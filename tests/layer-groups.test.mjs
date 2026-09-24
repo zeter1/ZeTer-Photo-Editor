@@ -132,6 +132,8 @@ test('layer panel exposes rename and group controls with drag-to-group wiring',(
   assert.ok(main.includes("const editable = Boolean(layer) && !isLayerLocked(doc, layer);"));
   assert.ok(main.includes("els.blend.disabled = !editable; els.layerOpacity.disabled = !editable;"));
   assert.ok(main.includes("['renameLayerBtn','duplicateLayerBtn','deleteLayerBtn','layerUpBtn','layerDownBtn','resetColorEffectsBtn']"));
+  assert.ok(main.includes("const control = $`#${id}`;") === false);
+  assert.ok(main.includes("const control = $(`#${id}`);"));
   assert.ok(main.includes("['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())&&!isLayerLocked(doc,selected())]"));
   assert.ok(main.includes("['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=selected();return Boolean(layer)&&!doc.groups?.find(group=>group.id===layer.groupId)?.locked;}]"));
   assert.ok(main.includes("['Поднять слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())]"));

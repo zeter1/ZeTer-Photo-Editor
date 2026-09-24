@@ -1101,7 +1101,7 @@ function updateLayerControls() {
   const editable = Boolean(layer) && !isLayerLocked(doc, layer);
   els.blend.disabled = !editable; els.layerOpacity.disabled = !editable;
   for (const id of ['renameLayerBtn','duplicateLayerBtn','deleteLayerBtn','layerUpBtn','layerDownBtn','resetColorEffectsBtn']) {
-    const control = $`#${id}`;
+    const control = $(`#${id}`);
     if (control) control.disabled = !editable;
   }
   if (layer) { els.blend.value = layer.blendMode || 'source-over'; els.layerOpacity.value = String(Math.round((layer.opacity ?? 1) * 100)); }
