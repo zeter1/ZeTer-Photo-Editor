@@ -370,6 +370,24 @@ export function sanitizeLayerMask(mask) {
   });
 }
 
+function sanitizePathHandle(handle) {
+  if (!handle || typeof handle !== 'object' || Array.isArray(handle)) return null;
+  return {
+    x: bounded(handle.x, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+    y: bounded(handle.y, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+  };
+}
+
+export function sanitizePathPoint(point) {
+  return {
+    x: bounded(point?.x, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+    y: bounded(point?.y, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+    handleIn: sanitizePathHandle(point?.handleIn),
+    handleOut: sanitizePathHandle(point?.handleOut),
+    kind: point?.kind === 'smooth' ? 'smooth' : 'corner',
+  };
+}
+
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
   const type = ['raster', 'text', 'shape', 'adjustment'].includes(layer?.type) ? layer.type : 'shape';
   const defaults = baseLayer(type);
@@ -431,7 +449,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
     result.lineFlip = Boolean(layer?.lineFlip);
     result.lineMode = ['diag','horizontal','vertical'].includes(layer?.lineMode) ? layer.lineMode : 'diag';
     result.pathPoints = result.shape === 'path' && Array.isArray(layer?.pathPoints)
-      ? layer.pathPoints.slice(0,5000).map(point=>({x:bounded(point?.x,0,-120000,120000),y:bounded(point?.y,0,-120000,120000)}))
+      ? layer.pathPoints.slice(0,5000).map(sanitizePathPoint)
       : [];
     result.pathClosed = result.shape === 'path' && Boolean(layer?.pathClosed);
   }

@@ -1411,6 +1411,23 @@ function sanitizeLayerMask(mask) {
   });
 }
 
+function sanitizePathHandle(handle) {
+  if (!handle || typeof handle !== 'object' || Array.isArray(handle)) return null;
+  return {
+    x: bounded(handle.x, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+    y: bounded(handle.y, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+  };
+}
+function sanitizePathPoint(point) {
+  return {
+    x: bounded(point?.x, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+    y: bounded(point?.y, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+    handleIn: sanitizePathHandle(point?.handleIn),
+    handleOut: sanitizePathHandle(point?.handleOut),
+    kind: point?.kind === 'smooth' ? 'smooth' : 'corner',
+  };
+}
+
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
   const type = ['raster', 'text', 'shape', 'adjustment'].includes(layer?.type) ? layer.type : 'shape';
   const defaults = baseLayer(type);
@@ -1472,7 +1489,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
     result.lineFlip = Boolean(layer?.lineFlip);
     result.lineMode = ['diag','horizontal','vertical'].includes(layer?.lineMode) ? layer.lineMode : 'diag';
     result.pathPoints = result.shape === 'path' && Array.isArray(layer?.pathPoints)
-      ? layer.pathPoints.slice(0,5000).map(point=>({x:bounded(point?.x,0,-120000,120000),y:bounded(point?.y,0,-120000,120000)}))
+      ? layer.pathPoints.slice(0,5000).map(sanitizePathPoint)
       : [];
     result.pathClosed = result.shape === 'path' && Boolean(layer?.pathClosed);
   }
@@ -1820,6 +1837,28 @@ async function renderDocument(canvas, doc, { checker = false, rasterOverrides = 
     await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
   }
 }
+
+function traceLayerBezierPath(ctx, points, closed = false) {
+  if (!Array.isArray(points) || !points.length) return false;
+  ctx.moveTo(points[0].x, points[0].y);
+  const segment = (from, to) => {
+    const out = from?.handleOut;
+    const incoming = to?.handleIn;
+    if (out || incoming) {
+      const cp1 = out || from;
+      const cp2 = incoming || to;
+      ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, to.x, to.y);
+    } else {
+      ctx.lineTo(to.x, to.y);
+    }
+  };
+  for (let index = 1; index < points.length; index += 1) segment(points[index - 1], points[index]);
+  if (closed && points.length > 1) {
+    segment(points.at(-1), points[0]);
+    ctx.closePath();
+  }
+  return true;
+}
 async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
   ctx.save();
   try {
@@ -1900,7 +1939,7 @@ async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       ctx.beginPath();
       if (layer.shape === 'path') {
         const points=Array.isArray(layer.pathPoints)?layer.pathPoints:[];
-        if(points.length){ctx.moveTo(points[0].x,points[0].y);for(let index=1;index<points.length;index+=1)ctx.lineTo(points[index].x,points[index].y);if(layer.pathClosed)ctx.closePath();}
+        traceLayerBezierPath(ctx,points,Boolean(layer.pathClosed));
         if(layer.pathClosed&&layer.fill&&layer.fill!=='transparent'){ctx.fillStyle=layer.fill;ctx.fill();}
         if(layer.stroke&&layer.stroke!=='transparent'&&layer.strokeWidth>0){ctx.strokeStyle=layer.stroke;ctx.lineWidth=layer.strokeWidth;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();}
       } else if (layer.shape === 'line') {
@@ -2734,8 +2773,24 @@ function drawOverlay() {
     for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,radius,0,Math.PI*2);ctx.fill();ctx.stroke();}
     ctx.restore();
   }
-  const pointDraft=penDraft||magneticDraft;
-  if(pointDraft?.points?.length){const points=pointDraft.points;ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle=penDraft?'#72a7ff':'#ff5fa8';ctx.fillStyle='#fff';ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i+=1)ctx.lineTo(points[i].x,points[i].y);if(pointDraft.hover)ctx.lineTo(pointDraft.hover.x,pointDraft.hover.y);ctx.stroke();for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,2.5/zoom,0,Math.PI*2);ctx.fill();}ctx.restore();}
+  if(penDraft?.points?.length){
+    const points=penDraft.points;
+    ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#72a7ff';ctx.fillStyle='#fff';ctx.setLineDash([]);
+    ctx.beginPath();tracePenDraftPath(ctx,points,drag?.kind==='pen-handle'?null:penDraft.hover);ctx.stroke();
+    ctx.lineWidth=1/zoom;ctx.strokeStyle='#8fc0ff';
+    for(const point of points){
+      for(const handle of [point.handleIn,point.handleOut]){
+        if(!handle)continue;
+        ctx.beginPath();ctx.moveTo(point.x,point.y);ctx.lineTo(handle.x,handle.y);ctx.stroke();
+        ctx.beginPath();ctx.arc(handle.x,handle.y,2.5/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();
+      }
+    }
+    ctx.fillStyle='#fff';ctx.strokeStyle='#3976ea';
+    for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,3/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();}
+    ctx.restore();
+  } else if(magneticDraft?.points?.length){
+    const points=magneticDraft.points;ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#ff5fa8';ctx.fillStyle='#fff';ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i+=1)ctx.lineTo(points[i].x,points[i].y);if(magneticDraft.hover)ctx.lineTo(magneticDraft.hover.x,magneticDraft.hover.y);ctx.stroke();for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,2.5/zoom,0,Math.PI*2);ctx.fill();}ctx.restore();
+  }
   if (RASTER_BRUSH_TOOLS.has(currentTool) && hoverPoint) {
     const paintLayer = paintLayerAtPoint(hoverPoint);
     const radius = Math.max(.5, Number(els.brushSize.value) / 2);
@@ -3562,7 +3617,7 @@ els.overlay.addEventListener('pointerdown', async (e) => {
   if (currentTool === 'fill') { await fillAtPoint(p); return; }
   if (currentTool === 'gradient') { drag={kind:'gradient',start:p,current:p};drawOverlay();return; }
   if (currentTool === 'wand') { magicWandSelect(p);return; }
-  if (currentTool === 'pen') { addPenPoint(p,e.detail>=2);return; }
+  if (currentTool === 'pen') { beginPenPoint(p,e.detail>=2);return; }
   if (currentTool === 'magnetic') { addMagneticPoint(p,e.detail>=2);return; }
   if (currentTool === 'marquee') {
     const previousSelection=cloneSelectionShape(selectionShape);
@@ -3682,6 +3737,21 @@ function onOverlayPointerMove(e) {
   if (drag.kind === 'shape') { drag.current=p; drag.lockAspect=e.shiftKey; const r=constrainedRect(drag.start,p,e.shiftKey); previewRect(r, els.primaryColor.value); return; }
   if (drag.kind === 'crop') { drag.current=p; cropRect=normalizeRect(drag.start,p); drawOverlay(); return; }
   if (drag.kind === 'gradient') { drag.current=p;previewGradient(drag.start,p);return; }
+  if (drag.kind === 'pen-handle') {
+    const node=penDraft?.points?.[drag.nodeIndex];
+    if(!node)return;
+    const dx=p.x-drag.anchor.x,dy=p.y-drag.anchor.y;
+    const moved=Math.hypot(dx,dy)>1/zoom;
+    drag.moved=moved;
+    if(moved){
+      node.handleOut={x:p.x,y:p.y};
+      if(e.altKey){node.handleIn=null;node.kind='corner';}
+      else{node.handleIn={x:drag.anchor.x-dx,y:drag.anchor.y-dy};node.kind='smooth';}
+    }else{
+      node.handleIn=null;node.handleOut=null;node.kind='corner';
+    }
+    penDraft.hover=p;drawOverlay();return;
+  }
 }
 els.overlay.addEventListener('pointermove', onOverlayPointerMove);
 els.overlay.addEventListener('pointerup', async (e) => {
@@ -3737,6 +3807,13 @@ els.overlay.addEventListener('pointerup', async (e) => {
     if (r.width >= 10 && r.height >= 10) applyCrop(r); else { cropRect=null; drawOverlay(); }
   }
   if (d.kind === 'gradient') await applyGradient(d.start,d.current);
+  if (d.kind === 'pen-handle') {
+    if(penDraft)penDraft.hover=canvasPoint(e);
+    setStatus(d.moved
+      ? (penDraft?.points?.[d.nodeIndex]?.kind==='smooth'?'Перо: гладкая точка с симметричными ручками':'Перо: угловая точка с независимой ручкой')
+      : 'Перо: угловая точка');
+    drawOverlay();
+  }
   updateMoveCursor(canvasPoint(e));
 });
 els.overlay.addEventListener('pointerleave', () => { els.pointer.textContent='x: — y: —';hoverPoint=null;drawOverlay(); });
@@ -3759,6 +3836,10 @@ els.overlay.addEventListener('pointercancel', async (e) => {
     }
     if (d.kind==='crop') cropRect=null;
     if (d.kind==='marquee') setSelectionShape(d.previousSelection);
+    if (d.kind==='pen-handle'&&penDraft){
+      penDraft.points.splice(d.nodeIndex,1);
+      if(!penDraft.points.length)penDraft=null;
+    }
     if (d.kind==='pan') els.overlay.style.cursor=defaultToolCursor();
     cancelPaintPreview(); drawOverlay(); setStatus('Действие отменено');
   }
@@ -3816,12 +3897,75 @@ async function applyGradient(start,end){
   finally{paintPersisting=false;}
 }
 
-function addPenPoint(point,finish=false){
-  if(!penDraft)penDraft={points:[],hover:point};const last=penDraft.points.at(-1);if(!last||Math.hypot(point.x-last.x,point.y-last.y)>1/zoom)penDraft.points.push({...point});penDraft.hover=point;if(finish&&penDraft.points.length>=2)finishPenPath();else{setStatus('Перо: ставьте точки, двойной щелчок или Enter — завершить');drawOverlay();}
+function tracePenDraftPath(ctx,points,hover=null){
+  if(!Array.isArray(points)||!points.length)return false;
+  ctx.moveTo(points[0].x,points[0].y);
+  const segment=(from,to)=>{
+    const out=from?.handleOut,incoming=to?.handleIn;
+    if(out||incoming){
+      const cp1=out||from,cp2=incoming||to;
+      ctx.bezierCurveTo(cp1.x,cp1.y,cp2.x,cp2.y,to.x,to.y);
+    }else ctx.lineTo(to.x,to.y);
+  };
+  for(let index=1;index<points.length;index+=1)segment(points[index-1],points[index]);
+  if(hover){
+    const last=points.at(-1);
+    const cp1=last.handleOut||last;
+    ctx.bezierCurveTo(cp1.x,cp1.y,hover.x,hover.y,hover.x,hover.y);
+  }
+  return true;
+}
+function beginPenPoint(point,finish=false){
+  if(!penDraft)penDraft={points:[],hover:point};
+  const last=penDraft.points.at(-1);
+  const nearLast=last&&Math.hypot(point.x-last.x,point.y-last.y)<=4/zoom;
+  if(finish&&nearLast){
+    if(penDraft.points.length>=2)finishPenPath();
+    else setStatus('Перо: для контура нужно минимум 2 точки');
+    return false;
+  }
+  const node={x:point.x,y:point.y,handleIn:null,handleOut:null,kind:'corner'};
+  penDraft.points.push(node);penDraft.hover=point;
+  drag={kind:'pen-handle',nodeIndex:penDraft.points.length-1,anchor:{...point},moved:false};
+  setStatus('Перо: клик — угловая точка, тяните — гладкая, Alt+drag — независимая ручка');
+  drawOverlay();return true;
+}
+function penDraftBounds(points){
+  const coords=[];
+  for(const point of points||[]){
+    coords.push({x:point.x,y:point.y});
+    if(point.handleIn)coords.push(point.handleIn);
+    if(point.handleOut)coords.push(point.handleOut);
+  }
+  if(!coords.length)return null;
+  const xs=coords.map(point=>point.x),ys=coords.map(point=>point.y);
+  const x=Math.min(...xs),y=Math.min(...ys),right=Math.max(...xs),bottom=Math.max(...ys);
+  return{x,y,width:right-x,height:bottom-y};
+}
+function localizePenNode(point,bounds){
+  const local=position=>position?{x:position.x-bounds.x,y:position.y-bounds.y}:null;
+  return{
+    x:point.x-bounds.x,y:point.y-bounds.y,
+    handleIn:local(point.handleIn),handleOut:local(point.handleOut),
+    kind:point.kind==='smooth'?'smooth':'corner',
+  };
 }
 function finishPenPath(){
-  if(!penDraft||penDraft.points.length<2){penDraft=null;drawOverlay();return false;}const points=penDraft.points;penDraft=null;const bounds=selectionBounds({type:'polygon',points});if(!bounds||bounds.width<1||bounds.height<1)return false;
-  const localPoints=points.map(point=>({x:point.x-bounds.x,y:point.y-bounds.y}));addLayer(doc,createShapeLayer({name:'Контур',shape:'path',x:bounds.x,y:bounds.y,width:Math.max(1,bounds.width),height:Math.max(1,bounds.height),pathPoints:localPoints,pathClosed:Boolean(els.penClosed?.checked),fill:'transparent',stroke:els.primaryColor.value,strokeWidth:Math.max(1,Number(els.brushSize.value)||1),opacity:Number(els.toolOpacity.value)/100}));commit('Добавить контур');setStatus('Векторный контур добавлен');drawOverlay();return true;
+  if(!penDraft||penDraft.points.length<2){penDraft=null;drag=null;drawOverlay();return false;}
+  const points=penDraft.points;penDraft=null;
+  if(drag?.kind==='pen-handle')drag=null;
+  const bounds=penDraftBounds(points);
+  if(!bounds||Math.max(bounds.width,bounds.height)<1)return false;
+  const localPoints=points.map(point=>localizePenNode(point,bounds));
+  addLayer(doc,createShapeLayer({
+    name:'Контур',shape:'path',x:bounds.x,y:bounds.y,
+    width:Math.max(1,bounds.width),height:Math.max(1,bounds.height),
+    pathPoints:localPoints,pathClosed:Boolean(els.penClosed?.checked),
+    fill:'transparent',stroke:els.primaryColor.value,
+    strokeWidth:Math.max(1,Number(els.brushSize.value)||1),
+    opacity:Number(els.toolOpacity.value)/100
+  }));
+  commit('Добавить Bézier-контур');setStatus('Bézier-контур добавлен');drawOverlay();return true;
 }
 
 function findMagneticEdgePoint(point){
@@ -5674,6 +5818,7 @@ window.addEventListener('keydown',e=>{
       if(d.kind==='move'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){l.x=d.x;l.y=d.y;render();updateTransformPropertyValues(l);}}
       if(d.kind==='resize'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){Object.assign(l,d.initial);render();updateTransformPropertyValues(l);}}
       if(d.kind==='rotate'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){l.rotation=d.initialRotation;render();updateTransformPropertyValues(l);}}
+      if(d.kind==='pen-handle'&&penDraft){penDraft.points.splice(d.nodeIndex,1);if(!penDraft.points.length)penDraft=null;}
       if(d.kind==='crop')cropRect=null;
       if(d.kind==='marquee')setSelectionShape(d.previousSelection);
       els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;

@@ -264,3 +264,26 @@ test('project sanitizer drops malformed mask payloads but keeps the owning layer
   assert.equal(safe.layers[0].mask.enabled,false);
   assert.equal(safe.layers[0].mask.dataUrl,null);
 });
+
+
+test('path sanitizer preserves legacy straight nodes and accepts Bezier handles', () => {
+  const safe=sanitizeProject({
+    version:PROJECT_VERSION,name:'paths',width:200,height:120,background:'transparent',
+    layers:[{
+      id:'path',type:'shape',name:'path',shape:'path',width:100,height:80,
+      pathPoints:[
+        {x:0,y:10},
+        {x:50,y:30,handleIn:{x:35,y:0},handleOut:{x:65,y:60},kind:'smooth'},
+        {x:100,y:70,handleIn:{x:90,y:40},kind:'corner'},
+      ],
+    }],
+  });
+  const [legacy,smooth,corner]=safe.layers[0].pathPoints;
+  assert.deepEqual(legacy,{x:0,y:10,handleIn:null,handleOut:null,kind:'corner'});
+  assert.deepEqual(smooth.handleIn,{x:35,y:0});
+  assert.deepEqual(smooth.handleOut,{x:65,y:60});
+  assert.equal(smooth.kind,'smooth');
+  assert.deepEqual(corner.handleIn,{x:90,y:40});
+  assert.equal(corner.handleOut,null);
+  assert.equal(corner.kind,'corner');
+});
