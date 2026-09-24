@@ -1349,6 +1349,7 @@ function touch(doc) { doc.modifiedAt = new Date().toISOString(); }
 function snapshotDocument(doc) {
   return JSON.stringify(doc);
 }
+
 function validateProjectVersion(input, { allowMissing = false } = {}) {
   const rawVersion = input?.version;
   if (allowMissing && rawVersion == null) return PROJECT_VERSION;
@@ -1359,7 +1360,6 @@ function validateProjectVersion(input, { allowMissing = false } = {}) {
   }
   return version;
 }
-
 function restoreDocument(snapshot) {
   const doc = JSON.parse(snapshot);
   if (!doc || !Array.isArray(doc.layers)) throw new Error('Неподдерживаемый файл проекта');
