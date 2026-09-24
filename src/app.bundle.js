@@ -1272,6 +1272,8 @@ function addLayer(doc, layer, { select = true } = {}) {
 function removeLayer(doc, id = doc.selectedLayerId) {
   const index = doc.layers.findIndex(layer => layer.id === id);
   if (index < 0) return null;
+  const layer = doc.layers[index];
+  if (isLayerLocked(doc, layer)) return null;
   const [removed] = doc.layers.splice(index, 1);
   if (doc.selectedLayerId === id) {
     doc.selectedLayerId = doc.layers[Math.min(index, doc.layers.length - 1)]?.id ?? null;
@@ -5028,7 +5030,7 @@ function layerContextMenu(id) {
     ['Параметры наложения…','',()=>openBlendingOptions(target()),editable],
     ['sep'],
     ['Переименовать…','F2',()=>renameLayer(target()),editable],
-    ['Дублировать','Ctrl+J',()=>{if(selectedTarget())duplicateSelected();},selectedTarget],
+    ['Дублировать','Ctrl+J',()=>{if(selectedTarget())duplicateSelected();},()=>selectedTarget() && editable()],
     ['Удалить','Delete',()=>{if(selectedTarget())deleteSelected();},()=>selectedTarget() && editable()],
     ['sep'],
     ['Показать / скрыть','',toggleSelectedVisibility,()=>Boolean(target())],
@@ -5139,8 +5141,8 @@ const menus={
     ['Вырезать выделение','Ctrl+X',cutSelection,()=>Boolean(selectionRect)&&(selectionCopyMode==='merged'||isEditableRasterLayer(selected()))],
     ['Очистить выделенные пиксели','Delete',()=>clearSelectedPixels(),()=>Boolean(selectionRect)&&isEditableRasterLayer(selected())],
     ['sep'],
-    ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())],
-    ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())],
+    ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Выбрать слой выше','Alt+↑',()=>selectAdjacentLayer(1),()=>doc.layers.length>1],
     ['Выбрать слой ниже','Alt+↓',()=>selectAdjacentLayer(-1),()=>doc.layers.length>1],
@@ -5149,8 +5151,8 @@ const menus={
     ['Новый растровый слой','Ctrl+Shift+N',addBlankLayer],
     ['Новая группа слоёв','',addGroup],
     ['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())],
-    ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())],
-    ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())],
+    ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Растеризовать слой','',rasterizeSelectedLayer,()=>Boolean(selected())&&selected().type!=='raster'&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Центрировать слой на холсте','',centerSelectedLayer,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
