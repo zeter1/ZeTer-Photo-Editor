@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeRect, constrainedRect, fitZoom, resizeFromHandle, layerFrame, frameBounds, hitLayerHandle, pointInLayer, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLayerMove, alignLayerToCanvas } from '../src/core/geometry.js';
 import { HistoryStack } from '../src/core/history.js';
-import { createDocument, createShapeLayer, addLayer, duplicateLayer, moveLayer, moveLayerToIndex, removeLayer, snapshotDocument, restoreDocument, sanitizeProject, imageResizeTransforms } from '../src/core/state.js';
+import { PROJECT_VERSION, createDocument, createShapeLayer, addLayer, duplicateLayer, moveLayer, moveLayerToIndex, removeLayer, snapshotDocument, restoreDocument, sanitizeProject, imageResizeTransforms } from '../src/core/state.js';
 
 test('normalizeRect handles reverse drags', () => {
   assert.deepEqual(normalizeRect({x:20,y:30},{x:5,y:10}), {x:5,y:10,width:15,height:20});
@@ -36,6 +36,15 @@ test('document snapshot round trips and sanitizes unsafe bounds', () => {
   const restored=restoreDocument(snapshotDocument(doc));assert.equal(restored.width,500);assert.equal(restored.layers.length,1);
   const dirty={...restored,width:999999,height:-5,layers:[{...restored.layers[0],opacity:5,scaleX:0}]};
   const safe=sanitizeProject(dirty);assert.equal(safe.width,12000);assert.equal(safe.height,1);assert.equal(safe.layers[0].opacity,1);assert.equal(safe.layers[0].scaleX,.01);
+});
+
+test('project loading rejects unknown format versions while keeping legacy versionless JSON compatible', () => {
+  const legacy={name:'legacy',width:640,height:480,background:'transparent',layers:[]};
+  assert.equal(sanitizeProject(legacy).version,PROJECT_VERSION);
+  assert.equal(sanitizeProject({...legacy,version:'1'}).version,PROJECT_VERSION);
+  assert.throws(()=>sanitizeProject({...legacy,version:2}),/Неподдерживаемая версия проекта: 2/);
+  assert.throws(()=>sanitizeProject({...legacy,version:'future'}),/Неподдерживаемая версия проекта/);
+  assert.throws(()=>restoreDocument(JSON.stringify({...legacy,version:2})),/Неподдерживаемая версия проекта: 2/);
 });
 
 test('image resize rejects transforms that would change after reopening the project', () => {

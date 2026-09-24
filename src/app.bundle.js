@@ -1077,6 +1077,7 @@ const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(
 const bounded = (value, fallback, min, max) => clamp(finite(value, fallback), min, max);
 const shortText = (value, fallback = '', max = 500) => String(value ?? fallback).slice(0, max);
 const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+const PROJECT_VERSION = 1;
 const DEFAULT_LAYER_FILTERS = Object.freeze({
   brightness: 100, contrast: 100, saturate: 100, exposure: 0, highlights: 0, shadows: 0,
   temperature: 0, tint: 0, vibrance: 0, gamma: 1, hue: 0,
@@ -1129,7 +1130,7 @@ function checkedCanvasSize(width, height, label = 'Холст') {
 function createDocument({ name = 'Без имени', width = 1200, height = 800, background = 'transparent' } = {}) {
   const size = checkedCanvasSize(width, height, 'Документ');
   return {
-    version: 1,
+    version: PROJECT_VERSION,
     name,
     width: size.width,
     height: size.height,
@@ -1348,9 +1349,21 @@ function touch(doc) { doc.modifiedAt = new Date().toISOString(); }
 function snapshotDocument(doc) {
   return JSON.stringify(doc);
 }
+function validateProjectVersion(input, { allowMissing = false } = {}) {
+  const rawVersion = input?.version;
+  if (allowMissing && rawVersion == null) return PROJECT_VERSION;
+  const version = Number(rawVersion);
+  if (!Number.isInteger(version) || version !== PROJECT_VERSION) {
+    const label = rawVersion == null ? 'не указана' : String(rawVersion).slice(0, 40);
+    throw new Error(`Неподдерживаемая версия проекта: ${label}. Ожидается версия ${PROJECT_VERSION}.`);
+  }
+  return version;
+}
+
 function restoreDocument(snapshot) {
   const doc = JSON.parse(snapshot);
-  if (!doc || doc.version !== 1 || !Array.isArray(doc.layers)) throw new Error('Неподдерживаемый файл проекта');
+  if (!doc || !Array.isArray(doc.layers)) throw new Error('Неподдерживаемый файл проекта');
+  validateProjectVersion(doc);
   if (!Array.isArray(doc.groups)) doc.groups = [];
   const validGroupIds = new Set(doc.groups.map(group => group?.id).filter(Boolean));
   for (const layer of doc.layers) {
@@ -1443,9 +1456,10 @@ function sanitizeGroup(group, usedIds) {
 }
 function sanitizeProject(input) {
   if (!input || typeof input !== 'object') throw new Error('Некорректный проект');
+  validateProjectVersion(input, { allowMissing: true });
   if (!Number.isFinite(Number(input.width)) || !Number.isFinite(Number(input.height))) throw new Error('Некорректный размер документа');
   const doc = structuredClone(input);
-  doc.version = 1;
+  doc.version = PROJECT_VERSION;
   doc.name = shortText(doc.name, 'Без имени', 240);
   const size = checkedCanvasSize(Number(doc.width), Number(doc.height), 'Проект');
   doc.width = size.width;
