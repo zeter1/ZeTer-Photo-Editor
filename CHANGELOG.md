@@ -12,6 +12,7 @@
 - Changed: если документ содержит видимый ZPE adjustment layer, исходные export layers остаются в PSD скрытыми, а сверху создаётся видимый `ZPE Composite Preview (adjustments baked)`; так визуальный результат не теряется до появления native adjustment mapping.
 - Reliability: PSD export ограничен суммарно 48 МП временных RGBA-буферов; writer отклоняет malformed RGBA/mask buffers и файлы за пределами PSD-size guard.
 - Added: round-trip regression `encodePsd → decodePsd` проверяет RGB pixels, Unicode name, opacity, multiply, hidden state и user mask.
+- Compatibility review: layer flags, `luni` alignment, mask layout и merged-image RLE дополнительно сверены с реализацией writer в `ag-psd`.
 - Verification: выполняется через PR CI, generated bundle consistency и реальный `file://` browser smoke перед merge.
 
 
