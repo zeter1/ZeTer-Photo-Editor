@@ -261,10 +261,11 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
 
     ctx.filter = filterString(layer.filters);
 
-    if (layer.type === 'raster' && (rasterOverride || layer.dataUrl)) {
-      const img = rasterOverride || await getImage(layer.dataUrl);
+    if ((layer.type === 'raster' && (rasterOverride || layer.dataUrl)) || (layer.type === 'smart-object' && layer.previewDataUrl)) {
+      const dataUrl = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl;
+      const img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
       if (img) {
-        const source = makeAdjustedRasterSource(img, layer, { cacheable: !rasterOverride });
+        const source = makeAdjustedRasterSource(img, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
         ctx.drawImage(source, 0, 0, w, h);
       }
     } else if (layer.type === 'text') {

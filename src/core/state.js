@@ -81,7 +81,7 @@ export function baseLayer(type, overrides = {}) {
   return {
     id: uid(type),
     type,
-    name: type === 'raster' ? 'Растровый слой' : type === 'text' ? 'Текст' : type === 'adjustment' ? 'Корректирующий слой' : 'Фигура',
+    name: type === 'raster' ? 'Растровый слой' : type === 'text' ? 'Текст' : type === 'adjustment' ? 'Корректирующий слой' : type === 'smart-object' ? 'Смарт-объект' : 'Фигура',
     visible: true,
     locked: false,
     opacity: 1,
@@ -103,6 +103,15 @@ export function baseLayer(type, overrides = {}) {
 
 export function createRasterLayer(overrides = {}) {
   return baseLayer('raster', { dataUrl: null, ...overrides });
+}
+
+export function createSmartObjectLayer(overrides = {}) {
+  return baseLayer('smart-object', {
+    name: 'Смарт-объект',
+    previewDataUrl: null,
+    embeddedDocument: null,
+    ...overrides,
+  });
 }
 
 export function createAdjustmentLayer(overrides = {}) {
@@ -388,8 +397,10 @@ export function sanitizePathPoint(point) {
   };
 }
 
-function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
-  const type = ['raster', 'text', 'shape', 'adjustment'].includes(layer?.type) ? layer.type : 'shape';
+const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
+
+function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
+  const type = ['raster', 'text', 'shape', 'adjustment', 'smart-object'].includes(layer?.type) ? layer.type : 'shape';
   const defaults = baseLayer(type);
   let id = shortText(layer?.id, defaults.id, 160).trim() || defaults.id;
   if (usedIds.has(id)) id = uid(type);
@@ -420,6 +431,16 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
     checkedCanvasSize(result.width, result.height, `Растровый слой «${result.name || 'Без имени'}»`);
     const dataUrl = typeof layer?.dataUrl === 'string' && /^data:image\//i.test(layer.dataUrl) ? layer.dataUrl : null;
     result.dataUrl = dataUrl;
+  } else if (type === 'smart-object') {
+    checkedCanvasSize(result.width, result.height, `Смарт-объект «${result.name || 'Без имени'}»`);
+    result.previewDataUrl = typeof layer?.previewDataUrl === 'string' && /^data:image\//i.test(layer.previewDataUrl) ? layer.previewDataUrl : null;
+    if (embeddedDepth >= MAX_EMBEDDED_DOCUMENT_DEPTH) {
+      result.embeddedDocument = null;
+    } else if (layer?.embeddedDocument && typeof layer.embeddedDocument === 'object' && !Array.isArray(layer.embeddedDocument)) {
+      result.embeddedDocument = sanitizeProjectInternal(layer.embeddedDocument, { allowMissingVersion: true, embeddedDepth: embeddedDepth + 1 });
+    } else {
+      result.embeddedDocument = null;
+    }
   } else if (type === 'text') {
     result.text = shortText(layer?.text, 'Текст', 100000);
     result.color = shortText(layer?.color, '#ffffff', 64);
@@ -470,14 +491,14 @@ function sanitizeGroup(group, usedIds) {
   };
 }
 
-export function sanitizeProject(input) {
+function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDepth = 0 } = {}) {
   if (!input || typeof input !== 'object') throw new Error('Некорректный проект');
-  validateProjectVersion(input, { allowMissing: true });
+  validateProjectVersion(input, { allowMissing: allowMissingVersion });
   if (!Number.isFinite(Number(input.width)) || !Number.isFinite(Number(input.height))) throw new Error('Некорректный размер документа');
   const doc = structuredClone(input);
   doc.version = PROJECT_VERSION;
   doc.name = shortText(doc.name, 'Без имени', 240);
-  const size = checkedCanvasSize(Number(doc.width), Number(doc.height), 'Проект');
+  const size = checkedCanvasSize(Number(doc.width), Number(doc.height), embeddedDepth ? 'Встроенный документ' : 'Проект');
   doc.width = size.width;
   doc.height = size.height;
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
@@ -485,9 +506,15 @@ export function sanitizeProject(input) {
   doc.groups = Array.isArray(doc.groups) ? doc.groups.slice(0, 100).map(group => sanitizeGroup(group, usedGroupIds)) : [];
   const validGroupIds = new Set(doc.groups.map(group => group.id));
   const usedIds = new Set();
-  doc.layers = Array.isArray(doc.layers) ? doc.layers.slice(0, 500).map(layer => sanitizeLayer(layer, usedIds, validGroupIds)) : [];
+  doc.layers = Array.isArray(doc.layers)
+    ? doc.layers.slice(0, 500).map(layer => sanitizeLayer(layer, usedIds, validGroupIds, embeddedDepth))
+    : [];
   if (!doc.layers.some(l => l.id === doc.selectedLayerId)) doc.selectedLayerId = doc.layers.at(-1)?.id ?? null;
   doc.createdAt = typeof doc.createdAt === 'string' ? doc.createdAt : new Date().toISOString();
   doc.modifiedAt = typeof doc.modifiedAt === 'string' ? doc.modifiedAt : new Date().toISOString();
   return doc;
+}
+
+export function sanitizeProject(input) {
+  return sanitizeProjectInternal(input, { allowMissingVersion: true, embeddedDepth: 0 });
 }

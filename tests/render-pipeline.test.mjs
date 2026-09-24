@@ -40,3 +40,9 @@ test('layer masks isolate layer content before destination-in compositing', () =
   assert.match(render, /globalCompositeOperation = 'destination-in'/);
   assert.match(render, /mask: null/);
 });
+
+
+test('smart objects render from preview data without mutating embedded document state', () => {
+  assert.match(render, /layer\.type === 'smart-object' && layer\.previewDataUrl/);
+  assert.match(render, /layer\.type === 'smart-object' \? layer\.previewDataUrl : layer\.dataUrl/);
+});

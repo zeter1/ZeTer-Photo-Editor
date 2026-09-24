@@ -21,6 +21,8 @@ test('save and tab switch wait for a pending document edit', () => {
     downloadText: () => calls.push('download'),
     markDirty: value => { context.dirty = value; calls.push('markDirty'); },
     queueRecovery: () => calls.push('queueRecovery'),
+    currentSession: () => null,
+    saveSmartObjectContent: () => calls.push('saveSmartObjectContent'),
     setStatus: value => calls.push(`status:${value}`),
     toast: () => calls.push('toast'),
     activeSessionId: 'first', documentSessions: [{ id: 'second' }],
