@@ -2659,7 +2659,7 @@ function writeLayerMaskExtra(writer, layer) {
   }
   writer.u32(20);
   writer.i32(layer.y).i32(layer.x).i32(layer.y + layer.height).i32(layer.x + layer.width);
-  writer.u8(0);
+  writer.u8(255);
   writer.u8(layer.mask.disabled ? 0x02 : 0);
   writer.u16(0);
 }
@@ -2684,6 +2684,21 @@ function normalizeExportLayer(layer, index, maxPixels) {
   return { ...metadata, mask, channels };
 }
 
+function compositePlane(rgba, channel, pixelCount) {
+  const plane = new Uint8Array(pixelCount);
+  for (let index = 0; index < pixelCount; index += 1) {
+    const alpha = rgba[index * 4 + 3];
+    const value = rgba[index * 4 + channel];
+    if (channel < 3 && alpha !== 0 && alpha !== 255) {
+      const a = alpha / 255;
+      plane[index] = value * a + 255 * (1 - a);
+    } else {
+      plane[index] = value;
+    }
+  }
+  return plane;
+}
+
 function encodeCompositeRle(pixels, width, height) {
   const pixelCount = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   const rgba = asBytes(pixels);
@@ -2691,16 +2706,7 @@ function encodeCompositeRle(pixels, width, height) {
   const rowTable = new Writer();
   const packed = [];
   for (let channel = 0; channel < 4; channel += 1) {
-    const plane = new Uint8Array(pixelCount);
-    for (let index = 0; index < pixelCount; index += 1) {
-      if (channel === 3) {
-        plane[index] = rgba[index * 4 + 3];
-      } else {
-        const alpha = rgba[index * 4 + 3];
-        const value = rgba[index * 4 + channel];
-        plane[index] = alpha === 255 ? value : alpha === 0 ? 255 : value * (alpha / 255) + 255 * (1 - alpha / 255);
-      }
-    }
+    const plane = compositePlane(rgba, channel, pixelCount);
     for (let row = 0; row < height; row += 1) {
       const data = packBitsEncodeRow(plane.subarray(row * width, (row + 1) * width));
       if (data.length > 0xffff) throw new PsdImportError('PSD writer: composite RLE-строка превышает 65535 байт', 'PSD_EXPORT_RLE_ROW');
@@ -5803,8 +5809,8 @@ async function preparePsdExport(exportDoc){
   const planned=sourceLayers.map(layer=>({layer,bounds:psdExportBounds(layer)}));
   let totalPixels=exportDoc.width*exportDoc.height+planned.reduce((sum,item)=>sum+item.bounds.width*item.bounds.height,0);
   if(hasAdjustmentLayers)totalPixels+=exportDoc.width*exportDoc.height;
-  if(totalPixels>96_000_000){
-    throw new Error(`PSD export Stage 4 ограничен суммарно 96 МП временных raster-буферов; документ требует около ${Math.ceil(totalPixels/1_000_000)} МП`);
+  if(totalPixels>48_000_000){
+    throw new Error(`PSD export Stage 4 ограничен суммарно 48 МП временных RGBA-буферов; документ требует около ${Math.ceil(totalPixels/1_000_000)} МП. Для больших документов нужен tiled/streaming writer.`);
   }
   if(exportDoc.groups?.length)warnings.push('Группы ZPE экспортированы как плоский список слоёв');
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');

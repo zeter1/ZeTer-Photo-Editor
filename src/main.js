@@ -3044,8 +3044,8 @@ async function preparePsdExport(exportDoc){
   const planned=sourceLayers.map(layer=>({layer,bounds:psdExportBounds(layer)}));
   let totalPixels=exportDoc.width*exportDoc.height+planned.reduce((sum,item)=>sum+item.bounds.width*item.bounds.height,0);
   if(hasAdjustmentLayers)totalPixels+=exportDoc.width*exportDoc.height;
-  if(totalPixels>96_000_000){
-    throw new Error(`PSD export Stage 4 ограничен суммарно 96 МП временных raster-буферов; документ требует около ${Math.ceil(totalPixels/1_000_000)} МП`);
+  if(totalPixels>48_000_000){
+    throw new Error(`PSD export Stage 4 ограничен суммарно 48 МП временных RGBA-буферов; документ требует около ${Math.ceil(totalPixels/1_000_000)} МП. Для больших документов нужен tiled/streaming writer.`);
   }
   if(exportDoc.groups?.length)warnings.push('Группы ZPE экспортированы как плоский список слоёв');
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
