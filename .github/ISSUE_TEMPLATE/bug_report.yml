@@ -1,0 +1,58 @@
+name: Bug report
+description: Сообщить о воспроизводимой ошибке ZeTer Photo Editor
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за отчёт. Не прикладывайте приватные изображения, проекты `.zpe`, токены или другие чувствительные данные без предварительной проверки.
+  - type: input
+    id: version
+    attributes:
+      label: Версия или commit
+      placeholder: "1.19.1 или SHA commit"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: ОС и браузер
+      placeholder: "Windows 11, Chrome 140"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Шаги воспроизведения
+      description: Опишите минимальную последовательность действий.
+      placeholder: |
+        1. Открыть ...
+        2. Выбрать ...
+        3. Нажать ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемое поведение
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Фактическое поведение
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Диагностика
+      description: Сообщения консоли, скриншоты или другие данные без приватной информации.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Проверка приватности
+      options:
+        - label: Я проверил(а), что приложенные материалы не содержат паролей, токенов или приватных данных.
+          required: true

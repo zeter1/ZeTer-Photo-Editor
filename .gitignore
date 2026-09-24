@@ -1,0 +1,12 @@
+node_modules/
+coverage/
+*.log
+npm-debug.log*
+*.zpe
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+__pycache__/
+*.py[cod]

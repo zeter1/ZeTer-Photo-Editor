@@ -1,0 +1,135 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
+
+const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const boundary = main.slice(main.indexOf('function documentEditPending()'), main.indexOf('function reportRecoveryFailure('));
+const fileCommands = main.slice(main.indexOf('function saveProject()'), main.indexOf('function canvasToPngBlob('));
+const switchTab = main.slice(main.indexOf('function activateDocumentTab('), main.indexOf('function addDocumentTab('));
+const jumpHistory = main.slice(main.indexOf('function jumpToHistory('), main.indexOf('function updateLayerControls('));
+const fillCommand = main.slice(main.indexOf('async function fillAtPoint('), main.indexOf('async function clearSelectedPixels('));
+const deleteCommand = main.slice(main.indexOf('function deleteSelected()'), main.indexOf('function duplicateSelected()'));
+
+test('save and tab switch wait for a pending document edit', () => {
+  const calls = [];
+  const context = {
+    paintPersisting: true, drag: null, activePrimaryPointerId: null,
+    RASTER_BRUSH_TOOLS: new Set(['brush']), currentTool: 'brush',
+    doc: { name: 'Тест', layers: [] }, dirty: true,
+    safeFilename: value => value,
+    downloadText: () => calls.push('download'),
+    markDirty: value => { context.dirty = value; calls.push('markDirty'); },
+    queueRecovery: () => calls.push('queueRecovery'),
+    setStatus: value => calls.push(`status:${value}`),
+    toast: () => calls.push('toast'),
+    activeSessionId: 'first', documentSessions: [{ id: 'second' }],
+    history: { jump: () => { calls.push('jump'); return { snapshot: '{}' }; } },
+    syncCurrentSession: () => calls.push('sync'),
+    loadSession: () => calls.push('load'),
+    updateAll: () => calls.push('update'),
+    requestAnimationFrame: () => {}, els: { viewport: { focus: () => {} } },
+  };
+  runInNewContext(`${boundary}\n${fileCommands}\n${switchTab}\n${jumpHistory}\nglobalThis.commands={saveProject,activateDocumentTab,jumpToHistory};`, context);
+  context.commands.saveProject();
+  context.commands.activateDocumentTab('second');
+  context.commands.jumpToHistory(0);
+  assert.equal(context.dirty, true);
+  assert.equal(context.activeSessionId, 'first');
+  assert.equal(calls.includes('download'), false);
+  assert.equal(calls.includes('queueRecovery'), false);
+  assert.equal(calls.includes('load'), false);
+  assert.equal(calls.includes('jump'), false);
+
+  context.paintPersisting = false;
+  context.drag = { kind: 'move' };
+  context.commands.saveProject();
+  assert.equal(calls.includes('download'), false);
+  context.drag = null;
+  context.currentTool = 'fill';
+  context.activePrimaryPointerId = 9;
+  context.commands.saveProject();
+  assert.equal(calls.includes('download'), false);
+  context.activePrimaryPointerId = null;
+  context.commands.saveProject();
+  assert.equal(context.dirty, true);
+  assert.ok(calls.includes('download'));
+  assert.ok(calls.includes('queueRecovery'));
+  assert.equal(calls.includes('markDirty'), false);
+});
+
+test('export submits one document snapshot and blocks while raster data is pending', async () => {
+  let modal;
+  const downloads = [];
+  const context = {
+    paintPersisting: false, drag: null, activePrimaryPointerId: null,
+    RASTER_BRUSH_TOOLS: new Set(['brush']), currentTool: 'brush',
+    doc: { name: 'До', layers: [{ id: 'one' }] },
+    showModal: options => { modal = options; },
+    snapshotDocument: value => JSON.stringify(value),
+    restoreDocument: value => JSON.parse(value),
+    compositeToBlob: async value => { await Promise.resolve(); return JSON.stringify(value); },
+    downloadBlob: (blob, name) => downloads.push({ blob, name }),
+    safeFilename: value => value,
+    MIME_EXT: { 'image/png': 'png' },
+    clamp: value => value,
+    setStatus: () => {}, toast: () => {}, alert: () => {},
+  };
+  runInNewContext(`${boundary}\n${fileCommands}\nglobalThis.commands={exportDialog};`, context);
+  await context.commands.exportDialog();
+  context.paintPersisting = true;
+  assert.equal(await modal.onSubmit({ format: 'image/png', quality: '92' }), false);
+  assert.equal(downloads.length, 0);
+
+  context.paintPersisting = false;
+  const exporting = modal.onSubmit({ format: 'image/png', quality: '92' });
+  context.doc.name = 'После';
+  context.doc.layers.push({ id: 'two' });
+  await exporting;
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].name, 'До.png');
+  assert.deepEqual(JSON.parse(downloads[0].blob).layers, [{ id: 'one' }]);
+});
+
+test('fill protects the document while its raster buffer is decoding', async () => {
+  let finishDecode;
+  const context = {
+    paintPersisting: false, selectionRect: null,
+    paintLayerAtPoint: () => ({ id: 'raster' }),
+    ensureRasterBuffer: () => new Promise(resolve => { finishDecode = resolve; }),
+    documentPointToLayerPixel: () => ({ x: 1, y: 1 }),
+    brushCanvas: { width: 10, height: 10 },
+    brushCtx: { getImageData: () => ({ data: new Uint8ClampedArray(400) }) },
+    floodFillPixels: () => 0,
+    hexToRgb: () => [0, 0, 0],
+    els: { primaryColor: { value: '#000000' }, fillTolerance: { value: '0' }, toolOpacity: { value: '100' } },
+    rasterSelectionPredicate: () => () => true,
+    doc: { selectedLayerId: null },
+    setStatus: () => {}, toast: () => {},
+  };
+  runInNewContext(`${fillCommand}\nglobalThis.fillAtPoint=fillAtPoint;`, context);
+  const fill = context.fillAtPoint({ x: 1, y: 1 });
+  assert.equal(context.paintPersisting, true);
+  finishDecode();
+  await fill;
+  assert.equal(context.paintPersisting, false);
+});
+
+test('selected raster layer cannot be deleted before its stroke is committed', () => {
+  let removals = 0;
+  const context = {
+    paintPersisting: true, drag: null, activePrimaryPointerId: null,
+    RASTER_BRUSH_TOOLS: new Set(['brush']), currentTool: 'brush',
+    doc: { layers: [{ id: 'painted' }] },
+    selected: () => ({ id: 'painted' }),
+    isLayerLocked: () => false,
+    removeLayer: () => { removals += 1; },
+    commit: () => {}, setStatus: () => {}, toast: () => {},
+  };
+  runInNewContext(`${boundary}\n${deleteCommand}\nglobalThis.deleteSelected=deleteSelected;`, context);
+  context.deleteSelected();
+  assert.equal(removals, 0);
+  context.paintPersisting = false;
+  context.deleteSelected();
+  assert.equal(removals, 1);
+});

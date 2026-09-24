@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>ZeTer Photo Editor — локальный редактор изображений</title>
+  <link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+  <svg class="icon-defs" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="icon-move" viewBox="0 0 24 24"><path d="M12 2v20M2 12h20M12 2l-3 3m3-3 3 3M12 22l-3-3m3 3 3-3M2 12l3-3m-3 3 3 3M22 12l-3-3m3 3-3 3"/></symbol>
+      <symbol id="icon-marquee" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5" stroke-dasharray="3 2"/></symbol>
+      <symbol id="icon-brush" viewBox="0 0 24 24"><path d="M14.5 5.5 18.5 1.5l4 4-4 4M3 21c4.5.4 7.1-1.2 7.8-4.8.3-1.6 1.1-3 2.3-4.2l5.4-5.4-4.1-4.1L9 7.9c-1.2 1.2-2.6 2-4.2 2.3C1.2 10.9-.4 16 3 21Z"/></symbol>
+      <symbol id="icon-clone" viewBox="0 0 24 24"><path d="M8 12.5c0-2 1.8-3.5 4-3.5s4 1.5 4 3.5c0 1.2-.5 2.1-1.4 2.8 2.5.7 4.4 2.5 4.4 4.7H5c0-2.2 1.9-4 4.4-4.7-.9-.7-1.4-1.6-1.4-2.8Z"/><path d="M7 4h10M12 4v5M4 20h16"/></symbol>
+      <symbol id="icon-dodge" viewBox="0 0 24 24"><circle cx="10" cy="10" r="5.5"/><path d="m14 14 6 6M10 1v2M10 17v2M1 10h2M17 10h2M3.6 3.6 5 5M15 5l1.4-1.4"/></symbol>
+      <symbol id="icon-burn" viewBox="0 0 24 24"><path d="M13.2 2.5c.7 3.6-2.5 4.7-1.4 7.5.7 1.8 2.8 1.4 3.6-.2 2.1 2.1 3.6 4.7 2.5 7.6C16.9 20.1 14.4 22 11 22c-4.2 0-7-2.8-7-6.7 0-3.5 2.2-6.3 5.5-9.2.1 2.1.7 3.4 1.6 3.8-.4-3.1.7-5.8 2.1-7.4Z"/></symbol>
+      <symbol id="icon-heal" viewBox="0 0 24 24"><path d="m5 16 11-11a3 3 0 0 1 4 4L9 20a3 3 0 0 1-4-4Z"/><path d="m9 12 4 4M15 7l4 4M7 17h3M8.5 15.5v3"/></symbol>
+      <symbol id="icon-smudge" viewBox="0 0 24 24"><path d="M5 13V8.5a1.5 1.5 0 0 1 3 0V12m0-6a1.5 1.5 0 0 1 3 0v6m0-5a1.5 1.5 0 0 1 3 0v5m0-3a1.5 1.5 0 0 1 3 0v6c0 4-2.7 6-6.5 6-2.1 0-3.8-.8-5.1-2.2L3 16.3A1.6 1.6 0 0 1 5.3 14L8 16.5"/></symbol>
+      <symbol id="icon-gradient" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16M13 4v16M18 4v16" opacity=".7"/></symbol>
+      <symbol id="icon-pen" viewBox="0 0 24 24"><path d="m12 3 7 7-7.5 10.5H4V13L12 3Z"/><path d="m4 20.5 6-6M12 3l-2 11.5M10 14.5a2 2 0 1 0 0 .1"/></symbol>
+      <symbol id="icon-magnetic-lasso" viewBox="0 0 24 24"><path d="M19 5c-3-3-8-2-11 1.2-3.6 3.8-3.4 9.7.5 12.1 2.9 1.8 6.8.4 6.3-2.3-.3-1.9-3.1-2.1-4.1-.9"/><path d="M16 3v4M20 5h-4M7 17v4M5 19h4"/></symbol>
+      <symbol id="icon-wand" viewBox="0 0 24 24"><path d="m5 19 10-10 4 4L9 23 5 19Z"/><path d="M15 2v3M21 8h-3M19.5 3.5l-2 2M8 4l1.5 2M3 10h3"/></symbol>
+      <symbol id="icon-blur" viewBox="0 0 24 24"><path d="M12 3s6 6.7 6 11a6 6 0 0 1-12 0c0-4.3 6-11 6-11Z"/><path d="M9 16.5c.7.8 1.6 1.2 3 1.2"/></symbol>
+      <symbol id="icon-eraser" viewBox="0 0 24 24"><path d="m4 15 8.5-10a2.5 2.5 0 0 1 3.6-.2l3.1 2.7a2.5 2.5 0 0 1 .2 3.6L12 20H7.5L4 17a1.5 1.5 0 0 1 0-2Z"/><path d="m9 10 7 6M11.5 20H21"/></symbol>
+      <symbol id="icon-fill" viewBox="0 0 24 24"><path d="m4 12 8-8 8 8-8 8-8-8Z"/><path d="M6 10h12M19 16c1.7 1.8 2.5 3 2.5 4a2.5 2.5 0 0 1-5 0c0-1 1-2.3 2.5-4Z"/></symbol>
+      <symbol id="icon-line" viewBox="0 0 24 24"><path d="M4 20 20 4"/><circle cx="4" cy="20" r="1.5"/><circle cx="20" cy="4" r="1.5"/></symbol>
+      <symbol id="icon-text" viewBox="0 0 24 24"><path d="M5 5h14M12 5v14M8 19h8"/></symbol>
+      <symbol id="icon-shape" viewBox="0 0 24 24"><rect x="4" y="4" width="9" height="9" rx="1.5"/><circle cx="16" cy="16" r="5"/></symbol>
+      <symbol id="icon-crop" viewBox="0 0 24 24"><path d="M7 2v15a2 2 0 0 0 2 2h13M2 7h15a2 2 0 0 1 2 2v13"/></symbol>
+      <symbol id="icon-eyedropper" viewBox="0 0 24 24"><path d="m14 5 5 5M8 17l9-9-5-5-9 9 5 5Z"/><path d="M3 21h5l3-3"/></symbol>
+      <symbol id="icon-hand" viewBox="0 0 24 24"><path d="M7.5 11V6.5a1.5 1.5 0 0 1 3 0V10m0-4.5a1.5 1.5 0 0 1 3 0V10m0-3.5a1.5 1.5 0 0 1 3 0V11m0-2.5a1.5 1.5 0 0 1 3 0V14c0 4.4-3 7-7.5 7-2.3 0-4.2-.8-5.7-2.4L3 15.3a1.7 1.7 0 0 1 2.4-2.4L7.5 15v-4Z"/></symbol>
+      <symbol id="icon-zoom" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M7.5 10.5h6M10.5 7.5v6"/></symbol>
+      <symbol id="icon-undo" viewBox="0 0 24 24"><path d="M9 7H4v-5M4 7c2.1-2.6 5.1-4 8.3-3.5 4.6.7 7.8 4.9 7.1 9.5-.6 4.1-4.1 7.1-8.1 7.1-2.4 0-4.6-1.1-6.1-2.8"/></symbol>
+      <symbol id="icon-redo" viewBox="0 0 24 24"><path d="M15 7h5v-5M20 7c-2.1-2.6-5.1-4-8.3-3.5C7.1 4.2 3.9 8.4 4.6 13c.6 4.1 4.1 7.1 8.1 7.1 2.4 0 4.6-1.1 6.1-2.8"/></symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="icon-folder-plus" viewBox="0 0 24 24"><path d="M3 7.5h6l2 2h10v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z"/><path d="M16 12v5M13.5 14.5h5"/></symbol>
+      <symbol id="icon-rename" viewBox="0 0 24 24"><path d="m4 17-.8 3.8L7 20l11-11-3-3L4 17Z"/><path d="m13.5 7.5 3 3M12 20h9"/></symbol>
+      <symbol id="icon-duplicate" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+      <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></symbol>
+      <symbol id="icon-align-left" viewBox="0 0 24 24"><path d="M4 3v18M8 7h10v4H8zM8 14h7v4H8z"/></symbol>
+      <symbol id="icon-align-hcenter" viewBox="0 0 24 24"><path d="M12 3v18M6 7h12v4H6zM8 14h8v4H8z"/></symbol>
+      <symbol id="icon-align-right" viewBox="0 0 24 24"><path d="M20 3v18M6 7h10v4H6zM9 14h7v4H9z"/></symbol>
+      <symbol id="icon-align-top" viewBox="0 0 24 24"><path d="M3 4h18M7 8v10h4V8zM14 8v7h4V8z"/></symbol>
+      <symbol id="icon-align-vcenter" viewBox="0 0 24 24"><path d="M3 12h18M7 6v12h4V6zM14 8v8h4V8z"/></symbol>
+      <symbol id="icon-align-bottom" viewBox="0 0 24 24"><path d="M3 20h18M7 6v10h4V6zM14 9v7h4V9z"/></symbol>
+    </defs>
+  </svg>
+  <div id="app" class="app-shell" aria-label="ZeTer Photo Editor image editor">
+    <header class="topbar">
+      <div class="brand" title="ZeTer Photo Editor">
+        <span class="brand-mark"><img src="./assets/zeter-mark.svg" alt="" /></span>
+        <span class="brand-name">ZeTer Photo Editor</span>
+      </div>
+      <nav class="menu-bar" aria-label="Главное меню">
+        <button class="menu-button" data-menu="file">Файл</button>
+        <button class="menu-button" data-menu="edit">Правка</button>
+        <button class="menu-button" data-menu="layer">Слой</button>
+        <button class="menu-button" data-menu="image">Изображение</button>
+        <button class="menu-button" data-menu="select">Выделение</button>
+        <button class="menu-button" data-menu="view">Вид</button>
+        <button class="menu-button" data-menu="help">Помощь</button>
+      </nav>
+      <div class="document-title" id="documentTitle">Без имени</div>
+      <div class="top-actions">
+        <button id="undoBtn" class="icon-button" title="Отменить (Ctrl+Z)" aria-label="Отменить"><svg class="ui-icon"><use href="#icon-undo" /></svg></button>
+        <button id="redoBtn" class="icon-button" title="Повторить (Ctrl+Y)" aria-label="Повторить"><svg class="ui-icon"><use href="#icon-redo" /></svg></button>
+        <button id="exportQuickBtn" class="primary-button">Экспорт</button>
+      </div>
+    </header>
+
+    <section class="optionsbar" id="optionsBar" aria-label="Параметры инструмента">
+      <div class="option-group" id="toolLabel">Перемещение</div>
+      <div class="option-group move-only move-options" aria-label="Параметры перемещения">
+        <label class="snap-toggle" title="Привязывать края и центры к холсту и другим слоям. Ctrl временно отключает привязку."><input id="smartSnapToggle" type="checkbox" checked /> Привязка</label>
+        <span class="option-divider" aria-hidden="true"></span>
+        <span class="option-caption">По холсту</span>
+        <button type="button" class="option-icon-button" data-align="left" title="По левому краю холста" aria-label="Выровнять слой по левому краю холста"><svg class="ui-icon"><use href="#icon-align-left" /></svg></button>
+        <button type="button" class="option-icon-button" data-align="hcenter" title="По центру холста по горизонтали" aria-label="Выровнять слой по центру холста по горизонтали"><svg class="ui-icon"><use href="#icon-align-hcenter" /></svg></button>
+        <button type="button" class="option-icon-button" data-align="right" title="По правому краю холста" aria-label="Выровнять слой по правому краю холста"><svg class="ui-icon"><use href="#icon-align-right" /></svg></button>
+        <button type="button" class="option-icon-button" data-align="top" title="По верхнему краю холста" aria-label="Выровнять слой по верхнему краю холста"><svg class="ui-icon"><use href="#icon-align-top" /></svg></button>
+        <button type="button" class="option-icon-button" data-align="vcenter" title="По центру холста по вертикали" aria-label="Выровнять слой по центру холста по вертикали"><svg class="ui-icon"><use href="#icon-align-vcenter" /></svg></button>
+        <button type="button" class="option-icon-button" data-align="bottom" title="По нижнему краю холста" aria-label="Выровнять слой по нижнему краю холста"><svg class="ui-icon"><use href="#icon-align-bottom" /></svg></button>
+      </div>
+      <label class="option-group marquee-only">Тип
+        <select id="selectionType" aria-label="Тип выделения">
+          <option value="rect">Прямоугольное</option>
+          <option value="ellipse">Эллиптическое</option>
+          <option value="lasso">Свободное лассо</option>
+          <option value="polygon">Многоугольное лассо</option>
+        </select>
+      </label>
+      <label class="option-group marquee-only">Копировать
+        <select id="selectionCopyMode" aria-label="Источник копирования выделения">
+          <option value="merged">Со всех видимых слоёв</option>
+          <option value="selected">С выбранного слоя</option>
+        </select>
+      </label>
+      <label class="option-group color-option">Цвет <input id="primaryColor" type="color" value="#4f8cff" /></label>
+      <label class="option-group">Размер <input id="brushSize" type="range" min="1" max="160" value="24" /><span id="brushSizeValue">24</span></label>
+      <label class="option-group opacity-option">Непрозр. <input id="toolOpacity" type="range" min="1" max="100" value="100" /><span id="toolOpacityValue">100%</span></label>
+      <label class="option-group dodge-only">Сила осветления <input id="dodgeStrength" type="range" min="1" max="100" value="20" /><span id="dodgeStrengthValue">20%</span></label>
+      <label class="option-group burn-only">Сила затемнения <input id="burnStrength" type="range" min="1" max="100" value="20" /><span id="burnStrengthValue">20%</span></label>
+      <label class="option-group blur-only">Сила размытия <input id="blurStrength" type="range" min="1" max="100" value="25" /><span id="blurStrengthValue">25%</span></label>
+      <label class="option-group smudge-only">Сила смазывания <input id="smudgeStrength" type="range" min="1" max="100" value="45" /><span id="smudgeStrengthValue">45%</span></label>
+      <label class="option-group fill-only">Допуск <input id="fillTolerance" type="range" min="0" max="100" value="18" /><span id="fillToleranceValue">18</span></label>
+      <label class="option-group gradient-only">Второй цвет <input id="secondaryColor" type="color" value="#ffffff" /></label>
+      <label class="option-group gradient-only">Тип <select id="gradientType"><option value="linear">Линейный</option><option value="radial">Радиальный</option></select></label>
+      <label class="option-group pen-only"><input id="penClosed" type="checkbox" /> Замкнуть контур</label>
+      <label class="option-group text-only">Шрифт
+        <select id="fontFamily">
+          <option value="Inter, Arial, sans-serif">Inter / Arial</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="'Courier New', monospace">Courier New</option>
+          <option value="Impact, sans-serif">Impact</option>
+          <option value="&quot;ZPE Roboto&quot;">Roboto</option>
+          <option value="&quot;ZPE Open Sans&quot;">Open Sans</option>
+          <option value="&quot;ZPE Montserrat&quot;">Montserrat</option>
+          <option value="&quot;ZPE Noto Sans&quot;">Noto Sans</option>
+          <option value="&quot;ZPE Noto Serif&quot;">Noto Serif</option>
+          <option value="&quot;ZPE Rubik&quot;">Rubik</option>
+          <option value="&quot;ZPE Oswald&quot;">Oswald</option>
+          <option value="&quot;ZPE PT Sans&quot;">PT Sans</option>
+          <option value="&quot;ZPE PT Serif&quot;">PT Serif</option>
+          <option value="&quot;ZPE Lobster&quot;">Lobster</option>
+          <option value="&quot;ZPE Manrope&quot;">Manrope</option>
+          <option value="&quot;ZPE Merriweather&quot;">Merriweather</option>
+        </select>
+      </label>
+      <label class="option-group text-only">px <input id="fontSize" type="number" min="6" max="500" value="48" /></label>
+      <label class="option-group shape-only">Фигура
+        <select id="shapeKind"><option value="rect">Прямоугольник</option><option value="ellipse">Эллипс</option></select>
+      </label>
+    </section>
+
+    <main class="workspace">
+      <aside class="toolbar" aria-label="Инструменты">
+        <button class="tool active" data-tool="move" title="Перемещение (V)" aria-label="Перемещение"><svg class="tool-icon"><use href="#icon-move" /></svg><small>V</small></button>
+        <button class="tool" data-tool="marquee" title="Выделение (M, Shift+M — сменить тип)" aria-label="Инструменты выделения"><svg class="tool-icon"><use href="#icon-marquee" /></svg><small>M</small></button>
+        <button class="tool" data-tool="brush" title="Кисть (B)" aria-label="Кисть"><svg class="tool-icon"><use href="#icon-brush" /></svg><small>B</small></button>
+        <button class="tool" data-tool="clone" title="Штамп (S, Alt+клик — источник)" aria-label="Штамп"><svg class="tool-icon"><use href="#icon-clone" /></svg><small>S</small></button>
+        <button class="tool" data-tool="heal" title="Лечебная кисть (J, Alt+клик — источник)" aria-label="Лечебная кисть"><svg class="tool-icon"><use href="#icon-heal" /></svg><small>J</small></button>
+        <button class="tool" data-tool="smudge" title="Палец / смазывание (N)" aria-label="Палец / смазывание"><svg class="tool-icon"><use href="#icon-smudge" /></svg><small>N</small></button>
+        <button class="tool" data-tool="dodge" title="Осветлитель (O)" aria-label="Осветлитель"><svg class="tool-icon"><use href="#icon-dodge" /></svg><small>O</small></button>
+        <button class="tool" data-tool="burn" title="Затемнитель (Shift+O)" aria-label="Затемнитель"><svg class="tool-icon"><use href="#icon-burn" /></svg><small>⇧O</small></button>
+        <button class="tool" data-tool="blur" title="Кисть размытия (R)" aria-label="Кисть размытия"><svg class="tool-icon"><use href="#icon-blur" /></svg><small>R</small></button>
+        <button class="tool" data-tool="eraser" title="Ластик (E)" aria-label="Ластик"><svg class="tool-icon"><use href="#icon-eraser" /></svg><small>E</small></button>
+        <button class="tool" data-tool="fill" title="Заливка (G)" aria-label="Заливка"><svg class="tool-icon"><use href="#icon-fill" /></svg><small>G</small></button>
+        <button class="tool" data-tool="gradient" title="Градиент (Shift+G)" aria-label="Градиент"><svg class="tool-icon"><use href="#icon-gradient" /></svg><small>⇧G</small></button>
+        <button class="tool" data-tool="pen" title="Перо / контуры (P)" aria-label="Перо / контуры"><svg class="tool-icon"><use href="#icon-pen" /></svg><small>P</small></button>
+        <button class="tool" data-tool="magnetic" title="Магнитное лассо (A)" aria-label="Магнитное лассо"><svg class="tool-icon"><use href="#icon-magnetic-lasso" /></svg><small>A</small></button>
+        <button class="tool" data-tool="wand" title="Волшебная палочка (W)" aria-label="Волшебная палочка"><svg class="tool-icon"><use href="#icon-wand" /></svg><small>W</small></button>
+        <button class="tool" data-tool="line" title="Линия (L)" aria-label="Линия"><svg class="tool-icon"><use href="#icon-line" /></svg><small>L</small></button>
+        <button class="tool" data-tool="text" title="Текст (T)" aria-label="Текст"><svg class="tool-icon"><use href="#icon-text" /></svg><small>T</small></button>
+        <button class="tool" data-tool="shape" title="Фигура (U)" aria-label="Фигура"><svg class="tool-icon"><use href="#icon-shape" /></svg><small>U</small></button>
+        <button class="tool" data-tool="crop" title="Кадрирование (C)" aria-label="Кадрирование"><svg class="tool-icon"><use href="#icon-crop" /></svg><small>C</small></button>
+        <button class="tool" data-tool="eyedropper" title="Пипетка (I)" aria-label="Пипетка"><svg class="tool-icon"><use href="#icon-eyedropper" /></svg><small>I</small></button>
+        <button class="tool" data-tool="hand" title="Рука (H / Space)" aria-label="Рука"><svg class="tool-icon"><use href="#icon-hand" /></svg><small>H</small></button>
+        <button class="tool" data-tool="zoom" title="Лупа (Z, Alt — уменьшить)" aria-label="Лупа"><svg class="tool-icon"><use href="#icon-zoom" /></svg><small>Z</small></button>
+        <div class="toolbar-spacer"></div>
+        <div class="color-chip" id="colorChip" title="Основной цвет"></div>
+      </aside>
+
+      <section class="stage-panel">
+        <div class="stage-tabs">
+          <div class="doc-tabs-wrap">
+            <div class="doc-tabs-strip" id="docTabs" role="tablist" aria-label="Документы"></div>
+            <button id="addDocTabBtn" class="doc-tab-add" type="button" title="Новая вкладка">＋</button>
+          </div>
+          <div class="stage-meta"><span id="docDimensions">1200 × 800</span><span>•</span><span id="zoomLabel">75%</span></div>
+        </div>
+        <div class="stage-viewport" id="stageViewport" tabindex="0" aria-label="Холст редактора">
+          <div class="canvas-shell" id="canvasShell">
+            <canvas id="editorCanvas" width="1200" height="800"></canvas>
+            <canvas id="overlayCanvas" width="1200" height="800" aria-hidden="true"></canvas>
+          </div>
+          <div class="empty-drop" id="emptyDrop" hidden>
+            <strong>Перетащите изображение сюда</strong>
+            <span>или вставьте изображение через Ctrl+V</span>
+            <small>PNG, JPEG, WebP, GIF, BMP, SVG</small>
+          </div>
+        </div>
+        <div class="statusbar">
+          <span id="statusText">Готово</span>
+          <span id="pointerInfo">x: — y: —</span>
+          <div class="zoom-controls">
+            <button id="zoomOutBtn" aria-label="Уменьшить">−</button>
+            <input id="zoomRange" type="range" min="10" max="1600" value="75" />
+            <button id="zoomInBtn" aria-label="Увеличить">+</button>
+            <button id="fitBtn">Вписать</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="right-panel">
+        <section class="panel-card properties-panel" data-panel-id="properties">
+          <header>
+            <button type="button" class="panel-toggle" aria-expanded="true" title="Свернуть раздел «Свойства»">
+              <span class="panel-toggle-icon" aria-hidden="true">▾</span><strong>Свойства</strong>
+            </button>
+          </header>
+          <div id="propertiesContent" class="panel-content muted">Выберите слой</div>
+        </section>
+
+        <section class="panel-card effects-panel" data-panel-id="effects">
+          <header>
+            <button type="button" class="panel-toggle" aria-expanded="true" title="Свернуть раздел «Цвет и эффекты»">
+              <span class="panel-toggle-icon" aria-hidden="true">▾</span><strong>Цвет и эффекты</strong>
+            </button>
+            <div class="panel-actions">
+              <button id="resetColorEffectsBtn" class="mini-button" title="Сбросить настройки цвета и эффектов">Сброс</button>
+            </div>
+          </header>
+          <div id="effectsContent" class="panel-content muted">Выберите слой</div>
+        </section>
+
+        <section class="panel-card layers-panel" data-panel-id="layers">
+          <header>
+            <button type="button" class="panel-toggle" aria-expanded="true" title="Свернуть раздел «Слои»">
+              <span class="panel-toggle-icon" aria-hidden="true">▾</span><strong>Слои</strong>
+            </button>
+            <div class="panel-actions">
+              <button id="addRasterBtn" title="Новый растровый слой" aria-label="Новый растровый слой"><svg class="ui-icon"><use href="#icon-plus" /></svg></button>
+              <button id="addGroupBtn" title="Новая группа слоёв" aria-label="Новая группа слоёв"><svg class="ui-icon"><use href="#icon-folder-plus" /></svg></button>
+              <button id="renameLayerBtn" title="Переименовать выбранный слой (F2)" aria-label="Переименовать выбранный слой"><svg class="ui-icon"><use href="#icon-rename" /></svg></button>
+              <button id="duplicateLayerBtn" title="Дублировать слой" aria-label="Дублировать слой"><svg class="ui-icon"><use href="#icon-duplicate" /></svg></button>
+              <button id="deleteLayerBtn" title="Удалить слой" aria-label="Удалить слой"><svg class="ui-icon"><use href="#icon-trash" /></svg></button>
+            </div>
+          </header>
+          <div class="layers-toolbar">
+            <select id="blendMode" aria-label="Режим наложения">
+              <option value="source-over">Обычный</option>
+              <option value="multiply">Умножение</option>
+              <option value="screen">Экран</option>
+              <option value="overlay">Перекрытие</option>
+              <option value="darken">Затемнение</option>
+              <option value="lighten">Осветление</option>
+              <option value="color-dodge">Осветление основы</option>
+              <option value="color-burn">Затемнение основы</option>
+            </select>
+            <label>Непр. <input id="layerOpacity" type="range" min="0" max="100" value="100" /></label>
+          </div>
+          <div id="layersList" class="layers-list" role="listbox" aria-label="Список слоёв"></div>
+          <div class="layer-order-actions">
+            <button id="layerUpBtn">Выше</button><button id="layerDownBtn">Ниже</button>
+          </div>
+        </section>
+
+        <section class="panel-card history-panel" data-panel-id="history">
+          <header>
+            <button type="button" class="panel-toggle" aria-expanded="true" title="Свернуть раздел «История»">
+              <span class="panel-toggle-icon" aria-hidden="true">▾</span><strong>История</strong>
+            </button>
+            <button id="clearHistoryBtn" title="Оставить текущее состояние">↺</button>
+          </header>
+          <div id="historyList" class="history-list"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div id="menuPopover" class="menu-popover" hidden></div>
+  <div id="modalRoot"></div>
+  <div id="dropOverlay" class="drop-overlay" hidden>
+    <div class="drop-overlay-card">
+      <strong>Отпустите файл, чтобы открыть его</strong>
+      <span>Изображения добавятся как слои • .zpe / .pixforge откроются как проект</span>
+    </div>
+  </div>
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <input id="fileInput" type="file" accept="image/*,.svg,.avif" multiple hidden />
+  <input id="projectInput" type="file" accept="application/json,.json,.zpe,.pixforge" hidden />
+
+  <script src="./src/app.bundle.js" defer></script>
+  <noscript><div class="fatal-error">Для работы ZeTer Photo Editor необходимо включить JavaScript.</div></noscript>
+</body>
+</html>
