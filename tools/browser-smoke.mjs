@@ -331,7 +331,7 @@ async function runSmoke() {
         resolve();
       });
     });
-    await rm(profileDir, { recursive: true, force: true });
+    await rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
   }
 }
 

@@ -6,7 +6,8 @@
 
 - Fixed: восстановлен повреждённый хвост `tools/browser-smoke.mjs`, из-за которого CI останавливался с `SyntaxError: Unexpected end of input` до запуска браузера.
 - Changed: `npm run check` теперь отдельно проверяет синтаксис browser-smoke harness до Node regression suite; навигационная ошибка Chromium выводится как отдельная причина.
-- Verification: новая версия harness проходит локальный `node --check`; полный `file://` runtime проверяется следующим GitHub Actions run на hosted runner.
+- Fixed: teardown временного Chrome-профиля использует bounded retry для `ENOTEMPTY`/занятых файлов после завершения браузера вместо ложного падения уже прошедшего smoke.
+- Verification: hosted Chrome успешно открыл реальный `file://` и прошёл startup/lock DOM assertions; следующий Actions run проверяет исправленный teardown.
 
 ### 2026-09-24 — Добавлен настоящий browser smoke для file:// и lock UI
 
