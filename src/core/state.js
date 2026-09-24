@@ -230,7 +230,7 @@ export function removeLayer(doc, id = doc.selectedLayerId) {
 
 export function duplicateLayer(doc, id = doc.selectedLayerId) {
   const source = doc.layers.find(layer => layer.id === id);
-  if (!source) return null;
+  if (!source || isLayerLocked(doc, source)) return null;
   const copy = structuredClone(source);
   copy.id = uid(source.type);
   copy.name = `${source.name} копия`;

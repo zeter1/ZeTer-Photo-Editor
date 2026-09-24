@@ -91,6 +91,8 @@ test('group visibility and locking are inherited by member layers',()=>{
   assert.equal(isLayerLocked(doc,layer),true);
   assert.equal(moveLayer(doc,layer.id,1),false);
   assert.equal(moveLayerIntoGroup(doc,layer.id,null),false);
+  assert.equal(duplicateLayer(doc,layer.id),null);
+  assert.equal(doc.layers.length,1);
   assert.equal(removeLayerGroup(doc,group.id),null);
 });
 
@@ -116,6 +118,7 @@ test('layer panel exposes rename and group controls with drag-to-group wiring',(
   assert.match(main,/group\.visible = group\.visible === false/);
   assert.match(main,/group\.locked = !group\.locked/);
   assert.match(main,/isLayerLocked\(doc, layer\)/);
+  assert.match(main,/if\(isLayerLocked\(doc,l\)\)\{setStatus\('Слой или его группа заблокированы'\);return;\}if\(duplicateLayer\(doc,l\.id\)\)commit\('Дублировать слой'\)/);
   assert.match(main,/Переименовать слой/);
   assert.match(css,/\.layer-group-row\.drop-into/);
   assert.match(css,/\.layer-row\.in-group/);

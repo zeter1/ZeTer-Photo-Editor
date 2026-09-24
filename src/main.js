@@ -3008,7 +3008,7 @@ function showAbout() {
 function undo(){if(blockPendingDocumentEdit())return;const entry=history.undo();if(!entry)return;doc=restoreDocument(entry.snapshot);clearSelectionState();brushCanvas=null;brushCtx=null;brushLayerId=null;updateAll();markDirty(true);setStatus(`Отменено → ${entry.label}`);}
 function redo(){if(blockPendingDocumentEdit())return;const entry=history.redo();if(!entry)return;doc=restoreDocument(entry.snapshot);clearSelectionState();brushCanvas=null;brushCtx=null;brushLayerId=null;updateAll();markDirty(true);setStatus(`Повторено → ${entry.label}`);}
 function deleteSelected(){if(blockPendingDocumentEdit())return;const l=selected();if(!l)return;if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}removeLayer(doc,l.id);commit('Удалить слой');}
-function duplicateSelected(){if(!selected())return;duplicateLayer(doc);commit('Дублировать слой');}
+function duplicateSelected(){const l=selected();if(!l)return;if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}if(duplicateLayer(doc,l.id))commit('Дублировать слой');}
 function renameLayer(layer){if(!layer||isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}showModal({title:'Переименовать слой',fields:[{name:'name',label:'Имя',value:layer.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===layer.name)return;layer.name=name;commit('Переименовать слой');}});}
 function addGroup(){
   const number=(doc.groups?.length||0)+1;
