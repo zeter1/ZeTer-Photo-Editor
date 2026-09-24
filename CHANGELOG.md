@@ -9,6 +9,7 @@
 - Changed: внутренний `Writer.append()` переносит chunk references без промежуточного `concat()` для layer records/channel data/layer-and-mask/composite sections; итоговый PSD по-прежнему материализуется один раз на выходе API.
 - Added: regression на 260-pixel rows покрывает PackBits literal/repeat boundaries, alpha и bitmap mask round-trip.
 - Added: structural regression фиксирует row-chunk seam и запрещает возврат `rgbaPlane`/`compositePlane` staging.
+- Test maintenance: mask round-trip теперь использует отдельную white-RGB/alpha fixture, а legacy Stage 4 structural guard проверяет актуальные row-stream primitives (`encodeRleRgbaChannel`, `measureRleRgbaRows`, `appendRleRgbaRows`).
 - Scope: публичный `encodePsd()` и RGB/8-bit PSD semantics не меняются; настоящий file streaming, PSB lengths и tiled document storage остаются следующими этапами.
 
 ### 2026-09-24 — CI reliability: browser startup budget
