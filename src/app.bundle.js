@@ -1096,6 +1096,7 @@ const MAX_LAYER_SCALE = 100;
 const MAX_LAYER_POSITION = 120000;
 function imageResizeTransforms(layers, sx, sy) {
   return layers.map(layer => {
+    if (layer?.type === 'adjustment') return { x: 0, y: 0, scaleX: 1, scaleY: 1 };
     const rotation = ((Number(layer.rotation) || 0) % 180 + 180) % 180;
     if (Math.abs(sx - sy) > 1e-9 && rotation > 1e-9) {
       throw new Error('Непропорциональный размер изображения нельзя применить к повёрнутому слою без искажения.');
@@ -1303,8 +1304,12 @@ function duplicateLayer(doc, id = doc.selectedLayerId) {
   const copy = structuredClone(source);
   copy.id = uid(source.type);
   copy.name = `${source.name} копия`;
-  copy.x += 18;
-  copy.y += 18;
+  if (copy.type === 'adjustment') {
+    copy.x = 0; copy.y = 0; copy.scaleX = 1; copy.scaleY = 1; copy.rotation = 0;
+  } else {
+    copy.x += 18;
+    copy.y += 18;
+  }
   const index = doc.layers.findIndex(layer => layer.id === id);
   doc.layers.splice(index + 1, 0, copy);
   doc.selectedLayerId = copy.id;
@@ -4729,8 +4734,9 @@ async function clearSelectionAcrossVisibleLayers({ historyLabel = 'Выреза�
   if(!selectionRect)return {cleared:0,locked:0,rasterized:0};
   if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return null;}
   const intersecting=doc.layers.filter(layer=>isLayerVisible(doc,layer)&&selectionIntersectsLayer(layer));
-  const targets=intersecting.filter(layer=>layer.type!=='adjustment'&&!isLayerLocked(doc,layer));
-  const locked=intersecting.length-targets.length;
+  const pixelTargets=intersecting.filter(layer=>layer.type!=='adjustment');
+  const targets=pixelTargets.filter(layer=>!isLayerLocked(doc,layer));
+  const locked=pixelTargets.length-targets.length;
   if(!targets.length)return {cleared:0,locked,rasterized:0};
   paintPersisting=true;
   try {

@@ -2750,8 +2750,9 @@ async function clearSelectionAcrossVisibleLayers({ historyLabel = 'Выреза�
   if(!selectionRect)return {cleared:0,locked:0,rasterized:0};
   if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return null;}
   const intersecting=doc.layers.filter(layer=>isLayerVisible(doc,layer)&&selectionIntersectsLayer(layer));
-  const targets=intersecting.filter(layer=>layer.type!=='adjustment'&&!isLayerLocked(doc,layer));
-  const locked=intersecting.length-targets.length;
+  const pixelTargets=intersecting.filter(layer=>layer.type!=='adjustment');
+  const targets=pixelTargets.filter(layer=>!isLayerLocked(doc,layer));
+  const locked=pixelTargets.length-targets.length;
   if(!targets.length)return {cleared:0,locked,rasterized:0};
   paintPersisting=true;
   try {

@@ -37,10 +37,13 @@ test('Ctrl+C and Ctrl+X are wired to image clipboard commands', () => {
   assert.match(main, /window\.addEventListener\('cut'/);
 });
 
-test('merged clipboard mode renders every visible layer and selected mode renders one layer', () => {
-  assert.match(main, /async function renderSelectionMergedToPng\(bounds\)/);
-  assert.match(main, /for\(const layer of doc\.layers\)/);
-  assert.match(main, /if\(!isLayerVisible\(doc,layer\)\|\|layer\.opacity<=0\)continue/);
+test('merged clipboard mode renders the complete document pipeline and selected mode renders one layer', () => {
+  const start = main.indexOf('async function renderSelectionMergedToPng(bounds) {');
+  const end = main.indexOf('\nasync function prepareClearedRasterDataUrl', start);
+  const fn = start >= 0 && end > start ? main.slice(start, end) : '';
+  assert.match(fn, /await renderDocument\(full,doc,\{checker:false\}\)/);
+  assert.match(fn, /clipContextToDocumentSelection\(ctx\)/);
+  assert.match(fn, /ctx\.drawImage\(full,0,0\)/);
   assert.match(main, /selectionCopyMode==='merged'[\s\S]*renderSelectionMergedToPng\(bounds\)[\s\S]*renderSelectionLayerToPng\(layer,bounds\)/);
 });
 
@@ -56,15 +59,15 @@ test('clipboard writes PNG before cut mutates raster pixels', () => {
 });
 
 
-test('merged cut rasterizes editable text and shape layers instead of silently skipping them', () => {
+test('merged cut rasterizes editable pixel layers while leaving adjustment layers non-destructive', () => {
   const start = main.indexOf('async function clearSelectionAcrossVisibleLayers(');
   const end = main.indexOf('\nfunction finishSelectionClipboardAction', start);
   const fn = start >= 0 && end > start ? main.slice(start, end) : '';
-  assert.match(fn, /const targets=intersecting\.filter\(layer=>!isLayerLocked\(doc,layer\)\)/);
+  assert.match(fn, /const pixelTargets=intersecting\.filter\(layer=>layer\.type!=='adjustment'\)/);
+  assert.match(fn, /const targets=pixelTargets\.filter\(layer=>!isLayerLocked\(doc,layer\)\)/);
   assert.match(fn, /layer\.type==='raster' \? layer : await rasterizeLayerForPixelEditing\(layer\)/);
   assert.match(fn, /doc\.layers\.splice\(index,1,working\)/);
   assert.match(fn, /rasterized\+=1/);
-  assert.doesNotMatch(fn, /nonRaster/);
 });
 
 test('successful copy or cut clears the marquee and switches to move for immediate paste positioning', () => {

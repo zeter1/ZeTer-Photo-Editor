@@ -27,6 +27,7 @@ export const MAX_LAYER_POSITION = 120000;
 
 export function imageResizeTransforms(layers, sx, sy) {
   return layers.map(layer => {
+    if (layer?.type === 'adjustment') return { x: 0, y: 0, scaleX: 1, scaleY: 1 };
     const rotation = ((Number(layer.rotation) || 0) % 180 + 180) % 180;
     if (Math.abs(sx - sy) > 1e-9 && rotation > 1e-9) {
       throw new Error('Непропорциональный размер изображения нельзя применить к повёрнутому слою без искажения.');
@@ -255,8 +256,12 @@ export function duplicateLayer(doc, id = doc.selectedLayerId) {
   const copy = structuredClone(source);
   copy.id = uid(source.type);
   copy.name = `${source.name} копия`;
-  copy.x += 18;
-  copy.y += 18;
+  if (copy.type === 'adjustment') {
+    copy.x = 0; copy.y = 0; copy.scaleX = 1; copy.scaleY = 1; copy.rotation = 0;
+  } else {
+    copy.x += 18;
+    copy.y += 18;
+  }
   const index = doc.layers.findIndex(layer => layer.id === id);
   doc.layers.splice(index + 1, 0, copy);
   doc.selectedLayerId = copy.id;
