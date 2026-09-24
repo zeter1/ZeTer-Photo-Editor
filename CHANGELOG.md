@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-24 — Performance Stage 6a: bounded pixel worker
+
+- Added: крупные advanced color corrections (от 512×512 px) выполняются в одном bounded Blob Worker; RGBA buffer передаётся transferable без дополнительного полного clone перед обработкой.
+- Reliability: максимум две pending pixel-задачи, timeout 45 секунд, worker reset на runtime/message error и синхронный fallback при недоступном Worker/перегрузке.
+- Reliability: если transferred buffer уже detached при worker failure, renderer повторно читает исходные Canvas pixels и применяет тот же sync algorithm вместо потери изображения.
+- Fixed: adjusted-color cache для smart-object теперь ключуется по `previewDataUrl`, поэтому обновление содержимого не может оставить stale color-corrected preview.
+- Added: regression-тест сравнивает worker algorithm с sync RGBA output; render contract проверяет async path и smart-object cache source token.
+- Browser proof: `file://` smoke отдельно проверяет, что Blob Worker реально стартует из локально открытого редактора.
+- Scope: это responsiveness foundation; tiled raster storage, PSB streaming и 16/32-bit buffers остаются следующими отдельными этапами.
+
 ### 2026-09-24 — Smart Objects Stage 5a: embedded source + linked content tabs
 
 - Added: новый слой `smart-object` хранит `embeddedDocument` как source of truth и `previewDataUrl` как render-cache; схема добавлена обратно совместимо в текущий `.zpe` v1.
