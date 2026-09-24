@@ -2974,7 +2974,12 @@ function jumpToHistory(index) {
 
 function updateLayerControls() {
   const layer = selected();
-  els.blend.disabled = !layer; els.layerOpacity.disabled = !layer;
+  const editable = Boolean(layer) && !isLayerLocked(doc, layer);
+  els.blend.disabled = !editable; els.layerOpacity.disabled = !editable;
+  for (const id of ['renameLayerBtn','duplicateLayerBtn','deleteLayerBtn','layerUpBtn','layerDownBtn','resetColorEffectsBtn']) {
+    const control = $`#${id}`;
+    if (control) control.disabled = !editable;
+  }
   if (layer) { els.blend.value = layer.blendMode || 'source-over'; els.layerOpacity.value = String(Math.round((layer.opacity ?? 1) * 100)); }
 }
 
@@ -5150,7 +5155,7 @@ const menus={
   layer:[
     ['Новый растровый слой','Ctrl+Shift+N',addBlankLayer],
     ['Новая группа слоёв','',addGroup],
-    ['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())],
+    ['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Растеризовать слой','',rasterizeSelectedLayer,()=>Boolean(selected())&&selected().type!=='raster'&&!isLayerLocked(doc,selected())],
@@ -5159,10 +5164,10 @@ const menus={
     ['Вписать слой в холст','',fitSelectedLayerToCanvas,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Показать / скрыть слой','',toggleSelectedVisibility,()=>Boolean(selected())],
-    ['Заблокировать / разблокировать','',toggleSelectedLock,()=>Boolean(selected())],
+    ['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=selected();return Boolean(layer)&&!doc.groups?.find(group=>group.id===layer.groupId)?.locked;}],
     ['sep'],
-    ['Поднять слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');},()=>Boolean(selected())],
-    ['Опустить слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');},()=>Boolean(selected())],
+    ['Поднять слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['Опустить слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],
   image:[
     ['Цветокоррекция…','',openColorCorrectionDialog,()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],

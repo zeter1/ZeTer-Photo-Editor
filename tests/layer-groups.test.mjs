@@ -129,6 +129,13 @@ test('layer panel exposes rename and group controls with drag-to-group wiring',(
   assert.match(main,/if\(isLayerLocked\(doc,l\)\)\{setStatus\('Слой или его группа заблокированы'\);return;\}if\(duplicateLayer\(doc,l\.id\)\)commit\('Дублировать слой'\)/);
   assert.match(main,/\['Дублировать слой','Ctrl\+J',duplicateSelected,\(\)=>Boolean\(selected\(\)\)&&!isLayerLocked\(doc,selected\(\)\)\]/);
   assert.match(main,/\['Удалить слой','Delete',deleteSelected,\(\)=>Boolean\(selected\(\)\)&&!isLayerLocked\(doc,selected\(\)\)\]/);
+  assert.ok(main.includes("const editable = Boolean(layer) && !isLayerLocked(doc, layer);"));
+  assert.ok(main.includes("els.blend.disabled = !editable; els.layerOpacity.disabled = !editable;"));
+  assert.ok(main.includes("['renameLayerBtn','duplicateLayerBtn','deleteLayerBtn','layerUpBtn','layerDownBtn','resetColorEffectsBtn']"));
+  assert.ok(main.includes("['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())&&!isLayerLocked(doc,selected())]"));
+  assert.ok(main.includes("['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=selected();return Boolean(layer)&&!doc.groups?.find(group=>group.id===layer.groupId)?.locked;}]"));
+  assert.ok(main.includes("['Поднять слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())]"));
+  assert.ok(main.includes("['Опустить слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())]"));
   assert.match(main,/Переименовать слой/);
   assert.match(css,/\.layer-group-row\.drop-into/);
   assert.match(css,/\.layer-row\.in-group/);
