@@ -997,7 +997,8 @@ async function renderLayerStyles(styles,width,height,paint,{contentBlur=0}={}) {
   const outer=(item,dx,dy)=>{
     reset();
     temp.shadowColor=item.color;temp.shadowBlur=item.blur*scale;
-    temp.shadowOffsetX=dx*scale;temp.shadowOffsetY=dy*scale;    temp.drawImage(source,0,0);
+    temp.shadowOffsetX=dx*scale;temp.shadowOffsetY=dy*scale;
+    temp.drawImage(source,0,0);
     temp.shadowColor='transparent';temp.shadowBlur=0;temp.shadowOffsetX=0;temp.shadowOffsetY=0;
     temp.globalCompositeOperation='destination-out';temp.drawImage(source,0,0);
     tint(item.color,item.opacity);commit();
@@ -1996,7 +1997,8 @@ let recoveryWritePromise = Promise.resolve();
 let recoveryStorageAvailable = true;
 let recoveryFailureNotified = false;
 let unrestoredRecoveryDocuments = [];
-function createRecoveryKey(forceNew = false) {  const key = `workspace:${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
+function createRecoveryKey(forceNew = false) {
+  const key = `workspace:${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
   try {
     const storageKey = 'zeter-photo-editor.recovery-window.v1';
     const previous = sessionStorage.getItem(storageKey);
@@ -2855,8 +2857,7 @@ function updateLayers() {
       commit(group.visible ? 'Показать группу слоёв' : 'Скрыть группу слоёв');
     };
 
-    const toggle = document.createElement('button');
-    toggle.className = 'layer-group-toggle';
+    const toggle = document.createElement('button');    toggle.className = 'layer-group-toggle';
     toggle.textContent = group.collapsed ? '▸' : '▾';
     toggle.title = group.collapsed ? 'Развернуть группу' : 'Свернуть группу';
     toggle.setAttribute('aria-expanded', String(!group.collapsed));
@@ -2995,7 +2996,8 @@ async function readCustomTextFont(file) {
   if (!(file instanceof File) || !file.name) return null;
   if (customFontReads.has(file)) return customFontReads.get(file);
   const loading = loadCustomTextFont(file).catch(error => { customFontReads.delete(file); throw error; });
-  customFontReads.set(file, loading);  return loading;
+  customFontReads.set(file, loading);
+  return loading;
 }
 async function loadCustomTextFont(file) {
   const extension = file.name.toLowerCase().match(/\.(woff2?|ttf|otf)$/)?.[1];
@@ -3854,8 +3856,7 @@ async function setCloneSource(point) {
   doc.selectedLayerId=layer.id;
   setStatus(`Источник для «${TOOL_LABELS[currentTool]}» задан. Рисуйте по этому же слою.`);
   drawOverlay();
-  return true;
-}
+  return true;}
 function prepareCloneStroke(layer, destinationPoint) {
   if(!cloneSource || cloneSource.layerId!==layer.id)return false;
   cloneSnapshotCanvas=document.createElement('canvas');
@@ -3994,7 +3995,8 @@ async function beginPaint(p, pointerId, pointerEvent = null) {
     schedulePaintPreview();
     return true;
   }
-  brushCtx.lineCap='round';  brushCtx.lineJoin='round';
+  brushCtx.lineCap='round';
+  brushCtx.lineJoin='round';
   brushCtx.lineWidth=brushWidthForPointer(pointerEvent);
   brushCtx.globalAlpha=Number(els.toolOpacity.value)/100;
   if (currentTool==='eraser') brushCtx.globalCompositeOperation='destination-out';
@@ -4853,8 +4855,7 @@ function showShortcuts() {
     <b>Стрелки</b><span>Сдвинуть выбранный слой на 1 px (Shift — 10 px)</span><b>Shift + перетаскивание</b><span>Перемещать слой строго по горизонтали / вертикали</span>
     <b>Ctrl + перетаскивание</b><span>Временно отключить умную привязку</span><b>Shift + ручка</b><span>Изменить размер с сохранением пропорций</span><b>Alt + ручка</b><span>Масштабировать от центра</span>
     <b>Shift + поворот</b><span>Поворот с шагом 15°</span><b>Shift + выделение / фигура / линия</b><span>Квадрат / круг для прямоугольного/эллиптического выделения и фигур; линия с шагом 45°</span>
-    <b>[ / ]</b><span>Уменьшить / увеличить размер кисти (Shift — крупнее шаг)</span><b>Перо</b><span>Нажим пера автоматически влияет на размер кисти/ластика</span>
-    <b>Space / средняя кнопка</b><span>Временно перемещать холст</span><b>Alt/Ctrl + колесо</b><span>Масштаб холста под курсором (до 1600%)</span>
+    <b>[ / ]</b><span>Уменьшить / увеличить размер кисти (Shift — крупнее шаг)</span><b>Перо</b><span>Нажим пера автоматически влияет на размер кисти/ластика</span>    <b>Space / средняя кнопка</b><span>Временно перемещать холст</span><b>Alt/Ctrl + колесо</b><span>Масштаб холста под курсором (до 1600%)</span>
     <b>Ctrl + / −</b><span>Увеличить / уменьшить масштаб</span><b>Ctrl+0 / Ctrl+1</b><span>Вписать в окно / 100%</span>
     <b>Tab</b><span>Режим холста: скрыть / показать боковые панели</span><b>F2</b><span>Переименовать выбранный слой</span>
     <b>Панель «Слои»</b><span>Кнопка группы создаёт папку; перетащите слой на заголовок группы, чтобы поместить его внутрь</span>
@@ -4993,7 +4994,8 @@ function openBlendingOptions(layer) {
   modal.querySelector('[data-cancel]').onclick=()=>finish();
   back.addEventListener('mousedown',e=>{if(e.target===back)finish();});
   modal.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();finish();}});
-  modal.addEventListener('submit',e=>{e.preventDefault();finish(true);});  back.append(modal);els.modalRoot.replaceChildren(back);
+  modal.addEventListener('submit',e=>{e.preventDefault();finish(true);});
+  back.append(modal);els.modalRoot.replaceChildren(back);
   makeModalDraggable(modal);
   blendingPreview={document:owner,layer,canvas:previewCanvas,crop:blendingPreviewCrop(owner,layer)};
   const previewObserver=typeof ResizeObserver==='function' ? new ResizeObserver(syncBlendingPreviewCanvas) : null;
