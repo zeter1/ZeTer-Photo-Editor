@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-24 — Performance Stage 6b: row-stream PSD writer
+
+- Changed: PSD PackBits/RLE writer больше не создаёт полноразмерные временные channel planes для RGB/alpha/mask/composite; канал строится построчно через bounded row buffer.
+- Changed: RLE row lengths измеряются первым проходом, а encoded row chunks пишутся вторым проходом. CPU PackBits немного увеличивается, зато peak memory не включает дополнительный full-plane buffer на каждый канал.
+- Changed: внутренний `Writer.append()` переносит chunk references без промежуточного `concat()` для layer records/channel data/layer-and-mask/composite sections; итоговый PSD по-прежнему материализуется один раз на выходе API.
+- Added: regression на 260-pixel rows покрывает PackBits literal/repeat boundaries, alpha и bitmap mask round-trip.
+- Added: structural regression фиксирует row-chunk seam и запрещает возврат `rgbaPlane`/`compositePlane` staging.
+- Scope: публичный `encodePsd()` и RGB/8-bit PSD semantics не меняются; настоящий file streaming, PSB lengths и tiled document storage остаются следующими этапами.
+
 ### 2026-09-24 — CI reliability: browser startup budget
 
 - Fixed: `file://` browser smoke теперь даёт Chrome/Chromium до 20 секунд на публикацию DevTools endpoint вместо 10 секунд.

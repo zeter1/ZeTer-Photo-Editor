@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decodePsd, encodePsd, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
+import { readFile } from 'node:fs/promises';
 
 const encoder = new TextEncoder();
+const psdSource = await readFile(new URL('../src/adapters/psd.js', import.meta.url), 'utf8');
 
 function concat(parts) {
   const size = parts.reduce((sum, part) => sum + part.length, 0);
@@ -130,4 +132,54 @@ test('PSD writer rejects malformed layer and mask buffers', () => {
     }),
     error => error instanceof PsdImportError && error.code === 'PSD_EXPORT_MASK',
   );
+});
+
+
+test('PSD writer Stage 6b keeps row-chunk encoding instead of full channel planes', () => {
+  assert.match(psdSource, /function fillRgbaChannelRow\(/);
+  assert.match(psdSource, /function measureRleRgbaRows\(/);
+  assert.match(psdSource, /function appendRleRgbaRows\(/);
+  assert.match(psdSource, /append\(other\)/);
+  assert.match(psdSource, /layerInfo\.append\(layerRecords\)\.append\(channelData\)/);
+  assert.doesNotMatch(psdSource, /function rgbaPlane\(/);
+  assert.doesNotMatch(psdSource, /function compositePlane\(/);
+});
+
+test('PSD row encoder round-trips long literal and repeated PackBits rows', async () => {
+  const width = 260;
+  const height = 2;
+  const pixels = new Uint8Array(width * height * 4);
+  const mask = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const repeated = x < 130;
+      pixels[offset] = repeated ? 42 : (x * 13 + y * 7) & 255;
+      pixels[offset + 1] = repeated ? 42 : (x * 29 + 11) & 255;
+      pixels[offset + 2] = repeated ? 42 : (255 - x) & 255;
+      pixels[offset + 3] = x % 5 === 0 ? 128 : 255;
+      mask[offset] = 255;
+      mask[offset + 1] = 255;
+      mask[offset + 2] = 255;
+      mask[offset + 3] = (x + y * 31) & 255;
+    }
+  }
+  const encoded = encodePsd({
+    width,
+    height,
+    composite: pixels,
+    layers:[{
+      name:'row-stream',
+      x:0,y:0,width,height,
+      pixels,
+      opacity:1,
+      blendMode:'source-over',
+      visible:true,
+      mask:{pixels,disabled:false},
+    }],
+  });
+  const decoded = await decodePsd(encoded);
+  assert.equal(decoded.layers.length, 1);
+  assert.deepEqual([...decoded.layers[0].pixels], [...pixels]);
+  assert.deepEqual([...decoded.layers[0].mask.pixels], [...pixels]);
 });

@@ -2707,6 +2707,15 @@ class Writer {
     this.length += bytes.length;
     return this;
   }
+  append(other) {
+    if (!(other instanceof Writer)) return this.push(other);
+    if (other === this) throw new Error('Writer cannot append itself');
+    for (const part of other.parts) {
+      this.parts.push(part);
+      this.length += part.length;
+    }
+    return this;
+  }
   u8(value) { return this.push([Number(value) & 255]); }
   u16(value) {
     const n = Number(value) & 0xffff;
@@ -2756,12 +2765,6 @@ function encodeUtf16Be(value) {
   return bytes;
 }
 
-function rgbaPlane(pixels, channel, pixelCount) {
-  const plane = new Uint8Array(pixelCount);
-  for (let index = 0; index < pixelCount; index += 1) plane[index] = pixels[index * 4 + channel];
-  return plane;
-}
-
 function packBitsEncodeRow(row) {
   const out = [];
   let index = 0;
@@ -2789,23 +2792,50 @@ function packBitsEncodeRow(row) {
   return Uint8Array.from(out);
 }
 
-function encodeRlePlane(plane, width, height) {
-  if (plane.length !== width * height) throw new PsdImportError('PSD writer: размер channel plane не совпадает с bounds', 'PSD_EXPORT_CHANNEL');
+function fillRgbaChannelRow(target, rgba, channel, width, row, { whiteMatte = false } = {}) {
+  const rowStart = row * width * 4;
+  for (let x = 0; x < width; x += 1) {
+    const source = rowStart + x * 4;
+    const alpha = rgba[source + 3];
+    const value = rgba[source + channel];
+    if (whiteMatte && channel < 3 && alpha !== 0 && alpha !== 255) {
+      const a = alpha / 255;
+      target[x] = value * a + 255 * (1 - a);
+    } else {
+      target[x] = value;
+    }
+  }
+  return target;
+}
+
+function measureRleRgbaRows(rgba, channel, width, height, options = {}) {
+  const rowBuffer = new Uint8Array(width);
   const rowLengths = new Uint16Array(height);
-  const packedRows = [];
-  let packedBytes = 0;
   for (let row = 0; row < height; row += 1) {
-    const packed = packBitsEncodeRow(plane.subarray(row * width, (row + 1) * width));
+    fillRgbaChannelRow(rowBuffer, rgba, channel, width, row, options);
+    const packed = packBitsEncodeRow(rowBuffer);
     if (packed.length > 0xffff) throw new PsdImportError('PSD writer: RLE-строка превышает 65535 байт', 'PSD_EXPORT_RLE_ROW');
     rowLengths[row] = packed.length;
-    packedRows.push(packed);
-    packedBytes += packed.length;
   }
+  return rowLengths;
+}
+
+function appendRleRgbaRows(writer, rgba, channel, width, height, options = {}) {
+  const rowBuffer = new Uint8Array(width);
+  for (let row = 0; row < height; row += 1) {
+    fillRgbaChannelRow(rowBuffer, rgba, channel, width, row, options);
+    writer.push(packBitsEncodeRow(rowBuffer));
+  }
+  return writer;
+}
+
+function encodeRleRgbaChannel(rgba, channel, width, height, options = {}) {
+  const rowLengths = measureRleRgbaRows(rgba, channel, width, height, options);
   const writer = new Writer();
   writer.u16(1);
   for (const length of rowLengths) writer.u16(length);
-  for (const packed of packedRows) writer.push(packed);
-  return writer.concat();
+  appendRleRgbaRows(writer, rgba, channel, width, height, options);
+  return writer;
 }
 
 function validateExportLayer(layer, index, maxPixels) {
@@ -2834,7 +2864,7 @@ function writeUnicodeLayerName(writer, name) {
   const utf16 = encodeUtf16Be(name || 'Layer');
   data.u32(utf16.length / 2).push(utf16);
   while (data.length % 4) data.u8(0);
-  writer.ascii('8BIM').ascii('luni').u32(data.length).push(data.concat());
+  writer.ascii('8BIM').ascii('luni').u32(data.length).append(data);
 }
 
 function writeLayerMaskExtra(writer, layer) {
@@ -2853,56 +2883,44 @@ function normalizeExportLayer(layer, index, maxPixels) {
   const item = validateExportLayer(layer, index, maxPixels);
   const pixelCount = item.width * item.height;
   const channels = [
-    { id: 0, data: encodeRlePlane(rgbaPlane(item.pixels, 0, pixelCount), item.width, item.height) },
-    { id: 1, data: encodeRlePlane(rgbaPlane(item.pixels, 1, pixelCount), item.width, item.height) },
-    { id: 2, data: encodeRlePlane(rgbaPlane(item.pixels, 2, pixelCount), item.width, item.height) },
-    { id: -1, data: encodeRlePlane(rgbaPlane(item.pixels, 3, pixelCount), item.width, item.height) },
+    { id: 0, data: encodeRleRgbaChannel(item.pixels, 0, item.width, item.height) },
+    { id: 1, data: encodeRleRgbaChannel(item.pixels, 1, item.width, item.height) },
+    { id: 2, data: encodeRleRgbaChannel(item.pixels, 2, item.width, item.height) },
+    { id: -1, data: encodeRleRgbaChannel(item.pixels, 3, item.width, item.height) },
   ];
   let mask = null;
   if (item.mask?.pixels) {
     const maskPixels = asBytes(item.mask.pixels);
     if (maskPixels.length !== pixelCount * 4) throw new PsdImportError(`PSD writer: маска слоя «${item.name || index + 1}» имеет неверный размер`, 'PSD_EXPORT_MASK');
     mask = { disabled: Boolean(item.mask.disabled), pixels: true };
-    channels.push({ id: -2, data: encodeRlePlane(rgbaPlane(maskPixels, 3, pixelCount), item.width, item.height) });
+    channels.push({ id: -2, data: encodeRleRgbaChannel(maskPixels, 3, item.width, item.height) });
   }
   const { pixels: _pixels, ...metadata } = item;
   return { ...metadata, mask, channels };
-}
-
-function compositePlane(rgba, channel, pixelCount) {
-  const plane = new Uint8Array(pixelCount);
-  for (let index = 0; index < pixelCount; index += 1) {
-    const alpha = rgba[index * 4 + 3];
-    const value = rgba[index * 4 + channel];
-    if (channel < 3 && alpha !== 0 && alpha !== 255) {
-      const a = alpha / 255;
-      plane[index] = value * a + 255 * (1 - a);
-    } else {
-      plane[index] = value;
-    }
-  }
-  return plane;
 }
 
 function encodeCompositeRle(pixels, width, height) {
   const pixelCount = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   const rgba = asBytes(pixels);
   if (rgba.length !== pixelCount * 4) throw new PsdImportError('PSD writer: composite RGBA имеет неверный размер', 'PSD_EXPORT_COMPOSITE');
-  const rowTable = new Writer();
-  const packed = [];
+
+  const channelRows = [];
   for (let channel = 0; channel < 4; channel += 1) {
-    const plane = compositePlane(rgba, channel, pixelCount);
-    for (let row = 0; row < height; row += 1) {
-      const data = packBitsEncodeRow(plane.subarray(row * width, (row + 1) * width));
-      if (data.length > 0xffff) throw new PsdImportError('PSD writer: composite RLE-строка превышает 65535 байт', 'PSD_EXPORT_RLE_ROW');
-      rowTable.u16(data.length);
-      packed.push(data);
-    }
+    channelRows.push({
+      channel,
+      rowLengths: measureRleRgbaRows(rgba, channel, width, height, { whiteMatte: true }),
+    });
   }
+
   const writer = new Writer();
-  writer.u16(1).push(rowTable.concat());
-  for (const row of packed) writer.push(row);
-  return writer.concat();
+  writer.u16(1);
+  for (const entry of channelRows) {
+    for (const length of entry.rowLengths) writer.u16(length);
+  }
+  for (const entry of channelRows) {
+    appendRleRgbaRows(writer, rgba, entry.channel, width, height, { whiteMatte: true });
+  }
+  return writer;
 }
 function encodePsd({ width, height, layers = [], composite, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
   const documentWidth = Math.trunc(Number(width));
@@ -2934,17 +2952,17 @@ function encodePsd({ width, height, layers = [], composite, maxPixels = 48_000_0
     extra.u32(0);
     writePascalLayerName(extra, layer.name || 'Layer');
     writeUnicodeLayerName(extra, layer.name || 'Layer');
-    layerRecords.u32(extra.length).push(extra.concat());
+    layerRecords.u32(extra.length).append(extra);
 
-    for (const channel of layer.channels) channelData.push(channel.data);
+    for (const channel of layer.channels) channelData.append(channel.data);
   }
 
   const layerInfo = new Writer();
-  layerInfo.push(layerRecords.concat()).push(channelData.concat());
+  layerInfo.append(layerRecords).append(channelData);
   while (layerInfo.length % 4) layerInfo.u8(0);
 
   const layerAndMask = new Writer();
-  layerAndMask.u32(layerInfo.length).push(layerInfo.concat());
+  layerAndMask.u32(layerInfo.length).append(layerInfo);
   layerAndMask.u32(0);
 
   const compositeData = encodeCompositeRle(composite, documentWidth, documentHeight);
@@ -2953,8 +2971,8 @@ function encodePsd({ width, height, layers = [], composite, maxPixels = 48_000_0
   out.u16(4).u32(documentHeight).u32(documentWidth).u16(8).u16(PSD_COLOR_MODE_RGB);
   out.u32(0);
   out.u32(0);
-  out.u32(layerAndMask.length).push(layerAndMask.concat());
-  out.push(compositeData);
+  out.u32(layerAndMask.length).append(layerAndMask);
+  out.append(compositeData);
 
   if (out.length > maxBytes) {
     throw new PsdImportError(`PSD writer: итоговый файл слишком большой (${Math.ceil(out.length / 1024 / 1024)} МБ). Для файлов больше 2 ГБ нужен PSB.`, 'PSD_EXPORT_TOO_LARGE');
