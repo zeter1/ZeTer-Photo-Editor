@@ -2922,7 +2922,8 @@ function encodeCompositeRle(pixels, width, height) {
   }
   return writer;
 }
-function encodePsd({ width, height, layers = [], composite, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+
+function buildPsdWriter({ width, height, layers = [], composite, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
   const documentWidth = Math.trunc(Number(width));
   const documentHeight = Math.trunc(Number(height));
   safeArea(documentWidth, documentHeight, maxPixels);
@@ -2977,7 +2978,17 @@ function encodePsd({ width, height, layers = [], composite, maxPixels = 48_000_0
   if (out.length > maxBytes) {
     throw new PsdImportError(`PSD writer: итоговый файл слишком большой (${Math.ceil(out.length / 1024 / 1024)} МБ). Для файлов больше 2 ГБ нужен PSB.`, 'PSD_EXPORT_TOO_LARGE');
   }
-  return out.concat();
+  return out;
+}
+function encodePsd(options = {}) {
+  return buildPsdWriter(options).concat();
+}
+function encodePsdBlob(options = {}) {
+  if (typeof Blob !== 'function') {
+    throw new PsdImportError('PSD writer: Blob API недоступен в этом окружении', 'PSD_EXPORT_BLOB_UNAVAILABLE');
+  }
+  const writer = buildPsdWriter(options);
+  return new Blob(writer.parts, { type: 'image/vnd.adobe.photoshop' });
 }
 
 // ---- src/main.js ----
@@ -6071,13 +6082,13 @@ async function exportPsdDocument(exportDoc){
   setStatus('PSD: подготовка слоёв…');
   const prepared=await preparePsdExport(exportDoc);
   setStatus('PSD: упаковка RLE-каналов…');
-  const bytes=encodePsd({
+  const blob=encodePsdBlob({
     width:exportDoc.width,height:exportDoc.height,
     layers:prepared.layers,composite:prepared.composite,
     maxPixels:48_000_000,maxLayers:500,
   });
   const filename=`${safeFilename(exportDoc.name)}.psd`;
-  downloadBlob(new Blob([bytes],{type:'image/vnd.adobe.photoshop'}),filename);
+  downloadBlob(blob,filename);
   if(prepared.warnings.length){
     console.warn('PSD export warnings',prepared.warnings);
     setStatus(`Экспортирован ${filename} с ограничениями: ${prepared.warnings.length}`);

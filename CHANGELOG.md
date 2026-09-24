@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-24 — Performance Stage 6c: chunked PSD Blob export
+
+- Added: `encodePsdBlob()` создаёт PSD `Blob` напрямую из chunked writer parts, не вызывая финальный `Writer.concat()` в пользовательском browser-export path.
+- Compatibility: существующий `encodePsd()` по-прежнему возвращает `Uint8Array` и строится из того же `buildPsdWriter()`, поэтому byte-level API и regression fixtures сохраняются.
+- Changed: `src/main.js` экспортирует PSD через `encodePsdBlob()` и передаёт готовый Blob в `downloadBlob()` без промежуточного contiguous byte buffer.
+- Added: regression сравнивает `encodePsdBlob()` и `encodePsd()` byte-for-byte и повторно декодирует Blob output.
+- Scope: browser memory-path стал chunk-friendly, но это ещё не настоящий WritableStream/file-system streaming и не PSB >2 GB.
+
 ### 2026-09-24 — Performance Stage 6b: row-stream PSD writer
 
 - Changed: PSD PackBits/RLE writer больше не создаёт полноразмерные временные channel planes для RGB/alpha/mask/composite; канал строится построчно через bounded row buffer.

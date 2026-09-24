@@ -11,7 +11,7 @@ import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataU
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb } from './core/pixels.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
-import { decodePsd, encodePsd, isPsdFile } from './adapters/psd.js';
+import { decodePsd, encodePsdBlob, isPsdFile } from './adapters/psd.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -3103,13 +3103,13 @@ async function exportPsdDocument(exportDoc){
   setStatus('PSD: подготовка слоёв…');
   const prepared=await preparePsdExport(exportDoc);
   setStatus('PSD: упаковка RLE-каналов…');
-  const bytes=encodePsd({
+  const blob=encodePsdBlob({
     width:exportDoc.width,height:exportDoc.height,
     layers:prepared.layers,composite:prepared.composite,
     maxPixels:48_000_000,maxLayers:500,
   });
   const filename=`${safeFilename(exportDoc.name)}.psd`;
-  downloadBlob(new Blob([bytes],{type:'image/vnd.adobe.photoshop'}),filename);
+  downloadBlob(blob,filename);
   if(prepared.warnings.length){
     console.warn('PSD export warnings',prepared.warnings);
     setStatus(`Экспортирован ${filename} с ограничениями: ${prepared.warnings.length}`);

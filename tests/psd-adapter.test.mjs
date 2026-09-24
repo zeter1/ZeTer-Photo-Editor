@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodePsd, encodePsd, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, encodePsdBlob, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
 import { readFile } from 'node:fs/promises';
 
 const encoder = new TextEncoder();
@@ -182,4 +182,33 @@ test('PSD row encoder round-trips long literal and repeated PackBits rows', asyn
   assert.equal(decoded.layers.length, 1);
   assert.deepEqual([...decoded.layers[0].pixels], [...pixels]);
   assert.deepEqual([...decoded.layers[0].mask.pixels], [...mask]);
+});
+
+
+test('PSD Blob export is byte-identical to encodePsd without a final UI concat', async () => {
+  const pixels=Uint8Array.from([
+    10,20,30,255,
+    40,50,60,128,
+  ]);
+  const options={
+    width:2,height:1,composite:pixels,
+    layers:[{
+      name:'blob',x:0,y:0,width:2,height:1,pixels,
+      opacity:1,blendMode:'source-over',visible:true,
+    }],
+  };
+  const bytes=encodePsd(options);
+  const blob=encodePsdBlob(options);
+  assert.equal(blob.type,'image/vnd.adobe.photoshop');
+  assert.equal(blob.size,bytes.length);
+  assert.deepEqual([...new Uint8Array(await blob.arrayBuffer())],[...bytes]);
+  const decoded=await decodePsd(await blob.arrayBuffer());
+  assert.deepEqual([...decoded.layers[0].pixels],[...pixels]);
+});
+
+test('PSD Blob export keeps byte-array compatibility API separate from chunked Blob path', () => {
+  assert.match(psdSource, /function buildPsdWriter\(/);
+  assert.match(psdSource, /export function encodePsd\(options = \{\}\)/);
+  assert.match(psdSource, /export function encodePsdBlob\(options = \{\}\)/);
+  assert.match(psdSource, /new Blob\(writer\.parts/);
 });
