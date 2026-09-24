@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   createDocument, createShapeLayer, createLayerGroup, addLayer, addLayerGroup,
-  removeLayerGroup, moveLayerIntoGroup, moveLayer, duplicateLayer, sanitizeProject,
+  removeLayerGroup, moveLayerIntoGroup, moveLayer, duplicateLayer, removeLayer, sanitizeProject,
   isLayerVisible, isLayerLocked,
 } from '../src/core/state.js';
 
@@ -92,8 +92,16 @@ test('group visibility and locking are inherited by member layers',()=>{
   assert.equal(moveLayer(doc,layer.id,1),false);
   assert.equal(moveLayerIntoGroup(doc,layer.id,null),false);
   assert.equal(duplicateLayer(doc,layer.id),null);
+  assert.equal(removeLayer(doc,layer.id),null);
   assert.equal(doc.layers.length,1);
   assert.equal(removeLayerGroup(doc,group.id),null);
+});
+
+test('locked layers cannot be removed through the state API',()=>{
+  const doc=createDocument();
+  const layer=addLayer(doc,createShapeLayer({name:'locked',locked:true}));
+  assert.equal(removeLayer(doc,layer.id),null);
+  assert.equal(doc.layers.length,1);
 });
 
 test('project sanitizer preserves group visibility and lock state',()=>{
@@ -119,6 +127,8 @@ test('layer panel exposes rename and group controls with drag-to-group wiring',(
   assert.match(main,/group\.locked = !group\.locked/);
   assert.match(main,/isLayerLocked\(doc, layer\)/);
   assert.match(main,/if\(isLayerLocked\(doc,l\)\)\{setStatus\('Слой или его группа заблокированы'\);return;\}if\(duplicateLayer\(doc,l\.id\)\)commit\('Дублировать слой'\)/);
+  assert.match(main,/\['Дублировать слой','Ctrl\+J',duplicateSelected,\(\)=>Boolean\(selected\(\)\)&&!isLayerLocked\(doc,selected\(\)\)\]/);
+  assert.match(main,/\['Удалить слой','Delete',deleteSelected,\(\)=>Boolean\(selected\(\)\)&&!isLayerLocked\(doc,selected\(\)\)\]/);
   assert.match(main,/Переименовать слой/);
   assert.match(css,/\.layer-group-row\.drop-into/);
   assert.match(css,/\.layer-row\.in-group/);

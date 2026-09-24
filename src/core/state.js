@@ -221,6 +221,8 @@ export function addLayer(doc, layer, { select = true } = {}) {
 export function removeLayer(doc, id = doc.selectedLayerId) {
   const index = doc.layers.findIndex(layer => layer.id === id);
   if (index < 0) return null;
+  const layer = doc.layers[index];
+  if (isLayerLocked(doc, layer)) return null;
   const [removed] = doc.layers.splice(index, 1);
   if (doc.selectedLayerId === id) {
     doc.selectedLayerId = doc.layers[Math.min(index, doc.layers.length - 1)]?.id ?? null;
