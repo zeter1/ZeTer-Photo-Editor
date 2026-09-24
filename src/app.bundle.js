@@ -1683,6 +1683,160 @@ function applyAdvancedColorAdjustments(imageData, filters = {}) {
   }
   return imageData;
 }
+function advancedColorWorkerSource() {
+  return `'use strict';
+const hasAdvancedColorAdjustments = ${hasAdvancedColorAdjustments.toString()};
+const compileColorAdjustments = ${compileColorAdjustments.toString()};
+const adjustRgbPackedCompiled = ${adjustRgbPackedCompiled.toString()};
+const applyAdvancedColorAdjustments = ${applyAdvancedColorAdjustments.toString()};
+self.onmessage = event => {
+  const message = event.data || {};
+  try {
+    const data = new Uint8ClampedArray(message.buffer);
+    const imageData = { data };
+    applyAdvancedColorAdjustments(imageData, message.filters || {});
+    self.postMessage({ id: message.id, buffer: data.buffer }, [data.buffer]);
+  } catch (error) {
+    self.postMessage({ id: message.id, error: String(error && (error.stack || error.message) || error) });
+  }
+};`;
+}
+
+// ---- src/core/pixel-worker.js ----
+const ADVANCED_COLOR_WORKER_MIN_PIXELS = 512 * 512;
+const PIXEL_WORKER_TIMEOUT_MS = 45_000;
+const PIXEL_WORKER_MAX_PENDING = 2;
+
+let worker = null;
+let workerUrl = null;
+let nextRequestId = 1;
+const pending = new Map();
+function pixelWorkerSupported() {
+  return typeof Worker === 'function'
+    && typeof Blob === 'function'
+    && typeof URL?.createObjectURL === 'function';
+}
+
+function releaseWorkerUrl() {
+  if (!workerUrl) return;
+  try { URL.revokeObjectURL(workerUrl); } catch {}
+  workerUrl = null;
+}
+
+function rejectPending(error) {
+  for (const request of pending.values()) {
+    clearTimeout(request.timer);
+    request.reject(error);
+  }
+  pending.clear();
+}
+function resetPixelWorker(reason = new Error('Pixel worker reset')) {
+  rejectPending(reason instanceof Error ? reason : new Error(String(reason)));
+  try { worker?.terminate(); } catch {}
+  worker = null;
+  releaseWorkerUrl();
+}
+
+function ensurePixelWorker() {
+  if (worker) return worker;
+  if (!pixelWorkerSupported()) return null;
+  try {
+    const blob = new Blob([advancedColorWorkerSource()], { type: 'text/javascript' });
+    workerUrl = URL.createObjectURL(blob);
+    worker = new Worker(workerUrl, { name: 'zpe-pixel-worker' });
+    worker.addEventListener('message', event => {
+      const message = event.data || {};
+      const request = pending.get(message.id);
+      if (!request) return;
+      pending.delete(message.id);
+      clearTimeout(request.timer);
+      if (message.error) {
+        request.reject(new Error(message.error));
+        return;
+      }
+      request.resolve(message.buffer);
+    });
+    worker.addEventListener('error', event => {
+      const error = new Error(`Pixel worker error: ${event.message || 'unknown error'}`);
+      resetPixelWorker(error);
+    });
+    worker.addEventListener('messageerror', () => resetPixelWorker(new Error('Pixel worker message could not be deserialized')));
+    return worker;
+  } catch (error) {
+    resetPixelWorker(error);
+    return null;
+  }
+}
+
+function rebuildImageData(original, buffer) {
+  const data = new Uint8ClampedArray(buffer);
+  const width = Number(original?.width) || 0;
+  const height = Number(original?.height) || 0;
+  if (typeof ImageData === 'function' && width > 0 && height > 0 && data.length === width * height * 4) {
+    return new ImageData(data, width, height);
+  }
+  return { data, width, height };
+}
+
+function syncAdjust(imageData, filters) {
+  applyAdvancedColorAdjustments(imageData, filters);
+  return imageData;
+}
+
+async function runWorker(imageData, filters) {
+  const target = ensurePixelWorker();
+  if (!target || pending.size >= PIXEL_WORKER_MAX_PENDING) return null;
+
+  const source = imageData.data;
+  const transferable = source.byteOffset === 0 && source.byteLength === source.buffer.byteLength
+    ? source
+    : new Uint8ClampedArray(source);
+  const id = nextRequestId++;
+  const result = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (!pending.has(id)) return;
+      pending.delete(id);
+      const error = new Error('Pixel worker timed out');
+      reject(error);
+      resetPixelWorker(error);
+    }, PIXEL_WORKER_TIMEOUT_MS);
+    pending.set(id, { resolve, reject, timer });
+  });
+
+  try {
+    target.postMessage({ id, buffer: transferable.buffer, filters }, [transferable.buffer]);
+  } catch (error) {
+    const request = pending.get(id);
+    if (request) {
+      pending.delete(id);
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
+  }
+  return rebuildImageData(imageData, await result);
+}
+async function applyAdvancedColorAdjustmentsAsync(imageData, filters = {}, {
+  forceWorker = false,
+  recover = null,
+} = {}) {
+  if (!imageData?.data || !hasAdvancedColorAdjustments(filters)) return imageData;
+  const pixelCount = Math.floor(imageData.data.length / 4);
+  if (!forceWorker && pixelCount < ADVANCED_COLOR_WORKER_MIN_PIXELS) return syncAdjust(imageData, filters);
+  if (!pixelWorkerSupported() || pending.size >= PIXEL_WORKER_MAX_PENDING) return syncAdjust(imageData, filters);
+
+  try {
+    const processed = await runWorker(imageData, filters);
+    if (processed) return processed;
+    return syncAdjust(imageData, filters);
+  } catch (error) {
+    if (imageData.data?.byteLength) return syncAdjust(imageData, filters);
+    if (typeof recover === 'function') {
+      const recovered = recover();
+      return syncAdjust(recovered, filters);
+    }
+    throw error;
+  }
+}
 
 // ---- src/core/render.js ----
 const imageCache = new Map();
@@ -1750,13 +1904,13 @@ function trimAdjustedRasterCache() {
   }
 }
 
-function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {
+async function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {
   const filters = layer.filters || {};
   if (!hasAdvancedColorAdjustments(filters)) return source;
   const width = Math.max(1, Math.round(source.naturalWidth || source.videoWidth || source.width || layer.width || 1));
   const height = Math.max(1, Math.round(source.naturalHeight || source.videoHeight || source.height || layer.height || 1));
   const signature = colorAdjustmentSignature(filters);
-  const sourceToken = cacheable ? layer.dataUrl : null;
+  const sourceToken = cacheable ? (layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl) : null;
   if (cacheable) {
     const cached = adjustedRasterCache.get(layer.id);
     if (cached && cached.sourceToken === sourceToken && cached.signature === signature && cached.width === width && cached.height === height) {
@@ -1773,11 +1927,13 @@ function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {
   if ('imageSmoothingQuality' in scratch) scratch.imageSmoothingQuality = 'high';
   scratch.drawImage(source, 0, 0, width, height);
   try {
-    const pixels = scratch.getImageData(0, 0, width, height);
-    applyAdvancedColorAdjustments(pixels, filters);
+    let pixels = scratch.getImageData(0, 0, width, height);
+    pixels = await applyAdvancedColorAdjustmentsAsync(pixels, filters, {
+      recover: () => scratch.getImageData(0, 0, width, height),
+    });
     scratch.putImageData(pixels, 0, 0);
   } catch (error) {
-    console.warn('Color correction preview could not read raster pixels', error);
+    console.warn('Color correction preview could not process raster pixels', error);
     return source;
   }
   if (cacheable) {
@@ -1818,11 +1974,13 @@ async function applyAdjustmentLayer(canvas, ctx, layer) {
   sourceCtx.drawImage(canvas, 0, 0, width, height);
   if (hasAdvancedColorAdjustments(layer.filters)) {
     try {
-      const pixels = sourceCtx.getImageData(0, 0, width, height);
-      applyAdvancedColorAdjustments(pixels, layer.filters);
+      let pixels = sourceCtx.getImageData(0, 0, width, height);
+      pixels = await applyAdvancedColorAdjustmentsAsync(pixels, layer.filters, {
+        recover: () => sourceCtx.getImageData(0, 0, width, height),
+      });
       sourceCtx.putImageData(pixels, 0, 0);
     } catch (error) {
-      console.warn('Adjustment layer could not read composite pixels', error);
+      console.warn('Adjustment layer could not process composite pixels', error);
     }
   }
   if (layer.mask?.enabled && layer.mask.dataUrl) {
@@ -1944,7 +2102,7 @@ async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       const dataUrl = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl;
       const img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
       if (img) {
-        const source = makeAdjustedRasterSource(img, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
+        const source = await makeAdjustedRasterSource(img, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
         ctx.drawImage(source, 0, 0, w, h);
       }
     } else if (layer.type === 'text') {

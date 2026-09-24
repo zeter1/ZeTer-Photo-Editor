@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adjustRgb, applyAdvancedColorAdjustments, hasAdvancedColorAdjustments } from '../src/core/color.js';
+import { adjustRgb, applyAdvancedColorAdjustments, advancedColorWorkerSource, hasAdvancedColorAdjustments } from '../src/core/color.js';
+import { ADVANCED_COLOR_WORKER_MIN_PIXELS, pixelWorkerSupported } from '../src/core/pixel-worker.js';
+import { runInNewContext } from 'node:vm';
 import { createRasterLayer, sanitizeFilters, sanitizeProject, DEFAULT_LAYER_FILTERS } from '../src/core/state.js';
 import { readFile } from 'node:fs/promises';
 
@@ -63,4 +65,45 @@ test('editor exposes non-destructive color correction UI and render wiring', () 
   assert.match(render, /applyAdvancedColorAdjustments/);
   assert.match(render, /hue-rotate\(\$\{f\.hue\}deg\)/);
   assert.match(render, /adjustedRasterCache/);
+});
+
+test('advanced color worker source preserves sync RGBA semantics', () => {
+  const filters = { exposure: 0.75, temperature: 35, tint: -20, vibrance: 40, gamma: 1.15, highlights: -25, shadows: 30 };
+  const input = new Uint8ClampedArray([
+    12, 45, 200, 255,
+    180, 120, 60, 133,
+    0, 0, 0, 0,
+  ]);
+  const expected = { data: new Uint8ClampedArray(input) };
+  applyAdvancedColorAdjustments(expected, filters);
+
+  const messages = [];
+  const context = {
+    self: { postMessage: (message, transfer) => messages.push({ message, transfer }) },
+    Uint8ClampedArray,
+    Float32Array,
+    Math,
+    Number,
+    String,
+  };
+  runInNewContext(advancedColorWorkerSource(), context);
+  const buffer = new Uint8ClampedArray(input).buffer;
+  context.self.onmessage({ data: { id: 7, buffer, filters } });
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].message.id, 7);
+  assert.equal(messages[0].message.error, undefined);
+  assert.deepEqual([...new Uint8ClampedArray(messages[0].message.buffer)], [...expected.data]);
+  assert.equal(messages[0].transfer[0], messages[0].message.buffer);
+});
+
+test('pixel worker has a bounded large-image threshold and safe non-browser fallback', () => {
+  assert.equal(ADVANCED_COLOR_WORKER_MIN_PIXELS, 512 * 512);
+  assert.equal(typeof pixelWorkerSupported(), 'boolean');
+});
+
+test('renderer awaits worker-backed advanced corrections and keys smart-object cache by preview source', () => {
+  assert.match(render, /await applyAdvancedColorAdjustmentsAsync\(pixels, filters/);
+  assert.match(render, /await applyAdvancedColorAdjustmentsAsync\(pixels, layer\.filters/);
+  assert.match(render, /layer\.type === 'smart-object' \? layer\.previewDataUrl : layer\.dataUrl/);
 });

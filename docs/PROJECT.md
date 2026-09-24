@@ -8,6 +8,7 @@ ZeTer Photo Editor — локальный браузерный растровы�
 - `src/main.js` — контроллер UI, инструменты, ввод мыши/клавиатуры, история действий и файловые сценарии.
 - `src/core/state.js` — документы, слои, безопасная нормализация проектов и embedded smart-object documents с ограничением вложенности.
 - `src/core/render.js` — Canvas 2D-рендер и растровый экспорт.
+- `src/core/pixel-worker.js` — bounded worker boundary для тяжёлых per-pixel цветокоррекций; Canvas/document state остаются на main thread.
 - `src/adapters/psd.js` — изолированный RGB/8-bit PSD parser/writer: импорт/экспорт слоёв, каналов, Unicode-имён и bitmap masks.
 - `src/core/layer-styles.js` — сохранение допустимых значений и Canvas-отрисовка стилей слоя.
 - `assets/fonts/*/embedded.css` и `assets/fonts/*/OFL.txt` — локальные свободные шрифты и их лицензии; источники перечислены в [assets/fonts/README.md](../assets/fonts/README.md).
@@ -32,6 +33,7 @@ npm run test:browser
 - Растровые кисти работают только с безопасно выделенным Canvas-буфером и публикуют результат в слой после завершения действия.
 - Пока жест редактирования или асинхронная растровая операция не завершены, сохранение, экспорт, смена вкладки, замена документа и Undo/Redo отклоняются с просьбой повторить команду; экспорт использует отдельный снимок документа.
 - Smart Objects Stage 5a: `embeddedDocument` является source of truth, `previewDataUrl` — только кэш отображения. Вкладка содержимого хранит `smartObjectLink` на родительскую session/layer; `Ctrl+S` обновляет embedded document + preview и добавляет одну запись в history родителя. Закрытие родительской вкладки блокируется, пока открыты дочерние content-tabs; lock родителя нельзя обойти через content-tab. UI и sanitizer ограничивают вложенность smart-object тремя уровнями.
+- Pixel Worker Stage 6a: крупный advanced-color RGBA loop может выполняться вне main thread через Blob Worker. Очередь bounded, buffer transferable, ошибки/timeout сбрасывают worker; renderer перечитывает Canvas и использует sync fallback, если transferred buffer уже detached. Worker не владеет document/Canvas state и не загружает внешний script, поэтому `file://` остаётся поддерживаемым.
 - PSD Stage 4 — ограниченный RGB/8-bit round-trip: text/shape/transforms/filters/styles растрируются в per-layer preview, groups flatten, bitmap masks сохраняются отдельным user-mask channel. При видимых adjustment layers экспорт добавляет верхний composite preview и скрывает исходные PSD layers, чтобы при открытии сохранить итоговый вид без ложной native Photoshop adjustment-семантики.
 - Стили слоя хранятся отдельно от исходных пикселей в `.zpe`; окно «Параметры наложения» показывает черновик, отмена восстанавливает прежние значения, применение создаёт одно действие истории. Временные Canvas для стилей ограничены 16 МП; на очень больших слоях предпросмотр и экспорт стилей используют пропорциональное уменьшение для защиты памяти.
 - В окне «Параметры наложения» для общих настроек и каждого стиля виден фрагмент итогового холста вокруг слоя. Он копируется после завершённой отрисовки и меняет размер вместе с окном; окно растягивается за нижний правый угол.

@@ -278,6 +278,28 @@ async function runSmoke() {
     await waitFor('editor bootstrap', async () => evaluate(client, `document.documentElement?.dataset.appReady === 'true'`));
     assertNoBrowserErrors(errors, stderrState);
 
+    const blobWorkerProbe = await evaluate(client, `(async () => {
+      if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') {
+        return { supported:false, ok:false, error:'Worker/Blob API unavailable' };
+      }
+      const url=URL.createObjectURL(new Blob(['self.onmessage=e=>self.postMessage(e.data+1)'],{type:'text/javascript'}));
+      try {
+        const value=await new Promise((resolve,reject)=>{
+          const worker=new Worker(url);
+          const timer=setTimeout(()=>{worker.terminate();reject(new Error('blob worker timeout'));},3000);
+          worker.onmessage=e=>{clearTimeout(timer);worker.terminate();resolve(e.data);};
+          worker.onerror=e=>{clearTimeout(timer);worker.terminate();reject(new Error(e.message||'blob worker error'));};
+          worker.postMessage(41);
+        });
+        return { supported:true, ok:value===42, value };
+      } catch (error) {
+        return { supported:true, ok:false, error:String(error && (error.stack || error.message) || error) };
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    })()`);
+    assert(blobWorkerProbe.supported && blobWorkerProbe.ok, 'Blob Worker must work from the real file:// editor', JSON.stringify(blobWorkerProbe));
+
     const initial = await evaluate(client, `(() => ({
       title: document.title,
       rows: document.querySelectorAll('.layer-row').length,

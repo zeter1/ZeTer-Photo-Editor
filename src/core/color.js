@@ -127,3 +127,22 @@ export function applyAdvancedColorAdjustments(imageData, filters = {}) {
   }
   return imageData;
 }
+
+export function advancedColorWorkerSource() {
+  return `'use strict';
+const hasAdvancedColorAdjustments = ${hasAdvancedColorAdjustments.toString()};
+const compileColorAdjustments = ${compileColorAdjustments.toString()};
+const adjustRgbPackedCompiled = ${adjustRgbPackedCompiled.toString()};
+const applyAdvancedColorAdjustments = ${applyAdvancedColorAdjustments.toString()};
+self.onmessage = event => {
+  const message = event.data || {};
+  try {
+    const data = new Uint8ClampedArray(message.buffer);
+    const imageData = { data };
+    applyAdvancedColorAdjustments(imageData, message.filters || {});
+    self.postMessage({ id: message.id, buffer: data.buffer }, [data.buffer]);
+  } catch (error) {
+    self.postMessage({ id: message.id, error: String(error && (error.stack || error.message) || error) });
+  }
+};`;
+}

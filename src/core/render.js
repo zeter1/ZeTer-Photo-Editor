@@ -1,6 +1,7 @@
 import { isLayerVisible } from './state.js';
 import { hasLayerStyles, renderLayerStyles } from './layer-styles.js';
-import { applyAdvancedColorAdjustments, colorAdjustmentSignature, hasAdvancedColorAdjustments } from './color.js';
+import { colorAdjustmentSignature, hasAdvancedColorAdjustments } from './color.js';
+import { applyAdvancedColorAdjustmentsAsync } from './pixel-worker.js';
 
 const imageCache = new Map();
 const IMAGE_CACHE_LIMIT = 24;
@@ -68,13 +69,13 @@ function trimAdjustedRasterCache() {
   }
 }
 
-function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {
+async function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {
   const filters = layer.filters || {};
   if (!hasAdvancedColorAdjustments(filters)) return source;
   const width = Math.max(1, Math.round(source.naturalWidth || source.videoWidth || source.width || layer.width || 1));
   const height = Math.max(1, Math.round(source.naturalHeight || source.videoHeight || source.height || layer.height || 1));
   const signature = colorAdjustmentSignature(filters);
-  const sourceToken = cacheable ? layer.dataUrl : null;
+  const sourceToken = cacheable ? (layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl) : null;
   if (cacheable) {
     const cached = adjustedRasterCache.get(layer.id);
     if (cached && cached.sourceToken === sourceToken && cached.signature === signature && cached.width === width && cached.height === height) {
@@ -91,11 +92,13 @@ function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {
   if ('imageSmoothingQuality' in scratch) scratch.imageSmoothingQuality = 'high';
   scratch.drawImage(source, 0, 0, width, height);
   try {
-    const pixels = scratch.getImageData(0, 0, width, height);
-    applyAdvancedColorAdjustments(pixels, filters);
+    let pixels = scratch.getImageData(0, 0, width, height);
+    pixels = await applyAdvancedColorAdjustmentsAsync(pixels, filters, {
+      recover: () => scratch.getImageData(0, 0, width, height),
+    });
     scratch.putImageData(pixels, 0, 0);
   } catch (error) {
-    console.warn('Color correction preview could not read raster pixels', error);
+    console.warn('Color correction preview could not process raster pixels', error);
     return source;
   }
   if (cacheable) {
@@ -137,11 +140,13 @@ async function applyAdjustmentLayer(canvas, ctx, layer) {
   sourceCtx.drawImage(canvas, 0, 0, width, height);
   if (hasAdvancedColorAdjustments(layer.filters)) {
     try {
-      const pixels = sourceCtx.getImageData(0, 0, width, height);
-      applyAdvancedColorAdjustments(pixels, layer.filters);
+      let pixels = sourceCtx.getImageData(0, 0, width, height);
+      pixels = await applyAdvancedColorAdjustmentsAsync(pixels, layer.filters, {
+        recover: () => sourceCtx.getImageData(0, 0, width, height),
+      });
       sourceCtx.putImageData(pixels, 0, 0);
     } catch (error) {
-      console.warn('Adjustment layer could not read composite pixels', error);
+      console.warn('Adjustment layer could not process composite pixels', error);
     }
   }
   if (layer.mask?.enabled && layer.mask.dataUrl) {
@@ -265,7 +270,7 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       const dataUrl = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl;
       const img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
       if (img) {
-        const source = makeAdjustedRasterSource(img, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
+        const source = await makeAdjustedRasterSource(img, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
         ctx.drawImage(source, 0, 0, w, h);
       }
     } else if (layer.type === 'text') {
