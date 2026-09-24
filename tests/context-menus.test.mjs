@@ -61,6 +61,7 @@ test('layer blending menu targets the clicked layer and disables edits when lock
     isLayerLocked:(_doc,item)=>item.locked,
     openBlendingOptions:item=>{opened=item;},
     toggleSelectedVisibility:()=>{}, toggleSelectedLock:()=>{}, rasterizeSelectedLayer:()=>{},
+    addSelectedLayerMask:()=>{}, removeSelectedLayerMask:()=>{}, selectionShape:null,
   };
   vm.runInNewContext(`${layerMenuFunction}\nglobalThis.getMenu=layerContextMenu;`,context);
   const option=context.getMenu('target').find(item=>item[0]==='Параметры наложения…');

@@ -27,6 +27,7 @@ export const MAX_LAYER_POSITION = 120000;
 
 export function imageResizeTransforms(layers, sx, sy) {
   return layers.map(layer => {
+    if (layer?.type === 'adjustment') return { x: 0, y: 0, scaleX: 1, scaleY: 1 };
     const rotation = ((Number(layer.rotation) || 0) % 180 + 180) % 180;
     if (Math.abs(sx - sy) > 1e-9 && rotation > 1e-9) {
       throw new Error('Непропорциональный размер изображения нельзя применить к повёрнутому слою без искажения.');
@@ -80,7 +81,7 @@ export function baseLayer(type, overrides = {}) {
   return {
     id: uid(type),
     type,
-    name: type === 'raster' ? 'Растровый слой' : type === 'text' ? 'Текст' : 'Фигура',
+    name: type === 'raster' ? 'Растровый слой' : type === 'text' ? 'Текст' : type === 'adjustment' ? 'Корректирующий слой' : 'Фигура',
     visible: true,
     locked: false,
     opacity: 1,
@@ -94,6 +95,7 @@ export function baseLayer(type, overrides = {}) {
     rotation: 0,
     filters: { ...DEFAULT_LAYER_FILTERS },
     styles: null,
+    mask: null,
     groupId: null,
     ...overrides,
   };
@@ -101,6 +103,23 @@ export function baseLayer(type, overrides = {}) {
 
 export function createRasterLayer(overrides = {}) {
   return baseLayer('raster', { dataUrl: null, ...overrides });
+}
+
+export function createAdjustmentLayer(overrides = {}) {
+  return baseLayer('adjustment', {
+    name: 'Корректирующий слой',
+    width: 1,
+    height: 1,
+    ...overrides,
+  });
+}
+
+export function createLayerMask(overrides = {}) {
+  return {
+    enabled: true,
+    dataUrl: null,
+    ...overrides,
+  };
 }
 
 export function createTextLayer(overrides = {}) {
@@ -237,8 +256,12 @@ export function duplicateLayer(doc, id = doc.selectedLayerId) {
   const copy = structuredClone(source);
   copy.id = uid(source.type);
   copy.name = `${source.name} копия`;
-  copy.x += 18;
-  copy.y += 18;
+  if (copy.type === 'adjustment') {
+    copy.x = 0; copy.y = 0; copy.scaleX = 1; copy.scaleY = 1; copy.rotation = 0;
+  } else {
+    copy.x += 18;
+    copy.y += 18;
+  }
   const index = doc.layers.findIndex(layer => layer.id === id);
   doc.layers.splice(index + 1, 0, copy);
   doc.selectedLayerId = copy.id;
@@ -338,8 +361,17 @@ export function sanitizeFilters(filters = {}) {
   return result;
 }
 
+export function sanitizeLayerMask(mask) {
+  if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
+  const dataUrl = typeof mask.dataUrl === 'string' && /^data:image\//i.test(mask.dataUrl) ? mask.dataUrl : null;
+  return createLayerMask({
+    enabled: mask.enabled !== false,
+    dataUrl,
+  });
+}
+
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
-  const type = ['raster', 'text', 'shape'].includes(layer?.type) ? layer.type : 'shape';
+  const type = ['raster', 'text', 'shape', 'adjustment'].includes(layer?.type) ? layer.type : 'shape';
   const defaults = baseLayer(type);
   let id = shortText(layer?.id, defaults.id, 160).trim() || defaults.id;
   if (usedIds.has(id)) id = uid(type);
@@ -362,7 +394,8 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
     scaleY: bounded(layer?.scaleY, 1, MIN_LAYER_SCALE, MAX_LAYER_SCALE),
     rotation: ((finite(layer?.rotation, 0) % 360) + 360) % 360,
     filters: sanitizeFilters(layer?.filters),
-    styles: sanitizeLayerStyles(layer?.styles),
+    styles: type === 'adjustment' ? null : sanitizeLayerStyles(layer?.styles),
+    mask: sanitizeLayerMask(layer?.mask),
     groupId: validGroupIds.has(layer?.groupId) ? layer.groupId : null,
   };
   if (type === 'raster') {
@@ -383,6 +416,12 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
     result.letterSpacing = bounded(layer?.letterSpacing, 0, -5, 20);
     result.underline = layer?.underline === true;
     result.strikeThrough = layer?.strikeThrough === true;
+  } else if (type === 'adjustment') {
+    result.x = 0;
+    result.y = 0;
+    result.scaleX = 1;
+    result.scaleY = 1;
+    result.rotation = 0;
   } else {
     result.shape = ['rect', 'ellipse', 'line', 'path'].includes(layer?.shape) ? layer.shape : 'rect';
     result.fill = shortText(layer?.fill, '#4f8cff', 64);

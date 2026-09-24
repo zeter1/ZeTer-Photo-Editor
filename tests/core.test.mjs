@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeRect, constrainedRect, fitZoom, resizeFromHandle, layerFrame, frameBounds, hitLayerHandle, pointInLayer, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLayerMove, alignLayerToCanvas } from '../src/core/geometry.js';
 import { HistoryStack } from '../src/core/history.js';
-import { PROJECT_VERSION, createDocument, createShapeLayer, addLayer, duplicateLayer, moveLayer, moveLayerToIndex, removeLayer, snapshotDocument, restoreDocument, sanitizeProject, imageResizeTransforms } from '../src/core/state.js';
+import { PROJECT_VERSION, createDocument, createShapeLayer, createAdjustmentLayer, createLayerMask, addLayer, duplicateLayer, moveLayer, moveLayerToIndex, removeLayer, snapshotDocument, restoreDocument, sanitizeProject, imageResizeTransforms } from '../src/core/state.js';
 
 test('normalizeRect handles reverse drags', () => {
   assert.deepEqual(normalizeRect({x:20,y:30},{x:5,y:10}), {x:5,y:10,width:15,height:20});
@@ -234,4 +234,33 @@ test('constrainedRect makes a square in every drag direction when Shift-style lo
   assert.deepEqual(constrainedRect({x:10,y:10},{x:40,y:25},true), {x:10,y:10,width:30,height:30});
   assert.deepEqual(constrainedRect({x:10,y:10},{x:-5,y:-30},true), {x:-30,y:-30,width:40,height:40});
   assert.deepEqual(constrainedRect({x:10,y:10},{x:40,y:25},false), {x:10,y:10,width:30,height:15});
+});
+
+test('adjustment layers and layer masks survive project sanitization without changing project version', () => {
+  const doc=createDocument({width:320,height:200});
+  const adjustment=addLayer(doc,createAdjustmentLayer({
+    width:320,height:200,
+    filters:{brightness:125,exposure:1},
+    mask:createLayerMask({dataUrl:'data:image/png;base64,AAAA'}),
+  }));
+  const safe=sanitizeProject(JSON.parse(snapshotDocument(doc)));
+  assert.equal(safe.version,PROJECT_VERSION);
+  assert.equal(safe.layers[0].type,'adjustment');
+  assert.equal(safe.layers[0].filters.brightness,125);
+  assert.equal(safe.layers[0].filters.exposure,1);
+  assert.equal(safe.layers[0].mask.enabled,true);
+  assert.equal(safe.layers[0].mask.dataUrl,'data:image/png;base64,AAAA');
+  assert.equal(safe.layers[0].x,0);
+  assert.equal(safe.layers[0].scaleX,1);
+  assert.equal(adjustment.type,'adjustment');
+});
+
+test('project sanitizer drops malformed mask payloads but keeps the owning layer', () => {
+  const safe=sanitizeProject({
+    version:PROJECT_VERSION,name:'mask',width:32,height:32,background:'transparent',
+    layers:[{id:'shape',type:'shape',name:'shape',width:10,height:10,mask:{enabled:false,dataUrl:'javascript:bad'}}],
+  });
+  assert.equal(safe.layers.length,1);
+  assert.equal(safe.layers[0].mask.enabled,false);
+  assert.equal(safe.layers[0].mask.dataUrl,null);
 });

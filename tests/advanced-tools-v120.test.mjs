@@ -36,7 +36,8 @@ test('about dialog identifies the developer and exposes safe contact links',()=>
 });
 
 test('selected layer is highlighted on canvas outside move mode with corners and a name badge',()=>{
-  assert.match(main,/if \(!layer \|\| !isLayerVisible\(doc, layer\)\) return/);
+  assert.match(main,/if \(!layer \|\| !isLayerVisible\(doc, layer\) \|\| !isTransformableLayer\(layer\)\) return/);
+  assert.match(main,/function isTransformableLayer\(layer\) \{ return Boolean\(layer\) && layer\.type !== 'adjustment'; \}/);
   assert.doesNotMatch(main,/!layer \|\| currentTool !== 'move' \|\| !isLayerVisible/);
   assert.match(main,/const moveMode=currentTool==='move'/);
   assert.match(main,/for\(const point of frame\.corners\)/);

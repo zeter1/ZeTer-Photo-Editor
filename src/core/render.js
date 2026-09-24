@@ -128,6 +128,41 @@ export async function getImage(dataUrl) {
   return promise;
 }
 
+async function applyAdjustmentLayer(canvas, ctx, layer) {
+  const width = Math.max(1, canvas.width || 1);
+  const height = Math.max(1, canvas.height || 1);
+  const source = document.createElement('canvas');
+  source.width = width; source.height = height;
+  const sourceCtx = source.getContext('2d', { alpha: true, willReadFrequently: true });
+  sourceCtx.drawImage(canvas, 0, 0, width, height);
+  if (hasAdvancedColorAdjustments(layer.filters)) {
+    try {
+      const pixels = sourceCtx.getImageData(0, 0, width, height);
+      applyAdvancedColorAdjustments(pixels, layer.filters);
+      sourceCtx.putImageData(pixels, 0, 0);
+    } catch (error) {
+      console.warn('Adjustment layer could not read composite pixels', error);
+    }
+  }
+  if (layer.mask?.enabled && layer.mask.dataUrl) {
+    const mask = await getImage(layer.mask.dataUrl);
+    if (mask) {
+      sourceCtx.save();
+      sourceCtx.globalCompositeOperation = 'destination-in';
+      sourceCtx.globalAlpha = 1;
+      sourceCtx.filter = 'none';
+      sourceCtx.drawImage(mask, 0, 0, width, height);
+      sourceCtx.restore();
+    }
+  }
+  ctx.save();
+  ctx.globalAlpha = layer.opacity ?? 1;
+  ctx.globalCompositeOperation = layer.blendMode || 'source-over';
+  ctx.filter = filterString(layer.filters);
+  ctx.drawImage(source, 0, 0, width, height);
+  ctx.restore();
+}
+
 export async function renderDocument(canvas, doc, { checker = false, rasterOverrides = null } = {}) {
   const ctx = canvas.getContext('2d', { alpha: true });
   if (canvas.width !== doc.width) canvas.width = doc.width;
@@ -141,6 +176,10 @@ export async function renderDocument(canvas, doc, { checker = false, rasterOverr
   }
   for (const layer of doc.layers) {
     if (!isLayerVisible(doc, layer) || layer.opacity <= 0) continue;
+    if (layer.type === 'adjustment') {
+      await applyAdjustmentLayer(canvas, ctx, layer);
+      continue;
+    }
     await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
   }
 }
@@ -165,6 +204,39 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       ctx.drawImage(styled.canvas,styled.x,styled.y,styled.width,styled.height);
       return;
     }
+    if (layer.mask?.enabled && layer.mask.dataUrl) {
+      const mask = await getImage(layer.mask.dataUrl);
+      if (mask) {
+        const masked = document.createElement('canvas');
+        masked.width = Math.max(1, Math.ceil(w));
+        masked.height = Math.max(1, Math.ceil(h));
+        const maskedCtx = masked.getContext('2d', { alpha: true });
+        const plain = {
+          ...layer,
+          mask: null,
+          styles: null,
+          opacity: 1,
+          blendMode: 'source-over',
+          x: 0,
+          y: 0,
+          width: w,
+          height: h,
+          scaleX: 1,
+          scaleY: 1,
+          rotation: 0,
+        };
+        await renderLayer(maskedCtx, plain, { rasterOverride });
+        maskedCtx.save();
+        maskedCtx.globalCompositeOperation = 'destination-in';
+        maskedCtx.globalAlpha = 1;
+        maskedCtx.filter = 'none';
+        maskedCtx.drawImage(mask, 0, 0, masked.width, masked.height);
+        maskedCtx.restore();
+        ctx.drawImage(masked, 0, 0, w, h);
+        return;
+      }
+    }
+
     ctx.filter = filterString(layer.filters);
 
     if (layer.type === 'raster' && (rasterOverride || layer.dataUrl)) {
