@@ -997,4 +997,4568 @@ async function renderLayerStyles(styles,width,height,paint,{contentBlur=0}={}) {
   const outer=(item,dx,dy)=>{
     reset();
     temp.shadowColor=item.color;temp.shadowBlur=item.blur*scale;
+    temp.shadowOffsetX=dx*scale;temp.shadowOffsetY=dy*scale;    temp.drawImage(source,0,0);
+    temp.shadowColor='transparent';temp.shadowBlur=0;temp.shadowOffsetX=0;temp.shadowOffsetY=0;
+    temp.globalCompositeOperation='destination-out';temp.drawImage(source,0,0);
+    tint(item.color,item.opacity);commit();
+  };
+  const inner=(color,opacity,blur,dx,dy)=>{
+    if(!inverse){
+      inverse=canvas(cw,ch);
+      const mask=inverse.getContext('2d',{alpha:true});
+      mask.fillStyle='#fff';mask.fillRect(0,0,cw,ch);
+      mask.globalCompositeOperation='destination-out';mask.drawImage(source,0,0);
+    }
+    reset();
+    temp.shadowColor=color;temp.shadowBlur=blur*scale;
     temp.shadowOffsetX=dx*scale;temp.shadowOffsetY=dy*scale;
+    temp.drawImage(inverse,0,0);
+    temp.shadowColor='transparent';temp.shadowBlur=0;temp.shadowOffsetX=0;temp.shadowOffsetY=0;
+    temp.globalCompositeOperation='destination-in';temp.drawImage(source,0,0);
+    tint(color,opacity);commit();
+  };
+  if(active.includes('dropShadow')){
+    const item=s.dropShadow,angle=item.angle*Math.PI/180;
+    outer(item,Math.cos(angle)*item.distance,Math.sin(angle)*item.distance);
+  }
+  if(active.includes('outerGlow'))outer(s.outerGlow,0,0);
+  if(active.includes('stroke')){
+    const item=s.stroke;reset();
+    for(let step=0;step<24;step++){
+      const angle=step*Math.PI/12;
+      temp.drawImage(source,Math.cos(angle)*item.size*scale,Math.sin(angle)*item.size*scale);
+    }
+    tint(item.color,item.opacity);
+    temp.globalCompositeOperation='destination-out';temp.globalAlpha=1;temp.drawImage(source,0,0);
+    commit();
+  }
+  out.globalAlpha=s.fillOpacity/100;out.drawImage(source,0,0);out.globalAlpha=1;
+  const overlay=(item,fill)=>{
+    reset();temp.drawImage(source,0,0);
+    temp.globalCompositeOperation='source-in';temp.globalAlpha=item.opacity/100;
+    temp.fillStyle=fill;temp.fillRect(0,0,cw,ch);commit();
+  };
+  if(active.includes('colorOverlay'))overlay(s.colorOverlay,s.colorOverlay.color);
+  if(active.includes('gradientOverlay')){
+    const item=s.gradientOverlay,angle=item.angle*Math.PI/180;
+    const cx=pad+w/2,cy=pad+h/2,reach=Math.hypot(w,h)/2;
+    const gradient=temp.createLinearGradient(cx-Math.cos(angle)*reach,cy-Math.sin(angle)*reach,cx+Math.cos(angle)*reach,cy+Math.sin(angle)*reach);
+    gradient.addColorStop(0,item.color1);gradient.addColorStop(1,item.color2);
+    overlay(item,gradient);
+  }
+  if(active.includes('patternOverlay')){
+    const item=s.patternOverlay,size=Math.max(2,Math.round(item.scale*scale));
+    const tile=canvas(size*2,size*2),tileCtx=tile.getContext('2d',{alpha:true});
+    tileCtx.fillStyle=item.color;
+    if(item.pattern==='checker'){tileCtx.fillRect(0,0,size,size);tileCtx.fillRect(size,size,size,size);}
+    else if(item.pattern==='dots'){
+      tileCtx.beginPath();tileCtx.arc(size/2,size/2,Math.max(1,size/3),0,Math.PI*2);tileCtx.arc(size*1.5,size*1.5,Math.max(1,size/3),0,Math.PI*2);tileCtx.fill();
+    } else {for(let x=-size*2;x<size*4;x+=size){tileCtx.beginPath();tileCtx.moveTo(x,0);tileCtx.lineTo(x+size*2,size*2);tileCtx.lineTo(x+size*2+Math.max(1,size/3),size*2);tileCtx.lineTo(x+Math.max(1,size/3),0);tileCtx.closePath();tileCtx.fill();}}
+    overlay(item,temp.createPattern(tile,'repeat'));
+  }
+  if(active.includes('innerGlow'))inner(s.innerGlow.color,s.innerGlow.opacity,s.innerGlow.blur,0,0);
+  if(active.includes('innerShadow')){
+    const item=s.innerShadow,angle=135*Math.PI/180;
+    inner(item.color,item.opacity,item.blur,Math.cos(angle)*item.distance,Math.sin(angle)*item.distance);
+  }
+  if(active.includes('bevel')){
+    const item=s.bevel,angle=item.angle*Math.PI/180,dx=Math.cos(angle)*item.size,dy=Math.sin(angle)*item.size;
+    inner('#ffffff',item.strength,item.size,-dx,-dy);
+    inner('#000000',item.strength,item.size,dx,dy);
+  }
+  return {canvas:output,x:-pad/scale,y:-pad/scale,width:cw/scale,height:ch/scale};
+}
+
+// ---- src/core/state.js ----
+let layerCounter = 0;
+const uid = (prefix = 'layer') => `${prefix}-${Date.now().toString(36)}-${(++layerCounter).toString(36)}`;
+const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+const bounded = (value, fallback, min, max) => clamp(finite(value, fallback), min, max);
+const shortText = (value, fallback = '', max = 500) => String(value ?? fallback).slice(0, max);
+const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+const DEFAULT_LAYER_FILTERS = Object.freeze({
+  brightness: 100, contrast: 100, saturate: 100, exposure: 0, highlights: 0, shadows: 0,
+  temperature: 0, tint: 0, vibrance: 0, gamma: 1, hue: 0,
+  grayscale: 0, sepia: 0, invert: 0, blur: 0,
+});
+const FILTER_RANGES = Object.freeze({
+  brightness: [0, 400], contrast: [0, 400], saturate: [0, 400], exposure: [-4, 4],
+  highlights: [-100, 100], shadows: [-100, 100], temperature: [-100, 100], tint: [-100, 100],
+  vibrance: [-100, 100], gamma: [0.1, 5], hue: [-180, 180], grayscale: [0, 100], sepia: [0, 100],
+  invert: [0, 100], blur: [0, 100],
+});
+const MAX_CANVAS_DIMENSION = 12000;
+const MAX_CANVAS_PIXELS = 48_000_000;
+const MIN_LAYER_SCALE = 0.01;
+const MAX_LAYER_SCALE = 100;
+const MAX_LAYER_POSITION = 120000;
+function imageResizeTransforms(layers, sx, sy) {
+  return layers.map(layer => {
+    const rotation = ((Number(layer.rotation) || 0) % 180 + 180) % 180;
+    if (Math.abs(sx - sy) > 1e-9 && rotation > 1e-9) {
+      throw new Error('Непропорциональный размер изображения нельзя применить к повёрнутому слою без искажения.');
+    }
+    const next = {
+      x: layer.x * sx,
+      y: layer.y * sy,
+      scaleX: (layer.scaleX ?? 1) * sx,
+      scaleY: (layer.scaleY ?? 1) * sy,
+    };
+    if (!Number.isFinite(next.x) || !Number.isFinite(next.y) ||
+        Math.abs(next.x) > MAX_LAYER_POSITION || Math.abs(next.y) > MAX_LAYER_POSITION ||
+        !Number.isFinite(next.scaleX) || !Number.isFinite(next.scaleY) ||
+        next.scaleX < MIN_LAYER_SCALE || next.scaleX > MAX_LAYER_SCALE ||
+        next.scaleY < MIN_LAYER_SCALE || next.scaleY > MAX_LAYER_SCALE) {
+      throw new Error('Размер изображения выведет слой за допустимые пределы. Уменьшите изменение размера.');
+    }
+    return next;
+  });
+}
+function checkedCanvasSize(width, height, label = 'Холст') {
+  const w = clamp(Math.round(finite(width, 1)), 1, MAX_CANVAS_DIMENSION);
+  const h = clamp(Math.round(finite(height, 1)), 1, MAX_CANVAS_DIMENSION);
+  const pixels = w * h;
+  if (pixels > MAX_CANVAS_PIXELS) {
+    const megapixels = (pixels / 1_000_000).toFixed(1);
+    const limit = (MAX_CANVAS_PIXELS / 1_000_000).toFixed(0);
+    throw new Error(`${label}: ${w} × ${h} (${megapixels} МП) превышает безопасный лимит ${limit} МП`);
+  }
+  return { width: w, height: h, pixels };
+}
+function createDocument({ name = 'Без имени', width = 1200, height = 800, background = 'transparent' } = {}) {
+  const size = checkedCanvasSize(width, height, 'Документ');
+  return {
+    version: 1,
+    name,
+    width: size.width,
+    height: size.height,
+    background,
+    layers: [],
+    groups: [],
+    selectedLayerId: null,
+    createdAt: new Date().toISOString(),
+    modifiedAt: new Date().toISOString(),
+  };
+}
+function baseLayer(type, overrides = {}) {
+  return {
+    id: uid(type),
+    type,
+    name: type === 'raster' ? 'Растровый слой' : type === 'text' ? 'Текст' : 'Фигура',
+    visible: true,
+    locked: false,
+    opacity: 1,
+    blendMode: 'source-over',
+    x: 0,
+    y: 0,
+    width: 1,
+    height: 1,
+    scaleX: 1,
+    scaleY: 1,
+    rotation: 0,
+    filters: { ...DEFAULT_LAYER_FILTERS },
+    styles: null,
+    groupId: null,
+    ...overrides,
+  };
+}
+function createRasterLayer(overrides = {}) {
+  return baseLayer('raster', { dataUrl: null, ...overrides });
+}
+function createTextLayer(overrides = {}) {
+  return baseLayer('text', {
+    name: 'Текст', text: 'Текст', color: '#ffffff', fontSize: 48, fontFamily: 'Inter, Arial, sans-serif',
+    fontWeight: '400', fontStyle: 'normal', align: 'left', lineHeight: 1.18,
+    letterSpacing: 0, underline: false, strikeThrough: false,
+    fontData: null, fontLabel: '',
+    width: 240, height: 60, ...overrides,
+  });
+}
+function documentWithTextPreview(doc, draft) {
+  if (!draft || draft.document !== doc) return doc;
+  if (draft.originalId && !doc.layers.some(layer => layer.id === draft.originalId)) return doc;
+  return {
+    ...doc,
+    layers: draft.originalId
+      ? doc.layers.map(layer => layer.id === draft.originalId ? draft.layer : layer)
+      : [...doc.layers, draft.layer],
+  };
+}
+function createShapeLayer(overrides = {}) {
+  return baseLayer('shape', {
+    name: 'Фигура', shape: 'rect', fill: '#4f8cff', stroke: 'transparent', strokeWidth: 0, lineFlip: false, lineMode: 'diag', pathPoints: [], pathClosed: false,
+    width: 180, height: 120, radius: 0, ...overrides,
+  });
+}
+function createLayerGroup(overrides = {}) {
+  return {
+    id: uid('group'),
+    name: 'Новая группа',
+    visible: true,
+    locked: false,
+    collapsed: false,
+    ...overrides,
+  };
+}
+function layerGroup(doc, layer) {
+  if (!layer?.groupId || !Array.isArray(doc?.groups)) return null;
+  return doc.groups.find(group => group.id === layer.groupId) ?? null;
+}
+function isLayerVisible(doc, layer) {
+  if (!layer || layer.visible === false) return false;
+  const group = layerGroup(doc, layer);
+  return group ? group.visible !== false : true;
+}
+function isLayerLocked(doc, layer) {
+  if (!layer) return false;
+  if (layer.locked) return true;
+  return Boolean(layerGroup(doc, layer)?.locked);
+}
+function addLayerGroup(doc, group = createLayerGroup()) {
+  if (!Array.isArray(doc.groups)) doc.groups = [];
+  doc.groups.push(group);
+  touch(doc);
+  return group;
+}
+function removeLayerGroup(doc, groupId) {
+  if (!Array.isArray(doc.groups)) return null;
+  const index = doc.groups.findIndex(group => group.id === groupId);
+  if (index < 0) return null;
+  if (doc.groups[index]?.locked) return null;
+  const [removed] = doc.groups.splice(index, 1);
+  for (const layer of doc.layers) {
+    if (layer.groupId === groupId) layer.groupId = null;
+  }
+  touch(doc);
+  return removed;
+}
+function moveLayerIntoGroup(doc, layerId, groupId) {
+  const layer = doc.layers.find(item => item.id === layerId);
+  if (!layer || isLayerLocked(doc, layer)) return false;
+  const targetGroup = groupId != null ? doc.groups?.find(group => group.id === groupId) : null;
+  if (groupId != null && !targetGroup) return false;
+  if (targetGroup?.locked) return false;
+  const oldGroupId = layer.groupId ?? null;
+  if (oldGroupId === (groupId ?? null)) return false;
+
+  const sourceIndex = doc.layers.findIndex(item => item.id === layerId);
+  doc.layers.splice(sourceIndex, 1);
+  layer.groupId = groupId ?? null;
+
+  if (groupId == null) {
+    doc.layers.splice(Math.min(sourceIndex, doc.layers.length), 0, layer);
+  } else {
+    let lastMemberIndex = -1;
+    for (let i = 0; i < doc.layers.length; i += 1) {
+      if (doc.layers[i].groupId === groupId) lastMemberIndex = i;
+    }
+    const insertIndex = lastMemberIndex >= 0 ? lastMemberIndex + 1 : doc.layers.length;
+    doc.layers.splice(insertIndex, 0, layer);
+  }
+  touch(doc);
+  return true;
+}
+function selectedLayer(doc) {
+  return doc.layers.find(layer => layer.id === doc.selectedLayerId) ?? null;
+}
+function addLayer(doc, layer, { select = true } = {}) {
+  doc.layers.push(layer);
+  if (select) doc.selectedLayerId = layer.id;
+  touch(doc);
+  return layer;
+}
+function removeLayer(doc, id = doc.selectedLayerId) {
+  const index = doc.layers.findIndex(layer => layer.id === id);
+  if (index < 0) return null;
+  const [removed] = doc.layers.splice(index, 1);
+  if (doc.selectedLayerId === id) {
+    doc.selectedLayerId = doc.layers[Math.min(index, doc.layers.length - 1)]?.id ?? null;
+  }
+  touch(doc);
+  return removed;
+}
+function duplicateLayer(doc, id = doc.selectedLayerId) {
+  const source = doc.layers.find(layer => layer.id === id);
+  if (!source) return null;
+  const copy = structuredClone(source);
+  copy.id = uid(source.type);
+  copy.name = `${source.name} копия`;
+  copy.x += 18;
+  copy.y += 18;
+  const index = doc.layers.findIndex(layer => layer.id === id);
+  doc.layers.splice(index + 1, 0, copy);
+  doc.selectedLayerId = copy.id;
+  touch(doc);
+  return copy;
+}
+function moveLayer(doc, id, direction) {
+  const index = doc.layers.findIndex(layer => layer.id === id);
+  if (index < 0 || !direction) return false;
+  const layer = doc.layers[index];
+  if (isLayerLocked(doc, layer)) return false;
+  const groupId = layer.groupId ?? null;
+  const step = direction < 0 ? -1 : 1;
+
+  if (groupId) {
+    let siblingIndex = index + step;
+    while (siblingIndex >= 0 && siblingIndex < doc.layers.length && (doc.layers[siblingIndex].groupId ?? null) !== groupId) {
+      siblingIndex += step;
+    }
+    if (siblingIndex < 0 || siblingIndex >= doc.layers.length) return false;
+    [doc.layers[index], doc.layers[siblingIndex]] = [doc.layers[siblingIndex], doc.layers[index]];
+    touch(doc);
+    return true;
+  }
+
+  const adjacentIndex = index + step;
+  if (adjacentIndex < 0 || adjacentIndex >= doc.layers.length) return false;
+  const adjacentGroupId = doc.layers[adjacentIndex].groupId ?? null;
+  if (!adjacentGroupId) {
+    [doc.layers[index], doc.layers[adjacentIndex]] = [doc.layers[adjacentIndex], doc.layers[index]];
+    touch(doc);
+    return true;
+  }
+
+  doc.layers.splice(index, 1);
+  if (step > 0) {
+    let blockEnd = index;
+    while (blockEnd < doc.layers.length && (doc.layers[blockEnd].groupId ?? null) === adjacentGroupId) blockEnd += 1;
+    doc.layers.splice(blockEnd, 0, layer);
+  } else {
+    let blockStart = adjacentIndex;
+    while (blockStart > 0 && (doc.layers[blockStart - 1].groupId ?? null) === adjacentGroupId) blockStart -= 1;
+    doc.layers.splice(blockStart, 0, layer);
+  }
+  touch(doc);
+  return true;
+}
+function moveLayerToIndex(doc, id, targetIndex) {
+  const index = doc.layers.findIndex(layer => layer.id === id);
+  if (index < 0 || !doc.layers.length) return false;
+  if (isLayerLocked(doc, doc.layers[index])) return false;
+  const boundedIndex = clamp(Math.trunc(targetIndex), 0, doc.layers.length - 1);
+  if (index === boundedIndex) return false;
+  const [layer] = doc.layers.splice(index, 1);
+  doc.layers.splice(clamp(boundedIndex, 0, doc.layers.length), 0, layer);
+  touch(doc);
+  return true;
+}
+function touch(doc) { doc.modifiedAt = new Date().toISOString(); }
+function snapshotDocument(doc) {
+  return JSON.stringify(doc);
+}
+function restoreDocument(snapshot) {
+  const doc = JSON.parse(snapshot);
+  if (!doc || doc.version !== 1 || !Array.isArray(doc.layers)) throw new Error('Неподдерживаемый файл проекта');
+  if (!Array.isArray(doc.groups)) doc.groups = [];
+  const validGroupIds = new Set(doc.groups.map(group => group?.id).filter(Boolean));
+  for (const layer of doc.layers) {
+    if (!validGroupIds.has(layer?.groupId)) layer.groupId = null;
+  }
+  return doc;
+}
+function sanitizeFilters(filters = {}) {
+  const result = {};
+  for (const [key, fallback] of Object.entries(DEFAULT_LAYER_FILTERS)) {
+    const [min, max] = FILTER_RANGES[key];
+    result[key] = bounded(filters?.[key], fallback, min, max);
+  }
+  return result;
+}
+
+function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
+  const type = ['raster', 'text', 'shape'].includes(layer?.type) ? layer.type : 'shape';
+  const defaults = baseLayer(type);
+  let id = shortText(layer?.id, defaults.id, 160).trim() || defaults.id;
+  if (usedIds.has(id)) id = uid(type);
+  usedIds.add(id);
+  const result = {
+    ...defaults,
+    ...layer,
+    id,
+    type,
+    name: shortText(layer?.name, defaults.name, 240),
+    visible: layer?.visible !== false,
+    locked: Boolean(layer?.locked),
+    opacity: bounded(layer?.opacity, 1, 0, 1),
+    blendMode: BLEND_MODES.has(layer?.blendMode) ? layer.blendMode : 'source-over',
+    x: bounded(layer?.x, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+    y: bounded(layer?.y, 0, -MAX_LAYER_POSITION, MAX_LAYER_POSITION),
+    width: bounded(layer?.width, 1, 1, 12000),
+    height: bounded(layer?.height, 1, 1, 12000),
+    scaleX: bounded(layer?.scaleX, 1, MIN_LAYER_SCALE, MAX_LAYER_SCALE),
+    scaleY: bounded(layer?.scaleY, 1, MIN_LAYER_SCALE, MAX_LAYER_SCALE),
+    rotation: ((finite(layer?.rotation, 0) % 360) + 360) % 360,
+    filters: sanitizeFilters(layer?.filters),
+    styles: sanitizeLayerStyles(layer?.styles),
+    groupId: validGroupIds.has(layer?.groupId) ? layer.groupId : null,
+  };
+  if (type === 'raster') {
+    checkedCanvasSize(result.width, result.height, `Растровый слой «${result.name || 'Без имени'}»`);
+    const dataUrl = typeof layer?.dataUrl === 'string' && /^data:image\//i.test(layer.dataUrl) ? layer.dataUrl : null;
+    result.dataUrl = dataUrl;
+  } else if (type === 'text') {
+    result.text = shortText(layer?.text, 'Текст', 100000);
+    result.color = shortText(layer?.color, '#ffffff', 64);
+    result.fontSize = bounded(layer?.fontSize, 48, 6, 500);
+    result.fontFamily = shortText(layer?.fontFamily, 'Inter, Arial, sans-serif', 240);
+    result.fontData = typeof layer?.fontData === 'string' && layer.fontData.length <= 7_000_000 && /^data:font\/(woff2?|ttf|otf);base64,[a-z\d+/=]+$/i.test(layer.fontData) ? layer.fontData : null;
+    result.fontLabel = result.fontData ? shortText(layer?.fontLabel, '', 160) : '';
+    result.fontWeight = ['400', '700'].includes(String(layer?.fontWeight)) ? String(layer.fontWeight) : '400';
+    result.fontStyle = layer?.fontStyle === 'italic' ? 'italic' : 'normal';
+    result.align = ['left', 'center', 'right'].includes(layer?.align) ? layer.align : 'left';
+    result.lineHeight = bounded(layer?.lineHeight, 1.18, 0.8, 3);
+    result.letterSpacing = bounded(layer?.letterSpacing, 0, -5, 20);
+    result.underline = layer?.underline === true;
+    result.strikeThrough = layer?.strikeThrough === true;
+  } else {
+    result.shape = ['rect', 'ellipse', 'line', 'path'].includes(layer?.shape) ? layer.shape : 'rect';
+    result.fill = shortText(layer?.fill, '#4f8cff', 64);
+    result.stroke = shortText(layer?.stroke, 'transparent', 64);
+    result.strokeWidth = bounded(layer?.strokeWidth, 0, 0, 1000);
+    result.radius = bounded(layer?.radius, 0, 0, 6000);
+    result.lineFlip = Boolean(layer?.lineFlip);
+    result.lineMode = ['diag','horizontal','vertical'].includes(layer?.lineMode) ? layer.lineMode : 'diag';
+    result.pathPoints = result.shape === 'path' && Array.isArray(layer?.pathPoints)
+      ? layer.pathPoints.slice(0,5000).map(point=>({x:bounded(point?.x,0,-120000,120000),y:bounded(point?.y,0,-120000,120000)}))
+      : [];
+    result.pathClosed = result.shape === 'path' && Boolean(layer?.pathClosed);
+  }
+  return result;
+}
+
+function sanitizeGroup(group, usedIds) {
+  const defaults = createLayerGroup();
+  let id = shortText(group?.id, defaults.id, 160).trim() || defaults.id;
+  if (usedIds.has(id)) id = uid('group');
+  usedIds.add(id);
+  return {
+    id,
+    name: shortText(group?.name, defaults.name, 240).trim() || defaults.name,
+    visible: group?.visible !== false,
+    locked: Boolean(group?.locked),
+    collapsed: Boolean(group?.collapsed),
+  };
+}
+function sanitizeProject(input) {
+  if (!input || typeof input !== 'object') throw new Error('Некорректный проект');
+  if (!Number.isFinite(Number(input.width)) || !Number.isFinite(Number(input.height))) throw new Error('Некорректный размер документа');
+  const doc = structuredClone(input);
+  doc.version = 1;
+  doc.name = shortText(doc.name, 'Без имени', 240);
+  const size = checkedCanvasSize(Number(doc.width), Number(doc.height), 'Проект');
+  doc.width = size.width;
+  doc.height = size.height;
+  doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
+  const usedGroupIds = new Set();
+  doc.groups = Array.isArray(doc.groups) ? doc.groups.slice(0, 100).map(group => sanitizeGroup(group, usedGroupIds)) : [];
+  const validGroupIds = new Set(doc.groups.map(group => group.id));
+  const usedIds = new Set();
+  doc.layers = Array.isArray(doc.layers) ? doc.layers.slice(0, 500).map(layer => sanitizeLayer(layer, usedIds, validGroupIds)) : [];
+  if (!doc.layers.some(l => l.id === doc.selectedLayerId)) doc.selectedLayerId = doc.layers.at(-1)?.id ?? null;
+  doc.createdAt = typeof doc.createdAt === 'string' ? doc.createdAt : new Date().toISOString();
+  doc.modifiedAt = typeof doc.modifiedAt === 'string' ? doc.modifiedAt : new Date().toISOString();
+  return doc;
+}
+
+// ---- src/core/color.js ----
+const clampColor01 = value => Math.min(1, Math.max(0, Number(value) || 0));
+function colorAdjustmentSignature(filters = {}) {
+  return [
+    Number(filters.exposure ?? 0).toFixed(3),
+    Number(filters.temperature ?? 0).toFixed(2),
+    Number(filters.tint ?? 0).toFixed(2),
+    Number(filters.vibrance ?? 0).toFixed(2),
+    Number(filters.gamma ?? 1).toFixed(3),
+    Number(filters.highlights ?? 0).toFixed(2),
+    Number(filters.shadows ?? 0).toFixed(2),
+  ].join('|');
+}
+function hasAdvancedColorAdjustments(filters = {}) {
+  return Math.abs(Number(filters.exposure) || 0) > 1e-6
+    || Math.abs(Number(filters.temperature) || 0) > 1e-6
+    || Math.abs(Number(filters.tint) || 0) > 1e-6
+    || Math.abs(Number(filters.vibrance) || 0) > 1e-6
+    || Math.abs((Number(filters.gamma) || 1) - 1) > 1e-6
+    || Math.abs(Number(filters.highlights) || 0) > 1e-6
+    || Math.abs(Number(filters.shadows) || 0) > 1e-6;
+}
+
+function compileColorAdjustments(filters = {}) {
+  const exposure = Math.max(-4, Math.min(4, Number(filters.exposure) || 0));
+  const gamma = Math.max(0.1, Math.min(5, Number(filters.gamma) || 1));
+  const multiplier = 2 ** exposure;
+  const power = 1 / gamma;
+  const base = new Float32Array(256);
+  for (let i = 0; i < 256; i += 1) base[i] = Math.min(1, ((i / 255) * multiplier)) ** power;
+
+  return {
+    base,
+    temperature: Math.max(-1, Math.min(1, (Number(filters.temperature) || 0) / 100)),
+    tint: Math.max(-1, Math.min(1, (Number(filters.tint) || 0) / 100)),
+    vibrance: Math.max(-1, Math.min(1, (Number(filters.vibrance) || 0) / 100)),
+    highlights: Math.max(-1, Math.min(1, (Number(filters.highlights) || 0) / 100)),
+    shadows: Math.max(-1, Math.min(1, (Number(filters.shadows) || 0) / 100)),
+  };
+}
+
+function adjustRgbPackedCompiled(r, g, b, compiled) {
+  let red = compiled.base[r];
+  let green = compiled.base[g];
+  let blue = compiled.base[b];
+
+  const temperature = compiled.temperature;
+  if (temperature > 0) {
+    red += (1 - red) * temperature * 0.16;
+    green += (1 - green) * temperature * 0.025;
+    blue *= 1 - temperature * 0.14;
+  } else if (temperature < 0) {
+    const cool = -temperature;
+    blue += (1 - blue) * cool * 0.16;
+    green += (1 - green) * cool * 0.02;
+    red *= 1 - cool * 0.14;
+  }
+
+  const tint = compiled.tint;
+  if (tint > 0) {
+    red += (1 - red) * tint * 0.07;
+    blue += (1 - blue) * tint * 0.07;
+    green *= 1 - tint * 0.11;
+  } else if (tint < 0) {
+    const towardGreen = -tint;
+    green += (1 - green) * towardGreen * 0.11;
+    red *= 1 - towardGreen * 0.06;
+    blue *= 1 - towardGreen * 0.06;
+  }
+
+  let luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+  const shadows = compiled.shadows;
+  if (shadows) {
+    const shadowWeight = 1 - luminance;
+    const strength = Math.abs(shadows) * shadowWeight * shadowWeight * 0.72;
+    if (shadows > 0) {
+      red += (1 - red) * strength; green += (1 - green) * strength; blue += (1 - blue) * strength;
+    } else {
+      const factor = 1 - strength; red *= factor; green *= factor; blue *= factor;
+    }
+  }
+
+  luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+  const highlights = compiled.highlights;
+  if (highlights) {
+    const strength = Math.abs(highlights) * luminance * luminance * 0.72;
+    if (highlights > 0) {
+      red += (1 - red) * strength; green += (1 - green) * strength; blue += (1 - blue) * strength;
+    } else {
+      const factor = 1 - strength; red *= factor; green *= factor; blue *= factor;
+    }
+  }
+
+  const vibrance = compiled.vibrance;
+  if (vibrance) {
+    const maxChannel = Math.max(red, green, blue);
+    const minChannel = Math.min(red, green, blue);
+    const factor = Math.max(0, 1 + vibrance * (1 - (maxChannel - minChannel)) * 0.85);
+    const gray = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+    red = gray + (red - gray) * factor;
+    green = gray + (green - gray) * factor;
+    blue = gray + (blue - gray) * factor;
+  }
+
+  const outR = Math.round(Math.min(1, Math.max(0, red)) * 255);
+  const outG = Math.round(Math.min(1, Math.max(0, green)) * 255);
+  const outB = Math.round(Math.min(1, Math.max(0, blue)) * 255);
+  return (outR << 16) | (outG << 8) | outB;
+}
+function adjustRgb(r, g, b, filters = {}) {
+  const packed = adjustRgbPackedCompiled(r, g, b, compileColorAdjustments(filters));
+  return [(packed >>> 16) & 255, (packed >>> 8) & 255, packed & 255];
+}
+function applyAdvancedColorAdjustments(imageData, filters = {}) {
+  if (!imageData?.data || !hasAdvancedColorAdjustments(filters)) return imageData;
+  const data = imageData.data;
+  const compiled = compileColorAdjustments(filters);
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] === 0) continue;
+    const packed = adjustRgbPackedCompiled(data[i], data[i + 1], data[i + 2], compiled);
+    data[i] = (packed >>> 16) & 255;
+    data[i + 1] = (packed >>> 8) & 255;
+    data[i + 2] = packed & 255;
+  }
+  return imageData;
+}
+
+// ---- src/core/render.js ----
+const imageCache = new Map();
+const IMAGE_CACHE_LIMIT = 24;
+const adjustedRasterCache = new Map();
+const ADJUSTED_RASTER_CACHE_LIMIT = 24;
+const fontLoads = new Map();
+const bundledFontStyles = new Map();
+const BUNDLED_FONT_PATHS = new Map([
+  ['"ZPE Roboto"', 'roboto'], ['"ZPE Open Sans"', 'opensans'],
+  ['"ZPE Montserrat"', 'montserrat'], ['"ZPE Noto Sans"', 'notosans'],
+  ['"ZPE Noto Serif"', 'notoserif'], ['"ZPE Rubik"', 'rubik'],
+  ['"ZPE Oswald"', 'oswald'], ['"ZPE PT Sans"', 'ptsans'],
+  ['"ZPE PT Serif"', 'ptserif'], ['"ZPE Lobster"', 'lobster'],
+  ['"ZPE Manrope"', 'manrope'], ['"ZPE Merriweather"', 'merriweather'],
+]);
+
+async function ensureBundledTextFont(family, font, text) {
+  const folder = BUNDLED_FONT_PATHS.get(family);
+  if (!folder) return;
+  if (!bundledFontStyles.has(folder)) {
+    const loading = new Promise((resolve, reject) => {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = `assets/fonts/${folder}/embedded.css`;
+      link.onload = resolve;
+      link.onerror = () => { link.remove(); reject(new Error(`Не удалось загрузить шрифт ${family}`)); };
+      document.head.append(link);
+    }).catch(error => { bundledFontStyles.delete(folder); throw error; });
+    bundledFontStyles.set(folder, loading);
+  }
+  await bundledFontStyles.get(folder);
+  await document.fonts.load(font, text || 'Аa');
+}
+async function ensureTextFont(fontFamily, fontData) {
+  if (!fontData) return;
+  if (!fontLoads.has(fontFamily)) {
+    const loading = new FontFace(fontFamily, `url("${fontData}")`).load()
+      .then(face => { document.fonts.add(face); return face; })
+      .catch(error => { fontLoads.delete(fontFamily); throw error; });
+    fontLoads.set(fontFamily, loading);
+  }
+  await fontLoads.get(fontFamily);
+}
+
+function trimImageCache() {
+  while (imageCache.size > IMAGE_CACHE_LIMIT) {
+    const oldest = imageCache.keys().next().value;
+    imageCache.delete(oldest);
+  }
+}
+
+function filterString(filters = {}) {
+  const f = {
+    brightness: 100, contrast: 100, saturate: 100, hue: 0, grayscale: 0,
+    sepia: 0, invert: 0, blur: 0, ...filters,
+  };
+  return `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturate}%) hue-rotate(${f.hue}deg) grayscale(${f.grayscale}%) sepia(${f.sepia}%) invert(${f.invert}%) blur(${f.blur}px)`;
+}
+
+function trimAdjustedRasterCache() {
+  while (adjustedRasterCache.size > ADJUSTED_RASTER_CACHE_LIMIT) {
+    const oldest = adjustedRasterCache.keys().next().value;
+    adjustedRasterCache.delete(oldest);
+  }
+}
+
+function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {
+  const filters = layer.filters || {};
+  if (!hasAdvancedColorAdjustments(filters)) return source;
+  const width = Math.max(1, Math.round(source.naturalWidth || source.videoWidth || source.width || layer.width || 1));
+  const height = Math.max(1, Math.round(source.naturalHeight || source.videoHeight || source.height || layer.height || 1));
+  const signature = colorAdjustmentSignature(filters);
+  const sourceToken = cacheable ? layer.dataUrl : null;
+  if (cacheable) {
+    const cached = adjustedRasterCache.get(layer.id);
+    if (cached && cached.sourceToken === sourceToken && cached.signature === signature && cached.width === width && cached.height === height) {
+      adjustedRasterCache.delete(layer.id);
+      adjustedRasterCache.set(layer.id, cached);
+      return cached.canvas;
+    }
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const scratch = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+  scratch.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in scratch) scratch.imageSmoothingQuality = 'high';
+  scratch.drawImage(source, 0, 0, width, height);
+  try {
+    const pixels = scratch.getImageData(0, 0, width, height);
+    applyAdvancedColorAdjustments(pixels, filters);
+    scratch.putImageData(pixels, 0, 0);
+  } catch (error) {
+    console.warn('Color correction preview could not read raster pixels', error);
+    return source;
+  }
+  if (cacheable) {
+    adjustedRasterCache.delete(layer.id);
+    adjustedRasterCache.set(layer.id, { sourceToken, signature, width, height, canvas });
+    trimAdjustedRasterCache();
+  }
+  return canvas;
+}
+async function getImage(dataUrl) {
+  if (!dataUrl) return null;
+  if (imageCache.has(dataUrl)) {
+    const cached = imageCache.get(dataUrl);
+    imageCache.delete(dataUrl);
+    imageCache.set(dataUrl, cached);
+    return cached;
+  }
+  // A broken embedded image must not poison the entire document renderer.
+  // Resolve to null and cache that result, so every animation frame does not
+  // repeatedly try to decode the same corrupt payload.
+  const promise = new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+  imageCache.set(dataUrl, promise);
+  trimImageCache();
+  return promise;
+}
+async function renderDocument(canvas, doc, { checker = false, rasterOverrides = null } = {}) {
+  const ctx = canvas.getContext('2d', { alpha: true });
+  if (canvas.width !== doc.width) canvas.width = doc.width;
+  if (canvas.height !== doc.height) canvas.height = doc.height;
+  ctx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+  ctx.clearRect(0, 0, doc.width, doc.height);
+  if (checker && doc.background === 'transparent') drawChecker(ctx, doc.width, doc.height);
+  if (doc.background && doc.background !== 'transparent') {
+    ctx.save(); ctx.fillStyle = doc.background; ctx.fillRect(0, 0, doc.width, doc.height); ctx.restore();
+  }
+  for (const layer of doc.layers) {
+    if (!isLayerVisible(doc, layer) || layer.opacity <= 0) continue;
+    await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
+  }
+}
+async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
+  ctx.save();
+  try {
+    ctx.globalAlpha = layer.opacity ?? 1;
+    ctx.globalCompositeOperation = layer.blendMode || 'source-over';
+    const w = Math.max(1, layer.width ?? 1);
+    const h = Math.max(1, layer.height ?? 1);
+    const cx = layer.x + (w * (layer.scaleX ?? 1)) / 2;
+    const cy = layer.y + (h * (layer.scaleY ?? 1)) / 2;
+    ctx.translate(cx, cy);
+    ctx.rotate((layer.rotation ?? 0) * Math.PI / 180);
+    ctx.scale(layer.scaleX ?? 1, layer.scaleY ?? 1);
+    ctx.translate(-w / 2, -h / 2);
+
+    if (hasLayerStyles(layer.styles)) {
+      const plain={...layer,styles:null,opacity:1,blendMode:'source-over',x:0,y:0,scaleX:1,scaleY:1,rotation:0};
+      const styled=await renderLayerStyles(layer.styles,w,h,sourceCtx=>renderLayer(sourceCtx,plain,{rasterOverride}),{contentBlur:layer.filters?.blur||0});
+      ctx.drawImage(styled.canvas,styled.x,styled.y,styled.width,styled.height);
+      return;
+    }
+    ctx.filter = filterString(layer.filters);
+
+    if (layer.type === 'raster' && (rasterOverride || layer.dataUrl)) {
+      const img = rasterOverride || await getImage(layer.dataUrl);
+      if (img) {
+        const source = makeAdjustedRasterSource(img, layer, { cacheable: !rasterOverride });
+        ctx.drawImage(source, 0, 0, w, h);
+      }
+    } else if (layer.type === 'text') {
+      if (layer.fontData) {
+        try { await ensureTextFont(layer.fontFamily, layer.fontData); }
+        catch (error) { console.warn('Не удалось загрузить шрифт текстового слоя', error); }
+      }
+      ctx.fillStyle = layer.color || '#ffffff';
+      ctx.font = `${layer.fontStyle === 'italic' ? 'italic ' : ''}${layer.fontWeight || '400'} ${layer.fontSize || 48}px ${layer.fontFamily || 'Arial, sans-serif'}`;
+      if (BUNDLED_FONT_PATHS.has(layer.fontFamily)) {
+        try { await ensureBundledTextFont(layer.fontFamily, ctx.font, layer.text); }
+        catch (error) { console.warn('Не удалось загрузить встроенный шрифт', error); }
+      }
+      if ('letterSpacing' in ctx) ctx.letterSpacing = `${layer.letterSpacing ?? 0}px`;
+      ctx.textAlign = layer.align || 'left';
+      ctx.textBaseline = 'top';
+      drawMultilineText(ctx, layer.text || '', layer.align === 'center' ? w / 2 : layer.align === 'right' ? w : 0, 0, w, (layer.fontSize || 48) * (layer.lineHeight ?? 1.18), layer);
+    } else if (layer.type === 'shape') {
+      ctx.beginPath();
+      if (layer.shape === 'path') {
+        const points=Array.isArray(layer.pathPoints)?layer.pathPoints:[];
+        if(points.length){ctx.moveTo(points[0].x,points[0].y);for(let index=1;index<points.length;index+=1)ctx.lineTo(points[index].x,points[index].y);if(layer.pathClosed)ctx.closePath();}
+        if(layer.pathClosed&&layer.fill&&layer.fill!=='transparent'){ctx.fillStyle=layer.fill;ctx.fill();}
+        if(layer.stroke&&layer.stroke!=='transparent'&&layer.strokeWidth>0){ctx.strokeStyle=layer.stroke;ctx.lineWidth=layer.strokeWidth;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();}
+      } else if (layer.shape === 'line') {
+        if (layer.lineMode === 'horizontal') { ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); }
+        else if (layer.lineMode === 'vertical') { ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); }
+        else if (layer.lineFlip) { ctx.moveTo(0, h); ctx.lineTo(w, 0); }
+        else { ctx.moveTo(0, 0); ctx.lineTo(w, h); }
+        ctx.lineCap = 'round';
+        if (layer.stroke && layer.stroke !== 'transparent' && layer.strokeWidth > 0) {
+          ctx.strokeStyle = layer.stroke; ctx.lineWidth = layer.strokeWidth; ctx.stroke();
+        }
+      } else {
+        if (layer.shape === 'ellipse') ctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+        else roundedRectPath(ctx, 0, 0, w, h, layer.radius || 0);
+        if (layer.fill && layer.fill !== 'transparent') { ctx.fillStyle = layer.fill; ctx.fill(); }
+        if (layer.stroke && layer.stroke !== 'transparent' && layer.strokeWidth > 0) {
+          ctx.strokeStyle = layer.stroke; ctx.lineWidth = layer.strokeWidth; ctx.stroke();
+        }
+      }
+    }
+  } finally {
+    // Keep the caller's context balanced even if a future layer renderer throws.
+    ctx.restore();
+  }
+}
+
+function drawMultilineText(ctx, text, x, y, maxWidth, lineHeight, layer) {
+  const paragraphs = String(text).split('\n');
+  let lineY = y;
+  const drawLine = line => {
+    ctx.fillText(line, x, lineY);
+    if (!line || (!layer.underline && !layer.strikeThrough)) return;
+    const width = ctx.measureText(line).width;
+    const startX = ctx.textAlign === 'center' ? x - width / 2 : ctx.textAlign === 'right' ? x - width : x;
+    const thickness = Math.max(1, (layer.fontSize || 48) / 16);
+    if (layer.underline) ctx.fillRect(startX, lineY + (layer.fontSize || 48) * .88, width, thickness);
+    if (layer.strikeThrough) ctx.fillRect(startX, lineY + (layer.fontSize || 48) * .5, width, thickness);
+  };
+  for (const paragraph of paragraphs) {
+    const words = paragraph.split(/\s+/);
+    let line = '';
+    for (const word of words) {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        drawLine(line);
+        lineY += lineHeight;
+        line = word;
+      } else line = test;
+    }
+    drawLine(line);
+    lineY += lineHeight;
+  }
+}
+
+function roundedRectPath(ctx, x, y, width, height, radius) {
+  const r = Math.min(Math.max(radius, 0), width / 2, height / 2);
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
+}
+
+let checkerTile = null;
+function drawChecker(ctx, width, height) {
+  if (!checkerTile) {
+    const size = 16;
+    checkerTile = document.createElement('canvas');
+    checkerTile.width = size * 2; checkerTile.height = size * 2;
+    const tileCtx = checkerTile.getContext('2d');
+    tileCtx.fillStyle = '#262a31'; tileCtx.fillRect(0, 0, size * 2, size * 2);
+    tileCtx.fillStyle = '#30353d';
+    tileCtx.fillRect(size, 0, size, size);
+    tileCtx.fillRect(0, size, size, size);
+  }
+  const pattern = ctx.createPattern(checkerTile, 'repeat');
+  if (!pattern) return;
+  ctx.save();
+  ctx.fillStyle = pattern;
+  ctx.fillRect(0, 0, width, height);
+  ctx.restore();
+}
+async function compositeToBlob(doc, type = 'image/png', quality = 0.92) {
+  const canvas = document.createElement('canvas');
+  canvas.width = doc.width; canvas.height = doc.height;
+  const exportDoc = structuredClone(doc);
+  if (type === 'image/jpeg' && exportDoc.background === 'transparent') exportDoc.background = '#ffffff';
+  await renderDocument(canvas, exportDoc, { checker: false });
+  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Экспорт не удался')), type, quality));
+}
+function invalidateImageCache(dataUrl) { if (dataUrl) imageCache.delete(dataUrl); adjustedRasterCache.clear(); }
+function clearImageCache() { imageCache.clear(); adjustedRasterCache.clear(); }
+
+// ---- src/main.js ----
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+const els = {
+  canvas: $('#editorCanvas'), overlay: $('#overlayCanvas'), shell: $('#canvasShell'), viewport: $('#stageViewport'),
+  title: $('#documentTitle'), tabs: $('#docTabs'), addTab: $('#addDocTabBtn'), dimensions: $('#docDimensions'), zoomLabel: $('#zoomLabel'), zoomRange: $('#zoomRange'),
+  status: $('#statusText'), pointer: $('#pointerInfo'), layers: $('#layersList'), history: $('#historyList'), props: $('#propertiesContent'), effects: $('#effectsContent'), emptyDrop: $('#emptyDrop'),
+  blend: $('#blendMode'), layerOpacity: $('#layerOpacity'), undo: $('#undoBtn'), redo: $('#redoBtn'),
+  primaryColor: $('#primaryColor'), colorChip: $('#colorChip'), brushSize: $('#brushSize'), brushSizeValue: $('#brushSizeValue'), selectionType: $('#selectionType'), selectionCopyMode: $('#selectionCopyMode'),
+  toolOpacity: $('#toolOpacity'), toolOpacityValue: $('#toolOpacityValue'), dodgeStrength: $('#dodgeStrength'), dodgeStrengthValue: $('#dodgeStrengthValue'), burnStrength: $('#burnStrength'), burnStrengthValue: $('#burnStrengthValue'), blurStrength: $('#blurStrength'), blurStrengthValue: $('#blurStrengthValue'), smudgeStrength: $('#smudgeStrength'), smudgeStrengthValue: $('#smudgeStrengthValue'), fillTolerance: $('#fillTolerance'), fillToleranceValue: $('#fillToleranceValue'), secondaryColor: $('#secondaryColor'), gradientType: $('#gradientType'), penClosed: $('#penClosed'), fontFamily: $('#fontFamily'), fontSize: $('#fontSize'), shapeKind: $('#shapeKind'),
+  smartSnapToggle: $('#smartSnapToggle'),
+  toolLabel: $('#toolLabel'), menu: $('#menuPopover'), modalRoot: $('#modalRoot'), fileInput: $('#fileInput'), projectInput: $('#projectInput'),
+  dropOverlay: $('#dropOverlay'), toastRegion: $('#toastRegion'), workspace: $('.workspace'), toolbar: $('.toolbar'), rightPanel: $('.right-panel'),
+};
+
+const TOOL_LABELS = { move: 'Перемещение', marquee: 'Выделение', brush: 'Кисть', clone: 'Штамп', heal: 'Лечебная кисть', smudge: 'Палец / смазывание', dodge: 'Осветлитель', burn: 'Затемнитель', blur: 'Кисть размытия', eraser: 'Ластик', fill: 'Заливка', gradient: 'Градиент', pen: 'Перо / контуры', magnetic: 'Магнитное лассо', wand: 'Волшебная палочка', line: 'Линия', text: 'Текст', shape: 'Фигура', crop: 'Кадрирование', eyedropper: 'Пипетка', hand: 'Рука', zoom: 'Лупа' };
+const TOOL_HELP = {
+  move:{shortcut:'V',description:'Выбирает и перемещает слои. Тяните рамку для масштаба, круглый маркер — для поворота; Shift ограничивает направление.'},
+  marquee:{shortcut:'M / Shift+M',description:'Создаёт прямоугольное, эллиптическое, свободное или многоугольное выделение. Ограничивает рисование и копирование выбранной областью.'},
+  brush:{shortcut:'B',description:'Рисует основным цветом на растровом слое. Размер меняется клавишами [ и ], давление пера поддерживается.'},
+  clone:{shortcut:'S',description:'Копирует пиксели из одной части изображения в другую. Сначала задайте источник через Alt+клик, затем рисуйте.'},
+  heal:{shortcut:'J',description:'Мягко переносит фактуру с выбранного участка для ретуши дефектов. Источник задаётся через Alt+клик.'},
+  smudge:{shortcut:'N',description:'Размазывает существующие пиксели по направлению движения кисти. Силу эффекта задаёт отдельный ползунок сверху.'},
+  dodge:{shortcut:'O',description:'Осветляет существующие пиксели. Ползунок «Сила осветления» задаёт эффект одного штриха; повторные штрихи усиливают его.'},
+  burn:{shortcut:'Shift+O',description:'Затемняет существующие пиксели. Ползунок «Сила затемнения» задаёт эффект одного штриха; повторные штрихи усиливают его.'},
+  blur:{shortcut:'R',description:'Локально смягчает детали растрового слоя. Размер задаёт область, а «Сила размытия» — интенсивность одного штриха в процентах.'},
+  eraser:{shortcut:'E',description:'Удаляет пиксели с существующего растрового слоя до прозрачности. Активное выделение ограничивает стирание.'},
+  fill:{shortcut:'G',description:'Заливает связанную область основным цветом. Ползунок «Допуск» определяет, насколько близкие оттенки захватывать.'},
+  gradient:{shortcut:'Shift+G',description:'Создаёт линейный или радиальный переход между двумя цветами на новом слое. Протяните линию по холсту.'},
+  pen:{shortcut:'P',description:'Строит редактируемый векторный контур по опорным точкам. Enter или двойной щелчок завершает путь.'},
+  magnetic:{shortcut:'A',description:'Создаёт выделение, притягивая поставленные точки к заметным границам изображения. Enter завершает контур.'},
+  wand:{shortcut:'W',description:'Одним щелчком выделяет связанную область похожего цвета. Чувствительность регулируется ползунком «Допуск».'},
+  line:{shortcut:'L',description:'Рисует линию на текущем растровом слое. Если его нет, создаёт один слой «Линии»; Shift привязывает угол к шагу 45°.'},
+  text:{shortcut:'T',description:'Добавляет новый текст или открывает существующий текстовый слой для редактирования.'},
+  shape:{shortcut:'U',description:'Создаёт прямоугольник или эллипс на отдельном редактируемом слое. Shift создаёт квадрат или круг.'},
+  crop:{shortcut:'C',description:'Обрезает документ по протянутой рамке. Содержимое и размеры холста обновляются одной операцией истории.'},
+  eyedropper:{shortcut:'I',description:'Берёт цвет видимого пикселя с холста и делает его основным цветом рисования.'},
+  hand:{shortcut:'H / Space',description:'Перемещает область просмотра без изменения слоёв. Пробел временно включает руку из любого инструмента.'},
+  zoom:{shortcut:'Z',description:'Увеличивает изображение относительно точки щелчка. Alt+клик уменьшает масштаб.'},
+};
+const RASTER_BRUSH_TOOLS = new Set(['brush','clone','heal','smudge','dodge','burn','blur','eraser']);
+const SELECTION_TYPE_LABELS = { rect:'Прямоугольное выделение', ellipse:'Эллиптическое выделение', lasso:'Свободное лассо', polygon:'Многоугольное лассо' };
+const SELECTION_TYPES = Object.keys(SELECTION_TYPE_LABELS);
+const MIME_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+const COLOR_CORRECTION_CONTROLS = [
+  { key:'exposure', label:'Экспозиция', min:-2, max:2, step:.05, unit:' EV', group:'Свет' },
+  { key:'brightness', label:'Яркость', min:0, max:200, step:1, unit:'%', group:'Свет' },
+  { key:'contrast', label:'Контраст', min:0, max:200, step:1, unit:'%', group:'Свет' },
+  { key:'highlights', label:'Светлые области', min:-100, max:100, step:1, unit:'', group:'Свет' },
+  { key:'shadows', label:'Тени', min:-100, max:100, step:1, unit:'', group:'Свет' },
+  { key:'temperature', label:'Температура', min:-100, max:100, step:1, unit:'', group:'Цвет' },
+  { key:'tint', label:'Оттенок', min:-100, max:100, step:1, unit:'', group:'Цвет' },
+  { key:'saturate', label:'Насыщенность', min:0, max:200, step:1, unit:'%', group:'Цвет' },
+  { key:'vibrance', label:'Красочность', min:-100, max:100, step:1, unit:'', group:'Цвет' },
+  { key:'hue', label:'Тон', min:-180, max:180, step:1, unit:'°', group:'Цвет' },
+  { key:'gamma', label:'Гамма', min:.2, max:3, step:.05, unit:'', group:'Тональный диапазон' },
+];
+const COLOR_CORRECTION_KEYS = new Set(COLOR_CORRECTION_CONTROLS.map(item => item.key));
+const BASIC_EFFECT_CONTROLS = [
+  { key:'brightness', label:'Яркость', min:0, max:200, step:1, group:'Цвет и эффекты' },
+  { key:'contrast', label:'Контраст', min:0, max:200, step:1, group:'Цвет и эффекты' },
+  { key:'saturate', label:'Насыщенность', min:0, max:200, step:1, group:'Цвет и эффекты' },
+  { key:'hue', label:'Тон', min:-180, max:180, step:1, group:'Цвет и эффекты' },
+  { key:'blur', label:'Размытие', min:0, max:30, step:1, group:'Эффекты' },
+];
+const RASTER_EFFECT_CONTROLS = [
+  ...COLOR_CORRECTION_CONTROLS,
+  { key:'blur', label:'Размытие', min:0, max:30, step:1, unit:' px', group:'Эффекты' },
+];
+const UI_COLLAPSE_STORAGE_KEY = 'zeter-photo-editor.ui-collapse.v1';
+const SMART_SNAP_STORAGE_KEY = 'zeter-photo-editor.smart-snap.v1';
+const collapsedPanelIds = new Set();
+let doc = createDocument();
+let history = new HistoryStack(80);
+let zoom = 0.75;
+let documentSessions = [];
+let activeSessionId = '';
+let nextSessionNumber = 1;
+let currentTool = 'move';
+let renderVersion = 0;
+let renderFrame = 0;
+let renderBusy = false;
+let textDraft = null;
+let blendingPreview = null;
+let renderPending = null;
+const renderBuffer = document.createElement('canvas');
+let dirty = false;
+let documentChangeSerial = 0;
+let drag = null;
+let brushCanvas = null;
+let brushCtx = null;
+let brushLayerId = null;
+let blurScratchCanvas = null;
+let blurScratchCtx = null;
+let retouchScratchCanvas = null;
+let retouchScratchCtx = null;
+let cloneSource = null;
+let cloneSnapshotCanvas = null;
+let penDraft = null;
+let magneticDraft = null;
+let spaceHeld = false;
+let cropRect = null;
+let selectionRect = null;
+let selectionShape = null;
+let selectionType = 'rect';
+let polygonDraft = null;
+let selectionCopyMode = 'merged';
+let dragDepth = 0;
+let layerDragId = null;
+let openMenuKey = null;
+let menuReturnFocus = null;
+let panelsVisible = true;
+let pasteGeneration = 0;
+let pasteFallbackTimer = null;
+let paintPreviewFrame = 0;
+let paintPreviewQueued = false;
+let activePrimaryPointerId = null;
+let paintPersisting = false;
+let hoverPoint = null;
+let recoveryTimer = 0;
+let recoveryGeneration = 0;
+let recoveryWritePromise = Promise.resolve();
+let recoveryStorageAvailable = true;
+let recoveryFailureNotified = false;
+let unrestoredRecoveryDocuments = [];
+function createRecoveryKey(forceNew = false) {  const key = `workspace:${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
+  try {
+    const storageKey = 'zeter-photo-editor.recovery-window.v1';
+    const previous = sessionStorage.getItem(storageKey);
+    const navigation = performance.getEntriesByType('navigation')[0]?.type;
+    if (!forceNew && navigation === 'reload' && previous?.startsWith('workspace:')) return previous;
+    sessionStorage.setItem(storageKey, key);
+  } catch (error) { console.warn('Recovery window identity is not persistent', error); }
+  return key;
+}
+let recoveryKey = createRecoveryKey();
+let smartSnapEnabled = true;
+let smartGuides = { x:null, y:null };
+const RECOVERY_DEBOUNCE_MS = 1500;
+
+function setStatus(message) { els.status.textContent = message; }
+function initTooltips(){
+  const tooltip=document.createElement('div');tooltip.id='toolTooltip';tooltip.className='tool-tooltip';tooltip.setAttribute('role','tooltip');tooltip.hidden=true;document.body.append(tooltip);
+  const hide=()=>{tooltip.hidden=true;};
+  for(const button of $$('.tool')){const help=TOOL_HELP[button.dataset.tool];if(!help)continue;button.removeAttribute('title');button.setAttribute('aria-describedby',tooltip.id);const show=()=>{const rect=button.getBoundingClientRect();tooltip.innerHTML=`<strong>${TOOL_LABELS[button.dataset.tool]}</strong><span>${help.description}</span><kbd>${help.shortcut}</kbd>`;tooltip.hidden=false;const width=tooltip.offsetWidth;const height=tooltip.offsetHeight;tooltip.style.left=`${Math.min(window.innerWidth-width-10,rect.right+10)}px`;tooltip.style.top=`${clamp(rect.top+rect.height/2-height/2,8,window.innerHeight-height-8)}px`;};button.addEventListener('pointerenter',show);button.addEventListener('pointerleave',hide);button.addEventListener('focus',show);button.addEventListener('blur',hide);}
+}
+function toast(message, tone = '') {
+  const item = document.createElement('div');
+  item.className = `toast${tone ? ` ${tone}` : ''}`;
+  item.textContent = message;
+  els.toastRegion.append(item);
+  setTimeout(() => item.remove(), 3000);
+}
+
+function readCollapseState() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(UI_COLLAPSE_STORAGE_KEY) || '{}');
+    for (const id of Array.isArray(parsed.panels) ? parsed.panels : []) collapsedPanelIds.add(String(id));
+    if (Array.isArray(parsed.propertySections) && parsed.propertySections.includes('color-effects')) collapsedPanelIds.add('effects');
+  } catch (error) {
+    console.warn('Could not restore panel collapse state', error);
+  }
+}
+function persistCollapseState() {
+  try {
+    localStorage.setItem(UI_COLLAPSE_STORAGE_KEY, JSON.stringify({
+      panels: [...collapsedPanelIds],
+    }));
+  } catch (error) {
+    console.warn('Could not persist panel collapse state', error);
+  }
+}
+function readSmartSnapState() {
+  try {
+    const saved = localStorage.getItem(SMART_SNAP_STORAGE_KEY);
+    smartSnapEnabled = saved === null ? true : saved !== 'false';
+  } catch (error) {
+    console.warn('Could not restore smart snap setting', error);
+    smartSnapEnabled = true;
+  }
+  if (els.smartSnapToggle) els.smartSnapToggle.checked = smartSnapEnabled;
+}
+function persistSmartSnapState() {
+  try { localStorage.setItem(SMART_SNAP_STORAGE_KEY, String(smartSnapEnabled)); }
+  catch (error) { console.warn('Could not persist smart snap setting', error); }
+}
+function clearSmartGuides() { smartGuides = { x:null, y:null }; }
+function cloneRect(rect) {
+  return rect ? { ...rect } : null;
+}
+function cloneSelectionShape(shape) {
+  if (!shape) return null;
+  if (shape.rect) return { ...shape, rect:{...shape.rect} };
+  if (Array.isArray(shape.points)) return { ...shape, points:shape.points.map(point=>({...point})) };
+  return { ...shape };
+}
+function createSessionId() {
+  return `doc-session-${nextSessionNumber++}`;
+}
+function createUntitledName() {
+  const used = new Set(documentSessions.map(session => String(session.doc?.name || '').trim()).filter(Boolean));
+  if (!used.has('Без имени')) return 'Без имени';
+  let index = 2;
+  while (used.has(`Без имени ${index}`)) index += 1;
+  return `Без имени ${index}`;
+}
+function currentSession() {
+  return documentSessions.find(session => session.id === activeSessionId) || null;
+}
+function syncCurrentSession() {
+  const session = currentSession();
+  if (!session) return;
+  session.doc = doc;
+  session.history = history;
+  session.zoom = zoom;
+  session.dirty = dirty;
+  session.cropRect = cloneRect(cropRect);
+  session.selectionRect = cloneRect(selectionRect);
+  session.selectionShape = cloneSelectionShape(selectionShape);
+}
+function loadSession(session) {
+  doc = session.doc;
+  history = session.history;
+  zoom = session.zoom;
+  dirty = session.dirty;
+  cropRect = cloneRect(session.cropRect);
+  selectionRect = cloneRect(session.selectionRect);
+  selectionShape = cloneSelectionShape(session.selectionShape) || (selectionRect ? {type:'rect',rect:cloneRect(selectionRect)} : null);
+  polygonDraft = null;
+  drag = null;
+  brushCanvas = null;
+  brushCtx = null;
+  brushLayerId = null;
+  hoverPoint = null;
+  activePrimaryPointerId = null;
+  paintPersisting = false;
+}
+function buildSession(documentValue, { label = 'Новый документ', zoomLevel = 0.75, dirtyState = false } = {}) {
+  const sessionHistory = new HistoryStack(80);
+  sessionHistory.reset(label, snapshotDocument(documentValue));
+  return {
+    id: createSessionId(),
+    doc: documentValue,
+    history: sessionHistory,
+    zoom: zoomLevel,
+    dirty: dirtyState,
+    cropRect: null,
+    selectionRect: null,
+    selectionShape: null,
+  };
+}
+function renderDocumentTabs() {
+  if (!els.tabs) return;
+  els.tabs.replaceChildren();
+  documentSessions.forEach(session => {
+    const shell = document.createElement('div');
+    shell.className = `doc-tab-shell${session.id === activeSessionId ? ' active' : ''}`;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'doc-tab';
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(session.id === activeSessionId));
+    button.title = session.doc?.name || 'Без имени';
+
+    const title = document.createElement('span');
+    title.className = 'doc-tab-title';
+    title.textContent = session.doc?.name || 'Без имени';
+    button.append(title);
+
+    const dot = document.createElement('span');
+    dot.className = 'dirty-dot';
+    dot.textContent = '●';
+    dot.hidden = !session.dirty;
+    button.append(dot);
+
+    button.addEventListener('click', () => activateDocumentTab(session.id, { focusViewport: true }));
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'doc-tab-close';
+    close.textContent = '×';
+    close.title = `Закрыть вкладку «${session.doc?.name || 'Без имени'}»`;
+    close.hidden = documentSessions.length <= 1;
+    close.addEventListener('click', event => {
+      event.stopPropagation();
+      closeDocumentTab(session.id);
+    });
+
+    shell.append(button, close);
+    shell.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      openContextMenu(`tab:${session.id}`, documentTabMenu(session.id), event, button);
+    });
+    els.tabs.append(shell);
+  });
+}
+function activateDocumentTab(id, { focusViewport = false } = {}) {
+  if (!id || id === activeSessionId) {
+    if (focusViewport) requestAnimationFrame(() => els.viewport.focus());
+    return;
+  }
+  if (blockPendingDocumentEdit()) return;
+  syncCurrentSession();
+  const session = documentSessions.find(item => item.id === id);
+  if (!session) return;
+  activeSessionId = session.id;
+  loadSession(session);
+  updateAll();
+  if (focusViewport) requestAnimationFrame(() => els.viewport.focus());
+  setStatus(`Вкладка: ${doc.name}`);
+}
+function addDocumentTab({ name = createUntitledName(), width = 1200, height = 800, background = 'transparent' } = {}) {
+  if (blockPendingDocumentEdit()) return;
+  syncCurrentSession();
+  const sessionDoc = createDocument({ name, width, height, background });
+  const session = buildSession(sessionDoc);
+  documentSessions.push(session);
+  activeSessionId = session.id;
+  loadSession(session);
+  updateAll();
+  fitToView();
+  setStatus(`Создана вкладка «${doc.name}»`);
+  toast('Новая вкладка создана', 'success');
+}
+function closeDocumentTab(id) {
+  if (blockPendingDocumentEdit()) return;
+  const index = documentSessions.findIndex(session => session.id === id);
+  if (index === -1) return;
+  syncCurrentSession();
+  const session = documentSessions[index];
+  if (session.dirty && !window.confirm(`Во вкладке «${session.doc?.name || 'Без имени'}» есть несохранённые изменения. Закрыть её?`)) return;
+  documentSessions.splice(index, 1);
+  if (!documentSessions.length) {
+    const fallback = buildSession(createDocument({ name: 'Без имени' }));
+    documentSessions.push(fallback);
+  }
+  const nextIndex = Math.max(0, Math.min(index, documentSessions.length - 1));
+  activeSessionId = documentSessions[nextIndex].id;
+  loadSession(documentSessions[nextIndex]);
+  updateAll();
+  queueRecovery({ immediate: true });
+  setStatus(`Закрыта вкладка «${session.doc?.name || 'Без имени'}»`);
+}
+function renameDocumentTab(id) {
+  if (blockPendingDocumentEdit()) return;
+  const session = documentSessions.find(item => item.id === id);
+  if (!session) return;
+  showModal({title:'Переименовать вкладку',fields:[{name:'name',label:'Имя',value:session.doc.name,required:true}],submitLabel:'Переименовать',onSubmit:values=>{
+    if (blockPendingDocumentEdit()) return false;
+    const target = documentSessions.find(item => item.id === id);
+    const name = String(values.name || '').trim();
+    if (!target || !name || name === target.doc.name) return;
+    target.doc.name = name;
+    if (id === activeSessionId) commit('Переименовать вкладку');
+    else {
+      touch(target.doc);
+      target.history.push('Переименовать вкладку', snapshotDocument(target.doc));
+      target.dirty = true;
+      renderDocumentTabs();
+      queueRecovery();
+    }
+    setStatus(`Вкладка переименована: ${name}`);
+  }});
+}
+function duplicateDocumentTab(id) {
+  if (blockPendingDocumentEdit()) return;
+  syncCurrentSession();
+  const index = documentSessions.findIndex(item => item.id === id);
+  if (index < 0) return;
+  const copy = restoreDocument(snapshotDocument(documentSessions[index].doc));
+  copy.name = `${copy.name} — копия`;
+  const session = buildSession(copy, {label:'Копия вкладки', zoomLevel:documentSessions[index].zoom, dirtyState:true});
+  documentSessions.splice(index + 1, 0, session);
+  renderDocumentTabs();
+  queueRecovery();
+  setStatus(`Создана копия вкладки «${copy.name}»`);
+}
+function documentTabMenu(id) {
+  const exists = () => documentSessions.some(item => item.id === id);
+  return [
+    ['Открыть вкладку','',()=>activateDocumentTab(id, {focusViewport:true}),exists],
+    ['Переименовать…','',()=>renameDocumentTab(id),exists],
+    ['Дублировать','',()=>duplicateDocumentTab(id),exists],
+    ['sep'],
+    ['Новая вкладка','',()=>addDocumentTab()],
+    ['Закрыть вкладку','',()=>closeDocumentTab(id),exists],
+  ];
+}
+function setPanelCollapsed(panel, collapsed, { persist = true } = {}) {
+  const id = panel?.dataset?.panelId;
+  if (!panel || !id) return;
+  panel.classList.toggle('is-collapsed', collapsed);
+  const toggle = panel.querySelector(':scope > header .panel-toggle');
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    const name = toggle.querySelector('strong')?.textContent?.trim() || 'раздел';
+    toggle.title = `${collapsed ? 'Развернуть' : 'Свернуть'} раздел «${name}»`;
+  }
+  if (collapsed) collapsedPanelIds.add(id); else collapsedPanelIds.delete(id);
+  if (persist) persistCollapseState();
+}
+function initCollapsiblePanels() {
+  readCollapseState();
+  $$('.panel-card[data-panel-id]').forEach(panel => {
+    const toggle = panel.querySelector(':scope > header .panel-toggle');
+    if (!toggle) return;
+    setPanelCollapsed(panel, collapsedPanelIds.has(panel.dataset.panelId), { persist: false });
+    toggle.addEventListener('click', () => setPanelCollapsed(panel, !panel.classList.contains('is-collapsed')));
+  });
+}
+function isEditingTarget(target = document.activeElement) {
+  const tag = target?.tagName;
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || target?.isContentEditable;
+}
+function isInteractiveControlTarget(target = document.activeElement) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest('button, a[href], [role=\"button\"], [role=\"menuitem\"], [role=\"option\"]'));
+}
+function markDirty(value = true) {
+  if(value)documentChangeSerial+=1;
+  dirty = value;
+  const session = currentSession();
+  if (session) session.dirty = value;
+  renderDocumentTabs();
+  if (value) queueRecovery();
+}
+function documentEditPending() {
+  return paintPersisting || Boolean(drag && !['pan','marquee'].includes(drag.kind)) ||
+    (activePrimaryPointerId !== null && (RASTER_BRUSH_TOOLS.has(currentTool) || currentTool === 'fill'));
+}
+function blockPendingDocumentEdit() {
+  if (!documentEditPending()) return false;
+  const message = 'Дождитесь завершения операции редактирования и повторите команду';
+  setStatus(message);
+  toast(message, 'warn');
+  return true;
+}
+function reportRecoveryFailure(error, { notify = false } = {}) {
+  recoveryStorageAvailable = false;
+  console.warn('ZeTer Photo Editor recovery storage unavailable', error);
+  if (notify && !recoveryFailureNotified) {
+    recoveryFailureNotified = true;
+    toast('Автовосстановление недоступно в этом режиме браузера', 'warn');
+  }
+}
+function cancelRecoveryTimer() {
+  recoveryGeneration += 1;
+  if (recoveryTimer) clearTimeout(recoveryTimer);
+  recoveryTimer = 0;
+}
+function queueRecovery({ immediate = false } = {}) {
+  if (!recoveryStorageAvailable) return;
+  cancelRecoveryTimer();
+  const generation = recoveryGeneration;
+  const write = () => {
+    if (generation !== recoveryGeneration || !recoveryStorageAvailable) return;
+    recoveryTimer = 0;
+    syncCurrentSession();
+    const sessions = documentSessions.filter(session => session.dirty);
+    const snapshots = [...unrestoredRecoveryDocuments, ...sessions.map(session => ({
+      name: session.doc.name,
+      modifiedAt: session.doc.modifiedAt,
+      snapshot: snapshotDocument(session.doc),
+    }))];
+    const activeIndex = unrestoredRecoveryDocuments.length + Math.max(0, sessions.findIndex(session => session.id === activeSessionId));
+    recoveryWritePromise = recoveryWritePromise
+      .then(() => snapshots.length ? saveRecoverySnapshot(snapshots, { activeIndex }, { key: recoveryKey }) : clearRecoverySnapshot({ key: recoveryKey }))
+      .catch(error => reportRecoveryFailure(error, { notify: true }));
+  };
+  if (immediate) write();
+  else recoveryTimer = setTimeout(write, RECOVERY_DEBOUNCE_MS);
+}
+function discardRecovery(key = recoveryKey) {
+  cancelRecoveryTimer();
+  if (!recoveryStorageAvailable) return Promise.resolve(false);
+  recoveryWritePromise = recoveryWritePromise
+    .catch(() => {})
+    .then(() => clearRecoverySnapshot({ key }))
+    .then(() => { unrestoredRecoveryDocuments = []; return true; })
+    .catch(error => { console.warn('Could not clear recovery snapshot', error); return false; });
+  return recoveryWritePromise;
+}
+function setDoc(next, { resetHistory = false, label = 'Состояние' } = {}) {
+  doc = next;
+  cropRect = null;
+  clearSelectionState();
+  brushCanvas=null;brushCtx=null;brushLayerId=null;
+  if (resetHistory) { clearImageCache(); history.reset(label, snapshotDocument(doc)); }
+  updateAll();
+}
+function commit(label) {
+  touch(doc);
+  const snapshot = snapshotDocument(doc);
+  history.push(label, snapshot);
+  markDirty(true);
+  updateAll();
+}
+function selected() { return selectedLayer(doc); }
+function isEditableRasterLayer(layer) { return !!layer && layer.type === 'raster' && !isLayerLocked(doc, layer); }
+function findTopEditableRasterLayerAt(point) { return [...doc.layers].reverse().find(layer => isLayerVisible(doc, layer) && isEditableRasterLayer(layer) && pointInLayer(point, layer)) ?? null; }
+function paintLayerAtPoint(point) {
+  const layer = selected();
+  return isEditableRasterLayer(layer) && isLayerVisible(doc, layer) && pointInLayer(point, layer) ? layer : null;
+}
+function documentPointToLayerPixel(point, layer) {
+  const width = Math.max(1, Number(layer.width) || 1);
+  const height = Math.max(1, Number(layer.height) || 1);
+  const scaleX = Number(layer.scaleX) || 1;
+  const scaleY = Number(layer.scaleY) || 1;
+  const boundsWidth = width * scaleX;
+  const boundsHeight = height * scaleY;
+  const cx = layer.x + boundsWidth / 2;
+  const cy = layer.y + boundsHeight / 2;
+  const radians = -((layer.rotation ?? 0) * Math.PI / 180);
+  const dx = point.x - cx;
+  const dy = point.y - cy;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const unrotatedX = cx + dx * cos - dy * sin;
+  const unrotatedY = cy + dx * sin + dy * cos;
+  const localScaledX = unrotatedX - layer.x;
+  const localScaledY = unrotatedY - layer.y;
+  return {
+    x: localScaledX / scaleX,
+    y: localScaledY / scaleY,
+  };
+}
+
+function layerPixelToDocumentPoint(point, layer) {
+  const width = Math.max(1, Number(layer.width) || 1);
+  const height = Math.max(1, Number(layer.height) || 1);
+  const scaleX = Number(layer.scaleX) || 1;
+  const scaleY = Number(layer.scaleY) || 1;
+  const boundsWidth = width * scaleX;
+  const boundsHeight = height * scaleY;
+  const cx = layer.x + boundsWidth / 2;
+  const cy = layer.y + boundsHeight / 2;
+  const unrotatedX = layer.x + point.x * scaleX;
+  const unrotatedY = layer.y + point.y * scaleY;
+  const radians = (layer.rotation ?? 0) * Math.PI / 180;
+  const dx = unrotatedX - cx;
+  const dy = unrotatedY - cy;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  };
+}
+
+function setSelectionShape(shape) {
+  selectionShape = cloneSelectionShape(shape);
+  selectionRect = selectionBounds(selectionShape);
+  if (!selectionRect || selectionRect.width < 1e-6 || selectionRect.height < 1e-6) {
+    selectionShape = null;
+    selectionRect = null;
+  }
+  return selectionShape;
+}
+
+function clearSelectionState() {
+  selectionShape = null;
+  selectionRect = null;
+  polygonDraft = null;
+}
+
+function pointInsideSelection(point) {
+  if (!selectionShape) return true;
+  return pointInSelection(point, selectionShape);
+}
+
+function selectionPolygonForLayer(layer) {
+  if (!selectionShape) return null;
+  const points = selectionPathPoints(selectionShape, 72);
+  if (points.length < 3) return null;
+  return points.map(point => documentPointToLayerPixel(point, layer));
+}
+
+function traceDocumentSelectionPath(ctx, shape = selectionShape) {
+  if (!shape) return false;
+  if (shape.type === 'rect' || shape.type === 'ellipse') {
+    const rect = selectionBounds(shape);
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    ctx.beginPath();
+    if (shape.type === 'ellipse') ctx.ellipse(rect.x + rect.width/2, rect.y + rect.height/2, rect.width/2, rect.height/2, 0, 0, Math.PI*2);
+    else ctx.rect(rect.x, rect.y, rect.width, rect.height);
+    ctx.closePath();
+    return true;
+  }
+  const points = selectionPathPoints(shape);
+  if (points.length < 2) return false;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i=1;i<points.length;i+=1) ctx.lineTo(points[i].x, points[i].y);
+  if (points.length >= 3) ctx.closePath();
+  return true;
+}
+
+function clipContextToDocumentSelection(ctx) {
+  if (!selectionShape) return;
+  if (traceDocumentSelectionPath(ctx)) ctx.clip();
+}
+
+function clipContextToSelection(ctx, layer) {
+  const polygon = selectionPolygonForLayer(layer);
+  if (!polygon) return;
+  ctx.beginPath();
+  ctx.moveTo(polygon[0].x, polygon[0].y);
+  for (let i=1;i<polygon.length;i+=1) ctx.lineTo(polygon[i].x, polygon[i].y);
+  ctx.closePath();
+  ctx.clip();
+}
+
+function rasterSelectionPredicate(layer) {
+  if (!selectionShape) return null;
+  return (x,y) => pointInsideSelection(layerPixelToDocumentPoint({x:x+.5,y:y+.5},layer));
+}
+
+function selectionIntersectsLayer(layer) {
+  if (!selectionRect) return false;
+  const bounds=frameBounds(layer);
+  return selectionRect.x < bounds.x+bounds.width && selectionRect.x+selectionRect.width > bounds.x && selectionRect.y < bounds.y+bounds.height && selectionRect.y+selectionRect.height > bounds.y;
+}
+
+function render({ paintPreview = false } = {}) {
+  const version = ++renderVersion;
+  renderPending = { paintPreview, version };
+  if (renderBusy || renderFrame) return;
+  renderFrame = requestAnimationFrame(() => {
+    renderFrame = 0;
+    drainRenderQueue();
+  });
+}
+
+async function drainRenderQueue() {
+  if (renderBusy || !renderPending) return;
+  const request = renderPending;
+  renderPending = null;
+  renderBusy = true;
+  try {
+    const rasterOverrides = request.paintPreview && brushCanvas && brushLayerId
+      ? new Map([[brushLayerId, brushCanvas]])
+      : null;
+    const previewDoc = documentWithTextPreview(doc, textDraft);
+    await renderDocument(renderBuffer, previewDoc, { checker: false, rasterOverrides });
+    if (request.version !== renderVersion) return;
+    if (els.canvas.width !== doc.width) els.canvas.width = doc.width;
+    if (els.canvas.height !== doc.height) els.canvas.height = doc.height;
+    const visibleCtx = els.canvas.getContext('2d', { alpha: true });
+    visibleCtx.clearRect(0, 0, doc.width, doc.height);
+    visibleCtx.drawImage(renderBuffer, 0, 0);
+    if (textDraft?.document === doc) syncTextPreviewCanvas();
+    syncBlendingPreviewCanvas();
+    if (!request.paintPreview) {
+      if (els.overlay.width !== doc.width) els.overlay.width = doc.width;
+      if (els.overlay.height !== doc.height) els.overlay.height = doc.height;
+      drawOverlay();
+    }
+  } catch (error) {
+    console.error(error);
+    setStatus(`Ошибка рендера: ${error.message}`);
+  } finally {
+    renderBusy = false;
+    if (renderPending && !renderFrame) {
+      renderFrame = requestAnimationFrame(() => {
+        renderFrame = 0;
+        drainRenderQueue();
+      });
+    }
+  }
+}
+
+function schedulePaintPreview() {
+  paintPreviewQueued = true;
+  if (paintPreviewFrame) return;
+  paintPreviewFrame = requestAnimationFrame(() => {
+    paintPreviewFrame = 0;
+    if (!paintPreviewQueued || !drag || drag.kind !== 'paint') return;
+    paintPreviewQueued = false;
+    render({ paintPreview: true });
+  });
+}
+
+function cancelPaintPreview() {
+  paintPreviewQueued = false;
+  if (paintPreviewFrame) cancelAnimationFrame(paintPreviewFrame);
+  paintPreviewFrame = 0;
+}
+
+function drawOverlay() {
+  const ctx = els.overlay.getContext('2d');
+  ctx.clearRect(0, 0, doc.width, doc.height);
+  if (cropRect) {
+    ctx.save();
+    ctx.fillStyle = '#0008';
+    ctx.fillRect(0, 0, doc.width, doc.height);
+    ctx.clearRect(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1 / zoom; ctx.setLineDash([8 / zoom, 5 / zoom]);
+    ctx.strokeRect(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
+    ctx.globalAlpha = .72;
+    ctx.setLineDash([4 / zoom, 5 / zoom]);
+    for (const fraction of [1 / 3, 2 / 3]) {
+      const x = cropRect.x + cropRect.width * fraction;
+      const y = cropRect.y + cropRect.height * fraction;
+      ctx.beginPath(); ctx.moveTo(x, cropRect.y); ctx.lineTo(x, cropRect.y + cropRect.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cropRect.x, y); ctx.lineTo(cropRect.x + cropRect.width, y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  if (selectionShape) {
+    ctx.save();
+    ctx.lineWidth = 1 / zoom;
+    ctx.strokeStyle = '#000';
+    ctx.setLineDash([6 / zoom, 6 / zoom]);
+    ctx.lineDashOffset = 3 / zoom;
+    if (traceDocumentSelectionPath(ctx)) ctx.stroke();
+    ctx.strokeStyle = '#fff';
+    ctx.lineDashOffset = 0;
+    if (traceDocumentSelectionPath(ctx)) ctx.stroke();
+    ctx.restore();
+  }
+  if (polygonDraft?.points?.length) {
+    const points=polygonDraft.points;
+    ctx.save();
+    ctx.lineWidth=1/zoom;
+    ctx.setLineDash([5/zoom,4/zoom]);
+    ctx.strokeStyle='#79a7ff';
+    ctx.fillStyle='#ffffff';
+    ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);
+    for(let i=1;i<points.length;i+=1)ctx.lineTo(points[i].x,points[i].y);
+    if(polygonDraft.hover)ctx.lineTo(polygonDraft.hover.x,polygonDraft.hover.y);
+    ctx.stroke();
+    const radius=3/zoom;
+    for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,radius,0,Math.PI*2);ctx.fill();ctx.stroke();}
+    ctx.restore();
+  }
+  const pointDraft=penDraft||magneticDraft;
+  if(pointDraft?.points?.length){const points=pointDraft.points;ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle=penDraft?'#72a7ff':'#ff5fa8';ctx.fillStyle='#fff';ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i+=1)ctx.lineTo(points[i].x,points[i].y);if(pointDraft.hover)ctx.lineTo(pointDraft.hover.x,pointDraft.hover.y);ctx.stroke();for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,2.5/zoom,0,Math.PI*2);ctx.fill();}ctx.restore();}
+  if (RASTER_BRUSH_TOOLS.has(currentTool) && hoverPoint) {
+    const paintLayer = paintLayerAtPoint(hoverPoint);
+    const radius = Math.max(.5, Number(els.brushSize.value) / 2);
+    const scaleX = Math.abs(Number(paintLayer?.scaleX) || 1);
+    const scaleY = Math.abs(Number(paintLayer?.scaleY) || 1);
+    const rotation = (Number(paintLayer?.rotation) || 0) * Math.PI / 180;
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.lineWidth = 3 / zoom;
+    ctx.strokeStyle = '#000a';
+    ctx.beginPath();ctx.ellipse(hoverPoint.x,hoverPoint.y,radius*scaleX,radius*scaleY,rotation,0,Math.PI*2);ctx.stroke();
+    ctx.lineWidth = 1 / zoom;
+    ctx.strokeStyle = '#fff';
+    ctx.beginPath();ctx.ellipse(hoverPoint.x,hoverPoint.y,radius*scaleX,radius*scaleY,rotation,0,Math.PI*2);ctx.stroke();
+    ctx.restore();
+  }
+  if ((currentTool === 'clone' || currentTool === 'heal') && cloneSource?.documentPoint) {
+    const point=cloneSource.documentPoint;
+    ctx.save();ctx.strokeStyle='#65d8ff';ctx.lineWidth=1.5/zoom;ctx.setLineDash([]);
+    ctx.beginPath();ctx.arc(point.x,point.y,7/zoom,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(point.x-10/zoom,point.y);ctx.lineTo(point.x+10/zoom,point.y);ctx.moveTo(point.x,point.y-10/zoom);ctx.lineTo(point.x,point.y+10/zoom);ctx.stroke();ctx.restore();
+  }
+  if (currentTool === 'move' && drag?.kind === 'move' && (smartGuides.x !== null || smartGuides.y !== null)) {
+    ctx.save();
+    ctx.strokeStyle = '#ff61d8';
+    ctx.lineWidth = 1 / zoom;
+    ctx.setLineDash([4 / zoom, 3 / zoom]);
+    if (smartGuides.x !== null) {
+      ctx.beginPath(); ctx.moveTo(smartGuides.x, 0); ctx.lineTo(smartGuides.x, doc.height); ctx.stroke();
+    }
+    if (smartGuides.y !== null) {
+      ctx.beginPath(); ctx.moveTo(0, smartGuides.y); ctx.lineTo(doc.width, smartGuides.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  const layer = textDraft?.document === doc ? textDraft.layer : selected();
+  if (!layer || !isLayerVisible(doc, layer)) return;
+  const frame = layerFrame(layer);
+  const moveMode=currentTool==='move';
+  const accent=isLayerLocked(doc,layer)?'#aeb6c4':moveMode?'#69a0ff':'#5ee7ff';
+  ctx.save();
+  ctx.strokeStyle='#000c';ctx.lineWidth=4/zoom;ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(frame.corners[0].x, frame.corners[0].y);
+  for (let i = 1; i < frame.corners.length; i += 1) ctx.lineTo(frame.corners[i].x, frame.corners[i].y);
+  ctx.closePath(); ctx.stroke();
+  ctx.strokeStyle=accent;ctx.lineWidth=1.5/zoom;ctx.setLineDash(moveMode?[6/zoom,4/zoom]:[]);ctx.stroke();
+  if(moveMode&&!isLayerLocked(doc, layer)) {
+    ctx.fillStyle = '#f8fbff'; ctx.strokeStyle = '#3976ea'; ctx.setLineDash([]);
+    const size = 8 / zoom;
+    for (const point of Object.values(frame.handles)) {
+      ctx.fillRect(point.x-size/2, point.y-size/2, size, size);
+      ctx.strokeRect(point.x-size/2, point.y-size/2, size, size);
+    }
+    const rotatePoint = interactiveRotationHandlePoint(layer);
+    ctx.beginPath(); ctx.moveTo(frame.handles.n.x, frame.handles.n.y); ctx.lineTo(rotatePoint.x, rotatePoint.y); ctx.stroke();
+    ctx.beginPath(); ctx.arc(rotatePoint.x, rotatePoint.y, 5 / zoom, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }else{
+    ctx.fillStyle=accent;ctx.strokeStyle='#071018';ctx.lineWidth=1/zoom;ctx.setLineDash([]);const radius=3.5/zoom;
+    for(const point of frame.corners){ctx.beginPath();ctx.arc(point.x,point.y,radius,0,Math.PI*2);ctx.fill();ctx.stroke();}
+  }
+  const label=String(layer.name||'Слой');ctx.font=`600 ${12/zoom}px Inter, Arial, sans-serif`;const paddingX=7/zoom,paddingY=5/zoom,labelWidth=ctx.measureText(label).width+paddingX*2,labelHeight=22/zoom;const bounds=frameBounds(layer);const labelX=clamp(bounds.x,2/zoom,Math.max(2/zoom,doc.width-labelWidth-2/zoom));const labelY=clamp(bounds.y-labelHeight-5/zoom,2/zoom,Math.max(2/zoom,doc.height-labelHeight-2/zoom));ctx.fillStyle='#101722ee';ctx.strokeStyle=accent;ctx.lineWidth=1/zoom;ctx.beginPath();ctx.roundRect(labelX,labelY,labelWidth,labelHeight,5/zoom);ctx.fill();ctx.stroke();ctx.fillStyle='#f6fbff';ctx.textBaseline='middle';ctx.fillText(label,labelX+paddingX,labelY+labelHeight/2);
+  ctx.restore();
+}
+
+function updateCanvasSize() {
+  els.shell.style.width = `${doc.width * zoom}px`;
+  els.shell.style.height = `${doc.height * zoom}px`;
+  els.canvas.style.width = `${doc.width * zoom}px`; els.canvas.style.height = `${doc.height * zoom}px`;
+  els.overlay.style.width = `${doc.width * zoom}px`; els.overlay.style.height = `${doc.height * zoom}px`;
+  els.canvas.style.imageRendering = zoom >= 4 ? 'pixelated' : 'auto';
+  els.zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+  els.zoomRange.value = String(Math.round(zoom * 100));
+}
+
+function updateAll() {
+  syncCurrentSession();
+  els.title.textContent = doc.name;
+  els.dimensions.textContent = `${doc.width} × ${doc.height}`;
+  els.undo.disabled = !history.canUndo(); els.redo.disabled = !history.canRedo();
+  els.emptyDrop.hidden = doc.layers.length > 0;
+  updateCanvasSize(); updateLayers(); updateHistory(); refreshInspectorPanels(); updateLayerControls(); render();
+  renderDocumentTabs();
+}
+
+function moveLayerRelativeToTarget(layerId, targetId, aboveInDisplay) {
+  if (layerId === targetId) return false;
+  const sourceIndex = doc.layers.findIndex(item => item.id === layerId);
+  const targetLayer = doc.layers.find(item => item.id === targetId);
+  if (sourceIndex < 0 || !targetLayer) return false;
+  const beforeOrder = doc.layers.map(item => item.id).join('|');
+  const source = doc.layers[sourceIndex];
+  if (isLayerLocked(doc, source)) return false;
+  const targetGroup = targetLayer.groupId ? doc.groups?.find(group => group.id === targetLayer.groupId) : null;
+  if (targetGroup?.locked) return false;
+  const beforeGroupId = source.groupId ?? null;
+  doc.layers.splice(sourceIndex, 1);
+  const targetIndex = doc.layers.findIndex(item => item.id === targetId);
+  if (targetIndex < 0) {
+    doc.layers.splice(Math.min(sourceIndex, doc.layers.length), 0, source);
+    return false;
+  }
+  source.groupId = targetLayer.groupId ?? null;
+  const insertIndex = aboveInDisplay ? targetIndex + 1 : targetIndex;
+  doc.layers.splice(insertIndex, 0, source);
+  const changed = beforeOrder !== doc.layers.map(item => item.id).join('|') || beforeGroupId !== (source.groupId ?? null);
+  if (changed) touch(doc);
+  return changed;
+}
+
+function moveLayerToRootTop(layerId) {
+  const index = doc.layers.findIndex(item => item.id === layerId);
+  if (index < 0) return false;
+  const layer = doc.layers[index];
+  if (isLayerLocked(doc, layer)) return false;
+  const beforeGroupId = layer.groupId ?? null;
+  const alreadyTop = index === doc.layers.length - 1;
+  if (beforeGroupId == null && alreadyTop) return false;
+  doc.layers.splice(index, 1);
+  layer.groupId = null;
+  doc.layers.push(layer);
+  touch(doc);
+  return true;
+}
+
+function clearLayerDragDecorations() {
+  els.layers.classList.remove('drop-root');
+  els.layers.querySelectorAll('.layer-row,.layer-group-row').forEach(item => item.classList.remove('dragging','drop-before','drop-after','drop-into'));
+}
+
+function updateLayers() {
+  els.layers.replaceChildren();
+  if (!Array.isArray(doc.groups)) doc.groups = [];
+  const groupsById = new Map(doc.groups.map(group => [group.id, group]));
+  const displayLayers = [...doc.layers].reverse();
+  const membersByGroup = new Map();
+  for (const layer of displayLayers) {
+    if (!layer.groupId || !groupsById.has(layer.groupId)) continue;
+    if (!membersByGroup.has(layer.groupId)) membersByGroup.set(layer.groupId, []);
+    membersByGroup.get(layer.groupId).push(layer);
+  }
+
+  const appendLayerRow = (layer, { inGroup = false } = {}) => {
+    const group = layer.groupId ? groupsById.get(layer.groupId) : null;
+    const groupHidden = Boolean(group && group.visible === false);
+    const groupLocked = Boolean(group?.locked);
+    const effectiveLocked = isLayerLocked(doc, layer);
+    const row = document.createElement('div');
+    row.className = `layer-row${inGroup ? ' in-group' : ''}${groupHidden ? ' group-hidden' : ''}${groupLocked ? ' group-locked' : ''}${layer.id === doc.selectedLayerId ? ' selected' : ''}`;
+    row.dataset.id = layer.id; row.setAttribute('role','option'); row.setAttribute('aria-selected', String(layer.id === doc.selectedLayerId));
+    row.tabIndex = layer.id === doc.selectedLayerId ? 0 : -1;
+    const eye = document.createElement('button'); eye.className = 'layer-eye'; eye.textContent = layer.visible ? '◉' : '○';
+    eye.title = groupHidden ? 'Группа скрыта; переключить собственную видимость слоя' : layer.visible ? 'Скрыть' : 'Показать';
+    eye.setAttribute('aria-label', eye.title);
+    eye.onclick = (e) => { e.stopPropagation(); layer.visible = !layer.visible; commit(layer.visible ? 'Показать слой' : 'Скрыть слой'); };
+    const thumb = document.createElement('div'); thumb.className = 'layer-thumb';
+    if (layer.type === 'raster' && layer.dataUrl) { const img = new Image(); img.src = layer.dataUrl; thumb.append(img); }
+    else thumb.textContent = layer.type === 'text' ? 'T' : layer.type === 'shape' ? '▭' : '▦';
+    const name = document.createElement('div'); name.className = 'layer-name'; name.textContent = layer.name; name.title = layer.name;
+    name.ondblclick = (e) => { e.stopPropagation(); renameLayer(layer); };
+    const lock = document.createElement('button'); lock.className = 'layer-lock';
+    lock.textContent = effectiveLocked ? '🔒' : '·';
+    lock.title = groupLocked ? 'Слой заблокирован группой' : layer.locked ? 'Разблокировать' : 'Заблокировать';
+    lock.setAttribute('aria-label', lock.title);
+    lock.disabled = groupLocked;
+    lock.onclick = (e) => { e.stopPropagation(); layer.locked = !layer.locked; commit(layer.locked ? 'Заблокировать слой' : 'Разблокировать слой'); };
+    row.append(eye, thumb, name, lock);
+    row.onclick = () => { doc.selectedLayerId = layer.id; updateAll(); };
+    row.addEventListener('contextmenu', e => {
+      e.preventDefault(); e.stopPropagation();
+      if (blockPendingDocumentEdit()) return;
+      if (doc.selectedLayerId !== layer.id) { doc.selectedLayerId = layer.id; updateAll(); }
+      const focusRow=[...els.layers.querySelectorAll('.layer-row')].find(item=>item.dataset.id===layer.id);
+      openContextMenu(`layer:${layer.id}`, layerContextMenu(layer.id), e, focusRow);
+    });
+    row.addEventListener('keydown', e => {
+      if (e.target !== row) return;
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault(); e.stopPropagation();
+        selectAdjacentLayer(e.key === 'ArrowUp' ? 1 : -1, { focus: true });
+        return;
+      }
+      if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault(); e.stopPropagation();
+        const next = e.key === 'Home' ? doc.layers.at(-1) : doc.layers[0];
+        if (next) { doc.selectedLayerId = next.id; updateAll(); requestAnimationFrame(focusSelectedLayerRow); }
+        return;
+      }
+      if (e.key === 'Enter' || e.code === 'F2') {
+        e.preventDefault(); e.stopPropagation(); renameLayer(layer); return;
+      }
+      if (e.key === 'Delete') {
+        e.preventDefault(); e.stopPropagation(); deleteSelected(); requestAnimationFrame(focusSelectedLayerRow);
+      }
+    });
+    row.draggable = !effectiveLocked;
+    row.addEventListener('dragstart', e => {
+      if (isLayerLocked(doc, layer)) { e.preventDefault(); setStatus('Слой или его группа заблокированы'); return; }
+      layerDragId = layer.id;
+      doc.selectedLayerId = layer.id;
+      row.classList.add('dragging');
+      if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', layer.id); }
+    });
+    row.addEventListener('dragover', e => {
+      if (!layerDragId || layerDragId === layer.id || groupLocked) return;
+      e.preventDefault(); e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+      row.classList.toggle('drop-before', before);
+      row.classList.toggle('drop-after', !before);
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-before','drop-after'));
+    row.addEventListener('drop', e => {
+      if (!layerDragId || layerDragId === layer.id || groupLocked) return;
+      e.preventDefault(); e.stopPropagation();
+      const before = e.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+      if (moveLayerRelativeToTarget(layerDragId, layer.id, before)) commit('Изменить порядок слоёв');
+      row.classList.remove('drop-before','drop-after');
+    });
+    row.addEventListener('dragend', () => {
+      layerDragId = null;
+      clearLayerDragDecorations();
+    });
+    els.layers.append(row);
+  };
+
+  const appendGroupRow = (group, members) => {
+    const row = document.createElement('div');
+    row.className = `layer-group-row${group.visible === false ? ' group-hidden' : ''}${group.locked ? ' group-locked' : ''}`;
+    row.dataset.groupId = group.id;
+    row.tabIndex = 0;
+    row.setAttribute('role','group');
+    row.setAttribute('aria-label', `${group.name}, ${members.length} слоёв`);
+
+    const eye = document.createElement('button');
+    eye.className = 'layer-eye layer-group-eye';
+    eye.textContent = group.visible === false ? '○' : '◉';
+    eye.title = group.visible === false ? 'Показать группу' : 'Скрыть группу';
+    eye.setAttribute('aria-label', eye.title);
+    eye.onclick = e => {
+      e.stopPropagation();
+      group.visible = group.visible === false;
+      commit(group.visible ? 'Показать группу слоёв' : 'Скрыть группу слоёв');
+    };
+
+    const toggle = document.createElement('button');
+    toggle.className = 'layer-group-toggle';
+    toggle.textContent = group.collapsed ? '▸' : '▾';
+    toggle.title = group.collapsed ? 'Развернуть группу' : 'Свернуть группу';
+    toggle.setAttribute('aria-expanded', String(!group.collapsed));
+    toggle.onclick = e => { e.stopPropagation(); group.collapsed = !group.collapsed; updateLayers(); };
+
+    const thumb = document.createElement('div'); thumb.className = 'layer-thumb layer-group-thumb'; thumb.textContent = '▰';
+
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'layer-name layer-group-name';
+    name.textContent = group.name;
+    name.title = `${group.name} · ${members.length} слоёв · клик: свернуть/развернуть · двойной клик: переименовать`;
+    name.onclick = e => { e.stopPropagation(); group.collapsed = !group.collapsed; updateLayers(); };
+    name.ondblclick = e => { e.preventDefault(); e.stopPropagation(); renameGroup(group); };
+
+    const lock = document.createElement('button');
+    lock.className = 'layer-lock layer-group-lock';
+    lock.textContent = group.locked ? '🔒' : '·';
+    lock.title = group.locked ? 'Разблокировать группу' : 'Заблокировать группу';
+    lock.setAttribute('aria-label', lock.title);
+    lock.onclick = e => {
+      e.stopPropagation();
+      group.locked = !group.locked;
+      commit(group.locked ? 'Заблокировать группу слоёв' : 'Разблокировать группу слоёв');
+    };
+
+    const remove = document.createElement('button'); remove.className = 'layer-group-remove'; remove.textContent = '×';
+    remove.title = 'Удалить группу (слои останутся)';
+    remove.setAttribute('aria-label', remove.title);
+    remove.onclick = e => { e.stopPropagation(); deleteLayerGroup(group); };
+
+    row.append(eye, toggle, thumb, name, lock, remove);
+    row.addEventListener('contextmenu', e => {
+      e.preventDefault(); e.stopPropagation();
+      openContextMenu(`group:${group.id}`, groupContextMenu(group.id), e, row);
+    });
+    row.addEventListener('dragover', e => {
+      if (!layerDragId || group.locked) return;
+      e.preventDefault(); e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drop-into');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-into'));
+    row.addEventListener('drop', e => {
+      if (!layerDragId || group.locked) return;
+      e.preventDefault(); e.stopPropagation();
+      const draggedId = layerDragId;
+      row.classList.remove('drop-into');
+      if (moveLayerIntoGroup(doc, draggedId, group.id)) {
+        group.collapsed = false;
+        commit('Переместить слой в группу');
+      }
+    });
+    els.layers.append(row);
+    if (!group.collapsed) for (const layer of members) appendLayerRow(layer, { inGroup: true });
+  };
+
+  const emittedGroups = new Set();
+  for (const group of [...doc.groups].reverse()) {
+    if (!membersByGroup.has(group.id)) {
+      appendGroupRow(group, []);
+      emittedGroups.add(group.id);
+    }
+  }
+  for (const layer of displayLayers) {
+    const group = layer.groupId ? groupsById.get(layer.groupId) : null;
+    if (!group) {
+      appendLayerRow(layer);
+      continue;
+    }
+    if (emittedGroups.has(group.id)) continue;
+    emittedGroups.add(group.id);
+    appendGroupRow(group, membersByGroup.get(group.id) || []);
+  }
+}
+
+function updateHistory() {
+  els.history.replaceChildren();
+  history.entries.forEach((entry, index) => {
+    const row = document.createElement('button'); row.type='button'; row.className = `history-row${index === history.index ? ' current' : ''}`;
+    row.textContent = `${index === history.index ? '● ' : ''}${entry.label}`;
+    row.title = index === history.index ? 'Текущее состояние' : 'Перейти к этому состоянию';
+    row.disabled = index === history.index;
+    row.onclick = () => jumpToHistory(index);
+    els.history.append(row);
+  });
+  els.history.scrollTop = els.history.scrollHeight;
+}
+
+function jumpToHistory(index) {
+  if (blockPendingDocumentEdit()) return;
+  const entry = history.jump(index);
+  if (!entry) return;
+  doc = restoreDocument(entry.snapshot);
+  brushCanvas=null; brushCtx=null; brushLayerId=null; cropRect=null; clearSelectionState();
+  updateAll(); markDirty(true); setStatus(`История → ${entry.label}`);
+}
+
+function updateLayerControls() {
+  const layer = selected();
+  els.blend.disabled = !layer; els.layerOpacity.disabled = !layer;
+  if (layer) { els.blend.value = layer.blendMode || 'source-over'; els.layerOpacity.value = String(Math.round((layer.opacity ?? 1) * 100)); }
+}
+
+function propField(label, key, value, type='number', attrs='') {
+  return `<label for="prop-${key}">${label}</label><input id="prop-${key}" data-prop="${key}" type="${type}" value="${String(value).replaceAll('"','&quot;')}" ${attrs}>`;
+}
+const TEXT_WEIGHT_OPTIONS = [['400', 'Обычный'], ['700', 'Жирный']];
+const TEXT_STYLE_OPTIONS = [['normal', 'Прямой'], ['italic', 'Курсив']];
+const TEXT_ALIGN_OPTIONS = [['left', 'Слева'], ['center', 'По центру'], ['right', 'Справа']];
+let localTextFonts = [];
+const customFontReads = new WeakMap();
+function textFontOptions(value, label = '') {
+  const options = [...els.fontFamily.options].map(option => [option.value, option.textContent]);
+  for (const [font, name] of localTextFonts) if (!options.some(([option]) => option === font)) options.push([font, name]);
+  if (value && !options.some(([font]) => font === value)) options.push([value, label ? `Свой: ${label}` : value.replace(/^"(.*)"$/, '$1')]);
+  return options;
+}
+async function loadComputerFonts(select) {
+  if (typeof window.queryLocalFonts !== 'function') throw new Error('Этот браузер не показывает список шрифтов компьютера. Можно загрузить файл шрифта ниже.');
+  let faces;
+  try { faces = await window.queryLocalFonts(); }
+  catch { throw new Error('Браузер не разрешил доступ к шрифтам компьютера. Разрешите доступ или загрузите файл шрифта.'); }
+  const names = [...new Set(faces.map(face => face.family).filter(name => typeof name === 'string' && name.trim() && name.length <= 160))];
+  names.sort((a, b) => a.localeCompare(b, 'ru'));
+  localTextFonts = names.slice(0, 1000).map(name => [JSON.stringify(name), name]);
+  const current = select.value;
+  for (const [value, name] of localTextFonts) {
+    if ([...select.options].some(option => option.value === value)) continue;
+    const option = document.createElement('option'); option.value = value; option.textContent = name; select.append(option);
+  }
+  select.value = current;
+  return localTextFonts.length;
+}
+async function readCustomTextFont(file) {
+  if (!(file instanceof File) || !file.name) return null;
+  if (customFontReads.has(file)) return customFontReads.get(file);
+  const loading = loadCustomTextFont(file).catch(error => { customFontReads.delete(file); throw error; });
+  customFontReads.set(file, loading);  return loading;
+}
+async function loadCustomTextFont(file) {
+  const extension = file.name.toLowerCase().match(/\.(woff2?|ttf|otf)$/)?.[1];
+  if (!extension || !file.size || file.size > 5_000_000) throw new Error('Выберите файл WOFF, WOFF2, TTF или OTF размером до 5 МБ');
+  const fontData = (await readFileAsDataURL(file)).replace(/^data:[^,]*,/, `data:font/${extension};base64,`);
+  const fontFamily = `ZPE-font-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  try { await ensureTextFont(fontFamily, fontData); }
+  catch { throw new Error('Не удалось открыть файл шрифта'); }
+  return { fontFamily, fontData, fontLabel: file.name.slice(0, 160) };
+}
+function textModalFields(layer, width) {
+  const fontFamily = layer?.fontFamily || els.fontFamily.value;
+  return [
+    {name:'text',label:'Текст',type:'textarea',value:layer?.text || 'Текст'},
+    {name:'fontFamily',label:'Шрифт',type:'select',value:fontFamily,options:textFontOptions(fontFamily, layer?.fontLabel)},
+    {name:'computerFonts',label:'Шрифты ПК',type:'fontPicker'},
+    {name:'systemFontName',label:'Или имя шрифта ПК',type:'text',value:'',placeholder:'Например, Segoe UI'},
+    {name:'fontFile',label:'Свой шрифт',type:'file',accept:'.woff,.woff2,.ttf,.otf'},
+    {name:'fontSize',label:'Размер, px',type:'number',value:layer?.fontSize || els.fontSize.value,min:'6',max:'500'},
+    {name:'fontWeight',label:'Начертание',type:'select',value:layer?.fontWeight || '400',options:TEXT_WEIGHT_OPTIONS},
+    {name:'fontStyle',label:'Стиль',type:'select',value:layer?.fontStyle || 'normal',options:TEXT_STYLE_OPTIONS},
+    {name:'align',label:'Выравнивание',type:'select',value:layer?.align || 'left',options:TEXT_ALIGN_OPTIONS},
+    {name:'lineHeight',label:'Межстрочный',type:'number',value:layer?.lineHeight ?? 1.18,min:'0.8',max:'3',step:'0.01'},
+    {name:'letterSpacing',label:'Межбуквенный, px',type:'number',value:layer?.letterSpacing ?? 0,min:'-5',max:'20',step:'0.5'},
+    {name:'underline',label:'Подчёркивание',type:'select',value:layer?.underline ? 'yes' : 'no',options:[['no','Нет'],['yes','Да']]},
+    {name:'strikeThrough',label:'Зачёркивание',type:'select',value:layer?.strikeThrough ? 'yes' : 'no',options:[['no','Нет'],['yes','Да']]},
+    {name:'width',label:'Ширина блока, px',type:'number',value:width,min:'1',max:'12000'},
+    {name:'color',label:'Цвет',type:'color',value:layer?.color || els.primaryColor.value},
+  ];
+}
+async function textSettingsFromForm(values, layer = null) {
+  const custom = await readCustomTextFont(values.fontFile);
+  const systemName=String(values.systemFontName || '').trim().slice(0,120);
+  const fontFamily = custom?.fontFamily || (systemName ? JSON.stringify(systemName) : values.fontFamily);
+  return {
+    text:values.text || 'Текст',
+    fontFamily,
+    fontData:custom?.fontData || (fontFamily === layer?.fontFamily ? layer.fontData : null),
+    fontLabel:custom?.fontLabel || (fontFamily === layer?.fontFamily ? layer.fontLabel : ''),
+    fontSize:clamp(Number(values.fontSize) || 48, 6, 500),
+    fontWeight:TEXT_WEIGHT_OPTIONS.some(([option]) => option === values.fontWeight) ? values.fontWeight : '400',
+    fontStyle:values.fontStyle === 'italic' ? 'italic' : 'normal',
+    align:TEXT_ALIGN_OPTIONS.some(([option]) => option === values.align) ? values.align : 'left',
+    lineHeight:clamp(Number(values.lineHeight) || 1.18, 0.8, 3),
+    letterSpacing:clamp(Number(values.letterSpacing) || 0, -5, 20),
+    underline:values.underline === 'yes',
+    strikeThrough:values.strikeThrough === 'yes',
+    width:clamp(Number(values.width) || layer?.width || 240, 1, 12000),
+    color:values.color || layer?.color || els.primaryColor.value,
+  };
+}
+function propSelectField(label, key, value, options) {
+  return `<label for="prop-${key}">${label}</label><select id="prop-${key}" data-prop="${key}">${options.map(([option, name]) => `<option value="${escapeAttr(option)}"${option === value ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('')}</select>`;
+}
+function formatFilterValue(key, value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  if (key === 'exposure') return `${number > 0 ? '+' : ''}${number.toFixed(2)} EV`;
+  if (key === 'gamma') return number.toFixed(2);
+  if (key === 'hue') return `${Math.round(number)}°`;
+  if (key === 'blur') return `${Math.round(number)} px`;
+  if (['brightness','contrast','saturate','grayscale','sepia','invert'].includes(key)) return `${Math.round(number)}%`;
+  if (['temperature','tint','vibrance','highlights','shadows'].includes(key)) return `${number > 0 ? '+' : ''}${Math.round(number)}`;
+  return String(Math.round(number * 100) / 100);
+}
+function propRangeField(label, key, value, attrs='') {
+  const filterKey = key.startsWith('filters.') ? key.split('.')[1] : key;
+  return `<label for="prop-${key}">${label}</label><div class="range-with-value"><input id="prop-${key}" data-prop="${key}" type="range" value="${escapeAttr(value)}" ${attrs}><output>${escapeHtml(formatFilterValue(filterKey,value))}</output></div>`;
+}
+function renderEffectControls(layer) {
+  const controls = layer.type === 'raster' ? RASTER_EFFECT_CONTROLS : BASIC_EFFECT_CONTROLS;
+  let currentGroup = null;
+  let html = '';
+  for (const control of controls) {
+    if (control.group && control.group !== currentGroup) {
+      currentGroup = control.group;
+      html += `<div class="prop-effect-group">${escapeHtml(currentGroup)}</div>`;
+    }
+    const fallback = DEFAULT_LAYER_FILTERS[control.key] ?? 0;
+    const value = layer.filters?.[control.key] ?? fallback;
+    html += propRangeField(control.label, `filters.${control.key}`, value, `min="${control.min}" max="${control.max}" step="${control.step}"`);
+  }
+  return html;
+}
+function bindPropertyInputs(root) {
+  root?.querySelectorAll('[data-prop]').forEach(input => {
+    if (input.type === 'range') {
+      input.addEventListener('input', () => {
+        const key = input.dataset.prop.startsWith('filters.') ? input.dataset.prop.split('.')[1] : input.dataset.prop;
+        const output = input.closest('.range-with-value')?.querySelector('output');
+        if (output) output.textContent = formatFilterValue(key, input.value);
+        applyProperty(input.dataset.prop, input.value, input, false);
+      });
+      input.addEventListener('change', () => applyProperty(input.dataset.prop, input.value, input, true));
+    } else if(input.type === 'number') {
+      input.dataset.initialValue=input.value;
+      input.addEventListener('change',()=>{normalizeNumberInput(input);applyProperty(input.dataset.prop,input.value,input,true);});
+    } else {
+      input.addEventListener('change', () => applyProperty(input.dataset.prop, input.value, input, true));
+    }
+  });
+}
+function refreshInspectorPanels() {
+  updateProperties();
+  updateEffectsPanel();
+}
+function resetSelectedLayerEffects() {
+  const layer = selected();
+  if (!layer || isLayerLocked(doc,layer)) return;
+  const controls = layer.type === 'raster' ? RASTER_EFFECT_CONTROLS : BASIC_EFFECT_CONTROLS;
+  layer.filters = sanitizeFilters(layer.filters);
+  let changed = false;
+  for (const control of controls) {
+    const fallback = DEFAULT_LAYER_FILTERS[control.key];
+    if (layer.filters[control.key] !== fallback) {
+      layer.filters[control.key] = fallback;
+      changed = true;
+    }
+  }
+  if (changed) commit('Сбросить цвет и эффекты');
+  else setStatus('Цвет и эффекты уже сброшены');
+}
+function updateProperties() {
+  const l = selected();
+  if (!l) { els.props.className = 'panel-content muted'; els.props.textContent = 'Выберите слой'; return; }
+  els.props.className = 'panel-content';
+  let extra = '';
+  if (l.type === 'text') extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textFontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}`;
+  if (l.type === 'shape') extra = l.shape === 'line'
+    ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
+    : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`;
+  els.props.innerHTML = `<div class="prop-grid">
+    <label>Имя</label><input data-prop="name" value="${escapeAttr(l.name)}">
+    ${propField('X','x',Math.round(l.x))}${propField('Y','y',Math.round(l.y))}
+    ${propField('Ширина','width',Math.round(l.width),'number','min="1" max="12000"')}${propField('Высота','height',Math.round(l.height),'number','min="1" max="12000"')}
+    ${propField('Масштаб X','scaleX',Number(l.scaleX ?? 1).toFixed(2),'number','step="0.01" min="0.01" max="100"')}
+    ${propField('Масштаб Y','scaleY',Number(l.scaleY ?? 1).toFixed(2),'number','step="0.01" min="0.01" max="100"')}
+    ${propField('Поворот','rotation',Math.round(l.rotation ?? 0),'number','step="1"')}
+    ${extra}
+  </div>`;
+  bindPropertyInputs(els.props);
+  const systemFontInput=els.props.querySelector('#system-font-name');
+  if(systemFontInput)systemFontInput.addEventListener('change',()=>{
+    const name=systemFontInput.value.trim().slice(0,120);
+    if(!name)return;
+    const value=JSON.stringify(name);
+    localTextFonts.push([value,name]);
+    applyProperty('fontFamily',value,systemFontInput,true);
+  });
+  const localFontsButton = els.props.querySelector('[data-local-fonts]');
+  if (localFontsButton) localFontsButton.addEventListener('click', async () => {
+    localFontsButton.disabled = true;
+    try { const count = await loadComputerFonts(els.props.querySelector('[data-prop="fontFamily"]')); setStatus(`Доступно шрифтов компьютера: ${count}`); }
+    catch (error) { toast(error.message, 'warn'); setStatus(error.message); }
+    finally { if (localFontsButton.isConnected) localFontsButton.disabled = false; }
+  });
+  const fontInput = els.props.querySelector('#text-font-file');
+  if (fontInput) fontInput.addEventListener('change', async () => {
+    const targetDoc = doc, targetLayer = l;
+    fontInput.disabled = true;
+    try {
+      const custom = await readCustomTextFont(fontInput.files?.[0]);
+      if (!custom || doc !== targetDoc || selected() !== targetLayer || isLayerLocked(doc,targetLayer)) return;
+      Object.assign(targetLayer, custom);
+      commit('Изменить шрифт текста');
+    } catch (error) { toast(error.message, 'error'); setStatus(error.message); }
+    finally { if (fontInput.isConnected) fontInput.disabled = false; }
+  });
+  if (isLayerLocked(doc,l)) els.props.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
+}
+function updateEffectsPanel() {
+  const l = selected();
+  if (!l) {
+    els.effects.className = 'panel-content muted';
+    els.effects.textContent = 'Выберите слой';
+    return;
+  }
+  els.effects.className = 'panel-content';
+  els.effects.innerHTML = `<div class="prop-effects-grid">${renderEffectControls(l)}</div>`;
+  bindPropertyInputs(els.effects);
+  if (isLayerLocked(doc,l)) els.effects.querySelectorAll('input,textarea,select').forEach(control => { control.disabled = true; });
+}
+function escapeHtml(v) { const d=document.createElement('div'); d.textContent=v; return d.innerHTML; }
+function escapeAttr(v) { return escapeHtml(v).replaceAll('"','&quot;'); }
+function applyProperty(path, raw, input, shouldCommit = true) {
+  const l = selected(); if (!l || isLayerLocked(doc,l)) return;
+  const stringProps = ['name','text','color','fill','stroke','fontFamily','fontWeight','fontStyle','align','underline','strikeThrough'];
+  let value = stringProps.includes(path) ? raw : Number(raw);
+  if (!stringProps.includes(path) && !Number.isFinite(value)) {
+    refreshInspectorPanels();
+    setStatus('Некорректное числовое значение');
+    return;
+  }
+  if (path.startsWith('filters.')) {
+    const key = path.split('.')[1];
+    const [min,max] = FILTER_RANGES[key] || [0,400];
+    value = clamp(value, min, max);
+    l.filters = sanitizeFilters(l.filters);
+    l.filters[key] = value;
+    markDirty(true);
+    if (shouldCommit) commit('Изменить фильтр слоя'); else render();
+    return;
+  }
+  if (path === 'width' || path === 'height') {
+    value = clamp(value, 1, 12000);
+    if (l.type === 'raster') {
+      try {
+        checkedCanvasSize(path === 'width' ? value : l.width, path === 'height' ? value : l.height, `Растровый слой «${l.name || 'Без имени'}»`);
+      } catch (error) {
+        refreshInspectorPanels();
+        setStatus(error.message);
+        toast(error.message, 'warn');
+        return;
+      }
+    }
+  }
+  if (path === 'scaleX' || path === 'scaleY') value = clamp(value, .01, 100);
+  if (path === 'x' || path === 'y') value = clamp(value, -120000, 120000);
+  if (path === 'rotation') value = ((value % 360) + 360) % 360;
+  if (path === 'fontSize') value = clamp(value, 6, 500);
+  if (path === 'fontWeight' && !TEXT_WEIGHT_OPTIONS.some(([option]) => option === value)) return;
+  if (path === 'fontStyle' && !TEXT_STYLE_OPTIONS.some(([option]) => option === value)) return;
+  if (path === 'align' && !TEXT_ALIGN_OPTIONS.some(([option]) => option === value)) return;
+  if (path === 'fontFamily' && !textFontOptions(l.fontFamily).some(([option]) => option === value)) return;
+  if (path === 'fontFamily' && value !== l.fontFamily) { l.fontData = null; l.fontLabel = ''; }
+  if (path === 'lineHeight') value = clamp(value, 0.8, 3);
+  if (path === 'letterSpacing') value = clamp(value, -5, 20);
+  if (path === 'underline' || path === 'strikeThrough') value = value === 'yes';
+  if (path === 'strokeWidth') value = clamp(value, 0, 1000);
+  l[path] = value;
+  markDirty(true);
+  if (shouldCommit) commit(`Изменить ${path}`);
+  else { render(); drawOverlay(); }
+}
+
+function updateToolLabel() {
+  els.toolLabel.textContent = currentTool === 'marquee' ? (SELECTION_TYPE_LABELS[selectionType] || TOOL_LABELS.marquee) : (TOOL_LABELS[currentTool] || currentTool);
+}
+
+function cancelPolygonDraft({ restorePrevious = true, announce = false } = {}) {
+  if (!polygonDraft) return false;
+  const previous = polygonDraft.previousSelection;
+  polygonDraft = null;
+  if (restorePrevious) setSelectionShape(previous);
+  drawOverlay();
+  if (announce) setStatus('Многоугольное выделение отменено');
+  return true;
+}
+
+function finishPolygonSelection() {
+  if (!polygonDraft) return false;
+  const points = polygonDraft.points || [];
+  const previousSelection = polygonDraft.previousSelection;
+  polygonDraft = null;
+  if (points.length < 3) {
+    setSelectionShape(previousSelection);
+    drawOverlay();
+    setStatus('Для многоугольного выделения нужно минимум 3 точки');
+    return false;
+  }
+  setSelectionShape({type:'polygon',points});
+  drawOverlay();
+  setStatus(`Многоугольное выделение: ${points.length} точек`);
+  return true;
+}
+
+function setSelectionType(type, { announce = true } = {}) {
+  const next = SELECTION_TYPES.includes(type) ? type : 'rect';
+  if (polygonDraft) cancelPolygonDraft({restorePrevious:true});
+  selectionType = next;
+  if (els.selectionType) els.selectionType.value = next;
+  updateToolLabel();
+  if (announce && currentTool === 'marquee') setStatus(`Тип выделения: ${SELECTION_TYPE_LABELS[next]}`);
+  drawOverlay();
+}
+
+function cycleSelectionType() {
+  const index = Math.max(0, SELECTION_TYPES.indexOf(selectionType));
+  setSelectionType(SELECTION_TYPES[(index + 1) % SELECTION_TYPES.length]);
+}
+
+function setTool(tool) {
+  if (tool !== currentTool && blockPendingDocumentEdit()) return;
+  if (tool !== 'marquee' && polygonDraft) cancelPolygonDraft({restorePrevious:true});
+  if(tool!=='pen')penDraft=null;
+  if(tool!=='magnetic')magneticDraft=null;
+  currentTool = tool;
+  $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  updateToolLabel();
+  $$('.text-only').forEach(x => x.style.display = tool === 'text' ? '' : 'none');
+  $$('.shape-only').forEach(x => x.style.display = tool === 'shape' ? '' : 'none');
+  $$('.fill-only').forEach(x => x.style.display = tool === 'fill' ? '' : 'none');
+  $$('.blur-only').forEach(x => x.style.display = tool === 'blur' ? '' : 'none');
+  $$('.smudge-only').forEach(x => x.style.display = tool === 'smudge' ? '' : 'none');
+  $$('.dodge-only').forEach(x => x.style.display = tool === 'dodge' ? '' : 'none');
+  $$('.burn-only').forEach(x => x.style.display = tool === 'burn' ? '' : 'none');
+  $$('.color-option, .opacity-option').forEach(x => x.style.display = ['dodge','burn','blur'].includes(tool) ? 'none' : '');
+  $$('.gradient-only').forEach(x => x.style.display = tool === 'gradient' ? '' : 'none');
+  $$('.pen-only').forEach(x => x.style.display = tool === 'pen' ? '' : 'none');
+  $$('.marquee-only').forEach(x => x.style.display = tool === 'marquee' ? '' : 'none');
+  $$('.move-only').forEach(x => x.style.display = tool === 'move' ? '' : 'none');
+  els.overlay.style.cursor = defaultToolCursor();
+  cropRect = null; hoverPoint = null; clearSmartGuides(); drawOverlay();
+  if ((tool === 'clone' || tool === 'heal') && !cloneSource) setStatus(`${TOOL_LABELS[tool]}: Alt+клик по растровому слою задаёт источник`);
+}
+
+function canvasPoint(event, { clampToDocument = true } = {}) {
+  const r = els.overlay.getBoundingClientRect();
+  const x = (event.clientX - r.left) / zoom;
+  const y = (event.clientY - r.top) / zoom;
+  return clampToDocument ? { x: clamp(x, 0, doc.width), y: clamp(y, 0, doc.height) } : { x, y };
+}
+function topLayerAt(point) { return [...doc.layers].reverse().find(l => isLayerVisible(doc,l) && !isLayerLocked(doc,l) && pointInLayer(point,l)) ?? null; }
+function topTextLayerAt(point) { return [...doc.layers].reverse().find(l => isLayerVisible(doc,l) && l.type === 'text' && pointInLayer(point,l)) ?? null; }
+function updateTransformPropertyValues(layer) {
+  const values = {
+    x: Math.round(layer.x), y: Math.round(layer.y),
+    scaleX: Number(layer.scaleX ?? 1).toFixed(2), scaleY: Number(layer.scaleY ?? 1).toFixed(2),
+    rotation: Math.round(layer.rotation ?? 0),
+  };
+  for (const [key, value] of Object.entries(values)) {
+    const input = els.props.querySelector(`[data-prop="${key}"]`);
+    if (input) input.value = String(value);
+  }
+}
+function interactiveRotationHandlePoint(layer) {
+  const preferred = rotationHandlePoint(layer, 30 / zoom);
+  const insetX = Math.min(Math.max(8 / zoom, 2), doc.width / 2);
+  const insetY = Math.min(Math.max(8 / zoom, 2), doc.height / 2);
+  return {
+    x: clamp(preferred.x, insetX, Math.max(insetX, doc.width - insetX)),
+    y: clamp(preferred.y, insetY, Math.max(insetY, doc.height - insetY)),
+  };
+}
+function cursorForHandle(handle, layer) {
+  const baseAngles = { e:0, se:45, s:90, sw:135, w:180, nw:225, n:270, ne:315 };
+  const angle = ((baseAngles[handle] ?? 0) + (Number(layer.rotation) || 0) + 360) % 180;
+  const bucket = Math.round(angle / 45) % 4;
+  return ['ew-resize','nwse-resize','ns-resize','nesw-resize'][bucket];
+}
+function defaultToolCursor() {
+  return currentTool === 'move' ? 'default' : currentTool === 'text' ? 'text' : currentTool === 'hand' ? 'grab' : currentTool === 'zoom' ? 'zoom-in' : RASTER_BRUSH_TOOLS.has(currentTool) ? 'none' : 'crosshair';
+}
+function brushWidthForPointer(event) {
+  const base = Number(els.brushSize.value) || 1;
+  if (event?.pointerType !== 'pen') return base;
+  const pressure = clamp(Number(event.pressure) || 0, 0, 1);
+  return base * (0.15 + pressure * 0.85);
+}
+function adjustBrushSize(direction, coarse = false) {
+  const current = Number(els.brushSize.value) || 1;
+  const step = coarse ? 10 : (current < 20 ? 2 : current < 80 ? 5 : 10);
+  const next = clamp(current + Math.sign(direction) * step, Number(els.brushSize.min) || 1, Number(els.brushSize.max) || 160);
+  els.brushSize.value = String(next);
+  els.brushSizeValue.textContent = String(next);
+  setStatus(`Размер кисти: ${next} px`);
+}
+
+function updateMoveCursor(point) {
+  if (currentTool !== 'move' || drag) return;
+  const layer = selected();
+  if (layer && isLayerVisible(doc, layer) && !isLayerLocked(doc, layer)) {
+    const rotatePoint = interactiveRotationHandlePoint(layer);
+    if (Math.hypot(point.x - rotatePoint.x, point.y - rotatePoint.y) <= 10 / zoom) { els.overlay.style.cursor = 'grab'; return; }
+    const handle = hitLayerHandle(point, layer, 10 / zoom);
+    if (handle) { els.overlay.style.cursor = cursorForHandle(handle, layer); return; }
+  }
+  els.overlay.style.cursor = layer && isLayerVisible(doc, layer) && !isLayerLocked(doc, layer) && pointInLayer(point, layer) ? 'move' : 'default';
+}
+
+function visibleSnapTargetRects(layerId) {
+  return doc.layers
+    .filter(layer => layer.id !== layerId && isLayerVisible(doc, layer))
+    .map(layer => frameBounds(layer));
+}
+
+els.overlay.addEventListener('pointerdown', async (e) => {
+  if (!e.isPrimary || ![0, 1].includes(e.button)) return;
+  const wantsPan = e.button === 1 || (e.button === 0 && (spaceHeld || currentTool === 'hand'));
+  if (e.button === 1) e.preventDefault();
+  if (!wantsPan && paintPersisting && (RASTER_BRUSH_TOOLS.has(currentTool) || currentTool === 'fill' || currentTool === 'line' || currentTool === 'gradient')) {
+    setStatus('Сохраняется предыдущая растровая операция…');
+    return;
+  }
+  activePrimaryPointerId = e.pointerId;
+  els.overlay.setPointerCapture(e.pointerId);
+  const p = canvasPoint(e);
+  if (wantsPan) {
+    drag = { kind:'pan', x:e.clientX, y:e.clientY, left:els.viewport.scrollLeft, top:els.viewport.scrollTop }; els.overlay.style.cursor='grabbing'; return;
+  }
+  if (e.button !== 0) return;
+  if (currentTool === 'move') {
+    let l = selected();
+    if (l && isLayerVisible(doc,l) && !isLayerLocked(doc,l)) {
+      const rotatePoint = interactiveRotationHandlePoint(l);
+      if (Math.hypot(p.x - rotatePoint.x, p.y - rotatePoint.y) <= 10 / zoom) {
+        const frame = layerFrame(l);
+        drag = { kind:'rotate', layerId:l.id, moved:false, initialRotation:l.rotation ?? 0, center:frame.center, start:p, lastPointer:p };
+        els.overlay.style.cursor = 'grabbing';
+        return;
+      }
+      const handle = hitLayerHandle(p, l, 10 / zoom);
+      if (handle) {
+        drag = { kind:'resize', layerId:l.id, handle, moved:false, lastPointer:p, initial:{x:l.x,y:l.y,width:l.width,height:l.height,scaleX:l.scaleX,scaleY:l.scaleY,rotation:l.rotation} };
+        els.overlay.style.cursor = cursorForHandle(handle, l);
+        return;
+      }
+    }
+    if (!l || isLayerLocked(doc,l) || !isLayerVisible(doc,l) || !pointInLayer(p,l)) l = topLayerAt(p);
+    if (l) {
+      doc.selectedLayerId = l.id;
+      drag = { kind:'move', layerId:l.id, px:p.x, py:p.y, x:l.x, y:l.y, moved:false, lastPointer:p };
+      els.overlay.style.cursor='move'; updateLayers(); refreshInspectorPanels(); drawOverlay();
+    }
+    return;
+  }
+  if ((currentTool === 'clone' || currentTool === 'heal') && e.altKey) { await setCloneSource(p); return; }
+  if (RASTER_BRUSH_TOOLS.has(currentTool)) { await beginPaint(p, e.pointerId, e); return; }
+  if (currentTool === 'fill') { await fillAtPoint(p); return; }
+  if (currentTool === 'gradient') { drag={kind:'gradient',start:p,current:p};drawOverlay();return; }
+  if (currentTool === 'wand') { magicWandSelect(p);return; }
+  if (currentTool === 'pen') { addPenPoint(p,e.detail>=2);return; }
+  if (currentTool === 'magnetic') { addMagneticPoint(p,e.detail>=2);return; }
+  if (currentTool === 'marquee') {
+    const previousSelection=cloneSelectionShape(selectionShape);
+    if (selectionType === 'polygon') {
+      e.preventDefault();
+      if (!polygonDraft) {
+        polygonDraft={points:[p],hover:p,previousSelection};
+        selectionShape=null;selectionRect=null;
+        setStatus('Многоугольное лассо: ставьте точки, двойной щелчок или Enter — завершить');
+      } else {
+        const first=polygonDraft.points[0];
+        const nearFirst=polygonDraft.points.length>=3&&Math.hypot(p.x-first.x,p.y-first.y)<=10/zoom;
+        const last=polygonDraft.points.at(-1);
+        if (!last || Math.hypot(p.x-last.x,p.y-last.y)>1/zoom) polygonDraft.points.push(p);
+        polygonDraft.hover=p;
+        if (nearFirst || e.detail>=2) finishPolygonSelection();
+      }
+      drawOverlay();return;
+    }
+    drag={kind:'marquee',selectionType,start:p,current:p,previousSelection,points:selectionType==='lasso'?[p]:null,lockAspect:false};
+    selectionShape=selectionType==='lasso'?{type:'lasso',points:[p]}:{type:selectionType,rect:{x:p.x,y:p.y,width:0,height:0}};
+    selectionRect={x:p.x,y:p.y,width:0,height:0};
+    drawOverlay();return;
+  }
+  if (currentTool === 'line') { drag = { kind:'line', start:p, current:p }; previewLine(p,p); return; }
+  if (currentTool === 'shape') { drag = { kind:'shape', start:p, current:p }; return; }
+  if (currentTool === 'crop') { drag = { kind:'crop', start:p, current:p }; cropRect = {x:p.x,y:p.y,width:0,height:0}; drawOverlay(); return; }
+  if (currentTool === 'text') { openTextModal(p); return; }
+  if (currentTool === 'eyedropper') { pickColor(p); return; }
+  if (currentTool === 'zoom') { setZoomAtClientPoint(zoom*(e.altKey ? 1/1.5 : 1.5),e.clientX,e.clientY); return; }
+});
+
+function onOverlayPointerMove(e) {
+  if (drag && e.pointerId !== activePrimaryPointerId) return;
+  const allowOutside = drag && ['move','resize','rotate','paint'].includes(drag.kind);
+  const p = canvasPoint(e, { clampToDocument: !allowOutside });
+  if (drag && ['move','resize','rotate'].includes(drag.kind)) drag.lastPointer = p;
+  els.pointer.textContent = `x: ${Math.round(p.x)} y: ${Math.round(p.y)}`;
+  hoverPoint = p;
+  if (!drag) {
+    if (polygonDraft && currentTool === 'marquee' && selectionType === 'polygon') polygonDraft.hover=p;
+    if(penDraft&&currentTool==='pen')penDraft.hover=p;
+    if(magneticDraft&&currentTool==='magnetic')magneticDraft.hover=findMagneticEdgePoint(p);
+    if (currentTool === 'zoom') els.overlay.style.cursor=e.altKey?'zoom-out':'zoom-in';
+    else updateMoveCursor(p);
+    drawOverlay(); return;
+  }
+  if (drag.kind === 'pan') { els.viewport.scrollLeft = drag.left - (e.clientX-drag.x); els.viewport.scrollTop = drag.top - (e.clientY-drag.y); return; }
+  if (drag.kind === 'move') {
+    const l = doc.layers.find(x=>x.id===drag.layerId); if (!l || isLayerLocked(doc,l)) return;
+    let dx = p.x-drag.px;
+    let dy = p.y-drag.py;
+    let lockedAxis = null;
+    if (e.shiftKey) {
+      if (Math.abs(dx) >= Math.abs(dy)) { dy = 0; lockedAxis = 'y'; }
+      else { dx = 0; lockedAxis = 'x'; }
+    }
+    let nextX = drag.x + dx;
+    let nextY = drag.y + dy;
+    if (smartSnapEnabled && !e.ctrlKey && !e.metaKey) {
+      const snapped = snapLayerMove(l, nextX, nextY, {
+        docWidth: doc.width,
+        docHeight: doc.height,
+        targetRects: visibleSnapTargetRects(l.id),
+        threshold: 8 / zoom,
+      });
+      nextX = lockedAxis === 'x' ? drag.x : snapped.x;
+      nextY = lockedAxis === 'y' ? drag.y : snapped.y;
+      smartGuides = {
+        x: lockedAxis === 'x' ? null : snapped.guides.x,
+        y: lockedAxis === 'y' ? null : snapped.guides.y,
+      };
+    } else clearSmartGuides();
+    l.x = nextX; l.y = nextY;
+    drag.moved = Math.abs(l.x-drag.x) > 1e-9 || Math.abs(l.y-drag.y) > 1e-9;
+    render(); updateTransformPropertyValues(l); drawOverlay(); return;
+  }
+  if (drag.kind === 'resize') {
+    const l = doc.layers.find(x=>x.id===drag.layerId); if (!l || isLayerLocked(doc,l)) return;
+    const next = resizeLayerFromPoint({ ...l, ...drag.initial }, drag.handle, p, {
+      minSize: Math.max(2, 6 / zoom),
+      lockAspect: e.shiftKey,
+      fromCenter: e.altKey,
+    });
+    l.x=next.x; l.y=next.y; l.scaleX=next.scaleX; l.scaleY=next.scaleY; drag.moved=true;
+    render(); updateTransformPropertyValues(l); drawOverlay(); return;
+  }
+  if (drag.kind === 'rotate') {
+    const l = doc.layers.find(x=>x.id===drag.layerId); if (!l || isLayerLocked(doc,l)) return;
+    l.rotation = rotationFromDrag(drag.initialRotation, drag.center, drag.start, p, e.shiftKey ? 15 : 0);
+    drag.moved = true;
+    render(); updateTransformPropertyValues(l); drawOverlay(); return;
+  }
+  if (drag.kind === 'paint') {
+    const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
+    for (const event of events.length ? events : [e]) paintTo(canvasPoint(event, { clampToDocument:false }), event);
+    schedulePaintPreview();
+    drawOverlay();
+    return;
+  }
+  if (drag.kind === 'marquee') {
+    drag.current=p;
+    if (drag.selectionType === 'lasso') {
+      const last=drag.points.at(-1);
+      const minDistance=Math.max(.5,1.5/zoom);
+      if (!last || Math.hypot(p.x-last.x,p.y-last.y)>=minDistance) drag.points.push(p);
+      selectionShape={type:'lasso',points:drag.points.map(point=>({...point}))};
+      selectionRect=selectionBounds(selectionShape);
+    } else {
+      drag.lockAspect=e.shiftKey;
+      const r=e.shiftKey?constrainedRect(drag.start,p,true):normalizeRect(drag.start,p);
+      selectionShape={type:drag.selectionType,rect:r};selectionRect=r;
+    }
+    drawOverlay();return;
+  }
+  if (drag.kind === 'line') { drag.current=e.shiftKey?snapLineEnd(drag.start,p,45):p; previewLine(drag.start,drag.current); return; }
+  if (drag.kind === 'shape') { drag.current=p; drag.lockAspect=e.shiftKey; const r=constrainedRect(drag.start,p,e.shiftKey); previewRect(r, els.primaryColor.value); return; }
+  if (drag.kind === 'crop') { drag.current=p; cropRect=normalizeRect(drag.start,p); drawOverlay(); return; }
+  if (drag.kind === 'gradient') { drag.current=p;previewGradient(drag.start,p);return; }
+}
+els.overlay.addEventListener('pointermove', onOverlayPointerMove);
+els.overlay.addEventListener('pointerup', async (e) => {
+  if (activePrimaryPointerId !== e.pointerId) return;
+  if (drag?.kind === 'pan') onOverlayPointerMove(e);
+  else if (drag && ['move','resize','rotate'].includes(drag.kind)) {
+    const releasePoint = canvasPoint(e, { clampToDocument:false });
+    if (Math.hypot(releasePoint.x-drag.lastPointer.x, releasePoint.y-drag.lastPointer.y) > .01) onOverlayPointerMove(e);
+  }
+  activePrimaryPointerId = null;
+  if (!drag) return;
+  if (drag.kind === 'paint') {
+    const layer = doc.layers.find(item => item.id === drag.layerId);
+    const releasePoint = canvasPoint(e, { clampToDocument:false });
+    const localPoint = layer && documentPointToLayerPixel(releasePoint, layer);
+    if (localPoint && Math.hypot(localPoint.x-drag.last.x, localPoint.y-drag.last.y) > .01) paintTo(releasePoint, e);
+  }
+  const d = drag; drag = null;
+  if (['marquee','line','shape','crop','gradient'].includes(d.kind)) d.current = canvasPoint(e);
+  clearSmartGuides();
+  if (d.kind === 'pan') els.overlay.style.cursor = (spaceHeld || currentTool === 'hand') ? 'grab' : defaultToolCursor();
+  if (d.kind === 'move' && d.moved) commit('Перемещение слоя');
+  if (d.kind === 'resize' && d.moved) commit('Изменить размер слоя');
+  if (d.kind === 'rotate' && d.moved) commit('Повернуть слой');
+  if (d.kind === 'paint') await endPaint(d.tool);
+  if (d.kind === 'marquee') {
+    if (d.selectionType === 'lasso') {
+      const last=d.points.at(-1);const p=canvasPoint(e);
+      if(!last||Math.hypot(p.x-last.x,p.y-last.y)>1/zoom)d.points.push(p);
+      const bounds=selectionBounds({type:'lasso',points:d.points});
+      if(d.points.length>=3&&bounds&&bounds.width>=1&&bounds.height>=1)setSelectionShape({type:'lasso',points:d.points});
+      else setSelectionShape(null);
+    } else {
+      const r=(e.shiftKey||d.lockAspect)?constrainedRect(d.start,d.current,true):normalizeRect(d.start,d.current);
+      if(r.width>=1&&r.height>=1)setSelectionShape({type:d.selectionType,rect:r});else setSelectionShape(null);
+    }
+    drawOverlay();
+    const label=SELECTION_TYPE_LABELS[d.selectionType]||'Выделение';
+    setStatus(selectionRect?`${label}: ${Math.round(selectionRect.width)} × ${Math.round(selectionRect.height)} px`:'Выделение снято');
+  }
+  if (d.kind === 'line') {
+    const end=e.shiftKey?snapLineEnd(d.start,d.current,45):d.current;
+    if(Math.hypot(end.x-d.start.x,end.y-d.start.y)>2)await drawLineOnCurrentRaster(d.start,end);
+    else render();
+  }
+  if (d.kind === 'shape') {
+    const r = constrainedRect(d.start,d.current,e.shiftKey||d.lockAspect);
+    if (r.width > 2 && r.height > 2) { addLayer(doc, createShapeLayer({ x:r.x,y:r.y,width:r.width,height:r.height,shape:els.shapeKind.value,fill:els.primaryColor.value,opacity:Number(els.toolOpacity.value)/100 })); commit('Добавить фигуру'); }
+    else render();
+  }
+  if (d.kind === 'crop') {
+    const r = normalizeRect(d.start,d.current);
+    if (r.width >= 10 && r.height >= 10) applyCrop(r); else { cropRect=null; drawOverlay(); }
+  }
+  if (d.kind === 'gradient') await applyGradient(d.start,d.current);
+  updateMoveCursor(canvasPoint(e));
+});
+els.overlay.addEventListener('pointerleave', () => { els.pointer.textContent='x: — y: —';hoverPoint=null;drawOverlay(); });
+els.overlay.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+els.overlay.addEventListener('pointercancel', async (e) => {
+  if (activePrimaryPointerId !== e.pointerId) return;
+  activePrimaryPointerId = null;
+  if (!drag) return;
+  const d=drag; drag=null; clearSmartGuides();
+  if (d.kind==='paint') { await endPaint(d.tool); }
+  else {
+    if (d.kind==='move') {
+      const l=doc.layers.find(x=>x.id===d.layerId); if(l){l.x=d.x;l.y=d.y;render();updateTransformPropertyValues(l);}
+    }
+    if (d.kind==='resize') {
+      const l=doc.layers.find(x=>x.id===d.layerId); if(l){Object.assign(l,d.initial);render();updateTransformPropertyValues(l);}
+    }
+    if (d.kind==='rotate') {
+      const l=doc.layers.find(x=>x.id===d.layerId); if(l){l.rotation=d.initialRotation;render();updateTransformPropertyValues(l);}
+    }
+    if (d.kind==='crop') cropRect=null;
+    if (d.kind==='marquee') setSelectionShape(d.previousSelection);
+    if (d.kind==='pan') els.overlay.style.cursor=defaultToolCursor();
+    cancelPaintPreview(); drawOverlay(); setStatus('Действие отменено');
+  }
+});
+
+function previewRect(rect, color) {
+  drawOverlay(); const ctx=els.overlay.getContext('2d'); ctx.save(); const opacity=Number(els.toolOpacity.value)/100; ctx.fillStyle=color; ctx.strokeStyle=color; ctx.lineWidth=2/zoom;
+  if (els.shapeKind.value === 'ellipse') { ctx.beginPath(); ctx.ellipse(rect.x+rect.width/2,rect.y+rect.height/2,rect.width/2,rect.height/2,0,0,Math.PI*2); ctx.globalAlpha=opacity*.25; ctx.fill(); ctx.globalAlpha=opacity; ctx.stroke(); }
+  else { ctx.globalAlpha=opacity*.25; ctx.fillRect(rect.x,rect.y,rect.width,rect.height); ctx.globalAlpha=opacity; ctx.strokeRect(rect.x,rect.y,rect.width,rect.height); } ctx.restore();
+}
+
+function previewLine(start,end) {
+  drawOverlay();
+  const ctx=els.overlay.getContext('2d');
+  ctx.save();
+  ctx.strokeStyle=els.primaryColor.value;
+  ctx.globalAlpha=Number(els.toolOpacity.value)/100;
+  ctx.lineWidth=Math.max(1,Number(els.brushSize.value)||1);
+  ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(start.x,start.y);ctx.lineTo(end.x,end.y);ctx.stroke();ctx.restore();
+}
+
+function previewGradient(start,end) {
+  drawOverlay();
+  const ctx=els.overlay.getContext('2d');
+  const distance=Math.max(1,Math.hypot(end.x-start.x,end.y-start.y));
+  const gradient=els.gradientType?.value==='radial'
+    ? ctx.createRadialGradient(start.x,start.y,0,start.x,start.y,distance)
+    : ctx.createLinearGradient(start.x,start.y,end.x,end.y);
+  gradient.addColorStop(0,els.primaryColor.value);
+  gradient.addColorStop(1,els.secondaryColor?.value||'#ffffff');
+  ctx.save();
+  clipContextToDocumentSelection(ctx);
+  ctx.globalAlpha=.48;
+  ctx.fillStyle=gradient;
+  ctx.fillRect(0,0,doc.width,doc.height);
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle='#fff';ctx.lineWidth=1.5/zoom;ctx.setLineDash([5/zoom,4/zoom]);
+  ctx.beginPath();ctx.moveTo(start.x,start.y);ctx.lineTo(end.x,end.y);ctx.stroke();
+  ctx.fillStyle='#fff';ctx.setLineDash([]);
+  for(const point of [start,end]){ctx.beginPath();ctx.arc(point.x,point.y,3/zoom,0,Math.PI*2);ctx.fill();}
+  ctx.restore();
+}
+
+async function applyGradient(start,end){
+  const distance=Math.hypot(end.x-start.x,end.y-start.y);if(distance<2){setStatus('Градиент: протяните линию по холсту');return false;}
+  if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return false;}
+  const canvas=document.createElement('canvas');canvas.width=doc.width;canvas.height=doc.height;const ctx=canvas.getContext('2d',{alpha:true});
+  const gradient=els.gradientType?.value==='radial'?ctx.createRadialGradient(start.x,start.y,0,start.x,start.y,distance):ctx.createLinearGradient(start.x,start.y,end.x,end.y);
+  gradient.addColorStop(0,els.primaryColor.value);gradient.addColorStop(1,els.secondaryColor?.value||'#ffffff');ctx.fillStyle=gradient;ctx.globalAlpha=Number(els.toolOpacity.value)/100;
+  ctx.save();clipContextToDocumentSelection(ctx);ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+  paintPersisting=true;
+  try{const dataUrl=await canvasToDataURL(canvas,'image/png');addLayer(doc,createRasterLayer({name:'Градиент',x:0,y:0,width:doc.width,height:doc.height,dataUrl}));brushCanvas=null;brushCtx=null;brushLayerId=null;commit('Добавить градиент');setStatus('Градиент добавлен на новый слой');return true;}catch(error){console.error(error);toast('Не удалось создать градиент','error');return false;}
+  finally{paintPersisting=false;}
+}
+
+function addPenPoint(point,finish=false){
+  if(!penDraft)penDraft={points:[],hover:point};const last=penDraft.points.at(-1);if(!last||Math.hypot(point.x-last.x,point.y-last.y)>1/zoom)penDraft.points.push({...point});penDraft.hover=point;if(finish&&penDraft.points.length>=2)finishPenPath();else{setStatus('Перо: ставьте точки, двойной щелчок или Enter — завершить');drawOverlay();}
+}
+function finishPenPath(){
+  if(!penDraft||penDraft.points.length<2){penDraft=null;drawOverlay();return false;}const points=penDraft.points;penDraft=null;const bounds=selectionBounds({type:'polygon',points});if(!bounds||bounds.width<1||bounds.height<1)return false;
+  const localPoints=points.map(point=>({x:point.x-bounds.x,y:point.y-bounds.y}));addLayer(doc,createShapeLayer({name:'Контур',shape:'path',x:bounds.x,y:bounds.y,width:Math.max(1,bounds.width),height:Math.max(1,bounds.height),pathPoints:localPoints,pathClosed:Boolean(els.penClosed?.checked),fill:'transparent',stroke:els.primaryColor.value,strokeWidth:Math.max(1,Number(els.brushSize.value)||1),opacity:Number(els.toolOpacity.value)/100}));commit('Добавить контур');setStatus('Векторный контур добавлен');drawOverlay();return true;
+}
+
+function findMagneticEdgePoint(point){
+  const ctx=els.canvas.getContext('2d',{alpha:true});const radius=Math.max(4,Math.round(10/zoom));const cx=Math.round(point.x),cy=Math.round(point.y);const left=clamp(cx-radius,1,Math.max(1,doc.width-2));const top=clamp(cy-radius,1,Math.max(1,doc.height-2));const right=clamp(cx+radius,2,doc.width-1);const bottom=clamp(cy+radius,2,doc.height-1);const width=right-left+1,height=bottom-top+1;if(width<3||height<3)return point;
+  const data=ctx.getImageData(left-1,top-1,width+2,height+2).data;const stride=width+2;const lum=(x,y)=>{const i=(y*stride+x)*4;return data[i]*.2126+data[i+1]*.7152+data[i+2]*.0722;};let best={x:cx,y:cy,score:-1};for(let y=1;y<=height;y+=1)for(let x=1;x<=width;x+=1){const gx=Math.abs(lum(x+1,y)-lum(x-1,y));const gy=Math.abs(lum(x,y+1)-lum(x,y-1));const score=gx+gy-Math.hypot(left+x-1-point.x,top+y-1-point.y)*1.5;if(score>best.score)best={x:left+x-1,y:top+y-1,score};}return{x:best.x,y:best.y};
+}
+function magneticSegmentPoints(from,to){
+  const distance=Math.hypot(to.x-from.x,to.y-from.y);const step=Math.max(5,12/zoom);const steps=Math.min(256,Math.max(1,Math.ceil(distance/step)));const result=[];
+  for(let index=1;index<=steps;index+=1){const t=index/steps;const snapped=findMagneticEdgePoint({x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t});const previous=result.at(-1)||from;if(Math.hypot(snapped.x-previous.x,snapped.y-previous.y)>1/zoom)result.push(snapped);}
+  return result;
+}
+function addMagneticPoint(point,finish=false){
+  const snapped=findMagneticEdgePoint(point);if(!magneticDraft)magneticDraft={points:[],hover:snapped};const last=magneticDraft.points.at(-1);if(last){magneticDraft.points.push(...magneticSegmentPoints(last,snapped));}else{magneticDraft.points.push(snapped);}magneticDraft.hover=snapped;if(finish&&magneticDraft.points.length>=3)finishMagneticSelection();else{setStatus(`Магнитное лассо: ${magneticDraft.points.length} точек • Enter или двойной щелчок — завершить`);drawOverlay();}
+}
+function finishMagneticSelection(){if(!magneticDraft||magneticDraft.points.length<3)return false;const points=magneticDraft.points;magneticDraft=null;setSelectionShape({type:'polygon',points});drawOverlay();setStatus(`Магнитное выделение: ${points.length} точек`);return true;}
+
+function magicWandSelect(point){
+  const width=els.canvas.width,height=els.canvas.height,total=width*height;if(total>8_000_000){toast('Волшебная палочка: изображение слишком большое для безопасного выделения','warn');setStatus('Уменьшите изображение до 8 МП для волшебной палочки');return false;}
+  const x0=clamp(Math.floor(point.x),0,width-1),y0=clamp(Math.floor(point.y),0,height-1);const data=els.canvas.getContext('2d',{alpha:true}).getImageData(0,0,width,height).data;const seed=(y0*width+x0)*4;const target=[data[seed],data[seed+1],data[seed+2],data[seed+3]];const tolerance=(Number(els.fillTolerance?.value)||0)*4.42;const selectedMask=new Uint8Array(total);const queue=new Int32Array(total);let head=0,tail=0;queue[tail++]=y0*width+x0;selectedMask[y0*width+x0]=1;
+  const similar=index=>{const i=index*4;return Math.abs(data[i]-target[0])+Math.abs(data[i+1]-target[1])+Math.abs(data[i+2]-target[2])+Math.abs(data[i+3]-target[3])<=tolerance;};while(head<tail){const index=queue[head++],x=index%width,y=(index/width)|0;const neighbors=[];if(x>0)neighbors.push(index-1);if(x+1<width)neighbors.push(index+1);if(y>0)neighbors.push(index-width);if(y+1<height)neighbors.push(index+width);for(const next of neighbors)if(!selectedMask[next]&&similar(next)){selectedMask[next]=1;queue[tail++]=next;}}
+  const edges=new Map();const addEdge=(ax,ay,bx,by)=>{const key=`${ax},${ay}`;if(!edges.has(key))edges.set(key,[]);edges.get(key).push({x:bx,y:by});};for(let index=0;index<total;index+=1){if(!selectedMask[index])continue;const x=index%width,y=(index/width)|0;if(y===0||!selectedMask[index-width])addEdge(x,y,x+1,y);if(x===width-1||!selectedMask[index+1])addEdge(x+1,y,x+1,y+1);if(y===height-1||!selectedMask[index+width])addEdge(x+1,y+1,x,y+1);if(x===0||!selectedMask[index-1])addEdge(x,y+1,x,y);}
+  const first=edges.keys().next().value;if(!first)return false;const [sx,sy]=first.split(',').map(Number);const points=[{x:sx,y:sy}];let key=first;for(let guard=0;guard<edges.size+4;guard+=1){const list=edges.get(key);if(!list?.length)break;const next=list.pop();if(!list.length)edges.delete(key);points.push(next);key=`${next.x},${next.y}`;if(key===first)break;}const simplified=points.filter((point,index,array)=>{if(index===0||index===array.length-1)return true;const a=array[index-1],b=array[index+1];return (point.x-a.x)*(b.y-point.y)!==(point.y-a.y)*(b.x-point.x);});if(simplified.length<3)return false;setSelectionShape({type:'polygon',points:simplified});drawOverlay();setStatus(`Волшебная палочка: выделено ${tail.toLocaleString('ru-RU')} px`);return true;
+}
+
+function createLineLayerFromPoints(start,end) {
+  const dx=end.x-start.x,dy=end.y-start.y;
+  const absX=Math.abs(dx),absY=Math.abs(dy);
+  let x=Math.min(start.x,end.x),y=Math.min(start.y,end.y),width=Math.max(1,absX),height=Math.max(1,absY),lineMode='diag';
+  if(absY<0.5){lineMode='horizontal';y=start.y-.5;height=1;}
+  else if(absX<0.5){lineMode='vertical';x=start.x-.5;width=1;}
+  return createShapeLayer({
+    name:'Линия',shape:'line',fill:'transparent',stroke:els.primaryColor.value,
+    strokeWidth:Math.max(1,Number(els.brushSize.value)||1),opacity:Number(els.toolOpacity.value)/100,
+    x,y,width,height,lineMode,lineFlip:lineMode==='diag'&&dx*dy<0,
+  });
+}
+
+async function drawLineOnCurrentRaster(start,end){
+  if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return false;}
+  let layer=selected();
+  if(!isEditableRasterLayer(layer)){
+    layer=createRasterLayer({name:'Линии',x:0,y:0,width:doc.width,height:doc.height,dataUrl:null});
+    addLayer(doc,layer);
+  }
+  paintPersisting=true;
+  try{
+    await ensureRasterBuffer(layer);
+    const from=documentPointToLayerPixel(start,layer),to=documentPointToLayerPixel(end,layer);
+    brushCtx.save();clipContextToSelection(brushCtx,layer);brushCtx.lineCap='round';brushCtx.lineJoin='round';brushCtx.lineWidth=Math.max(1,Number(els.brushSize.value)||1);brushCtx.globalAlpha=Number(els.toolOpacity.value)/100;brushCtx.globalCompositeOperation='source-over';brushCtx.strokeStyle=els.primaryColor.value;brushCtx.beginPath();brushCtx.moveTo(from.x,from.y);brushCtx.lineTo(to.x,to.y);brushCtx.stroke();brushCtx.restore();
+    doc.selectedLayerId=layer.id;
+    if(!await persistPaintLayer())throw new Error('Не удалось сохранить слой с линиями');
+    commit('Нарисовать линию');setStatus(`Линия добавлена в слой «${layer.name}»`);return true;
+  }catch(error){console.error(error);brushCanvas=null;brushCtx=null;brushLayerId=null;render();setStatus(`Ошибка линии: ${error.message}`);toast('Не удалось нарисовать линию','error');return false;}
+  finally{paintPersisting=false;}
+}
+
+async function ensureRasterBuffer(l) {
+  if (!isEditableRasterLayer(l)) return null;
+  const paintSize = checkedCanvasSize(l.width, l.height, `Растровый слой «${l.name || 'Без имени'}»`);
+  const canvasWidth = paintSize.width;
+  const canvasHeight = paintSize.height;
+  if (brushLayerId !== l.id || !brushCanvas || brushCanvas.width !== canvasWidth || brushCanvas.height !== canvasHeight) {
+    brushCanvas = document.createElement('canvas');
+    brushCanvas.width = canvasWidth;
+    brushCanvas.height = canvasHeight;
+    brushCtx = brushCanvas.getContext('2d', { alpha:true });
+    if (l.dataUrl) {
+      const img = await getImage(l.dataUrl);
+      if (img) brushCtx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+    }
+    brushLayerId = l.id;
+  }
+  return { canvas:brushCanvas, ctx:brushCtx };
+}
+
+async function fillAtPoint(point) {
+  if (paintPersisting) { setStatus('Сохраняется предыдущая растровая операция…'); return false; }
+  if (selectionRect && !pointInsideSelection(point)) {
+    setStatus('Заливка: щёлкните внутри активного выделения');
+    return false;
+  }
+  const layer=paintLayerAtPoint(point);
+  if(!layer){setStatus('Заливка работает по растровому слою');toast('Выберите растровый слой или щёлкните по изображению','warn');return false;}
+  paintPersisting=true;
+  try {
+    await ensureRasterBuffer(layer);
+    const local=documentPointToLayerPixel(point,layer);
+    const x=Math.floor(local.x),y=Math.floor(local.y);
+    if(x<0||y<0||x>=brushCanvas.width||y>=brushCanvas.height){setStatus('Точка заливки вне растрового слоя');return false;}
+    setStatus('Заливка области…');
+    const imageData=brushCtx.getImageData(0,0,brushCanvas.width,brushCanvas.height);
+    const filled=floodFillPixels(imageData.data,brushCanvas.width,brushCanvas.height,x,y,hexToRgb(els.primaryColor.value),{
+      tolerance:Number(els.fillTolerance?.value)||0,
+      opacity:Number(els.toolOpacity.value)/100,
+      isAllowed:rasterSelectionPredicate(layer),
+    });
+    if(!filled){setStatus('Заливка: подходящая область не найдена');return false;}
+    brushCtx.putImageData(imageData,0,0);
+    doc.selectedLayerId=layer.id;
+    if (!await persistPaintLayer()) throw new Error('Не удалось сохранить растровый слой');
+    commit('Заливка');
+    setStatus(`Заливка: ${filled.toLocaleString('ru-RU')} px`);
+    return true;
+  } catch (error) {
+    console.error(error);
+    brushCanvas=null;brushCtx=null;brushLayerId=null;
+    render();
+    setStatus(`Ошибка заливки: ${error.message}`);
+    toast('Не удалось выполнить заливку','error');
+    return false;
+  } finally {
+    paintPersisting=false;
+  }
+}
+
+async function clearSelectedPixels({ historyLabel = 'Очистить выделение', successStatus = 'Пиксели внутри выделения очищены' } = {}) {
+  if(!selectionRect)return false;
+  if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return false;}
+  const layer=selected();
+  if(!isEditableRasterLayer(layer)){setStatus('Для очистки выделения выберите незаблокированный растровый слой');toast('Выделение очищает пиксели только на растровом слое','warn');return false;}
+  if(!selectionIntersectsLayer(layer)){setStatus('Выделение не пересекает выбранный слой');return false;}
+  paintPersisting=true;
+  try {
+    await ensureRasterBuffer(layer);
+    brushCtx.save();
+    clipContextToSelection(brushCtx,layer);
+    brushCtx.clearRect(0,0,brushCanvas.width,brushCanvas.height);
+    brushCtx.restore();
+    if (!await persistPaintLayer()) throw new Error('Не удалось сохранить растровый слой');
+    commit(historyLabel);
+    setStatus(successStatus);
+    return true;
+  } catch (error) {
+    console.error(error);
+    brushCanvas=null;brushCtx=null;brushLayerId=null;
+    render();
+    setStatus(`Ошибка очистки выделения: ${error.message}`);
+    toast('Не удалось очистить выделение','error');
+    return false;
+  } finally {
+    paintPersisting=false;
+  }
+}
+
+async function ensurePaintLayer(point, canContinue = () => true) {
+  let l = selected();
+  const rasterAtPoint = paintLayerAtPoint(point);
+
+  if (['eraser','blur','clone','heal','smudge','dodge','burn'].includes(currentTool)) {
+    l = rasterAtPoint;
+    if (!l) return null;
+  } else if (rasterAtPoint) {
+    l = rasterAtPoint;
+  } else {
+    if (!canContinue()) return null;
+    // A transparent raster layer does not need to be encoded as a full-size
+    // PNG before the first stroke. Keep it sparse until pixels actually exist.
+    l = createRasterLayer({
+      name:'Рисование',
+      x:0, y:0, width:doc.width, height:doc.height,
+      dataUrl:null
+    });
+    addLayer(doc,l);
+  }
+
+  await ensureRasterBuffer(l);
+  doc.selectedLayerId = l.id;
+  return l;
+}
+async function setCloneSource(point) {
+  const layer=findTopEditableRasterLayerAt(point);
+  if(!layer){setStatus(`${TOOL_LABELS[currentTool]}: источник должен находиться на растровом слое`);toast('Alt+кликните по растровому слою','warn');return false;}
+  await ensureRasterBuffer(layer);
+  cloneSource={layerId:layer.id,documentPoint:{...point},localPoint:documentPointToLayerPixel(point,layer)};
+  doc.selectedLayerId=layer.id;
+  setStatus(`Источник для «${TOOL_LABELS[currentTool]}» задан. Рисуйте по этому же слою.`);
+  drawOverlay();
+  return true;
+}
+function prepareCloneStroke(layer, destinationPoint) {
+  if(!cloneSource || cloneSource.layerId!==layer.id)return false;
+  cloneSnapshotCanvas=document.createElement('canvas');
+  cloneSnapshotCanvas.width=brushCanvas.width;cloneSnapshotCanvas.height=brushCanvas.height;
+  cloneSnapshotCanvas.getContext('2d',{alpha:true}).drawImage(brushCanvas,0,0);
+  return {x:cloneSource.localPoint.x-destinationPoint.x,y:cloneSource.localPoint.y-destinationPoint.y};
+}
+function ensureRetouchScratch(width,height){
+  if(!retouchScratchCanvas)retouchScratchCanvas=document.createElement('canvas');
+  if(retouchScratchCanvas.width!==width||retouchScratchCanvas.height!==height){retouchScratchCanvas.width=width;retouchScratchCanvas.height=height;retouchScratchCtx=retouchScratchCanvas.getContext('2d',{alpha:true});}
+  else if(!retouchScratchCtx)retouchScratchCtx=retouchScratchCanvas.getContext('2d',{alpha:true});
+  retouchScratchCtx.setTransform(1,0,0,1,0,0);retouchScratchCtx.globalAlpha=1;retouchScratchCtx.globalCompositeOperation='source-over';retouchScratchCtx.filter='none';retouchScratchCtx.clearRect(0,0,width,height);
+  return{canvas:retouchScratchCanvas,ctx:retouchScratchCtx};
+}
+function applyFeatherMask(ctx,centerX,centerY,radius){
+  const gradient=ctx.createRadialGradient(centerX,centerY,Math.max(0,radius*.55),centerX,centerY,Math.max(.5,radius));
+  gradient.addColorStop(0,'rgba(255,255,255,1)');gradient.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.save();ctx.globalAlpha=1;ctx.globalCompositeOperation='destination-in';ctx.fillStyle=gradient;ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);ctx.restore();
+}
+function applyCloneDab(point, offset, pointerEvent=null, healing=false) {
+  if(!cloneSnapshotCanvas || !offset)return false;
+  const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);const padding=2;const left=Math.floor(point.x-radius-padding),top=Math.floor(point.y-radius-padding);const size=Math.max(2,Math.ceil(radius*2+padding*2));const {canvas:scratch,ctx:scratchCtx}=ensureRetouchScratch(size,size);
+  scratchCtx.drawImage(cloneSnapshotCanvas,-left-offset.x,-top-offset.y);applyFeatherMask(scratchCtx,point.x-left,point.y-top,radius);
+  brushCtx.save();brushCtx.globalAlpha=clamp(Number(els.toolOpacity.value)/100,0,1)*(healing?.68:1);brushCtx.globalCompositeOperation=healing?'soft-light':'source-over';brushCtx.drawImage(scratch,left,top);brushCtx.restore();return true;
+}
+function cloneStrokeSegment(from,to,offset,pointerEvent=null,healing=false) {
+  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);const distance=Math.hypot(to.x-from.x,to.y-from.y);const steps=Math.max(1,Math.ceil(distance/spacing));
+  for(let index=1;index<=steps;index+=1){const t=index/steps;applyCloneDab({x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},offset,pointerEvent,healing);}
+}
+function applySmudgeDab(from,to,pointerEvent=null){
+  if(!brushCanvas||!brushCtx)return false;const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);const left=Math.max(0,Math.floor(from.x-radius-2));const top=Math.max(0,Math.floor(from.y-radius-2));const right=Math.min(brushCanvas.width,Math.ceil(from.x+radius+2));const bottom=Math.min(brushCanvas.height,Math.ceil(from.y+radius+2));const width=right-left,height=bottom-top;if(width<=0||height<=0)return false;
+  const {canvas:scratch,ctx:scratchCtx}=ensureBlurScratch(width,height);scratchCtx.setTransform(1,0,0,1,0,0);scratchCtx.globalCompositeOperation='source-over';scratchCtx.clearRect(0,0,width,height);scratchCtx.drawImage(brushCanvas,left,top,width,height,0,0,width,height);applyFeatherMask(scratchCtx,from.x-left,from.y-top,radius);
+  brushCtx.save();brushCtx.globalAlpha=clamp(Number(els.smudgeStrength?.value||45)/100,0.01,1);brushCtx.globalCompositeOperation='source-over';brushCtx.drawImage(scratch,0,0,width,height,to.x-(from.x-left),to.y-(from.y-top),width,height);brushCtx.restore();return true;
+}
+function smudgeStrokeSegment(from,to,pointerEvent=null){const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.14);const distance=Math.hypot(to.x-from.x,to.y-from.y);const steps=Math.max(1,Math.ceil(distance/spacing));let previous=from;for(let index=1;index<=steps;index+=1){const t=index/steps;const point={x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t};applySmudgeDab(previous,point,pointerEvent);previous=point;}}
+function applyToneDab(layer,point,pointerEvent=null,brighten=true){
+  if(!brushCanvas||!brushCtx||!layer)return false;const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);const left=Math.max(0,Math.floor(point.x-radius));const top=Math.max(0,Math.floor(point.y-radius));const right=Math.min(brushCanvas.width,Math.ceil(point.x+radius));const bottom=Math.min(brushCanvas.height,Math.ceil(point.y+radius));const width=right-left,height=bottom-top;if(width<=0||height<=0)return false;
+  const strength=Number(brighten?els.dodgeStrength.value:els.burnStrength.value)/100;
+  const imageData=brushCtx.getImageData(left,top,width,height);const selectionAllows=rasterSelectionPredicate(layer);const changed=applyToneBrushPixels(imageData.data,width,height,point.x-left,point.y-top,radius,strength,{brighten,isAllowed:selectionAllows?(x,y)=>selectionAllows(left+x,top+y):null,strokeCoverage:drag?.toneCoverage,originX:left,originY:top});
+  if(changed)brushCtx.putImageData(imageData,left,top);return changed>0;
+}
+function toneStrokeSegment(layer,from,to,pointerEvent=null,brighten=true){const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);const distance=Math.hypot(to.x-from.x,to.y-from.y);const steps=Math.max(1,Math.ceil(distance/spacing));for(let index=1;index<=steps;index+=1){const t=index/steps;applyToneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent,brighten);}}
+function ensureBlurScratch(width, height) {
+  if (!blurScratchCanvas) blurScratchCanvas = document.createElement('canvas');
+  if (blurScratchCanvas.width !== width || blurScratchCanvas.height !== height) {
+    blurScratchCanvas.width = width;
+    blurScratchCanvas.height = height;
+    blurScratchCtx = blurScratchCanvas.getContext('2d', { alpha:true });
+  } else if (!blurScratchCtx) {
+    blurScratchCtx = blurScratchCanvas.getContext('2d', { alpha:true });
+  }
+  return { canvas:blurScratchCanvas, ctx:blurScratchCtx };
+}
+
+function applyBlurDab(layer, point, pointerEvent = null) {
+  if (!brushCanvas || !brushCtx || !layer) return false;
+  const diameter = Math.max(1, brushWidthForPointer(pointerEvent));
+  const radius = diameter / 2;
+  const blurRadius = 5;
+  const margin = Math.ceil(blurRadius * 3 + 2);
+  const left = Math.max(0, Math.floor(point.x - radius - margin));
+  const top = Math.max(0, Math.floor(point.y - radius - margin));
+  const right = Math.min(brushCanvas.width, Math.ceil(point.x + radius + margin));
+  const bottom = Math.min(brushCanvas.height, Math.ceil(point.y + radius + margin));
+  const width = right - left;
+  const height = bottom - top;
+  if (width <= 0 || height <= 0) return false;
+
+  const { canvas:scratch, ctx:scratchCtx } = ensureBlurScratch(width, height);
+  scratchCtx.save();
+  scratchCtx.setTransform(1,0,0,1,0,0);
+  scratchCtx.globalAlpha = 1;
+  scratchCtx.globalCompositeOperation = 'source-over';
+  scratchCtx.filter = 'none';
+  scratchCtx.clearRect(0,0,width,height);
+  scratchCtx.drawImage(brushCanvas,left,top,width,height,0,0,width,height);
+  scratchCtx.restore();
+
+  const {ctx:softenedCtx}=ensureRetouchScratch(width,height);
+  softenedCtx.save();softenedCtx.filter=`blur(${blurRadius}px)`;softenedCtx.drawImage(scratch,0,0);softenedCtx.restore();
+  const imageData=brushCtx.getImageData(left,top,width,height);
+  const blurredData=softenedCtx.getImageData(0,0,width,height);
+  const selectionAllows=rasterSelectionPredicate(layer);
+  const changed=applyBlurBrushPixels(imageData.data,blurredData.data,width,height,point.x-left,point.y-top,radius,Number(els.blurStrength.value)/100,{isAllowed:selectionAllows?(x,y)=>selectionAllows(left+x,top+y):null,strokeCoverage:drag?.blurCoverage,originX:left,originY:top});
+  if(changed)brushCtx.putImageData(imageData,left,top);
+  return changed>0;
+}
+
+function blurStrokeSegment(layer, from, to, pointerEvent = null) {
+  const diameter = Math.max(1, brushWidthForPointer(pointerEvent));
+  const spacing = Math.max(1, diameter * 0.22);
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  const steps = Math.max(1, Math.ceil(distance / spacing));
+  for (let index = 1; index <= steps; index += 1) {
+    const t = index / steps;
+    applyBlurDab(layer, { x:from.x + (to.x-from.x)*t, y:from.y + (to.y-from.y)*t }, pointerEvent);
+  }
+}
+
+async function beginPaint(p, pointerId, pointerEvent = null) {
+  if(selectionRect&&!pointInsideSelection(p)){setStatus('Рисование ограничено выделением');return false;}
+  const canContinue = () => activePrimaryPointerId === pointerId;
+  const l = await ensurePaintLayer(p, canContinue);
+  if (!canContinue()) return false;
+  if (!l) {
+    const message = currentTool === 'eraser'
+      ? 'Ластик работает только по растровому слою. Выберите слой с изображением или рисунком.'
+      : currentTool === 'blur'
+        ? 'Размытие работает только по растровому слою. Выберите слой с изображением или рисунком.'
+        : currentTool === 'clone' || currentTool === 'heal'
+          ? (cloneSource ? `${TOOL_LABELS[currentTool]} работает по слою заданного источника.` : `${TOOL_LABELS[currentTool]}: сначала задайте источник через Alt+клик.`)
+          : currentTool === 'smudge'
+            ? 'Палец работает только по существующему растровому слою.'
+          : currentTool === 'dodge' || currentTool === 'burn'
+            ? 'Инструмент ретуши работает только по существующему растровому слою.'
+        : 'Не удалось подготовить растровый слой для рисования.';
+    setStatus(message);
+    toast(message, 'warn');
+    return false;
+  }
+  const localPoint = documentPointToLayerPixel(p, l);
+  drag = { kind:'paint', tool:currentTool, layerId:l.id, last:localPoint };
+  if (currentTool === 'dodge' || currentTool === 'burn') drag.toneCoverage={width:brushCanvas.width,tiles:new Map()};
+  if (currentTool === 'blur') drag.blurCoverage={width:brushCanvas.width,tiles:new Map()};
+  brushCtx.save();
+  clipContextToSelection(brushCtx,l);
+  if (currentTool === 'clone' || currentTool === 'heal') {
+    drag.cloneOffset=prepareCloneStroke(l,localPoint);
+    if(!drag.cloneOffset){brushCtx.restore();drag=null;setStatus(cloneSource?`${TOOL_LABELS[currentTool]}: рисуйте по слою источника`:`${TOOL_LABELS[currentTool]}: Alt+клик задаёт источник`);toast('Сначала задайте источник на этом слое','warn');return false;}
+    applyCloneDab(localPoint,drag.cloneOffset,pointerEvent,currentTool==='heal');schedulePaintPreview();return true;
+  }
+  if(currentTool==='smudge'){drag.smudgeStarted=true;schedulePaintPreview();return true;}
+  if(currentTool==='dodge'||currentTool==='burn'){applyToneDab(l,localPoint,pointerEvent,currentTool==='dodge');schedulePaintPreview();return true;}
+  if (currentTool === 'blur') {
+    applyBlurDab(l, localPoint, pointerEvent);
+    schedulePaintPreview();
+    return true;
+  }
+  brushCtx.lineCap='round';  brushCtx.lineJoin='round';
+  brushCtx.lineWidth=brushWidthForPointer(pointerEvent);
+  brushCtx.globalAlpha=Number(els.toolOpacity.value)/100;
+  if (currentTool==='eraser') brushCtx.globalCompositeOperation='destination-out';
+  else { brushCtx.globalCompositeOperation='source-over'; brushCtx.strokeStyle=els.primaryColor.value; }
+  // Draw only the new segment. Keeping one ever-growing Canvas path makes each
+  // stroke() repaint the whole path again and becomes O(n²) on long strokes.
+  brushCtx.beginPath();
+  brushCtx.moveTo(localPoint.x,localPoint.y);
+  brushCtx.lineTo(localPoint.x+.01,localPoint.y+.01);
+  brushCtx.stroke();
+  schedulePaintPreview();
+  return true;
+}
+function paintTo(p, pointerEvent = null) {
+  if (!drag || drag.kind!=='paint') return;
+  const layer = doc.layers.find(x => x.id === drag.layerId);
+  if (!layer) return;
+  const next = documentPointToLayerPixel(p, layer);
+  const last=drag.last;
+  if (drag.tool === 'blur') {
+    blurStrokeSegment(layer,last,next,pointerEvent);
+    drag.last=next;
+    return;
+  }
+  if (drag.tool === 'clone' || drag.tool === 'heal') { cloneStrokeSegment(last,next,drag.cloneOffset,pointerEvent,drag.tool==='heal');drag.last=next;return; }
+  if (drag.tool === 'smudge') { smudgeStrokeSegment(last,next,pointerEvent);drag.last=next;return; }
+  if (drag.tool === 'dodge' || drag.tool === 'burn') { toneStrokeSegment(layer,last,next,pointerEvent,drag.tool==='dodge');drag.last=next;return; }
+  brushCtx.lineWidth=brushWidthForPointer(pointerEvent);
+  brushCtx.beginPath();
+  brushCtx.moveTo(last.x,last.y);
+  brushCtx.lineTo(next.x,next.y);
+  brushCtx.stroke();
+  drag.last=next;
+}
+async function persistPaintLayer() {
+  const layerId=brushLayerId;
+  const canvas=brushCanvas;
+  if(!layerId || !canvas)return false;
+  const dataUrl=await canvasToDataURL(canvas,'image/png');
+  const l=doc.layers.find(x=>x.id===layerId);
+  if(!l)return false;
+  const old=l.dataUrl;
+  l.dataUrl=dataUrl;
+  invalidateImageCache(old);
+  return true;
+}
+async function endPaint(paintTool = currentTool) {
+  cancelPaintPreview();
+  if (!brushCtx || paintPersisting) return;
+  const labels={eraser:'Ластик',blur:'Размытие кистью',clone:'Штамп',heal:'Лечебная кисть',smudge:'Палец / смазывание',dodge:'Осветлитель',burn:'Затемнитель',brush:'Кисть'};
+  const label=labels[paintTool]||'Кисть';
+  brushCtx.restore();
+  cloneSnapshotCanvas=null;
+  paintPersisting=true;
+  setStatus('Сохранение штриха…');
+  try {
+    if (await persistPaintLayer()) {
+      commit(label);
+      setStatus('Готово');
+    }
+  } catch (error) {
+    console.error(error);
+    brushCanvas=null;brushCtx=null;brushLayerId=null;
+    render();
+    setStatus(`Ошибка сохранения штриха: ${error.message}`);
+    toast('Не удалось сохранить штрих','error');
+  } finally {
+    paintPersisting=false;
+  }
+}
+
+function pickColor(p) {
+  const ctx=els.canvas.getContext('2d', { alpha:true });
+  const x=clamp(Math.floor(p.x),0,Math.max(0,doc.width-1));
+  const y=clamp(Math.floor(p.y),0,Math.max(0,doc.height-1));
+  const pixel=ctx.getImageData(x,y,1,1).data;
+  if(pixel[3]===0){setStatus('Пипетка: прозрачный пиксель');return;}
+  const hex='#'+[pixel[0],pixel[1],pixel[2]].map(v=>v.toString(16).padStart(2,'0')).join('');
+  els.primaryColor.value=hex;els.colorChip.style.background=hex;
+  const alpha=pixel[3]===255?'':` • alpha ${Math.round(pixel[3]/255*100)}%`;
+  setStatus(`Цвет: ${hex}${alpha}`);
+}
+function applyCrop(r) {
+  const x=Math.round(r.x), y=Math.round(r.y), w=Math.max(1,Math.round(r.width)), h=Math.max(1,Math.round(r.height));
+  doc.layers.forEach(l=>{l.x-=x;l.y-=y;}); doc.width=w; doc.height=h; cropRect=null; clearSelectionState(); brushCanvas=null; brushCtx=null; brushLayerId=null; commit('Кадрирование'); fitToView();
+}
+
+function selectAllPixels(){setSelectionShape({type:'rect',rect:{x:0,y:0,width:doc.width,height:doc.height}});drawOverlay();setStatus('Выделен весь холст');}
+function deselectPixels(){if(!selectionRect&&!polygonDraft)return;clearSelectionState();drawOverlay();setStatus('Выделение снято');}
+function cropToSelection(){if(!selectionRect){setStatus('Нет активного выделения');return;}if(selectionRect.width<1||selectionRect.height<1)return;applyCrop({...selectionRect});}
+
+function openTextModal(point) {
+  const existing=topTextLayerAt(point);
+  if(existing){
+    doc.selectedLayerId=existing.id;updateLayers();refreshInspectorPanels();drawOverlay();
+    if(isLayerLocked(doc,existing)){setStatus('Текстовый слой заблокирован');toast('Сначала разблокируйте слой или его группу','warn');return;}
+    const targetDoc = doc;
+    showModal({ title:'Редактировать текст', className:'text-modal', textPreviewLayer:existing, fields:textModalFields(existing,existing.width), submitLabel:'Применить', onSubmit:async(v,isActive)=>{
+      const settings = await textSettingsFromForm(v, existing);
+      if (!isActive() || doc !== targetDoc || selected() !== existing || isLayerLocked(doc,existing)) return false;
+      Object.assign(existing, settings);
+      textDraft = null;
+      commit('Редактировать текст');
+    }});
+    return;
+  }
+  const targetDoc = doc;
+  const defaultWidth = Math.max(240,Math.min(doc.width-point.x,600));
+  showModal({ title:'Добавить текст', className:'text-modal', textPreviewPoint:point, fields:textModalFields(null,defaultWidth), submitLabel:'Добавить', onSubmit:async(v,isActive)=>{
+    const settings = await textSettingsFromForm(v);
+    if (!isActive() || doc !== targetDoc) return false;
+    textDraft = null;
+    addLayer(doc,createTextLayer({x:point.x,y:point.y,...settings,opacity:Number(els.toolOpacity.value)/100,height:Math.min(12000,Math.max(settings.fontSize*2.4,settings.fontSize*settings.lineHeight*2))}));
+    commit('Добавить текст');
+  } });
+}
+
+function normalizeNumberInput(input) {
+  const min=input.min==='' ? -Infinity : Number(input.min);
+  const max=input.max==='' ? Infinity : Number(input.max);
+  let value=input.valueAsNumber;
+  if(!Number.isFinite(value))value=Number(input.dataset.initialValue);
+  if(!Number.isFinite(value))value=Number.isFinite(min) ? min : 0;
+  value=clamp(value,min,max);
+  const step=input.step==='' ? 1 : Number(input.step);
+  if(input.step!=='any' && Number.isFinite(step) && step>0){
+    const base=Number.isFinite(min) ? min : 0;
+    const lowest=Number.isFinite(min) ? Math.ceil((min-base)/step) : -Infinity;
+    const highest=Number.isFinite(max) ? Math.floor((max-base)/step) : Infinity;
+    const index=clamp(Math.round(Number(((value-base)/step).toFixed(10))),lowest,highest);
+    value=Number((base+index*step).toFixed(10));
+  }
+  input.value=String(value);
+}
+
+function showModal({title,className='',textPreviewLayer=null,textPreviewPoint=null,fields=[],submitLabel='OK',onSubmit}) {
+  const previousFocus=document.activeElement;
+  const back=document.createElement('div'); back.className='modal-backdrop';
+  const modal=document.createElement('form'); modal.className=`modal ${className}`;modal.noValidate=true;modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label',title);
+  modal.innerHTML=`<header>${escapeHtml(title)}</header><div class="modal-body"></div><footer><button type="button" class="secondary-button" data-cancel>Отмена</button><button type="submit" class="primary-button">${escapeHtml(submitLabel)}</button></footer>`;
+  const body=modal.querySelector('.modal-body');
+  for(const f of fields){ const row=document.createElement(f.type==='fontPicker'?'div':'label'); row.className='modal-row'; const label=document.createElement('span'); label.textContent=f.label; let input;
+    if(f.type==='fontPicker') { input=document.createElement('button');input.type='button';input.className='secondary-button';input.textContent='Показать список';input.addEventListener('click',async()=>{input.disabled=true;try{const count=await loadComputerFonts(modal.elements.fontFamily);setStatus(`Доступно шрифтов компьютера: ${count}`);}catch(error){toast(error.message,'warn');setStatus(error.message);}finally{input.disabled=false;}}); }
+    else if(f.type==='textarea'){input=document.createElement('textarea');input.value=f.value??'';} else if(f.type==='select'){input=document.createElement('select'); for(const [value,text] of f.options){const o=document.createElement('option');o.value=value;o.textContent=text;input.append(o);}input.value=f.value??'';} else {input=document.createElement('input');input.type=f.type||'text';if(f.type!=='file')input.value=f.value??'';if(f.accept)input.accept=f.accept;if(f.placeholder)input.placeholder=f.placeholder; if(f.min!=null)input.min=f.min;if(f.max!=null)input.max=f.max;if(f.step!=null)input.step=f.step;}
+    if(f.type!=='fontPicker')input.name=f.name; if(f.required)input.required=true; if(f.type==='number')input.dataset.initialValue=input.value;
+    if(f.type==='color'){
+      const syncColor=()=>{input.style.backgroundColor=input.value;input.title=input.value.toUpperCase();};
+      input.addEventListener('input',syncColor);
+      input.addEventListener('change',syncColor);
+      syncColor();
+    }
+    row.append(label,input);body.append(row);
+  }
+  let closed=false;
+  const close=()=>{if(closed)return;closed=true;modal.previewCleanup?.();if(textDraft?.owner===modal){textDraft=null;render();}els.modalRoot.replaceChildren();if(previousFocus instanceof HTMLElement)previousFocus.focus();};
+  back.append(modal);els.modalRoot.replaceChildren(back);
+  modal.addEventListener('change',event=>{if(event.target.matches('input[type="number"]'))normalizeNumberInput(event.target);});
+  if(className==='text-modal') { back.classList.add('text-modal-backdrop'); attachTextPreview(modal, body, textPreviewLayer, textPreviewPoint); makeModalDraggable(modal); }
+  modal.querySelector('[data-cancel]').onclick=close;
+  back.addEventListener('mousedown',e=>{if(e.target===back)close();});
+  modal.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();}});
+  modal.addEventListener('submit',async e=>{
+    e.preventDefault();
+    modal.querySelectorAll('input[type="number"]').forEach(normalizeNumberInput);
+    if(!modal.checkValidity()){modal.reportValidity();return;}
+    const submit=modal.querySelector('button[type="submit"]');
+    const data=Object.fromEntries(new FormData(modal));
+    submit.disabled=true;
+    try{
+      const result=await onSubmit?.(data,()=>!closed&&modal.isConnected);
+      if(result!==false)close();else submit.disabled=false;
+    }catch(error){
+      console.error(error);submit.disabled=false;toast(error?.message||'Ошибка команды','error');setStatus(error?.message||'Ошибка команды');
+    }
+  });
+  modal.querySelector('input,textarea,select')?.focus();
+}
+
+function makeModalDraggable(modal) {
+  const margin=12;
+  modal.style.left=`${Math.max(margin,Math.round((window.innerWidth-modal.offsetWidth)/2))}px`;
+  modal.style.top=`${Math.max(margin,Math.round((window.innerHeight-modal.offsetHeight)/2))}px`;
+  const header=modal.querySelector('header');
+  const keepVisible=()=>{
+    if(!modal.isConnected)return;
+    modal.style.left=`${clamp(modal.offsetLeft,margin,Math.max(margin,window.innerWidth-modal.offsetWidth-margin))}px`;
+    modal.style.top=`${clamp(modal.offsetTop,margin,Math.max(margin,window.innerHeight-modal.offsetHeight-margin))}px`;
+  };
+  const observer=typeof ResizeObserver==='function' ? new ResizeObserver(keepVisible) : null;
+  observer?.observe(modal);
+  window.addEventListener('resize',keepVisible);
+  const priorCleanup=modal.previewCleanup;
+  modal.previewCleanup=()=>{priorCleanup?.();observer?.disconnect();window.removeEventListener('resize',keepVisible);};
+  let drag=null;
+  header.addEventListener('pointerdown',event=>{
+    if(event.button!==0)return;
+    const bounds=modal.getBoundingClientRect();
+    drag={id:event.pointerId,offsetX:event.clientX-bounds.left,offsetY:event.clientY-bounds.top};
+    header.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  header.addEventListener('pointermove',event=>{
+    if(!drag||event.pointerId!==drag.id)return;
+    const maxX=Math.max(margin,window.innerWidth-modal.offsetWidth-margin);
+    const maxY=Math.max(margin,window.innerHeight-modal.offsetHeight-margin);
+    modal.style.left=`${clamp(event.clientX-drag.offsetX,margin,maxX)}px`;
+    modal.style.top=`${clamp(event.clientY-drag.offsetY,margin,maxY)}px`;
+  });
+  const finish=event=>{if(drag?.id===event.pointerId)drag=null;};
+  header.addEventListener('pointerup',finish);
+  header.addEventListener('pointercancel',finish);
+}
+
+function blendingPreviewCrop(documentValue, layer) {
+  const scale=Math.max(Math.abs(layer.scaleX || 1),Math.abs(layer.scaleY || 1));
+  const bounds=frameBounds(layer,Math.min(180*scale,Math.max(documentValue.width,documentValue.height)));
+  const width=Math.min(documentValue.width,Math.max(160,bounds.width));
+  const height=Math.min(documentValue.height,Math.max(120,bounds.height));
+  return {
+    x:clamp(bounds.x+bounds.width/2-width/2,0,documentValue.width-width),
+    y:clamp(bounds.y+bounds.height/2-height/2,0,documentValue.height-height),
+    width,height,
+  };
+}
+
+function syncBlendingPreviewCanvas() {
+  const preview=blendingPreview;
+  if(!preview || preview.document!==doc || !preview.canvas.isConnected ||
+    doc.layers.find(item=>item.id===preview.layer.id)!==preview.layer ||
+    els.canvas.width!==doc.width || els.canvas.height!==doc.height)return;
+  const canvas=preview.canvas;
+  const width=canvas.clientWidth;
+  const height=canvas.clientHeight;
+  if(width<1 || height<1)return;
+  const ratio=Math.min(window.devicePixelRatio || 1,2);
+  const pixelWidth=Math.max(1,Math.round(width*ratio));
+  const pixelHeight=Math.max(1,Math.round(height*ratio));
+  if(canvas.width!==pixelWidth)canvas.width=pixelWidth;
+  if(canvas.height!==pixelHeight)canvas.height=pixelHeight;
+  const context=canvas.getContext('2d',{alpha:true});
+  context.clearRect(0,0,pixelWidth,pixelHeight);
+  const crop=preview.crop;
+  const fit=Math.min(pixelWidth/crop.width,pixelHeight/crop.height);
+  const drawnWidth=crop.width*fit;
+  const drawnHeight=crop.height*fit;
+  context.imageSmoothingEnabled=true;
+  context.imageSmoothingQuality='high';
+  context.drawImage(els.canvas,crop.x,crop.y,crop.width,crop.height,
+    (pixelWidth-drawnWidth)/2,(pixelHeight-drawnHeight)/2,drawnWidth,drawnHeight);
+}
+
+function attachTextPreview(modal, body, layer, point) {
+  const sourceDoc=doc;
+  const preview=document.createElement('section');preview.className='text-preview';
+  const heading=document.createElement('strong');heading.textContent='Предпросмотр';
+  const canvas=document.createElement('canvas');canvas.setAttribute('aria-label','Предпросмотр текста на фоне изображения');
+  const status=document.createElement('small');status.textContent='Фрагмент холста в месте текста';
+  preview.append(heading,canvas,status);body.prepend(preview);
+  const observer=typeof ResizeObserver==='function' ? new ResizeObserver(()=>syncTextPreviewCanvas()) : null;
+  observer?.observe(canvas);
+  modal.previewCleanup=()=>observer?.disconnect();
+  let version=0;
+  const update=async()=>{
+    const current=++version;
+    if(doc!==sourceDoc)return;
+    try {
+      const values=Object.fromEntries(new FormData(modal));
+      const settings=await textSettingsFromForm(values,layer);
+      if(current!==version||!modal.isConnected||doc!==sourceDoc)return;
+      const draftLayer=createTextLayer({
+        ...(layer || {}), ...settings,
+        x:layer?.x ?? point?.x ?? 0, y:layer?.y ?? point?.y ?? 0,
+        height:layer?.height ?? Math.min(12000,Math.max(settings.fontSize*2.4,settings.fontSize*settings.lineHeight*2)),
+        opacity:layer?.opacity ?? Number(els.toolOpacity.value)/100,
+      });
+      textDraft={owner:modal,document:doc,originalId:layer?.id ?? null,layer:draftLayer,previewCanvas:canvas};
+      render();
+      status.textContent='Фрагмент холста в месте текста';
+    } catch(error) { if(current===version)status.textContent=error.message; }
+  };
+  modal.addEventListener('input',event=>{
+    if(event.target.name==='systemFontName' && event.target.value.trim())modal.elements.fontFile.value='';
+    if(event.target.matches('input,textarea,select'))update();
+  });
+  modal.addEventListener('change',event=>{
+    if(event.target.name==='fontFamily'){
+      modal.elements.systemFontName.value='';
+      modal.elements.fontFile.value='';
+    }
+    if(event.target.name==='fontFile' && event.target.files?.[0]?.name)modal.elements.systemFontName.value='';
+    if(event.target.matches('input,textarea,select'))update();
+  });
+  update();
+}
+
+function syncTextPreviewCanvas() {
+  const draft=textDraft;
+  const canvas=draft?.previewCanvas;
+  if (!canvas?.isConnected || draft.document!==doc) return;
+  const pixelRatio=window.devicePixelRatio||1;
+  const width=Math.max(1,Math.round(canvas.clientWidth*pixelRatio));
+  const height=Math.max(1,Math.round(canvas.clientHeight*pixelRatio));
+  if(canvas.width!==width)canvas.width=width;
+  if(canvas.height!==height)canvas.height=height;
+  const scale=zoom;
+  const bounds=frameBounds(draft.layer);
+  const visibleWidth=width/(scale*pixelRatio);
+  const margin=16/scale;
+  const sourceX=draft.layer.align==='right' ? bounds.x+bounds.width-visibleWidth+margin
+    : draft.layer.align==='center' ? bounds.x+bounds.width/2-visibleWidth/2
+    : bounds.x-margin;
+  const sourceY=bounds.y-margin;
+  const context=canvas.getContext('2d');
+  context.clearRect(0,0,width,height);
+  context.setTransform(scale*pixelRatio,0,0,scale*pixelRatio,-sourceX*scale*pixelRatio,-sourceY*scale*pixelRatio);
+  context.drawImage(renderBuffer,0,0);
+  context.setTransform(1,0,0,1,0,0);
+  const offsetX=-sourceX*scale,offsetY=-sourceY*scale;
+  canvas.style.setProperty('--preview-bg-x',`${offsetX}px`);
+  canvas.style.setProperty('--preview-bg-y',`${offsetY}px`);
+}
+
+function showInfoModal(title, html) {
+  const previousFocus=document.activeElement;
+  const back=document.createElement('div'); back.className='modal-backdrop';
+  const modal=document.createElement('div'); modal.className='modal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label',title);
+  modal.innerHTML=`<header>${escapeHtml(title)}</header><div class="modal-body info-modal">${html}</div><footer><button type="button" class="primary-button" data-close>Закрыть</button></footer>`;
+  back.append(modal); els.modalRoot.replaceChildren(back);
+  const close=()=>{els.modalRoot.replaceChildren();if(previousFocus instanceof HTMLElement)previousFocus.focus();};
+  modal.querySelector('[data-close]').onclick=close;
+  back.addEventListener('mousedown',e=>{if(e.target===back)close();});
+  modal.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();}});
+  modal.querySelector('[data-close]').focus();
+}
+
+function showRecoveryModal(record, { canRestore = true, canDiscard = false } = {}) {
+  return new Promise(resolve => {
+    const back=document.createElement('div');back.className='modal-backdrop';
+    const modal=document.createElement('div');modal.className='modal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Восстановление проекта');
+    const savedAt=new Date(record.savedAt);
+    const time=Number.isNaN(savedAt.getTime())?'неизвестно':savedAt.toLocaleString('ru-RU');
+    const names=record.documents.map(item=>escapeHtml(item.docName)).join(', ');
+    modal.innerHTML=`<header>Восстановление проекта</header><div class="modal-body info-modal"><p>Найдены автоматически сохранённые документы: <b>${names}</b>.</p><p>Последняя копия: ${escapeHtml(time)}.</p><p class="muted">Копия может относиться к другому открытому окну редактора. «Позже» оставит её в хранилище. ${canRestore?'Восстановленные документы останутся несохранёнными до подтверждения файла на диске.':'Копия повреждена и не может быть открыта.'}</p></div><footer>${canDiscard?'<button type="button" class="danger-button" data-discard>Удалить копию</button>':''}<button type="button" data-later>Позже</button>${canRestore?'<button type="button" class="primary-button" data-restore>Восстановить</button>':''}</footer>`;
+    back.append(modal);els.modalRoot.replaceChildren(back);
+    const close=action=>{els.modalRoot.replaceChildren();resolve(action);};
+    if(canDiscard)modal.querySelector('[data-discard]').onclick=()=>close('discard');
+    modal.querySelector('[data-later]').onclick=()=>close('later');
+    if(canRestore)modal.querySelector('[data-restore]').onclick=()=>close('restore');
+    modal.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close('later');}});
+    modal.querySelector(canRestore?'[data-restore]':'[data-later]').focus();
+  });
+}
+
+async function restoreRecoveryIfAvailable() {
+  if (!recoveryStorageAvailable) return false;
+  let stored;
+  try {
+    const entries=await loadRecoverySnapshots({includeInvalid:true});
+    if(entries.some(item=>item.key===recoveryKey&&!item.record))recoveryKey=createRecoveryKey(true);
+    stored=entries.filter(item=>item.record);
+  }
+  catch(error){ reportRecoveryFailure(error); return false; }
+  if(!stored.length)return false;
+  stored.sort((a,b)=>b.record.savedAt-a.record.savedAt);
+  for(const {key,record} of stored){
+    const recovered=[];
+    const invalid=[];
+    record.documents.forEach((item,index)=>{
+      try { recovered.push({ doc:sanitizeProject(JSON.parse(item.snapshot)), index }); }
+      catch(error){ invalid.push(item); console.warn('Invalid recovery document was preserved in storage',error); }
+    });
+    const canDiscard=key===recoveryKey||key==='latest';
+    const action=await showRecoveryModal(record,{canRestore:recovered.length>0,canDiscard});
+    if(action==='later'){
+      if(key===recoveryKey)recoveryKey=createRecoveryKey(true);
+      continue;
+    }
+    if(action==='discard'){
+      const removed=await discardRecovery(key);
+      toast(removed?'Автосохранённая копия удалена':'Не удалось удалить автокопию',removed?'success':'error');
+      if(!removed)return false;
+      continue;
+    }
+    unrestoredRecoveryDocuments=invalid;
+    if(key!==recoveryKey&&stored.some(item=>item.key===recoveryKey))recoveryKey=createRecoveryKey(true);
+    documentSessions=recovered.map(item=>buildSession(item.doc,{label:'Автовосстановление',dirtyState:true}));
+    const activeIndex=Math.max(0,recovered.findIndex(item=>item.index===record.activeIndex));
+    activeSessionId=documentSessions[activeIndex].id;
+    loadSession(documentSessions[activeIndex]);
+    updateAll();
+    markDirty(true);
+    setStatus('Проект восстановлен из автосохранения');
+    toast('Документы восстановлены. Сохраните каждый через Ctrl+S.','success');
+    return true;
+  }
+  return false;
+}
+
+function canReplaceDocument() {
+  return !dirty || window.confirm('В документе есть несохранённые изменения. Продолжить без сохранения?');
+}
+
+async function createNewDialog() {
+  if (blockPendingDocumentEdit()) return;
+  if (!canReplaceDocument()) return;
+  showModal({title:'Новый документ',fields:[{name:'name',label:'Название',value:'Без имени'},{name:'width',label:'Ширина',type:'number',value:'1200',min:'1',max:'12000',required:true},{name:'height',label:'Высота',type:'number',value:'800',min:'1',max:'12000',required:true},{name:'background',label:'Фон',type:'select',value:'transparent',options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный']] }],submitLabel:'Создать',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{const next=createDocument({name:v.name||'Без имени',width:Number(v.width),height:Number(v.height),background:v.background});history=new HistoryStack(80);setDoc(next,{resetHistory:true,label:'Новый документ'});markDirty(false);queueRecovery({immediate:true});fitToView();}catch(error){toast(error.message,'error');setStatus(error.message);return false;}}});
+}
+
+function isImageFile(file) {
+  return Boolean(file) && (String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
+}
+function isProjectFile(file) { return Boolean(file) && /\.(zpe|pixforge|json)$/i.test(file.name || ''); }
+function visibleCanvasCenter() {
+  const vr=els.viewport.getBoundingClientRect();
+  const cr=els.overlay.getBoundingClientRect();
+  return {
+    x: clamp((vr.left + vr.width / 2 - cr.left) / zoom, 0, doc.width),
+    y: clamp((vr.top + vr.height / 2 - cr.top) / zoom, 0, doc.height),
+  };
+}
+function clientPointToCanvas(clientX, clientY) {
+  const r=els.overlay.getBoundingClientRect();
+  return {
+    x: clamp((clientX-r.left)/zoom, 0, doc.width),
+    y: clamp((clientY-r.top)/zoom, 0, doc.height),
+  };
+}
+
+async function importImages(files, { anchor = null, source = 'Импорт' } = {}) {
+  const images=[...files].filter(isImageFile); if(!images.length)return 0;
+  const targetDocument=doc;
+  const targetSessionId=activeSessionId;
+  setStatus(`${source}: чтение изображений…`);
+
+  // Decode and validate everything before mutating the document. If the third
+  // file is corrupt or unreasonably large, the first two must not appear as a
+  // half-finished import with no matching history entry.
+  const prepared=[];
+  for(const file of images){
+    const dataUrl=await readFileAsDataURL(file);
+    const d=await dimensionsFromDataUrl(dataUrl);
+    checkedCanvasSize(d.width,d.height,`Изображение «${file.name || 'Без имени'}»`);
+    prepared.push({file,dataUrl,width:d.width,height:d.height});
+  }
+
+  if(doc!==targetDocument||activeSessionId!==targetSessionId){
+    setStatus('Импорт отменён: активный документ изменился');
+    toast('Повторите импорт в нужной вкладке','warn');
+    return 0;
+  }
+  if(blockPendingDocumentEdit())return 0;
+  const emptyDocument = doc.layers.length===0 && doc.name==='Без имени';
+  if(emptyDocument){
+    const first=prepared[0];
+    doc.width=first.width;doc.height=first.height;doc.name=(first.file.name || 'Изображение').replace(/\.[^.]+$/,'');
+  }
+  let offset=0;
+  for(const item of prepared){
+    const target = emptyDocument ? {x:doc.width/2,y:doc.height/2} : (anchor || visibleCanvasCenter());
+    addLayer(doc,createRasterLayer({
+      name:item.file.name || `Вставка ${new Date().toLocaleTimeString('ru-RU')}`,
+      x:target.x-item.width/2+offset,y:target.y-item.height/2+offset,width:item.width,height:item.height,dataUrl:item.dataUrl,
+    }));
+    offset+=18;
+  }
+  brushCanvas=null;
+  commit(images.length===1?`${source} изображения`:`${source}: ${images.length} изображений`);
+  if (emptyDocument) fitToView();
+  setStatus(`${source} завершён`);
+  toast(images.length===1?'Изображение добавлено как слой':`Добавлено слоёв: ${images.length}`,'success');
+  return images.length;
+}
+
+async function handleIncomingFiles(files, anchor = null, source = 'Импорт') {
+  const incoming=[...files];
+  const project=incoming.find(isProjectFile);
+  const images=incoming.filter(isImageFile);
+  if (project && images.length===0) { await openProject(project); return; }
+  if (images.length) { await importImages(images,{anchor,source}); return; }
+  if (project) { await openProject(project); return; }
+  toast('Формат файла не поддерживается','error');
+  setStatus('Неподдерживаемый файл');
+}
+
+async function openProject(file) {
+  if (blockPendingDocumentEdit()) return;
+  if (!canReplaceDocument()) return;
+  const targetDocument=doc;
+  const targetSessionId=activeSessionId;
+  const targetHistoryEntry=history.current();
+  const targetChangeSerial=documentChangeSerial;
+  try {
+    const raw=await readFileAsText(file);
+    const data=sanitizeProject(JSON.parse(raw));
+    if(doc!==targetDocument||activeSessionId!==targetSessionId||
+      history.current()!==targetHistoryEntry||documentChangeSerial!==targetChangeSerial){
+      setStatus('Открытие отменено: документ изменился во время чтения файла');
+      toast('Повторите открытие проекта в нужной вкладке','warn');
+      return;
+    }
+    if(blockPendingDocumentEdit())return;
+    history=new HistoryStack(80);
+    setDoc(data,{resetHistory:true,label:'Открыть проект'});
+    markDirty(false);
+    queueRecovery({immediate:true});
+    fitToView();
+    setStatus('Проект открыт');
+    toast('Открыт проект: '+file.name,'success');
+  }catch(e){
+    console.error(e);
+    alert('Не удалось открыть проект: '+e.message);
+    setStatus('Ошибка открытия проекта');
+  }
+}
+function saveProject() { if(blockPendingDocumentEdit())return; const name=`${safeFilename(doc.name)}.zpe`; downloadText(JSON.stringify(doc,null,2),name,'application/json'); queueRecovery({immediate:true}); setStatus(`Скачивание ${name} запущено. Проверьте файл перед закрытием вкладки`); }
+async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){alert(e.message);setStatus('Ошибка экспорта');}}}); }
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));
+}
+
+async function renderSelectionLayerToPng(layer,bounds) {
+  const canvas=document.createElement('canvas');
+  canvas.width=bounds.width;canvas.height=bounds.height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  ctx.clearRect(0,0,bounds.width,bounds.height);
+  ctx.save();
+  ctx.translate(-bounds.x,-bounds.y);
+  clipContextToDocumentSelection(ctx);
+  const clipboardLayer=structuredClone(layer);
+  clipboardLayer.blendMode='source-over';
+  await renderLayer(ctx,clipboardLayer);
+  ctx.restore();
+  return canvasToPngBlob(canvas);
+}
+
+async function renderSelectionMergedToPng(bounds) {
+  const canvas=document.createElement('canvas');
+  canvas.width=bounds.width;canvas.height=bounds.height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  ctx.clearRect(0,0,bounds.width,bounds.height);
+  ctx.save();
+  ctx.translate(-bounds.x,-bounds.y);
+  clipContextToDocumentSelection(ctx);
+  if(doc.background&&doc.background!=='transparent'){
+    ctx.fillStyle=doc.background;
+    ctx.fillRect(bounds.x,bounds.y,bounds.width,bounds.height);
+  }
+  for(const layer of doc.layers){
+    if(!isLayerVisible(doc,layer)||layer.opacity<=0)continue;
+    await renderLayer(ctx,layer);
+  }
+  ctx.restore();
+  return canvasToPngBlob(canvas);
+}
+
+async function prepareClearedRasterDataUrl(layer) {
+  const size=checkedCanvasSize(layer.width,layer.height,`Растровый слой «${layer.name||'Без имени'}»`);
+  const canvas=document.createElement('canvas');
+  canvas.width=size.width;canvas.height=size.height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  if(layer.dataUrl){
+    const image=await getImage(layer.dataUrl);
+    if(image)ctx.drawImage(image,0,0,size.width,size.height);
+  }
+  ctx.save();
+  clipContextToSelection(ctx,layer);
+  ctx.clearRect(0,0,size.width,size.height);
+  ctx.restore();
+  return canvasToDataURL(canvas,'image/png');
+}
+
+async function rasterizeLayerForPixelEditing(layer,{suffixName=true}={}) {
+  if(!layer)return null;
+  if(layer.type==='raster')return layer;
+  const scale=Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1));
+  const blur=Math.max(0,Number(layer.filters?.blur)||0) * scale * 3;
+  const stroke=layer.type==='shape' ? Math.max(0,Number(layer.strokeWidth)||0) * scale / 2 : 0;
+  const bounds=frameBounds(layer,Math.ceil(blur+stroke+layerStyleOutset(layer.styles)*scale+2));
+  const x=Math.floor(bounds.x), y=Math.floor(bounds.y);
+  const width=Math.max(1,Math.ceil(bounds.x+bounds.width)-x), height=Math.max(1,Math.ceil(bounds.y+bounds.height)-y);
+  checkedCanvasSize(width,height,`Растеризация слоя «${layer.name||'Без имени'}»`);
+  const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  ctx.translate(-x,-y);
+  const baked=structuredClone(layer);baked.opacity=1;baked.blendMode='source-over';
+  await renderLayer(ctx,baked);
+  return createRasterLayer({
+    id:layer.id,name:suffixName?`${layer.name} — растр`:layer.name,visible:layer.visible,locked:false,
+    opacity:layer.opacity,blendMode:layer.blendMode,groupId:layer.groupId??null,
+    x,y,width,height,dataUrl:await canvasToDataURL(canvas,'image/png')
+  });
+}
+
+async function clearSelectionAcrossVisibleLayers({ historyLabel = 'Вырезать выделение' } = {}) {
+  if(!selectionRect)return {cleared:0,locked:0,rasterized:0};
+  if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return null;}
+  const intersecting=doc.layers.filter(layer=>isLayerVisible(doc,layer)&&selectionIntersectsLayer(layer));
+  const targets=intersecting.filter(layer=>!isLayerLocked(doc,layer));
+  const locked=intersecting.length-targets.length;
+  if(!targets.length)return {cleared:0,locked,rasterized:0};
+  paintPersisting=true;
+  try {
+    const prepared=[];
+    let rasterized=0;
+    for(const layer of targets){
+      const working=layer.type==='raster' ? layer : await rasterizeLayerForPixelEditing(layer);
+      if(layer.type!=='raster')rasterized+=1;
+      prepared.push({layer,working,dataUrl:await prepareClearedRasterDataUrl(working)});
+    }
+    for(const {layer,working,dataUrl} of prepared){
+      const index=doc.layers.findIndex(item=>item.id===layer.id);
+      if(index<0)continue;
+      if(layer.type==='raster'){
+        const old=layer.dataUrl;
+        layer.dataUrl=dataUrl;
+        invalidateImageCache(old);
+      }else{
+        working.dataUrl=dataUrl;
+        doc.layers.splice(index,1,working);
+      }
+    }
+    brushCanvas=null;brushCtx=null;brushLayerId=null;
+    commit(historyLabel);
+    return {cleared:prepared.length,locked,rasterized};
+  } catch(error) {
+    console.error(error);
+    brushCanvas=null;brushCtx=null;brushLayerId=null;
+    render();
+    setStatus(`Ошибка вырезания со всех слоёв: ${error.message}`);
+    toast('Не удалось очистить выделение на всех слоях','error');
+    return null;
+  } finally {
+    paintPersisting=false;
+  }
+}
+
+function finishSelectionClipboardAction(message) {
+  clearSelectionState();
+  setTool('move');
+  setStatus(message);
+}
+
+async function copySelectionToClipboard({ cut = false } = {}) {
+  if(!selectionRect){setStatus('Сначала выделите область инструментом выделения');toast('Нет активного выделения','warn');return false;}
+  const layer=selected();
+  if(selectionCopyMode==='selected'&&!layer){setStatus('Нет выбранного слоя');toast('Выберите слой для копирования','warn');return false;}
+  if(cut&&selectionCopyMode==='selected'&&!isEditableRasterLayer(layer)){setStatus('Вырезание выбранного слоя доступно только на незаблокированном растровом слое');toast('Для вырезания выберите незаблокированный растровый слой','warn');return false;}
+  const bounds=selectionPixelBounds(selectionRect,doc.width,doc.height);
+  if(!bounds){setStatus('Выделение пустое');return false;}
+  if(!navigator.clipboard?.write||typeof ClipboardItem!=='function'){
+    setStatus('Копирование изображения в системный буфер недоступно в этом браузере');
+    toast('Браузер не поддерживает запись изображений в буфер обмена','error');
+    return false;
+  }
+  try {
+    // ClipboardItem accepts Promise<Blob>, so the clipboard write is initiated
+    // while Ctrl+C / Ctrl+X still owns the browser user activation.
+    const pngPromise=selectionCopyMode==='merged'
+      ? renderSelectionMergedToPng(bounds)
+      : renderSelectionLayerToPng(layer,bounds);
+    const item=new ClipboardItem({'image/png':pngPromise});
+    await navigator.clipboard.write([item]);
+    if(cut){
+      if(selectionCopyMode==='merged'){
+        const result=await clearSelectionAcrossVisibleLayers({historyLabel:'Вырезать выделение со всех слоёв'});
+        if(!result)return false;
+        const details=[];
+        if(result.rasterized)details.push(`растрировано слоёв: ${result.rasterized}`);
+        if(result.locked)details.push(`заблокировано и не изменено: ${result.locked}`);
+        const message=result.cleared
+          ? `Вырезано со всех видимых слоёв: ${bounds.width} × ${bounds.height} px${details.length?` • ${details.join(' • ')}`:''}`
+          : `Скопировано объединённое выделение: ${bounds.width} × ${bounds.height} px • очищать нечего`;
+        finishSelectionClipboardAction(message);
+        toast(result.cleared?'Выделение вырезано со всех доступных видимых слоёв':'Объединённое выделение скопировано; доступных слоёв для очистки нет',result.cleared?'success':'warn');
+        return true;
+      }
+      const cleared=await clearSelectedPixels({
+        historyLabel:'Вырезать выделение',
+        successStatus:`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`,
+      });
+      if(!cleared){toast('Область скопирована, но удалить пиксели со слоя не удалось','warn');return false;}
+      finishSelectionClipboardAction(`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`);
+      toast('Выделенная область вырезана в буфер обмена','success');
+      return true;
+    }
+    const sourceLabel=selectionCopyMode==='merged'?'со всех видимых слоёв':'с выбранного слоя';
+    finishSelectionClipboardAction(`Скопировано ${sourceLabel}: ${bounds.width} × ${bounds.height} px`);
+    toast(`Выделенная область скопирована ${sourceLabel}`,'success');
+    return true;
+  } catch(error) {
+    console.warn('Clipboard image write failed',error);
+    setStatus(`Не удалось записать выделение в буфер: ${error.message||'доступ запрещён'}`);
+    toast('Не удалось скопировать изображение в системный буфер','error');
+    return false;
+  }
+}
+
+function copySelection() { return copySelectionToClipboard(); }
+function cutSelection() { return copySelectionToClipboard({cut:true}); }
+
+async function readClipboardImageFiles() {
+  if (!navigator.clipboard?.read) return [];
+  const clipboardItems=await navigator.clipboard.read();
+  const files=[];
+  for (const item of clipboardItems) {
+    const type=item.types.find(t=>t.startsWith('image/'));
+    if (!type) continue;
+    const blob=await item.getType(type);
+    const ext=MIME_EXT[type] || type.split('/')[1] || 'png';
+    files.push(new File([blob],`Вставка-${Date.now()}.${ext}`,{type}));
+  }
+  return files;
+}
+
+async function pasteFromClipboard() {
+  if (!navigator.clipboard?.read) {
+    toast('Для вставки используйте Ctrl+V — прямое чтение буфера недоступно браузеру','error');
+    return;
+  }
+  const targetDocument=doc;
+  const targetSessionId=activeSessionId;
+  try {
+    const files=await readClipboardImageFiles();
+    if (!files.length) { toast('В буфере обмена нет изображения','error'); return; }
+    if(doc!==targetDocument||activeSessionId!==targetSessionId){
+      setStatus('Вставка отменена: активный документ изменился');
+      return;
+    }
+    pasteGeneration+=1;
+    await importImages(files,{anchor:visibleCanvasCenter(),source:'Вставка'});
+  } catch (error) {
+    console.warn('Clipboard read failed',error);
+    toast('Браузер не разрешил прямое чтение буфера. Нажмите Ctrl+V','error');
+  }
+}
+
+function armPasteShortcutFallback() {
+  const generation=++pasteGeneration;
+  const targetDocument=doc;
+  const targetSessionId=activeSessionId;
+  setStatus('Вставка из буфера…');
+  clearTimeout(pasteFallbackTimer);
+  pasteFallbackTimer=setTimeout(()=>{
+    if(generation===pasteGeneration&&doc===targetDocument&&activeSessionId===targetSessionId)
+      setStatus('Буфер не передал изображение — попробуйте скопировать изображение снова или перетащить файл');
+  },900);
+  if (!navigator.clipboard?.read) return;
+  // Start while the keydown still has user activation. Native `paste` remains enabled and wins when it supplies an image.
+  readClipboardImageFiles().then(files=>{
+    if(!files.length)return;
+    setTimeout(()=>{
+      if(generation!==pasteGeneration||doc!==targetDocument||activeSessionId!==targetSessionId)return;
+      pasteGeneration+=1;
+      clearTimeout(pasteFallbackTimer);
+      importImages(files,{anchor:visibleCanvasCenter(),source:'Вставка'}).catch(error=>{
+        console.error(error);toast(error.message||'Ошибка вставки','error');
+      });
+    },80);
+  }).catch(error=>{
+    // Permission errors are expected in some browsers; the native paste event still gets its chance.
+    console.debug('Clipboard fallback unavailable',error);
+  });
+}
+
+function toggleSelectedVisibility() {
+  const l=selected(); if(!l)return;
+  l.visible=!l.visible; commit(l.visible?'Показать слой':'Скрыть слой');
+}
+function toggleSelectedLock() {
+  const l=selected(); if(!l)return;
+  const group=l.groupId ? doc.groups?.find(item=>item.id===l.groupId) : null;
+  if(group?.locked){setStatus('Слой заблокирован группой');return;}
+  l.locked=!l.locked; commit(l.locked?'Заблокировать слой':'Разблокировать слой');
+}
+function nudgeSelected(dx,dy) {
+  const l=selected(); if(!l || isLayerLocked(doc,l))return;
+  l.x+=dx; l.y+=dy; commit('Сдвинуть слой');
+}
+function focusSelectedLayerRow() {
+  const id = doc.selectedLayerId;
+  if (!id) return;
+  els.layers.querySelector(`[data-id=\"${id}\"]`)?.focus();
+}
+function selectAdjacentLayer(direction, { focus = false } = {}) {
+  if (!doc.layers.length) return;
+  const index=Math.max(0,doc.layers.findIndex(l=>l.id===doc.selectedLayerId));
+  const next=clamp(index+direction,0,doc.layers.length-1);
+  doc.selectedLayerId=doc.layers[next].id; updateAll();
+  if (focus) requestAnimationFrame(focusSelectedLayerRow);
+}
+function centerSelectedLayer() {
+  const l=selected();if(!l||isLayerLocked(doc,l))return;
+  const frame=layerFrame(l);
+  l.x += doc.width/2-frame.center.x;
+  l.y += doc.height/2-frame.center.y;
+  commit('Центрировать слой');
+}
+function alignSelectedLayer(mode) {
+  const l=selected();
+  if(!l){setStatus('Сначала выберите слой');return;}
+  if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}
+  const next=alignLayerToCanvas(l,mode,doc.width,doc.height);
+  if(!next.changed){setStatus('Слой уже выровнен');return;}
+  l.x=next.x;l.y=next.y;
+  const labels={left:'по левому краю',hcenter:'по центру горизонтально',right:'по правому краю',top:'по верхнему краю',vcenter:'по центру вертикально',bottom:'по нижнему краю'};
+  commit(`Выровнять слой ${labels[mode]||''}`.trim());
+  setStatus(`Слой выровнен ${labels[mode]||''}`.trim());
+}
+function fitSelectedLayerToCanvas() {
+  const l=selected();if(!l||isLayerLocked(doc,l))return;
+  const bounds=frameBounds(l);
+  if(bounds.width<=0||bounds.height<=0)return;
+  const ratio=Math.min(doc.width/bounds.width,doc.height/bounds.height);
+  if(!Number.isFinite(ratio)||ratio<=0)return;
+  l.scaleX=(l.scaleX??1)*ratio;l.scaleY=(l.scaleY??1)*ratio;
+  const frame=layerFrame(l);
+  l.x += doc.width/2-frame.center.x;
+  l.y += doc.height/2-frame.center.y;
+  commit('Вписать слой в холст');
+}
+
+function setDocumentBackground() {
+  showModal({title:'Фон документа',fields:[{name:'background',label:'Фон',type:'select',value:doc.background,options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный'],[els.primaryColor.value,'Основной цвет']]}],submitLabel:'Применить',onSubmit:v=>{doc.background=v.background;commit('Фон документа');}});
+}
+function togglePanels() {
+  const before = els.viewport.getBoundingClientRect();
+  const centerPoint = clientPointToCanvas(before.left + before.width / 2, before.top + before.height / 2);
+  panelsVisible=!panelsVisible;
+  els.workspace.classList.toggle('panels-hidden',!panelsVisible);
+  els.toolbar.setAttribute('aria-hidden', String(!panelsVisible));
+  els.rightPanel.setAttribute('aria-hidden', String(!panelsVisible));
+  requestAnimationFrame(() => {
+    const viewportRect = els.viewport.getBoundingClientRect();
+    const canvasRect = els.overlay.getBoundingClientRect();
+    els.viewport.scrollLeft += canvasRect.left + centerPoint.x * zoom - (viewportRect.left + viewportRect.width / 2);
+    els.viewport.scrollTop += canvasRect.top + centerPoint.y * zoom - (viewportRect.top + viewportRect.height / 2);
+  });
+  setStatus(panelsVisible ? 'Панели показаны' : 'Режим холста: панели скрыты');
+}
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen();
+  } catch (error) { console.warn(error); toast('Полноэкранный режим недоступен','error'); }
+}
+function showShortcuts() {
+  showInfoModal('Горячие клавиши',`<div class="shortcut-list">
+    <b>Ctrl+N</b><span>Новый документ</span><b>Ctrl+O</b><span>Открыть изображение</span>
+    <b>Ctrl+S</b><span>Сохранить проект .zpe</span><b>Ctrl+Shift+S</b><span>Экспорт</span>
+    <b>Ctrl+C / Ctrl+X</b><span>Копировать / вырезать активное выделение</span><b>Ctrl+V</b><span>Вставить изображение из буфера</span>
+    <b>Ctrl+Z / Ctrl+Y</b><span>Отмена / повтор</span><b>Ctrl+A / Ctrl+D</b><span>Выделить всё / снять выделение</span>
+    <b>V / M / B / E</b><span>Перемещение / выделение / кисть / ластик</span><b>Shift+M</b><span>Переключить тип выделения</span><b>R</b><span>Кисть размытия</span>
+    <b>G / L / T / U</b><span>Заливка / линия / текст / фигура</span>
+    <b>C / I / H / Z</b><span>Кадрирование / пипетка / рука / лупа</span><b>Delete</b><span>Очистить активное выделение на растровом слое</span>
+    <b>Стрелки</b><span>Сдвинуть выбранный слой на 1 px (Shift — 10 px)</span><b>Shift + перетаскивание</b><span>Перемещать слой строго по горизонтали / вертикали</span>
+    <b>Ctrl + перетаскивание</b><span>Временно отключить умную привязку</span><b>Shift + ручка</b><span>Изменить размер с сохранением пропорций</span><b>Alt + ручка</b><span>Масштабировать от центра</span>
+    <b>Shift + поворот</b><span>Поворот с шагом 15°</span><b>Shift + выделение / фигура / линия</b><span>Квадрат / круг для прямоугольного/эллиптического выделения и фигур; линия с шагом 45°</span>
+    <b>[ / ]</b><span>Уменьшить / увеличить размер кисти (Shift — крупнее шаг)</span><b>Перо</b><span>Нажим пера автоматически влияет на размер кисти/ластика</span>
+    <b>Space / средняя кнопка</b><span>Временно перемещать холст</span><b>Alt/Ctrl + колесо</b><span>Масштаб холста под курсором (до 1600%)</span>
+    <b>Ctrl + / −</b><span>Увеличить / уменьшить масштаб</span><b>Ctrl+0 / Ctrl+1</b><span>Вписать в окно / 100%</span>
+    <b>Tab</b><span>Режим холста: скрыть / показать боковые панели</span><b>F2</b><span>Переименовать выбранный слой</span>
+    <b>Панель «Слои»</b><span>Кнопка группы создаёт папку; перетащите слой на заголовок группы, чтобы поместить его внутрь</span>
+  </div>`);
+}
+function showAbout() {
+  showInfoModal('О ZeTer Photo Editor',`<div class="about-copy"><strong>ZeTer Photo Editor 1.19.1</strong><p>Браузерный графический редактор со слоями, историей, умной привязкой, выделением, кистью, заливкой, линиями, текстом, фигурами и экспортом. Работает онлайн и локально; изображения обрабатываются в браузере.</p><p>Формат проекта: <code>.zpe</code>.</p><div class="developer-card"><span>Разработчик</span><strong>Дмитрий Колесниченко</strong><a href="mailto:zeter11@gmail.com">zeter11@gmail.com</a><a href="https://t.me/zeterchat" target="_blank" rel="noopener noreferrer">Telegram: @zeterchat</a></div></div>`);
+}
+
+function undo(){if(blockPendingDocumentEdit())return;const entry=history.undo();if(!entry)return;doc=restoreDocument(entry.snapshot);clearSelectionState();brushCanvas=null;brushCtx=null;brushLayerId=null;updateAll();markDirty(true);setStatus(`Отменено → ${entry.label}`);}
+function redo(){if(blockPendingDocumentEdit())return;const entry=history.redo();if(!entry)return;doc=restoreDocument(entry.snapshot);clearSelectionState();brushCanvas=null;brushCtx=null;brushLayerId=null;updateAll();markDirty(true);setStatus(`Повторено → ${entry.label}`);}
+function deleteSelected(){if(blockPendingDocumentEdit())return;const l=selected();if(!l)return;if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}removeLayer(doc,l.id);commit('Удалить слой');}
+function duplicateSelected(){if(!selected())return;duplicateLayer(doc);commit('Дублировать слой');}
+function renameLayer(layer){if(!layer||isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}showModal({title:'Переименовать слой',fields:[{name:'name',label:'Имя',value:layer.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===layer.name)return;layer.name=name;commit('Переименовать слой');}});}
+function addGroup(){
+  const number=(doc.groups?.length||0)+1;
+  const group=addLayerGroup(doc,createLayerGroup({name:`Группа ${number}`}));
+  commit('Новая группа слоёв');
+  setStatus(`Создана группа «${group.name}». Перетащите на неё нужные слои.`);
+}
+function renameGroup(group){if(!group||group.locked){setStatus('Группа заблокирована');return;}showModal({title:'Переименовать группу',fields:[{name:'name',label:'Имя',value:group.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===group.name)return;group.name=name;commit('Переименовать группу');}});}
+function deleteLayerGroup(group){
+  if(!group)return;
+  if(group.locked){setStatus('Сначала разблокируйте группу');return;}
+  if(removeLayerGroup(doc,group.id)){commit('Удалить группу слоёв');setStatus('Группа удалена, слои оставлены в документе');}
+}
+function openBlendingOptions(layer) {
+  if (!layer || isLayerLocked(doc, layer) || blockPendingDocumentEdit()) return;
+  const owner=doc;
+  const original={blendMode:layer.blendMode || 'source-over',opacity:layer.opacity ?? 1,styles:layer.styles ? structuredClone(layer.styles) : null};
+  const originalStyles=sanitizeLayerStyles(original.styles) || createLayerStyles();
+  const draft={blendMode:original.blendMode,opacity:Math.round(original.opacity*100),styles:structuredClone(originalStyles)};
+  const previousFocus=document.activeElement;
+  const back=document.createElement('div'); back.className='modal-backdrop';
+  const modal=document.createElement('form'); modal.className='modal blending-modal';
+  modal.setAttribute('role','dialog'); modal.setAttribute('aria-modal','true'); modal.setAttribute('aria-label','Параметры наложения');
+  modal.innerHTML=`<header>Параметры наложения</header><div class="blending-layout"><nav class="blending-list" aria-label="Стили слоя"></nav><div class="blending-details"><p class="muted blending-hint">Слой: ${escapeHtml(layer.name)}</p><div class="blending-fields"></div><section class="blending-canvas-preview" aria-label="Предпросмотр слоя на холсте"><strong>На холсте</strong><canvas aria-label="Фрагмент холста вокруг слоя"></canvas></section></div></div><footer><label class="blending-preview"><input type="checkbox" checked> Предпросмотр</label><span class="modal-footer-spacer"></span><button type="button" class="secondary-button" data-cancel>Отмена</button><button type="submit" class="primary-button">Применить</button></footer>`;
+  const list=modal.querySelector('.blending-list');
+  const fields=modal.querySelector('.blending-fields');
+  const previewCanvas=modal.querySelector('.blending-canvas-preview canvas');
+  const previewToggle=modal.querySelector('.blending-preview input');
+  const names={size:'Размер, px',strength:'Сила',angle:'Угол, °',distance:'Смещение, px',blur:'Размытие, px',color:'Цвет',color1:'Начальный цвет',color2:'Конечный цвет',opacity:'Непрозрачность',pattern:'Узор',scale:'Шаг, px'};
+  let selectedStyle='general';
+  let closed=false;
+  const stillCurrent=()=>doc===owner && doc.layers.find(item=>item.id===layer.id)===layer && !isLayerLocked(doc,layer);
+  const assign=(useDraft)=>{
+    if(!stillCurrent())return;
+    layer.blendMode=useDraft?draft.blendMode:original.blendMode;
+    layer.opacity=useDraft?draft.opacity/100:original.opacity;
+    layer.styles=useDraft?sanitizeLayerStyles(draft.styles):original.styles;
+    documentChangeSerial+=1;
+    updateLayerControls();
+    render();
+  };
+  const preview=()=>assign(previewToggle.checked);
+  const addRange=(parent,label,value,min,max,onChange)=>{
+    const row=document.createElement('label');row.className='blending-field';
+    const caption=document.createElement('span');caption.textContent=label;
+    const control=document.createElement('input');control.type='range';control.min=String(min);control.max=String(max);control.step='1';control.value=String(value);
+    const output=document.createElement('output');output.textContent=`${value}${label.includes('px')?' px':label.includes('°')?'°':'%'}`;
+    control.addEventListener('input',()=>{output.textContent=`${control.value}${label.includes('px')?' px':label.includes('°')?'°':'%'}`;onChange(Number(control.value));preview();});
+    row.append(caption,control,output);parent.append(row);
+  };
+  const addColor=(parent,label,value,onChange)=>{
+    const row=document.createElement('label');row.className='blending-field';
+    const caption=document.createElement('span');caption.textContent=label;
+    const control=document.createElement('input');control.type='color';control.value=value;
+    control.addEventListener('input',()=>{onChange(control.value);preview();});
+    row.append(caption,control);parent.append(row);
+  };
+  const showFields=()=>{
+    fields.replaceChildren();
+    for(const button of list.querySelectorAll('.blending-style-select'))button.classList.toggle('active',button.dataset.style===selectedStyle);
+    if(selectedStyle==='general'){
+      const modeRow=document.createElement('label');modeRow.className='blending-field';
+      const caption=document.createElement('span');caption.textContent='Режим наложения';
+      const mode=document.createElement('select');
+      for(const option of els.blend.options)mode.append(option.cloneNode(true));
+      mode.value=draft.blendMode;
+      mode.addEventListener('change',()=>{draft.blendMode=mode.value;preview();});
+      modeRow.append(caption,mode);fields.append(modeRow);
+      addRange(fields,'Непрозрачность',draft.opacity,0,100,value=>{draft.opacity=value;});
+      addRange(fields,'Непрозрачность заливки',draft.styles.fillOpacity,0,100,value=>{draft.styles.fillOpacity=value;});
+      const hint=document.createElement('p');hint.className='muted blending-note';hint.textContent='Непрозрачность заливки меняет содержимое слоя, сохраняя видимость включённых стилей.';fields.append(hint);
+      return;
+    }
+    const item=draft.styles[selectedStyle];
+    const title=document.createElement('h3');title.textContent=LAYER_STYLE_FIELDS[selectedStyle].label;fields.append(title);
+    for(const [key,rule] of Object.entries(LAYER_STYLE_FIELDS[selectedStyle].fields)){
+      if(rule[0]==='range')addRange(fields,names[key],item[key],rule[1],rule[2],value=>{item[key]=value;});
+      else if(rule[0]==='color')addColor(fields,names[key],item[key],value=>{item[key]=value;});
+      else {
+        const row=document.createElement('label');row.className='blending-field';
+        const caption=document.createElement('span');caption.textContent=names[key];
+        const select=document.createElement('select');
+        for(const [value,text] of [['stripes','Полосы'],['dots','Точки'],['checker','Шахматный']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}
+        select.value=item[key];select.addEventListener('change',()=>{item[key]=select.value;preview();});
+        row.append(caption,select);fields.append(row);
+      }
+    }
+  };
+  const addChoice=(key,label)=>{
+    const row=document.createElement('div');row.className='blending-style-row';
+    if(key!=='general'){
+      const toggle=document.createElement('input');toggle.type='checkbox';toggle.checked=draft.styles[key].enabled;toggle.setAttribute('aria-label',`Включить: ${label}`);
+      toggle.addEventListener('change',()=>{draft.styles[key].enabled=toggle.checked;preview();});
+      row.append(toggle);
+    }
+    const button=document.createElement('button');button.type='button';button.className='blending-style-select';button.dataset.style=key;button.textContent=label;
+    button.addEventListener('click',()=>{selectedStyle=key;showFields();});
+    row.append(button);list.append(row);
+  };
+  addChoice('general','Общие параметры');
+  for(const [key,spec] of Object.entries(LAYER_STYLE_FIELDS))addChoice(key,spec.label);
+  showFields();
+  const finish=(apply=false)=>{
+    if(closed)return;
+    closed=true;
+    modal.previewCleanup?.();
+    if(blendingPreview?.canvas===previewCanvas)blendingPreview=null;
+    const valid=stillCurrent();
+    const styleChanged=JSON.stringify(draft.styles)!==JSON.stringify(originalStyles);
+    const changed=valid && (draft.blendMode!==original.blendMode || draft.opacity!==Math.round(original.opacity*100) || styleChanged);
+    els.modalRoot.replaceChildren();
+    if(valid){
+      if(apply && changed){
+        layer.blendMode=draft.blendMode;layer.opacity=draft.opacity/100;
+        layer.styles=styleChanged || original.styles ? sanitizeLayerStyles(draft.styles) : null;
+        commit('Параметры наложения слоя');
+      } else assign(false);
+    }
+    if(previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    setStatus(apply && changed ? 'Параметры наложения применены' : 'Параметры наложения без изменений');
+  };
+  previewToggle.addEventListener('change',preview);
+  modal.querySelector('[data-cancel]').onclick=()=>finish();
+  back.addEventListener('mousedown',e=>{if(e.target===back)finish();});
+  modal.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();finish();}});
+  modal.addEventListener('submit',e=>{e.preventDefault();finish(true);});  back.append(modal);els.modalRoot.replaceChildren(back);
+  makeModalDraggable(modal);
+  blendingPreview={document:owner,layer,canvas:previewCanvas,crop:blendingPreviewCrop(owner,layer)};
+  const previewObserver=typeof ResizeObserver==='function' ? new ResizeObserver(syncBlendingPreviewCanvas) : null;
+  previewObserver?.observe(previewCanvas);
+  const priorCleanup=modal.previewCleanup;
+  modal.previewCleanup=()=>{previewObserver?.disconnect();priorCleanup?.();};
+  syncBlendingPreviewCanvas();
+  list.querySelector('button')?.focus();
+}
+function layerContextMenu(id) {
+  const owner=doc;
+  const target = () => doc===owner ? doc.layers.find(item => item.id === id) : null;
+  const editable = () => Boolean(target()) && !isLayerLocked(doc, target());
+  const selectedTarget = () => selected()?.id===id && Boolean(target());
+  return [
+    ['Параметры наложения…','',()=>openBlendingOptions(target()),editable],
+    ['sep'],
+    ['Переименовать…','F2',()=>renameLayer(target()),editable],
+    ['Дублировать','Ctrl+J',()=>{if(selectedTarget())duplicateSelected();},selectedTarget],
+    ['Удалить','Delete',()=>{if(selectedTarget())deleteSelected();},()=>selectedTarget() && editable()],
+    ['sep'],
+    ['Показать / скрыть','',toggleSelectedVisibility,()=>Boolean(target())],
+    ['Заблокировать / разблокировать','',toggleSelectedLock,()=>Boolean(target()) && !doc.groups?.find(group => group.id === target().groupId)?.locked],
+    ['sep'],
+    ['Поднять слой','',()=>{if(moveLayer(doc,id,1))commit('Поднять слой');},editable],
+    ['Опустить слой','',()=>{if(moveLayer(doc,id,-1))commit('Опустить слой');},editable],
+    ['Растеризовать','',rasterizeSelectedLayer,()=>editable() && target().type !== 'raster'],
+  ];
+}
+function groupContextMenu(id) {
+  const owner=doc;
+  const target = () => doc===owner ? doc.groups?.find(item => item.id === id) : null;
+  return [
+    ['Переименовать…','',()=>renameGroup(target()),()=>Boolean(target()) && !target().locked],
+    ['Свернуть / развернуть','',()=>{const group=target();if(group){group.collapsed=!group.collapsed;updateLayers();}},()=>Boolean(target())],
+    ['Показать / скрыть','',()=>{const group=target();if(group){group.visible=group.visible===false;commit(group.visible?'Показать группу слоёв':'Скрыть группу слоёв');}},()=>Boolean(target())],
+    ['Заблокировать / разблокировать','',()=>{const group=target();if(group){group.locked=!group.locked;commit(group.locked?'Заблокировать группу слоёв':'Разблокировать группу слоёв');}},()=>Boolean(target())],
+    ['sep'],
+    ['Удалить группу (слои останутся)','',()=>deleteLayerGroup(target()),()=>Boolean(target()) && !target().locked],
+  ];
+}
+function addBlankLayer(){addLayer(doc,createRasterLayer({name:'Новый слой',width:doc.width,height:doc.height,dataUrl:null}));brushCanvas=null;commit('Новый растровый слой');}
+async function rasterizeSelectedLayer(){
+  if(blockPendingDocumentEdit())return;
+  const layer=selected();
+  if(!layer)return;
+  if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}
+  if(layer.type==='raster'){setStatus('Слой уже растровый');return;}
+  const targetDocument=doc;
+  const targetSessionId=activeSessionId;
+  const originalLayer=JSON.stringify(layer);
+  paintPersisting=true;
+  setStatus('Растеризация слоя…');
+  try{
+    const raster=await rasterizeLayerForPixelEditing(layer);
+    const index=doc.layers.indexOf(layer);
+    if(doc!==targetDocument||activeSessionId!==targetSessionId||index<0||
+      selected()!==layer||isLayerLocked(doc,layer)||JSON.stringify(layer)!==originalLayer){
+      setStatus('Растеризация отменена: документ или слой изменился');
+      return;
+    }
+    doc.layers.splice(index,1,raster);doc.selectedLayerId=raster.id;
+    brushCanvas=null;brushCtx=null;brushLayerId=null;commit('Растеризовать слой');
+    setStatus(`Слой растрирован: ${raster.width} × ${raster.height}`);
+  }catch(error){
+    console.error(error);setStatus(`Ошибка растеризации: ${error.message}`);toast('Не удалось растрировать слой','error');
+  }finally{
+    paintPersisting=false;
+  }
+}
+function resizeImageDialog(){
+  if(blockPendingDocumentEdit())return;
+  showModal({title:'Размер изображения',fields:[
+    {name:'width',label:'Ширина',type:'number',value:doc.width,min:'1',max:'12000',required:true},
+    {name:'height',label:'Высота',type:'number',value:doc.height,min:'1',max:'12000',required:true}
+  ],submitLabel:'Изменить',onSubmit:v=>{
+    if(blockPendingDocumentEdit())return false;
+    let size;try{size=checkedCanvasSize(Number(v.width)||doc.width,Number(v.height)||doc.height,'Размер изображения');}catch(error){toast(error.message,'error');setStatus(error.message);return false;}
+    const {width,height}=size;
+    if(width===doc.width&&height===doc.height)return;
+    const sx=width/doc.width,sy=height/doc.height;
+    let transforms;
+    try{transforms=imageResizeTransforms(doc.layers,sx,sy);}catch(error){toast(error.message,'error');setStatus(error.message);return false;}
+    doc.layers.forEach((layer,index)=>Object.assign(layer,transforms[index]));
+    doc.width=width;doc.height=height;cropRect=null;clearSelectionState();brushCanvas=null;brushCtx=null;brushLayerId=null;
+    commit('Размер изображения');fitToView();
+  }});
+}
+
+function setZoom(next, announce=true){
+  const value=clamp(next,.1,16);
+  if(Math.abs(value-zoom)<1e-6)return;
+  zoom=value;const session=currentSession();if(session)session.zoom=zoom;updateCanvasSize();drawOverlay();
+  if(announce)setStatus(`Масштаб ${Math.round(zoom*100)}%`);
+}
+function setZoomAtClientPoint(next, clientX, clientY){
+  const point=clientPointToCanvas(clientX,clientY);
+  const value=clamp(next,.1,16);
+  if(Math.abs(value-zoom)<1e-6)return;
+  zoom=value;const session=currentSession();if(session)session.zoom=zoom;updateCanvasSize();drawOverlay();
+  requestAnimationFrame(()=>{
+    const r=els.overlay.getBoundingClientRect();
+    els.viewport.scrollLeft += r.left + point.x*zoom - clientX;
+    els.viewport.scrollTop += r.top + point.y*zoom - clientY;
+  });
+  setStatus(`Масштаб ${Math.round(zoom*100)}%`);
+}
+function fitToView(){const r=els.viewport.getBoundingClientRect();setZoom(fitZoom(r.width,r.height,doc.width,doc.height,90));els.viewport.scrollTo({left:0,top:0});}
+
+const menus={
+  file:[
+    ['Новый…','Ctrl+N',createNewDialog],
+    ['Открыть изображение…','Ctrl+O',()=>els.fileInput.click()],
+    ['Открыть проект…','',()=>els.projectInput.click()],
+    ['Вставить изображение из буфера','Ctrl+V',pasteFromClipboard],
+    ['sep'],
+    ['Сохранить проект','Ctrl+S',saveProject],
+    ['Экспорт…','Ctrl+Shift+S',exportDialog],
+  ],
+  edit:[
+    ['Отменить','Ctrl+Z',undo,()=>history.canUndo()],
+    ['Повторить','Ctrl+Y',redo,()=>history.canRedo()],
+    ['sep'],
+    ['Выделить всё','Ctrl+A',selectAllPixels],
+    ['Снять выделение','Ctrl+D',deselectPixels,()=>Boolean(selectionRect)],
+    ['Копировать выделение','Ctrl+C',copySelection,()=>Boolean(selectionRect)&&(selectionCopyMode==='merged'||Boolean(selected()))],
+    ['Вырезать выделение','Ctrl+X',cutSelection,()=>Boolean(selectionRect)&&(selectionCopyMode==='merged'||isEditableRasterLayer(selected()))],
+    ['Очистить выделенные пиксели','Delete',()=>clearSelectedPixels(),()=>Boolean(selectionRect)&&isEditableRasterLayer(selected())],
+    ['sep'],
+    ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())],
+    ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())],
+    ['sep'],
+    ['Выбрать слой выше','Alt+↑',()=>selectAdjacentLayer(1),()=>doc.layers.length>1],
+    ['Выбрать слой ниже','Alt+↓',()=>selectAdjacentLayer(-1),()=>doc.layers.length>1],
+  ],
+  layer:[
+    ['Новый растровый слой','Ctrl+Shift+N',addBlankLayer],
+    ['Новая группа слоёв','',addGroup],
+    ['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())],
+    ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())],
+    ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())],
+    ['Растеризовать слой','',rasterizeSelectedLayer,()=>Boolean(selected())&&selected().type!=='raster'&&!isLayerLocked(doc,selected())],
+    ['sep'],
+    ['Центрировать слой на холсте','',centerSelectedLayer,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['Вписать слой в холст','',fitSelectedLayerToCanvas,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['sep'],
+    ['Показать / скрыть слой','',toggleSelectedVisibility,()=>Boolean(selected())],
+    ['Заблокировать / разблокировать','',toggleSelectedLock,()=>Boolean(selected())],
+    ['sep'],
+    ['Поднять слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');},()=>Boolean(selected())],
+    ['Опустить слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');},()=>Boolean(selected())],
+  ],
+  image:[
+    ['Цветокоррекция…','',openColorCorrectionDialog,()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
+    ['Сбросить цветокоррекцию','',()=>{const l=selected();if(l?.type==='raster'&&!isLayerLocked(doc,l)){const current=sanitizeFilters(l.filters);for(const key of COLOR_CORRECTION_KEYS)current[key]=DEFAULT_LAYER_FILTERS[key];l.filters=current;commit('Сбросить цветокоррекцию');}},()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
+    ['sep'],
+    ['Размер изображения…','',resizeImageDialog],
+    ['Размер холста…','',resizeCanvasDialog],
+    ['Фон документа…','',setDocumentBackground],
+    ['sep'],
+    ['Сбросить все фильтры слоя','',()=>{const l=selected();if(l&&!isLayerLocked(doc,l)){l.filters={...DEFAULT_LAYER_FILTERS};commit('Сбросить фильтры');}},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+  ],
+  select:[
+    ['Выделить всё','Ctrl+A',selectAllPixels],
+    ['Снять выделение','Ctrl+D',deselectPixels,()=>Boolean(selectionRect)],
+    ['Копировать выделение','Ctrl+C',copySelection,()=>Boolean(selectionRect)&&(selectionCopyMode==='merged'||Boolean(selected()))],
+    ['Вырезать выделение','Ctrl+X',cutSelection,()=>Boolean(selectionRect)&&(selectionCopyMode==='merged'||isEditableRasterLayer(selected()))],
+    ['sep'],
+    ['Очистить пиксели выделения','Delete',()=>clearSelectedPixels(),()=>Boolean(selectionRect)&&isEditableRasterLayer(selected())],
+    ['Кадрировать по выделению','',cropToSelection,()=>Boolean(selectionRect)],
+  ],
+  view:[
+    ['Вписать в окно','0',fitToView],
+    ['100%','1',()=>setZoom(1)],
+    ['Увеличить','+',()=>setZoom(zoom+.1)],
+    ['Уменьшить','-',()=>setZoom(zoom-.1)],
+    ['sep'],
+    ['Режим холста: панели','Tab',togglePanels],
+    ['Полноэкранный режим','F11',toggleFullscreen],
+  ],
+  help:[
+    ['Горячие клавиши','?',showShortcuts],
+    ['О программе','',showAbout],
+  ],
+};
+function openColorCorrectionDialog(){
+  const layer=selected();
+  if(!layer||layer.type!=='raster'){toast('Цветокоррекция доступна для растрового слоя','warn');setStatus('Выберите растровый слой');return;}
+  if(isLayerLocked(doc,layer)){toast('Слой или его группа заблокированы','warn');return;}
+  const layerId=layer.id;
+  const original=sanitizeFilters(layer.filters);
+  layer.filters={...original};
+  const previousFocus=document.activeElement;
+  const back=document.createElement('div');back.className='modal-backdrop';
+  const modal=document.createElement('form');modal.className='modal color-correction-modal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Цветокоррекция');
+  modal.innerHTML='<header>Цветокоррекция</header><div class="modal-body color-correction-body"><p class="muted color-correction-hint">Настройки применяются неразрушающе к выбранному растровому слою. Изменения сразу видны на холсте.</p></div><footer><button type="button" class="secondary-button" data-reset>Сбросить</button><span class="modal-footer-spacer"></span><button type="button" class="secondary-button" data-cancel>Отмена</button><button type="submit" class="primary-button">Применить</button></footer>';
+  const body=modal.querySelector('.color-correction-body');
+  let currentGroup='';
+  for(const control of COLOR_CORRECTION_CONTROLS){
+    if(control.group!==currentGroup){currentGroup=control.group;const heading=document.createElement('div');heading.className='color-correction-group';heading.textContent=currentGroup;body.append(heading);}
+    const row=document.createElement('label');row.className='color-correction-row';
+    const label=document.createElement('span');label.textContent=control.label;
+    const input=document.createElement('input');input.type='range';input.name=control.key;input.min=String(control.min);input.max=String(control.max);input.step=String(control.step);input.value=String(layer.filters[control.key] ?? DEFAULT_LAYER_FILTERS[control.key]);
+    const output=document.createElement('output');output.value=formatFilterValue(control.key,input.value);output.textContent=output.value;
+    row.append(label,input,output);body.append(row);
+    input.addEventListener('input',()=>{
+      const target=doc.layers.find(item=>item.id===layerId);if(!target)return;
+      const [min,max]=FILTER_RANGES[control.key]||[control.min,control.max];
+      const value=clamp(Number(input.value),min,max);target.filters[control.key]=value;output.value=formatFilterValue(control.key,value);output.textContent=output.value;render();
+    });
+  }
+  const close=()=>{els.modalRoot.replaceChildren();if(previousFocus instanceof HTMLElement)previousFocus.focus();};
+  const restore=()=>{const target=doc.layers.find(item=>item.id===layerId);if(target){target.filters={...original};render();refreshInspectorPanels();}};
+  back.append(modal);els.modalRoot.replaceChildren(back);
+  modal.querySelector('[data-reset]').addEventListener('click',()=>{
+    for(const control of COLOR_CORRECTION_CONTROLS){
+      const input=modal.elements.namedItem(control.key);if(!(input instanceof HTMLInputElement))continue;
+      input.value=String(DEFAULT_LAYER_FILTERS[control.key]);input.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+  });
+  modal.querySelector('[data-cancel]').addEventListener('click',()=>{restore();close();setStatus('Цветокоррекция отменена');});
+  modal.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();restore();close();setStatus('Цветокоррекция отменена');}});
+  modal.addEventListener('submit',e=>{
+    e.preventDefault();const target=doc.layers.find(item=>item.id===layerId);if(!target){close();return;}
+    const changed=COLOR_CORRECTION_CONTROLS.some(control=>Math.abs((target.filters[control.key]??DEFAULT_LAYER_FILTERS[control.key])-(original[control.key]??DEFAULT_LAYER_FILTERS[control.key]))>1e-9);
+    close();
+    if(changed){commit('Цветокоррекция слоя');setStatus('Цветокоррекция применена');}
+    else {target.filters={...original};render();setStatus('Цветокоррекция без изменений');}
+  });
+  modal.querySelector('input[type="range"]')?.focus();
+}
+
+function resizeCanvasDialog(){if(blockPendingDocumentEdit())return;showModal({title:'Размер холста',fields:[
+  {name:'width',label:'Ширина',type:'number',value:doc.width,min:'1',max:'12000',required:true},
+  {name:'height',label:'Высота',type:'number',value:doc.height,min:'1',max:'12000',required:true},
+  {name:'anchor',label:'Якорь',type:'select',value:'center',options:[
+    ['top-left','↖ Слева сверху'],['top','↑ Сверху'],['top-right','↗ Справа сверху'],
+    ['left','← Слева'],['center','● По центру'],['right','→ Справа'],
+    ['bottom-left','↙ Слева снизу'],['bottom','↓ Снизу'],['bottom-right','↘ Справа снизу']
+  ]}
+],submitLabel:'Изменить',onSubmit:v=>{
+  if(blockPendingDocumentEdit())return false;
+  let size;try{size=checkedCanvasSize(Number(v.width)||doc.width,Number(v.height)||doc.height,'Размер холста');}catch(error){toast(error.message,'error');setStatus(error.message);return false;}
+  const {width,height}=size;
+  if(width===doc.width&&height===doc.height)return;
+  const anchors={
+    'top-left':[0,0],top:[.5,0],'top-right':[1,0],left:[0,.5],center:[.5,.5],right:[1,.5],
+    'bottom-left':[0,1],bottom:[.5,1],'bottom-right':[1,1]
+  };
+  const [ax,ay]=anchors[v.anchor]||anchors.center;
+  const shiftX=(width-doc.width)*ax, shiftY=(height-doc.height)*ay;
+  if(doc.layers.some(layer=>Math.abs(layer.x+shiftX)>MAX_LAYER_POSITION||Math.abs(layer.y+shiftY)>MAX_LAYER_POSITION)){
+    const message='Размер холста выведет слой за допустимые пределы';toast(message,'error');setStatus(message);return false;
+  }
+  for(const layer of doc.layers){layer.x+=shiftX;layer.y+=shiftY;}
+  doc.width=width;doc.height=height;cropRect=null;clearSelectionState();brushCanvas=null;brushCtx=null;brushLayerId=null;commit('Размер холста');fitToView();
+}});}
+function closeMenu({restoreFocus=false}={}) {
+  const active=$('.menu-button.active');
+  const focusTarget=menuReturnFocus || active;
+  openMenuKey=null; menuReturnFocus=null; els.menu.hidden=true; els.menu.replaceChildren();
+  $$('.menu-button').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-expanded','false');});
+  if (restoreFocus) (focusTarget?.isConnected ? focusTarget : els.viewport)?.focus();
+}
+function populateMenu(items){
+  els.menu.replaceChildren();
+  for(const item of items){
+    if(item[0]==='sep'){const sep=document.createElement('div');sep.className='menu-sep';sep.setAttribute('role','separator');els.menu.append(sep);continue;}
+    const [label,shortcut,action,enabled]=item;
+    const b=document.createElement('button');b.type='button';b.className='menu-item';b.setAttribute('role','menuitem');
+    b.disabled=enabled ? !enabled() : false;
+    b.innerHTML=`<span>${escapeHtml(label)}</span><span class="menu-shortcut">${escapeHtml(shortcut)}</span>`;
+    b.onclick=()=>{if(b.disabled)return;closeMenu();Promise.resolve(action()).catch(error=>{console.error(error);toast(error.message||'Ошибка команды','error');});};
+    els.menu.append(b);
+  }
+}
+function positionMenu(x,y,{focusFirst=false}={}){
+  els.menu.hidden=false;
+  const rect=els.menu.getBoundingClientRect();
+  els.menu.style.left=`${Math.max(6,Math.min(x,window.innerWidth-rect.width-6))}px`;
+  els.menu.style.top=`${Math.max(6,Math.min(y,window.innerHeight-rect.height-6))}px`;
+  if(focusFirst)els.menu.querySelector('.menu-item:not(:disabled)')?.focus();
+}
+function openMenu(button,key,{focusFirst=false}={}){
+  openMenuKey=key; menuReturnFocus=button;
+  $$('.menu-button').forEach(b=>{const active=b===button;b.classList.toggle('active',active);b.setAttribute('aria-expanded',String(active));});
+  populateMenu(menus[key]||[]);
+  const r=button.getBoundingClientRect();
+  positionMenu(r.left,r.bottom+3,{focusFirst});
+}
+function openContextMenu(key,items,event,focusTarget=event.target){
+  openMenuKey=key; menuReturnFocus=focusTarget;
+  $$('.menu-button').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-expanded','false');});
+  populateMenu(items);
+  const keyboard=event.clientX===0 && event.clientY===0;
+  const rect=focusTarget?.getBoundingClientRect?.();
+  positionMenu(keyboard && rect ? rect.left+8 : event.clientX, keyboard && rect ? rect.bottom : event.clientY,{focusFirst:keyboard});
+}
+const menuButtons=$$('.menu-button');
+menuButtons.forEach((b,index)=>{
+  b.type='button'; b.setAttribute('aria-haspopup','menu'); b.setAttribute('aria-expanded','false');
+  b.addEventListener('click',e=>{e.stopPropagation();if(openMenuKey===b.dataset.menu)closeMenu();else openMenu(b,b.dataset.menu);});
+  b.addEventListener('mouseenter',()=>{if(openMenuKey && openMenuKey!==b.dataset.menu)openMenu(b,b.dataset.menu);});
+  b.addEventListener('keydown',e=>{
+    if(e.key==='ArrowDown'){e.preventDefault();openMenu(b,b.dataset.menu,{focusFirst:true});}
+    if(e.key==='ArrowRight'||e.key==='ArrowLeft'){
+      e.preventDefault();const delta=e.key==='ArrowRight'?1:-1;const next=menuButtons[(index+delta+menuButtons.length)%menuButtons.length];next.focus();if(openMenuKey)openMenu(next,next.dataset.menu);
+    }
+  });
+});
+els.menu.setAttribute('role','menu');
+els.menu.addEventListener('keydown',e=>{
+  const items=[...els.menu.querySelectorAll('.menu-item:not(:disabled)')]; const index=items.indexOf(document.activeElement);
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu({restoreFocus:true});return;}
+  if(e.key==='ArrowDown'&&items.length){e.preventDefault();items[(index+1+items.length)%items.length].focus();}
+  if(e.key==='ArrowUp'&&items.length){e.preventDefault();items[(index-1+items.length)%items.length].focus();}
+});
+document.addEventListener('pointerdown',e=>{if(openMenuKey&&!els.menu.contains(e.target)&&!e.target.closest?.('.menu-button'))closeMenu();});
+els.tabs.addEventListener('contextmenu',e=>{
+  if(e.target!==els.tabs)return;
+  e.preventDefault();
+  openContextMenu('tabs-empty',[['Новая вкладка','',()=>addDocumentTab()]],e,els.addTab);
+});
+els.layers.addEventListener('contextmenu',e=>{
+  if(e.target!==els.layers)return;
+  e.preventDefault();
+  if(blockPendingDocumentEdit())return;
+  openContextMenu('layers-empty',[
+    ['Новый растровый слой','Ctrl+Shift+N',addBlankLayer],
+    ['Новая группа слоёв','',addGroup],
+  ],e,els.layers);
+});
+els.viewport.addEventListener('contextmenu',e=>{
+  e.preventDefault();
+  if(blockPendingDocumentEdit())return;
+  openContextMenu('canvas',[
+    ['Отменить','Ctrl+Z',undo,()=>history.canUndo()],
+    ['Повторить','Ctrl+Y',redo,()=>history.canRedo()],
+    ['sep'],
+    ['Вставить изображение','Ctrl+V',pasteFromClipboard],
+    ['Снять выделение','Ctrl+D',deselectPixels,()=>Boolean(selectionRect)],
+    ['Новый растровый слой','Ctrl+Shift+N',addBlankLayer],
+    ['sep'],
+    ['Вписать в окно','0',fitToView],
+    ['Масштаб 100%','1',()=>setZoom(1)],
+  ],e,els.viewport);
+});
+window.addEventListener('blur',()=>{closeMenu();spaceHeld=false;if(!drag)els.overlay.style.cursor=defaultToolCursor();});
+
+$$('.tool').forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
+els.primaryColor.oninput=()=>els.colorChip.style.background=els.primaryColor.value;
+els.brushSize.oninput=()=>els.brushSizeValue.textContent=els.brushSize.value;
+els.toolOpacity.oninput=()=>els.toolOpacityValue.textContent=`${els.toolOpacity.value}%`;
+els.dodgeStrength.oninput=()=>els.dodgeStrengthValue.textContent=`${els.dodgeStrength.value}%`;
+els.burnStrength.oninput=()=>els.burnStrengthValue.textContent=`${els.burnStrength.value}%`;
+if(els.blurStrength)els.blurStrength.oninput=()=>els.blurStrengthValue.textContent=`${els.blurStrength.value}%`;
+if(els.smudgeStrength)els.smudgeStrength.oninput=()=>els.smudgeStrengthValue.textContent=`${els.smudgeStrength.value}%`;
+if(els.fillTolerance)els.fillTolerance.oninput=()=>els.fillToleranceValue.textContent=els.fillTolerance.value;
+if(els.selectionType)els.selectionType.onchange=()=>setSelectionType(els.selectionType.value);
+if(els.selectionCopyMode)els.selectionCopyMode.onchange=()=>{selectionCopyMode=els.selectionCopyMode.value==='selected'?'selected':'merged';setStatus(selectionCopyMode==='merged'?'Выделение: копирование со всех видимых слоёв':'Выделение: копирование с выбранного слоя');};
+if(els.smartSnapToggle)els.smartSnapToggle.onchange=()=>{smartSnapEnabled=els.smartSnapToggle.checked;persistSmartSnapState();clearSmartGuides();drawOverlay();setStatus(smartSnapEnabled?'Умная привязка включена':'Умная привязка выключена');};
+$$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSelectedLayer(button.dataset.align)));
+els.undo.onclick=undo;els.redo.onclick=redo;$('#exportQuickBtn').onclick=exportDialog;
+$('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=addGroup;$('#renameLayerBtn').onclick=()=>{const layer=selected();if(layer)renameLayer(layer);};$('#duplicateLayerBtn').onclick=duplicateSelected;$('#deleteLayerBtn').onclick=deleteSelected;
+$('#layerUpBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');};$('#layerDownBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');};
+els.layers.addEventListener('dragover',e=>{
+  if(!layerDragId||e.target!==els.layers)return;
+  e.preventDefault();
+  if(e.dataTransfer)e.dataTransfer.dropEffect='move';
+  els.layers.classList.add('drop-root');
+});
+els.layers.addEventListener('dragleave',e=>{if(e.target===els.layers)els.layers.classList.remove('drop-root');});
+els.layers.addEventListener('drop',e=>{
+  if(!layerDragId||e.target!==els.layers)return;
+  e.preventDefault();
+  const draggedId=layerDragId;
+  els.layers.classList.remove('drop-root');
+  if(moveLayerToRootTop(draggedId))commit('Вынести слой из группы');
+});
+$('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateHistory();updateAll();};
+$('#resetColorEffectsBtn').onclick=resetSelectedLayerEffects;
+els.addTab.onclick=()=>addDocumentTab();
+els.blend.onchange=()=>{const l=selected();if(l&&!isLayerLocked(doc,l)){l.blendMode=els.blend.value;commit('Режим наложения');}};
+els.layerOpacity.oninput=()=>{const l=selected();if(l&&!isLayerLocked(doc,l)){l.opacity=Number(els.layerOpacity.value)/100;markDirty(true);render();}};
+els.layerOpacity.onchange=()=>{const l=selected();if(l&&!isLayerLocked(doc,l)){l.opacity=Number(els.layerOpacity.value)/100;commit('Непрозрачность слоя');}};
+$('#zoomOutBtn').onclick=()=>setZoom(zoom-.1);$('#zoomInBtn').onclick=()=>setZoom(zoom+.1);$('#fitBtn').onclick=fitToView;els.zoomRange.oninput=()=>setZoom(Number(els.zoomRange.value)/100,false);
+els.fileInput.onchange=()=>{handleIncomingFiles(els.fileInput.files,null,'Импорт').catch(e=>{console.error(e);alert(e.message);});els.fileInput.value='';};
+els.projectInput.onchange=()=>{const f=els.projectInput.files[0];if(f)openProject(f);els.projectInput.value='';};
+
+function dragCarriesFiles(event) {
+  const dt=event.dataTransfer;
+  if(!dt)return false;
+  if(dt.files?.length)return true;
+  if([...(dt.items||[])].some(item=>item.kind==='file'))return true;
+  return [...(dt.types||[])].some(type=>String(type).toLowerCase()==='files');
+}
+function showDropTarget() {
+  dragDepth=Math.max(1,dragDepth);
+  els.dropOverlay.hidden=false;
+  els.viewport.classList.add('drop-active');
+}
+function hideDropTarget() {
+  dragDepth=0;
+  els.dropOverlay.hidden=true;
+  els.viewport.classList.remove('drop-active');
+}
+// Capture on window so Windows Explorer drops are intercepted before the browser can navigate to the file.
+window.addEventListener('dragenter',e=>{
+  if(!dragCarriesFiles(e))return;
+  e.preventDefault();e.stopPropagation();dragDepth+=1;showDropTarget();
+},{capture:true});
+window.addEventListener('dragover',e=>{
+  if(!dragCarriesFiles(e))return;
+  e.preventDefault();e.stopPropagation();if(e.dataTransfer)e.dataTransfer.dropEffect='copy';showDropTarget();
+},{capture:true});
+window.addEventListener('dragleave',e=>{
+  if(!dragCarriesFiles(e))return;
+  e.preventDefault();e.stopPropagation();
+  dragDepth=Math.max(0,dragDepth-1);
+  if(dragDepth===0)hideDropTarget();
+},{capture:true});
+window.addEventListener('drop',e=>{
+  if(!dragCarriesFiles(e))return;
+  e.preventDefault();e.stopPropagation();hideDropTarget();
+  const files=[...(e.dataTransfer?.files||[])];
+  if(!files.length){toast('Windows передал событие перетаскивания без файла','error');return;}
+  const r=els.overlay.getBoundingClientRect();
+  const inside=e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom;
+  const anchor=inside?clientPointToCanvas(e.clientX,e.clientY):visibleCanvasCenter();
+  handleIncomingFiles(files,anchor,'Перетаскивание').catch(error=>{console.error(error);toast(error.message||'Ошибка импорта','error');});
+},{capture:true});
+
+window.addEventListener('copy',e=>{
+  if(isEditingTarget(e.target)||!selectionRect)return;
+  e.preventDefault();
+  copySelection().catch(error=>{console.error(error);toast(error.message||'Ошибка копирования','error');});
+});
+window.addEventListener('cut',e=>{
+  if(isEditingTarget(e.target)||!selectionRect)return;
+  e.preventDefault();
+  cutSelection().catch(error=>{console.error(error);toast(error.message||'Ошибка вырезания','error');});
+});
+
+window.addEventListener('paste',e=>{
+  if(isEditingTarget(e.target))return;
+  const files=[];
+  for(const item of [...(e.clipboardData?.items||[])]){
+    if(item.kind==='file'&&item.type.startsWith('image/')){
+      const file=item.getAsFile();if(file)files.push(file);
+    }
+  }
+  if(!files.length){
+    for(const file of [...(e.clipboardData?.files||[])])if(isImageFile(file))files.push(file);
+  }
+  if(!files.length){
+    const hasClipboardPayload=(e.clipboardData?.items?.length||0)>0 || (e.clipboardData?.files?.length||0)>0;
+    if(hasClipboardPayload)toast('В буфере есть данные, но браузер не передал их как изображение','error');
+    return;
+  }
+  e.preventDefault();
+  pasteGeneration+=1;
+  clearTimeout(pasteFallbackTimer);
+  importImages(files,{anchor:visibleCanvasCenter(),source:'Вставка'}).catch(error=>{console.error(error);toast(error.message||'Ошибка вставки','error');});
+});
+
+els.viewport.addEventListener('wheel',e=>{
+  if(!e.ctrlKey&&!e.altKey)return;
+  e.preventDefault();
+  const factor=e.deltaY<0?1.1:0.9;
+  setZoomAtClientPoint(zoom*factor,e.clientX,e.clientY);
+},{passive:false});
+
+window.addEventListener('keydown',e=>{
+  const editing=isEditingTarget();
+  const interactive=isInteractiveControlTarget(e.target);
+  if(e.code==='Space'&&!editing&&!interactive){spaceHeld=true;if(!drag)els.overlay.style.cursor='grab';e.preventDefault();}
+  if(editing)return;
+  const ctrl=e.ctrlKey||e.metaKey;
+  if(e.key==='Escape'){
+    if(openMenuKey){e.preventDefault();closeMenu({restoreFocus:true});return;}
+    if(drag && drag.kind!=='paint'){
+      e.preventDefault();
+      const d=drag;drag=null;activePrimaryPointerId=null;clearSmartGuides();
+      if(d.kind==='move'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){l.x=d.x;l.y=d.y;render();updateTransformPropertyValues(l);}}
+      if(d.kind==='resize'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){Object.assign(l,d.initial);render();updateTransformPropertyValues(l);}}
+      if(d.kind==='rotate'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){l.rotation=d.initialRotation;render();updateTransformPropertyValues(l);}}
+      if(d.kind==='crop')cropRect=null;
+      if(d.kind==='marquee')setSelectionShape(d.previousSelection);
+      els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;
+    }
+    if(polygonDraft){e.preventDefault();cancelPolygonDraft({restorePrevious:true,announce:true});return;}
+    if(penDraft){e.preventDefault();penDraft=null;drawOverlay();setStatus('Контур отменён');return;}
+    if(magneticDraft){e.preventDefault();magneticDraft=null;drawOverlay();setStatus('Магнитное выделение отменено');return;}
+    if(cropRect){cropRect=null;drawOverlay();setStatus('Кадрирование отменено');return;}
+    if(selectionRect){deselectPixels();return;}
+  }
+  if(e.target instanceof Node && els.modalRoot.contains(e.target))return;
+  if(openMenuKey && (els.menu.contains(e.target)||e.target.closest?.('.menu-button')))return;
+  if(e.key==='Enter'&&polygonDraft&&currentTool==='marquee'){e.preventDefault();finishPolygonSelection();return;}
+  if(e.key==='Enter'&&penDraft&&currentTool==='pen'){e.preventDefault();finishPenPath();return;}
+  if(e.key==='Enter'&&magneticDraft&&currentTool==='magnetic'){e.preventDefault();finishMagneticSelection();return;}
+  if(ctrl&&e.code==='Digit0'){e.preventDefault();fitToView();return;}
+  if(ctrl&&e.code==='Digit1'){e.preventDefault();setZoom(1);return;}
+  if(ctrl&&(e.code==='Equal'||e.code==='NumpadAdd')){e.preventDefault();setZoom(zoom+.1);return;}
+  if(ctrl&&(e.code==='Minus'||e.code==='NumpadSubtract')){e.preventDefault();setZoom(zoom-.1);return;}
+  if(ctrl&&e.code==='KeyC'){e.preventDefault();copySelection().catch(error=>{console.error(error);toast(error.message||'Ошибка копирования','error');});return;}
+  if(ctrl&&e.code==='KeyX'){e.preventDefault();cutSelection().catch(error=>{console.error(error);toast(error.message||'Ошибка вырезания','error');});return;}
+  if(ctrl&&e.code==='KeyV'){armPasteShortcutFallback();return;}
+  if(ctrl&&e.code==='KeyZ'){e.preventDefault();e.shiftKey?redo():undo();return;}
+  if(ctrl&&e.code==='KeyY'){e.preventDefault();redo();return;}
+  if(ctrl&&e.code==='KeyS'){e.preventDefault();(e.shiftKey||e.altKey)?exportDialog():saveProject();return;}
+  if(ctrl&&e.code==='KeyO'){e.preventDefault();els.fileInput.click();return;}
+  if(ctrl&&e.code==='KeyN'){e.preventDefault();e.shiftKey?addBlankLayer():createNewDialog();return;}
+  if(ctrl&&e.code==='KeyA'){e.preventDefault();selectAllPixels();return;}
+  if(ctrl&&e.code==='KeyD'){e.preventDefault();deselectPixels();return;}
+  if(ctrl&&e.code==='KeyJ'){e.preventDefault();duplicateSelected();return;}
+  if(interactive)return;
+  if(e.key==='Tab'&&!ctrl&&!e.altKey){e.preventDefault();togglePanels();return;}
+  if(e.altKey&&e.code==='ArrowUp'){e.preventDefault();selectAdjacentLayer(1);return;}
+  if(e.altKey&&e.code==='ArrowDown'){e.preventDefault();selectAdjacentLayer(-1);return;}
+  if(e.code==='F2'){e.preventDefault();const l=selected();if(l)renameLayer(l);return;}
+  if(e.key==='Delete'){e.preventDefault();if(selectionRect&&isEditableRasterLayer(selected()))clearSelectedPixels();else deleteSelected();return;}
+  if(!ctrl&&!e.altKey&&(e.code==='BracketLeft'||e.code==='BracketRight')){e.preventDefault();adjustBrushSize(e.code==='BracketRight'?1:-1,e.shiftKey);return;}
+  if(!ctrl&&!e.altKey&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code)){
+    e.preventDefault();const step=e.shiftKey?10:1;
+    if(e.code==='ArrowLeft')nudgeSelected(-step,0);if(e.code==='ArrowRight')nudgeSelected(step,0);if(e.code==='ArrowUp')nudgeSelected(0,-step);if(e.code==='ArrowDown')nudgeSelected(0,step);return;
+  }
+  if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyM'){e.preventDefault();if(currentTool!=='marquee')setTool('marquee');cycleSelectionType();return;}
+  if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyO'){e.preventDefault();setTool('burn');return;}
+  if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyG'){e.preventDefault();setTool('gradient');return;}
+  const map={KeyV:'move',KeyM:'marquee',KeyB:'brush',KeyS:'clone',KeyJ:'heal',KeyN:'smudge',KeyO:'dodge',KeyR:'blur',KeyE:'eraser',KeyG:'fill',KeyP:'pen',KeyA:'magnetic',KeyW:'wand',KeyL:'line',KeyT:'text',KeyU:'shape',KeyC:'crop',KeyI:'eyedropper',KeyH:'hand',KeyZ:'zoom'}; if(!ctrl&&!e.altKey&&map[e.code]){setTool(map[e.code]);return;}
+  if(e.code==='Digit0'&&!ctrl){fitToView();return;}if(e.code==='Digit1'&&!ctrl){setZoom(1);return;}
+  if((e.code==='Equal'||e.code==='NumpadAdd')&&!ctrl){e.preventDefault();setZoom(zoom+.1);return;}
+  if((e.code==='Minus'||e.code==='NumpadSubtract')&&!ctrl){e.preventDefault();setZoom(zoom-.1);return;}
+  if(e.code==='F11'){e.preventDefault();toggleFullscreen();}
+});
+window.addEventListener('keyup',e=>{if(e.code==='Space'){spaceHeld=false;if(!drag)els.overlay.style.cursor=defaultToolCursor();}});
+window.addEventListener('resize',()=>{drawOverlay();});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&documentSessions.some(session=>session.dirty))queueRecovery({immediate:true});});
+window.addEventListener('beforeunload',e=>{syncCurrentSession();if(documentSessions.some(session=>session.dirty)||documentEditPending()){e.preventDefault();e.returnValue='';}});
+
+async function bootstrap(){
+  initTooltips();
+  initCollapsiblePanels();
+  readSmartSnapState();
+  const initialSession = buildSession(doc);
+  documentSessions = [initialSession];
+  activeSessionId = initialSession.id;
+  loadSession(initialSession);
+  markDirty(false);
+  setTool('move');
+  updateAll();
+  const restored=await restoreRecoveryIfAvailable();
+  requestAnimationFrame(fitToView);
+  return restored;
+}
+bootstrap().then(()=>{
+  window.__ZETER_BOOTED__=true;
+  document.documentElement.dataset.appReady='true';
+}).catch(error=>{
+  console.error('ZeTer Photo Editor bootstrap failed',error);
+  document.documentElement.dataset.appReady='error';
+  const message=document.createElement('div');
+  message.className='fatal-error';
+  message.textContent=`Ошибка запуска редактора: ${error?.message||error}`;
+  document.body.append(message);
+});
+})();
