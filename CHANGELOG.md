@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-09-24 — CI reliability: Chromium sandbox on hosted Linux
+
+- Fixed: browser smoke добавляет `--no-sandbox` только для root или Linux GitHub Actions, где hosted runner может запрещать usable Chromium sandbox через user-namespace/AppArmor policy.
+- Root cause: post-merge CI Stage 6c завершал Chrome с `SIGABRT` и `No usable sandbox!` до публикации DevTools endpoint; 198/198 Node regression-тестов и generated bundle при этом были зелёными.
+- Guardrail: флаг относится только к изолированному CI smoke-browser; production/editor code и локальный обычный browser launch не меняются. Добавлен structural regression на scope этого launch policy.
+
 ### 2026-09-24 — Performance Stage 6c: chunked PSD Blob export
 
 - Added: `encodePsdBlob()` создаёт PSD `Blob` напрямую из chunked writer parts, не вызывая финальный `Writer.concat()` в пользовательском browser-export path.

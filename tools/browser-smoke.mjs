@@ -251,7 +251,8 @@ async function runSmoke() {
     '--disable-dev-shm-usage',
     'about:blank',
   ];
-  if (process.getuid?.() === 0) browserArgs.unshift('--no-sandbox');
+  const runningInGithubActionsLinux = process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true';
+  if (process.getuid?.() === 0 || runningInGithubActionsLinux) browserArgs.unshift('--no-sandbox');
 
   const browser = spawn(browserExecutable, browserArgs, {
     stdio: ['ignore', 'ignore', 'pipe'],
