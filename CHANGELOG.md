@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-09-24 — Исправлен browser smoke в CI
+
+- Fixed: восстановлен повреждённый хвост `tools/browser-smoke.mjs`, из-за которого CI останавливался с `SyntaxError: Unexpected end of input` до запуска браузера.
+- Changed: `npm run check` теперь отдельно проверяет синтаксис browser-smoke harness до Node regression suite; навигационная ошибка Chromium выводится как отдельная причина.
+- Verification: новая версия harness проходит локальный `node --check`; полный `file://` runtime проверяется следующим GitHub Actions run на hosted runner.
+
 ### 2026-09-24 — Добавлен настоящий browser smoke для file:// и lock UI
 
 - Added: `tools/browser-smoke.mjs` запускает установленный Chrome/Chromium без npm-зависимостей, подключается через DevTools Protocol и открывает фактический `index.html` по `file://`.
