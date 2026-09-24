@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### 2026-09-24 — PSD pipeline Stage 4: layered RGB/8-bit export
+
+- Added: dependency-free PSD writer в `src/adapters/psd.js` записывает RGB/8-bit PSD version 1 с PackBits/RLE channel data.
+- Added: экспортируются отдельные layer records с Unicode `luni` names, opacity, visibility, поддерживаемыми blend modes и merged transparency.
+- Added: ZPE bitmap layer masks экспортируются как Photoshop user mask channel `-2`, включая disabled-state.
+- Added: writer следует Photoshop 5+ layer flags, 4-byte layer-info/`luni` alignment и merged-image white-matte convention для полупрозрачного composite preview.
+- Changed: text/shape layers, transforms, filters и styles сохраняются как raster preview соответствующего PSD layer, при этом PSD opacity/blend остаются отдельными свойствами слоя.
+- Changed: если документ содержит видимый ZPE adjustment layer, исходные export layers остаются в PSD скрытыми, а сверху создаётся видимый `ZPE Composite Preview (adjustments baked)`; так визуальный результат не теряется до появления native adjustment mapping.
+- Reliability: PSD export ограничен 48 МП на отдельный raster buffer и 96 МП суммарных временных raster-буферов; writer отклоняет malformed RGBA/mask buffers и файлы за пределами PSD-size guard.
+- Added: round-trip regression `encodePsd → decodePsd` проверяет RGB pixels, Unicode name, opacity, multiply, hidden state и user mask.
+- Verification: выполняется через PR CI, generated bundle consistency и реальный `file://` browser smoke перед merge.
+
+
 ### 2026-09-24 — PSD pipeline Stage 3: layered RGB/8-bit import
 
 - Added: отдельный `src/adapters/psd.js` реализует dependency-free PSD binary adapter с жёсткими capability guards и memory/length checks.

@@ -2499,6 +2499,278 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
   return { ...header, layers, composite, warnings };
 }
 
+
+const PSD_BLEND_KEYS = Object.freeze({
+  'source-over': 'norm',
+  multiply: 'mul ',
+  screen: 'scrn',
+  overlay: 'over',
+  darken: 'dark',
+  lighten: 'lite',
+  'color-dodge': 'div ',
+  'color-burn': 'idiv',
+});
+
+class Writer {
+  constructor() {
+    this.parts = [];
+    this.length = 0;
+  }
+  push(value) {
+    const bytes = value instanceof Uint8Array ? value : Uint8Array.from(value);
+    this.parts.push(bytes);
+    this.length += bytes.length;
+    return this;
+  }
+  u8(value) { return this.push([Number(value) & 255]); }
+  u16(value) {
+    const n = Number(value) & 0xffff;
+    return this.push([(n >>> 8) & 255, n & 255]);
+  }
+  i16(value) { return this.u16(Number(value) < 0 ? 0x10000 + Number(value) : value); }
+  u32(value) {
+    const n = Number(value) >>> 0;
+    return this.push([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
+  }
+  i32(value) { return this.u32(Number(value) < 0 ? 0x100000000 + Number(value) : value); }
+  ascii(value) {
+    const text = String(value);
+    const bytes = new Uint8Array(text.length);
+    for (let index = 0; index < text.length; index += 1) bytes[index] = text.charCodeAt(index) & 255;
+    return this.push(bytes);
+  }
+  concat() {
+    const result = new Uint8Array(this.length);
+    let offset = 0;
+    for (const part of this.parts) {
+      result.set(part, offset);
+      offset += part.length;
+    }
+    return result;
+  }
+}
+
+function encodeLatin1(value, maxLength = 255) {
+  const text = String(value || '').slice(0, maxLength);
+  const bytes = new Uint8Array(text.length);
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    bytes[index] = code <= 255 ? code : 63;
+  }
+  return bytes;
+}
+
+function encodeUtf16Be(value) {
+  const text = String(value || '');
+  const bytes = new Uint8Array(text.length * 2);
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    bytes[index * 2] = (code >>> 8) & 255;
+    bytes[index * 2 + 1] = code & 255;
+  }
+  return bytes;
+}
+
+function rgbaPlane(pixels, channel, pixelCount) {
+  const plane = new Uint8Array(pixelCount);
+  for (let index = 0; index < pixelCount; index += 1) plane[index] = pixels[index * 4 + channel];
+  return plane;
+}
+
+function packBitsEncodeRow(row) {
+  const out = [];
+  let index = 0;
+  while (index < row.length) {
+    let run = 1;
+    while (index + run < row.length && row[index + run] === row[index] && run < 128) run += 1;
+    if (run >= 3) {
+      out.push((257 - run) & 255, row[index]);
+      index += run;
+      continue;
+    }
+    const literalStart = index;
+    index += run;
+    while (index < row.length && index - literalStart < 128) {
+      run = 1;
+      while (index + run < row.length && row[index + run] === row[index] && run < 128) run += 1;
+      if (run >= 3) break;
+      if (index - literalStart + run > 128) break;
+      index += run;
+    }
+    const count = index - literalStart;
+    out.push(count - 1);
+    for (let cursor = literalStart; cursor < index; cursor += 1) out.push(row[cursor]);
+  }
+  return Uint8Array.from(out);
+}
+
+function encodeRlePlane(plane, width, height) {
+  if (plane.length !== width * height) throw new PsdImportError('PSD writer: размер channel plane не совпадает с bounds', 'PSD_EXPORT_CHANNEL');
+  const rowLengths = new Uint16Array(height);
+  const packedRows = [];
+  let packedBytes = 0;
+  for (let row = 0; row < height; row += 1) {
+    const packed = packBitsEncodeRow(plane.subarray(row * width, (row + 1) * width));
+    if (packed.length > 0xffff) throw new PsdImportError('PSD writer: RLE-строка превышает 65535 байт', 'PSD_EXPORT_RLE_ROW');
+    rowLengths[row] = packed.length;
+    packedRows.push(packed);
+    packedBytes += packed.length;
+  }
+  const writer = new Writer();
+  writer.u16(1);
+  for (const length of rowLengths) writer.u16(length);
+  for (const packed of packedRows) writer.push(packed);
+  return writer.concat();
+}
+
+function validateExportLayer(layer, index, maxPixels) {
+  const width = Math.trunc(Number(layer?.width));
+  const height = Math.trunc(Number(layer?.height));
+  const pixels = safeArea(width, height, maxPixels);
+  const rgba = asBytes(layer?.pixels);
+  if (rgba.length !== pixels * 4) {
+    throw new PsdImportError(`PSD writer: слой #${index + 1} имеет неверный RGBA-буфер`, 'PSD_EXPORT_PIXELS');
+  }
+  const x = Math.trunc(Number(layer?.x) || 0);
+  const y = Math.trunc(Number(layer?.y) || 0);
+  return { ...layer, x, y, width, height, pixels: rgba };
+}
+
+function writePascalLayerName(writer, name) {
+  const bytes = encodeLatin1(name || 'Layer');
+  writer.u8(bytes.length).push(bytes);
+  const consumed = 1 + bytes.length;
+  const padding = (4 - (consumed % 4)) % 4;
+  if (padding) writer.push(new Uint8Array(padding));
+}
+
+function writeUnicodeLayerName(writer, name) {
+  const data = new Writer();
+  const utf16 = encodeUtf16Be(name || 'Layer');
+  data.u32(utf16.length / 2).push(utf16);
+  while (data.length % 4) data.u8(0);
+  writer.ascii('8BIM').ascii('luni').u32(data.length).push(data.concat());
+}
+
+function writeLayerMaskExtra(writer, layer) {
+  if (!layer.mask?.pixels) {
+    writer.u32(0);
+    return;
+  }
+  writer.u32(20);
+  writer.i32(layer.y).i32(layer.x).i32(layer.y + layer.height).i32(layer.x + layer.width);
+  writer.u8(0);
+  writer.u8(layer.mask.disabled ? 0x02 : 0);
+  writer.u16(0);
+}
+
+function normalizeExportLayer(layer, index, maxPixels) {
+  const item = validateExportLayer(layer, index, maxPixels);
+  const pixelCount = item.width * item.height;
+  const channels = [
+    { id: 0, data: encodeRlePlane(rgbaPlane(item.pixels, 0, pixelCount), item.width, item.height) },
+    { id: 1, data: encodeRlePlane(rgbaPlane(item.pixels, 1, pixelCount), item.width, item.height) },
+    { id: 2, data: encodeRlePlane(rgbaPlane(item.pixels, 2, pixelCount), item.width, item.height) },
+    { id: -1, data: encodeRlePlane(rgbaPlane(item.pixels, 3, pixelCount), item.width, item.height) },
+  ];
+  let mask = null;
+  if (item.mask?.pixels) {
+    const maskPixels = asBytes(item.mask.pixels);
+    if (maskPixels.length !== pixelCount * 4) throw new PsdImportError(`PSD writer: маска слоя «${item.name || index + 1}» имеет неверный размер`, 'PSD_EXPORT_MASK');
+    mask = { disabled: Boolean(item.mask.disabled), pixels: true };
+    channels.push({ id: -2, data: encodeRlePlane(rgbaPlane(maskPixels, 3, pixelCount), item.width, item.height) });
+  }
+  const { pixels: _pixels, ...metadata } = item;
+  return { ...metadata, mask, channels };
+}
+
+function encodeCompositeRle(pixels, width, height) {
+  const pixelCount = safeArea(width, height, Number.MAX_SAFE_INTEGER);
+  const rgba = asBytes(pixels);
+  if (rgba.length !== pixelCount * 4) throw new PsdImportError('PSD writer: composite RGBA имеет неверный размер', 'PSD_EXPORT_COMPOSITE');
+  const rowTable = new Writer();
+  const packed = [];
+  for (let channel = 0; channel < 4; channel += 1) {
+    const plane = new Uint8Array(pixelCount);
+    for (let index = 0; index < pixelCount; index += 1) {
+      if (channel === 3) {
+        plane[index] = rgba[index * 4 + 3];
+      } else {
+        const alpha = rgba[index * 4 + 3];
+        const value = rgba[index * 4 + channel];
+        plane[index] = alpha === 255 ? value : alpha === 0 ? 255 : value * (alpha / 255) + 255 * (1 - alpha / 255);
+      }
+    }
+    for (let row = 0; row < height; row += 1) {
+      const data = packBitsEncodeRow(plane.subarray(row * width, (row + 1) * width));
+      if (data.length > 0xffff) throw new PsdImportError('PSD writer: composite RLE-строка превышает 65535 байт', 'PSD_EXPORT_RLE_ROW');
+      rowTable.u16(data.length);
+      packed.push(data);
+    }
+  }
+  const writer = new Writer();
+  writer.u16(1).push(rowTable.concat());
+  for (const row of packed) writer.push(row);
+  return writer.concat();
+}
+function encodePsd({ width, height, layers = [], composite, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+  const documentWidth = Math.trunc(Number(width));
+  const documentHeight = Math.trunc(Number(height));
+  safeArea(documentWidth, documentHeight, maxPixels);
+  if (!Array.isArray(layers) || layers.length > maxLayers) {
+    throw new PsdImportError(`PSD writer: слишком много слоёв: ${layers?.length ?? 0} > ${maxLayers}`, 'PSD_EXPORT_LAYER_LIMIT');
+  }
+  if (!layers.length) throw new PsdImportError('PSD writer: нужен хотя бы один слой', 'PSD_EXPORT_EMPTY');
+
+  const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels));
+  const layerRecords = new Writer();
+  const channelData = new Writer();
+
+  layerRecords.i16(-normalized.length);
+  for (const layer of normalized) {
+    layerRecords.i32(layer.y).i32(layer.x).i32(layer.y + layer.height).i32(layer.x + layer.width);
+    layerRecords.u16(layer.channels.length);
+    for (const channel of layer.channels) layerRecords.i16(channel.id).u32(channel.data.length);
+    layerRecords.ascii('8BIM');
+    layerRecords.ascii(PSD_BLEND_KEYS[layer.blendMode] || 'norm');
+    const opacity = Math.round(Math.max(0, Math.min(1, Number(layer.opacity ?? 1))) * 255);
+    layerRecords.u8(opacity).u8(0);
+    const flags = 0x08 | (layer.transparencyProtected ? 0x01 : 0) | (layer.visible === false ? 0x02 : 0);
+    layerRecords.u8(flags).u8(0);
+
+    const extra = new Writer();
+    writeLayerMaskExtra(extra, layer);
+    extra.u32(0);
+    writePascalLayerName(extra, layer.name || 'Layer');
+    writeUnicodeLayerName(extra, layer.name || 'Layer');
+    layerRecords.u32(extra.length).push(extra.concat());
+
+    for (const channel of layer.channels) channelData.push(channel.data);
+  }
+
+  const layerInfo = new Writer();
+  layerInfo.push(layerRecords.concat()).push(channelData.concat());
+  while (layerInfo.length % 4) layerInfo.u8(0);
+
+  const layerAndMask = new Writer();
+  layerAndMask.u32(layerInfo.length).push(layerInfo.concat());
+  layerAndMask.u32(0);
+
+  const compositeData = encodeCompositeRle(composite, documentWidth, documentHeight);
+  const out = new Writer();
+  out.ascii('8BPS').u16(1).push(new Uint8Array(6));
+  out.u16(4).u32(documentHeight).u32(documentWidth).u16(8).u16(PSD_COLOR_MODE_RGB);
+  out.u32(0);
+  out.u32(0);
+  out.u32(layerAndMask.length).push(layerAndMask.concat());
+  out.push(compositeData);
+
+  if (out.length > maxBytes) {
+    throw new PsdImportError(`PSD writer: итоговый файл слишком большой (${Math.ceil(out.length / 1024 / 1024)} МБ). Для файлов больше 2 ГБ нужен PSB.`, 'PSD_EXPORT_TOO_LARGE');
+  }
+  return out.concat();
+}
+
 // ---- src/main.js ----
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -2543,7 +2815,7 @@ const TOOL_HELP = {
 const RASTER_BRUSH_TOOLS = new Set(['brush','clone','heal','smudge','dodge','burn','blur','eraser']);
 const SELECTION_TYPE_LABELS = { rect:'Прямоугольное выделение', ellipse:'Эллиптическое выделение', lasso:'Свободное лассо', polygon:'Многоугольное лассо' };
 const SELECTION_TYPES = Object.keys(SELECTION_TYPE_LABELS);
-const MIME_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+const MIME_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/vnd.adobe.photoshop': 'psd' };
 const COLOR_CORRECTION_CONTROLS = [
   { key:'exposure', label:'Экспозиция', min:-2, max:2, step:.05, unit:' EV', group:'Свет' },
   { key:'brightness', label:'Яркость', min:0, max:200, step:1, unit:'%', group:'Свет' },
@@ -5467,7 +5739,137 @@ async function openProject(file) {
   }
 }
 function saveProject() { if(blockPendingDocumentEdit())return; const name=`${safeFilename(doc.name)}.zpe`; downloadText(JSON.stringify(doc,null,2),name,'application/json'); queueRecovery({immediate:true}); setStatus(`Скачивание ${name} запущено. Проверьте файл перед закрытием вкладки`); }
-async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){alert(e.message);setStatus('Ошибка экспорта');}}}); }
+
+function psdExportBounds(layer){
+  const scale=Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1));
+  const blur=Math.max(0,Number(layer.filters?.blur)||0)*scale*3;
+  const stroke=layer.type==='shape'?Math.max(0,Number(layer.strokeWidth)||0)*scale/2:0;
+  const bounds=frameBounds(layer,Math.ceil(blur+stroke+layerStyleOutset(layer.styles)*scale+2));
+  const x=Math.floor(bounds.x),y=Math.floor(bounds.y);
+  const width=Math.max(1,Math.ceil(bounds.x+bounds.width)-x);
+  const height=Math.max(1,Math.ceil(bounds.y+bounds.height)-y);
+  checkedCanvasSize(width,height,`PSD export слоя «${layer.name||'Без имени'}»`);
+  return{x,y,width,height};
+}
+
+function canvasRgbaPixels(canvas,label){
+  try{
+    return canvas.getContext('2d',{alpha:true,willReadFrequently:true}).getImageData(0,0,canvas.width,canvas.height).data;
+  }catch(error){
+    throw new Error(`${label}: не удалось прочитать пиксели (${error?.message||error})`);
+  }
+}
+
+async function renderPsdLayerPixels(layer,bounds){
+  const canvas=document.createElement('canvas');canvas.width=bounds.width;canvas.height=bounds.height;
+  const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
+  ctx.translate(-bounds.x,-bounds.y);
+  const preview=structuredClone(layer);
+  preview.mask=null;
+  preview.opacity=1;
+  preview.blendMode='source-over';
+  await renderLayer(ctx,preview);
+  return canvasRgbaPixels(canvas,`PSD слой «${layer.name||'Без имени'}»`);
+}
+
+async function renderPsdMaskPixels(layer,bounds){
+  if(!layer.mask?.dataUrl)return null;
+  const canvas=document.createElement('canvas');canvas.width=bounds.width;canvas.height=bounds.height;
+  const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
+  ctx.translate(-bounds.x,-bounds.y);
+  const maskLayer=createRasterLayer({
+    name:`${layer.name||'Слой'} — mask`,
+    x:layer.x,y:layer.y,width:layer.width,height:layer.height,
+    scaleX:layer.scaleX,scaleY:layer.scaleY,rotation:layer.rotation,
+    opacity:1,blendMode:'source-over',dataUrl:layer.mask.dataUrl,
+    filters:{...DEFAULT_LAYER_FILTERS},styles:null,mask:null,
+  });
+  await renderLayer(ctx,maskLayer);
+  return canvasRgbaPixels(canvas,`PSD mask «${layer.name||'Без имени'}»`);
+}
+
+function layerNeedsSemanticRasterWarning(layer){
+  if(layer.type!=='raster')return true;
+  if(layer.styles)return true;
+  const filters=sanitizeFilters(layer.filters);
+  return Object.keys(DEFAULT_LAYER_FILTERS).some(key=>Math.abs(Number(filters[key])-Number(DEFAULT_LAYER_FILTERS[key]))>1e-9)||
+    Math.abs(Number(layer.scaleX??1)-1)>1e-9||Math.abs(Number(layer.scaleY??1)-1)>1e-9||Math.abs(Number(layer.rotation)||0)>1e-9;
+}
+
+async function preparePsdExport(exportDoc){
+  const warnings=[];
+  const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment');
+  const hasAdjustmentLayers=exportDoc.layers.some(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
+  const planned=sourceLayers.map(layer=>({layer,bounds:psdExportBounds(layer)}));
+  let totalPixels=exportDoc.width*exportDoc.height+planned.reduce((sum,item)=>sum+item.bounds.width*item.bounds.height,0);
+  if(hasAdjustmentLayers)totalPixels+=exportDoc.width*exportDoc.height;
+  if(totalPixels>96_000_000){
+    throw new Error(`PSD export Stage 4 ограничен суммарно 96 МП временных raster-буферов; документ требует около ${Math.ceil(totalPixels/1_000_000)} МП`);
+  }
+  if(exportDoc.groups?.length)warnings.push('Группы ZPE экспортированы как плоский список слоёв');
+  if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
+
+  const prepared=[];
+  for(const {layer,bounds} of planned){
+    prepared.push({
+      name:layer.name||'ZPE Layer',
+      x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
+      pixels:await renderPsdLayerPixels(layer,bounds),
+      opacity:clamp(Number(layer.opacity??1),0,1),
+      blendMode:layer.blendMode||'source-over',
+      visible:hasAdjustmentLayers?false:isLayerVisible(exportDoc,layer),
+      mask:layer.mask?.dataUrl?{
+        pixels:await renderPsdMaskPixels(layer,bounds),
+        disabled:layer.mask.enabled===false,
+      }:null,
+    });
+  }
+
+  const compositeCanvas=document.createElement('canvas');
+  await renderDocument(compositeCanvas,exportDoc,{checker:false});
+  const composite=canvasRgbaPixels(compositeCanvas,'PSD composite');
+
+  if(hasAdjustmentLayers){
+    warnings.push('Adjustment layers Stage 1 не имеют Photoshop-semantic mapping: визуальный результат сохранён через верхний Composite Preview, исходные слои оставлены скрытыми');
+    prepared.push({
+      name:'ZPE Composite Preview (adjustments baked)',
+      x:0,y:0,width:exportDoc.width,height:exportDoc.height,
+      pixels:composite,opacity:1,blendMode:'source-over',visible:true,mask:null,
+    });
+  }else if(!prepared.length){
+    prepared.push({
+      name:'ZPE Composite Preview',
+      x:0,y:0,width:exportDoc.width,height:exportDoc.height,
+      pixels:composite,opacity:1,blendMode:'source-over',visible:true,mask:null,
+    });
+  }
+
+  return{layers:[...prepared].reverse(),composite,warnings};
+}
+
+async function exportPsdDocument(exportDoc){
+  setStatus('PSD: подготовка слоёв…');
+  const prepared=await preparePsdExport(exportDoc);
+  setStatus('PSD: упаковка RLE-каналов…');
+  const bytes=encodePsd({
+    width:exportDoc.width,height:exportDoc.height,
+    layers:prepared.layers,composite:prepared.composite,
+    maxPixels:48_000_000,maxLayers:500,
+  });
+  const filename=`${safeFilename(exportDoc.name)}.psd`;
+  downloadBlob(new Blob([bytes],{type:'image/vnd.adobe.photoshop'}),filename);
+  if(prepared.warnings.length){
+    console.warn('PSD export warnings',prepared.warnings);
+    setStatus(`Экспортирован ${filename} с ограничениями: ${prepared.warnings.length}`);
+    toast(`PSD экспортирован с ограничениями: ${prepared.warnings.length}. Подробности — в консоли`,'warn');
+  }else{
+    setStatus(`Экспортирован ${filename}`);
+    toast('PSD экспортирован','success');
+  }
+}
+
+async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — слои (Stage 4)']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
 
 function canvasToPngBlob(canvas) {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));
