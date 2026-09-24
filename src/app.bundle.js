@@ -2587,6 +2587,81 @@ function layerPixelToDocumentPoint(point, layer) {
   };
 }
 
+function selectedPathLayer() {
+  const layer=selected();
+  return layer?.type==='shape'&&layer.shape==='path'&&isLayerVisible(doc,layer)?layer:null;
+}
+function pathControlDocumentPoint(layer,node,control='anchor'){
+  const local=control==='anchor'?node:node?.[control];
+  return local?layerPixelToDocumentPoint(local,layer):null;
+}
+function hitSelectedPathControl(point,radius=8/zoom){
+  const layer=selectedPathLayer();
+  if(!layer||isLayerLocked(doc,layer)||!Array.isArray(layer.pathPoints))return null;
+  for(let index=0;index<layer.pathPoints.length;index+=1){
+    const node=layer.pathPoints[index];
+    for(const control of ['handleIn','handleOut']){
+      const target=pathControlDocumentPoint(layer,node,control);
+      if(target&&Math.hypot(point.x-target.x,point.y-target.y)<=radius)return{layer,nodeIndex:index,control};
+    }
+  }
+  for(let index=0;index<layer.pathPoints.length;index+=1){
+    const node=layer.pathPoints[index],target=pathControlDocumentPoint(layer,node,'anchor');
+    if(target&&Math.hypot(point.x-target.x,point.y-target.y)<=radius)return{layer,nodeIndex:index,control:'anchor'};
+  }
+  return null;
+}
+function drawSelectedPathControls(ctx){
+  if(currentTool!=='pen'||penDraft)return;
+  const layer=selectedPathLayer();
+  if(!layer||!Array.isArray(layer.pathPoints)||!layer.pathPoints.length)return;
+  const locked=isLayerLocked(doc,layer);
+  ctx.save();ctx.setLineDash([]);ctx.lineWidth=1/zoom;
+  ctx.strokeStyle=locked?'#aeb6c4':'#8fc0ff';ctx.fillStyle='#f8fbff';
+  for(const node of layer.pathPoints){
+    const anchor=pathControlDocumentPoint(layer,node,'anchor');
+    if(!anchor)continue;
+    for(const control of ['handleIn','handleOut']){
+      const handle=pathControlDocumentPoint(layer,node,control);
+      if(!handle)continue;
+      ctx.beginPath();ctx.moveTo(anchor.x,anchor.y);ctx.lineTo(handle.x,handle.y);ctx.stroke();
+      const size=5/zoom;ctx.fillRect(handle.x-size/2,handle.y-size/2,size,size);ctx.strokeRect(handle.x-size/2,handle.y-size/2,size,size);
+    }
+    ctx.beginPath();ctx.arc(anchor.x,anchor.y,4/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();
+  }
+  ctx.restore();
+}
+function updatePenCursor(point){
+  if(currentTool!=='pen'||drag||penDraft)return;
+  els.overlay.style.cursor=hitSelectedPathControl(point)?'pointer':'crosshair';
+}
+function restorePathControlDrag(d){
+  const layer=doc.layers.find(item=>item.id===d.layerId);
+  if(!layer?.pathPoints?.[d.nodeIndex])return false;
+  layer.pathPoints[d.nodeIndex]=structuredClone(d.initial);
+  render();drawOverlay();return true;
+}
+function beginPathControlDrag(hit,point,event){
+  const node=hit.layer.pathPoints[hit.nodeIndex];
+  if(hit.control==='anchor'&&event.altKey){
+    const changed=Boolean(node.handleIn||node.handleOut||node.kind==='smooth');
+    node.handleIn=null;node.handleOut=null;node.kind='corner';
+    if(changed)commit('Преобразовать Bézier-узел в угловой');
+    else setStatus('Bézier-узел уже угловой');
+    return true;
+  }
+  const control=hit.control==='anchor'&&event.shiftKey?'handleOut':hit.control;
+  drag={
+    kind:'path-control',layerId:hit.layer.id,nodeIndex:hit.nodeIndex,control,
+    startLocal:documentPointToLayerPixel(point,hit.layer),
+    initial:structuredClone(node),moved:false,
+  };
+  setStatus(control==='anchor'
+    ? 'Перо: перетаскивайте anchor; Shift+drag создаёт smooth handles'
+    : 'Перо: перетаскивайте handle; Alt разрывает симметрию');
+  return true;
+}
+
 function setSelectionShape(shape) {
   selectionShape = cloneSelectionShape(shape);
   selectionRect = selectionBounds(selectionShape);
@@ -2791,6 +2866,7 @@ function drawOverlay() {
   } else if(magneticDraft?.points?.length){
     const points=magneticDraft.points;ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#ff5fa8';ctx.fillStyle='#fff';ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i+=1)ctx.lineTo(points[i].x,points[i].y);if(magneticDraft.hover)ctx.lineTo(magneticDraft.hover.x,magneticDraft.hover.y);ctx.stroke();for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,2.5/zoom,0,Math.PI*2);ctx.fill();}ctx.restore();
   }
+  drawSelectedPathControls(ctx);
   if (RASTER_BRUSH_TOOLS.has(currentTool) && hoverPoint) {
     const paintLayer = paintLayerAtPoint(hoverPoint);
     const radius = Math.max(.5, Number(els.brushSize.value) / 2);
@@ -3617,7 +3693,11 @@ els.overlay.addEventListener('pointerdown', async (e) => {
   if (currentTool === 'fill') { await fillAtPoint(p); return; }
   if (currentTool === 'gradient') { drag={kind:'gradient',start:p,current:p};drawOverlay();return; }
   if (currentTool === 'wand') { magicWandSelect(p);return; }
-  if (currentTool === 'pen') { beginPenPoint(p,e.detail>=2);return; }
+  if (currentTool === 'pen') {
+    const hit=!penDraft?hitSelectedPathControl(p):null;
+    if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
+    beginPenPoint(p,e.detail>=2);return;
+  }
   if (currentTool === 'magnetic') { addMagneticPoint(p,e.detail>=2);return; }
   if (currentTool === 'marquee') {
     const previousSelection=cloneSelectionShape(selectionShape);
@@ -3652,7 +3732,7 @@ els.overlay.addEventListener('pointerdown', async (e) => {
 
 function onOverlayPointerMove(e) {
   if (drag && e.pointerId !== activePrimaryPointerId) return;
-  const allowOutside = drag && ['move','resize','rotate','paint'].includes(drag.kind);
+  const allowOutside = drag && ['move','resize','rotate','paint','path-control'].includes(drag.kind);
   const p = canvasPoint(e, { clampToDocument: !allowOutside });
   if (drag && ['move','resize','rotate'].includes(drag.kind)) drag.lastPointer = p;
   els.pointer.textContent = `x: ${Math.round(p.x)} y: ${Math.round(p.y)}`;
@@ -3662,6 +3742,7 @@ function onOverlayPointerMove(e) {
     if(penDraft&&currentTool==='pen')penDraft.hover=p;
     if(magneticDraft&&currentTool==='magnetic')magneticDraft.hover=findMagneticEdgePoint(p);
     if (currentTool === 'zoom') els.overlay.style.cursor=e.altKey?'zoom-out':'zoom-in';
+    else if(currentTool==='pen'&&!penDraft)updatePenCursor(p);
     else updateMoveCursor(p);
     drawOverlay(); return;
   }
@@ -3737,6 +3818,30 @@ function onOverlayPointerMove(e) {
   if (drag.kind === 'shape') { drag.current=p; drag.lockAspect=e.shiftKey; const r=constrainedRect(drag.start,p,e.shiftKey); previewRect(r, els.primaryColor.value); return; }
   if (drag.kind === 'crop') { drag.current=p; cropRect=normalizeRect(drag.start,p); drawOverlay(); return; }
   if (drag.kind === 'gradient') { drag.current=p;previewGradient(drag.start,p);return; }
+  if (drag.kind === 'path-control') {
+    const layer=doc.layers.find(item=>item.id===drag.layerId);
+    const node=layer?.pathPoints?.[drag.nodeIndex];
+    if(!layer||!node||isLayerLocked(doc,layer))return;
+    const local=documentPointToLayerPixel(p,layer);
+    const distance=Math.hypot(local.x-drag.startLocal.x,local.y-drag.startLocal.y);
+    drag.moved=distance>1/zoom;
+    if(drag.control==='anchor'){
+      const dx=local.x-drag.startLocal.x,dy=local.y-drag.startLocal.y;
+      node.x=drag.initial.x+dx;node.y=drag.initial.y+dy;
+      node.handleIn=drag.initial.handleIn?{x:drag.initial.handleIn.x+dx,y:drag.initial.handleIn.y+dy}:null;
+      node.handleOut=drag.initial.handleOut?{x:drag.initial.handleOut.x+dx,y:drag.initial.handleOut.y+dy}:null;
+      node.kind=drag.initial.kind==='smooth'?'smooth':'corner';
+    }else{
+      node[drag.control]={x:local.x,y:local.y};
+      const opposite=drag.control==='handleIn'?'handleOut':'handleIn';
+      if(e.altKey)node.kind='corner';
+      else{
+        node.kind='smooth';
+        node[opposite]={x:node.x-(local.x-node.x),y:node.y-(local.y-node.y)};
+      }
+    }
+    render();drawOverlay();return;
+  }
   if (drag.kind === 'pen-handle') {
     const node=penDraft?.points?.[drag.nodeIndex];
     if(!node)return;
@@ -3807,6 +3912,10 @@ els.overlay.addEventListener('pointerup', async (e) => {
     if (r.width >= 10 && r.height >= 10) applyCrop(r); else { cropRect=null; drawOverlay(); }
   }
   if (d.kind === 'gradient') await applyGradient(d.start,d.current);
+  if (d.kind === 'path-control') {
+    if(d.moved)commit(d.control==='anchor'?'Переместить Bézier-узел':'Изменить Bézier-ручку');
+    else drawOverlay();
+  }
   if (d.kind === 'pen-handle') {
     if(penDraft)penDraft.hover=canvasPoint(e);
     setStatus(d.moved
@@ -3840,6 +3949,7 @@ els.overlay.addEventListener('pointercancel', async (e) => {
       penDraft.points.splice(d.nodeIndex,1);
       if(!penDraft.points.length)penDraft=null;
     }
+    if(d.kind==='path-control')restorePathControlDrag(d);
     if (d.kind==='pan') els.overlay.style.cursor=defaultToolCursor();
     cancelPaintPreview(); drawOverlay(); setStatus('Действие отменено');
   }
@@ -5819,6 +5929,7 @@ window.addEventListener('keydown',e=>{
       if(d.kind==='resize'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){Object.assign(l,d.initial);render();updateTransformPropertyValues(l);}}
       if(d.kind==='rotate'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){l.rotation=d.initialRotation;render();updateTransformPropertyValues(l);}}
       if(d.kind==='pen-handle'&&penDraft){penDraft.points.splice(d.nodeIndex,1);if(!penDraft.points.length)penDraft=null;}
+      if(d.kind==='path-control')restorePathControlDrag(d);
       if(d.kind==='crop')cropRect=null;
       if(d.kind==='marquee')setSelectionShape(d.previousSelection);
       els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;
