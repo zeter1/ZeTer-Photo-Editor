@@ -37,5 +37,8 @@ jobs:
       - name: Verify generated bundle is current
         run: git diff --exit-code -- src/app.bundle.js
 
+      - name: Browser smoke (file://)
+        run: npm run test:browser
+
       - name: Diff hygiene
         run: git diff --check
