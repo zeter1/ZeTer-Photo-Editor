@@ -11,6 +11,7 @@ import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataU
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb } from './core/pixels.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
+import { decodePsd, isPsdFile } from './adapters/psd.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -2780,7 +2781,7 @@ async function createNewDialog() {
 }
 
 function isImageFile(file) {
-  return Boolean(file) && (String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
+  return Boolean(file) && !isPsdFile(file) && (String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
 }
 function isProjectFile(file) { return Boolean(file) && /\.(zpe|pixforge|json)$/i.test(file.name || ''); }
 function visibleCanvasCenter() {
@@ -2844,10 +2845,103 @@ async function importImages(files, { anchor = null, source = 'Импорт' } = 
   return images.length;
 }
 
+async function rgbaPixelsToDataUrl(width,height,pixels,label='PSD слой'){
+  const size=checkedCanvasSize(width,height,label);
+  if(!(pixels instanceof Uint8Array)&&!(pixels instanceof Uint8ClampedArray))throw new Error(`${label}: отсутствуют RGBA-пиксели`);
+  if(pixels.length!==size.width*size.height*4)throw new Error(`${label}: неверный размер RGBA-буфера`);
+  const canvas=document.createElement('canvas');canvas.width=size.width;canvas.height=size.height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  const imageData=ctx.createImageData(size.width,size.height);
+  imageData.data.set(pixels);
+  ctx.putImageData(imageData,0,0);
+  return canvasToDataURL(canvas,'image/png');
+}
+
+async function openPsd(file){
+  if(blockPendingDocumentEdit())return;
+  if(!canReplaceDocument())return;
+  if(Number(file?.size)>512*1024*1024){
+    const message='PSD больше 512 МБ пока не импортируется: используйте уменьшенную копию или дождитесь tiled/PSB pipeline';
+    toast(message,'error');setStatus(message);return;
+  }
+  const targetDocument=doc;
+  const targetSessionId=activeSessionId;
+  const targetHistoryEntry=history.current();
+  const targetChangeSerial=documentChangeSerial;
+  setStatus('PSD: чтение структуры и каналов…');
+  try{
+    const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
+    const warnings=[...parsed.warnings];
+    if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD пока не переносится как отдельный lock-режим ZPE');
+    const prepared=[];
+    for(const sourceLayer of [...parsed.layers].reverse()){
+      const dataUrl=await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.pixels,`PSD слой «${sourceLayer.name}»`);
+      const maskDataUrl=sourceLayer.mask
+        ? await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.mask.pixels,`Маска PSD слоя «${sourceLayer.name}»`)
+        : null;
+      prepared.push(createRasterLayer({
+        name:sourceLayer.name||'PSD Layer',
+        visible:sourceLayer.visible!==false,
+        opacity:clamp(Number(sourceLayer.opacity),0,1),
+        blendMode:sourceLayer.blendMode||'source-over',
+        x:sourceLayer.x,y:sourceLayer.y,width:sourceLayer.width,height:sourceLayer.height,
+        dataUrl,
+        mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
+      }));
+      sourceLayer.pixels=null;
+      if(sourceLayer.mask)sourceLayer.mask.pixels=null;
+    }
+    if(!prepared.length&&parsed.composite){
+      prepared.push(createRasterLayer({
+        name:'PSD Composite',x:0,y:0,width:parsed.width,height:parsed.height,
+        dataUrl:await rgbaPixelsToDataUrl(parsed.width,parsed.height,parsed.composite,'PSD composite'),
+      }));
+    }
+    if(!prepared.length)throw new Error('PSD не содержит bitmap-данных, которые Stage 3 может импортировать');
+
+    if(doc!==targetDocument||activeSessionId!==targetSessionId||
+      history.current()!==targetHistoryEntry||documentChangeSerial!==targetChangeSerial){
+      setStatus('Импорт PSD отменён: документ изменился во время декодирования');
+      toast('Повторите импорт PSD в нужной вкладке','warn');
+      return;
+    }
+    if(blockPendingDocumentEdit())return;
+    const next=createDocument({
+      name:(file.name||'PSD').replace(/\.psd$/i,''),
+      width:parsed.width,height:parsed.height,background:'transparent'
+    });
+    next.layers=prepared;
+    next.selectedLayerId=prepared.at(-1)?.id??null;
+    history=new HistoryStack(80);
+    setDoc(next,{resetHistory:true,label:'Импорт PSD'});
+    markDirty(true);
+    queueRecovery({immediate:true});
+    fitToView();
+    setStatus(`PSD импортирован: ${prepared.length} слоёв. Сохраните проект как .zpe`);
+    toast(`PSD открыт: ${prepared.length} слоёв`,'success');
+    if(warnings.length){
+      console.warn('PSD import warnings',warnings);
+      toast(`PSD импортирован с ограничениями: ${warnings.length}. Подробности — в консоли`,'warn');
+    }
+  }catch(error){
+    console.error('PSD import failed',{name:file?.name,size:file?.size,error});
+    const message=`Не удалось импортировать PSD: ${error?.message||error}`;
+    alert(message);setStatus('Ошибка импорта PSD');toast(message,'error');
+  }
+}
+
 async function handleIncomingFiles(files, anchor = null, source = 'Импорт') {
   const incoming=[...files];
+  const psdFiles=incoming.filter(isPsdFile);
   const project=incoming.find(isProjectFile);
   const images=incoming.filter(isImageFile);
+  if(psdFiles.length){
+    if(psdFiles.length!==1||incoming.length!==1){
+      toast('PSD открывается как отдельный документ: выберите один PSD-файл за раз','warn');
+      setStatus('Выберите один PSD-файл');return;
+    }
+    await openPsd(psdFiles[0]);return;
+  }
   if (project && images.length===0) { await openProject(project); return; }
   if (images.length) { await importImages(images,{anchor,source}); return; }
   if (project) { await openProject(project); return; }
@@ -3526,7 +3620,7 @@ function fitToView(){const r=els.viewport.getBoundingClientRect();setZoom(fitZoo
 const menus={
   file:[
     ['Новый…','Ctrl+N',createNewDialog],
-    ['Открыть изображение…','Ctrl+O',()=>els.fileInput.click()],
+    ['Открыть изображение / PSD…','Ctrl+O',()=>els.fileInput.click()],
     ['Открыть проект…','',()=>els.projectInput.click()],
     ['Вставить изображение из буфера','Ctrl+V',pasteFromClipboard],
     ['sep'],

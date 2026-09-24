@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### 2026-09-24 — PSD pipeline Stage 3: layered RGB/8-bit import
+
+- Added: отдельный `src/adapters/psd.js` реализует dependency-free PSD binary adapter с жёсткими capability guards и memory/length checks.
+- Added: импорт RGB/8-bit PSD version 1 с Raw, PackBits/RLE, ZIP и ZIP-with-prediction channel compression.
+- Added: PSD bitmap layers превращаются в редактируемые ZPE raster layers с bounds, visibility, opacity и поддерживаемыми blend modes.
+- Added: bitmap user layer mask (channel `-2`) переносится в ZPE layer mask; Unicode layer names читаются из `luni`.
+- Added: если layered bitmap-preview отсутствует, adapter использует composite image как fallback.
+- Reliability: PSB, CMYK/Lab/Indexed и 16/32-bit на этом этапе отклоняются явной ошибкой вместо скрытого преобразования с потерей данных; PSD больше 512 МБ блокируется до tiled pipeline.
+- Reliability: документ заменяется только после полного decode + PNG preparation и проверки, что активная вкладка/история не изменились во время async-импорта.
+- Known limitation: PSD groups пока flatten в список; Photoshop text/vector/smart-object semantics импортируются только если в PSD присутствует raster preview.
+- Added: regression-тесты синтетического layered PSD, capability guards и file detection.
+
+
 ### 2026-09-24 — Bézier pipeline Stage 2b: direct-edit anchors и handles
 
 - Added: выбранный path-слой в инструменте «Перо» показывает editable anchors и control handles в document coordinates с учётом transform слоя.

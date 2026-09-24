@@ -12,6 +12,7 @@ const sources = [
   'src/core/state.js',
   'src/core/color.js',
   'src/core/render.js',
+  'src/adapters/psd.js',
   'src/main.js',
 ];
 
