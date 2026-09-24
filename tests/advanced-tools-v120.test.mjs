@@ -55,12 +55,18 @@ test('smudge strength, healing source, gradient, edge snapping and wand selectio
   assert.match(main,/const selectedMask=new Uint8Array\(total\)/);
 });
 
-test('pen creates a persistent vector path that renderer and sanitizer support',()=>{
-  assert.match(main,/function finishPenPath\(\)/);
+test('pen creates backward-compatible cubic Bezier paths with draggable handles',()=>{
+  assert.match(main,/function beginPenPoint\(point,finish=false\)/);
+  assert.match(main,/kind:'pen-handle'/);
+  assert.match(main,/handleIn/);
+  assert.match(main,/handleOut/);
+  assert.match(main,/function tracePenDraftPath/);
+  assert.match(main,/bezierCurveTo/);
   assert.match(main,/shape:'path'/);
-  assert.match(render,/layer\.shape === 'path'/);
+  assert.match(render,/function traceLayerBezierPath/);
+  assert.match(render,/ctx\.bezierCurveTo/);
   assert.match(state,/\['rect', 'ellipse', 'line', 'path'\]/);
-  assert.match(state,/result\.pathPoints/);
+  assert.match(state,/sanitizePathPoint/);
 });
 
 test('gradient and crop provide useful live previews before committing',()=>{

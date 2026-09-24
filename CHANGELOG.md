@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 2026-09-24 — Bézier pipeline Stage 2a: cubic-контуры и ручки
+
+- Added: `pathPoints` поддерживает `handleIn`, `handleOut` и тип узла `corner/smooth`; старые точки `{x,y}` автоматически остаются прямолинейными corner-узлами.
+- Added: renderer строит смешанные straight/cubic сегменты через `bezierCurveTo()`, включая корректное замыкание последнего сегмента.
+- Added: инструмент «Перо»: клик создаёт corner point, drag — smooth point с симметричными handles, `Alt+drag` — corner point с независимой исходящей ручкой.
+- Added: live overlay показывает cubic preview, anchors и управляющие ручки; отменённый pointer gesture не оставляет лишний узел.
+- Changed: bounds нового path-слоя учитывают не только anchors, но и control handles, поэтому ручки не оказываются за пределами локальной геометрии слоя.
+- Added: regression-тесты для backward compatibility старых pathPoints и нового cubic render contract.
+- Verification: выполняется через PR CI, generated bundle consistency и browser smoke перед merge в `main`.
+
+
 ### 2026-09-24 — Начат профессиональный imaging pipeline: маски и корректирующие слои
 
 - Added: новый тип слоя `adjustment` применяет неразрушающую цветокоррекцию и Canvas-эффекты ко всему уже собранному нижележащему стеку.

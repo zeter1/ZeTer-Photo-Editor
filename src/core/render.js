@@ -184,6 +184,28 @@ export async function renderDocument(canvas, doc, { checker = false, rasterOverr
   }
 }
 
+function traceLayerBezierPath(ctx, points, closed = false) {
+  if (!Array.isArray(points) || !points.length) return false;
+  ctx.moveTo(points[0].x, points[0].y);
+  const segment = (from, to) => {
+    const out = from?.handleOut;
+    const incoming = to?.handleIn;
+    if (out || incoming) {
+      const cp1 = out || from;
+      const cp2 = incoming || to;
+      ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, to.x, to.y);
+    } else {
+      ctx.lineTo(to.x, to.y);
+    }
+  };
+  for (let index = 1; index < points.length; index += 1) segment(points[index - 1], points[index]);
+  if (closed && points.length > 1) {
+    segment(points.at(-1), points[0]);
+    ctx.closePath();
+  }
+  return true;
+}
+
 export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
   ctx.save();
   try {
@@ -264,7 +286,7 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       ctx.beginPath();
       if (layer.shape === 'path') {
         const points=Array.isArray(layer.pathPoints)?layer.pathPoints:[];
-        if(points.length){ctx.moveTo(points[0].x,points[0].y);for(let index=1;index<points.length;index+=1)ctx.lineTo(points[index].x,points[index].y);if(layer.pathClosed)ctx.closePath();}
+        traceLayerBezierPath(ctx,points,Boolean(layer.pathClosed));
         if(layer.pathClosed&&layer.fill&&layer.fill!=='transparent'){ctx.fillStyle=layer.fill;ctx.fill();}
         if(layer.stroke&&layer.stroke!=='transparent'&&layer.strokeWidth>0){ctx.strokeStyle=layer.stroke;ctx.lineWidth=layer.strokeWidth;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();}
       } else if (layer.shape === 'line') {
