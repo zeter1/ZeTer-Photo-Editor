@@ -75,3 +75,15 @@ test('gradient and crop provide useful live previews before committing',()=>{
   assert.match(main,/drag\.kind === 'gradient'[\s\S]*?previewGradient\(drag\.start,p\)/);
   assert.match(main,/for \(const fraction of \[1 \/ 3, 2 \/ 3\]\)/);
 });
+
+test('existing Bezier paths expose direct anchor and handle editing with cancel-safe history',()=>{
+  assert.match(main,/function hitSelectedPathControl\(/);
+  assert.match(main,/function drawSelectedPathControls\(/);
+  assert.match(main,/kind:'path-control'/);
+  assert.match(main,/Shift\+drag создаёт smooth handles/);
+  assert.match(main,/event\.altKey/);
+  assert.match(main,/node\[opposite\]=\{x:node\.x-\(local\.x-node\.x\),y:node\.y-\(local\.y-node\.y\)\}/);
+  assert.match(main,/restorePathControlDrag\(d\)/);
+  assert.match(main,/Переместить Bézier-узел/);
+  assert.match(main,/Изменить Bézier-ручку/);
+});

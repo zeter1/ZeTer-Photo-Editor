@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-24 — Bézier pipeline Stage 2b: direct-edit anchors и handles
+
+- Added: выбранный path-слой в инструменте «Перо» показывает editable anchors и control handles в document coordinates с учётом transform слоя.
+- Added: drag anchor перемещает узел вместе с его handles; drag handle редактирует кривую, сохраняя smooth-симметрию.
+- Added: `Alt+drag` handle переводит узел в corner и разрывает симметрию; `Shift+drag` anchor создаёт smooth handles даже у старого straight/corner узла; `Alt+click` anchor удаляет handles.
+- Added: hit-testing приоритетно выбирает handles, затем anchors; курсор отражает доступность direct-edit.
+- Reliability: Escape и pointer cancel восстанавливают исходный node snapshot; история получает один commit только после завершённого изменения.
+- Verification: выполняется через PR CI, generated bundle consistency и реальный `file://` browser smoke перед merge.
+
+
 ### 2026-09-24 — Bézier pipeline Stage 2a: cubic-контуры и ручки
 
 - Added: `pathPoints` поддерживает `handleIn`, `handleOut` и тип узла `corner/smooth`; старые точки `{x,y}` автоматически остаются прямолинейными corner-узлами.
