@@ -175,11 +175,11 @@ test('PSD row encoder round-trips long literal and repeated PackBits rows', asyn
       opacity:1,
       blendMode:'source-over',
       visible:true,
-      mask:{pixels,disabled:false},
+      mask:{pixels:mask,disabled:false},
     }],
   });
   const decoded = await decodePsd(encoded);
   assert.equal(decoded.layers.length, 1);
   assert.deepEqual([...decoded.layers[0].pixels], [...pixels]);
-  assert.deepEqual([...decoded.layers[0].mask.pixels], [...pixels]);
+  assert.deepEqual([...decoded.layers[0].mask.pixels], [...mask]);
 });
