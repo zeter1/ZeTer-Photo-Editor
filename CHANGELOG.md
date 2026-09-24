@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-09-24 — CI reliability: browser startup budget
+
+- Fixed: `file://` browser smoke теперь даёт Chrome/Chromium до 20 секунд на публикацию DevTools endpoint вместо 10 секунд.
+- Root cause: hosted runner дважды показал startup timeout до загрузки приложения, а повторный run того же SHA проходил без изменений кода; Node regression suite и bundle-check во всех случаях были зелёными.
+- Guardrail: timeout остаётся bounded; runtime/DOM/Blob Worker assertions не ослаблены и по-прежнему падают отдельно после успешного запуска браузера.
+
 ### 2026-09-24 — Performance Stage 6a: bounded pixel worker
 
 - Added: крупные advanced color corrections (от 512×512 px) выполняются в одном bounded Blob Worker; RGBA buffer передаётся transferable без дополнительного полного clone перед обработкой.

@@ -9,7 +9,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
 const POLL_MS = 50;
 const CONDITION_TIMEOUT_MS = 8_000;
-const DEVTOOLS_TIMEOUT_MS = 10_000;
+// Hosted runners occasionally need more than 10s to expose the DevTools endpoint even when Chrome starts normally.
+const DEVTOOLS_TIMEOUT_MS = 20_000;
 
 function fail(message, details = '') {
   const error = new Error(details ? `${message}\n${details}` : message);
