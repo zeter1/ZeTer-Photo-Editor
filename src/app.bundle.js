@@ -1146,7 +1146,7 @@ function baseLayer(type, overrides = {}) {
   return {
     id: uid(type),
     type,
-    name: type === 'raster' ? 'Растровый слой' : type === 'text' ? 'Текст' : 'Фигура',
+    name: type === 'raster' ? 'Растровый слой' : type === 'text' ? 'Текст' : type === 'adjustment' ? 'Корректирующий слой' : 'Фигура',
     visible: true,
     locked: false,
     opacity: 1,
@@ -1160,12 +1160,28 @@ function baseLayer(type, overrides = {}) {
     rotation: 0,
     filters: { ...DEFAULT_LAYER_FILTERS },
     styles: null,
+    mask: null,
     groupId: null,
     ...overrides,
   };
 }
 function createRasterLayer(overrides = {}) {
   return baseLayer('raster', { dataUrl: null, ...overrides });
+}
+function createAdjustmentLayer(overrides = {}) {
+  return baseLayer('adjustment', {
+    name: 'Корректирующий слой',
+    width: 1,
+    height: 1,
+    ...overrides,
+  });
+}
+function createLayerMask(overrides = {}) {
+  return {
+    enabled: true,
+    dataUrl: null,
+    ...overrides,
+  };
 }
 function createTextLayer(overrides = {}) {
   return baseLayer('text', {
@@ -1381,9 +1397,17 @@ function sanitizeFilters(filters = {}) {
   }
   return result;
 }
+function sanitizeLayerMask(mask) {
+  if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
+  const dataUrl = typeof mask.dataUrl === 'string' && /^data:image\//i.test(mask.dataUrl) ? mask.dataUrl : null;
+  return createLayerMask({
+    enabled: mask.enabled !== false,
+    dataUrl,
+  });
+}
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
-  const type = ['raster', 'text', 'shape'].includes(layer?.type) ? layer.type : 'shape';
+  const type = ['raster', 'text', 'shape', 'adjustment'].includes(layer?.type) ? layer.type : 'shape';
   const defaults = baseLayer(type);
   let id = shortText(layer?.id, defaults.id, 160).trim() || defaults.id;
   if (usedIds.has(id)) id = uid(type);
@@ -1406,7 +1430,8 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
     scaleY: bounded(layer?.scaleY, 1, MIN_LAYER_SCALE, MAX_LAYER_SCALE),
     rotation: ((finite(layer?.rotation, 0) % 360) + 360) % 360,
     filters: sanitizeFilters(layer?.filters),
-    styles: sanitizeLayerStyles(layer?.styles),
+    styles: type === 'adjustment' ? null : sanitizeLayerStyles(layer?.styles),
+    mask: sanitizeLayerMask(layer?.mask),
     groupId: validGroupIds.has(layer?.groupId) ? layer.groupId : null,
   };
   if (type === 'raster') {
@@ -1427,6 +1452,12 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set()) {
     result.letterSpacing = bounded(layer?.letterSpacing, 0, -5, 20);
     result.underline = layer?.underline === true;
     result.strikeThrough = layer?.strikeThrough === true;
+  } else if (type === 'adjustment') {
+    result.x = 0;
+    result.y = 0;
+    result.scaleX = 1;
+    result.scaleY = 1;
+    result.rotation = 0;
   } else {
     result.shape = ['rect', 'ellipse', 'line', 'path'].includes(layer?.shape) ? layer.shape : 'rect';
     result.fill = shortText(layer?.fill, '#4f8cff', 64);
@@ -1729,6 +1760,41 @@ async function getImage(dataUrl) {
   trimImageCache();
   return promise;
 }
+
+async function applyAdjustmentLayer(canvas, ctx, layer) {
+  const width = Math.max(1, canvas.width || 1);
+  const height = Math.max(1, canvas.height || 1);
+  const source = document.createElement('canvas');
+  source.width = width; source.height = height;
+  const sourceCtx = source.getContext('2d', { alpha: true, willReadFrequently: true });
+  sourceCtx.drawImage(canvas, 0, 0, width, height);
+  if (hasAdvancedColorAdjustments(layer.filters)) {
+    try {
+      const pixels = sourceCtx.getImageData(0, 0, width, height);
+      applyAdvancedColorAdjustments(pixels, layer.filters);
+      sourceCtx.putImageData(pixels, 0, 0);
+    } catch (error) {
+      console.warn('Adjustment layer could not read composite pixels', error);
+    }
+  }
+  if (layer.mask?.enabled && layer.mask.dataUrl) {
+    const mask = await getImage(layer.mask.dataUrl);
+    if (mask) {
+      sourceCtx.save();
+      sourceCtx.globalCompositeOperation = 'destination-in';
+      sourceCtx.globalAlpha = 1;
+      sourceCtx.filter = 'none';
+      sourceCtx.drawImage(mask, 0, 0, width, height);
+      sourceCtx.restore();
+    }
+  }
+  ctx.save();
+  ctx.globalAlpha = layer.opacity ?? 1;
+  ctx.globalCompositeOperation = layer.blendMode || 'source-over';
+  ctx.filter = filterString(layer.filters);
+  ctx.drawImage(source, 0, 0, width, height);
+  ctx.restore();
+}
 async function renderDocument(canvas, doc, { checker = false, rasterOverrides = null } = {}) {
   const ctx = canvas.getContext('2d', { alpha: true });
   if (canvas.width !== doc.width) canvas.width = doc.width;
@@ -1742,6 +1808,10 @@ async function renderDocument(canvas, doc, { checker = false, rasterOverrides = 
   }
   for (const layer of doc.layers) {
     if (!isLayerVisible(doc, layer) || layer.opacity <= 0) continue;
+    if (layer.type === 'adjustment') {
+      await applyAdjustmentLayer(canvas, ctx, layer);
+      continue;
+    }
     await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
   }
 }
@@ -1765,6 +1835,39 @@ async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       ctx.drawImage(styled.canvas,styled.x,styled.y,styled.width,styled.height);
       return;
     }
+    if (layer.mask?.enabled && layer.mask.dataUrl) {
+      const mask = await getImage(layer.mask.dataUrl);
+      if (mask) {
+        const masked = document.createElement('canvas');
+        masked.width = Math.max(1, Math.ceil(w));
+        masked.height = Math.max(1, Math.ceil(h));
+        const maskedCtx = masked.getContext('2d', { alpha: true });
+        const plain = {
+          ...layer,
+          mask: null,
+          styles: null,
+          opacity: 1,
+          blendMode: 'source-over',
+          x: 0,
+          y: 0,
+          width: w,
+          height: h,
+          scaleX: 1,
+          scaleY: 1,
+          rotation: 0,
+        };
+        await renderLayer(maskedCtx, plain, { rasterOverride });
+        maskedCtx.save();
+        maskedCtx.globalCompositeOperation = 'destination-in';
+        maskedCtx.globalAlpha = 1;
+        maskedCtx.filter = 'none';
+        maskedCtx.drawImage(mask, 0, 0, masked.width, masked.height);
+        maskedCtx.restore();
+        ctx.drawImage(masked, 0, 0, w, h);
+        return;
+      }
+    }
+
     ctx.filter = filterString(layer.filters);
 
     if (layer.type === 'raster' && (rasterOverride || layer.dataUrl)) {
@@ -2664,7 +2767,7 @@ function drawOverlay() {
     ctx.restore();
   }
   const layer = textDraft?.document === doc ? textDraft.layer : selected();
-  if (!layer || !isLayerVisible(doc, layer)) return;
+  if (!layer || !isLayerVisible(doc, layer) || !isTransformableLayer(layer)) return;
   const frame = layerFrame(layer);
   const moveMode=currentTool==='move';
   const accent=isLayerLocked(doc,layer)?'#aeb6c4':moveMode?'#69a0ff':'#5ee7ff';
@@ -2785,7 +2888,8 @@ function updateLayers() {
     eye.onclick = (e) => { e.stopPropagation(); layer.visible = !layer.visible; commit(layer.visible ? 'Показать слой' : 'Скрыть слой'); };
     const thumb = document.createElement('div'); thumb.className = 'layer-thumb';
     if (layer.type === 'raster' && layer.dataUrl) { const img = new Image(); img.src = layer.dataUrl; thumb.append(img); }
-    else thumb.textContent = layer.type === 'text' ? 'T' : layer.type === 'shape' ? '▭' : '▦';
+    else thumb.textContent = layer.type === 'text' ? 'T' : layer.type === 'shape' ? '▭' : layer.type === 'adjustment' ? '◐' : '▦';
+    if (layer.mask) thumb.title = layer.mask.enabled === false ? 'Маска отключена' : layer.mask.dataUrl ? 'Есть маска слоя' : 'Маска слоя: показать всё';
     const name = document.createElement('div'); name.className = 'layer-name'; name.textContent = layer.name; name.title = layer.name;
     name.ondblclick = (e) => { e.stopPropagation(); renameLayer(layer); };
     const lock = document.createElement('button'); lock.className = 'layer-lock';
@@ -3089,7 +3193,7 @@ function propRangeField(label, key, value, attrs='') {
   return `<label for="prop-${key}">${label}</label><div class="range-with-value"><input id="prop-${key}" data-prop="${key}" type="range" value="${escapeAttr(value)}" ${attrs}><output>${escapeHtml(formatFilterValue(filterKey,value))}</output></div>`;
 }
 function renderEffectControls(layer) {
-  const controls = layer.type === 'raster' ? RASTER_EFFECT_CONTROLS : BASIC_EFFECT_CONTROLS;
+  const controls = layer.type === 'raster' || layer.type === 'adjustment' ? RASTER_EFFECT_CONTROLS : BASIC_EFFECT_CONTROLS;
   let currentGroup = null;
   let html = '';
   for (const control of controls) {
@@ -3128,7 +3232,7 @@ function refreshInspectorPanels() {
 function resetSelectedLayerEffects() {
   const layer = selected();
   if (!layer || isLayerLocked(doc,layer)) return;
-  const controls = layer.type === 'raster' ? RASTER_EFFECT_CONTROLS : BASIC_EFFECT_CONTROLS;
+  const controls = layer.type === 'raster' || layer.type === 'adjustment' ? RASTER_EFFECT_CONTROLS : BASIC_EFFECT_CONTROLS;
   layer.filters = sanitizeFilters(layer.filters);
   let changed = false;
   for (const control of controls) {
@@ -3145,6 +3249,18 @@ function updateProperties() {
   const l = selected();
   if (!l) { els.props.className = 'panel-content muted'; els.props.textContent = 'Выберите слой'; return; }
   els.props.className = 'panel-content';
+  if (l.type === 'adjustment') {
+    const maskLabel = l.mask ? (l.mask.enabled === false ? 'отключена' : l.mask.dataUrl ? 'из выделения' : 'показать всё') : 'нет';
+    els.props.innerHTML = `<div class="prop-grid">
+      <label>Имя</label><input data-prop="name" value="${escapeAttr(l.name)}">
+      <label>Тип</label><span>Корректирующий слой</span>
+      <label>Область</label><span>Нижележащий стек</span>
+      <label>Маска</label><span>${escapeHtml(maskLabel)}</span>
+    </div>`;
+    bindPropertyInputs(els.props);
+    if (isLayerLocked(doc,l)) els.props.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
+    return;
+  }
   let extra = '';
   if (l.type === 'text') extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textFontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}`;
   if (l.type === 'shape') extra = l.shape === 'line'
@@ -3331,7 +3447,8 @@ function canvasPoint(event, { clampToDocument = true } = {}) {
   const y = (event.clientY - r.top) / zoom;
   return clampToDocument ? { x: clamp(x, 0, doc.width), y: clamp(y, 0, doc.height) } : { x, y };
 }
-function topLayerAt(point) { return [...doc.layers].reverse().find(l => isLayerVisible(doc,l) && !isLayerLocked(doc,l) && pointInLayer(point,l)) ?? null; }
+function isTransformableLayer(layer) { return Boolean(layer) && layer.type !== 'adjustment'; }
+function topLayerAt(point) { return [...doc.layers].reverse().find(l => isTransformableLayer(l) && isLayerVisible(doc,l) && !isLayerLocked(doc,l) && pointInLayer(point,l)) ?? null; }
 function topTextLayerAt(point) { return [...doc.layers].reverse().find(l => isLayerVisible(doc,l) && l.type === 'text' && pointInLayer(point,l)) ?? null; }
 function updateTransformPropertyValues(layer) {
   const values = {
@@ -3380,7 +3497,7 @@ function adjustBrushSize(direction, coarse = false) {
 function updateMoveCursor(point) {
   if (currentTool !== 'move' || drag) return;
   const layer = selected();
-  if (layer && isLayerVisible(doc, layer) && !isLayerLocked(doc, layer)) {
+  if (isTransformableLayer(layer) && isLayerVisible(doc, layer) && !isLayerLocked(doc, layer)) {
     const rotatePoint = interactiveRotationHandlePoint(layer);
     if (Math.hypot(point.x - rotatePoint.x, point.y - rotatePoint.y) <= 10 / zoom) { els.overlay.style.cursor = 'grab'; return; }
     const handle = hitLayerHandle(point, layer, 10 / zoom);
@@ -3412,7 +3529,7 @@ els.overlay.addEventListener('pointerdown', async (e) => {
   if (e.button !== 0) return;
   if (currentTool === 'move') {
     let l = selected();
-    if (l && isLayerVisible(doc,l) && !isLayerLocked(doc,l)) {
+    if (isTransformableLayer(l) && isLayerVisible(doc,l) && !isLayerLocked(doc,l)) {
       const rotatePoint = interactiveRotationHandlePoint(l);
       if (Math.hypot(p.x - rotatePoint.x, p.y - rotatePoint.y) <= 10 / zoom) {
         const frame = layerFrame(l);
@@ -3427,7 +3544,7 @@ els.overlay.addEventListener('pointerdown', async (e) => {
         return;
       }
     }
-    if (!l || isLayerLocked(doc,l) || !isLayerVisible(doc,l) || !pointInLayer(p,l)) l = topLayerAt(p);
+    if (!isTransformableLayer(l) || isLayerLocked(doc,l) || !isLayerVisible(doc,l) || !pointInLayer(p,l)) l = topLayerAt(p);
     if (l) {
       doc.selectedLayerId = l.id;
       drag = { kind:'move', layerId:l.id, px:p.x, py:p.y, x:l.x, y:l.y, moved:false, lastPointer:p };
@@ -4555,6 +4672,8 @@ async function renderSelectionLayerToPng(layer,bounds) {
 }
 
 async function renderSelectionMergedToPng(bounds) {
+  const full=document.createElement('canvas');
+  await renderDocument(full,doc,{checker:false});
   const canvas=document.createElement('canvas');
   canvas.width=bounds.width;canvas.height=bounds.height;
   const ctx=canvas.getContext('2d',{alpha:true});
@@ -4562,14 +4681,7 @@ async function renderSelectionMergedToPng(bounds) {
   ctx.save();
   ctx.translate(-bounds.x,-bounds.y);
   clipContextToDocumentSelection(ctx);
-  if(doc.background&&doc.background!=='transparent'){
-    ctx.fillStyle=doc.background;
-    ctx.fillRect(bounds.x,bounds.y,bounds.width,bounds.height);
-  }
-  for(const layer of doc.layers){
-    if(!isLayerVisible(doc,layer)||layer.opacity<=0)continue;
-    await renderLayer(ctx,layer);
-  }
+  ctx.drawImage(full,0,0);
   ctx.restore();
   return canvasToPngBlob(canvas);
 }
@@ -4592,6 +4704,7 @@ async function prepareClearedRasterDataUrl(layer) {
 
 async function rasterizeLayerForPixelEditing(layer,{suffixName=true}={}) {
   if(!layer)return null;
+  if(layer.type==='adjustment')throw new Error('Корректирующий слой нельзя растрировать отдельно от результата нижележащего стека');
   if(layer.type==='raster')return layer;
   const scale=Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1));
   const blur=Math.max(0,Number(layer.filters?.blur)||0) * scale * 3;
@@ -4616,7 +4729,7 @@ async function clearSelectionAcrossVisibleLayers({ historyLabel = 'Выреза�
   if(!selectionRect)return {cleared:0,locked:0,rasterized:0};
   if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return null;}
   const intersecting=doc.layers.filter(layer=>isLayerVisible(doc,layer)&&selectionIntersectsLayer(layer));
-  const targets=intersecting.filter(layer=>!isLayerLocked(doc,layer));
+  const targets=intersecting.filter(layer=>layer.type!=='adjustment'&&!isLayerLocked(doc,layer));
   const locked=intersecting.length-targets.length;
   if(!targets.length)return {cleared:0,locked,rasterized:0};
   paintPersisting=true;
@@ -4810,7 +4923,7 @@ function selectAdjacentLayer(direction, { focus = false } = {}) {
   if (focus) requestAnimationFrame(focusSelectedLayerRow);
 }
 function centerSelectedLayer() {
-  const l=selected();if(!l||isLayerLocked(doc,l))return;
+  const l=selected();if(!isTransformableLayer(l)||isLayerLocked(doc,l))return;
   const frame=layerFrame(l);
   l.x += doc.width/2-frame.center.x;
   l.y += doc.height/2-frame.center.y;
@@ -4819,6 +4932,7 @@ function centerSelectedLayer() {
 function alignSelectedLayer(mode) {
   const l=selected();
   if(!l){setStatus('Сначала выберите слой');return;}
+  if(!isTransformableLayer(l)){setStatus('Корректирующий слой не имеет геометрической трансформации');return;}
   if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}
   const next=alignLayerToCanvas(l,mode,doc.width,doc.height);
   if(!next.changed){setStatus('Слой уже выровнен');return;}
@@ -4828,7 +4942,7 @@ function alignSelectedLayer(mode) {
   setStatus(`Слой выровнен ${labels[mode]||''}`.trim());
 }
 function fitSelectedLayerToCanvas() {
-  const l=selected();if(!l||isLayerLocked(doc,l))return;
+  const l=selected();if(!isTransformableLayer(l)||isLayerLocked(doc,l))return;
   const bounds=frameBounds(l);
   if(bounds.width<=0||bounds.height<=0)return;
   const ratio=Math.min(doc.width/bounds.width,doc.height/bounds.height);
@@ -5038,12 +5152,16 @@ function layerContextMenu(id) {
     ['Дублировать','Ctrl+J',()=>{if(selectedTarget())duplicateSelected();},()=>selectedTarget() && editable()],
     ['Удалить','Delete',()=>{if(selectedTarget())deleteSelected();},()=>selectedTarget() && editable()],
     ['sep'],
+    ['Добавить маску (показать всё)','',()=>addSelectedLayerMask(false),()=>selectedTarget() && editable() && !target().mask],
+    ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>selectedTarget() && editable() && !target().mask && Boolean(selectionShape)],
+    ['Удалить маску','',removeSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
+    ['sep'],
     ['Показать / скрыть','',toggleSelectedVisibility,()=>Boolean(target())],
     ['Заблокировать / разблокировать','',toggleSelectedLock,()=>Boolean(target()) && !doc.groups?.find(group => group.id === target().groupId)?.locked],
     ['sep'],
     ['Поднять слой','',()=>{if(moveLayer(doc,id,1))commit('Поднять слой');},editable],
     ['Опустить слой','',()=>{if(moveLayer(doc,id,-1))commit('Опустить слой');},editable],
-    ['Растеризовать','',rasterizeSelectedLayer,()=>editable() && target().type !== 'raster'],
+    ['Растеризовать','',rasterizeSelectedLayer,()=>editable() && target().type !== 'raster' && target().type !== 'adjustment'],
   ];
 }
 function groupContextMenu(id) {
@@ -5059,12 +5177,54 @@ function groupContextMenu(id) {
   ];
 }
 function addBlankLayer(){addLayer(doc,createRasterLayer({name:'Новый слой',width:doc.width,height:doc.height,dataUrl:null}));brushCanvas=null;commit('Новый растровый слой');}
+function addAdjustmentLayer(){
+  const layer=createAdjustmentLayer({name:'Корректирующий слой',width:doc.width,height:doc.height});
+  addLayer(doc,layer);commit('Новый корректирующий слой');
+  setStatus('Корректирующий слой применяет цвет и эффекты ко всему нижележащему стеку');
+}
+async function selectionMaskDataUrl(layer){
+  if(!selectionShape)return null;
+  const width=layer.type==='adjustment'?doc.width:Math.max(1,Math.round(layer.width||1));
+  const height=layer.type==='adjustment'?doc.height:Math.max(1,Math.round(layer.height||1));
+  checkedCanvasSize(width,height,'Маска слоя');
+  const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  ctx.fillStyle='#ffffff';
+  if(layer.type==='adjustment'){
+    if(traceDocumentSelectionPath(ctx))ctx.fill();
+  }else{
+    const polygon=selectionPolygonForLayer(layer);
+    if(polygon?.length>=3){
+      ctx.beginPath();ctx.moveTo(polygon[0].x,polygon[0].y);
+      for(let i=1;i<polygon.length;i+=1)ctx.lineTo(polygon[i].x,polygon[i].y);
+      ctx.closePath();ctx.fill();
+    }
+  }
+  return canvasToDataURL(canvas,'image/png');
+}
+async function addSelectedLayerMask(fromSelection=false){
+  const layer=selected();
+  if(!layer){setStatus('Сначала выберите слой');return;}
+  if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}
+  if(layer.mask){setStatus('У слоя уже есть маска');return;}
+  if(fromSelection&&!selectionShape){setStatus('Сначала создайте выделение');return;}
+  const dataUrl=fromSelection?await selectionMaskDataUrl(layer):null;
+  layer.mask=createLayerMask({enabled:true,dataUrl});
+  commit(fromSelection?'Добавить маску из выделения':'Добавить маску слоя');
+  setStatus(fromSelection?'Маска слоя создана из текущего выделения':'Добавлена маска «показать всё»');
+}
+function removeSelectedLayerMask(){
+  const layer=selected();
+  if(!layer?.mask||isLayerLocked(doc,layer))return;
+  layer.mask=null;commit('Удалить маску слоя');setStatus('Маска слоя удалена');
+}
 async function rasterizeSelectedLayer(){
   if(blockPendingDocumentEdit())return;
   const layer=selected();
   if(!layer)return;
   if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}
   if(layer.type==='raster'){setStatus('Слой уже растровый');return;}
+  if(layer.type==='adjustment'){setStatus('Корректирующий слой нельзя растрировать отдельно');return;}
   const targetDocument=doc;
   const targetSessionId=activeSessionId;
   const originalLayer=JSON.stringify(layer);
@@ -5154,14 +5314,19 @@ const menus={
   ],
   layer:[
     ['Новый растровый слой','Ctrl+Shift+N',addBlankLayer],
+    ['Новый корректирующий слой','',addAdjustmentLayer],
     ['Новая группа слоёв','',addGroup],
     ['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
-    ['Растеризовать слой','',rasterizeSelectedLayer,()=>Boolean(selected())&&selected().type!=='raster'&&!isLayerLocked(doc,selected())],
+    ['Растеризовать слой','',rasterizeSelectedLayer,()=>Boolean(selected())&&selected().type!=='raster'&&selected().type!=='adjustment'&&!isLayerLocked(doc,selected())],
     ['sep'],
-    ['Центрировать слой на холсте','',centerSelectedLayer,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
-    ['Вписать слой в холст','',fitSelectedLayerToCanvas,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['Добавить маску (показать всё)','',()=>addSelectedLayerMask(false),()=>Boolean(selected())&&!selected().mask&&!isLayerLocked(doc,selected())],
+    ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>Boolean(selected())&&!selected().mask&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Удалить маску','',removeSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
+    ['sep'],
+    ['Центрировать слой на холсте','',centerSelectedLayer,()=>isTransformableLayer(selected())&&!isLayerLocked(doc,selected())],
+    ['Вписать слой в холст','',fitSelectedLayerToCanvas,()=>isTransformableLayer(selected())&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Показать / скрыть слой','',toggleSelectedVisibility,()=>Boolean(selected())],
     ['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=selected();return Boolean(layer)&&!doc.groups?.find(group=>group.id===layer.groupId)?.locked;}],

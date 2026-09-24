@@ -28,3 +28,15 @@ test('resize interaction calculates every pointer move from the original transfo
   assert.match(main, /initial:\{x:l\.x,y:l\.y,width:l\.width,height:l\.height,scaleX:l\.scaleX,scaleY:l\.scaleY,rotation:l\.rotation\}/);
   assert.match(main, /resizeLayerFromPoint\(\{ \.\.\.l, \.\.\.drag\.initial \}/);
 });
+
+test('render pipeline treats adjustment layers as cumulative stack operations', () => {
+  assert.match(render, /layer\.type === 'adjustment'/);
+  assert.match(render, /applyAdjustmentLayer\(canvas, ctx, layer\)/);
+  assert.match(render, /sourceCtx\.drawImage\(canvas, 0, 0, width, height\)/);
+});
+
+test('layer masks isolate layer content before destination-in compositing', () => {
+  assert.match(render, /layer\.mask\?\.enabled && layer\.mask\.dataUrl/);
+  assert.match(render, /globalCompositeOperation = 'destination-in'/);
+  assert.match(render, /mask: null/);
+});
