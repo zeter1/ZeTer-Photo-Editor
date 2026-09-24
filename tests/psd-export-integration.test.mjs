@@ -6,11 +6,12 @@ const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const adapter=await readFile(new URL('../src/adapters/psd.js',import.meta.url),'utf8');
 
 test('PSD Stage 4 is wired into the export UI and uses the dedicated writer',()=>{
-  assert.match(main,/import \{ decodePsd, encodePsd, isPsdFile \} from '\.\/adapters\/psd\.js'/);
+  assert.match(main,/import \{ decodePsd, encodePsdBlob, isPsdFile \} from '\.\/adapters\/psd\.js'/);
   assert.match(main,/PSD — слои \(Stage 4\)/);
   assert.match(main,/async function preparePsdExport\(exportDoc\)/);
   assert.match(main,/async function exportPsdDocument\(exportDoc\)/);
-  assert.match(main,/const bytes=encodePsd\(/);
+  assert.match(main,/const blob=encodePsdBlob\(/);
+  assert.match(main,/downloadBlob\(blob,filename\)/);
   assert.match(main,/image\/vnd\.adobe\.photoshop/);
   assert.match(main,/48_000_000/);
   assert.match(main,/ZPE Composite Preview \(adjustments baked\)/);
@@ -18,6 +19,7 @@ test('PSD Stage 4 is wired into the export UI and uses the dedicated writer',()=
 
 test('PSD Stage 4 writer exposes Photoshop-compatible layered export primitives',()=>{
   assert.match(adapter,/export function encodePsd\(/);
+  assert.match(adapter,/export function encodePsdBlob\(/);
   assert.match(adapter,/const PSD_BLEND_KEYS/);
   assert.match(adapter,/writeUnicodeLayerName/);
   assert.match(adapter,/encodeRleRgbaChannel/);
