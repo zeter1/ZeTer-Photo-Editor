@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodePsd, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
 
 const encoder = new TextEncoder();
 
@@ -71,4 +71,63 @@ test('PSD detection uses extension or Photoshop MIME type', () => {
   assert.equal(isPsdFile({ name:'layout.PSD', type:'' }), true);
   assert.equal(isPsdFile({ name:'layout.bin', type:'image/vnd.adobe.photoshop' }), true);
   assert.equal(isPsdFile({ name:'layout.png', type:'image/png' }), false);
+});
+
+
+test('PSD writer round-trips layered RGB pixels, Unicode names, blend state and user mask', async () => {
+  const topPixels=Uint8Array.from([10,20,220,200]);
+  const topMask=Uint8Array.from([255,255,255,100]);
+  const bottomPixels=Uint8Array.from([
+    255,0,0,255,
+    0,255,0,255,
+  ]);
+  const composite=Uint8Array.from([
+    200,10,20,255,
+    5,180,40,180,
+  ]);
+  const encoded=encodePsd({
+    width:2,height:1,composite,
+    layers:[
+      {
+        name:'Верх ✓',x:1,y:0,width:1,height:1,pixels:topPixels,
+        opacity:.5,blendMode:'multiply',visible:false,
+        mask:{pixels:topMask,disabled:true},
+      },
+      {
+        name:'Низ',x:0,y:0,width:2,height:1,pixels:bottomPixels,
+        opacity:1,blendMode:'source-over',visible:true,
+      },
+    ],
+  });
+  const header=inspectPsdHeader(encoded);
+  assert.equal(header.channels,4);
+  assert.equal(header.width,2);
+  assert.equal(header.height,1);
+
+  const decoded=await decodePsd(encoded);
+  assert.equal(decoded.layers.length,2);
+  assert.equal(decoded.layers[0].name,'Верх ✓');
+  assert.equal(decoded.layers[0].blendMode,'multiply');
+  assert.equal(decoded.layers[0].visible,false);
+  assert.ok(Math.abs(decoded.layers[0].opacity-(128/255))<1e-9);
+  assert.deepEqual([...decoded.layers[0].pixels],[...topPixels]);
+  assert.equal(decoded.layers[0].mask.disabled,true);
+  assert.equal(decoded.layers[0].mask.pixels[3],100);
+  assert.equal(decoded.layers[1].name,'Низ');
+  assert.deepEqual([...decoded.layers[1].pixels],[...bottomPixels]);
+});
+
+test('PSD writer rejects malformed layer and mask buffers', () => {
+  const composite=Uint8Array.from([0,0,0,0]);
+  assert.throws(
+    () => encodePsd({width:1,height:1,composite,layers:[{name:'bad',x:0,y:0,width:1,height:1,pixels:Uint8Array.from([1,2,3])}]}),
+    error => error instanceof PsdImportError && error.code === 'PSD_EXPORT_PIXELS',
+  );
+  assert.throws(
+    () => encodePsd({
+      width:1,height:1,composite,
+      layers:[{name:'bad mask',x:0,y:0,width:1,height:1,pixels:Uint8Array.from([1,2,3,4]),mask:{pixels:Uint8Array.from([255])}}],
+    }),
+    error => error instanceof PsdImportError && error.code === 'PSD_EXPORT_MASK',
+  );
 });

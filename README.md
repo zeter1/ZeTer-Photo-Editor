@@ -67,6 +67,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **несколько вкладок документов**: кнопка **«+»** в верхней полосе создаёт сколько угодно независимых вкладок с собственными слоями, историей Undo/Redo, масштабом и признаком несохранённых изменений;
 - импорт PNG/JPEG/WebP/GIF/BMP/SVG;
 - **PSD Import Stage 3**: локальный offline decoder открывает RGB/8-bit `.psd` как редактируемый стек растровых слоёв, переносит bounds, visibility, opacity, поддерживаемые blend modes и bitmap layer masks; raw/RLE/ZIP channel compression декодируется без CDN и внешнего runtime;
+- **PSD Export Stage 4**: экспортирует RGB/8-bit `.psd` с отдельными слоями, Unicode-именами, opacity, visibility, поддерживаемыми blend modes, merged transparency и bitmap user masks; каналы пишутся PackBits/RLE без CDN и внешних зависимостей. Text/shape/transforms/filters/styles растрируются в preview соответствующего слоя, а adjustment layers сохраняют визуальный результат через отдельный верхний `ZPE Composite Preview`;
 - **перетаскивание изображений с рабочего стола по всему окну редактора**;
 - **вставка изображения из буфера обмена через Ctrl+V** (включая скриншоты);
 - `Ctrl+V` использует нативную вставку и резервное чтение Clipboard API, когда браузер это разрешает;
@@ -75,7 +76,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **аварийное автосохранение и восстановление** через IndexedDB: каждое окно хранит отдельную копию своих несохранённых вкладок; при новом запуске можно восстановить найденные документы или отложить решение, сохранив копии; повреждённая копия не открывается без проверки и остаётся в хранилище;
 - автосохранение выполняется с задержкой после изменений и сериализует фоновые записи; `Ctrl+S` запускает скачивание `.zpe`, но браузер не подтверждает запись файла на диск, поэтому отметка несохранённых изменений и аварийная копия остаются;
 - собственный проект `.zpe` с embedded data URL;
-- экспорт PNG/JPEG/WebP;
+- экспорт PNG/JPEG/WebP и layered PSD Stage 4;
 - полнофункциональное верхнее меню: Файл, Правка, Слой, Изображение, Выделение, Вид, Помощь;
 - управление главным меню с клавиатуры: стрелка вниз открывает меню, ↑/↓ перемещают фокус, Esc закрывает;
 - горячие клавиши работают по `KeyboardEvent.code`, поэтому основные Ctrl-команды не зависят от русской/английской раскладки;
@@ -158,7 +159,7 @@ npm test
 - `src/core/io.js` — browser I/O helpers;
 - `src/core/pixels.js` — пиксельные операции, включая flood fill;
 - `src/core/recovery.js` — неблокирующее аварийное автосохранение/восстановление через IndexedDB;
-- `src/adapters/psd.js` — изолированный PSD Adapter v1: binary parser, capability guards, channel decompression и нормализованный raster contract;
+- `src/adapters/psd.js` — изолированный PSD Adapter: binary parser/writer, capability guards, Raw/RLE/ZIP decode, RLE encode и нормализованный RGB/8-bit raster contract;
 - `src/main.js` — исходный UI controller, меню, инструменты, drag/drop, clipboard и shortcuts;
 - `src/app.bundle.js` — готовая браузерная сборка для прямого запуска через `file://`;
 - `tools/build-bundle.mjs` — воспроизводимая сборка runtime без внешних зависимостей;
@@ -168,6 +169,6 @@ npm test
 
 ## Ограничения относительно Photopea
 
-PSD Import v1 уже открывает RGB/8-bit `.psd` в редактируемые растровые слои, но полноценный PSD round-trip пока не готов: нет PSD export, PSB, сохранения Photoshop text/vector/smart-object semantics, вложенных PSD-групп, CMYK/16/32-bit color pipeline и полного набора Photoshop-compatible effects. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
+PSD Import Stage 3 и PSD Export Stage 4 уже дают ограниченный RGB/8-bit layered round-trip, но это ещё не полная Photoshop-семантика: нет PSB, native text/vector/smart-object round-trip, вложенных PSD-групп, native Photoshop adjustment-layer mapping, CMYK/16/32-bit color pipeline и полного набора Photoshop-compatible effects. Экспорт сохраняет визуальный результат сложных ZPE-слоёв через raster preview; при наличии adjustment layers добавляется верхний `ZPE Composite Preview`, а исходные слои остаются скрытыми. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
 
-Следующие крупные направления развития: path operations и vector masks, сложные выделения и маски, маски/режимы наложения для групп, расширенные типы adjustment layers, PSD export/round-trip и semantic layer mapping, PSB/16/32-bit/CMYK, более эффективная tiled-история растра и GPU/worker-ускорение для очень больших документов.
+Следующие крупные направления развития: semantic PSD mapping для text/vector/adjustment/smart objects и групп, path operations и vector masks, сложные выделения и маски, PSB/16/32-bit/CMYK, более эффективная tiled-история растра и GPU/worker-ускорение для очень больших документов.
