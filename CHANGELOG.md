@@ -11,6 +11,7 @@
 - Reliability: parent tab нельзя закрыть, пока открыты связанные content-tabs; заблокированный smart-object нельзя редактировать или обновлять через дочернюю вкладку.
 - Reliability: UI и project sanitizer ограничивают рекурсивную вложенность smart-object тремя уровнями; внешние проекты глубже лимита сохраняют preview, но отбрасывают более глубокий embedded source.
 - Added: regression-тесты schema/sanitizer, preview-render и session-link save contract.
+- Test maintenance: brush-preview regression теперь проверяет поведенческий raster-override contract после появления smart-object preview path, а save-boundary VM harness учитывает `currentSession()` без ослабления блокировки сохранения во время raster edit.
 - Known limitation: Stage 5a поддерживает embedded ZPE smart objects; linked external sources, smart filters/warp и native PSD smart-object round-trip ещё не реализованы.
 - Verification: выполняется через PR CI, generated bundle consistency и реальный `file://` browser smoke перед merge.
 
