@@ -2034,6 +2034,471 @@ async function compositeToBlob(doc, type = 'image/png', quality = 0.92) {
 function invalidateImageCache(dataUrl) { if (dataUrl) imageCache.delete(dataUrl); adjustedRasterCache.clear(); }
 function clearImageCache() { imageCache.clear(); adjustedRasterCache.clear(); }
 
+// ---- src/adapters/psd.js ----
+const PSD_SIGNATURE = '8BPS';
+const PSD_VERSION = 1;
+const PSD_COLOR_MODE_RGB = 3;
+const PSD_DEPTH = 8;
+const MAX_PSD_LAYERS = 500;
+const MAX_PSD_CHANNEL_BYTES = 256 * 1024 * 1024;
+
+const PSD_BLEND_MODES = Object.freeze({
+  norm: 'source-over',
+  mul: 'multiply',
+  'mul ': 'multiply',
+  scrn: 'screen',
+  over: 'overlay',
+  dark: 'darken',
+  lite: 'lighten',
+  div: 'color-dodge',
+  'div ': 'color-dodge',
+  idiv: 'color-burn',
+});
+class PsdImportError extends Error {
+  constructor(message, code = 'PSD_IMPORT_ERROR') {
+    super(message);
+    this.name = 'PsdImportError';
+    this.code = code;
+  }
+}
+
+class Reader {
+  constructor(bytes, offset = 0, end = bytes.length) {
+    this.bytes = bytes;
+    this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    this.offset = offset;
+    this.end = Math.min(end, bytes.length);
+  }
+  ensure(size) {
+    if (!Number.isInteger(size) || size < 0 || this.offset + size > this.end) {
+      throw new PsdImportError('PSD повреждён или обрезан', 'PSD_TRUNCATED');
+    }
+  }
+  u8() { this.ensure(1); return this.view.getUint8(this.offset++); }
+  i8() { this.ensure(1); return this.view.getInt8(this.offset++); }
+  u16() { this.ensure(2); const v = this.view.getUint16(this.offset, false); this.offset += 2; return v; }
+  i16() { this.ensure(2); const v = this.view.getInt16(this.offset, false); this.offset += 2; return v; }
+  u32() { this.ensure(4); const v = this.view.getUint32(this.offset, false); this.offset += 4; return v; }
+  i32() { this.ensure(4); const v = this.view.getInt32(this.offset, false); this.offset += 4; return v; }
+  ascii(size) {
+    const bytes = this.take(size);
+    let out = '';
+    for (const value of bytes) out += String.fromCharCode(value);
+    return out;
+  }
+  take(size) {
+    this.ensure(size);
+    const out = this.bytes.subarray(this.offset, this.offset + size);
+    this.offset += size;
+    return out;
+  }
+  skip(size) { this.ensure(size); this.offset += size; }
+  seek(offset) {
+    if (!Number.isInteger(offset) || offset < 0 || offset > this.end) throw new PsdImportError('Некорректный PSD offset', 'PSD_OFFSET');
+    this.offset = offset;
+  }
+}
+
+function asBytes(buffer) {
+  if (buffer instanceof Uint8Array) return buffer;
+  if (ArrayBuffer.isView(buffer)) return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  if (buffer instanceof ArrayBuffer) return new Uint8Array(buffer);
+  throw new PsdImportError('PSD decoder ожидал ArrayBuffer', 'PSD_BUFFER');
+}
+
+function safeArea(width, height, maxPixels) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 0 || height < 0) {
+    throw new PsdImportError('Некорректный размер PSD', 'PSD_SIZE');
+  }
+  const pixels = width * height;
+  if (!Number.isSafeInteger(pixels) || pixels > maxPixels) {
+    throw new PsdImportError(`PSD слишком большой для безопасного импорта: ${width} × ${height}`, 'PSD_TOO_LARGE');
+  }
+  return pixels;
+}
+function isPsdFile(file) {
+  const name = String(file?.name || '');
+  const type = String(file?.type || '').toLowerCase();
+  return /\.psd$/i.test(name) || type === 'image/vnd.adobe.photoshop' || type === 'image/x-photoshop';
+}
+function inspectPsdHeader(buffer) {
+  const reader = new Reader(asBytes(buffer));
+  const signature = reader.ascii(4);
+  if (signature !== PSD_SIGNATURE) throw new PsdImportError('Это не PSD-файл (нет сигнатуры 8BPS)', 'PSD_SIGNATURE');
+  const version = reader.u16();
+  reader.skip(6);
+  const channels = reader.u16();
+  const height = reader.u32();
+  const width = reader.u32();
+  const bitsPerChannel = reader.u16();
+  const colorMode = reader.u16();
+  return { signature, version, channels, width, height, bitsPerChannel, colorMode };
+}
+
+function requireStage3Capabilities(header, maxPixels) {
+  if (header.version !== PSD_VERSION) {
+    throw new PsdImportError(header.version === 2 ? 'PSB пока не поддерживается. Используйте PSD для этого этапа импорта.' : `Неподдерживаемая версия PSD: ${header.version}`, 'PSD_VERSION');
+  }
+  if (header.colorMode !== PSD_COLOR_MODE_RGB) {
+    throw new PsdImportError('PSD Import Stage 3 поддерживает только RGB. CMYK/Lab/Indexed будут добавлены отдельным color-management этапом.', 'PSD_COLOR_MODE');
+  }
+  if (header.bitsPerChannel !== PSD_DEPTH) {
+    throw new PsdImportError(`PSD Import Stage 3 поддерживает 8-bit/channel. Получено: ${header.bitsPerChannel}-bit.`, 'PSD_BIT_DEPTH');
+  }
+  if (header.channels < 3 || header.channels > 56) throw new PsdImportError(`Некорректное число каналов PSD: ${header.channels}`, 'PSD_CHANNELS');
+  safeArea(header.width, header.height, maxPixels);
+}
+
+function readLengthSection(reader, label) {
+  const length = reader.u32();
+  const end = reader.offset + length;
+  if (end > reader.end) throw new PsdImportError(`${label}: длина выходит за границы файла`, 'PSD_SECTION_LENGTH');
+  return { length, end };
+}
+
+function decodeUtf16Be(bytes) {
+  if (bytes.length % 2) return '';
+  let result = '';
+  for (let i = 0; i < bytes.length; i += 2) result += String.fromCharCode((bytes[i] << 8) | bytes[i + 1]);
+  return result;
+}
+
+function decodeLatin1(bytes) {
+  let result = '';
+  for (const value of bytes) result += String.fromCharCode(value);
+  return result;
+}
+
+function parseLayerMask(reader, length) {
+  if (!length) return null;
+  const start = reader.offset;
+  const end = start + length;
+  reader.ensure(length);
+  if (length < 18) { reader.seek(end); return null; }
+  const top = reader.i32();
+  const left = reader.i32();
+  const bottom = reader.i32();
+  const right = reader.i32();
+  const defaultColor = reader.u8();
+  const flags = reader.u8();
+  reader.seek(end);
+  return {
+    top, left, bottom, right,
+    defaultColor,
+    positionRelativeToLayer: Boolean(flags & 0x01),
+    disabled: Boolean(flags & 0x02),
+    inverted: Boolean(flags & 0x04),
+  };
+}
+
+function parseAdditionalLayerInfo(reader, extraEnd, record) {
+  while (reader.offset + 12 <= extraEnd) {
+    const blockStart = reader.offset;
+    const signature = reader.ascii(4);
+    if (signature !== '8BIM' && signature !== '8B64') { reader.seek(blockStart); break; }
+    const key = reader.ascii(4);
+    const length = reader.u32();
+    const dataStart = reader.offset;
+    const dataEnd = dataStart + length;
+    if (dataEnd > extraEnd) { reader.seek(extraEnd); break; }
+    if (key === 'luni' && length >= 4) {
+      const count = reader.u32();
+      const byteLength = Math.min(count * 2, Math.max(0, dataEnd - reader.offset));
+      const name = decodeUtf16Be(reader.take(byteLength));
+      if (name) record.name = name;
+    } else if ((key === 'lsct' || key === 'lsdk') && length >= 4) {
+      record.sectionDivider = reader.u32();
+    }
+    reader.seek(dataEnd);
+    if ((length & 1) && reader.offset < extraEnd) reader.skip(1);
+  }
+}
+
+function parseLayerRecord(reader) {
+  const top = reader.i32();
+  const left = reader.i32();
+  const bottom = reader.i32();
+  const right = reader.i32();
+  const channelCount = reader.u16();
+  if (channelCount > 64) throw new PsdImportError(`Слишком много каналов в слое: ${channelCount}`, 'PSD_LAYER_CHANNELS');
+  const channels = [];
+  for (let index = 0; index < channelCount; index += 1) channels.push({ id: reader.i16(), length: reader.u32() });
+  if (reader.ascii(4) !== '8BIM') throw new PsdImportError('Некорректная сигнатура blend mode слоя', 'PSD_BLEND_SIGNATURE');
+  const blendKey = reader.ascii(4);
+  const opacity = reader.u8();
+  reader.u8();
+  const flags = reader.u8();
+  reader.u8();
+  const extraLength = reader.u32();
+  const extraStart = reader.offset;
+  const extraEnd = extraStart + extraLength;
+  if (extraEnd > reader.end) throw new PsdImportError('Extra data слоя выходит за границы PSD', 'PSD_LAYER_EXTRA');
+  const maskLength = reader.u32();
+  const mask = parseLayerMask(reader, maskLength);
+  if (reader.offset + 4 > extraEnd) { reader.seek(extraEnd); return { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name:'Слой',sectionDivider:0 }; }
+  const blendingRangesLength = reader.u32();
+  if (reader.offset + blendingRangesLength > extraEnd) throw new PsdImportError('Повреждены blending ranges слоя', 'PSD_BLEND_RANGES');
+  reader.skip(blendingRangesLength);
+  let name = 'Слой';
+  if (reader.offset < extraEnd) {
+    const nameLength = reader.u8();
+    if (reader.offset + nameLength <= extraEnd) name = decodeLatin1(reader.take(nameLength)) || name;
+    const consumed = 1 + nameLength;
+    const padding = (4 - (consumed % 4)) % 4;
+    if (reader.offset + padding <= extraEnd) reader.skip(padding);
+  }
+  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0 };
+  parseAdditionalLayerInfo(reader, extraEnd, record);
+  reader.seek(extraEnd);
+  return record;
+}
+
+function packBitsRow(source, expectedWidth) {
+  const out = new Uint8Array(expectedWidth);
+  let input = 0;
+  let output = 0;
+  while (input < source.length && output < expectedWidth) {
+    const header = source[input++];
+    const signed = header > 127 ? header - 256 : header;
+    if (signed >= 0) {
+      const count = signed + 1;
+      if (input + count > source.length || output + count > expectedWidth) throw new PsdImportError('Повреждён PackBits-поток PSD', 'PSD_RLE');
+      out.set(source.subarray(input, input + count), output);
+      input += count;
+      output += count;
+    } else if (signed >= -127) {
+      if (input >= source.length) throw new PsdImportError('Повреждён PackBits repeat PSD', 'PSD_RLE');
+      const count = 1 - signed;
+      if (output + count > expectedWidth) throw new PsdImportError('PackBits строка длиннее ожидаемой', 'PSD_RLE');
+      out.fill(source[input++], output, output + count);
+      output += count;
+    }
+  }
+  if (output !== expectedWidth) throw new PsdImportError('PackBits строка короче ожидаемой', 'PSD_RLE');
+  return out;
+}
+
+async function inflateZlib(bytes) {
+  if (typeof DecompressionStream !== 'function' || typeof Blob !== 'function' || typeof Response !== 'function') {
+    throw new PsdImportError('Этот браузер не поддерживает встроенную ZIP-декомпрессию PSD', 'PSD_ZIP_UNAVAILABLE');
+  }
+  try {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch (error) {
+    throw new PsdImportError(`Не удалось распаковать ZIP-канал PSD: ${error?.message || error}`, 'PSD_ZIP');
+  }
+}
+
+async function decodeChannel(reader, descriptor, width, height, maxChannelBytes) {
+  const channelStart = reader.offset;
+  const channelEnd = channelStart + descriptor.length;
+  if (descriptor.length < 2 || channelEnd > reader.end || descriptor.length > maxChannelBytes) {
+    throw new PsdImportError('Некорректная длина PSD-канала', 'PSD_CHANNEL_LENGTH');
+  }
+  const compression = reader.u16();
+  const expected = safeArea(width, height, maxChannelBytes);
+  let decoded;
+  if (compression === 0) {
+    decoded = reader.take(Math.min(expected, channelEnd - reader.offset));
+    if (decoded.length !== expected) throw new PsdImportError('Raw PSD-канал имеет неверный размер', 'PSD_RAW_CHANNEL');
+  } else if (compression === 1) {
+    const rowLengths = [];
+    for (let row = 0; row < height; row += 1) rowLengths.push(reader.u16());
+    decoded = new Uint8Array(expected);
+    for (let row = 0; row < height; row += 1) {
+      const packed = reader.take(rowLengths[row]);
+      decoded.set(packBitsRow(packed, width), row * width);
+    }
+  } else if (compression === 2 || compression === 3) {
+    const compressed = reader.take(channelEnd - reader.offset);
+    decoded = await inflateZlib(compressed);
+    if (decoded.length < expected) throw new PsdImportError('ZIP PSD-канал короче ожидаемого', 'PSD_ZIP_CHANNEL');
+    if (decoded.length !== expected) decoded = decoded.subarray(0, expected);
+    if (compression === 3) {
+      for (let row = 0; row < height; row += 1) {
+        const start = row * width;
+        for (let x = 1; x < width; x += 1) decoded[start + x] = (decoded[start + x] + decoded[start + x - 1]) & 255;
+      }
+    }
+  } else {
+    throw new PsdImportError(`Неподдерживаемое сжатие PSD-канала: ${compression}`, 'PSD_COMPRESSION');
+  }
+  reader.seek(channelEnd);
+  return decoded;
+}
+
+function composeRgba(width, height, channels) {
+  const pixels = safeArea(width, height, Number.MAX_SAFE_INTEGER);
+  const red = channels.get(0);
+  const green = channels.get(1);
+  const blue = channels.get(2);
+  if (!red || !green || !blue) return null;
+  const alpha = channels.get(-1);
+  const rgba = new Uint8ClampedArray(pixels * 4);
+  for (let index = 0; index < pixels; index += 1) {
+    const out = index * 4;
+    rgba[out] = red[index];
+    rgba[out + 1] = green[index];
+    rgba[out + 2] = blue[index];
+    rgba[out + 3] = alpha ? alpha[index] : 255;
+  }
+  return rgba;
+}
+
+function buildMaskRgba(record, maskChannel, layerWidth, layerHeight) {
+  if (!record.mask || !maskChannel || layerWidth <= 0 || layerHeight <= 0) return null;
+  const mask = record.mask;
+  const maskWidth = Math.max(0, mask.right - mask.left);
+  const maskHeight = Math.max(0, mask.bottom - mask.top);
+  if (!maskWidth || !maskHeight || maskChannel.length < maskWidth * maskHeight) return null;
+  const rgba = new Uint8ClampedArray(layerWidth * layerHeight * 4);
+  const defaultAlpha = mask.defaultColor === 0 ? 0 : 255;
+  for (let index = 0; index < layerWidth * layerHeight; index += 1) {
+    const out = index * 4;
+    rgba[out] = 255; rgba[out + 1] = 255; rgba[out + 2] = 255; rgba[out + 3] = defaultAlpha;
+  }
+  const originX = mask.positionRelativeToLayer ? mask.left : mask.left - record.left;
+  const originY = mask.positionRelativeToLayer ? mask.top : mask.top - record.top;
+  for (let y = 0; y < maskHeight; y += 1) {
+    const targetY = originY + y;
+    if (targetY < 0 || targetY >= layerHeight) continue;
+    for (let x = 0; x < maskWidth; x += 1) {
+      const targetX = originX + x;
+      if (targetX < 0 || targetX >= layerWidth) continue;
+      let value = maskChannel[y * maskWidth + x];
+      if (mask.inverted) value = 255 - value;
+      rgba[(targetY * layerWidth + targetX) * 4 + 3] = value;
+    }
+  }
+  return rgba;
+}
+
+function blendModeFor(key, warnings, layerName) {
+  if (key in PSD_BLEND_MODES) return PSD_BLEND_MODES[key];
+  if (key !== 'pass') warnings.push(`Слой «${layerName}»: blend mode ${JSON.stringify(key)} импортирован как Normal`);
+  return 'source-over';
+}
+
+async function decodeComposite(reader, header, maxChannelBytes) {
+  if (reader.offset >= reader.end) return null;
+  const compression = reader.u16();
+  const pixels = header.width * header.height;
+  const channels = new Map();
+  if (compression === 0) {
+    for (let channel = 0; channel < header.channels; channel += 1) {
+      if (pixels > maxChannelBytes) throw new PsdImportError('Composite PSD-канал слишком большой', 'PSD_CHANNEL_LIMIT');
+      const data = reader.take(pixels);
+      if (channel < 3) channels.set(channel, data);
+      else if (channel === 3) channels.set(-1, data);
+    }
+  } else if (compression === 1) {
+    const rowLengths = [];
+    for (let channel = 0; channel < header.channels; channel += 1) {
+      const rows = [];
+      for (let row = 0; row < header.height; row += 1) rows.push(reader.u16());
+      rowLengths.push(rows);
+    }
+    for (let channel = 0; channel < header.channels; channel += 1) {
+      const data = new Uint8Array(pixels);
+      for (let row = 0; row < header.height; row += 1) data.set(packBitsRow(reader.take(rowLengths[channel][row]), header.width), row * header.width);
+      if (channel < 3) channels.set(channel, data);
+      else if (channel === 3) channels.set(-1, data);
+    }
+  } else if (compression === 2 || compression === 3) {
+    const decoded = await inflateZlib(reader.take(reader.end - reader.offset));
+    const expected = pixels * header.channels;
+    if (decoded.length < expected) throw new PsdImportError('Composite ZIP PSD короче ожидаемого', 'PSD_COMPOSITE_ZIP');
+    for (let channel = 0; channel < header.channels; channel += 1) {
+      const data = decoded.slice(channel * pixels, (channel + 1) * pixels);
+      if (compression === 3) {
+        for (let row = 0; row < header.height; row += 1) {
+          const start = row * header.width;
+          for (let x = 1; x < header.width; x += 1) data[start + x] = (data[start + x] + data[start + x - 1]) & 255;
+        }
+      }
+      if (channel < 3) channels.set(channel, data);
+      else if (channel === 3) channels.set(-1, data);
+    }
+  } else {
+    throw new PsdImportError(`Неподдерживаемое сжатие composite PSD: ${compression}`, 'PSD_COMPOSITE_COMPRESSION');
+  }
+  return composeRgba(header.width, header.height, channels);
+}
+async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxChannelBytes = MAX_PSD_CHANNEL_BYTES } = {}) {
+  const bytes = asBytes(buffer);
+  const header = inspectPsdHeader(bytes);
+  requireStage3Capabilities(header, maxPixels);
+  const reader = new Reader(bytes);
+  reader.skip(26);
+  const colorMode = readLengthSection(reader, 'Color Mode Data'); reader.seek(colorMode.end);
+  const resources = readLengthSection(reader, 'Image Resources'); reader.seek(resources.end);
+  const layerMask = readLengthSection(reader, 'Layer and Mask Information');
+  const warnings = [];
+  const records = [];
+  if (layerMask.length > 0) {
+    const layerInfoLength = reader.u32();
+    const layerInfoEnd = reader.offset + layerInfoLength;
+    if (layerInfoEnd > layerMask.end) throw new PsdImportError('Layer info выходит за границы Layer and Mask section', 'PSD_LAYER_INFO');
+    if (layerInfoLength > 0) {
+      const layerCountSigned = reader.i16();
+      const layerCount = Math.abs(layerCountSigned);
+      if (layerCount > maxLayers) throw new PsdImportError(`PSD содержит слишком много слоёв: ${layerCount} > ${maxLayers}`, 'PSD_LAYER_LIMIT');
+      for (let index = 0; index < layerCount; index += 1) records.push(parseLayerRecord(reader));
+      for (const record of records) {
+        const width = Math.max(0, record.right - record.left);
+        const height = Math.max(0, record.bottom - record.top);
+        if (width && height) safeArea(width, height, maxPixels);
+        record.decodedChannels = new Map();
+        for (const descriptor of record.channels) {
+          const useMaskBounds = descriptor.id === -2 && record.mask;
+          const channelWidth = useMaskBounds ? Math.max(0, record.mask.right - record.mask.left) : width;
+          const channelHeight = useMaskBounds ? Math.max(0, record.mask.bottom - record.mask.top) : height;
+          if (!channelWidth || !channelHeight) { reader.skip(descriptor.length); continue; }
+          const data = await decodeChannel(reader, descriptor, channelWidth, channelHeight, maxChannelBytes);
+          if ([0,1,2,-1,-2].includes(descriptor.id)) record.decodedChannels.set(descriptor.id, data);
+        }
+      }
+      if (reader.offset < layerInfoEnd) reader.seek(layerInfoEnd);
+    }
+    reader.seek(layerMask.end);
+  }
+
+  const groupMarkers = records.filter(record => record.sectionDivider === 1 || record.sectionDivider === 2 || record.sectionDivider === 3).length;
+  if (groupMarkers) warnings.push('Группы PSD импортированы как плоский список слоёв; вложенная структура групп пока не сохраняется');
+
+  const layers = [];
+  for (const record of records) {
+    if (record.sectionDivider === 1 || record.sectionDivider === 2 || record.sectionDivider === 3) continue;
+    const width = Math.max(0, record.right - record.left);
+    const height = Math.max(0, record.bottom - record.top);
+    if (!width || !height) { warnings.push(`Слой «${record.name}» пропущен: пустые bounds`); continue; }
+    const rgba = composeRgba(width, height, record.decodedChannels);
+    if (!rgba) { warnings.push(`Слой «${record.name}» пропущен: нет RGB bitmap-preview`); continue; }
+    const maskRgba = buildMaskRgba(record, record.decodedChannels.get(-2), width, height);
+    layers.push({
+      name: record.name || 'PSD Layer',
+      x: record.left,
+      y: record.top,
+      width,
+      height,
+      visible: !(record.flags & 0x02),
+      transparencyProtected: Boolean(record.flags & 0x01),
+      opacity: record.opacity / 255,
+      blendMode: blendModeFor(record.blendKey, warnings, record.name),
+      pixels: rgba,
+      mask: maskRgba ? { pixels: maskRgba, disabled: Boolean(record.mask?.disabled) } : null,
+    });
+  }
+
+  let composite = null;
+  if (!layers.length && reader.offset < reader.end) {
+    composite = await decodeComposite(reader, header, maxChannelBytes);
+    if (composite) warnings.push('PSD не содержит импортируемых bitmap-слоёв: использован composite preview');
+  }
+  return { ...header, layers, composite, warnings };
+}
+
 // ---- src/main.js ----
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -4803,7 +5268,7 @@ async function createNewDialog() {
 }
 
 function isImageFile(file) {
-  return Boolean(file) && (String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
+  return Boolean(file) && !isPsdFile(file) && (String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
 }
 function isProjectFile(file) { return Boolean(file) && /\.(zpe|pixforge|json)$/i.test(file.name || ''); }
 function visibleCanvasCenter() {
@@ -4867,10 +5332,103 @@ async function importImages(files, { anchor = null, source = 'Импорт' } = 
   return images.length;
 }
 
+async function rgbaPixelsToDataUrl(width,height,pixels,label='PSD слой'){
+  const size=checkedCanvasSize(width,height,label);
+  if(!(pixels instanceof Uint8Array)&&!(pixels instanceof Uint8ClampedArray))throw new Error(`${label}: отсутствуют RGBA-пиксели`);
+  if(pixels.length!==size.width*size.height*4)throw new Error(`${label}: неверный размер RGBA-буфера`);
+  const canvas=document.createElement('canvas');canvas.width=size.width;canvas.height=size.height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  const imageData=ctx.createImageData(size.width,size.height);
+  imageData.data.set(pixels);
+  ctx.putImageData(imageData,0,0);
+  return canvasToDataURL(canvas,'image/png');
+}
+
+async function openPsd(file){
+  if(blockPendingDocumentEdit())return;
+  if(!canReplaceDocument())return;
+  if(Number(file?.size)>512*1024*1024){
+    const message='PSD больше 512 МБ пока не импортируется: используйте уменьшенную копию или дождитесь tiled/PSB pipeline';
+    toast(message,'error');setStatus(message);return;
+  }
+  const targetDocument=doc;
+  const targetSessionId=activeSessionId;
+  const targetHistoryEntry=history.current();
+  const targetChangeSerial=documentChangeSerial;
+  setStatus('PSD: чтение структуры и каналов…');
+  try{
+    const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
+    const warnings=[...parsed.warnings];
+    if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD пока не переносится как отдельный lock-режим ZPE');
+    const prepared=[];
+    for(const sourceLayer of [...parsed.layers].reverse()){
+      const dataUrl=await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.pixels,`PSD слой «${sourceLayer.name}»`);
+      const maskDataUrl=sourceLayer.mask
+        ? await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.mask.pixels,`Маска PSD слоя «${sourceLayer.name}»`)
+        : null;
+      prepared.push(createRasterLayer({
+        name:sourceLayer.name||'PSD Layer',
+        visible:sourceLayer.visible!==false,
+        opacity:clamp(Number(sourceLayer.opacity),0,1),
+        blendMode:sourceLayer.blendMode||'source-over',
+        x:sourceLayer.x,y:sourceLayer.y,width:sourceLayer.width,height:sourceLayer.height,
+        dataUrl,
+        mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
+      }));
+      sourceLayer.pixels=null;
+      if(sourceLayer.mask)sourceLayer.mask.pixels=null;
+    }
+    if(!prepared.length&&parsed.composite){
+      prepared.push(createRasterLayer({
+        name:'PSD Composite',x:0,y:0,width:parsed.width,height:parsed.height,
+        dataUrl:await rgbaPixelsToDataUrl(parsed.width,parsed.height,parsed.composite,'PSD composite'),
+      }));
+    }
+    if(!prepared.length)throw new Error('PSD не содержит bitmap-данных, которые Stage 3 может импортировать');
+
+    if(doc!==targetDocument||activeSessionId!==targetSessionId||
+      history.current()!==targetHistoryEntry||documentChangeSerial!==targetChangeSerial){
+      setStatus('Импорт PSD отменён: документ изменился во время декодирования');
+      toast('Повторите импорт PSD в нужной вкладке','warn');
+      return;
+    }
+    if(blockPendingDocumentEdit())return;
+    const next=createDocument({
+      name:(file.name||'PSD').replace(/\.psd$/i,''),
+      width:parsed.width,height:parsed.height,background:'transparent'
+    });
+    next.layers=prepared;
+    next.selectedLayerId=prepared.at(-1)?.id??null;
+    history=new HistoryStack(80);
+    setDoc(next,{resetHistory:true,label:'Импорт PSD'});
+    markDirty(true);
+    queueRecovery({immediate:true});
+    fitToView();
+    setStatus(`PSD импортирован: ${prepared.length} слоёв. Сохраните проект как .zpe`);
+    toast(`PSD открыт: ${prepared.length} слоёв`,'success');
+    if(warnings.length){
+      console.warn('PSD import warnings',warnings);
+      toast(`PSD импортирован с ограничениями: ${warnings.length}. Подробности — в консоли`,'warn');
+    }
+  }catch(error){
+    console.error('PSD import failed',{name:file?.name,size:file?.size,error});
+    const message=`Не удалось импортировать PSD: ${error?.message||error}`;
+    alert(message);setStatus('Ошибка импорта PSD');toast(message,'error');
+  }
+}
+
 async function handleIncomingFiles(files, anchor = null, source = 'Импорт') {
   const incoming=[...files];
+  const psdFiles=incoming.filter(isPsdFile);
   const project=incoming.find(isProjectFile);
   const images=incoming.filter(isImageFile);
+  if(psdFiles.length){
+    if(psdFiles.length!==1||incoming.length!==1){
+      toast('PSD открывается как отдельный документ: выберите один PSD-файл за раз','warn');
+      setStatus('Выберите один PSD-файл');return;
+    }
+    await openPsd(psdFiles[0]);return;
+  }
   if (project && images.length===0) { await openProject(project); return; }
   if (images.length) { await importImages(images,{anchor,source}); return; }
   if (project) { await openProject(project); return; }
@@ -5549,7 +6107,7 @@ function fitToView(){const r=els.viewport.getBoundingClientRect();setZoom(fitZoo
 const menus={
   file:[
     ['Новый…','Ctrl+N',createNewDialog],
-    ['Открыть изображение…','Ctrl+O',()=>els.fileInput.click()],
+    ['Открыть изображение / PSD…','Ctrl+O',()=>els.fileInput.click()],
     ['Открыть проект…','',()=>els.projectInput.click()],
     ['Вставить изображение из буфера','Ctrl+V',pasteFromClipboard],
     ['sep'],

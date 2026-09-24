@@ -66,6 +66,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - Undo / Redo и **кликабельная история действий** с переходом прямо к выбранному состоянию;
 - **несколько вкладок документов**: кнопка **«+»** в верхней полосе создаёт сколько угодно независимых вкладок с собственными слоями, историей Undo/Redo, масштабом и признаком несохранённых изменений;
 - импорт PNG/JPEG/WebP/GIF/BMP/SVG;
+- **PSD Import Stage 3**: локальный offline decoder открывает RGB/8-bit `.psd` как редактируемый стек растровых слоёв, переносит bounds, visibility, opacity, поддерживаемые blend modes и bitmap layer masks; raw/RLE/ZIP channel compression декодируется без CDN и внешнего runtime;
 - **перетаскивание изображений с рабочего стола по всему окну редактора**;
 - **вставка изображения из буфера обмена через Ctrl+V** (включая скриншоты);
 - `Ctrl+V` использует нативную вставку и резервное чтение Clipboard API, когда браузер это разрешает;
@@ -157,6 +158,7 @@ npm test
 - `src/core/io.js` — browser I/O helpers;
 - `src/core/pixels.js` — пиксельные операции, включая flood fill;
 - `src/core/recovery.js` — неблокирующее аварийное автосохранение/восстановление через IndexedDB;
+- `src/adapters/psd.js` — изолированный PSD Adapter v1: binary parser, capability guards, channel decompression и нормализованный raster contract;
 - `src/main.js` — исходный UI controller, меню, инструменты, drag/drop, clipboard и shortcuts;
 - `src/app.bundle.js` — готовая браузерная сборка для прямого запуска через `file://`;
 - `tools/build-bundle.mjs` — воспроизводимая сборка runtime без внешних зависимостей;
@@ -166,6 +168,6 @@ npm test
 
 ## Ограничения относительно Photopea
 
-ZeTer Photo Editor пока не поддерживает полноценный PSD/PSB pipeline, smart objects, расширенное редактирование масок, сложные операции над несколькими Bézier-подконтурами/boolean path operations, полный набор типов adjustment layers, CMYK/16/32-bit, RAW, сложное уточнение выделений, content-aware операции и полный набор Photoshop-compatible effects. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
+PSD Import v1 уже открывает RGB/8-bit `.psd` в редактируемые растровые слои, но полноценный PSD round-trip пока не готов: нет PSD export, PSB, сохранения Photoshop text/vector/smart-object semantics, вложенных PSD-групп, CMYK/16/32-bit color pipeline и полного набора Photoshop-compatible effects. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
 
-Следующие крупные направления развития: path operations и vector masks, сложные выделения и маски, маски/режимы наложения для групп, расширенные типы adjustment layers, PSD import/export, более эффективная tiled-история растра и GPU/worker-ускорение для очень больших документов.
+Следующие крупные направления развития: path operations и vector masks, сложные выделения и маски, маски/режимы наложения для групп, расширенные типы adjustment layers, PSD export/round-trip и semantic layer mapping, PSB/16/32-bit/CMYK, более эффективная tiled-история растра и GPU/worker-ускорение для очень больших документов.

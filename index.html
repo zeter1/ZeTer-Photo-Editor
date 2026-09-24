@@ -265,11 +265,11 @@
   <div id="dropOverlay" class="drop-overlay" hidden>
     <div class="drop-overlay-card">
       <strong>Отпустите файл, чтобы открыть его</strong>
-      <span>Изображения добавятся как слои • .zpe / .pixforge откроются как проект</span>
+      <span>Изображения добавятся как слои • PSD откроется как документ • .zpe / .pixforge откроются как проект</span>
     </div>
   </div>
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-  <input id="fileInput" type="file" accept="image/*,.svg,.avif" multiple hidden />
+  <input id="fileInput" type="file" accept="image/*,.svg,.avif,.psd,image/vnd.adobe.photoshop" multiple hidden />
   <input id="projectInput" type="file" accept="application/json,.json,.zpe,.pixforge" hidden />
 
   <script src="./src/app.bundle.js" defer></script>
