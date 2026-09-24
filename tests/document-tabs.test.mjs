@@ -33,3 +33,25 @@ test("tabs UI styles keep the add button directly after the last tab", () => {
   assert.match(css, /\.doc-tab-add/);
   assert.match(html, /id="docTabs"[^>]*><\/div>\s*<button id="addDocTabBtn"/);
 });
+
+test("smart object content tabs link to parent sessions and save back through parent history", () => {
+  assert.match(main, /smartObjectLink: smartObjectLink \? \{ \.\.\.smartObjectLink \} : null/);
+  assert.match(main, /function openSmartObjectContents\(/);
+  assert.match(main, /smartObjectLink:\{parentSessionId,layerId:layer\.id\}/);
+  assert.match(main, /function saveSmartObjectContent\(/);
+  assert.match(main, /parentSession\.history\.push\('Обновить смарт-объект'/);
+  assert.match(main, /parentSession\.dirty=true/);
+  assert.match(main, /session\.dirty=false;dirty=false/);
+});
+
+test("smart object parent tab cannot close while linked content tabs remain open", () => {
+  assert.match(main, /item=>item\.smartObjectLink\?\.parentSessionId===session\.id/);
+  assert.match(main, /Сначала закройте вкладки содержимого смарт-объектов этого документа/);
+});
+
+test("smart object workflow is bounded and respects layer locks", () => {
+  assert.match(main, /function smartObjectSessionDepth\(/);
+  assert.match(main, /smartObjectSessionDepth\(\)>=3/);
+  assert.match(main, /Смарт-объект или его группа заблокированы/);
+  assert.match(main, /Родительский смарт-объект заблокирован/);
+});

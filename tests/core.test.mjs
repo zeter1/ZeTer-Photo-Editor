@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeRect, constrainedRect, fitZoom, resizeFromHandle, layerFrame, frameBounds, hitLayerHandle, pointInLayer, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLayerMove, alignLayerToCanvas } from '../src/core/geometry.js';
 import { HistoryStack } from '../src/core/history.js';
-import { PROJECT_VERSION, createDocument, createShapeLayer, createAdjustmentLayer, createLayerMask, addLayer, duplicateLayer, moveLayer, moveLayerToIndex, removeLayer, snapshotDocument, restoreDocument, sanitizeProject, imageResizeTransforms } from '../src/core/state.js';
+import { PROJECT_VERSION, createDocument, createShapeLayer, createSmartObjectLayer, createAdjustmentLayer, createLayerMask, addLayer, duplicateLayer, moveLayer, moveLayerToIndex, removeLayer, snapshotDocument, restoreDocument, sanitizeProject, imageResizeTransforms } from '../src/core/state.js';
 
 test('normalizeRect handles reverse drags', () => {
   assert.deepEqual(normalizeRect({x:20,y:30},{x:5,y:10}), {x:5,y:10,width:15,height:20});
@@ -286,4 +286,45 @@ test('path sanitizer preserves legacy straight nodes and accepts Bezier handles'
   assert.deepEqual(corner.handleIn,{x:90,y:40});
   assert.equal(corner.handleOut,null);
   assert.equal(corner.kind,'corner');
+});
+
+
+test('smart object layer preserves embedded document and preview in sanitized .zpe state', () => {
+  const embedded=createDocument({name:'embedded',width:64,height:48});
+  addLayer(embedded,createShapeLayer({name:'inside',x:5,y:6,width:20,height:10}));
+  const doc=createDocument({name:'parent',width:320,height:200});
+  addLayer(doc,createSmartObjectLayer({
+    name:'SO',x:10,y:20,width:64,height:48,
+    previewDataUrl:'data:image/png;base64,AAAA',
+    embeddedDocument:embedded,
+  }));
+  const safe=sanitizeProject(JSON.parse(snapshotDocument(doc)));
+  const smart=safe.layers[0];
+  assert.equal(smart.type,'smart-object');
+  assert.equal(smart.previewDataUrl,'data:image/png;base64,AAAA');
+  assert.equal(smart.embeddedDocument.name,'embedded');
+  assert.equal(smart.embeddedDocument.layers[0].name,'inside');
+  assert.equal(smart.embeddedDocument.width,64);
+  assert.equal(smart.embeddedDocument.height,48);
+});
+
+test('smart object sanitizer caps recursive embedded documents at three levels', () => {
+  const makeNested=depth=>{
+    const doc=createDocument({name:`d${depth}`,width:8,height:8});
+    if(depth<5)addLayer(doc,createSmartObjectLayer({
+      name:`so${depth}`,width:8,height:8,
+      previewDataUrl:'data:image/png;base64,AAAA',
+      embeddedDocument:makeNested(depth+1),
+    }));
+    return doc;
+  };
+  const safe=sanitizeProject(makeNested(0));
+  let current=safe;
+  let levels=0;
+  while(current?.layers?.[0]?.type==='smart-object'&&current.layers[0].embeddedDocument){
+    levels+=1;
+    current=current.layers[0].embeddedDocument;
+  }
+  assert.equal(levels,3);
+  assert.equal(current.layers[0].embeddedDocument,null);
 });

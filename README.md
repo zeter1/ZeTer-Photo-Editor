@@ -65,6 +65,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - ограниченный decode-cache изображений и устойчивое продолжение рендера при повреждённом embedded raster;
 - Undo / Redo и **кликабельная история действий** с переходом прямо к выбранному состоянию;
 - **несколько вкладок документов**: кнопка **«+»** в верхней полосе создаёт сколько угодно независимых вкладок с собственными слоями, историей Undo/Redo, масштабом и признаком несохранённых изменений;
+- **Smart Objects Stage 5a**: выбранный raster/text/shape слой можно преобразовать в нативный ZPE smart-object. Исходное содержимое хранится как `embeddedDocument`, отображение — как отдельный `previewDataUrl`; двойной клик по миниатюре открывает содержимое в связанной вкладке, а `Ctrl+S` обновляет preview и создаёт одну запись истории в родительском документе;
 - импорт PNG/JPEG/WebP/GIF/BMP/SVG;
 - **PSD Import Stage 3**: локальный offline decoder открывает RGB/8-bit `.psd` как редактируемый стек растровых слоёв, переносит bounds, visibility, opacity, поддерживаемые blend modes и bitmap layer masks; raw/RLE/ZIP channel compression декодируется без CDN и внешнего runtime;
 - **PSD Export Stage 4**: экспортирует RGB/8-bit `.psd` с отдельными слоями, Unicode-именами, opacity, visibility, поддерживаемыми blend modes, merged transparency и bitmap user masks; каналы пишутся PackBits/RLE без CDN и внешних зависимостей. Text/shape/transforms/filters/styles растрируются в preview соответствующего слоя, а adjustment layers сохраняют визуальный результат через отдельный верхний `ZPE Composite Preview`;
@@ -98,7 +99,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 - `Ctrl+N` — новый документ;
 - `Ctrl+O` — импорт изображения;
-- `Ctrl+S` — сохранить `.zpe`;
+- `Ctrl+S` — сохранить `.zpe`; во вкладке содержимого smart-object — обновить родительский smart-object;
 - `Ctrl+Shift+S` — экспорт;
 - `Ctrl+C` — скопировать активное выделение как PNG из выбранного в инструменте `M` источника: все видимые слои или выбранный слой;
 - `Ctrl+X` — вырезать активное выделение в буфер по выбранному режиму; после операции редактор автоматически переключается на «Перемещение»;
@@ -169,6 +170,6 @@ npm test
 
 ## Ограничения относительно Photopea
 
-PSD Import Stage 3 и PSD Export Stage 4 дают ограниченный RGB/8-bit layered round-trip, но это ещё не полная Photoshop-семантика: нет PSB, native text/vector/smart-object round-trip, вложенных PSD-групп, native Photoshop adjustment-layer mapping, CMYK/16/32-bit color pipeline и полного набора Photoshop-compatible effects. Экспорт сохраняет визуальный результат сложных ZPE-слоёв через raster preview; при наличии adjustment layers добавляется верхний `ZPE Composite Preview`, а исходные слои остаются скрытыми. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
+PSD Import Stage 3 и PSD Export Stage 4 дают ограниченный RGB/8-bit layered round-trip, а ZPE Smart Objects Stage 5a добавляет нативные embedded smart-object documents внутри `.zpe`. Это ещё не полная Photoshop-семантика: нет PSB, native PSD text/vector/smart-object round-trip, вложенных PSD-групп, native Photoshop adjustment-layer mapping, CMYK/16/32-bit color pipeline и полного набора Photoshop-compatible effects. Экспорт сохраняет визуальный результат сложных ZPE-слоёв через raster preview; при наличии adjustment layers добавляется верхний `ZPE Composite Preview`, а исходные слои остаются скрытыми. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
 
-Следующие крупные направления развития: semantic PSD mapping для text/vector/adjustment/smart objects и групп, path operations и vector masks, сложные выделения и маски, PSB/16/32-bit/CMYK, более эффективная tiled-история растра и GPU/worker-ускорение для очень больших документов.
+Следующие крупные направления развития: PSD mapping для embedded smart objects/text/vector/adjustment layers и групп, linked smart objects и smart filters, path operations и vector masks, сложные выделения и маски, PSB/16/32-bit/CMYK, более эффективная tiled-история растра и GPU/worker-ускорение для очень больших документов.

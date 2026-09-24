@@ -1,7 +1,7 @@
 import { HistoryStack } from './core/history.js';
 import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, alignLayerToCanvas, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
-  createDocument, createRasterLayer, createTextLayer, createShapeLayer, createAdjustmentLayer, createLayerMask, createLayerGroup, documentWithTextPreview,
+  createDocument, createRasterLayer, createTextLayer, createShapeLayer, createSmartObjectLayer, createAdjustmentLayer, createLayerMask, createLayerGroup, documentWithTextPreview,
   addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, selectedLayer,
   snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters,
   isLayerVisible, isLayerLocked,
@@ -251,7 +251,7 @@ function loadSession(session) {
   activePrimaryPointerId = null;
   paintPersisting = false;
 }
-function buildSession(documentValue, { label = 'Новый документ', zoomLevel = 0.75, dirtyState = false } = {}) {
+function buildSession(documentValue, { label = 'Новый документ', zoomLevel = 0.75, dirtyState = false, smartObjectLink = null } = {}) {
   const sessionHistory = new HistoryStack(80);
   sessionHistory.reset(label, snapshotDocument(documentValue));
   return {
@@ -260,6 +260,7 @@ function buildSession(documentValue, { label = 'Новый документ', zo
     history: sessionHistory,
     zoom: zoomLevel,
     dirty: dirtyState,
+    smartObjectLink: smartObjectLink ? { ...smartObjectLink } : null,
     cropRect: null,
     selectionRect: null,
     selectionShape: null,
@@ -277,11 +278,11 @@ function renderDocumentTabs() {
     button.className = 'doc-tab';
     button.setAttribute('role', 'tab');
     button.setAttribute('aria-selected', String(session.id === activeSessionId));
-    button.title = session.doc?.name || 'Без имени';
+    button.title = session.smartObjectLink ? `Содержимое смарт-объекта · ${session.doc?.name || 'Без имени'}` : (session.doc?.name || 'Без имени');
 
     const title = document.createElement('span');
     title.className = 'doc-tab-title';
-    title.textContent = session.doc?.name || 'Без имени';
+    title.textContent = `${session.smartObjectLink ? '◇ ' : ''}${session.doc?.name || 'Без имени'}`;
     button.append(title);
 
     const dot = document.createElement('span');
@@ -345,6 +346,11 @@ function closeDocumentTab(id) {
   if (index === -1) return;
   syncCurrentSession();
   const session = documentSessions[index];
+  const childSessions=documentSessions.filter(item=>item.smartObjectLink?.parentSessionId===session.id);
+  if(childSessions.length){
+    const message='Сначала закройте вкладки содержимого смарт-объектов этого документа';
+    setStatus(message);toast(message,'warn');return;
+  }
   if (session.dirty && !window.confirm(`Во вкладке «${session.doc?.name || 'Без имени'}» есть несохранённые изменения. Закрыть её?`)) return;
   documentSessions.splice(index, 1);
   if (!documentSessions.length) {
@@ -1001,8 +1007,9 @@ function updateLayers() {
     eye.setAttribute('aria-label', eye.title);
     eye.onclick = (e) => { e.stopPropagation(); layer.visible = !layer.visible; commit(layer.visible ? 'Показать слой' : 'Скрыть слой'); };
     const thumb = document.createElement('div'); thumb.className = 'layer-thumb';
-    if (layer.type === 'raster' && layer.dataUrl) { const img = new Image(); img.src = layer.dataUrl; thumb.append(img); }
-    else thumb.textContent = layer.type === 'text' ? 'T' : layer.type === 'shape' ? '▭' : layer.type === 'adjustment' ? '◐' : '▦';
+    if ((layer.type === 'raster' && layer.dataUrl) || (layer.type === 'smart-object' && layer.previewDataUrl)) { const img = new Image(); img.src = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl; thumb.append(img); }
+    else thumb.textContent = layer.type === 'text' ? 'T' : layer.type === 'shape' ? '▭' : layer.type === 'adjustment' ? '◐' : layer.type === 'smart-object' ? '◇' : '▦';
+    if (layer.type === 'smart-object') { thumb.title='Двойной клик: редактировать содержимое смарт-объекта'; thumb.ondblclick=e=>{e.stopPropagation();openSmartObjectContents(layer);}; }
     if (layer.mask) thumb.title = layer.mask.enabled === false ? 'Маска отключена' : layer.mask.dataUrl ? 'Есть маска слоя' : 'Маска слоя: показать всё';
     const name = document.createElement('div'); name.className = 'layer-name'; name.textContent = layer.name; name.title = layer.name;
     name.ondblclick = (e) => { e.stopPropagation(); renameLayer(layer); };
@@ -1380,6 +1387,7 @@ function updateProperties() {
   if (l.type === 'shape') extra = l.shape === 'line'
     ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
     : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`;
+  if (l.type === 'smart-object') extra = `<label>Содержимое</label><button type="button" class="mini-button" data-smart-object-edit>Редактировать содержимое</button><label>Источник</label><span>${l.embeddedDocument ? `${l.embeddedDocument.width} × ${l.embeddedDocument.height}` : 'недоступен'}</span>`;
   els.props.innerHTML = `<div class="prop-grid">
     <label>Имя</label><input data-prop="name" value="${escapeAttr(l.name)}">
     ${propField('X','x',Math.round(l.x))}${propField('Y','y',Math.round(l.y))}
@@ -1390,6 +1398,8 @@ function updateProperties() {
     ${extra}
   </div>`;
   bindPropertyInputs(els.props);
+  const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
+  if(smartObjectEdit)smartObjectEdit.addEventListener('click',()=>openSmartObjectContents(l));
   const systemFontInput=els.props.querySelector('#system-font-name');
   if(systemFontInput)systemFontInput.addEventListener('change',()=>{
     const name=systemFontInput.value.trim().slice(0,120);
@@ -2979,7 +2989,7 @@ async function openProject(file) {
     setStatus('Ошибка открытия проекта');
   }
 }
-function saveProject() { if(blockPendingDocumentEdit())return; const name=`${safeFilename(doc.name)}.zpe`; downloadText(JSON.stringify(doc,null,2),name,'application/json'); queueRecovery({immediate:true}); setStatus(`Скачивание ${name} запущено. Проверьте файл перед закрытием вкладки`); }
+function saveProject() { if(blockPendingDocumentEdit())return; const session=currentSession(); if(session?.smartObjectLink){saveSmartObjectContent(session);return;} const name=`${safeFilename(doc.name)}.zpe`; downloadText(JSON.stringify(doc,null,2),name,'application/json'); queueRecovery({immediate:true}); setStatus(`Скачивание ${name} запущено. Проверьте файл перед закрытием вкладки`); }
 
 function psdExportBounds(layer){
   const scale=Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1));
@@ -3608,6 +3618,8 @@ function layerContextMenu(id) {
   const selectedTarget = () => selected()?.id===id && Boolean(target());
   return [
     ['Параметры наложения…','',()=>openBlendingOptions(target()),editable],
+    ['Редактировать содержимое смарт-объекта','',()=>openSmartObjectContents(target()),()=>Boolean(target())&&target().type==='smart-object'],
+    ['Преобразовать в смарт-объект','',()=>{if(selectedTarget())convertSelectedToSmartObject();},()=>selectedTarget()&&editable()&&!['smart-object','adjustment'].includes(target().type)],
     ['sep'],
     ['Переименовать…','F2',()=>renameLayer(target()),editable],
     ['Дублировать','Ctrl+J',()=>{if(selectedTarget())duplicateSelected();},()=>selectedTarget() && editable()],
@@ -3638,6 +3650,127 @@ function groupContextMenu(id) {
   ];
 }
 function addBlankLayer(){addLayer(doc,createRasterLayer({name:'Новый слой',width:doc.width,height:doc.height,dataUrl:null}));brushCanvas=null;commit('Новый растровый слой');}
+function smartObjectSessionDepth(session=currentSession()){
+  let depth=0,current=session;
+  const visited=new Set();
+  while(current?.smartObjectLink){
+    if(visited.has(current.id))break;
+    visited.add(current.id);depth+=1;
+    current=documentSessions.find(item=>item.id===current.smartObjectLink.parentSessionId);
+  }
+  return depth;
+}
+function smartObjectSourceBounds(layer){
+  const scale=Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1));
+  const blur=Math.max(0,Number(layer.filters?.blur)||0)*scale*3;
+  const stroke=layer.type==='shape'?Math.max(0,Number(layer.strokeWidth)||0)*scale/2:0;
+  const bounds=frameBounds(layer,Math.ceil(blur+stroke+layerStyleOutset(layer.styles)*scale+2));
+  const x=Math.floor(bounds.x),y=Math.floor(bounds.y);
+  const width=Math.max(1,Math.ceil(bounds.x+bounds.width)-x);
+  const height=Math.max(1,Math.ceil(bounds.y+bounds.height)-y);
+  checkedCanvasSize(width,height,`Смарт-объект «${layer.name||'Без имени'}»`);
+  return{x,y,width,height};
+}
+async function smartObjectPreviewDataUrl(embeddedDocument){
+  const canvas=document.createElement('canvas');
+  await renderDocument(canvas,embeddedDocument,{checker:false});
+  return canvasToDataURL(canvas,'image/png');
+}
+async function convertSelectedToSmartObject(){
+  if(blockPendingDocumentEdit())return;
+  const source=selected();
+  if(!source||source.type==='smart-object'||source.type==='adjustment'||isLayerLocked(doc,source))return;
+  if(smartObjectSessionDepth()>=3){
+    const message='Достигнут лимит вложенности смарт-объектов: 3 уровня';
+    setStatus(message);toast(message,'warn');return;
+  }
+  const owner=doc,targetSessionId=activeSessionId,index=doc.layers.indexOf(source),original=JSON.stringify(source);
+  const bounds=smartObjectSourceBounds(source);
+  const embedded=createDocument({
+    name:`${source.name||'Слой'} — содержимое`,
+    width:bounds.width,height:bounds.height,background:'transparent'
+  });
+  const inner=structuredClone(source);
+  inner.x-=bounds.x;inner.y-=bounds.y;inner.opacity=1;inner.blendMode='source-over';inner.visible=true;inner.locked=false;inner.groupId=null;
+  embedded.layers=[inner];embedded.selectedLayerId=inner.id;
+  setStatus('Создание смарт-объекта…');
+  try{
+    const previewDataUrl=await smartObjectPreviewDataUrl(embedded);
+    if(doc!==owner||activeSessionId!==targetSessionId||doc.layers[index]!==source||JSON.stringify(source)!==original){
+      setStatus('Преобразование в смарт-объект отменено: слой изменился');return;
+    }
+    const smart=createSmartObjectLayer({
+      id:source.id,name:source.name||'Смарт-объект',visible:source.visible,locked:false,
+      opacity:source.opacity,blendMode:source.blendMode,groupId:source.groupId??null,
+      x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
+      previewDataUrl,embeddedDocument:embedded,
+    });
+    doc.layers.splice(index,1,smart);doc.selectedLayerId=smart.id;
+    commit('Преобразовать в смарт-объект');
+    setStatus('Слой преобразован в смарт-объект');
+  }catch(error){
+    console.error(error);setStatus(`Ошибка создания смарт-объекта: ${error.message}`);toast('Не удалось создать смарт-объект','error');
+  }
+}
+function openSmartObjectContents(layer=selected()){
+  if(blockPendingDocumentEdit())return;
+  if(!layer||layer.type!=='smart-object'||!layer.embeddedDocument){setStatus('У смарт-объекта нет встроенного содержимого');return;}
+  if(isLayerLocked(doc,layer)){setStatus('Смарт-объект или его группа заблокированы');return;}
+  syncCurrentSession();
+  const parentSessionId=activeSessionId;
+  const existing=documentSessions.find(session=>session.smartObjectLink?.parentSessionId===parentSessionId&&session.smartObjectLink?.layerId===layer.id);
+  if(existing){activateDocumentTab(existing.id,{focusViewport:true});return;}
+  const content=restoreDocument(snapshotDocument(layer.embeddedDocument));
+  content.name=`${layer.name||'Смарт-объект'} — содержимое`;
+  const session=buildSession(content,{
+    label:'Содержимое смарт-объекта',zoomLevel:zoom,dirtyState:false,
+    smartObjectLink:{parentSessionId,layerId:layer.id},
+  });
+  const parentIndex=documentSessions.findIndex(item=>item.id===parentSessionId);
+  documentSessions.splice(parentIndex+1,0,session);
+  activeSessionId=session.id;loadSession(session);updateAll();fitToView();
+  setStatus('Содержимое смарт-объекта открыто. Ctrl+S обновит родительский слой.');
+}
+async function saveSmartObjectContent(session=currentSession()){
+  if(!session?.smartObjectLink)return false;
+  if(blockPendingDocumentEdit())return false;
+  syncCurrentSession();
+  const parentSession=documentSessions.find(item=>item.id===session.smartObjectLink.parentSessionId);
+  const parentLayer=parentSession?.doc?.layers?.find(layer=>layer.id===session.smartObjectLink.layerId&&layer.type==='smart-object');
+  if(!parentSession||!parentLayer){
+    const message='Родительский смарт-объект больше недоступен';
+    setStatus(message);toast(message,'error');return false;
+  }
+  if(isLayerLocked(parentSession.doc,parentLayer)){
+    const message='Родительский смарт-объект заблокирован: разблокируйте его перед сохранением содержимого';
+    setStatus(message);toast(message,'warn');return false;
+  }
+  const embedded=restoreDocument(snapshotDocument(session.doc));
+  setStatus('Обновление смарт-объекта…');
+  try{
+    const previewDataUrl=await smartObjectPreviewDataUrl(embedded);
+    const liveParent=documentSessions.find(item=>item.id===session.smartObjectLink.parentSessionId);
+    const liveLayer=liveParent?.doc?.layers?.find(layer=>layer.id===session.smartObjectLink.layerId&&layer.type==='smart-object');
+    if(liveParent!==parentSession||liveLayer!==parentLayer){
+      setStatus('Обновление смарт-объекта отменено: родитель изменился');return false;
+    }
+    const oldPreview=parentLayer.previewDataUrl;
+    parentLayer.embeddedDocument=embedded;
+    parentLayer.previewDataUrl=previewDataUrl;
+    parentLayer.width=embedded.width;parentLayer.height=embedded.height;
+    touch(parentSession.doc);
+    parentSession.history.push('Обновить смарт-объект',snapshotDocument(parentSession.doc));
+    parentSession.dirty=true;
+    session.doc=embedded;doc=embedded;session.dirty=false;dirty=false;
+    invalidateImageCache(oldPreview);
+    renderDocumentTabs();queueRecovery({immediate:true});
+    setStatus('Смарт-объект обновлён в родительском документе');
+    toast('Содержимое смарт-объекта сохранено','success');
+    return true;
+  }catch(error){
+    console.error(error);setStatus(`Ошибка обновления смарт-объекта: ${error.message}`);toast('Не удалось обновить смарт-объект','error');return false;
+  }
+}
 function addAdjustmentLayer(){
   const layer=createAdjustmentLayer({name:'Корректирующий слой',width:doc.width,height:doc.height});
   addLayer(doc,layer);commit('Новый корректирующий слой');
@@ -3754,7 +3887,7 @@ const menus={
     ['Открыть проект…','',()=>els.projectInput.click()],
     ['Вставить изображение из буфера','Ctrl+V',pasteFromClipboard],
     ['sep'],
-    ['Сохранить проект','Ctrl+S',saveProject],
+    ['Сохранить проект / обновить смарт-объект','Ctrl+S',saveProject],
     ['Экспорт…','Ctrl+Shift+S',exportDialog],
   ],
   edit:[
@@ -3777,6 +3910,8 @@ const menus={
     ['Новый растровый слой','Ctrl+Shift+N',addBlankLayer],
     ['Новый корректирующий слой','',addAdjustmentLayer],
     ['Новая группа слоёв','',addGroup],
+    ['Преобразовать в смарт-объект','',convertSelectedToSmartObject,()=>Boolean(selected())&&!['smart-object','adjustment'].includes(selected().type)&&!isLayerLocked(doc,selected())],
+    ['Редактировать содержимое смарт-объекта','',()=>openSmartObjectContents(selected()),()=>selected()?.type==='smart-object'&&Boolean(selected()?.embeddedDocument)],
     ['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],

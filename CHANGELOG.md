@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### 2026-09-24 — Smart Objects Stage 5a: embedded source + linked content tabs
+
+- Added: новый слой `smart-object` хранит `embeddedDocument` как source of truth и `previewDataUrl` как render-cache; схема добавлена обратно совместимо в текущий `.zpe` v1.
+- Added: raster/text/shape слой можно преобразовать в smart-object без растрирования исходной семантики внутри embedded document; внешний opacity/blend/group остаются на smart-object layer.
+- Added: двойной клик по миниатюре, Properties и Layer menu открывают содержимое smart-object в отдельной связанной document tab.
+- Added: `Ctrl+S` внутри content-tab обновляет embedded document и PNG preview родительского слоя, создавая ровно одну запись history в родительской session.
+- Reliability: parent tab нельзя закрыть, пока открыты связанные content-tabs; заблокированный smart-object нельзя редактировать или обновлять через дочернюю вкладку.
+- Reliability: UI и project sanitizer ограничивают рекурсивную вложенность smart-object тремя уровнями; внешние проекты глубже лимита сохраняют preview, но отбрасывают более глубокий embedded source.
+- Added: regression-тесты schema/sanitizer, preview-render и session-link save contract.
+- Known limitation: Stage 5a поддерживает embedded ZPE smart objects; linked external sources, smart filters/warp и native PSD smart-object round-trip ещё не реализованы.
+- Verification: выполняется через PR CI, generated bundle consistency и реальный `file://` browser smoke перед merge.
+
+
 ### 2026-09-24 — PSD pipeline Stage 4: layered RGB/8-bit export
 
 - Added: dependency-free PSD writer в `src/adapters/psd.js` записывает RGB/8-bit PSD version 1 с PackBits/RLE channel data.
