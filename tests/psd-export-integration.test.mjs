@@ -20,9 +20,13 @@ test('PSD Stage 4 writer exposes Photoshop-compatible layered export primitives'
   assert.match(adapter,/export function encodePsd\(/);
   assert.match(adapter,/const PSD_BLEND_KEYS/);
   assert.match(adapter,/writeUnicodeLayerName/);
-  assert.match(adapter,/encodeRlePlane/);
+  assert.match(adapter,/encodeRleRgbaChannel/);
+  assert.match(adapter,/measureRleRgbaRows/);
+  assert.match(adapter,/appendRleRgbaRows/);
   assert.match(adapter,/writeLayerMaskExtra/);
   assert.match(adapter,/const flags = 0x08/);
   assert.match(adapter,/while \(layerInfo\.length % 4\)/);
-  assert.match(adapter,/function compositePlane/);
+  assert.match(adapter,/function encodeCompositeRle/);
+  assert.doesNotMatch(adapter,/function rgbaPlane/);
+  assert.doesNotMatch(adapter,/function compositePlane/);
 });

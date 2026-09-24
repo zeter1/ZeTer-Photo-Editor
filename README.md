@@ -70,6 +70,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - импорт PNG/JPEG/WebP/GIF/BMP/SVG;
 - **PSD Import Stage 3**: локальный offline decoder открывает RGB/8-bit `.psd` как редактируемый стек растровых слоёв, переносит bounds, visibility, opacity, поддерживаемые blend modes и bitmap layer masks; raw/RLE/ZIP channel compression декодируется без CDN и внешнего runtime;
 - **PSD Export Stage 4**: экспортирует RGB/8-bit `.psd` с отдельными слоями, Unicode-именами, opacity, visibility, поддерживаемыми blend modes, merged transparency и bitmap user masks; каналы пишутся PackBits/RLE без CDN и внешних зависимостей. Text/shape/transforms/filters/styles растрируются в preview соответствующего слоя, а adjustment layers сохраняют визуальный результат через отдельный верхний `ZPE Composite Preview`;
+- **PSD Writer Stage 6b**: PackBits/RLE channels кодируются построчно с bounded row buffer, без полноразмерных временных channel planes; крупные writer sections собираются chunk-wise без промежуточных full-section копий. Это снижает peak memory и подготавливает streaming/PSB pipeline;
 - **перетаскивание изображений с рабочего стола по всему окну редактора**;
 - **вставка изображения из буфера обмена через Ctrl+V** (включая скриншоты);
 - `Ctrl+V` использует нативную вставку и резервное чтение Clipboard API, когда браузер это разрешает;
