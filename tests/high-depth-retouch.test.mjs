@@ -50,7 +50,6 @@ test('Stage 12f clone uses an immutable typed snapshot and can copy HDR samples'
     data:new Float32Array([6,3,1.5,1, 1,1,1,1, .25,.5,.75,1]),
   });
   const snapshot=clonePixelBuffer(buffer);
-  const snapshotBefore=[...snapshot.data];
   const changed=applyPixelBufferCloneDab(buffer,snapshot,2.5,.5,.75,{x:-2,y:0},{opacity:1});
   assert.equal(changed,1);
   assert.ok(buffer.data[8]>1);
@@ -141,6 +140,7 @@ test('Stage 13c CMYK clone/heal uses immutable typed source and preserves model'
     ]),
   });
   const snapshot=clonePixelBuffer(buffer);
+  const snapshotBefore=[...snapshot.data];
   const cloned=applyCmykPixelBufferCloneDab(buffer,snapshot,2.5,.5,.75,{x:-2,y:0},{opacity:1});
   assert.equal(cloned,1);
   assert.ok(Math.abs(buffer.data[10]-.9)<1e-5);
