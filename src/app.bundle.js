@@ -538,6 +538,142 @@ function safeFilename(name) {
 }
 
 // ---- src/core/pixels.js ----
+function maskLineExtreme(length, radius, getValue, setValue, useMax) {
+  const r = Math.max(0, Math.trunc(radius));
+  if (!length) return;
+  if (!r) {
+    for (let i = 0; i < length; i += 1) setValue(i, getValue(i));
+    return;
+  }
+  const capacity = length + r * 2 + 2;
+  const indices = new Int32Array(capacity);
+  const values = new Uint8Array(capacity);
+  let head = 0;
+  let tail = 0;
+  const dominates = useMax
+    ? (a, b) => a <= b
+    : (a, b) => a >= b;
+
+  for (let i = -r; i < length + r; i += 1) {
+    const value = i >= 0 && i < length ? getValue(i) : 0;
+    while (tail > head && dominates(values[tail - 1], value)) tail -= 1;
+    indices[tail] = i;
+    values[tail] = value;
+    tail += 1;
+    const minimum = i - r * 2;
+    while (tail > head && indices[head] < minimum) head += 1;
+    if (i >= r) {
+      const target = i - r;
+      if (target < length) setValue(target, values[head]);
+    }
+  }
+}
+
+function maskExtremeFilter(source, width, height, radius, useMax) {
+  const r = Math.max(0, Math.trunc(radius));
+  if (!r) return new Uint8ClampedArray(source);
+  const horizontal = new Uint8ClampedArray(source.length);
+  const output = new Uint8ClampedArray(source.length);
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    maskLineExtreme(
+      width, r,
+      x => source[row + x],
+      (x, value) => { horizontal[row + x] = value; },
+      useMax,
+    );
+  }
+  for (let x = 0; x < width; x += 1) {
+    maskLineExtreme(
+      height, r,
+      y => horizontal[y * width + x],
+      (y, value) => { output[y * width + x] = value; },
+      useMax,
+    );
+  }
+  return output;
+}
+
+function maskBoxBlur(source, width, height, radius) {
+  const r = Math.max(0, Math.trunc(radius));
+  if (!r) return new Uint8ClampedArray(source);
+  const window = r * 2 + 1;
+  const horizontal = new Uint8ClampedArray(source.length);
+  const output = new Uint8ClampedArray(source.length);
+
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    let sum = 0;
+    for (let x = -r; x <= r; x += 1) if (x >= 0 && x < width) sum += source[row + x];
+    horizontal[row] = Math.round(sum / window);
+    for (let x = 1; x < width; x += 1) {
+      const remove = x - r - 1;
+      const add = x + r;
+      if (remove >= 0) sum -= source[row + remove];
+      if (add < width) sum += source[row + add];
+      horizontal[row + x] = Math.round(sum / window);
+    }
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    let sum = 0;
+    for (let y = -r; y <= r; y += 1) if (y >= 0 && y < height) sum += horizontal[y * width + x];
+    output[x] = Math.round(sum / window);
+    for (let y = 1; y < height; y += 1) {
+      const remove = y - r - 1;
+      const add = y + r;
+      if (remove >= 0) sum -= horizontal[remove * width + x];
+      if (add < height) sum += horizontal[add * width + x];
+      output[y * width + x] = Math.round(sum / window);
+    }
+  }
+  return output;
+}
+function refineMaskAlpha(alpha, width, height, {
+  smooth = 0,
+  shift = 0,
+  feather = 0,
+  contrast = 0,
+  invert = false,
+} = {}) {
+  if (!(alpha instanceof Uint8Array || alpha instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидался 8-bit alpha mask');
+  }
+  const w = Math.max(0, Math.trunc(width));
+  const h = Math.max(0, Math.trunc(height));
+  if (!w || !h || alpha.length < w * h) return new Uint8ClampedArray();
+  let output = new Uint8ClampedArray(alpha.slice(0, w * h));
+
+  const smoothRadius = clamp(Math.round(Number(smooth) || 0), 0, 32);
+  if (smoothRadius > 0) {
+    output = maskBoxBlur(output, w, h, smoothRadius);
+    for (let i = 0; i < output.length; i += 1) output[i] = output[i] >= 128 ? 255 : 0;
+  }
+
+  const edgeShift = clamp(Math.round(Number(shift) || 0), -64, 64);
+  if (edgeShift > 0) output = maskExtremeFilter(output, w, h, edgeShift, true);
+  else if (edgeShift < 0) output = maskExtremeFilter(output, w, h, -edgeShift, false);
+
+  const featherRadius = clamp(Number(feather) || 0, 0, 64);
+  if (featherRadius > 0) {
+    const radius = Math.max(1, Math.round(featherRadius / 2));
+    output = maskBoxBlur(output, w, h, radius);
+    output = maskBoxBlur(output, w, h, radius);
+  }
+
+  const edgeContrast = clamp(Number(contrast) || 0, 0, 100);
+  if (edgeContrast > 0) {
+    const slope = 1 + edgeContrast / 25;
+    for (let i = 0; i < output.length; i += 1) {
+      output[i] = clamp(Math.round(128 + (output[i] - 128) * slope), 0, 255);
+    }
+  }
+
+  if (invert) {
+    for (let i = 0; i < output.length; i += 1) output[i] = 255 - output[i];
+  }
+  return output;
+}
 function hexToRgb(hex) {
   const value = String(hex || '').trim();
   const short = /^#([0-9a-f]{3})$/i.exec(value);
@@ -7693,7 +7829,7 @@ function addAdjustmentLayer(){
   addLayer(doc,layer);commit('Новый корректирующий слой');
   setStatus('Корректирующий слой применяет цвет и эффекты ко всему нижележащему стеку');
 }
-async function selectionMaskDataUrl(layer){
+async function selectionMaskDataUrl(layer,{smooth=0,shift=0,feather=0,contrast=0,invert=false}={}){
   if(!selectionShape)return null;
   const width=layer.type==='adjustment'?doc.width:Math.max(1,Math.round(layer.width||1));
   const height=layer.type==='adjustment'?doc.height:Math.max(1,Math.round(layer.height||1));
@@ -7711,6 +7847,21 @@ async function selectionMaskDataUrl(layer){
       ctx.closePath();ctx.fill();
     }
   }
+  const needsRefine=Number(smooth)>0||Number(shift)!==0||Number(feather)>0||Number(contrast)>0||Boolean(invert);
+  if(needsRefine){
+    const pixels=width*height;
+    if(pixels>12_000_000)throw new Error('Уточнение края ограничено маской до 12 МП. Уменьшите слой или используйте обычную маску из выделения.');
+    const image=ctx.getImageData(0,0,width,height);
+    const alpha=new Uint8ClampedArray(pixels);
+    for(let i=0;i<pixels;i+=1)alpha[i]=image.data[i*4+3];
+    const refined=refineMaskAlpha(alpha,width,height,{smooth,shift,feather,contrast,invert});
+    for(let i=0;i<pixels;i+=1){
+      const offset=i*4;
+      image.data[offset]=255;image.data[offset+1]=255;image.data[offset+2]=255;image.data[offset+3]=refined[i];
+    }
+    ctx.clearRect(0,0,width,height);
+    ctx.putImageData(image,0,0);
+  }
   return canvasToDataURL(canvas,'image/png');
 }
 async function addSelectedLayerMask(fromSelection=false){
@@ -7724,6 +7875,40 @@ async function addSelectedLayerMask(fromSelection=false){
   commit(fromSelection?'Добавить маску из выделения':'Добавить маску слоя');
   setStatus(fromSelection?'Маска слоя создана из текущего выделения':'Добавлена маска «показать всё»');
 }
+
+async function refineSelectionToLayerMask(){
+  const layer=selected();
+  if(!layer){setStatus('Сначала выберите слой');return;}
+  if(!selectionShape){setStatus('Сначала создайте выделение');return;}
+  if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}
+  const scale=layer.type==='adjustment'?1:Math.max(.01,(Math.abs(Number(layer.scaleX)||1)+Math.abs(Number(layer.scaleY)||1))/2);
+  showModal({
+    title:'Уточнить выделение → маска слоя',
+    fields:[
+      {name:'smooth',label:'Сглаживание, px',type:'number',value:2,min:0,max:32,step:1},
+      {name:'shift',label:'Расширить / сжать, px',type:'number',value:0,min:-64,max:64,step:1},
+      {name:'feather',label:'Растушёвка, px',type:'number',value:1,min:0,max:64,step:.5},
+      {name:'contrast',label:'Контраст края, %',type:'number',value:0,min:0,max:100,step:1},
+      {name:'invert',label:'Инвертировать маску',type:'select',value:'no',options:[['no','Нет'],['yes','Да']]},
+    ],
+    submitLabel:layer.mask?'Заменить маску':'Создать маску',
+    onSubmit:async values=>{
+      const options={
+        smooth:clamp(Number(values.smooth)||0,0,32)/scale,
+        shift:clamp(Number(values.shift)||0,-64,64)/scale,
+        feather:clamp(Number(values.feather)||0,0,64)/scale,
+        contrast:clamp(Number(values.contrast)||0,0,100),
+        invert:values.invert==='yes',
+      };
+      const dataUrl=await selectionMaskDataUrl(layer,options);
+      layer.mask=createLayerMask({enabled:true,dataUrl});
+      commit(layer.mask?'Уточнить маску слоя':'Создать уточнённую маску слоя');
+      setStatus(`Маска уточнена: сглаживание ${Number(values.smooth)||0}px, край ${Number(values.shift)||0}px, растушёвка ${Number(values.feather)||0}px`);
+      return true;
+    },
+  });
+}
+
 function removeSelectedLayerMask(){
   const layer=selected();
   if(!layer?.mask||isLayerLocked(doc,layer))return;
@@ -7836,6 +8021,7 @@ const menus={
     ['sep'],
     ['Добавить маску (показать всё)','',()=>addSelectedLayerMask(false),()=>Boolean(selected())&&!selected().mask&&!isLayerLocked(doc,selected())],
     ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>Boolean(selected())&&!selected().mask&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Уточнить выделение → маска…','',refineSelectionToLayerMask,()=>Boolean(selected())&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Удалить маску','',removeSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Центрировать слой на холсте','',centerSelectedLayer,()=>isTransformableLayer(selected())&&!isLayerLocked(doc,selected())],
@@ -7865,6 +8051,8 @@ const menus={
     ['sep'],
     ['Очистить пиксели выделения','Delete',()=>clearSelectedPixels(),()=>Boolean(selectionRect)&&isEditableRasterLayer(selected())],
     ['Кадрировать по выделению','',cropToSelection,()=>Boolean(selectionRect)],
+    ['sep'],
+    ['Уточнить выделение → маска…','',refineSelectionToLayerMask,()=>Boolean(selectionShape)&&Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],
   view:[
     ['Вписать в окно','0',fitToView],

@@ -8,7 +8,7 @@ import {
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename } from './core/io.js';
-import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb } from './core/pixels.js';
+import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha } from './core/pixels.js';
 import { pixelBufferToRgba8Preview } from './core/pixel-buffer.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
@@ -3952,7 +3952,7 @@ function addAdjustmentLayer(){
   addLayer(doc,layer);commit('Новый корректирующий слой');
   setStatus('Корректирующий слой применяет цвет и эффекты ко всему нижележащему стеку');
 }
-async function selectionMaskDataUrl(layer){
+async function selectionMaskDataUrl(layer,{smooth=0,shift=0,feather=0,contrast=0,invert=false}={}){
   if(!selectionShape)return null;
   const width=layer.type==='adjustment'?doc.width:Math.max(1,Math.round(layer.width||1));
   const height=layer.type==='adjustment'?doc.height:Math.max(1,Math.round(layer.height||1));
@@ -3970,6 +3970,21 @@ async function selectionMaskDataUrl(layer){
       ctx.closePath();ctx.fill();
     }
   }
+  const needsRefine=Number(smooth)>0||Number(shift)!==0||Number(feather)>0||Number(contrast)>0||Boolean(invert);
+  if(needsRefine){
+    const pixels=width*height;
+    if(pixels>12_000_000)throw new Error('Уточнение края ограничено маской до 12 МП. Уменьшите слой или используйте обычную маску из выделения.');
+    const image=ctx.getImageData(0,0,width,height);
+    const alpha=new Uint8ClampedArray(pixels);
+    for(let i=0;i<pixels;i+=1)alpha[i]=image.data[i*4+3];
+    const refined=refineMaskAlpha(alpha,width,height,{smooth,shift,feather,contrast,invert});
+    for(let i=0;i<pixels;i+=1){
+      const offset=i*4;
+      image.data[offset]=255;image.data[offset+1]=255;image.data[offset+2]=255;image.data[offset+3]=refined[i];
+    }
+    ctx.clearRect(0,0,width,height);
+    ctx.putImageData(image,0,0);
+  }
   return canvasToDataURL(canvas,'image/png');
 }
 async function addSelectedLayerMask(fromSelection=false){
@@ -3983,6 +3998,40 @@ async function addSelectedLayerMask(fromSelection=false){
   commit(fromSelection?'Добавить маску из выделения':'Добавить маску слоя');
   setStatus(fromSelection?'Маска слоя создана из текущего выделения':'Добавлена маска «показать всё»');
 }
+
+async function refineSelectionToLayerMask(){
+  const layer=selected();
+  if(!layer){setStatus('Сначала выберите слой');return;}
+  if(!selectionShape){setStatus('Сначала создайте выделение');return;}
+  if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}
+  const scale=layer.type==='adjustment'?1:Math.max(.01,(Math.abs(Number(layer.scaleX)||1)+Math.abs(Number(layer.scaleY)||1))/2);
+  showModal({
+    title:'Уточнить выделение → маска слоя',
+    fields:[
+      {name:'smooth',label:'Сглаживание, px',type:'number',value:2,min:0,max:32,step:1},
+      {name:'shift',label:'Расширить / сжать, px',type:'number',value:0,min:-64,max:64,step:1},
+      {name:'feather',label:'Растушёвка, px',type:'number',value:1,min:0,max:64,step:.5},
+      {name:'contrast',label:'Контраст края, %',type:'number',value:0,min:0,max:100,step:1},
+      {name:'invert',label:'Инвертировать маску',type:'select',value:'no',options:[['no','Нет'],['yes','Да']]},
+    ],
+    submitLabel:layer.mask?'Заменить маску':'Создать маску',
+    onSubmit:async values=>{
+      const options={
+        smooth:clamp(Number(values.smooth)||0,0,32)/scale,
+        shift:clamp(Number(values.shift)||0,-64,64)/scale,
+        feather:clamp(Number(values.feather)||0,0,64)/scale,
+        contrast:clamp(Number(values.contrast)||0,0,100),
+        invert:values.invert==='yes',
+      };
+      const dataUrl=await selectionMaskDataUrl(layer,options);
+      layer.mask=createLayerMask({enabled:true,dataUrl});
+      commit(layer.mask?'Уточнить маску слоя':'Создать уточнённую маску слоя');
+      setStatus(`Маска уточнена: сглаживание ${Number(values.smooth)||0}px, край ${Number(values.shift)||0}px, растушёвка ${Number(values.feather)||0}px`);
+      return true;
+    },
+  });
+}
+
 function removeSelectedLayerMask(){
   const layer=selected();
   if(!layer?.mask||isLayerLocked(doc,layer))return;
@@ -4095,6 +4144,7 @@ const menus={
     ['sep'],
     ['Добавить маску (показать всё)','',()=>addSelectedLayerMask(false),()=>Boolean(selected())&&!selected().mask&&!isLayerLocked(doc,selected())],
     ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>Boolean(selected())&&!selected().mask&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Уточнить выделение → маска…','',refineSelectionToLayerMask,()=>Boolean(selected())&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Удалить маску','',removeSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Центрировать слой на холсте','',centerSelectedLayer,()=>isTransformableLayer(selected())&&!isLayerLocked(doc,selected())],
@@ -4124,6 +4174,8 @@ const menus={
     ['sep'],
     ['Очистить пиксели выделения','Delete',()=>clearSelectedPixels(),()=>Boolean(selectionRect)&&isEditableRasterLayer(selected())],
     ['Кадрировать по выделению','',cropToSelection,()=>Boolean(selectionRect)],
+    ['sep'],
+    ['Уточнить выделение → маска…','',refineSelectionToLayerMask,()=>Boolean(selectionShape)&&Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],
   view:[
     ['Вписать в окно','0',fitToView],

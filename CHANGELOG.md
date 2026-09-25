@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-25 — Select & Mask Foundation Stage 9a
+
+- Added: «Уточнить выделение → маска…» в меню «Выделение» и «Слой».
+- Controls: сглаживание, расширение/сжатие края, растушёвка, контраст края и инверсия.
+- Core: новый pure helper `refineMaskAlpha()` реализует separable morphology/blur pipeline для 8-bit alpha masks и покрыт unit tests.
+- Geometry: параметры в px документа пересчитываются в layer-pixel space для масштабированных слоёв; adjustment layer работает в координатах документа.
+- Safety: refinement масок больше 12 МП отклоняется понятной ошибкой вместо потенциальной блокировки вкладки; обычная маска из выделения остаётся без этого дополнительного CPU-heavy этапа.
+- Regression: grow/shrink, noise smoothing, soft feather, contrast/invert и UI wiring.
+
 ### 2026-09-25 — Group Compositing Stage 8e
 
 - Added: ZPE groups получили `opacity` и `blendMode` с backward-compatible defaults `1` и `pass-through`.
