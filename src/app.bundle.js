@@ -1362,6 +1362,132 @@ function pixelBufferWithStraightAlpha(buffer) {
     colorSpace:buffer.colorSpace,alphaMode:'straight',profileName:buffer.profileName,data:output,
   });
 }
+const MAX_HIGH_DEPTH_COMPOSITE_BYTES = 256 * 1024 * 1024;
+const HIGH_DEPTH_COMPOSITE_BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+
+function compositeColorSample(buffer, index, targetLinear) {
+  let value = sourceSampleValue(buffer, index);
+  const colorSpace = String(buffer.colorSpace || '');
+  const sourceLinear = /linear/i.test(colorSpace);
+  const sourceSrgb = /srgb/i.test(colorSpace) && !sourceLinear;
+  if (targetLinear && sourceSrgb) value = srgbToLinear(value);
+  else if (!targetLinear && sourceLinear) value = linearToSrgb(value);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function compositeBlendChannel(mode, backdrop, source) {
+  const cb = Number.isFinite(backdrop) ? backdrop : 0;
+  const cs = Number.isFinite(source) ? source : 0;
+  if (mode === 'multiply') return cb * cs;
+  if (mode === 'screen') return cb + cs - cb * cs;
+  if (mode === 'overlay') return cb <= 0.5 ? 2 * cb * cs : 1 - 2 * (1 - cb) * (1 - cs);
+  if (mode === 'darken') return Math.min(cb, cs);
+  if (mode === 'lighten') return Math.max(cb, cs);
+  if (mode === 'color-dodge') {
+    if (cs >= 1) return 1;
+    const base = clampPreview01(cb);
+    return Math.min(1, base / Math.max(1e-12, 1 - clampPreview01(cs)));
+  }
+  if (mode === 'color-burn') {
+    if (cs <= 0) return 0;
+    const base = clampPreview01(cb);
+    return 1 - Math.min(1, (1 - base) / Math.max(1e-12, clampPreview01(cs)));
+  }
+  return cs;
+}
+
+function compositeBackgroundInto(buffer, background, targetLinear) {
+  if (!background) return;
+  const descriptor = Array.isArray(background) ? { rgba:background, colorSpace:'srgb' } : background;
+  const rgba = Array.isArray(descriptor?.rgba) ? descriptor.rgba : null;
+  if (!rgba || rgba.length < 3) throw new TypeError('High-depth composite background требует RGB/RGBA');
+  const sourceSpace = String(descriptor.colorSpace || 'srgb');
+  const sourceLinear = /linear/i.test(sourceSpace);
+  const sourceSrgb = /srgb/i.test(sourceSpace) && !sourceLinear;
+  let r = Number(rgba[0]) || 0;
+  let g = Number(rgba[1]) || 0;
+  let b = Number(rgba[2]) || 0;
+  if (targetLinear && sourceSrgb) { r=srgbToLinear(r); g=srgbToLinear(g); b=srgbToLinear(b); }
+  else if (!targetLinear && sourceLinear) { r=linearToSrgb(r); g=linearToSrgb(g); b=linearToSrgb(b); }
+  const alpha = clampPreview01(rgba.length > 3 ? rgba[3] : 1);
+  for (let pixelIndex=0; pixelIndex<buffer.width*buffer.height; pixelIndex+=1) {
+    const offset=pixelIndex*4;
+    writeNormalizedSample(buffer,offset,r);
+    writeNormalizedSample(buffer,offset+1,g);
+    writeNormalizedSample(buffer,offset+2,b);
+    writeNormalizedSample(buffer,offset+3,alpha);
+  }
+}
+function compositePixelBufferLayers(width, height, layers = [], {
+  bitsPerChannel = 16,
+  colorSpace = bitsPerChannel === 32 ? 'linear-rgb-unmanaged' : 'srgb',
+  background = null,
+  maxBytes = MAX_HIGH_DEPTH_COMPOSITE_BYTES,
+} = {}) {
+  const w=integer(width,'High-depth composite width');
+  const h=integer(height,'High-depth composite height');
+  const depth=integer(bitsPerChannel,'High-depth composite bitsPerChannel');
+  if (![8,16,32].includes(depth)) throw new TypeError('High-depth composite поддерживает только 8/16/32-bit');
+  const sampleCount=w*h*4;
+  if (!Number.isSafeInteger(sampleCount)) throw new RangeError('High-depth composite слишком большой для безопасной адресации');
+  const requiredBytes=sampleCount*(depth/8);
+  const limit=Math.trunc(Number(maxBytes));
+  if (!Number.isSafeInteger(limit)||limit<=0) throw new TypeError('High-depth composite maxBytes должен быть положительным целым числом');
+  if (requiredBytes>limit) throw new RangeError('High-depth composite требует ' + requiredBytes + ' байт, лимит ' + limit);
+
+  const output=createPixelBuffer({
+    width:w,height:h,model:'rgb',channels:4,bitsPerChannel:depth,
+    colorSpace:String(colorSpace || (depth===32?'linear-rgb-unmanaged':'srgb')),alphaMode:'straight',
+  });
+  const targetLinear=/linear/i.test(output.colorSpace || '');
+  compositeBackgroundInto(output,background,targetLinear);
+
+  for (const entry of Array.isArray(layers)?layers:[]) {
+    const source=entry?.buffer;
+    if (!isPixelBuffer(source)||source.model!=='rgb'||![3,4].includes(source.channels)) {
+      throw new TypeError('High-depth composite layer требует RGB PixelBuffer');
+    }
+    const mode=HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
+    const opacity=clampPreview01(entry?.opacity ?? 1);
+    if (opacity<=0) continue;
+    const x=Math.trunc(Number(entry?.x)||0);
+    const y=Math.trunc(Number(entry?.y)||0);
+    const mask=entry?.maskPixels || null;
+    if (mask && (!ArrayBuffer.isView(mask) || mask.length < source.width*source.height*4)) {
+      throw new RangeError('High-depth composite mask имеет неверный размер');
+    }
+    const left=Math.max(0,-x),top=Math.max(0,-y);
+    const right=Math.min(source.width,w-x),bottom=Math.min(source.height,h-y);
+    if (left>=right||top>=bottom) continue;
+
+    for (let sy=top; sy<bottom; sy+=1) {
+      const dy=y+sy;
+      for (let sx=left; sx<right; sx+=1) {
+        const dx=x+sx;
+        const sourcePixel=sy*source.width+sx;
+        const sourceOffset=sourcePixel*source.channels;
+        const targetOffset=(dy*w+dx)*4;
+        const sourceAlpha=clampPreview01((source.channels===4?sourceSampleValue(source,sourceOffset+3):1)*opacity*(mask?clampPreview01(Number(mask[sourcePixel*4+3]??255)/255):1));
+        if (sourceAlpha<=0) continue;
+        const backdropAlpha=clampPreview01(normalizedSample(output,targetOffset+3));
+        const outputAlpha=sourceAlpha+backdropAlpha*(1-sourceAlpha);
+        if (outputAlpha<=0) continue;
+
+        for (let channel=0; channel<3; channel+=1) {
+          const sourceColor=compositeColorSample(source,sourceOffset+channel,targetLinear);
+          const backdropColor=normalizedSample(output,targetOffset+channel);
+          const blended=compositeBlendChannel(mode,backdropColor,sourceColor);
+          const premultiplied=
+            sourceAlpha*((1-backdropAlpha)*sourceColor+backdropAlpha*blended)
+            + backdropAlpha*(1-sourceAlpha)*backdropColor;
+          writeNormalizedSample(output,targetOffset+channel,premultiplied/outputAlpha);
+        }
+        writeNormalizedSample(output,targetOffset+3,outputAlpha);
+      }
+    }
+  }
+  return output;
+}
 
 function uiSrgbRgbForBuffer(buffer, rgb8) {
   if (!Array.isArray(rgb8) || rgb8.length < 3) throw new TypeError('Для high-depth editing нужен RGB-цвет');
@@ -9507,15 +9633,125 @@ function nativePsdBounds(layer,buffer){
   return{x:Math.trunc(Number(layer.x)||0),y:Math.trunc(Number(layer.y)||0),width:buffer.width,height:buffer.height};
 }
 
-function exactHighDepthCompositeCandidate(exportDoc,planned,hasAdjustmentLayers){
-  if(hasAdjustmentLayers)return null;
-  const visible=planned.filter(item=>isLayerVisible(exportDoc,item.layer));
-  if(visible.length!==1)return null;
-  const item=visible[0],layer=item.layer,buffer=item.nativePixelBuffer;
-  if(!buffer||layer.groupId||layer.mask||layer.vectorMask)return null;
-  if(Math.abs(Number(layer.opacity??1)-1)>1e-9||(layer.blendMode||'source-over')!=='source-over')return null;
-  if(item.bounds.x!==0||item.bounds.y!==0||item.bounds.width!==exportDoc.width||item.bounds.height!==exportDoc.height)return null;
-  return buffer;
+function highDepthCompositePlan(exportDoc,planned){
+  const groups=Array.isArray(exportDoc.groups)?exportDoc.groups:[];
+  const groupMap=new Map(groups.map(group=>[group.id,group]).filter(([id])=>Boolean(id)));
+  const plannedById=new Map(planned.map(item=>[item.layer.id,item]));
+  const directLayers=new Map(),childGroups=new Map(),groupRanks=new Map();
+  const append=(map,key,value)=>{if(!map.has(key))map.set(key,[]);map.get(key).push(value);};
+  for(const group of groups){
+    const parentId=group.parentGroupId&&groupMap.has(group.parentGroupId)?group.parentGroupId:null;
+    append(childGroups,parentId,group);
+  }
+  for(let index=0;index<exportDoc.layers.length;index+=1){
+    const layer=exportDoc.layers[index];
+    const groupId=layer.groupId&&groupMap.has(layer.groupId)?layer.groupId:null;
+    const plannedItem=plannedById.get(layer.id);
+    if(plannedItem)append(directLayers,groupId,{item:plannedItem,index});
+    let currentId=groupId;
+    const seen=new Set();
+    while(currentId&&!seen.has(currentId)){
+      seen.add(currentId);
+      if(!groupRanks.has(currentId)||index<groupRanks.get(currentId))groupRanks.set(currentId,index);
+      const current=groupMap.get(currentId);
+      currentId=current?.parentGroupId&&groupMap.has(current.parentGroupId)?current.parentGroupId:null;
+    }
+  }
+  const entriesFor=parentId=>{
+    const entries=[];
+    for(const direct of directLayers.get(parentId)||[])entries.push({type:'layer',item:direct.item,rank:direct.index,order:direct.index});
+    for(const group of childGroups.get(parentId)||[])entries.push({type:'group',group,rank:groupRanks.get(group.id)??Number.POSITIVE_INFINITY,order:groups.indexOf(group)});
+    entries.sort((a,b)=>a.rank-b.rank||a.order-b.order);
+    return entries;
+  };
+  const ordered=[],active=new Set();
+  let reason=null;
+  const visit=parentId=>{
+    for(const entry of entriesFor(parentId)){
+      if(reason)return;
+      if(entry.type==='layer'){
+        if(isLayerVisible(exportDoc,entry.item.layer)&&Number(entry.item.layer.opacity??1)>0)ordered.push(entry.item);
+        continue;
+      }
+      const group=entry.group;
+      if(!group||group.visible===false||Number(group.opacity??1)<=0)continue;
+      const mode=group.blendMode||'pass-through';
+      if(mode!=='pass-through'||Math.abs(Number(group.opacity??1)-1)>1e-9){
+        reason='группа «'+(group.name||'Без имени')+'» требует isolated Canvas group composite';
+        return;
+      }
+      if(active.has(group.id)){reason='обнаружен цикл групп';return;}
+      active.add(group.id);visit(group.id);active.delete(group.id);
+    }
+  };
+  visit(null);
+  return{items:ordered,reason};
+}
+
+function highDepthCompositeBackground(exportDoc){
+  if(!exportDoc.background||exportDoc.background==='transparent')return{background:null,reason:null};
+  try{
+    const [r,g,b]=hexToRgb(exportDoc.background);
+    return{background:{rgba:[r/255,g/255,b/255,1],colorSpace:'srgb'},reason:null};
+  }catch(error){
+    return{background:null,reason:'фон документа не является поддерживаемым RGB hex-цветом'};
+  }
+}
+
+function buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings){
+  if(bitsPerChannel<=8||hasAdjustmentLayers)return null;
+  const plan=highDepthCompositePlan(exportDoc,planned);
+  if(plan.reason){
+    warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: '+plan.reason);
+    return null;
+  }
+  const vectorMasked=plan.items.find(item=>item.layer.vectorMask?.enabled!==false&&item.layer.vectorMask?.subpaths?.length);
+  if(vectorMasked){
+    warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: vector mask слоя «'+(vectorMasked.layer.name||'Без имени')+'» пока требует rasterized mask bridge');
+    return null;
+  }
+  const backgroundInfo=highDepthCompositeBackground(exportDoc);
+  if(backgroundInfo.reason){
+    warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: '+backgroundInfo.reason);
+    return null;
+  }
+  const requiredBytes=exportDoc.width*exportDoc.height*4*(bitsPerChannel/8);
+  if(!Number.isSafeInteger(requiredBytes)||requiredBytes>MAX_HIGH_DEPTH_COMPOSITE_BYTES){
+    warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: typed output требует около '+Math.ceil(requiredBytes/1048576)+' МБ при лимите '+Math.floor(MAX_HIGH_DEPTH_COMPOSITE_BYTES/1048576)+' МБ');
+    return null;
+  }
+  const preparedByLayerId=new Map(planned.map((item,index)=>[item.layer.id,prepared[index]]));
+  const layers=[];
+  for(const item of plan.items){
+    const exported=preparedByLayerId.get(item.layer.id);
+    if(!exported)continue;
+    let buffer=item.nativePixelBuffer;
+    if(!buffer){
+      if(!exported.pixels){
+        warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: нет raster preview для слоя «'+(item.layer.name||'Без имени')+'»');
+        return null;
+      }
+      buffer=createRgba8PixelBuffer(exported.width,exported.height,exported.pixels,{colorSpace:'srgb'});
+    }
+    layers.push({
+      buffer,x:item.bounds.x,y:item.bounds.y,
+      opacity:clamp(Number(item.layer.opacity??1),0,1),
+      blendMode:item.layer.blendMode||'source-over',
+      maskPixels:exported.mask&&!exported.mask.disabled?exported.mask.pixels:null,
+    });
+  }
+  try{
+    return compositePixelBufferLayers(exportDoc.width,exportDoc.height,layers,{
+      bitsPerChannel,
+      colorSpace:bitsPerChannel===32?'linear-rgb-unmanaged':'srgb',
+      background:backgroundInfo.background,
+      maxBytes:MAX_HIGH_DEPTH_COMPOSITE_BYTES,
+    });
+  }catch(error){
+    console.warn('Stage 12g typed merged composite failed; using Canvas8 fallback',error);
+    warnings.push('Stage 12g: typed merged composite не собран ('+(error?.message||error)+'); использован Canvas8 fallback');
+    return null;
+  }
 }
 
 async function preparePsdExport(exportDoc){
@@ -9582,11 +9818,14 @@ async function preparePsdExport(exportDoc){
     prepared.push(item);
   }
 
-  const compositePixelBuffer=exactHighDepthCompositeCandidate(exportDoc,planned,hasAdjustmentLayers);
-  const compositeCanvas=document.createElement('canvas');
-  await renderDocument(compositeCanvas,exportDoc,{checker:false});
-  const composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
-  if(bitsPerChannel>8&&!compositePixelBuffer)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite построен из текущего 8-bit Canvas renderer и затем расширен до глубины документа`);
+  const compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
+  let composite=null;
+  if(!compositePixelBuffer){
+    const compositeCanvas=document.createElement('canvas');
+    await renderDocument(compositeCanvas,exportDoc,{checker:false});
+    composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
+    if(bitsPerChannel>8)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite использует 8-bit Canvas fallback и затем расширяется до глубины документа`);
+  }
 
   if(hasAdjustmentLayers){
     warnings.push('Adjustment layers Stage 1 не имеют Photoshop-semantic mapping: визуальный результат сохранён через верхний Composite Preview, исходные слои оставлены скрытыми');

@@ -317,6 +317,134 @@ export function pixelBufferWithStraightAlpha(buffer) {
   });
 }
 
+export const MAX_HIGH_DEPTH_COMPOSITE_BYTES = 256 * 1024 * 1024;
+const HIGH_DEPTH_COMPOSITE_BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+
+function compositeColorSample(buffer, index, targetLinear) {
+  let value = sourceSampleValue(buffer, index);
+  const colorSpace = String(buffer.colorSpace || '');
+  const sourceLinear = /linear/i.test(colorSpace);
+  const sourceSrgb = /srgb/i.test(colorSpace) && !sourceLinear;
+  if (targetLinear && sourceSrgb) value = srgbToLinear(value);
+  else if (!targetLinear && sourceLinear) value = linearToSrgb(value);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function compositeBlendChannel(mode, backdrop, source) {
+  const cb = Number.isFinite(backdrop) ? backdrop : 0;
+  const cs = Number.isFinite(source) ? source : 0;
+  if (mode === 'multiply') return cb * cs;
+  if (mode === 'screen') return cb + cs - cb * cs;
+  if (mode === 'overlay') return cb <= 0.5 ? 2 * cb * cs : 1 - 2 * (1 - cb) * (1 - cs);
+  if (mode === 'darken') return Math.min(cb, cs);
+  if (mode === 'lighten') return Math.max(cb, cs);
+  if (mode === 'color-dodge') {
+    if (cs >= 1) return 1;
+    const base = clampPreview01(cb);
+    return Math.min(1, base / Math.max(1e-12, 1 - clampPreview01(cs)));
+  }
+  if (mode === 'color-burn') {
+    if (cs <= 0) return 0;
+    const base = clampPreview01(cb);
+    return 1 - Math.min(1, (1 - base) / Math.max(1e-12, clampPreview01(cs)));
+  }
+  return cs;
+}
+
+function compositeBackgroundInto(buffer, background, targetLinear) {
+  if (!background) return;
+  const descriptor = Array.isArray(background) ? { rgba:background, colorSpace:'srgb' } : background;
+  const rgba = Array.isArray(descriptor?.rgba) ? descriptor.rgba : null;
+  if (!rgba || rgba.length < 3) throw new TypeError('High-depth composite background требует RGB/RGBA');
+  const sourceSpace = String(descriptor.colorSpace || 'srgb');
+  const sourceLinear = /linear/i.test(sourceSpace);
+  const sourceSrgb = /srgb/i.test(sourceSpace) && !sourceLinear;
+  let r = Number(rgba[0]) || 0;
+  let g = Number(rgba[1]) || 0;
+  let b = Number(rgba[2]) || 0;
+  if (targetLinear && sourceSrgb) { r=srgbToLinear(r); g=srgbToLinear(g); b=srgbToLinear(b); }
+  else if (!targetLinear && sourceLinear) { r=linearToSrgb(r); g=linearToSrgb(g); b=linearToSrgb(b); }
+  const alpha = clampPreview01(rgba.length > 3 ? rgba[3] : 1);
+  for (let pixelIndex=0; pixelIndex<buffer.width*buffer.height; pixelIndex+=1) {
+    const offset=pixelIndex*4;
+    writeNormalizedSample(buffer,offset,r);
+    writeNormalizedSample(buffer,offset+1,g);
+    writeNormalizedSample(buffer,offset+2,b);
+    writeNormalizedSample(buffer,offset+3,alpha);
+  }
+}
+
+export function compositePixelBufferLayers(width, height, layers = [], {
+  bitsPerChannel = 16,
+  colorSpace = bitsPerChannel === 32 ? 'linear-rgb-unmanaged' : 'srgb',
+  background = null,
+  maxBytes = MAX_HIGH_DEPTH_COMPOSITE_BYTES,
+} = {}) {
+  const w=integer(width,'High-depth composite width');
+  const h=integer(height,'High-depth composite height');
+  const depth=integer(bitsPerChannel,'High-depth composite bitsPerChannel');
+  if (![8,16,32].includes(depth)) throw new TypeError('High-depth composite поддерживает только 8/16/32-bit');
+  const sampleCount=w*h*4;
+  if (!Number.isSafeInteger(sampleCount)) throw new RangeError('High-depth composite слишком большой для безопасной адресации');
+  const requiredBytes=sampleCount*(depth/8);
+  const limit=Math.trunc(Number(maxBytes));
+  if (!Number.isSafeInteger(limit)||limit<=0) throw new TypeError('High-depth composite maxBytes должен быть положительным целым числом');
+  if (requiredBytes>limit) throw new RangeError('High-depth composite требует ' + requiredBytes + ' байт, лимит ' + limit);
+
+  const output=createPixelBuffer({
+    width:w,height:h,model:'rgb',channels:4,bitsPerChannel:depth,
+    colorSpace:String(colorSpace || (depth===32?'linear-rgb-unmanaged':'srgb')),alphaMode:'straight',
+  });
+  const targetLinear=/linear/i.test(output.colorSpace || '');
+  compositeBackgroundInto(output,background,targetLinear);
+
+  for (const entry of Array.isArray(layers)?layers:[]) {
+    const source=entry?.buffer;
+    if (!isPixelBuffer(source)||source.model!=='rgb'||![3,4].includes(source.channels)) {
+      throw new TypeError('High-depth composite layer требует RGB PixelBuffer');
+    }
+    const mode=HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
+    const opacity=clampPreview01(entry?.opacity ?? 1);
+    if (opacity<=0) continue;
+    const x=Math.trunc(Number(entry?.x)||0);
+    const y=Math.trunc(Number(entry?.y)||0);
+    const mask=entry?.maskPixels || null;
+    if (mask && (!ArrayBuffer.isView(mask) || mask.length < source.width*source.height*4)) {
+      throw new RangeError('High-depth composite mask имеет неверный размер');
+    }
+    const left=Math.max(0,-x),top=Math.max(0,-y);
+    const right=Math.min(source.width,w-x),bottom=Math.min(source.height,h-y);
+    if (left>=right||top>=bottom) continue;
+
+    for (let sy=top; sy<bottom; sy+=1) {
+      const dy=y+sy;
+      for (let sx=left; sx<right; sx+=1) {
+        const dx=x+sx;
+        const sourcePixel=sy*source.width+sx;
+        const sourceOffset=sourcePixel*source.channels;
+        const targetOffset=(dy*w+dx)*4;
+        const sourceAlpha=clampPreview01((source.channels===4?sourceSampleValue(source,sourceOffset+3):1)*opacity*(mask?clampPreview01(Number(mask[sourcePixel*4+3]??255)/255):1));
+        if (sourceAlpha<=0) continue;
+        const backdropAlpha=clampPreview01(normalizedSample(output,targetOffset+3));
+        const outputAlpha=sourceAlpha+backdropAlpha*(1-sourceAlpha);
+        if (outputAlpha<=0) continue;
+
+        for (let channel=0; channel<3; channel+=1) {
+          const sourceColor=compositeColorSample(source,sourceOffset+channel,targetLinear);
+          const backdropColor=normalizedSample(output,targetOffset+channel);
+          const blended=compositeBlendChannel(mode,backdropColor,sourceColor);
+          const premultiplied=
+            sourceAlpha*((1-backdropAlpha)*sourceColor+backdropAlpha*blended)
+            + backdropAlpha*(1-sourceAlpha)*backdropColor;
+          writeNormalizedSample(output,targetOffset+channel,premultiplied/outputAlpha);
+        }
+        writeNormalizedSample(output,targetOffset+3,outputAlpha);
+      }
+    }
+  }
+  return output;
+}
+
 function uiSrgbRgbForBuffer(buffer, rgb8) {
   if (!Array.isArray(rgb8) || rgb8.length < 3) throw new TypeError('Для high-depth editing нужен RGB-цвет');
   const encoded = rgb8.slice(0,3).map(value=>clampPreview01((Number(value)||0)/255));

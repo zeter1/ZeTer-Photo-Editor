@@ -9,7 +9,7 @@ import {
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
-import { pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab, floodFillPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES } from './core/pixel-buffer.js';
+import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab, floodFillPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './adapters/psd.js';
@@ -3918,15 +3918,125 @@ function nativePsdBounds(layer,buffer){
   return{x:Math.trunc(Number(layer.x)||0),y:Math.trunc(Number(layer.y)||0),width:buffer.width,height:buffer.height};
 }
 
-function exactHighDepthCompositeCandidate(exportDoc,planned,hasAdjustmentLayers){
-  if(hasAdjustmentLayers)return null;
-  const visible=planned.filter(item=>isLayerVisible(exportDoc,item.layer));
-  if(visible.length!==1)return null;
-  const item=visible[0],layer=item.layer,buffer=item.nativePixelBuffer;
-  if(!buffer||layer.groupId||layer.mask||layer.vectorMask)return null;
-  if(Math.abs(Number(layer.opacity??1)-1)>1e-9||(layer.blendMode||'source-over')!=='source-over')return null;
-  if(item.bounds.x!==0||item.bounds.y!==0||item.bounds.width!==exportDoc.width||item.bounds.height!==exportDoc.height)return null;
-  return buffer;
+function highDepthCompositePlan(exportDoc,planned){
+  const groups=Array.isArray(exportDoc.groups)?exportDoc.groups:[];
+  const groupMap=new Map(groups.map(group=>[group.id,group]).filter(([id])=>Boolean(id)));
+  const plannedById=new Map(planned.map(item=>[item.layer.id,item]));
+  const directLayers=new Map(),childGroups=new Map(),groupRanks=new Map();
+  const append=(map,key,value)=>{if(!map.has(key))map.set(key,[]);map.get(key).push(value);};
+  for(const group of groups){
+    const parentId=group.parentGroupId&&groupMap.has(group.parentGroupId)?group.parentGroupId:null;
+    append(childGroups,parentId,group);
+  }
+  for(let index=0;index<exportDoc.layers.length;index+=1){
+    const layer=exportDoc.layers[index];
+    const groupId=layer.groupId&&groupMap.has(layer.groupId)?layer.groupId:null;
+    const plannedItem=plannedById.get(layer.id);
+    if(plannedItem)append(directLayers,groupId,{item:plannedItem,index});
+    let currentId=groupId;
+    const seen=new Set();
+    while(currentId&&!seen.has(currentId)){
+      seen.add(currentId);
+      if(!groupRanks.has(currentId)||index<groupRanks.get(currentId))groupRanks.set(currentId,index);
+      const current=groupMap.get(currentId);
+      currentId=current?.parentGroupId&&groupMap.has(current.parentGroupId)?current.parentGroupId:null;
+    }
+  }
+  const entriesFor=parentId=>{
+    const entries=[];
+    for(const direct of directLayers.get(parentId)||[])entries.push({type:'layer',item:direct.item,rank:direct.index,order:direct.index});
+    for(const group of childGroups.get(parentId)||[])entries.push({type:'group',group,rank:groupRanks.get(group.id)??Number.POSITIVE_INFINITY,order:groups.indexOf(group)});
+    entries.sort((a,b)=>a.rank-b.rank||a.order-b.order);
+    return entries;
+  };
+  const ordered=[],active=new Set();
+  let reason=null;
+  const visit=parentId=>{
+    for(const entry of entriesFor(parentId)){
+      if(reason)return;
+      if(entry.type==='layer'){
+        if(isLayerVisible(exportDoc,entry.item.layer)&&Number(entry.item.layer.opacity??1)>0)ordered.push(entry.item);
+        continue;
+      }
+      const group=entry.group;
+      if(!group||group.visible===false||Number(group.opacity??1)<=0)continue;
+      const mode=group.blendMode||'pass-through';
+      if(mode!=='pass-through'||Math.abs(Number(group.opacity??1)-1)>1e-9){
+        reason='группа «'+(group.name||'Без имени')+'» требует isolated Canvas group composite';
+        return;
+      }
+      if(active.has(group.id)){reason='обнаружен цикл групп';return;}
+      active.add(group.id);visit(group.id);active.delete(group.id);
+    }
+  };
+  visit(null);
+  return{items:ordered,reason};
+}
+
+function highDepthCompositeBackground(exportDoc){
+  if(!exportDoc.background||exportDoc.background==='transparent')return{background:null,reason:null};
+  try{
+    const [r,g,b]=hexToRgb(exportDoc.background);
+    return{background:{rgba:[r/255,g/255,b/255,1],colorSpace:'srgb'},reason:null};
+  }catch(error){
+    return{background:null,reason:'фон документа не является поддерживаемым RGB hex-цветом'};
+  }
+}
+
+function buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings){
+  if(bitsPerChannel<=8||hasAdjustmentLayers)return null;
+  const plan=highDepthCompositePlan(exportDoc,planned);
+  if(plan.reason){
+    warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: '+plan.reason);
+    return null;
+  }
+  const vectorMasked=plan.items.find(item=>item.layer.vectorMask?.enabled!==false&&item.layer.vectorMask?.subpaths?.length);
+  if(vectorMasked){
+    warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: vector mask слоя «'+(vectorMasked.layer.name||'Без имени')+'» пока требует rasterized mask bridge');
+    return null;
+  }
+  const backgroundInfo=highDepthCompositeBackground(exportDoc);
+  if(backgroundInfo.reason){
+    warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: '+backgroundInfo.reason);
+    return null;
+  }
+  const requiredBytes=exportDoc.width*exportDoc.height*4*(bitsPerChannel/8);
+  if(!Number.isSafeInteger(requiredBytes)||requiredBytes>MAX_HIGH_DEPTH_COMPOSITE_BYTES){
+    warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: typed output требует около '+Math.ceil(requiredBytes/1048576)+' МБ при лимите '+Math.floor(MAX_HIGH_DEPTH_COMPOSITE_BYTES/1048576)+' МБ');
+    return null;
+  }
+  const preparedByLayerId=new Map(planned.map((item,index)=>[item.layer.id,prepared[index]]));
+  const layers=[];
+  for(const item of plan.items){
+    const exported=preparedByLayerId.get(item.layer.id);
+    if(!exported)continue;
+    let buffer=item.nativePixelBuffer;
+    if(!buffer){
+      if(!exported.pixels){
+        warnings.push('Stage 12g: merged composite оставлен на Canvas8 fallback: нет raster preview для слоя «'+(item.layer.name||'Без имени')+'»');
+        return null;
+      }
+      buffer=createRgba8PixelBuffer(exported.width,exported.height,exported.pixels,{colorSpace:'srgb'});
+    }
+    layers.push({
+      buffer,x:item.bounds.x,y:item.bounds.y,
+      opacity:clamp(Number(item.layer.opacity??1),0,1),
+      blendMode:item.layer.blendMode||'source-over',
+      maskPixels:exported.mask&&!exported.mask.disabled?exported.mask.pixels:null,
+    });
+  }
+  try{
+    return compositePixelBufferLayers(exportDoc.width,exportDoc.height,layers,{
+      bitsPerChannel,
+      colorSpace:bitsPerChannel===32?'linear-rgb-unmanaged':'srgb',
+      background:backgroundInfo.background,
+      maxBytes:MAX_HIGH_DEPTH_COMPOSITE_BYTES,
+    });
+  }catch(error){
+    console.warn('Stage 12g typed merged composite failed; using Canvas8 fallback',error);
+    warnings.push('Stage 12g: typed merged composite не собран ('+(error?.message||error)+'); использован Canvas8 fallback');
+    return null;
+  }
 }
 
 async function preparePsdExport(exportDoc){
@@ -3993,11 +4103,14 @@ async function preparePsdExport(exportDoc){
     prepared.push(item);
   }
 
-  const compositePixelBuffer=exactHighDepthCompositeCandidate(exportDoc,planned,hasAdjustmentLayers);
-  const compositeCanvas=document.createElement('canvas');
-  await renderDocument(compositeCanvas,exportDoc,{checker:false});
-  const composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
-  if(bitsPerChannel>8&&!compositePixelBuffer)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite построен из текущего 8-bit Canvas renderer и затем расширен до глубины документа`);
+  const compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
+  let composite=null;
+  if(!compositePixelBuffer){
+    const compositeCanvas=document.createElement('canvas');
+    await renderDocument(compositeCanvas,exportDoc,{checker:false});
+    composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
+    if(bitsPerChannel>8)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite использует 8-bit Canvas fallback и затем расширяется до глубины документа`);
+  }
 
   if(hasAdjustmentLayers){
     warnings.push('Adjustment layers Stage 1 не имеют Photoshop-semantic mapping: визуальный результат сохранён через верхний Composite Preview, исходные слои оставлены скрытыми');

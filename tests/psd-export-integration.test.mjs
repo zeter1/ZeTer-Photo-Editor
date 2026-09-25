@@ -145,5 +145,14 @@ test('Stage 12e keeps honest fallback semantics for transformed or effect-bearin
   assert.match(main,/layerNeedsSemanticRasterWarning\(layer\)/);
   assert.match(main,/downgradedHighDepth/);
   assert.match(main,/экспортированы через 8-bit raster preview/);
-  assert.match(main,/merged composite построен из текущего 8-bit Canvas renderer/);
+});
+
+test('Stage 12g routes compatible multi-layer merged composites through typed PixelBuffers',()=>{
+  assert.match(main,/function highDepthCompositePlan\(/);
+  assert.match(main,/function buildHighDepthComposite\(/);
+  assert.match(main,/compositePixelBufferLayers\(exportDoc\.width,exportDoc\.height,layers/);
+  assert.match(main,/createRgba8PixelBuffer\(exported\.width,exported\.height,exported\.pixels/);
+  assert.match(main,/MAX_HIGH_DEPTH_COMPOSITE_BYTES/);
+  assert.match(main,/merged composite использует 8-bit Canvas fallback/);
+  assert.doesNotMatch(main,/function exactHighDepthCompositeCandidate\(/);
 });

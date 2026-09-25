@@ -4,6 +4,21 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.28.0 — 2026-09-25
+
+### 2026-09-25 — High-depth Multi-layer Composite / Export Bridge Stage 12g
+
+- Typed composite core: `compositePixelBufferLayers()` собирает positioned RGB 8/16/32-bit sources напрямую в 16/32-bit RGBA PixelBuffer с straight-alpha source-over math и bounded allocation.
+- Blend semantics: Normal, Multiply, Screen, Overlay, Darken, Lighten, Color Dodge и Color Burn выполняются до PSD/PSB merged-image serialization; layer opacity и bitmap-mask alpha участвуют в том же typed equation.
+- HDR/color space: 32-bit merged output работает в `linear-rgb-unmanaged`; sRGB 8/16-bit sources переводятся в linear перед blend, поэтому native Float32 highlights выше `1.0` не проходят через tone-map/Canvas8.
+- Mixed stacks: rasterized 8-bit text/shape/transform/filter/style previews могут быть честно widened внутрь high-depth composite рядом с native layers; их собственная precision не выдумывается.
+- Groups: pass-through группы с opacity 100% разворачиваются в порядке, совпадающем с document group render plan. Isolated group blend/opacity пока честно переключает только merged composite на Canvas8 fallback.
+- Masks/fallback: bitmap masks поддерживаются в typed path; vector masks и adjustment layers пока используют explicit Canvas8 merged fallback, сохраняя существующую визуальную корректность без ложных claims.
+- Memory: merged typed output ограничен 256 МБ; превышение budget не приводит к неограниченной allocation и переводит merged image на существующий Canvas8 fallback с warning.
+- Export: при успешном Stage 12g `preparePsdExport()` вообще не вызывает Canvas renderer для merged image и передаёт `compositePixelBuffer` writer-у напрямую.
+- Tests: добавлены 16-bit non-quantization, Float32 HDR blend, sRGB→linear mixed-depth conversion, positioned mask/opacity и allocation-bound regressions плюс export wiring checks.
+- Version: приложение синхронизировано на 1.28.0.
+
 ## 1.27.0 — 2026-09-25
 
 ### 2026-09-25 — Typed High-depth Retouch Stage 12f
