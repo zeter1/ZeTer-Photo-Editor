@@ -54,7 +54,8 @@ button:disabled { opacity: .45; cursor: default; }
 .option-icon-button:active:not(:disabled) { background: #4f8cff28; border-color: #4f8cff66; }
 .option-icon-button:disabled { opacity: .35; cursor: not-allowed; }
 .workspace { display: grid; grid-template-columns: 86px minmax(0, 1fr) 286px; min-height: 0; }
-.toolbar { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 40px; align-content: start; gap: 4px; padding: 7px; background: #1c1f25; border-right: 1px solid var(--line); overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+.toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 40px; align-content: start; gap: 4px; padding: 7px; background: #1c1f25; border-right: 1px solid var(--line); overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+.toolbar { position: relative; }
 .tool { position: relative; min-width: 32px; min-height: 40px; display: grid; place-items: center; border-radius: 8px; background: transparent; color: #c9d1dd; font-size: 17px; }
 .tool small { position: absolute; right: 3px; bottom: 1px; max-width: 18px; overflow: hidden; font-size: 8px; line-height: 1; color: var(--muted); }
 .tool:hover { background: #ffffff10; }
