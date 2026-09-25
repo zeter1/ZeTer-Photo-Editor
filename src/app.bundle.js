@@ -1435,6 +1435,210 @@ function applyPixelBufferStrokeSegment(buffer, from, to, radius, rgb8, options =
   return changed;
 }
 
+function retouchStrokeIncrement(coverage, x, y, localStrength) {
+  if (!coverage) return localStrength;
+  const tileX=Math.floor(x/128),tileY=Math.floor(y/128);
+  const tileKey=tileY*Math.ceil(Math.max(1,Number(coverage.width)||1)/128)+tileX;
+  let tile=coverage.tiles.get(tileKey);
+  if(!tile){tile=new Uint8Array(128*128);coverage.tiles.set(tileKey,tile);}
+  const index=(y%128)*128+x%128;
+  const previous=tile[index];
+  const next=Math.max(previous,Math.round(clampPreview01(localStrength)*255));
+  if(next===previous)return 0;
+  tile[index]=next;
+  return (next-previous)/(255-previous);
+}
+
+function retouchEncodedSrgb(buffer) {
+  return /srgb/i.test(buffer.colorSpace || '') && !/linear/i.test(buffer.colorSpace || '');
+}
+
+function retouchReadRgb(buffer, offset) {
+  let r=normalizedSample(buffer,offset),g=normalizedSample(buffer,offset+1),b=normalizedSample(buffer,offset+2);
+  if(retouchEncodedSrgb(buffer)){r=srgbToLinear(r);g=srgbToLinear(g);b=srgbToLinear(b);}
+  return [r,g,b];
+}
+
+function retouchWriteRgb(buffer, offset, rgb) {
+  let [r,g,b]=rgb;
+  if(retouchEncodedSrgb(buffer)){r=linearToSrgb(r);g=linearToSrgb(g);b=linearToSrgb(b);}
+  writeNormalizedSample(buffer,offset,r);
+  writeNormalizedSample(buffer,offset+1,g);
+  writeNormalizedSample(buffer,offset+2,b);
+}
+
+function validateRgbRetouchBuffer(buffer,label='PixelBuffer') {
+  if(!isPixelBuffer(buffer)||buffer.model!=='rgb'||![3,4].includes(buffer.channels))throw new TypeError(label+': нужен RGB PixelBuffer');
+}
+
+function buffersMatchForRetouch(buffer,source) {
+  return isPixelBuffer(source)&&source.model===buffer.model&&source.width===buffer.width&&source.height===buffer.height&&
+    source.channels===buffer.channels&&source.bitsPerChannel===buffer.bitsPerChannel;
+}
+
+function pixelAlpha01(buffer,offset) {
+  return buffer.channels===4?clampPreview01(normalizedSample(buffer,offset+3)):1;
+}
+
+function blendRetouchRgb(buffer,offset,rgb,opacity,sourceAlpha=1) {
+  const amount=clampPreview01(opacity)*clampPreview01(sourceAlpha);
+  if(amount<=0)return;
+  const dest=retouchReadRgb(buffer,offset);
+  const alpha=pixelAlpha01(buffer,offset);
+  const outAlpha=amount+alpha*(1-amount);
+  const factor=alpha*(1-amount);
+  const out=outAlpha>1e-12
+    ? [(rgb[0]*amount+dest[0]*factor)/outAlpha,(rgb[1]*amount+dest[1]*factor)/outAlpha,(rgb[2]*amount+dest[2]*factor)/outAlpha]
+    : [0,0,0];
+  retouchWriteRgb(buffer,offset,out);
+  if(buffer.channels===4)writeNormalizedSample(buffer,offset+3,outAlpha);
+}
+
+function sampleRetouchBilinear(buffer,x,y) {
+  if(x<0||y<0||x>buffer.width-1||y>buffer.height-1)return null;
+  const x0=Math.floor(x),y0=Math.floor(y),x1=Math.min(buffer.width-1,x0+1),y1=Math.min(buffer.height-1,y0+1);
+  const tx=x-x0,ty=y-y0;
+  const weights=[[(1-tx)*(1-ty),x0,y0],[tx*(1-ty),x1,y0],[(1-tx)*ty,x0,y1],[tx*ty,x1,y1]];
+  const rgb=[0,0,0];let alpha=0;
+  for(const [weight,sx,sy] of weights){
+    if(weight<=0)continue;
+    const offset=(sy*buffer.width+sx)*buffer.channels;
+    const a=pixelAlpha01(buffer,offset);
+    const c=retouchReadRgb(buffer,offset);
+    rgb[0]+=c[0]*weight;rgb[1]+=c[1]*weight;rgb[2]+=c[2]*weight;alpha+=a*weight;
+  }
+  return {rgb,alpha};
+}
+
+function retouchNeighborhoodMean(buffer,centerX,centerY,radius=3) {
+  const r=Math.max(1,Math.min(12,Math.trunc(radius)||3));
+  const left=Math.max(0,Math.floor(centerX)-r),right=Math.min(buffer.width-1,Math.floor(centerX)+r);
+  const top=Math.max(0,Math.floor(centerY)-r),bottom=Math.min(buffer.height-1,Math.floor(centerY)+r);
+  const sum=[0,0,0];let weight=0;
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    const offset=(y*buffer.width+x)*buffer.channels;
+    const alpha=pixelAlpha01(buffer,offset);
+    if(alpha<=0)continue;
+    const rgb=retouchReadRgb(buffer,offset);
+    sum[0]+=rgb[0]*alpha;sum[1]+=rgb[1]*alpha;sum[2]+=rgb[2]*alpha;weight+=alpha;
+  }
+  return weight>1e-9?sum.map(value=>value/weight):[0,0,0];
+}
+function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount, { brighten=true, isAllowed=null, strokeCoverage=null } = {}) {
+  validateRgbRetouchBuffer(buffer,'High-depth tone brush');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(amount);
+  if(strength<=0)return 0;
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  let changed=0;
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const offset=(y*buffer.width+x)*buffer.channels;
+    if(pixelAlpha01(buffer,offset)<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    const increment=retouchStrokeIncrement(strokeCoverage,x,y,local);
+    if(increment<=0)continue;
+    const factor=2**(brighten?increment:-increment);
+    const rgb=retouchReadRgb(buffer,offset).map(value=>value*factor);
+    retouchWriteRgb(buffer,offset,rgb);
+    changed+=1;
+  }
+  return changed;
+}
+function applyPixelBufferBlurDab(buffer, centerX, centerY, radius, amount, { sampleRadius=3, isAllowed=null, strokeCoverage=null } = {}) {
+  validateRgbRetouchBuffer(buffer,'High-depth blur brush');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(amount);
+  const kernel=Math.max(1,Math.min(8,Math.trunc(sampleRadius)||3));
+  if(strength<=0)return 0;
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  const pending=[];
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const offset=(y*buffer.width+x)*buffer.channels;
+    if(pixelAlpha01(buffer,offset)<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    const increment=retouchStrokeIncrement(strokeCoverage,x,y,local);
+    if(increment<=0)continue;
+    const sum=[0,0,0];let weight=0;
+    for(let sy=Math.max(0,y-kernel);sy<=Math.min(buffer.height-1,y+kernel);sy+=1){
+      for(let sx=Math.max(0,x-kernel);sx<=Math.min(buffer.width-1,x+kernel);sx+=1){
+        const source=(sy*buffer.width+sx)*buffer.channels;
+        const alpha=pixelAlpha01(buffer,source);
+        if(alpha<=0)continue;
+        const rgb=retouchReadRgb(buffer,source);
+        sum[0]+=rgb[0]*alpha;sum[1]+=rgb[1]*alpha;sum[2]+=rgb[2]*alpha;weight+=alpha;
+      }
+    }
+    if(weight<=1e-9)continue;
+    const blurred=sum.map(value=>value/weight);
+    const dest=retouchReadRgb(buffer,offset);
+    pending.push({offset,rgb:dest.map((value,channel)=>value*(1-increment)+blurred[channel]*increment)});
+  }
+  for(const item of pending)retouchWriteRgb(buffer,item.offset,item.rgb);
+  return pending.length;
+}
+function applyPixelBufferCloneDab(buffer, snapshot, centerX, centerY, radius, sourceOffset, { opacity=1, healing=false, isAllowed=null } = {}) {
+  validateRgbRetouchBuffer(buffer,'High-depth clone target');
+  if(!buffersMatchForRetouch(buffer,snapshot))throw new TypeError('High-depth clone source должен совпадать с target PixelBuffer');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(opacity)*(healing?.68:1);
+  if(strength<=0)return 0;
+  const offsetX=Number(sourceOffset?.x)||0,offsetY=Number(sourceOffset?.y)||0;
+  let gain=null;
+  if(healing){
+    const localRadius=Math.max(2,Math.min(8,brushRadius*.25));
+    const sourceMean=retouchNeighborhoodMean(snapshot,centerX+offsetX,centerY+offsetY,localRadius);
+    const targetMean=retouchNeighborhoodMean(snapshot,centerX,centerY,localRadius);
+    gain=sourceMean.map((value,index)=>Math.max(.25,Math.min(4,(targetMean[index]+1e-6)/(value+1e-6))));
+  }
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  const pending=[];
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const sampled=sampleRetouchBilinear(snapshot,x+offsetX,y+offsetY);
+    if(!sampled||sampled.alpha<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    if(local<=0)continue;
+    const rgb=gain?sampled.rgb.map((value,index)=>value*gain[index]):sampled.rgb;
+    pending.push({offset:(y*buffer.width+x)*buffer.channels,rgb,alpha:sampled.alpha,local});
+  }
+  for(const item of pending)blendRetouchRgb(buffer,item.offset,item.rgb,item.local,item.alpha);
+  return pending.length;
+}
+function applyPixelBufferSmudgeDab(buffer, from, to, radius, amount, { isAllowed=null } = {}) {
+  validateRgbRetouchBuffer(buffer,'High-depth smudge');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(amount);
+  if(strength<=0)return 0;
+  const dx=Number(from?.x)-Number(to?.x),dy=Number(from?.y)-Number(to?.y);
+  if(!Number.isFinite(dx)||!Number.isFinite(dy))return 0;
+  const left=Math.max(0,Math.floor(to.x-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(to.x+brushRadius));
+  const top=Math.max(0,Math.floor(to.y-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(to.y+brushRadius));
+  const pending=[];
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-to.x,y+.5-to.y);
+    if(distance>brushRadius)continue;
+    const sampled=sampleRetouchBilinear(buffer,x+dx,y+dy);
+    if(!sampled||sampled.alpha<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    if(local<=0)continue;
+    pending.push({offset:(y*buffer.width+x)*buffer.channels,rgb:sampled.rgb,alpha:sampled.alpha,local});
+  }
+  for(const item of pending)blendRetouchRgb(buffer,item.offset,item.rgb,item.local,item.alpha);
+  return pending.length;
+}
+
 function pixelBufferDistanceSq(buffer, offset, target) {
   let distance=0;
   const count=Math.min(buffer.channels,4);
@@ -5470,6 +5674,7 @@ const RASTER_EFFECT_CONTROLS = [
 ];
 const UI_COLLAPSE_STORAGE_KEY = 'zeter-photo-editor.ui-collapse.v1';
 const SMART_SNAP_STORAGE_KEY = 'zeter-photo-editor.smart-snap.v1';
+const NATIVE_HIGH_DEPTH_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
 const collapsedPanelIds = new Set();
 let doc = createDocument();
 let history = new HistoryStack(80);
@@ -5494,6 +5699,7 @@ let brushLayerId = null;
 let highDepthPaintBuffer = null;
 let highDepthPaintLayerId = null;
 let highDepthPaintPreviewDirty = false;
+let highDepthCloneSnapshotBuffer = null;
 let blurScratchCanvas = null;
 let blurScratchCtx = null;
 let retouchScratchCanvas = null;
@@ -8000,7 +8206,7 @@ async function drawLineOnCurrentRaster(start,end){
 }
 
 function clearHighDepthPaintState(){
-  highDepthPaintBuffer=null;highDepthPaintLayerId=null;highDepthPaintPreviewDirty=false;
+  highDepthPaintBuffer=null;highDepthPaintLayerId=null;highDepthPaintPreviewDirty=false;highDepthCloneSnapshotBuffer=null;
 }
 
 function highDepthBudgetForLayer(layer){
@@ -8086,6 +8292,70 @@ function nativeHighDepthStrokeSegment(layer,from,to,pointerEvent=null,erase=fals
   const changed=applyPixelBufferStrokeSegment(highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),hexToRgb(els.primaryColor.value),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)});
   if(changed){highDepthPaintPreviewDirty=true;schedulePaintPreview();}
   return changed>0;
+}
+
+function markNativeHighDepthRetouchChanged(changed){
+  if(changed>0){highDepthPaintPreviewDirty=true;schedulePaintPreview();return true;}
+  return false;
+}
+
+function applyNativeHighDepthToneDab(layer,point,pointerEvent=null,brighten=true){
+  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer)return false;
+  const strength=Number(brighten?els.dodgeStrength.value:els.burnStrength.value)/100;
+  const changed=applyPixelBufferToneDab(highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),strength,{brighten,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:drag?.toneCoverage});
+  return markNativeHighDepthRetouchChanged(changed);
+}
+
+function nativeHighDepthToneSegment(layer,from,to,pointerEvent=null,brighten=true){
+  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);
+  const distance=Math.hypot(to.x-from.x,to.y-from.y),steps=Math.max(1,Math.ceil(distance/spacing));
+  for(let index=1;index<=steps;index+=1){const t=index/steps;applyNativeHighDepthToneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent,brighten);}
+}
+
+function applyNativeHighDepthBlurDab(layer,point,pointerEvent=null){
+  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer)return false;
+  const changed=applyPixelBufferBlurDab(highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),Number(els.blurStrength.value)/100,{sampleRadius:3,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:drag?.blurCoverage});
+  return markNativeHighDepthRetouchChanged(changed);
+}
+
+function nativeHighDepthBlurSegment(layer,from,to,pointerEvent=null){
+  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.22);
+  const distance=Math.hypot(to.x-from.x,to.y-from.y),steps=Math.max(1,Math.ceil(distance/spacing));
+  for(let index=1;index<=steps;index+=1){const t=index/steps;applyNativeHighDepthBlurDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent);}
+}
+
+function prepareNativeHighDepthCloneStroke(layer,destinationPoint){
+  if(!cloneSource||cloneSource.layerId!==layer?.id||!highDepthPaintBuffer)return false;
+  highDepthCloneSnapshotBuffer=clonePixelBuffer(highDepthPaintBuffer);
+  return{x:cloneSource.localPoint.x-destinationPoint.x,y:cloneSource.localPoint.y-destinationPoint.y};
+}
+
+function applyNativeHighDepthCloneDab(layer,point,offset,pointerEvent=null,healing=false){
+  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer||!highDepthCloneSnapshotBuffer||!offset)return false;
+  const changed=applyPixelBufferCloneDab(highDepthPaintBuffer,highDepthCloneSnapshotBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),offset,{opacity:Number(els.toolOpacity.value)/100,healing,isAllowed:rasterSelectionPredicate(layer)});
+  return markNativeHighDepthRetouchChanged(changed);
+}
+
+function nativeHighDepthCloneSegment(layer,from,to,offset,pointerEvent=null,healing=false){
+  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);
+  const distance=Math.hypot(to.x-from.x,to.y-from.y),steps=Math.max(1,Math.ceil(distance/spacing));
+  for(let index=1;index<=steps;index+=1){const t=index/steps;applyNativeHighDepthCloneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},offset,pointerEvent,healing);}
+}
+
+function applyNativeHighDepthSmudgeDab(layer,from,to,pointerEvent=null){
+  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer)return false;
+  const changed=applyPixelBufferSmudgeDab(highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),Number(els.smudgeStrength?.value||45)/100,{isAllowed:rasterSelectionPredicate(layer)});
+  return markNativeHighDepthRetouchChanged(changed);
+}
+
+function nativeHighDepthSmudgeSegment(layer,from,to,pointerEvent=null){
+  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.14);
+  const distance=Math.hypot(to.x-from.x,to.y-from.y),steps=Math.max(1,Math.ceil(distance/spacing));
+  let previous=from;
+  for(let index=1;index<=steps;index+=1){
+    const t=index/steps,point={x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t};
+    applyNativeHighDepthSmudgeDab(layer,previous,point,pointerEvent);previous=point;
+  }
 }
 
 function drawHighDepthRasterBase(layer, canvas, ctx) {
@@ -8235,7 +8505,7 @@ async function ensurePaintLayer(point, canContinue = () => true) {
     addLayer(doc,l);
   }
 
-  const nativeHighDepth=l.highDepthSource&&['brush','eraser'].includes(currentTool)
+  const nativeHighDepth=l.highDepthSource&&NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(currentTool)
     ? await ensureNativeHighDepthPaintBuffer(l,{requireAlpha:currentTool==='eraser'})
     : false;
   if(!nativeHighDepth)await ensureRasterBuffer(l);
@@ -8245,7 +8515,7 @@ async function ensurePaintLayer(point, canContinue = () => true) {
 async function setCloneSource(point) {
   const layer=findTopEditableRasterLayerAt(point);
   if(!layer){setStatus(`${TOOL_LABELS[currentTool]}: источник должен находиться на растровом слое`);toast('Alt+кликните по растровому слою','warn');return false;}
-  await ensureRasterBuffer(layer);
+  if(!layer.highDepthSource)await ensureRasterBuffer(layer);
   cloneSource={layerId:layer.id,documentPoint:{...point},localPoint:documentPointToLayerPixel(point,layer)};
   doc.selectedLayerId=layer.id;
   setStatus(`Источник для «${TOOL_LABELS[currentTool]}» задан. Рисуйте по этому же слою.`);
@@ -8372,10 +8642,20 @@ async function beginPaint(p, pointerId, pointerEvent = null) {
     return false;
   }
   const localPoint = documentPointToLayerPixel(p, l);
-  drag = { kind:'paint', tool:currentTool, layerId:l.id, last:localPoint, nativeHighDepth:highDepthPaintLayerId===l.id&&['brush','eraser'].includes(currentTool) };
-  if(drag.nativeHighDepth){applyNativeHighDepthDab(l,localPoint,pointerEvent,currentTool==='eraser');return true;}
-  if (currentTool === 'dodge' || currentTool === 'burn') drag.toneCoverage={width:brushCanvas.width,tiles:new Map()};
-  if (currentTool === 'blur') drag.blurCoverage={width:brushCanvas.width,tiles:new Map()};
+  drag = { kind:'paint', tool:currentTool, layerId:l.id, last:localPoint, nativeHighDepth:highDepthPaintLayerId===l.id&&NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(currentTool) };
+  if (currentTool === 'dodge' || currentTool === 'burn') drag.toneCoverage={width:drag.nativeHighDepth?highDepthPaintBuffer.width:brushCanvas.width,tiles:new Map()};
+  if (currentTool === 'blur') drag.blurCoverage={width:drag.nativeHighDepth?highDepthPaintBuffer.width:brushCanvas.width,tiles:new Map()};
+  if(drag.nativeHighDepth){
+    if(currentTool==='clone'||currentTool==='heal'){
+      drag.cloneOffset=prepareNativeHighDepthCloneStroke(l,localPoint);
+      if(!drag.cloneOffset){clearHighDepthPaintState();brushCanvas=null;brushCtx=null;brushLayerId=null;drag=null;setStatus(cloneSource?`${TOOL_LABELS[currentTool]}: рисуйте по слою источника`:`${TOOL_LABELS[currentTool]}: Alt+клик задаёт источник`);toast('Сначала задайте источник на этом слое','warn');return false;}
+      applyNativeHighDepthCloneDab(l,localPoint,drag.cloneOffset,pointerEvent,currentTool==='heal');return true;
+    }
+    if(currentTool==='smudge'){drag.smudgeStarted=true;return true;}
+    if(currentTool==='dodge'||currentTool==='burn'){applyNativeHighDepthToneDab(l,localPoint,pointerEvent,currentTool==='dodge');return true;}
+    if(currentTool==='blur'){applyNativeHighDepthBlurDab(l,localPoint,pointerEvent);return true;}
+    applyNativeHighDepthDab(l,localPoint,pointerEvent,currentTool==='eraser');return true;
+  }
   brushCtx.save();
   clipContextToSelection(brushCtx,l);
   if (currentTool === 'clone' || currentTool === 'heal') {
@@ -8411,7 +8691,14 @@ function paintTo(p, pointerEvent = null) {
   if (!layer) return;
   const next = documentPointToLayerPixel(p, layer);
   const last=drag.last;
-  if(drag.nativeHighDepth){nativeHighDepthStrokeSegment(layer,last,next,pointerEvent,drag.tool==='eraser');drag.last=next;return;}
+  if(drag.nativeHighDepth){
+    if(drag.tool==='blur')nativeHighDepthBlurSegment(layer,last,next,pointerEvent);
+    else if(drag.tool==='clone'||drag.tool==='heal')nativeHighDepthCloneSegment(layer,last,next,drag.cloneOffset,pointerEvent,drag.tool==='heal');
+    else if(drag.tool==='smudge')nativeHighDepthSmudgeSegment(layer,last,next,pointerEvent);
+    else if(drag.tool==='dodge'||drag.tool==='burn')nativeHighDepthToneSegment(layer,last,next,pointerEvent,drag.tool==='dodge');
+    else nativeHighDepthStrokeSegment(layer,last,next,pointerEvent,drag.tool==='eraser');
+    drag.last=next;return;
+  }
   if (drag.tool === 'blur') {
     blurStrokeSegment(layer,last,next,pointerEvent);
     drag.last=next;
@@ -8443,7 +8730,7 @@ async function persistPaintLayer() {
 }
 async function endPaint(paintTool = currentTool) {
   cancelPaintPreview();
-  const nativeHighDepth=Boolean(highDepthPaintBuffer&&highDepthPaintLayerId===brushLayerId&&['brush','eraser'].includes(paintTool));
+  const nativeHighDepth=Boolean(highDepthPaintBuffer&&highDepthPaintLayerId===brushLayerId&&NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool));
   if ((!brushCtx&&!nativeHighDepth) || paintPersisting) return;
   const labels={eraser:'Ластик',blur:'Размытие кистью',clone:'Штамп',heal:'Лечебная кисть',smudge:'Палец / смазывание',dodge:'Осветлитель',burn:'Затемнитель',brush:'Кисть'};
   const label=labels[paintTool]||'Кисть';

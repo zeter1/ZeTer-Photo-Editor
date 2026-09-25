@@ -391,6 +391,214 @@ export function applyPixelBufferStrokeSegment(buffer, from, to, radius, rgb8, op
   return changed;
 }
 
+function retouchStrokeIncrement(coverage, x, y, localStrength) {
+  if (!coverage) return localStrength;
+  const tileX=Math.floor(x/128),tileY=Math.floor(y/128);
+  const tileKey=tileY*Math.ceil(Math.max(1,Number(coverage.width)||1)/128)+tileX;
+  let tile=coverage.tiles.get(tileKey);
+  if(!tile){tile=new Uint8Array(128*128);coverage.tiles.set(tileKey,tile);}
+  const index=(y%128)*128+x%128;
+  const previous=tile[index];
+  const next=Math.max(previous,Math.round(clampPreview01(localStrength)*255));
+  if(next===previous)return 0;
+  tile[index]=next;
+  return (next-previous)/(255-previous);
+}
+
+function retouchEncodedSrgb(buffer) {
+  return /srgb/i.test(buffer.colorSpace || '') && !/linear/i.test(buffer.colorSpace || '');
+}
+
+function retouchReadRgb(buffer, offset) {
+  let r=normalizedSample(buffer,offset),g=normalizedSample(buffer,offset+1),b=normalizedSample(buffer,offset+2);
+  if(retouchEncodedSrgb(buffer)){r=srgbToLinear(r);g=srgbToLinear(g);b=srgbToLinear(b);}
+  return [r,g,b];
+}
+
+function retouchWriteRgb(buffer, offset, rgb) {
+  let [r,g,b]=rgb;
+  if(retouchEncodedSrgb(buffer)){r=linearToSrgb(r);g=linearToSrgb(g);b=linearToSrgb(b);}
+  writeNormalizedSample(buffer,offset,r);
+  writeNormalizedSample(buffer,offset+1,g);
+  writeNormalizedSample(buffer,offset+2,b);
+}
+
+function validateRgbRetouchBuffer(buffer,label='PixelBuffer') {
+  if(!isPixelBuffer(buffer)||buffer.model!=='rgb'||![3,4].includes(buffer.channels))throw new TypeError(label+': нужен RGB PixelBuffer');
+}
+
+function buffersMatchForRetouch(buffer,source) {
+  return isPixelBuffer(source)&&source.model===buffer.model&&source.width===buffer.width&&source.height===buffer.height&&
+    source.channels===buffer.channels&&source.bitsPerChannel===buffer.bitsPerChannel;
+}
+
+function pixelAlpha01(buffer,offset) {
+  return buffer.channels===4?clampPreview01(normalizedSample(buffer,offset+3)):1;
+}
+
+function blendRetouchRgb(buffer,offset,rgb,opacity,sourceAlpha=1) {
+  const amount=clampPreview01(opacity)*clampPreview01(sourceAlpha);
+  if(amount<=0)return;
+  const dest=retouchReadRgb(buffer,offset);
+  const alpha=pixelAlpha01(buffer,offset);
+  const outAlpha=amount+alpha*(1-amount);
+  const factor=alpha*(1-amount);
+  const out=outAlpha>1e-12
+    ? [(rgb[0]*amount+dest[0]*factor)/outAlpha,(rgb[1]*amount+dest[1]*factor)/outAlpha,(rgb[2]*amount+dest[2]*factor)/outAlpha]
+    : [0,0,0];
+  retouchWriteRgb(buffer,offset,out);
+  if(buffer.channels===4)writeNormalizedSample(buffer,offset+3,outAlpha);
+}
+
+function sampleRetouchBilinear(buffer,x,y) {
+  if(x<0||y<0||x>buffer.width-1||y>buffer.height-1)return null;
+  const x0=Math.floor(x),y0=Math.floor(y),x1=Math.min(buffer.width-1,x0+1),y1=Math.min(buffer.height-1,y0+1);
+  const tx=x-x0,ty=y-y0;
+  const weights=[[(1-tx)*(1-ty),x0,y0],[tx*(1-ty),x1,y0],[(1-tx)*ty,x0,y1],[tx*ty,x1,y1]];
+  const rgb=[0,0,0];let alpha=0;
+  for(const [weight,sx,sy] of weights){
+    if(weight<=0)continue;
+    const offset=(sy*buffer.width+sx)*buffer.channels;
+    const a=pixelAlpha01(buffer,offset);
+    const c=retouchReadRgb(buffer,offset);
+    rgb[0]+=c[0]*weight;rgb[1]+=c[1]*weight;rgb[2]+=c[2]*weight;alpha+=a*weight;
+  }
+  return {rgb,alpha};
+}
+
+function retouchNeighborhoodMean(buffer,centerX,centerY,radius=3) {
+  const r=Math.max(1,Math.min(12,Math.trunc(radius)||3));
+  const left=Math.max(0,Math.floor(centerX)-r),right=Math.min(buffer.width-1,Math.floor(centerX)+r);
+  const top=Math.max(0,Math.floor(centerY)-r),bottom=Math.min(buffer.height-1,Math.floor(centerY)+r);
+  const sum=[0,0,0];let weight=0;
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    const offset=(y*buffer.width+x)*buffer.channels;
+    const alpha=pixelAlpha01(buffer,offset);
+    if(alpha<=0)continue;
+    const rgb=retouchReadRgb(buffer,offset);
+    sum[0]+=rgb[0]*alpha;sum[1]+=rgb[1]*alpha;sum[2]+=rgb[2]*alpha;weight+=alpha;
+  }
+  return weight>1e-9?sum.map(value=>value/weight):[0,0,0];
+}
+
+export function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount, { brighten=true, isAllowed=null, strokeCoverage=null } = {}) {
+  validateRgbRetouchBuffer(buffer,'High-depth tone brush');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(amount);
+  if(strength<=0)return 0;
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  let changed=0;
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const offset=(y*buffer.width+x)*buffer.channels;
+    if(pixelAlpha01(buffer,offset)<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    const increment=retouchStrokeIncrement(strokeCoverage,x,y,local);
+    if(increment<=0)continue;
+    const factor=2**(brighten?increment:-increment);
+    const rgb=retouchReadRgb(buffer,offset).map(value=>value*factor);
+    retouchWriteRgb(buffer,offset,rgb);
+    changed+=1;
+  }
+  return changed;
+}
+
+export function applyPixelBufferBlurDab(buffer, centerX, centerY, radius, amount, { sampleRadius=3, isAllowed=null, strokeCoverage=null } = {}) {
+  validateRgbRetouchBuffer(buffer,'High-depth blur brush');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(amount);
+  const kernel=Math.max(1,Math.min(8,Math.trunc(sampleRadius)||3));
+  if(strength<=0)return 0;
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  const pending=[];
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const offset=(y*buffer.width+x)*buffer.channels;
+    if(pixelAlpha01(buffer,offset)<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    const increment=retouchStrokeIncrement(strokeCoverage,x,y,local);
+    if(increment<=0)continue;
+    const sum=[0,0,0];let weight=0;
+    for(let sy=Math.max(0,y-kernel);sy<=Math.min(buffer.height-1,y+kernel);sy+=1){
+      for(let sx=Math.max(0,x-kernel);sx<=Math.min(buffer.width-1,x+kernel);sx+=1){
+        const source=(sy*buffer.width+sx)*buffer.channels;
+        const alpha=pixelAlpha01(buffer,source);
+        if(alpha<=0)continue;
+        const rgb=retouchReadRgb(buffer,source);
+        sum[0]+=rgb[0]*alpha;sum[1]+=rgb[1]*alpha;sum[2]+=rgb[2]*alpha;weight+=alpha;
+      }
+    }
+    if(weight<=1e-9)continue;
+    const blurred=sum.map(value=>value/weight);
+    const dest=retouchReadRgb(buffer,offset);
+    pending.push({offset,rgb:dest.map((value,channel)=>value*(1-increment)+blurred[channel]*increment)});
+  }
+  for(const item of pending)retouchWriteRgb(buffer,item.offset,item.rgb);
+  return pending.length;
+}
+
+export function applyPixelBufferCloneDab(buffer, snapshot, centerX, centerY, radius, sourceOffset, { opacity=1, healing=false, isAllowed=null } = {}) {
+  validateRgbRetouchBuffer(buffer,'High-depth clone target');
+  if(!buffersMatchForRetouch(buffer,snapshot))throw new TypeError('High-depth clone source должен совпадать с target PixelBuffer');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(opacity)*(healing?.68:1);
+  if(strength<=0)return 0;
+  const offsetX=Number(sourceOffset?.x)||0,offsetY=Number(sourceOffset?.y)||0;
+  let gain=null;
+  if(healing){
+    const localRadius=Math.max(2,Math.min(8,brushRadius*.25));
+    const sourceMean=retouchNeighborhoodMean(snapshot,centerX+offsetX,centerY+offsetY,localRadius);
+    const targetMean=retouchNeighborhoodMean(snapshot,centerX,centerY,localRadius);
+    gain=sourceMean.map((value,index)=>Math.max(.25,Math.min(4,(targetMean[index]+1e-6)/(value+1e-6))));
+  }
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  const pending=[];
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const sampled=sampleRetouchBilinear(snapshot,x+offsetX,y+offsetY);
+    if(!sampled||sampled.alpha<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    if(local<=0)continue;
+    const rgb=gain?sampled.rgb.map((value,index)=>value*gain[index]):sampled.rgb;
+    pending.push({offset:(y*buffer.width+x)*buffer.channels,rgb,alpha:sampled.alpha,local});
+  }
+  for(const item of pending)blendRetouchRgb(buffer,item.offset,item.rgb,item.local,item.alpha);
+  return pending.length;
+}
+
+export function applyPixelBufferSmudgeDab(buffer, from, to, radius, amount, { isAllowed=null } = {}) {
+  validateRgbRetouchBuffer(buffer,'High-depth smudge');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(amount);
+  if(strength<=0)return 0;
+  const dx=Number(from?.x)-Number(to?.x),dy=Number(from?.y)-Number(to?.y);
+  if(!Number.isFinite(dx)||!Number.isFinite(dy))return 0;
+  const left=Math.max(0,Math.floor(to.x-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(to.x+brushRadius));
+  const top=Math.max(0,Math.floor(to.y-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(to.y+brushRadius));
+  const pending=[];
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-to.x,y+.5-to.y);
+    if(distance>brushRadius)continue;
+    const sampled=sampleRetouchBilinear(buffer,x+dx,y+dy);
+    if(!sampled||sampled.alpha<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    if(local<=0)continue;
+    pending.push({offset:(y*buffer.width+x)*buffer.channels,rgb:sampled.rgb,alpha:sampled.alpha,local});
+  }
+  for(const item of pending)blendRetouchRgb(buffer,item.offset,item.rgb,item.local,item.alpha);
+  return pending.length;
+}
+
 function pixelBufferDistanceSq(buffer, offset, target) {
   let distance=0;
   const count=Math.min(buffer.channels,4);

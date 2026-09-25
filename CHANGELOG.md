@@ -4,6 +4,20 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.27.0 — 2026-09-25
+
+### 2026-09-25 — Typed High-depth Retouch Stage 12f
+
+- Retouch core: добавлены typed PixelBuffer primitives для Dodge/Burn, Blur, Clone/Healing и Smudge; они работают с RGB 8/16/32-bit buffers без Canvas8 round-trip.
+- HDR tone tools: Dodge/Burn меняют экспозицию в linear working space; Float32 highlights выше `1.0` сохраняются и могут дальше усиливаться/ослабляться, alpha не меняется.
+- Blur: локальное alpha-weighted усреднение выполняется в linear RGB для sRGB sources, затем записывается обратно в исходную bit depth; overlapping dabs ограничиваются stroke coverage, как и старый Canvas8 path.
+- Clone/Healing: Clone берёт immutable typed snapshot в начале штриха и использует bilinear sampling; Healing дополнительно адаптирует source texture к локальному destination color/luminance, не клипуя Float32 HDR.
+- Smudge: переносит typed samples по направлению движения кисти и смешивает их source-over с feathered high-depth brush falloff.
+- UI integration: blur/clone/heal/smudge/dodge/burn теперь входят в общий native high-depth paint state, используют selection predicate, RAF-batched tone-mapped preview и сохраняют обновлённый `highDepthSource` после commit.
+- Compatibility: 8-bit retouch pipeline остаётся fallback для обычных raster layers; high-depth Alt+click clone-source больше не требует предварительной Canvas materialization.
+- Tests: добавлены HDR dodge/burn, 16-bit blur non-quantization, immutable HDR clone, healing, smudge, serialization и UI-routing regression tests.
+- Version: приложение синхронизировано на 1.27.0.
+
 ## 1.26.0 — 2026-09-25
 
 ### 2026-09-25 — Native 16/32-bit PSD/PSB Export Stage 12e
