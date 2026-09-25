@@ -10,6 +10,8 @@
 - Tests: PSD regression-suite читает канонический format module; добавлен architecture regression, который защищает новые границы и не даёт случайно вернуть implementation в legacy paths.
 - Docs/AI: `docs/PROJECT.md` превращён в короткую точку входа, подробная прежняя инженерная летопись сохранена в `docs/reference/PROJECT_HISTORY.md`; добавлены code map, boundaries, AI workflow и test matrix для быстрого поиска нужной части проекта с меньшим контекстом.
 - Regression follow-up: source-contract тесты теперь проверяют вынесенные UI-константы в `src/ui/tool-config.js`, а legacy shims содержат валидные re-export модули с нормальными переводами строк.
+- UI controller: toolbar drag/drop, localStorage order, drop-slot, tooltips и post-drag click suppression вынесены из `src/main.js` в `src/ui/toolbar-controller.js`; composition root больше не хранит toolbar-only mutable state.
+- Main.js reduction: удалено 162 строки автономной toolbar DOM-логики; build graph, architecture map, boundaries и test matrix синхронизированы с новым владельцем.
 
 
 ### 2026-09-25T23:11:00+03:00 — Исправлено точное размещение инструментов при перетаскивании
