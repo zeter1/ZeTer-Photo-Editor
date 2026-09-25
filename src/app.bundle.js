@@ -474,6 +474,324 @@ function gridCellIndexFromPoint(point, layout) {
   return Math.max(0, Math.min(maxIndex, row * columns + column));
 }
 
+// ---- src/config/editor.js ----
+// Static editor configuration.
+// Keep this module free of DOM access and mutable application state so both humans
+// and AI agents can find UI/tool policy without scanning the composition root.
+const TOOL_LABELS = {
+  move:'Перемещение', marquee:'Выделение', brush:'Кисть', clone:'Штамп',
+  heal:'Лечебная кисть', smudge:'Палец / смазывание', dodge:'Осветлитель',
+  burn:'Затемнитель', blur:'Кисть размытия', eraser:'Ластик', fill:'Заливка',
+  gradient:'Градиент', pen:'Перо / контуры', magnetic:'Магнитное лассо',
+  wand:'Волшебная палочка', line:'Линия', text:'Текст', shape:'Фигура',
+  crop:'Кадрирование', eyedropper:'Пипетка', hand:'Рука', zoom:'Лупа',
+};
+const TOOL_HELP = {
+  move:{shortcut:'V',description:'Выбирает и перемещает слои. Тяните рамку для масштаба, круглый маркер — для поворота; Shift ограничивает направление.'},
+  marquee:{shortcut:'M / Shift+M',description:'Создаёт прямоугольное, эллиптическое, свободное или многоугольное выделение. Ограничивает рисование и копирование выбранной областью.'},
+  brush:{shortcut:'B',description:'Рисует основным цветом на растровом слое. Размер меняется клавишами [ и ], давление пера поддерживается.'},
+  clone:{shortcut:'S',description:'Копирует пиксели из одной части изображения в другую. Сначала задайте источник через Alt+клик, затем рисуйте.'},
+  heal:{shortcut:'J',description:'Мягко переносит фактуру с выбранного участка для ретуши дефектов. Источник задаётся через Alt+клик.'},
+  smudge:{shortcut:'N',description:'Размазывает существующие пиксели по направлению движения кисти. Силу эффекта задаёт отдельный ползунок сверху.'},
+  dodge:{shortcut:'O',description:'Осветляет существующие пиксели. Ползунок «Сила осветления» задаёт эффект одного штриха; повторные штрихи усиливают его.'},
+  burn:{shortcut:'Shift+O',description:'Затемняет существующие пиксели. Ползунок «Сила затемнения» задаёт эффект одного штриха; повторные штрихи усиливают его.'},
+  blur:{shortcut:'R',description:'Локально смягчает детали растрового слоя. Размер задаёт область, а «Сила размытия» — интенсивность одного штриха в процентах.'},
+  eraser:{shortcut:'E',description:'Удаляет пиксели с существующего растрового слоя до прозрачности. Активное выделение ограничивает стирание.'},
+  fill:{shortcut:'G',description:'Заливает связанную область основным цветом. Ползунок «Допуск» определяет, насколько близкие оттенки захватывать.'},
+  gradient:{shortcut:'Shift+G',description:'Создаёт линейный или радиальный переход между двумя цветами на новом слое. Протяните линию по холсту.'},
+  pen:{shortcut:'P',description:'Строит редактируемый векторный контур по опорным точкам. Enter или двойной щелчок завершает путь.'},
+  magnetic:{shortcut:'A',description:'Создаёт выделение, притягивая поставленные точки к заметным границам изображения. Enter завершает контур.'},
+  wand:{shortcut:'W',description:'Одним щелчком выделяет связанную область похожего цвета. Чувствительность регулируется ползунком «Допуск».'},
+  line:{shortcut:'L',description:'Рисует линию на текущем растровом слое. Если его нет, создаёт один слой «Линии»; Shift привязывает угол к шагу 45°.'},
+  text:{shortcut:'T',description:'Добавляет новый текст или открывает существующий текстовый слой для редактирования.'},
+  shape:{shortcut:'U',description:'Создаёт прямоугольник или эллипс на отдельном редактируемом слое. Shift создаёт квадрат или круг.'},
+  crop:{shortcut:'C',description:'Обрезает документ по протянутой рамке. Содержимое и размеры холста обновляются одной операцией истории.'},
+  eyedropper:{shortcut:'I',description:'Берёт цвет видимого пикселя с холста и делает его основным цветом рисования.'},
+  hand:{shortcut:'H / Space',description:'Перемещает область просмотра без изменения слоёв. Пробел временно включает руку из любого инструмента.'},
+  zoom:{shortcut:'Z',description:'Увеличивает изображение относительно точки щелчка. Alt+клик уменьшает масштаб.'},
+};
+const RASTER_BRUSH_TOOLS = new Set(['brush','clone','heal','smudge','dodge','burn','blur','eraser']);
+const SELECTION_TYPE_LABELS = {
+  rect:'Прямоугольное выделение',
+  ellipse:'Эллиптическое выделение',
+  lasso:'Свободное лассо',
+  polygon:'Многоугольное лассо',
+};
+const SELECTION_TYPES = Object.keys(SELECTION_TYPE_LABELS);
+const MIME_EXT = {
+  'image/png':'png',
+  'image/jpeg':'jpg',
+  'image/webp':'webp',
+  'image/vnd.adobe.photoshop':'psd',
+};
+const COLOR_CORRECTION_CONTROLS = [
+  { key:'exposure', label:'Экспозиция', min:-2, max:2, step:.05, unit:' EV', group:'Свет' },
+  { key:'brightness', label:'Яркость', min:0, max:200, step:1, unit:'%', group:'Свет' },
+  { key:'contrast', label:'Контраст', min:0, max:200, step:1, unit:'%', group:'Свет' },
+  { key:'highlights', label:'Светлые области', min:-100, max:100, step:1, unit:'', group:'Свет' },
+  { key:'shadows', label:'Тени', min:-100, max:100, step:1, unit:'', group:'Свет' },
+  { key:'temperature', label:'Температура', min:-100, max:100, step:1, unit:'', group:'Цвет' },
+  { key:'tint', label:'Оттенок', min:-100, max:100, step:1, unit:'', group:'Цвет' },
+  { key:'saturate', label:'Насыщенность', min:0, max:200, step:1, unit:'%', group:'Цвет' },
+  { key:'vibrance', label:'Красочность', min:-100, max:100, step:1, unit:'', group:'Цвет' },
+  { key:'hue', label:'Тон', min:-180, max:180, step:1, unit:'°', group:'Цвет' },
+  { key:'gamma', label:'Гамма', min:.2, max:3, step:.05, unit:'', group:'Тональный диапазон' },
+];
+const COLOR_CORRECTION_KEYS = new Set(COLOR_CORRECTION_CONTROLS.map(item => item.key));
+const BASIC_EFFECT_CONTROLS = [
+  { key:'brightness', label:'Яркость', min:0, max:200, step:1, group:'Цвет и эффекты' },
+  { key:'contrast', label:'Контраст', min:0, max:200, step:1, group:'Цвет и эффекты' },
+  { key:'saturate', label:'Насыщенность', min:0, max:200, step:1, group:'Цвет и эффекты' },
+  { key:'hue', label:'Тон', min:-180, max:180, step:1, group:'Цвет и эффекты' },
+  { key:'blur', label:'Размытие', min:0, max:30, step:1, group:'Эффекты' },
+];
+const RASTER_EFFECT_CONTROLS = [
+  ...COLOR_CORRECTION_CONTROLS,
+  { key:'blur', label:'Размытие', min:0, max:30, step:1, unit:' px', group:'Эффекты' },
+];
+const UI_COLLAPSE_STORAGE_KEY = 'zeter-photo-editor.ui-collapse.v1';
+const SMART_SNAP_STORAGE_KEY = 'zeter-photo-editor.smart-snap.v1';
+const TOOL_ORDER_STORAGE_KEY = 'zeter-photo-editor.tool-order.v1';
+const NATIVE_HIGH_DEPTH_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
+const NATIVE_CMYK_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
+
+// ---- src/ui/toolbar.js ----
+// Browser-only owner for toolbar ordering and tooltips.
+// Document/layer/tool behavior stays in main.js; this module owns only toolbar UI state.
+function createToolbarController({
+  toolbar,
+  labels,
+  help,
+  storageKey,
+  setStatus = () => {},
+} = {}) {
+  if (!toolbar) throw new Error('Toolbar controller requires a toolbar element');
+
+  let dragToolId = '';
+  let dropIndex = -1;
+  let suppressClick = false;
+  let reorderInitialized = false;
+  let tooltipsInitialized = false;
+
+  const toolButtons = () => [...toolbar.querySelectorAll('.tool')];
+
+  function toolIds() {
+    return toolButtons().map(button => button.dataset.tool).filter(Boolean);
+  }
+
+  function applyOrder(order) {
+    const buttons = toolButtons();
+    const available = buttons.map(button => button.dataset.tool).filter(Boolean);
+    const normalized = sanitizeToolOrder(order, available);
+    const byTool = new Map(buttons.map(button => [button.dataset.tool, button]));
+    const anchor = toolbar.querySelector('.toolbar-spacer, .color-chip');
+    for (const tool of normalized) {
+      const button = byTool.get(tool);
+      if (button) toolbar.insertBefore(button, anchor);
+    }
+    return normalized;
+  }
+
+  function readOrder() {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+    } catch (error) {
+      console.warn('Could not restore toolbar tool order', error);
+    }
+    return applyOrder(saved);
+  }
+
+  function persistOrder(order = toolIds()) {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(order));
+      return true;
+    } catch (error) {
+      console.warn('Could not persist toolbar tool order', error);
+      return false;
+    }
+  }
+
+  function clearDropTarget() {
+    dropIndex = -1;
+    const marker = toolbar.querySelector('.toolbar-drop-slot');
+    if (marker) marker.hidden = true;
+  }
+
+  function gridMetrics() {
+    const buttons = toolButtons();
+    const sample = buttons.find(button => button.dataset.tool !== dragToolId) || buttons[0];
+    if (!sample) return null;
+
+    const toolbarRect = toolbar.getBoundingClientRect();
+    const sampleRect = sample.getBoundingClientRect();
+    const style = getComputedStyle(toolbar);
+    const borderLeft = parseFloat(style.borderLeftWidth) || 0;
+    const borderTop = parseFloat(style.borderTopWidth) || 0;
+    const paddingLeft = parseFloat(style.paddingLeft) || 0;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const columnGap = parseFloat(style.columnGap) || 0;
+    const rowGap = parseFloat(style.rowGap) || 0;
+    const template = String(style.gridTemplateColumns || '').trim();
+    const columns = template && template !== 'none'
+      ? Math.max(1, template.split(/\s+/).length)
+      : 1;
+
+    return {
+      left: toolbarRect.left + borderLeft + paddingLeft,
+      top: toolbarRect.top + borderTop + paddingTop,
+      toolbarRect,
+      columns,
+      cellWidth: sampleRect.width,
+      cellHeight: sampleRect.height,
+      columnGap,
+      rowGap,
+      scrollTop: toolbar.scrollTop,
+      maxIndex: Math.max(0, buttons.length - 1),
+    };
+  }
+
+  function dropIndexFromPointer(event) {
+    const metrics = gridMetrics();
+    if (!metrics) return 0;
+    return gridCellIndexFromPoint({ x:event.clientX, y:event.clientY }, metrics);
+  }
+
+  function showDropSlot(index) {
+    const metrics = gridMetrics();
+    const marker = toolbar.querySelector('.toolbar-drop-slot');
+    if (!metrics || !marker) return;
+
+    const clamped = Math.max(0, Math.min(metrics.maxIndex, Math.round(index)));
+    dropIndex = clamped;
+    const row = Math.floor(clamped / metrics.columns);
+    const column = clamped % metrics.columns;
+    const viewportLeft = metrics.left + column * (metrics.cellWidth + metrics.columnGap);
+    const viewportTop = metrics.top - metrics.scrollTop + row * (metrics.cellHeight + metrics.rowGap);
+    marker.style.left = `${viewportLeft - metrics.toolbarRect.left + toolbar.scrollLeft}px`;
+    marker.style.top = `${viewportTop - metrics.toolbarRect.top + toolbar.scrollTop}px`;
+    marker.style.width = `${metrics.cellWidth}px`;
+    marker.style.height = `${metrics.cellHeight}px`;
+    marker.hidden = false;
+  }
+
+  function commitMoveToIndex(index) {
+    const next = moveToolToIndex(toolIds(), dragToolId, index);
+    applyOrder(next);
+    return persistOrder(next);
+  }
+
+  function initReorder() {
+    if (reorderInitialized) return;
+    reorderInitialized = true;
+    readOrder();
+    toolbar.setAttribute('aria-label', 'Инструменты. Кнопки можно перетаскивать в любую позицию панели.');
+
+    const marker = document.createElement('div');
+    marker.className = 'toolbar-drop-slot';
+    marker.hidden = true;
+    marker.setAttribute('aria-hidden', 'true');
+    toolbar.append(marker);
+
+    for (const button of toolButtons()) {
+      button.draggable = true;
+      button.setAttribute('aria-roledescription', 'перетаскиваемый инструмент');
+      button.addEventListener('dragstart', event => {
+        dragToolId = button.dataset.tool || '';
+        if (!dragToolId) {
+          event.preventDefault();
+          return;
+        }
+        suppressClick = true;
+        button.classList.add('tool-dragging');
+        clearDropTarget();
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', `tool:${dragToolId}`);
+        }
+        setStatus(`Перемещение инструмента «${labels[dragToolId] || dragToolId}»: отпустите его в нужной ячейке панели`);
+      });
+      button.addEventListener('dragend', () => {
+        button.classList.remove('tool-dragging');
+        clearDropTarget();
+        dragToolId = '';
+        setTimeout(() => { suppressClick = false; }, 0);
+      });
+    }
+
+    toolbar.addEventListener('dragover', event => {
+      if (!dragToolId) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      showDropSlot(dropIndexFromPointer(event));
+    });
+    toolbar.addEventListener('dragleave', event => {
+      if (!dragToolId) return;
+      const rect = toolbar.getBoundingClientRect();
+      const outside = event.clientX < rect.left || event.clientX > rect.right
+        || event.clientY < rect.top || event.clientY > rect.bottom;
+      if (outside) clearDropTarget();
+    });
+    toolbar.addEventListener('drop', event => {
+      if (!dragToolId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const movedLabel = labels[dragToolId] || dragToolId;
+      const index = dropIndex >= 0 ? dropIndex : dropIndexFromPointer(event);
+      const saved = commitMoveToIndex(index);
+      clearDropTarget();
+      setStatus(saved
+        ? `Инструмент «${movedLabel}» перемещён в позицию ${index + 1}. Порядок сохранён.`
+        : `Инструмент «${movedLabel}» перемещён, но браузер не разрешил сохранить порядок.`);
+    });
+  }
+
+  function initTooltips() {
+    if (tooltipsInitialized) return;
+    tooltipsInitialized = true;
+
+    const tooltip = document.createElement('div');
+    tooltip.id = 'toolTooltip';
+    tooltip.className = 'tool-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.hidden = true;
+    document.body.append(tooltip);
+
+    const hide = () => { tooltip.hidden = true; };
+    for (const button of toolButtons()) {
+      const item = help[button.dataset.tool];
+      if (!item) continue;
+      button.removeAttribute('title');
+      button.setAttribute('aria-describedby', tooltip.id);
+      const show = () => {
+        const rect = button.getBoundingClientRect();
+        tooltip.innerHTML = `<strong>${labels[button.dataset.tool]}</strong><span>${item.description}</span><kbd>${item.shortcut}</kbd>`;
+        tooltip.hidden = false;
+        const width = tooltip.offsetWidth;
+        const height = tooltip.offsetHeight;
+        const maxTop = Math.max(8, window.innerHeight - height - 8);
+        const top = Math.max(8, Math.min(rect.top + rect.height / 2 - height / 2, maxTop));
+        tooltip.style.left = `${Math.min(window.innerWidth - width - 10, rect.right + 10)}px`;
+        tooltip.style.top = `${top}px`;
+      };
+      button.addEventListener('pointerenter', show);
+      button.addEventListener('pointerleave', hide);
+      button.addEventListener('focus', show);
+      button.addEventListener('blur', hide);
+      button.addEventListener('dragstart', hide);
+      button.addEventListener('dragend', hide);
+    }
+  }
+
+  return {
+    initReorder,
+    initTooltips,
+    isClickSuppressed: () => suppressClick,
+    applyOrder,
+    readOrder,
+  };
+}
+
 // ---- src/core/history.js ----
 class HistoryStack {
   constructor(limit = 60, byteLimit = 128 * 1024 * 1024) {
@@ -9218,65 +9536,6 @@ const els = {
   dropOverlay: $('#dropOverlay'), toastRegion: $('#toastRegion'), workspace: $('.workspace'), toolbar: $('.toolbar'), rightPanel: $('.right-panel'),
 };
 
-const TOOL_LABELS = { move: 'Перемещение', marquee: 'Выделение', brush: 'Кисть', clone: 'Штамп', heal: 'Лечебная кисть', smudge: 'Палец / смазывание', dodge: 'Осветлитель', burn: 'Затемнитель', blur: 'Кисть размытия', eraser: 'Ластик', fill: 'Заливка', gradient: 'Градиент', pen: 'Перо / контуры', magnetic: 'Магнитное лассо', wand: 'Волшебная палочка', line: 'Линия', text: 'Текст', shape: 'Фигура', crop: 'Кадрирование', eyedropper: 'Пипетка', hand: 'Рука', zoom: 'Лупа' };
-const TOOL_HELP = {
-  move:{shortcut:'V',description:'Выбирает и перемещает слои. Тяните рамку для масштаба, круглый маркер — для поворота; Shift ограничивает направление.'},
-  marquee:{shortcut:'M / Shift+M',description:'Создаёт прямоугольное, эллиптическое, свободное или многоугольное выделение. Ограничивает рисование и копирование выбранной областью.'},
-  brush:{shortcut:'B',description:'Рисует основным цветом на растровом слое. Размер меняется клавишами [ и ], давление пера поддерживается.'},
-  clone:{shortcut:'S',description:'Копирует пиксели из одной части изображения в другую. Сначала задайте источник через Alt+клик, затем рисуйте.'},
-  heal:{shortcut:'J',description:'Мягко переносит фактуру с выбранного участка для ретуши дефектов. Источник задаётся через Alt+клик.'},
-  smudge:{shortcut:'N',description:'Размазывает существующие пиксели по направлению движения кисти. Силу эффекта задаёт отдельный ползунок сверху.'},
-  dodge:{shortcut:'O',description:'Осветляет существующие пиксели. Ползунок «Сила осветления» задаёт эффект одного штриха; повторные штрихи усиливают его.'},
-  burn:{shortcut:'Shift+O',description:'Затемняет существующие пиксели. Ползунок «Сила затемнения» задаёт эффект одного штриха; повторные штрихи усиливают его.'},
-  blur:{shortcut:'R',description:'Локально смягчает детали растрового слоя. Размер задаёт область, а «Сила размытия» — интенсивность одного штриха в процентах.'},
-  eraser:{shortcut:'E',description:'Удаляет пиксели с существующего растрового слоя до прозрачности. Активное выделение ограничивает стирание.'},
-  fill:{shortcut:'G',description:'Заливает связанную область основным цветом. Ползунок «Допуск» определяет, насколько близкие оттенки захватывать.'},
-  gradient:{shortcut:'Shift+G',description:'Создаёт линейный или радиальный переход между двумя цветами на новом слое. Протяните линию по холсту.'},
-  pen:{shortcut:'P',description:'Строит редактируемый векторный контур по опорным точкам. Enter или двойной щелчок завершает путь.'},
-  magnetic:{shortcut:'A',description:'Создаёт выделение, притягивая поставленные точки к заметным границам изображения. Enter завершает контур.'},
-  wand:{shortcut:'W',description:'Одним щелчком выделяет связанную область похожего цвета. Чувствительность регулируется ползунком «Допуск».'},
-  line:{shortcut:'L',description:'Рисует линию на текущем растровом слое. Если его нет, создаёт один слой «Линии»; Shift привязывает угол к шагу 45°.'},
-  text:{shortcut:'T',description:'Добавляет новый текст или открывает существующий текстовый слой для редактирования.'},
-  shape:{shortcut:'U',description:'Создаёт прямоугольник или эллипс на отдельном редактируемом слое. Shift создаёт квадрат или круг.'},
-  crop:{shortcut:'C',description:'Обрезает документ по протянутой рамке. Содержимое и размеры холста обновляются одной операцией истории.'},
-  eyedropper:{shortcut:'I',description:'Берёт цвет видимого пикселя с холста и делает его основным цветом рисования.'},
-  hand:{shortcut:'H / Space',description:'Перемещает область просмотра без изменения слоёв. Пробел временно включает руку из любого инструмента.'},
-  zoom:{shortcut:'Z',description:'Увеличивает изображение относительно точки щелчка. Alt+клик уменьшает масштаб.'},
-};
-const RASTER_BRUSH_TOOLS = new Set(['brush','clone','heal','smudge','dodge','burn','blur','eraser']);
-const SELECTION_TYPE_LABELS = { rect:'Прямоугольное выделение', ellipse:'Эллиптическое выделение', lasso:'Свободное лассо', polygon:'Многоугольное лассо' };
-const SELECTION_TYPES = Object.keys(SELECTION_TYPE_LABELS);
-const MIME_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/vnd.adobe.photoshop': 'psd' };
-const COLOR_CORRECTION_CONTROLS = [
-  { key:'exposure', label:'Экспозиция', min:-2, max:2, step:.05, unit:' EV', group:'Свет' },
-  { key:'brightness', label:'Яркость', min:0, max:200, step:1, unit:'%', group:'Свет' },
-  { key:'contrast', label:'Контраст', min:0, max:200, step:1, unit:'%', group:'Свет' },
-  { key:'highlights', label:'Светлые области', min:-100, max:100, step:1, unit:'', group:'Свет' },
-  { key:'shadows', label:'Тени', min:-100, max:100, step:1, unit:'', group:'Свет' },
-  { key:'temperature', label:'Температура', min:-100, max:100, step:1, unit:'', group:'Цвет' },
-  { key:'tint', label:'Оттенок', min:-100, max:100, step:1, unit:'', group:'Цвет' },
-  { key:'saturate', label:'Насыщенность', min:0, max:200, step:1, unit:'%', group:'Цвет' },
-  { key:'vibrance', label:'Красочность', min:-100, max:100, step:1, unit:'', group:'Цвет' },
-  { key:'hue', label:'Тон', min:-180, max:180, step:1, unit:'°', group:'Цвет' },
-  { key:'gamma', label:'Гамма', min:.2, max:3, step:.05, unit:'', group:'Тональный диапазон' },
-];
-const COLOR_CORRECTION_KEYS = new Set(COLOR_CORRECTION_CONTROLS.map(item => item.key));
-const BASIC_EFFECT_CONTROLS = [
-  { key:'brightness', label:'Яркость', min:0, max:200, step:1, group:'Цвет и эффекты' },
-  { key:'contrast', label:'Контраст', min:0, max:200, step:1, group:'Цвет и эффекты' },
-  { key:'saturate', label:'Насыщенность', min:0, max:200, step:1, group:'Цвет и эффекты' },
-  { key:'hue', label:'Тон', min:-180, max:180, step:1, group:'Цвет и эффекты' },
-  { key:'blur', label:'Размытие', min:0, max:30, step:1, group:'Эффекты' },
-];
-const RASTER_EFFECT_CONTROLS = [
-  ...COLOR_CORRECTION_CONTROLS,
-  { key:'blur', label:'Размытие', min:0, max:30, step:1, unit:' px', group:'Эффекты' },
-];
-const UI_COLLAPSE_STORAGE_KEY = 'zeter-photo-editor.ui-collapse.v1';
-const SMART_SNAP_STORAGE_KEY = 'zeter-photo-editor.smart-snap.v1';
-const TOOL_ORDER_STORAGE_KEY = 'zeter-photo-editor.tool-order.v1';
-const NATIVE_HIGH_DEPTH_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
-const NATIVE_CMYK_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
 const collapsedPanelIds = new Set();
 let doc = createDocument();
 let history = new HistoryStack(80);
@@ -9285,9 +9544,6 @@ let documentSessions = [];
 let activeSessionId = '';
 let nextSessionNumber = 1;
 let currentTool = 'move';
-let toolbarDragToolId = '';
-let toolbarDropIndex = -1;
-let suppressToolClick = false;
 let renderVersion = 0;
 let renderFrame = 0;
 let renderBusy = false;
@@ -9362,170 +9618,14 @@ const RECOVERY_DEBOUNCE_MS = 1500;
 
 function setStatus(message) { els.status.textContent = message; }
 
-function toolbarToolIds() {
-  return [...els.toolbar.querySelectorAll('.tool')].map(button => button.dataset.tool).filter(Boolean);
-}
-function applyToolbarToolOrder(order) {
-  const buttons = [...els.toolbar.querySelectorAll('.tool')];
-  const available = buttons.map(button => button.dataset.tool).filter(Boolean);
-  const normalized = sanitizeToolOrder(order, available);
-  const byTool = new Map(buttons.map(button => [button.dataset.tool, button]));
-  const anchor = els.toolbar.querySelector('.toolbar-spacer, .color-chip');
-  for (const tool of normalized) {
-    const button = byTool.get(tool);
-    if (button) els.toolbar.insertBefore(button, anchor);
-  }
-  return normalized;
-}
-function readToolbarToolOrder() {
-  let saved = null;
-  try {
-    saved = JSON.parse(localStorage.getItem(TOOL_ORDER_STORAGE_KEY) || 'null');
-  } catch (error) {
-    console.warn('Could not restore toolbar tool order', error);
-  }
-  return applyToolbarToolOrder(saved);
-}
-function persistToolbarToolOrder(order = toolbarToolIds()) {
-  try {
-    localStorage.setItem(TOOL_ORDER_STORAGE_KEY, JSON.stringify(order));
-    return true;
-  } catch (error) {
-    console.warn('Could not persist toolbar tool order', error);
-    return false;
-  }
-}
-function clearToolbarDropTarget() {
-  toolbarDropIndex = -1;
-  const marker = els.toolbar.querySelector('.toolbar-drop-slot');
-  if (marker) marker.hidden = true;
-}
-function toolbarGridMetrics() {
-  const buttons = [...els.toolbar.querySelectorAll('.tool')];
-  const sample = buttons.find(button => button.dataset.tool !== toolbarDragToolId) || buttons[0];
-  if (!sample) return null;
-  const toolbarRect = els.toolbar.getBoundingClientRect();
-  const sampleRect = sample.getBoundingClientRect();
-  const style = getComputedStyle(els.toolbar);
-  const borderLeft = parseFloat(style.borderLeftWidth) || 0;
-  const borderTop = parseFloat(style.borderTopWidth) || 0;
-  const paddingLeft = parseFloat(style.paddingLeft) || 0;
-  const paddingTop = parseFloat(style.paddingTop) || 0;
-  const columnGap = parseFloat(style.columnGap) || 0;
-  const rowGap = parseFloat(style.rowGap) || 0;
-  const template = String(style.gridTemplateColumns || '').trim();
-  const columns = template && template !== 'none'
-    ? Math.max(1, template.split(/\s+/).length)
-    : 1;
-  return {
-    left: toolbarRect.left + borderLeft + paddingLeft,
-    top: toolbarRect.top + borderTop + paddingTop,
-    toolbarRect,
-    borderLeft,
-    borderTop,
-    paddingLeft,
-    paddingTop,
-    columns,
-    cellWidth: sampleRect.width,
-    cellHeight: sampleRect.height,
-    columnGap,
-    rowGap,
-    scrollTop: els.toolbar.scrollTop,
-    maxIndex: Math.max(0, buttons.length - 1),
-  };
-}
-function toolbarDropIndexFromPointer(event) {
-  const metrics = toolbarGridMetrics();
-  if (!metrics) return 0;
-  return gridCellIndexFromPoint(
-    { x:event.clientX, y:event.clientY },
-    metrics,
-  );
-}
-function showToolbarDropSlot(index) {
-  const metrics = toolbarGridMetrics();
-  const marker = els.toolbar.querySelector('.toolbar-drop-slot');
-  if (!metrics || !marker) return;
-  const clamped = Math.max(0, Math.min(metrics.maxIndex, Math.round(index)));
-  toolbarDropIndex = clamped;
-  const row = Math.floor(clamped / metrics.columns);
-  const column = clamped % metrics.columns;
-  const viewportLeft = metrics.left + column * (metrics.cellWidth + metrics.columnGap);
-  const viewportTop = metrics.top - metrics.scrollTop + row * (metrics.cellHeight + metrics.rowGap);
-  marker.style.left = `${viewportLeft - metrics.toolbarRect.left + els.toolbar.scrollLeft}px`;
-  marker.style.top = `${viewportTop - metrics.toolbarRect.top + els.toolbar.scrollTop}px`;
-  marker.style.width = `${metrics.cellWidth}px`;
-  marker.style.height = `${metrics.cellHeight}px`;
-  marker.hidden = false;
-}
-function commitToolbarToolMoveToIndex(index) {
-  const next = moveToolToIndex(toolbarToolIds(), toolbarDragToolId, index);
-  applyToolbarToolOrder(next);
-  return persistToolbarToolOrder(next);
-}
-function initToolbarReorder() {
-  readToolbarToolOrder();
-  els.toolbar.setAttribute('aria-label', 'Инструменты. Кнопки можно перетаскивать в любую позицию панели.');
-  const marker = document.createElement('div');
-  marker.className = 'toolbar-drop-slot';
-  marker.hidden = true;
-  marker.setAttribute('aria-hidden', 'true');
-  els.toolbar.append(marker);
+const toolbarUi = createToolbarController({
+  toolbar: els.toolbar,
+  labels: TOOL_LABELS,
+  help: TOOL_HELP,
+  storageKey: TOOL_ORDER_STORAGE_KEY,
+  setStatus,
+});
 
-  for (const button of els.toolbar.querySelectorAll('.tool')) {
-    button.draggable = true;
-    button.setAttribute('aria-roledescription', 'перетаскиваемый инструмент');
-    button.addEventListener('dragstart', event => {
-      toolbarDragToolId = button.dataset.tool || '';
-      if (!toolbarDragToolId) { event.preventDefault(); return; }
-      suppressToolClick = true;
-      button.classList.add('tool-dragging');
-      clearToolbarDropTarget();
-      if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', `tool:${toolbarDragToolId}`);
-      }
-      setStatus(`Перемещение инструмента «${TOOL_LABELS[toolbarDragToolId] || toolbarDragToolId}»: отпустите его в нужной ячейке панели`);
-    });
-    button.addEventListener('dragend', () => {
-      button.classList.remove('tool-dragging');
-      clearToolbarDropTarget();
-      toolbarDragToolId = '';
-      setTimeout(() => { suppressToolClick = false; }, 0);
-    });
-  }
-
-  els.toolbar.addEventListener('dragover', event => {
-    if (!toolbarDragToolId) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    showToolbarDropSlot(toolbarDropIndexFromPointer(event));
-  });
-  els.toolbar.addEventListener('dragleave', event => {
-    if (!toolbarDragToolId) return;
-    const rect = els.toolbar.getBoundingClientRect();
-    const outside = event.clientX < rect.left || event.clientX > rect.right
-      || event.clientY < rect.top || event.clientY > rect.bottom;
-    if (outside) clearToolbarDropTarget();
-  });
-  els.toolbar.addEventListener('drop', event => {
-    if (!toolbarDragToolId) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const movedLabel = TOOL_LABELS[toolbarDragToolId] || toolbarDragToolId;
-    const index = toolbarDropIndex >= 0 ? toolbarDropIndex : toolbarDropIndexFromPointer(event);
-    const saved = commitToolbarToolMoveToIndex(index);
-    clearToolbarDropTarget();
-    setStatus(saved
-      ? `Инструмент «${movedLabel}» перемещён в позицию ${index + 1}. Порядок сохранён.`
-      : `Инструмент «${movedLabel}» перемещён, но браузер не разрешил сохранить порядок.`);
-  });
-}
-function initTooltips(){
-  const tooltip=document.createElement('div');tooltip.id='toolTooltip';tooltip.className='tool-tooltip';tooltip.setAttribute('role','tooltip');tooltip.hidden=true;document.body.append(tooltip);
-  const hide=()=>{tooltip.hidden=true;};
-  for(const button of $$('.tool')){const help=TOOL_HELP[button.dataset.tool];if(!help)continue;button.removeAttribute('title');button.setAttribute('aria-describedby',tooltip.id);const show=()=>{const rect=button.getBoundingClientRect();tooltip.innerHTML=`<strong>${TOOL_LABELS[button.dataset.tool]}</strong><span>${help.description}</span><kbd>${help.shortcut}</kbd>`;tooltip.hidden=false;const width=tooltip.offsetWidth;const height=tooltip.offsetHeight;tooltip.style.left=`${Math.min(window.innerWidth-width-10,rect.right+10)}px`;tooltip.style.top=`${clamp(rect.top+rect.height/2-height/2,8,window.innerHeight-height-8)}px`;};button.addEventListener('pointerenter',show);button.addEventListener('pointerleave',hide);button.addEventListener('focus',show);button.addEventListener('blur',hide);button.addEventListener('dragstart',hide);button.addEventListener('dragend',hide);}
-}
 function toast(message, tone = '') {
   const item = document.createElement('div');
   item.className = `toast${tone ? ` ${tone}` : ''}`;
@@ -16160,7 +16260,7 @@ els.viewport.addEventListener('contextmenu',e=>{
 });
 window.addEventListener('blur',()=>{closeMenu();spaceHeld=false;if(!drag)els.overlay.style.cursor=defaultToolCursor();});
 
-$$('.tool').forEach(b=>b.onclick=()=>{if(suppressToolClick)return;setTool(b.dataset.tool);});
+$('.tool').forEach(b=>b.onclick=()=>{if(toolbarUi.isClickSuppressed())return;setTool(b.dataset.tool);});
 els.primaryColor.oninput=()=>els.colorChip.style.background=els.primaryColor.value;
 els.brushSize.oninput=()=>els.brushSizeValue.textContent=els.brushSize.value;
 els.toolOpacity.oninput=()=>els.toolOpacityValue.textContent=`${els.toolOpacity.value}%`;
@@ -16363,8 +16463,8 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 window.addEventListener('beforeunload',e=>{syncCurrentSession();if(documentSessions.some(session=>session.dirty)||documentEditPending()){e.preventDefault();e.returnValue='';}});
 
 async function bootstrap(){
-  initToolbarReorder();
-  initTooltips();
+  toolbarUi.initReorder();
+  toolbarUi.initTooltips();
   initCollapsiblePanels();
   readSmartSnapState();
   const initialSession = buildSession(doc);
@@ -16389,4 +16489,5 @@ bootstrap().then(()=>{
   message.textContent=`Ошибка запуска редактора: ${error?.message||error}`;
   document.body.append(message);
 });
+
 })();
