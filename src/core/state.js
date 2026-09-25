@@ -719,10 +719,33 @@ export function sanitizePsdSmartObject(value) {
     .filter(Boolean);
   if(!blocks.length)return null;
   const baseline=value.baseline&&typeof value.baseline==='object'&&!Array.isArray(value.baseline)?value.baseline:{};
+  const descriptor=value.descriptor&&typeof value.descriptor==='object'&&!Array.isArray(value.descriptor)?value.descriptor:null;
+  const asset=value.asset&&typeof value.asset==='object'&&!Array.isArray(value.asset)?value.asset:null;
+  const placedTransform=Array.isArray(value.placedTransform)&&value.placedTransform.length===8
+    ? value.placedTransform.map(item=>bounded(item,0,-1e9,1e9))
+    : null;
   return{
     kind:['embedded','linked','placed'].includes(value.kind)?value.kind:'placed',
     uniqueId:shortText(value.uniqueId,'',160).trim()||null,
     placedVersion:Number.isInteger(value.placedVersion)&&value.placedVersion>=0&&value.placedVersion<=100?value.placedVersion:null,
+    placedTransform,
+    descriptor:descriptor?{
+      smartVersion:Math.trunc(bounded(descriptor.smartVersion,0,0,100)),
+      uniqueId:shortText(descriptor.uniqueId,'',160).trim()||null,
+      resolution:bounded(descriptor.resolution,72,.01,100000),
+      descriptorClass:shortText(descriptor.descriptorClass,'',160).trim()||null,
+      descriptorKeys:Array.isArray(descriptor.descriptorKeys)?descriptor.descriptorKeys.slice(0,128).map(key=>shortText(key,'',160)).filter(Boolean):[],
+    }:null,
+    asset:asset?{
+      sourceKey:PSD_LINKED_LAYER_BLOCK_KEYS.has(asset.sourceKey)?asset.sourceKey:null,
+      kind:['data','external','alias'].includes(asset.kind)?asset.kind:null,
+      uuid:shortText(asset.uuid,'',160).trim()||null,
+      filename:shortText(asset.filename,'',500).replace(/\0/g,''),
+      filetype:shortText(asset.filetype,'',16).replace(/\0/g,''),
+      detectedFileType:shortText(asset.detectedFileType,'',32).toLowerCase().replace(/[^a-z0-9_-]/g,'')||null,
+      dataSize:Math.trunc(bounded(asset.dataSize,0,0,128*1024*1024)),
+      fileSize:asset.fileSize==null?null:Math.trunc(bounded(asset.fileSize,0,0,2_000_000_000)),
+    }:null,
     baseline:{
       x:bounded(baseline.x,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION),
       y:bounded(baseline.y,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION),
@@ -732,6 +755,7 @@ export function sanitizePsdSmartObject(value) {
       scaleY:bounded(baseline.scaleY,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
       rotation:((finite(baseline.rotation,0)%360)+360)%360,
       previewFingerprint:shortText(baseline.previewFingerprint,'',160).trim()||null,
+      embeddedFingerprint:shortText(baseline.embeddedFingerprint,'',160).trim()||null,
     },
     blocks,
   };

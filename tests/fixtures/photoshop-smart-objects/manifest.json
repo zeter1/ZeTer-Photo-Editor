@@ -10,5 +10,16 @@
     "sourceGitBlob": "b37b63466ecee1586b5d917e0b40fbf236b0e65d",
     "size": 26144,
     "sha256": "f451b816bb5292564eaad9a29eb7543c3b2ad6b5dc35d1babc0a4c799502ee01"
+  },
+  "placedLayerFixture": {
+    "id": "psd-tools-placed-layer",
+    "file": "psd-tools-placedLayer.psd",
+    "license": "MIT",
+    "sourceRepository": "psd-tools/psd-tools",
+    "sourceCommit": "8f9a25ea98202061365701db54ce938931b27c09",
+    "sourcePath": "tests/psd_files/placedLayer.psd",
+    "sourceGitBlob": "707df934bb10bbcbb699c46d4bcde5580e48c036",
+    "size": 114796,
+    "sha256": "69ea01bf88cb85c48d3a78c3bb9e06ae141c9c9fc6a88267eae95c315e16180e"
   }
 }

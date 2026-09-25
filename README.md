@@ -9,7 +9,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 Для текста доступны встроенные шрифты с поддержкой кириллицы, загрузка своего файла шрифта и кнопка показа шрифтов компьютера (если браузер предоставит доступ). В окне текста параметры сразу видны на холсте и в предпросмотре фрагмента изображения; окно можно переместить за заголовок и изменить его размер за угол. Размер малого предпросмотра меняется за его нижний угол. «Отмена» убирает временный результат.
 
-## Что умеет версия 1.33.0
+## Что умеет версия 1.34.0
 
 - растровые, текстовые и фигурные слои;
 - видимость, блокировка, порядок, дублирование, непрозрачность и режимы наложения;
@@ -92,6 +92,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **Production Color Proofing & Display Profiles Stage 13d**: `.zpe` хранит независимый RGB display ICC и отдельный proof intent. Preview проходит `CMYK source ICC → PCS → optional proof CMYK/BPC → RGB display ICC`; поддерживаются PCS→RGB LUT/MPE и типичные monitor `rXYZ/gXYZ/bXYZ + rTRC/gTRC/bTRC` matrix/TRC profiles. Gamut Warning строит magenta overlay по proof/display round-trip ΔE без изменения canonical CMYK samples. Выбранный display ICC симулируется внутри preview; физическую калибровку монитора завершает browser/OS compositor.
 - **Real ICC / Photoshop Compatibility Corpus Stage 13e**: tests теперь используют закреплённые реальные CC0 CMYK/Display-P3 ICC profiles и MIT PSD/PSB fixtures из внешних проектов, а не только synthetic bytes. Независимый oracle от Pillow 12.3.0 / LittleCMS 2.19 проверяет CMYK→PCS Lab/XYZ, sRGB и Display P3 с bounded tolerance; fixture manifest фиксирует upstream commit/blob, размер и SHA-256. Реальный 4×4 CMYK PSD с ~557 КБ printer ICC проходит native raster/profile round-trip, а внешний layered PSB v2 проверяет groups/vector mask/ICC import.
 - **Photoshop-native Smart Objects / Placed Layer Round-trip Stage 14a**: PSD/PSB adapter сохраняет bounded opaque `PlLd`, `SoLd`, `SoLE` и document-level `lnk2/lnkD/lnkE` blocks. Реальный внешний Photoshop Smart Object импортируется как ZPE smart-object preview, а не как обычный raster-layer; пока preview/geometry/filters не изменены, native metadata и linked-resource bytes проходят byte-for-byte PSD/PSB round-trip. После трансформации, фильтра, изменения preview или нарушения исходного набора Smart Objects passthrough автоматически отключается и экспорт честно растрирует слой без stale placed/linked metadata.
+- **Smart Object Descriptor & Embedded Asset Extraction Stage 14b**: adapter bounded-разбирает `SoLd/SoLE` ActionDescriptor foundation и typed Linked Layer records (`liFD` embedded data, `liFE` external, alias), связывает их по UUID и определяет payload type по Photoshop filetype + magic bytes. Embedded PNG/JPEG/WebP/GIF/BMP открываются как редактируемый content-tab; embedded PSD/PSB декодируется в bounded nested ZPE document. External links никогда автоматически не читаются по путям из PSD. Пока извлечённое содержимое не изменено, Stage 14a opaque round-trip остаётся byte-for-byte; после редактирования export честно переходит к raster fallback до Stage 14c resource rewrite.
 - импорт PNG/JPEG/WebP/GIF/BMP/SVG;
 - **PSD Import Stage 3**: локальный offline decoder открывает RGB/8-bit `.psd` как редактируемый стек растровых слоёв, переносит bounds, visibility, opacity, поддерживаемые blend modes и bitmap layer masks; raw/RLE/ZIP channel compression декодируется без CDN и внешнего runtime;
 - **PSD Export Stage 4 + Stage 12e/12g + Stage 13b**: экспортирует RGB и совместимый native CMYK `.psd`; CMYK writer пишет color mode 4, C/M/Y/K + alpha и сохраняет 8/16/32-bit typed precision. Несовместимая семантика остаётся явным RGB preview fallback;
@@ -164,7 +165,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Запуск на Windows
 
-Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.33.0 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
+Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.34.0 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
 
 Если браузер показывает старую версию после обновления архива, закройте старую вкладку и откройте `index.html` из новой распакованной папки.
 
@@ -219,6 +220,6 @@ npm test
 
 ## Ограничения относительно Photopea
 
-PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip, Stage 12e–12g сохраняют native RGB 16/32-bit typed channels и совместимый high-depth merged composite, Stage 13a–13e закрывают native CMYK/color-management и real-world ICC compatibility corpus, а Stage 14a сохраняет Photoshop Smart Object / Placed Layer metadata как bounded opaque round-trip. Это ещё не полная Photoshop-семантика: payload `SoLd/SoLE/lnk*` пока не разобран в редактируемый embedded/linked document, нет native Text/Shape/Adjustment mapping, полной parity isolated groups/vector-mask composites и tiled/streaming pipeline.
+PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip, Stage 12e–12g сохраняют native RGB 16/32-bit typed channels и compatible high-depth composite, Stage 13a–13e закрывают native CMYK/color-management и real-world ICC corpus, а Stage 14a–14b сохраняют Photoshop Smart Object metadata и извлекают supported embedded assets в editable content-tab. Ограничение Smart Objects теперь локализовано: после редактирования embedded content ZPE пока не переписывает `lnk*` payload/descriptor, поэтому экспорт безопасно растрирует изменённый экземпляр. Также ещё нет native Text/Shape/Adjustment mapping, полной parity isolated groups/vector-mask composites и tiled/streaming pipeline.
 
-Следующий imaging-этап: **Stage 14b — Smart Object Descriptor & Embedded Asset Extraction**: разобрать `SoLd/SoLE` ActionDescriptor и `lnk2/lnkD/lnkE` records в typed model, извлекать поддержанные embedded PNG/PSD payload в content-tab, сохранять linked/embedded identity и корректно переписывать resources после редактирования. После этого — Photoshop-native Text/Shape/Adjustment mapping.
+Следующий imaging-этап: **Stage 14c — Smart Object Embedded Asset Rewrite & Resource Rebuild**: после редактирования content-tab сериализовать supported embedded bitmap/PSD обратно в `liFD` record, обновлять `datasize`/linked resources и согласованные `SoLd/PlLd` identity/preview без raster fallback. Затем — Photoshop-native Text/Shape/Adjustment mapping.

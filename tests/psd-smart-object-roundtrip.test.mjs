@@ -19,6 +19,10 @@ test('Stage 14a pins a real external Photoshop Smart Object PSD fixture',async()
   assert.match(manifest.fixture.sourceCommit,/^[0-9a-f]{40}$/);
   assert.equal(manifest.fixture.sourceGitBlob,'b37b63466ecee1586b5d917e0b40fbf236b0e65d');
   assert.deepEqual(inspectPsdHeader(fixture),{signature:'8BPS',version:1,channels:3,width:32,height:32,bitsPerChannel:8,colorMode:3});
+  const placed=await bytes(manifest.placedLayerFixture.file);
+  assert.equal(placed.byteLength,manifest.placedLayerFixture.size);
+  assert.equal(sha256(placed),manifest.placedLayerFixture.sha256);
+  assert.equal(manifest.placedLayerFixture.sourceGitBlob,'707df934bb10bbcbb699c46d4bcde5580e48c036');
 });
 
 test('Stage 14a decodes PlLd/SoLd and linked-layer resources from a real Photoshop Smart Object',async()=>{
@@ -31,6 +35,18 @@ test('Stage 14a decodes PlLd/SoLd and linked-layer resources from a real Photosh
   assert.equal(layer.psdSmartObject.kind,'embedded');
   assert.equal(layer.psdSmartObject.placedVersion,3);
   assert.equal(layer.psdSmartObject.uniqueId,'fe5608a6-d2b4-3344-8959-a42156defed2');
+  assert.deepEqual(layer.psdSmartObject.placedTransform,[0,0,32,0,32,32,0,32]);
+  assert.equal(layer.psdSmartObject.descriptor.smartVersion,4);
+  assert.equal(layer.psdSmartObject.descriptor.uniqueId,layer.psdSmartObject.uniqueId);
+  assert.equal(layer.psdSmartObject.descriptor.resolution,72);
+  assert.ok(layer.psdSmartObject.descriptor.descriptorKeys.includes('Idnt'));
+  assert.equal(layer.psdSmartObject.asset.kind,'data');
+  assert.equal(layer.psdSmartObject.asset.filename,'A.png');
+  assert.equal(layer.psdSmartObject.asset.detectedFileType,'png');
+  assert.equal(layer.psdSmartObject.asset.data.byteLength,378);
+  assert.deepEqual([...layer.psdSmartObject.asset.data.slice(0,8)],[137,80,78,71,13,10,26,10]);
+  assert.equal(decoded.linkedLayerEntries.length,1);
+  assert.equal(decoded.linkedLayerEntries[0].uuid,layer.psdSmartObject.uniqueId);
   const smartBlocks=blockMap(layer.psdSmartObject.blocks);
   assert.equal(smartBlocks.get('PlLd').data.byteLength,484);
   assert.equal(smartBlocks.get('SoLd').data.byteLength,1268);
@@ -94,3 +110,30 @@ test('Stage 14a project sanitizer persists only bounded allow-listed Photoshop S
   assert.equal(safe.psdLinkedLayerBlocks.length,1);
   assert.equal(safe.psdLinkedLayerBlocks[0].key,'lnk2');
 });
+
+test('Stage 14b parses embedded and external linked-layer records without reading external filesystem paths',async()=>{
+  const fixture=await bytes('psd-tools-placedLayer.psd');
+  const decoded=await decodePsd(fixture,{maxPixels:2_000_000,maxLayers:100});
+  assert.deepEqual(decoded.warnings,[]);
+  const byName=new Map(decoded.layers.map(layer=>[layer.name,layer]));
+  const linkedPng=byName.get('linked-png').psdSmartObject;
+  const linkedPsd=byName.get('linked-psd').psdSmartObject;
+  const embedded=byName.get('embedded-png').psdSmartObject;
+  assert.equal(linkedPng.kind,'linked');
+  assert.equal(linkedPng.asset.kind,'external');
+  assert.equal(linkedPng.asset.filename,'linked-layer.png');
+  assert.equal(linkedPng.asset.detectedFileType,'png');
+  assert.equal(linkedPng.asset.data,null);
+  assert.equal(linkedPng.asset.fileSize,17272);
+  assert.equal(linkedPsd.asset.kind,'external');
+  assert.equal(linkedPsd.asset.filename,'1layer.psd');
+  assert.equal(linkedPsd.asset.detectedFileType,'psd');
+  assert.equal(linkedPsd.asset.data,null);
+  assert.equal(linkedPsd.asset.fileSize,6476);
+  assert.equal(embedded.asset.kind,'data');
+  assert.equal(embedded.asset.filename,'linked-layer.png');
+  assert.equal(embedded.asset.detectedFileType,'png');
+  assert.equal(embedded.asset.data.byteLength,17272);
+  assert.ok(decoded.linkedLayerEntries.some(item=>item.sourceKey==='lnkE'&&item.kind==='external'));
+});
+

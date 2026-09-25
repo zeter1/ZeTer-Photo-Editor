@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.34.0 — 2026-09-25
+
+### 2026-09-25 — Smart Object Descriptor & Embedded Asset Extraction Stage 14b
+
+- ActionDescriptor foundation: bounded parser читает Smart Object `SoLd/SoLE` DescriptorBlock и безопасно обрабатывает standard OSType primitives/lists/nested descriptors/reference values с depth/item/string limits.
+- Placed metadata: `PlLd` теперь извлекает Photoshop 8-point transform, version и unique id; `SoLd/SoLE` typed summary сохраняет `Idnt`, resolution, class и descriptor keys.
+- Linked Layer records: `lnk2/lnkD/lnkE` разбираются в `liFD` (embedded data), `liFE` (external) и alias records с UUID, filename, filetype, datasize/filesize, child id и cached data.
+- Asset detection: payload type определяется по stored Photoshop filetype, magic bytes и только затем filename extension; PNG/JPEG/WebP/GIF/BMP и PSD/PSB распознаются без выполнения содержимого.
+- Editable embedded content: supported embedded bitmap становится обычным nested ZPE document; embedded PSD/PSB декодируется в bounded nested raster/group document. Content-tab использует существующий Smart Object editor workflow.
+- External-link safety: пути `fullPath/relPath` из Photoshop descriptors не открываются автоматически и не дают PSD доступ к локальной файловой системе.
+- Round-trip invariant: неизменённый extracted embedded document сохраняет Stage 14a byte-for-byte native metadata/resource passthrough; после content edit preview/fingerprint меняется и native passthrough отключается до resource rewrite Stage 14c.
+- Real fixture expansion: MIT `psd-tools-placedLayer.psd` добавляет одновременно embedded PNG и external PNG/PSD Smart Objects; regression проверяет typed UUID matching и отсутствие filesystem resolution.
+- Version: приложение синхронизировано на 1.34.0.
+
 ## 1.33.0 — 2026-09-25
 
 ### 2026-09-25 — Photoshop-native Smart Objects / Placed Layer Round-trip Stage 14a

@@ -10,3 +10,12 @@
 - license: MIT; полный notice лежит рядом в `LICENSE-psd-tools-MIT.txt`.
 
 Fixture bytes не генерируются кодом ZPE и не скачиваются в CI.
+
+## Stage 14b typed linked-layer fixture
+
+`psd-tools-placedLayer.psd` из того же pinned upstream commit содержит одновременно embedded PNG (`liFD`) и external linked PNG/PSD (`liFE`) Smart Objects. Regression проверяет typed Linked Layer parser, UUID matching, filename/filetype, embedded payload bytes и то, что external paths никогда не читаются с файловой системы автоматически.
+
+- upstream Git blob: `707df934bb10bbcbb699c46d4bcde5580e48c036`
+- size: 114,796 bytes
+- SHA-256: `69ea01bf88cb85c48d3a78c3bb9e06ae141c9c9fc6a88267eae95c315e16180e`
+

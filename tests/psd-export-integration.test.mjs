@@ -214,3 +214,16 @@ test('Stage 14a wires Photoshop Smart Object / Placed Layer opaque metadata thro
   assert.match(main,/Photoshop Smart Object native passthrough отключён/);
 });
 
+test('Stage 14b wires typed Photoshop descriptors and embedded asset extraction into editable smart-object content',()=>{
+  assert.match(adapter,/function readPsdDescriptorBlock\(/);
+  assert.match(adapter,/function parseSmartObjectDescriptor\(/);
+  assert.match(adapter,/function parseLinkedLayerRecord\(/);
+  assert.match(adapter,/linkedLayerEntries/);
+  assert.match(adapter,/detectedFileType/);
+  assert.match(main,/function importPsdEmbeddedAssetDocument\(/);
+  assert.match(main,/function importPsdNestedDocument\(/);
+  assert.match(main,/embeddedFingerprint/);
+  assert.match(main,/Редактировать извлечённое содержимое/);
+  assert.match(main,/linked\/unsupported payload остаётся opaque/);
+});
+
