@@ -52,10 +52,10 @@ test('Stage 10 UI exposes vector masks and selection-driven boolean path operati
 test('Stage 10c edits vector-mask anchors and handles through the Pen direct-edit pipeline',()=>{
   assert.match(main,/let vectorMaskEditLayerId = null/);
   assert.match(main,/function selectedEditablePathTargets\(\)/);
-  assert.match(main,/source:'vector-mask',subpathIndex/);
-  assert.match(main,/function pathTargetPoints\(layer,source='shape',subpathIndex=null\)/);
-  assert.match(main,/pathSource:hit\.source,subpathIndex:hit\.subpathIndex/);
-  assert.match(main,/const points=pathTargetPoints\(layer,drag\.pathSource,drag\.subpathIndex\)/);
+  assert.match(main,/source:'vector-mask',documentPathIndex:null,subpathIndex/);
+  assert.match(main,/function pathTargetPoints\(layer,source='shape',subpathIndex=null,documentPathIndex=null\)/);
+  assert.match(main,/pathSource:hit\.source,documentPathIndex:hit\.documentPathIndex\?\?null,subpathIndex:hit\.subpathIndex/);
+  assert.match(main,/const points=pathTargetPoints\(layer,drag\.pathSource,drag\.subpathIndex,drag\.documentPathIndex\)/);
   assert.match(main,/function editSelectedVectorMask\(\)/);
   assert.match(main,/Редактировать векторную маску пером/);
   assert.match(main,/vectorMaskEditLayerId===selected\(\)\?\.id/);
