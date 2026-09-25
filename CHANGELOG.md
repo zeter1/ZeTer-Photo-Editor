@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-25 — Select & Mask View Modes Stage 9d
+
+- Added: четыре preview mode — «Чёрно-белая маска», «Наложение», «На чёрном», «На белом».
+- Architecture: preview visualization вынесена в pure `composeMaskPreviewRgba()`; refinement alpha остаётся отдельным source of truth.
+- Safety: `viewMode` не входит в final refinement options и поэтому не может изменить сохраняемую layer mask.
+- Regression: точные pixel expectations для всех четырёх режимов и UI wiring contract.
+
 ### 2026-09-25 — Select & Mask Edge Detection Stage 9c
 
 - Added: «Радиус обнаружения края», «Сила уточнения края» и «Умный радиус» в Select & Mask.

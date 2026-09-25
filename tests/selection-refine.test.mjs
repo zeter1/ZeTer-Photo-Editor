@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { refineMaskAlpha, refineMaskEdgeAware } from '../src/core/pixels.js';
+import { refineMaskAlpha, refineMaskEdgeAware, composeMaskPreviewRgba } from '../src/core/pixels.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
@@ -97,6 +97,32 @@ test('refineMaskAlpha applies edge detection before feather/contrast when a sour
   assert.ok(refined[1*width+3]>128);
 });
 
+
+test('Select & Mask preview compositor supports mask, overlay, black and white views',()=>{
+  const source=Uint8ClampedArray.from([
+    100,150,200,255,
+    50,100,150,128,
+  ]);
+  const maskAlpha=Uint8ClampedArray.from([255,0]);
+
+  assert.deepEqual(
+    [...composeMaskPreviewRgba(source,maskAlpha,2,1,{mode:'mask'})],
+    [255,255,255,255, 0,0,0,255],
+  );
+
+  const black=composeMaskPreviewRgba(source,maskAlpha,2,1,{mode:'black'});
+  assert.deepEqual([...black.slice(0,4)],[100,150,200,255]);
+  assert.deepEqual([...black.slice(4,8)],[0,0,0,255]);
+
+  const white=composeMaskPreviewRgba(source,maskAlpha,2,1,{mode:'white'});
+  assert.deepEqual([...white.slice(0,4)],[100,150,200,255]);
+  assert.deepEqual([...white.slice(4,8)],[255,255,255,255]);
+
+  const overlay=composeMaskPreviewRgba(source,maskAlpha,2,1,{mode:'overlay',overlay:[255,0,0],overlayOpacity:1});
+  assert.deepEqual([...overlay.slice(0,4)],[100,150,200,255]);
+  assert.deepEqual([...overlay.slice(4,8)],[255,0,0,255]);
+});
+
 test('Select & Mask Stage 9a is wired to layer masks with bounded processing',()=>{
   assert.match(main,/refineMaskAlpha/);
   assert.match(main,/async function refineSelectionToLayerMask\(\)/);
@@ -127,4 +153,15 @@ test('Select & Mask Stage 9c adds edge detection radius and smart radius to prev
   assert.match(main,/name:'edgeStrength'/);
   assert.match(main,/name:'smartRadius'/);
   assert.match(main,/pixels\*Math\.max\(1,detectionRadius\)>48_000_000/);
+});
+
+
+test('Select & Mask Stage 9d exposes professional preview modes without mutating output settings',()=>{
+  assert.match(main,/name:'viewMode'/);
+  assert.match(main,/Чёрно-белая маска/);
+  assert.match(main,/Наложение/);
+  assert.match(main,/На чёрном/);
+  assert.match(main,/На белом/);
+  assert.match(main,/composeMaskPreviewRgba\(source\.sourceRgba,alpha/);
+  assert.match(main,/mode:values\.viewMode\|\|'mask'/);
 });

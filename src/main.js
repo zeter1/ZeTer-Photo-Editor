@@ -8,7 +8,7 @@ import {
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
-import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha } from './core/pixels.js';
+import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
 import { pixelBufferToRgba8Preview } from './core/pixel-buffer.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
@@ -4116,13 +4116,12 @@ async function attachSelectionRefinePreview(modal,body,layer,layerScale) {
     const values=Object.fromEntries(new FormData(modal));
     const previewOptions=selectionRefineOptionsFromValues(values,layerScale/source.scale);
     const alpha=refineMaskAlpha(source.alpha,source.width,source.height,{...previewOptions,sourceRgba:source.sourceRgba});
+    const previewPixels=composeMaskPreviewRgba(source.sourceRgba,alpha,source.width,source.height,{mode:values.viewMode||'mask'});
     const image=ctx.createImageData(source.width,source.height);
-    for(let index=0;index<alpha.length;index+=1){
-      const value=alpha[index],offset=index*4;
-      image.data[offset]=value;image.data[offset+1]=value;image.data[offset+2]=value;image.data[offset+3]=255;
-    }
+    image.data.set(previewPixels);
     ctx.putImageData(image,0,0);
-    status.textContent=`Маска ${source.sourceWidth}×${source.sourceHeight}px · preview ${source.width}×${source.height}px · документ изменится только после применения`;
+    const viewLabel={mask:'маска',overlay:'наложение',black:'на чёрном',white:'на белом'}[values.viewMode]||'маска';
+    status.textContent=`${viewLabel} · маска ${source.sourceWidth}×${source.sourceHeight}px · preview ${source.width}×${source.height}px · документ изменится только после применения`;
   };
   const schedule=()=>{
     if(frame)cancelAnimationFrame(frame);
@@ -4151,6 +4150,7 @@ async function refineSelectionToLayerMask(){
     title:'Уточнить выделение → маска слоя',
     className:'selection-refine-modal',
     fields:[
+      {name:'viewMode',label:'Режим просмотра',type:'select',value:'mask',options:[['mask','Чёрно-белая маска'],['overlay','Наложение'],['black','На чёрном'],['white','На белом']]},
       {name:'smooth',label:'Сглаживание, px',type:'number',value:2,min:0,max:32,step:1},
       {name:'shift',label:'Расширить / сжать, px',type:'number',value:0,min:-64,max:64,step:1},
       {name:'edgeRadius',label:'Радиус обнаружения края, px',type:'number',value:0,min:0,max:12,step:.5},

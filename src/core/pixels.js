@@ -236,6 +236,59 @@ export function refineMaskAlpha(alpha, width, height, {
   return output;
 }
 
+
+export function composeMaskPreviewRgba(sourceRgba, maskAlpha, width, height, {
+  mode = 'mask',
+  overlay = [255, 72, 72],
+  overlayOpacity = 0.58,
+} = {}) {
+  if (!(sourceRgba instanceof Uint8Array || sourceRgba instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидался RGBA source');
+  }
+  if (!(maskAlpha instanceof Uint8Array || maskAlpha instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидалась 8-bit mask');
+  }
+  const w=Math.max(0,Math.trunc(width));
+  const h=Math.max(0,Math.trunc(height));
+  const count=w*h;
+  if(!w||!h||sourceRgba.length<count*4||maskAlpha.length<count)return new Uint8ClampedArray();
+  const view=['mask','overlay','black','white'].includes(mode)?mode:'mask';
+  const tint=[
+    clamp(Math.round(Number(overlay?.[0])||0),0,255),
+    clamp(Math.round(Number(overlay?.[1])||0),0,255),
+    clamp(Math.round(Number(overlay?.[2])||0),0,255),
+  ];
+  const tintOpacity=clamp(Number(overlayOpacity)||0,0,1);
+  const out=new Uint8ClampedArray(count*4);
+
+  for(let index=0;index<count;index+=1){
+    const offset=index*4;
+    const mask=maskAlpha[index]/255;
+    const sourceAlpha=sourceRgba[offset+3]/255;
+    if(view==='mask'){
+      const value=maskAlpha[index];
+      out[offset]=value;out[offset+1]=value;out[offset+2]=value;out[offset+3]=255;
+      continue;
+    }
+    if(view==='overlay'){
+      const hidden=1-mask;
+      const mix=tintOpacity*hidden;
+      out[offset]=Math.round(sourceRgba[offset]*(1-mix)+tint[0]*mix);
+      out[offset+1]=Math.round(sourceRgba[offset+1]*(1-mix)+tint[1]*mix);
+      out[offset+2]=Math.round(sourceRgba[offset+2]*(1-mix)+tint[2]*mix);
+      out[offset+3]=255;
+      continue;
+    }
+    const coverage=mask*sourceAlpha;
+    const background=view==='white'?255:0;
+    out[offset]=Math.round(sourceRgba[offset]*coverage+background*(1-coverage));
+    out[offset+1]=Math.round(sourceRgba[offset+1]*coverage+background*(1-coverage));
+    out[offset+2]=Math.round(sourceRgba[offset+2]*coverage+background*(1-coverage));
+    out[offset+3]=255;
+  }
+  return out;
+}
+
 export function hexToRgb(hex) {
   const value = String(hex || '').trim();
   const short = /^#([0-9a-f]{3})$/i.exec(value);
