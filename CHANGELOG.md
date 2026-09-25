@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-25 — RGB 16-bit PSD/PSB Import Stage 7c
+
+- Added: RGB 16-bit/channel PSD/PSB layer и composite channels теперь декодируются в precision-preserving `Uint16Array` PixelBuffer.
+- Compression: поддержаны Raw, PackBits/RLE и ZIP без prediction; RLE считает scanline в байтах с учётом 2 bytes/sample и сохраняет PSB 32-bit row-length contract.
+- Guardrail: 16-bit ZIP prediction пока отклоняется отдельным `PSD_ZIP_PREDICTION_DEPTH`, а 32-bit/HDR и CMYK остаются за capability gate вместо молчаливой потери данных.
+- Masks: 16-bit user-mask samples безопасно приводятся к 8-bit alpha только на текущей Canvas mask boundary.
+- UI contract: при открытии 16-bit PSD/PSB текущий ZPE/Canvas документ получает 8-bit preview и явно предупреждает, что high-depth precision после импорта пока не сохраняется.
+- Added: regression tests для 16-bit Raw PSD, RLE PSB, ZIP PSD, точного Uint16 payload/preview bridge и unsupported-depth/prediction guards.
+
 ### 2026-09-25 — PixelBuffer Stage 7b: typed high-depth boundary
 
 - Added: `src/core/pixel-buffer.js` defines a strict typed pixel contract for RGB/CMYK buffers with 8-bit integer, 16-bit integer and 32-bit float samples.

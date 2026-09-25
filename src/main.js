@@ -2883,6 +2883,7 @@ async function openPsd(file){
   try{
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
+    if(parsed.bitsPerChannel===16)warnings.push('RGB 16-bit/channel декодирован без потери точности на PSD/PSB adapter boundary, но текущий ZPE/Canvas документ получает 8-bit preview; точность выше 8 bit после импорта пока не сохраняется');
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
     const prepared=[];
     for(const sourceLayer of [...parsed.layers].reverse()){

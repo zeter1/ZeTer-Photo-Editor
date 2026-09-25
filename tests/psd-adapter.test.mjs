@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decodePsd, encodePsd, encodePsdBlob, encodePsb, encodePsbBlob, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
 import { readFile } from 'node:fs/promises';
+import { deflateSync } from 'node:zlib';
+import { pixelBufferToRgba8Preview } from '../src/core/pixel-buffer.js';
 
 const encoder = new TextEncoder();
 const psdSource = await readFile(new URL('../src/adapters/psd.js', import.meta.url), 'utf8');
@@ -31,6 +33,31 @@ function writer() {
   return { parts, bytes, ascii, u16, i16, u32, i32, u64, push };
 }
 
+function channelSamples(depth) {
+  if (depth === 16) {
+    return [
+      [65535, 0],
+      [0, 32768],
+      [0, 65535],
+      [65535, 32768],
+    ];
+  }
+  return [
+    [255, 0],
+    [0, 255],
+    [0, 0],
+    [255, 128],
+  ];
+}
+
+function sampleRowBytes(samples, depth) {
+  if (depth !== 16) return Uint8Array.from(samples.map(value => value & 255));
+  const bytes = new Uint8Array(samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  for (let index = 0; index < samples.length; index += 1) view.setUint16(index * 2, samples[index], false);
+  return bytes;
+}
+
 function makeRawPsd({ version = 1, depth = 8, colorMode = 3 } = {}) {
   const out = writer();
   out.ascii('8BPS'); out.u16(version); out.bytes(0,0,0,0,0,0);
@@ -40,14 +67,15 @@ function makeRawPsd({ version = 1, depth = 8, colorMode = 3 } = {}) {
   const info = writer();
   info.i16(1);
   info.i32(0); info.i32(0); info.i32(1); info.i32(2);
+  const rows = channelSamples(depth).map(samples => sampleRowBytes(samples, depth));
   info.u16(4);
-  for (const id of [0,1,2,-1]) { info.i16(id); info.u32(4); }
+  for (let index = 0; index < 4; index += 1) { info.i16([0,1,2,-1][index]); info.u32(2 + rows[index].length); }
   info.ascii('8BIM'); info.ascii('norm'); info.bytes(255,0,0,0);
   const extra = writer();
   extra.u32(0); extra.u32(0); extra.bytes(5); extra.ascii('Layer'); extra.bytes(0,0);
   const extraBytes = concat(extra.parts);
   info.u32(extraBytes.length); info.push(extraBytes);
-  for (const data of [[255,0],[0,255],[0,0],[255,128]]) { info.u16(0); info.bytes(...data); }
+  for (const row of rows) { info.u16(0); info.push(row); }
 
   const infoBytes = concat(info.parts);
   out.u32(4 + infoBytes.length);
@@ -67,10 +95,11 @@ function makeRlePsb({ depth = 8, colorMode = 3 } = {}) {
   const info = writer();
   info.i16(1);
   info.i32(0); info.i32(0); info.i32(1); info.i32(2);
+  const rows = channelSamples(depth).map(samples => sampleRowBytes(samples, depth));
   info.u16(4);
-  for (const id of [0,1,2,-1]) {
-    info.i16(id);
-    info.u64(9); // compression(2) + PSB row byte-count(4) + PackBits row(3)
+  for (let index = 0; index < 4; index += 1) {
+    info.i16([0,1,2,-1][index]);
+    info.u64(2 + 4 + 1 + rows[index].length);
   }
   info.ascii('8BIM'); info.ascii('norm'); info.bytes(255,0,0,0);
   const extra = writer();
@@ -78,10 +107,11 @@ function makeRlePsb({ depth = 8, colorMode = 3 } = {}) {
   const extraBytes = concat(extra.parts);
   info.u32(extraBytes.length); info.push(extraBytes);
 
-  for (const data of [[255,0],[0,255],[0,0],[255,128]]) {
+  for (const row of rows) {
     info.u16(1);
-    info.u32(3);
-    info.bytes(1, ...data);
+    info.u32(1 + row.length);
+    info.bytes(row.length - 1);
+    info.push(row);
   }
 
   const infoBytes = concat(info.parts);
@@ -93,6 +123,39 @@ function makeRlePsb({ depth = 8, colorMode = 3 } = {}) {
 
   out.u64(layerAndMaskBytes.length);
   out.push(layerAndMaskBytes);
+  return concat(out.parts);
+}
+
+function makeZipPsd16({ compression = 2 } = {}) {
+  const out = writer();
+  out.ascii('8BPS'); out.u16(1); out.bytes(0,0,0,0,0,0);
+  out.u16(4); out.u32(1); out.u32(2); out.u16(16); out.u16(3);
+  out.u32(0); out.u32(0);
+
+  const rows = channelSamples(16).map(samples => sampleRowBytes(samples, 16));
+  const compressedRows = rows.map(row => new Uint8Array(deflateSync(row)));
+  const info = writer();
+  info.i16(1);
+  info.i32(0); info.i32(0); info.i32(1); info.i32(2);
+  info.u16(4);
+  for (let index = 0; index < 4; index += 1) {
+    info.i16([0,1,2,-1][index]);
+    info.u32(2 + compressedRows[index].length);
+  }
+  info.ascii('8BIM'); info.ascii('norm'); info.bytes(255,0,0,0);
+  const extra = writer();
+  extra.u32(0); extra.u32(0); extra.bytes(5); extra.ascii('Layer'); extra.bytes(0,0);
+  const extraBytes = concat(extra.parts);
+  info.u32(extraBytes.length); info.push(extraBytes);
+  for (const compressed of compressedRows) {
+    info.u16(compression);
+    info.push(compressed);
+  }
+
+  const infoBytes = concat(info.parts);
+  out.u32(4 + infoBytes.length);
+  out.u32(infoBytes.length);
+  out.push(infoBytes);
   return concat(out.parts);
 }
 
@@ -124,11 +187,33 @@ test('PSB Stage 7a decodes version 2 with 64-bit section/channel lengths and 32-
   assert.deepEqual([...decoded.layers[0].pixels], [255,0,0,255, 0,255,0,128]);
 });
 
-test('PSD/PSB Stage 7a still rejects unsupported high bit depth and color modes explicitly', async () => {
-  await assert.rejects(() => decodePsd(makeRawPsd({ depth:16 })), error => error instanceof PsdImportError && error.code === 'PSD_BIT_DEPTH');
-  await assert.rejects(() => decodePsd(makeRlePsb({ depth:16 })), error => error instanceof PsdImportError && error.code === 'PSD_BIT_DEPTH');
+test('PSD/PSB Stage 7c decodes RGB/16-bit Raw, RLE and ZIP without prediction into precision-preserving PixelBuffers', async () => {
+  const expected16 = [
+    65535,0,0,65535,
+    0,32768,65535,32768,
+  ];
+  const expectedPreview = [
+    255,0,0,255,
+    0,128,255,128,
+  ];
+  for (const source of [makeRawPsd({ depth:16 }), makeRlePsb({ depth:16 }), makeZipPsd16()]) {
+    const decoded = await decodePsd(source);
+    assert.equal(decoded.bitsPerChannel,16);
+    assert.equal(decoded.layers.length,1);
+    assert.equal(decoded.layers[0].pixelBuffer.bitsPerChannel,16);
+    assert.ok(decoded.layers[0].pixelBuffer.data instanceof Uint16Array);
+    assert.deepEqual([...decoded.layers[0].pixelBuffer.data],expected16);
+    assert.equal(decoded.layers[0].pixels,null);
+    assert.deepEqual([...pixelBufferToRgba8Preview(decoded.layers[0].pixelBuffer)],expectedPreview);
+  }
+});
+
+test('PSD/PSB Stage 7c rejects 32-bit, CMYK and 16-bit ZIP prediction explicitly', async () => {
+  await assert.rejects(() => decodePsd(makeRawPsd({ depth:32 })), error => error instanceof PsdImportError && error.code === 'PSD_BIT_DEPTH');
+  await assert.rejects(() => decodePsd(makeRlePsb({ depth:32 })), error => error instanceof PsdImportError && error.code === 'PSD_BIT_DEPTH');
   await assert.rejects(() => decodePsd(makeRawPsd({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
   await assert.rejects(() => decodePsd(makeRlePsb({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
+  await assert.rejects(() => decodePsd(makeZipPsd16({ compression:3 })), error => error instanceof PsdImportError && error.code === 'PSD_ZIP_PREDICTION_DEPTH');
 });
 
 test('PSD/PSB detection uses extensions or Photoshop MIME type', () => {

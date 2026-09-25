@@ -1,11 +1,11 @@
-import { createRgba8PixelBuffer } from '../core/pixel-buffer.js';
+import { createPixelBuffer, createRgba8PixelBuffer } from '../core/pixel-buffer.js';
 
 const PSD_SIGNATURE = '8BPS';
 const PSD_VERSION = 1;
 const PSB_VERSION = 2;
 const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt32','Mtrn','Alph','FMsk','lnk2','FEid','FXid','PxSD']);
 const PSD_COLOR_MODE_RGB = 3;
-const PSD_DEPTH = 8;
+const PSD_SUPPORTED_DEPTHS = new Set([8, 16]);
 const MAX_PSD_LAYERS = 500;
 const MAX_PSD_CHANNEL_BYTES = 256 * 1024 * 1024;
 
@@ -119,8 +119,11 @@ function requireImportCapabilities(header, maxPixels) {
   if (header.colorMode !== PSD_COLOR_MODE_RGB) {
     throw new PsdImportError('PSD/PSB import поддерживает только RGB. CMYK/Lab/Indexed будут добавлены отдельным color-management этапом.', 'PSD_COLOR_MODE');
   }
-  if (header.bitsPerChannel !== PSD_DEPTH) {
-    throw new PsdImportError(`PSD/PSB import поддерживает 8-bit/channel. Получено: ${header.bitsPerChannel}-bit.`, 'PSD_BIT_DEPTH');
+  if (!PSD_SUPPORTED_DEPTHS.has(header.bitsPerChannel)) {
+    throw new PsdImportError(
+      `PSD/PSB import поддерживает RGB 8/16-bit/channel. Получено: ${header.bitsPerChannel}-bit. 32-bit/HDR требует отдельного rendering/tone-mapping этапа.`,
+      'PSD_BIT_DEPTH',
+    );
   }
   if (header.channels < 3 || header.channels > 56) throw new PsdImportError(`Некорректное число каналов PSD/PSB: ${header.channels}`, 'PSD_CHANNELS');
   safeArea(header.width, header.height, maxPixels);
@@ -272,60 +275,129 @@ async function inflateZlib(bytes) {
   }
 }
 
-async function decodeChannel(reader, descriptor, width, height, maxChannelBytes, version) {
+function bytesPerSample(bitsPerChannel) {
+  if (bitsPerChannel === 8) return 1;
+  if (bitsPerChannel === 16) return 2;
+  throw new PsdImportError(`Неподдерживаемая глубина PSD/PSB sample: ${bitsPerChannel}-bit`, 'PSD_BIT_DEPTH');
+}
+
+function decodedChannelByteLength(width, height, bitsPerChannel, maxChannelBytes) {
+  const pixels = safeArea(width, height, Number.MAX_SAFE_INTEGER);
+  const bytes = pixels * bytesPerSample(bitsPerChannel);
+  if (!Number.isSafeInteger(bytes) || bytes > maxChannelBytes) {
+    throw new PsdImportError(
+      `PSD/PSB канал слишком большой после декодирования: ${Math.ceil(bytes / 1024 / 1024)} МБ`,
+      'PSD_CHANNEL_LIMIT',
+    );
+  }
+  return bytes;
+}
+
+function decodeSamplePlane(bytes, bitsPerChannel) {
+  if (bitsPerChannel === 8) return bytes;
+  if (bitsPerChannel === 16) {
+    if (bytes.length % 2) throw new PsdImportError('16-bit PSD/PSB канал имеет нечётную длину', 'PSD_16BIT_CHANNEL');
+    const samples = new Uint16Array(bytes.length / 2);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let index = 0; index < samples.length; index += 1) samples[index] = view.getUint16(index * 2, false);
+    return samples;
+  }
+  throw new PsdImportError(`Неподдерживаемая глубина PSD/PSB sample: ${bitsPerChannel}-bit`, 'PSD_BIT_DEPTH');
+}
+
+async function decodeChannel(reader, descriptor, width, height, maxChannelBytes, version, bitsPerChannel) {
   const channelStart = reader.offset;
   const channelEnd = channelStart + descriptor.length;
-  if (descriptor.length < 2 || channelEnd > reader.end || descriptor.length > maxChannelBytes) {
+  if (descriptor.length < 2 || channelEnd > reader.end || descriptor.length > maxChannelBytes * 2 + 16 * 1024 * 1024) {
     throw new PsdImportError('Некорректная длина PSD-канала', 'PSD_CHANNEL_LENGTH');
   }
   const compression = reader.u16();
-  const expected = safeArea(width, height, maxChannelBytes);
-  let decoded;
+  const expectedBytes = decodedChannelByteLength(width, height, bitsPerChannel, maxChannelBytes);
+  const rowBytes = width * bytesPerSample(bitsPerChannel);
+  let decodedBytes;
   if (compression === 0) {
-    decoded = reader.take(Math.min(expected, channelEnd - reader.offset));
-    if (decoded.length !== expected) throw new PsdImportError('Raw PSD-канал имеет неверный размер', 'PSD_RAW_CHANNEL');
+    if (reader.offset + expectedBytes > channelEnd) {
+      throw new PsdImportError('Raw PSD-канал имеет неверный размер', 'PSD_RAW_CHANNEL');
+    }
+    decodedBytes = reader.take(expectedBytes);
   } else if (compression === 1) {
     const rowLengths = [];
+    const rowLengthBytes = version === PSB_VERSION ? 4 : 2;
+    if (reader.offset + height * rowLengthBytes > channelEnd) {
+      throw new PsdImportError('RLE table PSD/PSB выходит за границы канала', 'PSD_RLE');
+    }
     for (let row = 0; row < height; row += 1) rowLengths.push(version === PSB_VERSION ? reader.u32() : reader.u16());
-    decoded = new Uint8Array(expected);
+    decodedBytes = new Uint8Array(expectedBytes);
     for (let row = 0; row < height; row += 1) {
+      if (reader.offset + rowLengths[row] > channelEnd) {
+        throw new PsdImportError('RLE строка PSD/PSB выходит за границы канала', 'PSD_RLE');
+      }
       const packed = reader.take(rowLengths[row]);
-      decoded.set(packBitsRow(packed, width), row * width);
+      decodedBytes.set(packBitsRow(packed, rowBytes), row * rowBytes);
     }
   } else if (compression === 2 || compression === 3) {
+    if (compression === 3 && bitsPerChannel !== 8) {
+      throw new PsdImportError(
+        'ZIP prediction для 16-bit PSD/PSB пока не поддерживается: используйте Raw/RLE/ZIP без prediction',
+        'PSD_ZIP_PREDICTION_DEPTH',
+      );
+    }
     const compressed = reader.take(channelEnd - reader.offset);
-    decoded = await inflateZlib(compressed);
-    if (decoded.length < expected) throw new PsdImportError('ZIP PSD-канал короче ожидаемого', 'PSD_ZIP_CHANNEL');
-    if (decoded.length !== expected) decoded = decoded.subarray(0, expected);
+    decodedBytes = await inflateZlib(compressed);
+    if (decodedBytes.length < expectedBytes) throw new PsdImportError('ZIP PSD-канал короче ожидаемого', 'PSD_ZIP_CHANNEL');
+    if (decodedBytes.length !== expectedBytes) decodedBytes = decodedBytes.subarray(0, expectedBytes);
     if (compression === 3) {
       for (let row = 0; row < height; row += 1) {
-        const start = row * width;
-        for (let x = 1; x < width; x += 1) decoded[start + x] = (decoded[start + x] + decoded[start + x - 1]) & 255;
+        const start = row * rowBytes;
+        for (let x = 1; x < rowBytes; x += 1) decodedBytes[start + x] = (decodedBytes[start + x] + decodedBytes[start + x - 1]) & 255;
       }
     }
   } else {
     throw new PsdImportError(`Неподдерживаемое сжатие PSD-канала: ${compression}`, 'PSD_COMPRESSION');
   }
   reader.seek(channelEnd);
-  return decoded;
+  return decodeSamplePlane(decodedBytes, bitsPerChannel);
 }
 
-function composeRgba(width, height, channels) {
+function composeRgbPixelBuffer(width, height, channels, bitsPerChannel) {
   const pixels = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   const red = channels.get(0);
   const green = channels.get(1);
   const blue = channels.get(2);
   if (!red || !green || !blue) return null;
   const alpha = channels.get(-1);
-  const rgba = new Uint8ClampedArray(pixels * 4);
-  for (let index = 0; index < pixels; index += 1) {
-    const out = index * 4;
-    rgba[out] = red[index];
-    rgba[out + 1] = green[index];
-    rgba[out + 2] = blue[index];
-    rgba[out + 3] = alpha ? alpha[index] : 255;
+  if (bitsPerChannel === 8) {
+    const rgba = new Uint8ClampedArray(pixels * 4);
+    for (let index = 0; index < pixels; index += 1) {
+      const out = index * 4;
+      rgba[out] = red[index];
+      rgba[out + 1] = green[index];
+      rgba[out + 2] = blue[index];
+      rgba[out + 3] = alpha ? alpha[index] : 255;
+    }
+    return createRgba8PixelBuffer(width, height, rgba, { colorSpace: 'srgb' });
   }
-  return rgba;
+  if (bitsPerChannel === 16) {
+    const rgba = new Uint16Array(pixels * 4);
+    for (let index = 0; index < pixels; index += 1) {
+      const out = index * 4;
+      rgba[out] = red[index];
+      rgba[out + 1] = green[index];
+      rgba[out + 2] = blue[index];
+      rgba[out + 3] = alpha ? alpha[index] : 65535;
+    }
+    return createPixelBuffer({
+      width,
+      height,
+      model: 'rgb',
+      channels: 4,
+      bitsPerChannel: 16,
+      colorSpace: 'srgb',
+      alphaMode: 'straight',
+      data: rgba,
+    });
+  }
+  return null;
 }
 
 function buildMaskRgba(record, maskChannel, layerWidth, layerHeight) {
@@ -348,7 +420,8 @@ function buildMaskRgba(record, maskChannel, layerWidth, layerHeight) {
     for (let x = 0; x < maskWidth; x += 1) {
       const targetX = originX + x;
       if (targetX < 0 || targetX >= layerWidth) continue;
-      let value = maskChannel[y * maskWidth + x];
+      const sample = maskChannel[y * maskWidth + x];
+      let value = maskChannel instanceof Uint16Array ? Math.round(sample / 257) : sample;
       if (mask.inverted) value = 255 - value;
       rgba[(targetY * layerWidth + targetX) * 4 + 3] = value;
     }
@@ -365,14 +438,14 @@ function blendModeFor(key, warnings, layerName) {
 async function decodeComposite(reader, header, maxChannelBytes) {
   if (reader.offset >= reader.end) return null;
   const compression = reader.u16();
-  const pixels = header.width * header.height;
+  const planeBytes = decodedChannelByteLength(header.width, header.height, header.bitsPerChannel, maxChannelBytes);
+  const rowBytes = header.width * bytesPerSample(header.bitsPerChannel);
   const channels = new Map();
   if (compression === 0) {
     for (let channel = 0; channel < header.channels; channel += 1) {
-      if (pixels > maxChannelBytes) throw new PsdImportError('Composite PSD-канал слишком большой', 'PSD_CHANNEL_LIMIT');
-      const data = reader.take(pixels);
-      if (channel < 3) channels.set(channel, data);
-      else if (channel === 3) channels.set(-1, data);
+      const bytes = reader.take(planeBytes);
+      if (channel < 3) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
+      else if (channel === 3) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
     }
   } else if (compression === 1) {
     const rowLengths = [];
@@ -382,30 +455,40 @@ async function decodeComposite(reader, header, maxChannelBytes) {
       rowLengths.push(rows);
     }
     for (let channel = 0; channel < header.channels; channel += 1) {
-      const data = new Uint8Array(pixels);
-      for (let row = 0; row < header.height; row += 1) data.set(packBitsRow(reader.take(rowLengths[channel][row]), header.width), row * header.width);
-      if (channel < 3) channels.set(channel, data);
-      else if (channel === 3) channels.set(-1, data);
+      const bytes = new Uint8Array(planeBytes);
+      for (let row = 0; row < header.height; row += 1) {
+        bytes.set(packBitsRow(reader.take(rowLengths[channel][row]), rowBytes), row * rowBytes);
+      }
+      if (channel < 3) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
+      else if (channel === 3) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
     }
   } else if (compression === 2 || compression === 3) {
+    if (compression === 3 && header.bitsPerChannel !== 8) {
+      throw new PsdImportError(
+        'ZIP prediction для 16-bit PSD/PSB composite пока не поддерживается',
+        'PSD_ZIP_PREDICTION_DEPTH',
+      );
+    }
     const decoded = await inflateZlib(reader.take(reader.end - reader.offset));
-    const expected = pixels * header.channels;
-    if (decoded.length < expected) throw new PsdImportError('Composite ZIP PSD короче ожидаемого', 'PSD_COMPOSITE_ZIP');
+    const expected = planeBytes * header.channels;
+    if (!Number.isSafeInteger(expected) || decoded.length < expected) {
+      throw new PsdImportError('Composite ZIP PSD/PSB короче ожидаемого', 'PSD_COMPOSITE_ZIP');
+    }
     for (let channel = 0; channel < header.channels; channel += 1) {
-      const data = decoded.slice(channel * pixels, (channel + 1) * pixels);
+      const bytes = decoded.slice(channel * planeBytes, (channel + 1) * planeBytes);
       if (compression === 3) {
         for (let row = 0; row < header.height; row += 1) {
-          const start = row * header.width;
-          for (let x = 1; x < header.width; x += 1) data[start + x] = (data[start + x] + data[start + x - 1]) & 255;
+          const start = row * rowBytes;
+          for (let x = 1; x < rowBytes; x += 1) bytes[start + x] = (bytes[start + x] + bytes[start + x - 1]) & 255;
         }
       }
-      if (channel < 3) channels.set(channel, data);
-      else if (channel === 3) channels.set(-1, data);
+      if (channel < 3) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
+      else if (channel === 3) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
     }
   } else {
     throw new PsdImportError(`Неподдерживаемое сжатие composite PSD: ${compression}`, 'PSD_COMPOSITE_COMPRESSION');
   }
-  return composeRgba(header.width, header.height, channels);
+  return composeRgbPixelBuffer(header.width, header.height, channels, header.bitsPerChannel);
 }
 
 export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxChannelBytes = MAX_PSD_CHANNEL_BYTES } = {}) {
@@ -441,7 +524,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
           const channelWidth = useMaskBounds ? Math.max(0, record.mask.right - record.mask.left) : width;
           const channelHeight = useMaskBounds ? Math.max(0, record.mask.bottom - record.mask.top) : height;
           if (!channelWidth || !channelHeight) { reader.skip(descriptor.length); continue; }
-          const data = await decodeChannel(reader, descriptor, channelWidth, channelHeight, maxChannelBytes, header.version);
+          const data = await decodeChannel(reader, descriptor, channelWidth, channelHeight, maxChannelBytes, header.version, header.bitsPerChannel);
           if ([0,1,2,-1,-2].includes(descriptor.id)) record.decodedChannels.set(descriptor.id, data);
         }
       }
@@ -459,9 +542,8 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
     const width = Math.max(0, record.right - record.left);
     const height = Math.max(0, record.bottom - record.top);
     if (!width || !height) { warnings.push(`Слой «${record.name}» пропущен: пустые bounds`); continue; }
-    const rgba = composeRgba(width, height, record.decodedChannels);
-    if (!rgba) { warnings.push(`Слой «${record.name}» пропущен: нет RGB bitmap-preview`); continue; }
-    const pixelBuffer = createRgba8PixelBuffer(width, height, rgba, { colorSpace: 'srgb' });
+    const pixelBuffer = composeRgbPixelBuffer(width, height, record.decodedChannels, header.bitsPerChannel);
+    if (!pixelBuffer) { warnings.push(`Слой «${record.name}» пропущен: нет RGB bitmap-preview`); continue; }
     const maskRgba = buildMaskRgba(record, record.decodedChannels.get(-2), width, height);
     layers.push({
       name: record.name || 'PSD Layer',
@@ -474,7 +556,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
       opacity: record.opacity / 255,
       blendMode: blendModeFor(record.blendKey, warnings, record.name),
       pixelBuffer,
-      pixels: pixelBuffer.data,
+      pixels: header.bitsPerChannel === 8 ? pixelBuffer.data : null,
       mask: maskRgba ? { pixels: maskRgba, disabled: Boolean(record.mask?.disabled) } : null,
     });
   }
@@ -482,10 +564,9 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
   let composite = null;
   let compositePixelBuffer = null;
   if (!layers.length && reader.offset < reader.end) {
-    composite = await decodeComposite(reader, header, maxChannelBytes);
-    if (composite) {
-      compositePixelBuffer = createRgba8PixelBuffer(header.width, header.height, composite, { colorSpace: 'srgb' });
-      composite = compositePixelBuffer.data;
+    compositePixelBuffer = await decodeComposite(reader, header, maxChannelBytes);
+    if (compositePixelBuffer) {
+      composite = header.bitsPerChannel === 8 ? compositePixelBuffer.data : null;
       warnings.push('PSD/PSB не содержит импортируемых bitmap-слоёв: использован composite preview');
     }
   }
