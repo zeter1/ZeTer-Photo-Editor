@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.39.0 — 2026-09-25
+
+### 2026-09-25 — Shape Descriptor Rewrite + Gradient/Pattern Fill Foundation Stage 15d
+
+- Solid descriptor rewrite: добавлен `rewritePsdShapeStyle()`, который копирует source blocks и bounded-патчит только известные leaves вместо полной сериализации Photoshop ActionDescriptor.
+- Fill edit: `SoCo` и `vscg/SoCo` RGB `Rd/Grn/Bl` doubles теперь переписываются из текущего ZPE `#RRGGBB`.
+- Stroke edit: `vstk` обновляет `strokeEnabled`, `fillEnabled`, `strokeStyleLineWidth` и nested RGB stroke content; прозрачный fill/stroke переводится через enable flags.
+- Safe native gate: fill/stroke/strokeWidth edits больше не требуют raster fallback, если исходный solid descriptor contract совместим; unsupported descriptor structure по-прежнему fail-safe переводит layer в preview.
+- Gradient foundation: `GdFl` parser извлекает angle/type, gradient name/form/smoothness, до 64 RGB color stops и transparency stops с bounded metadata.
+- Pattern foundation: `PtFl` parser извлекает pattern name/id, scale и linked policy.
+- Zero-bounds fill layers: Gradient/Pattern Fill records больше не теряются полностью — adapter возвращает их в `fillLayers`, при этом canvas честно использует PSD composite preview до semantic renderer.
+- Real compatibility fixtures: добавлены pinned MIT `psd-tools` minimal Gradient Fill и Pattern Fill PSD с size/SHA-256 provenance.
+- Regression: real solid Shape fixture проходит PSD + PSB after fill=`#112233`, stroke=`#445566`, width=3.5; source descriptor blocks не мутируются.
+- Version: приложение синхронизировано на 1.39.0.
+
 ## 1.38.0 — 2026-09-25
 
 ### 2026-09-25 — Photoshop-native Shape / Vector Fill Mapping Stage 15c

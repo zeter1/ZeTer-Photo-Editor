@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "id": "psd-tools-gradient-fill-minimal",
+      "file": "psd-tools-gradient-fill.psd",
+      "kind": "gradient-fill",
+      "license": "MIT",
+      "sourceRepository": "psd-tools/psd-tools",
+      "sourceCommit": "8f9a25ea98202061365701db54ce938931b27c09",
+      "sourcePath": "tests/psd_files/layers-minimal/gradient-fill.psd",
+      "sourceGitBlob": "2b2f56751e27833b06e6c1ee7ad19f958c3a49fd",
+      "size": 23370,
+      "sha256": "8d995a89eee1b4b11e0639cb4546e46aff8c9fd168a7b7ddfb4abb9f4b75e806"
+    },
+    {
+      "id": "psd-tools-pattern-fill-minimal",
+      "file": "psd-tools-pattern-fill.psd",
+      "kind": "pattern-fill",
+      "license": "MIT",
+      "sourceRepository": "psd-tools/psd-tools",
+      "sourceCommit": "8f9a25ea98202061365701db54ce938931b27c09",
+      "sourcePath": "tests/psd_files/layers-minimal/pattern-fill.psd",
+      "sourceGitBlob": "e5c6cbaf00b76a75f742c227255bafee2ebabf46",
+      "size": 58494,
+      "sha256": "c1f7bb729d8476f328388ed58fd9fadc72819426b23b45f7cbf9ece1b0e36865"
+    }
+  ]
+}

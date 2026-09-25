@@ -6,7 +6,7 @@ const PSB_VERSION = 2;
 const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt32','Mtrn','Alph','FMsk','lnk2','lnkD','lnkE','FEid','FXid','PxSD']);
 const PSD_SMART_OBJECT_LAYER_KEYS = new Set(['PlLd','SoLd','SoLE']);
 const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
-const PSD_SHAPE_LAYER_KEYS = new Set(['SoCo','vscg','vstk']);
+const PSD_SHAPE_LAYER_KEYS = new Set(['SoCo','GdFl','PtFl','vscg','vstk']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
@@ -711,6 +711,120 @@ function encodePsdRawDataValue(data) {
   return out;
 }
 
+function readPsdDescriptorBodyLayout(reader,depth=0) {
+  if(depth>MAX_PSD_DESCRIPTOR_DEPTH)throw new PsdImportError('Descriptor layout nesting depth превышен','PSD_DESCRIPTOR_DEPTH');
+  const name=readPsdUnicodeString(reader,'descriptor name');
+  const classId=readPsdDescriptorKey(reader,'descriptor class id');
+  const count=reader.u32();
+  if(count>MAX_PSD_DESCRIPTOR_ITEMS)throw new PsdImportError('Descriptor layout содержит слишком много items','PSD_DESCRIPTOR_LIMIT');
+  const items={},layout=new Map();
+  for(let index=0;index<count;index+=1){
+    const key=readPsdDescriptorKey(reader,'descriptor item key');
+    const type=reader.ascii(4);
+    const valueStart=reader.offset;
+    let value;
+    if(type==='Objc'||type==='GlbO')value=readPsdDescriptorBodyLayout(reader,depth+1);
+    else value=readPsdDescriptorValue(reader,type,depth+1);
+    const valueEnd=reader.offset;
+    items[key]=value?.descriptor??value;
+    layout.set(key,{type,valueStart,valueEnd,value});
+  }
+  return{descriptor:{name,classId,items},layout};
+}
+
+function readPsdDescriptorBlockDeepLayout(reader) {
+  const version=reader.u32();
+  if(version!==16)throw new PsdImportError('DescriptorBlock version '+version+' не поддерживается','PSD_DESCRIPTOR_VERSION');
+  return{version,...readPsdDescriptorBodyLayout(reader,0)};
+}
+
+function descriptorNestedLayout(item,bytes,label) {
+  if(!item||item.type!=='Objc')throw new PsdImportError(label+': ожидался Objc descriptor','PSD_SHAPE_DESCRIPTOR');
+  return readPsdDescriptorBodyLayout(new Reader(bytes,item.valueStart,item.valueEnd),1);
+}
+
+function patchDescriptorNumber(bytes,item,value,label) {
+  if(!item)throw new PsdImportError(label+': numeric descriptor item не найден','PSD_SHAPE_DESCRIPTOR');
+  const number=Number(value);
+  if(!Number.isFinite(number))throw new PsdImportError(label+': numeric value некорректно','PSD_SHAPE_DESCRIPTOR');
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  if(item.type==='doub'){ view.setFloat64(item.valueStart,number,false); return; }
+  if(item.type==='UntF'){ view.setFloat64(item.valueStart+4,number,false); return; }
+  if(item.type==='long'){ view.setInt32(item.valueStart,Math.round(number),false); return; }
+  throw new PsdImportError(label+': неподдерживаемый numeric OSType '+item.type,'PSD_SHAPE_DESCRIPTOR');
+}
+
+function patchDescriptorBoolean(bytes,item,value,label) {
+  if(!item||item.type!=='bool')throw new PsdImportError(label+': bool descriptor item не найден','PSD_SHAPE_DESCRIPTOR');
+  bytes[item.valueStart]=value?1:0;
+}
+
+function parseShapeHexRgb(value,label) {
+  const match=/^#([0-9a-f]{6})$/i.exec(String(value||''));
+  if(!match)throw new PsdImportError(label+': ожидается RGB #RRGGBB','PSD_SHAPE_COLOR');
+  return[
+    parseInt(match[1].slice(0,2),16),
+    parseInt(match[1].slice(2,4),16),
+    parseInt(match[1].slice(4,6),16),
+  ];
+}
+
+function patchRgbDescriptorObject(bytes,item,rgb,label) {
+  const color=descriptorNestedLayout(item,bytes,label);
+  patchDescriptorNumber(bytes,color.layout.get('Rd  '),rgb[0],label+'.R');
+  patchDescriptorNumber(bytes,color.layout.get('Grn '),rgb[1],label+'.G');
+  patchDescriptorNumber(bytes,color.layout.get('Bl  '),rgb[2],label+'.B');
+}
+
+function rewriteShapeSolidContentBlock(key,data,fill) {
+  const bytes=asBytes(data).slice();
+  const reader=new Reader(bytes);
+  let subtype=key;
+  if(key==='vscg')subtype=reader.ascii(4);
+  if(subtype!=='SoCo')throw new PsdImportError('Shape content '+key+' subtype '+subtype+' не является SoCo','PSD_SHAPE_CONTENT');
+  const layout=readPsdDescriptorBlockDeepLayout(reader);
+  patchRgbDescriptorObject(bytes,layout.layout.get('Clr '),parseShapeHexRgb(fill,'Shape fill'),'Shape fill');
+  return bytes;
+}
+
+function rewriteShapeStrokeBlock(data,{stroke,strokeEnabled,fillEnabled,strokeWidth}) {
+  const bytes=asBytes(data).slice();
+  const layout=readPsdDescriptorBlockDeepLayout(new Reader(bytes));
+  patchDescriptorBoolean(bytes,layout.layout.get('strokeEnabled'),Boolean(strokeEnabled),'strokeEnabled');
+  patchDescriptorBoolean(bytes,layout.layout.get('fillEnabled'),Boolean(fillEnabled),'fillEnabled');
+  patchDescriptorNumber(bytes,layout.layout.get('strokeStyleLineWidth'),Math.max(0,Number(strokeWidth)||0),'strokeStyleLineWidth');
+  if(strokeEnabled){
+    const content=descriptorNestedLayout(layout.layout.get('strokeStyleContent'),bytes,'strokeStyleContent');
+    patchRgbDescriptorObject(bytes,content.layout.get('Clr '),parseShapeHexRgb(stroke,'Shape stroke'),'Shape stroke');
+  }
+  return bytes;
+}
+
+export function rewritePsdShapeStyle(blocks,{fill,stroke,strokeWidth,fillEnabled=true,strokeEnabled=true}={}) {
+  if(!Array.isArray(blocks)||!blocks.length)throw new PsdImportError('Shape style rewrite: blocks отсутствуют','PSD_SHAPE_DESCRIPTOR');
+  const hasContent=blocks.some(block=>block?.key==='SoCo'||block?.key==='vscg');
+  const hasStroke=blocks.some(block=>block?.key==='vstk');
+  if(fillEnabled&&!hasContent)throw new PsdImportError('Shape style rewrite: solid content block отсутствует','PSD_SHAPE_CONTENT');
+  if((!fillEnabled||strokeEnabled||Number(strokeWidth)>0)&&!hasStroke)throw new PsdImportError('Shape style rewrite: vstk block нужен для enable/disable или stroke edit','PSD_SHAPE_STROKE');
+  let contentRewritten=0,strokeRewritten=0;
+  const output=blocks.map(block=>{
+    if(!block?.data)return block;
+    if((block.key==='SoCo'||block.key==='vscg')&&fillEnabled){
+      const subtype=block.key==='vscg'?decodeLatin1(asBytes(block.data).subarray(0,4)):block.key;
+      if(subtype==='SoCo'){
+        contentRewritten+=1;
+        return{...block,data:rewriteShapeSolidContentBlock(block.key,block.data,fill)};
+      }
+    }
+    if(block.key==='vstk'){
+      strokeRewritten+=1;
+      return{...block,data:rewriteShapeStrokeBlock(block.data,{stroke,strokeEnabled,fillEnabled,strokeWidth})};
+    }
+    return block;
+  });
+  return{blocks:output,contentRewritten,strokeRewritten};
+}
+
 function psdRgbDescriptorHex(descriptor) {
   const color=descriptor?.items?.['Clr ']?.items;
   if(!color||typeof color!=='object')return null;
@@ -719,17 +833,63 @@ function psdRgbDescriptorHex(descriptor) {
   return'#'+rgb.map(value=>value.toString(16).padStart(2,'0')).join('');
 }
 
+function psdGradientSummary(descriptor) {
+  const items=descriptor?.items||{};
+  const gradient=items['Grad']?.items||{};
+  const colors=Array.isArray(gradient.Clrs)?gradient.Clrs:[];
+  const transparency=Array.isArray(gradient.Trns)?gradient.Trns:[];
+  const colorStops=colors.slice(0,64).map(stop=>({
+    location:Number(stop?.items?.Lctn)||0,
+    midpoint:Number(stop?.items?.Mdpn)||50,
+    color:psdRgbDescriptorHex({items:{'Clr ':stop?.items?.['Clr ']}}),
+  })).filter(stop=>Boolean(stop.color));
+  const transparencyStops=transparency.slice(0,64).map(stop=>{
+    const opacity=Number(stop?.items?.Opct?.value);
+    return{
+      location:Number(stop?.items?.Lctn)||0,
+      midpoint:Number(stop?.items?.Mdpn)||50,
+      opacity:Number.isFinite(opacity)?Math.max(0,Math.min(100,opacity)):100,
+    };
+  });
+  return{
+    angle:Number(items.Angl?.value),
+    type:items.Type?.value||null,
+    name:String(gradient['Nm  ']||'').replace(/\0+$/g,'')||null,
+    form:gradient.GrdF?.value||null,
+    smoothness:Number(gradient.Intr),
+    scale:Number(items['Scl ']?.value),
+    reverse:items.Rvrs===true,
+    dither:items.Dthr===true,
+    align:items.Algn!==false,
+    colorStops,
+    transparencyStops,
+  };
+}
+
+function psdPatternSummary(descriptor) {
+  const items=descriptor?.items||{};
+  const pattern=items.Ptrn?.items||{};
+  return{
+    name:String(pattern['Nm  ']||'').replace(/\0+$/g,'')||null,
+    id:String(pattern.Idnt||'').replace(/\0+$/g,'')||null,
+    scale:Number(items['Scl ']?.value??items['Scl ']),
+    linked:items.Lnkd!==false,
+  };
+}
+
 function parseShapeContentBlock(key,data,warnings,label) {
   try{
     const reader=new Reader(data);
     let subtype=key;
     if(key==='vscg')subtype=reader.ascii(4);
-    if(subtype!=='SoCo')return{sourceKey:key,subtype,fillType:null,fill:null};
     const descriptor=readPsdDescriptorBlock(reader);
-    return{sourceKey:key,subtype,fillType:'solid',fill:psdRgbDescriptorHex(descriptor)};
+    if(subtype==='SoCo')return{sourceKey:key,subtype,fillType:'solid',fill:psdRgbDescriptorHex(descriptor),gradient:null,pattern:null};
+    if(subtype==='GdFl')return{sourceKey:key,subtype,fillType:'gradient',fill:null,gradient:psdGradientSummary(descriptor),pattern:null};
+    if(subtype==='PtFl')return{sourceKey:key,subtype,fillType:'pattern',fill:null,gradient:null,pattern:psdPatternSummary(descriptor)};
+    return{sourceKey:key,subtype,fillType:null,fill:null,gradient:null,pattern:null};
   }catch(error){
     warnings.push(label+': '+key+' shape content не разобран ('+(error?.message||error)+'); opaque bytes сохранены');
-    return{sourceKey:key,subtype:null,fillType:null,fill:null};
+    return{sourceKey:key,subtype:null,fillType:null,fill:null,gradient:null,pattern:null};
   }
 }
 
@@ -761,16 +921,19 @@ function appendShapeLayerBlock(record,signature,key,data,warnings) {
     record.psdShape={
       fillType:null,fill:null,fillEnabled:true,
       stroke:null,strokeEnabled:false,strokeWidth:0,
-      sourceContentKey:null,strokeStyle:null,blocks:[],
+      sourceContentKey:null,contentSubtype:null,gradient:null,pattern:null,strokeStyle:null,blocks:[],
     };
   }
   record.psdShape.blocks.push({signature,key,data});
-  if(key==='SoCo'||key==='vscg'){
+  if(key==='SoCo'||key==='GdFl'||key==='PtFl'||key==='vscg'){
     const parsed=parseShapeContentBlock(key,data,warnings,'Слой «'+record.name+'»');
     if(parsed.fillType){
       record.psdShape.fillType=parsed.fillType;
       record.psdShape.fill=parsed.fill;
+      record.psdShape.gradient=parsed.gradient;
+      record.psdShape.pattern=parsed.pattern;
       record.psdShape.sourceContentKey=key;
+      record.psdShape.contentSubtype=parsed.subtype;
     }
   }else if(key==='vstk'){
     const stroke=parseShapeStrokeBlock(data,warnings,'Слой «'+record.name+'»');
@@ -1728,11 +1891,25 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
   const groups = reconstructPsdGroups(records, warnings);
 
   const layers = [];
+  const fillLayers = [];
   for (const record of records) {
     if (record.sectionDivider === 1 || record.sectionDivider === 2 || record.sectionDivider === 3) continue;
     const width = Math.max(0, record.right - record.left);
     const height = Math.max(0, record.bottom - record.top);
-    if (!width || !height) { warnings.push(`Слой «${record.name}» пропущен: пустые bounds`); continue; }
+    if (!width || !height) {
+      if(record.psdShape?.fillType==='gradient'||record.psdShape?.fillType==='pattern'){
+        fillLayers.push({
+          name:record.name||'PSD Fill Layer',
+          visible:!(record.flags&0x02),
+          opacity:record.opacity/255,
+          blendMode:blendModeFor(record.blendKey,warnings,record.name),
+          groupKey:record.groupKey||null,
+          psdShape:record.psdShape,
+        });
+        warnings.push(`Слой «${record.name}»: ${record.psdShape.fillType} fill metadata сохранены в fillLayers foundation; raster preview берётся из composite`);
+      }else warnings.push(`Слой «${record.name}» пропущен: пустые bounds`);
+      continue;
+    }
     const pixelBuffer = composeDocumentPixelBuffer(width, height, record.decodedChannels, header);
     if (!pixelBuffer) { warnings.push(`Слой «${record.name}» пропущен: нет RGB bitmap-preview`); continue; }
     const maskRgba = buildMaskRgba(record, record.decodedChannels.get(-2), width, height);
@@ -1769,6 +1946,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
   return {
     ...header,
     layers,
+    fillLayers,
     groups,
     composite,
     compositePixelBuffer,

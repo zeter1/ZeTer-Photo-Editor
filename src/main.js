@@ -13,7 +13,7 @@ import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBuffer
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
-import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText } from './adapters/psd.js';
+import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText, rewritePsdShapeStyle } from './adapters/psd.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -3893,12 +3893,9 @@ function psdShapeNativePlan(layer) {
     return{eligible:false,reason:'нет поддержанного imported solid-shape metadata',metadata:null,vectorMask:null};
   }
   const same=(left,right)=>Math.abs(Number(left)-Number(right))<=1e-9;
-  const styleSame=
-    String(layer.fill||'transparent')===String(baseline.fill||'transparent')&&
-    String(layer.stroke||'transparent')===String(baseline.stroke||'transparent')&&
-    same(layer.strokeWidth,baseline.strokeWidth)&&
-    Boolean(layer.pathClosed)!==false&&baseline.pathClosed!==false;
-  if(!styleSame)return{eligible:false,reason:'изменены fill/stroke/path-closure; descriptor rewrite будет отдельным этапом',metadata:null,vectorMask:null};
+  if(layer.pathClosed===false||baseline.pathClosed===false){
+    return{eligible:false,reason:'open path не совместим с imported closed Photoshop Shape',metadata:null,vectorMask:null};
+  }
   if(!same(layer.width,baseline.width)||!same(layer.height,baseline.height)||
      !same(layer.scaleX??1,baseline.scaleX??1)||!same(layer.scaleY??1,baseline.scaleY??1)||
      !same(layer.rotation??0,baseline.rotation??0)){
@@ -3912,10 +3909,35 @@ function psdShapeNativePlan(layer) {
   const vectorMask=exportPsdShapePathMask(layer);
   if(!vectorMask)return{eligible:false,reason:'path geometry недоступна',metadata:null,vectorMask:null};
   try{
-    const blocks=source.blocks.map(block=>psdOpaqueBlockFromState(block,{maxBytes:4*1024*1024})).filter(Boolean);
-    return{eligible:true,reason:null,metadata:{...source,blocks},vectorMask};
+    let blocks=source.blocks.map(block=>psdOpaqueBlockFromState(block,{maxBytes:4*1024*1024})).filter(Boolean);
+    const fill=String(layer.fill||'transparent');
+    const stroke=String(layer.stroke||'transparent');
+    const strokeWidth=Math.max(0,Number(layer.strokeWidth)||0);
+    const fillEnabled=fill!=='transparent';
+    const strokeEnabled=stroke!=='transparent'&&strokeWidth>0;
+    const styleChanged=
+      fill!==String(baseline.fill||'transparent')||
+      stroke!==String(baseline.stroke||'transparent')||
+      !same(strokeWidth,baseline.strokeWidth);
+    if(styleChanged){
+      const rewritten=rewritePsdShapeStyle(blocks,{fill,stroke,strokeWidth,fillEnabled,strokeEnabled});
+      blocks=rewritten.blocks;
+    }
+    return{
+      eligible:true,reason:null,
+      metadata:{
+        ...source,
+        fill:fillEnabled?fill:source.fill,
+        fillEnabled,
+        stroke:strokeEnabled?stroke:source.stroke,
+        strokeEnabled,
+        strokeWidth,
+        blocks,
+      },
+      vectorMask,
+    };
   }catch(error){
-    return{eligible:false,reason:'shape metadata повреждены: '+(error?.message||error),metadata:null,vectorMask:null};
+    return{eligible:false,reason:'shape descriptor rewrite недоступен: '+(error?.message||error),metadata:null,vectorMask:null};
   }
 }
 
@@ -4179,6 +4201,7 @@ async function openPsd(file){
   try{
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
+    if(parsed.fillLayers?.length)warnings.push(`Stage 15d: найдено ${parsed.fillLayers.length} Photoshop gradient/pattern fill layer(s); bounded GdFl/PtFl metadata разобраны, но canvas пока использует composite preview до editable fill renderer`);
     const isCmyk=parsed.colorMode===4;
     const colorPolicy=sanitizeColorManagement(targetDocument.colorManagement);
     const sourceProfileBytes=parsed.iccProfile?.bytes||null,proofProfileBytes=colorProfileBytes(targetDocument.proofProfile),displayProfileBytes=colorProfileBytes(targetDocument.displayProfile);
@@ -4287,7 +4310,7 @@ async function openPsd(file){
         importedLayer.pathPoints=structuredClone(subpath?.points||[]);
         importedLayer.pathClosed=subpath?.closed!==false;
         importedLayer.psdShape=importPsdShapeMetadata(sourceLayer.psdShape,importedLayer);
-        warnings.push(`Слой «${sourceLayer.name}»: Photoshop solid-color vector shape импортирован как editable ZPE path; fill/stroke metadata сохраняются native, path geometry можно редактировать`);
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop solid-color vector shape импортирован как editable ZPE path; fill/stroke/width и path geometry можно менять с native descriptor rewrite`);
       }else if(canMapText){
         const parsedText=sourceLayer.psdText.parsed;
         const typography=parsedText.typography||{};

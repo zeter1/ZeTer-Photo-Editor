@@ -270,7 +270,7 @@ test('Stage 15b wires EngineData typography import and single-run text writeback
 });
 
 test('Stage 15c wires Photoshop solid vector shapes into editable ZPE paths and native PSD/PSB metadata',()=>{
-  assert.match(adapter,/PSD_SHAPE_LAYER_KEYS = new Set\(\['SoCo','vscg','vstk'\]\)/);
+  assert.match(adapter,/PSD_SHAPE_LAYER_KEYS = new Set\(\['SoCo','GdFl','PtFl','vscg','vstk'\]\)/);
   assert.match(adapter,/function parseShapeContentBlock\(/);
   assert.match(adapter,/function parseShapeStrokeBlock\(/);
   assert.match(adapter,/appendShapeLayerBlock/);
@@ -286,5 +286,18 @@ test('Stage 15c wires Photoshop solid vector shapes into editable ZPE paths and 
   assert.match(main,/psdShape:nativeShape\?\.eligible\?nativeShape\.metadata:null/);
   assert.match(main,/Photoshop Shape/);
   assert.match(main,/Stage 15c: .*solid vector shape/);
+});
+
+test('Stage 15d wires solid shape descriptor rewrite plus gradient/pattern fill metadata foundation',()=>{
+  assert.match(adapter,/export function rewritePsdShapeStyle\(/);
+  assert.match(adapter,/function rewriteShapeSolidContentBlock\(/);
+  assert.match(adapter,/function rewriteShapeStrokeBlock\(/);
+  assert.match(adapter,/function psdGradientSummary\(/);
+  assert.match(adapter,/function psdPatternSummary\(/);
+  assert.match(adapter,/const fillLayers = \[\]/);
+  assert.match(main,/rewritePsdShapeStyle/);
+  assert.match(main,/shape descriptor rewrite недоступен/);
+  assert.match(main,/parsed\.fillLayers\?\.length/);
+  assert.match(main,/GdFl\/PtFl metadata/);
 });
 

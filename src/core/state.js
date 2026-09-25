@@ -854,7 +854,7 @@ function sanitizePsdText(value) {
   };
 }
 
-const PSD_SHAPE_BLOCK_KEYS = new Set(['SoCo','vscg','vstk']);
+const PSD_SHAPE_BLOCK_KEYS = new Set(['SoCo','GdFl','PtFl','vscg','vstk']);
 const MAX_PSD_SHAPE_DATA_URL_CHARS = 6_000_000;
 
 function sanitizePsdShape(value) {
@@ -874,14 +874,42 @@ function sanitizePsdShape(value) {
   if(!blocks.length)return null;
   const baseline=value.baseline&&typeof value.baseline==='object'&&!Array.isArray(value.baseline)?value.baseline:{};
   const strokeStyle=value.strokeStyle&&typeof value.strokeStyle==='object'&&!Array.isArray(value.strokeStyle)?value.strokeStyle:null;
+  const gradient=value.gradient&&typeof value.gradient==='object'&&!Array.isArray(value.gradient)?value.gradient:null;
+  const pattern=value.pattern&&typeof value.pattern==='object'&&!Array.isArray(value.pattern)?value.pattern:null;
+  const sanitizeGradientStops=(items,colorMode)=>Array.isArray(items)?items.slice(0,64).map(stop=>{
+    if(!stop||typeof stop!=='object'||Array.isArray(stop))return null;
+    const base={location:Math.trunc(bounded(stop.location,0,0,4096)),midpoint:Math.trunc(bounded(stop.midpoint,50,0,100))};
+    if(colorMode)return{...base,color:shortText(stop.color,'#000000',64)};
+    return{...base,opacity:bounded(stop.opacity,100,0,100)};
+  }).filter(Boolean):[];
   return{
-    fillType:value.fillType==='solid'?'solid':null,
+    fillType:['solid','gradient','pattern'].includes(value.fillType)?value.fillType:null,
     fill:shortText(value.fill,'#000000',64),
     fillEnabled:value.fillEnabled!==false,
     stroke:shortText(value.stroke,'transparent',64),
     strokeEnabled:value.strokeEnabled===true,
     strokeWidth:bounded(value.strokeWidth,0,0,1000),
-    sourceContentKey:['SoCo','vscg'].includes(value.sourceContentKey)?value.sourceContentKey:null,
+    sourceContentKey:['SoCo','GdFl','PtFl','vscg'].includes(value.sourceContentKey)?value.sourceContentKey:null,
+    contentSubtype:['SoCo','GdFl','PtFl'].includes(value.contentSubtype)?value.contentSubtype:null,
+    gradient:gradient?{
+      angle:bounded(gradient.angle,0,-3600,3600),
+      type:shortText(gradient.type,'',64)||null,
+      name:shortText(gradient.name,'',500)||null,
+      form:shortText(gradient.form,'',64)||null,
+      smoothness:Math.trunc(bounded(gradient.smoothness,4096,0,65535)),
+      scale:bounded(gradient.scale,100,0,10000),
+      reverse:gradient.reverse===true,
+      dither:gradient.dither===true,
+      align:gradient.align!==false,
+      colorStops:sanitizeGradientStops(gradient.colorStops,true),
+      transparencyStops:sanitizeGradientStops(gradient.transparencyStops,false),
+    }:null,
+    pattern:pattern?{
+      name:shortText(pattern.name,'',500)||null,
+      id:shortText(pattern.id,'',240)||null,
+      scale:bounded(pattern.scale,100,0,10000),
+      linked:pattern.linked!==false,
+    }:null,
     strokeStyle:strokeStyle?{
       opacity:bounded(strokeStyle.opacity,100,0,100),
       lineCap:shortText(strokeStyle.lineCap,'',160)||null,

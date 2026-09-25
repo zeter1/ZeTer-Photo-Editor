@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createDocument, createShapeLayer, sanitizeProject } from '../src/core/state.js';
 import { bytesToDataUrl } from '../src/core/io.js';
-import { decodePsd, encodePsd, encodePsb } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, encodePsb, rewritePsdShapeStyle } from '../src/adapters/psd.js';
 
 const root=new URL('./fixtures/photoshop-shapes/',import.meta.url);
 async function bytes(name){return new Uint8Array(await readFile(new URL(name,root)));}
@@ -105,3 +105,38 @@ test('Stage 15c project sanitizer persists bounded allow-listed Photoshop shape 
   assert.equal(safe.layers[0].psdShape.baseline.width,32);
   assert.equal(safe.layers[0].psdShape.strokeStyle.lineAlignment,'strokeStyleAlignInside');
 });
+
+test('Stage 15d rewrites Photoshop solid fill/stroke descriptors without mutating source blocks',async()=>{
+  const fixture=await bytes('psd-tools-shape-layer.psd');
+  const decoded=await decodePsd(fixture,{maxPixels:2_000_000,maxLayers:50});
+  const layer=decoded.layers[0];
+  const before=layer.psdShape.blocks.map(block=>({signature:block.signature,key:block.key,data:block.data.slice()}));
+  const rewritten=rewritePsdShapeStyle(layer.psdShape.blocks,{
+    fill:'#112233',stroke:'#445566',strokeWidth:3.5,fillEnabled:true,strokeEnabled:true,
+  });
+  assert.equal(rewritten.contentRewritten,1);
+  assert.equal(rewritten.strokeRewritten,1);
+  assert.deepEqual(layer.psdShape.blocks,before,'rewrite must not mutate source metadata');
+
+  const options={
+    width:decoded.width,height:decoded.height,bitsPerChannel:8,colorMode:3,
+    layers:[{
+      name:layer.name,x:layer.x,y:layer.y,width:layer.width,height:layer.height,
+      pixelBuffer:layer.pixelBuffer,opacity:layer.opacity,blendMode:layer.blendMode,visible:layer.visible,
+      vectorMask:layer.vectorMask,psdShape:{...layer.psdShape,blocks:rewritten.blocks},
+    }],
+    composite:new Uint8ClampedArray(decoded.width*decoded.height*4),
+    iccProfile:decoded.iccProfile?.bytes||null,
+  };
+  for(const [label,encoded] of [['PSD',encodePsd(options)],['PSB',encodePsb(options)]]){
+    const roundTrip=await decodePsd(encoded,{maxPixels:2_000_000,maxLayers:50});
+    assert.deepEqual(roundTrip.warnings,[],label+' warnings');
+    const shape=roundTrip.layers[0].psdShape;
+    assert.equal(shape.fill,'#112233',label+' fill');
+    assert.equal(shape.fillEnabled,true,label+' fill enabled');
+    assert.equal(shape.stroke,'#445566',label+' stroke');
+    assert.equal(shape.strokeEnabled,true,label+' stroke enabled');
+    assert.equal(shape.strokeWidth,3.5,label+' stroke width');
+  }
+});
+

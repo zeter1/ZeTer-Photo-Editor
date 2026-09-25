@@ -4327,7 +4327,7 @@ function sanitizePsdText(value) {
   };
 }
 
-const PSD_SHAPE_BLOCK_KEYS = new Set(['SoCo','vscg','vstk']);
+const PSD_SHAPE_BLOCK_KEYS = new Set(['SoCo','GdFl','PtFl','vscg','vstk']);
 const MAX_PSD_SHAPE_DATA_URL_CHARS = 6_000_000;
 
 function sanitizePsdShape(value) {
@@ -4347,14 +4347,42 @@ function sanitizePsdShape(value) {
   if(!blocks.length)return null;
   const baseline=value.baseline&&typeof value.baseline==='object'&&!Array.isArray(value.baseline)?value.baseline:{};
   const strokeStyle=value.strokeStyle&&typeof value.strokeStyle==='object'&&!Array.isArray(value.strokeStyle)?value.strokeStyle:null;
+  const gradient=value.gradient&&typeof value.gradient==='object'&&!Array.isArray(value.gradient)?value.gradient:null;
+  const pattern=value.pattern&&typeof value.pattern==='object'&&!Array.isArray(value.pattern)?value.pattern:null;
+  const sanitizeGradientStops=(items,colorMode)=>Array.isArray(items)?items.slice(0,64).map(stop=>{
+    if(!stop||typeof stop!=='object'||Array.isArray(stop))return null;
+    const base={location:Math.trunc(bounded(stop.location,0,0,4096)),midpoint:Math.trunc(bounded(stop.midpoint,50,0,100))};
+    if(colorMode)return{...base,color:shortText(stop.color,'#000000',64)};
+    return{...base,opacity:bounded(stop.opacity,100,0,100)};
+  }).filter(Boolean):[];
   return{
-    fillType:value.fillType==='solid'?'solid':null,
+    fillType:['solid','gradient','pattern'].includes(value.fillType)?value.fillType:null,
     fill:shortText(value.fill,'#000000',64),
     fillEnabled:value.fillEnabled!==false,
     stroke:shortText(value.stroke,'transparent',64),
     strokeEnabled:value.strokeEnabled===true,
     strokeWidth:bounded(value.strokeWidth,0,0,1000),
-    sourceContentKey:['SoCo','vscg'].includes(value.sourceContentKey)?value.sourceContentKey:null,
+    sourceContentKey:['SoCo','GdFl','PtFl','vscg'].includes(value.sourceContentKey)?value.sourceContentKey:null,
+    contentSubtype:['SoCo','GdFl','PtFl'].includes(value.contentSubtype)?value.contentSubtype:null,
+    gradient:gradient?{
+      angle:bounded(gradient.angle,0,-3600,3600),
+      type:shortText(gradient.type,'',64)||null,
+      name:shortText(gradient.name,'',500)||null,
+      form:shortText(gradient.form,'',64)||null,
+      smoothness:Math.trunc(bounded(gradient.smoothness,4096,0,65535)),
+      scale:bounded(gradient.scale,100,0,10000),
+      reverse:gradient.reverse===true,
+      dither:gradient.dither===true,
+      align:gradient.align!==false,
+      colorStops:sanitizeGradientStops(gradient.colorStops,true),
+      transparencyStops:sanitizeGradientStops(gradient.transparencyStops,false),
+    }:null,
+    pattern:pattern?{
+      name:shortText(pattern.name,'',500)||null,
+      id:shortText(pattern.id,'',240)||null,
+      scale:bounded(pattern.scale,100,0,10000),
+      linked:pattern.linked!==false,
+    }:null,
     strokeStyle:strokeStyle?{
       opacity:bounded(strokeStyle.opacity,100,0,100),
       lineCap:shortText(strokeStyle.lineCap,'',160)||null,
@@ -5538,7 +5566,7 @@ const PSB_VERSION = 2;
 const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt32','Mtrn','Alph','FMsk','lnk2','lnkD','lnkE','FEid','FXid','PxSD']);
 const PSD_SMART_OBJECT_LAYER_KEYS = new Set(['PlLd','SoLd','SoLE']);
 const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
-const PSD_SHAPE_LAYER_KEYS = new Set(['SoCo','vscg','vstk']);
+const PSD_SHAPE_LAYER_KEYS = new Set(['SoCo','GdFl','PtFl','vscg','vstk']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
@@ -6240,6 +6268,119 @@ function encodePsdRawDataValue(data) {
   return out;
 }
 
+function readPsdDescriptorBodyLayout(reader,depth=0) {
+  if(depth>MAX_PSD_DESCRIPTOR_DEPTH)throw new PsdImportError('Descriptor layout nesting depth превышен','PSD_DESCRIPTOR_DEPTH');
+  const name=readPsdUnicodeString(reader,'descriptor name');
+  const classId=readPsdDescriptorKey(reader,'descriptor class id');
+  const count=reader.u32();
+  if(count>MAX_PSD_DESCRIPTOR_ITEMS)throw new PsdImportError('Descriptor layout содержит слишком много items','PSD_DESCRIPTOR_LIMIT');
+  const items={},layout=new Map();
+  for(let index=0;index<count;index+=1){
+    const key=readPsdDescriptorKey(reader,'descriptor item key');
+    const type=reader.ascii(4);
+    const valueStart=reader.offset;
+    let value;
+    if(type==='Objc'||type==='GlbO')value=readPsdDescriptorBodyLayout(reader,depth+1);
+    else value=readPsdDescriptorValue(reader,type,depth+1);
+    const valueEnd=reader.offset;
+    items[key]=value?.descriptor??value;
+    layout.set(key,{type,valueStart,valueEnd,value});
+  }
+  return{descriptor:{name,classId,items},layout};
+}
+
+function readPsdDescriptorBlockDeepLayout(reader) {
+  const version=reader.u32();
+  if(version!==16)throw new PsdImportError('DescriptorBlock version '+version+' не поддерживается','PSD_DESCRIPTOR_VERSION');
+  return{version,...readPsdDescriptorBodyLayout(reader,0)};
+}
+
+function descriptorNestedLayout(item,bytes,label) {
+  if(!item||item.type!=='Objc')throw new PsdImportError(label+': ожидался Objc descriptor','PSD_SHAPE_DESCRIPTOR');
+  return readPsdDescriptorBodyLayout(new Reader(bytes,item.valueStart,item.valueEnd),1);
+}
+
+function patchDescriptorNumber(bytes,item,value,label) {
+  if(!item)throw new PsdImportError(label+': numeric descriptor item не найден','PSD_SHAPE_DESCRIPTOR');
+  const number=Number(value);
+  if(!Number.isFinite(number))throw new PsdImportError(label+': numeric value некорректно','PSD_SHAPE_DESCRIPTOR');
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  if(item.type==='doub'){ view.setFloat64(item.valueStart,number,false); return; }
+  if(item.type==='UntF'){ view.setFloat64(item.valueStart+4,number,false); return; }
+  if(item.type==='long'){ view.setInt32(item.valueStart,Math.round(number),false); return; }
+  throw new PsdImportError(label+': неподдерживаемый numeric OSType '+item.type,'PSD_SHAPE_DESCRIPTOR');
+}
+
+function patchDescriptorBoolean(bytes,item,value,label) {
+  if(!item||item.type!=='bool')throw new PsdImportError(label+': bool descriptor item не найден','PSD_SHAPE_DESCRIPTOR');
+  bytes[item.valueStart]=value?1:0;
+}
+
+function parseShapeHexRgb(value,label) {
+  const match=/^#([0-9a-f]{6})$/i.exec(String(value||''));
+  if(!match)throw new PsdImportError(label+': ожидается RGB #RRGGBB','PSD_SHAPE_COLOR');
+  return[
+    parseInt(match[1].slice(0,2),16),
+    parseInt(match[1].slice(2,4),16),
+    parseInt(match[1].slice(4,6),16),
+  ];
+}
+
+function patchRgbDescriptorObject(bytes,item,rgb,label) {
+  const color=descriptorNestedLayout(item,bytes,label);
+  patchDescriptorNumber(bytes,color.layout.get('Rd  '),rgb[0],label+'.R');
+  patchDescriptorNumber(bytes,color.layout.get('Grn '),rgb[1],label+'.G');
+  patchDescriptorNumber(bytes,color.layout.get('Bl  '),rgb[2],label+'.B');
+}
+
+function rewriteShapeSolidContentBlock(key,data,fill) {
+  const bytes=asBytes(data).slice();
+  const reader=new Reader(bytes);
+  let subtype=key;
+  if(key==='vscg')subtype=reader.ascii(4);
+  if(subtype!=='SoCo')throw new PsdImportError('Shape content '+key+' subtype '+subtype+' не является SoCo','PSD_SHAPE_CONTENT');
+  const layout=readPsdDescriptorBlockDeepLayout(reader);
+  patchRgbDescriptorObject(bytes,layout.layout.get('Clr '),parseShapeHexRgb(fill,'Shape fill'),'Shape fill');
+  return bytes;
+}
+
+function rewriteShapeStrokeBlock(data,{stroke,strokeEnabled,fillEnabled,strokeWidth}) {
+  const bytes=asBytes(data).slice();
+  const layout=readPsdDescriptorBlockDeepLayout(new Reader(bytes));
+  patchDescriptorBoolean(bytes,layout.layout.get('strokeEnabled'),Boolean(strokeEnabled),'strokeEnabled');
+  patchDescriptorBoolean(bytes,layout.layout.get('fillEnabled'),Boolean(fillEnabled),'fillEnabled');
+  patchDescriptorNumber(bytes,layout.layout.get('strokeStyleLineWidth'),Math.max(0,Number(strokeWidth)||0),'strokeStyleLineWidth');
+  if(strokeEnabled){
+    const content=descriptorNestedLayout(layout.layout.get('strokeStyleContent'),bytes,'strokeStyleContent');
+    patchRgbDescriptorObject(bytes,content.layout.get('Clr '),parseShapeHexRgb(stroke,'Shape stroke'),'Shape stroke');
+  }
+  return bytes;
+}
+function rewritePsdShapeStyle(blocks,{fill,stroke,strokeWidth,fillEnabled=true,strokeEnabled=true}={}) {
+  if(!Array.isArray(blocks)||!blocks.length)throw new PsdImportError('Shape style rewrite: blocks отсутствуют','PSD_SHAPE_DESCRIPTOR');
+  const hasContent=blocks.some(block=>block?.key==='SoCo'||block?.key==='vscg');
+  const hasStroke=blocks.some(block=>block?.key==='vstk');
+  if(fillEnabled&&!hasContent)throw new PsdImportError('Shape style rewrite: solid content block отсутствует','PSD_SHAPE_CONTENT');
+  if((!fillEnabled||strokeEnabled||Number(strokeWidth)>0)&&!hasStroke)throw new PsdImportError('Shape style rewrite: vstk block нужен для enable/disable или stroke edit','PSD_SHAPE_STROKE');
+  let contentRewritten=0,strokeRewritten=0;
+  const output=blocks.map(block=>{
+    if(!block?.data)return block;
+    if((block.key==='SoCo'||block.key==='vscg')&&fillEnabled){
+      const subtype=block.key==='vscg'?decodeLatin1(asBytes(block.data).subarray(0,4)):block.key;
+      if(subtype==='SoCo'){
+        contentRewritten+=1;
+        return{...block,data:rewriteShapeSolidContentBlock(block.key,block.data,fill)};
+      }
+    }
+    if(block.key==='vstk'){
+      strokeRewritten+=1;
+      return{...block,data:rewriteShapeStrokeBlock(block.data,{stroke,strokeEnabled,fillEnabled,strokeWidth})};
+    }
+    return block;
+  });
+  return{blocks:output,contentRewritten,strokeRewritten};
+}
+
 function psdRgbDescriptorHex(descriptor) {
   const color=descriptor?.items?.['Clr ']?.items;
   if(!color||typeof color!=='object')return null;
@@ -6248,17 +6389,63 @@ function psdRgbDescriptorHex(descriptor) {
   return'#'+rgb.map(value=>value.toString(16).padStart(2,'0')).join('');
 }
 
+function psdGradientSummary(descriptor) {
+  const items=descriptor?.items||{};
+  const gradient=items['Grad']?.items||{};
+  const colors=Array.isArray(gradient.Clrs)?gradient.Clrs:[];
+  const transparency=Array.isArray(gradient.Trns)?gradient.Trns:[];
+  const colorStops=colors.slice(0,64).map(stop=>({
+    location:Number(stop?.items?.Lctn)||0,
+    midpoint:Number(stop?.items?.Mdpn)||50,
+    color:psdRgbDescriptorHex({items:{'Clr ':stop?.items?.['Clr ']}}),
+  })).filter(stop=>Boolean(stop.color));
+  const transparencyStops=transparency.slice(0,64).map(stop=>{
+    const opacity=Number(stop?.items?.Opct?.value);
+    return{
+      location:Number(stop?.items?.Lctn)||0,
+      midpoint:Number(stop?.items?.Mdpn)||50,
+      opacity:Number.isFinite(opacity)?Math.max(0,Math.min(100,opacity)):100,
+    };
+  });
+  return{
+    angle:Number(items.Angl?.value),
+    type:items.Type?.value||null,
+    name:String(gradient['Nm  ']||'').replace(/\0+$/g,'')||null,
+    form:gradient.GrdF?.value||null,
+    smoothness:Number(gradient.Intr),
+    scale:Number(items['Scl ']?.value),
+    reverse:items.Rvrs===true,
+    dither:items.Dthr===true,
+    align:items.Algn!==false,
+    colorStops,
+    transparencyStops,
+  };
+}
+
+function psdPatternSummary(descriptor) {
+  const items=descriptor?.items||{};
+  const pattern=items.Ptrn?.items||{};
+  return{
+    name:String(pattern['Nm  ']||'').replace(/\0+$/g,'')||null,
+    id:String(pattern.Idnt||'').replace(/\0+$/g,'')||null,
+    scale:Number(items['Scl ']?.value??items['Scl ']),
+    linked:items.Lnkd!==false,
+  };
+}
+
 function parseShapeContentBlock(key,data,warnings,label) {
   try{
     const reader=new Reader(data);
     let subtype=key;
     if(key==='vscg')subtype=reader.ascii(4);
-    if(subtype!=='SoCo')return{sourceKey:key,subtype,fillType:null,fill:null};
     const descriptor=readPsdDescriptorBlock(reader);
-    return{sourceKey:key,subtype,fillType:'solid',fill:psdRgbDescriptorHex(descriptor)};
+    if(subtype==='SoCo')return{sourceKey:key,subtype,fillType:'solid',fill:psdRgbDescriptorHex(descriptor),gradient:null,pattern:null};
+    if(subtype==='GdFl')return{sourceKey:key,subtype,fillType:'gradient',fill:null,gradient:psdGradientSummary(descriptor),pattern:null};
+    if(subtype==='PtFl')return{sourceKey:key,subtype,fillType:'pattern',fill:null,gradient:null,pattern:psdPatternSummary(descriptor)};
+    return{sourceKey:key,subtype,fillType:null,fill:null,gradient:null,pattern:null};
   }catch(error){
     warnings.push(label+': '+key+' shape content не разобран ('+(error?.message||error)+'); opaque bytes сохранены');
-    return{sourceKey:key,subtype:null,fillType:null,fill:null};
+    return{sourceKey:key,subtype:null,fillType:null,fill:null,gradient:null,pattern:null};
   }
 }
 
@@ -6290,16 +6477,19 @@ function appendShapeLayerBlock(record,signature,key,data,warnings) {
     record.psdShape={
       fillType:null,fill:null,fillEnabled:true,
       stroke:null,strokeEnabled:false,strokeWidth:0,
-      sourceContentKey:null,strokeStyle:null,blocks:[],
+      sourceContentKey:null,contentSubtype:null,gradient:null,pattern:null,strokeStyle:null,blocks:[],
     };
   }
   record.psdShape.blocks.push({signature,key,data});
-  if(key==='SoCo'||key==='vscg'){
+  if(key==='SoCo'||key==='GdFl'||key==='PtFl'||key==='vscg'){
     const parsed=parseShapeContentBlock(key,data,warnings,'Слой «'+record.name+'»');
     if(parsed.fillType){
       record.psdShape.fillType=parsed.fillType;
       record.psdShape.fill=parsed.fill;
+      record.psdShape.gradient=parsed.gradient;
+      record.psdShape.pattern=parsed.pattern;
       record.psdShape.sourceContentKey=key;
+      record.psdShape.contentSubtype=parsed.subtype;
     }
   }else if(key==='vstk'){
     const stroke=parseShapeStrokeBlock(data,warnings,'Слой «'+record.name+'»');
@@ -7255,11 +7445,25 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
   const groups = reconstructPsdGroups(records, warnings);
 
   const layers = [];
+  const fillLayers = [];
   for (const record of records) {
     if (record.sectionDivider === 1 || record.sectionDivider === 2 || record.sectionDivider === 3) continue;
     const width = Math.max(0, record.right - record.left);
     const height = Math.max(0, record.bottom - record.top);
-    if (!width || !height) { warnings.push(`Слой «${record.name}» пропущен: пустые bounds`); continue; }
+    if (!width || !height) {
+      if(record.psdShape?.fillType==='gradient'||record.psdShape?.fillType==='pattern'){
+        fillLayers.push({
+          name:record.name||'PSD Fill Layer',
+          visible:!(record.flags&0x02),
+          opacity:record.opacity/255,
+          blendMode:blendModeFor(record.blendKey,warnings,record.name),
+          groupKey:record.groupKey||null,
+          psdShape:record.psdShape,
+        });
+        warnings.push(`Слой «${record.name}»: ${record.psdShape.fillType} fill metadata сохранены в fillLayers foundation; raster preview берётся из composite`);
+      }else warnings.push(`Слой «${record.name}» пропущен: пустые bounds`);
+      continue;
+    }
     const pixelBuffer = composeDocumentPixelBuffer(width, height, record.decodedChannels, header);
     if (!pixelBuffer) { warnings.push(`Слой «${record.name}» пропущен: нет RGB bitmap-preview`); continue; }
     const maskRgba = buildMaskRgba(record, record.decodedChannels.get(-2), width, height);
@@ -7296,6 +7500,7 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
   return {
     ...header,
     layers,
+    fillLayers,
     groups,
     composite,
     compositePixelBuffer,
@@ -12075,12 +12280,9 @@ function psdShapeNativePlan(layer) {
     return{eligible:false,reason:'нет поддержанного imported solid-shape metadata',metadata:null,vectorMask:null};
   }
   const same=(left,right)=>Math.abs(Number(left)-Number(right))<=1e-9;
-  const styleSame=
-    String(layer.fill||'transparent')===String(baseline.fill||'transparent')&&
-    String(layer.stroke||'transparent')===String(baseline.stroke||'transparent')&&
-    same(layer.strokeWidth,baseline.strokeWidth)&&
-    Boolean(layer.pathClosed)!==false&&baseline.pathClosed!==false;
-  if(!styleSame)return{eligible:false,reason:'изменены fill/stroke/path-closure; descriptor rewrite будет отдельным этапом',metadata:null,vectorMask:null};
+  if(layer.pathClosed===false||baseline.pathClosed===false){
+    return{eligible:false,reason:'open path не совместим с imported closed Photoshop Shape',metadata:null,vectorMask:null};
+  }
   if(!same(layer.width,baseline.width)||!same(layer.height,baseline.height)||
      !same(layer.scaleX??1,baseline.scaleX??1)||!same(layer.scaleY??1,baseline.scaleY??1)||
      !same(layer.rotation??0,baseline.rotation??0)){
@@ -12094,10 +12296,35 @@ function psdShapeNativePlan(layer) {
   const vectorMask=exportPsdShapePathMask(layer);
   if(!vectorMask)return{eligible:false,reason:'path geometry недоступна',metadata:null,vectorMask:null};
   try{
-    const blocks=source.blocks.map(block=>psdOpaqueBlockFromState(block,{maxBytes:4*1024*1024})).filter(Boolean);
-    return{eligible:true,reason:null,metadata:{...source,blocks},vectorMask};
+    let blocks=source.blocks.map(block=>psdOpaqueBlockFromState(block,{maxBytes:4*1024*1024})).filter(Boolean);
+    const fill=String(layer.fill||'transparent');
+    const stroke=String(layer.stroke||'transparent');
+    const strokeWidth=Math.max(0,Number(layer.strokeWidth)||0);
+    const fillEnabled=fill!=='transparent';
+    const strokeEnabled=stroke!=='transparent'&&strokeWidth>0;
+    const styleChanged=
+      fill!==String(baseline.fill||'transparent')||
+      stroke!==String(baseline.stroke||'transparent')||
+      !same(strokeWidth,baseline.strokeWidth);
+    if(styleChanged){
+      const rewritten=rewritePsdShapeStyle(blocks,{fill,stroke,strokeWidth,fillEnabled,strokeEnabled});
+      blocks=rewritten.blocks;
+    }
+    return{
+      eligible:true,reason:null,
+      metadata:{
+        ...source,
+        fill:fillEnabled?fill:source.fill,
+        fillEnabled,
+        stroke:strokeEnabled?stroke:source.stroke,
+        strokeEnabled,
+        strokeWidth,
+        blocks,
+      },
+      vectorMask,
+    };
   }catch(error){
-    return{eligible:false,reason:'shape metadata повреждены: '+(error?.message||error),metadata:null,vectorMask:null};
+    return{eligible:false,reason:'shape descriptor rewrite недоступен: '+(error?.message||error),metadata:null,vectorMask:null};
   }
 }
 
@@ -12361,6 +12588,7 @@ async function openPsd(file){
   try{
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
+    if(parsed.fillLayers?.length)warnings.push(`Stage 15d: найдено ${parsed.fillLayers.length} Photoshop gradient/pattern fill layer(s); bounded GdFl/PtFl metadata разобраны, но canvas пока использует composite preview до editable fill renderer`);
     const isCmyk=parsed.colorMode===4;
     const colorPolicy=sanitizeColorManagement(targetDocument.colorManagement);
     const sourceProfileBytes=parsed.iccProfile?.bytes||null,proofProfileBytes=colorProfileBytes(targetDocument.proofProfile),displayProfileBytes=colorProfileBytes(targetDocument.displayProfile);
@@ -12469,7 +12697,7 @@ async function openPsd(file){
         importedLayer.pathPoints=structuredClone(subpath?.points||[]);
         importedLayer.pathClosed=subpath?.closed!==false;
         importedLayer.psdShape=importPsdShapeMetadata(sourceLayer.psdShape,importedLayer);
-        warnings.push(`Слой «${sourceLayer.name}»: Photoshop solid-color vector shape импортирован как editable ZPE path; fill/stroke metadata сохраняются native, path geometry можно редактировать`);
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop solid-color vector shape импортирован как editable ZPE path; fill/stroke/width и path geometry можно менять с native descriptor rewrite`);
       }else if(canMapText){
         const parsedText=sourceLayer.psdText.parsed;
         const typography=parsedText.typography||{};
