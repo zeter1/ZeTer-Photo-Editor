@@ -13,7 +13,7 @@ import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBuffer
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
-import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './adapters/psd.js';
+import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset } from './adapters/psd.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -3950,6 +3950,8 @@ function importPsdSmartObjectMetadata(source,sourceLayer,previewDataUrl,embedded
       scaleX:1,scaleY:1,rotation:0,
       previewFingerprint:psdPreviewFingerprint(previewDataUrl),
       embeddedFingerprint:psdEmbeddedDocumentFingerprint(embeddedDocument),
+      embeddedWidth:Number(embeddedDocument?.width)||1,
+      embeddedHeight:Number(embeddedDocument?.height)||1,
     },
     blocks:source.blocks.map(psdOpaqueBlockToState).filter(Boolean),
   };
@@ -5176,7 +5178,7 @@ function layerContextMenu(id) {
   return [
     ['Параметры наложения…','',()=>openBlendingOptions(target()),editable],
     ['Редактировать содержимое смарт-объекта','',()=>openSmartObjectContents(target()),()=>Boolean(target())&&target().type==='smart-object'&&Boolean(target().embeddedDocument)],
-    ['Создать связанную копию смарт-объекта','',()=>createLinkedSmartObjectCopy(target()),()=>Boolean(target())&&target().type==='smart-object'&&Boolean(target().embeddedDocument)&&editable()],
+    ['Создать связанную копию смарт-объекта','',()=>createLinkedSmartObjectCopy(target()),()=>Boolean(target())&&target().type==='smart-object'&&Boolean(target().embeddedDocument)&&!target().psdSmartObject&&editable()],
     ['Разорвать связь смарт-объекта','',()=>unlinkSmartObject(target()),()=>Boolean(target()?.linkedSourceId)&&editable()],
     ['Добавить смарт-фильтр…','',()=>openSmartFilterDialog(target()),()=>Boolean(target())&&target().type==='smart-object'&&editable()&&(target().smartFilters?.length||0)<24],
     ['Очистить смарт-фильтры','',()=>clearSmartFilters(target()),()=>Boolean(target())&&target().type==='smart-object'&&editable()&&Boolean(target().smartFilters?.length)],
@@ -5432,13 +5434,19 @@ function openSmartFilterDialog(layer=selected(),index=-1){
   nameInput.focus();nameInput.select();
 }
 
+function photoshopSmartObjectLayers(owner,uniqueId){
+  if(!owner||!uniqueId)return[];
+  return (owner.layers||[]).filter(layer=>layer?.type==='smart-object'&&layer.psdSmartObject?.uniqueId===uniqueId);
+}
 function smartObjectLinkedCount(layer,owner=doc){
+  if(layer?.psdSmartObject?.uniqueId)return Math.max(1,photoshopSmartObjectLayers(owner,layer.psdSmartObject.uniqueId).length);
   if(!layer?.linkedSourceId)return 1;
   return Math.max(1,linkedSmartObjectLayers(owner,layer.linkedSourceId).length);
 }
 function createLinkedSmartObjectCopy(layer=selected()){
   if(blockPendingDocumentEdit())return null;
   if(!layer||layer.type!=='smart-object'||!layer.embeddedDocument){setStatus('Нужен смарт-объект со встроенным содержимым');return null;}
+  if(layer.psdSmartObject){setStatus('Photoshop Smart Object уже использует native UUID/source identity; обычная ZPE linked-copy для него отключена');return null;}
   if(isLayerLocked(doc,layer)){setStatus('Смарт-объект или его группа заблокированы');return null;}
   const linkedSourceId=layer.linkedSourceId||createSmartObjectLinkId();
   const copy=duplicateLayer(doc,layer.id);
@@ -5486,6 +5494,49 @@ async function smartObjectPreviewDataUrl(embeddedDocument){
   await renderDocument(canvas,embeddedDocument,{checker:false});
   return canvasToDataURL(canvas,'image/png');
 }
+
+async function serializePhotoshopEmbeddedAsset(embedded,source,previewDataUrl){
+  const type=String(source?.asset?.detectedFileType||'').toLowerCase();
+  if(type==='png'){
+    return dataUrlToBytes(previewDataUrl,{maxBytes:40*1024*1024});
+  }
+  if(type==='psd'||type==='psb'){
+    const prepared=await preparePsdExport(embedded);
+    const profile=embedded.colorProfile;
+    const iccProfile=profile?.kind==='icc'&&profile.dataUrl
+      ? dataUrlToBytes(profile.dataUrl,{maxBytes:4*1024*1024})
+      : null;
+    const encodeBlob=type==='psb'?encodePsbBlob:encodePsdBlob;
+    const blob=encodeBlob({
+      width:embedded.width,height:embedded.height,
+      layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,linkedLayerBlocks:prepared.linkedLayerBlocks,composite:prepared.composite,
+      compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,colorMode:prepared.colorMode,
+      iccProfile,iccUntagged:Boolean(profile?.untagged),
+      maxPixels:12_000_000,maxLayers:200,
+    });
+    const bytes=new Uint8Array(await blob.arrayBuffer());
+    if(bytes.byteLength>40*1024*1024)throw new Error('Пересобранный embedded PSD/PSB превышает лимит 40 МБ');
+    return bytes;
+  }
+  throw new Error('Stage 14c resource rewrite поддерживает embedded PNG/PSD/PSB; '+(type||'тип payload не определён'));
+}
+
+async function rewritePhotoshopEmbeddedSource(parentDoc,layer,embedded,previewDataUrl){
+  const source=layer?.psdSmartObject,asset=source?.asset,baseline=source?.baseline;
+  if(!source?.uniqueId||asset?.kind!=='data')return{rewritten:false,reason:'источник не является embedded Photoshop data asset'};
+  if(!baseline)return{rewritten:false,reason:'нет import baseline для безопасного rewrite'};
+  if(Number(embedded.width)!==Number(baseline.embeddedWidth)||Number(embedded.height)!==Number(baseline.embeddedHeight)){
+    return{rewritten:false,reason:'размер embedded документа изменён; PlLd transform пока не пересчитывается'};
+  }
+  const blocks=(parentDoc.psdLinkedLayerBlocks||[])
+    .map(block=>psdOpaqueBlockFromState(block,{maxBytes:128*1024*1024}))
+    .filter(Boolean);
+  const assetBytes=await serializePhotoshopEmbeddedAsset(embedded,source,previewDataUrl);
+  const rewritten=rewriteEmbeddedLinkedLayerAsset(blocks,source.uniqueId,assetBytes);
+  if(rewritten.rewritten<1)return{rewritten:false,reason:'liFD resource с matching UUID не найден'};
+  parentDoc.psdLinkedLayerBlocks=rewritten.blocks.map(psdOpaqueBlockToState).filter(Boolean);
+  return{rewritten:true,newSize:rewritten.newSize,oldSize:rewritten.oldSize,sourceKey:rewritten.sourceKey,type:asset.detectedFileType};
+}
 async function convertSelectedToSmartObject(){
   if(blockPendingDocumentEdit())return;
   const source=selected();
@@ -5529,18 +5580,24 @@ function openSmartObjectContents(layer=selected()){
   syncCurrentSession();
   const parentSessionId=activeSessionId;
   const linkedSourceId=layer.linkedSourceId||null;
-  const existing=documentSessions.find(session=>session.smartObjectLink?.parentSessionId===parentSessionId&&(linkedSourceId?session.smartObjectLink?.linkedSourceId===linkedSourceId:session.smartObjectLink?.layerId===layer.id));
+  const photoshopSourceId=layer.psdSmartObject?.uniqueId||null;
+  const existing=documentSessions.find(session=>session.smartObjectLink?.parentSessionId===parentSessionId&&(
+    linkedSourceId?session.smartObjectLink?.linkedSourceId===linkedSourceId:
+    photoshopSourceId?session.smartObjectLink?.photoshopSourceId===photoshopSourceId:
+    session.smartObjectLink?.layerId===layer.id
+  ));
   if(existing){activateDocumentTab(existing.id,{focusViewport:true});return;}
   const content=restoreDocument(snapshotDocument(layer.embeddedDocument));
   content.name=`${layer.name||'Смарт-объект'} — содержимое`;
   const session=buildSession(content,{
     label:'Содержимое смарт-объекта',zoomLevel:zoom,dirtyState:false,
-    smartObjectLink:{parentSessionId,layerId:layer.id,linkedSourceId},
+    smartObjectLink:{parentSessionId,layerId:layer.id,linkedSourceId,photoshopSourceId},
   });
   const parentIndex=documentSessions.findIndex(item=>item.id===parentSessionId);
   documentSessions.splice(parentIndex+1,0,session);
   activeSessionId=session.id;loadSession(session);updateAll();fitToView();
-  setStatus(linkedSourceId?`Содержимое связанного смарт-объекта открыто. Ctrl+S обновит ${smartObjectLinkedCount(layer)} экземпляр(а).`:'Содержимое смарт-объекта открыто. Ctrl+S обновит родительский слой.');
+  const count=smartObjectLinkedCount(layer);
+  setStatus((linkedSourceId||photoshopSourceId)?`Содержимое общего источника открыто. Ctrl+S обновит ${count} экземпляр(а).`:'Содержимое смарт-объекта открыто. Ctrl+S обновит родительский слой.');
 }
 async function saveSmartObjectContent(session=currentSession()){
   if(!session?.smartObjectLink)return false;
@@ -5550,6 +5607,7 @@ async function saveSmartObjectContent(session=currentSession()){
   const parentSession=documentSessions.find(item=>item.id===link.parentSessionId);
   let parentLayer=parentSession?.doc?.layers?.find(layer=>layer.id===link.layerId&&layer.type==='smart-object')||null;
   if(!parentLayer&&parentSession&&link.linkedSourceId)parentLayer=linkedSmartObjectLayers(parentSession.doc,link.linkedSourceId)[0]||null;
+  if(!parentLayer&&parentSession&&link.photoshopSourceId)parentLayer=photoshopSmartObjectLayers(parentSession.doc,link.photoshopSourceId)[0]||null;
   if(!parentSession||!parentLayer){
     const message='Родительский смарт-объект больше недоступен';
     setStatus(message);toast(message,'error');return false;
@@ -5559,38 +5617,77 @@ async function saveSmartObjectContent(session=currentSession()){
     setStatus(message);toast(message,'warn');return false;
   }
   const linkedSourceId=parentLayer.linkedSourceId||null;
-  const initialTargets=linkedSourceId?linkedSmartObjectLayers(parentSession.doc,linkedSourceId):[parentLayer];
+  const photoshopSourceId=parentLayer.psdSmartObject?.uniqueId||link.photoshopSourceId||null;
+  const targetsFor=(owner,layer)=>linkedSourceId
+    ? linkedSmartObjectLayers(owner,linkedSourceId)
+    : photoshopSourceId?photoshopSmartObjectLayers(owner,photoshopSourceId):[layer];
+  const initialTargets=targetsFor(parentSession.doc,parentLayer);
   const embedded=restoreDocument(snapshotDocument(session.doc));
-  setStatus(linkedSourceId?`Обновление связанных смарт-объектов: ${initialTargets.length}…`:'Обновление смарт-объекта…');
+  setStatus((linkedSourceId||photoshopSourceId)?`Обновление общего источника: ${initialTargets.length} экземпляр(а)…`:'Обновление смарт-объекта…');
   try{
     const previewDataUrl=await smartObjectPreviewDataUrl(embedded);
     const liveParent=documentSessions.find(item=>item.id===link.parentSessionId);
     let liveLayer=liveParent?.doc?.layers?.find(layer=>layer.id===link.layerId&&layer.type==='smart-object')||null;
     if(!liveLayer&&liveParent&&linkedSourceId)liveLayer=linkedSmartObjectLayers(liveParent.doc,linkedSourceId)[0]||null;
-    if(liveParent!==parentSession||!liveLayer||(linkedSourceId&&liveLayer.linkedSourceId!==linkedSourceId)){
+    if(!liveLayer&&liveParent&&photoshopSourceId)liveLayer=photoshopSmartObjectLayers(liveParent.doc,photoshopSourceId)[0]||null;
+    if(liveParent!==parentSession||!liveLayer||
+      (linkedSourceId&&liveLayer.linkedSourceId!==linkedSourceId)||
+      (photoshopSourceId&&liveLayer.psdSmartObject?.uniqueId!==photoshopSourceId)){
       setStatus('Обновление смарт-объекта отменено: родитель изменился');return false;
     }
-    const liveTargets=linkedSourceId?linkedSmartObjectLayers(liveParent.doc,linkedSourceId):[liveLayer];
+    const liveTargets=targetsFor(liveParent.doc,liveLayer);
     if(!liveTargets.length){
       setStatus('Обновление смарт-объекта отменено: связанные экземпляры удалены');return false;
     }
+
+    let photoshopRewrite=null;
+    if(photoshopSourceId){
+      try{
+        photoshopRewrite=await rewritePhotoshopEmbeddedSource(liveParent.doc,liveLayer,embedded,previewDataUrl);
+      }catch(error){
+        console.warn('Photoshop Smart Object resource rewrite skipped',error);
+        photoshopRewrite={rewritten:false,reason:error?.message||String(error)};
+      }
+    }
+
     const embeddedSnapshot=snapshotDocument(embedded);
     const oldPreviews=new Set();
+    const previewFingerprint=psdPreviewFingerprint(previewDataUrl);
+    const embeddedFingerprint=psdEmbeddedDocumentFingerprint(embedded);
     for(const target of liveTargets){
       if(target.previewDataUrl)oldPreviews.add(target.previewDataUrl);
       target.embeddedDocument=restoreDocument(embeddedSnapshot);
       target.previewDataUrl=previewDataUrl;
-      target.width=embedded.width;target.height=embedded.height;
+      if(!target.psdSmartObject){
+        target.width=embedded.width;target.height=embedded.height;
+      }else if(photoshopRewrite?.rewritten){
+        target.psdSmartObject.asset={...(target.psdSmartObject.asset||{}),dataSize:photoshopRewrite.newSize,sourceKey:photoshopRewrite.sourceKey||target.psdSmartObject.asset?.sourceKey||null};
+        target.psdSmartObject.baseline={
+          ...target.psdSmartObject.baseline,
+          previewFingerprint,embeddedFingerprint,
+          embeddedWidth:embedded.width,embeddedHeight:embedded.height,
+        };
+      }
     }
     touch(parentSession.doc);
-    parentSession.history.push(liveTargets.length>1?'Обновить связанные смарт-объекты':'Обновить смарт-объект',snapshotDocument(parentSession.doc));
+    parentSession.history.push(liveTargets.length>1?'Обновить общий источник смарт-объектов':'Обновить смарт-объект',snapshotDocument(parentSession.doc));
     parentSession.dirty=true;
     session.doc=embedded;doc=embedded;session.dirty=false;dirty=false;
-    session.smartObjectLink={...link,layerId:liveLayer.id,linkedSourceId};
+    session.smartObjectLink={...link,layerId:liveLayer.id,linkedSourceId,photoshopSourceId};
     for(const oldPreview of oldPreviews)invalidateImageCache(oldPreview);
     renderDocumentTabs();queueRecovery({immediate:true});
-    setStatus(liveTargets.length>1?`Связанный источник обновлён: ${liveTargets.length} экземпляр(а)`:'Смарт-объект обновлён в родительском документе');
-    toast(liveTargets.length>1?'Связанные смарт-объекты обновлены':'Содержимое смарт-объекта сохранено','success');
+    if(photoshopSourceId){
+      if(photoshopRewrite?.rewritten){
+        setStatus(`Photoshop Smart Object обновлён: embedded ${photoshopRewrite.type||'asset'} переписан в native linked resource (${photoshopRewrite.newSize} bytes), экземпляров: ${liveTargets.length}`);
+        toast('Embedded Photoshop Smart Object обновлён без raster fallback','success');
+      }else{
+        setStatus(`Содержимое обновлено; native Photoshop passthrough отключён: ${photoshopRewrite?.reason||'resource rewrite недоступен'}`);
+        toast('Содержимое сохранено; PSD/PSB использует безопасный raster fallback','warn');
+      }
+    }else{
+      setStatus(liveTargets.length>1?`Связанный источник обновлён: ${liveTargets.length} экземпляр(а)`:'Смарт-объект обновлён в родительском документе');
+      toast(liveTargets.length>1?'Связанные смарт-объекты обновлены':'Содержимое смарт-объекта сохранено','success');
+    }
     return true;
   }catch(error){
     console.error(error);setStatus(`Ошибка обновления смарт-объекта: ${error.message}`);toast('Не удалось обновить смарт-объект','error');return false;

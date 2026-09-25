@@ -1484,6 +1484,72 @@ function writeVectorMaskExtra(writer, layer, documentWidth, documentHeight) {
   if (data.length & 1) writer.u8(0);
 }
 
+function locateEmbeddedLinkedLayerRecord(bytes,start,end) {
+  const reader=new Reader(bytes,start,end);
+  const kindCode=reader.ascii(4);
+  const version=reader.u32();
+  if(version<1||version>8)return null;
+  const uuid=readPsdPascal1(reader,'Linked Layer uuid');
+  readPsdUnicodeString(reader,'Linked Layer filename');
+  reader.ascii(4);reader.ascii(4);
+  const dataSizeOffset=reader.offset;
+  const dataSize=reader.u64();
+  const dataSizeFieldEnd=reader.offset;
+  const hasOpenFile=Boolean(reader.u8());
+  if(hasOpenFile)readPsdDescriptorBlock(reader);
+  if(kindCode!=='liFD')return{kindCode,version,uuid,dataSize};
+  const dataStart=reader.offset;
+  const dataEnd=dataStart+dataSize;
+  if(dataEnd>end)throw new PsdImportError('Embedded Smart Object data обрезаны','PSD_LINKED_LAYER_DATA');
+  return{kindCode,version,uuid,dataSize,dataSizeOffset,dataSizeFieldEnd,dataStart,dataEnd};
+}
+
+export function rewriteEmbeddedLinkedLayerAsset(blocks,uniqueId,newData) {
+  const id=String(uniqueId||'');
+  if(!id)throw new PsdImportError('Embedded Smart Object rewrite: отсутствует UUID','PSD_SMART_OBJECT_UUID');
+  const asset=asBytes(newData);
+  if(asset.byteLength>MAX_PSD_LINKED_ASSET_BYTES)throw new PsdImportError(`Embedded Smart Object rewrite: payload ${asset.byteLength} bytes превышает safety limit`,'PSD_LINKED_LAYER_DATA');
+  let rewritten=0,oldSize=null,sourceKey=null;
+  const output=(Array.isArray(blocks)?blocks:[]).map(block=>{
+    if(!PSD_LINKED_LAYER_KEYS.has(block?.key))return block;
+    const bytes=asBytes(block.data);
+    const reader=new Reader(bytes);
+    const writer=new Writer();
+    let changed=false;
+    while(reader.offset+8<=reader.end){
+      const prefixStart=reader.offset;
+      const length=reader.u64();
+      if(!length){writer.push(bytes.subarray(prefixStart));reader.seek(reader.end);break;}
+      const recordStart=reader.offset;
+      const recordEnd=recordStart+length;
+      if(recordEnd>reader.end)throw new PsdImportError(`Linked Layer ${block.key}: record выходит за границы блока`,'PSD_LINKED_LAYER_DATA');
+      const layout=locateEmbeddedLinkedLayerRecord(bytes,recordStart,recordEnd);
+      const oldPadding=(4-(length%4))%4;
+      const nextOffset=recordEnd+oldPadding;
+      if(nextOffset>reader.end)throw new PsdImportError(`Linked Layer ${block.key}: record padding выходит за границы блока`,'PSD_LINKED_LAYER_DATA');
+      if(layout?.kindCode==='liFD'&&layout.uuid===id){
+        const record=new Writer();
+        record.push(bytes.subarray(recordStart,layout.dataSizeOffset));
+        record.u64(asset.byteLength);
+        record.push(bytes.subarray(layout.dataSizeFieldEnd,layout.dataStart));
+        record.push(asset);
+        record.push(bytes.subarray(layout.dataEnd,recordEnd));
+        const recordBytes=record.concat();
+        writer.u64(recordBytes.byteLength).push(recordBytes);
+        const newPadding=(4-(recordBytes.byteLength%4))%4;
+        if(newPadding)writer.push(new Uint8Array(newPadding));
+        rewritten+=1;oldSize=layout.dataSize;sourceKey=block.key;changed=true;
+      }else{
+        writer.push(bytes.subarray(prefixStart,nextOffset));
+      }
+      reader.seek(nextOffset);
+    }
+    if(reader.offset<reader.end)writer.push(bytes.subarray(reader.offset));
+    return changed?{...block,data:writer.concat()}:block;
+  });
+  return{blocks:output,rewritten,oldSize,newSize:asset.byteLength,sourceKey};
+}
+
 function writeOpaqueAdditionalInfoBlock(writer,block,version,allowedKeys,maxBytes,label) {
   const key=String(block?.key||'');
   if(!allowedKeys.has(key))throw new PsdImportError(`PSD/PSB writer: ${label} key ${JSON.stringify(key)} не разрешён`,'PSD_EXPORT_OPAQUE_KEY');

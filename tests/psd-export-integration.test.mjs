@@ -227,3 +227,15 @@ test('Stage 14b wires typed Photoshop descriptors and embedded asset extraction 
   assert.match(main,/linked\/unsupported payload остаётся opaque/);
 });
 
+test('Stage 14c wires editable embedded Smart Object saves into native liFD resource rewrite',()=>{
+  assert.match(adapter,/export function rewriteEmbeddedLinkedLayerAsset\(/);
+  assert.match(adapter,/locateEmbeddedLinkedLayerRecord/);
+  assert.match(main,/function serializePhotoshopEmbeddedAsset\(/);
+  assert.match(main,/function rewritePhotoshopEmbeddedSource\(/);
+  assert.match(main,/photoshopSmartObjectLayers/);
+  assert.match(main,/embeddedWidth/);
+  assert.match(main,/embeddedHeight/);
+  assert.match(main,/Embedded Photoshop Smart Object обновлён без raster fallback/);
+  assert.match(main,/native Photoshop passthrough отключён/);
+});
+

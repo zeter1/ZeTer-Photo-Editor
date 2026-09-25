@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.35.0 — 2026-09-25
+
+### 2026-09-25 — Smart Object Embedded Asset Rewrite & Resource Rebuild Stage 14c
+
+- Native liFD rewrite: добавлен bounded `rewriteEmbeddedLinkedLayerAsset()`, который находит embedded Linked Layer record по UUID и меняет только payload, 64-bit `datasize`, record length и padding.
+- Non-destructive neighbors: другие `lnk2/lnkD/lnkE` records и внешние `liFE` links остаются нетронутыми; helper не мутирует caller-owned source blocks.
+- Editable PNG: изменённый embedded PNG content сериализуется обратно в PNG и записывается в исходный Photoshop Smart Object resource.
+- Editable PSD/PSB: extracted nested PSD/PSB можно пересобрать через существующий PSD/PSB writer и вернуть в `liFD` при соблюдении bounded pixel/layer/size limits.
+- Shared Photoshop identity: несколько Smart Object layers с одинаковым Photoshop UUID открывают один source-content session и обновляются как один источник.
+- Placement correctness: Photoshop placed-layer width/height больше не заменяются intrinsic размером embedded document при Ctrl+S; placement и content dimensions разделены.
+- Round-trip gate: после успешного resource rewrite обновляются preview/content fingerprints и asset datasize, поэтому native passthrough остаётся допустимым; изменение intrinsic content size или unsupported payload сохраняют честный raster fallback.
+- UI/UX safety: обычная ZPE linked-copy отключена для imported Photoshop Smart Objects, чтобы не создавать дубли с неконсистентной native UUID/resource семантикой.
+- Regression: реальный MIT Smart Object fixture проверяет замену `liFD` payload, сохранение UUID, соседнего `lnkE` block и повторный PSD decode.
+- Version: приложение синхронизировано на 1.35.0.
+
 ## 1.34.0 — 2026-09-25
 
 ### 2026-09-25 — Smart Object Descriptor & Embedded Asset Extraction Stage 14b

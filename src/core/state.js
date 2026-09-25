@@ -756,6 +756,8 @@ export function sanitizePsdSmartObject(value) {
       rotation:((finite(baseline.rotation,0)%360)+360)%360,
       previewFingerprint:shortText(baseline.previewFingerprint,'',160).trim()||null,
       embeddedFingerprint:shortText(baseline.embeddedFingerprint,'',160).trim()||null,
+      embeddedWidth:Math.trunc(bounded(baseline.embeddedWidth,1,1,12000)),
+      embeddedHeight:Math.trunc(bounded(baseline.embeddedHeight,1,1,12000)),
     },
     blocks,
   };

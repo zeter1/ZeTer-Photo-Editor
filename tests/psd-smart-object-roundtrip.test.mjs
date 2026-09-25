@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createSmartObjectLayer, createDocument, sanitizeProject } from '../src/core/state.js';
 import { bytesToDataUrl } from '../src/core/io.js';
-import { decodePsd, encodePsd, encodePsb, inspectPsdHeader } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, encodePsb, inspectPsdHeader, rewriteEmbeddedLinkedLayerAsset } from '../src/adapters/psd.js';
 
 const root=new URL('./fixtures/photoshop-smart-objects/',import.meta.url);
 async function bytes(name){return new Uint8Array(await readFile(new URL(name,root)));}
@@ -135,5 +135,36 @@ test('Stage 14b parses embedded and external linked-layer records without readin
   assert.equal(embedded.asset.detectedFileType,'png');
   assert.equal(embedded.asset.data.byteLength,17272);
   assert.ok(decoded.linkedLayerEntries.some(item=>item.sourceKey==='lnkE'&&item.kind==='external'));
+});
+
+test('Stage 14c rewrites a matching embedded liFD payload while preserving Smart Object UUID and other linked records',async()=>{
+  const fixture=await bytes('psd-tools-smartobject-layer.psd');
+  const decoded=await decodePsd(fixture,{maxPixels:100000,maxLayers:20});
+  const layer=decoded.layers[0];
+  const replacement=new Uint8Array([137,80,78,71,13,10,26,10,1,2,3,4,5,6,7,8,9,10,11,12]);
+  const beforeBlocks=decoded.linkedLayerBlocks.map(block=>({signature:block.signature,key:block.key,data:block.data.slice()}));
+  const rewritten=rewriteEmbeddedLinkedLayerAsset(decoded.linkedLayerBlocks,layer.psdSmartObject.uniqueId,replacement);
+  assert.equal(rewritten.rewritten,1);
+  assert.equal(rewritten.oldSize,378);
+  assert.equal(rewritten.newSize,replacement.byteLength);
+  assert.equal(rewritten.sourceKey,'lnk2');
+  assert.deepEqual(decoded.linkedLayerBlocks,beforeBlocks,'rewrite must not mutate the caller-owned linked blocks');
+  const options={
+    width:decoded.width,height:decoded.height,bitsPerChannel:8,colorMode:3,
+    layers:[{
+      name:layer.name,x:layer.x,y:layer.y,width:layer.width,height:layer.height,
+      pixelBuffer:layer.pixelBuffer,opacity:layer.opacity,blendMode:layer.blendMode,visible:layer.visible,
+      psdSmartObject:layer.psdSmartObject,
+    }],
+    composite:new Uint8ClampedArray(decoded.width*decoded.height*4),
+    iccProfile:decoded.iccProfile?.bytes||null,
+    linkedLayerBlocks:rewritten.blocks,
+  };
+  const roundTrip=await decodePsd(encodePsd(options),{maxPixels:100000,maxLayers:20});
+  assert.equal(roundTrip.layers[0].psdSmartObject.uniqueId,layer.psdSmartObject.uniqueId);
+  assert.equal(roundTrip.layers[0].psdSmartObject.asset.dataSize,replacement.byteLength);
+  assert.deepEqual(roundTrip.layers[0].psdSmartObject.asset.data,replacement);
+  assert.equal(roundTrip.layers[0].psdSmartObject.asset.detectedFileType,'png');
+  assert.equal(roundTrip.linkedLayerBlocks.some(block=>block.key==='lnkE'),true);
 });
 
