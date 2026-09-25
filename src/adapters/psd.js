@@ -536,11 +536,13 @@ function reconstructPsdGroups(records, warnings) {
     }
     return {
       key: group.key,
+      parentKey: group.parent?.key ?? null,
       name: group.name || 'PSD Group',
       path,
       depth: Math.max(0, path.length - 1),
       collapsed: Boolean(group.collapsed),
-      visible,
+      visible: group.visible !== false,
+      effectiveVisible: visible,
     };
   });
 
@@ -936,6 +938,7 @@ function normalizeExportGroups(groups = []) {
     seen.add(key);
     normalized.push({
       key,
+      parentKey: group?.parentKey == null ? null : String(group.parentKey).slice(0, 160),
       name: String(group?.name || 'Group').slice(0, 240),
       visible: group?.visible !== false,
       collapsed: Boolean(group?.collapsed),
@@ -963,39 +966,69 @@ function makeExportGroupMarker(group, sectionDivider) {
   };
 }
 
+function exportGroupLineage(groupMap, key) {
+  if (!key) return [];
+  const lineage = [];
+  const seen = new Set();
+  let current = groupMap.get(String(key));
+  if (!current) return [];
+  while (current) {
+    if (seen.has(current.key)) {
+      throw new PsdImportError(`PSD/PSB writer: цикл вложенности групп у «${current.name}»`, 'PSD_EXPORT_GROUP_CYCLE');
+    }
+    seen.add(current.key);
+    lineage.unshift(current);
+    if (!current.parentKey) break;
+    const parent = groupMap.get(String(current.parentKey));
+    if (!parent) {
+      throw new PsdImportError(
+        `PSD/PSB writer: родительская группа ${JSON.stringify(current.parentKey)} для «${current.name}» отсутствует`,
+        'PSD_EXPORT_GROUP_PARENT',
+      );
+    }
+    current = parent;
+  }
+  return lineage;
+}
+
 function expandExportLayerGroups(layers, groups) {
   const groupMap = new Map(normalizeExportGroups(groups).map(group => [group.key, group]));
   if (!groupMap.size) return layers;
   const records = [];
-  const emitted = new Set();
+  const open = [];
+  const closed = new Set();
 
-  for (let index = 0; index < layers.length;) {
-    const layer = layers[index];
-    const key = layer.groupKey && groupMap.has(String(layer.groupKey)) ? String(layer.groupKey) : null;
-    if (!key) {
-      records.push(layer);
-      index += 1;
-      continue;
+  const closeTo = common => {
+    while (open.length > common) {
+      const group = open.pop();
+      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1));
+      closed.add(group.key);
     }
-    if (emitted.has(key)) {
-      throw new PsdImportError(
-        `PSD/PSB writer: группа «${groupMap.get(key).name}» разделена несмежными слоями`,
-        'PSD_EXPORT_GROUP_SPLIT',
-      );
+  };
+
+  for (const layer of layers) {
+    const lineage = exportGroupLineage(groupMap, layer.groupKey);
+    let common = 0;
+    while (common < open.length && common < lineage.length && open[common].key === lineage[common].key) common += 1;
+    closeTo(common);
+    for (let index = common; index < lineage.length; index += 1) {
+      const group = lineage[index];
+      if (closed.has(group.key)) {
+        throw new PsdImportError(
+          `PSD/PSB writer: группа «${group.name}» разделена несмежными слоями`,
+          'PSD_EXPORT_GROUP_SPLIT',
+        );
+      }
+      records.push(makeExportGroupMarker(group, 3));
+      open.push(group);
     }
-    emitted.add(key);
-    const group = groupMap.get(key);
-    records.push(makeExportGroupMarker(group, 3));
-    while (index < layers.length && String(layers[index].groupKey || '') === key) {
-      records.push(layers[index]);
-      index += 1;
-    }
-    records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1));
+    records.push(layer);
   }
+  closeTo(0);
   return records;
 }
 
-function encodeCompositeRle(pixels, width, height, version) {
+function encodeCompositeRle(pixels, width, height, version) {function encodeCompositeRle(pixels, width, height, version) {
   const pixelCount = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   const rgba = asBytes(pixels);
   if (rgba.length !== pixelCount * 4) throw new PsdImportError('PSD/PSB writer: composite RGBA имеет неверный размер', 'PSD_EXPORT_COMPOSITE');

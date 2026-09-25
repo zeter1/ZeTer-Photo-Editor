@@ -330,6 +330,7 @@ test('PSD Group Import Stage 8a reconstructs nested lsct groups and layer member
   assert.equal(outer.collapsed,false);
   assert.equal(outer.visible,true);
   assert.deepEqual(inner.path,['Outer','Inner']);
+  assert.equal(inner.parentKey,outer.key);
   assert.equal(inner.depth,1);
   assert.equal(inner.collapsed,true);
   assert.equal(inner.visible,false);
@@ -487,6 +488,33 @@ test('PSD Group Export Stage 8b round-trips flat group records and keeps child v
   assert.equal(hiddenChild.groupKey,group.key);
   assert.equal(hiddenChild.visible,false);
   assert.equal(free.groupKey,null);
+});
+
+
+test('PSD Group Stage 8c round-trips native nested groups without flattening names', async () => {
+  const pixels=Uint8Array.from([20,40,60,255]);
+  const encoded=encodePsd({
+    width:1,height:1,composite:pixels,
+    groups:[
+      {key:'outer',name:'Outer',visible:true,collapsed:false},
+      {key:'inner',parentKey:'outer',name:'Inner',visible:false,collapsed:true},
+    ],
+    layers:[
+      {name:'Outer layer',groupKey:'outer',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true},
+      {name:'Inner layer',groupKey:'inner',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true},
+    ],
+  });
+  const decoded=await decodePsd(encoded);
+  const outer=decoded.groups.find(group=>group.name==='Outer');
+  const inner=decoded.groups.find(group=>group.name==='Inner');
+  assert.ok(outer);
+  assert.ok(inner);
+  assert.equal(inner.parentKey,outer.key);
+  assert.deepEqual(inner.path,['Outer','Inner']);
+  assert.equal(inner.visible,false);
+  assert.equal(inner.collapsed,true);
+  assert.equal(decoded.layers.find(layer=>layer.name==='Outer layer').groupKey,outer.key);
+  assert.equal(decoded.layers.find(layer=>layer.name==='Inner layer').groupKey,inner.key);
 });
 
 test('PSD Group Export Stage 8b rejects non-contiguous members instead of grouping unrelated layers', () => {

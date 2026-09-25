@@ -1359,38 +1359,117 @@ function createLayerGroup(overrides = {}) {
     visible: true,
     locked: false,
     collapsed: false,
+    parentGroupId: null,
     ...overrides,
   };
+}
+
+function normalizeGroupParents(groups) {
+  if (!Array.isArray(groups)) return groups;
+  const byId = new Map(groups.map(group => [group?.id, group]).filter(([id]) => Boolean(id)));
+  for (const group of groups) {
+    const parentId = typeof group?.parentGroupId === 'string' ? group.parentGroupId : null;
+    group.parentGroupId = parentId && parentId !== group.id && byId.has(parentId) ? parentId : null;
+  }
+  for (const group of groups) {
+    const seen = new Set([group.id]);
+    let current = group;
+    while (current?.parentGroupId) {
+      const parent = byId.get(current.parentGroupId);
+      if (!parent) {
+        current.parentGroupId = null;
+        break;
+      }
+      if (seen.has(parent.id)) {
+        group.parentGroupId = null;
+        break;
+      }
+      seen.add(parent.id);
+      current = parent;
+    }
+  }
+  return groups;
 }
 function layerGroup(doc, layer) {
   if (!layer?.groupId || !Array.isArray(doc?.groups)) return null;
   return doc.groups.find(group => group.id === layer.groupId) ?? null;
 }
+
+function groupChain(doc, group) {
+  if (!group || !Array.isArray(doc?.groups)) return [];
+  const byId = new Map(doc.groups.map(item => [item.id, item]));
+  const chain = [];
+  const seen = new Set();
+  let current = typeof group === 'string' ? byId.get(group) : group;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.push(current);
+    current = current.parentGroupId ? byId.get(current.parentGroupId) : null;
+  }
+  return chain;
+}
+function groupDepth(doc, group) {
+  return Math.max(0, groupChain(doc, group).length - 1);
+}
+function isGroupVisible(doc, group) {
+  const chain = groupChain(doc, group);
+  return chain.length ? chain.every(item => item.visible !== false) : true;
+}
+function isGroupLocked(doc, group) {
+  return groupChain(doc, group).some(item => Boolean(item.locked));
+}
+function isGroupWithin(doc, groupId, ancestorGroupId) {
+  if (!groupId || !ancestorGroupId) return false;
+  return groupChain(doc, groupId).some(group => group.id === ancestorGroupId);
+}
 function isLayerVisible(doc, layer) {
   if (!layer || layer.visible === false) return false;
   const group = layerGroup(doc, layer);
-  return group ? group.visible !== false : true;
+  return group ? isGroupVisible(doc, group) : true;
 }
 function isLayerLocked(doc, layer) {
   if (!layer) return false;
   if (layer.locked) return true;
-  return Boolean(layerGroup(doc, layer)?.locked);
+  const group = layerGroup(doc, layer);
+  return group ? isGroupLocked(doc, group) : false;
 }
 function addLayerGroup(doc, group = createLayerGroup()) {
   if (!Array.isArray(doc.groups)) doc.groups = [];
+  if (group.parentGroupId && !doc.groups.some(item => item.id === group.parentGroupId)) group.parentGroupId = null;
   doc.groups.push(group);
+  normalizeGroupParents(doc.groups);
   touch(doc);
   return group;
+}
+function moveLayerGroupIntoGroup(doc, groupId, parentGroupId) {
+  if (!Array.isArray(doc?.groups)) return false;
+  const group = doc.groups.find(item => item.id === groupId);
+  const parent = parentGroupId != null ? doc.groups.find(item => item.id === parentGroupId) : null;
+  if (!group || (parentGroupId != null && !parent)) return false;
+  if (isGroupLocked(doc, group) || (parent && isGroupLocked(doc, parent))) return false;
+  if (parent?.id === group.id || (parent && isGroupWithin(doc, parent.id, group.id))) return false;
+  const nextParentId = parent?.id ?? null;
+  if ((group.parentGroupId ?? null) === nextParentId) return false;
+  group.parentGroupId = nextParentId;
+  normalizeGroupParents(doc.groups);
+  touch(doc);
+  return true;
 }
 function removeLayerGroup(doc, groupId) {
   if (!Array.isArray(doc.groups)) return null;
   const index = doc.groups.findIndex(group => group.id === groupId);
   if (index < 0) return null;
-  if (doc.groups[index]?.locked) return null;
+  const target = doc.groups[index];
+  if (isGroupLocked(doc, target)) return null;
+  const parentGroupId = target.parentGroupId ?? null;
   const [removed] = doc.groups.splice(index, 1);
   for (const layer of doc.layers) {
-    if (layer.groupId === groupId) layer.groupId = null;
+    if (layer.groupId === groupId) layer.groupId = parentGroupId;
   }
+  for (const group of doc.groups) {
+    if (group.parentGroupId === groupId) group.parentGroupId = parentGroupId;
+  }
+  normalizeGroupParents(doc.groups);
   touch(doc);
   return removed;
 }
@@ -1399,7 +1478,7 @@ function moveLayerIntoGroup(doc, layerId, groupId) {
   if (!layer || isLayerLocked(doc, layer)) return false;
   const targetGroup = groupId != null ? doc.groups?.find(group => group.id === groupId) : null;
   if (groupId != null && !targetGroup) return false;
-  if (targetGroup?.locked) return false;
+  if (targetGroup && isGroupLocked(doc, targetGroup)) return false;
   const oldGroupId = layer.groupId ?? null;
   if (oldGroupId === (groupId ?? null)) return false;
 
@@ -1412,7 +1491,7 @@ function moveLayerIntoGroup(doc, layerId, groupId) {
   } else {
     let lastMemberIndex = -1;
     for (let i = 0; i < doc.layers.length; i += 1) {
-      if (doc.layers[i].groupId === groupId) lastMemberIndex = i;
+      if (isGroupWithin(doc, doc.layers[i].groupId, groupId)) lastMemberIndex = i;
     }
     const insertIndex = lastMemberIndex >= 0 ? lastMemberIndex + 1 : doc.layers.length;
     doc.layers.splice(insertIndex, 0, layer);
@@ -1531,6 +1610,8 @@ function restoreDocument(snapshot) {
   if (!doc || !Array.isArray(doc.layers)) throw new Error('Неподдерживаемый файл проекта');
   validateProjectVersion(doc);
   if (!Array.isArray(doc.groups)) doc.groups = [];
+  for (const group of doc.groups) if (!('parentGroupId' in group)) group.parentGroupId = null;
+  normalizeGroupParents(doc.groups);
   const validGroupIds = new Set(doc.groups.map(group => group?.id).filter(Boolean));
   for (const layer of doc.layers) {
     if (!validGroupIds.has(layer?.groupId)) layer.groupId = null;
@@ -1662,6 +1743,7 @@ function sanitizeGroup(group, usedIds) {
     visible: group?.visible !== false,
     locked: Boolean(group?.locked),
     collapsed: Boolean(group?.collapsed),
+    parentGroupId: typeof group?.parentGroupId === 'string' ? shortText(group.parentGroupId, '', 160).trim() || null : null,
   };
 }
 
@@ -1678,6 +1760,7 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
   const usedGroupIds = new Set();
   doc.groups = Array.isArray(doc.groups) ? doc.groups.slice(0, 100).map(group => sanitizeGroup(group, usedGroupIds)) : [];
+  normalizeGroupParents(doc.groups);
   const validGroupIds = new Set(doc.groups.map(group => group.id));
   const usedIds = new Set();
   doc.layers = Array.isArray(doc.layers)
@@ -2888,11 +2971,13 @@ function reconstructPsdGroups(records, warnings) {
     }
     return {
       key: group.key,
+      parentKey: group.parent?.key ?? null,
       name: group.name || 'PSD Group',
       path,
       depth: Math.max(0, path.length - 1),
       collapsed: Boolean(group.collapsed),
-      visible,
+      visible: group.visible !== false,
+      effectiveVisible: visible,
     };
   });
 
@@ -3287,6 +3372,7 @@ function normalizeExportGroups(groups = []) {
     seen.add(key);
     normalized.push({
       key,
+      parentKey: group?.parentKey == null ? null : String(group.parentKey).slice(0, 160),
       name: String(group?.name || 'Group').slice(0, 240),
       visible: group?.visible !== false,
       collapsed: Boolean(group?.collapsed),
@@ -3314,39 +3400,69 @@ function makeExportGroupMarker(group, sectionDivider) {
   };
 }
 
+function exportGroupLineage(groupMap, key) {
+  if (!key) return [];
+  const lineage = [];
+  const seen = new Set();
+  let current = groupMap.get(String(key));
+  if (!current) return [];
+  while (current) {
+    if (seen.has(current.key)) {
+      throw new PsdImportError(`PSD/PSB writer: цикл вложенности групп у «${current.name}»`, 'PSD_EXPORT_GROUP_CYCLE');
+    }
+    seen.add(current.key);
+    lineage.unshift(current);
+    if (!current.parentKey) break;
+    const parent = groupMap.get(String(current.parentKey));
+    if (!parent) {
+      throw new PsdImportError(
+        `PSD/PSB writer: родительская группа ${JSON.stringify(current.parentKey)} для «${current.name}» отсутствует`,
+        'PSD_EXPORT_GROUP_PARENT',
+      );
+    }
+    current = parent;
+  }
+  return lineage;
+}
+
 function expandExportLayerGroups(layers, groups) {
   const groupMap = new Map(normalizeExportGroups(groups).map(group => [group.key, group]));
   if (!groupMap.size) return layers;
   const records = [];
-  const emitted = new Set();
+  const open = [];
+  const closed = new Set();
 
-  for (let index = 0; index < layers.length;) {
-    const layer = layers[index];
-    const key = layer.groupKey && groupMap.has(String(layer.groupKey)) ? String(layer.groupKey) : null;
-    if (!key) {
-      records.push(layer);
-      index += 1;
-      continue;
+  const closeTo = common => {
+    while (open.length > common) {
+      const group = open.pop();
+      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1));
+      closed.add(group.key);
     }
-    if (emitted.has(key)) {
-      throw new PsdImportError(
-        `PSD/PSB writer: группа «${groupMap.get(key).name}» разделена несмежными слоями`,
-        'PSD_EXPORT_GROUP_SPLIT',
-      );
+  };
+
+  for (const layer of layers) {
+    const lineage = exportGroupLineage(groupMap, layer.groupKey);
+    let common = 0;
+    while (common < open.length && common < lineage.length && open[common].key === lineage[common].key) common += 1;
+    closeTo(common);
+    for (let index = common; index < lineage.length; index += 1) {
+      const group = lineage[index];
+      if (closed.has(group.key)) {
+        throw new PsdImportError(
+          `PSD/PSB writer: группа «${group.name}» разделена несмежными слоями`,
+          'PSD_EXPORT_GROUP_SPLIT',
+        );
+      }
+      records.push(makeExportGroupMarker(group, 3));
+      open.push(group);
     }
-    emitted.add(key);
-    const group = groupMap.get(key);
-    records.push(makeExportGroupMarker(group, 3));
-    while (index < layers.length && String(layers[index].groupKey || '') === key) {
-      records.push(layers[index]);
-      index += 1;
-    }
-    records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1));
+    records.push(layer);
   }
+  closeTo(0);
   return records;
 }
 
-function encodeCompositeRle(pixels, width, height, version) {
+function encodeCompositeRle(pixels, width, height, version) {function encodeCompositeRle(pixels, width, height, version) {
   const pixelCount = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   const rgba = asBytes(pixels);
   if (rgba.length !== pixelCount * 4) throw new PsdImportError('PSD/PSB writer: composite RGBA имеет неверный размер', 'PSD_EXPORT_COMPOSITE');
@@ -4399,7 +4515,7 @@ function moveLayerRelativeToTarget(layerId, targetId, aboveInDisplay) {
   const source = doc.layers[sourceIndex];
   if (isLayerLocked(doc, source)) return false;
   const targetGroup = targetLayer.groupId ? doc.groups?.find(group => group.id === targetLayer.groupId) : null;
-  if (targetGroup?.locked) return false;
+  if (targetGroup && isGroupLocked(doc, targetGroup)) return false;
   const beforeGroupId = source.groupId ?? null;
   doc.layers.splice(sourceIndex, 1);
   const targetIndex = doc.layers.findIndex(item => item.id === targetId);
@@ -4440,24 +4556,53 @@ function updateLayers() {
   if (!Array.isArray(doc.groups)) doc.groups = [];
   const groupsById = new Map(doc.groups.map(group => [group.id, group]));
   const displayLayers = [...doc.layers].reverse();
+  const displayIndex = new Map(displayLayers.map((layer,index) => [layer.id,index]));
   const membersByGroup = new Map();
+  const childrenByParent = new Map();
+
+  for (const group of doc.groups) {
+    const parentId = group.parentGroupId && groupsById.has(group.parentGroupId) ? group.parentGroupId : null;
+    if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
+    childrenByParent.get(parentId).push(group);
+  }
   for (const layer of displayLayers) {
-    if (!layer.groupId || !groupsById.has(layer.groupId)) continue;
-    if (!membersByGroup.has(layer.groupId)) membersByGroup.set(layer.groupId, []);
-    membersByGroup.get(layer.groupId).push(layer);
+    const groupId = layer.groupId && groupsById.has(layer.groupId) ? layer.groupId : null;
+    if (!membersByGroup.has(groupId)) membersByGroup.set(groupId, []);
+    membersByGroup.get(groupId).push(layer);
   }
 
-  const appendLayerRow = (layer, { inGroup = false } = {}) => {
+  const groupRankCache = new Map();
+  const groupRank = group => {
+    if (groupRankCache.has(group.id)) return groupRankCache.get(group.id);
+    let rank = Number.POSITIVE_INFINITY;
+    for (const layer of displayLayers) {
+      let current = layer.groupId ? groupsById.get(layer.groupId) : null;
+      const seen = new Set();
+      while (current && !seen.has(current.id)) {
+        seen.add(current.id);
+        if (current.id === group.id) {
+          rank = Math.min(rank, displayIndex.get(layer.id) ?? Number.POSITIVE_INFINITY);
+          break;
+        }
+        current = current.parentGroupId ? groupsById.get(current.parentGroupId) : null;
+      }
+    }
+    groupRankCache.set(group.id, rank);
+    return rank;
+  };
+
+  const appendLayerRow = (layer, { depth = 0 } = {}) => {
     const group = layer.groupId ? groupsById.get(layer.groupId) : null;
-    const groupHidden = Boolean(group && group.visible === false);
-    const groupLocked = Boolean(group?.locked);
+    const groupHidden = Boolean(group && !isGroupVisible(doc, group));
+    const groupLocked = Boolean(group && isGroupLocked(doc, group));
     const effectiveLocked = isLayerLocked(doc, layer);
     const row = document.createElement('div');
-    row.className = `layer-row${inGroup ? ' in-group' : ''}${groupHidden ? ' group-hidden' : ''}${groupLocked ? ' group-locked' : ''}${layer.id === doc.selectedLayerId ? ' selected' : ''}`;
+    row.className = `layer-row${depth > 0 ? ' in-group' : ''}${groupHidden ? ' group-hidden' : ''}${groupLocked ? ' group-locked' : ''}${layer.id === doc.selectedLayerId ? ' selected' : ''}`;
+    row.style.setProperty('--layer-depth', String(depth));
     row.dataset.id = layer.id; row.setAttribute('role','option'); row.setAttribute('aria-selected', String(layer.id === doc.selectedLayerId));
     row.tabIndex = layer.id === doc.selectedLayerId ? 0 : -1;
     const eye = document.createElement('button'); eye.className = 'layer-eye'; eye.textContent = layer.visible ? '◉' : '○';
-    eye.title = groupHidden ? 'Группа скрыта; переключить собственную видимость слоя' : layer.visible ? 'Скрыть' : 'Показать';
+    eye.title = groupHidden ? 'Родительская группа скрыта; переключить собственную видимость слоя' : layer.visible ? 'Скрыть' : 'Показать';
     eye.setAttribute('aria-label', eye.title);
     eye.onclick = (e) => { e.stopPropagation(); layer.visible = !layer.visible; commit(layer.visible ? 'Показать слой' : 'Скрыть слой'); };
     const thumb = document.createElement('div'); thumb.className = 'layer-thumb';
@@ -4469,7 +4614,7 @@ function updateLayers() {
     name.ondblclick = (e) => { e.stopPropagation(); renameLayer(layer); };
     const lock = document.createElement('button'); lock.className = 'layer-lock';
     lock.textContent = effectiveLocked ? '🔒' : '·';
-    lock.title = groupLocked ? 'Слой заблокирован группой' : layer.locked ? 'Разблокировать' : 'Заблокировать';
+    lock.title = groupLocked ? 'Слой заблокирован одной из родительских групп' : layer.locked ? 'Разблокировать' : 'Заблокировать';
     lock.setAttribute('aria-label', lock.title);
     lock.disabled = groupLocked;
     lock.onclick = (e) => { e.stopPropagation(); layer.locked = !layer.locked; commit(layer.locked ? 'Заблокировать слой' : 'Разблокировать слой'); };
@@ -4533,18 +4678,24 @@ function updateLayers() {
     els.layers.append(row);
   };
 
-  const appendGroupRow = (group, members) => {
+  const appendGroupRow = (group, members, depth) => {
+    const effectiveVisible = isGroupVisible(doc, group);
+    const effectiveLocked = isGroupLocked(doc, group);
+    const parent = group.parentGroupId ? groupsById.get(group.parentGroupId) : null;
+    const ancestorLocked = Boolean(parent && isGroupLocked(doc, parent));
+    const ancestorHidden = Boolean(parent && !isGroupVisible(doc, parent));
     const row = document.createElement('div');
-    row.className = `layer-group-row${group.visible === false ? ' group-hidden' : ''}${group.locked ? ' group-locked' : ''}`;
+    row.className = `layer-group-row${!effectiveVisible ? ' group-hidden' : ''}${effectiveLocked ? ' group-locked' : ''}`;
+    row.style.setProperty('--group-depth', String(depth));
     row.dataset.groupId = group.id;
     row.tabIndex = 0;
     row.setAttribute('role','group');
-    row.setAttribute('aria-label', `${group.name}, ${members.length} слоёв`);
+    row.setAttribute('aria-label', `${group.name}, уровень ${depth + 1}, ${members.length} прямых слоёв`);
 
     const eye = document.createElement('button');
     eye.className = 'layer-eye layer-group-eye';
     eye.textContent = group.visible === false ? '○' : '◉';
-    eye.title = group.visible === false ? 'Показать группу' : 'Скрыть группу';
+    eye.title = ancestorHidden ? 'Родительская группа скрыта; переключить собственную видимость' : group.visible === false ? 'Показать группу' : 'Скрыть группу';
     eye.setAttribute('aria-label', eye.title);
     eye.onclick = e => {
       e.stopPropagation();
@@ -4552,7 +4703,7 @@ function updateLayers() {
       commit(group.visible ? 'Показать группу слоёв' : 'Скрыть группу слоёв');
     };
 
-    const toggle = document.createElement('button');    toggle.className = 'layer-group-toggle';
+    const toggle = document.createElement('button'); toggle.className = 'layer-group-toggle';
     toggle.textContent = group.collapsed ? '▸' : '▾';
     toggle.title = group.collapsed ? 'Развернуть группу' : 'Свернуть группу';
     toggle.setAttribute('aria-expanded', String(!group.collapsed));
@@ -4564,24 +4715,27 @@ function updateLayers() {
     name.type = 'button';
     name.className = 'layer-name layer-group-name';
     name.textContent = group.name;
-    name.title = `${group.name} · ${members.length} слоёв · клик: свернуть/развернуть · двойной клик: переименовать`;
+    name.title = `${group.name} · уровень ${depth + 1} · ${members.length} прямых слоёв · клик: свернуть/развернуть · двойной клик: переименовать`;
     name.onclick = e => { e.stopPropagation(); group.collapsed = !group.collapsed; updateLayers(); };
     name.ondblclick = e => { e.preventDefault(); e.stopPropagation(); renameGroup(group); };
 
     const lock = document.createElement('button');
     lock.className = 'layer-lock layer-group-lock';
-    lock.textContent = group.locked ? '🔒' : '·';
-    lock.title = group.locked ? 'Разблокировать группу' : 'Заблокировать группу';
+    lock.textContent = effectiveLocked ? '🔒' : '·';
+    lock.title = ancestorLocked ? 'Группа заблокирована родительской группой' : group.locked ? 'Разблокировать группу' : 'Заблокировать группу';
     lock.setAttribute('aria-label', lock.title);
+    lock.disabled = ancestorLocked;
     lock.onclick = e => {
       e.stopPropagation();
+      if (ancestorLocked) return;
       group.locked = !group.locked;
       commit(group.locked ? 'Заблокировать группу слоёв' : 'Разблокировать группу слоёв');
     };
 
     const remove = document.createElement('button'); remove.className = 'layer-group-remove'; remove.textContent = '×';
-    remove.title = 'Удалить группу (слои останутся)';
+    remove.title = 'Удалить группу (содержимое останется)';
     remove.setAttribute('aria-label', remove.title);
+    remove.disabled = effectiveLocked;
     remove.onclick = e => { e.stopPropagation(); deleteLayerGroup(group); };
 
     row.append(eye, toggle, thumb, name, lock, remove);
@@ -4590,14 +4744,14 @@ function updateLayers() {
       openContextMenu(`group:${group.id}`, groupContextMenu(group.id), e, row);
     });
     row.addEventListener('dragover', e => {
-      if (!layerDragId || group.locked) return;
+      if (!layerDragId || effectiveLocked) return;
       e.preventDefault(); e.stopPropagation();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
       row.classList.add('drop-into');
     });
     row.addEventListener('dragleave', () => row.classList.remove('drop-into'));
     row.addEventListener('drop', e => {
-      if (!layerDragId || group.locked) return;
+      if (!layerDragId || effectiveLocked) return;
       e.preventDefault(); e.stopPropagation();
       const draggedId = layerDragId;
       row.classList.remove('drop-into');
@@ -4607,29 +4761,36 @@ function updateLayers() {
       }
     });
     els.layers.append(row);
-    if (!group.collapsed) for (const layer of members) appendLayerRow(layer, { inGroup: true });
   };
 
-  const emittedGroups = new Set();
-  for (const group of [...doc.groups].reverse()) {
-    if (!membersByGroup.has(group.id)) {
-      appendGroupRow(group, []);
-      emittedGroups.add(group.id);
+  const renderLevel = (parentGroupId = null, depth = 0) => {
+    const entries = [];
+    for (const group of childrenByParent.get(parentGroupId) || []) {
+      entries.push({ type:'group', group, rank:groupRank(group), order:doc.groups.indexOf(group) });
     }
-  }
-  for (const layer of displayLayers) {
-    const group = layer.groupId ? groupsById.get(layer.groupId) : null;
-    if (!group) {
-      appendLayerRow(layer);
-      continue;
+    for (const layer of membersByGroup.get(parentGroupId) || []) {
+      entries.push({ type:'layer', layer, rank:displayIndex.get(layer.id) ?? Number.POSITIVE_INFINITY, order:displayIndex.get(layer.id) ?? 0 });
     }
-    if (emittedGroups.has(group.id)) continue;
-    emittedGroups.add(group.id);
-    appendGroupRow(group, membersByGroup.get(group.id) || []);
-  }
+    entries.sort((a,b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (a.type !== b.type) return a.type === 'group' ? -1 : 1;
+      return a.order - b.order;
+    });
+    for (const entry of entries) {
+      if (entry.type === 'layer') {
+        appendLayerRow(entry.layer,{depth});
+        continue;
+      }
+      const group = entry.group;
+      appendGroupRow(group,membersByGroup.get(group.id)||[],depth);
+      if (!group.collapsed) renderLevel(group.id,depth+1);
+    }
+  };
+
+  renderLevel(null,0);
 }
 
-function updateHistory() {
+function updateHistory() {function updateHistory() {
   els.history.replaceChildren();
   history.entries.forEach((entry, index) => {
     const row = document.createElement('button'); row.type='button'; row.className = `history-row${index === history.index ? ' current' : ''}`;
@@ -6339,22 +6500,34 @@ async function openPsd(file){
     if(parsed.bitsPerChannel===16)warnings.push('RGB 16-bit/channel декодирован без потери точности на PSD/PSB adapter boundary, но текущий ZPE/Canvas документ получает 8-bit preview; точность выше 8 bit после импорта пока не сохраняется');
     if(parsed.bitsPerChannel===32)warnings.push('RGB 32-bit floating-point/HDR декодирован в Float32 PixelBuffer, но текущий ZPE/Canvas preview ограничивает отображение диапазоном 0..1; HDR tone mapping/exposure и сохранение Float32 после импорта пока не реализованы');
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
+    const sourceGroups=new Map((parsed.groups||[]).map(group=>[group.key,group]));
     const usedGroupKeys=new Set(parsed.layers.map(layer=>layer.groupKey).filter(Boolean));
+    for(const key of [...usedGroupKeys]){
+      let current=sourceGroups.get(key);
+      const seen=new Set();
+      while(current?.parentKey&&!seen.has(current.key)){
+        seen.add(current.key);
+        usedGroupKeys.add(current.parentKey);
+        current=sourceGroups.get(current.parentKey);
+      }
+    }
     const importedGroups=[];
     const groupIdByKey=new Map();
     for(const sourceGroup of parsed.groups||[]){
       if(!usedGroupKeys.has(sourceGroup.key))continue;
-      const path=Array.isArray(sourceGroup.path)&&sourceGroup.path.length?sourceGroup.path:[sourceGroup.name||'PSD Group'];
       const group=createLayerGroup({
-        name:path.length>1?path.join(' / '):(sourceGroup.name||'PSD Group'),
+        name:sourceGroup.name||'PSD Group',
         visible:sourceGroup.visible!==false,
         collapsed:Boolean(sourceGroup.collapsed),
       });
       importedGroups.push(group);
       groupIdByKey.set(sourceGroup.key,group.id);
     }
-    if((parsed.groups||[]).some(group=>group.depth>0)){
-      warnings.push('Вложенные PSD/PSB группы импортированы как отдельные плоские группы ZPE; полный путь сохранён в имени группы');
+    for(const sourceGroup of parsed.groups||[]){
+      const groupId=groupIdByKey.get(sourceGroup.key);
+      if(!groupId)continue;
+      const group=importedGroups.find(item=>item.id===groupId);
+      group.parentGroupId=sourceGroup.parentKey?(groupIdByKey.get(sourceGroup.parentKey)??null):null;
     }
     const prepared=[];
     for(const sourceLayer of [...parsed.layers].reverse()){
@@ -6539,10 +6712,26 @@ async function preparePsdExport(exportDoc){
   if(totalPixels>48_000_000){
     throw new Error(`PSD export Stage 4 ограничен суммарно 48 МП временных RGBA-буферов; документ требует около ${Math.ceil(totalPixels/1_000_000)} МП. Для больших документов нужен tiled/streaming writer.`);
   }
+  const groupsById=new Map((exportDoc.groups||[]).map(group=>[group.id,group]));
   const sourceGroupIds=new Set(sourceLayers.map(layer=>layer.groupId).filter(Boolean));
+  for(const id of [...sourceGroupIds]){
+    let current=groupsById.get(id);
+    const seen=new Set();
+    while(current?.parentGroupId&&!seen.has(current.id)){
+      seen.add(current.id);
+      sourceGroupIds.add(current.parentGroupId);
+      current=groupsById.get(current.parentGroupId);
+    }
+  }
   const exportGroups=(exportDoc.groups||[])
     .filter(group=>sourceGroupIds.has(group.id))
-    .map(group=>({key:group.id,name:group.name||'Group',visible:group.visible!==false,collapsed:Boolean(group.collapsed)}));
+    .map(group=>({
+      key:group.id,
+      parentKey:group.parentGroupId&&sourceGroupIds.has(group.parentGroupId)?group.parentGroupId:null,
+      name:group.name||'Group',
+      visible:group.visible!==false,
+      collapsed:Boolean(group.collapsed),
+    }));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
 
@@ -6970,11 +7159,11 @@ function addGroup(){
   commit('Новая группа слоёв');
   setStatus(`Создана группа «${group.name}». Перетащите на неё нужные слои.`);
 }
-function renameGroup(group){if(!group||group.locked){setStatus('Группа заблокирована');return;}showModal({title:'Переименовать группу',fields:[{name:'name',label:'Имя',value:group.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===group.name)return;group.name=name;commit('Переименовать группу');}});}
+function renameGroup(group){if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}showModal({title:'Переименовать группу',fields:[{name:'name',label:'Имя',value:group.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===group.name)return;group.name=name;commit('Переименовать группу');}});}
 function deleteLayerGroup(group){
   if(!group)return;
-  if(group.locked){setStatus('Сначала разблокируйте группу');return;}
-  if(removeLayerGroup(doc,group.id)){commit('Удалить группу слоёв');setStatus('Группа удалена, слои оставлены в документе');}
+  if(isGroupLocked(doc,group)){setStatus('Сначала разблокируйте группу и её родителей');return;}
+  if(removeLayerGroup(doc,group.id)){commit('Удалить группу слоёв');setStatus('Группа удалена, содержимое перенесено на уровень выше');}
 }
 function openBlendingOptions(layer) {
   if (!layer || isLayerLocked(doc, layer) || blockPendingDocumentEdit()) return;
@@ -7129,12 +7318,12 @@ function groupContextMenu(id) {
   const owner=doc;
   const target = () => doc===owner ? doc.groups?.find(item => item.id === id) : null;
   return [
-    ['Переименовать…','',()=>renameGroup(target()),()=>Boolean(target()) && !target().locked],
+    ['Переименовать…','',()=>renameGroup(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
     ['Свернуть / развернуть','',()=>{const group=target();if(group){group.collapsed=!group.collapsed;updateLayers();}},()=>Boolean(target())],
     ['Показать / скрыть','',()=>{const group=target();if(group){group.visible=group.visible===false;commit(group.visible?'Показать группу слоёв':'Скрыть группу слоёв');}},()=>Boolean(target())],
-    ['Заблокировать / разблокировать','',()=>{const group=target();if(group){group.locked=!group.locked;commit(group.locked?'Заблокировать группу слоёв':'Разблокировать группу слоёв');}},()=>Boolean(target())],
+    ['Заблокировать / разблокировать','',()=>{const group=target();if(group&&!group.parentGroupId||group&&!isGroupLocked(doc,doc.groups?.find(item=>item.id===group.parentGroupId))){group.locked=!group.locked;commit(group.locked?'Заблокировать группу слоёв':'Разблокировать группу слоёв');}},()=>{const group=target();const parent=group?.parentGroupId?doc.groups?.find(item=>item.id===group.parentGroupId):null;return Boolean(group)&&!(parent&&isGroupLocked(doc,parent));}],
     ['sep'],
-    ['Удалить группу (слои останутся)','',()=>deleteLayerGroup(target()),()=>Boolean(target()) && !target().locked],
+    ['Удалить группу (содержимое останется)','',()=>deleteLayerGroup(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
   ];
 }
 function addBlankLayer(){addLayer(doc,createRasterLayer({name:'Новый слой',width:doc.width,height:doc.height,dataUrl:null}));brushCanvas=null;commit('Новый растровый слой');}
@@ -7835,4 +8024,6 @@ bootstrap().then(()=>{
   message.textContent=`Ошибка запуска редактора: ${error?.message||error}`;
   document.body.append(message);
 });
+
+
 })();

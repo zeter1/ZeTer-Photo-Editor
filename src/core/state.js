@@ -167,8 +167,36 @@ export function createLayerGroup(overrides = {}) {
     visible: true,
     locked: false,
     collapsed: false,
+    parentGroupId: null,
     ...overrides,
   };
+}
+
+function normalizeGroupParents(groups) {
+  if (!Array.isArray(groups)) return groups;
+  const byId = new Map(groups.map(group => [group?.id, group]).filter(([id]) => Boolean(id)));
+  for (const group of groups) {
+    const parentId = typeof group?.parentGroupId === 'string' ? group.parentGroupId : null;
+    group.parentGroupId = parentId && parentId !== group.id && byId.has(parentId) ? parentId : null;
+  }
+  for (const group of groups) {
+    const seen = new Set([group.id]);
+    let current = group;
+    while (current?.parentGroupId) {
+      const parent = byId.get(current.parentGroupId);
+      if (!parent) {
+        current.parentGroupId = null;
+        break;
+      }
+      if (seen.has(parent.id)) {
+        group.parentGroupId = null;
+        break;
+      }
+      seen.add(parent.id);
+      current = parent;
+    }
+  }
+  return groups;
 }
 
 export function layerGroup(doc, layer) {
@@ -176,34 +204,90 @@ export function layerGroup(doc, layer) {
   return doc.groups.find(group => group.id === layer.groupId) ?? null;
 }
 
+function groupChain(doc, group) {
+  if (!group || !Array.isArray(doc?.groups)) return [];
+  const byId = new Map(doc.groups.map(item => [item.id, item]));
+  const chain = [];
+  const seen = new Set();
+  let current = typeof group === 'string' ? byId.get(group) : group;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.push(current);
+    current = current.parentGroupId ? byId.get(current.parentGroupId) : null;
+  }
+  return chain;
+}
+
+export function groupDepth(doc, group) {
+  return Math.max(0, groupChain(doc, group).length - 1);
+}
+
+export function isGroupVisible(doc, group) {
+  const chain = groupChain(doc, group);
+  return chain.length ? chain.every(item => item.visible !== false) : true;
+}
+
+export function isGroupLocked(doc, group) {
+  return groupChain(doc, group).some(item => Boolean(item.locked));
+}
+
+export function isGroupWithin(doc, groupId, ancestorGroupId) {
+  if (!groupId || !ancestorGroupId) return false;
+  return groupChain(doc, groupId).some(group => group.id === ancestorGroupId);
+}
+
 export function isLayerVisible(doc, layer) {
   if (!layer || layer.visible === false) return false;
   const group = layerGroup(doc, layer);
-  return group ? group.visible !== false : true;
+  return group ? isGroupVisible(doc, group) : true;
 }
 
 export function isLayerLocked(doc, layer) {
   if (!layer) return false;
   if (layer.locked) return true;
-  return Boolean(layerGroup(doc, layer)?.locked);
+  const group = layerGroup(doc, layer);
+  return group ? isGroupLocked(doc, group) : false;
 }
 
 export function addLayerGroup(doc, group = createLayerGroup()) {
   if (!Array.isArray(doc.groups)) doc.groups = [];
+  if (group.parentGroupId && !doc.groups.some(item => item.id === group.parentGroupId)) group.parentGroupId = null;
   doc.groups.push(group);
+  normalizeGroupParents(doc.groups);
   touch(doc);
   return group;
+}
+
+export function moveLayerGroupIntoGroup(doc, groupId, parentGroupId) {
+  if (!Array.isArray(doc?.groups)) return false;
+  const group = doc.groups.find(item => item.id === groupId);
+  const parent = parentGroupId != null ? doc.groups.find(item => item.id === parentGroupId) : null;
+  if (!group || (parentGroupId != null && !parent)) return false;
+  if (isGroupLocked(doc, group) || (parent && isGroupLocked(doc, parent))) return false;
+  if (parent?.id === group.id || (parent && isGroupWithin(doc, parent.id, group.id))) return false;
+  const nextParentId = parent?.id ?? null;
+  if ((group.parentGroupId ?? null) === nextParentId) return false;
+  group.parentGroupId = nextParentId;
+  normalizeGroupParents(doc.groups);
+  touch(doc);
+  return true;
 }
 
 export function removeLayerGroup(doc, groupId) {
   if (!Array.isArray(doc.groups)) return null;
   const index = doc.groups.findIndex(group => group.id === groupId);
   if (index < 0) return null;
-  if (doc.groups[index]?.locked) return null;
+  const target = doc.groups[index];
+  if (isGroupLocked(doc, target)) return null;
+  const parentGroupId = target.parentGroupId ?? null;
   const [removed] = doc.groups.splice(index, 1);
   for (const layer of doc.layers) {
-    if (layer.groupId === groupId) layer.groupId = null;
+    if (layer.groupId === groupId) layer.groupId = parentGroupId;
   }
+  for (const group of doc.groups) {
+    if (group.parentGroupId === groupId) group.parentGroupId = parentGroupId;
+  }
+  normalizeGroupParents(doc.groups);
   touch(doc);
   return removed;
 }
@@ -213,7 +297,7 @@ export function moveLayerIntoGroup(doc, layerId, groupId) {
   if (!layer || isLayerLocked(doc, layer)) return false;
   const targetGroup = groupId != null ? doc.groups?.find(group => group.id === groupId) : null;
   if (groupId != null && !targetGroup) return false;
-  if (targetGroup?.locked) return false;
+  if (targetGroup && isGroupLocked(doc, targetGroup)) return false;
   const oldGroupId = layer.groupId ?? null;
   if (oldGroupId === (groupId ?? null)) return false;
 
@@ -226,7 +310,7 @@ export function moveLayerIntoGroup(doc, layerId, groupId) {
   } else {
     let lastMemberIndex = -1;
     for (let i = 0; i < doc.layers.length; i += 1) {
-      if (doc.layers[i].groupId === groupId) lastMemberIndex = i;
+      if (isGroupWithin(doc, doc.layers[i].groupId, groupId)) lastMemberIndex = i;
     }
     const insertIndex = lastMemberIndex >= 0 ? lastMemberIndex + 1 : doc.layers.length;
     doc.layers.splice(insertIndex, 0, layer);
@@ -354,6 +438,8 @@ export function restoreDocument(snapshot) {
   if (!doc || !Array.isArray(doc.layers)) throw new Error('Неподдерживаемый файл проекта');
   validateProjectVersion(doc);
   if (!Array.isArray(doc.groups)) doc.groups = [];
+  for (const group of doc.groups) if (!('parentGroupId' in group)) group.parentGroupId = null;
+  normalizeGroupParents(doc.groups);
   const validGroupIds = new Set(doc.groups.map(group => group?.id).filter(Boolean));
   for (const layer of doc.layers) {
     if (!validGroupIds.has(layer?.groupId)) layer.groupId = null;
@@ -488,6 +574,7 @@ function sanitizeGroup(group, usedIds) {
     visible: group?.visible !== false,
     locked: Boolean(group?.locked),
     collapsed: Boolean(group?.collapsed),
+    parentGroupId: typeof group?.parentGroupId === 'string' ? shortText(group.parentGroupId, '', 160).trim() || null : null,
   };
 }
 
@@ -504,6 +591,7 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
   const usedGroupIds = new Set();
   doc.groups = Array.isArray(doc.groups) ? doc.groups.slice(0, 100).map(group => sanitizeGroup(group, usedGroupIds)) : [];
+  normalizeGroupParents(doc.groups);
   const validGroupIds = new Set(doc.groups.map(group => group.id));
   const usedIds = new Set();
   doc.layers = Array.isArray(doc.layers)

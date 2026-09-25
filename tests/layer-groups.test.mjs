@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   createDocument, createShapeLayer, createLayerGroup, addLayer, addLayerGroup,
-  removeLayerGroup, moveLayerIntoGroup, moveLayer, duplicateLayer, removeLayer, sanitizeProject,
-  isLayerVisible, isLayerLocked,
+  removeLayerGroup, moveLayerIntoGroup, moveLayerGroupIntoGroup, moveLayer, duplicateLayer, removeLayer, sanitizeProject,
+  isLayerVisible, isLayerLocked, isGroupVisible, isGroupLocked, groupDepth,
 } from '../src/core/state.js';
 
 const main=fs.readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
@@ -97,6 +97,66 @@ test('group visibility and locking are inherited by member layers',()=>{
   assert.equal(removeLayerGroup(doc,group.id),null);
 });
 
+
+test('nested groups inherit visibility/locking and preserve hierarchy through sanitize',()=>{
+  const doc=createDocument();
+  const root=addLayerGroup(doc,createLayerGroup({name:'Root'}));
+  const child=addLayerGroup(doc,createLayerGroup({name:'Child',parentGroupId:root.id}));
+  const layer=addLayer(doc,createShapeLayer({name:'nested'}));
+  assert.equal(moveLayerIntoGroup(doc,layer.id,child.id),true);
+  assert.equal(groupDepth(doc,root),0);
+  assert.equal(groupDepth(doc,child),1);
+  assert.equal(isLayerVisible(doc,layer),true);
+  root.visible=false;
+  assert.equal(isGroupVisible(doc,child),false);
+  assert.equal(isLayerVisible(doc,layer),false);
+  root.visible=true;
+  root.locked=true;
+  assert.equal(isGroupLocked(doc,child),true);
+  assert.equal(isLayerLocked(doc,layer),true);
+
+  root.locked=false;
+  const safe=sanitizeProject(JSON.parse(JSON.stringify(doc)));
+  const safeRoot=safe.groups.find(group=>group.name==='Root');
+  const safeChild=safe.groups.find(group=>group.name==='Child');
+  assert.equal(safeChild.parentGroupId,safeRoot.id);
+  assert.equal(groupDepth(safe,safeChild),1);
+});
+
+test('nested group moves reject cycles and removing a group reparents its content',()=>{
+  const doc=createDocument();
+  const root=addLayerGroup(doc,createLayerGroup({name:'Root'}));
+  const child=addLayerGroup(doc,createLayerGroup({name:'Child',parentGroupId:root.id}));
+  const grand=addLayerGroup(doc,createLayerGroup({name:'Grand',parentGroupId:child.id}));
+  const layer=addLayer(doc,createShapeLayer({name:'nested'}));
+  moveLayerIntoGroup(doc,layer.id,child.id);
+  assert.equal(moveLayerGroupIntoGroup(doc,root.id,grand.id),false);
+  assert.equal(moveLayerGroupIntoGroup(doc,grand.id,root.id),true);
+  assert.equal(grand.parentGroupId,root.id);
+  assert.ok(removeLayerGroup(doc,child.id));
+  assert.equal(layer.groupId,root.id);
+  assert.equal(doc.groups.some(group=>group.id===child.id),false);
+});
+
+test('group sanitizer breaks malformed parent cycles instead of preserving recursive graphs',()=>{
+  const safe=sanitizeProject({
+    version:1,name:'cycles',width:64,height:64,background:'transparent',
+    groups:[
+      {id:'a',name:'A',parentGroupId:'b'},
+      {id:'b',name:'B',parentGroupId:'a'},
+      {id:'c',name:'C',parentGroupId:'missing'},
+    ],
+    layers:[],
+  });
+  const a=safe.groups.find(group=>group.id==='a');
+  const b=safe.groups.find(group=>group.id==='b');
+  const c=safe.groups.find(group=>group.id==='c');
+  assert.ok(a.parentGroupId===null||b.parentGroupId===null);
+  assert.equal(c.parentGroupId,null);
+  assert.doesNotThrow(()=>groupDepth(safe,a));
+  assert.doesNotThrow(()=>groupDepth(safe,b));
+});
+
 test('locked layers cannot be removed through the state API',()=>{
   const doc=createDocument();
   const layer=addLayer(doc,createShapeLayer({name:'locked',locked:true}));
@@ -141,5 +201,7 @@ test('layer panel exposes rename and group controls with drag-to-group wiring',(
   assert.match(main,/Переименовать слой/);
   assert.match(css,/\.layer-group-row\.drop-into/);
   assert.match(css,/\.layer-row\.in-group/);
+  assert.match(css,/--group-depth/);
+  assert.match(main,/const renderLevel = \(parentGroupId = null, depth = 0\) =>/);
   assert.match(css,/\.layer-group-row \{ grid-template-columns:/);
 });

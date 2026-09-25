@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-25 — Native Nested Groups Stage 8c
+
+- Added: ZPE group schema получила optional `parentGroupId`; старые проекты без поля остаются совместимыми.
+- Inheritance: layer/group visibility и locking теперь учитывают всю ancestor chain, а не только непосредственную группу.
+- Safety: sanitizer обнуляет orphan/self/cyclic parent links; попытка программно вложить группу в собственного потомка отклоняется.
+- UX: панель слоёв рендерит настоящую group hierarchy с отступами и recursive collapse; ancestor hidden/locked state отображается на дочерних строках.
+- Removal: удаление группы сохраняет содержимое — прямые слои и подгруппы поднимаются к её родителю.
+- PSD/PSB: import сохраняет adapter `parentKey` как ZPE hierarchy, writer формирует nested `lsct` records по lineage transitions и сохраняет имена групп без `Parent / Child` flatten.
+- Added: nested state/sanitizer tests и PSD nested group writer → reader round-trip regression.
+
 ### 2026-09-25 — PSD/PSB Group Export Stage 8b
 
 - Added: плоские ZPE groups теперь экспортируются в PSD/PSB как настоящие `lsct` folder + bounding-divider layer records.

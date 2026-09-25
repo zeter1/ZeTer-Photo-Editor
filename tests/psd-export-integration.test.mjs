@@ -73,3 +73,13 @@ test('PSD Group Export Stage 8b wires ZPE flat groups into the PSD/PSB writer',(
   assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,composite,warnings\}/);
   assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,composite:prepared\.composite/);
 });
+
+
+test('PSD Group Stage 8c carries native parent relationships through ZPE and writer',()=>{
+  assert.match(adapter,/parentKey: group\.parent\?\.key \?\? null/);
+  assert.match(adapter,/function exportGroupLineage\(/);
+  assert.match(main,/group\.parentGroupId=sourceGroup\.parentKey/);
+  assert.match(main,/parentKey:group\.parentGroupId/);
+  assert.match(main,/isGroupVisible\(doc, group\)/);
+  assert.match(main,/isGroupLocked\(doc, group\)/);
+});
