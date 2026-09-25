@@ -18,6 +18,7 @@
 - Compatibility gate: mixed RGB/CMYK, text/shape, adjustment layers, active vector masks, isolated groups, non-transparent RGB background и видимый non-Normal blend оставляют RGB display-preview export и дают причину fallback.
 - ICC round-trip: embedded profile resource 1039 сохраняется вместе с native CMYK channels; экранный preview остаётся sRGB display conversion и не объявляется press proof.
 - Regression tests: synthetic `mAB`, float `D2B0/mpet`, intent fallback, display policy, typed CMYK composite и native CMYK PSD/PSB 8/16-bit writer round-trip.
+- CI follow-up: export UI integration test обновлён под новые явные `RGB/CMYK` подписи PSD/PSB, чтобы проверять актуальный пользовательский contract вместо устаревшего текста.
 - Version: приложение синхронизировано на 1.30.0.
 
 ## 1.29.0 — 2026-09-25
