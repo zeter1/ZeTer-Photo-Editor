@@ -3552,6 +3552,7 @@ const MAX_LAYER_SCALE = 100;
 const MAX_LAYER_POSITION = 120000;
 const MAX_ICC_PROFILE_DATA_URL = 5_700_000;
 const MAX_SMART_FILTERS = 24;
+const MAX_PSD_TEXT_DATA_URL_CHARS = 22_500_000;
 function imageResizeTransforms(layers, sx, sy) {
   return layers.map(layer => {
     if (layer?.type === 'adjustment') return { x: 0, y: 0, scaleX: 1, scaleY: 1 };
@@ -3704,7 +3705,7 @@ function createTextLayer(overrides = {}) {
     name: 'Текст', text: 'Текст', color: '#ffffff', fontSize: 48, fontFamily: 'Inter, Arial, sans-serif',
     fontWeight: '400', fontStyle: 'normal', align: 'left', lineHeight: 1.18,
     letterSpacing: 0, underline: false, strikeThrough: false,
-    fontData: null, fontLabel: '',
+    fontData: null, fontLabel: '', psdText: null,
     width: 240, height: 60, ...overrides,
   });
 }
@@ -4250,6 +4251,62 @@ function sanitizePsdLinkedLayerBlocks(value) {
   return result;
 }
 
+function sanitizePsdText(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  if(value.key!=='TySh')return null;
+  const dataUrl=typeof value.dataUrl==='string'&&value.dataUrl.length<=MAX_PSD_TEXT_DATA_URL_CHARS&&/^data:application\/octet-stream;base64,[a-z\d+/=]*$/i.test(value.dataUrl)
+    ? value.dataUrl:null;
+  if(!dataUrl)return null;
+  const parsed=value.parsed&&typeof value.parsed==='object'&&!Array.isArray(value.parsed)?value.parsed:{};
+  const baseline=value.baseline&&typeof value.baseline==='object'&&!Array.isArray(value.baseline)?value.baseline:{};
+  const transform=Array.isArray(parsed.transform)&&parsed.transform.length===6
+    ? parsed.transform.map(item=>bounded(item,0,-1e9,1e9))
+    : null;
+  const bounds=parsed.bounds&&typeof parsed.bounds==='object'&&!Array.isArray(parsed.bounds)?{
+    left:Math.trunc(bounded(parsed.bounds.left,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION)),
+    top:Math.trunc(bounded(parsed.bounds.top,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION)),
+    right:Math.trunc(bounded(parsed.bounds.right,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION)),
+    bottom:Math.trunc(bounded(parsed.bounds.bottom,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION)),
+  }:null;
+  return{
+    signature:value.signature==='8B64'?'8B64':'8BIM',
+    key:'TySh',
+    dataUrl,
+    parsed:{
+      version:Math.trunc(bounded(parsed.version,1,0,100)),
+      textVersion:Math.trunc(bounded(parsed.textVersion,50,0,1000)),
+      warpVersion:Math.trunc(bounded(parsed.warpVersion,1,0,100)),
+      transform,bounds,
+      text:shortText(parsed.text,'',100000),
+      orientation:shortText(parsed.orientation,'',32)||null,
+      antiAlias:shortText(parsed.antiAlias,'',32)||null,
+      descriptorClass:shortText(parsed.descriptorClass,'',160)||null,
+      descriptorKeys:Array.isArray(parsed.descriptorKeys)?parsed.descriptorKeys.slice(0,128).map(key=>shortText(key,'',160)).filter(Boolean):[],
+      warpClass:shortText(parsed.warpClass,'',160)||null,
+    },
+    baseline:{
+      x:bounded(baseline.x,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION),
+      y:bounded(baseline.y,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION),
+      width:bounded(baseline.width,1,1,12000),
+      height:bounded(baseline.height,1,1,12000),
+      scaleX:bounded(baseline.scaleX,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      scaleY:bounded(baseline.scaleY,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      rotation:((finite(baseline.rotation,0)%360)+360)%360,
+      text:shortText(baseline.text,'',100000),
+      fontFamily:shortText(baseline.fontFamily,'Inter, Arial, sans-serif',240),
+      fontSize:bounded(baseline.fontSize,48,6,500),
+      fontWeight:['400','700'].includes(String(baseline.fontWeight))?String(baseline.fontWeight):'400',
+      fontStyle:baseline.fontStyle==='italic'?'italic':'normal',
+      align:['left','center','right'].includes(baseline.align)?baseline.align:'left',
+      lineHeight:bounded(baseline.lineHeight,1.18,.8,3),
+      letterSpacing:bounded(baseline.letterSpacing,0,-5,20),
+      underline:baseline.underline===true,
+      strikeThrough:baseline.strikeThrough===true,
+      color:shortText(baseline.color,'#ffffff',64),
+    },
+  };
+}
+
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -4316,6 +4373,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     result.letterSpacing = bounded(layer?.letterSpacing, 0, -5, 20);
     result.underline = layer?.underline === true;
     result.strikeThrough = layer?.strikeThrough === true;
+    result.psdText = sanitizePsdText(layer?.psdText);
   } else if (type === 'adjustment') {
     result.x = 0;
     result.y = 0;
@@ -5409,8 +5467,10 @@ const PSD_VERSION = 1;
 const PSB_VERSION = 2;
 const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt32','Mtrn','Alph','FMsk','lnk2','lnkD','lnkE','FEid','FXid','PxSD']);
 const PSD_SMART_OBJECT_LAYER_KEYS = new Set(['PlLd','SoLd','SoLE']);
+const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
+const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCK_BYTES = 128 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCKS = 32;
 const MAX_PSD_LINKED_ASSET_BYTES = 64 * 1024 * 1024;
@@ -5858,6 +5918,102 @@ function readPsdDescriptorBlock(reader) {
   return{version,...readPsdDescriptorBody(reader,0)};
 }
 
+function readPsdDescriptorBlockLayout(reader) {
+  const version=reader.u32();
+  if(version!==16)throw new PsdImportError('DescriptorBlock version '+version+' не поддерживается','PSD_DESCRIPTOR_VERSION');
+  const name=readPsdUnicodeString(reader,'descriptor name');
+  const classId=readPsdDescriptorKey(reader,'descriptor class id');
+  const count=reader.u32();
+  if(count>MAX_PSD_DESCRIPTOR_ITEMS)throw new PsdImportError('Descriptor содержит слишком много items','PSD_DESCRIPTOR_LIMIT');
+  const items={},layout=new Map();
+  for(let index=0;index<count;index+=1){
+    const key=readPsdDescriptorKey(reader,'descriptor item key');
+    const type=reader.ascii(4);
+    const valueStart=reader.offset;
+    const value=readPsdDescriptorValue(reader,type,1);
+    const valueEnd=reader.offset;
+    items[key]=value;
+    layout.set(key,{type,valueStart,valueEnd,value});
+  }
+  return{descriptor:{version,name,classId,items},layout};
+}
+
+function parseTypeToolObject(data,warnings,label) {
+  if(!(data instanceof Uint8Array)||data.length<60)return null;
+  try{
+    const reader=new Reader(data);
+    const version=reader.u16();
+    const transform=Array.from({length:6},()=>readPsdFloat64(reader));
+    const textVersion=reader.u16();
+    const textLayout=readPsdDescriptorBlockLayout(reader);
+    const textValue=textLayout.descriptor.items['Txt '];
+    const warpVersion=reader.u16();
+    const warp=readPsdDescriptorBlock(reader);
+    const left=reader.i32(),top=reader.i32(),right=reader.i32(),bottom=reader.i32();
+    return{
+      version,textVersion,warpVersion,
+      transform,bounds:{left,top,right,bottom},
+      text:typeof textValue==='string'?textValue.replace(/\0+$/g,''):'',
+      orientation:textLayout.descriptor.items.Ornt?.value||null,
+      antiAlias:textLayout.descriptor.items.AntA?.value||null,
+      descriptorClass:textLayout.descriptor.classId||null,
+      descriptorKeys:Object.keys(textLayout.descriptor.items).slice(0,128),
+      warpClass:warp.classId||null,
+    };
+  }catch(error){
+    warnings.push(label+': TySh descriptor не разобран ('+(error?.message||error)+'); raster preview сохранён');
+    return null;
+  }
+}
+
+function encodePsdUnicodeValue(value) {
+  const text=String(value??'').replace(/\n/g,'\r');
+  const utf=encodeUtf16Be(text);
+  const out=new Uint8Array(4+utf.length);
+  new DataView(out.buffer).setUint32(0,text.length,false);
+  out.set(utf,4);
+  return out;
+}
+
+function replaceByteRanges(bytes,replacements) {
+  const sorted=[...replacements].sort((a,b)=>a.start-b.start);
+  let cursor=0,total=bytes.length;
+  for(const item of sorted){
+    if(item.start<cursor||item.end<item.start||item.end>bytes.length)throw new PsdImportError('Перекрывающиеся PSD rewrite ranges','PSD_TEXT_REWRITE');
+    total+=item.data.length-(item.end-item.start);
+    cursor=item.end;
+  }
+  const out=new Uint8Array(total);
+  cursor=0;
+  let dest=0;
+  for(const item of sorted){
+    out.set(bytes.subarray(cursor,item.start),dest);
+    dest+=item.start-cursor;
+    out.set(item.data,dest);
+    dest+=item.data.length;
+    cursor=item.end;
+  }
+  out.set(bytes.subarray(cursor),dest);
+  return out;
+}
+function rewriteTypeToolText(data,value,{deltaX=0,deltaY=0}={}) {
+  const bytes=asBytes(data);
+  const reader=new Reader(bytes);
+  const version=reader.u16();
+  if(version!==1)throw new PsdImportError('TySh version '+version+' не поддерживается для rewrite','PSD_TEXT_VERSION');
+  const transform=Array.from({length:6},()=>readPsdFloat64(reader));
+  const textVersion=reader.u16();
+  if(textVersion!==50)throw new PsdImportError('TySh text version '+textVersion+' не поддерживается для rewrite','PSD_TEXT_VERSION');
+  const layout=readPsdDescriptorBlockLayout(reader);
+  const txt=layout.layout.get('Txt ');
+  if(!txt||txt.type!=='TEXT')throw new PsdImportError('TySh не содержит writable Txt TEXT item','PSD_TEXT_REWRITE');
+  const out=replaceByteRanges(bytes,[{start:txt.valueStart,end:txt.valueEnd,data:encodePsdUnicodeValue(value)}]);
+  const view=new DataView(out.buffer,out.byteOffset,out.byteLength);
+  view.setFloat64(34,transform[4]+Number(deltaX||0),false);
+  view.setFloat64(42,transform[5]+Number(deltaY||0),false);
+  return{data:out,textUpdated:true,deltaX:Number(deltaX||0),deltaY:Number(deltaY||0)};
+}
+
 function parseSmartObjectDescriptor(data,warnings,label) {
   if(!(data instanceof Uint8Array)||data.length<12)return null;
   try{
@@ -5941,6 +6097,9 @@ function parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWid
     if (PSD_SMART_OBJECT_LAYER_KEYS.has(key)) {
       const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_SMART_OBJECT_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
       appendSmartObjectLayerBlock(record,signature,key,data,warnings);
+    } else if (PSD_TEXT_LAYER_KEYS.has(key)) {
+      const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_TEXT_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
+      if(data)record.psdText={signature,key,data,parsed:parseTypeToolObject(data,warnings,`Слой «${record.name}»`)};
     } else if (key === 'luni' && length >= 4) {
       const count = reader.u32();
       const byteLength = Math.min(count * 2, Math.max(0, dataEnd - reader.offset));
@@ -6011,7 +6170,7 @@ function parseLayerRecord(reader, version, documentWidth, documentHeight, warnin
     const padding = (4 - (consumed % 4)) % 4;
     if (reader.offset + padding <= extraEnd) reader.skip(padding);
   }
-  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null };
+  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null };
   parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings);
   reader.seek(extraEnd);
   return record;
@@ -6712,6 +6871,7 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
       mask: maskRgba ? { pixels: maskRgba, disabled: Boolean(record.mask?.disabled) } : null,
       vectorMask: record.vectorMask,
       psdSmartObject: record.psdSmartObject,
+      psdText: record.psdText,
     });
   }
 
@@ -6968,6 +7128,12 @@ function writeSmartObjectLayerExtras(writer,layer,version) {
   for(const block of blocks.slice(0,8)){
     writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_SMART_OBJECT_LAYER_KEYS,MAX_PSD_SMART_OBJECT_BLOCK_BYTES,'Smart Object layer block');
   }
+}
+
+function writeTextLayerExtra(writer,layer,version) {
+  const block=layer?.psdText;
+  if(!block)return;
+  writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_TEXT_LAYER_KEYS,MAX_PSD_TEXT_BLOCK_BYTES,'Text layer block');
 }
 
 function writeLinkedLayerBlocks(writer,blocks,version) {
@@ -7508,6 +7674,7 @@ function writeLayerRecordAndData(layerRecords, channelData, layer, version, docu
   writeUnicodeLayerName(extra, layer.name || 'Layer');
   writeSectionDividerExtra(extra, layer);
   writeVectorMaskExtra(extra, layer, documentWidth, documentHeight);
+  writeTextLayerExtra(extra, layer, version);
   writeSmartObjectLayerExtras(extra, layer, version);
   layerRecords.u32(extra.length).append(extra);
   for (const channel of layer.channels) channelData.append(channel.data);
@@ -9552,7 +9719,11 @@ function updateProperties() {
     return;
   }
   let extra = '';
-  if (l.type === 'text') extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textFontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}`;
+  if (l.type === 'text') {
+    const nativeText=l.psdText?psdTextNativePlan(l):null;
+    const nativeInfo=l.psdText?`<label>Photoshop Text</label><span>${nativeText?.eligible?'native TySh round-trip':'raster fallback: '+escapeHtml(nativeText?.reason||'metadata unavailable')}</span>`:'';
+    extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textFontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}${nativeInfo}`;
+  }
   if (l.type === 'shape') extra = l.shape === 'line'
     ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
     : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`;
@@ -11414,6 +11585,69 @@ function psdOpaqueBlockFromState(block,{maxBytes=8*1024*1024}={}){
   };
 }
 
+function importPsdTextMetadata(source,sourceLayer,textLayer){
+  if(!source?.data||!source?.parsed)return null;
+  return{
+    signature:source.signature==='8B64'?'8B64':'8BIM',
+    key:'TySh',
+    dataUrl:bytesToDataUrl(source.data,'application/octet-stream'),
+    parsed:structuredClone(source.parsed),
+    baseline:{
+      x:Number(sourceLayer.x)||0,y:Number(sourceLayer.y)||0,
+      width:Number(sourceLayer.width)||1,height:Number(sourceLayer.height)||1,
+      scaleX:Number(textLayer.scaleX??1)||1,scaleY:Number(textLayer.scaleY??1)||1,rotation:Number(textLayer.rotation)||0,
+      text:String(textLayer.text||''),
+      fontFamily:String(textLayer.fontFamily||'Inter, Arial, sans-serif'),
+      fontSize:Number(textLayer.fontSize)||48,
+      fontWeight:String(textLayer.fontWeight||'400'),
+      fontStyle:textLayer.fontStyle==='italic'?'italic':'normal',
+      align:['left','center','right'].includes(textLayer.align)?textLayer.align:'left',
+      lineHeight:Number(textLayer.lineHeight)||1.18,
+      letterSpacing:Number(textLayer.letterSpacing)||0,
+      underline:textLayer.underline===true,
+      strikeThrough:textLayer.strikeThrough===true,
+      color:String(textLayer.color||'#ffffff'),
+    },
+  };
+}
+
+function psdTextNativePlan(layer){
+  const source=layer?.psdText,baseline=source?.baseline;
+  if(layer?.type!=='text'||!source?.dataUrl||!baseline)return{eligible:false,reason:'нет imported TySh metadata',block:null};
+  const same=(left,right)=>Math.abs(Number(left)-Number(right))<=1e-9;
+  if(!same(layer.width,baseline.width)||!same(layer.height,baseline.height)||
+     !same(layer.scaleX??1,baseline.scaleX??1)||!same(layer.scaleY??1,baseline.scaleY??1)||
+     !same(layer.rotation??0,baseline.rotation??0)){
+    return{eligible:false,reason:'изменена text-layer geometry/scale/rotation',block:null};
+  }
+  const styleSame=
+    String(layer.fontFamily||'')===String(baseline.fontFamily||'')&&
+    same(layer.fontSize,baseline.fontSize)&&
+    String(layer.fontWeight||'400')===String(baseline.fontWeight||'400')&&
+    String(layer.fontStyle||'normal')===String(baseline.fontStyle||'normal')&&
+    String(layer.align||'left')===String(baseline.align||'left')&&
+    same(layer.lineHeight,baseline.lineHeight)&&same(layer.letterSpacing,baseline.letterSpacing)&&
+    Boolean(layer.underline)===Boolean(baseline.underline)&&Boolean(layer.strikeThrough)===Boolean(baseline.strikeThrough)&&
+    String(layer.color||'')===String(baseline.color||'');
+  if(!styleSame)return{eligible:false,reason:'изменена typography, которую Stage 15a пока сохраняет opaque',block:null};
+  if(String(layer.text||'')!==String(baseline.text||'')){
+    return{eligible:false,reason:'изменён текст; EngineData rewrite будет добавлен в Stage 15b',block:null};
+  }
+  try{
+    const raw=dataUrlToBytes(source.dataUrl,{maxBytes:16*1024*1024});
+    const deltaX=Number(layer.x)-Number(baseline.x);
+    const deltaY=Number(layer.y)-Number(baseline.y);
+    const rewritten=rewriteTypeToolText(raw,layer.text,{deltaX,deltaY});
+    return{
+      eligible:true,reason:null,
+      block:{signature:source.signature==='8B64'?'8B64':'8BIM',key:'TySh',data:rewritten.data},
+      bounds:{x:Math.round(Number(layer.x)||0),y:Math.round(Number(layer.y)||0),width:Math.max(1,Math.round(Number(baseline.width)||1)),height:Math.max(1,Math.round(Number(baseline.height)||1))},
+    };
+  }catch(error){
+    return{eligible:false,reason:'TySh metadata не прошли rewrite validation: '+(error?.message||error),block:null};
+  }
+}
+
 function psdPreviewFingerprint(dataUrl){
   const value=String(dataUrl||'');
   let hash=2166136261;
@@ -11698,19 +11932,38 @@ async function openPsd(file){
         groupId:sourceLayer.groupKey?(groupIdByKey.get(sourceLayer.groupKey)??null):null,
         mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
       };
-      const embeddedDocument=sourceLayer.psdSmartObject
+      const canMapText=Boolean(sourceLayer.psdText?.parsed)&&sourceLayer.psdText.parsed.orientation!=='Vrtc';
+      const embeddedDocument=!canMapText&&sourceLayer.psdSmartObject
         ? await importPsdEmbeddedAssetDocument(sourceLayer.psdSmartObject,sourceLayer.name||'Smart Object',warnings)
         : null;
-      const importedLayer=sourceLayer.psdSmartObject
-        ? createSmartObjectLayer({
-            ...commonLayer,
-            previewDataUrl:dataUrl,
-            embeddedDocument,
-            psdSmartObject:importPsdSmartObjectMetadata(sourceLayer.psdSmartObject,sourceLayer,dataUrl,embeddedDocument),
-          })
-        : createRasterLayer({...commonLayer,dataUrl,highDepthSource});
+      let importedLayer;
+      if(canMapText){
+        const parsedText=sourceLayer.psdText.parsed;
+        importedLayer=createTextLayer({
+          ...commonLayer,
+          text:String(parsedText.text||'').replace(/\r/g,'\n')||sourceLayer.name||'Текст',
+          fontFamily:'Arial, sans-serif',
+          fontSize:clamp(Math.round(sourceLayer.height*.8)||18,6,500),
+          width:sourceLayer.width,height:sourceLayer.height,
+          color:'#000000',
+        });
+        importedLayer.psdText=importPsdTextMetadata(sourceLayer.psdText,sourceLayer,importedLayer);
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop TySh импортирован как editable ZPE text; точная typography пока сохраняется opaque и native export доступен до изменения text/style geometry`);
+      }else if(sourceLayer.psdSmartObject){
+        importedLayer=createSmartObjectLayer({
+          ...commonLayer,
+          previewDataUrl:dataUrl,
+          embeddedDocument,
+          psdSmartObject:importPsdSmartObjectMetadata(sourceLayer.psdSmartObject,sourceLayer,dataUrl,embeddedDocument),
+        });
+      }else{
+        importedLayer=createRasterLayer({...commonLayer,dataUrl,highDepthSource});
+      }
       importedLayer.vectorMask=importPsdVectorMask(sourceLayer.vectorMask,importedLayer);
-      if(sourceLayer.psdSmartObject){
+      if(!canMapText&&sourceLayer.psdText?.parsed?.orientation==='Vrtc'){
+        warnings.push(`Слой «${sourceLayer.name}»: vertical Photoshop text пока оставлен raster preview; TySh vertical mapping будет отдельным этапом`);
+      }
+      if(!canMapText&&sourceLayer.psdSmartObject){
         const asset=sourceLayer.psdSmartObject.asset;
         if(embeddedDocument)warnings.push(`Слой «${sourceLayer.name}»: embedded ${asset?.detectedFileType||'asset'} «${asset?.filename||''}» извлечён в editable content-tab; исходные Photoshop bytes сохраняются пока содержимое не изменено`);
         else warnings.push(`Слой «${sourceLayer.name}»: Photoshop Smart Object/Placed Layer сохранён как non-destructive preview + opaque native metadata; linked/unsupported payload не читается с внешней файловой системы`);
@@ -12077,11 +12330,12 @@ async function preparePsdExport(exportDoc){
   const hasAdjustmentLayers=exportDoc.layers.some(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
   const planned=sourceLayers.map(layer=>{
     const nativePixelBuffer=nativeHighDepthPsdSource(layer);
+    const nativeText=layer.psdText?psdTextNativePlan(layer):null;
     const baseline=psdSmartPlan.eligible&&layer.psdSmartObject?layer.psdSmartObject.baseline:null;
-    const bounds=baseline
+    const bounds=nativeText?.eligible?nativeText.bounds:baseline
       ? {x:Math.trunc(Number(baseline.x)||0),y:Math.trunc(Number(baseline.y)||0),width:Math.max(1,Math.trunc(Number(baseline.width)||1)),height:Math.max(1,Math.trunc(Number(baseline.height)||1))}
       : nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer);
-    return{layer,nativePixelBuffer,bounds};
+    return{layer,nativePixelBuffer,nativeText,bounds};
   });
   const cmykDepths=planned.filter(item=>item.nativePixelBuffer?.model==='cmyk').map(item=>item.nativePixelBuffer.bitsPerChannel);
   const tentativeCmykDepth=cmykDepths.includes(32)?32:cmykDepths.includes(16)?16:8;
@@ -12117,7 +12371,11 @@ async function preparePsdExport(exportDoc){
       opacity:clamp(Number(group.opacity??1),0,1),
       blendMode:group.blendMode||'pass-through',
     }));
-  if(sourceLayers.some(layer=>!(psdSmartPlan.eligible&&layer.psdSmartObject)&&layerNeedsSemanticRasterWarning(layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
+  const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
+  if(nativeTextCount)warnings.push(`Stage 15a: ${nativeTextCount} Photoshop TySh text layer(s) сохраняют native descriptor + transform metadata`);
+  for(const item of fallbackText)warnings.push(`Stage 15a: text layer «${item.layer.name||'Без имени'}» экспортируется raster preview (${item.nativeText?.reason||'native text mapping unavailable'})`);
   if(psdSmartPlan.imported.length){
     if(psdSmartPlan.eligible)warnings.push(`Stage 14a: ${psdSmartPlan.imported.length} Photoshop Smart Object layer(s) сохраняют opaque PlLd/SoLd/SoLE + linked-resource metadata`);
     else warnings.push(`Stage 14a: Photoshop Smart Object native passthrough отключён (${psdSmartPlan.reason}); сохранён безопасный raster preview без stale placed/linked metadata`);
@@ -12133,7 +12391,7 @@ async function preparePsdExport(exportDoc){
 
   const prepared=[];
   for(let planIndex=0;planIndex<planned.length;planIndex+=1){
-    const {layer,bounds}=planned[planIndex];
+    const {layer,bounds,nativeText}=planned[planIndex];
     const nativePixelBuffer=writerNative[planIndex];
     const item={
       name:layer.name||'ZPE Layer',
@@ -12148,6 +12406,7 @@ async function preparePsdExport(exportDoc){
       }:null,
       vectorMask:exportPsdVectorMask(layer),
       psdSmartObject:psdSmartPlan.eligible&&layer.psdSmartObject?psdSmartObjectMetadataForExport(layer):null,
+      psdText:nativeText?.eligible?nativeText.block:null,
     };
     if(nativePixelBuffer)item.pixelBuffer=nativePixelBuffer;
     else item.pixels=await renderPsdLayerPixels(layer,bounds);

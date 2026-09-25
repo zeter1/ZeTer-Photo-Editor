@@ -239,3 +239,17 @@ test('Stage 14c wires editable embedded Smart Object saves into native liFD reso
   assert.match(main,/native Photoshop passthrough отключён/);
 });
 
+test('Stage 15a wires Photoshop TySh text mapping and safe native round-trip into import/export',()=>{
+  assert.match(adapter,/PSD_TEXT_LAYER_KEYS = new Set\(\['TySh'\]\)/);
+  assert.match(adapter,/function parseTypeToolObject\(/);
+  assert.match(adapter,/export function rewriteTypeToolText\(/);
+  assert.match(adapter,/writeTextLayerExtra\(extra, layer, version\)/);
+  assert.match(main,/importPsdTextMetadata/);
+  assert.match(main,/psdTextNativePlan/);
+  assert.match(main,/canMapText/);
+  assert.match(main,/createTextLayer\(\{/);
+  assert.match(main,/psdText:nativeText\?\.eligible\?nativeText\.block:null/);
+  assert.match(main,/Photoshop TySh imported as editable ZPE text|Photoshop TySh импортирован как editable ZPE text/);
+  assert.match(main,/Stage 15a: .*TySh text layer/);
+});
+

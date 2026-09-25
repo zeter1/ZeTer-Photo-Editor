@@ -5,8 +5,10 @@ const PSD_VERSION = 1;
 const PSB_VERSION = 2;
 const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt32','Mtrn','Alph','FMsk','lnk2','lnkD','lnkE','FEid','FXid','PxSD']);
 const PSD_SMART_OBJECT_LAYER_KEYS = new Set(['PlLd','SoLd','SoLE']);
+const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
+const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCK_BYTES = 128 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCKS = 32;
 const MAX_PSD_LINKED_ASSET_BYTES = 64 * 1024 * 1024;
@@ -457,6 +459,103 @@ function readPsdDescriptorBlock(reader) {
   return{version,...readPsdDescriptorBody(reader,0)};
 }
 
+function readPsdDescriptorBlockLayout(reader) {
+  const version=reader.u32();
+  if(version!==16)throw new PsdImportError('DescriptorBlock version '+version+' не поддерживается','PSD_DESCRIPTOR_VERSION');
+  const name=readPsdUnicodeString(reader,'descriptor name');
+  const classId=readPsdDescriptorKey(reader,'descriptor class id');
+  const count=reader.u32();
+  if(count>MAX_PSD_DESCRIPTOR_ITEMS)throw new PsdImportError('Descriptor содержит слишком много items','PSD_DESCRIPTOR_LIMIT');
+  const items={},layout=new Map();
+  for(let index=0;index<count;index+=1){
+    const key=readPsdDescriptorKey(reader,'descriptor item key');
+    const type=reader.ascii(4);
+    const valueStart=reader.offset;
+    const value=readPsdDescriptorValue(reader,type,1);
+    const valueEnd=reader.offset;
+    items[key]=value;
+    layout.set(key,{type,valueStart,valueEnd,value});
+  }
+  return{descriptor:{version,name,classId,items},layout};
+}
+
+function parseTypeToolObject(data,warnings,label) {
+  if(!(data instanceof Uint8Array)||data.length<60)return null;
+  try{
+    const reader=new Reader(data);
+    const version=reader.u16();
+    const transform=Array.from({length:6},()=>readPsdFloat64(reader));
+    const textVersion=reader.u16();
+    const textLayout=readPsdDescriptorBlockLayout(reader);
+    const textValue=textLayout.descriptor.items['Txt '];
+    const warpVersion=reader.u16();
+    const warp=readPsdDescriptorBlock(reader);
+    const left=reader.i32(),top=reader.i32(),right=reader.i32(),bottom=reader.i32();
+    return{
+      version,textVersion,warpVersion,
+      transform,bounds:{left,top,right,bottom},
+      text:typeof textValue==='string'?textValue.replace(/\0+$/g,''):'',
+      orientation:textLayout.descriptor.items.Ornt?.value||null,
+      antiAlias:textLayout.descriptor.items.AntA?.value||null,
+      descriptorClass:textLayout.descriptor.classId||null,
+      descriptorKeys:Object.keys(textLayout.descriptor.items).slice(0,128),
+      warpClass:warp.classId||null,
+    };
+  }catch(error){
+    warnings.push(label+': TySh descriptor не разобран ('+(error?.message||error)+'); raster preview сохранён');
+    return null;
+  }
+}
+
+function encodePsdUnicodeValue(value) {
+  const text=String(value??'').replace(/\n/g,'\r');
+  const utf=encodeUtf16Be(text);
+  const out=new Uint8Array(4+utf.length);
+  new DataView(out.buffer).setUint32(0,text.length,false);
+  out.set(utf,4);
+  return out;
+}
+
+function replaceByteRanges(bytes,replacements) {
+  const sorted=[...replacements].sort((a,b)=>a.start-b.start);
+  let cursor=0,total=bytes.length;
+  for(const item of sorted){
+    if(item.start<cursor||item.end<item.start||item.end>bytes.length)throw new PsdImportError('Перекрывающиеся PSD rewrite ranges','PSD_TEXT_REWRITE');
+    total+=item.data.length-(item.end-item.start);
+    cursor=item.end;
+  }
+  const out=new Uint8Array(total);
+  cursor=0;
+  let dest=0;
+  for(const item of sorted){
+    out.set(bytes.subarray(cursor,item.start),dest);
+    dest+=item.start-cursor;
+    out.set(item.data,dest);
+    dest+=item.data.length;
+    cursor=item.end;
+  }
+  out.set(bytes.subarray(cursor),dest);
+  return out;
+}
+
+export function rewriteTypeToolText(data,value,{deltaX=0,deltaY=0}={}) {
+  const bytes=asBytes(data);
+  const reader=new Reader(bytes);
+  const version=reader.u16();
+  if(version!==1)throw new PsdImportError('TySh version '+version+' не поддерживается для rewrite','PSD_TEXT_VERSION');
+  const transform=Array.from({length:6},()=>readPsdFloat64(reader));
+  const textVersion=reader.u16();
+  if(textVersion!==50)throw new PsdImportError('TySh text version '+textVersion+' не поддерживается для rewrite','PSD_TEXT_VERSION');
+  const layout=readPsdDescriptorBlockLayout(reader);
+  const txt=layout.layout.get('Txt ');
+  if(!txt||txt.type!=='TEXT')throw new PsdImportError('TySh не содержит writable Txt TEXT item','PSD_TEXT_REWRITE');
+  const out=replaceByteRanges(bytes,[{start:txt.valueStart,end:txt.valueEnd,data:encodePsdUnicodeValue(value)}]);
+  const view=new DataView(out.buffer,out.byteOffset,out.byteLength);
+  view.setFloat64(34,transform[4]+Number(deltaX||0),false);
+  view.setFloat64(42,transform[5]+Number(deltaY||0),false);
+  return{data:out,textUpdated:true,deltaX:Number(deltaX||0),deltaY:Number(deltaY||0)};
+}
+
 function parseSmartObjectDescriptor(data,warnings,label) {
   if(!(data instanceof Uint8Array)||data.length<12)return null;
   try{
@@ -540,6 +639,9 @@ function parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWid
     if (PSD_SMART_OBJECT_LAYER_KEYS.has(key)) {
       const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_SMART_OBJECT_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
       appendSmartObjectLayerBlock(record,signature,key,data,warnings);
+    } else if (PSD_TEXT_LAYER_KEYS.has(key)) {
+      const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_TEXT_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
+      if(data)record.psdText={signature,key,data,parsed:parseTypeToolObject(data,warnings,`Слой «${record.name}»`)};
     } else if (key === 'luni' && length >= 4) {
       const count = reader.u32();
       const byteLength = Math.min(count * 2, Math.max(0, dataEnd - reader.offset));
@@ -610,7 +712,7 @@ function parseLayerRecord(reader, version, documentWidth, documentHeight, warnin
     const padding = (4 - (consumed % 4)) % 4;
     if (reader.offset + padding <= extraEnd) reader.skip(padding);
   }
-  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null };
+  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null };
   parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings);
   reader.seek(extraEnd);
   return record;
@@ -1312,6 +1414,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
       mask: maskRgba ? { pixels: maskRgba, disabled: Boolean(record.mask?.disabled) } : null,
       vectorMask: record.vectorMask,
       psdSmartObject: record.psdSmartObject,
+      psdText: record.psdText,
     });
   }
 
@@ -1569,6 +1672,12 @@ function writeSmartObjectLayerExtras(writer,layer,version) {
   for(const block of blocks.slice(0,8)){
     writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_SMART_OBJECT_LAYER_KEYS,MAX_PSD_SMART_OBJECT_BLOCK_BYTES,'Smart Object layer block');
   }
+}
+
+function writeTextLayerExtra(writer,layer,version) {
+  const block=layer?.psdText;
+  if(!block)return;
+  writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_TEXT_LAYER_KEYS,MAX_PSD_TEXT_BLOCK_BYTES,'Text layer block');
 }
 
 function writeLinkedLayerBlocks(writer,blocks,version) {
@@ -2109,6 +2218,7 @@ function writeLayerRecordAndData(layerRecords, channelData, layer, version, docu
   writeUnicodeLayerName(extra, layer.name || 'Layer');
   writeSectionDividerExtra(extra, layer);
   writeVectorMaskExtra(extra, layer, documentWidth, documentHeight);
+  writeTextLayerExtra(extra, layer, version);
   writeSmartObjectLayerExtras(extra, layer, version);
   layerRecords.u32(extra.length).append(extra);
   for (const channel of layer.channels) channelData.append(channel.data);

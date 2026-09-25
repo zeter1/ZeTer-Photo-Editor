@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.36.0 — 2026-09-25
+
+### 2026-09-25 — Photoshop-native Text Layer Mapping Stage 15a
+
+- TySh parser: bounded Additional Layer Info parser распознаёт Photoshop `TySh` и TypeToolObjectSetting v1 / text descriptor v50 без внешнего runtime.
+- Typed semantics: импортируются text value, 6-value affine transform, horizontal/vertical orientation id, anti-alias id, descriptor class/keys, warp class/version и TypeTool bounds.
+- Editable import: horizontal Photoshop Type Layer создаётся как настоящий ZPE `text` layer вместо обычного raster layer; исходный TySh block сохраняется отдельно в `.zpe`.
+- Safe project persistence: sanitizer allow-list-ит только `TySh`, bounded octet-stream payload и нормализованный semantic baseline.
+- Native writer: PSD/PSB layer writer возвращает сохранённый `TySh` block; перемещение поддержанного текста переписывает только affine translation `tx/ty`, сохраняя остальные descriptor bytes.
+- Honest fallback: text content, typography, width/height, scale или rotation edits пока отключают native text passthrough, потому что Photoshop `EngineData` run/style/paragraph writeback ещё не реализован.
+- Vertical text: `Vrtc` пока не маскируется под horizontal ZPE text и остаётся raster preview.
+- Real compatibility fixture: добавлен MIT `psd-tools` `type-layer.psd`; regression фиксирует `A`, transform `(1,0,0,1,0,4.978787...)`, descriptor metadata и PSD/PSB TySh round-trip.
+- UI: Properties показывает состояние Photoshop Text native round-trip / raster fallback.
+- Version: приложение синхронизировано на 1.36.0.
+
 ## 1.35.0 — 2026-09-25
 
 ### 2026-09-25 — Smart Object Embedded Asset Rewrite & Resource Rebuild Stage 14c

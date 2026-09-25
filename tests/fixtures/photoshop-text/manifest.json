@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "fixture": {
+    "id": "psd-tools-type-layer",
+    "file": "psd-tools-type-layer.psd",
+    "license": "MIT",
+    "sourceRepository": "psd-tools/psd-tools",
+    "sourceCommit": "8f9a25ea98202061365701db54ce938931b27c09",
+    "sourcePath": "tests/psd_files/layers-minimal/type-layer.psd",
+    "sourceGitBlob": "d920df70baf977c2fc04d5e47147ef831d5c53e6",
+    "size": 43944,
+    "sha256": "b24e6f4c7277dd499ebb20c88ac06698f4563e75bfeb6aa6cb0d2466140fd81f"
+  }
+}

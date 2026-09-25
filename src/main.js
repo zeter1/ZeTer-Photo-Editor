@@ -13,7 +13,7 @@ import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBuffer
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
-import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset } from './adapters/psd.js';
+import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText } from './adapters/psd.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -1957,7 +1957,11 @@ function updateProperties() {
     return;
   }
   let extra = '';
-  if (l.type === 'text') extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textFontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}`;
+  if (l.type === 'text') {
+    const nativeText=l.psdText?psdTextNativePlan(l):null;
+    const nativeInfo=l.psdText?`<label>Photoshop Text</label><span>${nativeText?.eligible?'native TySh round-trip':'raster fallback: '+escapeHtml(nativeText?.reason||'metadata unavailable')}</span>`:'';
+    extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textFontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}${nativeInfo}`;
+  }
   if (l.type === 'shape') extra = l.shape === 'line'
     ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
     : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`;
@@ -3819,6 +3823,69 @@ function psdOpaqueBlockFromState(block,{maxBytes=8*1024*1024}={}){
   };
 }
 
+function importPsdTextMetadata(source,sourceLayer,textLayer){
+  if(!source?.data||!source?.parsed)return null;
+  return{
+    signature:source.signature==='8B64'?'8B64':'8BIM',
+    key:'TySh',
+    dataUrl:bytesToDataUrl(source.data,'application/octet-stream'),
+    parsed:structuredClone(source.parsed),
+    baseline:{
+      x:Number(sourceLayer.x)||0,y:Number(sourceLayer.y)||0,
+      width:Number(sourceLayer.width)||1,height:Number(sourceLayer.height)||1,
+      scaleX:Number(textLayer.scaleX??1)||1,scaleY:Number(textLayer.scaleY??1)||1,rotation:Number(textLayer.rotation)||0,
+      text:String(textLayer.text||''),
+      fontFamily:String(textLayer.fontFamily||'Inter, Arial, sans-serif'),
+      fontSize:Number(textLayer.fontSize)||48,
+      fontWeight:String(textLayer.fontWeight||'400'),
+      fontStyle:textLayer.fontStyle==='italic'?'italic':'normal',
+      align:['left','center','right'].includes(textLayer.align)?textLayer.align:'left',
+      lineHeight:Number(textLayer.lineHeight)||1.18,
+      letterSpacing:Number(textLayer.letterSpacing)||0,
+      underline:textLayer.underline===true,
+      strikeThrough:textLayer.strikeThrough===true,
+      color:String(textLayer.color||'#ffffff'),
+    },
+  };
+}
+
+function psdTextNativePlan(layer){
+  const source=layer?.psdText,baseline=source?.baseline;
+  if(layer?.type!=='text'||!source?.dataUrl||!baseline)return{eligible:false,reason:'нет imported TySh metadata',block:null};
+  const same=(left,right)=>Math.abs(Number(left)-Number(right))<=1e-9;
+  if(!same(layer.width,baseline.width)||!same(layer.height,baseline.height)||
+     !same(layer.scaleX??1,baseline.scaleX??1)||!same(layer.scaleY??1,baseline.scaleY??1)||
+     !same(layer.rotation??0,baseline.rotation??0)){
+    return{eligible:false,reason:'изменена text-layer geometry/scale/rotation',block:null};
+  }
+  const styleSame=
+    String(layer.fontFamily||'')===String(baseline.fontFamily||'')&&
+    same(layer.fontSize,baseline.fontSize)&&
+    String(layer.fontWeight||'400')===String(baseline.fontWeight||'400')&&
+    String(layer.fontStyle||'normal')===String(baseline.fontStyle||'normal')&&
+    String(layer.align||'left')===String(baseline.align||'left')&&
+    same(layer.lineHeight,baseline.lineHeight)&&same(layer.letterSpacing,baseline.letterSpacing)&&
+    Boolean(layer.underline)===Boolean(baseline.underline)&&Boolean(layer.strikeThrough)===Boolean(baseline.strikeThrough)&&
+    String(layer.color||'')===String(baseline.color||'');
+  if(!styleSame)return{eligible:false,reason:'изменена typography, которую Stage 15a пока сохраняет opaque',block:null};
+  if(String(layer.text||'')!==String(baseline.text||'')){
+    return{eligible:false,reason:'изменён текст; EngineData rewrite будет добавлен в Stage 15b',block:null};
+  }
+  try{
+    const raw=dataUrlToBytes(source.dataUrl,{maxBytes:16*1024*1024});
+    const deltaX=Number(layer.x)-Number(baseline.x);
+    const deltaY=Number(layer.y)-Number(baseline.y);
+    const rewritten=rewriteTypeToolText(raw,layer.text,{deltaX,deltaY});
+    return{
+      eligible:true,reason:null,
+      block:{signature:source.signature==='8B64'?'8B64':'8BIM',key:'TySh',data:rewritten.data},
+      bounds:{x:Math.round(Number(layer.x)||0),y:Math.round(Number(layer.y)||0),width:Math.max(1,Math.round(Number(baseline.width)||1)),height:Math.max(1,Math.round(Number(baseline.height)||1))},
+    };
+  }catch(error){
+    return{eligible:false,reason:'TySh metadata не прошли rewrite validation: '+(error?.message||error),block:null};
+  }
+}
+
 function psdPreviewFingerprint(dataUrl){
   const value=String(dataUrl||'');
   let hash=2166136261;
@@ -4103,19 +4170,38 @@ async function openPsd(file){
         groupId:sourceLayer.groupKey?(groupIdByKey.get(sourceLayer.groupKey)??null):null,
         mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
       };
-      const embeddedDocument=sourceLayer.psdSmartObject
+      const canMapText=Boolean(sourceLayer.psdText?.parsed)&&sourceLayer.psdText.parsed.orientation!=='Vrtc';
+      const embeddedDocument=!canMapText&&sourceLayer.psdSmartObject
         ? await importPsdEmbeddedAssetDocument(sourceLayer.psdSmartObject,sourceLayer.name||'Smart Object',warnings)
         : null;
-      const importedLayer=sourceLayer.psdSmartObject
-        ? createSmartObjectLayer({
-            ...commonLayer,
-            previewDataUrl:dataUrl,
-            embeddedDocument,
-            psdSmartObject:importPsdSmartObjectMetadata(sourceLayer.psdSmartObject,sourceLayer,dataUrl,embeddedDocument),
-          })
-        : createRasterLayer({...commonLayer,dataUrl,highDepthSource});
+      let importedLayer;
+      if(canMapText){
+        const parsedText=sourceLayer.psdText.parsed;
+        importedLayer=createTextLayer({
+          ...commonLayer,
+          text:String(parsedText.text||'').replace(/\r/g,'\n')||sourceLayer.name||'Текст',
+          fontFamily:'Arial, sans-serif',
+          fontSize:clamp(Math.round(sourceLayer.height*.8)||18,6,500),
+          width:sourceLayer.width,height:sourceLayer.height,
+          color:'#000000',
+        });
+        importedLayer.psdText=importPsdTextMetadata(sourceLayer.psdText,sourceLayer,importedLayer);
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop TySh импортирован как editable ZPE text; точная typography пока сохраняется opaque и native export доступен до изменения text/style geometry`);
+      }else if(sourceLayer.psdSmartObject){
+        importedLayer=createSmartObjectLayer({
+          ...commonLayer,
+          previewDataUrl:dataUrl,
+          embeddedDocument,
+          psdSmartObject:importPsdSmartObjectMetadata(sourceLayer.psdSmartObject,sourceLayer,dataUrl,embeddedDocument),
+        });
+      }else{
+        importedLayer=createRasterLayer({...commonLayer,dataUrl,highDepthSource});
+      }
       importedLayer.vectorMask=importPsdVectorMask(sourceLayer.vectorMask,importedLayer);
-      if(sourceLayer.psdSmartObject){
+      if(!canMapText&&sourceLayer.psdText?.parsed?.orientation==='Vrtc'){
+        warnings.push(`Слой «${sourceLayer.name}»: vertical Photoshop text пока оставлен raster preview; TySh vertical mapping будет отдельным этапом`);
+      }
+      if(!canMapText&&sourceLayer.psdSmartObject){
         const asset=sourceLayer.psdSmartObject.asset;
         if(embeddedDocument)warnings.push(`Слой «${sourceLayer.name}»: embedded ${asset?.detectedFileType||'asset'} «${asset?.filename||''}» извлечён в editable content-tab; исходные Photoshop bytes сохраняются пока содержимое не изменено`);
         else warnings.push(`Слой «${sourceLayer.name}»: Photoshop Smart Object/Placed Layer сохранён как non-destructive preview + opaque native metadata; linked/unsupported payload не читается с внешней файловой системы`);
@@ -4482,11 +4568,12 @@ async function preparePsdExport(exportDoc){
   const hasAdjustmentLayers=exportDoc.layers.some(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
   const planned=sourceLayers.map(layer=>{
     const nativePixelBuffer=nativeHighDepthPsdSource(layer);
+    const nativeText=layer.psdText?psdTextNativePlan(layer):null;
     const baseline=psdSmartPlan.eligible&&layer.psdSmartObject?layer.psdSmartObject.baseline:null;
-    const bounds=baseline
+    const bounds=nativeText?.eligible?nativeText.bounds:baseline
       ? {x:Math.trunc(Number(baseline.x)||0),y:Math.trunc(Number(baseline.y)||0),width:Math.max(1,Math.trunc(Number(baseline.width)||1)),height:Math.max(1,Math.trunc(Number(baseline.height)||1))}
       : nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer);
-    return{layer,nativePixelBuffer,bounds};
+    return{layer,nativePixelBuffer,nativeText,bounds};
   });
   const cmykDepths=planned.filter(item=>item.nativePixelBuffer?.model==='cmyk').map(item=>item.nativePixelBuffer.bitsPerChannel);
   const tentativeCmykDepth=cmykDepths.includes(32)?32:cmykDepths.includes(16)?16:8;
@@ -4522,7 +4609,11 @@ async function preparePsdExport(exportDoc){
       opacity:clamp(Number(group.opacity??1),0,1),
       blendMode:group.blendMode||'pass-through',
     }));
-  if(sourceLayers.some(layer=>!(psdSmartPlan.eligible&&layer.psdSmartObject)&&layerNeedsSemanticRasterWarning(layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
+  const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
+  if(nativeTextCount)warnings.push(`Stage 15a: ${nativeTextCount} Photoshop TySh text layer(s) сохраняют native descriptor + transform metadata`);
+  for(const item of fallbackText)warnings.push(`Stage 15a: text layer «${item.layer.name||'Без имени'}» экспортируется raster preview (${item.nativeText?.reason||'native text mapping unavailable'})`);
   if(psdSmartPlan.imported.length){
     if(psdSmartPlan.eligible)warnings.push(`Stage 14a: ${psdSmartPlan.imported.length} Photoshop Smart Object layer(s) сохраняют opaque PlLd/SoLd/SoLE + linked-resource metadata`);
     else warnings.push(`Stage 14a: Photoshop Smart Object native passthrough отключён (${psdSmartPlan.reason}); сохранён безопасный raster preview без stale placed/linked metadata`);
@@ -4538,7 +4629,7 @@ async function preparePsdExport(exportDoc){
 
   const prepared=[];
   for(let planIndex=0;planIndex<planned.length;planIndex+=1){
-    const {layer,bounds}=planned[planIndex];
+    const {layer,bounds,nativeText}=planned[planIndex];
     const nativePixelBuffer=writerNative[planIndex];
     const item={
       name:layer.name||'ZPE Layer',
@@ -4553,6 +4644,7 @@ async function preparePsdExport(exportDoc){
       }:null,
       vectorMask:exportPsdVectorMask(layer),
       psdSmartObject:psdSmartPlan.eligible&&layer.psdSmartObject?psdSmartObjectMetadataForExport(layer):null,
+      psdText:nativeText?.eligible?nativeText.block:null,
     };
     if(nativePixelBuffer)item.pixelBuffer=nativePixelBuffer;
     else item.pixels=await renderPsdLayerPixels(layer,bounds);

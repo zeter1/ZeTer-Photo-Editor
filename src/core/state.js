@@ -28,6 +28,7 @@ export const MAX_LAYER_SCALE = 100;
 export const MAX_LAYER_POSITION = 120000;
 export const MAX_ICC_PROFILE_DATA_URL = 5_700_000;
 export const MAX_SMART_FILTERS = 24;
+const MAX_PSD_TEXT_DATA_URL_CHARS = 22_500_000;
 
 export function imageResizeTransforms(layers, sx, sy) {
   return layers.map(layer => {
@@ -194,7 +195,7 @@ export function createTextLayer(overrides = {}) {
     name: 'Текст', text: 'Текст', color: '#ffffff', fontSize: 48, fontFamily: 'Inter, Arial, sans-serif',
     fontWeight: '400', fontStyle: 'normal', align: 'left', lineHeight: 1.18,
     letterSpacing: 0, underline: false, strikeThrough: false,
-    fontData: null, fontLabel: '',
+    fontData: null, fontLabel: '', psdText: null,
     width: 240, height: 60, ...overrides,
   });
 }
@@ -777,6 +778,62 @@ export function sanitizePsdLinkedLayerBlocks(value) {
   return result;
 }
 
+function sanitizePsdText(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  if(value.key!=='TySh')return null;
+  const dataUrl=typeof value.dataUrl==='string'&&value.dataUrl.length<=MAX_PSD_TEXT_DATA_URL_CHARS&&/^data:application\/octet-stream;base64,[a-z\d+/=]*$/i.test(value.dataUrl)
+    ? value.dataUrl:null;
+  if(!dataUrl)return null;
+  const parsed=value.parsed&&typeof value.parsed==='object'&&!Array.isArray(value.parsed)?value.parsed:{};
+  const baseline=value.baseline&&typeof value.baseline==='object'&&!Array.isArray(value.baseline)?value.baseline:{};
+  const transform=Array.isArray(parsed.transform)&&parsed.transform.length===6
+    ? parsed.transform.map(item=>bounded(item,0,-1e9,1e9))
+    : null;
+  const bounds=parsed.bounds&&typeof parsed.bounds==='object'&&!Array.isArray(parsed.bounds)?{
+    left:Math.trunc(bounded(parsed.bounds.left,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION)),
+    top:Math.trunc(bounded(parsed.bounds.top,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION)),
+    right:Math.trunc(bounded(parsed.bounds.right,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION)),
+    bottom:Math.trunc(bounded(parsed.bounds.bottom,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION)),
+  }:null;
+  return{
+    signature:value.signature==='8B64'?'8B64':'8BIM',
+    key:'TySh',
+    dataUrl,
+    parsed:{
+      version:Math.trunc(bounded(parsed.version,1,0,100)),
+      textVersion:Math.trunc(bounded(parsed.textVersion,50,0,1000)),
+      warpVersion:Math.trunc(bounded(parsed.warpVersion,1,0,100)),
+      transform,bounds,
+      text:shortText(parsed.text,'',100000),
+      orientation:shortText(parsed.orientation,'',32)||null,
+      antiAlias:shortText(parsed.antiAlias,'',32)||null,
+      descriptorClass:shortText(parsed.descriptorClass,'',160)||null,
+      descriptorKeys:Array.isArray(parsed.descriptorKeys)?parsed.descriptorKeys.slice(0,128).map(key=>shortText(key,'',160)).filter(Boolean):[],
+      warpClass:shortText(parsed.warpClass,'',160)||null,
+    },
+    baseline:{
+      x:bounded(baseline.x,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION),
+      y:bounded(baseline.y,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION),
+      width:bounded(baseline.width,1,1,12000),
+      height:bounded(baseline.height,1,1,12000),
+      scaleX:bounded(baseline.scaleX,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      scaleY:bounded(baseline.scaleY,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      rotation:((finite(baseline.rotation,0)%360)+360)%360,
+      text:shortText(baseline.text,'',100000),
+      fontFamily:shortText(baseline.fontFamily,'Inter, Arial, sans-serif',240),
+      fontSize:bounded(baseline.fontSize,48,6,500),
+      fontWeight:['400','700'].includes(String(baseline.fontWeight))?String(baseline.fontWeight):'400',
+      fontStyle:baseline.fontStyle==='italic'?'italic':'normal',
+      align:['left','center','right'].includes(baseline.align)?baseline.align:'left',
+      lineHeight:bounded(baseline.lineHeight,1.18,.8,3),
+      letterSpacing:bounded(baseline.letterSpacing,0,-5,20),
+      underline:baseline.underline===true,
+      strikeThrough:baseline.strikeThrough===true,
+      color:shortText(baseline.color,'#ffffff',64),
+    },
+  };
+}
+
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -843,6 +900,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     result.letterSpacing = bounded(layer?.letterSpacing, 0, -5, 20);
     result.underline = layer?.underline === true;
     result.strikeThrough = layer?.strikeThrough === true;
+    result.psdText = sanitizePsdText(layer?.psdText);
   } else if (type === 'adjustment') {
     result.x = 0;
     result.y = 0;
