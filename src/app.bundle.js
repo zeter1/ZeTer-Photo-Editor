@@ -1212,6 +1212,7 @@ const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(
 const bounded = (value, fallback, min, max) => clamp(finite(value, fallback), min, max);
 const shortText = (value, fallback = '', max = 500) => String(value ?? fallback).slice(0, max);
 const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+const GROUP_BLEND_MODES = new Set(['pass-through', ...BLEND_MODES]);
 const PROJECT_VERSION = 1;
 const DEFAULT_LAYER_FILTERS = Object.freeze({
   brightness: 100, contrast: 100, saturate: 100, exposure: 0, highlights: 0, shadows: 0,
@@ -1359,6 +1360,8 @@ function createLayerGroup(overrides = {}) {
     visible: true,
     locked: false,
     collapsed: false,
+    opacity: 1,
+    blendMode: 'pass-through',
     parentGroupId: null,
     ...overrides,
   };
@@ -1743,6 +1746,8 @@ function sanitizeGroup(group, usedIds) {
     visible: group?.visible !== false,
     locked: Boolean(group?.locked),
     collapsed: Boolean(group?.collapsed),
+    opacity: bounded(group?.opacity, 1, 0, 1),
+    blendMode: GROUP_BLEND_MODES.has(group?.blendMode) ? group.blendMode : 'pass-through',
     parentGroupId: typeof group?.parentGroupId === 'string' ? shortText(group.parentGroupId, '', 160).trim() || null : null,
   };
 }
@@ -2219,6 +2224,113 @@ async function applyAdjustmentLayer(canvas, ctx, layer) {
   ctx.drawImage(source, 0, 0, width, height);
   ctx.restore();
 }
+
+function buildGroupRenderPlan(doc) {
+  const groups = Array.isArray(doc?.groups) ? doc.groups : [];
+  const groupMap = new Map(groups.map(group => [group.id, group]).filter(([id]) => Boolean(id)));
+  const directLayers = new Map();
+  const childGroups = new Map();
+  const groupRanks = new Map();
+
+  const append = (map, key, value) => {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(value);
+  };
+
+  for (const group of groups) {
+    const parentId = group.parentGroupId && groupMap.has(group.parentGroupId) ? group.parentGroupId : null;
+    append(childGroups, parentId, group);
+  }
+
+  for (let index = 0; index < doc.layers.length; index += 1) {
+    const layer = doc.layers[index];
+    const groupId = layer.groupId && groupMap.has(layer.groupId) ? layer.groupId : null;
+    append(directLayers, groupId, { layer, index });
+    let currentId = groupId;
+    const seen = new Set();
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId);
+      if (!groupRanks.has(currentId) || index < groupRanks.get(currentId)) groupRanks.set(currentId, index);
+      const current = groupMap.get(currentId);
+      currentId = current?.parentGroupId && groupMap.has(current.parentGroupId) ? current.parentGroupId : null;
+    }
+  }
+
+  const entriesFor = parentId => {
+    const entries = [];
+    for (const item of directLayers.get(parentId) || []) {
+      entries.push({ type:'layer', layer:item.layer, rank:item.index, order:item.index });
+    }
+    for (const group of childGroups.get(parentId) || []) {
+      entries.push({
+        type:'group',
+        group,
+        rank:groupRanks.get(group.id) ?? Number.POSITIVE_INFINITY,
+        order:groups.indexOf(group),
+      });
+    }
+    entries.sort((a,b) => a.rank - b.rank || a.order - b.order);
+    return entries;
+  };
+
+  return { entriesFor };
+}
+
+async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides) {
+  if (!isLayerVisible(doc, layer) || layer.opacity <= 0) return;
+  if (layer.type === 'adjustment') {
+    await applyAdjustmentLayer(canvas, ctx, layer);
+    return;
+  }
+  await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
+}
+
+async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
+  const plan = buildGroupRenderPlan(doc);
+  const activeGroups = new Set();
+
+  const renderEntries = async (targetCanvas, targetCtx, parentGroupId = null) => {
+    for (const entry of plan.entriesFor(parentGroupId)) {
+      if (entry.type === 'layer') {
+        await renderLayerEntry(targetCanvas, targetCtx, doc, entry.layer, rasterOverrides);
+        continue;
+      }
+
+      const group = entry.group;
+      if (!group || group.visible === false || Number(group.opacity ?? 1) <= 0 || activeGroups.has(group.id)) continue;
+      activeGroups.add(group.id);
+      try {
+        const opacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1)));
+        const blendMode = group.blendMode || 'pass-through';
+        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9;
+
+        if (!isolated) {
+          await renderEntries(targetCanvas, targetCtx, group.id);
+          continue;
+        }
+
+        const groupCanvas = document.createElement('canvas');
+        groupCanvas.width = doc.width;
+        groupCanvas.height = doc.height;
+        const groupCtx = groupCanvas.getContext('2d', { alpha:true });
+        groupCtx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in groupCtx) groupCtx.imageSmoothingQuality = 'high';
+        await renderEntries(groupCanvas, groupCtx, group.id);
+
+        targetCtx.save();
+        targetCtx.globalAlpha = opacity;
+        targetCtx.globalCompositeOperation = blendMode === 'pass-through' ? 'source-over' : blendMode;
+        targetCtx.filter = 'none';
+        targetCtx.drawImage(groupCanvas, 0, 0);
+        targetCtx.restore();
+      } finally {
+        activeGroups.delete(group.id);
+      }
+    }
+  };
+
+  await renderEntries(canvas, ctx, null);
+}
 async function renderDocument(canvas, doc, { checker = false, rasterOverrides = null } = {}) {
   const ctx = canvas.getContext('2d', { alpha: true });
   if (canvas.width !== doc.width) canvas.width = doc.width;
@@ -2230,14 +2342,7 @@ async function renderDocument(canvas, doc, { checker = false, rasterOverrides = 
   if (doc.background && doc.background !== 'transparent') {
     ctx.save(); ctx.fillStyle = doc.background; ctx.fillRect(0, 0, doc.width, doc.height); ctx.restore();
   }
-  for (const layer of doc.layers) {
-    if (!isLayerVisible(doc, layer) || layer.opacity <= 0) continue;
-    if (layer.type === 'adjustment') {
-      await applyAdjustmentLayer(canvas, ctx, layer);
-      continue;
-    }
-    await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
-  }
+  await renderGroupHierarchy(canvas, ctx, doc, rasterOverrides);
 }
 
 function traceLayerBezierPath(ctx, points, closed = false) {
@@ -2978,6 +3083,13 @@ function blendModeFor(key, warnings, layerName) {
   return 'source-over';
 }
 
+function groupBlendModeFor(key, warnings, groupName) {
+  if (key === 'pass') return 'pass-through';
+  if (key in PSD_BLEND_MODES) return PSD_BLEND_MODES[key];
+  warnings.push(`Группа «${groupName}»: blend mode ${JSON.stringify(key)} импортирован как Pass Through`);
+  return 'pass-through';
+}
+
 
 function reconstructPsdGroups(records, warnings) {
   const stack = [];
@@ -3033,12 +3145,6 @@ function reconstructPsdGroups(records, warnings) {
       visible = visible && cursor.visible !== false;
       cursor = cursor.parent;
     }
-    if (group.opacity < 1 - 1e-9) {
-      warnings.push(`Группа «${path.join(' / ')}»: group opacity пока не поддерживается ZPE и импортирована без него`);
-    }
-    if (group.blendKey && group.blendKey !== 'pass' && group.blendKey !== 'norm') {
-      warnings.push(`Группа «${path.join(' / ')}»: group blend mode ${JSON.stringify(group.blendKey)} пока не поддерживается ZPE`);
-    }
     return {
       key: group.key,
       parentKey: group.parent?.key ?? null,
@@ -3048,6 +3154,8 @@ function reconstructPsdGroups(records, warnings) {
       collapsed: Boolean(group.collapsed),
       visible: group.visible !== false,
       effectiveVisible: visible,
+      opacity: group.opacity,
+      blendMode: groupBlendModeFor(group.blendKey || 'pass', warnings, path.join(' / ')),
     };
   });
 
@@ -3436,24 +3544,28 @@ function normalizeExportGroups(groups = []) {
       name: String(group?.name || 'Group').slice(0, 240),
       visible: group?.visible !== false,
       collapsed: Boolean(group?.collapsed),
+      opacity: Math.max(0, Math.min(1, Number(group?.opacity ?? 1))),
+      blendMode: group?.blendMode === 'pass-through' || group?.blendMode in PSD_BLEND_KEYS ? group.blendMode : 'pass-through',
     });
   }
   return normalized;
 }
 
 function makeExportGroupMarker(group, sectionDivider) {
+  const folder = sectionDivider !== 3;
+  const sectionBlendKey = group.blendMode === 'pass-through' ? 'pass' : (PSD_BLEND_KEYS[group.blendMode] || 'norm');
   return {
     recordType: sectionDivider === 3 ? 'group-boundary' : 'group-folder',
     sectionDivider,
-    sectionBlendKey: 'pass',
+    sectionBlendKey,
     name: sectionDivider === 3 ? '</Layer group>' : group.name,
     x: 0,
     y: 0,
     width: 0,
     height: 0,
-    opacity: 1,
+    opacity: folder ? group.opacity : 1,
     blendMode: 'source-over',
-    visible: sectionDivider === 3 ? false : group.visible,
+    visible: folder ? group.visible : false,
     transparencyProtected: false,
     mask: null,
     channels: [],
@@ -4776,7 +4888,8 @@ function updateLayers() {
     name.type = 'button';
     name.className = 'layer-name layer-group-name';
     name.textContent = group.name;
-    name.title = `${group.name} · уровень ${depth + 1} · ${members.length} прямых слоёв · клик: свернуть/развернуть · двойной клик: переименовать`;
+    const groupMode=group.blendMode==='pass-through'?'Pass Through':(group.blendMode||'source-over');
+    name.title = `${group.name} · уровень ${depth + 1} · ${members.length} прямых слоёв · ${Math.round((group.opacity??1)*100)}% · ${groupMode} · клик: свернуть/развернуть · двойной клик: переименовать`;
     name.onclick = e => { e.stopPropagation(); group.collapsed = !group.collapsed; updateLayers(); };
     name.ondblclick = e => { e.preventDefault(); e.stopPropagation(); renameGroup(group); };
 
@@ -6605,6 +6718,8 @@ async function openPsd(file){
         name:sourceGroup.name||'PSD Group',
         visible:sourceGroup.visible!==false,
         collapsed:Boolean(sourceGroup.collapsed),
+        opacity:clamp(Number(sourceGroup.opacity??1),0,1),
+        blendMode:sourceGroup.blendMode||'pass-through',
       });
       importedGroups.push(group);
       groupIdByKey.set(sourceGroup.key,group.id);
@@ -6817,6 +6932,8 @@ async function preparePsdExport(exportDoc){
       name:group.name||'Group',
       visible:group.visible!==false,
       collapsed:Boolean(group.collapsed),
+      opacity:clamp(Number(group.opacity??1),0,1),
+      blendMode:group.blendMode||'pass-through',
     }));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
@@ -7250,7 +7367,37 @@ function addGroup(parentGroupId=null){
   setStatus(parent?`Создана подгруппа «${group.name}» в «${parent.name}»`:`Создана группа «${group.name}». Перетащите на неё нужные слои.`);
   return group;
 }
+const GROUP_BLEND_OPTIONS=[
+  ['pass-through','Пропускать (Pass Through)'],
+  ['source-over','Обычный (Normal)'],
+  ['multiply','Умножение'],
+  ['screen','Экран'],
+  ['overlay','Перекрытие'],
+  ['darken','Затемнение'],
+  ['lighten','Осветление'],
+  ['color-dodge','Осветление основы'],
+  ['color-burn','Затемнение основы'],
+];
 function renameGroup(group){if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}showModal({title:'Переименовать группу',fields:[{name:'name',label:'Имя',value:group.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===group.name)return;group.name=name;commit('Переименовать группу');}});}
+function editGroupProperties(group){
+  if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}
+  showModal({
+    title:'Параметры группы',
+    fields:[
+      {name:'blendMode',label:'Режим наложения',type:'select',value:group.blendMode||'pass-through',options:GROUP_BLEND_OPTIONS},
+      {name:'opacity',label:'Непрозрачность, %',type:'number',value:Math.round(clamp(Number(group.opacity??1),0,1)*100),min:0,max:100,step:1,required:true},
+    ],
+    submitLabel:'Применить',
+    onSubmit:v=>{
+      const blendMode=GROUP_BLEND_OPTIONS.some(([value])=>value===v.blendMode)?v.blendMode:'pass-through';
+      const opacity=clamp(Number(v.opacity)/100,0,1);
+      if(group.blendMode===blendMode&&Math.abs(Number(group.opacity??1)-opacity)<1e-9)return;
+      group.blendMode=blendMode;
+      group.opacity=opacity;
+      commit('Параметры группы');
+    },
+  });
+}
 function deleteLayerGroup(group){
   if(!group)return;
   if(isGroupLocked(doc,group)){setStatus('Сначала разблокируйте группу и её родителей');return;}
@@ -7410,6 +7557,7 @@ function groupContextMenu(id) {
   const target = () => doc===owner ? doc.groups?.find(item => item.id === id) : null;
   return [
     ['Создать подгруппу','',()=>addGroup(id),()=>Boolean(target()) && !isGroupLocked(doc,target())],
+    ['Параметры группы…','',()=>editGroupProperties(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
     ['Переименовать…','',()=>renameGroup(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
     ['Свернуть / развернуть','',()=>{const group=target();if(group){group.collapsed=!group.collapsed;updateLayers();}},()=>Boolean(target())],
     ['Показать / скрыть','',()=>{const group=target();if(group){group.visible=group.visible===false;commit(group.visible?'Показать группу слоёв':'Скрыть группу слоёв');}},()=>Boolean(target())],

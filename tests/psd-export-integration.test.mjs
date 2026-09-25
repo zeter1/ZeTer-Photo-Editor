@@ -83,3 +83,14 @@ test('PSD Group Stage 8c carries native parent relationships through ZPE and wri
   assert.match(main,/isGroupVisible\(doc, group\)/);
   assert.match(main,/isGroupLocked\(doc, group\)/);
 });
+
+
+test('PSD Group Stage 8e maps opacity and blend mode through ZPE and lsct folder records',()=>{
+  assert.match(adapter,/function groupBlendModeFor\(/);
+  assert.match(adapter,/opacity: group\.opacity/);
+  assert.match(adapter,/blendMode: groupBlendModeFor/);
+  assert.match(adapter,/opacity: folder \? group\.opacity : 1/);
+  assert.match(main,/opacity:clamp\(Number\(sourceGroup\.opacity\?\?1\),0,1\)/);
+  assert.match(main,/blendMode:sourceGroup\.blendMode\|\|'pass-through'/);
+  assert.match(main,/opacity:clamp\(Number\(group\.opacity\?\?1\),0,1\)/);
+});

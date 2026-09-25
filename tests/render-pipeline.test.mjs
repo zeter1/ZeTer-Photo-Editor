@@ -19,6 +19,15 @@ test('full render respects effective group visibility', () => {
   assert.match(render, /isLayerVisible\(doc, layer\)/);
 });
 
+test('Stage 8e renders nested group opacity and blend through isolated canvases', () => {
+  assert.match(render, /function buildGroupRenderPlan\(doc\)/);
+  assert.match(render, /async function renderGroupHierarchy\(/);
+  assert.match(render, /const isolated = blendMode !== 'pass-through' \|\| opacity < 1 - 1e-9/);
+  assert.match(render, /targetCtx\.globalAlpha = opacity/);
+  assert.match(render, /targetCtx\.globalCompositeOperation = blendMode === 'pass-through' \? 'source-over' : blendMode/);
+  assert.match(render, /await renderEntries\(targetCanvas, targetCtx, group\.id\)/);
+});
+
 test('scaled raster rendering requests high-quality image smoothing', () => {
   assert.match(render, /ctx\.imageSmoothingEnabled = true/);
   assert.match(render, /ctx\.imageSmoothingQuality = 'high'/);

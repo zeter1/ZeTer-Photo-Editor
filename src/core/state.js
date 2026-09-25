@@ -7,6 +7,7 @@ const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(
 const bounded = (value, fallback, min, max) => clamp(finite(value, fallback), min, max);
 const shortText = (value, fallback = '', max = 500) => String(value ?? fallback).slice(0, max);
 const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+const GROUP_BLEND_MODES = new Set(['pass-through', ...BLEND_MODES]);
 export const PROJECT_VERSION = 1;
 export const DEFAULT_LAYER_FILTERS = Object.freeze({
   brightness: 100, contrast: 100, saturate: 100, exposure: 0, highlights: 0, shadows: 0,
@@ -167,6 +168,8 @@ export function createLayerGroup(overrides = {}) {
     visible: true,
     locked: false,
     collapsed: false,
+    opacity: 1,
+    blendMode: 'pass-through',
     parentGroupId: null,
     ...overrides,
   };
@@ -574,6 +577,8 @@ function sanitizeGroup(group, usedIds) {
     visible: group?.visible !== false,
     locked: Boolean(group?.locked),
     collapsed: Boolean(group?.collapsed),
+    opacity: bounded(group?.opacity, 1, 0, 1),
+    blendMode: GROUP_BLEND_MODES.has(group?.blendMode) ? group.blendMode : 'pass-through',
     parentGroupId: typeof group?.parentGroupId === 'string' ? shortText(group.parentGroupId, '', 160).trim() || null : null,
   };
 }

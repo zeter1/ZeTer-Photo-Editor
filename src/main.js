@@ -1147,7 +1147,8 @@ function updateLayers() {
     name.type = 'button';
     name.className = 'layer-name layer-group-name';
     name.textContent = group.name;
-    name.title = `${group.name} · уровень ${depth + 1} · ${members.length} прямых слоёв · клик: свернуть/развернуть · двойной клик: переименовать`;
+    const groupMode=group.blendMode==='pass-through'?'Pass Through':(group.blendMode||'source-over');
+    name.title = `${group.name} · уровень ${depth + 1} · ${members.length} прямых слоёв · ${Math.round((group.opacity??1)*100)}% · ${groupMode} · клик: свернуть/развернуть · двойной клик: переименовать`;
     name.onclick = e => { e.stopPropagation(); group.collapsed = !group.collapsed; updateLayers(); };
     name.ondblclick = e => { e.preventDefault(); e.stopPropagation(); renameGroup(group); };
 
@@ -2976,6 +2977,8 @@ async function openPsd(file){
         name:sourceGroup.name||'PSD Group',
         visible:sourceGroup.visible!==false,
         collapsed:Boolean(sourceGroup.collapsed),
+        opacity:clamp(Number(sourceGroup.opacity??1),0,1),
+        blendMode:sourceGroup.blendMode||'pass-through',
       });
       importedGroups.push(group);
       groupIdByKey.set(sourceGroup.key,group.id);
@@ -3188,6 +3191,8 @@ async function preparePsdExport(exportDoc){
       name:group.name||'Group',
       visible:group.visible!==false,
       collapsed:Boolean(group.collapsed),
+      opacity:clamp(Number(group.opacity??1),0,1),
+      blendMode:group.blendMode||'pass-through',
     }));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
@@ -3621,7 +3626,37 @@ function addGroup(parentGroupId=null){
   setStatus(parent?`Создана подгруппа «${group.name}» в «${parent.name}»`:`Создана группа «${group.name}». Перетащите на неё нужные слои.`);
   return group;
 }
+const GROUP_BLEND_OPTIONS=[
+  ['pass-through','Пропускать (Pass Through)'],
+  ['source-over','Обычный (Normal)'],
+  ['multiply','Умножение'],
+  ['screen','Экран'],
+  ['overlay','Перекрытие'],
+  ['darken','Затемнение'],
+  ['lighten','Осветление'],
+  ['color-dodge','Осветление основы'],
+  ['color-burn','Затемнение основы'],
+];
 function renameGroup(group){if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}showModal({title:'Переименовать группу',fields:[{name:'name',label:'Имя',value:group.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===group.name)return;group.name=name;commit('Переименовать группу');}});}
+function editGroupProperties(group){
+  if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}
+  showModal({
+    title:'Параметры группы',
+    fields:[
+      {name:'blendMode',label:'Режим наложения',type:'select',value:group.blendMode||'pass-through',options:GROUP_BLEND_OPTIONS},
+      {name:'opacity',label:'Непрозрачность, %',type:'number',value:Math.round(clamp(Number(group.opacity??1),0,1)*100),min:0,max:100,step:1,required:true},
+    ],
+    submitLabel:'Применить',
+    onSubmit:v=>{
+      const blendMode=GROUP_BLEND_OPTIONS.some(([value])=>value===v.blendMode)?v.blendMode:'pass-through';
+      const opacity=clamp(Number(v.opacity)/100,0,1);
+      if(group.blendMode===blendMode&&Math.abs(Number(group.opacity??1)-opacity)<1e-9)return;
+      group.blendMode=blendMode;
+      group.opacity=opacity;
+      commit('Параметры группы');
+    },
+  });
+}
 function deleteLayerGroup(group){
   if(!group)return;
   if(isGroupLocked(doc,group)){setStatus('Сначала разблокируйте группу и её родителей');return;}
@@ -3781,6 +3816,7 @@ function groupContextMenu(id) {
   const target = () => doc===owner ? doc.groups?.find(item => item.id === id) : null;
   return [
     ['Создать подгруппу','',()=>addGroup(id),()=>Boolean(target()) && !isGroupLocked(doc,target())],
+    ['Параметры группы…','',()=>editGroupProperties(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
     ['Переименовать…','',()=>renameGroup(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
     ['Свернуть / развернуть','',()=>{const group=target();if(group){group.collapsed=!group.collapsed;updateLayers();}},()=>Boolean(target())],
     ['Показать / скрыть','',()=>{const group=target();if(group){group.visible=group.visible===false;commit(group.visible?'Показать группу слоёв':'Скрыть группу слоёв');}},()=>Boolean(target())],

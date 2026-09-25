@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-25 — Group Compositing Stage 8e
+
+- Added: ZPE groups получили `opacity` и `blendMode` с backward-compatible defaults `1` и `pass-through`.
+- Render: 100% Pass Through group рендерит children прямо в parent stack; reduced-opacity или non-pass-through group изолируется во временный Canvas и композитится как единое целое.
+- Nested semantics: group render plan сохраняет порядок слоёв/подгрупп по исходному layer stack и рекурсивно применяет group hierarchy.
+- UI: контекстное меню группы открывает «Параметры группы…» с режимом наложения и непрозрачностью.
+- PSD/PSB: folder marker opacity и `lsct` section blend key теперь импортируются в ZPE и возвращаются writer'ом; Pass Through ↔ `pass`, Normal/Multiply/Screen/Overlay/etc. ↔ стандартные PSD blend keys.
+- Added: sanitizer, renderer contract, PSD nested-group round-trip и adapter/UI wiring regressions.
+
 ### 2026-09-25 — High-depth ZIP Prediction Stage 7e
 
 - Added: PSD/PSB compression=3 (ZIP with prediction) для RGB 16-bit и 32-bit layer/composite channels.

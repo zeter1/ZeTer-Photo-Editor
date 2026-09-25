@@ -543,6 +543,13 @@ function blendModeFor(key, warnings, layerName) {
   return 'source-over';
 }
 
+function groupBlendModeFor(key, warnings, groupName) {
+  if (key === 'pass') return 'pass-through';
+  if (key in PSD_BLEND_MODES) return PSD_BLEND_MODES[key];
+  warnings.push(`Группа «${groupName}»: blend mode ${JSON.stringify(key)} импортирован как Pass Through`);
+  return 'pass-through';
+}
+
 
 function reconstructPsdGroups(records, warnings) {
   const stack = [];
@@ -598,12 +605,6 @@ function reconstructPsdGroups(records, warnings) {
       visible = visible && cursor.visible !== false;
       cursor = cursor.parent;
     }
-    if (group.opacity < 1 - 1e-9) {
-      warnings.push(`Группа «${path.join(' / ')}»: group opacity пока не поддерживается ZPE и импортирована без него`);
-    }
-    if (group.blendKey && group.blendKey !== 'pass' && group.blendKey !== 'norm') {
-      warnings.push(`Группа «${path.join(' / ')}»: group blend mode ${JSON.stringify(group.blendKey)} пока не поддерживается ZPE`);
-    }
     return {
       key: group.key,
       parentKey: group.parent?.key ?? null,
@@ -613,6 +614,8 @@ function reconstructPsdGroups(records, warnings) {
       collapsed: Boolean(group.collapsed),
       visible: group.visible !== false,
       effectiveVisible: visible,
+      opacity: group.opacity,
+      blendMode: groupBlendModeFor(group.blendKey || 'pass', warnings, path.join(' / ')),
     };
   });
 
@@ -1002,24 +1005,28 @@ function normalizeExportGroups(groups = []) {
       name: String(group?.name || 'Group').slice(0, 240),
       visible: group?.visible !== false,
       collapsed: Boolean(group?.collapsed),
+      opacity: Math.max(0, Math.min(1, Number(group?.opacity ?? 1))),
+      blendMode: group?.blendMode === 'pass-through' || group?.blendMode in PSD_BLEND_KEYS ? group.blendMode : 'pass-through',
     });
   }
   return normalized;
 }
 
 function makeExportGroupMarker(group, sectionDivider) {
+  const folder = sectionDivider !== 3;
+  const sectionBlendKey = group.blendMode === 'pass-through' ? 'pass' : (PSD_BLEND_KEYS[group.blendMode] || 'norm');
   return {
     recordType: sectionDivider === 3 ? 'group-boundary' : 'group-folder',
     sectionDivider,
-    sectionBlendKey: 'pass',
+    sectionBlendKey,
     name: sectionDivider === 3 ? '</Layer group>' : group.name,
     x: 0,
     y: 0,
     width: 0,
     height: 0,
-    opacity: 1,
+    opacity: folder ? group.opacity : 1,
     blendMode: 'source-over',
-    visible: sectionDivider === 3 ? false : group.visible,
+    visible: folder ? group.visible : false,
     transparencyProtected: false,
     mask: null,
     channels: [],

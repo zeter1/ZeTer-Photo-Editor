@@ -67,6 +67,8 @@ test('project sanitizer preserves valid groups and drops orphaned group referenc
   assert.equal(safe.groups[0].collapsed,true);
   assert.equal(safe.groups[0].visible,true);
   assert.equal(safe.groups[0].locked,false);
+  assert.equal(safe.groups[0].opacity,1);
+  assert.equal(safe.groups[0].blendMode,'pass-through');
   assert.equal(safe.layers[0].groupId,'group-a');
   assert.equal(safe.layers[1].groupId,null);
 });
@@ -177,6 +179,22 @@ test('project sanitizer preserves group visibility and lock state',()=>{
   assert.equal(isLayerLocked(safe,safe.layers[0]),true);
 });
 
+
+test('group opacity and blend mode survive project sanitization',()=>{
+  const safe=sanitizeProject({
+    version:1,name:'group-composite',width:64,height:64,background:'transparent',
+    groups:[
+      {id:'g1',name:'Multiply',opacity:.42,blendMode:'multiply'},
+      {id:'g2',name:'Invalid',opacity:99,blendMode:'unknown'},
+    ],
+    layers:[],
+  });
+  assert.equal(safe.groups[0].opacity,.42);
+  assert.equal(safe.groups[0].blendMode,'multiply');
+  assert.equal(safe.groups[1].opacity,1);
+  assert.equal(safe.groups[1].blendMode,'pass-through');
+});
+
 test('layer panel exposes rename and group controls with drag-to-group wiring',()=>{
   assert.match(html,/id="addGroupBtn"/);
   assert.match(html,/id="renameLayerBtn"/);
@@ -185,6 +203,8 @@ test('layer panel exposes rename and group controls with drag-to-group wiring',(
   assert.match(main,/moveLayerGroupIntoGroup\(doc, draggedGroupId, group\.id\)/);
   assert.match(main,/moveLayerGroupIntoGroup\(doc,draggedGroupId,null\)/);
   assert.match(main,/\['Создать подгруппу'/);
+  assert.match(main,/\['Параметры группы…'/);
+  assert.match(main,/function editGroupProperties\(group\)/);
   assert.match(main,/function renameGroup\(group\)/);
   assert.match(main,/group\.visible = group\.visible === false/);
   assert.match(main,/group\.locked = !group\.locked/);

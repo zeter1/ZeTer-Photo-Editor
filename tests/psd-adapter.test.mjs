@@ -562,8 +562,8 @@ test('PSD Group Stage 8c round-trips native nested groups without flattening nam
   const encoded=encodePsd({
     width:1,height:1,composite:pixels,
     groups:[
-      {key:'outer',name:'Outer',visible:true,collapsed:false},
-      {key:'inner',parentKey:'outer',name:'Inner',visible:false,collapsed:true},
+      {key:'outer',name:'Outer',visible:true,collapsed:false,opacity:1,blendMode:'pass-through'},
+      {key:'inner',parentKey:'outer',name:'Inner',visible:false,collapsed:true,opacity:.5,blendMode:'multiply'},
     ],
     layers:[
       {name:'Outer layer',groupKey:'outer',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true},
@@ -579,6 +579,9 @@ test('PSD Group Stage 8c round-trips native nested groups without flattening nam
   assert.deepEqual(inner.path,['Outer','Inner']);
   assert.equal(inner.visible,false);
   assert.equal(inner.collapsed,true);
+  assert.ok(Math.abs(inner.opacity-128/255)<1e-9);
+  assert.equal(inner.blendMode,'multiply');
+  assert.equal(outer.blendMode,'pass-through');
   assert.equal(decoded.layers.find(layer=>layer.name==='Outer layer').groupKey,outer.key);
   assert.equal(decoded.layers.find(layer=>layer.name==='Inner layer').groupKey,inner.key);
 });

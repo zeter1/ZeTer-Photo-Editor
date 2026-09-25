@@ -168,6 +168,113 @@ async function applyAdjustmentLayer(canvas, ctx, layer) {
   ctx.restore();
 }
 
+function buildGroupRenderPlan(doc) {
+  const groups = Array.isArray(doc?.groups) ? doc.groups : [];
+  const groupMap = new Map(groups.map(group => [group.id, group]).filter(([id]) => Boolean(id)));
+  const directLayers = new Map();
+  const childGroups = new Map();
+  const groupRanks = new Map();
+
+  const append = (map, key, value) => {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(value);
+  };
+
+  for (const group of groups) {
+    const parentId = group.parentGroupId && groupMap.has(group.parentGroupId) ? group.parentGroupId : null;
+    append(childGroups, parentId, group);
+  }
+
+  for (let index = 0; index < doc.layers.length; index += 1) {
+    const layer = doc.layers[index];
+    const groupId = layer.groupId && groupMap.has(layer.groupId) ? layer.groupId : null;
+    append(directLayers, groupId, { layer, index });
+    let currentId = groupId;
+    const seen = new Set();
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId);
+      if (!groupRanks.has(currentId) || index < groupRanks.get(currentId)) groupRanks.set(currentId, index);
+      const current = groupMap.get(currentId);
+      currentId = current?.parentGroupId && groupMap.has(current.parentGroupId) ? current.parentGroupId : null;
+    }
+  }
+
+  const entriesFor = parentId => {
+    const entries = [];
+    for (const item of directLayers.get(parentId) || []) {
+      entries.push({ type:'layer', layer:item.layer, rank:item.index, order:item.index });
+    }
+    for (const group of childGroups.get(parentId) || []) {
+      entries.push({
+        type:'group',
+        group,
+        rank:groupRanks.get(group.id) ?? Number.POSITIVE_INFINITY,
+        order:groups.indexOf(group),
+      });
+    }
+    entries.sort((a,b) => a.rank - b.rank || a.order - b.order);
+    return entries;
+  };
+
+  return { entriesFor };
+}
+
+async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides) {
+  if (!isLayerVisible(doc, layer) || layer.opacity <= 0) return;
+  if (layer.type === 'adjustment') {
+    await applyAdjustmentLayer(canvas, ctx, layer);
+    return;
+  }
+  await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
+}
+
+async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
+  const plan = buildGroupRenderPlan(doc);
+  const activeGroups = new Set();
+
+  const renderEntries = async (targetCanvas, targetCtx, parentGroupId = null) => {
+    for (const entry of plan.entriesFor(parentGroupId)) {
+      if (entry.type === 'layer') {
+        await renderLayerEntry(targetCanvas, targetCtx, doc, entry.layer, rasterOverrides);
+        continue;
+      }
+
+      const group = entry.group;
+      if (!group || group.visible === false || Number(group.opacity ?? 1) <= 0 || activeGroups.has(group.id)) continue;
+      activeGroups.add(group.id);
+      try {
+        const opacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1)));
+        const blendMode = group.blendMode || 'pass-through';
+        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9;
+
+        if (!isolated) {
+          await renderEntries(targetCanvas, targetCtx, group.id);
+          continue;
+        }
+
+        const groupCanvas = document.createElement('canvas');
+        groupCanvas.width = doc.width;
+        groupCanvas.height = doc.height;
+        const groupCtx = groupCanvas.getContext('2d', { alpha:true });
+        groupCtx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in groupCtx) groupCtx.imageSmoothingQuality = 'high';
+        await renderEntries(groupCanvas, groupCtx, group.id);
+
+        targetCtx.save();
+        targetCtx.globalAlpha = opacity;
+        targetCtx.globalCompositeOperation = blendMode === 'pass-through' ? 'source-over' : blendMode;
+        targetCtx.filter = 'none';
+        targetCtx.drawImage(groupCanvas, 0, 0);
+        targetCtx.restore();
+      } finally {
+        activeGroups.delete(group.id);
+      }
+    }
+  };
+
+  await renderEntries(canvas, ctx, null);
+}
+
 export async function renderDocument(canvas, doc, { checker = false, rasterOverrides = null } = {}) {
   const ctx = canvas.getContext('2d', { alpha: true });
   if (canvas.width !== doc.width) canvas.width = doc.width;
@@ -179,14 +286,7 @@ export async function renderDocument(canvas, doc, { checker = false, rasterOverr
   if (doc.background && doc.background !== 'transparent') {
     ctx.save(); ctx.fillStyle = doc.background; ctx.fillRect(0, 0, doc.width, doc.height); ctx.restore();
   }
-  for (const layer of doc.layers) {
-    if (!isLayerVisible(doc, layer) || layer.opacity <= 0) continue;
-    if (layer.type === 'adjustment') {
-      await applyAdjustmentLayer(canvas, ctx, layer);
-      continue;
-    }
-    await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
-  }
+  await renderGroupHierarchy(canvas, ctx, doc, rasterOverrides);
 }
 
 function traceLayerBezierPath(ctx, points, closed = false) {
