@@ -6,14 +6,16 @@ body:
   - type: markdown
     attributes:
       value: |
-        Спасибо за отчёт. Не прикладывайте приватные изображения, проекты `.zpe`, токены или другие чувствительные данные без предварительной проверки.
+        Спасибо за отчёт. Не прикладывайте приватные изображения, рабочие PSD/PSB/ZPE, ICC-профили, токены или другие чувствительные данные без предварительной проверки.
+
   - type: input
     id: version
     attributes:
       label: Версия или commit
-      placeholder: "1.19.1 или SHA commit"
+      placeholder: "1.30.0 или SHA commit"
     validations:
       required: true
+
   - type: input
     id: environment
     attributes:
@@ -21,6 +23,45 @@ body:
       placeholder: "Windows 11, Chrome 140"
     validations:
       required: true
+
+  - type: dropdown
+    id: launch
+    attributes:
+      label: Режим запуска
+      options:
+        - file://
+        - Локальный HTTP-сервер
+        - Онлайн-версия
+        - Другое
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Область
+      options:
+        - UI / workspace / tools
+        - Layers / masks / groups
+        - Brush / retouch / selection
+        - Text / shapes / paths
+        - ZPE save / load / autosave
+        - PSD / PSB import
+        - PSD / PSB export
+        - 16/32-bit high-depth pipeline
+        - ICC / CMYK / color management
+        - Performance / memory
+        - Другое
+    validations:
+      required: true
+
+  - type: input
+    id: document
+    attributes:
+      label: Документ / формат
+      description: Размер, формат, bit depth/color mode, если это относится к проблеме.
+      placeholder: "PSD, 6000x4000, 16-bit RGB / CMYK"
+
   - type: textarea
     id: steps
     attributes:
@@ -32,27 +73,32 @@ body:
         3. Нажать ...
     validations:
       required: true
+
   - type: textarea
     id: expected
     attributes:
       label: Ожидаемое поведение
     validations:
       required: true
+
   - type: textarea
     id: actual
     attributes:
       label: Фактическое поведение
     validations:
       required: true
+
   - type: textarea
     id: diagnostics
     attributes:
-      label: Диагностика
-      description: Сообщения консоли, скриншоты или другие данные без приватной информации.
+      label: DevTools Console / диагностика
+      description: Небольшой релевантный фрагмент без приватной информации.
+      render: text
+
   - type: checkboxes
     id: privacy
     attributes:
       label: Проверка приватности
       options:
-        - label: Я проверил(а), что приложенные материалы не содержат паролей, токенов или приватных данных.
+        - label: Я проверил(а), что приложенные материалы не содержат паролей, токенов, приватных изображений или других конфиденциальных данных.
           required: true
