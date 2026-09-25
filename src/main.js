@@ -1221,7 +1221,7 @@ function updateLayers() {
   renderLevel(null,0);
 }
 
-function updateHistory() {function updateHistory() {
+function updateHistory() {
   els.history.replaceChildren();
   history.entries.forEach((entry, index) => {
     const row = document.createElement('button'); row.type='button'; row.className = `history-row${index === history.index ? ' current' : ''}`;

@@ -1028,7 +1028,7 @@ function expandExportLayerGroups(layers, groups) {
   return records;
 }
 
-function encodeCompositeRle(pixels, width, height, version) {function encodeCompositeRle(pixels, width, height, version) {
+function encodeCompositeRle(pixels, width, height, version) {
   const pixelCount = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   const rgba = asBytes(pixels);
   if (rgba.length !== pixelCount * 4) throw new PsdImportError('PSD/PSB writer: composite RGBA имеет неверный размер', 'PSD_EXPORT_COMPOSITE');
