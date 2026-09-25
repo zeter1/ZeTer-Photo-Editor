@@ -10,7 +10,7 @@ test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
   assert.match(main,/PSD — слои \(Stage 4\)/);
   assert.match(main,/PSB — Large Document \(Stage 7a\)/);
   assert.match(main,/async function preparePsdExport\(exportDoc\)/);
-  assert.match(main,/async function exportPsdDocument\(exportDoc\)/);
+  assert.match(main,/async function exportPsdDocument\(exportDoc,\{psb=false\}=\{\}\)/);
   assert.match(main,/const encodeBlob=psb\?encodePsbBlob:encodePsdBlob/);
   assert.match(main,/if\(type==='psb'\)\{await exportPsdDocument\(exportDoc,\{psb:true\}\);return;\}/);
   assert.match(main,/downloadBlob\(blob,filename\)/);
