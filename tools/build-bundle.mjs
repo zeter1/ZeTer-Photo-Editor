@@ -7,6 +7,7 @@ const sources = [
   'src/core/history.js',
   'src/core/io.js',
   'src/core/pixels.js',
+  'src/core/pixel-buffer.js',
   'src/core/recovery.js',
   'src/core/layer-styles.js',
   'src/core/state.js',

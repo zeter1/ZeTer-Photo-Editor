@@ -105,6 +105,9 @@ test('PSD adapter inspects and decodes layered raw RGB/8-bit PSD', async () => {
   assert.equal(decoded.layers.length, 1);
   assert.equal(decoded.layers[0].name, 'Layer');
   assert.equal(decoded.layers[0].blendMode, 'source-over');
+  assert.equal(decoded.layers[0].pixelBuffer.kind, 'zpe-pixel-buffer-v1');
+  assert.equal(decoded.layers[0].pixelBuffer.bitsPerChannel, 8);
+  assert.strictEqual(decoded.layers[0].pixels, decoded.layers[0].pixelBuffer.data);
   assert.deepEqual([...decoded.layers[0].pixels], [255,0,0,255, 0,255,0,128]);
 });
 
@@ -116,6 +119,8 @@ test('PSB Stage 7a decodes version 2 with 64-bit section/channel lengths and 32-
   const decoded = await decodePsd(psb);
   assert.equal(decoded.layers.length, 1);
   assert.equal(decoded.layers[0].name, 'Layer');
+  assert.equal(decoded.layers[0].pixelBuffer.kind, 'zpe-pixel-buffer-v1');
+  assert.strictEqual(decoded.layers[0].pixels, decoded.layers[0].pixelBuffer.data);
   assert.deepEqual([...decoded.layers[0].pixels], [255,0,0,255, 0,255,0,128]);
 });
 

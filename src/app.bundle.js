@@ -737,6 +737,141 @@ function floodFillPixels(data, width, height, startX, startY, color, { tolerance
   return filled;
 }
 
+// ---- src/core/pixel-buffer.js ----
+const PIXEL_BUFFER_KIND = 'zpe-pixel-buffer-v1';
+const PIXEL_MODELS = Object.freeze(['rgb','cmyk']);
+const PIXEL_DEPTHS = Object.freeze([8,16,32]);
+
+function integer(value, label) {
+  const number = Math.trunc(Number(value));
+  if (!Number.isInteger(number) || number <= 0) throw new TypeError(`${label} должен быть положительным целым числом`);
+  return number;
+}
+
+function channelRange(model) {
+  if (model === 'rgb') return { min: 3, max: 4 };
+  if (model === 'cmyk') return { min: 4, max: 5 };
+  throw new TypeError(`Неподдерживаемая модель PixelBuffer: ${model}`);
+}
+
+function expectedArrayConstructor(bitsPerChannel) {
+  if (bitsPerChannel === 8) return Uint8ClampedArray;
+  if (bitsPerChannel === 16) return Uint16Array;
+  if (bitsPerChannel === 32) return Float32Array;
+  throw new TypeError(`Неподдерживаемая глубина PixelBuffer: ${bitsPerChannel}-bit`);
+}
+
+function normalizeData(data, bitsPerChannel, length) {
+  const Expected = expectedArrayConstructor(bitsPerChannel);
+  if (data == null) return new Expected(length);
+  if (bitsPerChannel === 8 && data instanceof Uint8Array && !(data instanceof Uint8ClampedArray)) {
+    return new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+  }
+  if (!(data instanceof Expected)) {
+    throw new TypeError(`PixelBuffer ${bitsPerChannel}-bit требует ${Expected.name}`);
+  }
+  if (data.length !== length) {
+    throw new RangeError(`PixelBuffer data length ${data.length} не совпадает с ожидаемым ${length}`);
+  }
+  return data;
+}
+function createPixelBuffer({
+  width,
+  height,
+  model = 'rgb',
+  channels,
+  bitsPerChannel = 8,
+  colorSpace = model === 'rgb' ? 'srgb' : 'device-cmyk',
+  alphaMode,
+  profileName = '',
+  data = null,
+} = {}) {
+  const w = integer(width, 'PixelBuffer width');
+  const h = integer(height, 'PixelBuffer height');
+  const normalizedModel = String(model || '').toLowerCase();
+  const range = channelRange(normalizedModel);
+  const channelCount = channels == null ? range.max : integer(channels, 'PixelBuffer channels');
+  if (channelCount < range.min || channelCount > range.max) {
+    throw new RangeError(`PixelBuffer ${normalizedModel} поддерживает ${range.min}–${range.max} каналов`);
+  }
+  const depth = integer(bitsPerChannel, 'PixelBuffer bitsPerChannel');
+  expectedArrayConstructor(depth);
+  const samples = w * h * channelCount;
+  if (!Number.isSafeInteger(samples)) throw new RangeError('PixelBuffer слишком большой для безопасной адресации');
+  const hasAlpha = channelCount === range.max;
+  const normalizedAlpha = alphaMode ?? (hasAlpha ? 'straight' : 'none');
+  if (!['none','straight'].includes(normalizedAlpha)) throw new TypeError(`Неподдерживаемый alphaMode PixelBuffer: ${normalizedAlpha}`);
+  if ((normalizedAlpha === 'none') === hasAlpha) {
+    throw new RangeError('PixelBuffer alphaMode не согласован с числом каналов');
+  }
+  return {
+    kind: PIXEL_BUFFER_KIND,
+    width: w,
+    height: h,
+    model: normalizedModel,
+    channels: channelCount,
+    bitsPerChannel: depth,
+    sampleType: depth === 32 ? 'float' : 'uint',
+    colorSpace: String(colorSpace || ''),
+    alphaMode: normalizedAlpha,
+    profileName: String(profileName || ''),
+    data: normalizeData(data, depth, samples),
+  };
+}
+function createRgba8PixelBuffer(width, height, data, options = {}) {
+  return createPixelBuffer({
+    width,
+    height,
+    model: 'rgb',
+    channels: 4,
+    bitsPerChannel: 8,
+    colorSpace: options.colorSpace || 'srgb',
+    alphaMode: 'straight',
+    profileName: options.profileName || '',
+    data,
+  });
+}
+function isPixelBuffer(value) {
+  return Boolean(value)
+    && value.kind === PIXEL_BUFFER_KIND
+    && Number.isInteger(value.width)
+    && Number.isInteger(value.height)
+    && PIXEL_MODELS.includes(value.model)
+    && PIXEL_DEPTHS.includes(value.bitsPerChannel)
+    && ArrayBuffer.isView(value.data);
+}
+
+function sample01(buffer, index) {
+  if (buffer.bitsPerChannel === 8) return buffer.data[index] / 255;
+  if (buffer.bitsPerChannel === 16) return buffer.data[index] / 65535;
+  return Math.min(1, Math.max(0, Number(buffer.data[index]) || 0));
+}
+function pixelBufferToRgba8Preview(buffer) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  if (buffer.model !== 'rgb') {
+    throw new Error('CMYK PixelBuffer требует отдельного color-management преобразования перед RGB preview');
+  }
+  if (buffer.bitsPerChannel === 8 && buffer.channels === 4 && buffer.data instanceof Uint8ClampedArray) {
+    return buffer.data;
+  }
+  const pixels = buffer.width * buffer.height;
+  const rgba = new Uint8ClampedArray(pixels * 4);
+  const hasAlpha = buffer.channels === 4;
+  for (let pixel = 0; pixel < pixels; pixel += 1) {
+    const source = pixel * buffer.channels;
+    const target = pixel * 4;
+    rgba[target] = Math.round(sample01(buffer, source) * 255);
+    rgba[target + 1] = Math.round(sample01(buffer, source + 1) * 255);
+    rgba[target + 2] = Math.round(sample01(buffer, source + 2) * 255);
+    rgba[target + 3] = hasAlpha ? Math.round(sample01(buffer, source + 3) * 255) : 255;
+  }
+  return rgba;
+}
+function pixelBufferByteLength(buffer) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  return buffer.data.byteLength;
+}
+
 // ---- src/core/recovery.js ----
 const RECOVERY_DB_NAME = 'zeter-photo-editor';
 const RECOVERY_STORE_NAME = 'recovery';
@@ -2677,6 +2812,7 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
     if (!width || !height) { warnings.push(`Слой «${record.name}» пропущен: пустые bounds`); continue; }
     const rgba = composeRgba(width, height, record.decodedChannels);
     if (!rgba) { warnings.push(`Слой «${record.name}» пропущен: нет RGB bitmap-preview`); continue; }
+    const pixelBuffer = createRgba8PixelBuffer(width, height, rgba, { colorSpace: 'srgb' });
     const maskRgba = buildMaskRgba(record, record.decodedChannels.get(-2), width, height);
     layers.push({
       name: record.name || 'PSD Layer',
@@ -2688,17 +2824,23 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
       transparencyProtected: Boolean(record.flags & 0x01),
       opacity: record.opacity / 255,
       blendMode: blendModeFor(record.blendKey, warnings, record.name),
-      pixels: rgba,
+      pixelBuffer,
+      pixels: pixelBuffer.data,
       mask: maskRgba ? { pixels: maskRgba, disabled: Boolean(record.mask?.disabled) } : null,
     });
   }
 
   let composite = null;
+  let compositePixelBuffer = null;
   if (!layers.length && reader.offset < reader.end) {
     composite = await decodeComposite(reader, header, maxChannelBytes);
-    if (composite) warnings.push('PSD/PSB не содержит импортируемых bitmap-слоёв: использован composite preview');
+    if (composite) {
+      compositePixelBuffer = createRgba8PixelBuffer(header.width, header.height, composite, { colorSpace: 'srgb' });
+      composite = compositePixelBuffer.data;
+      warnings.push('PSD/PSB не содержит импортируемых bitmap-слоёв: использован composite preview');
+    }
   }
-  return { ...header, layers, composite, warnings };
+  return { ...header, layers, composite, compositePixelBuffer, warnings };
 }
 
 
@@ -5917,7 +6059,10 @@ async function openPsd(file){
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
     const prepared=[];
     for(const sourceLayer of [...parsed.layers].reverse()){
-      const dataUrl=await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.pixels,`PSD/PSB слой «${sourceLayer.name}»`);
+      const sourcePixels=sourceLayer.pixelBuffer
+        ? pixelBufferToRgba8Preview(sourceLayer.pixelBuffer)
+        : sourceLayer.pixels;
+      const dataUrl=await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourcePixels,`PSD/PSB слой «${sourceLayer.name}»`);
       const maskDataUrl=sourceLayer.mask
         ? await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.mask.pixels,`Маска PSD/PSB слоя «${sourceLayer.name}»`)
         : null;
@@ -5930,13 +6075,17 @@ async function openPsd(file){
         dataUrl,
         mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
       }));
+      sourceLayer.pixelBuffer=null;
       sourceLayer.pixels=null;
       if(sourceLayer.mask)sourceLayer.mask.pixels=null;
     }
-    if(!prepared.length&&parsed.composite){
+    if(!prepared.length&&(parsed.compositePixelBuffer||parsed.composite)){
+      const compositePixels=parsed.compositePixelBuffer
+        ? pixelBufferToRgba8Preview(parsed.compositePixelBuffer)
+        : parsed.composite;
       prepared.push(createRasterLayer({
         name:'PSD/PSB Composite',x:0,y:0,width:parsed.width,height:parsed.height,
-        dataUrl:await rgbaPixelsToDataUrl(parsed.width,parsed.height,parsed.composite,'PSD/PSB composite'),
+        dataUrl:await rgbaPixelsToDataUrl(parsed.width,parsed.height,compositePixels,'PSD/PSB composite'),
       }));
     }
     if(!prepared.length)throw new Error('PSD/PSB не содержит bitmap-данных, которые текущий RGB/8-bit pipeline может импортировать');

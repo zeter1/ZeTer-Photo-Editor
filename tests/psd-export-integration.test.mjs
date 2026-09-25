@@ -42,3 +42,12 @@ test('PSB Stage 7a import surface accepts .psb and strips either Photoshop exten
   assert.match(main,/replace\(\/\\\.ps\[db\]\$\/i,''\)/);
   assert.match(adapter,/\/\\\.ps\[db\]\$\/i/);
 });
+
+
+test('PixelBuffer Stage 7b is the PSD/PSB adapter-to-UI raster boundary',()=>{
+  assert.match(adapter,/createRgba8PixelBuffer/);
+  assert.match(adapter,/pixelBuffer,/);
+  assert.match(main,/pixelBufferToRgba8Preview/);
+  assert.match(main,/sourceLayer\.pixelBuffer/);
+  assert.match(main,/parsed\.compositePixelBuffer/);
+});
