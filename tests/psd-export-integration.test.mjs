@@ -102,7 +102,7 @@ test('PSD Color Management Stage 7f surfaces ICC metadata without pretending to 
   assert.match(adapter,/id === 1041/);
   assert.match(adapter,/iccProfile: imageResources\.iccProfile/);
   assert.match(main,/ICC profile обнаружен/);
-  assert.match(main,/Canvas preview пока не выполняет явное ICC-преобразование/);
+  assert.match(main,/RGB Canvas preview пока не выполняет явное ICC-преобразование/);
 });
 
 
@@ -155,4 +155,15 @@ test('Stage 12g routes compatible multi-layer merged composites through typed Pi
   assert.match(main,/MAX_HIGH_DEPTH_COMPOSITE_BYTES/);
   assert.match(main,/merged composite использует 8-bit Canvas fallback/);
   assert.doesNotMatch(main,/function exactHighDepthCompositeCandidate\(/);
+});
+
+test('Stage 13a wires CMYK PSD decode, ICC preview transform and bounded source preservation',()=>{
+  assert.match(adapter,/const PSD_COLOR_MODE_CMYK = 4/);
+  assert.match(adapter,/function composeCmykPixelBuffer\(/);
+  assert.match(adapter,/invertCmykPlaneSample/);
+  assert.match(main,/createCmykToSrgbTransform/);
+  assert.match(main,/cmykPixelBufferToRgba8Preview/);
+  assert.match(main,/sourceLayer\.pixelBuffer\.model==='cmyk'/);
+  assert.match(main,/Stage 13a: .*native CMYK source/);
+  assert.match(main,/decoded\.model!=='rgb'/);
 });

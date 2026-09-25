@@ -8,6 +8,7 @@ const sources = [
   'src/core/io.js',
   'src/core/pixels.js',
   'src/core/pixel-buffer.js',
+  'src/core/color-management.js',
   'src/core/recovery.js',
   'src/core/layer-styles.js',
   'src/core/state.js',

@@ -4,6 +4,22 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.29.0 — 2026-09-25
+
+### 2026-09-25 — CMYK / ICC Preview Foundation Stage 13a
+
+- PSD/PSB import: разрешён CMYK color mode `4` для 8/16/32-bit/channel рядом с существующим RGB path; четыре color channels больше не интерпретируются как RGB+alpha.
+- CMYK storage: Photoshop-inverted CMYK samples декодируются в нормализованный внутренний ink-space (`0` = нет краски, максимум = полная краска), optional transparency остаётся отдельным straight-alpha channel.
+- PixelBuffer: layered и merged CMYK данные представлены как 4/5-channel `cmyk` PixelBuffer и могут сохраняться canonical `.zpe` source без потери исходной channel precision.
+- ICC engine: добавлен dependency-free `src/core/color-management.js` с безопасным ICC header/tag-table parser, `A2B0/A2B1/A2B2`, `mft1`/`mft2`, 4D multilinear CLUT interpolation и PCS Lab/XYZ → D50→D65 → sRGB display conversion.
+- Fallback semantics: отсутствие/повреждение ICC либо unsupported `mAB`/MPE не маскируются под color-managed результат — importer использует явный Device-CMYK approximation и добавляет warning, что preview не является press proof.
+- UI/import: CMYK layer/composite preview создаётся через один выбранный transform на документ; inspector показывает сохранённый CMYK source отдельно от HDR controls.
+- Edit boundary: RGB typed editing primitives больше не пытаются мутировать CMYK PixelBuffer; destructive edit безопасно переходит через существующий RGB raster-preview boundary и снимает stale native source.
+- Export honesty: текущий PSD/PSB writer остаётся RGB; наличие сохранённого CMYK source даёт отдельный Stage 13a warning и экспортирует display preview вместо ложного native CMYK round-trip.
+- Persistence: CMYK source сохраняется даже для 8-bit документов в пределах существующего 48 МБ raw budget; sanitizer не прикрепляет к CMYK HDR tone-map settings.
+- Tests: добавлены synthetic CMYK PSD layer/composite fixtures, channel inversion checks, synthetic CMYK→Lab `A2B0/mft1` ICC profile, managed preview, explicit fallback и alpha regressions.
+- Version: приложение синхронизировано на 1.29.0.
+
 ## 1.28.0 — 2026-09-25
 
 ### 2026-09-25 — High-depth Multi-layer Composite / Export Bridge Stage 12g

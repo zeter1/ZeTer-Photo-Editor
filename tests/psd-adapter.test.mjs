@@ -342,6 +342,42 @@ function makeNestedGroupPsd() {
   return concat(out.parts);
 }
 
+function makeRawCmykPsd({ depth = 8 } = {}) {
+  const out=writer();
+  out.ascii('8BPS');out.u16(1);out.bytes(0,0,0,0,0,0);
+  out.u16(5);out.u32(1);out.u32(2);out.u16(depth);out.u16(4);
+  out.u32(0);out.u32(0);
+  const stored=depth===16
+    ? [[65535,0],[65535,65535],[65535,65535],[65535,0],[65535,32768]]
+    : [[255,0],[255,255],[255,255],[255,0],[255,128]];
+  const rows=stored.map(samples=>sampleRowBytes(samples,depth));
+  const info=writer();
+  info.i16(1);
+  info.i32(0);info.i32(0);info.i32(1);info.i32(2);
+  info.u16(5);
+  for(let index=0;index<5;index+=1){info.i16([0,1,2,3,-1][index]);info.u32(2+rows[index].length);}
+  info.ascii('8BIM');info.ascii('norm');info.bytes(255,0,0,0);
+  const extra=writer();extra.u32(0);extra.u32(0);extra.bytes(4);extra.ascii('CMYK');extra.bytes(0,0,0);
+  const extraBytes=concat(extra.parts);info.u32(extraBytes.length);info.push(extraBytes);
+  for(const row of rows){info.u16(0);info.push(row);}
+  const infoBytes=concat(info.parts);
+  out.u32(4+infoBytes.length);out.u32(infoBytes.length);out.push(infoBytes);
+  return concat(out.parts);
+}
+
+function makeCompositeCmykPsd() {
+  const out=writer();
+  out.ascii('8BPS');out.u16(1);out.bytes(0,0,0,0,0,0);
+  out.u16(4);out.u32(1);out.u32(2);out.u16(8);out.u16(4);
+  out.u32(0);out.u32(0);out.u32(0);
+  out.u16(0);
+  out.push(Uint8Array.from([255,0]));
+  out.push(Uint8Array.from([255,255]));
+  out.push(Uint8Array.from([255,255]));
+  out.push(Uint8Array.from([255,0]));
+  return concat(out.parts);
+}
+
 test('PSD adapter inspects and decodes layered raw RGB/8-bit PSD', async () => {
   const psd = makeRawPsd();
   assert.deepEqual(inspectPsdHeader(psd), {
@@ -436,9 +472,29 @@ test('PSD/PSB Stage 7e decodes high-depth ZIP prediction for composite image dat
   }
 });
 
-test('PSD/PSB high-depth import still rejects CMYK explicitly', async () => {
-  await assert.rejects(() => decodePsd(makeRawPsd({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
-  await assert.rejects(() => decodePsd(makeRlePsb({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
+test('PSD Stage 13a decodes inverted CMYK layer channels into ink-space PixelBuffers', async () => {
+  for(const depth of [8,16]){
+    const decoded=await decodePsd(makeRawCmykPsd({depth}));
+    assert.equal(decoded.colorMode,4);
+    assert.equal(decoded.layers.length,1);
+    const buffer=decoded.layers[0].pixelBuffer;
+    assert.equal(buffer.model,'cmyk');
+    assert.equal(buffer.channels,5);
+    assert.equal(buffer.bitsPerChannel,depth);
+    const max=depth===8?255:65535;
+    const half=depth===8?128:32768;
+    assert.deepEqual([...buffer.data],[0,0,0,0,max, max,0,0,max,half]);
+    assert.equal(decoded.layers[0].pixels,depth===8?buffer.data:null);
+  }
+});
+
+test('PSD Stage 13a decodes CMYK merged image planes instead of treating K as alpha', async () => {
+  const decoded=await decodePsd(makeCompositeCmykPsd());
+  assert.equal(decoded.layers.length,0);
+  assert.ok(decoded.compositePixelBuffer);
+  assert.equal(decoded.compositePixelBuffer.model,'cmyk');
+  assert.equal(decoded.compositePixelBuffer.channels,4);
+  assert.deepEqual([...decoded.compositePixelBuffer.data],[0,0,0,0, 255,0,0,255]);
 });
 
 

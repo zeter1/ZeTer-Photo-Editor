@@ -10,6 +10,7 @@ import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, cle
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
 import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab, floodFillPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
+import { createCmykToSrgbTransform, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './adapters/psd.js';
@@ -1840,10 +1841,14 @@ function updateProperties() {
   if (l.type === 'raster' && l.highDepthSource) {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
-    const preview=sanitizeHighDepthPreview(l.highDepthPreview);
-    const resolvedAuto=source.bitsPerChannel===32?'ACES':'Clip';
-    const displayLabel=formatDisplayExposure(preview.displayExposure);
-    extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit ${escapeHtml(String(source.model||'RGB').toUpperCase())} · ${sizeMb} МБ</span><label>High-depth</label><span>Exposure/gamma/color работают до tone mapping; Canvas preview/edit — 8-bit</span><label>Tone map</label><select data-high-depth-tone-map><option value="auto"${preview.toneMap==='auto'?' selected':''}>Auto (${resolvedAuto})</option><option value="clip"${preview.toneMap==='clip'?' selected':''}>Clip</option><option value="aces"${preview.toneMap==='aces'?' selected':''}>ACES</option></select><label>Display exposure</label><span class="range-with-value"><input type="range" min="-6" max="6" step="0.1" value="${preview.displayExposure}" data-high-depth-display-exposure><output data-high-depth-display-output>${displayLabel}</output></span><div class="wide"><button type="button" class="mini-button" data-high-depth-preview-reset>Сбросить HDR preview</button></div>`;
+    if(source.model==='cmyk'){
+      extra = `<label>Нативный источник</label><span>${source.bitsPerChannel}-bit CMYK · ${sizeMb} МБ</span><label>Color management</label><span>CMYK source сохранён в .zpe; Canvas показывает sRGB preview, созданный через ICC transform либо явный Device CMYK fallback при импорте</span><label>Редактирование</label><span>Destructive RGB-инструмент растрирует display preview и снимает нативный CMYK source до появления native CMYK editing</span>`;
+    }else if(Number(source.bitsPerChannel)>8){
+      const preview=sanitizeHighDepthPreview(l.highDepthPreview);
+      const resolvedAuto=source.bitsPerChannel===32?'ACES':'Clip';
+      const displayLabel=formatDisplayExposure(preview.displayExposure);
+      extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit RGB · ${sizeMb} МБ</span><label>High-depth</label><span>Exposure/gamma/color работают до tone mapping; Canvas display — 8-bit</span><label>Tone map</label><select data-high-depth-tone-map><option value="auto"${preview.toneMap==='auto'?' selected':''}>Auto (${resolvedAuto})</option><option value="clip"${preview.toneMap==='clip'?' selected':''}>Clip</option><option value="aces"${preview.toneMap==='aces'?' selected':''}>ACES</option></select><label>Display exposure</label><span class="range-with-value"><input type="range" min="-6" max="6" step="0.1" value="${preview.displayExposure}" data-high-depth-display-exposure><output data-high-depth-display-output>${displayLabel}</output></span><div class="wide"><button type="button" class="mini-button" data-high-depth-preview-reset>Сбросить HDR preview</button></div>`;
+    }
   }
   if (l.type === 'smart-object') {
     const linkedCount=l.linkedSourceId?linkedSmartObjectLayers(doc,l.linkedSourceId).length:0;
@@ -1861,7 +1866,7 @@ function updateProperties() {
     ${extra}
   </div>`;
   bindPropertyInputs(els.props);
-  if(l.type==='raster'&&l.highDepthSource)bindHighDepthPreviewControls(els.props,l);
+  if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,l);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
   if(smartObjectEdit)smartObjectEdit.addEventListener('click',()=>openSmartObjectContents(l));
   const smartObjectLinkCopy=els.props.querySelector('[data-smart-object-link-copy]');
@@ -2628,6 +2633,7 @@ function highDepthBudgetForLayer(layer){
 function editableHighDepthBuffer(layer,{requireAlpha=false}={}){
   if(!layer?.highDepthSource)return null;
   const decoded=deserializePixelBufferSource(layer.highDepthSource);
+  if(decoded.model!=='rgb')return null;
   const working=requireAlpha?pixelBufferWithStraightAlpha(decoded):clonePixelBuffer(decoded);
   if(pixelBufferByteLength(working)>highDepthBudgetForLayer(layer))return null;
   return working;
@@ -3645,14 +3651,27 @@ async function openPsd(file){
   try{
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
-    if(parsed.iccProfile){
+    const isCmyk=parsed.colorMode===4;
+    const cmykTransform=isCmyk?createCmykToSrgbTransform(parsed.iccProfile?.bytes||null):null;
+    const previewPixelsFor=buffer=>buffer?.model==='cmyk'
+      ? cmykPixelBufferToRgba8Preview(buffer,cmykTransform)
+      : pixelBufferToRgba8Preview(buffer);
+    if(isCmyk){
+      if(cmykTransform.managed){
+        warnings.push(`CMYK preview: применён ICC ${cmykTransform.tag} ${cmykTransform.method} → ${cmykTransform.pcs} → sRGB display transform. Native CMYK samples сохраняются отдельно`);
+      }else{
+        warnings.push(`CMYK preview: ${cmykTransform.warning}. Native CMYK samples сохраняются отдельно; display preview не следует считать proof/press simulation`);
+      }
+    }
+    if(parsed.iccProfile&&!isCmyk){
       const profile=parsed.iccProfile;
-      warnings.push(`ICC profile обнаружен: ${profile.colorSpace||'unknown'} → ${profile.pcs||'unknown'}, v${profile.version||'?'}${profile.signatureValid?'':' (header signature invalid)'}. Текущий Canvas preview пока не выполняет явное ICC-преобразование`);
-    }else if(parsed.iccUntagged){
+      warnings.push(`ICC profile обнаружен: ${profile.colorSpace||'unknown'} → ${profile.pcs||'unknown'}, v${profile.version||'?'}${profile.signatureValid?'':' (header signature invalid)'}. RGB Canvas preview пока не выполняет явное ICC-преобразование`);
+    }else if(parsed.iccUntagged&&!isCmyk){
       warnings.push('PSD/PSB помечен как intentionally untagged ICC; ZPE не назначает профиль автоматически');
     }
-    if(parsed.bitsPerChannel===16)warnings.push('RGB 16-bit/channel декодирован без потери точности; Stage 12a сохраняет bounded high-depth source внутри .zpe, а Canvas preview/edit пока остаётся 8-bit');
-    if(parsed.bitsPerChannel===32)warnings.push('RGB 32-bit floating-point/HDR декодирован в Float32 PixelBuffer; Stage 12a сохраняет bounded source внутри .zpe, но Canvas preview пока клипует 0..1 и не выполняет HDR tone mapping');
+    const modeLabel=isCmyk?'CMYK':'RGB';
+    if(parsed.bitsPerChannel===16)warnings.push(`${modeLabel} 16-bit/channel декодирован без потери channel precision; bounded native source сохраняется внутри .zpe`);
+    if(parsed.bitsPerChannel===32)warnings.push(`${modeLabel} 32-bit/channel декодирован в Float32 PixelBuffer; bounded native source сохраняется внутри .zpe`);
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
     const sourceGroups=new Map((parsed.groups||[]).map(group=>[group.key,group]));
     const usedGroupKeys=new Set(parsed.layers.map(layer=>layer.groupKey).filter(Boolean));
@@ -3689,11 +3708,11 @@ async function openPsd(file){
     let highDepthBytesUsed=0;
     for(const sourceLayer of [...parsed.layers].reverse()){
       const sourcePixels=sourceLayer.pixelBuffer
-        ? pixelBufferToRgba8Preview(sourceLayer.pixelBuffer)
+        ? previewPixelsFor(sourceLayer.pixelBuffer)
         : sourceLayer.pixels;
       const dataUrl=await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourcePixels,`PSD/PSB слой «${sourceLayer.name}»`);
       let highDepthSource=null;
-      if(sourceLayer.pixelBuffer?.bitsPerChannel>8){
+      if(sourceLayer.pixelBuffer&&(sourceLayer.pixelBuffer.bitsPerChannel>8||sourceLayer.pixelBuffer.model==='cmyk')){
         const rawBytes=sourceLayer.pixelBuffer.data?.byteLength||0;
         const remaining=Math.max(0,MAX_PIXEL_BUFFER_SOURCE_BYTES-highDepthBytesUsed);
         if(rawBytes>0&&rawBytes<=remaining){
@@ -3726,10 +3745,10 @@ async function openPsd(file){
     }
     if(!prepared.length&&(parsed.compositePixelBuffer||parsed.composite)){
       const compositePixels=parsed.compositePixelBuffer
-        ? pixelBufferToRgba8Preview(parsed.compositePixelBuffer)
+        ? previewPixelsFor(parsed.compositePixelBuffer)
         : parsed.composite;
       let highDepthSource=null;
-      if(parsed.compositePixelBuffer?.bitsPerChannel>8){
+      if(parsed.compositePixelBuffer&&(parsed.compositePixelBuffer.bitsPerChannel>8||parsed.compositePixelBuffer.model==='cmyk')){
         const rawBytes=parsed.compositePixelBuffer.data?.byteLength||0;
         const remaining=Math.max(0,MAX_PIXEL_BUFFER_SOURCE_BYTES-highDepthBytesUsed);
         if(rawBytes>0&&rawBytes<=remaining){
@@ -4077,8 +4096,10 @@ async function preparePsdExport(exportDoc){
       blendMode:group.blendMode||'pass-through',
     }));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
-  const downgradedHighDepth=planned.filter(item=>item.layer.highDepthSource&&!item.nativePixelBuffer);
-  if(downgradedHighDepth.length)warnings.push(`${downgradedHighDepth.length} high-depth слой(я) с transform/filter/style или несовместимой геометрией экспортированы через 8-bit raster preview`);
+  const cmykSources=planned.filter(item=>item.layer.highDepthSource?.model==='cmyk');
+  if(cmykSources.length)warnings.push(`Stage 13a: ${cmykSources.length} native CMYK source сохранены в .zpe, но текущий PSD/PSB writer остаётся RGB; экспорт использует их sRGB display preview`);
+  const downgradedHighDepth=planned.filter(item=>item.layer.highDepthSource?.model==='rgb'&&!item.nativePixelBuffer);
+  if(downgradedHighDepth.length)warnings.push(`${downgradedHighDepth.length} high-depth RGB слой(я) с transform/filter/style или несовместимой геометрией экспортированы через 8-bit raster preview`);
   if(bitsPerChannel>8&&planned.some(item=>!item.nativePixelBuffer))warnings.push(`Документ экспортируется как ${bitsPerChannel}-bit; raster-preview слои без native high-depth source расширены из 8-bit без восстановления утраченной точности`);
   if(sourceLayers.some(layer=>layer.vectorMask?.linked===false))warnings.push('Unlinked vector mask flag записывается в PSD/PSB, но ZPE при трансформациях пока перемещает такую маску вместе со слоем');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');

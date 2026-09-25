@@ -695,7 +695,8 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     const dataUrl = typeof layer?.dataUrl === 'string' && /^data:image\//i.test(layer.dataUrl) ? layer.dataUrl : null;
     result.dataUrl = dataUrl;
     result.highDepthSource = sanitizeSerializedPixelBufferSource(layer?.highDepthSource);
-    result.highDepthPreview = result.highDepthSource ? sanitizeHighDepthPreview(layer?.highDepthPreview) : null;
+    const hasRgbHighDepthPreview = result.highDepthSource?.model === 'rgb' && Number(result.highDepthSource.bitsPerChannel) > 8;
+    result.highDepthPreview = hasRgbHighDepthPreview ? sanitizeHighDepthPreview(layer?.highDepthPreview) : null;
   } else if (type === 'smart-object') {
     checkedCanvasSize(result.width, result.height, `Смарт-объект «${result.name || 'Без имени'}»`);
     result.previewDataUrl = typeof layer?.previewDataUrl === 'string' && /^data:image\//i.test(layer.previewDataUrl) ? layer.previewDataUrl : null;

@@ -5,6 +5,7 @@ const PSD_VERSION = 1;
 const PSB_VERSION = 2;
 const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt32','Mtrn','Alph','FMsk','lnk2','FEid','FXid','PxSD']);
 const PSD_COLOR_MODE_RGB = 3;
+const PSD_COLOR_MODE_CMYK = 4;
 const PSD_SUPPORTED_DEPTHS = new Set([8, 16, 32]);
 const MAX_PSD_LAYERS = 500;
 const MAX_PSD_CHANNEL_BYTES = 256 * 1024 * 1024;
@@ -118,16 +119,17 @@ function requireImportCapabilities(header, maxPixels) {
   if (header.version !== PSD_VERSION && header.version !== PSB_VERSION) {
     throw new PsdImportError(`Неподдерживаемая версия PSD/PSB: ${header.version}`, 'PSD_VERSION');
   }
-  if (header.colorMode !== PSD_COLOR_MODE_RGB) {
-    throw new PsdImportError('PSD/PSB import поддерживает только RGB. CMYK/Lab/Indexed будут добавлены отдельным color-management этапом.', 'PSD_COLOR_MODE');
+  if (header.colorMode !== PSD_COLOR_MODE_RGB && header.colorMode !== PSD_COLOR_MODE_CMYK) {
+    throw new PsdImportError('PSD/PSB import Stage 13a поддерживает RGB и CMYK. Lab/Indexed/Multichannel требуют отдельного adapter path.', 'PSD_COLOR_MODE');
   }
   if (!PSD_SUPPORTED_DEPTHS.has(header.bitsPerChannel)) {
     throw new PsdImportError(
-      `PSD/PSB import поддерживает RGB 8/16/32-bit/channel. Получено: ${header.bitsPerChannel}-bit.`,
+      `PSD/PSB import поддерживает RGB/CMYK 8/16/32-bit/channel. Получено: ${header.bitsPerChannel}-bit.`,
       'PSD_BIT_DEPTH',
     );
   }
-  if (header.channels < 3 || header.channels > 56) throw new PsdImportError(`Некорректное число каналов PSD/PSB: ${header.channels}`, 'PSD_CHANNELS');
+  const minimumChannels = header.colorMode === PSD_COLOR_MODE_CMYK ? 4 : 3;
+  if (header.channels < minimumChannels || header.channels > 56) throw new PsdImportError(`Некорректное число каналов PSD/PSB: ${header.channels}`, 'PSD_CHANNELS');
   safeArea(header.width, header.height, maxPixels);
 }
 
@@ -692,6 +694,44 @@ function composeRgbPixelBuffer(width, height, channels, bitsPerChannel) {
   return null;
 }
 
+function invertCmykPlaneSample(plane, index, bitsPerChannel) {
+  const sample=plane[index];
+  if(bitsPerChannel===8)return 255-sample;
+  if(bitsPerChannel===16)return 65535-sample;
+  const value=Number(sample);
+  return 1-Math.min(1,Math.max(0,Number.isFinite(value)?value:0));
+}
+
+function composeCmykPixelBuffer(width, height, channels, bitsPerChannel) {
+  const pixels=safeArea(width,height,Number.MAX_SAFE_INTEGER);
+  const cyan=channels.get(0),magenta=channels.get(1),yellow=channels.get(2),black=channels.get(3);
+  if(!cyan||!magenta||!yellow||!black)return null;
+  const alpha=channels.get(-1);
+  const channelCount=alpha?5:4;
+  const Type=bitsPerChannel===8?Uint8ClampedArray:bitsPerChannel===16?Uint16Array:Float32Array;
+  if(!Type)return null;
+  const data=new Type(pixels*channelCount);
+  const alphaMax=bitsPerChannel===8?255:bitsPerChannel===16?65535:1;
+  for(let index=0;index<pixels;index+=1){
+    const out=index*channelCount;
+    data[out]=invertCmykPlaneSample(cyan,index,bitsPerChannel);
+    data[out+1]=invertCmykPlaneSample(magenta,index,bitsPerChannel);
+    data[out+2]=invertCmykPlaneSample(yellow,index,bitsPerChannel);
+    data[out+3]=invertCmykPlaneSample(black,index,bitsPerChannel);
+    if(alpha)data[out+4]=alpha[index];
+  }
+  return createPixelBuffer({
+    width,height,model:'cmyk',channels:channelCount,bitsPerChannel,
+    colorSpace:'device-cmyk',alphaMode:alpha?'straight':'none',data,
+  });
+}
+
+function composeDocumentPixelBuffer(width,height,channels,header) {
+  return header.colorMode===PSD_COLOR_MODE_CMYK
+    ? composeCmykPixelBuffer(width,height,channels,header.bitsPerChannel)
+    : composeRgbPixelBuffer(width,height,channels,header.bitsPerChannel);
+}
+
 function buildMaskRgba(record, maskChannel, layerWidth, layerHeight) {
   if (!record.mask || !maskChannel || layerWidth <= 0 || layerHeight <= 0) return null;
   const mask = record.mask;
@@ -816,11 +856,12 @@ async function decodeComposite(reader, header, maxChannelBytes) {
   const planeBytes = decodedChannelByteLength(header.width, header.height, header.bitsPerChannel, maxChannelBytes);
   const rowBytes = header.width * bytesPerSample(header.bitsPerChannel);
   const channels = new Map();
+  const baseColorChannels = header.colorMode === PSD_COLOR_MODE_CMYK ? 4 : 3;
   if (compression === 0) {
     for (let channel = 0; channel < header.channels; channel += 1) {
       const bytes = reader.take(planeBytes);
-      if (channel < 3) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
-      else if (channel === 3) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
+      if (channel < baseColorChannels) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
+      else if (channel === baseColorChannels) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
     }
   } else if (compression === 1) {
     const rowLengths = [];
@@ -834,8 +875,8 @@ async function decodeComposite(reader, header, maxChannelBytes) {
       for (let row = 0; row < header.height; row += 1) {
         bytes.set(packBitsRow(reader.take(rowLengths[channel][row]), rowBytes), row * rowBytes);
       }
-      if (channel < 3) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
-      else if (channel === 3) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
+      if (channel < baseColorChannels) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
+      else if (channel === baseColorChannels) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
     }
   } else if (compression === 2 || compression === 3) {
     const expected = planeBytes * header.channels;
@@ -847,13 +888,13 @@ async function decodeComposite(reader, header, maxChannelBytes) {
     for (let channel = 0; channel < header.channels; channel += 1) {
       let bytes = decoded.slice(channel * planeBytes, (channel + 1) * planeBytes);
       if (compression === 3) bytes = decodeZipPredictionBytes(bytes, header.width, header.height, header.bitsPerChannel);
-      if (channel < 3) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
-      else if (channel === 3) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
+      if (channel < baseColorChannels) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
+      else if (channel === baseColorChannels) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
     }
   } else {
     throw new PsdImportError(`Неподдерживаемое сжатие composite PSD: ${compression}`, 'PSD_COMPOSITE_COMPRESSION');
   }
-  return composeRgbPixelBuffer(header.width, header.height, channels, header.bitsPerChannel);
+  return composeDocumentPixelBuffer(header.width, header.height, channels, header);
 }
 
 async function parseLayerInfoBody(reader, layerInfoEnd, header, maxPixels, maxLayers, maxChannelBytes, warnings) {
@@ -951,7 +992,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
     const width = Math.max(0, record.right - record.left);
     const height = Math.max(0, record.bottom - record.top);
     if (!width || !height) { warnings.push(`Слой «${record.name}» пропущен: пустые bounds`); continue; }
-    const pixelBuffer = composeRgbPixelBuffer(width, height, record.decodedChannels, header.bitsPerChannel);
+    const pixelBuffer = composeDocumentPixelBuffer(width, height, record.decodedChannels, header);
     if (!pixelBuffer) { warnings.push(`Слой «${record.name}» пропущен: нет RGB bitmap-preview`); continue; }
     const maskRgba = buildMaskRgba(record, record.decodedChannels.get(-2), width, height);
     layers.push({
