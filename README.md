@@ -238,22 +238,23 @@ npm test
 
 ## Архитектура
 
-- `src/core/state.js` — модель документа и слоёв;
-- `src/core/color.js` — попиксельная цветокоррекция, тональный диапазон и проверяемые RGB-преобразования;
-- `src/core/render.js` — Canvas 2D renderer, кэш скорректированных растров, live raster override для кисти и экспорт;
-- `src/core/history.js` — snapshot-based Undo/Redo с лимитом количества состояний и бюджета памяти;
-- `src/core/geometry.js` — геометрия и масштаб;
-- `src/core/io.js` — browser I/O helpers;
-- `src/core/pixels.js` — пиксельные операции, включая flood fill;
-- `src/core/recovery.js` — неблокирующее аварийное автосохранение/восстановление через IndexedDB;
-- `src/core/pixel-buffer.js` — typed pixel contract для RGB/CMYK, 8/16/32-bit sample storage и явного RGB→RGBA8 preview bridge; CMYK не подменяется приблизительной конверсией без color management;
-- `src/adapters/psd.js` — изолированный PSD/PSB Adapter: binary parser/writer, version-aware 32/64-bit lengths, Raw/RLE/ZIP decode, RLE encode и нормализованный RGB/8-bit raster contract;
-- `src/main.js` — исходный UI controller, меню, инструменты, drag/drop, clipboard и shortcuts;
-- `src/app.bundle.js` — готовая браузерная сборка для прямого запуска через `file://`;
-- `tools/build-bundle.mjs` — воспроизводимая сборка runtime без внешних зависимостей;
-- `src/styles.css` — интерфейс редактора.
+Исходники разделены по владельцам, а `src/main.js` используется как composition root:
 
-Документ остаётся source of truth, а canvas — представлением. Это позволяет сохранять проект, восстанавливать историю и постепенно наращивать инструменты без превращения Canvas в скрытое состояние приложения.
+- `src/core/` — document model, rendering, geometry, pixels, high-depth/CMYK, color management, history и recovery;
+- `src/adapters/` — binary/file-format boundaries, прежде всего PSD/PSB;
+- `src/config/` — статическая конфигурация редактора без DOM/state;
+- `src/ui/` — автономные browser UI controllers;
+- `src/main.js` — связывание DOM, feature workflows, core и adapters;
+- `src/app.bundle.js` — генерируемая сборка для прямого запуска через `file://`, вручную не редактируется.
+
+Для разработки и AI-навигации:
+- [AI START HERE](docs/ai/START-HERE.md) — куда идти по типу задачи и как не читать лишнее;
+- [Карта проекта](docs/PROJECT.md) — дерево и dependency direction;
+- [Module Map](docs/architecture/MODULE-MAP.md) — точные владельцы кода;
+- [Runtime & Compatibility Contracts](docs/architecture/RUNTIME-CONTRACTS.md) — глубокие PSD/PSB/high-depth/CMYK/Smart Object invariants;
+- [Verification](docs/testing/VERIFICATION.md) — какие проверки что действительно доказывают.
+
+Документ остаётся source of truth, а Canvas — представлением. Generated bundle нужен только как deploy/runtime artifact.
 
 ## Ограничения относительно Photopea
 
