@@ -16,6 +16,7 @@
 - Masks: semantic adjustment renderer применяет и raster mask, и document-space vector mask к adjustment result.
 - Real compatibility corpus: добавлены пять pinned MIT `psd-tools` fixtures (Brightness/Contrast, Exposure, Hue/Saturation, Levels, Curves) с commit/blob/size/SHA-256 manifest.
 - Regression: реальные records декодируются в semantic model; editable parameters повторно декодируются после PSD и PSB writeback; Curves unchanged block остаётся byte-identical.
+- CI follow-up: Stage 8a group-import wiring regression расширен на новый `adjustmentLayers` collection и проверяет объединённый group-key source stack без зависимости от прежней формы `parsed.layers`.
 - Version: приложение синхронизировано на 1.40.0.
 
 ## 1.39.0 — 2026-09-25

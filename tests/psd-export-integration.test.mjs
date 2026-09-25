@@ -56,8 +56,9 @@ test('PixelBuffer Stage 7b is the PSD/PSB adapter-to-UI raster boundary',()=>{
 test('PSD Group Import Stage 8a maps adapter group keys into ZPE layer groups',()=>{
   assert.match(adapter,/function reconstructPsdGroups\(/);
   assert.match(adapter,/groupKey: record\.groupKey \|\| null/);
-  assert.match(adapter,/layers,\s*(?:fillLayers,\s*)?groups,\s*composite,\s*compositePixelBuffer,\s*iccProfile:/);
-  assert.match(main,/const usedGroupKeys=new Set\(parsed\.layers\.map\(layer=>layer\.groupKey\)/);
+  assert.match(adapter,/layers,\s*(?:fillLayers,\s*)?(?:adjustmentLayers,\s*)?groups,\s*composite,\s*compositePixelBuffer,\s*iccProfile:/);
+  assert.match(main,/const adjustmentSources=adjustmentOnlyComposite\?\[\]:\(parsed\.adjustmentLayers\|\|\[\]\)/);
+  assert.match(main,/const usedGroupKeys=new Set\(\[\.\.\.parsed\.layers,\.\.\.adjustmentSources\]\.map\(layer=>layer\.groupKey\)/);
   assert.match(main,/createLayerGroup\(\{/);
   assert.match(main,/groupId:sourceLayer\.groupKey\?/);
   assert.match(main,/next\.groups=importedGroups/);
