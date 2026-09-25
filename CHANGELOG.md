@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-25 — Select & Mask Edge Detection Stage 9c
+
+- Added: «Радиус обнаружения края», «Сила уточнения края» и «Умный радиус» в Select & Mask.
+- Core: новый pure `refineMaskEdgeAware()` строит eroded foreground core + dilated edge band и уточняет band pixels по сходству с уверенными foreground/background RGBA samples.
+- Smart Radius: color-separation confidence автоматически снижает влияние алгоритма на однородных/неопределённых границах.
+- Source pixels: обычные слои анализируются через unmasked local render; adjustment layer использует текущий document composite.
+- Preview parity: live preview получает тот же RGBA edge source и тот же ordering — smooth/shift → edge detection → feather/contrast/invert.
+- Safety: full-resolution edge work ограничен бюджетом `pixels × radius <= 48M`; общий refinement limit остаётся 12 МП.
+- Regression: recovery of a subject-colored fringe, conservative behavior on indistinguishable colors, full-pipeline wiring and UI/budget contracts.
+
 ### 2026-09-25 — Select & Mask Preview Stage 9b
 
 - Added: live black/white mask preview inside «Уточнить выделение → маска…».

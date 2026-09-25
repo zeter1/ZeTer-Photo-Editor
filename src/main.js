@@ -3977,7 +3977,32 @@ function addAdjustmentLayer(){
   addLayer(doc,layer);commit('Новый корректирующий слой');
   setStatus('Корректирующий слой применяет цвет и эффекты ко всему нижележащему стеку');
 }
-async function selectionMaskDataUrl(layer,{smooth=0,shift=0,feather=0,contrast=0,invert=false}={}){
+
+async function selectionRefineSourceRgba(layer,sourceWidth,sourceHeight,scale=1){
+  const factor=Math.max(.0001,Number(scale)||1);
+  const width=Math.max(1,Math.round(sourceWidth*factor));
+  const height=Math.max(1,Math.round(sourceHeight*factor));
+  const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  if(layer.type==='adjustment'){
+    ctx.imageSmoothingEnabled=true;
+    if('imageSmoothingQuality' in ctx)ctx.imageSmoothingQuality='high';
+    ctx.drawImage(els.canvas,0,0,doc.width,doc.height,0,0,width,height);
+  }else{
+    ctx.scale(factor,factor);
+    const plain={
+      ...layer,mask:null,styles:null,
+      opacity:1,blendMode:'source-over',
+      x:0,y:0,scaleX:1,scaleY:1,rotation:0,
+      width:sourceWidth,height:sourceHeight,
+    };
+    await renderLayer(ctx,plain);
+    ctx.setTransform(1,0,0,1,0,0);
+  }
+  return ctx.getImageData(0,0,width,height).data;
+}
+
+async function selectionMaskDataUrl(layer,{smooth=0,shift=0,edgeRadius=0,edgeStrength=60,smartRadius=true,feather=0,contrast=0,invert=false}={}){
   if(!selectionShape)return null;
   const width=layer.type==='adjustment'?doc.width:Math.max(1,Math.round(layer.width||1));
   const height=layer.type==='adjustment'?doc.height:Math.max(1,Math.round(layer.height||1));
@@ -3995,14 +4020,19 @@ async function selectionMaskDataUrl(layer,{smooth=0,shift=0,feather=0,contrast=0
       ctx.closePath();ctx.fill();
     }
   }
-  const needsRefine=Number(smooth)>0||Number(shift)!==0||Number(feather)>0||Number(contrast)>0||Boolean(invert);
+  const needsRefine=Number(smooth)>0||Number(shift)!==0||Number(edgeRadius)>0||Number(feather)>0||Number(contrast)>0||Boolean(invert);
   if(needsRefine){
     const pixels=width*height;
     if(pixels>12_000_000)throw new Error('Уточнение края ограничено маской до 12 МП. Уменьшите слой или используйте обычную маску из выделения.');
+    const detectionRadius=clamp(Math.round(Number(edgeRadius)||0),0,12);
+    if(detectionRadius>0&&pixels*Math.max(1,detectionRadius)>48_000_000){
+      throw new Error('Умный радиус слишком тяжёлый для этой маски. Уменьшите радиус или размер слоя.');
+    }
     const image=ctx.getImageData(0,0,width,height);
     const alpha=new Uint8ClampedArray(pixels);
     for(let i=0;i<pixels;i+=1)alpha[i]=image.data[i*4+3];
-    const refined=refineMaskAlpha(alpha,width,height,{smooth,shift,feather,contrast,invert});
+    const sourceRgba=detectionRadius>0?await selectionRefineSourceRgba(layer,width,height,1):null;
+    const refined=refineMaskAlpha(alpha,width,height,{smooth,shift,edgeRadius:detectionRadius,edgeStrength,smartRadius,sourceRgba,feather,contrast,invert});
     for(let i=0;i<pixels;i+=1){
       const offset=i*4;
       image.data[offset]=255;image.data[offset+1]=255;image.data[offset+2]=255;image.data[offset+3]=refined[i];
@@ -4030,13 +4060,16 @@ function selectionRefineOptionsFromValues(values, scale = 1) {
   return {
     smooth:clamp(Number(values?.smooth)||0,0,32)/factor,
     shift:clamp(Number(values?.shift)||0,-64,64)/factor,
+    edgeRadius:clamp(Number(values?.edgeRadius)||0,0,12)/factor,
+    edgeStrength:clamp(Number(values?.edgeStrength)||0,0,100),
+    smartRadius:values?.smartRadius!=='no',
     feather:clamp(Number(values?.feather)||0,0,64)/factor,
     contrast:clamp(Number(values?.contrast)||0,0,100),
     invert:values?.invert==='yes',
   };
 }
 
-function buildSelectionRefinePreviewSource(layer,{maxWidth=420,maxHeight=240}={}) {
+async function buildSelectionRefinePreviewSource(layer,{maxWidth=420,maxHeight=240}={}) {
   if(!selectionShape||!layer)return null;
   const sourceWidth=layer.type==='adjustment'?doc.width:Math.max(1,Math.round(layer.width||1));
   const sourceHeight=layer.type==='adjustment'?doc.height:Math.max(1,Math.round(layer.height||1));
@@ -4061,17 +4094,19 @@ function buildSelectionRefinePreviewSource(layer,{maxWidth=420,maxHeight=240}={}
   const image=ctx.getImageData(0,0,width,height);
   const alpha=new Uint8ClampedArray(width*height);
   for(let index=0;index<alpha.length;index+=1)alpha[index]=image.data[index*4+3];
-  return{alpha,width,height,scale:previewScale,sourceWidth,sourceHeight};
+  const sourceRgba=await selectionRefineSourceRgba(layer,sourceWidth,sourceHeight,previewScale);
+  return{alpha,sourceRgba,width,height,scale:previewScale,sourceWidth,sourceHeight};
 }
 
-function attachSelectionRefinePreview(modal,body,layer,layerScale) {
-  const source=buildSelectionRefinePreviewSource(layer);
-  if(!source)return;
+async function attachSelectionRefinePreview(modal,body,layer,layerScale) {
   const section=document.createElement('section');section.className='selection-refine-preview';
   const heading=document.createElement('strong');heading.textContent='Предпросмотр маски';
-  const canvas=document.createElement('canvas');canvas.width=source.width;canvas.height=source.height;canvas.setAttribute('aria-label','Предпросмотр уточнённой маски');
-  const status=document.createElement('small');
+  const status=document.createElement('small');status.textContent='Подготовка edge-aware preview…';
+  const canvas=document.createElement('canvas');canvas.width=1;canvas.height=1;canvas.setAttribute('aria-label','Предпросмотр уточнённой маски');
   section.append(heading,canvas,status);body.prepend(section);
+  const source=await buildSelectionRefinePreviewSource(layer);
+  if(!source||!modal.isConnected)return;
+  canvas.width=source.width;canvas.height=source.height;
   const ctx=canvas.getContext('2d',{alpha:false});
   let frame=0;
 
@@ -4080,7 +4115,7 @@ function attachSelectionRefinePreview(modal,body,layer,layerScale) {
     if(!modal.isConnected)return;
     const values=Object.fromEntries(new FormData(modal));
     const previewOptions=selectionRefineOptionsFromValues(values,layerScale/source.scale);
-    const alpha=refineMaskAlpha(source.alpha,source.width,source.height,previewOptions);
+    const alpha=refineMaskAlpha(source.alpha,source.width,source.height,{...previewOptions,sourceRgba:source.sourceRgba});
     const image=ctx.createImageData(source.width,source.height);
     for(let index=0;index<alpha.length;index+=1){
       const value=alpha[index],offset=index*4;
@@ -4118,18 +4153,21 @@ async function refineSelectionToLayerMask(){
     fields:[
       {name:'smooth',label:'Сглаживание, px',type:'number',value:2,min:0,max:32,step:1},
       {name:'shift',label:'Расширить / сжать, px',type:'number',value:0,min:-64,max:64,step:1},
+      {name:'edgeRadius',label:'Радиус обнаружения края, px',type:'number',value:0,min:0,max:12,step:.5},
+      {name:'edgeStrength',label:'Сила уточнения края, %',type:'number',value:60,min:0,max:100,step:1},
+      {name:'smartRadius',label:'Умный радиус',type:'select',value:'yes',options:[['yes','Да'],['no','Нет']]},
       {name:'feather',label:'Растушёвка, px',type:'number',value:1,min:0,max:64,step:.5},
       {name:'contrast',label:'Контраст края, %',type:'number',value:0,min:0,max:100,step:1},
       {name:'invert',label:'Инвертировать маску',type:'select',value:'no',options:[['no','Нет'],['yes','Да']]},
     ],
     submitLabel:replacing?'Заменить маску':'Создать маску',
-    onMount:({modal,body})=>attachSelectionRefinePreview(modal,body,layer,scale),
+    onMount:({modal,body})=>{void attachSelectionRefinePreview(modal,body,layer,scale).catch(error=>{console.error(error);if(modal.isConnected)toast(error?.message||'Не удалось построить edge-aware preview','warn');});},
     onSubmit:async values=>{
       const options=selectionRefineOptionsFromValues(values,scale);
       const dataUrl=await selectionMaskDataUrl(layer,options);
       layer.mask=createLayerMask({enabled:true,dataUrl});
       commit(replacing?'Уточнить маску слоя':'Создать уточнённую маску слоя');
-      setStatus(`Маска уточнена: сглаживание ${Number(values.smooth)||0}px, край ${Number(values.shift)||0}px, растушёвка ${Number(values.feather)||0}px`);
+      setStatus(`Маска уточнена: сглаживание ${Number(values.smooth)||0}px, край ${Number(values.shift)||0}px, радиус ${Number(values.edgeRadius)||0}px, растушёвка ${Number(values.feather)||0}px`);
       return true;
     },
   });

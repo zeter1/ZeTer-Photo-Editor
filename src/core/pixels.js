@@ -93,9 +93,94 @@ function maskBoxBlur(source, width, height, radius) {
   return output;
 }
 
+
+const MASK_EDGE_DIRECTIONS = [
+  [1,0],[-1,0],[0,1],[0,-1],
+  [1,1],[1,-1],[-1,1],[-1,-1],
+];
+
+function meanCoreSample(rgba, coreMask, width, height, x, y, desired, maxDistance) {
+  let red=0,green=0,blue=0,alpha=0,count=0;
+  for (const [dx,dy] of MASK_EDGE_DIRECTIONS) {
+    for (let step=1;step<=maxDistance;step+=1) {
+      const nx=x+dx*step,ny=y+dy*step;
+      if(nx<0||ny<0||nx>=width||ny>=height)break;
+      const index=ny*width+nx;
+      if(coreMask[index]!==desired)continue;
+      const offset=index*4;
+      red+=rgba[offset];green+=rgba[offset+1];blue+=rgba[offset+2];alpha+=rgba[offset+3];
+      count+=1;
+      break;
+    }
+  }
+  return count?[
+    red/count,green/count,blue/count,alpha/count,
+  ]:null;
+}
+
+function rgbaDistanceToMean(rgba, offset, mean) {
+  const dr=rgba[offset]-mean[0];
+  const dg=rgba[offset+1]-mean[1];
+  const db=rgba[offset+2]-mean[2];
+  const da=(rgba[offset+3]-mean[3])*.5;
+  return dr*dr+dg*dg+db*db+da*da;
+}
+
+export function refineMaskEdgeAware(alpha, rgba, width, height, {
+  radius = 0,
+  strength = 60,
+  smart = true,
+} = {}) {
+  if (!(alpha instanceof Uint8Array || alpha instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидался 8-bit alpha mask');
+  }
+  if (!(rgba instanceof Uint8Array || rgba instanceof Uint8ClampedArray)) {
+    throw new TypeError('Для уточнения края требуется RGBA source');
+  }
+  const w=Math.max(0,Math.trunc(width));
+  const h=Math.max(0,Math.trunc(height));
+  const pixels=w*h;
+  if(!w||!h||alpha.length<pixels||rgba.length<pixels*4)return new Uint8ClampedArray();
+  const edgeRadius=clamp(Math.round(Number(radius)||0),0,12);
+  const amount=clamp(Number(strength)||0,0,100)/100;
+  const output=new Uint8ClampedArray(alpha.slice(0,pixels));
+  if(!edgeRadius||!amount)return output;
+
+  const binary=new Uint8ClampedArray(pixels);
+  for(let index=0;index<pixels;index+=1)binary[index]=alpha[index]>=128?255:0;
+  const insideCore=maskExtremeFilter(binary,w,h,edgeRadius,false);
+  const expanded=maskExtremeFilter(binary,w,h,edgeRadius,true);
+  const maxDistance=Math.min(24,Math.max(2,edgeRadius*2));
+
+  for(let y=0;y<h;y+=1){
+    for(let x=0;x<w;x+=1){
+      const index=y*w+x;
+      if(expanded[index]===0||insideCore[index]===255)continue;
+      const inside=meanCoreSample(rgba,insideCore,w,h,x,y,255,maxDistance);
+      const outside=meanCoreSample(rgba,expanded,w,h,x,y,0,maxDistance);
+      if(!inside||!outside)continue;
+      const offset=index*4;
+      const distanceInside=rgbaDistanceToMean(rgba,offset,inside);
+      const distanceOutside=rgbaDistanceToMean(rgba,offset,outside);
+      const total=distanceInside+distanceOutside;
+      if(total<16)continue;
+      const target=clamp(Math.round(255*distanceOutside/total),0,255);
+      const confidence=Math.abs(distanceOutside-distanceInside)/(total+1);
+      const localAmount=amount*(smart?clamp(confidence*1.5,0,1):1);
+      if(localAmount<=0)continue;
+      output[index]=clamp(Math.round(alpha[index]*(1-localAmount)+target*localAmount),0,255);
+    }
+  }
+  return output;
+}
+
 export function refineMaskAlpha(alpha, width, height, {
   smooth = 0,
   shift = 0,
+  edgeRadius = 0,
+  edgeStrength = 60,
+  smartRadius = true,
+  sourceRgba = null,
   feather = 0,
   contrast = 0,
   invert = false,
@@ -117,6 +202,18 @@ export function refineMaskAlpha(alpha, width, height, {
   const edgeShift = clamp(Math.round(Number(shift) || 0), -64, 64);
   if (edgeShift > 0) output = maskExtremeFilter(output, w, h, edgeShift, true);
   else if (edgeShift < 0) output = maskExtremeFilter(output, w, h, -edgeShift, false);
+
+  const detectionRadius = clamp(Math.round(Number(edgeRadius) || 0), 0, 12);
+  if (detectionRadius > 0) {
+    if (!(sourceRgba instanceof Uint8Array || sourceRgba instanceof Uint8ClampedArray) || sourceRgba.length < w*h*4) {
+      throw new TypeError('Для радиуса обнаружения края требуется RGBA source');
+    }
+    output = refineMaskEdgeAware(output, sourceRgba, w, h, {
+      radius:detectionRadius,
+      strength:edgeStrength,
+      smart:smartRadius !== false,
+    });
+  }
 
   const featherRadius = clamp(Number(feather) || 0, 0, 64);
   if (featherRadius > 0) {
