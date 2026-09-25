@@ -8,7 +8,7 @@ const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8
 const adapter=await readFile(new URL('../src/formats/psd.js',import.meta.url),'utf8');
 
 test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
-  assert.match(main,/import \{[^}]*decodePsd[^}]*encodePsdBlob[^}]*encodePsbBlob[^}]*isPsdFile[^}]*\} from '\.\/adapters\/psd\.js'/);
+  assert.match(main,/import \{[^}]*decodePsd[^}]*encodePsdBlob[^}]*encodePsbBlob[^}]*isPsdFile[^}]*\} from '\.\/formats\/psd\.js'/);
   assert.match(main,/PSD — RGB\/CMYK слои 8\/16\/32-bit/);
   assert.match(main,/PSB — RGB\/CMYK Large Document 8\/16\/32-bit/);
   assert.match(main,/async function preparePsdExport\(exportDoc\)/);

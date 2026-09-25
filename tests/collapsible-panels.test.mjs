@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const toolConfig = await readFile(new URL('../src/ui/tool-config.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
@@ -12,12 +13,12 @@ const advancedKeys = [
 ];
 
 test('all color-correction sliders are rendered in the dedicated color and effects sidebar panel', () => {
-  assert.match(main, /const RASTER_EFFECT_CONTROLS = \[/);
-  assert.match(main, /\.\.\.COLOR_CORRECTION_CONTROLS/);
+  assert.match(toolConfig, /export const RASTER_EFFECT_CONTROLS = \[/);
+  assert.match(toolConfig, /\.\.\.COLOR_CORRECTION_CONTROLS/);
   assert.match(main, /function updateEffectsPanel\(\)/);
   assert.match(main, /renderEffectControls\(l\)/);
-  for (const key of advancedKeys) assert.match(main, new RegExp(`key:'${key}'`));
-  assert.match(main, /key:'blur'.*group:'Эффекты'/);
+  for (const key of advancedKeys) assert.match(toolConfig, new RegExp(`key:'${key}'`));
+  assert.match(toolConfig, /key:'blur'.*group:'Эффекты'/);
   assert.match(html, /data-panel-id="effects"/);
   assert.match(html, /id="effectsContent"/);
   assert.match(html, /id="resetColorEffectsBtn"/);

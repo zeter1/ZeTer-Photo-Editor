@@ -9,6 +9,7 @@
 - Build: `tools/build-bundle.mjs` собирает bundle только из канонических модулей; `src/app.bundle.js` синхронизирован с новым source graph.
 - Tests: PSD regression-suite читает канонический format module; добавлен architecture regression, который защищает новые границы и не даёт случайно вернуть implementation в legacy paths.
 - Docs/AI: `docs/PROJECT.md` превращён в короткую точку входа, подробная прежняя инженерная летопись сохранена в `docs/reference/PROJECT_HISTORY.md`; добавлены code map, boundaries, AI workflow и test matrix для быстрого поиска нужной части проекта с меньшим контекстом.
+- Regression follow-up: source-contract тесты теперь проверяют вынесенные UI-константы в `src/ui/tool-config.js`, а legacy shims содержат валидные re-export модули с нормальными переводами строк.
 
 
 ### 2026-09-25T23:11:00+03:00 — Исправлено точное размещение инструментов при перетаскивании

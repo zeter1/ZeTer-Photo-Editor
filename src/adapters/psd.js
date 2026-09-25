@@ -1,1 +1,2 @@
-// Compatibility shim. Canonical implementation: ../formats/psd.js\nexport * from '../formats/psd.js';\n
+// Compatibility shim. Canonical implementation: ../formats/psd.js
+export * from '../formats/psd.js';

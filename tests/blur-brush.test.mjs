@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const toolConfig = await readFile(new URL('../src/ui/tool-config.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
 test('blur brush is exposed as a first-class tool with strength control and shortcut', () => {
   assert.match(index, /data-tool="blur"/);
   assert.match(index, /id="blurStrength"/);
-  assert.match(main, /blur: 'Кисть размытия'/);
+  assert.match(toolConfig, /blur: 'Кисть размытия'/);
   assert.match(main, /KeyR:'blur'/);
   assert.match(main, /tool === 'blur'/);
 });

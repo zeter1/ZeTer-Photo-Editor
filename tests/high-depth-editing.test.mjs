@@ -9,6 +9,7 @@ import {
 } from '../src/core/pixel-buffer.js';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const toolConfig=await readFile(new URL('../src/ui/tool-config.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 
 test('Stage 12d paints directly into 16-bit samples without collapsing them to 8-bit steps',()=>{
@@ -128,7 +129,7 @@ test('Stage 13c flood fill stays in CMYK source space and respects selection pre
 });
 
 test('Stage 13c routes CMYK brush, fill, line and clear through canonical PixelBuffer mutations',()=>{
-  assert.match(main,/NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
+  assert.match(toolConfig,/export const NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
   assert.match(main,/applyCmykPixelBufferBrushDab\(highDepthPaintBuffer/);
   assert.match(main,/applyCmykPixelBufferStrokeSegment\(highDepthPaintBuffer/);
   assert.match(main,/floodFillCmykPixelBuffer\(buffer,x,y/);

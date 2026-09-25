@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const toolConfig=await readFile(new URL('../src/ui/tool-config.js',import.meta.url),'utf8');
 const html=await readFile(new URL('../index.html',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
@@ -21,8 +22,8 @@ test('desktop toolbar uses a readable two-column layout with a compact narrow-sc
 });
 
 test('every toolbar tool receives a rich accessible tooltip instead of a short native title',()=>{
-  assert.match(main,/const TOOL_HELP = \{/);
-  for(const tool of ['move','marquee','brush','clone','heal','smudge','dodge','burn','blur','eraser','fill','gradient','pen','magnetic','wand','line','text','shape','crop','eyedropper','hand','zoom'])assert.match(main,new RegExp(`${tool}:\\{shortcut:`));
+  assert.match(toolConfig,/export const TOOL_HELP = \{/);
+  for(const tool of ['move','marquee','brush','clone','heal','smudge','dodge','burn','blur','eraser','fill','gradient','pen','magnetic','wand','line','text','shape','crop','eyedropper','hand','zoom'])assert.match(toolConfig,new RegExp(`${tool}:\\{shortcut:`));
   assert.match(main,/button\.removeAttribute\('title'\)/);
   assert.match(main,/button\.setAttribute\('aria-describedby',tooltip\.id\)/);
   assert.match(css,/\.tool-tooltip \{/);

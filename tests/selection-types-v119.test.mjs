@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { pointInSelection, selectionBounds, selectionPathPoints } from '../src/core/geometry.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const toolConfig = await readFile(new URL('../src/ui/tool-config.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
 test('selection geometry supports rectangle, ellipse, free lasso and polygonal lasso', () => {
@@ -29,7 +30,7 @@ test('selection toolbar exposes all four selection types and Shift+M cycling', (
   assert.match(index, /value="ellipse">Эллиптическое/);
   assert.match(index, /value="lasso">Свободное лассо/);
   assert.match(index, /value="polygon">Многоугольное лассо/);
-  assert.match(main, /const SELECTION_TYPE_LABELS = \{ rect:'Прямоугольное выделение', ellipse:'Эллиптическое выделение', lasso:'Свободное лассо', polygon:'Многоугольное лассо' \}/);
+  assert.match(toolConfig, /export const SELECTION_TYPE_LABELS = \{ rect:'Прямоугольное выделение', ellipse:'Эллиптическое выделение', lasso:'Свободное лассо', polygon:'Многоугольное лассо' \}/);
   assert.match(main, /function cycleSelectionType\(\)/);
   assert.match(main, /e\.shiftKey&&e\.code==='KeyM'/);
 });
