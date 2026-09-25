@@ -10,7 +10,7 @@ import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, cle
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
 import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, compositeCmykPixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment, applyCmykPixelBufferToneDab, applyCmykPixelBufferBlurDab, applyCmykPixelBufferCloneDab, applyCmykPixelBufferSmudgeDab, floodFillPixelBuffer, floodFillCmykPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
-import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
+import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './adapters/psd.js';
@@ -113,7 +113,7 @@ let highDepthPaintBuffer = null;
 let highDepthPaintLayerId = null;
 let highDepthPaintPreviewDirty = false;
 let highDepthCloneSnapshotBuffer = null;
-let cmykPreviewTransformCache = { document:null, source:null, proof:null, policyKey:'', transform:null };
+let cmykPreviewTransformCache = { document:null, source:null, proof:null, display:null, policyKey:'', transform:null };
 let cmykEditingTransformCache = { document:null, source:null, policyKey:'', transform:null };
 let blurScratchCanvas = null;
 let blurScratchCtx = null;
@@ -1825,17 +1825,17 @@ function colorProfileBytes(profile){
 }
 function colorManagementPolicyKey(documentValue,kind){
   const policy=sanitizeColorManagement(documentValue.colorManagement);
-  return kind+'|'+policy.renderingIntent+'|'+policy.displaySpace+'|'+Number(policy.softProofEnabled)+'|'+Number(policy.blackPointCompensation);
+  return kind+'|'+policy.renderingIntent+'|'+policy.proofRenderingIntent+'|'+policy.displaySpace+'|'+Number(policy.softProofEnabled)+'|'+Number(policy.blackPointCompensation)+'|'+Number(policy.gamutWarningEnabled)+'|'+policy.gamutWarningThreshold;
 }
 function currentCmykPreviewTransform(documentValue=doc){
   const policyKey=colorManagementPolicyKey(documentValue,'preview');
-  if(cmykPreviewTransformCache.document===documentValue&&cmykPreviewTransformCache.source===documentValue.colorProfile&&cmykPreviewTransformCache.proof===documentValue.proofProfile&&cmykPreviewTransformCache.policyKey===policyKey&&cmykPreviewTransformCache.transform)return cmykPreviewTransformCache.transform;
+  if(cmykPreviewTransformCache.document===documentValue&&cmykPreviewTransformCache.source===documentValue.colorProfile&&cmykPreviewTransformCache.proof===documentValue.proofProfile&&cmykPreviewTransformCache.display===documentValue.displayProfile&&cmykPreviewTransformCache.policyKey===policyKey&&cmykPreviewTransformCache.transform)return cmykPreviewTransformCache.transform;
   const policy=sanitizeColorManagement(documentValue.colorManagement);
-  const source=colorProfileBytes(documentValue.colorProfile),proof=colorProfileBytes(documentValue.proofProfile);
+  const source=colorProfileBytes(documentValue.colorProfile),proof=colorProfileBytes(documentValue.proofProfile),display=colorProfileBytes(documentValue.displayProfile);
   const transform=policy.softProofEnabled&&proof
-    ? createCmykSoftProofTransform(source,proof,{intent:policy.renderingIntent,blackPointCompensation:policy.blackPointCompensation})
-    : createCmykToSrgbTransform(source,{intent:policy.renderingIntent,displaySpace:policy.displaySpace});
-  cmykPreviewTransformCache={document:documentValue,source:documentValue.colorProfile,proof:documentValue.proofProfile,policyKey,transform};
+    ? createCmykSoftProofTransform(source,proof,{sourceIntent:policy.renderingIntent,intent:policy.proofRenderingIntent,blackPointCompensation:policy.blackPointCompensation,displayProfileBytes:display,gamutWarningThreshold:policy.gamutWarningThreshold})
+    : createCmykToSrgbTransform(source,{intent:policy.renderingIntent,displaySpace:policy.displaySpace,displayProfileBytes:display,gamutWarningThreshold:policy.gamutWarningThreshold});
+  cmykPreviewTransformCache={document:documentValue,source:documentValue.colorProfile,proof:documentValue.proofProfile,display:documentValue.displayProfile,policyKey,transform};
   return transform;
 }
 function currentSrgbToCmykTransform(documentValue=doc){
@@ -1851,48 +1851,51 @@ function rgb8ToDocumentCmyk(rgb8,documentValue=doc){
   return currentSrgbToCmykTransform(documentValue).apply((Number(rgb[0])||0)/255,(Number(rgb[1])||0)/255,(Number(rgb[2])||0)/255);
 }
 function invalidateCmykTransformCaches(){
-  cmykPreviewTransformCache={document:null,source:null,proof:null,policyKey:'',transform:null};cmykEditingTransformCache={document:null,source:null,policyKey:'',transform:null};
+  cmykPreviewTransformCache={document:null,source:null,proof:null,display:null,policyKey:'',transform:null};cmykEditingTransformCache={document:null,source:null,policyKey:'',transform:null};
 }
 async function rebuildDocumentCmykPreviews(targetDoc,transform){
-  const updates=[];
+  const updates=[],policy=sanitizeColorManagement(targetDoc.colorManagement);
   for(const layer of targetDoc.layers){
     if(layer.type!=='raster'||layer.highDepthSource?.model!=='cmyk')continue;
     const buffer=deserializePixelBufferSource(layer.highDepthSource);
-    const rgba=cmykPixelBufferToRgba8Preview(buffer,transform);
+    const rgba=cmykPixelBufferToRgba8Preview(buffer,transform,{gamutWarning:policy.gamutWarningEnabled});
     updates.push({layer,dataUrl:await rgbaPixelsToDataUrl(buffer.width,buffer.height,rgba,'CMYK preview «'+(layer.name||'Без имени')+'»')});
   }
   if(doc!==targetDoc)return false;
   for(const update of updates){const old=update.layer.dataUrl;update.layer.dataUrl=update.dataUrl;invalidateImageCache(old);}
   return true;
 }
-async function updateDocumentColorManagement(patch,{proofProfile=doc.proofProfile,historyLabel='Изменить CMYK color management'}={}){
+async function updateDocumentColorManagement(patch,{proofProfile=doc.proofProfile,displayProfile=doc.displayProfile,historyLabel='Изменить CMYK color management'}={}){
   const targetDoc=doc;
-  const previousPolicy=sanitizeColorManagement(targetDoc.colorManagement),previousProof=targetDoc.proofProfile;
-  targetDoc.colorManagement=sanitizeColorManagement({...targetDoc.colorManagement,...patch});targetDoc.proofProfile=proofProfile||null;
+  const previousPolicy=sanitizeColorManagement(targetDoc.colorManagement),previousProof=targetDoc.proofProfile,previousDisplay=targetDoc.displayProfile;
+  targetDoc.colorManagement=sanitizeColorManagement({...targetDoc.colorManagement,...patch});targetDoc.proofProfile=proofProfile||null;targetDoc.displayProfile=displayProfile||null;
   invalidateCmykTransformCaches();
   const transform=currentCmykPreviewTransform(targetDoc);
   setStatus('CMYK: пересчёт color-managed display preview…');
   try{
     if(!await rebuildDocumentCmykPreviews(targetDoc,transform)){
-      targetDoc.colorManagement=previousPolicy;targetDoc.proofProfile=previousProof;invalidateCmykTransformCaches();setStatus('CMYK preview отменён: активный документ изменился');return false;
+      targetDoc.colorManagement=previousPolicy;targetDoc.proofProfile=previousProof;targetDoc.displayProfile=previousDisplay;invalidateCmykTransformCaches();setStatus('CMYK preview отменён: активный документ изменился');return false;
     }
-  }catch(error){targetDoc.colorManagement=previousPolicy;targetDoc.proofProfile=previousProof;invalidateCmykTransformCaches();throw error;}
+  }catch(error){targetDoc.colorManagement=previousPolicy;targetDoc.proofProfile=previousProof;targetDoc.displayProfile=previousDisplay;invalidateCmykTransformCaches();throw error;}
   commit(historyLabel);
   const policy=sanitizeColorManagement(targetDoc.colorManagement);
-  const proofLabel=policy.softProofEnabled&&targetDoc.proofProfile?' • soft proof '+(targetDoc.proofProfile.name||'ICC'):'';
+  const displayLabel=targetDoc.displayProfile?'ICC '+(targetDoc.displayProfile.name||'RGB'):policy.displaySpace.toUpperCase();
+  const proofLabel=policy.softProofEnabled&&targetDoc.proofProfile?' • soft proof '+(targetDoc.proofProfile.name||'ICC')+' ('+policy.proofRenderingIntent+')':'';
   const bpc=policy.softProofEnabled&&targetDoc.proofProfile?(policy.blackPointCompensation?' • BPC on':' • BPC off'):'';
-  setStatus('CMYK display: '+policy.renderingIntent+' → '+policy.displaySpace.toUpperCase()+proofLabel+bpc+(transform.warning?' • '+transform.warning:''));
+  const gamut=policy.gamutWarningEnabled?' • gamut warning ΔE>'+policy.gamutWarningThreshold:'';
+  setStatus('CMYK display: '+policy.renderingIntent+' → '+displayLabel+proofLabel+bpc+gamut+(transform.warning?' • '+transform.warning:''));
   if(transform.warning)toast('CMYK preview пересчитан с ограничением ICC transform','warn');
   return true;
 }
 async function updateDocumentRenderingIntent(intent){return updateDocumentColorManagement({renderingIntent:intent},{historyLabel:'Изменить CMYK rendering intent'});}
+async function updateDocumentProofRenderingIntent(intent){return updateDocumentColorManagement({proofRenderingIntent:intent},{historyLabel:'Изменить soft-proof rendering intent'});}
 async function setDocumentSoftProofEnabled(enabled){
   if(enabled&&!doc.proofProfile){toast('Сначала загрузите CMYK ICC proof profile','warn');return false;}
   return updateDocumentColorManagement({softProofEnabled:Boolean(enabled)},{historyLabel:enabled?'Включить soft proof':'Отключить soft proof'});
 }
-async function setDocumentBlackPointCompensation(enabled){
-  return updateDocumentColorManagement({blackPointCompensation:Boolean(enabled)},{historyLabel:'Изменить Black Point Compensation'});
-}
+async function setDocumentBlackPointCompensation(enabled){return updateDocumentColorManagement({blackPointCompensation:Boolean(enabled)},{historyLabel:'Изменить Black Point Compensation'});}
+async function setDocumentGamutWarningEnabled(enabled){return updateDocumentColorManagement({gamutWarningEnabled:Boolean(enabled)},{historyLabel:enabled?'Включить gamut warning':'Отключить gamut warning'});}
+async function setDocumentGamutWarningThreshold(value){return updateDocumentColorManagement({gamutWarningThreshold:Number(value)},{historyLabel:'Изменить gamut-warning threshold'});}
 async function loadDocumentProofProfile(file){
   if(!(file instanceof File)||!file.size)return false;
   if(file.size>4*1024*1024)throw new Error('ICC proof profile превышает лимит 4 МБ');
@@ -1905,16 +1908,36 @@ async function removeDocumentProofProfile(){
   if(!doc.proofProfile)return false;
   return updateDocumentColorManagement({softProofEnabled:false},{proofProfile:null,historyLabel:'Удалить soft proof ICC profile'});
 }
+async function loadDocumentDisplayProfile(file){
+  if(!(file instanceof File)||!file.size)return false;
+  if(file.size>4*1024*1024)throw new Error('Display ICC profile превышает лимит 4 МБ');
+  const bytes=new Uint8Array(await file.arrayBuffer()),info=inspectDisplayIccProfile(bytes);
+  const profile={kind:'icc',untagged:false,dataUrl:bytesToDataUrl(bytes,'application/vnd.iccprofile'),name:file.name.slice(0,240),version:'',deviceClass:'mntr',colorSpace:'RGB',pcs:info.pcs,signatureValid:true};
+  return updateDocumentColorManagement({},{displayProfile:profile,historyLabel:'Загрузить display ICC profile'});
+}
+async function removeDocumentDisplayProfile(){
+  if(!doc.displayProfile)return false;
+  return updateDocumentColorManagement({},{displayProfile:null,historyLabel:'Удалить display ICC profile'});
+}
 function bindColorManagementControls(root){
   const intent=root?.querySelector('[data-cmyk-rendering-intent]');
   if(intent)intent.addEventListener('change',async()=>{intent.disabled=true;try{await updateDocumentRenderingIntent(intent.value);}catch(error){console.error(error);toast('Не удалось пересчитать CMYK preview','error');setStatus('Ошибка CMYK color management: '+error.message);}finally{if(intent.isConnected)intent.disabled=false;}});
+  const proofIntent=root?.querySelector('[data-cmyk-proof-intent]');
+  if(proofIntent)proofIntent.addEventListener('change',async()=>{proofIntent.disabled=true;try{await updateDocumentProofRenderingIntent(proofIntent.value);}catch(error){console.error(error);toast('Не удалось изменить proof intent','error');}finally{if(proofIntent.isConnected)proofIntent.disabled=false;}});
   const proofToggle=root?.querySelector('[data-cmyk-soft-proof]');
   if(proofToggle)proofToggle.addEventListener('change',async()=>{proofToggle.disabled=true;try{await setDocumentSoftProofEnabled(proofToggle.checked);}catch(error){console.error(error);toast(error.message||'Ошибка soft proof','error');}finally{if(proofToggle.isConnected)proofToggle.disabled=false;}});
   const bpc=root?.querySelector('[data-cmyk-bpc]');
   if(bpc)bpc.addEventListener('change',async()=>{bpc.disabled=true;try{await setDocumentBlackPointCompensation(bpc.checked);}catch(error){console.error(error);toast(error.message||'Ошибка BPC','error');}finally{if(bpc.isConnected)bpc.disabled=false;}});
+  const gamut=root?.querySelector('[data-cmyk-gamut-warning]');
+  if(gamut)gamut.addEventListener('change',async()=>{gamut.disabled=true;try{await setDocumentGamutWarningEnabled(gamut.checked);}catch(error){console.error(error);toast(error.message||'Ошибка gamut warning','error');}finally{if(gamut.isConnected)gamut.disabled=false;}});
+  const threshold=root?.querySelector('[data-cmyk-gamut-threshold]');
+  if(threshold)threshold.addEventListener('change',async()=>{threshold.disabled=true;try{await setDocumentGamutWarningThreshold(threshold.value);}catch(error){console.error(error);toast(error.message||'Ошибка gamut threshold','error');}finally{if(threshold.isConnected)threshold.disabled=false;}});
   const proofFile=root?.querySelector('[data-cmyk-proof-file]');
   if(proofFile)proofFile.addEventListener('change',async()=>{const selected=proofFile.files?.[0];if(!selected)return;proofFile.disabled=true;try{await loadDocumentProofProfile(selected);}catch(error){console.error(error);toast(error.message||'Не удалось открыть ICC proof profile','error');setStatus('Ошибка soft proof ICC: '+error.message);}finally{if(proofFile.isConnected)proofFile.disabled=false;}});
+  const displayFile=root?.querySelector('[data-cmyk-display-file]');
+  if(displayFile)displayFile.addEventListener('change',async()=>{const selected=displayFile.files?.[0];if(!selected)return;displayFile.disabled=true;try{await loadDocumentDisplayProfile(selected);}catch(error){console.error(error);toast(error.message||'Не удалось открыть display ICC profile','error');setStatus('Ошибка display ICC: '+error.message);}finally{if(displayFile.isConnected)displayFile.disabled=false;}});
   root?.querySelector('[data-cmyk-proof-remove]')?.addEventListener('click',()=>removeDocumentProofProfile().catch(error=>{console.error(error);toast(error.message||'Ошибка удаления proof profile','error');}));
+  root?.querySelector('[data-cmyk-display-remove]')?.addEventListener('click',()=>removeDocumentDisplayProfile().catch(error=>{console.error(error);toast(error.message||'Ошибка удаления display profile','error');}));
 }
 
 function updateProperties() {
@@ -1945,8 +1968,10 @@ function updateProperties() {
       const policy=sanitizeColorManagement(doc.colorManagement);
       const intentOptions=[['perceptual','Perceptual'],['relative','Relative colorimetric'],['saturation','Saturation'],['absolute','Absolute colorimetric']];
       const intentSelect=intentOptions.map(([value,label])=>`<option value="${value}"${policy.renderingIntent===value?' selected':''}>${label}</option>`).join('');
+      const proofIntentSelect=intentOptions.map(([value,label])=>`<option value="${value}"${policy.proofRenderingIntent===value?' selected':''}>${label}</option>`).join('');
       const proofName=doc.proofProfile?.name||'не выбран';
-      extra = `<label>Нативный источник</label><span>${source.bitsPerChannel}-bit CMYK · ${sizeMb} МБ</span><label>Rendering intent</label><select data-cmyk-rendering-intent>${intentSelect}</select><label>Display space</label><span>${policy.displaySpace.toUpperCase()}</span><label>Soft proof</label><span><input type="checkbox" data-cmyk-soft-proof${policy.softProofEnabled?' checked':''}${doc.proofProfile?'':' disabled'}> ${escapeHtml(proofName)}</span><label>Black Point Compensation</label><span><input type="checkbox" data-cmyk-bpc${policy.blackPointCompensation?' checked':''}> ICC BPC</span><label>Proof ICC</label><input type="file" accept=".icc,.icm,application/vnd.iccprofile" data-cmyk-proof-file><div class="wide"><button type="button" class="mini-button" data-cmyk-proof-remove${doc.proofProfile?'':' disabled'}>Удалить proof profile</button></div><label>Color management</label><span>ICC A2B/D2B/mAB/MPE/cvst → profile-to-profile soft proof → sRGB display</span><label>Редактирование</label><span>Brush, Eraser, Fill, Clear, Line, Blur, Clone/Heal, Smudge и Dodge/Burn сохраняют native CMYK source; Dodge уменьшает ink density, Burn усиливает K без RGB rasterization</span>`;
+      const displayName=doc.displayProfile?.name||'sRGB (browser/OS)';
+      extra = `<label>Нативный источник</label><span>${source.bitsPerChannel}-bit CMYK · ${sizeMb} МБ</span><label>Source intent</label><select data-cmyk-rendering-intent>${intentSelect}</select><label>Display target</label><span>${escapeHtml(displayName)}</span><label>Display ICC</label><input type="file" accept=".icc,.icm,application/vnd.iccprofile" data-cmyk-display-file><div class="wide"><button type="button" class="mini-button" data-cmyk-display-remove${doc.displayProfile?'':' disabled'}>Вернуть sRGB display</button></div><label>Soft proof</label><span><input type="checkbox" data-cmyk-soft-proof${policy.softProofEnabled?' checked':''}${doc.proofProfile?'':' disabled'}> ${escapeHtml(proofName)}</span><label>Proof intent</label><select data-cmyk-proof-intent>${proofIntentSelect}</select><label>Black Point Compensation</label><span><input type="checkbox" data-cmyk-bpc${policy.blackPointCompensation?' checked':''}> ICC BPC</span><label>Proof ICC</label><input type="file" accept=".icc,.icm,application/vnd.iccprofile" data-cmyk-proof-file><div class="wide"><button type="button" class="mini-button" data-cmyk-proof-remove${doc.proofProfile?'':' disabled'}>Удалить proof profile</button></div><label>Gamut warning</label><span><input type="checkbox" data-cmyk-gamut-warning${policy.gamutWarningEnabled?' checked':''}> magenta overlay</span><label>Gamut ΔE</label><input type="number" min="0.5" max="20" step="0.5" value="${policy.gamutWarningThreshold}" data-cmyk-gamut-threshold><label>Color management</label><span>CMYK ICC → PCS → optional proof ICC/BPC → RGB display ICC → browser/OS compositor</span><label>Редактирование</label><span>Brush, Eraser, Fill, Clear, Line, Blur, Clone/Heal, Smudge и Dodge/Burn сохраняют native CMYK source; Dodge уменьшает ink density, Burn усиливает K без RGB rasterization</span>`;
     }else if(Number(source.bitsPerChannel)>8){
       const preview=sanitizeHighDepthPreview(l.highDepthPreview);
       const resolvedAuto=source.bitsPerChannel===32?'ACES':'Clip';
@@ -3782,9 +3807,12 @@ async function openPsd(file){
     const warnings=[...parsed.warnings];
     const isCmyk=parsed.colorMode===4;
     const colorPolicy=sanitizeColorManagement(targetDocument.colorManagement);
-    const cmykTransform=isCmyk?createCmykToSrgbTransform(parsed.iccProfile?.bytes||null,{intent:colorPolicy.renderingIntent,displaySpace:colorPolicy.displaySpace}):null;
+    const sourceProfileBytes=parsed.iccProfile?.bytes||null,proofProfileBytes=colorProfileBytes(targetDocument.proofProfile),displayProfileBytes=colorProfileBytes(targetDocument.displayProfile);
+    const cmykTransform=isCmyk?(colorPolicy.softProofEnabled&&proofProfileBytes
+      ? createCmykSoftProofTransform(sourceProfileBytes,proofProfileBytes,{sourceIntent:colorPolicy.renderingIntent,intent:colorPolicy.proofRenderingIntent,blackPointCompensation:colorPolicy.blackPointCompensation,displayProfileBytes,gamutWarningThreshold:colorPolicy.gamutWarningThreshold})
+      : createCmykToSrgbTransform(sourceProfileBytes,{intent:colorPolicy.renderingIntent,displaySpace:colorPolicy.displaySpace,displayProfileBytes,gamutWarningThreshold:colorPolicy.gamutWarningThreshold})):null;
     const previewPixelsFor=buffer=>buffer?.model==='cmyk'
-      ? cmykPixelBufferToRgba8Preview(buffer,cmykTransform)
+      ? cmykPixelBufferToRgba8Preview(buffer,cmykTransform,{gamutWarning:colorPolicy.gamutWarningEnabled})
       : pixelBufferToRgba8Preview(buffer);
     if(isCmyk){
       if(cmykTransform.managed){
@@ -3912,6 +3940,8 @@ async function openPsd(file){
     next.groups=importedGroups;
     next.paths=structuredClone(parsed.paths||[]);
     next.colorManagement=colorPolicy;
+    next.proofProfile=targetDocument.proofProfile?structuredClone(targetDocument.proofProfile):null;
+    next.displayProfile=targetDocument.displayProfile?structuredClone(targetDocument.displayProfile):null;
     next.colorProfile=parsed.iccProfile?{
       kind:'icc',
       untagged:Boolean(parsed.iccUntagged),

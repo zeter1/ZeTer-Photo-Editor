@@ -972,6 +972,7 @@ test('Stage 13b PSD writer round-trips native CMYK/8-bit layer and composite cha
   assert.equal(decoded.layers[0].pixelBuffer.channels,5);
   assert.deepEqual([...decoded.layers[0].pixelBuffer.data],[...buffer.data]);
   assert.equal(decoded.iccProfile.colorSpace,'CMYK');
+  assert.deepEqual([...decoded.iccProfile.bytes],[...profile],'embedded ICC resource 1039 must survive native CMYK PSD round-trip byte-for-byte');
 });
 
 test('Stage 13b PSB writer round-trips native CMYK/16-bit channels through Lr16', async()=>{

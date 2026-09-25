@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPixelBuffer } from '../src/core/pixel-buffer.js';
-import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, cmykPixelBufferToRgba8Preview } from '../src/core/color-management.js';
+import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from '../src/core/color-management.js';
 
 function putAscii(bytes,offset,value){
   for(let index=0;index<value.length;index+=1)bytes[offset+index]=value.charCodeAt(index);
@@ -240,13 +240,13 @@ function makeFloatClutMpeTag(inputs,outputs,sampleFn){
   return tag;
 }
 
-function makeIccProfileWithTags(entries,{pcs='XYZ '}={}){
+function makeIccProfileWithTags(entries,{pcs='XYZ ',colorSpace='CMYK',deviceClass='prtr'}={}){
   const tableEnd=132+entries.length*12;
   let total=tableEnd;
   for(const entry of entries)total+=entry.data.length;
   const bytes=new Uint8Array(total),view=new DataView(bytes.buffer);
   view.setUint32(0,total,false);bytes[8]=4;bytes[9]=0x40;
-  putAscii(bytes,12,'prtr');putAscii(bytes,16,'CMYK');putAscii(bytes,20,pcs);putAscii(bytes,36,'acsp');
+  putAscii(bytes,12,deviceClass);putAscii(bytes,16,colorSpace);putAscii(bytes,20,pcs);putAscii(bytes,36,'acsp');
   view.setUint32(128,entries.length,false);
   let cursor=tableEnd;
   entries.forEach((entry,index)=>{
@@ -254,6 +254,40 @@ function makeIccProfileWithTags(entries,{pcs='XYZ '}={}){
     bytes.set(entry.data,cursor);cursor+=entry.data.length;
   });
   return bytes;
+}
+
+function makeXyzTypeTag(x,y,z){
+  const bytes=new Uint8Array(20),view=new DataView(bytes.buffer);
+  putAscii(bytes,0,'XYZ ');
+  [x,y,z].forEach((value,index)=>view.setInt32(8+index*4,Math.round(value*65536),false));
+  return bytes;
+}
+
+function makeParametricType4Tag(){
+  const bytes=new Uint8Array(40),view=new DataView(bytes.buffer);
+  putAscii(bytes,0,'para');view.setUint16(8,4,false);
+  const params=[2.4,1/1.055,.055/1.055,1/12.92,.04045,0,0];
+  params.forEach((value,index)=>view.setInt32(12+index*4,Math.round(value*65536),false));
+  return bytes;
+}
+
+function makeProductionLikeDisplayP3Profile(){
+  const trc=makeParametricType4Tag();
+  return makeIccProfileWithTags([
+    {signature:'rXYZ',data:makeXyzTypeTag(.5151,.2412,-.00105)},
+    {signature:'gXYZ',data:makeXyzTypeTag(.29198,.69225,.04188)},
+    {signature:'bXYZ',data:makeXyzTypeTag(.15710,.06657,.78407)},
+    {signature:'rTRC',data:trc},{signature:'gTRC',data:trc},{signature:'bTRC',data:trc},
+  ],{pcs:'XYZ ',colorSpace:'RGB ',deviceClass:'mntr'});
+}
+
+function makeColorfulCmykXyzProfile(){
+  const d2b=makeFloatClutMpeTag(4,3,([c,m,y,k])=>[
+    (1-Math.min(1,c+k))*.96422,
+    1-Math.min(1,m+k),
+    (1-Math.min(1,y+k))*.82521,
+  ]);
+  return makeIccProfileWithTags([{signature:'D2B1',data:d2b}],{pcs:'XYZ '});
 }
 
 function makeRoundTripCmykXyzProfile(){
@@ -307,3 +341,39 @@ test('Stage 13c keeps explicit fallbacks when proof/output transforms are unavai
   assert.equal(proof.softProof,false);
   assert.match(proof.warning,/Soft proof недоступен/);
 });
+
+test('Stage 13d accepts a production-like RGB v4 matrix/TRC display ICC and converts PCS into display RGB',()=>{
+  const source=makeRoundTripCmykXyzProfile();
+  const display=makeProductionLikeDisplayP3Profile();
+  const info=inspectDisplayIccProfile(display);
+  assert.equal(info.colorSpace,'RGB');
+  assert.equal(info.pcs,'XYZ');
+  assert.equal(info.method,'icc-display-matrix-trc');
+  const transform=createCmykToSrgbTransform(source,{intent:'relative',displayProfileBytes:display});
+  assert.equal(transform.managed,true);
+  assert.equal(transform.displayProfileManaged,true);
+  assert.equal(transform.displaySpace,'icc');
+  assert.equal(transform.displayMethod,'icc-display-matrix-trc');
+  assert.ok(transform.apply(0,0,0,0).every(value=>value>.97));
+  assert.ok(transform.apply(0,0,0,1).every(value=>value<.03));
+});
+
+test('Stage 13d gamut warning marks proof-clipped colours without mutating canonical CMYK samples',()=>{
+  const source=makeColorfulCmykXyzProfile();
+  const proof=makeRoundTripCmykXyzProfile();
+  const display=makeProductionLikeDisplayP3Profile();
+  const transform=createCmykSoftProofTransform(source,proof,{sourceIntent:'relative',intent:'relative',displayProfileBytes:display,gamutWarningThreshold:3});
+  const saturated=transform.applyWithGamut(1,0,0,0);
+  const neutral=transform.applyWithGamut(0,0,0,.5);
+  assert.equal(transform.softProof,true);
+  assert.equal(saturated.outOfGamut,true);
+  assert.equal(neutral.outOfGamut,false);
+  const data=new Uint8ClampedArray([255,0,0,0,255, 0,0,0,128,255]);
+  const buffer=createPixelBuffer({width:2,height:1,model:'cmyk',channels:5,bitsPerChannel:8,colorSpace:'device-cmyk',alphaMode:'straight',data});
+  const before=[...buffer.data];
+  const preview=cmykPixelBufferToRgba8Preview(buffer,transform,{gamutWarning:true});
+  assert.deepEqual([...preview.slice(0,4)],[255,0,255,255]);
+  assert.notDeepEqual([...preview.slice(4,7)],[255,0,255]);
+  assert.deepEqual([...buffer.data],before);
+});
+

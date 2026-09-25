@@ -75,6 +75,7 @@ export function createDocument({ name = 'Без имени', width = 1200, heigh
     background,
     colorProfile: null,
     proofProfile: null,
+    displayProfile: null,
     colorManagement: sanitizeColorManagement(),
     paths: [],
     layers: [],
@@ -498,6 +499,7 @@ export function restoreDocument(snapshot) {
   normalizeGroupParents(doc.groups);
   doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
   doc.proofProfile = sanitizeColorProfile(doc.proofProfile);
+  doc.displayProfile = sanitizeColorProfile(doc.displayProfile);
   doc.colorManagement = sanitizeColorManagement(doc.colorManagement);
   const validGroupIds = new Set(doc.groups.map(group => group?.id).filter(Boolean));
   for (const layer of doc.layers) {
@@ -511,18 +513,24 @@ export const COLOR_RENDERING_INTENTS = Object.freeze(['perceptual','relative','s
 export const COLOR_DISPLAY_SPACES = Object.freeze(['srgb']);
 export const DEFAULT_COLOR_MANAGEMENT = Object.freeze({
   renderingIntent:'perceptual',
+  proofRenderingIntent:'relative',
   displaySpace:'srgb',
   softProofEnabled:false,
   blackPointCompensation:true,
+  gamutWarningEnabled:false,
+  gamutWarningThreshold:3,
 });
 
 export function sanitizeColorManagement(value = {}) {
   const source=value&&typeof value==='object'&&!Array.isArray(value)?value:{};
   return {
     renderingIntent:COLOR_RENDERING_INTENTS.includes(source.renderingIntent)?source.renderingIntent:DEFAULT_COLOR_MANAGEMENT.renderingIntent,
+    proofRenderingIntent:COLOR_RENDERING_INTENTS.includes(source.proofRenderingIntent)?source.proofRenderingIntent:DEFAULT_COLOR_MANAGEMENT.proofRenderingIntent,
     displaySpace:COLOR_DISPLAY_SPACES.includes(source.displaySpace)?source.displaySpace:DEFAULT_COLOR_MANAGEMENT.displaySpace,
     softProofEnabled:source.softProofEnabled===true,
     blackPointCompensation:source.blackPointCompensation!==false,
+    gamutWarningEnabled:source.gamutWarningEnabled===true,
+    gamutWarningThreshold:Math.round(bounded(source.gamutWarningThreshold,DEFAULT_COLOR_MANAGEMENT.gamutWarningThreshold,.5,20)*10)/10,
   };
 }
 
@@ -799,6 +807,7 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
   doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
   doc.proofProfile = sanitizeColorProfile(doc.proofProfile);
+  doc.displayProfile = sanitizeColorProfile(doc.displayProfile);
   doc.colorManagement = sanitizeColorManagement(doc.colorManagement);
   const usedPathIds = new Set();
   doc.paths = Array.isArray(doc.paths)

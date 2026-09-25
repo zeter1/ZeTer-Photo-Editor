@@ -173,7 +173,7 @@ test('Stage 13b wires advanced ICC policy and native CMYK PSD/PSB export',()=>{
   assert.match(main,/sanitizeColorManagement/);
   assert.match(main,/data-cmyk-rendering-intent/);
   assert.match(main,/updateDocumentRenderingIntent/);
-  assert.match(main,/createCmykToSrgbTransform\(parsed\.iccProfile\?\.bytes\|\|null,\{intent:colorPolicy\.renderingIntent,displaySpace:colorPolicy\.displaySpace\}\)/);
+  assert.match(main,/createCmykToSrgbTransform\(sourceProfileBytes,\{intent:colorPolicy\.renderingIntent,displaySpace:colorPolicy\.displaySpace,displayProfileBytes/);
   assert.match(main,/function cmykNativeExportEligibility\(/);
   assert.match(main,/function buildNativeCmykComposite\(/);
   assert.match(main,/compositeCmykPixelBufferLayers\(/);
@@ -185,3 +185,14 @@ test('Stage 13b wires advanced ICC policy and native CMYK PSD/PSB export',()=>{
   assert.match(adapter,/\{ id:3, data:encodeExportChannel/);
   assert.match(adapter,/invert:true,matte:0/);
 });
+
+test('Stage 13d wires independent display ICC, proof intent and gamut warning into CMYK preview',()=>{
+  assert.match(main,/inspectDisplayIccProfile/);
+  assert.match(main,/data-cmyk-display-file/);
+  assert.match(main,/data-cmyk-proof-intent/);
+  assert.match(main,/data-cmyk-gamut-warning/);
+  assert.match(main,/gamutWarningThreshold/);
+  assert.match(main,/displayProfileBytes/);
+  assert.match(main,/cmykPixelBufferToRgba8Preview\(buffer,transform,\{gamutWarning:policy\.gamutWarningEnabled\}\)/);
+});
+

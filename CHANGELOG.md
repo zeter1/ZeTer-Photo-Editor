@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.31.0 — 2026-09-25
+
+### 2026-09-25 — Production Color Proofing & Display Profiles Stage 13d
+
+- Display ICC: `.zpe` хранит отдельный bounded RGB `displayProfile`; CMYK preview больше не ограничен только встроенной sRGB policy.
+- Monitor/display transform: ICC core поддерживает PCS→RGB output LUT/MPE и типичный display matrix/TRC contract `rXYZ/gXYZ/bXYZ + rTRC/gTRC/bTRC`, включая inverse TRC, invertible matrix validation и signed XYZ colorants.
+- Proof setup: source rendering intent и proof rendering intent разделены; soft proof сохраняет BPC и проходит source CMYK → PCS → proof CMYK → PCS → selected display ICC.
+- Gamut Warning: добавлен magenta overlay с bounded ΔE threshold; proof/display round-trip проверяется отдельно от canonical CMYK source и не меняет native channels.
+- UI: CMYK inspector получил загрузку/удаление display ICC, отдельный Proof Intent, Gamut Warning и ΔE threshold; sRGB остаётся явным fallback.
+- Import: новый CMYK PSD/PSB использует текущие display/proof settings уже при построении первого preview и переносит proof/display setup в новый документ без смешивания с embedded source ICC.
+- Compatibility regression: synthetic production-like Display-P3 v4 matrix/parametric-TRC structure, gamut overlay и byte-for-byte preservation embedded ICC resource 1039 при native CMYK PSD round-trip.
+- Browser boundary: application-level display ICC симулирует target device RGB, но финальную физическую monitor calibration по-прежнему выполняют browser/OS compositor.
+- Version: приложение синхронизировано на 1.31.0.
+
 ### 2026-09-25 — Native CMYK Editing + Full Proofing Path Stage 13c
 
 - Native CMYK editing: Brush, Eraser, Fill, Clear и Line теперь изменяют canonical 4/5-channel CMYK PixelBuffer напрямую и сохраняют исходную 8/16/32-bit channel precision вместо растрирования display preview в RGB.

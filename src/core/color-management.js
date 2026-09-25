@@ -35,7 +35,13 @@ function iccClamp01(value) {
   return Number.isFinite(number) ? Math.min(1,Math.max(0,number)) : 0;
 }
 
-function iccParseProfile(bytesLike) {
+function iccColorSpaceChannels(colorSpace) {
+  if(colorSpace==='CMYK')return 4;
+  if(colorSpace==='RGB ')return 3;
+  throw new ColorManagementError('ICC color space '+JSON.stringify(colorSpace)+' пока не поддерживается', 'ICC_COLOR_SPACE');
+}
+
+function iccParseProfile(bytesLike,{expectedColorSpace='CMYK'}={}) {
   const bytes=iccBytes(bytesLike);
   if(bytes.length<132)throw new ColorManagementError('ICC profile короче обязательного header/tag table', 'ICC_TRUNCATED');
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
@@ -44,23 +50,20 @@ function iccParseProfile(bytesLike) {
   if(declared<132||declared>bytes.length)throw new ColorManagementError('ICC profile declared size повреждён', 'ICC_SIZE');
   const colorSpace=iccAscii(bytes,16,4);
   const pcs=iccAscii(bytes,20,4);
-  if(colorSpace!=='CMYK')throw new ColorManagementError('ICC profile не является CMYK input profile', 'ICC_COLOR_SPACE');
+  if(expectedColorSpace&&colorSpace!==expectedColorSpace)throw new ColorManagementError('ICC profile color space '+JSON.stringify(colorSpace)+' != '+JSON.stringify(expectedColorSpace), 'ICC_COLOR_SPACE');
+  iccColorSpaceChannels(colorSpace);
   if(pcs!=='Lab '&&pcs!=='XYZ ')throw new ColorManagementError('ICC profile использует неподдерживаемый PCS '+JSON.stringify(pcs), 'ICC_PCS');
   const count=view.getUint32(128,false);
   if(count>4096)throw new ColorManagementError('ICC profile содержит слишком много tags', 'ICC_TAG_LIMIT');
   iccSpan(132,count*12,declared,'ICC tag table');
   const tags=new Map();
   for(let index=0;index<count;index+=1){
-    const entry=132+index*12;
-    const signature=iccAscii(bytes,entry,4);
-    const offset=view.getUint32(entry+4,false);
-    const size=view.getUint32(entry+8,false);
+    const entry=132+index*12,signature=iccAscii(bytes,entry,4),offset=view.getUint32(entry+4,false),size=view.getUint32(entry+8,false);
     iccSpan(offset,size,declared,'ICC tag '+signature);
     if(!tags.has(signature))tags.set(signature,{signature,offset,size});
   }
   return{bytes,view,declared,colorSpace,pcs,tags};
 }
-
 
 function iccAlign4(value) {
   return (Number(value) + 3) & ~3;
@@ -185,7 +188,8 @@ function iccReadMab(profile, tag) {
   if(tag.size<32)throw new ColorManagementError('ICC '+tag.signature+' mAB tag слишком короткий','ICC_MAB_TRUNCATED');
   if(iccAscii(bytes,start,4)!=='mAB ')throw new ColorManagementError('ICC '+tag.signature+' не является lutAToBType','ICC_MAB_TYPE');
   const inputs=bytes[start+8],outputs=bytes[start+9];
-  if(inputs!==4||outputs!==3)throw new ColorManagementError('ICC CMYK mAB ожидает 4 input / 3 output channels','ICC_MAB_CHANNELS');
+  const deviceChannels=iccColorSpaceChannels(profile.colorSpace);
+  if(inputs!==deviceChannels||outputs!==3)throw new ColorManagementError('ICC mAB channel contract '+inputs+'→'+outputs+' не соответствует '+profile.colorSpace.trim()+'→PCS','ICC_MAB_CHANNELS');
   const bOffset=view.getUint32(start+12,false);
   const matrixOffset=view.getUint32(start+16,false);
   const mOffset=view.getUint32(start+20,false);
@@ -233,18 +237,15 @@ function iccReadMab(profile, tag) {
   return{type:'mAB ',tag:tag.signature,pcs,inputs,outputs,aCurves,mCurves,bCurves,clut,matrix};
 }
 
-function iccApplyMab(transform, c, m, y, k) {
-  let values=iccApplyCurves(transform.aCurves,[c,m,y,k]);
+function iccApplyMab(transform, ...inputValues) {
+  if(inputValues.length!==transform.inputs)throw new ColorManagementError('ICC mAB apply input channel mismatch','ICC_MAB_APPLY_CHANNELS');
+  let values=iccApplyCurves(transform.aCurves,inputValues);
   if(transform.clut)values=iccInterpolateClut(transform.clut.data,transform.clut.grid,transform.clut.outputs,values);
   values=iccApplyCurves(transform.mCurves,values);
   if(transform.matrix){
     if(values.length!==3)throw new ColorManagementError('ICC mAB matrix требует 3 channels','ICC_MAB_MATRIX_CHANNELS');
     const q=transform.matrix;
-    values=[
-      q[0]*values[0]+q[1]*values[1]+q[2]*values[2]+q[9],
-      q[3]*values[0]+q[4]*values[1]+q[5]*values[2]+q[10],
-      q[6]*values[0]+q[7]*values[1]+q[8]*values[2]+q[11],
-    ];
+    values=[q[0]*values[0]+q[1]*values[1]+q[2]*values[2]+q[9],q[3]*values[0]+q[4]*values[1]+q[5]*values[2]+q[10],q[6]*values[0]+q[7]*values[1]+q[8]*values[2]+q[11]];
   }
   return iccApplyCurves(transform.bCurves,values).map(iccClamp01);
 }
@@ -615,34 +616,24 @@ function iccIntentPlan(intent) {
 }
 
 function iccResolveDeviceToPcs(profile, intent) {
-  const plan=iccIntentPlan(intent);
-  const warnings=[];
+  const plan=iccIntentPlan(intent),warnings=[],deviceChannels=iccColorSpaceChannels(profile.colorSpace);
   let tag=profile.tags.get(plan.dTag);
   if(tag){
     const type=iccAscii(profile.bytes,tag.offset,4);
-    if(type==='mpet'){
-      return{transform:iccReadMpe(profile,tag,{expectedInputs:4,expectedOutputs:3}),kind:'mpet',tag:tag.signature,resolvedIntent:plan.requested,warnings};
-    }
+    if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:deviceChannels,expectedOutputs:3}),kind:'mpet',tag:tag.signature,resolvedIntent:plan.requested,warnings};
     warnings.push(plan.dTag+' найден, но имеет неподдерживаемый type '+JSON.stringify(type));
   }
   tag=profile.tags.get(plan.aTag);
   let resolvedIntent=plan.requested==='absolute'?'relative':plan.requested;
   if(plan.requested==='absolute'&&tag)warnings.push('Absolute intent: D2B3 отсутствует; использован relative A2B1 transform');
-  if(!tag&&plan.aTag!=='A2B0'){
-    tag=profile.tags.get('A2B0');
-    if(tag){
-      resolvedIntent='perceptual';
-      warnings.push(plan.aTag+' отсутствует; использован A2B0 perceptual transform');
-    }
-  }
+  if(!tag&&plan.aTag!=='A2B0'){tag=profile.tags.get('A2B0');if(tag){resolvedIntent='perceptual';warnings.push(plan.aTag+' отсутствует; использован A2B0 perceptual transform');}}
   if(!tag)throw new ColorManagementError('ICC profile не содержит подходящий D2B/A2B device-to-PCS transform','ICC_DEVICE_TO_PCS_MISSING');
   const type=iccAscii(profile.bytes,tag.offset,4);
-  if(type==='mft1'||type==='mft2')return{transform:iccReadMft(profile,tag,{expectedInputs:4,expectedOutputs:3}),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mft1'||type==='mft2')return{transform:iccReadMft(profile,tag,{expectedInputs:deviceChannels,expectedOutputs:3}),kind:type,tag:tag.signature,resolvedIntent,warnings};
   if(type==='mAB ')return{transform:iccReadMab(profile,tag),kind:type,tag:tag.signature,resolvedIntent,warnings};
-  if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:4,expectedOutputs:3}),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:deviceChannels,expectedOutputs:3}),kind:type,tag:tag.signature,resolvedIntent,warnings};
   throw new ColorManagementError('ICC '+tag.signature+' использует неподдерживаемый transform type '+JSON.stringify(type),'ICC_TRANSFORM_TYPE');
 }
-
 
 function iccXyzD50ToLab(x,y,z) {
   const delta=6/29;
@@ -697,7 +688,8 @@ function iccReadMba(profile,tag) {
   const start=tag.offset,end=start+tag.size;
   if(tag.size<32||iccAscii(bytes,start,4)!=='mBA ')throw new ColorManagementError('ICC '+tag.signature+' не является lutBToAType','ICC_MBA_TYPE');
   const inputs=bytes[start+8],outputs=bytes[start+9];
-  if(inputs!==3||outputs!==4)throw new ColorManagementError('ICC CMYK output mBA ожидает PCS 3 input / CMYK 4 output','ICC_MBA_CHANNELS');
+  const deviceChannels=iccColorSpaceChannels(profile.colorSpace);
+  if(inputs!==3||outputs!==deviceChannels)throw new ColorManagementError('ICC mBA channel contract '+inputs+'→'+outputs+' не соответствует PCS→'+profile.colorSpace.trim(),'ICC_MBA_CHANNELS');
   const bOffset=view.getUint32(start+12,false),matrixOffset=view.getUint32(start+16,false),mOffset=view.getUint32(start+20,false),clutOffset=view.getUint32(start+24,false),aOffset=view.getUint32(start+28,false);
   for(const [name,offset] of [['B',bOffset],['matrix',matrixOffset],['M',mOffset],['CLUT',clutOffset],['A',aOffset]])if(offset)iccSpan(start+offset,4,end,'ICC mBA '+name);
   const bCurves=iccReadSequentialCurves(profile,tag,bOffset,inputs,'ICC mBA B curve');
@@ -719,7 +711,7 @@ function iccReadMba(profile,tag) {
     for(let i=0;i<samples;i+=1)data[i]=precision===1?bytes[dataStart+i]/255:view.getUint16(dataStart+i*2,false)/65535;
     clut={grid,outputs,data};
   }
-  if(inputs!==outputs&&!clut)throw new ColorManagementError('ICC mBA 3→4 требует CLUT','ICC_MBA_CLUT_REQUIRED');
+  if(inputs!==outputs&&!clut)throw new ColorManagementError('ICC mBA с разным числом channels требует CLUT','ICC_MBA_CLUT_REQUIRED');
   return{type:'mBA ',tag:tag.signature,pcs,inputs,outputs,bCurves,matrix,mCurves,clut,aCurves};
 }
 
@@ -745,15 +737,10 @@ function iccOutputIntentPlan(intent) {
   if(normalized==='absolute')return{requested:normalized,dTag:'B2D3',aTag:'B2A1'};
   return{requested:'perceptual',dTag:'B2D0',aTag:'B2A0'};
 }
-
 function iccResolvePcsToDevice(profile,intent) {
-  const plan=iccOutputIntentPlan(intent),warnings=[];
+  const plan=iccOutputIntentPlan(intent),warnings=[],deviceChannels=iccColorSpaceChannels(profile.colorSpace);
   let tag=profile.tags.get(plan.dTag);
-  if(tag){
-    const type=iccAscii(profile.bytes,tag.offset,4);
-    if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:3,expectedOutputs:4}),kind:'mpet',tag:tag.signature,resolvedIntent:plan.requested,warnings};
-    warnings.push(plan.dTag+' найден, но имеет неподдерживаемый type '+JSON.stringify(type));
-  }
+  if(tag){const type=iccAscii(profile.bytes,tag.offset,4);if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:3,expectedOutputs:deviceChannels}),kind:'mpet',tag:tag.signature,resolvedIntent:plan.requested,warnings};warnings.push(plan.dTag+' найден, но имеет неподдерживаемый type '+JSON.stringify(type));}
   tag=profile.tags.get(plan.aTag);
   let resolvedIntent=plan.requested==='absolute'?'relative':plan.requested;
   if(plan.requested==='absolute'&&tag)warnings.push('Absolute intent: B2D3 отсутствует; использован relative B2A1 transform');
@@ -761,53 +748,57 @@ function iccResolvePcsToDevice(profile,intent) {
   if(!tag)throw new ColorManagementError('ICC profile не содержит подходящий B2D/B2A PCS-to-device transform','ICC_PCS_TO_DEVICE_MISSING');
   const type=iccAscii(profile.bytes,tag.offset,4);
   if(type==='mBA ')return{transform:iccReadMba(profile,tag),kind:'mBA ',tag:tag.signature,resolvedIntent,warnings};
-  if(type==='mft1'||type==='mft2')return{transform:iccReadMft(profile,tag,{expectedInputs:3,expectedOutputs:4}),kind:type,tag:tag.signature,resolvedIntent,warnings};
-  if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:3,expectedOutputs:4}),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mft1'||type==='mft2')return{transform:iccReadMft(profile,tag,{expectedInputs:3,expectedOutputs:deviceChannels}),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:3,expectedOutputs:deviceChannels}),kind:type,tag:tag.signature,resolvedIntent,warnings};
   throw new ColorManagementError('ICC '+tag.signature+' uses unsupported PCS-to-device transform '+JSON.stringify(type),'ICC_PCS_TO_DEVICE_TYPE');
 }
-
 function iccDeviceToXyzTransform(profile,intent) {
-  const resolved=iccResolveDeviceToPcs(profile,intent),transform=resolved.transform;
-  return{
-    ...resolved,
-    apply(values){
-      if(!Array.isArray(values)||values.length!==4)throw new ColorManagementError('CMYK→PCS ожидает 4 channels','ICC_DEVICE_INPUT');
-      if(resolved.kind==='mft1'||resolved.kind==='mft2')return iccLutOutputToXyzD50(transform,iccApplyLut(transform,...values.map(iccClamp01)));
-      if(resolved.kind==='mAB ')return iccNormalizedPcsToXyzD50(profile.pcs,iccApplyMab(transform,...values.map(iccClamp01)));
-      return iccFloatPcsToXyzD50(profile.pcs,iccApplyMpe(transform,...values.map(iccClamp01)));
-    },
-  };
+  const resolved=iccResolveDeviceToPcs(profile,intent),transform=resolved.transform,deviceChannels=iccColorSpaceChannels(profile.colorSpace);
+  return{...resolved,apply(values){const samples=Array.from(values||[]);if(samples.length!==deviceChannels)throw new ColorManagementError(profile.colorSpace.trim()+'→PCS ожидает '+deviceChannels+' channels','ICC_DEVICE_INPUT');const normalized=samples.map(iccClamp01);if(resolved.kind==='mft1'||resolved.kind==='mft2')return iccLutOutputToXyzD50(transform,iccApplyLut(transform,...normalized));if(resolved.kind==='mAB ')return iccNormalizedPcsToXyzD50(profile.pcs,iccApplyMab(transform,...normalized));return iccFloatPcsToXyzD50(profile.pcs,iccApplyMpe(transform,...normalized));}};
 }
-
 function iccPcsToDeviceTransform(profile,intent) {
   const resolved=iccResolvePcsToDevice(profile,intent),transform=resolved.transform;
-  return{
-    ...resolved,
-    applyXyz(xyz){
-      let values;
-      if(resolved.kind==='mpet')values=iccApplyMpe(transform,...iccXyzD50ToFloatPcs(profile.pcs,xyz));
-      else if(resolved.kind==='mBA ')values=iccApplyMba(transform,iccXyzD50ToNormalizedPcs(profile.pcs,xyz));
-      else values=iccApplyLut(transform,...iccXyzD50ToNormalizedPcs(profile.pcs,xyz));
-      return Array.from(values,iccClamp01);
-    },
-  };
+  return{...resolved,applyXyz(xyz){let values;if(resolved.kind==='mpet')values=iccApplyMpe(transform,...iccXyzD50ToFloatPcs(profile.pcs,xyz));else if(resolved.kind==='mBA ')values=iccApplyMba(transform,iccXyzD50ToNormalizedPcs(profile.pcs,xyz));else values=iccApplyLut(transform,...iccXyzD50ToNormalizedPcs(profile.pcs,xyz));return Array.from(values,iccClamp01);}};
 }
-
 function srgbToXyzD50(r,g,b) {
-  const red=iccClamp01(r),green=iccClamp01(g),blue=iccClamp01(b);
-  const lin=[red,green,blue].map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
-  const x65=.4124564*lin[0]+.3575761*lin[1]+.1804375*lin[2];
-  const y65=.2126729*lin[0]+.7151522*lin[1]+.0721750*lin[2];
-  const z65=.0193339*lin[0]+.1191920*lin[1]+.9503041*lin[2];
-  return[
-    1.0478112*x65+.0228866*y65-.0501270*z65,
-    .0295424*x65+.9904844*y65-.0170491*z65,
-    -.0092345*x65+.0150436*y65+.7521316*z65,
-  ];
+  const red=iccClamp01(r),green=iccClamp01(g),blue=iccClamp01(b),lin=[red,green,blue].map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
+  const x65=.4124564*lin[0]+.3575761*lin[1]+.1804375*lin[2],y65=.2126729*lin[0]+.7151522*lin[1]+.0721750*lin[2],z65=.0193339*lin[0]+.1191920*lin[1]+.9503041*lin[2];
+  return[1.0478112*x65+.0228866*y65-.0501270*z65,.0295424*x65+.9904844*y65-.0170491*z65,-.0092345*x65+.0150436*y65+.7521316*z65];
 }
 
-function xyzD50ToSrgb(xyz) {
-  return iccXyzD65ToSrgb(...iccXyzD50ToD65(...xyz));
+function xyzD50ToSrgbDetailed(xyz) {
+  const [x,y,z]=iccXyzD50ToD65(Number(xyz?.[0])||0,Number(xyz?.[1])||0,Number(xyz?.[2])||0);
+  const linear=[3.2404542*x-1.5371385*y-.4985314*z,-.969266*x+1.8760108*y+.041556*z,.0556434*x-.2040259*y+1.0572252*z];
+  const encode=value=>{const v=iccClamp01(value);return v<=.0031308?12.92*v:1.055*(v**(1/2.4))-.055;};
+  return{rgb:linear.map(encode),outOfGamut:linear.some(value=>value<-1e-6||value>1+1e-6),deviceLinear:linear};
+}
+function xyzD50ToSrgb(xyz){return xyzD50ToSrgbDetailed(xyz).rgb;}
+function iccReadXyzTag(profile,signature){const tag=profile.tags.get(signature);if(!tag)throw new ColorManagementError('Display ICC не содержит '+signature,'ICC_DISPLAY_XYZ_TAG');if(tag.size<20)throw new ColorManagementError('Display ICC '+signature+' tag обрезан','ICC_DISPLAY_XYZ_TAG');if(iccAscii(profile.bytes,tag.offset,4)!=='XYZ ')throw new ColorManagementError('Display ICC '+signature+' должен быть XYZType','ICC_DISPLAY_XYZ_TYPE');return[iccS15Fixed16(profile.view,tag.offset+8),iccS15Fixed16(profile.view,tag.offset+12),iccS15Fixed16(profile.view,tag.offset+16)];}
+function iccReadStandaloneCurveTag(profile,signature){const tag=profile.tags.get(signature);if(!tag)throw new ColorManagementError('Display ICC не содержит '+signature,'ICC_DISPLAY_TRC_TAG');return iccReadCurve(profile,tag.offset,tag.offset+tag.size,'Display ICC '+signature);}
+function iccInvert3x3(matrix){const[a,b,c,d,e,f,g,h,i]=matrix,a11=e*i-f*h,a12=c*h-b*i,a13=b*f-c*e,a21=f*g-d*i,a22=a*i-c*g,a23=c*d-a*f,a31=d*h-e*g,a32=b*g-a*h,a33=a*e-b*d,det=a*a11+b*a21+c*a31;if(!Number.isFinite(det)||Math.abs(det)<1e-12)throw new ColorManagementError('Display ICC RGB matrix вырождена','ICC_DISPLAY_MATRIX');return[a11/det,a12/det,a13/det,a21/det,a22/det,a23/det,a31/det,a32/det,a33/det];}
+function iccApplyMatrix3(matrix,values){return[matrix[0]*values[0]+matrix[1]*values[1]+matrix[2]*values[2],matrix[3]*values[0]+matrix[4]*values[1]+matrix[5]*values[2],matrix[6]*values[0]+matrix[7]*values[1]+matrix[8]*values[2]];}
+function iccPrepareCurveInverse(curve,label){let previous=curve.apply(0);for(let step=1;step<=32;step+=1){const current=curve.apply(step/32);if(current+1e-7<previous)throw new ColorManagementError(label+' должна быть монотонной','ICC_DISPLAY_TRC_MONOTONIC');previous=current;}return value=>{const target=iccClamp01(value);let low=0,high=1;for(let iteration=0;iteration<28;iteration+=1){const middle=(low+high)/2;if(curve.apply(middle)<target)low=middle;else high=middle;}return iccClamp01((low+high)/2);};}
+function iccDeltaE76Xyz(first,second){const a=iccXyzD50ToLab(...first),b=iccXyzD50ToLab(...second);return Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);}
+function iccCreateMatrixTrcDisplayTransform(profile,{gamutWarningThreshold=3}={}) {
+  if(profile.colorSpace!=='RGB '||profile.pcs!=='XYZ ')throw new ColorManagementError('Matrix/TRC display ICC требует RGB device space и XYZ PCS','ICC_DISPLAY_MATRIX_PCS');
+  const red=iccReadXyzTag(profile,'rXYZ'),green=iccReadXyzTag(profile,'gXYZ'),blue=iccReadXyzTag(profile,'bXYZ'),matrix=[red[0],green[0],blue[0],red[1],green[1],blue[1],red[2],green[2],blue[2]],inverse=iccInvert3x3(matrix);
+  const curves=['rTRC','gTRC','bTRC'].map(signature=>iccReadStandaloneCurveTag(profile,signature)),inverseCurves=curves.map((curve,index)=>iccPrepareCurveInverse(curve,['rTRC','gTRC','bTRC'][index])),threshold=Math.max(.5,Math.min(20,Number(gamutWarningThreshold)||3));
+  return{managed:true,profileManaged:true,method:'icc-display-matrix-trc',displaySpace:'icc',tag:'rXYZ/rTRC',warning:null,applyXyzDetailed(xyz){const linear=iccApplyMatrix3(inverse,Array.from(xyz,Number)),rgb=linear.map((value,index)=>inverseCurves[index](value)),roundTrip=iccApplyMatrix3(matrix,rgb.map((value,index)=>curves[index].apply(value))),deltaE=iccDeltaE76Xyz(Array.from(xyz,Number),roundTrip);return{rgb,outOfGamut:linear.some(value=>value<-1e-6||value>1+1e-6)||deltaE>threshold,deltaE};}};
+}
+export function createDisplayIccTransform(profileBytes=null,{intent='relative',gamutWarningThreshold=3}={}) {
+  const threshold=Math.max(.5,Math.min(20,Number(gamutWarningThreshold)||3));
+  const srgbFallback=warning=>({managed:profileBytes?false:true,profileManaged:false,method:profileBytes?'srgb-display-fallback':'builtin-srgb',displaySpace:'srgb',tag:null,warning:warning||null,applyXyzDetailed(xyz){return xyzD50ToSrgbDetailed(xyz);}});
+  if(!profileBytes)return srgbFallback(null);
+  try{
+    const profile=iccParseProfile(profileBytes,{expectedColorSpace:'RGB '});let lutError=null;
+    try{
+      const output=iccPcsToDeviceTransform(profile,intent);let input=null;try{input=iccDeviceToXyzTransform(profile,'relative');}catch{}
+      const warnings=[...output.warnings];
+      return{managed:true,profileManaged:true,method:output.kind==='mpet'?'icc-display-b2d-mpe':output.kind==='mBA '?'icc-display-mba':'icc-display-b2a-lut',displaySpace:'icc',tag:output.tag,warning:warnings.length?warnings.join('; '):null,applyXyzDetailed(xyz){const rgb=output.applyXyz(Array.from(xyz,Number));let deltaE=0,outOfGamut=false;if(input){const roundTrip=input.apply(rgb);deltaE=iccDeltaE76Xyz(Array.from(xyz,Number),roundTrip);outOfGamut=deltaE>threshold;}return{rgb,outOfGamut,deltaE};}};
+    }catch(error){lutError=error;}
+    try{return iccCreateMatrixTrcDisplayTransform(profile,{gamutWarningThreshold:threshold});}
+    catch(matrixError){throw new ColorManagementError('Display ICC не содержит поддерживаемого PCS→RGB LUT или matrix/TRC transform ('+(matrixError?.message||matrixError)+'; LUT: '+(lutError?.message||lutError)+')','ICC_DISPLAY_TRANSFORM');}
+  }catch(error){return srgbFallback('Display ICC transform недоступен ('+(error?.message||error)+'); используется sRGB display fallback');}
 }
 
 function deviceCmykFromSrgb(r,g,b) {
@@ -823,25 +814,29 @@ export function inspectCmykIccProfile(profileBytes) {
   return{colorSpace:profile.colorSpace.trim(),pcs:profile.pcs.trim(),tags:[...profile.tags.keys()].sort()};
 }
 
+export function inspectDisplayIccProfile(profileBytes) {
+  const profile=iccParseProfile(profileBytes,{expectedColorSpace:'RGB '});
+  const transform=createDisplayIccTransform(profileBytes,{intent:'relative'});
+  if(!transform.profileManaged)throw new ColorManagementError(transform.warning||'Display ICC profile не поддерживается','ICC_DISPLAY_TRANSFORM');
+  return{colorSpace:profile.colorSpace.trim(),pcs:profile.pcs.trim(),tags:[...profile.tags.keys()].sort(),method:transform.method};
+}
+
 export function createSrgbToCmykTransform(profileBytes=null,{intent='relative'}={}) {
   const requestedIntent=iccIntentPlan(intent).requested;
   const fallback=warning=>({managed:false,method:'srgb-device-cmyk-fallback',intent:'fallback',requestedIntent,tag:null,warning,apply:(r,g,b)=>deviceCmykFromSrgb(r,g,b)});
   if(!profileBytes)return fallback('CMYK ICC profile отсутствует; RGB editing color переводится через Device-CMYK fallback');
   try{
     const profile=iccParseProfile(profileBytes),output=iccPcsToDeviceTransform(profile,requestedIntent);
-    return{managed:true,method:output.kind==='mpet'?'icc-b2d-mpe':output.kind==='mBA '?'icc-mba':'icc-b2a-lut',intent:output.resolvedIntent,requestedIntent,tag:output.tag,warning:output.warnings.length?output.warnings.join('; '):null,
-      apply(r,g,b){return output.applyXyz(srgbToXyzD50(r,g,b));}};
+    return{managed:true,method:output.kind==='mpet'?'icc-b2d-mpe':output.kind==='mBA '?'icc-mba':'icc-b2a-lut',intent:output.resolvedIntent,requestedIntent,tag:output.tag,warning:output.warnings.length?output.warnings.join('; '):null,apply(r,g,b){return output.applyXyz(srgbToXyzD50(r,g,b));}};
   }catch(error){return fallback('RGB→CMYK ICC transform недоступен ('+(error?.message||error)+'); используется Device-CMYK fallback');}
 }
 
 function estimateProfileBlackY(profile) {
   try{
-    const output=iccPcsToDeviceTransform(profile,'perceptual');
-    const relative=iccDeviceToXyzTransform(profile,'relative');
-    const deviceBlack=output.applyXyz([0,0,0]);
+    const output=iccPcsToDeviceTransform(profile,'perceptual'),relative=iccDeviceToXyzTransform(profile,'relative'),deviceBlack=output.applyXyz([0,0,0]);
     return Math.max(0,Math.min(.999999,relative.apply(deviceBlack)[1]));
   }catch{
-    try{return Math.max(0,Math.min(.999999,iccDeviceToXyzTransform(profile,'relative').apply([1,1,1,1])[1]));}
+    try{const channels=iccColorSpaceChannels(profile.colorSpace);return Math.max(0,Math.min(.999999,iccDeviceToXyzTransform(profile,'relative').apply(new Array(channels).fill(1))[1]));}
     catch{return 0;}
   }
 }
@@ -850,104 +845,50 @@ function applyBlackPointCompensationXyz(xyz,sourceBlackY,destBlackY) {
   const denominator=1-sourceBlackY;
   if(!(denominator>1e-9))return xyz;
   const r=(1-destBlackY)/denominator;
-  return[
-    r*xyz[0]+(1-r)*ICC_D50[0],
-    r*xyz[1]+(1-r)*ICC_D50[1],
-    r*xyz[2]+(1-r)*ICC_D50[2],
-  ];
+  return[r*xyz[0]+(1-r)*ICC_D50[0],r*xyz[1]+(1-r)*ICC_D50[1],r*xyz[2]+(1-r)*ICC_D50[2]];
 }
 
-export function createCmykSoftProofTransform(sourceProfileBytes,proofProfileBytes,{intent='relative',blackPointCompensation=true}={}) {
-  const requestedIntent=iccIntentPlan(intent).requested;
+export function createCmykSoftProofTransform(sourceProfileBytes,proofProfileBytes,{intent='relative',sourceIntent=intent,blackPointCompensation=true,displayProfileBytes=null,displayIntent='relative',gamutWarningThreshold=3}={}) {
+  const requestedIntent=iccIntentPlan(intent).requested,requestedSourceIntent=iccIntentPlan(sourceIntent).requested,threshold=Math.max(.5,Math.min(20,Number(gamutWarningThreshold)||3));
   if(!sourceProfileBytes||!proofProfileBytes){
-    const base=createCmykToSrgbTransform(sourceProfileBytes,{intent:requestedIntent});
+    const base=createCmykToSrgbTransform(sourceProfileBytes,{intent:requestedSourceIntent,displayProfileBytes,displayIntent,gamutWarningThreshold:threshold});
     return{...base,softProof:false,blackPointCompensation:false,warning:'Soft proof profile отсутствует; используется обычный CMYK display transform'+(base.warning?' • '+base.warning:'')};
   }
   try{
-    const source=iccParseProfile(sourceProfileBytes),proof=iccParseProfile(proofProfileBytes);
-    const sourceIn=iccDeviceToXyzTransform(source,requestedIntent);
-    const proofOut=iccPcsToDeviceTransform(proof,requestedIntent);
-    const proofIn=iccDeviceToXyzTransform(proof,'relative');
-    const sourceBlackY=blackPointCompensation?estimateProfileBlackY(source):0;
-    const proofBlackY=blackPointCompensation?estimateProfileBlackY(proof):0;
-    const warnings=[...sourceIn.warnings,...proofOut.warnings,...proofIn.warnings].filter(Boolean);
-    return{
-      managed:true,softProof:true,method:'icc-profile-to-profile-proof',intent:requestedIntent,requestedIntent,displaySpace:'srgb',
-      blackPointCompensation:Boolean(blackPointCompensation),sourceTag:sourceIn.tag,proofOutputTag:proofOut.tag,proofInputTag:proofIn.tag,
-      warning:warnings.length?warnings.join('; '):null,
-      apply(c,m,y,k){
-        let xyz=sourceIn.apply([iccClamp01(c),iccClamp01(m),iccClamp01(y),iccClamp01(k)]);
-        if(blackPointCompensation)xyz=applyBlackPointCompensationXyz(xyz,sourceBlackY,proofBlackY);
-        const proofDevice=proofOut.applyXyz(xyz);
-        const simulated=proofIn.apply(proofDevice);
-        return xyzD50ToSrgb(simulated);
-      },
+    const source=iccParseProfile(sourceProfileBytes),proof=iccParseProfile(proofProfileBytes),sourceIn=iccDeviceToXyzTransform(source,requestedSourceIntent),proofOut=iccPcsToDeviceTransform(proof,requestedIntent),proofIn=iccDeviceToXyzTransform(proof,'relative'),display=createDisplayIccTransform(displayProfileBytes,{intent:displayIntent,gamutWarningThreshold:threshold});
+    const sourceBlackY=blackPointCompensation?estimateProfileBlackY(source):0,proofBlackY=blackPointCompensation?estimateProfileBlackY(proof):0,warnings=[...sourceIn.warnings,...proofOut.warnings,...proofIn.warnings,display.warning].filter(Boolean);
+    const applyWithGamut=(c,m,y,k)=>{
+      let targetXyz=sourceIn.apply([iccClamp01(c),iccClamp01(m),iccClamp01(y),iccClamp01(k)]);
+      if(blackPointCompensation)targetXyz=applyBlackPointCompensationXyz(targetXyz,sourceBlackY,proofBlackY);
+      const proofDevice=proofOut.applyXyz(targetXyz),simulated=proofIn.apply(proofDevice),proofDeltaE=iccDeltaE76Xyz(targetXyz,simulated),displayResult=display.applyXyzDetailed(simulated);
+      return{rgb:displayResult.rgb,outOfGamut:proofDeltaE>threshold||displayResult.outOfGamut,proofDeltaE,displayDeltaE:displayResult.deltaE||0};
     };
+    return{managed:true,softProof:true,method:'icc-profile-to-profile-proof',intent:proofOut.resolvedIntent,requestedIntent,sourceIntent:sourceIn.resolvedIntent,requestedSourceIntent,displaySpace:display.displaySpace,displayManaged:display.managed,displayProfileManaged:display.profileManaged,displayMethod:display.method,displayTag:display.tag,blackPointCompensation:Boolean(blackPointCompensation),gamutWarningThreshold:threshold,sourceTag:sourceIn.tag,proofOutputTag:proofOut.tag,proofInputTag:proofIn.tag,warning:warnings.length?warnings.join('; '):null,applyWithGamut,apply(c,m,y,k){return applyWithGamut(c,m,y,k).rgb;}};
   }catch(error){
-    const base=createCmykToSrgbTransform(sourceProfileBytes,{intent:requestedIntent});
+    const base=createCmykToSrgbTransform(sourceProfileBytes,{intent:requestedSourceIntent,displayProfileBytes,displayIntent,gamutWarningThreshold:threshold});
     return{...base,softProof:false,blackPointCompensation:false,warning:'Soft proof недоступен ('+(error?.message||error)+'); используется обычный CMYK display transform'+(base.warning?' • '+base.warning:'')};
   }
 }
 
 function iccDeviceCmykFallback(c,m,y,k) {
   const cyan=iccClamp01(c),magenta=iccClamp01(m),yellow=iccClamp01(y),black=iccClamp01(k);
-  return[
-    (1-cyan)*(1-black),
-    (1-magenta)*(1-black),
-    (1-yellow)*(1-black),
-  ];
+  return[(1-cyan)*(1-black),(1-magenta)*(1-black),(1-yellow)*(1-black)];
 }
 
-export function createCmykToSrgbTransform(profileBytes = null, { intent = 'perceptual', displaySpace = 'srgb' } = {}) {
-  const requestedIntent=iccIntentPlan(intent).requested;
-  const requestedDisplay=String(displaySpace||'srgb').toLowerCase();
-  const fallback=warning=>({
-    managed:false,
-    method:'device-cmyk-fallback',
-    intent:'fallback',
-    requestedIntent,
-    displaySpace:'srgb',
-    tag:null,
-    pcs:null,
-    warning,
-    apply:iccDeviceCmykFallback,
-  });
-  if(requestedDisplay!=='srgb')return fallback('Display space '+JSON.stringify(displaySpace)+' пока не поддерживается; доступен только sRGB display policy');
+export function createCmykToSrgbTransform(profileBytes=null,{intent='perceptual',displaySpace='srgb',displayProfileBytes=null,displayIntent='relative',gamutWarningThreshold=3}={}) {
+  const requestedIntent=iccIntentPlan(intent).requested,requestedDisplay=String(displaySpace||'srgb').toLowerCase(),threshold=Math.max(.5,Math.min(20,Number(gamutWarningThreshold)||3)),display=createDisplayIccTransform(displayProfileBytes,{intent:displayIntent,gamutWarningThreshold:threshold});
+  const fallback=warning=>{
+    const applyWithGamut=(c,m,y,k)=>{const fallbackRgb=iccDeviceCmykFallback(c,m,y,k),displayResult=display.applyXyzDetailed(srgbToXyzD50(...fallbackRgb));return{rgb:displayResult.rgb,outOfGamut:displayResult.outOfGamut,displayDeltaE:displayResult.deltaE||0};};
+    return{managed:false,method:'device-cmyk-fallback',intent:'fallback',requestedIntent,displaySpace:display.displaySpace,displayManaged:display.managed,displayProfileManaged:display.profileManaged,displayMethod:display.method,displayTag:display.tag,tag:null,pcs:null,gamutWarningThreshold:threshold,warning:[warning,display.warning].filter(Boolean).join(' • ')||null,applyWithGamut,apply(c,m,y,k){return applyWithGamut(c,m,y,k).rgb;}};
+  };
+  if(requestedDisplay!=='srgb'&&!displayProfileBytes)return fallback('Display space '+JSON.stringify(displaySpace)+' пока не поддерживается без RGB display ICC profile; доступен только sRGB display fallback');
   if(!profileBytes)return fallback('ICC profile отсутствует; используется unmanaged Device CMYK approximation');
   try{
-    const profile=iccParseProfile(profileBytes);
-    const resolved=iccResolveDeviceToPcs(profile,requestedIntent);
-    const warnings=[...resolved.warnings];
-    const transform=resolved.transform;
-    let method;
-    if(resolved.kind==='mft1')method='icc-lut8';
-    else if(resolved.kind==='mft2')method='icc-lut16';
-    else if(resolved.kind==='mAB ')method='icc-mab';
-    else method='icc-mpe';
-    return{
-      managed:true,
-      method,
-      intent:resolved.resolvedIntent,
-      requestedIntent,
-      displaySpace:'srgb',
-      tag:resolved.tag,
-      pcs:profile.pcs.trim(),
-      warning:warnings.length?warnings.join('; '):null,
-      apply(c,m,y,k){
-        const inputs=[iccClamp01(c),iccClamp01(m),iccClamp01(y),iccClamp01(k)];
-        if(resolved.kind==='mft1'||resolved.kind==='mft2'){
-          return iccLutOutputToSrgb(transform,iccApplyLut(transform,...inputs));
-        }
-        if(resolved.kind==='mAB '){
-          return iccNormalizedPcsToSrgb(profile.pcs,iccApplyMab(transform,...inputs));
-        }
-        return iccFloatPcsToSrgb(profile.pcs,iccApplyMpe(transform,...inputs));
-      },
-    };
-  }catch(error){
-    const detail=error instanceof Error?error.message:String(error);
-    return fallback('ICC CMYK transform недоступен ('+detail+'); используется unmanaged Device CMYK approximation');
-  }
+    const profile=iccParseProfile(profileBytes),sourceIn=iccDeviceToXyzTransform(profile,requestedIntent);
+    const method=sourceIn.kind==='mft1'?'icc-lut8':sourceIn.kind==='mft2'?'icc-lut16':sourceIn.kind==='mAB '?'icc-mab':'icc-mpe',warnings=[...sourceIn.warnings,display.warning].filter(Boolean);
+    const applyWithGamut=(c,m,y,k)=>{const xyz=sourceIn.apply([iccClamp01(c),iccClamp01(m),iccClamp01(y),iccClamp01(k)]),displayResult=display.applyXyzDetailed(xyz);return{rgb:displayResult.rgb,outOfGamut:displayResult.outOfGamut,displayDeltaE:displayResult.deltaE||0};};
+    return{managed:true,method,intent:sourceIn.resolvedIntent,requestedIntent,displaySpace:display.displaySpace,displayManaged:display.managed,displayProfileManaged:display.profileManaged,displayMethod:display.method,displayTag:display.tag,tag:sourceIn.tag,pcs:profile.pcs.trim(),gamutWarningThreshold:threshold,warning:warnings.length?warnings.join('; '):null,applyWithGamut,apply(c,m,y,k){return applyWithGamut(c,m,y,k).rgb;}};
+  }catch(error){return fallback('ICC CMYK transform недоступен ('+(error instanceof Error?error.message:String(error))+'); используется unmanaged Device CMYK approximation');}
 }
 
 function iccPixelSample01(buffer,index) {
@@ -956,25 +897,15 @@ function iccPixelSample01(buffer,index) {
   return iccClamp01(buffer.data[index]);
 }
 
-export function cmykPixelBufferToRgba8Preview(buffer, transform = null) {
-  if(!isPixelBuffer(buffer)||buffer.model!=='cmyk'||![4,5].includes(buffer.channels)){
-    throw new ColorManagementError('CMYK preview требует 4/5-channel CMYK PixelBuffer', 'CMYK_PIXEL_BUFFER');
-  }
-  const converter=transform&&typeof transform.apply==='function'?transform:createCmykToSrgbTransform();
-  const rgba=new Uint8ClampedArray(buffer.width*buffer.height*4);
-  const hasAlpha=buffer.channels===5;
+export function cmykPixelBufferToRgba8Preview(buffer,transform=null,{gamutWarning=false,gamutWarningColor=[1,0,1]}={}) {
+  if(!isPixelBuffer(buffer)||buffer.model!=='cmyk'||![4,5].includes(buffer.channels))throw new ColorManagementError('CMYK preview требует 4/5-channel CMYK PixelBuffer', 'CMYK_PIXEL_BUFFER');
+  const converter=transform&&typeof transform.apply==='function'?transform:createCmykToSrgbTransform(),warningColor=Array.from(gamutWarningColor||[1,0,1]).slice(0,3).map(iccClamp01);
+  while(warningColor.length<3)warningColor.push(warningColor.length===1?0:1);
+  const rgba=new Uint8ClampedArray(buffer.width*buffer.height*4),hasAlpha=buffer.channels===5;
   for(let pixel=0;pixel<buffer.width*buffer.height;pixel+=1){
-    const source=pixel*buffer.channels,target=pixel*4;
-    const rgb=converter.apply(
-      iccPixelSample01(buffer,source),
-      iccPixelSample01(buffer,source+1),
-      iccPixelSample01(buffer,source+2),
-      iccPixelSample01(buffer,source+3),
-    );
-    rgba[target]=Math.round(iccClamp01(rgb[0])*255);
-    rgba[target+1]=Math.round(iccClamp01(rgb[1])*255);
-    rgba[target+2]=Math.round(iccClamp01(rgb[2])*255);
-    rgba[target+3]=hasAlpha?Math.round(iccPixelSample01(buffer,source+4)*255):255;
+    const source=pixel*buffer.channels,target=pixel*4,samples=[iccPixelSample01(buffer,source),iccPixelSample01(buffer,source+1),iccPixelSample01(buffer,source+2),iccPixelSample01(buffer,source+3)];
+    const detail=typeof converter.applyWithGamut==='function'?converter.applyWithGamut(...samples):{rgb:converter.apply(...samples),outOfGamut:false},rgb=gamutWarning&&detail.outOfGamut?warningColor:detail.rgb;
+    rgba[target]=Math.round(iccClamp01(rgb[0])*255);rgba[target+1]=Math.round(iccClamp01(rgb[1])*255);rgba[target+2]=Math.round(iccClamp01(rgb[2])*255);rgba[target+3]=hasAlpha?Math.round(iccPixelSample01(buffer,source+4)*255):255;
   }
   return rgba;
 }
