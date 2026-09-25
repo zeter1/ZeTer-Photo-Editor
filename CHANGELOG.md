@@ -13,6 +13,7 @@
 - UI: CMYK inspector получил загрузку/удаление display ICC, отдельный Proof Intent, Gamut Warning и ΔE threshold; sRGB остаётся явным fallback.
 - Import: новый CMYK PSD/PSB использует текущие display/proof settings уже при построении первого preview и переносит proof/display setup в новый документ без смешивания с embedded source ICC.
 - Compatibility regression: synthetic production-like Display-P3 v4 matrix/parametric-TRC structure, gamut overlay и byte-for-byte preservation embedded ICC resource 1039 при native CMYK PSD round-trip.
+- CI follow-up: unmanaged Device-CMYK fallback больше не проходит лишний sRGB→XYZ→sRGB round-trip без display ICC, поэтому сохраняет прежние точные fallback samples и не создаёт микроскопический numerical drift.
 - Browser boundary: application-level display ICC симулирует target device RGB, но финальную физическую monitor calibration по-прежнему выполняют browser/OS compositor.
 - Version: приложение синхронизировано на 1.31.0.
 
