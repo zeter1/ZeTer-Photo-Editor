@@ -1217,18 +1217,18 @@ function encodeRleRgbaChannel(rgba, channel, width, height, version, options = {
   return writer;
 }
 
-function exportPixelSource(value, width, height, label) {
+function exportPixelSource(value, width, height, label, errorCode = 'PSD_EXPORT_PIXELS') {
   const count = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   if (isPixelBuffer(value?.pixelBuffer)) {
     const buffer = value.pixelBuffer;
     if (buffer.model !== 'rgb' || ![3,4].includes(buffer.channels) || buffer.width !== width || buffer.height !== height) {
-      throw new PsdImportError(`PSD/PSB writer: ${label} имеет несовместимый PixelBuffer`, 'PSD_EXPORT_PIXELS');
+      throw new PsdImportError(`PSD/PSB writer: ${label} имеет несовместимый PixelBuffer`, errorCode);
     }
     return { kind:'pixel-buffer', buffer };
   }
   const rgba = asBytes(value?.pixels);
   if (rgba.length !== count * 4) {
-    throw new PsdImportError(`PSD/PSB writer: ${label} имеет неверный RGBA-буфер`, 'PSD_EXPORT_PIXELS');
+    throw new PsdImportError(`PSD/PSB writer: ${label} имеет неверный RGBA-буфер`, errorCode);
   }
   return { kind:'rgba8', pixels:rgba };
 }
@@ -1371,7 +1371,7 @@ function normalizeExportLayer(layer, index, maxPixels, version, bitsPerChannel) 
   ];
   let mask = null;
   if (item.mask?.pixels || isPixelBuffer(item.mask?.pixelBuffer)) {
-    const maskSource = exportPixelSource(item.mask, item.width, item.height, `маска слоя «${item.name || index + 1}»`);
+    const maskSource = exportPixelSource(item.mask, item.width, item.height, `маска слоя «${item.name || index + 1}»`, 'PSD_EXPORT_MASK');
     mask = { disabled: Boolean(item.mask.disabled), pixels: true };
     channels.push({ id: -2, data: encodeExportChannel(maskSource, 3, item.width, item.height, version, bitsPerChannel) });
   }
