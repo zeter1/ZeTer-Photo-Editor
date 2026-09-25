@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "fixture": {
+    "id": "psd-tools-smartobject-layer",
+    "file": "psd-tools-smartobject-layer.psd",
+    "license": "MIT",
+    "sourceRepository": "psd-tools/psd-tools",
+    "sourceCommit": "8f9a25ea98202061365701db54ce938931b27c09",
+    "sourcePath": "tests/psd_files/layers-minimal/smartobject-layer.psd",
+    "sourceGitBlob": "b37b63466ecee1586b5d917e0b40fbf236b0e65d",
+    "size": 26144,
+    "sha256": "f451b816bb5292564eaad9a29eb7543c3b2ad6b5dc35d1babc0a4c799502ee01"
+  }
+}

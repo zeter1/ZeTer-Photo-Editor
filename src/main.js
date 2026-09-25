@@ -1980,9 +1980,16 @@ function updateProperties() {
     }
   }
   if (l.type === 'smart-object') {
-    const linkedCount=l.linkedSourceId?linkedSmartObjectLayers(doc,l.linkedSourceId).length:0;
-    const linkSummary=l.linkedSourceId?`Связанный источник · ${linkedCount} экз.`:'Независимый встроенный источник';
-    extra = `<label>Содержимое</label><button type="button" class="mini-button" data-smart-object-edit>Редактировать содержимое</button><label>Источник</label><span>${l.embeddedDocument ? `${l.embeddedDocument.width} × ${l.embeddedDocument.height}` : 'недоступен'}</span><label>Связь</label><span>${escapeHtml(linkSummary)}</span><div class="wide smart-object-link-actions"><button type="button" class="mini-button" data-smart-object-link-copy>Создать связанную копию</button>${l.linkedSourceId?'<button type="button" class="mini-button" data-smart-object-unlink>Разорвать связь</button>':''}</div>${smartFilterStackMarkup(l)}`;
+    if(l.psdSmartObject&&!l.embeddedDocument){
+      const sourceKind=l.psdSmartObject.kind==='linked'?'Linked':l.psdSmartObject.kind==='embedded'?'Embedded':'Placed';
+      const unique=l.psdSmartObject.uniqueId?escapeHtml(l.psdSmartObject.uniqueId):'не указан';
+      const roundTrip=psdSmartObjectLayerUnchanged(l)?'native metadata сохранится при PSD/PSB export':'слой изменён — PSD/PSB export растрирует preview';
+      extra = `<label>Photoshop Smart Object</label><span>${sourceKind}</span><label>Placed ID</label><span>${unique}</span><label>Round-trip</label><span>${escapeHtml(roundTrip)}</span><label>Содержимое</label><span>payload сохранён opaque; редактирование содержимого будет добавлено в Stage 14b</span>${smartFilterStackMarkup(l)}`;
+    }else{
+      const linkedCount=l.linkedSourceId?linkedSmartObjectLayers(doc,l.linkedSourceId).length:0;
+      const linkSummary=l.linkedSourceId?`Связанный источник · ${linkedCount} экз.`:'Независимый встроенный источник';
+      extra = `<label>Содержимое</label><button type="button" class="mini-button" data-smart-object-edit>Редактировать содержимое</button><label>Источник</label><span>${l.embeddedDocument ? `${l.embeddedDocument.width} × ${l.embeddedDocument.height}` : 'недоступен'}</span><label>Связь</label><span>${escapeHtml(linkSummary)}</span><div class="wide smart-object-link-actions"><button type="button" class="mini-button" data-smart-object-link-copy>Создать связанную копию</button>${l.linkedSourceId?'<button type="button" class="mini-button" data-smart-object-unlink>Разорвать связь</button>':''}</div>${smartFilterStackMarkup(l)}`;
+    }
   }
   els.props.innerHTML = `<div class="prop-grid">
     <label>Имя</label><input data-prop="name" value="${escapeAttr(l.name)}">
@@ -3790,6 +3797,94 @@ function exportPsdVectorMask(layer) {
     })).filter(subpath=>subpath.points.length>=2),
   };
 }
+
+function psdOpaqueBlockToState(block){
+  if(!block?.key||!(block.data instanceof Uint8Array))return null;
+  return{
+    signature:block.signature==='8B64'?'8B64':'8BIM',
+    key:String(block.key).slice(0,4),
+    dataUrl:bytesToDataUrl(block.data,'application/octet-stream'),
+  };
+}
+
+function psdOpaqueBlockFromState(block,{maxBytes=8*1024*1024}={}){
+  if(!block?.key||!block.dataUrl)return null;
+  return{
+    signature:block.signature==='8B64'?'8B64':'8BIM',
+    key:String(block.key).slice(0,4),
+    data:dataUrlToBytes(block.dataUrl,{maxBytes}),
+  };
+}
+
+function psdPreviewFingerprint(dataUrl){
+  const value=String(dataUrl||'');
+  let hash=2166136261;
+  for(let index=0;index<value.length;index+=1){
+    hash^=value.charCodeAt(index);
+    hash=Math.imul(hash,16777619);
+  }
+  return'value:'+value.length+':'+(hash>>>0).toString(16).padStart(8,'0');
+}
+
+function importPsdSmartObjectMetadata(source,sourceLayer,previewDataUrl){
+  if(!source?.blocks?.length)return null;
+  return{
+    kind:['embedded','linked','placed'].includes(source.kind)?source.kind:'placed',
+    uniqueId:source.uniqueId||null,
+    placedVersion:Number.isInteger(source.placedVersion)?source.placedVersion:null,
+    baseline:{
+      x:Number(sourceLayer.x)||0,
+      y:Number(sourceLayer.y)||0,
+      width:Number(sourceLayer.width)||1,
+      height:Number(sourceLayer.height)||1,
+      scaleX:1,
+      scaleY:1,
+      rotation:0,
+      previewFingerprint:psdPreviewFingerprint(previewDataUrl),
+    },
+    blocks:source.blocks.map(psdOpaqueBlockToState).filter(Boolean),
+  };
+}
+
+function psdSmartObjectLayerUnchanged(layer){
+  const source=layer?.psdSmartObject,baseline=source?.baseline;
+  if(layer?.type!=='smart-object'||!source||!baseline||!source.blocks?.length)return false;
+  const same=(left,right)=>Math.abs(Number(left)-Number(right))<=1e-9;
+  if(!same(layer.x,baseline.x)||!same(layer.y,baseline.y)||!same(layer.width,baseline.width)||!same(layer.height,baseline.height))return false;
+  if(!same(layer.scaleX??1,baseline.scaleX??1)||!same(layer.scaleY??1,baseline.scaleY??1)||!same(layer.rotation??0,baseline.rotation??0))return false;
+  if(psdPreviewFingerprint(layer.previewDataUrl)!==baseline.previewFingerprint)return false;
+  if(layer.embeddedDocument||layer.styles||layer.smartFilterMask||(layer.smartFilters?.length||0))return false;
+  const filters=sanitizeFilters(layer.filters);
+  return !Object.keys(DEFAULT_LAYER_FILTERS).some(key=>Math.abs(Number(filters[key])-Number(DEFAULT_LAYER_FILTERS[key]))>1e-9);
+}
+
+function psdSmartObjectRoundTripPlan(documentValue){
+  const imported=(documentValue?.layers||[]).filter(layer=>layer?.psdSmartObject);
+  const expected=Math.max(0,Math.trunc(Number(documentValue?.psdSmartObjectSourceCount)||0));
+  if(!imported.length)return{eligible:false,imported,expected,reason:'нет imported Photoshop Smart Object metadata',linkedLayerBlocks:[]};
+  if(expected!==imported.length)return{eligible:false,imported,expected,reason:'изменилось число imported Photoshop Smart Objects',linkedLayerBlocks:[]};
+  const changed=imported.find(layer=>!psdSmartObjectLayerUnchanged(layer));
+  if(changed)return{eligible:false,imported,expected,reason:'слой «'+(changed.name||'Smart Object')+'» был трансформирован, отфильтрован или его preview изменён',linkedLayerBlocks:[]};
+  try{
+    const linkedLayerBlocks=(documentValue.psdLinkedLayerBlocks||[])
+      .map(block=>psdOpaqueBlockFromState(block,{maxBytes:128*1024*1024}))
+      .filter(Boolean);
+    return{eligible:true,imported,expected,reason:null,linkedLayerBlocks};
+  }catch(error){
+    return{eligible:false,imported,expected,reason:'linked resource metadata повреждены: '+(error?.message||error),linkedLayerBlocks:[]};
+  }
+}
+
+function psdSmartObjectMetadataForExport(layer){
+  const source=layer?.psdSmartObject;
+  if(!source?.blocks?.length)return null;
+  return{
+    kind:source.kind,
+    uniqueId:source.uniqueId||null,
+    placedVersion:source.placedVersion??null,
+    blocks:source.blocks.map(block=>psdOpaqueBlockFromState(block,{maxBytes:8*1024*1024})).filter(Boolean),
+  };
+}
 async function openPsd(file){
   if(blockPendingDocumentEdit())return;
   if(!canReplaceDocument())return;
@@ -3884,18 +3979,27 @@ async function openPsd(file){
       const maskDataUrl=sourceLayer.mask
         ? await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.mask.pixels,`Маска PSD/PSB слоя «${sourceLayer.name}»`)
         : null;
-      const importedLayer=createRasterLayer({
+      const commonLayer={
         name:sourceLayer.name||'PSD Layer',
         visible:sourceLayer.visible!==false,
         opacity:clamp(Number(sourceLayer.opacity),0,1),
         blendMode:sourceLayer.blendMode||'source-over',
         x:sourceLayer.x,y:sourceLayer.y,width:sourceLayer.width,height:sourceLayer.height,
         groupId:sourceLayer.groupKey?(groupIdByKey.get(sourceLayer.groupKey)??null):null,
-        dataUrl,
-        highDepthSource,
         mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
-      });
+      };
+      const importedLayer=sourceLayer.psdSmartObject
+        ? createSmartObjectLayer({
+            ...commonLayer,
+            previewDataUrl:dataUrl,
+            embeddedDocument:null,
+            psdSmartObject:importPsdSmartObjectMetadata(sourceLayer.psdSmartObject,sourceLayer,dataUrl),
+          })
+        : createRasterLayer({...commonLayer,dataUrl,highDepthSource});
       importedLayer.vectorMask=importPsdVectorMask(sourceLayer.vectorMask,importedLayer);
+      if(sourceLayer.psdSmartObject){
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop Smart Object/Placed Layer сохранён как non-destructive preview + opaque native metadata; embedded/linked payload пока не редактируется в ZPE`);
+      }
       if(sourceLayer.vectorMask?.linked===false)warnings.push(`Слой «${sourceLayer.name}»: Photoshop vector mask unlinked-флаг сохранён, но ZPE при трансформациях пока перемещает её вместе со слоем`);
       prepared.push(importedLayer);
       sourceLayer.pixelBuffer=null;
@@ -3939,6 +4043,8 @@ async function openPsd(file){
     next.layers=prepared;
     next.groups=importedGroups;
     next.paths=structuredClone(parsed.paths||[]);
+    next.psdLinkedLayerBlocks=(parsed.linkedLayerBlocks||[]).map(psdOpaqueBlockToState).filter(Boolean);
+    next.psdSmartObjectSourceCount=prepared.filter(layer=>Boolean(layer.psdSmartObject)).length;
     next.colorManagement=colorPolicy;
     next.proofProfile=targetDocument.proofProfile?structuredClone(targetDocument.proofProfile):null;
     next.displayProfile=targetDocument.displayProfile?structuredClone(targetDocument.displayProfile):null;
@@ -4251,11 +4357,16 @@ function buildNativeCmykComposite(exportDoc,planned,prepared,bitsPerChannel,elig
 
 async function preparePsdExport(exportDoc){
   const warnings=[];
+  const psdSmartPlan=psdSmartObjectRoundTripPlan(exportDoc);
   const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment');
   const hasAdjustmentLayers=exportDoc.layers.some(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
   const planned=sourceLayers.map(layer=>{
     const nativePixelBuffer=nativeHighDepthPsdSource(layer);
-    return{layer,nativePixelBuffer,bounds:nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer)};
+    const baseline=psdSmartPlan.eligible&&layer.psdSmartObject?layer.psdSmartObject.baseline:null;
+    const bounds=baseline
+      ? {x:Math.trunc(Number(baseline.x)||0),y:Math.trunc(Number(baseline.y)||0),width:Math.max(1,Math.trunc(Number(baseline.width)||1)),height:Math.max(1,Math.trunc(Number(baseline.height)||1))}
+      : nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer);
+    return{layer,nativePixelBuffer,bounds};
   });
   const cmykDepths=planned.filter(item=>item.nativePixelBuffer?.model==='cmyk').map(item=>item.nativePixelBuffer.bitsPerChannel);
   const tentativeCmykDepth=cmykDepths.includes(32)?32:cmykDepths.includes(16)?16:8;
@@ -4291,7 +4402,11 @@ async function preparePsdExport(exportDoc){
       opacity:clamp(Number(group.opacity??1),0,1),
       blendMode:group.blendMode||'pass-through',
     }));
-  if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(sourceLayers.some(layer=>!(psdSmartPlan.eligible&&layer.psdSmartObject)&&layerNeedsSemanticRasterWarning(layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(psdSmartPlan.imported.length){
+    if(psdSmartPlan.eligible)warnings.push(`Stage 14a: ${psdSmartPlan.imported.length} Photoshop Smart Object layer(s) сохраняют opaque PlLd/SoLd/SoLE + linked-resource metadata`);
+    else warnings.push(`Stage 14a: Photoshop Smart Object native passthrough отключён (${psdSmartPlan.reason}); сохранён безопасный raster preview без stale placed/linked metadata`);
+  }
   const cmykSources=planned.filter(item=>item.layer.highDepthSource?.model==='cmyk');
   if(colorMode==='cmyk')warnings.push(`Stage 13b: ${cmykSources.length} native CMYK layer source экспортируются как настоящий CMYK PSD/PSB с сохранением channel precision`);
   else if(cmykSources.length)warnings.push(`Stage 13b: native CMYK round-trip отключён для этого документа (${cmykEligibility.reason}); ${cmykSources.length} CMYK source экспортируются через sRGB display preview`);
@@ -4317,6 +4432,7 @@ async function preparePsdExport(exportDoc){
         disabled:layer.mask.enabled===false,
       }:null,
       vectorMask:exportPsdVectorMask(layer),
+      psdSmartObject:psdSmartPlan.eligible&&layer.psdSmartObject?psdSmartObjectMetadataForExport(layer):null,
     };
     if(nativePixelBuffer)item.pixelBuffer=nativePixelBuffer;
     else item.pixels=await renderPsdLayerPixels(layer,bounds);
@@ -4357,7 +4473,7 @@ async function preparePsdExport(exportDoc){
     if(colorMode==='cmyk')warnings.push(`ICC profile embedded с native CMYK channels; display policy ZPE: ${policy.renderingIntent} → ${policy.displaySpace.toUpperCase()}`);
     else warnings.push('ICC profile сохранён как metadata resource; RGB Canvas fallback не объявляется profile-converted');
   }
-  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,compositePixelBuffer,bitsPerChannel,colorMode,warnings};
+  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),linkedLayerBlocks:psdSmartPlan.eligible?psdSmartPlan.linkedLayerBlocks:[],composite,compositePixelBuffer,bitsPerChannel,colorMode,warnings};
 }
 
 async function exportPsdDocument(exportDoc,{psb=false}={}){
@@ -4372,7 +4488,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
     : null;
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
-    layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,composite:prepared.composite,
+    layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,linkedLayerBlocks:prepared.linkedLayerBlocks,composite:prepared.composite,
     compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,colorMode:prepared.colorMode,
     iccProfile,iccUntagged:Boolean(profile?.untagged),
     maxPixels:48_000_000,maxLayers:500,
@@ -4941,7 +5057,7 @@ function layerContextMenu(id) {
   const selectedTarget = () => selected()?.id===id && Boolean(target());
   return [
     ['Параметры наложения…','',()=>openBlendingOptions(target()),editable],
-    ['Редактировать содержимое смарт-объекта','',()=>openSmartObjectContents(target()),()=>Boolean(target())&&target().type==='smart-object'],
+    ['Редактировать содержимое смарт-объекта','',()=>openSmartObjectContents(target()),()=>Boolean(target())&&target().type==='smart-object'&&Boolean(target().embeddedDocument)],
     ['Создать связанную копию смарт-объекта','',()=>createLinkedSmartObjectCopy(target()),()=>Boolean(target())&&target().type==='smart-object'&&Boolean(target().embeddedDocument)&&editable()],
     ['Разорвать связь смарт-объекта','',()=>unlinkSmartObject(target()),()=>Boolean(target()?.linkedSourceId)&&editable()],
     ['Добавить смарт-фильтр…','',()=>openSmartFilterDialog(target()),()=>Boolean(target())&&target().type==='smart-object'&&editable()&&(target().smartFilters?.length||0)<24],

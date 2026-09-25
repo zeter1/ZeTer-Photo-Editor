@@ -70,8 +70,8 @@ test('PSD Group Export Stage 8b wires ZPE flat groups into the PSD/PSB writer',(
   assert.match(adapter,/groups = \[\]/);
   assert.match(main,/const exportGroups=\(exportDoc\.groups\|\|\[\]\)/);
   assert.match(main,/groupKey:layer\.groupId/);
-  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),composite,compositePixelBuffer,bitsPerChannel,colorMode,warnings\}/);
-  assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,paths:prepared\.paths,composite:prepared\.composite/);
+  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),linkedLayerBlocks:/);
+  assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,paths:prepared\.paths,linkedLayerBlocks:prepared\.linkedLayerBlocks,composite:prepared\.composite/);
 });
 
 
@@ -194,5 +194,23 @@ test('Stage 13d wires independent display ICC, proof intent and gamut warning in
   assert.match(main,/gamutWarningThreshold/);
   assert.match(main,/displayProfileBytes/);
   assert.match(main,/cmykPixelBufferToRgba8Preview\(buffer,transform,\{gamutWarning:policy\.gamutWarningEnabled\}\)/);
+});
+
+test('Stage 14a wires Photoshop Smart Object / Placed Layer opaque metadata through import and export',()=>{
+  assert.match(adapter,/PSD_SMART_OBJECT_LAYER_KEYS = new Set\(\['PlLd','SoLd','SoLE'\]\)/);
+  assert.match(adapter,/PSD_LINKED_LAYER_KEYS = new Set\(\['lnk2','lnkD','lnkE'\]\)/);
+  assert.match(adapter,/appendSmartObjectLayerBlock/);
+  assert.match(adapter,/psdSmartObject: record\.psdSmartObject/);
+  assert.match(adapter,/linkedLayerBlocks/);
+  assert.match(adapter,/writeSmartObjectLayerExtras\(extra, layer, version\)/);
+  assert.match(adapter,/writeLinkedLayerBlocks\(layerAndMask,linkedLayerBlocks,version\)/);
+  assert.match(main,/importPsdSmartObjectMetadata/);
+  assert.match(main,/createSmartObjectLayer\(\{/);
+  assert.match(main,/psdSmartObjectRoundTripPlan/);
+  assert.match(main,/psdSmartObject:psdSmartPlan\.eligible/);
+  assert.match(main,/next\.psdLinkedLayerBlocks=/);
+  assert.match(main,/next\.psdSmartObjectSourceCount=/);
+  assert.match(main,/linkedLayerBlocks:prepared\.linkedLayerBlocks/);
+  assert.match(main,/Photoshop Smart Object native passthrough отключён/);
 });
 

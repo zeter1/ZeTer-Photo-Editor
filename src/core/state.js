@@ -77,6 +77,8 @@ export function createDocument({ name = 'Без имени', width = 1200, heigh
     proofProfile: null,
     displayProfile: null,
     colorManagement: sanitizeColorManagement(),
+    psdLinkedLayerBlocks: [],
+    psdSmartObjectSourceCount: 0,
     paths: [],
     layers: [],
     groups: [],
@@ -123,6 +125,7 @@ export function createSmartObjectLayer(overrides = {}) {
     smartFilters: [],
     smartFilterMask: null,
     linkedSourceId: null,
+    psdSmartObject: null,
     ...overrides,
   });
 }
@@ -690,6 +693,64 @@ function sanitizeDocumentPath(path, index, usedIds) {
   };
 }
 
+const PSD_SMART_OBJECT_BLOCK_KEYS = new Set(['PlLd','SoLd','SoLE']);
+const PSD_LINKED_LAYER_BLOCK_KEYS = new Set(['lnk2','lnkD','lnkE']);
+const MAX_PSD_SMART_OBJECT_DATA_URL_CHARS = 12_000_000;
+const MAX_PSD_LINKED_LAYER_DATA_URL_CHARS = 64_000_000;
+const MAX_PSD_LINKED_LAYER_TOTAL_CHARS = 70_000_000;
+
+function sanitizePsdOpaqueBlock(block,allowedKeys,maxDataUrlChars) {
+  if(!block||typeof block!=='object'||Array.isArray(block))return null;
+  const key=shortText(block.key,'',4);
+  if(!allowedKeys.has(key))return null;
+  const signature=block.signature==='8B64'?'8B64':'8BIM';
+  const dataUrl=typeof block.dataUrl==='string'&&block.dataUrl.length<=maxDataUrlChars&&/^data:application\/octet-stream;base64,[a-z\d+/=]*$/i.test(block.dataUrl)
+    ? block.dataUrl
+    : null;
+  if(!dataUrl)return null;
+  return{signature,key,dataUrl};
+}
+
+export function sanitizePsdSmartObject(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const blocks=(Array.isArray(value.blocks)?value.blocks:[])
+    .slice(0,8)
+    .map(block=>sanitizePsdOpaqueBlock(block,PSD_SMART_OBJECT_BLOCK_KEYS,MAX_PSD_SMART_OBJECT_DATA_URL_CHARS))
+    .filter(Boolean);
+  if(!blocks.length)return null;
+  const baseline=value.baseline&&typeof value.baseline==='object'&&!Array.isArray(value.baseline)?value.baseline:{};
+  return{
+    kind:['embedded','linked','placed'].includes(value.kind)?value.kind:'placed',
+    uniqueId:shortText(value.uniqueId,'',160).trim()||null,
+    placedVersion:Number.isInteger(value.placedVersion)&&value.placedVersion>=0&&value.placedVersion<=100?value.placedVersion:null,
+    baseline:{
+      x:bounded(baseline.x,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION),
+      y:bounded(baseline.y,0,-MAX_LAYER_POSITION,MAX_LAYER_POSITION),
+      width:bounded(baseline.width,1,1,12000),
+      height:bounded(baseline.height,1,1,12000),
+      scaleX:bounded(baseline.scaleX,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      scaleY:bounded(baseline.scaleY,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      rotation:((finite(baseline.rotation,0)%360)+360)%360,
+      previewFingerprint:shortText(baseline.previewFingerprint,'',160).trim()||null,
+    },
+    blocks,
+  };
+}
+
+export function sanitizePsdLinkedLayerBlocks(value) {
+  if(!Array.isArray(value))return[];
+  const result=[];
+  let totalChars=0;
+  for(const item of value.slice(0,32)){
+    const block=sanitizePsdOpaqueBlock(item,PSD_LINKED_LAYER_BLOCK_KEYS,MAX_PSD_LINKED_LAYER_DATA_URL_CHARS);
+    if(!block)continue;
+    totalChars+=block.dataUrl.length;
+    if(totalChars>MAX_PSD_LINKED_LAYER_TOTAL_CHARS)break;
+    result.push(block);
+  }
+  return result;
+}
+
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -734,6 +795,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     result.smartFilters = sanitizeSmartFilters(layer?.smartFilters);
     result.smartFilterMask = sanitizeSmartFilterMask(layer?.smartFilterMask);
     result.linkedSourceId = shortText(layer?.linkedSourceId, '', 160).trim() || null;
+    result.psdSmartObject = sanitizePsdSmartObject(layer?.psdSmartObject);
     if (embeddedDepth >= MAX_EMBEDDED_DOCUMENT_DEPTH) {
       result.embeddedDocument = null;
     } else if (layer?.embeddedDocument && typeof layer.embeddedDocument === 'object' && !Array.isArray(layer.embeddedDocument)) {
@@ -809,6 +871,8 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.proofProfile = sanitizeColorProfile(doc.proofProfile);
   doc.displayProfile = sanitizeColorProfile(doc.displayProfile);
   doc.colorManagement = sanitizeColorManagement(doc.colorManagement);
+  doc.psdLinkedLayerBlocks = sanitizePsdLinkedLayerBlocks(doc.psdLinkedLayerBlocks);
+  doc.psdSmartObjectSourceCount = Math.trunc(bounded(doc.psdSmartObjectSourceCount,0,0,500));
   const usedPathIds = new Set();
   doc.paths = Array.isArray(doc.paths)
     ? doc.paths.slice(0, 998).map((path, index) => sanitizeDocumentPath(path, index, usedPathIds)).filter(Boolean)

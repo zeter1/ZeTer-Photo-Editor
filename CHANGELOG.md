@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.33.0 — 2026-09-25
+
+### 2026-09-25 — Photoshop-native Smart Objects / Placed Layer Round-trip Stage 14a
+
+- PSD/PSB parser: layer Additional Layer Info теперь bounded-сохраняет `PlLd`, `SoLd` и `SoLE`; document Layer/Mask Additional Info сохраняет `lnk2`, `lnkD`, `lnkE`.
+- Placed Layer identity: `PlLd` foundation читает `plcL` version и unique id, не пытаясь угадать неподдержанные proprietary descriptor fields.
+- Import semantics: Photoshop Smart Object больше не становится обычным raster-layer — ZPE создаёт `smart-object` с lossless PNG preview и отдельным opaque Photoshop metadata payload.
+- Project persistence: `.zpe` sanitizer allow-list-ит только Smart Object / Linked Layer keys, проверяет MIME/data URL contract и bounded limits; document хранит исходное число imported Photoshop Smart Objects.
+- Safe passthrough gate: native metadata записывается обратно только если imported preview, geometry, transform и effect/filter state не изменены и исходный набор Photoshop Smart Objects сохранён.
+- Honest fallback: после move/scale/rotate/filter/preview edit, удаления/дублирования исходного Photoshop Smart Object или повреждения linked resources export растрирует preview и не пишет stale placed/linked metadata.
+- PSD/PSB writer: opaque Smart Object blocks и linked resources сохраняются byte-for-byte; PSB учитывает `8B64`/64-bit length contracts для linked-layer keys.
+- Real compatibility fixture: добавлен MIT `psd-tools` Smart Object PSD с настоящими `PlLd + SoLd + lnk2/lnkE`; regression покрывает decode и повторный PSD + PSB round-trip.
+- UI: Properties показывает Photoshop Smart Object kind/id и состояние native round-trip; редактирование opaque embedded payload не маскируется под уже поддержанное.
+- Version: приложение синхронизировано на 1.33.0.
+
 ## 1.32.0 — 2026-09-25
 
 ### 2026-09-25 — Real ICC / Photoshop Compatibility Corpus Stage 13e
