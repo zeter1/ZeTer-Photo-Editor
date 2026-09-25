@@ -2,7 +2,19 @@
 
 ## Unreleased
 
-- Пока нет незарелизенных изменений.
+### 2026-09-25 — Native CMYK Editing + Full Proofing Path Stage 13c
+
+- Native CMYK editing: Brush, Eraser, Fill, Clear и Line теперь изменяют canonical 4/5-channel CMYK PixelBuffer напрямую и сохраняют исходную 8/16/32-bit channel precision вместо растрирования display preview в RGB.
+- CMYK retouch: Blur, Clone, Healing и Smudge получили typed ink-space path с selection/opacity semantics; Clone/Heal используют immutable source snapshot. Dodge/Burn для native CMYK пока fail-safe блокируются без уничтожения source.
+- CMYK compositing: compositeCmykPixelBufferLayers() поддерживает компонентные Normal/Multiply/Screen/Overlay/Darken/Lighten/Color Dodge/Color Burn semantics, layer opacity и bitmap masks без RGB round-trip.
+- ICC MPE: multiProcessElementsType дополнен cvst/curf curve-set parsing с formula/sample segments и bounded validation; device→PCS и PCS→device MPE теперь явно проверяют channel contracts.
+- ICC output transforms: добавлены B2D*/B2A*, lutBToAType (mBA) и profile-managed sRGB→CMYK conversion для цветов кисти в native ink-space.
+- Soft proof: документ хранит отдельный bounded CMYK proof profile, переключатель soft proof, rendering intent и Black Point Compensation; preview строится по profile-to-profile path source CMYK → PCS → proof CMYK → PCS → sRGB.
+- UI: CMYK inspector получил proof ICC upload/remove, soft-proof toggle и BPC toggle; canonical CMYK source остаётся неизменяемым при смене proof/display policy.
+- Persistence: .zpe sanitizer сохраняет proofProfile, softProofEnabled и blackPointCompensation, не смешивая proof profile с source ICC.
+- Regression coverage: добавлены synthetic cvst, mBA, B2D/D2B profile-to-profile tests, native CMYK brush/fill/clear/line/retouch tests и component blend regressions.
+- CI follow-up: Float32 clone snapshot regression сравнивает snapshot с его фактическими Float32 samples, а не с double-precision literals; это сохраняет oracle «source immutable» без ложного падения на IEEE-754 rounding.
+
 
 ## 1.30.0 — 2026-09-25
 
