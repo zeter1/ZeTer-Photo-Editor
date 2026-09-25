@@ -311,6 +311,8 @@ async function runSmoke() {
     assert(initial.rows === 0, 'Fresh profile should start without layer rows', JSON.stringify(initial));
     assert(Object.values(initial.controls).every(value => value === true), 'Layer edit controls must be disabled when no layer is selected', JSON.stringify(initial.controls));
 
+    await client.send('Emulation.setDeviceMetricsOverride', { width:1280, height:900, deviceScaleFactor:1, mobile:false });
+    await waitFor('desktop two-column toolbar', async () => evaluate(client, `getComputedStyle(document.querySelector('.toolbar')).gridTemplateColumns.trim().split(/\\s+/).length === 2`));
     const toolbarBefore = await evaluate(client, `[...document.querySelectorAll('.toolbar .tool')].map(button => button.dataset.tool)`);
     assert(toolbarBefore.length > 3, 'Toolbar must expose draggable tools', JSON.stringify(toolbarBefore));
     const dragResult = await evaluate(client, `(() => {
