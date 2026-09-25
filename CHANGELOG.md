@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### 2026-09-25T21:57:51+03:00 — Исправлена проверка проекта после клонирования на Windows
+
+- Fixed: текстовые файлы проекта сохраняют LF при checkout даже с `core.autocrlf=true`; для `start.bat` сохранён CRLF.
+- Verification: `npm run check` — 391 тест пройден в LF-копии; выборочная проверка падения теста в CRLF-копии установила причину.
+
 ## 1.42.0 — 2026-09-25
 
 ### 2026-09-25 — Native Invert / Posterize / Threshold Adjustment Layers Stage 16c
