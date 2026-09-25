@@ -5,6 +5,8 @@ const root = resolve(import.meta.dirname, '..');
 const sources = [
   'src/core/geometry.js',
   'src/core/tool-layout.js',
+  'src/config/editor.js',
+  'src/ui/toolbar.js',
   'src/core/history.js',
   'src/core/io.js',
   'src/core/pixels.js',
