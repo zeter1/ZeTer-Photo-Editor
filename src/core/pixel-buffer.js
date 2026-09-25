@@ -664,6 +664,39 @@ function cmykNeighborhoodMean(buffer,centerX,centerY,radius=3) {
   return weight>1e-9?sum.map(value=>value/weight):[0,0,0,0];
 }
 
+export function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount,{brighten=true,isAllowed=null,strokeCoverage=null}={}) {
+  validateCmykEditBuffer(buffer,'CMYK tone brush');
+  const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
+  if(strength<=0)return 0;
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  let changed=0;
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const offset=(y*buffer.width+x)*buffer.channels;
+    if(cmykPixelAlpha01(buffer,offset)<=0)continue;
+    const increment=retouchStrokeIncrement(strokeCoverage,x,y,strength*highDepthBrushFalloff(distance,brushRadius));
+    if(increment<=0)continue;
+    const factor=2**(-increment);
+    let pixelChanged=false;
+    if(brighten){
+      for(let channel=0;channel<4;channel+=1){
+        const current=clampPreview01(normalizedSample(buffer,offset+channel));
+        const next=current*factor;
+        if(Math.abs(next-current)>1e-12){writeNormalizedSample(buffer,offset+channel,next);pixelChanged=true;}
+      }
+    }else{
+      const current=clampPreview01(normalizedSample(buffer,offset+3));
+      const next=1-(1-current)*factor;
+      if(Math.abs(next-current)>1e-12){writeNormalizedSample(buffer,offset+3,next);pixelChanged=true;}
+    }
+    if(pixelChanged)changed+=1;
+  }
+  return changed;
+}
+
 export function applyCmykPixelBufferBlurDab(buffer,centerX,centerY,radius,amount,{sampleRadius=3,isAllowed=null,strokeCoverage=null}={}) {
   validateCmykEditBuffer(buffer,'CMYK blur');
   const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
