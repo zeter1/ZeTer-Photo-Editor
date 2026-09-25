@@ -1,3 +1,5 @@
+import { createRgba8PixelBuffer } from '../core/pixel-buffer.js';
+
 const PSD_SIGNATURE = '8BPS';
 const PSD_VERSION = 1;
 const PSB_VERSION = 2;
@@ -459,6 +461,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
     if (!width || !height) { warnings.push(`Слой «${record.name}» пропущен: пустые bounds`); continue; }
     const rgba = composeRgba(width, height, record.decodedChannels);
     if (!rgba) { warnings.push(`Слой «${record.name}» пропущен: нет RGB bitmap-preview`); continue; }
+    const pixelBuffer = createRgba8PixelBuffer(width, height, rgba, { colorSpace: 'srgb' });
     const maskRgba = buildMaskRgba(record, record.decodedChannels.get(-2), width, height);
     layers.push({
       name: record.name || 'PSD Layer',
@@ -470,17 +473,23 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
       transparencyProtected: Boolean(record.flags & 0x01),
       opacity: record.opacity / 255,
       blendMode: blendModeFor(record.blendKey, warnings, record.name),
-      pixels: rgba,
+      pixelBuffer,
+      pixels: pixelBuffer.data,
       mask: maskRgba ? { pixels: maskRgba, disabled: Boolean(record.mask?.disabled) } : null,
     });
   }
 
   let composite = null;
+  let compositePixelBuffer = null;
   if (!layers.length && reader.offset < reader.end) {
     composite = await decodeComposite(reader, header, maxChannelBytes);
-    if (composite) warnings.push('PSD/PSB не содержит импортируемых bitmap-слоёв: использован composite preview');
+    if (composite) {
+      compositePixelBuffer = createRgba8PixelBuffer(header.width, header.height, composite, { colorSpace: 'srgb' });
+      composite = compositePixelBuffer.data;
+      warnings.push('PSD/PSB не содержит импортируемых bitmap-слоёв: использован composite preview');
+    }
   }
-  return { ...header, layers, composite, warnings };
+  return { ...header, layers, composite, compositePixelBuffer, warnings };
 }
 
 

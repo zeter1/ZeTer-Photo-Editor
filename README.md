@@ -73,6 +73,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **PSD Writer Stage 6b**: PackBits/RLE channels кодируются построчно с bounded row buffer, без полноразмерных временных channel planes; крупные writer sections собираются chunk-wise без промежуточных full-section копий. Это снижает peak memory и подготавливает streaming/PSB pipeline;
 - **PSD Blob Stage 6c**: браузерный экспорт собирает `Blob` прямо из готовых writer chunks вместо обязательного финального `Uint8Array` + второго `Blob`-обёртывания; byte-array API `encodePsd()` сохранён для совместимости и тестов;
 - **PSB Stage 7a**: импорт и экспорт RGB/8-bit `.psb` (Photoshop Large Document Format, version 2) с 64-bit section/channel lengths и 32-bit RLE scanline counts; текущие ZPE safety limits по памяти/Canvas сохраняются, поэтому это совместимость формата, а не снятие лимитов до 300 000 px;
+- **PixelBuffer Stage 7b**: adapter boundary получил typed pixel contract для RGB/CMYK и 8/16/32-bit samples (`Uint8ClampedArray` / `Uint16Array` / `Float32Array`). Текущий PSD/PSB RGB/8-bit import уже проходит через этот контракт без дополнительной копии; Canvas остаётся 8-bit preview/render boundary;
 - **перетаскивание изображений с рабочего стола по всему окну редактора**;
 - **вставка изображения из буфера обмена через Ctrl+V** (включая скриншоты);
 - `Ctrl+V` использует нативную вставку и резервное чтение Clipboard API, когда браузер это разрешает;
@@ -164,6 +165,7 @@ npm test
 - `src/core/io.js` — browser I/O helpers;
 - `src/core/pixels.js` — пиксельные операции, включая flood fill;
 - `src/core/recovery.js` — неблокирующее аварийное автосохранение/восстановление через IndexedDB;
+- `src/core/pixel-buffer.js` — typed pixel contract для RGB/CMYK, 8/16/32-bit sample storage и явного RGB→RGBA8 preview bridge; CMYK не подменяется приблизительной конверсией без color management;
 - `src/adapters/psd.js` — изолированный PSD/PSB Adapter: binary parser/writer, version-aware 32/64-bit lengths, Raw/RLE/ZIP decode, RLE encode и нормализованный RGB/8-bit raster contract;
 - `src/main.js` — исходный UI controller, меню, инструменты, drag/drop, clipboard и shortcuts;
 - `src/app.bundle.js` — готовая браузерная сборка для прямого запуска через `file://`;
@@ -174,6 +176,6 @@ npm test
 
 ## Ограничения относительно Photopea
 
-PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают ограниченный RGB/8-bit layered round-trip, а ZPE Smart Objects Stage 5a добавляет нативные embedded smart-object documents внутри `.zpe`. Это ещё не полная Photoshop-семантика: PSB работает в текущих ZPE memory/Canvas limits; нет native PSD/PSB text/vector/smart-object round-trip, вложенных Photoshop-групп, native Photoshop adjustment-layer mapping, CMYK/16/32-bit color pipeline и полного набора Photoshop-compatible effects. Экспорт сохраняет визуальный результат сложных ZPE-слоёв через raster preview; при наличии adjustment layers добавляется верхний `ZPE Composite Preview`, а исходные слои остаются скрытыми. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
+PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают ограниченный RGB/8-bit layered round-trip, а ZPE Smart Objects Stage 5a добавляет нативные embedded smart-object documents внутри `.zpe`. Это ещё не полная Photoshop-семантика: PSB работает в текущих ZPE memory/Canvas limits; нет native PSD/PSB text/vector/smart-object round-trip, вложенных Photoshop-групп, native Photoshop adjustment-layer mapping, CMYK/16/32-bit color pipeline и полного набора Photoshop-compatible effects. PixelBuffer Stage 7b уже умеет безопасно хранить RGB/CMYK 8/16/32-bit payload, но high-depth rendering/editing, ICC/CMYK conversion и сохранение такой точности в документе ещё не включены. Экспорт сохраняет визуальный результат сложных ZPE-слоёв через raster preview; при наличии adjustment layers добавляется верхний `ZPE Composite Preview`, а исходные слои остаются скрытыми. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
 
 Следующие крупные направления развития: PSD/PSB mapping для embedded smart objects/text/vector/adjustment layers и групп, linked smart objects и smart filters, path operations и vector masks, сложные выделения и маски, 16/32-bit/CMYK PixelBuffer pipeline, настоящий tiled/streaming storage и GPU/worker-ускорение для очень больших документов.

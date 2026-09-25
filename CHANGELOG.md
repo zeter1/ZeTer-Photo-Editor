@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-25 — PixelBuffer Stage 7b: typed high-depth boundary
+
+- Added: `src/core/pixel-buffer.js` defines a strict typed pixel contract for RGB/CMYK buffers with 8-bit integer, 16-bit integer and 32-bit float samples.
+- Added: RGBA8 uses `Uint8ClampedArray`, 16-bit uses `Uint16Array`, 32-bit/HDR uses `Float32Array`; dimensions, channel counts, alpha semantics and data length are validated.
+- Integration: PSD/PSB RGB/8-bit decoder now exposes `pixelBuffer` and keeps `pixels` as the same underlying array for compatibility; import UI consumes the PixelBuffer preview bridge.
+- Zero-copy: current RGBA8 adapter-to-Canvas path returns the existing `Uint8ClampedArray` without an extra full-frame copy.
+- Guardrail: CMYK PixelBuffer can be carried with profile metadata but RGB preview intentionally fails until a real color-management transform exists; no fake device-CMYK conversion is presented as accurate color.
+- Added: regression tests cover RGBA8 zero-copy, RGB16 preview, RGB32 float preview/clamping, CMYK carry/guardrails and invalid sample/channel layouts.
+- Scope: this is the source-format boundary needed for later 16/32-bit/CMYK work; the ZPE document model and Canvas renderer remain 8-bit at this stage.
+
 ### 2026-09-25 — PSB Stage 7a: RGB/8-bit Large Document Format
 
 - Added: `.psb` import/export как Photoshop Large Document Format version 2 в существующем offline PSD adapter.

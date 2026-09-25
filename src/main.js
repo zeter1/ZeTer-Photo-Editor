@@ -9,6 +9,7 @@ import {
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename } from './core/io.js';
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb } from './core/pixels.js';
+import { pixelBufferToRgba8Preview } from './core/pixel-buffer.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './adapters/psd.js';
@@ -2885,7 +2886,10 @@ async function openPsd(file){
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
     const prepared=[];
     for(const sourceLayer of [...parsed.layers].reverse()){
-      const dataUrl=await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.pixels,`PSD/PSB слой «${sourceLayer.name}»`);
+      const sourcePixels=sourceLayer.pixelBuffer
+        ? pixelBufferToRgba8Preview(sourceLayer.pixelBuffer)
+        : sourceLayer.pixels;
+      const dataUrl=await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourcePixels,`PSD/PSB слой «${sourceLayer.name}»`);
       const maskDataUrl=sourceLayer.mask
         ? await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.mask.pixels,`Маска PSD/PSB слоя «${sourceLayer.name}»`)
         : null;
@@ -2898,13 +2902,17 @@ async function openPsd(file){
         dataUrl,
         mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
       }));
+      sourceLayer.pixelBuffer=null;
       sourceLayer.pixels=null;
       if(sourceLayer.mask)sourceLayer.mask.pixels=null;
     }
-    if(!prepared.length&&parsed.composite){
+    if(!prepared.length&&(parsed.compositePixelBuffer||parsed.composite)){
+      const compositePixels=parsed.compositePixelBuffer
+        ? pixelBufferToRgba8Preview(parsed.compositePixelBuffer)
+        : parsed.composite;
       prepared.push(createRasterLayer({
         name:'PSD/PSB Composite',x:0,y:0,width:parsed.width,height:parsed.height,
-        dataUrl:await rgbaPixelsToDataUrl(parsed.width,parsed.height,parsed.composite,'PSD/PSB composite'),
+        dataUrl:await rgbaPixelsToDataUrl(parsed.width,parsed.height,compositePixels,'PSD/PSB composite'),
       }));
     }
     if(!prepared.length)throw new Error('PSD/PSB не содержит bitmap-данных, которые текущий RGB/8-bit pipeline может импортировать');
