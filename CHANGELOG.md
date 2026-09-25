@@ -14,6 +14,7 @@
 - Safe path editing: move и path-anchor edits остаются native; width/height resize, scale/rotation, fill/stroke edit, filters или layer styles переводят export в raster fallback, чтобы не создавать несогласованные Photoshop descriptors.
 - Project persistence: `.zpe` sanitizer allow-list-ит только `SoCo/vscg/vstk`, bounded octet-stream payload и semantic baseline.
 - Real compatibility fixture: добавлен MIT `psd-tools` `layers/shape-layer.psd`; regression фиксирует cyan `#00ffff` fill, magenta `#ff00ff` 1px stroke, 5-point polygon и PSD/PSB vector rewrite.
+- CI follow-up: Stage 10 vector-mask wiring regression обновлён под semantic shape mapping — обычные layers по-прежнему импортируют/export vector masks, а native Photoshop shape использует path geometry как authoritative source без двойного mask application.
 - UI: Properties показывает Photoshop Shape native round-trip / raster fallback status.
 - Version: приложение синхронизировано на 1.38.0.
 

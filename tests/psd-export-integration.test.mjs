@@ -120,9 +120,9 @@ test('PSD Vector/Path Stage 10d-10e wires native masks and saved paths through U
   assert.match(adapter,/writeVectorMaskExtra\(extra, layer, documentWidth, documentHeight\)/);
   assert.match(adapter,/id >= 2000 && id <= 2997/);
   assert.match(adapter,/writeSavedPathResources/);
-  assert.match(main,/importedLayer\.vectorMask=importPsdVectorMask\(sourceLayer\.vectorMask,importedLayer\)/);
+  assert.match(main,/importedLayer\.vectorMask=canMapShape\?null:importPsdVectorMask\(sourceLayer\.vectorMask,importedLayer\)/);
   assert.match(main,/next\.paths=structuredClone\(parsed\.paths\|\|\[\]\)/);
-  assert.match(main,/vectorMask:exportPsdVectorMask\(layer\)/);
+  assert.match(main,/vectorMask:nativeShape\?\.eligible\?nativeShape\.vectorMask:exportPsdVectorMask\(layer\)/);
   assert.match(main,/paths:prepared\.paths/);
 });
 
