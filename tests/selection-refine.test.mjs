@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { refineMaskAlpha } from '../src/core/pixels.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 const mask = (width,height,points) => {
   const alpha=new Uint8ClampedArray(width*height);
@@ -53,4 +54,17 @@ test('Select & Mask Stage 9a is wired to layer masks with bounded processing',()
   assert.match(main,/Уточнить выделение → маска/);
   assert.match(main,/pixels>12_000_000/);
   assert.match(main,/selectionMaskDataUrl\(layer,options\)/);
+});
+
+
+test('Select & Mask Stage 9b provides a non-destructive live mask preview',()=>{
+  assert.match(main,/function selectionRefineOptionsFromValues\(/);
+  assert.match(main,/function buildSelectionRefinePreviewSource\(/);
+  assert.match(main,/function attachSelectionRefinePreview\(/);
+  assert.match(main,/onMount:\(\{modal,body\}\)=>attachSelectionRefinePreview\(modal,body,layer,scale\)/);
+  assert.match(main,/requestAnimationFrame\(renderPreview\)/);
+  assert.match(main,/document changed only after application|документ изменится только после применения/i);
+  assert.match(main,/const replacing=Boolean\(layer\.mask\)/);
+  assert.match(styles,/\.selection-refine-preview/);
+  assert.match(styles,/\.selection-refine-modal/);
 });

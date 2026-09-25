@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-25 — Select & Mask Preview Stage 9b
+
+- Added: live black/white mask preview inside «Уточнить выделение → маска…».
+- Non-destructive: preview never mutates layer mask, document, history or recovery state before submit.
+- Performance: selection is rasterized into a bounded reduced-resolution preview buffer (up to ~420×240), not a second full-size document mask.
+- Consistency: preview and final apply share one parameter-normalization helper, including document→layer scale conversion.
+- Responsiveness: rapid input/change events are coalesced with `requestAnimationFrame`; modal cleanup cancels pending frames/listeners.
+- Fixed: history label now correctly distinguishes creation of a new refined mask from replacement of an existing mask.
+- Docs: clarified that Stage 8a/8b flat-group wording was historical and superseded by native nested groups in Stage 8c.
+
 ### 2026-09-25 — ICC Metadata Round-trip Stage 7g
 
 - Added: `.zpe` document schema сохраняет bounded ICC profile metadata и intentionally-untagged state.

@@ -6660,7 +6660,7 @@ function normalizeNumberInput(input) {
   input.value=String(value);
 }
 
-function showModal({title,className='',textPreviewLayer=null,textPreviewPoint=null,fields=[],submitLabel='OK',onSubmit}) {
+function showModal({title,className='',textPreviewLayer=null,textPreviewPoint=null,fields=[],submitLabel='OK',onSubmit,onMount=null}) {
   const previousFocus=document.activeElement;
   const back=document.createElement('div'); back.className='modal-backdrop';
   const modal=document.createElement('form'); modal.className=`modal ${className}`;modal.noValidate=true;modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label',title);
@@ -6681,6 +6681,7 @@ function showModal({title,className='',textPreviewLayer=null,textPreviewPoint=nu
   let closed=false;
   const close=()=>{if(closed)return;closed=true;modal.previewCleanup?.();if(textDraft?.owner===modal){textDraft=null;render();}els.modalRoot.replaceChildren();if(previousFocus instanceof HTMLElement)previousFocus.focus();};
   back.append(modal);els.modalRoot.replaceChildren(back);
+  try{onMount?.({modal,body,back,close});}catch(error){console.error(error);toast(error?.message||'Ошибка предпросмотра','error');}
   modal.addEventListener('change',event=>{if(event.target.matches('input[type="number"]'))normalizeNumberInput(event.target);});
   if(className==='text-modal') { back.classList.add('text-modal-backdrop'); attachTextPreview(modal, body, textPreviewLayer, textPreviewPoint); makeModalDraggable(modal); }
   modal.querySelector('[data-cancel]').onclick=close;
@@ -8093,14 +8094,97 @@ async function addSelectedLayerMask(fromSelection=false){
   setStatus(fromSelection?'Маска слоя создана из текущего выделения':'Добавлена маска «показать всё»');
 }
 
+
+function selectionRefineOptionsFromValues(values, scale = 1) {
+  const factor=Math.max(.0001,Number(scale)||1);
+  return {
+    smooth:clamp(Number(values?.smooth)||0,0,32)/factor,
+    shift:clamp(Number(values?.shift)||0,-64,64)/factor,
+    feather:clamp(Number(values?.feather)||0,0,64)/factor,
+    contrast:clamp(Number(values?.contrast)||0,0,100),
+    invert:values?.invert==='yes',
+  };
+}
+
+function buildSelectionRefinePreviewSource(layer,{maxWidth=420,maxHeight=240}={}) {
+  if(!selectionShape||!layer)return null;
+  const sourceWidth=layer.type==='adjustment'?doc.width:Math.max(1,Math.round(layer.width||1));
+  const sourceHeight=layer.type==='adjustment'?doc.height:Math.max(1,Math.round(layer.height||1));
+  const previewScale=Math.max(.0001,Math.min(2,maxWidth/sourceWidth,maxHeight/sourceHeight));
+  const width=Math.max(1,Math.round(sourceWidth*previewScale));
+  const height=Math.max(1,Math.round(sourceHeight*previewScale));
+  const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  ctx.scale(previewScale,previewScale);
+  ctx.fillStyle='#fff';
+  if(layer.type==='adjustment'){
+    if(traceDocumentSelectionPath(ctx))ctx.fill();
+  }else{
+    const polygon=selectionPolygonForLayer(layer);
+    if(polygon?.length>=3){
+      ctx.beginPath();ctx.moveTo(polygon[0].x,polygon[0].y);
+      for(let index=1;index<polygon.length;index+=1)ctx.lineTo(polygon[index].x,polygon[index].y);
+      ctx.closePath();ctx.fill();
+    }
+  }
+  ctx.setTransform(1,0,0,1,0,0);
+  const image=ctx.getImageData(0,0,width,height);
+  const alpha=new Uint8ClampedArray(width*height);
+  for(let index=0;index<alpha.length;index+=1)alpha[index]=image.data[index*4+3];
+  return{alpha,width,height,scale:previewScale,sourceWidth,sourceHeight};
+}
+
+function attachSelectionRefinePreview(modal,body,layer,layerScale) {
+  const source=buildSelectionRefinePreviewSource(layer);
+  if(!source)return;
+  const section=document.createElement('section');section.className='selection-refine-preview';
+  const heading=document.createElement('strong');heading.textContent='Предпросмотр маски';
+  const canvas=document.createElement('canvas');canvas.width=source.width;canvas.height=source.height;canvas.setAttribute('aria-label','Предпросмотр уточнённой маски');
+  const status=document.createElement('small');
+  section.append(heading,canvas,status);body.prepend(section);
+  const ctx=canvas.getContext('2d',{alpha:false});
+  let frame=0;
+
+  const renderPreview=()=>{
+    frame=0;
+    if(!modal.isConnected)return;
+    const values=Object.fromEntries(new FormData(modal));
+    const previewOptions=selectionRefineOptionsFromValues(values,layerScale/source.scale);
+    const alpha=refineMaskAlpha(source.alpha,source.width,source.height,previewOptions);
+    const image=ctx.createImageData(source.width,source.height);
+    for(let index=0;index<alpha.length;index+=1){
+      const value=alpha[index],offset=index*4;
+      image.data[offset]=value;image.data[offset+1]=value;image.data[offset+2]=value;image.data[offset+3]=255;
+    }
+    ctx.putImageData(image,0,0);
+    status.textContent=`Маска ${source.sourceWidth}×${source.sourceHeight}px · preview ${source.width}×${source.height}px · документ изменится только после применения`;
+  };
+  const schedule=()=>{
+    if(frame)cancelAnimationFrame(frame);
+    frame=requestAnimationFrame(renderPreview);
+  };
+  modal.addEventListener('input',schedule);
+  modal.addEventListener('change',schedule);
+  const priorCleanup=modal.previewCleanup;
+  modal.previewCleanup=()=>{
+    priorCleanup?.();
+    if(frame)cancelAnimationFrame(frame);
+    modal.removeEventListener('input',schedule);
+    modal.removeEventListener('change',schedule);
+  };
+  renderPreview();
+}
+
 async function refineSelectionToLayerMask(){
   const layer=selected();
   if(!layer){setStatus('Сначала выберите слой');return;}
   if(!selectionShape){setStatus('Сначала создайте выделение');return;}
   if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}
   const scale=layer.type==='adjustment'?1:Math.max(.01,(Math.abs(Number(layer.scaleX)||1)+Math.abs(Number(layer.scaleY)||1))/2);
+  const replacing=Boolean(layer.mask);
   showModal({
     title:'Уточнить выделение → маска слоя',
+    className:'selection-refine-modal',
     fields:[
       {name:'smooth',label:'Сглаживание, px',type:'number',value:2,min:0,max:32,step:1},
       {name:'shift',label:'Расширить / сжать, px',type:'number',value:0,min:-64,max:64,step:1},
@@ -8108,18 +8192,13 @@ async function refineSelectionToLayerMask(){
       {name:'contrast',label:'Контраст края, %',type:'number',value:0,min:0,max:100,step:1},
       {name:'invert',label:'Инвертировать маску',type:'select',value:'no',options:[['no','Нет'],['yes','Да']]},
     ],
-    submitLabel:layer.mask?'Заменить маску':'Создать маску',
+    submitLabel:replacing?'Заменить маску':'Создать маску',
+    onMount:({modal,body})=>attachSelectionRefinePreview(modal,body,layer,scale),
     onSubmit:async values=>{
-      const options={
-        smooth:clamp(Number(values.smooth)||0,0,32)/scale,
-        shift:clamp(Number(values.shift)||0,-64,64)/scale,
-        feather:clamp(Number(values.feather)||0,0,64)/scale,
-        contrast:clamp(Number(values.contrast)||0,0,100),
-        invert:values.invert==='yes',
-      };
+      const options=selectionRefineOptionsFromValues(values,scale);
       const dataUrl=await selectionMaskDataUrl(layer,options);
       layer.mask=createLayerMask({enabled:true,dataUrl});
-      commit(layer.mask?'Уточнить маску слоя':'Создать уточнённую маску слоя');
+      commit(replacing?'Уточнить маску слоя':'Создать уточнённую маску слоя');
       setStatus(`Маска уточнена: сглаживание ${Number(values.smooth)||0}px, край ${Number(values.shift)||0}px, растушёвка ${Number(values.feather)||0}px`);
       return true;
     },
