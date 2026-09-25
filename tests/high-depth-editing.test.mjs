@@ -128,11 +128,10 @@ test('Stage 13c flood fill stays in CMYK source space and respects selection pre
 });
 
 test('Stage 13c routes CMYK brush, fill, line and clear through canonical PixelBuffer mutations',()=>{
-  assert.match(main,/NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge'\]\)/);
+  assert.match(main,/NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
   assert.match(main,/applyCmykPixelBufferBrushDab\(highDepthPaintBuffer/);
   assert.match(main,/applyCmykPixelBufferStrokeSegment\(highDepthPaintBuffer/);
   assert.match(main,/floodFillCmykPixelBuffer\(buffer,x,y/);
   assert.match(main,/buffer\.model==='cmyk'/);
   assert.match(main,/highDepthPreview:buffer\.model==='cmyk'\?null/);
-  assert.match(main,/Dodge\/Burn Stage 13c пока не реализован/);
 });
