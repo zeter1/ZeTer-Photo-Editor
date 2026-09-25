@@ -2955,6 +2955,12 @@ async function openPsd(file){
   try{
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
+    if(parsed.iccProfile){
+      const profile=parsed.iccProfile;
+      warnings.push(`ICC profile обнаружен: ${profile.colorSpace||'unknown'} → ${profile.pcs||'unknown'}, v${profile.version||'?'}${profile.signatureValid?'':' (header signature invalid)'}. Текущий Canvas preview пока не выполняет явное ICC-преобразование`);
+    }else if(parsed.iccUntagged){
+      warnings.push('PSD/PSB помечен как intentionally untagged ICC; ZPE не назначает профиль автоматически');
+    }
     if(parsed.bitsPerChannel===16)warnings.push('RGB 16-bit/channel декодирован без потери точности на PSD/PSB adapter boundary, но текущий ZPE/Canvas документ получает 8-bit preview; точность выше 8 bit после импорта пока не сохраняется');
     if(parsed.bitsPerChannel===32)warnings.push('RGB 32-bit floating-point/HDR декодирован в Float32 PixelBuffer, но текущий ZPE/Canvas preview ограничивает отображение диапазоном 0..1; HDR tone mapping/exposure и сохранение Float32 после импорта пока не реализованы');
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');

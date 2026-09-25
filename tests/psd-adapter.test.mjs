@@ -71,11 +71,52 @@ function sampleRowBytes(samples, depth) {
   return bytes;
 }
 
-function makeRawPsd({ version = 1, depth = 8, colorMode = 3 } = {}) {
+
+function makeTestIccProfile({ colorSpace='RGB ', pcs='XYZ ', deviceClass='mntr' } = {}) {
+  const bytes = new Uint8Array(128);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, bytes.length, false);
+  bytes[8] = 4;
+  bytes[9] = 0x30;
+  const putAscii = (offset, value) => {
+    for (let i = 0; i < 4; i += 1) bytes[offset + i] = value.charCodeAt(i) || 32;
+  };
+  putAscii(12, deviceClass);
+  putAscii(16, colorSpace);
+  putAscii(20, pcs);
+  putAscii(36, 'acsp');
+  return bytes;
+}
+
+function imageResourceBlock(id, data, name='') {
+  const out=writer();
+  out.ascii('8BIM');
+  out.u16(id);
+  const nameBytes=encoder.encode(name);
+  out.bytes(nameBytes.length);
+  if(nameBytes.length)out.push(nameBytes);
+  if((1+nameBytes.length)&1)out.bytes(0);
+  out.u32(data.length);
+  out.push(data);
+  if(data.length&1)out.bytes(0);
+  return concat(out.parts);
+}
+
+function imageResourcesBytes({ iccProfile=null, iccUntagged=false } = {}) {
+  const parts=[];
+  if(iccProfile)parts.push(imageResourceBlock(1039,iccProfile));
+  if(iccUntagged)parts.push(imageResourceBlock(1041,Uint8Array.of(1)));
+  return concat(parts);
+}
+
+function makeRawPsd({ version = 1, depth = 8, colorMode = 3, iccProfile = null, iccUntagged = false } = {}) {
   const out = writer();
   out.ascii('8BPS'); out.u16(version); out.bytes(0,0,0,0,0,0);
   out.u16(4); out.u32(1); out.u32(2); out.u16(depth); out.u16(colorMode);
-  out.u32(0); out.u32(0);
+  out.u32(0);
+  const resources=imageResourcesBytes({iccProfile,iccUntagged});
+  out.u32(resources.length);
+  if(resources.length)out.push(resources);
 
   const info = writer();
   info.i16(1);
@@ -407,6 +448,23 @@ test('PSD Group Import Stage 8a reconstructs nested lsct groups and layer member
   assert.equal(innerPixel.groupKey,inner.key);
   assert.deepEqual([...outerPixel.pixels],[255,0,0,255,0,255,0,255]);
   assert.deepEqual([...innerPixel.pixels],[0,0,255,255,255,255,0,128]);
+});
+
+
+test('PSD Color Management Stage 7f extracts ICC resource 1039 and untagged flag 1041', async () => {
+  const profile=makeTestIccProfile();
+  const decoded=await decodePsd(makeRawPsd({iccProfile:profile,iccUntagged:true}));
+  assert.ok(decoded.iccProfile);
+  assert.equal(decoded.iccProfile.id,1039);
+  assert.equal(decoded.iccProfile.size,128);
+  assert.equal(decoded.iccProfile.declaredSize,128);
+  assert.equal(decoded.iccProfile.version,'4.3.0');
+  assert.equal(decoded.iccProfile.deviceClass,'mntr');
+  assert.equal(decoded.iccProfile.colorSpace,'RGB');
+  assert.equal(decoded.iccProfile.pcs,'XYZ');
+  assert.equal(decoded.iccProfile.signatureValid,true);
+  assert.deepEqual([...decoded.iccProfile.bytes],[...profile]);
+  assert.equal(decoded.iccUntagged,true);
 });
 
 test('PSD/PSB detection uses extensions or Photoshop MIME type', () => {

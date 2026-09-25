@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-25 — ICC Metadata Foundation Stage 7f
+
+- Added: PSD/PSB Image Resources parser для корректно padded `8BIM` resource blocks.
+- ICC: resource `0x040F / 1039` читается как raw ICC profile bytes с 4 МБ safety cap; resource `0x0410 / 1041` переносит intentionally-untagged flag.
+- Header summary: declared profile size, ICC version, device class, color space, PCS и `acsp` signature validation.
+- UI: при импорте профилируемого PSD/PSB показывается явное предупреждение, что текущий Canvas preview ещё не делает ICC transform; ZPE не выдаёт unmanaged preview за color-managed результат.
+- Regression: synthetic ICC v4 RGB/XYZ profile и untagged resource fixture.
+
 ### 2026-09-25 — Select & Mask Foundation Stage 9a
 
 - Added: «Уточнить выделение → маска…» в меню «Выделение» и «Слой».

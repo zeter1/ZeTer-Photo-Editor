@@ -94,3 +94,13 @@ test('PSD Group Stage 8e maps opacity and blend mode through ZPE and lsct folder
   assert.match(main,/blendMode:sourceGroup\.blendMode\|\|'pass-through'/);
   assert.match(main,/opacity:clamp\(Number\(group\.opacity\?\?1\),0,1\)/);
 });
+
+
+test('PSD Color Management Stage 7f surfaces ICC metadata without pretending to color-convert',()=>{
+  assert.match(adapter,/function parseImageResources\(/);
+  assert.match(adapter,/id === 1039/);
+  assert.match(adapter,/id === 1041/);
+  assert.match(adapter,/iccProfile: imageResources\.iccProfile/);
+  assert.match(main,/ICC profile обнаружен/);
+  assert.match(main,/Canvas preview пока не выполняет явное ICC-преобразование/);
+});

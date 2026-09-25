@@ -2816,6 +2816,96 @@ function readLengthSection(reader, label) {
   return { length, end };
 }
 
+
+function readPascalEven(reader, sectionEnd) {
+  if (reader.offset >= sectionEnd) throw new PsdImportError('Image resource: отсутствует Pascal name', 'PSD_IMAGE_RESOURCE');
+  const length = reader.u8();
+  if (reader.offset + length > sectionEnd) throw new PsdImportError('Image resource name выходит за границы секции', 'PSD_IMAGE_RESOURCE');
+  const name = decodeLatin1(reader.take(length));
+  if ((1 + length) & 1) {
+    if (reader.offset >= sectionEnd) throw new PsdImportError('Image resource name padding отсутствует', 'PSD_IMAGE_RESOURCE');
+    reader.skip(1);
+  }
+  return name;
+}
+
+function parseIccProfileHeader(bytes) {
+  const summary = {
+    size: bytes.length,
+    declaredSize: null,
+    version: null,
+    deviceClass: null,
+    colorSpace: null,
+    pcs: null,
+    signatureValid: false,
+  };
+  if (bytes.length < 128) return summary;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const asciiAt = offset => {
+    let value = '';
+    for (let i = 0; i < 4; i += 1) value += String.fromCharCode(bytes[offset + i]);
+    return value;
+  };
+  summary.declaredSize = view.getUint32(0, false);
+  const major = bytes[8];
+  const minor = bytes[9] >> 4;
+  const bugfix = bytes[9] & 0x0f;
+  summary.version = `${major}.${minor}.${bugfix}`;
+  summary.deviceClass = asciiAt(12).trim();
+  summary.colorSpace = asciiAt(16).trim();
+  summary.pcs = asciiAt(20).trim();
+  summary.signatureValid = asciiAt(36) === 'acsp';
+  return summary;
+}
+
+function parseImageResources(reader, section, warnings, { maxIccBytes = 4 * 1024 * 1024 } = {}) {
+  const resources = {
+    iccProfile: null,
+    iccUntagged: false,
+  };
+  while (reader.offset < section.end) {
+    if (section.end - reader.offset < 12) {
+      warnings.push('Image Resources: хвост секции короче минимального resource block');
+      reader.seek(section.end);
+      break;
+    }
+    const signature = reader.ascii(4);
+    if (signature !== '8BIM') {
+      warnings.push(`Image Resources: неизвестная сигнатура ${JSON.stringify(signature)}; оставшаяся часть секции пропущена`);
+      reader.seek(section.end);
+      break;
+    }
+    const id = reader.u16();
+    const name = readPascalEven(reader, section.end);
+    if (reader.offset + 4 > section.end) throw new PsdImportError('Image resource size отсутствует', 'PSD_IMAGE_RESOURCE');
+    const size = reader.u32();
+    if (reader.offset + size > section.end) throw new PsdImportError('Image resource data выходит за границы секции', 'PSD_IMAGE_RESOURCE');
+    const data = reader.take(size);
+    if (size & 1) {
+      if (reader.offset >= section.end) throw new PsdImportError('Image resource padding отсутствует', 'PSD_IMAGE_RESOURCE');
+      reader.skip(1);
+    }
+
+    if (id === 1039) {
+      if (size > maxIccBytes) {
+        warnings.push(`ICC profile пропущен: ${Math.ceil(size / 1024 / 1024)} МБ превышает лимит ${Math.ceil(maxIccBytes / 1024 / 1024)} МБ`);
+        continue;
+      }
+      const bytes = new Uint8Array(size);
+      bytes.set(data);
+      resources.iccProfile = {
+        id,
+        name,
+        bytes,
+        ...parseIccProfileHeader(bytes),
+      };
+    } else if (id === 1041) {
+      resources.iccUntagged = Boolean(data[0]);
+    }
+  }
+  return resources;
+}
+
 function decodeUtf16Be(bytes) {
   if (bytes.length % 2) return '';
   let result = '';
@@ -3350,12 +3440,14 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
   const reader = new Reader(bytes);
   reader.skip(26);
   const colorMode = readLengthSection(reader, 'Color Mode Data'); reader.seek(colorMode.end);
-  const resources = readLengthSection(reader, 'Image Resources'); reader.seek(resources.end);
+  const warnings = [];
+  const resources = readLengthSection(reader, 'Image Resources');
+  const imageResources = parseImageResources(reader, resources, warnings);
+  reader.seek(resources.end);
   const layerMaskLength = readVersionedLength(reader, header.version);
   const layerMaskEnd = reader.offset + layerMaskLength;
   if (layerMaskEnd > reader.end) throw new PsdImportError('Layer and Mask Information: длина выходит за границы файла', 'PSD_SECTION_LENGTH');
   const layerMask = { length: layerMaskLength, end: layerMaskEnd };
-  const warnings = [];
   const records = [];
   if (layerMask.length > 0) {
     const layerInfoLength = readVersionedLength(reader, header.version);
@@ -3422,7 +3514,16 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
       warnings.push('PSD/PSB не содержит импортируемых bitmap-слоёв: использован composite preview');
     }
   }
-  return { ...header, layers, groups, composite, compositePixelBuffer, warnings };
+  return {
+    ...header,
+    layers,
+    groups,
+    composite,
+    compositePixelBuffer,
+    iccProfile: imageResources.iccProfile,
+    iccUntagged: imageResources.iccUntagged,
+    warnings,
+  };
 }
 
 
@@ -6832,6 +6933,12 @@ async function openPsd(file){
   try{
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
+    if(parsed.iccProfile){
+      const profile=parsed.iccProfile;
+      warnings.push(`ICC profile обнаружен: ${profile.colorSpace||'unknown'} → ${profile.pcs||'unknown'}, v${profile.version||'?'}${profile.signatureValid?'':' (header signature invalid)'}. Текущий Canvas preview пока не выполняет явное ICC-преобразование`);
+    }else if(parsed.iccUntagged){
+      warnings.push('PSD/PSB помечен как intentionally untagged ICC; ZPE не назначает профиль автоматически');
+    }
     if(parsed.bitsPerChannel===16)warnings.push('RGB 16-bit/channel декодирован без потери точности на PSD/PSB adapter boundary, но текущий ZPE/Canvas документ получает 8-bit preview; точность выше 8 bit после импорта пока не сохраняется');
     if(parsed.bitsPerChannel===32)warnings.push('RGB 32-bit floating-point/HDR декодирован в Float32 PixelBuffer, но текущий ZPE/Canvas preview ограничивает отображение диапазоном 0..1; HDR tone mapping/exposure и сохранение Float32 после импорта пока не реализованы');
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
