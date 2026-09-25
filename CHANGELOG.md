@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-25 — ICC Metadata Round-trip Stage 7g
+
+- Added: `.zpe` document schema сохраняет bounded ICC profile metadata и intentionally-untagged state.
+- IO: binary ICC bytes кодируются в `data:application/vnd.iccprofile;base64,...`; decoder проверяет raw-size ceiling до/после `atob`.
+- PSD/PSB writer: resources 1039 (ICC Profile) и 1041 (ICC Untagged) записываются с корректным Pascal-name/data even padding.
+- Export: сохранённый профиль передаётся обратно в PSD/PSB; UI предупреждает, что это metadata preservation, а не ICC color conversion.
+- Safety: raw ICC ограничен 4 МБ, `.zpe` profile data URL — 5.7 МБ; некорректные схемы/URL sanitizer отбрасывает.
+- Regression: state sanitizer и adapter writer→reader byte-identical ICC round-trip.
+
 ### 2026-09-25 — ICC Metadata Foundation Stage 7f
 
 - Added: PSD/PSB Image Resources parser для корректно padded `8BIM` resource blocks.

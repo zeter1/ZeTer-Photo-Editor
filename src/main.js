@@ -7,7 +7,7 @@ import {
   isLayerVisible, isLayerLocked, isGroupVisible, isGroupLocked, groupDepth,
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
-import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename } from './core/io.js';
+import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha } from './core/pixels.js';
 import { pixelBufferToRgba8Preview } from './core/pixel-buffer.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
@@ -3042,6 +3042,18 @@ async function openPsd(file){
     });
     next.layers=prepared;
     next.groups=importedGroups;
+    next.colorProfile=parsed.iccProfile?{
+      kind:'icc',
+      untagged:Boolean(parsed.iccUntagged),
+      dataUrl:bytesToDataUrl(parsed.iccProfile.bytes,'application/vnd.iccprofile'),
+      name:parsed.iccProfile.name||'',
+      version:parsed.iccProfile.version||'',
+      deviceClass:parsed.iccProfile.deviceClass||'',
+      colorSpace:parsed.iccProfile.colorSpace||'',
+      pcs:parsed.iccProfile.pcs||'',
+      signatureValid:parsed.iccProfile.signatureValid===true,
+    }:(parsed.iccUntagged?{kind:'untagged',untagged:true}:null);
+    if(parsed.iccProfile)parsed.iccProfile.bytes=null;
     next.selectedLayerId=prepared.at(-1)?.id??null;
     history=new HistoryStack(80);
     setDoc(next,{resetHistory:true,label:'Импорт PSD/PSB'});
@@ -3239,6 +3251,7 @@ async function preparePsdExport(exportDoc){
     });
   }
 
+  if(exportDoc.colorProfile?.kind==='icc')warnings.push('ICC profile сохранён как metadata resource без явного color transform; пиксельные операции ZPE пока выполняются в unmanaged Canvas pipeline');
   return{layers:[...prepared].reverse(),groups:exportGroups,composite,warnings};
 }
 
@@ -3248,9 +3261,14 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   const prepared=await preparePsdExport(exportDoc);
   setStatus(`${format}: упаковка RLE-каналов…`);
   const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
+  const profile=exportDoc.colorProfile;
+  const iccProfile=profile?.kind==='icc'&&profile.dataUrl
+    ? dataUrlToBytes(profile.dataUrl,{maxBytes:4*1024*1024})
+    : null;
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
     layers:prepared.layers,groups:prepared.groups,composite:prepared.composite,
+    iccProfile,iccUntagged:Boolean(profile?.untagged),
     maxPixels:48_000_000,maxLayers:500,
   });
   const filename=`${safeFilename(exportDoc.name)}.${psb?'psb':'psd'}`;

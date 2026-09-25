@@ -25,6 +25,7 @@ export const MAX_CANVAS_PIXELS = 48_000_000;
 export const MIN_LAYER_SCALE = 0.01;
 export const MAX_LAYER_SCALE = 100;
 export const MAX_LAYER_POSITION = 120000;
+export const MAX_ICC_PROFILE_DATA_URL = 5_700_000;
 
 export function imageResizeTransforms(layers, sx, sy) {
   return layers.map(layer => {
@@ -70,6 +71,7 @@ export function createDocument({ name = 'Без имени', width = 1200, heigh
     width: size.width,
     height: size.height,
     background,
+    colorProfile: null,
     layers: [],
     groups: [],
     selectedLayerId: null,
@@ -443,11 +445,37 @@ export function restoreDocument(snapshot) {
   if (!Array.isArray(doc.groups)) doc.groups = [];
   for (const group of doc.groups) if (!('parentGroupId' in group)) group.parentGroupId = null;
   normalizeGroupParents(doc.groups);
+  doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
   const validGroupIds = new Set(doc.groups.map(group => group?.id).filter(Boolean));
   for (const layer of doc.layers) {
     if (!validGroupIds.has(layer?.groupId)) layer.groupId = null;
   }
   return doc;
+}
+
+
+export function sanitizeColorProfile(profile) {
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
+  const untagged = profile.untagged === true;
+  if (profile.kind === 'untagged') return { kind:'untagged', untagged:true };
+  if (profile.kind !== 'icc') return untagged ? { kind:'untagged', untagged:true } : null;
+  const dataUrl = typeof profile.dataUrl === 'string' &&
+    profile.dataUrl.length <= MAX_ICC_PROFILE_DATA_URL &&
+    /^data:application\/(?:vnd\.iccprofile|octet-stream);base64,[a-z\d+/=]+$/i.test(profile.dataUrl)
+      ? profile.dataUrl
+      : null;
+  if (!dataUrl) return untagged ? { kind:'untagged', untagged:true } : null;
+  return {
+    kind:'icc',
+    untagged,
+    dataUrl,
+    name:shortText(profile.name,'',240),
+    version:shortText(profile.version,'',32),
+    deviceClass:shortText(profile.deviceClass,'',16),
+    colorSpace:shortText(profile.colorSpace,'',16),
+    pcs:shortText(profile.pcs,'',16),
+    signatureValid:profile.signatureValid === true,
+  };
 }
 
 export function sanitizeFilters(filters = {}) {
@@ -594,6 +622,7 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.width = size.width;
   doc.height = size.height;
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
+  doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
   const usedGroupIds = new Set();
   doc.groups = Array.isArray(doc.groups) ? doc.groups.slice(0, 100).map(group => sanitizeGroup(group, usedGroupIds)) : [];
   normalizeGroupParents(doc.groups);

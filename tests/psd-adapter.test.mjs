@@ -475,6 +475,23 @@ test('PSD/PSB detection uses extensions or Photoshop MIME type', () => {
 });
 
 
+
+test('PSD Color Management Stage 7g writes ICC resources back without altering raw profile bytes', async () => {
+  const profile=makeTestIccProfile({colorSpace:'RGB ',pcs:'XYZ '});
+  const pixels=Uint8Array.from([40,80,120,255]);
+  const encoded=encodePsd({
+    width:1,height:1,composite:pixels,
+    iccProfile:profile,iccUntagged:true,
+    layers:[{name:'ICC Layer',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true}],
+  });
+  const decoded=await decodePsd(encoded);
+  assert.ok(decoded.iccProfile);
+  assert.deepEqual([...decoded.iccProfile.bytes],[...profile]);
+  assert.equal(decoded.iccProfile.colorSpace,'RGB');
+  assert.equal(decoded.iccProfile.pcs,'XYZ');
+  assert.equal(decoded.iccUntagged,true);
+});
+
 test('PSD writer round-trips layered RGB pixels, Unicode names, blend state and user mask', async () => {
   const topPixels=Uint8Array.from([10,20,220,200]);
   const topMask=Uint8Array.from([255,255,255,100]);

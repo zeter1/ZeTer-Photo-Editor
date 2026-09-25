@@ -479,6 +479,38 @@ class HistoryStack {
 }
 
 // ---- src/core/io.js ----
+function bytesToDataUrl(value, mime = 'application/octet-stream') {
+  const bytes = value instanceof Uint8Array
+    ? value
+    : ArrayBuffer.isView(value)
+      ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+      : value instanceof ArrayBuffer
+        ? new Uint8Array(value)
+        : null;
+  if (!bytes) throw new TypeError('Ожидался бинарный буфер');
+  if (typeof btoa !== 'function') throw new Error('Base64 encoder недоступен');
+  const chunks = [];
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
+    chunks.push(String.fromCharCode(...chunk));
+  }
+  return `data:${String(mime || 'application/octet-stream')};base64,${btoa(chunks.join(''))}`;
+}
+function dataUrlToBytes(dataUrl, { maxBytes = 4 * 1024 * 1024 } = {}) {
+  const match = /^data:([^;,]+)?;base64,([a-z\d+/=]*)$/i.exec(String(dataUrl || ''));
+  if (!match) throw new Error('Некорректный binary data URL');
+  const base64 = match[2];
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  const estimated = Math.max(0, Math.floor(base64.length * 3 / 4) - padding);
+  if (estimated > maxBytes) throw new Error(`Binary data URL превышает лимит ${maxBytes} байт`);
+  if (typeof atob !== 'function') throw new Error('Base64 decoder недоступен');
+  const binary = atob(base64);
+  if (binary.length > maxBytes) throw new Error(`Binary data URL превышает лимит ${maxBytes} байт`);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index) & 255;
+  return bytes;
+}
 function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1366,6 +1398,7 @@ const MAX_CANVAS_PIXELS = 48_000_000;
 const MIN_LAYER_SCALE = 0.01;
 const MAX_LAYER_SCALE = 100;
 const MAX_LAYER_POSITION = 120000;
+const MAX_ICC_PROFILE_DATA_URL = 5_700_000;
 function imageResizeTransforms(layers, sx, sy) {
   return layers.map(layer => {
     if (layer?.type === 'adjustment') return { x: 0, y: 0, scaleX: 1, scaleY: 1 };
@@ -1408,6 +1441,7 @@ function createDocument({ name = 'Без имени', width = 1200, height = 800
     width: size.width,
     height: size.height,
     background,
+    colorProfile: null,
     layers: [],
     groups: [],
     selectedLayerId: null,
@@ -1751,11 +1785,35 @@ function restoreDocument(snapshot) {
   if (!Array.isArray(doc.groups)) doc.groups = [];
   for (const group of doc.groups) if (!('parentGroupId' in group)) group.parentGroupId = null;
   normalizeGroupParents(doc.groups);
+  doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
   const validGroupIds = new Set(doc.groups.map(group => group?.id).filter(Boolean));
   for (const layer of doc.layers) {
     if (!validGroupIds.has(layer?.groupId)) layer.groupId = null;
   }
   return doc;
+}
+function sanitizeColorProfile(profile) {
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
+  const untagged = profile.untagged === true;
+  if (profile.kind === 'untagged') return { kind:'untagged', untagged:true };
+  if (profile.kind !== 'icc') return untagged ? { kind:'untagged', untagged:true } : null;
+  const dataUrl = typeof profile.dataUrl === 'string' &&
+    profile.dataUrl.length <= MAX_ICC_PROFILE_DATA_URL &&
+    /^data:application\/(?:vnd\.iccprofile|octet-stream);base64,[a-z\d+/=]+$/i.test(profile.dataUrl)
+      ? profile.dataUrl
+      : null;
+  if (!dataUrl) return untagged ? { kind:'untagged', untagged:true } : null;
+  return {
+    kind:'icc',
+    untagged,
+    dataUrl,
+    name:shortText(profile.name,'',240),
+    version:shortText(profile.version,'',32),
+    deviceClass:shortText(profile.deviceClass,'',16),
+    colorSpace:shortText(profile.colorSpace,'',16),
+    pcs:shortText(profile.pcs,'',16),
+    signatureValid:profile.signatureValid === true,
+  };
 }
 function sanitizeFilters(filters = {}) {
   const result = {};
@@ -1899,6 +1957,7 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.width = size.width;
   doc.height = size.height;
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
+  doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
   const usedGroupIds = new Set();
   doc.groups = Array.isArray(doc.groups) ? doc.groups.slice(0, 100).map(group => sanitizeGroup(group, usedGroupIds)) : [];
   normalizeGroupParents(doc.groups);
@@ -3898,7 +3957,39 @@ function encodeCompositeRle(pixels, width, height, version) {
   return writer;
 }
 
-function buildPsdWriter({ width, height, layers = [], groups = [], composite, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+
+function writePascalEven(writer, name = '') {
+  const text = String(name || '').slice(0, 255);
+  writer.u8(text.length);
+  for (let index = 0; index < text.length; index += 1) writer.u8(text.charCodeAt(index) & 255);
+  if ((1 + text.length) & 1) writer.u8(0);
+}
+
+function writeImageResourceBlock(writer, id, data, name = '') {
+  const bytes = asBytes(data);
+  writer.ascii('8BIM').u16(id);
+  writePascalEven(writer, name);
+  writer.u32(bytes.length).push(bytes);
+  if (bytes.length & 1) writer.u8(0);
+}
+
+function buildImageResources({ iccProfile = null, iccUntagged = false, maxIccBytes = 4 * 1024 * 1024 } = {}) {
+  const resources = new Writer();
+  if (iccProfile) {
+    const bytes = asBytes(iccProfile);
+    if (bytes.length > maxIccBytes) {
+      throw new PsdImportError(
+        `PSD/PSB writer: ICC profile ${Math.ceil(bytes.length / 1024 / 1024)} МБ превышает лимит ${Math.ceil(maxIccBytes / 1024 / 1024)} МБ`,
+        'PSD_EXPORT_ICC_LIMIT',
+      );
+    }
+    writeImageResourceBlock(resources, 1039, bytes);
+  }
+  if (iccUntagged) writeImageResourceBlock(resources, 1041, Uint8Array.of(1));
+  return resources;
+}
+
+function buildPsdWriter({ width, height, layers = [], groups = [], composite, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
   if (version !== PSD_VERSION && version !== PSB_VERSION) throw new PsdImportError(`PSD/PSB writer: unsupported version ${version}`, 'PSD_EXPORT_VERSION');
   const documentWidth = Math.trunc(Number(width));
   const documentHeight = Math.trunc(Number(height));
@@ -3954,11 +4045,12 @@ function buildPsdWriter({ width, height, layers = [], groups = [], composite, ve
   layerAndMask.u32(0);
 
   const compositeData = encodeCompositeRle(composite, documentWidth, documentHeight, version);
+  const imageResources = buildImageResources({iccProfile,iccUntagged});
   const out = new Writer();
   out.ascii('8BPS').u16(version).push(new Uint8Array(6));
   out.u16(4).u32(documentHeight).u32(documentWidth).u16(8).u16(PSD_COLOR_MODE_RGB);
   out.u32(0);
-  out.u32(0);
+  out.u32(imageResources.length).append(imageResources);
   if (version === PSB_VERSION) out.u64(layerAndMask.length);
   else out.u32(layerAndMask.length);
   out.append(layerAndMask);
@@ -7020,6 +7112,18 @@ async function openPsd(file){
     });
     next.layers=prepared;
     next.groups=importedGroups;
+    next.colorProfile=parsed.iccProfile?{
+      kind:'icc',
+      untagged:Boolean(parsed.iccUntagged),
+      dataUrl:bytesToDataUrl(parsed.iccProfile.bytes,'application/vnd.iccprofile'),
+      name:parsed.iccProfile.name||'',
+      version:parsed.iccProfile.version||'',
+      deviceClass:parsed.iccProfile.deviceClass||'',
+      colorSpace:parsed.iccProfile.colorSpace||'',
+      pcs:parsed.iccProfile.pcs||'',
+      signatureValid:parsed.iccProfile.signatureValid===true,
+    }:(parsed.iccUntagged?{kind:'untagged',untagged:true}:null);
+    if(parsed.iccProfile)parsed.iccProfile.bytes=null;
     next.selectedLayerId=prepared.at(-1)?.id??null;
     history=new HistoryStack(80);
     setDoc(next,{resetHistory:true,label:'Импорт PSD/PSB'});
@@ -7217,6 +7321,7 @@ async function preparePsdExport(exportDoc){
     });
   }
 
+  if(exportDoc.colorProfile?.kind==='icc')warnings.push('ICC profile сохранён как metadata resource без явного color transform; пиксельные операции ZPE пока выполняются в unmanaged Canvas pipeline');
   return{layers:[...prepared].reverse(),groups:exportGroups,composite,warnings};
 }
 
@@ -7226,9 +7331,14 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   const prepared=await preparePsdExport(exportDoc);
   setStatus(`${format}: упаковка RLE-каналов…`);
   const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
+  const profile=exportDoc.colorProfile;
+  const iccProfile=profile?.kind==='icc'&&profile.dataUrl
+    ? dataUrlToBytes(profile.dataUrl,{maxBytes:4*1024*1024})
+    : null;
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
     layers:prepared.layers,groups:prepared.groups,composite:prepared.composite,
+    iccProfile,iccUntagged:Boolean(profile?.untagged),
     maxPixels:48_000_000,maxLayers:500,
   });
   const filename=`${safeFilename(exportDoc.name)}.${psb?'psb':'psd'}`;

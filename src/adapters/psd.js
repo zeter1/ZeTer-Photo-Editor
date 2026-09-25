@@ -1223,7 +1223,39 @@ function encodeCompositeRle(pixels, width, height, version) {
   return writer;
 }
 
-function buildPsdWriter({ width, height, layers = [], groups = [], composite, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+
+function writePascalEven(writer, name = '') {
+  const text = String(name || '').slice(0, 255);
+  writer.u8(text.length);
+  for (let index = 0; index < text.length; index += 1) writer.u8(text.charCodeAt(index) & 255);
+  if ((1 + text.length) & 1) writer.u8(0);
+}
+
+function writeImageResourceBlock(writer, id, data, name = '') {
+  const bytes = asBytes(data);
+  writer.ascii('8BIM').u16(id);
+  writePascalEven(writer, name);
+  writer.u32(bytes.length).push(bytes);
+  if (bytes.length & 1) writer.u8(0);
+}
+
+function buildImageResources({ iccProfile = null, iccUntagged = false, maxIccBytes = 4 * 1024 * 1024 } = {}) {
+  const resources = new Writer();
+  if (iccProfile) {
+    const bytes = asBytes(iccProfile);
+    if (bytes.length > maxIccBytes) {
+      throw new PsdImportError(
+        `PSD/PSB writer: ICC profile ${Math.ceil(bytes.length / 1024 / 1024)} МБ превышает лимит ${Math.ceil(maxIccBytes / 1024 / 1024)} МБ`,
+        'PSD_EXPORT_ICC_LIMIT',
+      );
+    }
+    writeImageResourceBlock(resources, 1039, bytes);
+  }
+  if (iccUntagged) writeImageResourceBlock(resources, 1041, Uint8Array.of(1));
+  return resources;
+}
+
+function buildPsdWriter({ width, height, layers = [], groups = [], composite, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
   if (version !== PSD_VERSION && version !== PSB_VERSION) throw new PsdImportError(`PSD/PSB writer: unsupported version ${version}`, 'PSD_EXPORT_VERSION');
   const documentWidth = Math.trunc(Number(width));
   const documentHeight = Math.trunc(Number(height));
@@ -1279,11 +1311,12 @@ function buildPsdWriter({ width, height, layers = [], groups = [], composite, ve
   layerAndMask.u32(0);
 
   const compositeData = encodeCompositeRle(composite, documentWidth, documentHeight, version);
+  const imageResources = buildImageResources({iccProfile,iccUntagged});
   const out = new Writer();
   out.ascii('8BPS').u16(version).push(new Uint8Array(6));
   out.u16(4).u32(documentHeight).u32(documentWidth).u16(8).u16(PSD_COLOR_MODE_RGB);
   out.u32(0);
-  out.u32(0);
+  out.u32(imageResources.length).append(imageResources);
   if (version === PSB_VERSION) out.u64(layerAndMask.length);
   else out.u32(layerAndMask.length);
   out.append(layerAndMask);

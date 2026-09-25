@@ -104,3 +104,12 @@ test('PSD Color Management Stage 7f surfaces ICC metadata without pretending to 
   assert.match(main,/ICC profile обнаружен/);
   assert.match(main,/Canvas preview пока не выполняет явное ICC-преобразование/);
 });
+
+
+test('PSD Color Management Stage 7g persists ICC bytes in ZPE and passes them back to writer',()=>{
+  assert.match(adapter,/function buildImageResources\(/);
+  assert.match(adapter,/writeImageResourceBlock\(resources, 1039/);
+  assert.match(main,/bytesToDataUrl\(parsed\.iccProfile\.bytes,'application\/vnd\.iccprofile'\)/);
+  assert.match(main,/dataUrlToBytes\(profile\.dataUrl,\{maxBytes:4\*1024\*1024\}\)/);
+  assert.match(main,/iccProfile,iccUntagged:Boolean\(profile\?\.untagged\)/);
+});
