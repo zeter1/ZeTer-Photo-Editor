@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-26 — Toolbar/tooltips controller extraction
+
+- Refactor: toolbar drag/drop, persisted order, exact grid drop-slot и rich tooltip lifecycle вынесены из `src/main.js` в `src/ui/toolbar-controller.js`.
+- Architecture: controller владеет только UI-механикой панели; `currentTool` и выбор активного инструмента остаются в `src/main.js`, а чистая grid/order математика остаётся в `src/ui/tool-layout.js`.
+- Browser contract: существующий real `file://` smoke продолжает проверять drag в межколоночный gap, DOM order, localStorage и восстановление после reload.
+- Docs/tests: architecture/source contracts и AI code map обновлены на нового канонического владельца toolbar lifecycle.
+
 ### 2026-09-26 — Workspace/session controller extraction
 
 - Refactor: lifecycle вкладок и document sessions вынесен из `src/main.js` в `src/workspace/session-controller.js`: создание/переключение/закрытие/переименование/дублирование вкладок, per-tab history/zoom/dirty/selection state и smart-object parent/child close guard.

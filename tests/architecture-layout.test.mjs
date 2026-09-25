@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
   readFile(new URL('src/core/tool-layout.js', root), 'utf8'),
   readFile(new URL('docs/PROJECT.md', root), 'utf8'),
   readFile(new URL('src/workspace/session-controller.js', root), 'utf8'),
+  readFile(new URL('src/ui/toolbar-controller.js', root), 'utf8'),
 ]);
 
 test('canonical UI and PSD boundaries stay out of legacy compatibility paths', () => {
@@ -31,4 +32,9 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(build, /'src\/workspace\/session-controller\.js'/);
   assert.match(workspaceSessions, /export function createDocumentSessionController/);
   assert.doesNotMatch(main, /function renderDocumentTabs\(\)/);
+  assert.match(main, /from '\.\/ui\/toolbar-controller\.js'/);
+  assert.match(build, /'src\/ui\/toolbar-controller\.js'/);
+  assert.match(toolbarController, /export function createToolbarController/);
+  assert.doesNotMatch(main, /function initToolbarReorder\(\)/);
+  assert.doesNotMatch(main, /function initTooltips\(\)/);
 });

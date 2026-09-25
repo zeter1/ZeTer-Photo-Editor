@@ -18,6 +18,9 @@ Pure immutable-ish configuration: tool labels/help, control metadata, storage ke
 ### `tool-layout.js`
 Pure toolbar order/grid-slot helpers. Safe to unit-test without browser state.
 
+### `toolbar-controller.js`
+Owns toolbar drag/drop, persisted order, drop-slot rendering and rich accessible tooltips. It deliberately does not own `currentTool`; tool selection stays in `src/main.js`.
+
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 
 ## Workspace boundary — `src/workspace/`
