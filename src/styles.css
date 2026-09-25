@@ -185,6 +185,14 @@ button:disabled { opacity: .45; cursor: default; }
 .smart-filter-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .smart-filter-heading strong { font-size: 11px; color: #eef2f7; }
 .smart-filter-heading span { color: var(--muted); font-size: 9px; text-align: right; }
+.smart-filter-mask { display: grid; gap: 6px; padding: 7px; border: 1px solid #3a4350; border-radius: 6px; background: #14181e; }
+.smart-filter-mask.is-disabled { opacity: .62; }
+.smart-filter-mask-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; }
+.smart-filter-mask-title span { color: var(--muted); }
+.smart-filter-mask-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.smart-filter-mask-range { display: grid; grid-template-columns: 72px minmax(80px,1fr) 54px; gap: 6px; align-items: center; font-size: 10px; color: #cbd4e1; }
+.smart-filter-mask-range input[type="range"] { min-width: 0; padding: 0; border: 0; background: transparent; }
+.smart-filter-mask-range output { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 .smart-filter-row { display: grid; grid-template-columns: 24px minmax(0,1fr) 24px 24px 24px; gap: 3px; align-items: center; min-height: 29px; padding: 2px; border: 1px solid #343b47; border-radius: 5px; background: #191d24; }
 .smart-filter-row.is-disabled { opacity: .58; }
 .smart-filter-row button { min-width: 24px; min-height: 24px; padding: 2px; border-radius: 4px; background: transparent; color: #cbd4e1; }

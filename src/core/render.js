@@ -73,11 +73,20 @@ function trimAdjustedRasterCache() {
 
 
 function smartFilterStackSignature(layer) {
-  return JSON.stringify((Array.isArray(layer?.smartFilters) ? layer.smartFilters : []).map(item => ({
-    id:item?.id || '',
-    enabled:item?.enabled !== false,
-    filters:item?.filters || {},
-  })));
+  return JSON.stringify({
+    stack:(Array.isArray(layer?.smartFilters) ? layer.smartFilters : []).map(item => ({
+      id:item?.id || '',
+      enabled:item?.enabled !== false,
+      filters:item?.filters || {},
+    })),
+    mask:layer?.smartFilterMask ? {
+      enabled:layer.smartFilterMask.enabled !== false,
+      dataUrl:layer.smartFilterMask.dataUrl || '',
+      invert:Boolean(layer.smartFilterMask.invert),
+      density:Number(layer.smartFilterMask.density ?? 1),
+      feather:Number(layer.smartFilterMask.feather ?? 0),
+    } : null,
+  });
 }
 
 function trimSmartFilterCache() {
@@ -117,6 +126,52 @@ async function applyFilterSetToSource(source, filters = {}) {
   return output;
 }
 
+async function applySmartFilterMask(source, filtered, mask, width, height) {
+  if (!mask || mask.enabled === false) return filtered;
+  const coverage = document.createElement('canvas');
+  coverage.width = width; coverage.height = height;
+  const coverageCtx = coverage.getContext('2d', { alpha:true, willReadFrequently:true });
+  const feather = Math.max(0, Math.min(250, Number(mask.feather) || 0));
+  if (mask.dataUrl) {
+    const maskImage = await getImage(mask.dataUrl);
+    if (!maskImage) return filtered;
+    coverageCtx.save();
+    coverageCtx.filter = feather > 0 ? `blur(${feather}px)` : 'none';
+    coverageCtx.drawImage(maskImage, 0, 0, width, height);
+    coverageCtx.restore();
+  } else {
+    coverageCtx.fillStyle = '#fff';
+    coverageCtx.fillRect(0, 0, width, height);
+  }
+
+  const density = Math.max(0, Math.min(1, Number(mask.density ?? 1)));
+  const pixels = coverageCtx.getImageData(0, 0, width, height);
+  for (let offset = 0; offset < pixels.data.length; offset += 4) {
+    let amount = pixels.data[offset + 3] / 255;
+    if (mask.invert) amount = 1 - amount;
+    amount = 1 - density + density * amount;
+    pixels.data[offset] = 255;
+    pixels.data[offset + 1] = 255;
+    pixels.data[offset + 2] = 255;
+    pixels.data[offset + 3] = Math.round(amount * 255);
+  }
+  coverageCtx.putImageData(pixels, 0, 0);
+
+  const filteredMasked = document.createElement('canvas');
+  filteredMasked.width = width; filteredMasked.height = height;
+  const filteredCtx = filteredMasked.getContext('2d', { alpha:true });
+  filteredCtx.drawImage(filtered, 0, 0, width, height);
+  filteredCtx.globalCompositeOperation = 'destination-in';
+  filteredCtx.drawImage(coverage, 0, 0, width, height);
+
+  const output = document.createElement('canvas');
+  output.width = width; output.height = height;
+  const outputCtx = output.getContext('2d', { alpha:true });
+  outputCtx.drawImage(source, 0, 0, width, height);
+  outputCtx.drawImage(filteredMasked, 0, 0, width, height);
+  return output;
+}
+
 async function applySmartFilterStack(source, layer) {
   const stack = Array.isArray(layer?.smartFilters) ? layer.smartFilters : [];
   if (!stack.some(item => item?.enabled !== false)) return source;
@@ -137,10 +192,11 @@ async function applySmartFilterStack(source, layer) {
     if (!item || item.enabled === false) continue;
     current = await applyFilterSetToSource(current, item.filters || {});
   }
+  const result = await applySmartFilterMask(source, current, layer.smartFilterMask, width, height);
   smartFilterCache.delete(layer.id);
-  smartFilterCache.set(layer.id, { sourceToken, signature, width, height, canvas:current });
+  smartFilterCache.set(layer.id, { sourceToken, signature, width, height, canvas:result });
   trimSmartFilterCache();
-  return current;
+  return result;
 }
 
 async function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {

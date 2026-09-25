@@ -117,6 +117,7 @@ export function createSmartObjectLayer(overrides = {}) {
     previewDataUrl: null,
     embeddedDocument: null,
     smartFilters: [],
+    smartFilterMask: null,
     ...overrides,
   });
 }
@@ -127,6 +128,17 @@ export function createSmartFilter(overrides = {}) {
     name: 'Смарт-фильтр',
     enabled: true,
     filters: { ...DEFAULT_LAYER_FILTERS },
+    ...overrides,
+  };
+}
+
+export function createSmartFilterMask(overrides = {}) {
+  return {
+    enabled: true,
+    dataUrl: null,
+    invert: false,
+    density: 1,
+    feather: 0,
     ...overrides,
   };
 }
@@ -528,6 +540,18 @@ export function sanitizeSmartFilters(value = []) {
   });
 }
 
+export function sanitizeSmartFilterMask(mask) {
+  if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
+  const dataUrl = typeof mask.dataUrl === 'string' && /^data:image\//i.test(mask.dataUrl) ? mask.dataUrl : null;
+  return createSmartFilterMask({
+    enabled: mask.enabled !== false,
+    dataUrl,
+    invert: Boolean(mask.invert),
+    density: bounded(mask.density, 1, 0, 1),
+    feather: bounded(mask.feather, 0, 0, 250),
+  });
+}
+
 export function sanitizeLayerMask(mask) {
   if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
   const dataUrl = typeof mask.dataUrl === 'string' && /^data:image\//i.test(mask.dataUrl) ? mask.dataUrl : null;
@@ -652,6 +676,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     checkedCanvasSize(result.width, result.height, `Смарт-объект «${result.name || 'Без имени'}»`);
     result.previewDataUrl = typeof layer?.previewDataUrl === 'string' && /^data:image\//i.test(layer.previewDataUrl) ? layer.previewDataUrl : null;
     result.smartFilters = sanitizeSmartFilters(layer?.smartFilters);
+    result.smartFilterMask = sanitizeSmartFilterMask(layer?.smartFilterMask);
     if (embeddedDepth >= MAX_EMBEDDED_DOCUMENT_DEPTH) {
       result.embeddedDocument = null;
     } else if (layer?.embeddedDocument && typeof layer.embeddedDocument === 'object' && !Array.isArray(layer.embeddedDocument)) {

@@ -1,7 +1,7 @@
 import { HistoryStack } from './core/history.js';
 import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, alignLayerToCanvas, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
-  createDocument, createRasterLayer, createTextLayer, createShapeLayer, createSmartObjectLayer, createSmartFilter, createAdjustmentLayer, createLayerMask, createVectorMask, createLayerGroup, documentWithTextPreview,
+  createDocument, createRasterLayer, createTextLayer, createShapeLayer, createSmartObjectLayer, createSmartFilter, createSmartFilterMask, createAdjustmentLayer, createLayerMask, createVectorMask, createLayerGroup, documentWithTextPreview,
   addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, moveLayerGroupIntoGroup, selectedLayer,
   snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters,
   isLayerVisible, isLayerLocked, isGroupVisible, isGroupLocked, groupDepth,
@@ -1123,6 +1123,7 @@ function updateLayers() {
     const maskHints=[];
     if(layer.mask)maskHints.push(layer.mask.enabled===false?'Растровая маска отключена':layer.mask.dataUrl?'Есть растровая маска':'Растровая маска: показать всё');
     if(layer.vectorMask)maskHints.push(`Векторная маска: ${layer.vectorMask.subpaths?.length||0} контур(ов)${layer.vectorMask.enabled===false?' · отключена':''}${layer.vectorMask.invert?' · инвертирована':''}`);
+    if(layer.smartFilterMask)maskHints.push(`Маска смарт-фильтров${layer.smartFilterMask.enabled===false?' · отключена':''}${layer.smartFilterMask.invert?' · инвертирована':''}`);
     if(maskHints.length)thumb.title=[thumb.title,...maskHints].filter(Boolean).join(' · ');
     const name = document.createElement('div'); name.className = 'layer-name'; name.textContent = layer.name; name.title = layer.name;
     name.ondblclick = (e) => { e.stopPropagation(); renameLayer(layer); };
@@ -1693,6 +1694,19 @@ function renderEffectControls(layer) {
   return html;
 }
 
+function smartFilterMaskMarkup(layer) {
+  const stack=Array.isArray(layer?.smartFilters)?layer.smartFilters:[];
+  if(!stack.length)return '';
+  const mask=layer?.smartFilterMask;
+  const selectionDisabled=selectionShape?'':' disabled';
+  if(!mask){
+    return '<div class="smart-filter-mask"><div class="smart-filter-mask-title"><strong>Маска смарт-фильтров</strong><span>нет</span></div><div class="smart-filter-mask-actions"><button type="button" class="mini-button" data-smart-filter-mask-show>Показать всё</button><button type="button" class="mini-button" data-smart-filter-mask-selection'+selectionDisabled+'>Из выделения</button></div></div>';
+  }
+  const density=Math.round(Math.max(0,Math.min(1,Number(mask.density??1)))*100);
+  const feather=Math.max(0,Math.min(250,Number(mask.feather)||0));
+  return '<div class="smart-filter-mask'+(mask.enabled===false?' is-disabled':'')+'"><div class="smart-filter-mask-title"><strong>Маска смарт-фильтров</strong><span>'+(mask.dataUrl?'растровая':'показать всё')+'</span></div><div class="smart-filter-mask-actions"><button type="button" class="mini-button" data-smart-filter-mask-toggle>'+(mask.enabled===false?'Включить':'Отключить')+'</button><button type="button" class="mini-button" data-smart-filter-mask-invert>'+(mask.invert?'Не инвертировать':'Инвертировать')+'</button><button type="button" class="mini-button" data-smart-filter-mask-selection'+selectionDisabled+'>Из выделения</button><button type="button" class="mini-button" data-smart-filter-mask-remove>Удалить</button></div><label class="smart-filter-mask-range"><span>Плотность</span><input type="range" min="0" max="100" step="1" value="'+density+'" data-smart-filter-mask-density><output>'+density+'%</output></label><label class="smart-filter-mask-range"><span>Растушёвка</span><input type="range" min="0" max="250" step="0.5" value="'+feather+'" data-smart-filter-mask-feather><output>'+feather+' px</output></label></div>';
+}
+
 function smartFilterStackMarkup(layer) {
   const stack=Array.isArray(layer?.smartFilters)?layer.smartFilters:[];
   const rows=stack.map((item,index)=>`
@@ -1705,6 +1719,7 @@ function smartFilterStackMarkup(layer) {
     </div>`).join('');
   return `<div class="wide smart-filter-stack">
     <div class="smart-filter-heading"><strong>Смарт-фильтры</strong><span>верхние применяются последними</span></div>
+    ${smartFilterMaskMarkup(layer)}
     ${rows||'<div class="smart-filter-empty">Нет смарт-фильтров</div>'}
     <div class="smart-filter-actions">
       <button type="button" class="mini-button" data-smart-filter-add>+ Добавить</button>
@@ -4207,6 +4222,11 @@ function layerContextMenu(id) {
     ['Редактировать содержимое смарт-объекта','',()=>openSmartObjectContents(target()),()=>Boolean(target())&&target().type==='smart-object'],
     ['Добавить смарт-фильтр…','',()=>openSmartFilterDialog(target()),()=>Boolean(target())&&target().type==='smart-object'&&editable()&&(target().smartFilters?.length||0)<24],
     ['Очистить смарт-фильтры','',()=>clearSmartFilters(target()),()=>Boolean(target())&&target().type==='smart-object'&&editable()&&Boolean(target().smartFilters?.length)],
+    ['Маска смарт-фильтров: показать всё','',()=>{void setSmartFilterMask(target(),false);},()=>Boolean(target())&&target().type==='smart-object'&&editable()&&Boolean(target().smartFilters?.length)&&!target().smartFilterMask],
+    ['Маска смарт-фильтров из выделения','',()=>{void setSmartFilterMask(target(),true);},()=>Boolean(target())&&target().type==='smart-object'&&editable()&&Boolean(target().smartFilters?.length)&&Boolean(selectionShape)],
+    ['Инвертировать маску смарт-фильтров','',()=>invertSmartFilterMask(target()),()=>Boolean(target()?.smartFilterMask)&&editable()],
+    ['Включить / отключить маску смарт-фильтров','',()=>toggleSmartFilterMask(target()),()=>Boolean(target()?.smartFilterMask)&&editable()],
+    ['Удалить маску смарт-фильтров','',()=>removeSmartFilterMask(target()),()=>Boolean(target()?.smartFilterMask)&&editable()],
     ['Преобразовать в смарт-объект','',()=>{if(selectedTarget())convertSelectedToSmartObject();},()=>selectedTarget()&&editable()&&!['smart-object','adjustment'].includes(target().type)],
     ['sep'],
     ['Переименовать…','F2',()=>renameLayer(target()),editable],
@@ -4284,6 +4304,7 @@ function removeSmartFilter(layer,index){
   if(!layer||layer.type!=='smart-object'||isLayerLocked(doc,layer))return false;
   if(!Array.isArray(layer.smartFilters)||index<0||index>=layer.smartFilters.length)return false;
   layer.smartFilters.splice(index,1);
+  if(!layer.smartFilters.length)layer.smartFilterMask=null;
   commit('Удалить смарт-фильтр');
   return true;
 }
@@ -4291,13 +4312,81 @@ function removeSmartFilter(layer,index){
 function clearSmartFilters(layer=selected()){
   if(!layer||layer.type!=='smart-object'||isLayerLocked(doc,layer)||!layer.smartFilters?.length)return false;
   layer.smartFilters=[];
+  layer.smartFilterMask=null;
   commit('Очистить смарт-фильтры');
+  return true;
+}
+
+async function setSmartFilterMask(layer=selected(),fromSelection=false){
+  if(blockPendingDocumentEdit())return false;
+  if(!layer||layer.type!=='smart-object'){setStatus('Маска смарт-фильтров доступна только для смарт-объекта');return false;}
+  if(isLayerLocked(doc,layer)){setStatus('Смарт-объект или его группа заблокированы');return false;}
+  if(!layer.smartFilters?.length){setStatus('Сначала добавьте хотя бы один смарт-фильтр');return false;}
+  if(fromSelection&&!selectionShape){setStatus('Сначала создайте выделение');return false;}
+  const owner=doc,layerId=layer.id;
+  const dataUrl=fromSelection?await selectionMaskDataUrl(layer):null;
+  const target=smartFilterTarget(owner,layerId);
+  if(!target||isLayerLocked(owner,target))return false;
+  target.smartFilterMask=createSmartFilterMask({enabled:true,dataUrl});
+  commit(fromSelection?'Маска смарт-фильтров из выделения':'Маска смарт-фильтров: показать всё');
+  return true;
+}
+
+function toggleSmartFilterMask(layer=selected()){
+  if(!layer?.smartFilterMask||layer.type!=='smart-object'||isLayerLocked(doc,layer))return false;
+  layer.smartFilterMask.enabled=layer.smartFilterMask.enabled===false;
+  commit(layer.smartFilterMask.enabled?'Включить маску смарт-фильтров':'Отключить маску смарт-фильтров');
+  return true;
+}
+
+function invertSmartFilterMask(layer=selected()){
+  if(!layer?.smartFilterMask||layer.type!=='smart-object'||isLayerLocked(doc,layer))return false;
+  layer.smartFilterMask.invert=!layer.smartFilterMask.invert;
+  commit(layer.smartFilterMask.invert?'Инвертировать маску смарт-фильтров':'Снять инверсию маски смарт-фильтров');
+  return true;
+}
+
+function removeSmartFilterMask(layer=selected()){
+  if(!layer?.smartFilterMask||layer.type!=='smart-object'||isLayerLocked(doc,layer))return false;
+  layer.smartFilterMask=null;
+  commit('Удалить маску смарт-фильтров');
+  return true;
+}
+
+function updateSmartFilterMaskSetting(layer,key,raw,shouldCommit=true){
+  if(!layer?.smartFilterMask||layer.type!=='smart-object'||isLayerLocked(doc,layer))return false;
+  let value=Number(raw);
+  if(!Number.isFinite(value))return false;
+  if(key==='density')value=clamp(value,0,1);
+  else if(key==='feather')value=clamp(value,0,250);
+  else return false;
+  layer.smartFilterMask[key]=value;
+  markDirty(true);
+  if(shouldCommit)commit(key==='density'?'Изменить плотность маски смарт-фильтров':'Изменить растушёвку маски смарт-фильтров');
+  else render();
   return true;
 }
 
 function bindSmartFilterControls(root,layer){
   root?.querySelector('[data-smart-filter-add]')?.addEventListener('click',()=>openSmartFilterDialog(layer));
   root?.querySelector('[data-smart-filter-clear]')?.addEventListener('click',()=>clearSmartFilters(layer));
+  root?.querySelector('[data-smart-filter-mask-show]')?.addEventListener('click',()=>{void setSmartFilterMask(layer,false);});
+  root?.querySelector('[data-smart-filter-mask-selection]')?.addEventListener('click',()=>{void setSmartFilterMask(layer,true);});
+  root?.querySelector('[data-smart-filter-mask-toggle]')?.addEventListener('click',()=>toggleSmartFilterMask(layer));
+  root?.querySelector('[data-smart-filter-mask-invert]')?.addEventListener('click',()=>invertSmartFilterMask(layer));
+  root?.querySelector('[data-smart-filter-mask-remove]')?.addEventListener('click',()=>removeSmartFilterMask(layer));
+  const density=root?.querySelector('[data-smart-filter-mask-density]');
+  if(density){
+    const output=density.closest('.smart-filter-mask-range')?.querySelector('output');
+    density.addEventListener('input',()=>{if(output)output.textContent=density.value+'%';updateSmartFilterMaskSetting(layer,'density',Number(density.value)/100,false);});
+    density.addEventListener('change',()=>updateSmartFilterMaskSetting(layer,'density',Number(density.value)/100,true));
+  }
+  const feather=root?.querySelector('[data-smart-filter-mask-feather]');
+  if(feather){
+    const output=feather.closest('.smart-filter-mask-range')?.querySelector('output');
+    feather.addEventListener('input',()=>{if(output)output.textContent=feather.value+' px';updateSmartFilterMaskSetting(layer,'feather',feather.value,false);});
+    feather.addEventListener('change',()=>updateSmartFilterMaskSetting(layer,'feather',feather.value,true));
+  }
   root?.querySelectorAll('[data-smart-filter-edit]').forEach(button=>button.addEventListener('click',()=>openSmartFilterDialog(layer,Number(button.dataset.smartFilterEdit))));
   root?.querySelectorAll('[data-smart-filter-toggle]').forEach(button=>button.addEventListener('click',()=>toggleSmartFilter(layer,Number(button.dataset.smartFilterToggle))));
   root?.querySelectorAll('[data-smart-filter-up]').forEach(button=>button.addEventListener('click',()=>moveSmartFilter(layer,Number(button.dataset.smartFilterUp),-1)));
@@ -4632,6 +4721,10 @@ function layerMaskSummary(layer){
     const count=layer.vectorMask.subpaths?.length||0,state=layer.vectorMask.enabled===false?'отключена':layer.vectorMask.invert?'инвертирована':'включена';
     parts.push(`векторная: ${count} контур(ов), ${state}`);
   }
+  if(layer?.smartFilterMask){
+    const state=layer.smartFilterMask.enabled===false?'отключена':layer.smartFilterMask.invert?'инвертирована':'включена';
+    parts.push(`смарт-фильтры: маска ${state}`);
+  }
   return parts.join(' + ')||'нет';
 }
 
@@ -4913,6 +5006,11 @@ const menus={
     ['Редактировать содержимое смарт-объекта','',()=>openSmartObjectContents(selected()),()=>selected()?.type==='smart-object'&&Boolean(selected()?.embeddedDocument)],
     ['Добавить смарт-фильтр…','',()=>openSmartFilterDialog(selected()),()=>selected()?.type==='smart-object'&&!isLayerLocked(doc,selected())&&(selected()?.smartFilters?.length||0)<24],
     ['Очистить смарт-фильтры','',()=>clearSmartFilters(selected()),()=>selected()?.type==='smart-object'&&!isLayerLocked(doc,selected())&&Boolean(selected()?.smartFilters?.length)],
+    ['Маска смарт-фильтров: показать всё','',()=>{void setSmartFilterMask(selected(),false);},()=>selected()?.type==='smart-object'&&!isLayerLocked(doc,selected())&&Boolean(selected()?.smartFilters?.length)&&!selected()?.smartFilterMask],
+    ['Маска смарт-фильтров из выделения','',()=>{void setSmartFilterMask(selected(),true);},()=>selected()?.type==='smart-object'&&!isLayerLocked(doc,selected())&&Boolean(selected()?.smartFilters?.length)&&Boolean(selectionShape)],
+    ['Инвертировать маску смарт-фильтров','',()=>invertSmartFilterMask(selected()),()=>Boolean(selected()?.smartFilterMask)&&!isLayerLocked(doc,selected())],
+    ['Включить / отключить маску смарт-фильтров','',()=>toggleSmartFilterMask(selected()),()=>Boolean(selected()?.smartFilterMask)&&!isLayerLocked(doc,selected())],
+    ['Удалить маску смарт-фильтров','',()=>removeSmartFilterMask(selected()),()=>Boolean(selected()?.smartFilterMask)&&!isLayerLocked(doc,selected())],
     ['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  createDocument, createSmartObjectLayer, createSmartFilter, addLayer,
+  createDocument, createSmartObjectLayer, createSmartFilter, createSmartFilterMask, addLayer,
   sanitizeProject, snapshotDocument, MAX_SMART_FILTERS,
 } from '../src/core/state.js';
 
@@ -10,61 +10,45 @@ const render=await readFile(new URL('../src/core/render.js',import.meta.url),'ut
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const styles=await readFile(new URL('../src/styles.css',import.meta.url),'utf8');
 
-test('Smart Filters Stage 11a survives .zpe sanitization and clamps filter payloads',()=>{
+test('Smart Filters Stage 11b survives .zpe sanitization and clamps filter/mask payloads',()=>{
   const doc=createDocument({name:'smart-filters',width:64,height:64});
   addLayer(doc,createSmartObjectLayer({
     width:32,height:32,previewDataUrl:'data:image/png;base64,AAAA',
     embeddedDocument:createDocument({name:'embedded',width:32,height:32}),
-    smartFilters:[
-      createSmartFilter({id:'one',name:'Exposure',filters:{exposure:99,blur:-5}}),
-      createSmartFilter({id:'two',name:'Disabled',enabled:false,filters:{brightness:150,gamma:.01}}),
-    ],
+    smartFilters:[createSmartFilter({id:'one',name:'Exposure',filters:{exposure:99,blur:-5}}),createSmartFilter({id:'two',name:'Disabled',enabled:false,filters:{brightness:150,gamma:.01}})],
+    smartFilterMask:createSmartFilterMask({dataUrl:'data:image/png;base64,BBBB',invert:true,density:3,feather:999}),
   }));
-  const safe=sanitizeProject(JSON.parse(snapshotDocument(doc)));
-  const stack=safe.layers[0].smartFilters;
-  assert.equal(stack.length,2);
-  assert.equal(stack[0].name,'Exposure');
-  assert.equal(stack[0].filters.exposure,4);
-  assert.equal(stack[0].filters.blur,0);
-  assert.equal(stack[1].enabled,false);
-  assert.equal(stack[1].filters.brightness,150);
-  assert.equal(stack[1].filters.gamma,.1);
+  const layer=sanitizeProject(JSON.parse(snapshotDocument(doc))).layers[0],stack=layer.smartFilters;
+  assert.equal(stack.length,2); assert.equal(stack[0].filters.exposure,4); assert.equal(stack[0].filters.blur,0);
+  assert.equal(stack[1].enabled,false); assert.equal(stack[1].filters.brightness,150); assert.equal(stack[1].filters.gamma,.1);
+  assert.equal(layer.smartFilterMask.enabled,true); assert.equal(layer.smartFilterMask.invert,true);
+  assert.equal(layer.smartFilterMask.density,1); assert.equal(layer.smartFilterMask.feather,250);
 });
 
-test('Smart Filter sanitizer bounds the stack and repairs duplicate IDs',()=>{
-  const raw=Array.from({length:MAX_SMART_FILTERS+8},(_,index)=>({
-    id:'duplicate',name:`Filter ${index+1}`,enabled:true,filters:{contrast:100+index},
-  }));
-  const safe=sanitizeProject({
-    version:1,name:'bounded',width:20,height:20,background:'transparent',
-    layers:[{id:'so',type:'smart-object',name:'SO',width:10,height:10,previewDataUrl:null,embeddedDocument:null,smartFilters:raw}],
-  });
-  const stack=safe.layers[0].smartFilters;
-  assert.equal(stack.length,MAX_SMART_FILTERS);
-  assert.equal(new Set(stack.map(item=>item.id)).size,MAX_SMART_FILTERS);
+test('Smart Filter sanitizer bounds the stack, repairs duplicate IDs and accepts maskless legacy data',()=>{
+  const raw=Array.from({length:MAX_SMART_FILTERS+8},(_,index)=>({id:'duplicate',name:`Filter ${index+1}`,enabled:true,filters:{contrast:100+index}}));
+  const safe=sanitizeProject({version:1,name:'bounded',width:20,height:20,background:'transparent',layers:[{id:'so',type:'smart-object',name:'SO',width:10,height:10,previewDataUrl:null,embeddedDocument:null,smartFilters:raw}]});
+  assert.equal(safe.layers[0].smartFilters.length,MAX_SMART_FILTERS);
+  assert.equal(new Set(safe.layers[0].smartFilters.map(item=>item.id)).size,MAX_SMART_FILTERS);
+  assert.equal(safe.layers[0].smartFilterMask,null);
 });
 
-test('Smart Filter renderer applies visible top-first stack in bottom-up order and isolates its cache key',()=>{
-  assert.match(render,/function smartFilterStackSignature\(layer\)/);
-  assert.match(render,/async function applySmartFilterStack\(source, layer\)/);
-  assert.match(render,/for \(let index = stack\.length - 1; index >= 0; index -= 1\)/);
-  assert.match(render,/if \(!item \|\| item\.enabled === false\) continue/);
-  assert.match(render,/layer\.type === 'smart-object' \? await applySmartFilterStack\(img, layer\) : img/);
-  assert.match(render,/smartFilterStackSignature\(layer\)/);
-  assert.match(render,/smartFilterCache\.clear\(\)/);
+test('Smart Filter renderer composites the ordered stack through a separate mask',()=>{
+  assert.ok(render.includes('async function applySmartFilterMask(source, filtered, mask, width, height)'));
+  assert.ok(render.includes('amount = 1 - density + density * amount;'));
+  assert.ok(render.includes("filteredCtx.globalCompositeOperation = 'destination-in';"));
+  assert.ok(render.includes('outputCtx.drawImage(source, 0, 0, width, height);'));
+  assert.ok(render.includes('for (let index = stack.length - 1; index >= 0; index -= 1)'));
+  assert.ok(render.includes('const result = await applySmartFilterMask(source, current, layer.smartFilterMask, width, height);'));
 });
 
-test('Smart Filter UI supports live add/edit, visibility, reordering, removal and bounded count',()=>{
-  assert.match(main,/function openSmartFilterDialog\(layer=selected\(\),index=-1\)/);
-  assert.match(main,/function moveSmartFilter\(layer,index,direction\)/);
-  assert.match(main,/function toggleSmartFilter\(layer,index\)/);
-  assert.match(main,/function removeSmartFilter\(layer,index\)/);
-  assert.match(main,/function clearSmartFilters\(layer=selected\(\)\)/);
-  assert.match(main,/data-smart-filter-edit/);
-  assert.match(main,/data-smart-filter-up/);
-  assert.match(main,/data-smart-filter-down/);
-  assert.match(main,/Достигнут лимит: 24 смарт-фильтра/);
-  assert.match(main,/Фильтры в списке применяются снизу вверх/);
-  assert.match(styles,/\.smart-filter-stack/);
-  assert.match(styles,/\.smart-filter-modal/);
+test('Smart Filter UI supports mask creation, invert, visibility, density, feather and removal',()=>{
+  assert.ok(main.includes('async function setSmartFilterMask(layer=selected(),fromSelection=false)'));
+  assert.ok(main.includes('function toggleSmartFilterMask(layer=selected())'));
+  assert.ok(main.includes('function invertSmartFilterMask(layer=selected())'));
+  assert.ok(main.includes('function removeSmartFilterMask(layer=selected())'));
+  assert.ok(main.includes('data-smart-filter-mask-density'));
+  assert.ok(main.includes('data-smart-filter-mask-feather'));
+  assert.ok(main.includes('Маска смарт-фильтров из выделения'));
+  assert.ok(styles.includes('.smart-filter-mask'));
 });

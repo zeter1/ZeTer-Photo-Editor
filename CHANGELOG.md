@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Пока нет незарелизенных изменений.
+
+## 1.20.0 — 2026-09-25
+
+### 2026-09-25 — Smart Filter Masks Stage 11b
+
+- Added: отдельная `smartFilterMask` у smart-object, независимая от обычной raster/vector mask слоя.
+- UI: маску стека можно создать как «показать всё» или из выделения, включить/отключить, инвертировать, удалить, менять плотность 0–100% и растушёвку до 250 px.
+- Rendering: Smart Filter result смешивается с исходным preview по effective alpha маски; density ослабляет маску к белому, invert переворачивает влияние фильтров, feather применяется перед composite.
+- Cache correctness: mask payload и параметры входят в Smart Filter signature, поэтому смена маски, density/feather/invert не оставляет stale result.
+- State: sanitizer нормализует data URL, enabled/invert, density и feather и сохраняет backward compatibility для smart-object без маски.
+- Version hygiene: версия приложения синхронизирована на 1.20.0 в package/README/index metadata; regression test блокирует повторное расхождение версий.
+
 ### 2026-09-25 — Smart Filters Stage 11a
 
 - Added: native ZPE Smart Filter stack для `smart-object`, максимум 24 entry с собственными name/enabled/filter payload.
