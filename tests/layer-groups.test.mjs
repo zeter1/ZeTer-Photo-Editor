@@ -180,7 +180,7 @@ test('project sanitizer preserves group visibility and lock state',()=>{
 test('layer panel exposes rename and group controls with drag-to-group wiring',()=>{
   assert.match(html,/id="addGroupBtn"/);
   assert.match(html,/id="renameLayerBtn"/);
-  assert.match(main,/function addGroup\(\)/);
+  assert.match(main,/function addGroup\(parentGroupId=null\)/);
   assert.match(main,/moveLayerIntoGroup\(doc, draggedLayerId, group\.id\)/);
   assert.match(main,/moveLayerGroupIntoGroup\(doc, draggedGroupId, group\.id\)/);
   assert.match(main,/moveLayerGroupIntoGroup\(doc,draggedGroupId,null\)/);
