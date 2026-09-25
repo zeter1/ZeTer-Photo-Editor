@@ -250,6 +250,22 @@ test('Stage 15a wires Photoshop TySh text mapping and safe native round-trip int
   assert.match(main,/createTextLayer\(\{/);
   assert.match(main,/psdText:nativeText\?\.eligible\?nativeText\.block:null/);
   assert.match(main,/Photoshop TySh imported as editable ZPE text|Photoshop TySh импортирован как editable ZPE text/);
-  assert.match(main,/Stage 15a: .*TySh text layer/);
+  assert.match(main,/Stage 15b: .*TySh text layer/);
+});
+
+test('Stage 15b wires EngineData typography import and single-run text writeback',()=>{
+  assert.match(adapter,/MAX_PSD_ENGINE_DATA_BYTES/);
+  assert.match(adapter,/function parsePsdEngineData\(/);
+  assert.match(adapter,/function engineDataTypographySummary\(/);
+  assert.match(adapter,/editableSingleStyle/);
+  assert.match(adapter,/findEngineEditorTextRange/);
+  assert.match(adapter,/findEngineRunLengthRanges/);
+  assert.match(adapter,/engineUpdated/);
+  assert.match(main,/const typography=parsedText\.typography\|\|\{\}/);
+  assert.match(main,/fontFamily:typography\.fontFamily/);
+  assert.match(main,/fontSize:clamp\(Number\(typography\.fontSize\)/);
+  assert.match(main,/editableSingleStyle/);
+  assert.match(main,/native TySh \+ EngineData round-trip/);
+  assert.match(main,/Stage 15b: .*EngineData/);
 });
 

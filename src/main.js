@@ -1959,7 +1959,7 @@ function updateProperties() {
   let extra = '';
   if (l.type === 'text') {
     const nativeText=l.psdText?psdTextNativePlan(l):null;
-    const nativeInfo=l.psdText?`<label>Photoshop Text</label><span>${nativeText?.eligible?'native TySh round-trip':'raster fallback: '+escapeHtml(nativeText?.reason||'metadata unavailable')}</span>`:'';
+    const nativeInfo=l.psdText?`<label>Photoshop Text</label><span>${nativeText?.eligible?'native TySh + EngineData round-trip':'raster fallback: '+escapeHtml(nativeText?.reason||'metadata unavailable')}</span>`:'';
     extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textFontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}${nativeInfo}`;
   }
   if (l.type === 'shape') extra = l.shape === 'line'
@@ -3867,9 +3867,10 @@ function psdTextNativePlan(layer){
     same(layer.lineHeight,baseline.lineHeight)&&same(layer.letterSpacing,baseline.letterSpacing)&&
     Boolean(layer.underline)===Boolean(baseline.underline)&&Boolean(layer.strikeThrough)===Boolean(baseline.strikeThrough)&&
     String(layer.color||'')===String(baseline.color||'');
-  if(!styleSame)return{eligible:false,reason:'изменена typography, которую Stage 15a пока сохраняет opaque',block:null};
-  if(String(layer.text||'')!==String(baseline.text||'')){
-    return{eligible:false,reason:'изменён текст; EngineData rewrite будет добавлен в Stage 15b',block:null};
+  if(!styleSame)return{eligible:false,reason:'изменена typography; Stage 15b безопасно переписывает text/run lengths, но не style runs',block:null};
+  const textChanged=String(layer.text||'')!==String(baseline.text||'');
+  if(textChanged&&source.parsed?.typography?.editableSingleStyle!==true){
+    return{eligible:false,reason:'изменён multi-run Photoshop text; безопасный EngineData writeback требует single style/paragraph run',block:null};
   }
   try{
     const raw=dataUrlToBytes(source.dataUrl,{maxBytes:16*1024*1024});
@@ -4177,16 +4178,26 @@ async function openPsd(file){
       let importedLayer;
       if(canMapText){
         const parsedText=sourceLayer.psdText.parsed;
+        const typography=parsedText.typography||{};
         importedLayer=createTextLayer({
           ...commonLayer,
           text:String(parsedText.text||'').replace(/\r/g,'\n')||sourceLayer.name||'Текст',
-          fontFamily:'Arial, sans-serif',
-          fontSize:clamp(Math.round(sourceLayer.height*.8)||18,6,500),
+          fontFamily:typography.fontFamily||'Arial, sans-serif',
+          fontLabel:typography.fontName||'',
+          fontSize:clamp(Number(typography.fontSize)||Math.round(sourceLayer.height*.8)||18,6,500),
+          fontWeight:typography.fontWeight==='700'?'700':'400',
+          fontStyle:typography.fontStyle==='italic'?'italic':'normal',
+          align:['left','center','right'].includes(typography.align)?typography.align:'left',
+          lineHeight:clamp(Number(typography.lineHeight)||1.18,.8,3),
+          letterSpacing:clamp(Number(typography.letterSpacing)||0,-5,20),
+          underline:typography.underline===true,
+          strikeThrough:typography.strikeThrough===true,
           width:sourceLayer.width,height:sourceLayer.height,
-          color:'#000000',
+          color:typography.color||'#000000',
         });
         importedLayer.psdText=importPsdTextMetadata(sourceLayer.psdText,sourceLayer,importedLayer);
-        warnings.push(`Слой «${sourceLayer.name}»: Photoshop TySh импортирован как editable ZPE text; точная typography пока сохраняется opaque и native export доступен до изменения text/style geometry`);
+        const runMode=typography.editableSingleStyle?'single-run EngineData writeback готов':'multi-run typography сохранена только для безопасного fallback';
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop TySh импортирован как editable ZPE text с EngineData typography (${runMode})`);
       }else if(sourceLayer.psdSmartObject){
         importedLayer=createSmartObjectLayer({
           ...commonLayer,
@@ -4612,8 +4623,8 @@ async function preparePsdExport(exportDoc){
   if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
   const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
-  if(nativeTextCount)warnings.push(`Stage 15a: ${nativeTextCount} Photoshop TySh text layer(s) сохраняют native descriptor + transform metadata`);
-  for(const item of fallbackText)warnings.push(`Stage 15a: text layer «${item.layer.name||'Без имени'}» экспортируется raster preview (${item.nativeText?.reason||'native text mapping unavailable'})`);
+  if(nativeTextCount)warnings.push(`Stage 15b: ${nativeTextCount} Photoshop TySh text layer(s) сохраняют native descriptor + EngineData + transform metadata`);
+  for(const item of fallbackText)warnings.push(`Stage 15b: text layer «${item.layer.name||'Без имени'}» экспортируется raster preview (${item.nativeText?.reason||'native text mapping unavailable'})`);
   if(psdSmartPlan.imported.length){
     if(psdSmartPlan.eligible)warnings.push(`Stage 14a: ${psdSmartPlan.imported.length} Photoshop Smart Object layer(s) сохраняют opaque PlLd/SoLd/SoLE + linked-resource metadata`);
     else warnings.push(`Stage 14a: Photoshop Smart Object native passthrough отключён (${psdSmartPlan.reason}); сохранён безопасный raster preview без stale placed/linked metadata`);

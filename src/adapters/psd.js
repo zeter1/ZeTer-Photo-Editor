@@ -9,6 +9,7 @@ const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
+const MAX_PSD_ENGINE_DATA_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCK_BYTES = 128 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCKS = 32;
 const MAX_PSD_LINKED_ASSET_BYTES = 64 * 1024 * 1024;
@@ -423,8 +424,11 @@ function readPsdDescriptorValue(reader,type,depth) {
   if(type==='alis'||type==='tdta'||type==='Pth '){
     const length=reader.u32();
     if(length>reader.end-reader.offset)throw new PsdImportError('Descriptor raw data обрезаны','PSD_DESCRIPTOR_RAW');
+    if(type==='tdta'&&length<=MAX_PSD_ENGINE_DATA_BYTES){
+      return{byteLength:length,data:reader.take(length).slice()};
+    }
     reader.skip(length);
-    return{byteLength:length};
+    return{byteLength:length,data:null};
   }
   if(type==='ObAr'){
     const itemsCount=reader.u32();
@@ -479,6 +483,232 @@ function readPsdDescriptorBlockLayout(reader) {
   return{descriptor:{version,name,classId,items},layout};
 }
 
+function psdEngineSkipWhitespace(bytes,state) {
+  while(state.index<bytes.length){
+    const value=bytes[state.index];
+    if(value===0x20||value===0x09||value===0x0a||value===0x0d||value===0)state.index+=1;
+    else break;
+  }
+}
+
+function psdEngineReadBareToken(bytes,state) {
+  const start=state.index;
+  while(state.index<bytes.length){
+    const value=bytes[state.index];
+    if(value===0x20||value===0x09||value===0x0a||value===0x0d||value===0||
+       value===0x5b||value===0x5d||value===0x3c||value===0x3e)break;
+    state.index+=1;
+  }
+  return decodeLatin1(bytes.subarray(start,state.index));
+}
+
+function psdEngineReadProperty(bytes,state) {
+  if(bytes[state.index]!==0x2f)throw new PsdImportError('EngineData property: expected /','PSD_ENGINE_DATA');
+  state.index+=1;
+  const start=state.index;
+  while(state.index<bytes.length){
+    const value=bytes[state.index];
+    if(value===0x20||value===0x09||value===0x0a||value===0x0d||value===0||
+       value===0x5b||value===0x5d||value===0x3c||value===0x3e||value===0x2f)break;
+    state.index+=1;
+  }
+  if(state.index===start)throw new PsdImportError('EngineData property: empty name','PSD_ENGINE_DATA');
+  return decodeLatin1(bytes.subarray(start,state.index));
+}
+
+function psdEngineReadString(bytes,state) {
+  if(bytes[state.index]!==0x28)throw new PsdImportError('EngineData string: expected (','PSD_ENGINE_DATA');
+  state.index+=1;
+  const raw=[];
+  let escaped=false,closed=false;
+  while(state.index<bytes.length){
+    const value=bytes[state.index++];
+    if(escaped){raw.push(value);escaped=false;continue;}
+    if(value===0x5c){escaped=true;continue;}
+    if(value===0x29){closed=true;break;}
+    raw.push(value);
+  }
+  if(!closed)throw new PsdImportError('EngineData string не закрыта','PSD_ENGINE_DATA');
+  const data=Uint8Array.from(raw);
+  if(data.length>=2&&data[0]===0xfe&&data[1]===0xff)return decodeUtf16Be(data.subarray(2)).replace(/\0+$/g,'');
+  return decodeLatin1(data);
+}
+
+function psdEngineReadValue(bytes,state,depth=0) {
+  if(depth>MAX_PSD_DESCRIPTOR_DEPTH)throw new PsdImportError('EngineData nesting depth превышен','PSD_ENGINE_DATA_DEPTH');
+  psdEngineSkipWhitespace(bytes,state);
+  if(state.index>=bytes.length)return null;
+
+  if(bytes[state.index]===0x3c&&bytes[state.index+1]===0x3c){
+    state.index+=2;
+    const out={};
+    let count=0;
+    while(state.index<bytes.length){
+      psdEngineSkipWhitespace(bytes,state);
+      if(bytes[state.index]===0x3e&&bytes[state.index+1]===0x3e){state.index+=2;return out;}
+      const key=psdEngineReadProperty(bytes,state);
+      out[key]=psdEngineReadValue(bytes,state,depth+1);
+      count+=1;
+      if(count>MAX_PSD_DESCRIPTOR_ITEMS)throw new PsdImportError('EngineData dict слишком большой','PSD_ENGINE_DATA_LIMIT');
+    }
+    throw new PsdImportError('EngineData dict не закрыт','PSD_ENGINE_DATA');
+  }
+
+  if(bytes[state.index]===0x5b){
+    state.index+=1;
+    const out=[];
+    while(state.index<bytes.length){
+      psdEngineSkipWhitespace(bytes,state);
+      if(bytes[state.index]===0x5d){state.index+=1;return out;}
+      out.push(psdEngineReadValue(bytes,state,depth+1));
+      if(out.length>MAX_PSD_DESCRIPTOR_ITEMS)throw new PsdImportError('EngineData array слишком большой','PSD_ENGINE_DATA_LIMIT');
+    }
+    throw new PsdImportError('EngineData array не закрыт','PSD_ENGINE_DATA');
+  }
+
+  if(bytes[state.index]===0x28)return psdEngineReadString(bytes,state);
+
+  const token=psdEngineReadBareToken(bytes,state);
+  if(!token)throw new PsdImportError('EngineData содержит пустой token','PSD_ENGINE_DATA');
+  if(token==='true')return true;
+  if(token==='false')return false;
+  if(/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(token))return Number(token);
+  return token;
+}
+
+function parsePsdEngineData(data,warnings,label) {
+  if(!(data instanceof Uint8Array)||!data.length)return null;
+  try{
+    const state={index:0};
+    return psdEngineReadValue(data,state,0);
+  }catch(error){
+    warnings.push(label+': EngineData не разобраны ('+(error?.message||error)+'); исходные bytes сохранены');
+    return null;
+  }
+}
+
+function normalizePhotoshopFontFamily(name) {
+  const value=String(name||'').replace(/\0+$/g,'').trim();
+  if(!value)return'Arial, sans-serif';
+  if(/^Arial(?:MT)?$/i.test(value))return'Arial, sans-serif';
+  if(/^HelveticaNeue/i.test(value))return'"Helvetica Neue", Helvetica, Arial, sans-serif';
+  if(/^TimesNewRomanPS/i.test(value))return'"Times New Roman", Times, serif';
+  if(/^CourierNewPS/i.test(value))return'"Courier New", Courier, monospace';
+  return JSON.stringify(value)+', Arial, sans-serif';
+}
+
+function engineDataTypographySummary(engine) {
+  if(!engine||typeof engine!=='object')return null;
+  const engineDict=engine.EngineDict&&typeof engine.EngineDict==='object'?engine.EngineDict:{};
+  const resource=engine.ResourceDict&&typeof engine.ResourceDict==='object'?engine.ResourceDict:{};
+  const styleRun=engineDict.StyleRun&&typeof engineDict.StyleRun==='object'?engineDict.StyleRun:{};
+  const styleDefault=styleRun.DefaultRunData?.StyleSheet?.StyleSheetData||{};
+  const firstStyle=Array.isArray(styleRun.RunArray)?styleRun.RunArray[0]?.StyleSheet?.StyleSheetData||{}:{};
+  const style={...styleDefault,...firstStyle};
+  const paragraphRun=engineDict.ParagraphRun&&typeof engineDict.ParagraphRun==='object'?engineDict.ParagraphRun:{};
+  const paragraphDefault=paragraphRun.DefaultRunData?.ParagraphSheet?.Properties||{};
+  const firstParagraph=Array.isArray(paragraphRun.RunArray)?paragraphRun.RunArray[0]?.ParagraphSheet?.Properties||{}:{};
+  const paragraph={...paragraphDefault,...firstParagraph};
+  const fontSet=Array.isArray(resource.FontSet)?resource.FontSet:[];
+  const fontIndex=Number(style.Font);
+  const font=Number.isInteger(fontIndex)&&fontSet[fontIndex]?fontSet[fontIndex]:fontSet[0]||{};
+  const fontName=String(font.Name||font.FontFamily||'').replace(/\0+$/g,'')||null;
+  const fontSize=Number(style.FontSize)||12;
+  const tracking=Number(style.Tracking)||0;
+  const fill=style.FillColor?.Values;
+  let color=null;
+  if(Array.isArray(fill)&&fill.length>=4){
+    const rgb=fill.slice(-3).map(value=>Math.max(0,Math.min(255,Math.round(Number(value||0)*255))));
+    color='#'+rgb.map(value=>value.toString(16).padStart(2,'0')).join('');
+  }
+  const justification=Number(paragraph.Justification);
+  const align=justification===1?'right':justification===2?'center':'left';
+  const autoLeading=Number(paragraph.AutoLeading);
+  const explicitLeading=Number(style.Leading);
+  const lineHeight=style.AutoLeading===false&&Number.isFinite(explicitLeading)&&explicitLeading>0&&fontSize>0
+    ? explicitLeading/fontSize
+    : Number.isFinite(autoLeading)&&autoLeading>0?autoLeading:1.2;
+  const styleRunLengths=Array.isArray(styleRun.RunLengthArray)?styleRun.RunLengthArray.map(value=>Math.max(0,Math.trunc(Number(value)||0))):[];
+  const paragraphRunLengths=Array.isArray(paragraphRun.RunLengthArray)?paragraphRun.RunLengthArray.map(value=>Math.max(0,Math.trunc(Number(value)||0))):[];
+  const engineText=typeof engineDict.Editor?.Text==='string'?engineDict.Editor.Text.replace(/\r$/,'').replace(/\r/g,'\n'):null;
+  return{
+    engineText,fontName,fontFamily:normalizePhotoshopFontFamily(fontName),fontSize,
+    fontWeight:style.FauxBold===true?'700':'400',
+    fontStyle:style.FauxItalic===true?'italic':'normal',
+    color:color||'#000000',align,lineHeight,tracking,letterSpacing:fontSize*tracking/1000,
+    underline:style.Underline===true,strikeThrough:style.Strikethrough===true,
+    justification:Number.isFinite(justification)?justification:0,
+    styleRunLengths,paragraphRunLengths,
+    editableSingleStyle:styleRunLengths.length===1&&paragraphRunLengths.length===1,
+    fontCount:fontSet.length,
+  };
+}
+
+function findEngineEditorTextRange(data) {
+  const bytes=asBytes(data);
+  const matchAscii=(needle,start=0)=>{
+    outer:for(let index=start;index<=bytes.length-needle.length;index+=1){
+      for(let cursor=0;cursor<needle.length;cursor+=1)if(bytes[index+cursor]!==needle.charCodeAt(cursor))continue outer;
+      return index;
+    }
+    return-1;
+  };
+  const editor=matchAscii('/Editor');
+  if(editor<0)return null;
+  const textKey=matchAscii('/Text',editor+7);
+  if(textKey<0)return null;
+  let open=textKey+5;
+  while(open<bytes.length&&(bytes[open]===0x20||bytes[open]===0x09||bytes[open]===0x0a||bytes[open]===0x0d||bytes[open]===0))open+=1;
+  if(bytes[open]!==0x28||bytes[open+1]!==0xfe||bytes[open+2]!==0xff)return null;
+  let index=open+1,escaped=false;
+  while(index<bytes.length){
+    const value=bytes[index++];
+    if(escaped){escaped=false;continue;}
+    if(value===0x5c){escaped=true;continue;}
+    if(value===0x29)return{start:open,end:index};
+  }
+  return null;
+}
+
+function findEngineRunLengthRanges(data) {
+  const bytes=asBytes(data),ranges=[];
+  const needle='/RunLengthArray';
+  outer:for(let start=0;start<=bytes.length-needle.length;start+=1){
+    for(let cursor=0;cursor<needle.length;cursor+=1)if(bytes[start+cursor]!==needle.charCodeAt(cursor))continue outer;
+    let open=start+needle.length;
+    while(open<bytes.length&&(bytes[open]===0x20||bytes[open]===0x09||bytes[open]===0x0a||bytes[open]===0x0d||bytes[open]===0))open+=1;
+    if(bytes[open]!==0x5b)continue;
+    let close=open+1;
+    while(close<bytes.length&&bytes[close]!==0x5d)close+=1;
+    if(close>=bytes.length)continue;
+    const content=decodeLatin1(bytes.subarray(open+1,close)).trim();
+    const values=content?content.split(/\s+/).map(Number).filter(Number.isFinite):[];
+    ranges.push({start:open+1,end:close,values});
+    start=close;
+  }
+  return ranges;
+}
+
+function encodeEngineTextString(value) {
+  const normalized=String(value??'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/\n/g,'\r').replace(/\r*$/,'')+'\r';
+  const utf=encodeUtf16Be(normalized);
+  const out=[0x28,0xfe,0xff];
+  for(const byte of utf){
+    if(byte===0x5c||byte===0x28||byte===0x29)out.push(0x5c);
+    out.push(byte);
+  }
+  out.push(0x29);
+  return{bytes:Uint8Array.from(out),runLength:normalized.length};
+}
+
+function encodePsdRawDataValue(data) {
+  const bytes=asBytes(data);
+  const out=new Uint8Array(4+bytes.length);
+  new DataView(out.buffer).setUint32(0,bytes.length,false);
+  out.set(bytes,4);
+  return out;
+}
+
 function parseTypeToolObject(data,warnings,label) {
   if(!(data instanceof Uint8Array)||data.length<60)return null;
   try{
@@ -488,13 +718,17 @@ function parseTypeToolObject(data,warnings,label) {
     const textVersion=reader.u16();
     const textLayout=readPsdDescriptorBlockLayout(reader);
     const textValue=textLayout.descriptor.items['Txt '];
+    const engineRaw=textLayout.descriptor.items.EngineData?.data||null;
+    const engine=parsePsdEngineData(engineRaw,warnings,label);
+    const typography=engineDataTypographySummary(engine);
     const warpVersion=reader.u16();
     const warp=readPsdDescriptorBlock(reader);
     const left=reader.i32(),top=reader.i32(),right=reader.i32(),bottom=reader.i32();
     return{
       version,textVersion,warpVersion,
       transform,bounds:{left,top,right,bottom},
-      text:typeof textValue==='string'?textValue.replace(/\0+$/g,''):'',
+      text:typeof textValue==='string'?textValue.replace(/\0+$/g,'').replace(/\r/g,'\n'):'',
+      typography,
       orientation:textLayout.descriptor.items.Ornt?.value||null,
       antiAlias:textLayout.descriptor.items.AntA?.value||null,
       descriptorClass:textLayout.descriptor.classId||null,
@@ -549,13 +783,39 @@ export function rewriteTypeToolText(data,value,{deltaX=0,deltaY=0}={}) {
   const layout=readPsdDescriptorBlockLayout(reader);
   const txt=layout.layout.get('Txt ');
   if(!txt||txt.type!=='TEXT')throw new PsdImportError('TySh не содержит writable Txt TEXT item','PSD_TEXT_REWRITE');
-  const out=replaceByteRanges(bytes,[{start:txt.valueStart,end:txt.valueEnd,data:encodePsdUnicodeValue(value)}]);
+
+  const normalized=String(value??'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  const original=typeof txt.value==='string'?txt.value.replace(/\0+$/g,'').replace(/\r/g,'\n'):'';
+  const replacements=[{start:txt.valueStart,end:txt.valueEnd,data:encodePsdUnicodeValue(normalized)}];
+  let engineUpdated=false,runLength=null;
+
+  if(normalized!==original){
+    const engineItem=layout.layout.get('EngineData');
+    const engineRaw=engineItem?.value?.data;
+    if(engineItem?.type!=='tdta'||!(engineRaw instanceof Uint8Array))throw new PsdImportError('TySh EngineData недоступны для text writeback','PSD_TEXT_ENGINE_DATA');
+    const textRange=findEngineEditorTextRange(engineRaw);
+    const runRanges=findEngineRunLengthRanges(engineRaw);
+    if(!textRange||runRanges.length<2||runRanges.some(range=>range.values.length!==1)){
+      throw new PsdImportError('TySh EngineData имеют multi-run/unknown layout; text writeback небезопасен','PSD_TEXT_ENGINE_DATA');
+    }
+    const encoded=encodeEngineTextString(normalized);
+    runLength=encoded.runLength;
+    const asciiBytes=value=>Uint8Array.from(String(value).split('').map(ch=>ch.charCodeAt(0)));
+    const engineReplacements=[
+      {start:textRange.start,end:textRange.end,data:encoded.bytes},
+      ...runRanges.map(range=>({start:range.start,end:range.end,data:asciiBytes(' '+runLength+' ')})),
+    ];
+    const nextEngine=replaceByteRanges(engineRaw,engineReplacements);
+    replacements.push({start:engineItem.valueStart,end:engineItem.valueEnd,data:encodePsdRawDataValue(nextEngine)});
+    engineUpdated=true;
+  }
+
+  const out=replaceByteRanges(bytes,replacements);
   const view=new DataView(out.buffer,out.byteOffset,out.byteLength);
   view.setFloat64(34,transform[4]+Number(deltaX||0),false);
   view.setFloat64(42,transform[5]+Number(deltaY||0),false);
-  return{data:out,textUpdated:true,deltaX:Number(deltaX||0),deltaY:Number(deltaY||0)};
+  return{data:out,textUpdated:true,engineUpdated,runLength,deltaX:Number(deltaX||0),deltaY:Number(deltaY||0)};
 }
-
 function parseSmartObjectDescriptor(data,warnings,label) {
   if(!(data instanceof Uint8Array)||data.length<12)return null;
   try{

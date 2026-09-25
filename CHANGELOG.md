@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.37.0 — 2026-09-25
+
+### 2026-09-25 — Photoshop EngineData Typography & Editable Text Writeback Stage 15b
+
+- EngineData parser: добавлен bounded parser Photoshop text-engine grammar (`<< >>`, arrays, properties, UTF-16 strings, numbers, booleans) без внешнего runtime.
+- Typography mapping: `StyleRun`, `ParagraphRun` и `ResourceDict/FontSet` дают font name/family, font size, faux bold/italic, RGB fill, alignment, leading, tracking, underline/strike-through и run lengths.
+- Real import fidelity: внешний `type-layer.psd` теперь импортируется как ArialMT/Arial 30 pt, красный, centered, tracking 15 / letterSpacing 0.45 и line-height 1.75 вместо generic Arial/black heuristic.
+- Editable native text: single-style/single-paragraph-run content edit переписывает одновременно TySh descriptor `Txt ` и EngineData `/Editor /Text`.
+- Run-length integrity: StyleRun и ParagraphRun `RunLengthArray` обновляются по UTF-16 code-unit length с обязательным Photoshop terminal CR; multiline `Hello\nWorld` получает run length 12.
+- Transform compatibility: content writeback можно совмещать с Stage 15a affine `tx/ty` move rewrite в одном TySh block.
+- Safe fallback: multi-run text и изменения typography/scale/rotation/box geometry не получают stale native metadata и продолжают экспортироваться raster preview.
+- Project persistence: normalized EngineData typography summary сохраняется bounded в `.zpe`; исходный TySh остаётся authoritative opaque payload.
+- Regression: реальный MIT `psd-tools` fixture проверяет EngineData oracle, text edit, font/style/paragraph preservation и повторный PSD + PSB decode.
+- Version: приложение синхронизировано на 1.37.0.
+
 ## 1.36.0 — 2026-09-25
 
 ### 2026-09-25 — Photoshop-native Text Layer Mapping Stage 15a

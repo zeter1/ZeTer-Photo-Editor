@@ -38,6 +38,26 @@ test('Stage 15a decodes Photoshop TypeToolObjectSetting into typed text semantic
   assert.equal(layer.psdText.parsed.descriptorClass,'TxLr');
   assert.ok(layer.psdText.parsed.descriptorKeys.includes('EngineData'));
   assert.deepEqual(layer.psdText.parsed.transform,[1.0000000000000002,0,0,1,0,4.978787878787878]);
+  assert.deepEqual(layer.psdText.parsed.typography,{
+    engineText:'A',
+    fontName:'ArialMT',
+    fontFamily:'Arial, sans-serif',
+    fontSize:30,
+    fontWeight:'400',
+    fontStyle:'normal',
+    color:'#ff0000',
+    align:'center',
+    lineHeight:1.75,
+    tracking:15,
+    letterSpacing:.45,
+    underline:false,
+    strikeThrough:false,
+    justification:2,
+    styleRunLengths:[2],
+    paragraphRunLengths:[2],
+    editableSingleStyle:true,
+    fontCount:4,
+  });
 });
 
 test('Stage 15a preserves TySh through PSD/PSB and rewrites affine translation without touching the text descriptor',async()=>{
@@ -83,6 +103,47 @@ test('Stage 15a project sanitizer persists only bounded allow-listed TySh metada
   assert.equal(safe.layers[0].psdText.key,'TySh');
   assert.equal(safe.layers[0].psdText.parsed.text,'A');
   assert.equal(safe.layers[0].psdText.baseline.fontSize,18);
+  assert.equal(safe.layers[0].psdText.parsed.typography.fontName,'ArialMT');
+  assert.deepEqual(safe.layers[0].psdText.parsed.typography.styleRunLengths,[2]);
+  assert.equal(safe.layers[0].psdText.parsed.typography.editableSingleStyle,true);
   safe.layers[0].psdText.key='NOPE';
   assert.equal(sanitizeProject(safe).layers[0].psdText,null);
 });
+
+test('Stage 15b rewrites Txt + EngineData Editor.Text and compatible run lengths for editable single-style text',async()=>{
+  const fixture=await bytes('psd-tools-type-layer.psd');
+  const decoded=await decodePsd(fixture,{maxPixels:2_000_000,maxLayers:50});
+  const layer=decoded.layers[0];
+  const rewritten=rewriteTypeToolText(layer.psdText.data,'Hello\nWorld',{deltaX:7,deltaY:-3});
+  assert.equal(rewritten.engineUpdated,true);
+  assert.equal(rewritten.runLength,12);
+
+  const options={
+    width:decoded.width,height:decoded.height,bitsPerChannel:8,colorMode:3,
+    layers:[{
+      name:layer.name,x:layer.x+7,y:layer.y-3,width:layer.width,height:layer.height,
+      pixelBuffer:layer.pixelBuffer,opacity:layer.opacity,blendMode:layer.blendMode,visible:layer.visible,
+      psdText:{signature:layer.psdText.signature,key:'TySh',data:rewritten.data},
+    }],
+    composite:new Uint8ClampedArray(decoded.width*decoded.height*4),
+    iccProfile:decoded.iccProfile?.bytes||null,
+  };
+
+  for(const [label,encoded] of [['PSD',encodePsd(options)],['PSB',encodePsb(options)]]){
+    const roundTrip=await decodePsd(encoded,{maxPixels:2_000_000,maxLayers:50});
+    assert.deepEqual(roundTrip.warnings,[],label+' warnings');
+    const text=roundTrip.layers[0].psdText?.parsed;
+    assert.ok(text,label+' TySh');
+    assert.equal(text.text,'Hello\nWorld',label+' descriptor text');
+    assert.equal(text.typography.engineText,'Hello\nWorld',label+' EngineData text');
+    assert.deepEqual(text.typography.styleRunLengths,[12],label+' style run length');
+    assert.deepEqual(text.typography.paragraphRunLengths,[12],label+' paragraph run length');
+    assert.equal(text.typography.fontName,'ArialMT',label+' font');
+    assert.equal(text.typography.fontSize,30,label+' font size');
+    assert.equal(text.typography.color,'#ff0000',label+' color');
+    assert.equal(text.typography.align,'center',label+' paragraph alignment');
+    assert.equal(text.transform[4],7,label+' tx');
+    assert.ok(Math.abs(text.transform[5]-1.9787878787878777)<1e-12,label+' ty');
+  }
+});
+
