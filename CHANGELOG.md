@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-25T22:09:00+03:00 — Исправлена прозрачность корректирующих слоёв и checker preview
+
+- Fixed: корректирующие слои больше не повышают alpha полупрозрачных пикселей при повторном `source-over`; opacity, raster/vector mask и clipping теперь задают только степень цветового эффекта, а исходная alpha сохраняется.
+- Blend semantics: alpha-safe compositor поддерживает текущие режимы `source-over`, Multiply, Screen, Overlay, Darken, Lighten, Color Dodge и Color Burn.
+- Fixed: checkerboard прозрачности теперь композится позади уже отрендеренного документа и больше не попадает под adjustment layers или blend operations.
+- Regression: добавлены pixel-level проверки semi-transparent alpha/mask coverage и source-contract проверки checker/render boundary; browser bundle пересобирается штатным генератором.
+
 ### 2026-09-25T21:57:51+03:00 — Исправлена проверка проекта после клонирования на Windows
 
 - Fixed: текстовые файлы проекта сохраняют LF при checkout даже с `core.autocrlf=true`; для `start.bat` сохранён CRLF.

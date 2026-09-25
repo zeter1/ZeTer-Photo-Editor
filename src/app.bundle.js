@@ -3703,6 +3703,37 @@ function applyAdjustmentPixels(imageData,adjustment) {
   }
   return imageData;
 }
+
+function blendAdjustmentChannel(base,effect,mode) {
+  if(mode==='multiply')return base*effect;
+  if(mode==='screen')return 1-(1-base)*(1-effect);
+  if(mode==='overlay')return base<=.5?2*base*effect:1-2*(1-base)*(1-effect);
+  if(mode==='darken')return Math.min(base,effect);
+  if(mode==='lighten')return Math.max(base,effect);
+  if(mode==='color-dodge')return effect>=1?1:Math.min(1,base/(1-effect));
+  if(mode==='color-burn')return effect<=0?0:1-Math.min(1,(1-base)/effect);
+  return effect;
+}
+function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity=1,blendMode='source-over'}={}) {
+  if(!baseImageData?.data||!effectImageData?.data||baseImageData.data.length!==effectImageData.data.length)return baseImageData;
+  const layerOpacity=clampAdjustment(opacity,0,1,1);
+  if(layerOpacity<=0)return baseImageData;
+  const base=baseImageData.data,effect=effectImageData.data;
+  for(let index=0;index<base.length;index+=4){
+    const baseAlpha=base[index+3];
+    const effectAlpha=effect[index+3];
+    if(baseAlpha<=0||effectAlpha<=0)continue;
+    const coverage=Math.min(1,effectAlpha/baseAlpha)*layerOpacity;
+    if(coverage<=0)continue;
+    for(let channel=0;channel<3;channel+=1){
+      const original=base[index+channel]/255;
+      const adjusted=effect[index+channel]/255;
+      const blended=blendAdjustmentChannel(original,adjusted,blendMode);
+      base[index+channel]=Math.round(Math.max(0,Math.min(1,original+(blended-original)*coverage))*255);
+    }
+  }
+  return baseImageData;
+}
 function adjustmentModelEqual(left,right) {
   return JSON.stringify(sanitizeAdjustmentModel(left))===JSON.stringify(sanitizeAdjustmentModel(right));
 }
@@ -5406,12 +5437,22 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
     sourceCtx.drawImage(clippingMask,0,0,width,height);
     sourceCtx.restore();
   }
-  ctx.save();
-  ctx.globalAlpha = layer.opacity ?? 1;
-  ctx.globalCompositeOperation = layer.blendMode || 'source-over';
-  ctx.filter = filterString(layer.filters);
-  ctx.drawImage(source, 0, 0, width, height);
-  ctx.restore();
+  const effect=document.createElement('canvas');
+  effect.width=width;effect.height=height;
+  const effectCtx=effect.getContext('2d',{alpha:true,willReadFrequently:true});
+  effectCtx.filter=filterString(layer.filters);
+  effectCtx.drawImage(source,0,0,width,height);
+  try{
+    const basePixels=ctx.getImageData(0,0,width,height);
+    const effectPixels=effectCtx.getImageData(0,0,width,height);
+    compositeAdjustmentPixels(basePixels,effectPixels,{
+      opacity:layer.opacity??1,
+      blendMode:layer.blendMode||'source-over',
+    });
+    ctx.putImageData(basePixels,0,0);
+  }catch(error){
+    console.warn('Adjustment layer compositing failed; previous composite preserved',error);
+  }
 }
 
 function buildGroupRenderPlan(doc) {
@@ -5547,12 +5588,24 @@ async function renderDocument(canvas, doc, { checker = false, rasterOverrides = 
   if (canvas.height !== doc.height) canvas.height = doc.height;
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-  ctx.clearRect(0, 0, doc.width, doc.height);
-  if (checker && doc.background === 'transparent') drawChecker(ctx, doc.width, doc.height);
+
+  const needsCheckerBackdrop=checker&&doc.background==='transparent';
+  const contentCanvas=needsCheckerBackdrop?document.createElement('canvas'):canvas;
+  if(contentCanvas!==canvas){contentCanvas.width=doc.width;contentCanvas.height=doc.height;}
+  const contentCtx=contentCanvas.getContext('2d',{alpha:true});
+  contentCtx.imageSmoothingEnabled=true;
+  if('imageSmoothingQuality' in contentCtx)contentCtx.imageSmoothingQuality='high';
+  contentCtx.clearRect(0,0,doc.width,doc.height);
   if (doc.background && doc.background !== 'transparent') {
-    ctx.save(); ctx.fillStyle = doc.background; ctx.fillRect(0, 0, doc.width, doc.height); ctx.restore();
+    contentCtx.save(); contentCtx.fillStyle = doc.background; contentCtx.fillRect(0, 0, doc.width, doc.height); contentCtx.restore();
   }
-  await renderGroupHierarchy(canvas, ctx, doc, rasterOverrides);
+  await renderGroupHierarchy(contentCanvas, contentCtx, doc, rasterOverrides);
+
+  if(needsCheckerBackdrop){
+    ctx.clearRect(0,0,doc.width,doc.height);
+    drawChecker(ctx,doc.width,doc.height);
+    ctx.drawImage(contentCanvas,0,0);
+  }
 }
 
 function traceLayerBezierPath(ctx, points, closed = false) {

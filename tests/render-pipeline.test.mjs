@@ -65,3 +65,17 @@ test('smart objects render from preview data without mutating embedded document 
   assert.match(render, /layer\.type === 'smart-object' && layer\.previewDataUrl/);
   assert.match(render, /layer\.type === 'smart-object' \? layer\.previewDataUrl : layer\.dataUrl/);
 });
+
+
+test('adjustment rendering preserves alpha through the pixel compositor', () => {
+  assert.match(render, /compositeAdjustmentPixels\(basePixels,effectPixels/);
+  assert.match(render, /ctx\.putImageData\(basePixels,0,0\)/);
+  assert.doesNotMatch(render, /ctx\.globalAlpha = layer\.opacity \?\? 1;[\s\S]{0,180}ctx\.drawImage\(source, 0, 0, width, height\)/);
+});
+
+test('checkerboard is composited behind transparent document content after adjustments', () => {
+  assert.match(render, /const needsCheckerBackdrop=checker&&doc\.background==='transparent'/);
+  assert.match(render, /await renderGroupHierarchy\(contentCanvas, contentCtx, doc, rasterOverrides\)/);
+  assert.match(render, /drawChecker\(ctx,doc\.width,doc\.height\)/);
+  assert.match(render, /ctx\.drawImage\(contentCanvas,0,0\)/);
+});

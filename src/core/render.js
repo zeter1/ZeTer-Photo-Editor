@@ -3,7 +3,7 @@ import { hasLayerStyles, renderLayerStyles } from './layer-styles.js';
 import { colorAdjustmentSignature, hasAdvancedColorAdjustments } from './color.js';
 import { applyAdvancedColorAdjustmentsAsync } from './pixel-worker.js';
 import { deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview } from './pixel-buffer.js';
-import { applyAdjustmentPixels } from './adjustments.js';
+import { applyAdjustmentPixels, compositeAdjustmentPixels } from './adjustments.js';
 
 const imageCache = new Map();
 const IMAGE_CACHE_LIMIT = 24;
@@ -366,12 +366,22 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
     sourceCtx.drawImage(clippingMask,0,0,width,height);
     sourceCtx.restore();
   }
-  ctx.save();
-  ctx.globalAlpha = layer.opacity ?? 1;
-  ctx.globalCompositeOperation = layer.blendMode || 'source-over';
-  ctx.filter = filterString(layer.filters);
-  ctx.drawImage(source, 0, 0, width, height);
-  ctx.restore();
+  const effect=document.createElement('canvas');
+  effect.width=width;effect.height=height;
+  const effectCtx=effect.getContext('2d',{alpha:true,willReadFrequently:true});
+  effectCtx.filter=filterString(layer.filters);
+  effectCtx.drawImage(source,0,0,width,height);
+  try{
+    const basePixels=ctx.getImageData(0,0,width,height);
+    const effectPixels=effectCtx.getImageData(0,0,width,height);
+    compositeAdjustmentPixels(basePixels,effectPixels,{
+      opacity:layer.opacity??1,
+      blendMode:layer.blendMode||'source-over',
+    });
+    ctx.putImageData(basePixels,0,0);
+  }catch(error){
+    console.warn('Adjustment layer compositing failed; previous composite preserved',error);
+  }
 }
 
 function buildGroupRenderPlan(doc) {
@@ -508,12 +518,24 @@ export async function renderDocument(canvas, doc, { checker = false, rasterOverr
   if (canvas.height !== doc.height) canvas.height = doc.height;
   ctx.imageSmoothingEnabled = true;
   if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
-  ctx.clearRect(0, 0, doc.width, doc.height);
-  if (checker && doc.background === 'transparent') drawChecker(ctx, doc.width, doc.height);
+
+  const needsCheckerBackdrop=checker&&doc.background==='transparent';
+  const contentCanvas=needsCheckerBackdrop?document.createElement('canvas'):canvas;
+  if(contentCanvas!==canvas){contentCanvas.width=doc.width;contentCanvas.height=doc.height;}
+  const contentCtx=contentCanvas.getContext('2d',{alpha:true});
+  contentCtx.imageSmoothingEnabled=true;
+  if('imageSmoothingQuality' in contentCtx)contentCtx.imageSmoothingQuality='high';
+  contentCtx.clearRect(0,0,doc.width,doc.height);
   if (doc.background && doc.background !== 'transparent') {
-    ctx.save(); ctx.fillStyle = doc.background; ctx.fillRect(0, 0, doc.width, doc.height); ctx.restore();
+    contentCtx.save(); contentCtx.fillStyle = doc.background; contentCtx.fillRect(0, 0, doc.width, doc.height); contentCtx.restore();
   }
-  await renderGroupHierarchy(canvas, ctx, doc, rasterOverrides);
+  await renderGroupHierarchy(contentCanvas, contentCtx, doc, rasterOverrides);
+
+  if(needsCheckerBackdrop){
+    ctx.clearRect(0,0,doc.width,doc.height);
+    drawChecker(ctx,doc.width,doc.height);
+    ctx.drawImage(contentCanvas,0,0);
+  }
 }
 
 function traceLayerBezierPath(ctx, points, closed = false) {

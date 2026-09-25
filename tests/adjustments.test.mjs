@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyAdjustmentPixels, sanitizeAdjustmentModel, adjustmentModelEqual } from '../src/core/adjustments.js';
+import { applyAdjustmentPixels, compositeAdjustmentPixels, sanitizeAdjustmentModel, adjustmentModelEqual } from '../src/core/adjustments.js';
 import { sanitizeProject } from '../src/core/state.js';
 
 function pixel(r,g,b,a=255){return {data:new Uint8ClampedArray([r,g,b,a])};}
@@ -113,4 +113,21 @@ test('Stage 16c project sanitizer preserves native simple adjustment metadata',(
   assert.deepEqual(sanitized.layers[0].adjustment,{kind:'invert'});
   assert.equal(sanitized.layers[0].psdAdjustment.kind,'invert');
   assert.equal(sanitized.layers[0].psdAdjustment.blocks[0].key,'nvrt');
+});
+
+
+test('adjustment compositing preserves semi-transparent destination alpha and mask coverage',()=>{
+  const full={data:new Uint8ClampedArray([100,100,100,128])};
+  compositeAdjustmentPixels(full,{data:new Uint8ClampedArray([200,50,0,128])},{opacity:1,blendMode:'source-over'});
+  assert.deepEqual([...full.data],[200,50,0,128]);
+
+  const masked={data:new Uint8ClampedArray([100,100,100,128])};
+  compositeAdjustmentPixels(masked,{data:new Uint8ClampedArray([200,50,0,64])},{opacity:.5,blendMode:'source-over'});
+  assert.deepEqual([...masked.data],[125,88,75,128]);
+});
+
+test('adjustment compositing applies supported blend modes without changing alpha',()=>{
+  const base={data:new Uint8ClampedArray([128,128,128,77])};
+  compositeAdjustmentPixels(base,{data:new Uint8ClampedArray([128,128,128,77])},{blendMode:'multiply'});
+  assert.deepEqual([...base.data],[64,64,64,77]);
 });
