@@ -320,7 +320,7 @@ export function pixelBufferWithStraightAlpha(buffer) {
 }
 
 export const MAX_HIGH_DEPTH_COMPOSITE_BYTES = 256 * 1024 * 1024;
-const HIGH_DEPTH_COMPOSITE_BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+const HIGH_DEPTH_COMPOSITE_BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion']);
 
 function compositeColorSample(buffer, index, targetLinear) {
   let value = sourceSampleValue(buffer, index);
@@ -338,6 +338,17 @@ function compositeBlendChannel(mode, backdrop, source) {
   if (mode === 'multiply') return cb * cs;
   if (mode === 'screen') return cb + cs - cb * cs;
   if (mode === 'overlay') return cb <= 0.5 ? 2 * cb * cs : 1 - 2 * (1 - cb) * (1 - cs);
+  if (mode === 'soft-light') {
+    const base=clampPreview01(cb),blend=clampPreview01(cs);
+    const d=base<=0.25?((16*base-12)*base+4)*base:Math.sqrt(base);
+    return blend<=0.5
+      ? base-(1-2*blend)*base*(1-base)
+      : base+(2*blend-1)*(d-base);
+  }
+  if (mode === 'hard-light') {
+    const base=clampPreview01(cb),blend=clampPreview01(cs);
+    return blend<=0.5?2*base*blend:1-2*(1-base)*(1-blend);
+  }
   if (mode === 'darken') return Math.min(cb, cs);
   if (mode === 'lighten') return Math.max(cb, cs);
   if (mode === 'color-dodge') {
@@ -349,6 +360,11 @@ function compositeBlendChannel(mode, backdrop, source) {
     if (cs <= 0) return 0;
     const base = clampPreview01(cb);
     return 1 - Math.min(1, (1 - base) / Math.max(1e-12, clampPreview01(cs)));
+  }
+  if (mode === 'difference') return Math.abs(clampPreview01(cb)-clampPreview01(cs));
+  if (mode === 'exclusion') {
+    const base=clampPreview01(cb),blend=clampPreview01(cs);
+    return base+blend-2*base*blend;
   }
   return cs;
 }

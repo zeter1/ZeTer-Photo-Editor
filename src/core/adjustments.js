@@ -183,10 +183,19 @@ function blendAdjustmentChannel(base,effect,mode) {
   if(mode==='multiply')return base*effect;
   if(mode==='screen')return 1-(1-base)*(1-effect);
   if(mode==='overlay')return base<=.5?2*base*effect:1-2*(1-base)*(1-effect);
+  if(mode==='soft-light'){
+    const d=base<=.25?((16*base-12)*base+4)*base:Math.sqrt(base);
+    return effect<=.5
+      ? base-(1-2*effect)*base*(1-base)
+      : base+(2*effect-1)*(d-base);
+  }
+  if(mode==='hard-light')return effect<=.5?2*base*effect:1-2*(1-base)*(1-effect);
   if(mode==='darken')return Math.min(base,effect);
   if(mode==='lighten')return Math.max(base,effect);
   if(mode==='color-dodge')return effect>=1?1:Math.min(1,base/(1-effect));
   if(mode==='color-burn')return effect<=0?0:1-Math.min(1,(1-base)/effect);
+  if(mode==='difference')return Math.abs(base-effect);
+  if(mode==='exclusion')return base+effect-2*base*effect;
   return effect;
 }
 

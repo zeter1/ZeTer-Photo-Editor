@@ -148,3 +148,32 @@ test('adjustment compositing applies supported blend modes without changing alph
   compositeAdjustmentPixels(base,{data:new Uint8ClampedArray([128,128,128,77])},{blendMode:'multiply'});
   assert.deepEqual([...base.data],[64,64,64,77]);
 });
+
+test('adjustment compositing implements Soft Light, Hard Light, Difference and Exclusion without changing alpha',()=>{
+  const cases=[
+    ['soft-light',96],
+    ['hard-light',161],
+    ['difference',128],
+    ['exclusion',160],
+  ];
+  for(const [blendMode,expected] of cases){
+    const base={data:new Uint8ClampedArray([64,64,64,77])};
+    const effect={data:new Uint8ClampedArray([192,192,192,77])};
+    compositeAdjustmentPixels(base,effect,{blendMode});
+    assert.deepEqual([...base.data],[expected,expected,expected,77],blendMode);
+  }
+});
+
+test('project sanitizer preserves the expanded Photoshop-compatible blend modes for layers and groups',()=>{
+  for(const blendMode of ['soft-light','hard-light','difference','exclusion']){
+    const sanitized=sanitizeProject({
+      width:1,height:1,name:'Blend persistence',background:'transparent',selectedLayerId:'adj',groups:[{
+        id:'g',name:'Group',visible:true,locked:false,collapsed:false,opacity:1,blendMode,parentGroupId:null,
+      }],layers:[{
+        id:'adj',type:'adjustment',name:'Invert',visible:true,locked:false,opacity:1,blendMode,groupId:'g',adjustment:{kind:'invert'},
+      }],
+    });
+    assert.equal(sanitized.layers[0].blendMode,blendMode);
+    assert.equal(sanitized.groups[0].blendMode,blendMode);
+  }
+});

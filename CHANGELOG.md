@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-25T22:34:00+03:00 — Исправлена потеря Photoshop blend modes при PSD/PSB round-trip
+
+- Fixed: PSD/PSB `sLit`, `hLit`, `diff` и `smud` больше не деградируют в Normal; они сохраняются как Soft Light, Hard Light, Difference и Exclusion при импорте и экспорте.
+- Renderer/UI: новые режимы доступны слоям и группам; adjustment layers используют alpha-safe формулы Soft Light / Hard Light / Difference / Exclusion без изменения destination alpha.
+- High-depth/CMYK: typed compositors понимают тот же расширенный набор режимов вместо тихого fallback в `source-over`.
+- Regression: добавлены PSD+PSB key round-trip, project-sanitizer, 8-bit adjustment и typed RGB/CMYK pixel-level проверки; `src/app.bundle.js` синхронизирован с исходниками.
+
 ### 2026-09-25T22:19:00+03:00 — Исправлен Photoshop Hue/Saturation Colorize round-trip
 
 - Fixed: PSD/PSB `hue2`/`hue ` с включённым Colorize теперь импортируют активную тройку Colorization Hue/Saturation/Lightness вместо неактивных master-полей.

@@ -5481,10 +5481,14 @@ const GROUP_BLEND_OPTIONS=[
   ['multiply','Умножение'],
   ['screen','Экран'],
   ['overlay','Перекрытие'],
+  ['soft-light','Мягкий свет'],
+  ['hard-light','Жёсткий свет'],
   ['darken','Затемнение'],
   ['lighten','Осветление'],
   ['color-dodge','Осветление основы'],
   ['color-burn','Затемнение основы'],
+  ['difference','Разница'],
+  ['exclusion','Исключение'],
 ];
 function renameGroup(group){if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}showModal({title:'Переименовать группу',fields:[{name:'name',label:'Имя',value:group.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===group.name)return;group.name=name;commit('Переименовать группу');}});}
 function editGroupProperties(group){

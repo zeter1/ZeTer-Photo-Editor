@@ -34,11 +34,15 @@ const PSD_BLEND_MODES = Object.freeze({
   'mul ': 'multiply',
   scrn: 'screen',
   over: 'overlay',
+  sLit: 'soft-light',
+  hLit: 'hard-light',
   dark: 'darken',
   lite: 'lighten',
   div: 'color-dodge',
   'div ': 'color-dodge',
   idiv: 'color-burn',
+  diff: 'difference',
+  smud: 'exclusion',
 });
 
 export class PsdImportError extends Error {
@@ -2319,10 +2323,14 @@ const PSD_BLEND_KEYS = Object.freeze({
   multiply: 'mul ',
   screen: 'scrn',
   overlay: 'over',
+  'soft-light': 'sLit',
+  'hard-light': 'hLit',
   darken: 'dark',
   lighten: 'lite',
   'color-dodge': 'div ',
   'color-burn': 'idiv',
+  difference: 'diff',
+  exclusion: 'smud',
 });
 
 class Writer {

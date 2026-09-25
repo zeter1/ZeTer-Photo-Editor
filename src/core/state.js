@@ -8,7 +8,7 @@ const uid = (prefix = 'layer') => `${prefix}-${Date.now().toString(36)}-${(++lay
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const bounded = (value, fallback, min, max) => clamp(finite(value, fallback), min, max);
 const shortText = (value, fallback = '', max = 500) => String(value ?? fallback).slice(0, max);
-const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion']);
 const GROUP_BLEND_MODES = new Set(['pass-through', ...BLEND_MODES]);
 export const PROJECT_VERSION = 1;
 export const DEFAULT_LAYER_FILTERS = Object.freeze({

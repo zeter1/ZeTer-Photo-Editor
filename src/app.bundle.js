@@ -1365,7 +1365,7 @@ function pixelBufferWithStraightAlpha(buffer) {
   });
 }
 const MAX_HIGH_DEPTH_COMPOSITE_BYTES = 256 * 1024 * 1024;
-const HIGH_DEPTH_COMPOSITE_BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+const HIGH_DEPTH_COMPOSITE_BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion']);
 
 function compositeColorSample(buffer, index, targetLinear) {
   let value = sourceSampleValue(buffer, index);
@@ -1383,6 +1383,17 @@ function compositeBlendChannel(mode, backdrop, source) {
   if (mode === 'multiply') return cb * cs;
   if (mode === 'screen') return cb + cs - cb * cs;
   if (mode === 'overlay') return cb <= 0.5 ? 2 * cb * cs : 1 - 2 * (1 - cb) * (1 - cs);
+  if (mode === 'soft-light') {
+    const base=clampPreview01(cb),blend=clampPreview01(cs);
+    const d=base<=0.25?((16*base-12)*base+4)*base:Math.sqrt(base);
+    return blend<=0.5
+      ? base-(1-2*blend)*base*(1-base)
+      : base+(2*blend-1)*(d-base);
+  }
+  if (mode === 'hard-light') {
+    const base=clampPreview01(cb),blend=clampPreview01(cs);
+    return blend<=0.5?2*base*blend:1-2*(1-base)*(1-blend);
+  }
   if (mode === 'darken') return Math.min(cb, cs);
   if (mode === 'lighten') return Math.max(cb, cs);
   if (mode === 'color-dodge') {
@@ -1394,6 +1405,11 @@ function compositeBlendChannel(mode, backdrop, source) {
     if (cs <= 0) return 0;
     const base = clampPreview01(cb);
     return 1 - Math.min(1, (1 - base) / Math.max(1e-12, clampPreview01(cs)));
+  }
+  if (mode === 'difference') return Math.abs(clampPreview01(cb)-clampPreview01(cs));
+  if (mode === 'exclusion') {
+    const base=clampPreview01(cb),blend=clampPreview01(cs);
+    return base+blend-2*base*blend;
   }
   return cs;
 }
@@ -3709,10 +3725,19 @@ function blendAdjustmentChannel(base,effect,mode) {
   if(mode==='multiply')return base*effect;
   if(mode==='screen')return 1-(1-base)*(1-effect);
   if(mode==='overlay')return base<=.5?2*base*effect:1-2*(1-base)*(1-effect);
+  if(mode==='soft-light'){
+    const d=base<=.25?((16*base-12)*base+4)*base:Math.sqrt(base);
+    return effect<=.5
+      ? base-(1-2*effect)*base*(1-base)
+      : base+(2*effect-1)*(d-base);
+  }
+  if(mode==='hard-light')return effect<=.5?2*base*effect:1-2*(1-base)*(1-effect);
   if(mode==='darken')return Math.min(base,effect);
   if(mode==='lighten')return Math.max(base,effect);
   if(mode==='color-dodge')return effect>=1?1:Math.min(1,base/(1-effect));
   if(mode==='color-burn')return effect<=0?0:1-Math.min(1,(1-base)/effect);
+  if(mode==='difference')return Math.abs(base-effect);
+  if(mode==='exclusion')return base+effect-2*base*effect;
   return effect;
 }
 function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity=1,blendMode='source-over'}={}) {
@@ -3745,7 +3770,7 @@ const uid = (prefix = 'layer') => `${prefix}-${Date.now().toString(36)}-${(++lay
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const bounded = (value, fallback, min, max) => clamp(finite(value, fallback), min, max);
 const shortText = (value, fallback = '', max = 500) => String(value ?? fallback).slice(0, max);
-const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','darken','lighten','color-dodge','color-burn']);
+const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion']);
 const GROUP_BLEND_MODES = new Set(['pass-through', ...BLEND_MODES]);
 const PROJECT_VERSION = 1;
 const DEFAULT_LAYER_FILTERS = Object.freeze({
@@ -5911,11 +5936,15 @@ const PSD_BLEND_MODES = Object.freeze({
   'mul ': 'multiply',
   scrn: 'screen',
   over: 'overlay',
+  sLit: 'soft-light',
+  hLit: 'hard-light',
   dark: 'darken',
   lite: 'lighten',
   div: 'color-dodge',
   'div ': 'color-dodge',
   idiv: 'color-burn',
+  diff: 'difference',
+  smud: 'exclusion',
 });
 class PsdImportError extends Error {
   constructor(message, code = 'PSD_IMPORT_ERROR') {
@@ -8189,10 +8218,14 @@ const PSD_BLEND_KEYS = Object.freeze({
   multiply: 'mul ',
   screen: 'scrn',
   overlay: 'over',
+  'soft-light': 'sLit',
+  'hard-light': 'hLit',
   darken: 'dark',
   lighten: 'lite',
   'color-dodge': 'div ',
   'color-burn': 'idiv',
+  difference: 'diff',
+  exclusion: 'smud',
 });
 
 class Writer {
@@ -14574,10 +14607,14 @@ const GROUP_BLEND_OPTIONS=[
   ['multiply','Умножение'],
   ['screen','Экран'],
   ['overlay','Перекрытие'],
+  ['soft-light','Мягкий свет'],
+  ['hard-light','Жёсткий свет'],
   ['darken','Затемнение'],
   ['lighten','Осветление'],
   ['color-dodge','Осветление основы'],
   ['color-burn','Затемнение основы'],
+  ['difference','Разница'],
+  ['exclusion','Исключение'],
 ];
 function renameGroup(group){if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}showModal({title:'Переименовать группу',fields:[{name:'name',label:'Имя',value:group.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===group.name)return;group.name=name;commit('Переименовать группу');}});}
 function editGroupProperties(group){

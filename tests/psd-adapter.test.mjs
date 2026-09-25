@@ -995,3 +995,18 @@ test('Stage 13b PSB writer round-trips native CMYK/16-bit channels through Lr16'
   assert.ok(decoded.layers[0].pixelBuffer.data instanceof Uint16Array);
   assert.deepEqual([...decoded.layers[0].pixelBuffer.data],[...buffer.data]);
 });
+
+test('PSD and PSB round-trip common Photoshop Soft Light, Hard Light, Difference and Exclusion blend keys',async()=>{
+  const pixels=Uint8Array.from([64,128,192,255]);
+  for(const encode of [encodePsd,encodePsb]){
+    for(const blendMode of ['soft-light','hard-light','difference','exclusion']){
+      const encoded=encode({
+        width:1,height:1,composite:pixels,
+        layers:[{name:blendMode,x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode,visible:true}],
+      });
+      const decoded=await decodePsd(encoded);
+      assert.equal(decoded.layers[0].blendMode,blendMode);
+      assert.doesNotMatch(decoded.warnings.join('\n'),/импортирован как Normal/);
+    }
+  }
+});

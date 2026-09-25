@@ -105,3 +105,24 @@ test('Stage 13c export planner no longer forces native CMYK layers with supporte
   assert.doesNotMatch(main,/CMYK merged composite Stage 13b поддерживает только Normal blend/);
   assert.match(main,/blendMode:item\.layer\.blendMode\|\|'source-over'/);
 });
+
+test('Stage 12g/13c typed compositors implement the expanded Photoshop-compatible component blend modes',()=>{
+  const makeRgb=value=>createPixelBuffer({
+    width:1,height:1,model:'rgb',channels:4,bitsPerChannel:32,colorSpace:'linear-rgb-unmanaged',
+    data:new Float32Array([value,value,value,1]),
+  });
+  const expected=new Map([['soft-light',.375],['hard-light',.625],['difference',.5],['exclusion',.625]]);
+  for(const [blendMode,target] of expected){
+    const out=compositePixelBufferLayers(1,1,[{buffer:makeRgb(.25)},{buffer:makeRgb(.75),blendMode}],{bitsPerChannel:32});
+    assert.ok(Math.abs(out.data[0]-target)<1e-6,blendMode);
+  }
+
+  const makeCmyk=value=>createPixelBuffer({
+    width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:32,colorSpace:'device-cmyk',alphaMode:'straight',
+    data:new Float32Array([value,value,value,value,1]),
+  });
+  for(const [blendMode,target] of expected){
+    const out=compositeCmykPixelBufferLayers(1,1,[{buffer:makeCmyk(.25)},{buffer:makeCmyk(.75),blendMode}],{bitsPerChannel:32});
+    assert.ok(Math.abs(out.data[0]-target)<1e-6,blendMode);
+  }
+});
