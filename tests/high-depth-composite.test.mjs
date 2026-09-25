@@ -85,11 +85,23 @@ test('Stage 13b composites native CMYK layers without RGB conversion or 8-bit qu
   assert.ok([...out.data.slice(0,4)].some(value=>value%257!==0));
 });
 
-test('Stage 13b CMYK composite applies raster-mask alpha and rejects unsupported blend modes',()=>{
+test('Stage 13c CMYK composite applies raster-mask alpha and component blend modes without RGB conversion',()=>{
   const ink=createPixelBuffer({width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:8,colorSpace:'device-cmyk',alphaMode:'straight',data:new Uint8ClampedArray([200,100,50,25,255])});
   const mask=new Uint8ClampedArray([255,255,255,128]);
   const out=compositeCmykPixelBufferLayers(1,1,[{buffer:ink,opacity:.5,maskPixels:mask}],{bitsPerChannel:8});
   assert.ok(out.data[4]>=63&&out.data[4]<=65);
   assert.deepEqual([...out.data.slice(0,4)],[200,100,50,25]);
-  assert.throws(()=>compositeCmykPixelBufferLayers(1,1,[{buffer:ink,blendMode:'multiply'}]),/только Normal/);
+
+  const bottom=createPixelBuffer({width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:16,colorSpace:'device-cmyk',alphaMode:'straight',data:new Uint16Array([30000,20000,10000,5000,65535])});
+  const top=createPixelBuffer({width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:16,colorSpace:'device-cmyk',alphaMode:'straight',data:new Uint16Array([40000,30000,20000,10000,65535])});
+  const normal=compositeCmykPixelBufferLayers(1,1,[{buffer:bottom},{buffer:top,blendMode:'source-over'}],{bitsPerChannel:16});
+  const multiply=compositeCmykPixelBufferLayers(1,1,[{buffer:bottom},{buffer:top,blendMode:'multiply'}],{bitsPerChannel:16});
+  assert.notDeepEqual([...multiply.data.slice(0,4)],[...normal.data.slice(0,4)]);
+  assert.ok([...multiply.data.slice(0,4)].some(value=>value%257!==0));
+});
+
+
+test('Stage 13c export planner no longer forces native CMYK layers with supported component blends to RGB fallback',()=>{
+  assert.doesNotMatch(main,/CMYK merged composite Stage 13b поддерживает только Normal blend/);
+  assert.match(main,/blendMode:item\.layer\.blendMode\|\|'source-over'/);
 });

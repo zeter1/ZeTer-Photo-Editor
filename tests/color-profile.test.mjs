@@ -28,11 +28,27 @@ test('ICC profile metadata is bounded and survives project sanitization',()=>{
 
 
 test('Stage 13b persists bounded rendering-intent and display-space policy',()=>{
-  assert.deepEqual(sanitizeColorManagement(),{renderingIntent:'perceptual',displaySpace:'srgb'});
-  assert.deepEqual(sanitizeColorManagement({renderingIntent:'relative',displaySpace:'srgb'}),{renderingIntent:'relative',displaySpace:'srgb'});
-  assert.deepEqual(sanitizeColorManagement({renderingIntent:'absolute',displaySpace:'display-p3'}),{renderingIntent:'absolute',displaySpace:'srgb'});
+  assert.deepEqual(sanitizeColorManagement(),{renderingIntent:'perceptual',displaySpace:'srgb',softProofEnabled:false,blackPointCompensation:true});
+  assert.deepEqual(sanitizeColorManagement({renderingIntent:'relative',displaySpace:'srgb'}),{renderingIntent:'relative',displaySpace:'srgb',softProofEnabled:false,blackPointCompensation:true});
+  assert.deepEqual(sanitizeColorManagement({renderingIntent:'absolute',displaySpace:'display-p3'}),{renderingIntent:'absolute',displaySpace:'srgb',softProofEnabled:false,blackPointCompensation:true});
   const doc=createDocument({name:'CM policy'});
   doc.colorManagement={renderingIntent:'saturation',displaySpace:'srgb'};
   const safe=sanitizeProject(doc);
-  assert.deepEqual(safe.colorManagement,{renderingIntent:'saturation',displaySpace:'srgb'});
+  assert.deepEqual(safe.colorManagement,{renderingIntent:'saturation',displaySpace:'srgb',softProofEnabled:false,blackPointCompensation:true});
+});
+
+
+test('Stage 13c persists bounded soft-proof profile and BPC policy independently from source ICC',()=>{
+  const proof={
+    kind:'icc',untagged:false,
+    dataUrl:'data:application/vnd.iccprofile;base64,YWNzcA==',
+    name:'Proof CMYK',version:'4.4',deviceClass:'prtr',colorSpace:'CMYK',pcs:'Lab',signatureValid:true,
+  };
+  const doc=createDocument({name:'Soft proof'});
+  doc.proofProfile=proof;
+  doc.colorManagement={renderingIntent:'relative',displaySpace:'srgb',softProofEnabled:true,blackPointCompensation:false};
+  const safe=sanitizeProject(doc);
+  assert.deepEqual(safe.proofProfile,proof);
+  assert.deepEqual(safe.colorManagement,{renderingIntent:'relative',displaySpace:'srgb',softProofEnabled:true,blackPointCompensation:false});
+  assert.equal(sanitizeProject({...doc,proofProfile:{kind:'icc',dataUrl:'javascript:bad'}}).proofProfile,null);
 });

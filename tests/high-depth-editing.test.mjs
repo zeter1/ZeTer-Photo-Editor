@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   createPixelBuffer, clonePixelBuffer, pixelBufferWithStraightAlpha,
-  applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, floodFillPixelBuffer, clearPixelBufferPixels,
+  applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment,
+  floodFillPixelBuffer, floodFillCmykPixelBuffer, clearPixelBufferPixels,
   serializePixelBufferSource, deserializePixelBufferSource,
 } from '../src/core/pixel-buffer.js';
 
@@ -73,4 +74,65 @@ test('Stage 12d paint preview can bypass the legacy RGBA8 adjustment pass after 
   assert.match(main,/skipAdjustments:true/);
   assert.match(render,/overrideSkipAdjustments/);
   assert.match(render,/highDepthApplied \|\| overrideSkipAdjustments/);
+});
+
+
+test('Stage 13c paints directly into 16-bit CMYK ink samples without RGB rasterization',()=>{
+  const source=createPixelBuffer({
+    width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:16,colorSpace:'device-cmyk',alphaMode:'straight',
+    data:new Uint16Array([10001,20003,30007,40009,65535]),
+  });
+  const edited=clonePixelBuffer(source);
+  const changed=applyCmykPixelBufferBrushDab(edited,.5,.5,1,[.75,.1,.2,.35],{opacity:.37});
+  assert.equal(changed,1);
+  assert.deepEqual([...source.data],[10001,20003,30007,40009,65535]);
+  assert.equal(edited.data[4],65535);
+  assert.ok([...edited.data.slice(0,4)].some(value=>value%257!==0));
+  assert.notDeepEqual([...edited.data.slice(0,4)],[...source.data.slice(0,4)]);
+  const restored=deserializePixelBufferSource(serializePixelBufferSource(edited));
+  assert.equal(restored.model,'cmyk');
+  assert.deepEqual([...restored.data],[...edited.data]);
+});
+
+test('Stage 13c upgrades CMYK to straight alpha for native eraser and clear without changing ink first',()=>{
+  const source=createPixelBuffer({
+    width:2,height:1,model:'cmyk',channels:4,bitsPerChannel:16,colorSpace:'device-cmyk',
+    data:new Uint16Array([11111,22222,33333,44444, 5555,6666,7777,8888]),
+  });
+  const withAlpha=pixelBufferWithStraightAlpha(source);
+  assert.equal(withAlpha.model,'cmyk');
+  assert.equal(withAlpha.channels,5);
+  assert.deepEqual([...withAlpha.data.slice(0,4)],[11111,22222,33333,44444]);
+  assert.equal(withAlpha.data[4],65535);
+  applyCmykPixelBufferBrushDab(withAlpha,.5,.5,1,[0,0,0,0],{opacity:.5,erase:true});
+  assert.deepEqual([...withAlpha.data.slice(0,4)],[11111,22222,33333,44444]);
+  assert.ok(withAlpha.data[4]>0&&withAlpha.data[4]<65535);
+  const cleared=clearPixelBufferPixels(withAlpha,{isAllowed:x=>x===1});
+  assert.equal(cleared,1);
+  assert.equal(withAlpha.data[9],0);
+});
+
+test('Stage 13c flood fill stays in CMYK source space and respects selection predicates',()=>{
+  const buffer=createPixelBuffer({
+    width:3,height:1,model:'cmyk',channels:5,bitsPerChannel:16,colorSpace:'device-cmyk',alphaMode:'straight',
+    data:new Uint16Array([
+      10001,10001,10001,10001,65535,
+      10001,10001,10001,10001,65535,
+      60001,60001,60001,60001,65535,
+    ]),
+  });
+  const filled=floodFillCmykPixelBuffer(buffer,0,0,[.2,.3,.4,.5],{tolerance:0,opacity:.5,isAllowed:x=>x<2});
+  assert.equal(filled,2);
+  assert.ok(buffer.data[0]%257!==0||buffer.data[1]%257!==0);
+  assert.equal(buffer.data[10],60001);
+});
+
+test('Stage 13c routes CMYK brush, fill, line and clear through canonical PixelBuffer mutations',()=>{
+  assert.match(main,/NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge'\]\)/);
+  assert.match(main,/applyCmykPixelBufferBrushDab\(highDepthPaintBuffer/);
+  assert.match(main,/applyCmykPixelBufferStrokeSegment\(highDepthPaintBuffer/);
+  assert.match(main,/floodFillCmykPixelBuffer\(buffer,x,y/);
+  assert.match(main,/buffer\.model==='cmyk'/);
+  assert.match(main,/highDepthPreview:buffer\.model==='cmyk'\?null/);
+  assert.match(main,/Dodge\/Burn Stage 13c пока не реализован/);
 });
