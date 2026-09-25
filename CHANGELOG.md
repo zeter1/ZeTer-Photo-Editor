@@ -15,6 +15,7 @@
 - Safe fallback: multi-run text и изменения typography/scale/rotation/box geometry не получают stale native metadata и продолжают экспортироваться raster preview.
 - Project persistence: normalized EngineData typography summary сохраняется bounded в `.zpe`; исходный TySh остаётся authoritative opaque payload.
 - Regression: реальный MIT `psd-tools` fixture проверяет EngineData oracle, text edit, font/style/paragraph preservation и повторный PSD + PSB decode.
+- CI follow-up: README startup marker синхронизирован с `package.json`/meta version, чтобы version-consistency gate снова проверял один публичный current version.
 - Version: приложение синхронизировано на 1.37.0.
 
 ## 1.36.0 — 2026-09-25
