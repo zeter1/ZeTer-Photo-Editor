@@ -16489,5 +16489,4 @@ bootstrap().then(()=>{
   message.textContent=`Ошибка запуска редактора: ${error?.message||error}`;
   document.body.append(message);
 });
-
 })();
