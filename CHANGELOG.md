@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-25 — PSD/PSB Group Import Stage 8a
+
+- Added: PSD/PSB `lsct` section-divider records теперь восстанавливают folder boundaries вместо полного flatten при импорте.
+- Mapping: type 1/2 open/closed folders переносят имя, visibility и collapsed-state; type 3 используется как hidden bounding divider, bitmap layers получают стабильный adapter `groupKey`.
+- Nested groups: текущая плоская ZPE group model сохраняет nested context через имя полного пути `Parent / Child`; parent/child group hierarchy пока не заявляется.
+- Guardrails: malformed/unmatched group markers, group opacity и неподдерживаемые group blend modes дают явные warnings вместо тихой подмены семантики.
+- Added: synthetic nested PSD regression fixture и integration-contract test для adapter → ZPE group mapping.
+
 ### 2026-09-25 — RGB 32-bit Float PSD/PSB Import Stage 7d
 
 - Added: RGB 32-bit/channel PSD/PSB layer и composite samples читаются big-endian как IEEE-754 float и сохраняются в `Float32Array` PixelBuffer, включая HDR-значения вне диапазона 0..1.

@@ -51,3 +51,14 @@ test('PixelBuffer Stage 7b is the PSD/PSB adapter-to-UI raster boundary',()=>{
   assert.match(main,/sourceLayer\.pixelBuffer/);
   assert.match(main,/parsed\.compositePixelBuffer/);
 });
+
+
+test('PSD Group Import Stage 8a maps adapter group keys into ZPE layer groups',()=>{
+  assert.match(adapter,/function reconstructPsdGroups\(/);
+  assert.match(adapter,/groupKey: record\.groupKey \|\| null/);
+  assert.match(adapter,/return \{ \.\.\.header, layers, groups, composite, compositePixelBuffer, warnings \}/);
+  assert.match(main,/const usedGroupKeys=new Set\(parsed\.layers\.map\(layer=>layer\.groupKey\)/);
+  assert.match(main,/createLayerGroup\(\{/);
+  assert.match(main,/groupId:sourceLayer\.groupKey\?/);
+  assert.match(main,/next\.groups=importedGroups/);
+});

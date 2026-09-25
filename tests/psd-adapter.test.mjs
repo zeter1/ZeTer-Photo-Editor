@@ -172,6 +172,74 @@ function makeZipPsd({ depth = 16, compression = 2 } = {}) {
   return concat(out.parts);
 }
 
+
+function makeNestedGroupPsd() {
+  const out = writer();
+  out.ascii('8BPS'); out.u16(1); out.bytes(0,0,0,0,0,0);
+  out.u16(4); out.u32(1); out.u32(2); out.u16(8); out.u16(3);
+  out.u32(0); out.u32(0);
+
+  const records = [
+    {name:'</Layer group>',divider:3},
+    {name:'Outer Pixel',planes:[[0,[255,0]],[1,[0,255]],[2,[0,0]],[-1,[255,255]]]},
+    {name:'</Layer group>',divider:3},
+    {name:'Inner Pixel',planes:[[0,[0,255]],[1,[0,255]],[2,[255,0]],[-1,[255,128]]]},
+    {name:'Inner',divider:2,hidden:true},
+    {name:'Outer',divider:1},
+  ];
+
+  const info = writer();
+  const channelPayloads = [];
+  info.i16(records.length);
+  for (const record of records) {
+    const hasPixels = Array.isArray(record.planes);
+    const width = hasPixels ? 2 : 0;
+    const height = hasPixels ? 1 : 0;
+    info.i32(0); info.i32(0); info.i32(height); info.i32(width);
+    info.u16(hasPixels ? record.planes.length : 0);
+    if (hasPixels) {
+      for (const [id, plane] of record.planes) {
+        info.i16(id);
+        info.u32(2 + plane.length);
+      }
+    }
+    info.ascii('8BIM');
+    info.ascii(record.divider ? 'pass' : 'norm');
+    info.bytes(255,0,record.hidden ? 0x02 : 0,0);
+
+    const extra = writer();
+    extra.u32(0);
+    extra.u32(0);
+    const nameBytes = encoder.encode(record.name);
+    extra.bytes(nameBytes.length);
+    extra.push(nameBytes);
+    const nameConsumed = 1 + nameBytes.length;
+    const namePadding = (4 - (nameConsumed % 4)) % 4;
+    if (namePadding) extra.push(new Uint8Array(namePadding));
+    if (record.divider) {
+      extra.ascii('8BIM'); extra.ascii('lsct'); extra.u32(12);
+      extra.u32(record.divider); extra.ascii('8BIM'); extra.ascii('pass');
+    }
+    const extraBytes = concat(extra.parts);
+    info.u32(extraBytes.length);
+    info.push(extraBytes);
+    if (hasPixels) channelPayloads.push(record.planes);
+  }
+
+  for (const planes of channelPayloads) {
+    for (const [, plane] of planes) {
+      info.u16(0);
+      info.bytes(...plane);
+    }
+  }
+
+  const infoBytes = concat(info.parts);
+  out.u32(4 + infoBytes.length);
+  out.u32(infoBytes.length);
+  out.push(infoBytes);
+  return concat(out.parts);
+}
+
 test('PSD adapter inspects and decodes layered raw RGB/8-bit PSD', async () => {
   const psd = makeRawPsd();
   assert.deepEqual(inspectPsdHeader(psd), {
@@ -247,6 +315,31 @@ test('PSD/PSB high-depth import still rejects CMYK and ZIP prediction explicitly
   await assert.rejects(() => decodePsd(makeRlePsb({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
   await assert.rejects(() => decodePsd(makeZipPsd({ depth:16, compression:3 })), error => error instanceof PsdImportError && error.code === 'PSD_ZIP_PREDICTION_DEPTH');
   await assert.rejects(() => decodePsd(makeZipPsd({ depth:32, compression:3 })), error => error instanceof PsdImportError && error.code === 'PSD_ZIP_PREDICTION_DEPTH');
+});
+
+
+test('PSD Group Import Stage 8a reconstructs nested lsct groups and layer membership', async () => {
+  const decoded=await decodePsd(makeNestedGroupPsd());
+  assert.equal(decoded.groups.length,2);
+  const outer=decoded.groups.find(group=>group.name==='Outer');
+  const inner=decoded.groups.find(group=>group.name==='Inner');
+  assert.ok(outer);
+  assert.ok(inner);
+  assert.deepEqual(outer.path,['Outer']);
+  assert.equal(outer.depth,0);
+  assert.equal(outer.collapsed,false);
+  assert.equal(outer.visible,true);
+  assert.deepEqual(inner.path,['Outer','Inner']);
+  assert.equal(inner.depth,1);
+  assert.equal(inner.collapsed,true);
+  assert.equal(inner.visible,false);
+
+  const outerPixel=decoded.layers.find(layer=>layer.name==='Outer Pixel');
+  const innerPixel=decoded.layers.find(layer=>layer.name==='Inner Pixel');
+  assert.equal(outerPixel.groupKey,outer.key);
+  assert.equal(innerPixel.groupKey,inner.key);
+  assert.deepEqual([...outerPixel.pixels],[255,0,0,255,0,255,0,255]);
+  assert.deepEqual([...innerPixel.pixels],[0,0,255,255,255,255,0,128]);
 });
 
 test('PSD/PSB detection uses extensions or Photoshop MIME type', () => {

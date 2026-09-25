@@ -2886,6 +2886,23 @@ async function openPsd(file){
     if(parsed.bitsPerChannel===16)warnings.push('RGB 16-bit/channel декодирован без потери точности на PSD/PSB adapter boundary, но текущий ZPE/Canvas документ получает 8-bit preview; точность выше 8 bit после импорта пока не сохраняется');
     if(parsed.bitsPerChannel===32)warnings.push('RGB 32-bit floating-point/HDR декодирован в Float32 PixelBuffer, но текущий ZPE/Canvas preview ограничивает отображение диапазоном 0..1; HDR tone mapping/exposure и сохранение Float32 после импорта пока не реализованы');
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
+    const usedGroupKeys=new Set(parsed.layers.map(layer=>layer.groupKey).filter(Boolean));
+    const importedGroups=[];
+    const groupIdByKey=new Map();
+    for(const sourceGroup of parsed.groups||[]){
+      if(!usedGroupKeys.has(sourceGroup.key))continue;
+      const path=Array.isArray(sourceGroup.path)&&sourceGroup.path.length?sourceGroup.path:[sourceGroup.name||'PSD Group'];
+      const group=createLayerGroup({
+        name:path.length>1?path.join(' / '):(sourceGroup.name||'PSD Group'),
+        visible:sourceGroup.visible!==false,
+        collapsed:Boolean(sourceGroup.collapsed),
+      });
+      importedGroups.push(group);
+      groupIdByKey.set(sourceGroup.key,group.id);
+    }
+    if((parsed.groups||[]).some(group=>group.depth>0)){
+      warnings.push('Вложенные PSD/PSB группы импортированы как отдельные плоские группы ZPE; полный путь сохранён в имени группы');
+    }
     const prepared=[];
     for(const sourceLayer of [...parsed.layers].reverse()){
       const sourcePixels=sourceLayer.pixelBuffer
@@ -2901,6 +2918,7 @@ async function openPsd(file){
         opacity:clamp(Number(sourceLayer.opacity),0,1),
         blendMode:sourceLayer.blendMode||'source-over',
         x:sourceLayer.x,y:sourceLayer.y,width:sourceLayer.width,height:sourceLayer.height,
+        groupId:sourceLayer.groupKey?(groupIdByKey.get(sourceLayer.groupKey)??null):null,
         dataUrl,
         mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
       }));
@@ -2931,14 +2949,15 @@ async function openPsd(file){
       width:parsed.width,height:parsed.height,background:'transparent'
     });
     next.layers=prepared;
+    next.groups=importedGroups;
     next.selectedLayerId=prepared.at(-1)?.id??null;
     history=new HistoryStack(80);
     setDoc(next,{resetHistory:true,label:'Импорт PSD/PSB'});
     markDirty(true);
     queueRecovery({immediate:true});
     fitToView();
-    setStatus(`PSD/PSB импортирован: ${prepared.length} слоёв. Сохраните проект как .zpe`);
-    toast(`PSD/PSB открыт: ${prepared.length} слоёв`,'success');
+    setStatus(`PSD/PSB импортирован: ${prepared.length} слоёв, групп: ${importedGroups.length}. Сохраните проект как .zpe`);
+    toast(`PSD/PSB открыт: ${prepared.length} слоёв, групп: ${importedGroups.length}`,'success');
     if(warnings.length){
       console.warn('PSD/PSB import warnings',warnings);
       toast(`PSD/PSB импортирован с ограничениями: ${warnings.length}. Подробности — в консоли`,'warn');
