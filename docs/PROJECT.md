@@ -9,7 +9,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 | Задача | Главные файлы | Сначала тесты |
 |---|---|---|
 | UI, события, меню, pointer/keyboard, вкладки | `src/main.js`, `src/ui/`, `src/styles.css`, `index.html` | interaction/browser tests |
-| Порядок инструментов | `src/ui/tool-layout.js`, UI section в `src/main.js` | `tests/tool-layout.test.mjs`, browser smoke |
+| Порядок инструментов / tooltips | `src/ui/toolbar-controller.js`, `src/ui/tool-layout.js` | `tests/tool-layout.test.mjs`, toolbar-controller architecture test, browser smoke |
 | Документы, слои, groups, smart objects | `src/core/state.js` | core/layer/smart-object tests |
 | Рендеринг и composite | `src/core/render.js` | render/blending/high-depth tests |
 | Пиксельные операции | `src/core/pixels.js`, `src/core/pixel-buffer.js` | pixel/retouch/high-depth tests |
@@ -26,6 +26,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 - `src/main.js` — runtime orchestrator. Это всё ещё большой файл; не читай его целиком без необходимости. Ищи конкретный symbol/event handler.
 - `src/ui/tool-config.js` — чистые UI-константы, labels/help/effect-control metadata/storage keys.
 - `src/ui/tool-layout.js` — чистая математика порядка/позиции toolbar.
+- `src/ui/toolbar-controller.js` — узкий DOM-controller панели: drag/drop, persistence, drop-slot, tooltips и защита от click после drag; active tool остаётся в `main.js`.
 - `src/core/*.js` — domain, render, pixel, history, IO, recovery и color logic.
 - `src/formats/psd.js` — единственный канонический PSD/PSB implementation.
 - `src/app.bundle.js` — generated artifact для `file://`; править только через `npm run build`.
