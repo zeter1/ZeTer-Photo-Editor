@@ -42,6 +42,23 @@ test('Stage 16a hue/saturation and curves renderer follows bounded semantic mode
   assert.deepEqual([...curves.data.slice(0,3)],[191,127,63]);
 });
 
+test('Stage 16a Hue/Saturation Colorize uses Photoshop colorization saturation semantics',()=>{
+  assert.deepEqual(sanitizeAdjustmentModel({kind:'hue-saturation',hue:15,saturation:-25,lightness:0,colorize:true}),{
+    kind:'hue-saturation',hue:15,saturation:0,lightness:0,colorize:true,
+  });
+
+  const desaturated=pixel(255,0,0,91);
+  applyAdjustmentPixels(desaturated,{kind:'hue-saturation',hue:120,saturation:0,lightness:0,colorize:true});
+  assert.deepEqual([...desaturated.data],[128,128,128,91]);
+
+  const saturated=pixel(128,128,128,63);
+  applyAdjustmentPixels(saturated,{kind:'hue-saturation',hue:120,saturation:100,lightness:0,colorize:true});
+  assert.ok(saturated.data[1]>250);
+  assert.ok(saturated.data[0]<5);
+  assert.ok(saturated.data[2]<5);
+  assert.equal(saturated.data[3],63);
+});
+
 test('Stage 16a semantic equality ignores untrusted extra fields after normalization',()=>{
   assert.equal(adjustmentModelEqual(
     {kind:'exposure',exposure:1,offset:.1,gamma:1,garbage:'x'},

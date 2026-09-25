@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-25T22:19:00+03:00 — Исправлен Photoshop Hue/Saturation Colorize round-trip
+
+- Fixed: PSD/PSB `hue2`/`hue ` с включённым Colorize теперь импортируют активную тройку Colorization Hue/Saturation/Lightness вместо неактивных master-полей.
+- Renderer: Colorize saturation использует Photoshop-диапазон 0–100; значение 0 больше не превращается ошибочно в 50% насыщенности.
+- Native writeback: `rewritePsdAdjustmentBlocks()` синхронизирует Colorize flag и патчит правильные offsets — colorization при Colorize и master при обычном Hue/Saturation, сохраняя неактивную тройку byte-for-byte.
+- Regression: добавлены pixel-level Colorize checks и PSD+PSB round-trip через реальный pinned Hue/Saturation fixture.
+
 ### 2026-09-25T22:09:00+03:00 — Исправлена прозрачность корректирующих слоёв и checker preview
 
 - Fixed: корректирующие слои больше не повышают alpha полупрозрачных пикселей при повторном `source-over`; opacity, raster/vector mask и clipping теперь задают только степень цветового эффекта, а исходная alpha сохраняется.

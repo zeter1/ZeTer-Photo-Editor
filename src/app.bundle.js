@@ -3571,7 +3571,8 @@ function sanitizeAdjustmentModel(value) {
     return{kind,exposure:clampAdjustment(value.exposure,-20,20,0),offset:clampAdjustment(value.offset,-2,2,0),gamma:clampAdjustment(value.gamma,.1,10,1)};
   }
   if(kind==='hue-saturation'){
-    return{kind,hue:intAdjustment(value.hue,-180,180,0),saturation:intAdjustment(value.saturation,-100,100,0),lightness:intAdjustment(value.lightness,-100,100,0),colorize:value.colorize===true};
+    const colorize=value.colorize===true;
+    return{kind,hue:intAdjustment(value.hue,-180,180,0),saturation:intAdjustment(value.saturation,colorize?0:-100,100,0),lightness:intAdjustment(value.lightness,-100,100,0),colorize};
   }
   if(kind==='invert')return{kind};
   if(kind==='posterize')return{kind,levels:intAdjustment(value.levels,2,255,4)};
@@ -3667,7 +3668,7 @@ function applyAdjustmentPixels(imageData,adjustment) {
       b=Math.pow(Math.max(0,b*scale+model.offset),power);
     }else if(model.kind==='hue-saturation'){
       let[h,s,l]=rgbToHsl(r,g,b);
-      if(model.colorize){h=((model.hue%360)+360)%360;s=Math.max(0,Math.min(1,(model.saturation+100)/200));}
+      if(model.colorize){h=((model.hue%360)+360)%360;s=Math.max(0,Math.min(1,model.saturation/100));}
       else{h=(h+model.hue+360)%360;s=Math.max(0,Math.min(1,s*(1+model.saturation/100)));}
       l=Math.max(0,Math.min(1,l+model.lightness/100));
       [r,g,b]=hslToRgb(h,s,l);
@@ -7067,10 +7068,12 @@ function parseHueSaturationAdjustment(block) {
     const settings=[reader.i16(),reader.i16(),reader.i16()];
     items.push({range,settings});
   }
+  const colorize=Boolean(enable);
+  const active=colorize?colorization:master;
   return{
-    kind:'hue-saturation',version,enable:Boolean(enable),
-    hue:master[0],saturation:master[1],lightness:master[2],
-    colorize:Boolean(enable),
+    kind:'hue-saturation',version,enable:colorize,
+    hue:active[0],saturation:active[1],lightness:active[2],
+    colorize,
     colorization,items,
   };
 }
@@ -7273,9 +7276,12 @@ function rewritePsdAdjustmentBlocks(blocks,adjustment) {
       rewritten+=1;return{...block,data:bytes};
     }
     if(kind==='hue-saturation'&&(block.key==='hue2'||block.key==='hue ')&&bytes.length>=16){
-      view.setInt16(10,Math.round(Number(adjustment.hue)||0),false);
-      view.setInt16(12,Math.round(Number(adjustment.saturation)||0),false);
-      view.setInt16(14,Math.round(Number(adjustment.lightness)||0),false);
+      const colorize=adjustment.colorize===true;
+      const offset=colorize?4:10;
+      view.setUint8(2,colorize?1:0);
+      view.setInt16(offset,Math.round(Number(adjustment.hue)||0),false);
+      view.setInt16(offset+2,Math.round(Number(adjustment.saturation)||0),false);
+      view.setInt16(offset+4,Math.round(Number(adjustment.lightness)||0),false);
       rewritten+=1;return{...block,data:bytes};
     }
     if(kind==='levels'&&block.key==='levl'&&bytes.length>=292){

@@ -44,7 +44,8 @@ export function sanitizeAdjustmentModel(value) {
     return{kind,exposure:clampAdjustment(value.exposure,-20,20,0),offset:clampAdjustment(value.offset,-2,2,0),gamma:clampAdjustment(value.gamma,.1,10,1)};
   }
   if(kind==='hue-saturation'){
-    return{kind,hue:intAdjustment(value.hue,-180,180,0),saturation:intAdjustment(value.saturation,-100,100,0),lightness:intAdjustment(value.lightness,-100,100,0),colorize:value.colorize===true};
+    const colorize=value.colorize===true;
+    return{kind,hue:intAdjustment(value.hue,-180,180,0),saturation:intAdjustment(value.saturation,colorize?0:-100,100,0),lightness:intAdjustment(value.lightness,-100,100,0),colorize};
   }
   if(kind==='invert')return{kind};
   if(kind==='posterize')return{kind,levels:intAdjustment(value.levels,2,255,4)};
@@ -141,7 +142,7 @@ export function applyAdjustmentPixels(imageData,adjustment) {
       b=Math.pow(Math.max(0,b*scale+model.offset),power);
     }else if(model.kind==='hue-saturation'){
       let[h,s,l]=rgbToHsl(r,g,b);
-      if(model.colorize){h=((model.hue%360)+360)%360;s=Math.max(0,Math.min(1,(model.saturation+100)/200));}
+      if(model.colorize){h=((model.hue%360)+360)%360;s=Math.max(0,Math.min(1,model.saturation/100));}
       else{h=(h+model.hue+360)%360;s=Math.max(0,Math.min(1,s*(1+model.saturation/100)));}
       l=Math.max(0,Math.min(1,l+model.lightness/100));
       [r,g,b]=hslToRgb(h,s,l);

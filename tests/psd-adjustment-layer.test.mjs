@@ -65,7 +65,8 @@ test('Stage 16a rewrites editable adjustment parameters and round-trips them thr
   const cases=[
     ['brightness-contrast.psd',{kind:'brightness-contrast',brightness:23,contrast:70,legacy:false},parsed=>{assert.equal(parsed.brightness,23);assert.equal(parsed.contrast,70);} ],
     ['exposure.psd',{kind:'exposure',exposure:1.25,offset:.125,gamma:1.2},parsed=>{approx(parsed.exposure,1.25);approx(parsed.offset,.125);approx(parsed.gamma,1.2);} ],
-    ['hue-saturation.psd',{kind:'hue-saturation',hue:30,saturation:20,lightness:-10,colorize:false},parsed=>{assert.equal(parsed.hue,30);assert.equal(parsed.saturation,20);assert.equal(parsed.lightness,-10);} ],
+    ['hue-saturation.psd',{kind:'hue-saturation',hue:30,saturation:20,lightness:-10,colorize:false},parsed=>{assert.equal(parsed.colorize,false);assert.equal(parsed.hue,30);assert.equal(parsed.saturation,20);assert.equal(parsed.lightness,-10);} ],
+    ['hue-saturation.psd',{kind:'hue-saturation',hue:-35,saturation:65,lightness:12,colorize:true},parsed=>{assert.equal(parsed.colorize,true);assert.equal(parsed.hue,-35);assert.equal(parsed.saturation,65);assert.equal(parsed.lightness,12);assert.deepEqual(parsed.colorization,[-35,65,12]);} ],
     ['levels.psd',{kind:'levels',master:{inputBlack:10,inputWhite:240,outputBlack:5,outputWhite:250,gamma:1.25},channels:[]},parsed=>{assert.deepEqual(parsed.master,{inputBlack:10,inputWhite:240,outputBlack:5,outputWhite:250,gamma:1.25});} ],
   ];
   for(const [file,model,verify] of cases){

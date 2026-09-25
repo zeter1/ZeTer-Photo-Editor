@@ -1196,10 +1196,12 @@ function parseHueSaturationAdjustment(block) {
     const settings=[reader.i16(),reader.i16(),reader.i16()];
     items.push({range,settings});
   }
+  const colorize=Boolean(enable);
+  const active=colorize?colorization:master;
   return{
-    kind:'hue-saturation',version,enable:Boolean(enable),
-    hue:master[0],saturation:master[1],lightness:master[2],
-    colorize:Boolean(enable),
+    kind:'hue-saturation',version,enable:colorize,
+    hue:active[0],saturation:active[1],lightness:active[2],
+    colorize,
     colorization,items,
   };
 }
@@ -1403,9 +1405,12 @@ export function rewritePsdAdjustmentBlocks(blocks,adjustment) {
       rewritten+=1;return{...block,data:bytes};
     }
     if(kind==='hue-saturation'&&(block.key==='hue2'||block.key==='hue ')&&bytes.length>=16){
-      view.setInt16(10,Math.round(Number(adjustment.hue)||0),false);
-      view.setInt16(12,Math.round(Number(adjustment.saturation)||0),false);
-      view.setInt16(14,Math.round(Number(adjustment.lightness)||0),false);
+      const colorize=adjustment.colorize===true;
+      const offset=colorize?4:10;
+      view.setUint8(2,colorize?1:0);
+      view.setInt16(offset,Math.round(Number(adjustment.hue)||0),false);
+      view.setInt16(offset+2,Math.round(Number(adjustment.saturation)||0),false);
+      view.setInt16(offset+4,Math.round(Number(adjustment.lightness)||0),false);
       rewritten+=1;return{...block,data:bytes};
     }
     if(kind==='levels'&&block.key==='levl'&&bytes.length>=292){
