@@ -113,6 +113,7 @@ let retouchScratchCtx = null;
 let cloneSource = null;
 let cloneSnapshotCanvas = null;
 let penDraft = null;
+let vectorMaskEditLayerId = null;
 let magneticDraft = null;
 let spaceHeld = false;
 let cropRect = null;
@@ -573,47 +574,89 @@ function layerPixelToDocumentPoint(point, layer) {
   };
 }
 
-function selectedPathLayer() {
+function selectedEditablePathTargets(){
   const layer=selected();
-  return layer?.type==='shape'&&layer.shape==='path'&&isLayerVisible(doc,layer)?layer:null;
+  if(!layer||!isLayerVisible(doc,layer))return[];
+  if(vectorMaskEditLayerId===layer.id&&layer.vectorMask?.subpaths?.length){
+    return layer.vectorMask.subpaths
+      .map((subpath,subpathIndex)=>({
+        layer,points:Array.isArray(subpath?.points)?subpath.points:[],
+        source:'vector-mask',subpathIndex,closed:true,operation:subpath?.operation||'add',
+      }))
+      .filter(target=>target.points.length);
+  }
+  if(layer.type==='shape'&&layer.shape==='path'&&Array.isArray(layer.pathPoints)){
+    return[{layer,points:layer.pathPoints,source:'shape',subpathIndex:null,closed:Boolean(layer.pathClosed),operation:'add'}];
+  }
+  return[];
+}
+function pathTargetPoints(layer,source='shape',subpathIndex=null){
+  if(source==='vector-mask')return layer?.vectorMask?.subpaths?.[subpathIndex]?.points??null;
+  return layer?.pathPoints??null;
 }
 function pathControlDocumentPoint(layer,node,control='anchor'){
   const local=control==='anchor'?node:node?.[control];
   return local?layerPixelToDocumentPoint(local,layer):null;
 }
 function hitSelectedPathControl(point,radius=8/zoom){
-  const layer=selectedPathLayer();
-  if(!layer||isLayerLocked(doc,layer)||!Array.isArray(layer.pathPoints))return null;
-  for(let index=0;index<layer.pathPoints.length;index+=1){
-    const node=layer.pathPoints[index];
-    for(const control of ['handleIn','handleOut']){
-      const target=pathControlDocumentPoint(layer,node,control);
-      if(target&&Math.hypot(point.x-target.x,point.y-target.y)<=radius)return{layer,nodeIndex:index,control};
+  for(const target of selectedEditablePathTargets()){
+    if(isLayerLocked(doc,target.layer))continue;
+    for(let index=0;index<target.points.length;index+=1){
+      const node=target.points[index];
+      for(const control of ['handleIn','handleOut']){
+        const p=pathControlDocumentPoint(target.layer,node,control);
+        if(p&&Math.hypot(point.x-p.x,point.y-p.y)<=radius)return{...target,nodeIndex:index,control};
+      }
     }
-  }
-  for(let index=0;index<layer.pathPoints.length;index+=1){
-    const node=layer.pathPoints[index],target=pathControlDocumentPoint(layer,node,'anchor');
-    if(target&&Math.hypot(point.x-target.x,point.y-target.y)<=radius)return{layer,nodeIndex:index,control:'anchor'};
+    for(let index=0;index<target.points.length;index+=1){
+      const node=target.points[index],p=pathControlDocumentPoint(target.layer,node,'anchor');
+      if(p&&Math.hypot(point.x-p.x,point.y-p.y)<=radius)return{...target,nodeIndex:index,control:'anchor'};
+    }
   }
   return null;
 }
+function traceEditablePathTarget(ctx,target){
+  const points=target?.points||[];
+  if(!points.length)return false;
+  const documentNodes=points.map(node=>({
+    ...pathControlDocumentPoint(target.layer,node,'anchor'),
+    handleIn:pathControlDocumentPoint(target.layer,node,'handleIn'),
+    handleOut:pathControlDocumentPoint(target.layer,node,'handleOut'),
+  }));
+  ctx.moveTo(documentNodes[0].x,documentNodes[0].y);
+  const segment=(from,to)=>{
+    if(from.handleOut||to.handleIn){
+      const cp1=from.handleOut||from,cp2=to.handleIn||to;
+      ctx.bezierCurveTo(cp1.x,cp1.y,cp2.x,cp2.y,to.x,to.y);
+    }else ctx.lineTo(to.x,to.y);
+  };
+  for(let index=1;index<documentNodes.length;index+=1)segment(documentNodes[index-1],documentNodes[index]);
+  if(target.closed&&documentNodes.length>1){segment(documentNodes.at(-1),documentNodes[0]);ctx.closePath();}
+  return true;
+}
 function drawSelectedPathControls(ctx){
   if(currentTool!=='pen'||penDraft)return;
-  const layer=selectedPathLayer();
-  if(!layer||!Array.isArray(layer.pathPoints)||!layer.pathPoints.length)return;
-  const locked=isLayerLocked(doc,layer);
-  ctx.save();ctx.setLineDash([]);ctx.lineWidth=1/zoom;
-  ctx.strokeStyle=locked?'#aeb6c4':'#8fc0ff';ctx.fillStyle='#f8fbff';
-  for(const node of layer.pathPoints){
-    const anchor=pathControlDocumentPoint(layer,node,'anchor');
-    if(!anchor)continue;
-    for(const control of ['handleIn','handleOut']){
-      const handle=pathControlDocumentPoint(layer,node,control);
-      if(!handle)continue;
-      ctx.beginPath();ctx.moveTo(anchor.x,anchor.y);ctx.lineTo(handle.x,handle.y);ctx.stroke();
-      const size=5/zoom;ctx.fillRect(handle.x-size/2,handle.y-size/2,size,size);ctx.strokeRect(handle.x-size/2,handle.y-size/2,size,size);
+  const targets=selectedEditablePathTargets();
+  if(!targets.length)return;
+  ctx.save();ctx.setLineDash([]);ctx.lineWidth=1/zoom;ctx.fillStyle='#f8fbff';
+  for(const target of targets){
+    const locked=isLayerLocked(doc,target.layer);
+    const vector=target.source==='vector-mask';
+    ctx.strokeStyle=locked?'#aeb6c4':vector?'#ff78cf':'#8fc0ff';
+    if(vector){
+      ctx.save();ctx.setLineDash([5/zoom,3/zoom]);ctx.beginPath();traceEditablePathTarget(ctx,target);ctx.stroke();ctx.restore();
     }
-    ctx.beginPath();ctx.arc(anchor.x,anchor.y,4/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();
+    for(const node of target.points){
+      const anchor=pathControlDocumentPoint(target.layer,node,'anchor');
+      if(!anchor)continue;
+      for(const control of ['handleIn','handleOut']){
+        const handle=pathControlDocumentPoint(target.layer,node,control);
+        if(!handle)continue;
+        ctx.beginPath();ctx.moveTo(anchor.x,anchor.y);ctx.lineTo(handle.x,handle.y);ctx.stroke();
+        const size=5/zoom;ctx.fillRect(handle.x-size/2,handle.y-size/2,size,size);ctx.strokeRect(handle.x-size/2,handle.y-size/2,size,size);
+      }
+      ctx.beginPath();ctx.arc(anchor.x,anchor.y,4/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -623,28 +666,34 @@ function updatePenCursor(point){
 }
 function restorePathControlDrag(d){
   const layer=doc.layers.find(item=>item.id===d.layerId);
-  if(!layer?.pathPoints?.[d.nodeIndex])return false;
-  layer.pathPoints[d.nodeIndex]=structuredClone(d.initial);
+  const points=pathTargetPoints(layer,d.pathSource,d.subpathIndex);
+  if(!points?.[d.nodeIndex])return false;
+  points[d.nodeIndex]=structuredClone(d.initial);
   render();drawOverlay();return true;
 }
 function beginPathControlDrag(hit,point,event){
-  const node=hit.layer.pathPoints[hit.nodeIndex];
+  const points=pathTargetPoints(hit.layer,hit.source,hit.subpathIndex);
+  const node=points?.[hit.nodeIndex];
+  if(!node)return false;
   if(hit.control==='anchor'&&event.altKey){
     const changed=Boolean(node.handleIn||node.handleOut||node.kind==='smooth');
     node.handleIn=null;node.handleOut=null;node.kind='corner';
-    if(changed)commit('Преобразовать Bézier-узел в угловой');
+    if(changed)commit(hit.source==='vector-mask'?'Преобразовать узел векторной маски':'Преобразовать Bézier-узел в угловой');
     else setStatus('Bézier-узел уже угловой');
     return true;
   }
   const control=hit.control==='anchor'&&event.shiftKey?'handleOut':hit.control;
   drag={
     kind:'path-control',layerId:hit.layer.id,nodeIndex:hit.nodeIndex,control,
+    pathSource:hit.source,subpathIndex:hit.subpathIndex,
     startLocal:documentPointToLayerPixel(point,hit.layer),
     initial:structuredClone(node),moved:false,
   };
-  setStatus(control==='anchor'
-    ? 'Перо: перетаскивайте anchor; Shift+drag создаёт smooth handles'
-    : 'Перо: перетаскивайте handle; Alt разрывает симметрию');
+  setStatus(hit.source==='vector-mask'
+    ? 'Векторная маска: перетаскивайте anchors/handles; Alt разрывает симметрию'
+    : control==='anchor'
+      ? 'Перо: перетаскивайте anchor; Shift+drag создаёт smooth handles'
+      : 'Перо: перетаскивайте handle; Alt разрывает симметрию');
   return true;
 }
 
@@ -1620,7 +1669,7 @@ function cycleSelectionType() {
 function setTool(tool) {
   if (tool !== currentTool && blockPendingDocumentEdit()) return;
   if (tool !== 'marquee' && polygonDraft) cancelPolygonDraft({restorePrevious:true});
-  if(tool!=='pen')penDraft=null;
+  if(tool!=='pen'){penDraft=null;vectorMaskEditLayerId=null;}
   if(tool!=='magnetic')magneticDraft=null;
   currentTool = tool;
   $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
@@ -1761,6 +1810,10 @@ els.overlay.addEventListener('pointerdown', async (e) => {
   if (currentTool === 'pen') {
     const hit=!penDraft?hitSelectedPathControl(p):null;
     if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
+    if(vectorMaskEditLayerId===selected()?.id){
+      setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
+      return;
+    }
     beginPenPoint(p,e.detail>=2);return;
   }
   if (currentTool === 'magnetic') { addMagneticPoint(p,e.detail>=2);return; }
@@ -1885,7 +1938,8 @@ function onOverlayPointerMove(e) {
   if (drag.kind === 'gradient') { drag.current=p;previewGradient(drag.start,p);return; }
   if (drag.kind === 'path-control') {
     const layer=doc.layers.find(item=>item.id===drag.layerId);
-    const node=layer?.pathPoints?.[drag.nodeIndex];
+    const points=pathTargetPoints(layer,drag.pathSource,drag.subpathIndex);
+    const node=points?.[drag.nodeIndex];
     if(!layer||!node||isLayerLocked(doc,layer))return;
     const local=documentPointToLayerPixel(p,layer);
     const distance=Math.hypot(local.x-drag.startLocal.x,local.y-drag.startLocal.y);
@@ -1978,8 +2032,12 @@ els.overlay.addEventListener('pointerup', async (e) => {
   }
   if (d.kind === 'gradient') await applyGradient(d.start,d.current);
   if (d.kind === 'path-control') {
-    if(d.moved)commit(d.control==='anchor'?'Переместить Bézier-узел':'Изменить Bézier-ручку');
-    else drawOverlay();
+    if(d.moved){
+      const vector=d.pathSource==='vector-mask';
+      commit(vector
+        ? (d.control==='anchor'?'Переместить узел векторной маски':'Изменить ручку векторной маски')
+        : (d.control==='anchor'?'Переместить Bézier-узел':'Изменить Bézier-ручку'));
+    }else drawOverlay();
   }
   if (d.kind === 'pen-handle') {
     if(penDraft)penDraft.hover=canvasPoint(e);
@@ -3839,6 +3897,7 @@ function layerContextMenu(id) {
     ['Вычесть выделение из векторной маски','',()=>applySelectionToVectorMask('subtract'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
+    ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
@@ -4080,6 +4139,17 @@ function applySelectionToVectorMask(operation='replace'){
   return true;
 }
 
+function editSelectedVectorMask(){
+  const layer=selected();
+  if(!layer?.vectorMask){setStatus('У выбранного слоя нет векторной маски');return false;}
+  if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return false;}
+  vectorMaskEditLayerId=layer.id;
+  setTool('pen');
+  vectorMaskEditLayerId=layer.id;
+  drawOverlay();
+  setStatus('Перо: редактирование векторной маски — перетаскивайте anchors и Bézier-handles');
+  return true;
+}
 function toggleSelectedVectorMask(){
   const layer=selected();if(!layer?.vectorMask||isLayerLocked(doc,layer))return;
   layer.vectorMask.enabled=layer.vectorMask.enabled===false;
@@ -4092,6 +4162,7 @@ function invertSelectedVectorMask(){
 }
 function removeSelectedVectorMask(){
   const layer=selected();if(!layer?.vectorMask||isLayerLocked(doc,layer))return;
+  if(vectorMaskEditLayerId===layer.id)vectorMaskEditLayerId=null;
   layer.vectorMask=null;commit('Удалить векторную маску');setStatus('Векторная маска удалена');
 }
 function layerMaskSummary(layer){
@@ -4396,6 +4467,7 @@ const menus={
     ['Вычесть выделение из векторной маски','',()=>applySelectionToVectorMask('subtract'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],

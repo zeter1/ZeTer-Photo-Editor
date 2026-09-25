@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-25 — Vector Mask Direct Edit Stage 10c
+
+- Added: «Редактировать векторную маску пером» в Layer/context menus.
+- Pen: vector-mask subpaths показывают пунктирный контур, anchors и Bézier handles в document coordinates.
+- Direct edit: anchor/handle drag использует существующие Shift/Alt semantics и сохраняет `pathSource + subpathIndex`, поэтому изменения не попадают в shape path по ошибке.
+- Reliability: pointer cancel восстанавливает исходный vector-mask node; выход из Pen очищает mask-edit mode; клик по пустому месту в mask-edit mode не создаёт новый shape-layer.
+- History: отдельные labels для перемещения узла/ручки vector mask.
+- Regression: static contracts подтверждают target abstraction, drag routing, edit command и accidental-shape guard.
+
 ### 2026-09-25 — Vector Masks Stage 10a + Path Operations Stage 10b
 
 - Added: first-class `vectorMask` в layer schema и `.zpe`, с enable/invert и bounded списком cubic Bézier subpaths.
