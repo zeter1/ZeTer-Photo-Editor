@@ -311,7 +311,7 @@ export async function getImage(dataUrl) {
   return promise;
 }
 
-async function applyAdjustmentLayer(canvas, ctx, layer) {
+async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } = {}) {
   const width = Math.max(1, canvas.width || 1);
   const height = Math.max(1, canvas.height || 1);
   const source = document.createElement('canvas');
@@ -356,6 +356,14 @@ async function applyAdjustmentLayer(canvas, ctx, layer) {
     sourceCtx.globalAlpha=1;
     sourceCtx.filter='none';
     sourceCtx.drawImage(vectorMask,0,0,width,height);
+    sourceCtx.restore();
+  }
+  if(clippingMask){
+    sourceCtx.save();
+    sourceCtx.globalCompositeOperation='destination-in';
+    sourceCtx.globalAlpha=1;
+    sourceCtx.filter='none';
+    sourceCtx.drawImage(clippingMask,0,0,width,height);
     sourceCtx.restore();
   }
   ctx.save();
@@ -417,13 +425,24 @@ function buildGroupRenderPlan(doc) {
   return { entriesFor };
 }
 
-async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides) {
+async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides, clippingMask = null) {
   if (!isLayerVisible(doc, layer) || layer.opacity <= 0) return;
   if (layer.type === 'adjustment') {
-    await applyAdjustmentLayer(canvas, ctx, layer);
+    await applyAdjustmentLayer(canvas, ctx, layer, { clippingMask });
     return;
   }
   await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
+}
+
+async function renderClippingBase(doc, layer, rasterOverrides) {
+  if(!layer||layer.type==='adjustment'||!isLayerVisible(doc,layer)||Number(layer.opacity??1)<=0)return null;
+  const canvas=document.createElement('canvas');
+  canvas.width=doc.width;canvas.height=doc.height;
+  const ctx=canvas.getContext('2d',{alpha:true});
+  ctx.imageSmoothingEnabled=true;
+  if('imageSmoothingQuality' in ctx)ctx.imageSmoothingQuality='high';
+  await renderLayer(ctx,layer,{rasterOverride:rasterOverrides?.get?.(layer.id)||null});
+  return canvas;
 }
 
 async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
@@ -431,12 +450,22 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
   const activeGroups = new Set();
 
   const renderEntries = async (targetCanvas, targetCtx, parentGroupId = null) => {
-    for (const entry of plan.entriesFor(parentGroupId)) {
+    const entries=plan.entriesFor(parentGroupId);
+    let clippingBase=null;
+    for (let entryIndex=0;entryIndex<entries.length;entryIndex+=1) {
+      const entry=entries[entryIndex];
       if (entry.type === 'layer') {
-        await renderLayerEntry(targetCanvas, targetCtx, doc, entry.layer, rasterOverrides);
+        const clipped=entry.layer?.clipping===true;
+        await renderLayerEntry(targetCanvas,targetCtx,doc,entry.layer,rasterOverrides,clipped?clippingBase:null);
+        if(!clipped){
+          const next=entries[entryIndex+1];
+          const needsBase=next?.type==='layer'&&next.layer?.clipping===true;
+          clippingBase=needsBase?await renderClippingBase(doc,entry.layer,rasterOverrides):null;
+        }
         continue;
       }
 
+      clippingBase=null;
       const group = entry.group;
       if (!group || group.visible === false || Number(group.opacity ?? 1) <= 0 || activeGroups.has(group.id)) continue;
       activeGroups.add(group.id);

@@ -47,3 +47,32 @@ test('Stage 16a semantic equality ignores untrusted extra fields after normaliza
     {kind:'exposure',exposure:1,offset:.1,gamma:1}
   ),true);
 });
+
+test('Stage 16b Levels applies channel-specific records after master and Curves applies master + RGB channels',()=>{
+  const levels=pixel(64,128,192);
+  applyAdjustmentPixels(levels,{
+    kind:'levels',
+    master:{inputBlack:0,inputWhite:255,gamma:1,outputBlack:0,outputWhite:255},
+    channels:[
+      {id:1,inputBlack:64,inputWhite:255,gamma:1,outputBlack:0,outputWhite:255},
+      {id:2,inputBlack:0,inputWhite:128,gamma:1,outputBlack:0,outputWhite:255},
+      {id:3,inputBlack:0,inputWhite:255,gamma:1,outputBlack:0,outputWhite:128},
+    ],
+  });
+  assert.deepEqual([...levels.data.slice(0,3)],[0,255,96]);
+
+  const curves=pixel(64,128,192);
+  applyAdjustmentPixels(curves,{
+    kind:'curves',
+    channels:[
+      {id:0,points:[{input:0,output:0},{input:255,output:255}]},
+      {id:1,points:[{input:0,output:255},{input:255,output:0}]},
+      {id:2,points:[{input:0,output:0},{input:255,output:128}]},
+      {id:3,points:[{input:0,output:64},{input:255,output:255}]},
+    ],
+  });
+  assert.equal(curves.data[0],191);
+  assert.ok(curves.data[1]>=63&&curves.data[1]<=65);
+  assert.ok(curves.data[2]>=207&&curves.data[2]<=209);
+});
+

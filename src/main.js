@@ -4024,14 +4024,10 @@ function psdAdjustmentNativePlan(layer) {
   const adjustment=sanitizeAdjustmentModel(layer?.adjustment);
   if(layer?.type!=='adjustment'||!source||!adjustment)return{eligible:false,reason:'нет imported Photoshop adjustment metadata',metadata:null};
   if(source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
-  if(layer.mask?.dataUrl)return{eligible:false,reason:'raster adjustment mask пока требует composite fallback',metadata:null};
   if(layer.styles)return{eligible:false,reason:'layer styles на adjustment layer требуют composite fallback',metadata:null};
   const filters=sanitizeFilters(layer.filters);
   if(Object.keys(DEFAULT_LAYER_FILTERS).some(key=>Math.abs(Number(filters[key])-Number(DEFAULT_LAYER_FILTERS[key]))>1e-9)){
     return{eligible:false,reason:'дополнительные ZPE filters не кодируются в Photoshop adjustment record',metadata:null};
-  }
-  if(adjustment.kind==='curves'&&!adjustmentModelEqual(adjustment,source.baseline)){
-    return{eligible:false,reason:'Curves Stage 16a сохраняет native points, но editable curve writeback будет расширен отдельно',metadata:null};
   }
   try{
     const blocks=(source.blocks||[]).map(block=>psdOpaqueBlockFromState(block,{maxBytes:4*1024*1024})).filter(Boolean);
@@ -4046,23 +4042,52 @@ function adjustmentNumberField(label,key,value,min,max,step='1') {
   return '<label>'+escapeHtml(label)+'</label><input type="number" min="'+min+'" max="'+max+'" step="'+step+'" value="'+Number(value)+'" data-adjustment-prop="'+escapeAttr(key)+'">';
 }
 
+function levelRecordMarkup(label,prefix,record) {
+  const value=record||{inputBlack:0,inputWhite:255,gamma:1,outputBlack:0,outputWhite:255};
+  return '<label>'+escapeHtml(label)+'</label><span>Levels channel</span>'+
+    adjustmentNumberField('Input black',prefix+'.inputBlack',value.inputBlack,0,253)+
+    adjustmentNumberField('Input white',prefix+'.inputWhite',value.inputWhite,2,255)+
+    adjustmentNumberField('Gamma',prefix+'.gamma',value.gamma,.1,9.99,'0.01')+
+    adjustmentNumberField('Output black',prefix+'.outputBlack',value.outputBlack,0,255)+
+    adjustmentNumberField('Output white',prefix+'.outputWhite',value.outputWhite,0,255);
+}
+
+function curvePointsInputValue(points) {
+  return (Array.isArray(points)?points:[]).map(point=>Math.round(Number(point.input))+':'+Math.round(Number(point.output))).join(', ');
+}
+
+function adjustmentCurveField(label,id,points) {
+  const value=points?.length?points:[{input:0,output:0},{input:255,output:255}];
+  return '<label>'+escapeHtml(label)+'</label><input type="text" value="'+escapeAttr(curvePointsInputValue(value))+'" data-adjustment-curve-channel="'+id+'" title="Формат: input:output, например 0:0, 128:160, 255:255">';
+}
+
 function adjustmentPropertiesMarkup(layer) {
   const value=sanitizeAdjustmentModel(layer?.adjustment);
   if(!value)return'<label>Параметры</label><span>Generic ZPE filters</span>';
   const native=layer.psdAdjustment?psdAdjustmentNativePlan(layer):null;
   const nativeInfo=layer.psdAdjustment?'<label>Photoshop Adjustment</label><span>'+(native?.eligible?'native '+escapeHtml(value.kind)+' round-trip':'composite fallback: '+escapeHtml(native?.reason||'metadata unavailable'))+'</span>':'';
-  if(value.kind==='brightness-contrast')return adjustmentNumberField('Яркость','brightness',value.brightness,-150,150)+adjustmentNumberField('Контраст','contrast',value.contrast,-100,100)+nativeInfo;
-  if(value.kind==='exposure')return adjustmentNumberField('Exposure','exposure',value.exposure,-20,20,'0.05')+adjustmentNumberField('Offset','offset',value.offset,-2,2,'0.005')+adjustmentNumberField('Gamma','gamma',value.gamma,.1,10,'0.01')+nativeInfo;
-  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+nativeInfo;
+  const clipping='<label>Clipping</label><label><input type="checkbox" data-adjustment-clipping '+(layer.clipping?'checked':'')+'> к alpha нижележащего base layer</label>';
+  if(value.kind==='brightness-contrast')return adjustmentNumberField('Яркость','brightness',value.brightness,-150,150)+adjustmentNumberField('Контраст','contrast',value.contrast,-100,100)+clipping+nativeInfo;
+  if(value.kind==='exposure')return adjustmentNumberField('Exposure','exposure',value.exposure,-20,20,'0.05')+adjustmentNumberField('Offset','offset',value.offset,-2,2,'0.005')+adjustmentNumberField('Gamma','gamma',value.gamma,.1,10,'0.01')+clipping+nativeInfo;
+  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+clipping+nativeInfo;
   if(value.kind==='levels'){
-    const master=value.master||{};
-    return adjustmentNumberField('Input black','master.inputBlack',master.inputBlack,0,253)+adjustmentNumberField('Input white','master.inputWhite',master.inputWhite,2,255)+adjustmentNumberField('Gamma','master.gamma',master.gamma,.1,9.99,'0.01')+adjustmentNumberField('Output black','master.outputBlack',master.outputBlack,0,255)+adjustmentNumberField('Output white','master.outputWhite',master.outputWhite,0,255)+nativeInfo;
+    const byId=new Map((value.channels||[]).map(channel=>[channel.id,channel]));
+    return levelRecordMarkup('Master','master',value.master)+
+      levelRecordMarkup('Red','channels.1',byId.get(1))+
+      levelRecordMarkup('Green','channels.2',byId.get(2))+
+      levelRecordMarkup('Blue','channels.3',byId.get(3))+
+      clipping+nativeInfo;
   }
   if(value.kind==='curves'){
-    const summary=value.channels.length?value.channels.map(channel=>'ch '+channel.id+': '+channel.points.length+' points').join(', '):'identity/default curve';
-    return '<label>Curves</label><span>'+escapeHtml(summary)+'</span><label>Редактирование</label><span>Stage 16a: native points сохраняются; curve editor/writeback — следующий шаг</span>'+nativeInfo;
+    const byId=new Map((value.channels||[]).map(channel=>[channel.id,channel.points]));
+    return '<label>Curves</label><span>2–19 точек; input должен возрастать 0..255</span>'+
+      adjustmentCurveField('Master / RGB',0,byId.get(0))+
+      adjustmentCurveField('Red',1,byId.get(1))+
+      adjustmentCurveField('Green',2,byId.get(2))+
+      adjustmentCurveField('Blue',3,byId.get(3))+
+      clipping+nativeInfo;
   }
-  return nativeInfo;
+  return clipping+nativeInfo;
 }
 
 function updateAdjustmentProperty(layer,path,raw) {
@@ -4070,17 +4095,67 @@ function updateAdjustmentProperty(layer,path,raw) {
   const current=structuredClone(sanitizeAdjustmentModel(layer.adjustment));
   if(!current)return false;
   const value=Number(raw);if(!Number.isFinite(value))return false;
-  if(path.startsWith('master.')){if(!current.master)return false;current.master[path.split('.')[1]]=value;}else current[path]=value;
+  if(path.startsWith('master.')){
+    if(!current.master)return false;
+    current.master[path.split('.')[1]]=value;
+  }else{
+    const channelMatch=String(path).match(/^channels\.(\d+)\.(inputBlack|inputWhite|gamma|outputBlack|outputWhite)$/);
+    if(channelMatch&&current.kind==='levels'){
+      const id=Number(channelMatch[1]),key=channelMatch[2];
+      let channel=(current.channels||[]).find(item=>item.id===id);
+      if(!channel){
+        channel={id,inputBlack:0,inputWhite:255,gamma:1,outputBlack:0,outputWhite:255};
+        current.channels=[...(current.channels||[]),channel];
+      }
+      channel[key]=value;
+    }else current[path]=value;
+  }
   layer.adjustment=sanitizeAdjustmentModel(current);
   markDirty(true);commit('Изменить Photoshop adjustment');return true;
+}
+
+function parseCurvePointsInput(raw) {
+  const tokens=String(raw||'').split(/[;,]+/).map(item=>item.trim()).filter(Boolean);
+  if(tokens.length<2||tokens.length>19)return null;
+  const points=tokens.map(token=>{
+    const match=token.match(/^(\d{1,3})\s*:\s*(\d{1,3})$/);
+    if(!match)return null;
+    return{input:Number(match[1]),output:Number(match[2])};
+  });
+  if(points.some(point=>!point||point.input<0||point.input>255||point.output<0||point.output>255))return null;
+  points.sort((a,b)=>a.input-b.input);
+  for(let index=1;index<points.length;index+=1)if(points[index].input<=points[index-1].input)return null;
+  return points;
+}
+
+function updateAdjustmentCurveChannel(layer,id,raw) {
+  if(!layer||layer.type!=='adjustment'||isLayerLocked(doc,layer))return false;
+  const current=structuredClone(sanitizeAdjustmentModel(layer.adjustment));
+  if(current?.kind!=='curves')return false;
+  const points=parseCurvePointsInput(raw);
+  if(!points)return false;
+  const channelId=Number(id);
+  current.channels=(current.channels||[]).filter(channel=>channel.id!==channelId);
+  current.channels.push({id:channelId,points});
+  current.channels.sort((a,b)=>a.id-b.id);
+  layer.adjustment=sanitizeAdjustmentModel(current);
+  markDirty(true);commit('Изменить точки Photoshop Curves');return true;
 }
 
 function bindAdjustmentControls(root,layer) {
   root?.querySelectorAll('[data-adjustment-prop]').forEach(input=>input.addEventListener('change',()=>{
     if(!updateAdjustmentProperty(layer,input.dataset.adjustmentProp,input.value)){refreshInspectorPanels();setStatus('Некорректный параметр adjustment layer');}
   }));
+  root?.querySelectorAll('[data-adjustment-curve-channel]').forEach(input=>input.addEventListener('change',()=>{
+    if(!updateAdjustmentCurveChannel(layer,input.dataset.adjustmentCurveChannel,input.value)){refreshInspectorPanels();setStatus('Curves: используйте 2–19 точек в формате input:output, 0..255');}
+  }));
+  const clippingInput=root?.querySelector('[data-adjustment-clipping]');
+  clippingInput?.addEventListener('change',()=>{
+    if(isLayerLocked(doc,layer)){refreshInspectorPanels();return;}
+    layer.clipping=clippingInput.checked;
+    markDirty(true);commit('Изменить clipping adjustment layer');
+  });
 }
-
 function psdPreviewFingerprint(dataUrl){
   const value=String(dataUrl||'');
   let hash=2166136261;
@@ -4353,14 +4428,19 @@ async function openPsd(file){
           warnings.push(`Слой «${sourceLayer.name}»: adjustment metadata не поддержаны semantic renderer и пропущены`);
           continue;
         }
+        const adjustmentMaskDataUrl=sourceLayer.mask?.pixels
+          ? await rgbaPixelsToDataUrl(parsed.width,parsed.height,sourceLayer.mask.pixels,`Маска adjustment «${sourceLayer.name}»`)
+          : null;
         const imported=createAdjustmentLayer({
           name:sourceLayer.name||'PSD Adjustment',
           visible:sourceLayer.visible!==false,
           opacity:clamp(Number(sourceLayer.opacity),0,1),
           blendMode:sourceLayer.blendMode||'source-over',
+          clipping:sourceLayer.clipping===true,
           width:parsed.width,height:parsed.height,
           groupId:sourceLayer.groupKey?(groupIdByKey.get(sourceLayer.groupKey)??null):null,
           adjustment:semantic,
+          mask:adjustmentMaskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:adjustmentMaskDataUrl}):null,
         });
         imported.psdAdjustment=importPsdAdjustmentMetadata({
           ...sourceLayer.psdAdjustment,
@@ -4368,7 +4448,7 @@ async function openPsd(file){
         },semantic);
         imported.vectorMask=importPsdVectorMask(sourceLayer.vectorMask,imported);
         prepared.push(imported);
-        warnings.push(`Слой «${sourceLayer.name}»: Photoshop ${semantic.kind} импортирован как editable ZPE adjustment layer с bounded native metadata`);
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop ${semantic.kind} импортирован как editable ZPE adjustment layer с bounded native metadata${sourceLayer.mask?' + raster mask':''}${sourceLayer.clipping?' + clipping':''}`);
         continue;
       }
       const sourcePixels=sourceLayer.pixelBuffer
@@ -4394,6 +4474,7 @@ async function openPsd(file){
         visible:sourceLayer.visible!==false,
         opacity:clamp(Number(sourceLayer.opacity),0,1),
         blendMode:sourceLayer.blendMode||'source-over',
+        clipping:sourceLayer.clipping===true,
         x:sourceLayer.x,y:sourceLayer.y,width:sourceLayer.width,height:sourceLayer.height,
         groupId:sourceLayer.groupKey?(groupIdByKey.get(sourceLayer.groupKey)??null):null,
         mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
@@ -4875,8 +4956,8 @@ async function preparePsdExport(exportDoc){
   if(nativeTextCount)warnings.push(`Stage 15b: ${nativeTextCount} Photoshop TySh text layer(s) сохраняют native descriptor + EngineData + transform metadata`);
   for(const item of fallbackText)warnings.push(`Stage 15b: text layer «${item.layer.name||'Без имени'}» экспортируется raster preview (${item.nativeText?.reason||'native text mapping unavailable'})`);
   const nativeAdjustmentCount=planned.filter(item=>item.nativeAdjustment?.eligible).length;
-  if(nativeAdjustmentCount)warnings.push(`Stage 16a: ${nativeAdjustmentCount} Photoshop adjustment layer(s) сохраняют native blocks + semantic parameters`);
-  if(needsAdjustmentRasterFallback)warnings.push(`Stage 16a: adjustment layer «${unsupportedVisibleAdjustment?.name||'Без имени'}» требует composite fallback (${adjustmentPlans.get(unsupportedVisibleAdjustment?.id)?.reason||'unsupported adjustment'})`);
+  if(nativeAdjustmentCount)warnings.push(`Stage 16b: ${nativeAdjustmentCount} Photoshop adjustment layer(s) сохраняют native blocks + semantic parameters/masks/clipping`);
+  if(needsAdjustmentRasterFallback)warnings.push(`Stage 16b: adjustment layer «${unsupportedVisibleAdjustment?.name||'Без имени'}» требует composite fallback (${adjustmentPlans.get(unsupportedVisibleAdjustment?.id)?.reason||'unsupported adjustment'})`);
   const nativeShapeCount=planned.filter(item=>item.nativeShape?.eligible).length;
   const fallbackShapes=planned.filter(item=>item.layer.psdShape&&!item.nativeShape?.eligible);
   if(nativeShapeCount)warnings.push(`Stage 15c: ${nativeShapeCount} Photoshop solid vector shape layer(s) сохраняют native fill/stroke + vector-mask metadata`);
@@ -4899,14 +4980,20 @@ async function preparePsdExport(exportDoc){
     const {layer,bounds,nativeText,nativeShape,nativeAdjustment}=planned[planIndex];
     const nativePixelBuffer=writerNative[planIndex];
     if(nativeAdjustment?.eligible){
+      const adjustmentMask=layer.mask?.dataUrl?{
+        pixels:await renderPsdMaskPixels(layer,{x:0,y:0,width:exportDoc.width,height:exportDoc.height}),
+        disabled:layer.mask.enabled===false,
+        x:0,y:0,width:exportDoc.width,height:exportDoc.height,defaultColor:255,
+      }:null;
       prepared.push({
         name:layer.name||'Photoshop Adjustment',
         x:0,y:0,width:0,height:0,
         opacity:clamp(Number(layer.opacity??1),0,1),
         blendMode:layer.blendMode||'source-over',
+        clipping:layer.clipping===true,
         groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
         visible:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer),
-        mask:null,vectorMask:exportPsdVectorMask(layer),
+        mask:adjustmentMask,vectorMask:exportPsdVectorMask(layer),
         psdAdjustment:nativeAdjustment.metadata,
       });
       continue;
@@ -4916,6 +5003,7 @@ async function preparePsdExport(exportDoc){
       x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
       opacity:clamp(Number(layer.opacity??1),0,1),
       blendMode:layer.blendMode||'source-over',
+      clipping:layer.clipping===true,
       groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
       visible:needsAdjustmentRasterFallback?false:(layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer)),
       mask:layer.mask?.dataUrl?{

@@ -13,7 +13,7 @@ function approx(actual,expected,tolerance=1e-5){
   assert.ok(Math.abs(actual-expected)<=tolerance,`${actual} vs ${expected}`);
 }
 
-test('Stage 16a pins five real MIT Photoshop adjustment fixtures',async()=>{
+test('Stage 16b pins real MIT Photoshop adjustment/mask/clipping fixtures',async()=>{
   const manifest=await fixtureJson('manifest.json');
   for(const item of manifest.fixtures){
     const data=await fixtureBytes(item.file);
@@ -90,3 +90,95 @@ test('Stage 16a preserves Curves native block byte-for-byte when semantic points
   const rewritten=rewritePsdAdjustmentBlocks(layer.psdAdjustment.blocks,layer.psdAdjustment.parsed);
   assert.deepEqual(rewritten.blocks[0].data,before);
 });
+
+test('Stage 16b decodes a zero-bounds adjustment raster mask and Photoshop clipping byte',async()=>{
+  const masked=await decodePsd(await fixtureBytes('adjustment-mask.psd'),{maxPixels:2_000_000,maxLayers:50});
+  const adjustment=masked.adjustmentLayers[0];
+  assert.equal(adjustment.psdAdjustment.kind,'brightness-contrast');
+  assert.equal(adjustment.clipping,false);
+  assert.ok(adjustment.mask?.pixels);
+  assert.equal(adjustment.mask.pixels.length,masked.width*masked.height*4);
+  let min=255,max=0;
+  for(let index=3;index<adjustment.mask.pixels.length;index+=4){
+    min=Math.min(min,adjustment.mask.pixels[index]);
+    max=Math.max(max,adjustment.mask.pixels[index]);
+  }
+  assert.equal(min,0);
+  assert.equal(max,255);
+
+  const clipped=await decodePsd(await fixtureBytes('clip-adjustment.psd'),{maxPixels:100_000,maxLayers:50});
+  assert.equal(clipped.adjustmentLayers.length,1);
+  assert.equal(clipped.adjustmentLayers[0].psdAdjustment.kind,'hue-saturation');
+  assert.equal(clipped.adjustmentLayers[0].clipping,true);
+});
+
+test('Stage 16b round-trips native adjustment raster mask + clipping through PSD and PSB',async()=>{
+  const source=await decodePsd(await fixtureBytes('adjustment-mask.psd'),{maxPixels:2_000_000,maxLayers:50});
+  const layer=source.adjustmentLayers[0];
+  const rewritten=rewritePsdAdjustmentBlocks(layer.psdAdjustment.blocks,layer.psdAdjustment.parsed);
+  const alphaHash=pixels=>{
+    const alpha=new Uint8Array(pixels.length/4);
+    for(let src=3,dst=0;src<pixels.length;src+=4,dst+=1)alpha[dst]=pixels[src];
+    return sha256(alpha);
+  };
+  const expectedMaskHash=alphaHash(layer.mask.pixels);
+  const baseLayer={
+    name:layer.name,x:0,y:0,width:0,height:0,opacity:layer.opacity,blendMode:layer.blendMode,visible:true,clipping:true,
+    mask:{pixels:layer.mask.pixels,x:0,y:0,width:source.width,height:source.height,disabled:false,defaultColor:255},
+    psdAdjustment:{kind:layer.psdAdjustment.kind,blocks:rewritten.blocks,channelIds:layer.channelIds},
+  };
+  for(const [format,encoded] of [
+    ['PSD',encodePsd({width:source.width,height:source.height,bitsPerChannel:8,colorMode:3,layers:[baseLayer],composite:new Uint8ClampedArray(source.width*source.height*4)})],
+    ['PSB',encodePsb({width:source.width,height:source.height,bitsPerChannel:8,colorMode:3,layers:[baseLayer],composite:new Uint8ClampedArray(source.width*source.height*4)})],
+  ]){
+    const roundTrip=await decodePsd(encoded,{maxPixels:2_000_000,maxLayers:50});
+    const next=roundTrip.adjustmentLayers[0];
+    assert.equal(next.clipping,true,format+' clipping');
+    assert.ok(next.mask?.pixels,format+' mask');
+    assert.equal(alphaHash(next.mask.pixels),expectedMaskHash,format+' mask alpha');
+  }
+});
+
+test('Stage 16b writes channel-specific RGB Levels records natively',async()=>{
+  const source=await decodePsd(await fixtureBytes('levels-rgb.psd'),{maxPixels:2_000_000,maxLayers:100});
+  const layer=source.adjustmentLayers[0];
+  const model=structuredClone(layer.psdAdjustment.parsed);
+  const green=model.channels.find(channel=>channel.id===2);
+  assert.ok(green);
+  green.gamma=1.77;
+  green.inputBlack=17;
+  const rewritten=rewritePsdAdjustmentBlocks(layer.psdAdjustment.blocks,model);
+  for(const [format,encoded] of [
+    ['PSD',encodePsd({width:source.width,height:source.height,bitsPerChannel:8,colorMode:3,layers:[{name:layer.name,x:0,y:0,width:0,height:0,opacity:1,blendMode:'source-over',visible:true,psdAdjustment:{kind:'levels',blocks:rewritten.blocks,channelIds:layer.channelIds}}],composite:new Uint8ClampedArray(source.width*source.height*4)})],
+    ['PSB',encodePsb({width:source.width,height:source.height,bitsPerChannel:8,colorMode:3,layers:[{name:layer.name,x:0,y:0,width:0,height:0,opacity:1,blendMode:'source-over',visible:true,psdAdjustment:{kind:'levels',blocks:rewritten.blocks,channelIds:layer.channelIds}}],composite:new Uint8ClampedArray(source.width*source.height*4)})],
+  ]){
+    const roundTrip=await decodePsd(encoded,{maxPixels:2_000_000,maxLayers:100});
+    const parsed=roundTrip.adjustmentLayers[0].psdAdjustment.parsed;
+    const nextGreen=parsed.channels.find(channel=>channel.id===2);
+    assert.equal(nextGreen.inputBlack,17,format+' green input black');
+    assert.equal(nextGreen.gamma,1.77,format+' green gamma');
+  }
+});
+
+test('Stage 16b rebuilds real Photoshop point Curves after semantic point edits',async()=>{
+  const source=await decodePsd(await fixtureBytes('curves-rgb.psd'),{maxPixels:2_000_000,maxLayers:100});
+  const layer=source.adjustmentLayers[0];
+  const model=structuredClone(layer.psdAdjustment.parsed);
+  const master=model.channels.find(channel=>channel.id===0);
+  assert.ok(master);
+  const original=master.points[1].output;
+  master.points[1].output=Math.min(255,original+7);
+  const rewritten=rewritePsdAdjustmentBlocks(layer.psdAdjustment.blocks,model);
+  assert.notDeepEqual(rewritten.blocks[0].data,layer.psdAdjustment.blocks[0].data);
+  for(const [format,encoded] of [
+    ['PSD',encodePsd({width:source.width,height:source.height,bitsPerChannel:8,colorMode:3,layers:[{name:layer.name,x:0,y:0,width:0,height:0,opacity:1,blendMode:'source-over',visible:true,psdAdjustment:{kind:'curves',blocks:rewritten.blocks,channelIds:layer.channelIds}}],composite:new Uint8ClampedArray(source.width*source.height*4)})],
+    ['PSB',encodePsb({width:source.width,height:source.height,bitsPerChannel:8,colorMode:3,layers:[{name:layer.name,x:0,y:0,width:0,height:0,opacity:1,blendMode:'source-over',visible:true,psdAdjustment:{kind:'curves',blocks:rewritten.blocks,channelIds:layer.channelIds}}],composite:new Uint8ClampedArray(source.width*source.height*4)})],
+  ]){
+    const roundTrip=await decodePsd(encoded,{maxPixels:2_000_000,maxLayers:100});
+    const parsed=roundTrip.adjustmentLayers[0].psdAdjustment.parsed;
+    const nextMaster=parsed.channels.find(channel=>channel.id===0);
+    assert.equal(nextMaster.points[1].output,master.points[1].output,format+' master point output');
+    assert.equal(parsed.extraVersion,4,format+' curves extra marker');
+  }
+});
+

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
+const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
 const adapter=await readFile(new URL('../src/adapters/psd.js',import.meta.url),'utf8');
 
 test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
@@ -314,6 +316,25 @@ test('Stage 16a wires Photoshop adjustment records into semantic ZPE layers and 
   assert.match(main,/createAdjustmentLayer\(\{/);
   assert.match(main,/needsAdjustmentRasterFallback/);
   assert.match(main,/psdAdjustment:nativeAdjustment\.metadata/);
-  assert.match(main,/Stage 16a: .*adjustment layer/);
+  assert.match(main,/Stage 16[ab]: .*adjustment layer/);
+});
+
+test('Stage 16b wires adjustment masks, clipping, Levels channels and editable Curves end-to-end',()=>{
+  assert.match(adapter,/const clipping = reader\.u8\(\)/);
+  assert.match(adapter,/clipping:Boolean\(record\.clipping\)/);
+  assert.match(adapter,/targetLeft = record\.left/);
+  assert.match(adapter,/function patchLevelRecordAt\(/);
+  assert.match(adapter,/function encodeCurvesAdjustmentBlock\(/);
+  assert.match(adapter,/layerRecords\.u8\(opacity\)\.u8\(layer\.clipping \? 1 : 0\)/);
+  assert.match(main,/adjustmentMaskDataUrl/);
+  assert.match(main,/data-adjustment-curve-channel/);
+  assert.ok(main.includes("match(/^channels\\.(\\d+)\\."));
+  assert.match(main,/clipping:layer\.clipping===true/);
+  assert.match(main,/Stage 16b: .*adjustment layer/);
+  assert.match(render,/async function applyAdjustmentLayer\(canvas, ctx, layer, \{ clippingMask = null \} = \{\}\)/);
+  assert.match(render,/function renderClippingBase|async function renderClippingBase/);
+  assert.match(render,/entry\.layer\?\.clipping===true/);
+  assert.match(state,/clipping: false/);
+  assert.match(state,/clipping: layer\?\.clipping === true/);
 });
 

@@ -45,6 +45,38 @@
       "size": 22794,
       "sha256": "e34d8f3bf915d4e48527efd2c6231d39b0705943208391ec03571015aa37ac54",
       "kind": "curves"
+    },
+    {
+      "file": "adjustment-mask.psd",
+      "sourcePath": "tests/psd_files/adjustment-mask.psd",
+      "sourceGitBlob": "c9878bb113a65170f134a52d9147d8c2b35d1fd0",
+      "size": 60232,
+      "sha256": "6c866b95c1458b5a639249f379fad009e3dd6f8cfa2d3dfbbb431ee637c30390",
+      "kind": "adjustment-mask"
+    },
+    {
+      "file": "clip-adjustment.psd",
+      "sourcePath": "tests/psd_files/clip-adjustment.psd",
+      "sourceGitBlob": "cc911585027144633d89ba9ab58604dea277dab0",
+      "size": 42728,
+      "sha256": "60c2fcfe7245bfa141b565b54cdaa36ee4ad56133a883260c663f857db935f15",
+      "kind": "clipping"
+    },
+    {
+      "file": "curves-rgb.psd",
+      "sourcePath": "tests/psd_files/adjustments/curves_rgb.psd",
+      "sourceGitBlob": "42b61f44986954e9eb295de486e4e76bd01ac54e",
+      "size": 291957,
+      "sha256": "ca20254c47a9fcc0029caa81f7ac7e197ff3657808332c22b75e23920fd040bb",
+      "kind": "curves-real-points"
+    },
+    {
+      "file": "levels-rgb.psd",
+      "sourcePath": "tests/psd_files/adjustments/levels_rgb.psd",
+      "sourceGitBlob": "afb24e5279b3bec48ffb3a69525c916004213ce5",
+      "size": 283764,
+      "sha256": "7c6a8e94a97b66d554748ad09be068a6dcbe3cd8d56ea3809eb231a8168905df",
+      "kind": "levels-channel-specific"
     }
   ]
 }

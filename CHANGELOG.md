@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.41.0 — 2026-09-25
+
+### 2026-09-25 — Adjustment Masks, Curves/Levels UI & Clipping Semantics Stage 16b
+
+- PSD parser: layer-record clipping byte больше не отбрасывается; `clipping` сохраняется у bitmap/fill/adjustment layers.
+- Adjustment raster masks: zero-bounds adjustment channel `-2` декодируется на document-size mask canvas с правильными absolute/relative bounds, default color и invert semantics.
+- Native mask writer: adjustment PSD/PSB export пишет реальный `-2` channel и Layer Mask Data rectangle вместо прежнего forced `mask:null`; document-sized alpha переживает round-trip.
+- Clipping renderer: clipped adjustment пересекает результат alpha нижележащего base layer в том же sibling stack, включая собственные raster/vector masks.
+- Clipping writer: PSD/PSB layer record пишет Photoshop clipping byte; импортированные ordinary layers также сохраняют этот metadata flag.
+- Levels UI/writeback: Properties редактирует Master, Red, Green и Blue input/output/gamma; `levl` writer patch-ит соответствующие 10-byte records, сохраняя остальные 29 records/extra bytes.
+- Curves UI/writeback: Properties принимает 2–19 point pairs `input:output`; point-based version-1 `curv` writer bounded-пересобирает channel bitmap, point records и `Crv ` extra marker. Неизменённые curves blocks остаются byte-identical.
+- Fail-safe: map-based/unknown Curves layout, invalid points, unsupported style/filter semantics по-прежнему переводят export в честный composite fallback вместо stale metadata.
+- Real compatibility corpus: добавлены MIT fixtures `adjustment-mask.psd`, `clip-adjustment.psd`, `curves-rgb.psd`, `levels-rgb.psd` с pinned upstream commit/blob/size/SHA-256.
+- Regression: mask/clipping проходят PSD+PSB round-trip; channel-specific Green Levels и edited real Curves повторно декодируются с изменёнными semantic values.
+- Version: приложение синхронизировано на 1.41.0.
+
 ## 1.40.0 — 2026-09-25
 
 ### 2026-09-25 — Photoshop-native Adjustment Layer Mapping Stage 16a

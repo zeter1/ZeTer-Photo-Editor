@@ -1305,6 +1305,70 @@ function patchBrightnessContrastBlock(block,adjustment) {
   return bytes;
 }
 
+function patchLevelRecordAt(view,offset,record) {
+  const value=record||{};
+  const finite=(input,fallback)=>Number.isFinite(Number(input))?Number(input):fallback;
+  view.setUint16(offset,Math.round(finite(value.inputBlack,0)),false);
+  view.setUint16(offset+2,Math.round(finite(value.inputWhite,255)),false);
+  view.setUint16(offset+4,Math.round(finite(value.outputBlack,0)),false);
+  view.setUint16(offset+6,Math.round(finite(value.outputWhite,255)),false);
+  view.setUint16(offset+8,Math.round(finite(value.gamma,1)*100),false);
+}
+
+function curveChannelsSemanticEqual(left,right) {
+  const normalize=channels=>(Array.isArray(channels)?channels:[])
+    .map(channel=>({
+      id:Number(channel.id),
+      points:(Array.isArray(channel.points)?channel.points:[]).map(point=>({input:Number(point.input),output:Number(point.output)})),
+    }))
+    .sort((a,b)=>a.id-b.id);
+  return JSON.stringify(normalize(left))===JSON.stringify(normalize(right));
+}
+
+function encodeCurvesAdjustmentBlock(sourceBlock,adjustment) {
+  const parsed=parseCurvesAdjustment(sourceBlock,[],'Curves rewrite');
+  if(!parsed||parsed.version!==1||parsed.isMap){
+    throw new PsdImportError('Curves rewrite: поддерживается point-based version 1','PSD_ADJUSTMENT_CURVES_WRITE');
+  }
+  const channels=(Array.isArray(adjustment?.channels)?adjustment.channels:[])
+    .map(channel=>({
+      id:Math.trunc(Number(channel?.id)),
+      points:(Array.isArray(channel?.points)?channel.points:[])
+        .map(point=>({input:Math.round(Number(point?.input)),output:Math.round(Number(point?.output))}))
+        .sort((a,b)=>a.input-b.input),
+    }))
+    .filter(channel=>channel.id>=0&&channel.id<=31&&channel.points.length>=2&&channel.points.length<=19)
+    .sort((a,b)=>a.id-b.id);
+  if(!channels.length&&curveChannelsSemanticEqual(parsed.channels,channels))return asBytes(sourceBlock.data).slice();
+  if(!channels.length)throw new PsdImportError('Curves rewrite: нужен хотя бы один channel с 2..19 points','PSD_ADJUSTMENT_CURVES_WRITE');
+  for(const channel of channels){
+    let previous=-1;
+    for(const point of channel.points){
+      if(point.input<0||point.input>255||point.output<0||point.output>255||point.input<=previous){
+        throw new PsdImportError('Curves rewrite: points должны иметь возрастающий input 0..255 и output 0..255','PSD_ADJUSTMENT_CURVES_WRITE');
+      }
+      previous=point.input;
+    }
+  }
+  if(curveChannelsSemanticEqual(parsed.channels,channels))return asBytes(sourceBlock.data).slice();
+  let countMap=0;
+  for(const channel of channels)countMap=(countMap|(1<<channel.id))>>>0;
+  const writer=new Writer();
+  writer.u8(0).u16(1).u32(countMap);
+  for(const channel of channels){
+    writer.u16(channel.points.length);
+    for(const point of channel.points)writer.u16(point.output).u16(point.input);
+  }
+  const extraVersion=[3,4].includes(parsed.extraVersion)?parsed.extraVersion:4;
+  writer.ascii('Crv ').u16(extraVersion).u32(channels.length);
+  for(const channel of channels){
+    writer.u16(channel.id).u16(channel.points.length);
+    for(const point of channel.points)writer.u16(point.output).u16(point.input);
+  }
+  while(writer.length%4)writer.u8(0);
+  return writer.concat();
+}
+
 export function rewritePsdAdjustmentBlocks(blocks,adjustment) {
   if(!Array.isArray(blocks)||!blocks.length)throw new PsdImportError('Adjustment rewrite: blocks отсутствуют','PSD_ADJUSTMENT_BLOCKS');
   const kind=String(adjustment?.kind||'');
@@ -1328,16 +1392,17 @@ export function rewritePsdAdjustmentBlocks(blocks,adjustment) {
       view.setInt16(14,Math.round(Number(adjustment.lightness)||0),false);
       rewritten+=1;return{...block,data:bytes};
     }
-    if(kind==='levels'&&block.key==='levl'&&bytes.length>=12){
-      const master=adjustment.master||{};
-      view.setUint16(2,Math.round(Number(master.inputBlack)||0),false);
-      view.setUint16(4,Math.round(Number(master.inputWhite)||255),false);
-      view.setUint16(6,Math.round(Number(master.outputBlack)||0),false);
-      view.setUint16(8,Math.round(Number(master.outputWhite)||255),false);
-      view.setUint16(10,Math.round((Number(master.gamma)||1)*100),false);
+    if(kind==='levels'&&block.key==='levl'&&bytes.length>=292){
+      patchLevelRecordAt(view,2,adjustment.master);
+      for(const channel of Array.isArray(adjustment.channels)?adjustment.channels:[]){
+        const id=Math.trunc(Number(channel?.id));
+        if(id>=1&&id<=3)patchLevelRecordAt(view,2+id*10,channel);
+      }
       rewritten+=1;return{...block,data:bytes};
     }
-    if(kind==='curves'&&block.key==='curv'){rewritten+=1;return{...block,data:bytes};}
+    if(kind==='curves'&&block.key==='curv'){
+      rewritten+=1;return{...block,data:encodeCurvesAdjustmentBlock(block,adjustment)};
+    }
     return block;
   });
   if(!rewritten)throw new PsdImportError('Adjustment rewrite: compatible block не найден для '+kind,'PSD_ADJUSTMENT_BLOCKS');
@@ -1416,7 +1481,7 @@ function parseLayerRecord(reader, version, documentWidth, documentHeight, warnin
   if (reader.ascii(4) !== '8BIM') throw new PsdImportError('Некорректная сигнатура blend mode слоя', 'PSD_BLEND_SIGNATURE');
   const blendKey = reader.ascii(4);
   const opacity = reader.u8();
-  reader.u8();
+  const clipping = reader.u8();
   const flags = reader.u8();
   reader.u8();
   const extraLength = reader.u32();
@@ -1425,7 +1490,7 @@ function parseLayerRecord(reader, version, documentWidth, documentHeight, warnin
   if (extraEnd > reader.end) throw new PsdImportError('Extra data слоя выходит за границы PSD', 'PSD_LAYER_EXTRA');
   const maskLength = reader.u32();
   const mask = parseLayerMask(reader, maskLength);
-  if (reader.offset + 4 > extraEnd) { reader.seek(extraEnd); return { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name:'Слой',sectionDivider:0,sectionBlendKey:null,sectionSubtype:0 }; }
+  if (reader.offset + 4 > extraEnd) { reader.seek(extraEnd); return { top,left,bottom,right,channels,blendKey,opacity,clipping,flags,mask,name:'Слой',sectionDivider:0,sectionBlendKey:null,sectionSubtype:0 }; }
   const blendingRangesLength = reader.u32();
   if (reader.offset + blendingRangesLength > extraEnd) throw new PsdImportError('Повреждены blending ranges слоя', 'PSD_BLEND_RANGES');
   reader.skip(blendingRangesLength);
@@ -1437,7 +1502,7 @@ function parseLayerRecord(reader, version, documentWidth, documentHeight, warnin
     const padding = (4 - (consumed % 4)) % 4;
     if (reader.offset + padding <= extraEnd) reader.skip(padding);
   }
-  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null,psdShape:null,psdAdjustment:null };
+  const record = { top,left,bottom,right,channels,blendKey,opacity,clipping,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null,psdShape:null,psdAdjustment:null };
   parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings);
   reader.seek(extraEnd);
   return record;
@@ -1741,26 +1806,28 @@ function composeDocumentPixelBuffer(width,height,channels,header) {
     : composeRgbPixelBuffer(width,height,channels,header.bitsPerChannel);
 }
 
-function buildMaskRgba(record, maskChannel, layerWidth, layerHeight) {
-  if (!record.mask || !maskChannel || layerWidth <= 0 || layerHeight <= 0) return null;
+function buildMaskRgba(record, maskChannel, targetWidth, targetHeight, { targetLeft = record.left, targetTop = record.top } = {}) {
+  if (!record.mask || !maskChannel || targetWidth <= 0 || targetHeight <= 0) return null;
   const mask = record.mask;
   const maskWidth = Math.max(0, mask.right - mask.left);
   const maskHeight = Math.max(0, mask.bottom - mask.top);
   if (!maskWidth || !maskHeight || maskChannel.length < maskWidth * maskHeight) return null;
-  const rgba = new Uint8ClampedArray(layerWidth * layerHeight * 4);
+  const rgba = new Uint8ClampedArray(targetWidth * targetHeight * 4);
   const defaultAlpha = mask.defaultColor === 0 ? 0 : 255;
-  for (let index = 0; index < layerWidth * layerHeight; index += 1) {
+  for (let index = 0; index < targetWidth * targetHeight; index += 1) {
     const out = index * 4;
     rgba[out] = 255; rgba[out + 1] = 255; rgba[out + 2] = 255; rgba[out + 3] = defaultAlpha;
   }
-  const originX = mask.positionRelativeToLayer ? mask.left : mask.left - record.left;
-  const originY = mask.positionRelativeToLayer ? mask.top : mask.top - record.top;
+  const maskDocumentLeft = mask.positionRelativeToLayer ? record.left + mask.left : mask.left;
+  const maskDocumentTop = mask.positionRelativeToLayer ? record.top + mask.top : mask.top;
+  const originX = maskDocumentLeft - targetLeft;
+  const originY = maskDocumentTop - targetTop;
   for (let y = 0; y < maskHeight; y += 1) {
     const targetY = originY + y;
-    if (targetY < 0 || targetY >= layerHeight) continue;
+    if (targetY < 0 || targetY >= targetHeight) continue;
     for (let x = 0; x < maskWidth; x += 1) {
       const targetX = originX + x;
-      if (targetX < 0 || targetX >= layerWidth) continue;
+      if (targetX < 0 || targetX >= targetWidth) continue;
       const sample = maskChannel[y * maskWidth + x];
       let value = maskChannel instanceof Uint16Array
         ? Math.round(sample / 257)
@@ -1768,7 +1835,7 @@ function buildMaskRgba(record, maskChannel, layerWidth, layerHeight) {
           ? Math.round(Math.min(1, Math.max(0, Number.isNaN(sample) ? 0 : sample)) * 255)
           : sample;
       if (mask.inverted) value = 255 - value;
-      rgba[(targetY * layerWidth + targetX) * 4 + 3] = value;
+      rgba[(targetY * targetWidth + targetX) * 4 + 3] = value;
     }
   }
   return rgba;
@@ -2121,13 +2188,23 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
     const record=records[recordIndex];
     if (record.sectionDivider === 1 || record.sectionDivider === 2 || record.sectionDivider === 3) continue;
     if(record.psdAdjustment?.parsed){
+      const maskRgba=buildMaskRgba(
+        record,
+        record.decodedChannels.get(-2),
+        header.width,
+        header.height,
+        {targetLeft:0,targetTop:0},
+      );
       adjustmentLayers.push({
         name:record.name||'PSD Adjustment Layer',
         visible:!(record.flags&0x02),
         opacity:record.opacity/255,
         blendMode:blendModeFor(record.blendKey,warnings,record.name),
+        clipping:Boolean(record.clipping),
         groupKey:record.groupKey||null,
         vectorMask:record.vectorMask,
+        mask:maskRgba?{pixels:maskRgba,disabled:Boolean(record.mask?.disabled)}:null,
+        maskMeta:record.mask?{...record.mask}:null,
         channelIds:record.channels.map(channel=>channel.id),
         psdAdjustment:record.psdAdjustment,
         stackIndex:recordIndex,
@@ -2143,6 +2220,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
           visible:!(record.flags&0x02),
           opacity:record.opacity/255,
           blendMode:blendModeFor(record.blendKey,warnings,record.name),
+          clipping:Boolean(record.clipping),
           groupKey:record.groupKey||null,
           psdShape:record.psdShape,
           stackIndex:recordIndex,
@@ -2164,6 +2242,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
       transparencyProtected: Boolean(record.flags & 0x01),
       opacity: record.opacity / 255,
       blendMode: blendModeFor(record.blendKey, warnings, record.name),
+      clipping: Boolean(record.clipping),
       groupKey: record.groupKey || null,
       pixelBuffer,
       pixels: header.bitsPerChannel === 8 ? pixelBuffer.data : null,
@@ -2700,9 +2779,13 @@ function writeLayerMaskExtra(writer, layer) {
     writer.u32(0);
     return;
   }
+  const x=Math.trunc(Number(layer.mask.x??layer.x)||0);
+  const y=Math.trunc(Number(layer.mask.y??layer.y)||0);
+  const width=Math.max(0,Math.trunc(Number(layer.mask.width??layer.width)||0));
+  const height=Math.max(0,Math.trunc(Number(layer.mask.height??layer.height)||0));
   writer.u32(20);
-  writer.i32(layer.y).i32(layer.x).i32(layer.y + layer.height).i32(layer.x + layer.width);
-  writer.u8(255);
+  writer.i32(y).i32(x).i32(y + height).i32(x + width);
+  writer.u8(layer.mask.defaultColor===0?0:255);
   writer.u8(layer.mask.disabled ? 0x02 : 0);
   writer.u16(0);
 }
@@ -2710,12 +2793,27 @@ function writeLayerMaskExtra(writer, layer) {
 function normalizeExportLayer(layer, index, maxPixels, version, bitsPerChannel, colorMode = PSD_COLOR_MODE_RGB) {
   if(layer?.psdAdjustment){
     const channelIds=Array.isArray(layer.psdAdjustment.channelIds)&&layer.psdAdjustment.channelIds.length
-      ? layer.psdAdjustment.channelIds.slice(0,16)
+      ? layer.psdAdjustment.channelIds.slice(0,16).map(Number)
       : [-1,0,1,2,-2];
+    const channels=channelIds.map(id=>({id,data:new Uint8Array([0,0])}));
+    let mask=null;
+    if(layer.mask?.pixels){
+      const maskWidth=Math.max(1,Math.trunc(Number(layer.mask.width)||0));
+      const maskHeight=Math.max(1,Math.trunc(Number(layer.mask.height)||0));
+      const maskSource=exportPixelSource({pixels:layer.mask.pixels},maskWidth,maskHeight,'маска adjustment '+(layer.name||index+1),'PSD_EXPORT_MASK','rgb');
+      const maskData=encodeExportChannel(maskSource,0,maskWidth,maskHeight,version,bitsPerChannel,{alpha:true});
+      const existing=channels.find(channel=>channel.id===-2);
+      if(existing)existing.data=maskData;else channels.push({id:-2,data:maskData});
+      mask={
+        disabled:Boolean(layer.mask.disabled),pixels:true,
+        x:Math.trunc(Number(layer.mask.x)||0),y:Math.trunc(Number(layer.mask.y)||0),
+        width:maskWidth,height:maskHeight,defaultColor:layer.mask.defaultColor===0?0:255,
+      };
+    }
     return{
       ...layer,
-      x:0,y:0,width:0,height:0,mask:null,
-      channels:channelIds.map(id=>({id:Number(id),data:new Uint8Array([0,0])})),
+      x:0,y:0,width:0,height:0,mask,
+      channels,
     };
   }
   const item = validateExportLayer(layer, index, maxPixels, colorMode);
@@ -2993,7 +3091,7 @@ function writeLayerRecordAndData(layerRecords, channelData, layer, version, docu
   layerRecords.ascii('8BIM');
   layerRecords.ascii(layer.sectionDivider ? (layer.sectionBlendKey || 'pass') : (PSD_BLEND_KEYS[layer.blendMode] || 'norm'));
   const opacity = Math.round(Math.max(0, Math.min(1, Number(layer.opacity ?? 1))) * 255);
-  layerRecords.u8(opacity).u8(0);
+  layerRecords.u8(opacity).u8(layer.clipping ? 1 : 0);
   const flags = 0x08 | (layer.transparencyProtected ? 0x01 : 0) | (layer.visible === false ? 0x02 : 0);
   layerRecords.u8(flags).u8(0);
 
