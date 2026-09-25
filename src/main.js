@@ -3817,11 +3817,45 @@ function layerNeedsSemanticRasterWarning(layer){
     Math.abs(Number(layer.scaleX??1)-1)>1e-9||Math.abs(Number(layer.scaleY??1)-1)>1e-9||Math.abs(Number(layer.rotation)||0)>1e-9;
 }
 
+function nativeHighDepthPsdSource(layer){
+  if(!layer?.highDepthSource||layer.type!=='raster'||layerNeedsSemanticRasterWarning(layer))return null;
+  if(!Number.isInteger(Number(layer.x))||!Number.isInteger(Number(layer.y)))return null;
+  try{
+    const buffer=deserializePixelBufferSource(layer.highDepthSource);
+    if(buffer.model!=='rgb'||![16,32].includes(buffer.bitsPerChannel))return null;
+    if(buffer.width!==Math.trunc(Number(layer.width))||buffer.height!==Math.trunc(Number(layer.height)))return null;
+    return buffer;
+  }catch(error){
+    console.warn(`PSD/PSB high-depth source «${layer.name||'Без имени'}» не прошёл export validation`,error);
+    return null;
+  }
+}
+
+function nativePsdBounds(layer,buffer){
+  return{x:Math.trunc(Number(layer.x)||0),y:Math.trunc(Number(layer.y)||0),width:buffer.width,height:buffer.height};
+}
+
+function exactHighDepthCompositeCandidate(exportDoc,planned,hasAdjustmentLayers){
+  if(hasAdjustmentLayers)return null;
+  const visible=planned.filter(item=>isLayerVisible(exportDoc,item.layer));
+  if(visible.length!==1)return null;
+  const item=visible[0],layer=item.layer,buffer=item.nativePixelBuffer;
+  if(!buffer||layer.groupId||layer.mask||layer.vectorMask)return null;
+  if(Math.abs(Number(layer.opacity??1)-1)>1e-9||(layer.blendMode||'source-over')!=='source-over')return null;
+  if(item.bounds.x!==0||item.bounds.y!==0||item.bounds.width!==exportDoc.width||item.bounds.height!==exportDoc.height)return null;
+  return buffer;
+}
+
 async function preparePsdExport(exportDoc){
   const warnings=[];
   const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment');
   const hasAdjustmentLayers=exportDoc.layers.some(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
-  const planned=sourceLayers.map(layer=>({layer,bounds:psdExportBounds(layer)}));
+  const planned=sourceLayers.map(layer=>{
+    const nativePixelBuffer=nativeHighDepthPsdSource(layer);
+    return{layer,nativePixelBuffer,bounds:nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer)};
+  });
+  const nativeDepths=planned.map(item=>item.nativePixelBuffer?.bitsPerChannel||0);
+  const bitsPerChannel=nativeDepths.includes(32)?32:nativeDepths.includes(16)?16:8;
   let totalPixels=exportDoc.width*exportDoc.height+planned.reduce((sum,item)=>sum+item.bounds.width*item.bounds.height,0);
   if(hasAdjustmentLayers)totalPixels+=exportDoc.width*exportDoc.height;
   if(totalPixels>48_000_000){
@@ -3850,15 +3884,17 @@ async function preparePsdExport(exportDoc){
       blendMode:group.blendMode||'pass-through',
     }));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  const downgradedHighDepth=planned.filter(item=>item.layer.highDepthSource&&!item.nativePixelBuffer);
+  if(downgradedHighDepth.length)warnings.push(`${downgradedHighDepth.length} high-depth слой(я) с transform/filter/style или несовместимой геометрией экспортированы через 8-bit raster preview`);
+  if(bitsPerChannel>8&&planned.some(item=>!item.nativePixelBuffer))warnings.push(`Документ экспортируется как ${bitsPerChannel}-bit; raster-preview слои без native high-depth source расширены из 8-bit без восстановления утраченной точности`);
   if(sourceLayers.some(layer=>layer.vectorMask?.linked===false))warnings.push('Unlinked vector mask flag записывается в PSD/PSB, но ZPE при трансформациях пока перемещает такую маску вместе со слоем');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
 
   const prepared=[];
-  for(const {layer,bounds} of planned){
-    prepared.push({
+  for(const {layer,bounds,nativePixelBuffer} of planned){
+    const item={
       name:layer.name||'ZPE Layer',
       x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
-      pixels:await renderPsdLayerPixels(layer,bounds),
       opacity:clamp(Number(layer.opacity??1),0,1),
       blendMode:layer.blendMode||'source-over',
       groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
@@ -3868,12 +3904,17 @@ async function preparePsdExport(exportDoc){
         disabled:layer.mask.enabled===false,
       }:null,
       vectorMask:exportPsdVectorMask(layer),
-    });
+    };
+    if(nativePixelBuffer)item.pixelBuffer=nativePixelBuffer;
+    else item.pixels=await renderPsdLayerPixels(layer,bounds);
+    prepared.push(item);
   }
 
+  const compositePixelBuffer=exactHighDepthCompositeCandidate(exportDoc,planned,hasAdjustmentLayers);
   const compositeCanvas=document.createElement('canvas');
   await renderDocument(compositeCanvas,exportDoc,{checker:false});
   const composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
+  if(bitsPerChannel>8&&!compositePixelBuffer)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite построен из текущего 8-bit Canvas renderer и затем расширен до глубины документа`);
 
   if(hasAdjustmentLayers){
     warnings.push('Adjustment layers Stage 1 не имеют Photoshop-semantic mapping: визуальный результат сохранён через верхний Composite Preview, исходные слои оставлены скрытыми');
@@ -3891,14 +3932,14 @@ async function preparePsdExport(exportDoc){
   }
 
   if(exportDoc.colorProfile?.kind==='icc')warnings.push('ICC profile сохранён как metadata resource без явного color transform; пиксельные операции ZPE пока выполняются в unmanaged Canvas pipeline');
-  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,warnings};
+  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,compositePixelBuffer,bitsPerChannel,warnings};
 }
 
 async function exportPsdDocument(exportDoc,{psb=false}={}){
   const format=psb?'PSB':'PSD';
   setStatus(`${format}: подготовка слоёв…`);
   const prepared=await preparePsdExport(exportDoc);
-  setStatus(`${format}: упаковка RLE-каналов…`);
+  setStatus(`${format}: упаковка ${prepared.bitsPerChannel}-bit каналов…`);
   const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
   const profile=exportDoc.colorProfile;
   const iccProfile=profile?.kind==='icc'&&profile.dataUrl
@@ -3907,6 +3948,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
     layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,composite:prepared.composite,
+    compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,
     iccProfile,iccUntagged:Boolean(profile?.untagged),
     maxPixels:48_000_000,maxLayers:500,
   });
@@ -3922,7 +3964,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   }
 }
 
-async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — слои (Stage 4)'],['psb','PSB — Large Document (Stage 7a)']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
+async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — слои 8/16/32-bit'],['psb','PSB — Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
 
 function canvasToPngBlob(canvas) {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));

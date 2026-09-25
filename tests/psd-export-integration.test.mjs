@@ -7,8 +7,8 @@ const adapter=await readFile(new URL('../src/adapters/psd.js',import.meta.url),'
 
 test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
   assert.match(main,/import \{ decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile \} from '\.\/adapters\/psd\.js'/);
-  assert.match(main,/PSD — слои \(Stage 4\)/);
-  assert.match(main,/PSB — Large Document \(Stage 7a\)/);
+  assert.match(main,/PSD — слои 8\/16\/32-bit/);
+  assert.match(main,/PSB — Large Document 8\/16\/32-bit/);
   assert.match(main,/async function preparePsdExport\(exportDoc\)/);
   assert.match(main,/async function exportPsdDocument\(exportDoc,\{psb=false\}=\{\}\)/);
   assert.match(main,/const encodeBlob=psb\?encodePsbBlob:encodePsdBlob/);
@@ -70,7 +70,7 @@ test('PSD Group Export Stage 8b wires ZPE flat groups into the PSD/PSB writer',(
   assert.match(adapter,/groups = \[\]/);
   assert.match(main,/const exportGroups=\(exportDoc\.groups\|\|\[\]\)/);
   assert.match(main,/groupKey:layer\.groupId/);
-  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),composite,warnings\}/);
+  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),composite,compositePixelBuffer,bitsPerChannel,warnings\}/);
   assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,paths:prepared\.paths,composite:prepared\.composite/);
 });
 
@@ -124,4 +124,26 @@ test('PSD Vector/Path Stage 10d-10e wires native masks and saved paths through U
   assert.match(main,/next\.paths=structuredClone\(parsed\.paths\|\|\[\]\)/);
   assert.match(main,/vectorMask:exportPsdVectorMask\(layer\)/);
   assert.match(main,/paths:prepared\.paths/);
+});
+
+
+test('PSD/PSB Stage 12e routes native 16/32-bit PixelBuffers into Lr16/Lr32 writer structures',()=>{
+  assert.match(adapter,/function encodeRawExportChannel\(/);
+  assert.match(adapter,/function appendHighDepthLayerInfoBlock\(/);
+  assert.match(adapter,/bitsPerChannel === 16 \? 'Lr16' : bitsPerChannel === 32 \? 'Lr32'/);
+  assert.match(adapter,/version === PSB_VERSION \? '8B64' : '8BIM'/);
+  assert.match(adapter,/out\.u16\(4\)\.u32\(documentHeight\)\.u32\(documentWidth\)\.u16\(depth\)/);
+  assert.match(adapter,/compositePixelBuffer = null, bitsPerChannel = 8/);
+  assert.match(main,/function nativeHighDepthPsdSource\(/);
+  assert.match(main,/nativePixelBuffer\?nativePsdBounds/);
+  assert.match(main,/const bitsPerChannel=nativeDepths\.includes\(32\)\?32:nativeDepths\.includes\(16\)\?16:8/);
+  assert.match(main,/if\(nativePixelBuffer\)item\.pixelBuffer=nativePixelBuffer/);
+  assert.match(main,/compositePixelBuffer:prepared\.compositePixelBuffer,bitsPerChannel:prepared\.bitsPerChannel/);
+});
+
+test('Stage 12e keeps honest fallback semantics for transformed or effect-bearing high-depth layers',()=>{
+  assert.match(main,/layerNeedsSemanticRasterWarning\(layer\)/);
+  assert.match(main,/downgradedHighDepth/);
+  assert.match(main,/экспортированы через 8-bit raster preview/);
+  assert.match(main,/merged composite построен из текущего 8-bit Canvas renderer/);
 });

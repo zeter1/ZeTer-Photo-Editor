@@ -4,6 +4,19 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.26.0 — 2026-09-25
+
+### 2026-09-25 — Native 16/32-bit PSD/PSB Export Stage 12e
+
+- Writer depth: `encodePsd*` / `encodePsb*` получили `bitsPerChannel=8|16|32` и `pixelBuffer`/`compositePixelBuffer` inputs; header depth больше не захардкожен в 8-bit.
+- Photoshop structure: 16/32-bit layered documents пишут ordinary Layer Info как пустой и размещают layer-info body в `Lr16` / `Lr32`; PSB использует `8B64` + 64-bit tagged-block length.
+- Channels: native 16-bit `Uint16` и 32-bit `Float32` RGB/alpha сериализуются Raw в big-endian sample order; Float32 значения вне `0..1` не клипуются. 8-bit writer сохраняет существующий row-bounded PackBits/RLE path.
+- Decoder: high-depth import теперь также читает Photoshop-style document-level `Lr16/Lr32`, сохраняя совместимость со старыми ordinary-layer-info fixtures.
+- Mixed documents: RGBA8 fallback layers и masks расширяются до выбранной document depth; это widening, а не восстановление precision, и UI добавляет явный warning.
+- Export planner: identity raster layer с валидным high-depth source идёт в writer напрямую; transform/filter/style path остаётся raster-preview fallback. Один full-canvas native high-depth layer может дать точный typed composite, сложный merged composite остаётся Canvas8-derived с warning.
+- Tests: добавлены exact 16-bit PSD round-trip, Float32 HDR PSB round-trip, `Lr16/Lr32`/`8B64` structure checks, high-depth mask и mixed-depth widening contracts.
+- Version: приложение синхронизировано на 1.26.0.
+
 ## 1.25.0 — 2026-09-25
 
 ### 2026-09-25 — Native High-depth Editing Foundation Stage 12d

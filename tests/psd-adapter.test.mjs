@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { decodePsd, encodePsd, encodePsdBlob, encodePsb, encodePsbBlob, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
 import { readFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
-import { pixelBufferToRgba8Preview } from '../src/core/pixel-buffer.js';
+import { createPixelBuffer, pixelBufferToRgba8Preview } from '../src/core/pixel-buffer.js';
 
 const encoder = new TextEncoder();
 const psdSource = await readFile(new URL('../src/adapters/psd.js', import.meta.url), 'utf8');
@@ -31,6 +31,23 @@ function writer() {
   };
   const push = value => parts.push(value);
   return { parts, bytes, ascii, u16, i16, u32, i32, u64, push };
+}
+
+
+function readU32Be(bytes,offset){return new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength).getUint32(offset,false);}
+function readU64Be(bytes,offset){
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  return view.getUint32(offset,false)*0x100000000+view.getUint32(offset+4,false);
+}
+function asciiAt(bytes,offset,length){return String.fromCharCode(...bytes.slice(offset,offset+length));}
+function layerMaskContentStart(bytes,version){
+  let offset=26;
+  const colorLength=readU32Be(bytes,offset);offset+=4+colorLength;
+  const resourceLength=readU32Be(bytes,offset);offset+=4+resourceLength;
+  const sectionLengthBytes=version===2?8:4;
+  const sectionLength=version===2?readU64Be(bytes,offset):readU32Be(bytes,offset);
+  assert.ok(sectionLength>0);
+  return offset+sectionLengthBytes;
 }
 
 function channelSamples(depth) {
@@ -813,4 +830,67 @@ test('PSD path writer rejects coordinates outside Photoshop 8.24 path range',()=
       {closed:true,operation:'add',points:[{x:0,y:0},{x:17,y:0},{x:0,y:1}]},
     ]}}],
   }),error=>error instanceof PsdImportError&&error.code==='PSD_EXPORT_PATH_RANGE');
+});
+
+test('Stage 12e PSD writer round-trips native 16-bit layer samples through Lr16 without 8-bit quantization', async () => {
+  const buffer=createPixelBuffer({
+    width:2,height:1,model:'rgb',channels:4,bitsPerChannel:16,colorSpace:'srgb',
+    data:new Uint16Array([12345,23456,34567,65535, 65000,1024,40000,30000]),
+  });
+  const mask=Uint8Array.from([255,255,255,100, 255,255,255,220]);
+  const encoded=encodePsd({
+    width:2,height:1,bitsPerChannel:16,compositePixelBuffer:buffer,
+    layers:[{name:'16-bit native',x:0,y:0,width:2,height:1,pixelBuffer:buffer,opacity:1,blendMode:'source-over',visible:true,mask:{pixels:mask}}],
+  });
+  assert.equal(inspectPsdHeader(encoded).bitsPerChannel,16);
+  const section=layerMaskContentStart(encoded,1);
+  assert.equal(readU32Be(encoded,section),0,'ordinary layer info must stay empty for high-depth Photoshop-compatible structure');
+  assert.equal(readU32Be(encoded,section+4),0,'global layer mask length');
+  assert.equal(asciiAt(encoded,section+8,8),'8BIMLr16');
+  const decoded=await decodePsd(encoded);
+  assert.equal(decoded.layers.length,1);
+  assert.equal(decoded.layers[0].pixelBuffer.bitsPerChannel,16);
+  assert.ok(decoded.layers[0].pixelBuffer.data instanceof Uint16Array);
+  assert.deepEqual([...decoded.layers[0].pixelBuffer.data],[...buffer.data]);
+  assert.deepEqual([...decoded.layers[0].mask.pixels],[...mask]);
+});
+
+test('Stage 12e PSB writer round-trips Float32 HDR through 8B64/Lr32 with values outside 0..1 intact', async () => {
+  const buffer=createPixelBuffer({
+    width:2,height:1,model:'rgb',channels:4,bitsPerChannel:32,colorSpace:'linear-rgb-unmanaged',
+    data:new Float32Array([-0.5,0.25,4,1, 2,0.5,8,0.75]),
+  });
+  const encoded=encodePsb({
+    width:2,height:1,bitsPerChannel:32,compositePixelBuffer:buffer,
+    layers:[{name:'HDR native',x:0,y:0,width:2,height:1,pixelBuffer:buffer,opacity:1,blendMode:'screen',visible:true}],
+  });
+  const header=inspectPsdHeader(encoded);
+  assert.equal(header.version,2);
+  assert.equal(header.bitsPerChannel,32);
+  const section=layerMaskContentStart(encoded,2);
+  assert.equal(readU64Be(encoded,section),0,'ordinary PSB layer info must stay empty at 32-bit');
+  assert.equal(readU32Be(encoded,section+8),0);
+  assert.equal(asciiAt(encoded,section+12,8),'8B64Lr32');
+  const decoded=await decodePsd(encoded);
+  assert.equal(decoded.layers.length,1);
+  assert.equal(decoded.layers[0].blendMode,'screen');
+  assert.equal(decoded.layers[0].pixelBuffer.bitsPerChannel,32);
+  assert.ok(decoded.layers[0].pixelBuffer.data instanceof Float32Array);
+  assert.deepEqual([...decoded.layers[0].pixelBuffer.data],[...buffer.data]);
+  assert.ok(decoded.layers[0].pixelBuffer.data[2]>1);
+});
+
+test('Stage 12e high-depth writer can widen an RGBA8 fallback layer to the document depth', async()=>{
+  const native=createPixelBuffer({width:1,height:1,model:'rgb',channels:4,bitsPerChannel:16,colorSpace:'srgb',data:new Uint16Array([40000,30000,20000,65535])});
+  const rgba8=Uint8Array.from([17,91,203,128]);
+  const encoded=encodePsd({
+    width:1,height:1,bitsPerChannel:16,composite:rgba8,
+    layers:[
+      {name:'native',x:0,y:0,width:1,height:1,pixelBuffer:native,opacity:1,blendMode:'source-over',visible:true},
+      {name:'fallback',x:0,y:0,width:1,height:1,pixels:rgba8,opacity:1,blendMode:'source-over',visible:true},
+    ],
+  });
+  const decoded=await decodePsd(encoded);
+  const fallback=decoded.layers.find(layer=>layer.name==='fallback').pixelBuffer.data;
+  assert.deepEqual([...fallback],[17*257,91*257,203*257,128*257]);
 });

@@ -4530,6 +4530,60 @@ async function decodeComposite(reader, header, maxChannelBytes) {
   }
   return composeRgbPixelBuffer(header.width, header.height, channels, header.bitsPerChannel);
 }
+
+async function parseLayerInfoBody(reader, layerInfoEnd, header, maxPixels, maxLayers, maxChannelBytes, warnings) {
+  const records = [];
+  if (reader.offset >= layerInfoEnd) return records;
+  if (reader.offset + 2 > layerInfoEnd) throw new PsdImportError('Layer info не содержит layer count', 'PSD_LAYER_INFO');
+  const layerCountSigned = reader.i16();
+  const layerCount = Math.abs(layerCountSigned);
+  if (layerCount > maxLayers) throw new PsdImportError(`PSD содержит слишком много слоёв: ${layerCount} > ${maxLayers}`, 'PSD_LAYER_LIMIT');
+  for (let index = 0; index < layerCount; index += 1) records.push(parseLayerRecord(reader, header.version, header.width, header.height, warnings));
+  for (const record of records) {
+    const width = Math.max(0, record.right - record.left);
+    const height = Math.max(0, record.bottom - record.top);
+    if (width && height) safeArea(width, height, maxPixels);
+    record.decodedChannels = new Map();
+    for (const descriptor of record.channels) {
+      const useMaskBounds = descriptor.id === -2 && record.mask;
+      const channelWidth = useMaskBounds ? Math.max(0, record.mask.right - record.mask.left) : width;
+      const channelHeight = useMaskBounds ? Math.max(0, record.mask.bottom - record.mask.top) : height;
+      if (!channelWidth || !channelHeight) {
+        if (reader.offset + descriptor.length > layerInfoEnd) throw new PsdImportError('PSD layer channel выходит за границы layer info', 'PSD_LAYER_INFO');
+        reader.skip(descriptor.length);
+        continue;
+      }
+      const data = await decodeChannel(reader, descriptor, channelWidth, channelHeight, maxChannelBytes, header.version, header.bitsPerChannel);
+      if ([0,1,2,-1,-2].includes(descriptor.id)) record.decodedChannels.set(descriptor.id, data);
+    }
+  }
+  if (reader.offset > layerInfoEnd) throw new PsdImportError('PSD layer info channel data выходит за границы секции', 'PSD_LAYER_INFO');
+  reader.seek(layerInfoEnd);
+  return records;
+}
+
+async function readHighDepthLayerInfoBlocks(reader, sectionEnd, header, maxPixels, maxLayers, maxChannelBytes, warnings) {
+  const wantedKey = header.bitsPerChannel === 16 ? 'Lr16' : header.bitsPerChannel === 32 ? 'Lr32' : null;
+  let highDepthRecords = null;
+  while (reader.offset + 12 <= sectionEnd) {
+    const blockStart = reader.offset;
+    const signature = reader.ascii(4);
+    if (signature !== '8BIM' && signature !== '8B64') { reader.seek(blockStart); break; }
+    const key = reader.ascii(4);
+    const useLongLength = header.version === PSB_VERSION && (signature === '8B64' || PSB_LONG_ADDITIONAL_KEYS.has(key));
+    const length = useLongLength ? reader.u64() : reader.u32();
+    const dataStart = reader.offset;
+    const dataEnd = dataStart + length;
+    if (dataEnd > sectionEnd) throw new PsdImportError(`Additional Layer Info ${key}: длина выходит за границы секции`, 'PSD_LAYER_INFO');
+    if (wantedKey && key === wantedKey && length > 0) {
+      const blockReader = new Reader(reader.bytes, dataStart, dataEnd);
+      highDepthRecords = await parseLayerInfoBody(blockReader, dataEnd, header, maxPixels, maxLayers, maxChannelBytes, warnings);
+    }
+    reader.seek(dataEnd);
+    if ((length & 1) && reader.offset < sectionEnd) reader.skip(1);
+  }
+  return highDepthRecords;
+}
 async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxChannelBytes = MAX_PSD_CHANNEL_BYTES } = {}) {
   const bytes = asBytes(buffer);
   const header = inspectPsdHeader(bytes);
@@ -4545,32 +4599,21 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
   const layerMaskEnd = reader.offset + layerMaskLength;
   if (layerMaskEnd > reader.end) throw new PsdImportError('Layer and Mask Information: длина выходит за границы файла', 'PSD_SECTION_LENGTH');
   const layerMask = { length: layerMaskLength, end: layerMaskEnd };
-  const records = [];
+  let records = [];
   if (layerMask.length > 0) {
     const layerInfoLength = readVersionedLength(reader, header.version);
     const layerInfoEnd = reader.offset + layerInfoLength;
     if (layerInfoEnd > layerMask.end) throw new PsdImportError('Layer info выходит за границы Layer and Mask section', 'PSD_LAYER_INFO');
-    if (layerInfoLength > 0) {
-      const layerCountSigned = reader.i16();
-      const layerCount = Math.abs(layerCountSigned);
-      if (layerCount > maxLayers) throw new PsdImportError(`PSD содержит слишком много слоёв: ${layerCount} > ${maxLayers}`, 'PSD_LAYER_LIMIT');
-      for (let index = 0; index < layerCount; index += 1) records.push(parseLayerRecord(reader, header.version, header.width, header.height, warnings));
-      for (const record of records) {
-        const width = Math.max(0, record.right - record.left);
-        const height = Math.max(0, record.bottom - record.top);
-        if (width && height) safeArea(width, height, maxPixels);
-        record.decodedChannels = new Map();
-        for (const descriptor of record.channels) {
-          const useMaskBounds = descriptor.id === -2 && record.mask;
-          const channelWidth = useMaskBounds ? Math.max(0, record.mask.right - record.mask.left) : width;
-          const channelHeight = useMaskBounds ? Math.max(0, record.mask.bottom - record.mask.top) : height;
-          if (!channelWidth || !channelHeight) { reader.skip(descriptor.length); continue; }
-          const data = await decodeChannel(reader, descriptor, channelWidth, channelHeight, maxChannelBytes, header.version, header.bitsPerChannel);
-          if ([0,1,2,-1,-2].includes(descriptor.id)) record.decodedChannels.set(descriptor.id, data);
-        }
-      }
-      if (reader.offset < layerInfoEnd) reader.seek(layerInfoEnd);
+    if (layerInfoLength > 0) records = await parseLayerInfoBody(reader, layerInfoEnd, header, maxPixels, maxLayers, maxChannelBytes, warnings);
+    else reader.seek(layerInfoEnd);
+
+    if (reader.offset + 4 <= layerMask.end) {
+      const globalMaskLength = reader.u32();
+      if (reader.offset + globalMaskLength > layerMask.end) throw new PsdImportError('Global Layer Mask выходит за границы секции', 'PSD_LAYER_INFO');
+      reader.skip(globalMaskLength);
     }
+    const taggedRecords = await readHighDepthLayerInfoBlocks(reader, layerMask.end, header, maxPixels, maxLayers, maxChannelBytes, warnings);
+    if (taggedRecords?.length) records = taggedRecords;
     reader.seek(layerMask.end);
   }
 
@@ -4848,17 +4891,108 @@ function encodeRleRgbaChannel(rgba, channel, width, height, version, options = {
   return writer;
 }
 
+function exportPixelSource(value, width, height, label) {
+  const count = safeArea(width, height, Number.MAX_SAFE_INTEGER);
+  if (isPixelBuffer(value?.pixelBuffer)) {
+    const buffer = value.pixelBuffer;
+    if (buffer.model !== 'rgb' || ![3,4].includes(buffer.channels) || buffer.width !== width || buffer.height !== height) {
+      throw new PsdImportError(`PSD/PSB writer: ${label} имеет несовместимый PixelBuffer`, 'PSD_EXPORT_PIXELS');
+    }
+    return { kind:'pixel-buffer', buffer };
+  }
+  const rgba = asBytes(value?.pixels);
+  if (rgba.length !== count * 4) {
+    throw new PsdImportError(`PSD/PSB writer: ${label} имеет неверный RGBA-буфер`, 'PSD_EXPORT_PIXELS');
+  }
+  return { kind:'rgba8', pixels:rgba };
+}
+
+function exportSourceValue(source, pixel, channel) {
+  if (source.kind === 'rgba8') return source.pixels[pixel * 4 + channel] / 255;
+  const buffer = source.buffer;
+  const offset = pixel * buffer.channels;
+  if (channel === 3 && buffer.channels === 3) return 1;
+  const value = Number(buffer.data[offset + channel]);
+  if (!Number.isFinite(value)) return 0;
+  if (buffer.bitsPerChannel === 8) return value / 255;
+  if (buffer.bitsPerChannel === 16) return value / 65535;
+  return channel === 3 ? Math.max(0, Math.min(1, value)) : value;
+}
+
+function writeExportSample(view, offset, value, bitsPerChannel, channel) {
+  const finite = Number.isFinite(Number(value)) ? Number(value) : 0;
+  if (bitsPerChannel === 8) {
+    view.setUint8(offset, Math.round(Math.max(0, Math.min(1, finite)) * 255));
+    return;
+  }
+  if (bitsPerChannel === 16) {
+    view.setUint16(offset, Math.round(Math.max(0, Math.min(1, finite)) * 65535), false);
+    return;
+  }
+  view.setFloat32(offset, channel === 3 ? Math.max(0, Math.min(1, finite)) : finite, false);
+}
+
+function fillExportChannelRow(target, source, channel, width, row, bitsPerChannel, { whiteMatte=false } = {}) {
+  const sampleBytes = bytesPerSample(bitsPerChannel);
+  const view = new DataView(target.buffer, target.byteOffset, target.byteLength);
+  for (let x=0; x<width; x+=1) {
+    const pixel = row * width + x;
+    const alpha = exportSourceValue(source, pixel, 3);
+    let value = exportSourceValue(source, pixel, channel);
+    if (whiteMatte && channel < 3 && alpha > 0 && alpha < 1) value = value * alpha + (1 - alpha);
+    writeExportSample(view, x * sampleBytes, value, bitsPerChannel, channel);
+  }
+  return target;
+}
+
+function encodeRleExportChannel(source, channel, width, height, version, options = {}) {
+  const rowLengthBytes = version === PSB_VERSION ? 4 : 2;
+  const rows = [];
+  const lengths = rowLengthBytes === 4 ? new Uint32Array(height) : new Uint16Array(height);
+  const raw = new Uint8Array(width);
+  for (let row=0; row<height; row+=1) {
+    fillExportChannelRow(raw, source, channel, width, row, 8, options);
+    const packed = packBitsEncodeRow(raw);
+    const max = rowLengthBytes === 4 ? 0xffffffff : 0xffff;
+    if (packed.length > max) throw new PsdImportError('PSD/PSB writer: RLE-строка превышает допустимую длину', 'PSD_EXPORT_RLE_ROW');
+    lengths[row] = packed.length;
+    rows.push(packed);
+  }
+  const writer = new Writer();
+  writer.u16(1);
+  for (const length of lengths) rowLengthBytes === 4 ? writer.u32(length) : writer.u16(length);
+  for (const row of rows) writer.push(row);
+  return writer;
+}
+
+function encodeRawExportChannel(source, channel, width, height, bitsPerChannel, options = {}) {
+  const writer = new Writer();
+  writer.u16(0);
+  const rowBytes = width * bytesPerSample(bitsPerChannel);
+  for (let row=0; row<height; row+=1) {
+    const bytes = new Uint8Array(rowBytes);
+    fillExportChannelRow(bytes, source, channel, width, row, bitsPerChannel, options);
+    writer.push(bytes);
+  }
+  return writer;
+}
+
+function encodeExportChannel(source, channel, width, height, version, bitsPerChannel, options = {}) {
+  if (bitsPerChannel === 8 && source.kind === 'rgba8') {
+    return encodeRleRgbaChannel(source.pixels, channel, width, height, version, options);
+  }
+  if (bitsPerChannel === 8) return encodeRleExportChannel(source, channel, width, height, version, options);
+  return encodeRawExportChannel(source, channel, width, height, bitsPerChannel, options);
+}
+
 function validateExportLayer(layer, index, maxPixels) {
   const width = Math.trunc(Number(layer?.width));
   const height = Math.trunc(Number(layer?.height));
-  const pixels = safeArea(width, height, maxPixels);
-  const rgba = asBytes(layer?.pixels);
-  if (rgba.length !== pixels * 4) {
-    throw new PsdImportError(`PSD/PSB writer: слой #${index + 1} имеет неверный RGBA-буфер`, 'PSD_EXPORT_PIXELS');
-  }
+  safeArea(width, height, maxPixels);
+  const source = exportPixelSource(layer, width, height, `слой #${index + 1}`);
   const x = Math.trunc(Number(layer?.x) || 0);
   const y = Math.trunc(Number(layer?.y) || 0);
-  return { ...layer, x, y, width, height, pixels: rgba };
+  return { ...layer, x, y, width, height, source };
 }
 
 function writePascalLayerName(writer, name) {
@@ -4901,23 +5035,21 @@ function writeLayerMaskExtra(writer, layer) {
   writer.u16(0);
 }
 
-function normalizeExportLayer(layer, index, maxPixels, version) {
+function normalizeExportLayer(layer, index, maxPixels, version, bitsPerChannel) {
   const item = validateExportLayer(layer, index, maxPixels);
-  const pixelCount = item.width * item.height;
   const channels = [
-    { id: 0, data: encodeRleRgbaChannel(item.pixels, 0, item.width, item.height, version) },
-    { id: 1, data: encodeRleRgbaChannel(item.pixels, 1, item.width, item.height, version) },
-    { id: 2, data: encodeRleRgbaChannel(item.pixels, 2, item.width, item.height, version) },
-    { id: -1, data: encodeRleRgbaChannel(item.pixels, 3, item.width, item.height, version) },
+    { id: 0, data: encodeExportChannel(item.source, 0, item.width, item.height, version, bitsPerChannel) },
+    { id: 1, data: encodeExportChannel(item.source, 1, item.width, item.height, version, bitsPerChannel) },
+    { id: 2, data: encodeExportChannel(item.source, 2, item.width, item.height, version, bitsPerChannel) },
+    { id: -1, data: encodeExportChannel(item.source, 3, item.width, item.height, version, bitsPerChannel) },
   ];
   let mask = null;
-  if (item.mask?.pixels) {
-    const maskPixels = asBytes(item.mask.pixels);
-    if (maskPixels.length !== pixelCount * 4) throw new PsdImportError(`PSD/PSB writer: маска слоя «${item.name || index + 1}» имеет неверный размер`, 'PSD_EXPORT_MASK');
+  if (item.mask?.pixels || isPixelBuffer(item.mask?.pixelBuffer)) {
+    const maskSource = exportPixelSource(item.mask, item.width, item.height, `маска слоя «${item.name || index + 1}»`);
     mask = { disabled: Boolean(item.mask.disabled), pixels: true };
-    channels.push({ id: -2, data: encodeRleRgbaChannel(maskPixels, 3, item.width, item.height, version) });
+    channels.push({ id: -2, data: encodeExportChannel(maskSource, 3, item.width, item.height, version, bitsPerChannel) });
   }
-  const { pixels: _pixels, ...metadata } = item;
+  const { pixels: _pixels, pixelBuffer: _pixelBuffer, source: _source, ...metadata } = item;
   return { ...metadata, mask, channels };
 }
 
@@ -5053,6 +5185,48 @@ function encodeCompositeRle(pixels, width, height, version) {
   return writer;
 }
 
+function encodeCompositeData({ composite, compositePixelBuffer }, width, height, version, bitsPerChannel) {
+  if (bitsPerChannel === 8 && !compositePixelBuffer) return encodeCompositeRle(composite, width, height, version);
+  const source = exportPixelSource(
+    compositePixelBuffer ? { pixelBuffer:compositePixelBuffer } : { pixels:composite },
+    width,
+    height,
+    'composite',
+  );
+  if (bitsPerChannel === 8) {
+    const writer = new Writer();
+    // Composite RLE has one compression header and a single row-length table for all planes,
+    // unlike per-layer channels.
+    const rowLengthBytes = version === PSB_VERSION ? 4 : 2;
+    const rows = [];
+    const lengths = [];
+    const raw = new Uint8Array(width);
+    for (let channel=0; channel<4; channel+=1) {
+      for (let row=0; row<height; row+=1) {
+        fillExportChannelRow(raw, source, channel, width, row, 8, { whiteMatte:true });
+        const packed = packBitsEncodeRow(raw);
+        lengths.push(packed.length);
+        rows.push(packed);
+      }
+    }
+    writer.u16(1);
+    for (const length of lengths) rowLengthBytes === 4 ? writer.u32(length) : writer.u16(length);
+    for (const row of rows) writer.push(row);
+    return writer;
+  }
+  const writer = new Writer();
+  writer.u16(0);
+  const rowBytes = width * bytesPerSample(bitsPerChannel);
+  for (let channel=0; channel<4; channel+=1) {
+    for (let row=0; row<height; row+=1) {
+      const bytes = new Uint8Array(rowBytes);
+      fillExportChannelRow(bytes, source, channel, width, row, bitsPerChannel, { whiteMatte:true });
+      writer.push(bytes);
+    }
+  }
+  return writer;
+}
+
 
 function writePascalEven(writer, name = '') {
   const text = String(name || '').slice(0, 255);
@@ -5104,8 +5278,57 @@ function buildImageResources({ iccProfile = null, iccUntagged = false, paths = [
   return resources;
 }
 
-function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], composite, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+function writeLayerRecordAndData(layerRecords, channelData, layer, version, documentWidth, documentHeight) {
+  layerRecords.i32(layer.y).i32(layer.x).i32(layer.y + layer.height).i32(layer.x + layer.width);
+  layerRecords.u16(layer.channels.length);
+  for (const channel of layer.channels) {
+    layerRecords.i16(channel.id);
+    if (version === PSB_VERSION) layerRecords.u64(channel.data.length);
+    else layerRecords.u32(channel.data.length);
+  }
+  layerRecords.ascii('8BIM');
+  layerRecords.ascii(layer.sectionDivider ? (layer.sectionBlendKey || 'pass') : (PSD_BLEND_KEYS[layer.blendMode] || 'norm'));
+  const opacity = Math.round(Math.max(0, Math.min(1, Number(layer.opacity ?? 1))) * 255);
+  layerRecords.u8(opacity).u8(0);
+  const flags = 0x08 | (layer.transparencyProtected ? 0x01 : 0) | (layer.visible === false ? 0x02 : 0);
+  layerRecords.u8(flags).u8(0);
+
+  const extra = new Writer();
+  writeLayerMaskExtra(extra, layer);
+  extra.u32(0);
+  writePascalLayerName(extra, layer.name || 'Layer');
+  writeUnicodeLayerName(extra, layer.name || 'Layer');
+  writeSectionDividerExtra(extra, layer);
+  writeVectorMaskExtra(extra, layer, documentWidth, documentHeight);
+  layerRecords.u32(extra.length).append(extra);
+  for (const channel of layer.channels) channelData.append(channel.data);
+}
+
+function buildLayerInfoBody(records, version, documentWidth, documentHeight) {
+  const layerRecords = new Writer();
+  const channelData = new Writer();
+  layerRecords.i16(-records.length);
+  for (const layer of records) writeLayerRecordAndData(layerRecords, channelData, layer, version, documentWidth, documentHeight);
+  const layerInfo = new Writer();
+  layerInfo.append(layerRecords).append(channelData);
+  while (layerInfo.length % 4) layerInfo.u8(0);
+  return layerInfo;
+}
+
+function appendHighDepthLayerInfoBlock(writer, layerInfo, version, bitsPerChannel) {
+  const key = bitsPerChannel === 16 ? 'Lr16' : bitsPerChannel === 32 ? 'Lr32' : null;
+  if (!key) throw new PsdImportError(`PSD/PSB writer: high-depth tagged layer info не поддерживает ${bitsPerChannel}-bit`, 'PSD_EXPORT_DEPTH');
+  writer.ascii(version === PSB_VERSION ? '8B64' : '8BIM').ascii(key);
+  if (version === PSB_VERSION) writer.u64(layerInfo.length);
+  else writer.u32(layerInfo.length);
+  writer.append(layerInfo);
+  if (layerInfo.length & 1) writer.u8(0);
+}
+
+function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], composite, compositePixelBuffer = null, bitsPerChannel = 8, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
   if (version !== PSD_VERSION && version !== PSB_VERSION) throw new PsdImportError(`PSD/PSB writer: unsupported version ${version}`, 'PSD_EXPORT_VERSION');
+  const depth = Math.trunc(Number(bitsPerChannel));
+  if (!PSD_SUPPORTED_DEPTHS.has(depth)) throw new PsdImportError(`PSD/PSB writer: unsupported bit depth ${bitsPerChannel}`, 'PSD_EXPORT_DEPTH');
   const documentWidth = Math.trunc(Number(width));
   const documentHeight = Math.trunc(Number(height));
   safeArea(documentWidth, documentHeight, maxPixels);
@@ -5114,57 +5337,33 @@ function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], c
   }
   if (!layers.length) throw new PsdImportError('PSD/PSB writer: нужен хотя бы один слой', 'PSD_EXPORT_EMPTY');
 
-  const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version));
+  const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version, depth));
   const records = expandExportLayerGroups(normalized, groups);
   if (records.length > 32767) {
     throw new PsdImportError(`PSD/PSB writer: слишком много layer records после добавления групп: ${records.length}`, 'PSD_EXPORT_LAYER_RECORD_LIMIT');
   }
-  const layerRecords = new Writer();
-  const channelData = new Writer();
 
-  layerRecords.i16(-records.length);
-  for (const layer of records) {
-    layerRecords.i32(layer.y).i32(layer.x).i32(layer.y + layer.height).i32(layer.x + layer.width);
-    layerRecords.u16(layer.channels.length);
-    for (const channel of layer.channels) {
-      layerRecords.i16(channel.id);
-      if (version === PSB_VERSION) layerRecords.u64(channel.data.length);
-      else layerRecords.u32(channel.data.length);
-    }
-    layerRecords.ascii('8BIM');
-    layerRecords.ascii(layer.sectionDivider ? (layer.sectionBlendKey || 'pass') : (PSD_BLEND_KEYS[layer.blendMode] || 'norm'));
-    const opacity = Math.round(Math.max(0, Math.min(1, Number(layer.opacity ?? 1))) * 255);
-    layerRecords.u8(opacity).u8(0);
-    const flags = 0x08 | (layer.transparencyProtected ? 0x01 : 0) | (layer.visible === false ? 0x02 : 0);
-    layerRecords.u8(flags).u8(0);
-
-    const extra = new Writer();
-    writeLayerMaskExtra(extra, layer);
-    extra.u32(0);
-    writePascalLayerName(extra, layer.name || 'Layer');
-    writeUnicodeLayerName(extra, layer.name || 'Layer');
-    writeSectionDividerExtra(extra, layer);
-    writeVectorMaskExtra(extra, layer, documentWidth, documentHeight);
-    layerRecords.u32(extra.length).append(extra);
-
-    for (const channel of layer.channels) channelData.append(channel.data);
+  const layerInfo = buildLayerInfoBody(records, version, documentWidth, documentHeight);
+  const layerAndMask = new Writer();
+  if (depth === 8) {
+    if (version === PSB_VERSION) layerAndMask.u64(layerInfo.length);
+    else layerAndMask.u32(layerInfo.length);
+    layerAndMask.append(layerInfo);
+    layerAndMask.u32(0);
+  } else {
+    // Photoshop stores 16/32-bit layer records in document-level Lr16/Lr32
+    // tagged blocks; the ordinary layer-info length is zero.
+    if (version === PSB_VERSION) layerAndMask.u64(0);
+    else layerAndMask.u32(0);
+    layerAndMask.u32(0);
+    appendHighDepthLayerInfoBlock(layerAndMask, layerInfo, version, depth);
   }
 
-  const layerInfo = new Writer();
-  layerInfo.append(layerRecords).append(channelData);
-  while (layerInfo.length % 4) layerInfo.u8(0);
-
-  const layerAndMask = new Writer();
-  if (version === PSB_VERSION) layerAndMask.u64(layerInfo.length);
-  else layerAndMask.u32(layerInfo.length);
-  layerAndMask.append(layerInfo);
-  layerAndMask.u32(0);
-
-  const compositeData = encodeCompositeRle(composite, documentWidth, documentHeight, version);
+  const compositeData = encodeCompositeData({ composite, compositePixelBuffer }, documentWidth, documentHeight, version, depth);
   const imageResources = buildImageResources({iccProfile,iccUntagged,paths,width:documentWidth,height:documentHeight});
   const out = new Writer();
   out.ascii('8BPS').u16(version).push(new Uint8Array(6));
-  out.u16(4).u32(documentHeight).u32(documentWidth).u16(8).u16(PSD_COLOR_MODE_RGB);
+  out.u16(4).u32(documentHeight).u32(documentWidth).u16(depth).u16(PSD_COLOR_MODE_RGB);
   out.u32(0);
   out.u32(imageResources.length).append(imageResources);
   if (version === PSB_VERSION) out.u64(layerAndMask.length);
@@ -9003,11 +9202,45 @@ function layerNeedsSemanticRasterWarning(layer){
     Math.abs(Number(layer.scaleX??1)-1)>1e-9||Math.abs(Number(layer.scaleY??1)-1)>1e-9||Math.abs(Number(layer.rotation)||0)>1e-9;
 }
 
+function nativeHighDepthPsdSource(layer){
+  if(!layer?.highDepthSource||layer.type!=='raster'||layerNeedsSemanticRasterWarning(layer))return null;
+  if(!Number.isInteger(Number(layer.x))||!Number.isInteger(Number(layer.y)))return null;
+  try{
+    const buffer=deserializePixelBufferSource(layer.highDepthSource);
+    if(buffer.model!=='rgb'||![16,32].includes(buffer.bitsPerChannel))return null;
+    if(buffer.width!==Math.trunc(Number(layer.width))||buffer.height!==Math.trunc(Number(layer.height)))return null;
+    return buffer;
+  }catch(error){
+    console.warn(`PSD/PSB high-depth source «${layer.name||'Без имени'}» не прошёл export validation`,error);
+    return null;
+  }
+}
+
+function nativePsdBounds(layer,buffer){
+  return{x:Math.trunc(Number(layer.x)||0),y:Math.trunc(Number(layer.y)||0),width:buffer.width,height:buffer.height};
+}
+
+function exactHighDepthCompositeCandidate(exportDoc,planned,hasAdjustmentLayers){
+  if(hasAdjustmentLayers)return null;
+  const visible=planned.filter(item=>isLayerVisible(exportDoc,item.layer));
+  if(visible.length!==1)return null;
+  const item=visible[0],layer=item.layer,buffer=item.nativePixelBuffer;
+  if(!buffer||layer.groupId||layer.mask||layer.vectorMask)return null;
+  if(Math.abs(Number(layer.opacity??1)-1)>1e-9||(layer.blendMode||'source-over')!=='source-over')return null;
+  if(item.bounds.x!==0||item.bounds.y!==0||item.bounds.width!==exportDoc.width||item.bounds.height!==exportDoc.height)return null;
+  return buffer;
+}
+
 async function preparePsdExport(exportDoc){
   const warnings=[];
   const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment');
   const hasAdjustmentLayers=exportDoc.layers.some(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
-  const planned=sourceLayers.map(layer=>({layer,bounds:psdExportBounds(layer)}));
+  const planned=sourceLayers.map(layer=>{
+    const nativePixelBuffer=nativeHighDepthPsdSource(layer);
+    return{layer,nativePixelBuffer,bounds:nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer)};
+  });
+  const nativeDepths=planned.map(item=>item.nativePixelBuffer?.bitsPerChannel||0);
+  const bitsPerChannel=nativeDepths.includes(32)?32:nativeDepths.includes(16)?16:8;
   let totalPixels=exportDoc.width*exportDoc.height+planned.reduce((sum,item)=>sum+item.bounds.width*item.bounds.height,0);
   if(hasAdjustmentLayers)totalPixels+=exportDoc.width*exportDoc.height;
   if(totalPixels>48_000_000){
@@ -9036,15 +9269,17 @@ async function preparePsdExport(exportDoc){
       blendMode:group.blendMode||'pass-through',
     }));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  const downgradedHighDepth=planned.filter(item=>item.layer.highDepthSource&&!item.nativePixelBuffer);
+  if(downgradedHighDepth.length)warnings.push(`${downgradedHighDepth.length} high-depth слой(я) с transform/filter/style или несовместимой геометрией экспортированы через 8-bit raster preview`);
+  if(bitsPerChannel>8&&planned.some(item=>!item.nativePixelBuffer))warnings.push(`Документ экспортируется как ${bitsPerChannel}-bit; raster-preview слои без native high-depth source расширены из 8-bit без восстановления утраченной точности`);
   if(sourceLayers.some(layer=>layer.vectorMask?.linked===false))warnings.push('Unlinked vector mask flag записывается в PSD/PSB, но ZPE при трансформациях пока перемещает такую маску вместе со слоем');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
 
   const prepared=[];
-  for(const {layer,bounds} of planned){
-    prepared.push({
+  for(const {layer,bounds,nativePixelBuffer} of planned){
+    const item={
       name:layer.name||'ZPE Layer',
       x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
-      pixels:await renderPsdLayerPixels(layer,bounds),
       opacity:clamp(Number(layer.opacity??1),0,1),
       blendMode:layer.blendMode||'source-over',
       groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
@@ -9054,12 +9289,17 @@ async function preparePsdExport(exportDoc){
         disabled:layer.mask.enabled===false,
       }:null,
       vectorMask:exportPsdVectorMask(layer),
-    });
+    };
+    if(nativePixelBuffer)item.pixelBuffer=nativePixelBuffer;
+    else item.pixels=await renderPsdLayerPixels(layer,bounds);
+    prepared.push(item);
   }
 
+  const compositePixelBuffer=exactHighDepthCompositeCandidate(exportDoc,planned,hasAdjustmentLayers);
   const compositeCanvas=document.createElement('canvas');
   await renderDocument(compositeCanvas,exportDoc,{checker:false});
   const composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
+  if(bitsPerChannel>8&&!compositePixelBuffer)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite построен из текущего 8-bit Canvas renderer и затем расширен до глубины документа`);
 
   if(hasAdjustmentLayers){
     warnings.push('Adjustment layers Stage 1 не имеют Photoshop-semantic mapping: визуальный результат сохранён через верхний Composite Preview, исходные слои оставлены скрытыми');
@@ -9077,14 +9317,14 @@ async function preparePsdExport(exportDoc){
   }
 
   if(exportDoc.colorProfile?.kind==='icc')warnings.push('ICC profile сохранён как metadata resource без явного color transform; пиксельные операции ZPE пока выполняются в unmanaged Canvas pipeline');
-  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,warnings};
+  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,compositePixelBuffer,bitsPerChannel,warnings};
 }
 
 async function exportPsdDocument(exportDoc,{psb=false}={}){
   const format=psb?'PSB':'PSD';
   setStatus(`${format}: подготовка слоёв…`);
   const prepared=await preparePsdExport(exportDoc);
-  setStatus(`${format}: упаковка RLE-каналов…`);
+  setStatus(`${format}: упаковка ${prepared.bitsPerChannel}-bit каналов…`);
   const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
   const profile=exportDoc.colorProfile;
   const iccProfile=profile?.kind==='icc'&&profile.dataUrl
@@ -9093,6 +9333,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
     layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,composite:prepared.composite,
+    compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,
     iccProfile,iccUntagged:Boolean(profile?.untagged),
     maxPixels:48_000_000,maxLayers:500,
   });
@@ -9108,7 +9349,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   }
 }
 
-async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — слои (Stage 4)'],['psb','PSB — Large Document (Stage 7a)']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
+async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — слои 8/16/32-bit'],['psb','PSB — Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
 
 function canvasToPngBlob(canvas) {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));
