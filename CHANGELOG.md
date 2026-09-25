@@ -14,6 +14,7 @@
 - Project persistence: `.zpe` sanitizer allow-list синхронизирован с новыми adjustment kinds и native block keys.
 - Regression: semantic pixel tests, .zpe persistence и synthetic native PSD+PSB round-trip проверяют все три новых adjustment records без внешней сети.
 - Upstream format oracle: структуры подтверждены по pinned MIT `psd-tools` commit `8f9a25ea98202061365701db54ce938931b27c09`.
+- CI follow-up: Stage 16a source-wiring regression синхронизирован с расширенным `nvrt/post/thrs` allow-list; runtime assertions не ослаблены.
 - Version: приложение синхронизировано на 1.42.0.
 
 ## 1.41.0 — 2026-09-25
