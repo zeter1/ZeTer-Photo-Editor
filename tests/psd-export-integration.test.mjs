@@ -70,8 +70,8 @@ test('PSD Group Export Stage 8b wires ZPE flat groups into the PSD/PSB writer',(
   assert.match(adapter,/groups = \[\]/);
   assert.match(main,/const exportGroups=\(exportDoc\.groups\|\|\[\]\)/);
   assert.match(main,/groupKey:layer\.groupId/);
-  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,composite,warnings\}/);
-  assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,composite:prepared\.composite/);
+  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),composite,warnings\}/);
+  assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,paths:prepared\.paths,composite:prepared\.composite/);
 });
 
 
