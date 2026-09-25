@@ -459,6 +459,49 @@ test('PSD row encoder round-trips long literal and repeated PackBits rows', asyn
 });
 
 
+
+test('PSD Group Export Stage 8b round-trips flat group records and keeps child visibility independent', async () => {
+  const visiblePixels=Uint8Array.from([255,0,0,255]);
+  const hiddenPixels=Uint8Array.from([0,255,0,255]);
+  const freePixels=Uint8Array.from([0,0,255,255]);
+  const encoded=encodePsd({
+    width:1,height:1,composite:visiblePixels,
+    groups:[{key:'group-1',name:'Папка ✓',visible:false,collapsed:true}],
+    layers:[
+      {name:'Visible child',groupKey:'group-1',x:0,y:0,width:1,height:1,pixels:visiblePixels,opacity:1,blendMode:'source-over',visible:true},
+      {name:'Hidden child',groupKey:'group-1',x:0,y:0,width:1,height:1,pixels:hiddenPixels,opacity:1,blendMode:'source-over',visible:false},
+      {name:'Free',x:0,y:0,width:1,height:1,pixels:freePixels,opacity:1,blendMode:'source-over',visible:true},
+    ],
+  });
+  const decoded=await decodePsd(encoded);
+  assert.equal(decoded.groups.length,1);
+  const group=decoded.groups[0];
+  assert.equal(group.name,'Папка ✓');
+  assert.equal(group.visible,false);
+  assert.equal(group.collapsed,true);
+  const visibleChild=decoded.layers.find(layer=>layer.name==='Visible child');
+  const hiddenChild=decoded.layers.find(layer=>layer.name==='Hidden child');
+  const free=decoded.layers.find(layer=>layer.name==='Free');
+  assert.equal(visibleChild.groupKey,group.key);
+  assert.equal(visibleChild.visible,true);
+  assert.equal(hiddenChild.groupKey,group.key);
+  assert.equal(hiddenChild.visible,false);
+  assert.equal(free.groupKey,null);
+});
+
+test('PSD Group Export Stage 8b rejects non-contiguous members instead of grouping unrelated layers', () => {
+  const pixels=Uint8Array.from([1,2,3,255]);
+  assert.throws(()=>encodePsd({
+    width:1,height:1,composite:pixels,
+    groups:[{key:'g',name:'split'}],
+    layers:[
+      {name:'A',groupKey:'g',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true},
+      {name:'Free',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true},
+      {name:'B',groupKey:'g',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true},
+    ],
+  }),error=>error instanceof PsdImportError&&error.code==='PSD_EXPORT_GROUP_SPLIT');
+});
+
 test('PSD Blob export is byte-identical to encodePsd without a final UI concat', async () => {
   const pixels=Uint8Array.from([
     10,20,30,255,

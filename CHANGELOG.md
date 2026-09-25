@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-25 — PSD/PSB Group Export Stage 8b
+
+- Added: плоские ZPE groups теперь экспортируются в PSD/PSB как настоящие `lsct` folder + bounding-divider layer records.
+- Preserved: Unicode group names, visibility и open/closed (collapsed) state; child visibility пишется отдельно от folder visibility.
+- Safety: одна группа должна занимать contiguous run слоёв. Если тот же `groupKey` появляется повторно после посторонних слоёв, writer отклоняет экспорт с `PSD_EXPORT_GROUP_SPLIT` вместо ошибочного захвата чужих слоёв.
+- Compatibility: group marker records не создают pixel channels и используют pass-through section blend key; обычный RGB/8-bit layer writer остаётся прежним.
+- Added: PSD group export → import round-trip regression и wiring tests для UI → writer.
+
 ### 2026-09-25 — PSD/PSB Group Import Stage 8a
 
 - Added: PSD/PSB `lsct` section-divider records теперь восстанавливают folder boundaries вместо полного flatten при импорте.

@@ -3232,6 +3232,18 @@ function writeUnicodeLayerName(writer, name) {
   writer.ascii('8BIM').ascii('luni').u32(data.length).append(data);
 }
 
+
+function writeSectionDividerExtra(writer, layer) {
+  const divider = Number(layer?.sectionDivider) || 0;
+  if (![1,2,3].includes(divider)) return;
+  const data = new Writer();
+  data.u32(divider);
+  data.ascii('8BIM');
+  data.ascii(layer.sectionBlendKey || 'pass');
+  writer.ascii('8BIM').ascii('lsct').u32(data.length).append(data);
+  if (data.length & 1) writer.u8(0);
+}
+
 function writeLayerMaskExtra(writer, layer) {
   if (!layer.mask?.pixels) {
     writer.u32(0);
@@ -3264,6 +3276,76 @@ function normalizeExportLayer(layer, index, maxPixels, version) {
   return { ...metadata, mask, channels };
 }
 
+
+function normalizeExportGroups(groups = []) {
+  if (!Array.isArray(groups)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const group of groups) {
+    const key = String(group?.key ?? group?.id ?? '').slice(0, 160);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({
+      key,
+      name: String(group?.name || 'Group').slice(0, 240),
+      visible: group?.visible !== false,
+      collapsed: Boolean(group?.collapsed),
+    });
+  }
+  return normalized;
+}
+
+function makeExportGroupMarker(group, sectionDivider) {
+  return {
+    recordType: sectionDivider === 3 ? 'group-boundary' : 'group-folder',
+    sectionDivider,
+    sectionBlendKey: 'pass',
+    name: sectionDivider === 3 ? '</Layer group>' : group.name,
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    opacity: 1,
+    blendMode: 'source-over',
+    visible: sectionDivider === 3 ? false : group.visible,
+    transparencyProtected: false,
+    mask: null,
+    channels: [],
+  };
+}
+
+function expandExportLayerGroups(layers, groups) {
+  const groupMap = new Map(normalizeExportGroups(groups).map(group => [group.key, group]));
+  if (!groupMap.size) return layers;
+  const records = [];
+  const emitted = new Set();
+
+  for (let index = 0; index < layers.length;) {
+    const layer = layers[index];
+    const key = layer.groupKey && groupMap.has(String(layer.groupKey)) ? String(layer.groupKey) : null;
+    if (!key) {
+      records.push(layer);
+      index += 1;
+      continue;
+    }
+    if (emitted.has(key)) {
+      throw new PsdImportError(
+        `PSD/PSB writer: группа «${groupMap.get(key).name}» разделена несмежными слоями`,
+        'PSD_EXPORT_GROUP_SPLIT',
+      );
+    }
+    emitted.add(key);
+    const group = groupMap.get(key);
+    records.push(makeExportGroupMarker(group, 3));
+    while (index < layers.length && String(layers[index].groupKey || '') === key) {
+      records.push(layers[index]);
+      index += 1;
+    }
+    records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1));
+  }
+  return records;
+}
+
 function encodeCompositeRle(pixels, width, height, version) {
   const pixelCount = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   const rgba = asBytes(pixels);
@@ -3291,7 +3373,7 @@ function encodeCompositeRle(pixels, width, height, version) {
   return writer;
 }
 
-function buildPsdWriter({ width, height, layers = [], composite, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+function buildPsdWriter({ width, height, layers = [], groups = [], composite, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
   if (version !== PSD_VERSION && version !== PSB_VERSION) throw new PsdImportError(`PSD/PSB writer: unsupported version ${version}`, 'PSD_EXPORT_VERSION');
   const documentWidth = Math.trunc(Number(width));
   const documentHeight = Math.trunc(Number(height));
@@ -3302,11 +3384,15 @@ function buildPsdWriter({ width, height, layers = [], composite, version = PSD_V
   if (!layers.length) throw new PsdImportError('PSD/PSB writer: нужен хотя бы один слой', 'PSD_EXPORT_EMPTY');
 
   const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version));
+  const records = expandExportLayerGroups(normalized, groups);
+  if (records.length > 32767) {
+    throw new PsdImportError(`PSD/PSB writer: слишком много layer records после добавления групп: ${records.length}`, 'PSD_EXPORT_LAYER_RECORD_LIMIT');
+  }
   const layerRecords = new Writer();
   const channelData = new Writer();
 
-  layerRecords.i16(-normalized.length);
-  for (const layer of normalized) {
+  layerRecords.i16(-records.length);
+  for (const layer of records) {
     layerRecords.i32(layer.y).i32(layer.x).i32(layer.y + layer.height).i32(layer.x + layer.width);
     layerRecords.u16(layer.channels.length);
     for (const channel of layer.channels) {
@@ -3315,7 +3401,7 @@ function buildPsdWriter({ width, height, layers = [], composite, version = PSD_V
       else layerRecords.u32(channel.data.length);
     }
     layerRecords.ascii('8BIM');
-    layerRecords.ascii(PSD_BLEND_KEYS[layer.blendMode] || 'norm');
+    layerRecords.ascii(layer.sectionDivider ? (layer.sectionBlendKey || 'pass') : (PSD_BLEND_KEYS[layer.blendMode] || 'norm'));
     const opacity = Math.round(Math.max(0, Math.min(1, Number(layer.opacity ?? 1))) * 255);
     layerRecords.u8(opacity).u8(0);
     const flags = 0x08 | (layer.transparencyProtected ? 0x01 : 0) | (layer.visible === false ? 0x02 : 0);
@@ -3326,6 +3412,7 @@ function buildPsdWriter({ width, height, layers = [], composite, version = PSD_V
     extra.u32(0);
     writePascalLayerName(extra, layer.name || 'Layer');
     writeUnicodeLayerName(extra, layer.name || 'Layer');
+    writeSectionDividerExtra(extra, layer);
     layerRecords.u32(extra.length).append(extra);
 
     for (const channel of layer.channels) channelData.append(channel.data);
@@ -6452,7 +6539,10 @@ async function preparePsdExport(exportDoc){
   if(totalPixels>48_000_000){
     throw new Error(`PSD export Stage 4 ограничен суммарно 48 МП временных RGBA-буферов; документ требует около ${Math.ceil(totalPixels/1_000_000)} МП. Для больших документов нужен tiled/streaming writer.`);
   }
-  if(exportDoc.groups?.length)warnings.push('Группы ZPE экспортированы как плоский список слоёв');
+  const sourceGroupIds=new Set(sourceLayers.map(layer=>layer.groupId).filter(Boolean));
+  const exportGroups=(exportDoc.groups||[])
+    .filter(group=>sourceGroupIds.has(group.id))
+    .map(group=>({key:group.id,name:group.name||'Group',visible:group.visible!==false,collapsed:Boolean(group.collapsed)}));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
 
@@ -6464,7 +6554,8 @@ async function preparePsdExport(exportDoc){
       pixels:await renderPsdLayerPixels(layer,bounds),
       opacity:clamp(Number(layer.opacity??1),0,1),
       blendMode:layer.blendMode||'source-over',
-      visible:hasAdjustmentLayers?false:isLayerVisible(exportDoc,layer),
+      groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
+      visible:hasAdjustmentLayers?false:(layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer)),
       mask:layer.mask?.dataUrl?{
         pixels:await renderPsdMaskPixels(layer,bounds),
         disabled:layer.mask.enabled===false,
@@ -6491,7 +6582,7 @@ async function preparePsdExport(exportDoc){
     });
   }
 
-  return{layers:[...prepared].reverse(),composite,warnings};
+  return{layers:[...prepared].reverse(),groups:exportGroups,composite,warnings};
 }
 
 async function exportPsdDocument(exportDoc,{psb=false}={}){
@@ -6502,7 +6593,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
-    layers:prepared.layers,composite:prepared.composite,
+    layers:prepared.layers,groups:prepared.groups,composite:prepared.composite,
     maxPixels:48_000_000,maxLayers:500,
   });
   const filename=`${safeFilename(exportDoc.name)}.${psb?'psb':'psd'}`;

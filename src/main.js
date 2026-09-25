@@ -3086,7 +3086,10 @@ async function preparePsdExport(exportDoc){
   if(totalPixels>48_000_000){
     throw new Error(`PSD export Stage 4 ограничен суммарно 48 МП временных RGBA-буферов; документ требует около ${Math.ceil(totalPixels/1_000_000)} МП. Для больших документов нужен tiled/streaming writer.`);
   }
-  if(exportDoc.groups?.length)warnings.push('Группы ZPE экспортированы как плоский список слоёв');
+  const sourceGroupIds=new Set(sourceLayers.map(layer=>layer.groupId).filter(Boolean));
+  const exportGroups=(exportDoc.groups||[])
+    .filter(group=>sourceGroupIds.has(group.id))
+    .map(group=>({key:group.id,name:group.name||'Group',visible:group.visible!==false,collapsed:Boolean(group.collapsed)}));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
 
@@ -3098,7 +3101,8 @@ async function preparePsdExport(exportDoc){
       pixels:await renderPsdLayerPixels(layer,bounds),
       opacity:clamp(Number(layer.opacity??1),0,1),
       blendMode:layer.blendMode||'source-over',
-      visible:hasAdjustmentLayers?false:isLayerVisible(exportDoc,layer),
+      groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
+      visible:hasAdjustmentLayers?false:(layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer)),
       mask:layer.mask?.dataUrl?{
         pixels:await renderPsdMaskPixels(layer,bounds),
         disabled:layer.mask.enabled===false,
@@ -3125,7 +3129,7 @@ async function preparePsdExport(exportDoc){
     });
   }
 
-  return{layers:[...prepared].reverse(),composite,warnings};
+  return{layers:[...prepared].reverse(),groups:exportGroups,composite,warnings};
 }
 
 async function exportPsdDocument(exportDoc,{psb=false}={}){
@@ -3136,7 +3140,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
-    layers:prepared.layers,composite:prepared.composite,
+    layers:prepared.layers,groups:prepared.groups,composite:prepared.composite,
     maxPixels:48_000_000,maxLayers:500,
   });
   const filename=`${safeFilename(exportDoc.name)}.${psb?'psb':'psd'}`;

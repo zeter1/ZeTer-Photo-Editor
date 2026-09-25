@@ -62,3 +62,14 @@ test('PSD Group Import Stage 8a maps adapter group keys into ZPE layer groups',(
   assert.match(main,/groupId:sourceLayer\.groupKey\?/);
   assert.match(main,/next\.groups=importedGroups/);
 });
+
+
+test('PSD Group Export Stage 8b wires ZPE flat groups into the PSD/PSB writer',()=>{
+  assert.match(adapter,/function expandExportLayerGroups\(/);
+  assert.match(adapter,/writeSectionDividerExtra\(extra, layer\)/);
+  assert.match(adapter,/groups = \[\]/);
+  assert.match(main,/const exportGroups=\(exportDoc\.groups\|\|\[\]\)/);
+  assert.match(main,/groupKey:layer\.groupId/);
+  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,composite,warnings\}/);
+  assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,composite:prepared\.composite/);
+});
