@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-25 — Nested Groups UX Stage 8d
+
+- Added: group rows в панели слоёв стали draggable — группу можно вложить в другую группу.
+- Added: drop группы на свободную область панели поднимает её обратно на верхний уровень.
+- Added: контекстное меню группы содержит «Создать подгруппу».
+- Safety: UI использует `moveLayerGroupIntoGroup()`, поэтому self/descendant cycles и ancestor locks нельзя обойти drag-and-drop.
+- Fixed: блокировка слоя в context menu теперь учитывает всю цепочку родительских групп, а не только непосредственную папку.
+- Added: regression contracts для group drag nesting/root extraction/subgroup action.
+
 ### 2026-09-25 — Native Nested Groups Stage 8c
 
 - Added: ZPE group schema получила optional `parentGroupId`; старые проекты без поля остаются совместимыми.

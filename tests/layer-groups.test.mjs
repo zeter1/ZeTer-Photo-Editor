@@ -181,7 +181,10 @@ test('layer panel exposes rename and group controls with drag-to-group wiring',(
   assert.match(html,/id="addGroupBtn"/);
   assert.match(html,/id="renameLayerBtn"/);
   assert.match(main,/function addGroup\(\)/);
-  assert.match(main,/moveLayerIntoGroup\(doc, draggedId, group\.id\)/);
+  assert.match(main,/moveLayerIntoGroup\(doc, draggedLayerId, group\.id\)/);
+  assert.match(main,/moveLayerGroupIntoGroup\(doc, draggedGroupId, group\.id\)/);
+  assert.match(main,/moveLayerGroupIntoGroup\(doc,draggedGroupId,null\)/);
+  assert.match(main,/\['Создать подгруппу'/);
   assert.match(main,/function renameGroup\(group\)/);
   assert.match(main,/group\.visible = group\.visible === false/);
   assert.match(main,/group\.locked = !group\.locked/);
@@ -200,6 +203,7 @@ test('layer panel exposes rename and group controls with drag-to-group wiring',(
   assert.ok(main.includes("['Опустить слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())]"));
   assert.match(main,/Переименовать слой/);
   assert.match(css,/\.layer-group-row\.drop-into/);
+  assert.match(css,/\.layer-group-row\.dragging/);
   assert.match(css,/\.layer-row\.in-group/);
   assert.match(css,/--group-depth/);
   assert.match(main,/const renderLevel = \(parentGroupId = null, depth = 0\) =>/);

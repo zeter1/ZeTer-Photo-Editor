@@ -2,7 +2,7 @@ import { HistoryStack } from './core/history.js';
 import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, alignLayerToCanvas, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
   createDocument, createRasterLayer, createTextLayer, createShapeLayer, createSmartObjectLayer, createAdjustmentLayer, createLayerMask, createLayerGroup, documentWithTextPreview,
-  addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, selectedLayer,
+  addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, moveLayerGroupIntoGroup, selectedLayer,
   snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters,
   isLayerVisible, isLayerLocked, isGroupVisible, isGroupLocked, groupDepth,
 } from './core/state.js';
@@ -123,6 +123,7 @@ let polygonDraft = null;
 let selectionCopyMode = 'merged';
 let dragDepth = 0;
 let layerDragId = null;
+let groupDragId = null;
 let openMenuKey = null;
 let menuReturnFocus = null;
 let panelsVisible = true;
@@ -1174,22 +1175,47 @@ function updateLayers() {
       e.preventDefault(); e.stopPropagation();
       openContextMenu(`group:${group.id}`, groupContextMenu(group.id), e, row);
     });
+    row.draggable = !effectiveLocked;
+    row.addEventListener('dragstart', e => {
+      if (effectiveLocked) { e.preventDefault(); setStatus('Группа или её родитель заблокированы'); return; }
+      groupDragId = group.id;
+      layerDragId = null;
+      row.classList.add('dragging');
+      if (e.dataTransfer) { e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', `group:${group.id}`); }
+    });
     row.addEventListener('dragover', e => {
-      if (!layerDragId || effectiveLocked) return;
+      const draggingLayer = Boolean(layerDragId);
+      const draggingGroup = Boolean(groupDragId && groupDragId !== group.id);
+      if ((!draggingLayer && !draggingGroup) || effectiveLocked) return;
       e.preventDefault(); e.stopPropagation();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
       row.classList.add('drop-into');
     });
     row.addEventListener('dragleave', () => row.classList.remove('drop-into'));
     row.addEventListener('drop', e => {
-      if (!layerDragId || effectiveLocked) return;
+      if (effectiveLocked) return;
+      const draggedLayerId = layerDragId;
+      const draggedGroupId = groupDragId;
+      if (!draggedLayerId && (!draggedGroupId || draggedGroupId === group.id)) return;
       e.preventDefault(); e.stopPropagation();
-      const draggedId = layerDragId;
       row.classList.remove('drop-into');
-      if (moveLayerIntoGroup(doc, draggedId, group.id)) {
+      if (draggedLayerId && moveLayerIntoGroup(doc, draggedLayerId, group.id)) {
         group.collapsed = false;
         commit('Переместить слой в группу');
+        return;
       }
+      if (draggedGroupId) {
+        if (moveLayerGroupIntoGroup(doc, draggedGroupId, group.id)) {
+          group.collapsed = false;
+          commit('Переместить группу в группу');
+        } else {
+          setStatus('Нельзя вложить группу в саму себя, потомка или заблокированную группу');
+        }
+      }
+    });
+    row.addEventListener('dragend', () => {
+      groupDragId = null;
+      clearLayerDragDecorations();
     });
     els.layers.append(row);
   };
@@ -3584,11 +3610,16 @@ function redo(){if(blockPendingDocumentEdit())return;const entry=history.redo();
 function deleteSelected(){if(blockPendingDocumentEdit())return;const l=selected();if(!l)return;if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}removeLayer(doc,l.id);commit('Удалить слой');}
 function duplicateSelected(){const l=selected();if(!l)return;if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}if(duplicateLayer(doc,l.id))commit('Дублировать слой');}
 function renameLayer(layer){if(!layer||isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}showModal({title:'Переименовать слой',fields:[{name:'name',label:'Имя',value:layer.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===layer.name)return;layer.name=name;commit('Переименовать слой');}});}
-function addGroup(){
+function addGroup(parentGroupId=null){
+  const parent=parentGroupId?doc.groups?.find(group=>group.id===parentGroupId):null;
+  if(parentGroupId&&!parent){setStatus('Родительская группа не найдена');return null;}
+  if(parent&&isGroupLocked(doc,parent)){setStatus('Родительская группа заблокирована');return null;}
   const number=(doc.groups?.length||0)+1;
-  const group=addLayerGroup(doc,createLayerGroup({name:`Группа ${number}`}));
-  commit('Новая группа слоёв');
-  setStatus(`Создана группа «${group.name}». Перетащите на неё нужные слои.`);
+  const group=addLayerGroup(doc,createLayerGroup({name:`Группа ${number}`,parentGroupId:parent?.id??null}));
+  if(parent)parent.collapsed=false;
+  commit(parent?'Новая подгруппа':'Новая группа слоёв');
+  setStatus(parent?`Создана подгруппа «${group.name}» в «${parent.name}»`:`Создана группа «${group.name}». Перетащите на неё нужные слои.`);
+  return group;
 }
 function renameGroup(group){if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}showModal({title:'Переименовать группу',fields:[{name:'name',label:'Имя',value:group.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===group.name)return;group.name=name;commit('Переименовать группу');}});}
 function deleteLayerGroup(group){
@@ -3738,7 +3769,7 @@ function layerContextMenu(id) {
     ['Удалить маску','',removeSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
     ['sep'],
     ['Показать / скрыть','',toggleSelectedVisibility,()=>Boolean(target())],
-    ['Заблокировать / разблокировать','',toggleSelectedLock,()=>Boolean(target()) && !doc.groups?.find(group => group.id === target().groupId)?.locked],
+    ['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=target();const group=layer?.groupId?doc.groups?.find(item=>item.id===layer.groupId):null;return Boolean(layer)&&!(group&&isGroupLocked(doc,group));}],
     ['sep'],
     ['Поднять слой','',()=>{if(moveLayer(doc,id,1))commit('Поднять слой');},editable],
     ['Опустить слой','',()=>{if(moveLayer(doc,id,-1))commit('Опустить слой');},editable],
@@ -3749,6 +3780,7 @@ function groupContextMenu(id) {
   const owner=doc;
   const target = () => doc===owner ? doc.groups?.find(item => item.id === id) : null;
   return [
+    ['Создать подгруппу','',()=>addGroup(id),()=>Boolean(target()) && !isGroupLocked(doc,target())],
     ['Переименовать…','',()=>renameGroup(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
     ['Свернуть / развернуть','',()=>{const group=target();if(group){group.collapsed=!group.collapsed;updateLayers();}},()=>Boolean(target())],
     ['Показать / скрыть','',()=>{const group=target();if(group){group.visible=group.visible===false;commit(group.visible?'Показать группу слоёв':'Скрыть группу слоёв');}},()=>Boolean(target())],
@@ -4249,21 +4281,23 @@ if(els.selectionCopyMode)els.selectionCopyMode.onchange=()=>{selectionCopyMode=e
 if(els.smartSnapToggle)els.smartSnapToggle.onchange=()=>{smartSnapEnabled=els.smartSnapToggle.checked;persistSmartSnapState();clearSmartGuides();drawOverlay();setStatus(smartSnapEnabled?'Умная привязка включена':'Умная привязка выключена');};
 $$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSelectedLayer(button.dataset.align)));
 els.undo.onclick=undo;els.redo.onclick=redo;$('#exportQuickBtn').onclick=exportDialog;
-$('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=addGroup;$('#renameLayerBtn').onclick=()=>{const layer=selected();if(layer)renameLayer(layer);};$('#duplicateLayerBtn').onclick=duplicateSelected;$('#deleteLayerBtn').onclick=deleteSelected;
+$('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=()=>addGroup();$('#renameLayerBtn').onclick=()=>{const layer=selected();if(layer)renameLayer(layer);};$('#duplicateLayerBtn').onclick=duplicateSelected;$('#deleteLayerBtn').onclick=deleteSelected;
 $('#layerUpBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');};$('#layerDownBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');};
 els.layers.addEventListener('dragover',e=>{
-  if(!layerDragId||e.target!==els.layers)return;
+  if((!layerDragId&&!groupDragId)||e.target!==els.layers)return;
   e.preventDefault();
   if(e.dataTransfer)e.dataTransfer.dropEffect='move';
   els.layers.classList.add('drop-root');
 });
 els.layers.addEventListener('dragleave',e=>{if(e.target===els.layers)els.layers.classList.remove('drop-root');});
 els.layers.addEventListener('drop',e=>{
-  if(!layerDragId||e.target!==els.layers)return;
+  if((!layerDragId&&!groupDragId)||e.target!==els.layers)return;
   e.preventDefault();
-  const draggedId=layerDragId;
+  const draggedLayerId=layerDragId;
+  const draggedGroupId=groupDragId;
   els.layers.classList.remove('drop-root');
-  if(moveLayerToRootTop(draggedId))commit('Вынести слой из группы');
+  if(draggedLayerId&&moveLayerToRootTop(draggedLayerId)){commit('Вынести слой из группы');return;}
+  if(draggedGroupId&&moveLayerGroupIntoGroup(doc,draggedGroupId,null))commit('Вынести группу на верхний уровень');
 });
 $('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateHistory();updateAll();};
 $('#resetColorEffectsBtn').onclick=resetSelectedLayerEffects;
