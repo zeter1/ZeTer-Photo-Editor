@@ -12,7 +12,7 @@ import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, 
 import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, compositeCmykPixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment, applyCmykPixelBufferToneDab, applyCmykPixelBufferBlurDab, applyCmykPixelBufferCloneDab, applyCmykPixelBufferSmudgeDab, floodFillPixelBuffer, floodFillCmykPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
-import { sanitizeToolOrder, moveToolInOrder } from './core/tool-layout.js';
+import { sanitizeToolOrder, moveToolToIndex, gridCellIndexFromPoint } from './core/tool-layout.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
 import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustments.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText, rewritePsdShapeStyle, rewritePsdAdjustmentBlocks } from './adapters/psd.js';
@@ -100,6 +100,7 @@ let activeSessionId = '';
 let nextSessionNumber = 1;
 let currentTool = 'move';
 let toolbarDragToolId = '';
+let toolbarDropIndex = -1;
 let suppressToolClick = false;
 let renderVersion = 0;
 let renderFrame = 0;
@@ -209,26 +210,82 @@ function persistToolbarToolOrder(order = toolbarToolIds()) {
   }
 }
 function clearToolbarDropTarget() {
-  for (const button of els.toolbar.querySelectorAll('.tool-drop-target')) {
-    button.classList.remove('tool-drop-target');
-    delete button.dataset.dropAfter;
-  }
-  els.toolbar.classList.remove('tool-drop-at-end');
+  toolbarDropIndex = -1;
+  const marker = els.toolbar.querySelector('.toolbar-drop-slot');
+  if (marker) marker.hidden = true;
 }
-function toolDropAfterPointer(button, event) {
-  const rect = button.getBoundingClientRect();
-  const dx = (event.clientX - (rect.left + rect.width / 2)) / Math.max(rect.width, 1);
-  const dy = (event.clientY - (rect.top + rect.height / 2)) / Math.max(rect.height, 1);
-  return Math.abs(dx) > Math.abs(dy) ? dx > 0 : dy > 0;
+function toolbarGridMetrics() {
+  const buttons = [...els.toolbar.querySelectorAll('.tool')];
+  const sample = buttons.find(button => button.dataset.tool !== toolbarDragToolId) || buttons[0];
+  if (!sample) return null;
+  const toolbarRect = els.toolbar.getBoundingClientRect();
+  const sampleRect = sample.getBoundingClientRect();
+  const style = getComputedStyle(els.toolbar);
+  const borderLeft = parseFloat(style.borderLeftWidth) || 0;
+  const borderTop = parseFloat(style.borderTopWidth) || 0;
+  const paddingLeft = parseFloat(style.paddingLeft) || 0;
+  const paddingTop = parseFloat(style.paddingTop) || 0;
+  const columnGap = parseFloat(style.columnGap) || 0;
+  const rowGap = parseFloat(style.rowGap) || 0;
+  const template = String(style.gridTemplateColumns || '').trim();
+  const columns = template && template !== 'none'
+    ? Math.max(1, template.split(/\s+/).length)
+    : 1;
+  return {
+    left: toolbarRect.left + borderLeft + paddingLeft,
+    top: toolbarRect.top + borderTop + paddingTop,
+    toolbarRect,
+    borderLeft,
+    borderTop,
+    paddingLeft,
+    paddingTop,
+    columns,
+    cellWidth: sampleRect.width,
+    cellHeight: sampleRect.height,
+    columnGap,
+    rowGap,
+    scrollTop: els.toolbar.scrollTop,
+    maxIndex: Math.max(0, buttons.length - 1),
+  };
 }
-function commitToolbarToolMove(targetTool = null, placeAfter = true) {
-  const next = moveToolInOrder(toolbarToolIds(), toolbarDragToolId, targetTool, placeAfter);
+function toolbarDropIndexFromPointer(event) {
+  const metrics = toolbarGridMetrics();
+  if (!metrics) return 0;
+  return gridCellIndexFromPoint(
+    { x:event.clientX, y:event.clientY },
+    metrics,
+  );
+}
+function showToolbarDropSlot(index) {
+  const metrics = toolbarGridMetrics();
+  const marker = els.toolbar.querySelector('.toolbar-drop-slot');
+  if (!metrics || !marker) return;
+  const clamped = Math.max(0, Math.min(metrics.maxIndex, Math.round(index)));
+  toolbarDropIndex = clamped;
+  const row = Math.floor(clamped / metrics.columns);
+  const column = clamped % metrics.columns;
+  const viewportLeft = metrics.left + column * (metrics.cellWidth + metrics.columnGap);
+  const viewportTop = metrics.top - metrics.scrollTop + row * (metrics.cellHeight + metrics.rowGap);
+  marker.style.left = `${viewportLeft - metrics.toolbarRect.left + els.toolbar.scrollLeft}px`;
+  marker.style.top = `${viewportTop - metrics.toolbarRect.top + els.toolbar.scrollTop}px`;
+  marker.style.width = `${metrics.cellWidth}px`;
+  marker.style.height = `${metrics.cellHeight}px`;
+  marker.hidden = false;
+}
+function commitToolbarToolMoveToIndex(index) {
+  const next = moveToolToIndex(toolbarToolIds(), toolbarDragToolId, index);
   applyToolbarToolOrder(next);
   return persistToolbarToolOrder(next);
 }
 function initToolbarReorder() {
   readToolbarToolOrder();
-  els.toolbar.setAttribute('aria-label', 'Инструменты. Кнопки можно перетаскивать для изменения порядка.');
+  els.toolbar.setAttribute('aria-label', 'Инструменты. Кнопки можно перетаскивать в любую позицию панели.');
+  const marker = document.createElement('div');
+  marker.className = 'toolbar-drop-slot';
+  marker.hidden = true;
+  marker.setAttribute('aria-hidden', 'true');
+  els.toolbar.append(marker);
+
   for (const button of els.toolbar.querySelectorAll('.tool')) {
     button.draggable = true;
     button.setAttribute('aria-roledescription', 'перетаскиваемый инструмент');
@@ -242,33 +299,7 @@ function initToolbarReorder() {
         event.dataTransfer.effectAllowed = 'move';
         event.dataTransfer.setData('text/plain', `tool:${toolbarDragToolId}`);
       }
-      setStatus(`Перемещение инструмента «${TOOL_LABELS[toolbarDragToolId] || toolbarDragToolId}»`);
-    });
-    button.addEventListener('dragover', event => {
-      if (!toolbarDragToolId || toolbarDragToolId === button.dataset.tool) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-      clearToolbarDropTarget();
-      button.classList.add('tool-drop-target');
-      button.dataset.dropAfter = String(toolDropAfterPointer(button, event));
-    });
-    button.addEventListener('dragleave', event => {
-      if (event.relatedTarget && button.contains(event.relatedTarget)) return;
-      button.classList.remove('tool-drop-target');
-      delete button.dataset.dropAfter;
-    });
-    button.addEventListener('drop', event => {
-      if (!toolbarDragToolId || toolbarDragToolId === button.dataset.tool) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const movedLabel = TOOL_LABELS[toolbarDragToolId] || toolbarDragToolId;
-      const placeAfter = button.dataset.dropAfter === 'true' || toolDropAfterPointer(button, event);
-      const saved = commitToolbarToolMove(button.dataset.tool, placeAfter);
-      clearToolbarDropTarget();
-      setStatus(saved
-        ? `Инструмент «${movedLabel}» перемещён. Порядок сохранён.`
-        : `Инструмент «${movedLabel}» перемещён, но браузер не разрешил сохранить порядок.`);
+      setStatus(`Перемещение инструмента «${TOOL_LABELS[toolbarDragToolId] || toolbarDragToolId}»: отпустите его в нужной ячейке панели`);
     });
     button.addEventListener('dragend', () => {
       button.classList.remove('tool-dragging');
@@ -277,21 +308,30 @@ function initToolbarReorder() {
       setTimeout(() => { suppressToolClick = false; }, 0);
     });
   }
+
   els.toolbar.addEventListener('dragover', event => {
-    if (!toolbarDragToolId || event.target.closest?.('.tool')) return;
+    if (!toolbarDragToolId) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    clearToolbarDropTarget();
-    els.toolbar.classList.add('tool-drop-at-end');
+    showToolbarDropSlot(toolbarDropIndexFromPointer(event));
+  });
+  els.toolbar.addEventListener('dragleave', event => {
+    if (!toolbarDragToolId) return;
+    const rect = els.toolbar.getBoundingClientRect();
+    const outside = event.clientX < rect.left || event.clientX > rect.right
+      || event.clientY < rect.top || event.clientY > rect.bottom;
+    if (outside) clearToolbarDropTarget();
   });
   els.toolbar.addEventListener('drop', event => {
-    if (!toolbarDragToolId || event.target.closest?.('.tool')) return;
+    if (!toolbarDragToolId) return;
     event.preventDefault();
+    event.stopPropagation();
     const movedLabel = TOOL_LABELS[toolbarDragToolId] || toolbarDragToolId;
-    const saved = commitToolbarToolMove(null, true);
+    const index = toolbarDropIndex >= 0 ? toolbarDropIndex : toolbarDropIndexFromPointer(event);
+    const saved = commitToolbarToolMoveToIndex(index);
     clearToolbarDropTarget();
     setStatus(saved
-      ? `Инструмент «${movedLabel}» перемещён в конец. Порядок сохранён.`
+      ? `Инструмент «${movedLabel}» перемещён в позицию ${index + 1}. Порядок сохранён.`
       : `Инструмент «${movedLabel}» перемещён, но браузер не разрешил сохранить порядок.`);
   });
 }

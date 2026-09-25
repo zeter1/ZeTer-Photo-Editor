@@ -54,7 +54,7 @@ button:disabled { opacity: .45; cursor: default; }
 .option-icon-button:active:not(:disabled) { background: #4f8cff28; border-color: #4f8cff66; }
 .option-icon-button:disabled { opacity: .35; cursor: not-allowed; }
 .workspace { display: grid; grid-template-columns: 86px minmax(0, 1fr) 286px; min-height: 0; }
-.toolbar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 40px; align-content: start; gap: 4px; padding: 7px; background: #1c1f25; border-right: 1px solid var(--line); overflow-y: auto; min-height: 0; scrollbar-width: thin; }
+.toolbar { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 40px; align-content: start; gap: 4px; padding: 7px; background: #1c1f25; border-right: 1px solid var(--line); overflow-y: auto; min-height: 0; scrollbar-width: thin; }
 .tool { position: relative; min-width: 32px; min-height: 40px; display: grid; place-items: center; border-radius: 8px; background: transparent; color: #c9d1dd; font-size: 17px; }
 .tool small { position: absolute; right: 3px; bottom: 1px; max-width: 18px; overflow: hidden; font-size: 8px; line-height: 1; color: var(--muted); }
 .tool:hover { background: #ffffff10; }
@@ -62,8 +62,7 @@ button:disabled { opacity: .45; cursor: default; }
 .tool[draggable="true"]:active { cursor: grabbing; }
 .tool.active { background: #4f8cff2c; color: #f4f8ff; outline: 1px solid #4f8cff88; }
 .tool.tool-dragging { opacity: .38; transform: scale(.94); }
-.tool.tool-drop-target { background: #4f8cff20; outline: 2px dashed #8fb5ff; outline-offset: -2px; }
-.toolbar.tool-drop-at-end { box-shadow: inset 0 -3px 0 #4f8cffaa; }
+.toolbar-drop-slot { position: absolute; z-index: 4; box-sizing: border-box; border: 2px dashed #8fb5ff; border-radius: 8px; background: #4f8cff24; box-shadow: inset 0 0 0 1px #4f8cff55; pointer-events: none; }
 .tool-tooltip { position: fixed; z-index: 1000; width: min(310px, calc(100vw - 20px)); padding: 11px 12px 10px; border: 1px solid #556176; border-radius: 9px; background: #11151df5; color: #edf3ff; box-shadow: 0 12px 32px #000a; pointer-events: none; white-space: normal; }
 .tool-tooltip strong { display: block; margin-bottom: 5px; color: #fff; font-size: 13px; }
 .tool-tooltip span { display: block; color: #c5cfde; font-size: 12px; line-height: 1.42; }

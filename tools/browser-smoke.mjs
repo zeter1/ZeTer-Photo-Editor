@@ -313,18 +313,35 @@ async function runSmoke() {
 
     const toolbarBefore = await evaluate(client, `[...document.querySelectorAll('.toolbar .tool')].map(button => button.dataset.tool)`);
     assert(toolbarBefore.length > 3, 'Toolbar must expose draggable tools', JSON.stringify(toolbarBefore));
-    const persistedToolbarOrder = [toolbarBefore.at(-1), ...toolbarBefore.slice(0, -1)];
-    await evaluate(client, `(() => {
-      localStorage.setItem('zeter-photo-editor.tool-order.v1', JSON.stringify(${JSON.stringify(persistedToolbarOrder)}));
-      document.documentElement.dataset.appReady = 'reloading';
-      location.reload();
-      return true;
+    const dragResult = await evaluate(client, `(() => {
+      const toolbar=document.querySelector('.toolbar');
+      const tools=[...toolbar.querySelectorAll('.tool')];
+      const source=tools.at(-1);
+      const first=tools[0].getBoundingClientRect();
+      const second=tools[1].getBoundingClientRect();
+      const gapX=(first.right+second.left)/2;
+      const gapY=first.top+first.height/2;
+      const gapTarget=document.elementFromPoint(gapX,gapY);
+      const dt=new DataTransfer();
+      source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:source.getBoundingClientRect().left+4,clientY:source.getBoundingClientRect().top+4}));
+      gapTarget.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:gapX,clientY:gapY}));
+      gapTarget.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:gapX,clientY:gapY}));
+      source.dispatchEvent(new DragEvent('dragend',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:gapX,clientY:gapY}));
+      return {
+        gapTargetClass:gapTarget.className,
+        gapTargetIsToolbar:gapTarget===toolbar,
+        source:source.dataset.tool,
+        order:[...toolbar.querySelectorAll('.tool')].map(button=>button.dataset.tool),
+        saved:JSON.parse(localStorage.getItem('zeter-photo-editor.tool-order.v1')||'null'),
+      };
     })()`);
-    await waitFor('persisted toolbar order after reload', async () => evaluate(client, `document.documentElement?.dataset.appReady === 'true'
-      && document.querySelector('.toolbar .tool')?.dataset.tool === ${JSON.stringify(persistedToolbarOrder[0])}
-      && [...document.querySelectorAll('.toolbar .tool')].every(button => button.draggable)`));
-    const toolbarAfter = await evaluate(client, `[...document.querySelectorAll('.toolbar .tool')].map(button => button.dataset.tool)`);
-    assert(JSON.stringify(toolbarAfter) === JSON.stringify(persistedToolbarOrder), 'Toolbar order must survive reload', JSON.stringify({ toolbarBefore, toolbarAfter, persistedToolbarOrder }));
+    const expectedDraggedOrder = [toolbarBefore[0], toolbarBefore.at(-1), ...toolbarBefore.slice(1, -1)];
+    assert(dragResult.gapTargetIsToolbar === true, 'Regression setup must drop into the empty gap between grid cells', JSON.stringify(dragResult));
+    assert(JSON.stringify(dragResult.order) === JSON.stringify(expectedDraggedOrder), 'Dropping into a toolbar gap must place the tool in that exact grid slot', JSON.stringify({toolbarBefore,dragResult,expectedDraggedOrder}));
+    assert(JSON.stringify(dragResult.saved) === JSON.stringify(expectedDraggedOrder), 'Drag/drop toolbar order must persist immediately', JSON.stringify(dragResult));
+    await evaluate(client, `document.documentElement.dataset.appReady='reloading'; location.reload(); true`);
+    await waitFor('persisted dragged toolbar order after reload', async () => evaluate(client, `document.documentElement?.dataset.appReady === 'true'
+      && JSON.stringify([...document.querySelectorAll('.toolbar .tool')].map(button => button.dataset.tool)) === ${JSON.stringify(JSON.stringify(expectedDraggedOrder))}`));
     assertNoBrowserErrors(errors, stderrState);
 
     await evaluate(client, `document.querySelector('#addRasterBtn').click(); true`);
