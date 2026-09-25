@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import {
   createPixelBuffer, clonePixelBuffer,
   applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab,
-  applyCmykPixelBufferBlurDab, applyCmykPixelBufferCloneDab, applyCmykPixelBufferSmudgeDab,
+  applyCmykPixelBufferToneDab, applyCmykPixelBufferBlurDab, applyCmykPixelBufferCloneDab, applyCmykPixelBufferSmudgeDab,
   serializePixelBufferSource, deserializePixelBufferSource,
 } from '../src/core/pixel-buffer.js';
 
@@ -100,7 +100,8 @@ test('Stage 12f retouch result survives canonical high-depth source serializatio
 
 test('Stage 12f routes blur, clone, heal, smudge, dodge and burn through native high-depth paint state',()=>{
   assert.match(main,/NATIVE_HIGH_DEPTH_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
-  assert.match(main,/applyPixelBufferToneDab\(highDepthPaintBuffer/);
+  assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferToneDab:applyPixelBufferToneDab/);
+  assert.match(main,/changed=fn\(highDepthPaintBuffer,point\.x,point\.y/);
   assert.match(main,/applyCmykPixelBufferBlurDab:applyPixelBufferBlurDab/);
   assert.match(main,/applyCmykPixelBufferCloneDab:applyPixelBufferCloneDab/);
   assert.match(main,/applyCmykPixelBufferSmudgeDab:applyPixelBufferSmudgeDab/);
@@ -165,10 +166,37 @@ test('Stage 13c CMYK smudge transports native ink samples without RGB conversion
   assert.equal(buffer.data[9],1);
 });
 
-test('Stage 13c routes blur, clone/heal and smudge natively for CMYK while keeping Dodge/Burn guarded',()=>{
-  assert.match(main,/NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge'\]\)/);
+test('Stage 13c CMYK Dodge/Burn edits native ink density without changing alpha or quantizing to RGB8',()=>{
+  const dodge=createPixelBuffer({
+    width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:16,colorSpace:'device-cmyk',alphaMode:'straight',
+    data:new Uint16Array([21001,32003,43007,18011,50001]),
+  });
+  const coverage={width:1,tiles:new Map()};
+  const changedDodge=applyCmykPixelBufferToneDab(dodge,.5,.5,1,.5,{brighten:true,strokeCoverage:coverage});
+  assert.equal(changedDodge,1);
+  assert.ok(dodge.data[0]<21001&&dodge.data[1]<32003&&dodge.data[2]<43007&&dodge.data[3]<18011);
+  assert.equal(dodge.data[4],50001);
+  assert.ok([...dodge.data.slice(0,4)].some(value=>value%257!==0));
+  const afterFirst=[...dodge.data];
+  for(let n=0;n<6;n+=1)applyCmykPixelBufferToneDab(dodge,.5,.5,1,.5,{brighten:true,strokeCoverage:coverage});
+  assert.deepEqual([...dodge.data],afterFirst);
+
+  const burn=createPixelBuffer({
+    width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:32,colorSpace:'device-cmyk',alphaMode:'straight',
+    data:new Float32Array([.6,.2,.1,.15,.75]),
+  });
+  const changedBurn=applyCmykPixelBufferToneDab(burn,.5,.5,1,.4,{brighten:false,strokeCoverage:{width:1,tiles:new Map()}});
+  assert.equal(changedBurn,1);
+  assert.ok(burn.data[3]>.15);
+  assert.ok(Math.abs(burn.data[0]-.6)<1e-6&&Math.abs(burn.data[1]-.2)<1e-6&&Math.abs(burn.data[2]-.1)<1e-6);
+  assert.equal(burn.data[4],Math.fround(.75));
+});
+
+test('Stage 13c routes the full CMYK retouch set through native typed buffers',()=>{
+  assert.match(main,/NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
   assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferBlurDab/);
   assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferCloneDab/);
   assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferSmudgeDab/);
-  assert.match(main,/native CMYK source сохранён без изменений/);
+  assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferToneDab:applyPixelBufferToneDab/);
+  assert.doesNotMatch(main,/CMYK Dodge\/Burn Stage 13c пока не реализован/);
 });

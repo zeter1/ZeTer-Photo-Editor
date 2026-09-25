@@ -5,7 +5,7 @@
 ### 2026-09-25 — Native CMYK Editing + Full Proofing Path Stage 13c
 
 - Native CMYK editing: Brush, Eraser, Fill, Clear и Line теперь изменяют canonical 4/5-channel CMYK PixelBuffer напрямую и сохраняют исходную 8/16/32-bit channel precision вместо растрирования display preview в RGB.
-- CMYK retouch: Blur, Clone, Healing и Smudge получили typed ink-space path с selection/opacity semantics; Clone/Heal используют immutable source snapshot. Dodge/Burn для native CMYK пока fail-safe блокируются без уничтожения source.
+- CMYK retouch: Blur, Clone, Healing, Smudge, Dodge и Burn работают в typed ink-space с selection/stroke-coverage semantics; Clone/Heal используют immutable source snapshot, Dodge уменьшает C/M/Y/K ink density, а Burn добавляет нейтральное затемнение через K без RGB rasterization.
 - CMYK compositing: compositeCmykPixelBufferLayers() поддерживает компонентные Normal/Multiply/Screen/Overlay/Darken/Lighten/Color Dodge/Color Burn semantics, layer opacity и bitmap masks без RGB round-trip.
 - ICC MPE: multiProcessElementsType дополнен cvst/curf curve-set parsing с formula/sample segments и bounded validation; device→PCS и PCS→device MPE теперь явно проверяют channel contracts.
 - ICC output transforms: добавлены B2D*/B2A*, lutBToAType (mBA) и profile-managed sRGB→CMYK conversion для цветов кисти в native ink-space.

@@ -1703,6 +1703,38 @@ function cmykNeighborhoodMean(buffer,centerX,centerY,radius=3) {
   }
   return weight>1e-9?sum.map(value=>value/weight):[0,0,0,0];
 }
+function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount,{brighten=true,isAllowed=null,strokeCoverage=null}={}) {
+  validateCmykEditBuffer(buffer,'CMYK tone brush');
+  const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
+  if(strength<=0)return 0;
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  let changed=0;
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const offset=(y*buffer.width+x)*buffer.channels;
+    if(cmykPixelAlpha01(buffer,offset)<=0)continue;
+    const increment=retouchStrokeIncrement(strokeCoverage,x,y,strength*highDepthBrushFalloff(distance,brushRadius));
+    if(increment<=0)continue;
+    const factor=2**(-increment);
+    let pixelChanged=false;
+    if(brighten){
+      for(let channel=0;channel<4;channel+=1){
+        const current=clampPreview01(normalizedSample(buffer,offset+channel));
+        const next=current*factor;
+        if(Math.abs(next-current)>1e-12){writeNormalizedSample(buffer,offset+channel,next);pixelChanged=true;}
+      }
+    }else{
+      const current=clampPreview01(normalizedSample(buffer,offset+3));
+      const next=1-(1-current)*factor;
+      if(Math.abs(next-current)>1e-12){writeNormalizedSample(buffer,offset+3,next);pixelChanged=true;}
+    }
+    if(pixelChanged)changed+=1;
+  }
+  return changed;
+}
 function applyCmykPixelBufferBlurDab(buffer,centerX,centerY,radius,amount,{sampleRadius=3,isAllowed=null,strokeCoverage=null}={}) {
   validateCmykEditBuffer(buffer,'CMYK blur');
   const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
@@ -7201,7 +7233,7 @@ const RASTER_EFFECT_CONTROLS = [
 const UI_COLLAPSE_STORAGE_KEY = 'zeter-photo-editor.ui-collapse.v1';
 const SMART_SNAP_STORAGE_KEY = 'zeter-photo-editor.smart-snap.v1';
 const NATIVE_HIGH_DEPTH_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
-const NATIVE_CMYK_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge']);
+const NATIVE_CMYK_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
 const collapsedPanelIds = new Set();
 let doc = createDocument();
 let history = new HistoryStack(80);
@@ -9060,7 +9092,7 @@ function updateProperties() {
       const intentOptions=[['perceptual','Perceptual'],['relative','Relative colorimetric'],['saturation','Saturation'],['absolute','Absolute colorimetric']];
       const intentSelect=intentOptions.map(([value,label])=>`<option value="${value}"${policy.renderingIntent===value?' selected':''}>${label}</option>`).join('');
       const proofName=doc.proofProfile?.name||'не выбран';
-      extra = `<label>Нативный источник</label><span>${source.bitsPerChannel}-bit CMYK · ${sizeMb} МБ</span><label>Rendering intent</label><select data-cmyk-rendering-intent>${intentSelect}</select><label>Display space</label><span>${policy.displaySpace.toUpperCase()}</span><label>Soft proof</label><span><input type="checkbox" data-cmyk-soft-proof${policy.softProofEnabled?' checked':''}${doc.proofProfile?'':' disabled'}> ${escapeHtml(proofName)}</span><label>Black Point Compensation</label><span><input type="checkbox" data-cmyk-bpc${policy.blackPointCompensation?' checked':''}> ICC BPC</span><label>Proof ICC</label><input type="file" accept=".icc,.icm,application/vnd.iccprofile" data-cmyk-proof-file><div class="wide"><button type="button" class="mini-button" data-cmyk-proof-remove${doc.proofProfile?'':' disabled'}>Удалить proof profile</button></div><label>Color management</label><span>ICC A2B/D2B/mAB/MPE/cvst → profile-to-profile soft proof → sRGB display</span><label>Редактирование</label><span>Brush, Eraser, Fill, Clear, Line, Blur, Clone/Heal и Smudge сохраняют native CMYK source; Dodge/Burn пока блокируются без растрирования native source</span>`;
+      extra = `<label>Нативный источник</label><span>${source.bitsPerChannel}-bit CMYK · ${sizeMb} МБ</span><label>Rendering intent</label><select data-cmyk-rendering-intent>${intentSelect}</select><label>Display space</label><span>${policy.displaySpace.toUpperCase()}</span><label>Soft proof</label><span><input type="checkbox" data-cmyk-soft-proof${policy.softProofEnabled?' checked':''}${doc.proofProfile?'':' disabled'}> ${escapeHtml(proofName)}</span><label>Black Point Compensation</label><span><input type="checkbox" data-cmyk-bpc${policy.blackPointCompensation?' checked':''}> ICC BPC</span><label>Proof ICC</label><input type="file" accept=".icc,.icm,application/vnd.iccprofile" data-cmyk-proof-file><div class="wide"><button type="button" class="mini-button" data-cmyk-proof-remove${doc.proofProfile?'':' disabled'}>Удалить proof profile</button></div><label>Color management</label><span>ICC A2B/D2B/mAB/MPE/cvst → profile-to-profile soft proof → sRGB display</span><label>Редактирование</label><span>Brush, Eraser, Fill, Clear, Line, Blur, Clone/Heal, Smudge и Dodge/Burn сохраняют native CMYK source; Dodge уменьшает ink density, Burn усиливает K без RGB rasterization</span>`;
     }else if(Number(source.bitsPerChannel)>8){
       const preview=sanitizeHighDepthPreview(l.highDepthPreview);
       const resolvedAuto=source.bitsPerChannel===32?'ACES':'Clip';
@@ -9951,7 +9983,8 @@ function markNativeHighDepthRetouchChanged(changed){
 function applyNativeHighDepthToneDab(layer,point,pointerEvent=null,brighten=true){
   if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer)return false;
   const strength=Number(brighten?els.dodgeStrength.value:els.burnStrength.value)/100;
-  const changed=applyPixelBufferToneDab(highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),strength,{brighten,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:drag?.toneCoverage});
+  const fn=highDepthPaintBuffer.model==='cmyk'?applyCmykPixelBufferToneDab:applyPixelBufferToneDab;
+  const changed=fn(highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),strength,{brighten,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:drag?.toneCoverage});
   return markNativeHighDepthRetouchChanged(changed);
 }
 
@@ -10143,11 +10176,6 @@ async function clearSelectedPixels({ historyLabel = 'Очистить выдел
 
 async function ensurePaintLayer(point, canContinue = () => true) {
   let l = selected();
-  if(l?.highDepthSource?.model==='cmyk'&&['dodge','burn'].includes(currentTool)){
-    setStatus('CMYK Dodge/Burn Stage 13c пока не реализован: native CMYK source сохранён без изменений');
-    toast('Dodge/Burn для native CMYK пока недоступны — исходные каналы не растрированы','warn');
-    return null;
-  }
   const rasterAtPoint = paintLayerAtPoint(point);
 
   if (['eraser','blur','clone','heal','smudge','dodge','burn'].includes(currentTool)) {
@@ -10167,11 +10195,6 @@ async function ensurePaintLayer(point, canContinue = () => true) {
     addLayer(doc,l);
   }
 
-  if(l?.highDepthSource?.model==='cmyk'&&['dodge','burn'].includes(currentTool)){
-    setStatus('CMYK Dodge/Burn Stage 13c пока не реализован: native CMYK source сохранён без изменений');
-    toast('Dodge/Burn для native CMYK пока недоступны — исходные каналы не растрированы','warn');
-    return null;
-  }
   const nativeModel=l.highDepthSource?.model;
   const nativeToolSupported=nativeModel==='cmyk'?NATIVE_CMYK_PAINT_TOOLS.has(currentTool):NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(currentTool);
   const nativeHighDepth=l.highDepthSource&&nativeToolSupported
