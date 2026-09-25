@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { decodePsd } from '../src/adapters/psd.js';
+import { decodePsd } from '../src/formats/psd.js';
 
 const root=new URL('./fixtures/photoshop-fills/',import.meta.url);
 async function bytes(name){return new Uint8Array(await readFile(new URL(name,root)));}

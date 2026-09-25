@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createDocument, createTextLayer, sanitizeProject } from '../src/core/state.js';
 import { bytesToDataUrl } from '../src/core/io.js';
-import { decodePsd, encodePsd, encodePsb, rewriteTypeToolText } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, encodePsb, rewriteTypeToolText } from '../src/formats/psd.js';
 
 const root=new URL('./fixtures/photoshop-text/',import.meta.url);
 async function bytes(name){return new Uint8Array(await readFile(new URL(name,root)));}

@@ -1,0 +1,63 @@
+# Architecture boundaries
+
+These rules keep the project understandable and prevent the large app controller from absorbing every new concern.
+
+## Allowed direction
+
+```text
+index.html / styles
+        ↓
+src/main.js  ─────→  src/ui/*
+    ↓   ↓
+src/core/*  ←────  src/formats/*
+        ↓
+browser primitives (Canvas, Worker, storage, File APIs)
+```
+
+## Rules
+
+### UI
+- `src/ui/tool-config.js`: pure configuration only.
+- `src/ui/tool-layout.js`: pure layout/order math only.
+- DOM mutation, global event wiring and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API.
+- UI modules must not become alternate owners of document/layer domain state.
+
+### Core
+- Core modules should not know about menu labels, DOM selectors or CSS classes.
+- Pixel/color/render code owns math and data transforms, not dialogs or toasts.
+- State sanitization remains the gate for persisted/untrusted project structures.
+
+### Formats
+- `src/formats/psd.js` may depend on core data contracts such as PixelBuffer.
+- Core modules must not depend on PSD-specific binary layout.
+- Photoshop-specific byte preservation/rewrite belongs in the format boundary.
+- `src/adapters/psd.js` is a compatibility shim only.
+
+### Generated files
+- `src/app.bundle.js` has no independent logic ownership.
+- Source changes must be made in canonical modules and regenerated.
+- CI's generated-bundle diff is an architecture check, not noise to suppress.
+
+### Compatibility shims
+- Legacy paths may re-export canonical modules while migrations settle.
+- Do not add implementation, state or tests that target shim internals.
+- New imports use canonical paths.
+
+## Extraction rule for src/main.js
+
+Extract only when a section has a clear owner and API. Prefer this sequence:
+1. pure constants/config;
+2. pure helpers;
+3. controller with explicit dependencies/callbacks;
+4. stateful subsystem only after regression coverage exists.
+
+Do not move code merely to reduce line count if it increases hidden coupling.
+
+## Change checklist
+
+Before moving a boundary:
+- locate direct imports and source-contract tests;
+- preserve `file://` bundle order;
+- keep compatibility only where it prevents avoidable breakage;
+- add/adjust a regression test for the new boundary;
+- run `npm run check` and `npm run test:browser` when runtime/bootstrap paths changed.

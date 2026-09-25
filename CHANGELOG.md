@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-26T00:07:00+03:00 — Архитектурный рефакторинг и AI-friendly карта проекта
+
+- Refactor: чистая UI-конфигурация вынесена из большого `src/main.js` в `src/ui/tool-config.js`; toolbar layout получил канонический путь `src/ui/tool-layout.js`.
+- Architecture: PSD/PSB boundary перенесён в канонический `src/formats/psd.js`; старые `src/adapters/psd.js` и `src/core/tool-layout.js` оставлены только как маленькие compatibility shims, чтобы не ломать внешние/старые импорты.
+- Build: `tools/build-bundle.mjs` собирает bundle только из канонических модулей; `src/app.bundle.js` синхронизирован с новым source graph.
+- Tests: PSD regression-suite читает канонический format module; добавлен architecture regression, который защищает новые границы и не даёт случайно вернуть implementation в legacy paths.
+- Docs/AI: `docs/PROJECT.md` превращён в короткую точку входа, подробная прежняя инженерная летопись сохранена в `docs/reference/PROJECT_HISTORY.md`; добавлены code map, boundaries, AI workflow и test matrix для быстрого поиска нужной части проекта с меньшим контекстом.
+
+
 ### 2026-09-25T23:11:00+03:00 — Исправлено точное размещение инструментов при перетаскивании
 
 - Fixed: drop больше не зависит от попадания именно по кнопке инструмента; пустые промежутки и свободные ячейки двухколоночной панели теперь вычисляются как реальные позиции сетки.

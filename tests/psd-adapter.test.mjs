@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodePsd, encodePsd, encodePsdBlob, encodePsb, encodePsbBlob, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, encodePsdBlob, encodePsb, encodePsbBlob, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/formats/psd.js';
 import { readFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import { createPixelBuffer, pixelBufferToRgba8Preview } from '../src/core/pixel-buffer.js';
 
 const encoder = new TextEncoder();
-const psdSource = await readFile(new URL('../src/adapters/psd.js', import.meta.url), 'utf8');
+const psdSource = await readFile(new URL('../src/formats/psd.js', import.meta.url), 'utf8');
 
 function concat(parts) {
   const size = parts.reduce((sum, part) => sum + part.length, 0);

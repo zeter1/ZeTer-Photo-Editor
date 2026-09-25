@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createDocument, createShapeLayer, sanitizeProject } from '../src/core/state.js';
 import { bytesToDataUrl } from '../src/core/io.js';
-import { decodePsd, encodePsd, encodePsb, rewritePsdShapeStyle } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, encodePsb, rewritePsdShapeStyle } from '../src/formats/psd.js';
 
 const root=new URL('./fixtures/photoshop-shapes/',import.meta.url);
 async function bytes(name){return new Uint8Array(await readFile(new URL(name,root)));}

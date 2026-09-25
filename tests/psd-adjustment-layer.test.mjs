@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { decodePsd, encodePsd, encodePsb, rewritePsdAdjustmentBlocks } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, encodePsb, rewritePsdAdjustmentBlocks } from '../src/formats/psd.js';
 
 const root=new URL('./fixtures/photoshop-adjustments/',import.meta.url);
 const fixtureBytes=name=>readFile(new URL(name,root)).then(buffer=>new Uint8Array(buffer));

@@ -9,7 +9,7 @@ import {
   inspectDisplayIccProfile,
   cmykPixelBufferToRgba8Preview,
 } from '../src/core/color-management.js';
-import { decodePsd, encodePsd, inspectPsdHeader } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, inspectPsdHeader } from '../src/formats/psd.js';
 
 const fixtureRoot=new URL('./fixtures/color-management/',import.meta.url);
 

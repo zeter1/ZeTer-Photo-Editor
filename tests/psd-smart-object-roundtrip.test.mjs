@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createSmartObjectLayer, createDocument, sanitizeProject } from '../src/core/state.js';
 import { bytesToDataUrl } from '../src/core/io.js';
-import { decodePsd, encodePsd, encodePsb, inspectPsdHeader, rewriteEmbeddedLinkedLayerAsset } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, encodePsb, inspectPsdHeader, rewriteEmbeddedLinkedLayerAsset } from '../src/formats/psd.js';
 
 const root=new URL('./fixtures/photoshop-smart-objects/',import.meta.url);
 async function bytes(name){return new Uint8Array(await readFile(new URL(name,root)));}

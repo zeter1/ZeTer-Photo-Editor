@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
-const adapter=await readFile(new URL('../src/adapters/psd.js',import.meta.url),'utf8');
+const adapter=await readFile(new URL('../src/formats/psd.js',import.meta.url),'utf8');
 
 test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
   assert.match(main,/import \{[^}]*decodePsd[^}]*encodePsdBlob[^}]*encodePsbBlob[^}]*isPsdFile[^}]*\} from '\.\/adapters\/psd\.js'/);
