@@ -3,7 +3,6 @@
 [![CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml/badge.svg)](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml)
 
 **Онлайн-версия:** https://dkl.do.am/servisi/PhotoEditor/index.html  
-**GitHub:** https://github.com/zeter1/ZeTer-Photo-Editor
 
 ZeTer Photo Editor — браузерный графический редактор со слоями, историей действий и Canvas 2D-рендером. Он работает как онлайн, так и локально через обычный `index.html`. Редактор вдохновлён рабочим процессом Photopea / Photoshop, но остаётся самостоятельным приложением. Пользовательские изображения обрабатываются в браузере и для обычной работы не требуют загрузки на внешний сервер.
 
