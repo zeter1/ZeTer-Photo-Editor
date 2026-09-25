@@ -37,9 +37,9 @@ test("tabs UI styles keep the add button directly after the last tab", () => {
 test("smart object content tabs link to parent sessions and save back through parent history", () => {
   assert.match(main, /smartObjectLink: smartObjectLink \? \{ \.\.\.smartObjectLink \} : null/);
   assert.match(main, /function openSmartObjectContents\(/);
-  assert.match(main, /smartObjectLink:\{parentSessionId,layerId:layer\.id\}/);
+  assert.match(main, /smartObjectLink:\{parentSessionId,layerId:layer\.id,linkedSourceId\}/);
   assert.match(main, /function saveSmartObjectContent\(/);
-  assert.match(main, /parentSession\.history\.push\('Обновить смарт-объект'/);
+  assert.match(main, /parentSession\.history\.push\(liveTargets\.length>1\?'Обновить связанные смарт-объекты':'Обновить смарт-объект'/);
   assert.match(main, /parentSession\.dirty=true/);
   assert.match(main, /session\.dirty=false;dirty=false/);
 });
