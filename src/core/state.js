@@ -1,6 +1,7 @@
 import { clamp } from './geometry.js';
 import { sanitizeLayerStyles } from './layer-styles.js';
 import { sanitizeSerializedPixelBufferSource } from './pixel-buffer.js';
+import { sanitizeAdjustmentModel } from './adjustments.js';
 
 let layerCounter = 0;
 const uid = (prefix = 'layer') => `${prefix}-${Date.now().toString(36)}-${(++layerCounter).toString(36)}`;
@@ -165,6 +166,8 @@ export function createSmartFilterMask(overrides = {}) {
 export function createAdjustmentLayer(overrides = {}) {
   return baseLayer('adjustment', {
     name: 'Корректирующий слой',
+    adjustment: null,
+    psdAdjustment: null,
     width: 1,
     height: 1,
     ...overrides,
@@ -931,6 +934,34 @@ function sanitizePsdShape(value) {
   };
 }
 
+const PSD_ADJUSTMENT_BLOCK_KEYS = new Set(['brit','CgEd','expA','hue2','hue ','levl','curv']);
+const MAX_PSD_ADJUSTMENT_DATA_URL_CHARS = 6_000_000;
+
+function sanitizePsdAdjustment(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const kind=['brightness-contrast','exposure','hue-saturation','levels','curves'].includes(value.kind)?value.kind:null;
+  if(!kind)return null;
+  const blocks=(Array.isArray(value.blocks)?value.blocks:[])
+    .slice(0,12)
+    .map(block=>{
+      if(!block||typeof block!=='object'||Array.isArray(block))return null;
+      const key=shortText(block.key,'',4);
+      if(!PSD_ADJUSTMENT_BLOCK_KEYS.has(key))return null;
+      const dataUrl=typeof block.dataUrl==='string'&&block.dataUrl.length<=MAX_PSD_ADJUSTMENT_DATA_URL_CHARS&&/^data:application\/octet-stream;base64,[a-z\d+/=]*$/i.test(block.dataUrl)
+        ? block.dataUrl:null;
+      if(!dataUrl)return null;
+      return{signature:block.signature==='8B64'?'8B64':'8BIM',key,dataUrl};
+    })
+    .filter(Boolean);
+  if(!blocks.length)return null;
+  const baseline=sanitizeAdjustmentModel(value.baseline);
+  if(!baseline||baseline.kind!==kind)return null;
+  const channelIds=Array.isArray(value.channelIds)
+    ? value.channelIds.slice(0,16).map(id=>Math.trunc(bounded(id,0,-32768,32767)))
+    : [];
+  return{kind,blocks,baseline,channelIds};
+}
+
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -1004,6 +1035,8 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     result.scaleX = 1;
     result.scaleY = 1;
     result.rotation = 0;
+    result.adjustment = sanitizeAdjustmentModel(layer?.adjustment);
+    result.psdAdjustment = sanitizePsdAdjustment(layer?.psdAdjustment);
   } else {
     result.shape = ['rect', 'ellipse', 'line', 'path'].includes(layer?.shape) ? layer.shape : 'rect';
     result.fill = shortText(layer?.fill, '#4f8cff', 64);

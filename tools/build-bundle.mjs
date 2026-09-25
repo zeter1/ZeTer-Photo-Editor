@@ -11,6 +11,7 @@ const sources = [
   'src/core/color-management.js',
   'src/core/recovery.js',
   'src/core/layer-styles.js',
+  'src/core/adjustments.js',
   'src/core/state.js',
   'src/core/color.js',
   'src/core/pixel-worker.js',

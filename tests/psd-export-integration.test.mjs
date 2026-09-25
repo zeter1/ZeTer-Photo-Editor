@@ -301,3 +301,18 @@ test('Stage 15d wires solid shape descriptor rewrite plus gradient/pattern fill 
   assert.match(main,/GdFl\/PtFl metadata/);
 });
 
+test('Stage 16a wires Photoshop adjustment records into semantic ZPE layers and native PSD/PSB round-trip',()=>{
+  assert.match(adapter,/PSD_ADJUSTMENT_LAYER_KEYS = new Set\(\['brit','CgEd','expA','hue2','hue ','levl','curv'\]\)/);
+  assert.match(adapter,/function parsePsdAdjustmentBlocks\(/);
+  assert.match(adapter,/export function rewritePsdAdjustmentBlocks\(/);
+  assert.match(adapter,/const adjustmentLayers = \[\]/);
+  assert.match(adapter,/writeAdjustmentLayerExtras\(extra, layer, version\)/);
+  assert.match(main,/importPsdAdjustmentMetadata/);
+  assert.match(main,/psdAdjustmentNativePlan/);
+  assert.match(main,/adjustmentSources/);
+  assert.match(main,/createAdjustmentLayer\(\{/);
+  assert.match(main,/needsAdjustmentRasterFallback/);
+  assert.match(main,/psdAdjustment:nativeAdjustment\.metadata/);
+  assert.match(main,/Stage 16a: .*adjustment layer/);
+});
+

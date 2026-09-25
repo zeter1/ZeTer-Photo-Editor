@@ -13,7 +13,8 @@ import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBuffer
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
-import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText, rewritePsdShapeStyle } from './adapters/psd.js';
+import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustments.js';
+import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText, rewritePsdShapeStyle, rewritePsdAdjustmentBlocks } from './adapters/psd.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -1946,13 +1947,16 @@ function updateProperties() {
   els.props.className = 'panel-content';
   if (l.type === 'adjustment') {
     const maskLabel=layerMaskSummary(l);
+    const kindLabel=l.adjustment?.kind||'Generic ZPE';
     els.props.innerHTML = `<div class="prop-grid">
       <label>Имя</label><input data-prop="name" value="${escapeAttr(l.name)}">
-      <label>Тип</label><span>Корректирующий слой</span>
+      <label>Тип</label><span>Корректирующий слой · ${escapeHtml(kindLabel)}</span>
       <label>Область</label><span>Нижележащий стек</span>
       <label>Маски</label><span>${escapeHtml(maskLabel)}</span>
+      ${adjustmentPropertiesMarkup(l)}
     </div>`;
     bindPropertyInputs(els.props);
+    bindAdjustmentControls(els.props,l);
     if (isLayerLocked(doc,l)) els.props.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
     return;
   }
@@ -4005,6 +4009,78 @@ function psdTextNativePlan(layer){
   }
 }
 
+function importPsdAdjustmentMetadata(source,adjustment) {
+  if(!source?.blocks?.length||!adjustment)return null;
+  return{
+    kind:adjustment.kind,
+    blocks:source.blocks.map(psdOpaqueBlockToState).filter(Boolean),
+    baseline:structuredClone(sanitizeAdjustmentModel(adjustment)),
+    channelIds:Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[],
+  };
+}
+
+function psdAdjustmentNativePlan(layer) {
+  const source=layer?.psdAdjustment;
+  const adjustment=sanitizeAdjustmentModel(layer?.adjustment);
+  if(layer?.type!=='adjustment'||!source||!adjustment)return{eligible:false,reason:'нет imported Photoshop adjustment metadata',metadata:null};
+  if(source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
+  if(layer.mask?.dataUrl)return{eligible:false,reason:'raster adjustment mask пока требует composite fallback',metadata:null};
+  if(layer.styles)return{eligible:false,reason:'layer styles на adjustment layer требуют composite fallback',metadata:null};
+  const filters=sanitizeFilters(layer.filters);
+  if(Object.keys(DEFAULT_LAYER_FILTERS).some(key=>Math.abs(Number(filters[key])-Number(DEFAULT_LAYER_FILTERS[key]))>1e-9)){
+    return{eligible:false,reason:'дополнительные ZPE filters не кодируются в Photoshop adjustment record',metadata:null};
+  }
+  if(adjustment.kind==='curves'&&!adjustmentModelEqual(adjustment,source.baseline)){
+    return{eligible:false,reason:'Curves Stage 16a сохраняет native points, но editable curve writeback будет расширен отдельно',metadata:null};
+  }
+  try{
+    const blocks=(source.blocks||[]).map(block=>psdOpaqueBlockFromState(block,{maxBytes:4*1024*1024})).filter(Boolean);
+    const rewritten=rewritePsdAdjustmentBlocks(blocks,adjustment);
+    return{eligible:true,reason:null,metadata:{kind:adjustment.kind,blocks:rewritten.blocks,channelIds:Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[]}};
+  }catch(error){
+    return{eligible:false,reason:error?.message||String(error),metadata:null};
+  }
+}
+
+function adjustmentNumberField(label,key,value,min,max,step='1') {
+  return '<label>'+escapeHtml(label)+'</label><input type="number" min="'+min+'" max="'+max+'" step="'+step+'" value="'+Number(value)+'" data-adjustment-prop="'+escapeAttr(key)+'">';
+}
+
+function adjustmentPropertiesMarkup(layer) {
+  const value=sanitizeAdjustmentModel(layer?.adjustment);
+  if(!value)return'<label>Параметры</label><span>Generic ZPE filters</span>';
+  const native=layer.psdAdjustment?psdAdjustmentNativePlan(layer):null;
+  const nativeInfo=layer.psdAdjustment?'<label>Photoshop Adjustment</label><span>'+(native?.eligible?'native '+escapeHtml(value.kind)+' round-trip':'composite fallback: '+escapeHtml(native?.reason||'metadata unavailable'))+'</span>':'';
+  if(value.kind==='brightness-contrast')return adjustmentNumberField('Яркость','brightness',value.brightness,-150,150)+adjustmentNumberField('Контраст','contrast',value.contrast,-100,100)+nativeInfo;
+  if(value.kind==='exposure')return adjustmentNumberField('Exposure','exposure',value.exposure,-20,20,'0.05')+adjustmentNumberField('Offset','offset',value.offset,-2,2,'0.005')+adjustmentNumberField('Gamma','gamma',value.gamma,.1,10,'0.01')+nativeInfo;
+  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+nativeInfo;
+  if(value.kind==='levels'){
+    const master=value.master||{};
+    return adjustmentNumberField('Input black','master.inputBlack',master.inputBlack,0,253)+adjustmentNumberField('Input white','master.inputWhite',master.inputWhite,2,255)+adjustmentNumberField('Gamma','master.gamma',master.gamma,.1,9.99,'0.01')+adjustmentNumberField('Output black','master.outputBlack',master.outputBlack,0,255)+adjustmentNumberField('Output white','master.outputWhite',master.outputWhite,0,255)+nativeInfo;
+  }
+  if(value.kind==='curves'){
+    const summary=value.channels.length?value.channels.map(channel=>'ch '+channel.id+': '+channel.points.length+' points').join(', '):'identity/default curve';
+    return '<label>Curves</label><span>'+escapeHtml(summary)+'</span><label>Редактирование</label><span>Stage 16a: native points сохраняются; curve editor/writeback — следующий шаг</span>'+nativeInfo;
+  }
+  return nativeInfo;
+}
+
+function updateAdjustmentProperty(layer,path,raw) {
+  if(!layer||layer.type!=='adjustment'||isLayerLocked(doc,layer))return false;
+  const current=structuredClone(sanitizeAdjustmentModel(layer.adjustment));
+  if(!current)return false;
+  const value=Number(raw);if(!Number.isFinite(value))return false;
+  if(path.startsWith('master.')){if(!current.master)return false;current.master[path.split('.')[1]]=value;}else current[path]=value;
+  layer.adjustment=sanitizeAdjustmentModel(current);
+  markDirty(true);commit('Изменить Photoshop adjustment');return true;
+}
+
+function bindAdjustmentControls(root,layer) {
+  root?.querySelectorAll('[data-adjustment-prop]').forEach(input=>input.addEventListener('change',()=>{
+    if(!updateAdjustmentProperty(layer,input.dataset.adjustmentProp,input.value)){refreshInspectorPanels();setStatus('Некорректный параметр adjustment layer');}
+  }));
+}
+
 function psdPreviewFingerprint(dataUrl){
   const value=String(dataUrl||'');
   let hash=2166136261;
@@ -4202,6 +4278,9 @@ async function openPsd(file){
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
     if(parsed.fillLayers?.length)warnings.push(`Stage 15d: найдено ${parsed.fillLayers.length} Photoshop gradient/pattern fill layer(s); bounded GdFl/PtFl metadata разобраны, но canvas пока использует composite preview до editable fill renderer`);
+    if(parsed.adjustmentLayers?.length)warnings.push(`Stage 16a: найдено ${parsed.adjustmentLayers.length} Photoshop adjustment layer(s): Brightness/Contrast, Exposure, Hue/Saturation, Levels и Curves мапятся semantic-first`);
+    const adjustmentOnlyComposite=Boolean(parsed.adjustmentLayers?.length&&!parsed.layers.length&&parsed.compositePixelBuffer);
+    if(adjustmentOnlyComposite)warnings.push('Stage 16a: adjustment-only PSD не содержит base bitmap layers; используется composite preview, чтобы не применить adjustment повторно');
     const isCmyk=parsed.colorMode===4;
     const colorPolicy=sanitizeColorManagement(targetDocument.colorManagement);
     const sourceProfileBytes=parsed.iccProfile?.bytes||null,proofProfileBytes=colorProfileBytes(targetDocument.proofProfile),displayProfileBytes=colorProfileBytes(targetDocument.displayProfile);
@@ -4230,7 +4309,8 @@ async function openPsd(file){
     if(parsed.bitsPerChannel===32)warnings.push(`${modeLabel} 32-bit/channel декодирован в Float32 PixelBuffer; bounded native source сохраняется внутри .zpe`);
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
     const sourceGroups=new Map((parsed.groups||[]).map(group=>[group.key,group]));
-    const usedGroupKeys=new Set(parsed.layers.map(layer=>layer.groupKey).filter(Boolean));
+    const adjustmentSources=adjustmentOnlyComposite?[]:(parsed.adjustmentLayers||[]);
+    const usedGroupKeys=new Set([...parsed.layers,...adjustmentSources].map(layer=>layer.groupKey).filter(Boolean));
     for(const key of [...usedGroupKeys]){
       let current=sourceGroups.get(key);
       const seen=new Set();
@@ -4262,7 +4342,35 @@ async function openPsd(file){
     }
     const prepared=[];
     let highDepthBytesUsed=0;
-    for(const sourceLayer of [...parsed.layers].reverse()){
+    const sourceStack=[
+      ...parsed.layers.map(layer=>({...layer,__psdKind:'pixel'})),
+      ...adjustmentSources.map(layer=>({...layer,__psdKind:'adjustment'})),
+    ].sort((left,right)=>(left.stackIndex??0)-(right.stackIndex??0)).reverse();
+    for(const sourceLayer of sourceStack){
+      if(sourceLayer.__psdKind==='adjustment'){
+        const semantic=sanitizeAdjustmentModel(sourceLayer.psdAdjustment?.parsed);
+        if(!semantic){
+          warnings.push(`Слой «${sourceLayer.name}»: adjustment metadata не поддержаны semantic renderer и пропущены`);
+          continue;
+        }
+        const imported=createAdjustmentLayer({
+          name:sourceLayer.name||'PSD Adjustment',
+          visible:sourceLayer.visible!==false,
+          opacity:clamp(Number(sourceLayer.opacity),0,1),
+          blendMode:sourceLayer.blendMode||'source-over',
+          width:parsed.width,height:parsed.height,
+          groupId:sourceLayer.groupKey?(groupIdByKey.get(sourceLayer.groupKey)??null):null,
+          adjustment:semantic,
+        });
+        imported.psdAdjustment=importPsdAdjustmentMetadata({
+          ...sourceLayer.psdAdjustment,
+          channelIds:sourceLayer.channelIds,
+        },semantic);
+        imported.vectorMask=importPsdVectorMask(sourceLayer.vectorMask,imported);
+        prepared.push(imported);
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop ${semantic.kind} импортирован как editable ZPE adjustment layer с bounded native metadata`);
+        continue;
+      }
       const sourcePixels=sourceLayer.pixelBuffer
         ? previewPixelsFor(sourceLayer.pixelBuffer)
         : sourceLayer.pixels;
@@ -4710,17 +4818,22 @@ function buildNativeCmykComposite(exportDoc,planned,prepared,bitsPerChannel,elig
 async function preparePsdExport(exportDoc){
   const warnings=[];
   const psdSmartPlan=psdSmartObjectRoundTripPlan(exportDoc);
-  const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment');
-  const hasAdjustmentLayers=exportDoc.layers.some(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
+  const visibleAdjustmentLayers=exportDoc.layers.filter(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
+  const adjustmentPlans=new Map(exportDoc.layers.filter(layer=>layer.type==='adjustment').map(layer=>[layer.id,psdAdjustmentNativePlan(layer)]));
+  const unsupportedVisibleAdjustment=visibleAdjustmentLayers.find(layer=>!adjustmentPlans.get(layer.id)?.eligible);
+  const needsAdjustmentRasterFallback=Boolean(unsupportedVisibleAdjustment);
+  const hasAdjustmentLayers=visibleAdjustmentLayers.length>0;
+  const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment'||(!needsAdjustmentRasterFallback&&adjustmentPlans.get(layer.id)?.eligible));
   const planned=sourceLayers.map(layer=>{
     const nativePixelBuffer=nativeHighDepthPsdSource(layer);
     const nativeText=layer.psdText?psdTextNativePlan(layer):null;
     const nativeShape=layer.psdShape?psdShapeNativePlan(layer):null;
+    const nativeAdjustment=layer.type==='adjustment'?adjustmentPlans.get(layer.id):null;
     const baseline=psdSmartPlan.eligible&&layer.psdSmartObject?layer.psdSmartObject.baseline:null;
-    const bounds=nativeText?.eligible?nativeText.bounds:baseline
+    const bounds=nativeAdjustment?.eligible?{x:0,y:0,width:0,height:0}:nativeText?.eligible?nativeText.bounds:baseline
       ? {x:Math.trunc(Number(baseline.x)||0),y:Math.trunc(Number(baseline.y)||0),width:Math.max(1,Math.trunc(Number(baseline.width)||1)),height:Math.max(1,Math.trunc(Number(baseline.height)||1))}
       : nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer);
-    return{layer,nativePixelBuffer,nativeText,nativeShape,bounds};
+    return{layer,nativePixelBuffer,nativeText,nativeShape,nativeAdjustment,bounds};
   });
   const cmykDepths=planned.filter(item=>item.nativePixelBuffer?.model==='cmyk').map(item=>item.nativePixelBuffer.bitsPerChannel);
   const tentativeCmykDepth=cmykDepths.includes(32)?32:cmykDepths.includes(16)?16:8;
@@ -4756,11 +4869,14 @@ async function preparePsdExport(exportDoc){
       opacity:clamp(Number(group.opacity??1),0,1),
       blendMode:group.blendMode||'pass-through',
     }));
-  if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&!item.nativeShape?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&!item.nativeShape?.eligible&&!item.nativeAdjustment?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
   const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
   if(nativeTextCount)warnings.push(`Stage 15b: ${nativeTextCount} Photoshop TySh text layer(s) сохраняют native descriptor + EngineData + transform metadata`);
   for(const item of fallbackText)warnings.push(`Stage 15b: text layer «${item.layer.name||'Без имени'}» экспортируется raster preview (${item.nativeText?.reason||'native text mapping unavailable'})`);
+  const nativeAdjustmentCount=planned.filter(item=>item.nativeAdjustment?.eligible).length;
+  if(nativeAdjustmentCount)warnings.push(`Stage 16a: ${nativeAdjustmentCount} Photoshop adjustment layer(s) сохраняют native blocks + semantic parameters`);
+  if(needsAdjustmentRasterFallback)warnings.push(`Stage 16a: adjustment layer «${unsupportedVisibleAdjustment?.name||'Без имени'}» требует composite fallback (${adjustmentPlans.get(unsupportedVisibleAdjustment?.id)?.reason||'unsupported adjustment'})`);
   const nativeShapeCount=planned.filter(item=>item.nativeShape?.eligible).length;
   const fallbackShapes=planned.filter(item=>item.layer.psdShape&&!item.nativeShape?.eligible);
   if(nativeShapeCount)warnings.push(`Stage 15c: ${nativeShapeCount} Photoshop solid vector shape layer(s) сохраняют native fill/stroke + vector-mask metadata`);
@@ -4780,15 +4896,28 @@ async function preparePsdExport(exportDoc){
 
   const prepared=[];
   for(let planIndex=0;planIndex<planned.length;planIndex+=1){
-    const {layer,bounds,nativeText,nativeShape}=planned[planIndex];
+    const {layer,bounds,nativeText,nativeShape,nativeAdjustment}=planned[planIndex];
     const nativePixelBuffer=writerNative[planIndex];
+    if(nativeAdjustment?.eligible){
+      prepared.push({
+        name:layer.name||'Photoshop Adjustment',
+        x:0,y:0,width:0,height:0,
+        opacity:clamp(Number(layer.opacity??1),0,1),
+        blendMode:layer.blendMode||'source-over',
+        groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
+        visible:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer),
+        mask:null,vectorMask:exportPsdVectorMask(layer),
+        psdAdjustment:nativeAdjustment.metadata,
+      });
+      continue;
+    }
     const item={
       name:layer.name||'ZPE Layer',
       x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
       opacity:clamp(Number(layer.opacity??1),0,1),
       blendMode:layer.blendMode||'source-over',
       groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
-      visible:hasAdjustmentLayers?false:(layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer)),
+      visible:needsAdjustmentRasterFallback?false:(layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer)),
       mask:layer.mask?.dataUrl?{
         pixels:await renderPsdMaskPixels(layer,bounds),
         disabled:layer.mask.enabled===false,
@@ -4817,8 +4946,8 @@ async function preparePsdExport(exportDoc){
     }
   }
 
-  if(hasAdjustmentLayers){
-    warnings.push('Adjustment layers Stage 1 не имеют Photoshop-semantic mapping: визуальный результат сохранён через верхний Composite Preview, исходные слои оставлены скрытыми');
+  if(needsAdjustmentRasterFallback){
+    warnings.push('Неподдержанный adjustment layer сохранён через верхний Composite Preview; исходные raster/vector layers оставлены скрытыми, чтобы не удвоить baked-эффект');
     prepared.push({
       name:'ZPE Composite Preview (adjustments baked)',
       x:0,y:0,width:exportDoc.width,height:exportDoc.height,

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "psd-tools/psd-tools",
+    "commit": "8f9a25ea98202061365701db54ce938931b27c09",
+    "license": "MIT"
+  },
+  "fixtures": [
+    {
+      "file": "brightness-contrast.psd",
+      "sourcePath": "tests/psd_files/layers/brightness-contrast.psd",
+      "sourceGitBlob": "2e37a3c048c696134c8e5e29642f25f2429b1ce0",
+      "size": 22564,
+      "sha256": "ba069aff12a110616c4d1ba7522f0cda8dc312fa4129f4cb8bdc21e30c805744",
+      "kind": "brightness-contrast"
+    },
+    {
+      "file": "exposure.psd",
+      "sourcePath": "tests/psd_files/layers/exposure.psd",
+      "sourceGitBlob": "8931bbd5b22d2442e10e3493bee18a3d5acf7e3a",
+      "size": 22794,
+      "sha256": "1eb4ffdab3c21acf455baf7084cfafefe816d628f4edc7d45206f3e0dffe183b",
+      "kind": "exposure"
+    },
+    {
+      "file": "hue-saturation.psd",
+      "sourcePath": "tests/psd_files/layers/hue-saturation.psd",
+      "sourceGitBlob": "112b946162851385201e3d9f509f03dbe4143545",
+      "size": 22890,
+      "sha256": "679b1b6468b1c68d65f698d2c4dbdb185232092d78a2f9f6e77c897f400c7111",
+      "kind": "hue-saturation"
+    },
+    {
+      "file": "levels.psd",
+      "sourcePath": "tests/psd_files/layers/levels.psd",
+      "sourceGitBlob": "63dbe0d9933ff9e64189ceaa683a64d5ebfb312b",
+      "size": 23406,
+      "sha256": "f15bbf06fbd48fc3ad35a5ec266fe2927c39db2bf591fcad7186a4815e633920",
+      "kind": "levels"
+    },
+    {
+      "file": "curves.psd",
+      "sourcePath": "tests/psd_files/layers/curves.psd",
+      "sourceGitBlob": "acea84f70422ea24661c24a62e2a067574c1c666",
+      "size": 22794,
+      "sha256": "e34d8f3bf915d4e48527efd2c6231d39b0705943208391ec03571015aa37ac54",
+      "kind": "curves"
+    }
+  ]
+}

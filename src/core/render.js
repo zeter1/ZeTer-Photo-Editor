@@ -3,6 +3,7 @@ import { hasLayerStyles, renderLayerStyles } from './layer-styles.js';
 import { colorAdjustmentSignature, hasAdvancedColorAdjustments } from './color.js';
 import { applyAdvancedColorAdjustmentsAsync } from './pixel-worker.js';
 import { deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview } from './pixel-buffer.js';
+import { applyAdjustmentPixels } from './adjustments.js';
 
 const imageCache = new Map();
 const IMAGE_CACHE_LIMIT = 24;
@@ -317,6 +318,15 @@ async function applyAdjustmentLayer(canvas, ctx, layer) {
   source.width = width; source.height = height;
   const sourceCtx = source.getContext('2d', { alpha: true, willReadFrequently: true });
   sourceCtx.drawImage(canvas, 0, 0, width, height);
+  if(layer.adjustment){
+    try{
+      const pixels=sourceCtx.getImageData(0,0,width,height);
+      applyAdjustmentPixels(pixels,layer.adjustment);
+      sourceCtx.putImageData(pixels,0,0);
+    }catch(error){
+      console.warn('Photoshop semantic adjustment could not process composite pixels',error);
+    }
+  }
   if (hasAdvancedColorAdjustments(layer.filters)) {
     try {
       let pixels = sourceCtx.getImageData(0, 0, width, height);
@@ -338,6 +348,15 @@ async function applyAdjustmentLayer(canvas, ctx, layer) {
       sourceCtx.drawImage(mask, 0, 0, width, height);
       sourceCtx.restore();
     }
+  }
+  if(layer.vectorMask?.enabled!==false&&layer.vectorMask?.subpaths?.length){
+    const vectorMask=renderVectorMaskBitmap(layer.vectorMask,width,height);
+    sourceCtx.save();
+    sourceCtx.globalCompositeOperation='destination-in';
+    sourceCtx.globalAlpha=1;
+    sourceCtx.filter='none';
+    sourceCtx.drawImage(vectorMask,0,0,width,height);
+    sourceCtx.restore();
   }
   ctx.save();
   ctx.globalAlpha = layer.opacity ?? 1;

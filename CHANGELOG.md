@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.40.0 — 2026-09-25
+
+### 2026-09-25 — Photoshop-native Adjustment Layer Mapping Stage 16a
+
+- PSD parser: allow-list Additional Layer Info расширен `brit`, `CgEd`, `expA`, `hue2`/`hue `, `levl`, `curv`; zero-bounds adjustment records больше не теряются как пустые layers.
+- Semantic model: новый `src/core/adjustments.js` нормализует Brightness/Contrast, Exposure, Hue/Saturation, master/channel Levels и Curves channel points и применяет их к нижележащему RGBA composite.
+- Real stack import: decoder возвращает `adjustmentLayers` со `stackIndex`, raw blocks, group/vector-mask metadata и channel ids; main объединяет их с bitmap stack и создаёт настоящие ZPE adjustment layers.
+- Editable controls: Properties получили kind-specific numeric controls для Brightness/Contrast, Exposure, Hue/Saturation и master Levels; Curves показывает сохранённые channel points в read-only foundation.
+- Native writeback: `rewritePsdAdjustmentBlocks()` bounded-патчит CgEd/brit brightness+contrast, `expA` float32 exposure/offset/gamma, `hue2` master H/S/L и `levl` master record. Unknown bytes сохраняются.
+- Native writer: поддержанный adjustment экспортируется как настоящий zero-bounds PSD/PSB layer с исходными channel ids и Additional Layer Info вместо raster layer.
+- Safe fallback: raster adjustment mask, ZPE post-filters, неподдержанный metadata contract или изменённые Curves points не получают stale native metadata и переходят через существующий Composite Preview fallback.
+- Masks: semantic adjustment renderer применяет и raster mask, и document-space vector mask к adjustment result.
+- Real compatibility corpus: добавлены пять pinned MIT `psd-tools` fixtures (Brightness/Contrast, Exposure, Hue/Saturation, Levels, Curves) с commit/blob/size/SHA-256 manifest.
+- Regression: реальные records декодируются в semantic model; editable parameters повторно декодируются после PSD и PSB writeback; Curves unchanged block остаётся byte-identical.
+- Version: приложение синхронизировано на 1.40.0.
+
 ## 1.39.0 — 2026-09-25
 
 ### 2026-09-25 — Shape Descriptor Rewrite + Gradient/Pattern Fill Foundation Stage 15d

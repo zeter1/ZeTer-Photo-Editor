@@ -3525,6 +3525,173 @@ async function renderLayerStyles(styles,width,height,paint,{contentBlur=0}={}) {
   return {canvas:output,x:-pad/scale,y:-pad/scale,width:cw/scale,height:ch/scale};
 }
 
+// ---- src/core/adjustments.js ----
+const clampAdjustment=(value,min,max,fallback=0)=>{
+  const number=Number(value);
+  return Number.isFinite(number)?Math.max(min,Math.min(max,number)):fallback;
+};
+const intAdjustment=(value,min,max,fallback=0)=>Math.round(clampAdjustment(value,min,max,fallback));
+
+function sanitizeLevelRecord(value={}) {
+  const inputBlack=intAdjustment(value.inputBlack,0,253,0);
+  const inputWhite=Math.max(inputBlack+2,intAdjustment(value.inputWhite,2,255,255));
+  const outputBlack=intAdjustment(value.outputBlack,0,255,0);
+  const outputWhite=intAdjustment(value.outputWhite,0,255,255);
+  return{
+    inputBlack,
+    inputWhite:Math.min(255,inputWhite),
+    gamma:clampAdjustment(value.gamma,.1,9.99,1),
+    outputBlack,
+    outputWhite,
+  };
+}
+
+function sanitizeCurvePoints(points) {
+  const clean=(Array.isArray(points)?points:[])
+    .slice(0,19)
+    .map(point=>({
+      input:intAdjustment(point?.input,0,255,0),
+      output:intAdjustment(point?.output,0,255,0),
+    }))
+    .sort((a,b)=>a.input-b.input||a.output-b.output);
+  const unique=[];
+  for(const point of clean){
+    if(unique.length&&unique.at(-1).input===point.input)unique[unique.length-1]=point;
+    else unique.push(point);
+  }
+  return unique;
+}
+function sanitizeAdjustmentModel(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const kind=String(value.kind||'');
+  if(kind==='brightness-contrast'){
+    return{kind,brightness:intAdjustment(value.brightness,-150,150,0),contrast:intAdjustment(value.contrast,-100,100,0),legacy:value.legacy===true};
+  }
+  if(kind==='exposure'){
+    return{kind,exposure:clampAdjustment(value.exposure,-20,20,0),offset:clampAdjustment(value.offset,-2,2,0),gamma:clampAdjustment(value.gamma,.1,10,1)};
+  }
+  if(kind==='hue-saturation'){
+    return{kind,hue:intAdjustment(value.hue,-180,180,0),saturation:intAdjustment(value.saturation,-100,100,0),lightness:intAdjustment(value.lightness,-100,100,0),colorize:value.colorize===true};
+  }
+  if(kind==='levels'){
+    const channels=Array.isArray(value.channels)?value.channels.slice(0,8).map((entry,index)=>({
+      id:intAdjustment(entry?.id,-1,32,index),
+      ...sanitizeLevelRecord(entry),
+    })):[];
+    return{kind,master:sanitizeLevelRecord(value.master),channels};
+  }
+  if(kind==='curves'){
+    const channels=(Array.isArray(value.channels)?value.channels:[]).slice(0,16).map((entry,index)=>({
+      id:intAdjustment(entry?.id,0,31,index),
+      points:sanitizeCurvePoints(entry?.points),
+    })).filter(entry=>entry.points.length>=2);
+    return{kind,channels};
+  }
+  return null;
+}
+
+function applyBrightnessContrast01(value,brightness,contrast) {
+  const bright=Math.max(-1,Math.min(1,brightness/150));
+  let x=bright>=0?value+(1-value)*bright:value*(1+bright);
+  const c=Math.max(-254,Math.min(254,contrast*2.54));
+  const factor=(259*(c+255))/(255*(259-c));
+  x=factor*(x-.5)+.5;
+  return Math.max(0,Math.min(1,x));
+}
+
+function rgbToHsl(r,g,b) {
+  const max=Math.max(r,g,b),min=Math.min(r,g,b),delta=max-min;
+  let h=0;
+  if(delta){
+    if(max===r)h=((g-b)/delta)%6;
+    else if(max===g)h=(b-r)/delta+2;
+    else h=(r-g)/delta+4;
+    h*=60;if(h<0)h+=360;
+  }
+  const l=(max+min)/2;
+  const s=delta===0?0:delta/(1-Math.abs(2*l-1));
+  return[h,s,l];
+}
+function hslToRgb(h,s,l) {
+  const c=(1-Math.abs(2*l-1))*s;
+  const hp=((h%360)+360)%360/60;
+  const x=c*(1-Math.abs((hp%2)-1));
+  let r=0,g=0,b=0;
+  if(hp<1){r=c;g=x}else if(hp<2){r=x;g=c}else if(hp<3){g=c;b=x}else if(hp<4){g=x;b=c}else if(hp<5){r=x;b=c}else{r=c;b=x}
+  const m=l-c/2;
+  return[r+m,g+m,b+m];
+}
+
+function applyLevels01(value,record) {
+  const inputBlack=record.inputBlack/255,inputWhite=record.inputWhite/255;
+  let x=(value-inputBlack)/Math.max(1/255,inputWhite-inputBlack);
+  x=Math.max(0,Math.min(1,x));
+  x=Math.pow(x,1/Math.max(.1,record.gamma));
+  const outputBlack=record.outputBlack/255,outputWhite=record.outputWhite/255;
+  return Math.max(0,Math.min(1,outputBlack+x*(outputWhite-outputBlack)));
+}
+
+function curveValue(value,points) {
+  if(!points?.length)return value;
+  const x=Math.max(0,Math.min(255,value*255));
+  if(x<=points[0].input)return points[0].output/255;
+  if(x>=points.at(-1).input)return points.at(-1).output/255;
+  for(let index=1;index<points.length;index+=1){
+    const right=points[index],left=points[index-1];
+    if(x<=right.input){
+      const t=(x-left.input)/Math.max(1,right.input-left.input);
+      return Math.max(0,Math.min(1,(left.output+(right.output-left.output)*t)/255));
+    }
+  }
+  return value;
+}
+function applyAdjustmentPixels(imageData,adjustment) {
+  if(!imageData?.data)return imageData;
+  const model=sanitizeAdjustmentModel(adjustment);
+  if(!model)return imageData;
+  const data=imageData.data;
+  for(let index=0;index<data.length;index+=4){
+    if(data[index+3]===0)continue;
+    let r=data[index]/255,g=data[index+1]/255,b=data[index+2]/255;
+    if(model.kind==='brightness-contrast'){
+      r=applyBrightnessContrast01(r,model.brightness,model.contrast);
+      g=applyBrightnessContrast01(g,model.brightness,model.contrast);
+      b=applyBrightnessContrast01(b,model.brightness,model.contrast);
+    }else if(model.kind==='exposure'){
+      const scale=2**model.exposure,power=1/Math.max(.1,model.gamma);
+      r=Math.pow(Math.max(0,r*scale+model.offset),power);
+      g=Math.pow(Math.max(0,g*scale+model.offset),power);
+      b=Math.pow(Math.max(0,b*scale+model.offset),power);
+    }else if(model.kind==='hue-saturation'){
+      let[h,s,l]=rgbToHsl(r,g,b);
+      if(model.colorize){h=((model.hue%360)+360)%360;s=Math.max(0,Math.min(1,(model.saturation+100)/200));}
+      else{h=(h+model.hue+360)%360;s=Math.max(0,Math.min(1,s*(1+model.saturation/100)));}
+      l=Math.max(0,Math.min(1,l+model.lightness/100));
+      [r,g,b]=hslToRgb(h,s,l);
+    }else if(model.kind==='levels'){
+      r=applyLevels01(r,model.master);g=applyLevels01(g,model.master);b=applyLevels01(b,model.master);
+      const byId=new Map(model.channels.map(entry=>[entry.id,entry]));
+      if(byId.has(1))r=applyLevels01(r,byId.get(1));
+      if(byId.has(2))g=applyLevels01(g,byId.get(2));
+      if(byId.has(3))b=applyLevels01(b,byId.get(3));
+    }else if(model.kind==='curves'){
+      const byId=new Map(model.channels.map(entry=>[entry.id,entry.points]));
+      const master=byId.get(0);
+      if(master){r=curveValue(r,master);g=curveValue(g,master);b=curveValue(b,master);}
+      if(byId.has(1))r=curveValue(r,byId.get(1));
+      if(byId.has(2))g=curveValue(g,byId.get(2));
+      if(byId.has(3))b=curveValue(b,byId.get(3));
+    }
+    data[index]=Math.round(Math.max(0,Math.min(1,r))*255);
+    data[index+1]=Math.round(Math.max(0,Math.min(1,g))*255);
+    data[index+2]=Math.round(Math.max(0,Math.min(1,b))*255);
+  }
+  return imageData;
+}
+function adjustmentModelEqual(left,right) {
+  return JSON.stringify(sanitizeAdjustmentModel(left))===JSON.stringify(sanitizeAdjustmentModel(right));
+}
+
 // ---- src/core/state.js ----
 let layerCounter = 0;
 const uid = (prefix = 'layer') => `${prefix}-${Date.now().toString(36)}-${(++layerCounter).toString(36)}`;
@@ -3678,6 +3845,8 @@ function createSmartFilterMask(overrides = {}) {
 function createAdjustmentLayer(overrides = {}) {
   return baseLayer('adjustment', {
     name: 'Корректирующий слой',
+    adjustment: null,
+    psdAdjustment: null,
     width: 1,
     height: 1,
     ...overrides,
@@ -4404,6 +4573,34 @@ function sanitizePsdShape(value) {
   };
 }
 
+const PSD_ADJUSTMENT_BLOCK_KEYS = new Set(['brit','CgEd','expA','hue2','hue ','levl','curv']);
+const MAX_PSD_ADJUSTMENT_DATA_URL_CHARS = 6_000_000;
+
+function sanitizePsdAdjustment(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const kind=['brightness-contrast','exposure','hue-saturation','levels','curves'].includes(value.kind)?value.kind:null;
+  if(!kind)return null;
+  const blocks=(Array.isArray(value.blocks)?value.blocks:[])
+    .slice(0,12)
+    .map(block=>{
+      if(!block||typeof block!=='object'||Array.isArray(block))return null;
+      const key=shortText(block.key,'',4);
+      if(!PSD_ADJUSTMENT_BLOCK_KEYS.has(key))return null;
+      const dataUrl=typeof block.dataUrl==='string'&&block.dataUrl.length<=MAX_PSD_ADJUSTMENT_DATA_URL_CHARS&&/^data:application\/octet-stream;base64,[a-z\d+/=]*$/i.test(block.dataUrl)
+        ? block.dataUrl:null;
+      if(!dataUrl)return null;
+      return{signature:block.signature==='8B64'?'8B64':'8BIM',key,dataUrl};
+    })
+    .filter(Boolean);
+  if(!blocks.length)return null;
+  const baseline=sanitizeAdjustmentModel(value.baseline);
+  if(!baseline||baseline.kind!==kind)return null;
+  const channelIds=Array.isArray(value.channelIds)
+    ? value.channelIds.slice(0,16).map(id=>Math.trunc(bounded(id,0,-32768,32767)))
+    : [];
+  return{kind,blocks,baseline,channelIds};
+}
+
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -4477,6 +4674,8 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     result.scaleX = 1;
     result.scaleY = 1;
     result.rotation = 0;
+    result.adjustment = sanitizeAdjustmentModel(layer?.adjustment);
+    result.psdAdjustment = sanitizePsdAdjustment(layer?.psdAdjustment);
   } else {
     result.shape = ['rect', 'ellipse', 'line', 'path'].includes(layer?.shape) ? layer.shape : 'rect';
     result.fill = shortText(layer?.fill, '#4f8cff', 64);
@@ -5142,6 +5341,15 @@ async function applyAdjustmentLayer(canvas, ctx, layer) {
   source.width = width; source.height = height;
   const sourceCtx = source.getContext('2d', { alpha: true, willReadFrequently: true });
   sourceCtx.drawImage(canvas, 0, 0, width, height);
+  if(layer.adjustment){
+    try{
+      const pixels=sourceCtx.getImageData(0,0,width,height);
+      applyAdjustmentPixels(pixels,layer.adjustment);
+      sourceCtx.putImageData(pixels,0,0);
+    }catch(error){
+      console.warn('Photoshop semantic adjustment could not process composite pixels',error);
+    }
+  }
   if (hasAdvancedColorAdjustments(layer.filters)) {
     try {
       let pixels = sourceCtx.getImageData(0, 0, width, height);
@@ -5163,6 +5371,15 @@ async function applyAdjustmentLayer(canvas, ctx, layer) {
       sourceCtx.drawImage(mask, 0, 0, width, height);
       sourceCtx.restore();
     }
+  }
+  if(layer.vectorMask?.enabled!==false&&layer.vectorMask?.subpaths?.length){
+    const vectorMask=renderVectorMaskBitmap(layer.vectorMask,width,height);
+    sourceCtx.save();
+    sourceCtx.globalCompositeOperation='destination-in';
+    sourceCtx.globalAlpha=1;
+    sourceCtx.filter='none';
+    sourceCtx.drawImage(vectorMask,0,0,width,height);
+    sourceCtx.restore();
   }
   ctx.save();
   ctx.globalAlpha = layer.opacity ?? 1;
@@ -5567,10 +5784,12 @@ const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt
 const PSD_SMART_OBJECT_LAYER_KEYS = new Set(['PlLd','SoLd','SoLE']);
 const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
 const PSD_SHAPE_LAYER_KEYS = new Set(['SoCo','GdFl','PtFl','vscg','vstk']);
+const PSD_ADJUSTMENT_LAYER_KEYS = new Set(['brit','CgEd','expA','hue2','hue ','levl','curv']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
 const MAX_PSD_SHAPE_BLOCK_BYTES = 4 * 1024 * 1024;
+const MAX_PSD_ADJUSTMENT_BLOCK_BYTES = 4 * 1024 * 1024;
 const MAX_PSD_ENGINE_DATA_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCK_BYTES = 128 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCKS = 32;
@@ -6678,6 +6897,224 @@ function appendSmartObjectLayerBlock(record,signature,key,data,warnings) {
   }
 }
 
+function readPsdFloat32(reader) {
+  reader.ensure(4);
+  const value=reader.view.getFloat32(reader.offset,false);
+  reader.offset+=4;
+  return value;
+}
+
+function signed16(value) {
+  const number=Number(value)&0xffff;
+  return number>0x7fff?number-0x10000:number;
+}
+
+function levelRecordFromReader(reader) {
+  return{
+    inputBlack:reader.u16(),
+    inputWhite:reader.u16(),
+    outputBlack:reader.u16(),
+    outputWhite:reader.u16(),
+    gamma:reader.u16()/100,
+  };
+}
+
+function parseBrightnessContrastAdjustment(blocks,warnings,label) {
+  const modern=blocks.find(block=>block.key==='CgEd');
+  if(modern){
+    try{
+      const descriptor=readPsdDescriptorBlock(new Reader(modern.data));
+      const items=descriptor.items||{};
+      return{
+        kind:'brightness-contrast',
+        brightness:Number(items.Brgh)||0,
+        contrast:Number(items.Cntr)||0,
+        legacy:Boolean(items.useLegacy),
+      };
+    }catch(error){
+      warnings.push(label+': CgEd Brightness/Contrast не разобран ('+(error?.message||error)+')');
+    }
+  }
+  const legacy=blocks.find(block=>block.key==='brit');
+  if(legacy?.data?.length>=8){
+    const reader=new Reader(legacy.data);
+    return{
+      kind:'brightness-contrast',
+      brightness:signed16(reader.u16()),
+      contrast:signed16(reader.u16()),
+      legacy:true,
+    };
+  }
+  return null;
+}
+
+function parseExposureAdjustment(block) {
+  if(!block?.data||block.data.length<14)return null;
+  const reader=new Reader(block.data);
+  const version=reader.u16();
+  return{kind:'exposure',version,exposure:readPsdFloat32(reader),offset:readPsdFloat32(reader),gamma:readPsdFloat32(reader)};
+}
+
+function parseHueSaturationAdjustment(block) {
+  if(!block?.data||block.data.length<16)return null;
+  const reader=new Reader(block.data);
+  const version=reader.u16(),enable=reader.u8();
+  reader.u8();
+  const colorization=[reader.i16(),reader.i16(),reader.i16()];
+  const master=[reader.i16(),reader.i16(),reader.i16()];
+  const items=[];
+  while(reader.offset+14<=reader.end&&items.length<6){
+    const range=[reader.i16(),reader.i16(),reader.i16(),reader.i16()];
+    const settings=[reader.i16(),reader.i16(),reader.i16()];
+    items.push({range,settings});
+  }
+  return{
+    kind:'hue-saturation',version,enable:Boolean(enable),
+    hue:master[0],saturation:master[1],lightness:master[2],
+    colorize:Boolean(enable),
+    colorization,items,
+  };
+}
+
+function parseLevelsAdjustment(block) {
+  if(!block?.data||block.data.length<12)return null;
+  const reader=new Reader(block.data);
+  const version=reader.u16();
+  if(version!==2)return{kind:'levels',version,master:null,channels:[]};
+  const records=[];
+  for(let index=0;index<29&&reader.offset+10<=reader.end;index+=1)records.push(levelRecordFromReader(reader));
+  return{
+    kind:'levels',version,
+    master:records[0]||null,
+    channels:records.slice(1,4).map((record,index)=>({id:index+1,...record})),
+  };
+}
+
+function curvePointPair(reader) {
+  const output=reader.u16(),input=reader.u16();
+  return{input,output};
+}
+function parseCurvesAdjustment(block,warnings,label) {
+  if(!block?.data||block.data.length<7)return null;
+  try{
+    const reader=new Reader(block.data);
+    const isMap=Boolean(reader.u8()),version=reader.u16(),countMap=reader.u32();
+    const ids=[];
+    for(let bit=0;bit<32;bit+=1)if((countMap>>>bit)&1)ids.push(bit);
+    const channels=[];
+    if(isMap){
+      for(let index=0;index<ids.length&&reader.offset+256<=reader.end;index+=1){
+        const map=reader.take(256);
+        const points=[];for(let input=0;input<256;input+=1)points.push({input,output:map[input]});
+        channels.push({id:ids[index],points});
+      }
+    }else{
+      for(let index=0;index<ids.length;index+=1){
+        const count=reader.u16();
+        if(count<2||count>19||reader.offset+count*4>reader.end)throw new PsdImportError('Curves point count повреждён','PSD_ADJUSTMENT_CURVES');
+        channels.push({id:ids[index],points:Array.from({length:count},()=>curvePointPair(reader))});
+      }
+    }
+    if(version===1&&reader.offset+10<=reader.end&&reader.ascii(4)==='Crv '){
+      const extraVersion=reader.u16(),count=reader.u32();
+      if(count<=32){
+        const extra=[];
+        for(let index=0;index<count&&reader.offset+4<=reader.end;index+=1){
+          const id=reader.u16(),pointCount=reader.u16();
+          if(pointCount>19||reader.offset+pointCount*4>reader.end)break;
+          extra.push({id,points:Array.from({length:pointCount},()=>curvePointPair(reader))});
+        }
+        for(const entry of extra){
+          const existing=channels.findIndex(channel=>channel.id===entry.id);
+          if(existing>=0)channels[existing]=entry;else channels.push(entry);
+        }
+      }
+      return{kind:'curves',version,isMap,countMap,extraVersion,channels};
+    }
+    return{kind:'curves',version,isMap,countMap,channels};
+  }catch(error){
+    warnings.push(label+': Curves не разобраны ('+(error?.message||error)+'); raw block сохранён');
+    return{kind:'curves',version:null,isMap:false,countMap:0,channels:[]};
+  }
+}
+
+function parsePsdAdjustmentBlocks(blocks,warnings,label) {
+  if(!Array.isArray(blocks)||!blocks.length)return null;
+  if(blocks.some(block=>block.key==='CgEd'||block.key==='brit'))return parseBrightnessContrastAdjustment(blocks,warnings,label);
+  const exposure=blocks.find(block=>block.key==='expA');
+  if(exposure)return parseExposureAdjustment(exposure);
+  const hue=blocks.find(block=>block.key==='hue2'||block.key==='hue ');
+  if(hue)return parseHueSaturationAdjustment(hue);
+  const levels=blocks.find(block=>block.key==='levl');
+  if(levels)return parseLevelsAdjustment(levels);
+  const curves=blocks.find(block=>block.key==='curv');
+  if(curves)return parseCurvesAdjustment(curves,warnings,label);
+  return null;
+}
+
+function appendAdjustmentLayerBlock(record,signature,key,data,warnings) {
+  if(!data)return;
+  if(!record.psdAdjustment)record.psdAdjustment={kind:null,parsed:null,blocks:[]};
+  record.psdAdjustment.blocks.push({signature,key,data});
+  const parsed=parsePsdAdjustmentBlocks(record.psdAdjustment.blocks,warnings,'Слой «'+record.name+'»');
+  if(parsed){record.psdAdjustment.kind=parsed.kind;record.psdAdjustment.parsed=parsed;}
+}
+
+function patchBrightnessContrastBlock(block,adjustment) {
+  const bytes=asBytes(block.data).slice();
+  if(block.key==='CgEd'){
+    const layout=readPsdDescriptorBlockDeepLayout(new Reader(bytes));
+    patchDescriptorNumber(bytes,layout.layout.get('Brgh'),Math.round(Number(adjustment.brightness)||0),'Brightness');
+    patchDescriptorNumber(bytes,layout.layout.get('Cntr'),Math.round(Number(adjustment.contrast)||0),'Contrast');
+    return bytes;
+  }
+  if(block.key==='brit'&&bytes.length>=8){
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    view.setInt16(0,Math.round(Number(adjustment.brightness)||0),false);
+    view.setInt16(2,Math.round(Number(adjustment.contrast)||0),false);
+    return bytes;
+  }
+  return bytes;
+}
+function rewritePsdAdjustmentBlocks(blocks,adjustment) {
+  if(!Array.isArray(blocks)||!blocks.length)throw new PsdImportError('Adjustment rewrite: blocks отсутствуют','PSD_ADJUSTMENT_BLOCKS');
+  const kind=String(adjustment?.kind||'');
+  let rewritten=0;
+  const output=blocks.map(block=>{
+    if(!block?.data)return block;
+    const bytes=asBytes(block.data).slice();
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    if(kind==='brightness-contrast'&&(block.key==='CgEd'||block.key==='brit')){
+      rewritten+=1;return{...block,data:patchBrightnessContrastBlock(block,adjustment)};
+    }
+    if(kind==='exposure'&&block.key==='expA'&&bytes.length>=14){
+      view.setFloat32(2,Number(adjustment.exposure)||0,false);
+      view.setFloat32(6,Number(adjustment.offset)||0,false);
+      view.setFloat32(10,Number(adjustment.gamma)||1,false);
+      rewritten+=1;return{...block,data:bytes};
+    }
+    if(kind==='hue-saturation'&&(block.key==='hue2'||block.key==='hue ')&&bytes.length>=16){
+      view.setInt16(10,Math.round(Number(adjustment.hue)||0),false);
+      view.setInt16(12,Math.round(Number(adjustment.saturation)||0),false);
+      view.setInt16(14,Math.round(Number(adjustment.lightness)||0),false);
+      rewritten+=1;return{...block,data:bytes};
+    }
+    if(kind==='levels'&&block.key==='levl'&&bytes.length>=12){
+      const master=adjustment.master||{};
+      view.setUint16(2,Math.round(Number(master.inputBlack)||0),false);
+      view.setUint16(4,Math.round(Number(master.inputWhite)||255),false);
+      view.setUint16(6,Math.round(Number(master.outputBlack)||0),false);
+      view.setUint16(8,Math.round(Number(master.outputWhite)||255),false);
+      view.setUint16(10,Math.round((Number(master.gamma)||1)*100),false);
+      rewritten+=1;return{...block,data:bytes};
+    }
+    if(kind==='curves'&&block.key==='curv'){rewritten+=1;return{...block,data:bytes};}
+    return block;
+  });
+  if(!rewritten)throw new PsdImportError('Adjustment rewrite: compatible block не найден для '+kind,'PSD_ADJUSTMENT_BLOCKS');
+  return{blocks:output,rewritten};
+}
+
 function parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings) {
   while (reader.offset + 12 <= extraEnd) {
     const blockStart = reader.offset;
@@ -6698,6 +7135,9 @@ function parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWid
     } else if (PSD_SHAPE_LAYER_KEYS.has(key)) {
       const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_SHAPE_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
       appendShapeLayerBlock(record,signature,key,data,warnings);
+    } else if (PSD_ADJUSTMENT_LAYER_KEYS.has(key)) {
+      const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_ADJUSTMENT_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
+      appendAdjustmentLayerBlock(record,signature,key,data,warnings);
     } else if (key === 'luni' && length >= 4) {
       const count = reader.u32();
       const byteLength = Math.min(count * 2, Math.max(0, dataEnd - reader.offset));
@@ -6768,7 +7208,7 @@ function parseLayerRecord(reader, version, documentWidth, documentHeight, warnin
     const padding = (4 - (consumed % 4)) % 4;
     if (reader.offset + padding <= extraEnd) reader.skip(padding);
   }
-  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null,psdShape:null };
+  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null,psdShape:null,psdAdjustment:null };
   parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings);
   reader.seek(extraEnd);
   return record;
@@ -7446,8 +7886,24 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
 
   const layers = [];
   const fillLayers = [];
-  for (const record of records) {
+  const adjustmentLayers = [];
+  for (let recordIndex=0;recordIndex<records.length;recordIndex+=1) {
+    const record=records[recordIndex];
     if (record.sectionDivider === 1 || record.sectionDivider === 2 || record.sectionDivider === 3) continue;
+    if(record.psdAdjustment?.parsed){
+      adjustmentLayers.push({
+        name:record.name||'PSD Adjustment Layer',
+        visible:!(record.flags&0x02),
+        opacity:record.opacity/255,
+        blendMode:blendModeFor(record.blendKey,warnings,record.name),
+        groupKey:record.groupKey||null,
+        vectorMask:record.vectorMask,
+        channelIds:record.channels.map(channel=>channel.id),
+        psdAdjustment:record.psdAdjustment,
+        stackIndex:recordIndex,
+      });
+      continue;
+    }
     const width = Math.max(0, record.right - record.left);
     const height = Math.max(0, record.bottom - record.top);
     if (!width || !height) {
@@ -7459,6 +7915,7 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
           blendMode:blendModeFor(record.blendKey,warnings,record.name),
           groupKey:record.groupKey||null,
           psdShape:record.psdShape,
+          stackIndex:recordIndex,
         });
         warnings.push(`Слой «${record.name}»: ${record.psdShape.fillType} fill metadata сохранены в fillLayers foundation; raster preview берётся из composite`);
       }else warnings.push(`Слой «${record.name}» пропущен: пустые bounds`);
@@ -7485,6 +7942,7 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
       psdSmartObject: record.psdSmartObject,
       psdText: record.psdText,
       psdShape: record.psdShape,
+      stackIndex:recordIndex,
     });
   }
 
@@ -7501,6 +7959,7 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
     ...header,
     layers,
     fillLayers,
+    adjustmentLayers,
     groups,
     composite,
     compositePixelBuffer,
@@ -7759,6 +8218,13 @@ function writeShapeLayerExtras(writer,layer,version,phase='content') {
   }
 }
 
+function writeAdjustmentLayerExtras(writer,layer,version) {
+  const blocks=Array.isArray(layer?.psdAdjustment?.blocks)?layer.psdAdjustment.blocks:[];
+  for(const block of blocks.slice(0,12)){
+    writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_ADJUSTMENT_LAYER_KEYS,MAX_PSD_ADJUSTMENT_BLOCK_BYTES,'Adjustment layer block');
+  }
+}
+
 function writeLinkedLayerBlocks(writer,blocks,version) {
   if(!Array.isArray(blocks))return;
   for(const block of blocks.slice(0,MAX_PSD_LINKED_LAYER_BLOCKS)){
@@ -8011,6 +8477,16 @@ function writeLayerMaskExtra(writer, layer) {
 }
 
 function normalizeExportLayer(layer, index, maxPixels, version, bitsPerChannel, colorMode = PSD_COLOR_MODE_RGB) {
+  if(layer?.psdAdjustment){
+    const channelIds=Array.isArray(layer.psdAdjustment.channelIds)&&layer.psdAdjustment.channelIds.length
+      ? layer.psdAdjustment.channelIds.slice(0,16)
+      : [-1,0,1,2,-2];
+    return{
+      ...layer,
+      x:0,y:0,width:0,height:0,mask:null,
+      channels:channelIds.map(id=>({id:Number(id),data:new Uint8Array([0,0])})),
+    };
+  }
   const item = validateExportLayer(layer, index, maxPixels, colorMode);
   const cmyk=colorMode===PSD_COLOR_MODE_CMYK;
   const channels = cmyk
@@ -8299,6 +8775,7 @@ function writeLayerRecordAndData(layerRecords, channelData, layer, version, docu
   writeShapeLayerExtras(extra, layer, version, 'content');
   writeVectorMaskExtra(extra, layer, documentWidth, documentHeight);
   writeShapeLayerExtras(extra, layer, version, 'stroke');
+  writeAdjustmentLayerExtras(extra, layer, version);
   writeTextLayerExtra(extra, layer, version);
   writeSmartObjectLayerExtras(extra, layer, version);
   layerRecords.u32(extra.length).append(extra);
@@ -10333,13 +10810,16 @@ function updateProperties() {
   els.props.className = 'panel-content';
   if (l.type === 'adjustment') {
     const maskLabel=layerMaskSummary(l);
+    const kindLabel=l.adjustment?.kind||'Generic ZPE';
     els.props.innerHTML = `<div class="prop-grid">
       <label>Имя</label><input data-prop="name" value="${escapeAttr(l.name)}">
-      <label>Тип</label><span>Корректирующий слой</span>
+      <label>Тип</label><span>Корректирующий слой · ${escapeHtml(kindLabel)}</span>
       <label>Область</label><span>Нижележащий стек</span>
       <label>Маски</label><span>${escapeHtml(maskLabel)}</span>
+      ${adjustmentPropertiesMarkup(l)}
     </div>`;
     bindPropertyInputs(els.props);
+    bindAdjustmentControls(els.props,l);
     if (isLayerLocked(doc,l)) els.props.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
     return;
   }
@@ -12392,6 +12872,78 @@ function psdTextNativePlan(layer){
   }
 }
 
+function importPsdAdjustmentMetadata(source,adjustment) {
+  if(!source?.blocks?.length||!adjustment)return null;
+  return{
+    kind:adjustment.kind,
+    blocks:source.blocks.map(psdOpaqueBlockToState).filter(Boolean),
+    baseline:structuredClone(sanitizeAdjustmentModel(adjustment)),
+    channelIds:Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[],
+  };
+}
+
+function psdAdjustmentNativePlan(layer) {
+  const source=layer?.psdAdjustment;
+  const adjustment=sanitizeAdjustmentModel(layer?.adjustment);
+  if(layer?.type!=='adjustment'||!source||!adjustment)return{eligible:false,reason:'нет imported Photoshop adjustment metadata',metadata:null};
+  if(source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
+  if(layer.mask?.dataUrl)return{eligible:false,reason:'raster adjustment mask пока требует composite fallback',metadata:null};
+  if(layer.styles)return{eligible:false,reason:'layer styles на adjustment layer требуют composite fallback',metadata:null};
+  const filters=sanitizeFilters(layer.filters);
+  if(Object.keys(DEFAULT_LAYER_FILTERS).some(key=>Math.abs(Number(filters[key])-Number(DEFAULT_LAYER_FILTERS[key]))>1e-9)){
+    return{eligible:false,reason:'дополнительные ZPE filters не кодируются в Photoshop adjustment record',metadata:null};
+  }
+  if(adjustment.kind==='curves'&&!adjustmentModelEqual(adjustment,source.baseline)){
+    return{eligible:false,reason:'Curves Stage 16a сохраняет native points, но editable curve writeback будет расширен отдельно',metadata:null};
+  }
+  try{
+    const blocks=(source.blocks||[]).map(block=>psdOpaqueBlockFromState(block,{maxBytes:4*1024*1024})).filter(Boolean);
+    const rewritten=rewritePsdAdjustmentBlocks(blocks,adjustment);
+    return{eligible:true,reason:null,metadata:{kind:adjustment.kind,blocks:rewritten.blocks,channelIds:Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[]}};
+  }catch(error){
+    return{eligible:false,reason:error?.message||String(error),metadata:null};
+  }
+}
+
+function adjustmentNumberField(label,key,value,min,max,step='1') {
+  return '<label>'+escapeHtml(label)+'</label><input type="number" min="'+min+'" max="'+max+'" step="'+step+'" value="'+Number(value)+'" data-adjustment-prop="'+escapeAttr(key)+'">';
+}
+
+function adjustmentPropertiesMarkup(layer) {
+  const value=sanitizeAdjustmentModel(layer?.adjustment);
+  if(!value)return'<label>Параметры</label><span>Generic ZPE filters</span>';
+  const native=layer.psdAdjustment?psdAdjustmentNativePlan(layer):null;
+  const nativeInfo=layer.psdAdjustment?'<label>Photoshop Adjustment</label><span>'+(native?.eligible?'native '+escapeHtml(value.kind)+' round-trip':'composite fallback: '+escapeHtml(native?.reason||'metadata unavailable'))+'</span>':'';
+  if(value.kind==='brightness-contrast')return adjustmentNumberField('Яркость','brightness',value.brightness,-150,150)+adjustmentNumberField('Контраст','contrast',value.contrast,-100,100)+nativeInfo;
+  if(value.kind==='exposure')return adjustmentNumberField('Exposure','exposure',value.exposure,-20,20,'0.05')+adjustmentNumberField('Offset','offset',value.offset,-2,2,'0.005')+adjustmentNumberField('Gamma','gamma',value.gamma,.1,10,'0.01')+nativeInfo;
+  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+nativeInfo;
+  if(value.kind==='levels'){
+    const master=value.master||{};
+    return adjustmentNumberField('Input black','master.inputBlack',master.inputBlack,0,253)+adjustmentNumberField('Input white','master.inputWhite',master.inputWhite,2,255)+adjustmentNumberField('Gamma','master.gamma',master.gamma,.1,9.99,'0.01')+adjustmentNumberField('Output black','master.outputBlack',master.outputBlack,0,255)+adjustmentNumberField('Output white','master.outputWhite',master.outputWhite,0,255)+nativeInfo;
+  }
+  if(value.kind==='curves'){
+    const summary=value.channels.length?value.channels.map(channel=>'ch '+channel.id+': '+channel.points.length+' points').join(', '):'identity/default curve';
+    return '<label>Curves</label><span>'+escapeHtml(summary)+'</span><label>Редактирование</label><span>Stage 16a: native points сохраняются; curve editor/writeback — следующий шаг</span>'+nativeInfo;
+  }
+  return nativeInfo;
+}
+
+function updateAdjustmentProperty(layer,path,raw) {
+  if(!layer||layer.type!=='adjustment'||isLayerLocked(doc,layer))return false;
+  const current=structuredClone(sanitizeAdjustmentModel(layer.adjustment));
+  if(!current)return false;
+  const value=Number(raw);if(!Number.isFinite(value))return false;
+  if(path.startsWith('master.')){if(!current.master)return false;current.master[path.split('.')[1]]=value;}else current[path]=value;
+  layer.adjustment=sanitizeAdjustmentModel(current);
+  markDirty(true);commit('Изменить Photoshop adjustment');return true;
+}
+
+function bindAdjustmentControls(root,layer) {
+  root?.querySelectorAll('[data-adjustment-prop]').forEach(input=>input.addEventListener('change',()=>{
+    if(!updateAdjustmentProperty(layer,input.dataset.adjustmentProp,input.value)){refreshInspectorPanels();setStatus('Некорректный параметр adjustment layer');}
+  }));
+}
+
 function psdPreviewFingerprint(dataUrl){
   const value=String(dataUrl||'');
   let hash=2166136261;
@@ -12589,6 +13141,9 @@ async function openPsd(file){
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
     if(parsed.fillLayers?.length)warnings.push(`Stage 15d: найдено ${parsed.fillLayers.length} Photoshop gradient/pattern fill layer(s); bounded GdFl/PtFl metadata разобраны, но canvas пока использует composite preview до editable fill renderer`);
+    if(parsed.adjustmentLayers?.length)warnings.push(`Stage 16a: найдено ${parsed.adjustmentLayers.length} Photoshop adjustment layer(s): Brightness/Contrast, Exposure, Hue/Saturation, Levels и Curves мапятся semantic-first`);
+    const adjustmentOnlyComposite=Boolean(parsed.adjustmentLayers?.length&&!parsed.layers.length&&parsed.compositePixelBuffer);
+    if(adjustmentOnlyComposite)warnings.push('Stage 16a: adjustment-only PSD не содержит base bitmap layers; используется composite preview, чтобы не применить adjustment повторно');
     const isCmyk=parsed.colorMode===4;
     const colorPolicy=sanitizeColorManagement(targetDocument.colorManagement);
     const sourceProfileBytes=parsed.iccProfile?.bytes||null,proofProfileBytes=colorProfileBytes(targetDocument.proofProfile),displayProfileBytes=colorProfileBytes(targetDocument.displayProfile);
@@ -12617,7 +13172,8 @@ async function openPsd(file){
     if(parsed.bitsPerChannel===32)warnings.push(`${modeLabel} 32-bit/channel декодирован в Float32 PixelBuffer; bounded native source сохраняется внутри .zpe`);
     if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
     const sourceGroups=new Map((parsed.groups||[]).map(group=>[group.key,group]));
-    const usedGroupKeys=new Set(parsed.layers.map(layer=>layer.groupKey).filter(Boolean));
+    const adjustmentSources=adjustmentOnlyComposite?[]:(parsed.adjustmentLayers||[]);
+    const usedGroupKeys=new Set([...parsed.layers,...adjustmentSources].map(layer=>layer.groupKey).filter(Boolean));
     for(const key of [...usedGroupKeys]){
       let current=sourceGroups.get(key);
       const seen=new Set();
@@ -12649,7 +13205,35 @@ async function openPsd(file){
     }
     const prepared=[];
     let highDepthBytesUsed=0;
-    for(const sourceLayer of [...parsed.layers].reverse()){
+    const sourceStack=[
+      ...parsed.layers.map(layer=>({...layer,__psdKind:'pixel'})),
+      ...adjustmentSources.map(layer=>({...layer,__psdKind:'adjustment'})),
+    ].sort((left,right)=>(left.stackIndex??0)-(right.stackIndex??0)).reverse();
+    for(const sourceLayer of sourceStack){
+      if(sourceLayer.__psdKind==='adjustment'){
+        const semantic=sanitizeAdjustmentModel(sourceLayer.psdAdjustment?.parsed);
+        if(!semantic){
+          warnings.push(`Слой «${sourceLayer.name}»: adjustment metadata не поддержаны semantic renderer и пропущены`);
+          continue;
+        }
+        const imported=createAdjustmentLayer({
+          name:sourceLayer.name||'PSD Adjustment',
+          visible:sourceLayer.visible!==false,
+          opacity:clamp(Number(sourceLayer.opacity),0,1),
+          blendMode:sourceLayer.blendMode||'source-over',
+          width:parsed.width,height:parsed.height,
+          groupId:sourceLayer.groupKey?(groupIdByKey.get(sourceLayer.groupKey)??null):null,
+          adjustment:semantic,
+        });
+        imported.psdAdjustment=importPsdAdjustmentMetadata({
+          ...sourceLayer.psdAdjustment,
+          channelIds:sourceLayer.channelIds,
+        },semantic);
+        imported.vectorMask=importPsdVectorMask(sourceLayer.vectorMask,imported);
+        prepared.push(imported);
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop ${semantic.kind} импортирован как editable ZPE adjustment layer с bounded native metadata`);
+        continue;
+      }
       const sourcePixels=sourceLayer.pixelBuffer
         ? previewPixelsFor(sourceLayer.pixelBuffer)
         : sourceLayer.pixels;
@@ -13097,17 +13681,22 @@ function buildNativeCmykComposite(exportDoc,planned,prepared,bitsPerChannel,elig
 async function preparePsdExport(exportDoc){
   const warnings=[];
   const psdSmartPlan=psdSmartObjectRoundTripPlan(exportDoc);
-  const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment');
-  const hasAdjustmentLayers=exportDoc.layers.some(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
+  const visibleAdjustmentLayers=exportDoc.layers.filter(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
+  const adjustmentPlans=new Map(exportDoc.layers.filter(layer=>layer.type==='adjustment').map(layer=>[layer.id,psdAdjustmentNativePlan(layer)]));
+  const unsupportedVisibleAdjustment=visibleAdjustmentLayers.find(layer=>!adjustmentPlans.get(layer.id)?.eligible);
+  const needsAdjustmentRasterFallback=Boolean(unsupportedVisibleAdjustment);
+  const hasAdjustmentLayers=visibleAdjustmentLayers.length>0;
+  const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment'||(!needsAdjustmentRasterFallback&&adjustmentPlans.get(layer.id)?.eligible));
   const planned=sourceLayers.map(layer=>{
     const nativePixelBuffer=nativeHighDepthPsdSource(layer);
     const nativeText=layer.psdText?psdTextNativePlan(layer):null;
     const nativeShape=layer.psdShape?psdShapeNativePlan(layer):null;
+    const nativeAdjustment=layer.type==='adjustment'?adjustmentPlans.get(layer.id):null;
     const baseline=psdSmartPlan.eligible&&layer.psdSmartObject?layer.psdSmartObject.baseline:null;
-    const bounds=nativeText?.eligible?nativeText.bounds:baseline
+    const bounds=nativeAdjustment?.eligible?{x:0,y:0,width:0,height:0}:nativeText?.eligible?nativeText.bounds:baseline
       ? {x:Math.trunc(Number(baseline.x)||0),y:Math.trunc(Number(baseline.y)||0),width:Math.max(1,Math.trunc(Number(baseline.width)||1)),height:Math.max(1,Math.trunc(Number(baseline.height)||1))}
       : nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer);
-    return{layer,nativePixelBuffer,nativeText,nativeShape,bounds};
+    return{layer,nativePixelBuffer,nativeText,nativeShape,nativeAdjustment,bounds};
   });
   const cmykDepths=planned.filter(item=>item.nativePixelBuffer?.model==='cmyk').map(item=>item.nativePixelBuffer.bitsPerChannel);
   const tentativeCmykDepth=cmykDepths.includes(32)?32:cmykDepths.includes(16)?16:8;
@@ -13143,11 +13732,14 @@ async function preparePsdExport(exportDoc){
       opacity:clamp(Number(group.opacity??1),0,1),
       blendMode:group.blendMode||'pass-through',
     }));
-  if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&!item.nativeShape?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&!item.nativeShape?.eligible&&!item.nativeAdjustment?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
   const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
   if(nativeTextCount)warnings.push(`Stage 15b: ${nativeTextCount} Photoshop TySh text layer(s) сохраняют native descriptor + EngineData + transform metadata`);
   for(const item of fallbackText)warnings.push(`Stage 15b: text layer «${item.layer.name||'Без имени'}» экспортируется raster preview (${item.nativeText?.reason||'native text mapping unavailable'})`);
+  const nativeAdjustmentCount=planned.filter(item=>item.nativeAdjustment?.eligible).length;
+  if(nativeAdjustmentCount)warnings.push(`Stage 16a: ${nativeAdjustmentCount} Photoshop adjustment layer(s) сохраняют native blocks + semantic parameters`);
+  if(needsAdjustmentRasterFallback)warnings.push(`Stage 16a: adjustment layer «${unsupportedVisibleAdjustment?.name||'Без имени'}» требует composite fallback (${adjustmentPlans.get(unsupportedVisibleAdjustment?.id)?.reason||'unsupported adjustment'})`);
   const nativeShapeCount=planned.filter(item=>item.nativeShape?.eligible).length;
   const fallbackShapes=planned.filter(item=>item.layer.psdShape&&!item.nativeShape?.eligible);
   if(nativeShapeCount)warnings.push(`Stage 15c: ${nativeShapeCount} Photoshop solid vector shape layer(s) сохраняют native fill/stroke + vector-mask metadata`);
@@ -13167,15 +13759,28 @@ async function preparePsdExport(exportDoc){
 
   const prepared=[];
   for(let planIndex=0;planIndex<planned.length;planIndex+=1){
-    const {layer,bounds,nativeText,nativeShape}=planned[planIndex];
+    const {layer,bounds,nativeText,nativeShape,nativeAdjustment}=planned[planIndex];
     const nativePixelBuffer=writerNative[planIndex];
+    if(nativeAdjustment?.eligible){
+      prepared.push({
+        name:layer.name||'Photoshop Adjustment',
+        x:0,y:0,width:0,height:0,
+        opacity:clamp(Number(layer.opacity??1),0,1),
+        blendMode:layer.blendMode||'source-over',
+        groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
+        visible:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer),
+        mask:null,vectorMask:exportPsdVectorMask(layer),
+        psdAdjustment:nativeAdjustment.metadata,
+      });
+      continue;
+    }
     const item={
       name:layer.name||'ZPE Layer',
       x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
       opacity:clamp(Number(layer.opacity??1),0,1),
       blendMode:layer.blendMode||'source-over',
       groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
-      visible:hasAdjustmentLayers?false:(layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer)),
+      visible:needsAdjustmentRasterFallback?false:(layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer)),
       mask:layer.mask?.dataUrl?{
         pixels:await renderPsdMaskPixels(layer,bounds),
         disabled:layer.mask.enabled===false,
@@ -13204,8 +13809,8 @@ async function preparePsdExport(exportDoc){
     }
   }
 
-  if(hasAdjustmentLayers){
-    warnings.push('Adjustment layers Stage 1 не имеют Photoshop-semantic mapping: визуальный результат сохранён через верхний Composite Preview, исходные слои оставлены скрытыми');
+  if(needsAdjustmentRasterFallback){
+    warnings.push('Неподдержанный adjustment layer сохранён через верхний Composite Preview; исходные raster/vector layers оставлены скрытыми, чтобы не удвоить baked-эффект');
     prepared.push({
       name:'ZPE Composite Preview (adjustments baked)',
       x:0,y:0,width:exportDoc.width,height:exportDoc.height,

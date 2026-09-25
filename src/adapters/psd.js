@@ -7,10 +7,12 @@ const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt
 const PSD_SMART_OBJECT_LAYER_KEYS = new Set(['PlLd','SoLd','SoLE']);
 const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
 const PSD_SHAPE_LAYER_KEYS = new Set(['SoCo','GdFl','PtFl','vscg','vstk']);
+const PSD_ADJUSTMENT_LAYER_KEYS = new Set(['brit','CgEd','expA','hue2','hue ','levl','curv']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
 const MAX_PSD_SHAPE_BLOCK_BYTES = 4 * 1024 * 1024;
+const MAX_PSD_ADJUSTMENT_BLOCK_BYTES = 4 * 1024 * 1024;
 const MAX_PSD_ENGINE_DATA_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCK_BYTES = 128 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCKS = 32;
@@ -1123,6 +1125,225 @@ function appendSmartObjectLayerBlock(record,signature,key,data,warnings) {
   }
 }
 
+function readPsdFloat32(reader) {
+  reader.ensure(4);
+  const value=reader.view.getFloat32(reader.offset,false);
+  reader.offset+=4;
+  return value;
+}
+
+function signed16(value) {
+  const number=Number(value)&0xffff;
+  return number>0x7fff?number-0x10000:number;
+}
+
+function levelRecordFromReader(reader) {
+  return{
+    inputBlack:reader.u16(),
+    inputWhite:reader.u16(),
+    outputBlack:reader.u16(),
+    outputWhite:reader.u16(),
+    gamma:reader.u16()/100,
+  };
+}
+
+function parseBrightnessContrastAdjustment(blocks,warnings,label) {
+  const modern=blocks.find(block=>block.key==='CgEd');
+  if(modern){
+    try{
+      const descriptor=readPsdDescriptorBlock(new Reader(modern.data));
+      const items=descriptor.items||{};
+      return{
+        kind:'brightness-contrast',
+        brightness:Number(items.Brgh)||0,
+        contrast:Number(items.Cntr)||0,
+        legacy:Boolean(items.useLegacy),
+      };
+    }catch(error){
+      warnings.push(label+': CgEd Brightness/Contrast не разобран ('+(error?.message||error)+')');
+    }
+  }
+  const legacy=blocks.find(block=>block.key==='brit');
+  if(legacy?.data?.length>=8){
+    const reader=new Reader(legacy.data);
+    return{
+      kind:'brightness-contrast',
+      brightness:signed16(reader.u16()),
+      contrast:signed16(reader.u16()),
+      legacy:true,
+    };
+  }
+  return null;
+}
+
+function parseExposureAdjustment(block) {
+  if(!block?.data||block.data.length<14)return null;
+  const reader=new Reader(block.data);
+  const version=reader.u16();
+  return{kind:'exposure',version,exposure:readPsdFloat32(reader),offset:readPsdFloat32(reader),gamma:readPsdFloat32(reader)};
+}
+
+function parseHueSaturationAdjustment(block) {
+  if(!block?.data||block.data.length<16)return null;
+  const reader=new Reader(block.data);
+  const version=reader.u16(),enable=reader.u8();
+  reader.u8();
+  const colorization=[reader.i16(),reader.i16(),reader.i16()];
+  const master=[reader.i16(),reader.i16(),reader.i16()];
+  const items=[];
+  while(reader.offset+14<=reader.end&&items.length<6){
+    const range=[reader.i16(),reader.i16(),reader.i16(),reader.i16()];
+    const settings=[reader.i16(),reader.i16(),reader.i16()];
+    items.push({range,settings});
+  }
+  return{
+    kind:'hue-saturation',version,enable:Boolean(enable),
+    hue:master[0],saturation:master[1],lightness:master[2],
+    colorize:Boolean(enable),
+    colorization,items,
+  };
+}
+
+function parseLevelsAdjustment(block) {
+  if(!block?.data||block.data.length<12)return null;
+  const reader=new Reader(block.data);
+  const version=reader.u16();
+  if(version!==2)return{kind:'levels',version,master:null,channels:[]};
+  const records=[];
+  for(let index=0;index<29&&reader.offset+10<=reader.end;index+=1)records.push(levelRecordFromReader(reader));
+  return{
+    kind:'levels',version,
+    master:records[0]||null,
+    channels:records.slice(1,4).map((record,index)=>({id:index+1,...record})),
+  };
+}
+
+function curvePointPair(reader) {
+  const output=reader.u16(),input=reader.u16();
+  return{input,output};
+}
+function parseCurvesAdjustment(block,warnings,label) {
+  if(!block?.data||block.data.length<7)return null;
+  try{
+    const reader=new Reader(block.data);
+    const isMap=Boolean(reader.u8()),version=reader.u16(),countMap=reader.u32();
+    const ids=[];
+    for(let bit=0;bit<32;bit+=1)if((countMap>>>bit)&1)ids.push(bit);
+    const channels=[];
+    if(isMap){
+      for(let index=0;index<ids.length&&reader.offset+256<=reader.end;index+=1){
+        const map=reader.take(256);
+        const points=[];for(let input=0;input<256;input+=1)points.push({input,output:map[input]});
+        channels.push({id:ids[index],points});
+      }
+    }else{
+      for(let index=0;index<ids.length;index+=1){
+        const count=reader.u16();
+        if(count<2||count>19||reader.offset+count*4>reader.end)throw new PsdImportError('Curves point count повреждён','PSD_ADJUSTMENT_CURVES');
+        channels.push({id:ids[index],points:Array.from({length:count},()=>curvePointPair(reader))});
+      }
+    }
+    if(version===1&&reader.offset+10<=reader.end&&reader.ascii(4)==='Crv '){
+      const extraVersion=reader.u16(),count=reader.u32();
+      if(count<=32){
+        const extra=[];
+        for(let index=0;index<count&&reader.offset+4<=reader.end;index+=1){
+          const id=reader.u16(),pointCount=reader.u16();
+          if(pointCount>19||reader.offset+pointCount*4>reader.end)break;
+          extra.push({id,points:Array.from({length:pointCount},()=>curvePointPair(reader))});
+        }
+        for(const entry of extra){
+          const existing=channels.findIndex(channel=>channel.id===entry.id);
+          if(existing>=0)channels[existing]=entry;else channels.push(entry);
+        }
+      }
+      return{kind:'curves',version,isMap,countMap,extraVersion,channels};
+    }
+    return{kind:'curves',version,isMap,countMap,channels};
+  }catch(error){
+    warnings.push(label+': Curves не разобраны ('+(error?.message||error)+'); raw block сохранён');
+    return{kind:'curves',version:null,isMap:false,countMap:0,channels:[]};
+  }
+}
+
+function parsePsdAdjustmentBlocks(blocks,warnings,label) {
+  if(!Array.isArray(blocks)||!blocks.length)return null;
+  if(blocks.some(block=>block.key==='CgEd'||block.key==='brit'))return parseBrightnessContrastAdjustment(blocks,warnings,label);
+  const exposure=blocks.find(block=>block.key==='expA');
+  if(exposure)return parseExposureAdjustment(exposure);
+  const hue=blocks.find(block=>block.key==='hue2'||block.key==='hue ');
+  if(hue)return parseHueSaturationAdjustment(hue);
+  const levels=blocks.find(block=>block.key==='levl');
+  if(levels)return parseLevelsAdjustment(levels);
+  const curves=blocks.find(block=>block.key==='curv');
+  if(curves)return parseCurvesAdjustment(curves,warnings,label);
+  return null;
+}
+
+function appendAdjustmentLayerBlock(record,signature,key,data,warnings) {
+  if(!data)return;
+  if(!record.psdAdjustment)record.psdAdjustment={kind:null,parsed:null,blocks:[]};
+  record.psdAdjustment.blocks.push({signature,key,data});
+  const parsed=parsePsdAdjustmentBlocks(record.psdAdjustment.blocks,warnings,'Слой «'+record.name+'»');
+  if(parsed){record.psdAdjustment.kind=parsed.kind;record.psdAdjustment.parsed=parsed;}
+}
+
+function patchBrightnessContrastBlock(block,adjustment) {
+  const bytes=asBytes(block.data).slice();
+  if(block.key==='CgEd'){
+    const layout=readPsdDescriptorBlockDeepLayout(new Reader(bytes));
+    patchDescriptorNumber(bytes,layout.layout.get('Brgh'),Math.round(Number(adjustment.brightness)||0),'Brightness');
+    patchDescriptorNumber(bytes,layout.layout.get('Cntr'),Math.round(Number(adjustment.contrast)||0),'Contrast');
+    return bytes;
+  }
+  if(block.key==='brit'&&bytes.length>=8){
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    view.setInt16(0,Math.round(Number(adjustment.brightness)||0),false);
+    view.setInt16(2,Math.round(Number(adjustment.contrast)||0),false);
+    return bytes;
+  }
+  return bytes;
+}
+
+export function rewritePsdAdjustmentBlocks(blocks,adjustment) {
+  if(!Array.isArray(blocks)||!blocks.length)throw new PsdImportError('Adjustment rewrite: blocks отсутствуют','PSD_ADJUSTMENT_BLOCKS');
+  const kind=String(adjustment?.kind||'');
+  let rewritten=0;
+  const output=blocks.map(block=>{
+    if(!block?.data)return block;
+    const bytes=asBytes(block.data).slice();
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    if(kind==='brightness-contrast'&&(block.key==='CgEd'||block.key==='brit')){
+      rewritten+=1;return{...block,data:patchBrightnessContrastBlock(block,adjustment)};
+    }
+    if(kind==='exposure'&&block.key==='expA'&&bytes.length>=14){
+      view.setFloat32(2,Number(adjustment.exposure)||0,false);
+      view.setFloat32(6,Number(adjustment.offset)||0,false);
+      view.setFloat32(10,Number(adjustment.gamma)||1,false);
+      rewritten+=1;return{...block,data:bytes};
+    }
+    if(kind==='hue-saturation'&&(block.key==='hue2'||block.key==='hue ')&&bytes.length>=16){
+      view.setInt16(10,Math.round(Number(adjustment.hue)||0),false);
+      view.setInt16(12,Math.round(Number(adjustment.saturation)||0),false);
+      view.setInt16(14,Math.round(Number(adjustment.lightness)||0),false);
+      rewritten+=1;return{...block,data:bytes};
+    }
+    if(kind==='levels'&&block.key==='levl'&&bytes.length>=12){
+      const master=adjustment.master||{};
+      view.setUint16(2,Math.round(Number(master.inputBlack)||0),false);
+      view.setUint16(4,Math.round(Number(master.inputWhite)||255),false);
+      view.setUint16(6,Math.round(Number(master.outputBlack)||0),false);
+      view.setUint16(8,Math.round(Number(master.outputWhite)||255),false);
+      view.setUint16(10,Math.round((Number(master.gamma)||1)*100),false);
+      rewritten+=1;return{...block,data:bytes};
+    }
+    if(kind==='curves'&&block.key==='curv'){rewritten+=1;return{...block,data:bytes};}
+    return block;
+  });
+  if(!rewritten)throw new PsdImportError('Adjustment rewrite: compatible block не найден для '+kind,'PSD_ADJUSTMENT_BLOCKS');
+  return{blocks:output,rewritten};
+}
+
 function parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings) {
   while (reader.offset + 12 <= extraEnd) {
     const blockStart = reader.offset;
@@ -1143,6 +1364,9 @@ function parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWid
     } else if (PSD_SHAPE_LAYER_KEYS.has(key)) {
       const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_SHAPE_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
       appendShapeLayerBlock(record,signature,key,data,warnings);
+    } else if (PSD_ADJUSTMENT_LAYER_KEYS.has(key)) {
+      const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_ADJUSTMENT_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
+      appendAdjustmentLayerBlock(record,signature,key,data,warnings);
     } else if (key === 'luni' && length >= 4) {
       const count = reader.u32();
       const byteLength = Math.min(count * 2, Math.max(0, dataEnd - reader.offset));
@@ -1213,7 +1437,7 @@ function parseLayerRecord(reader, version, documentWidth, documentHeight, warnin
     const padding = (4 - (consumed % 4)) % 4;
     if (reader.offset + padding <= extraEnd) reader.skip(padding);
   }
-  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null,psdShape:null };
+  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null,psdShape:null,psdAdjustment:null };
   parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings);
   reader.seek(extraEnd);
   return record;
@@ -1892,8 +2116,24 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
 
   const layers = [];
   const fillLayers = [];
-  for (const record of records) {
+  const adjustmentLayers = [];
+  for (let recordIndex=0;recordIndex<records.length;recordIndex+=1) {
+    const record=records[recordIndex];
     if (record.sectionDivider === 1 || record.sectionDivider === 2 || record.sectionDivider === 3) continue;
+    if(record.psdAdjustment?.parsed){
+      adjustmentLayers.push({
+        name:record.name||'PSD Adjustment Layer',
+        visible:!(record.flags&0x02),
+        opacity:record.opacity/255,
+        blendMode:blendModeFor(record.blendKey,warnings,record.name),
+        groupKey:record.groupKey||null,
+        vectorMask:record.vectorMask,
+        channelIds:record.channels.map(channel=>channel.id),
+        psdAdjustment:record.psdAdjustment,
+        stackIndex:recordIndex,
+      });
+      continue;
+    }
     const width = Math.max(0, record.right - record.left);
     const height = Math.max(0, record.bottom - record.top);
     if (!width || !height) {
@@ -1905,6 +2145,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
           blendMode:blendModeFor(record.blendKey,warnings,record.name),
           groupKey:record.groupKey||null,
           psdShape:record.psdShape,
+          stackIndex:recordIndex,
         });
         warnings.push(`Слой «${record.name}»: ${record.psdShape.fillType} fill metadata сохранены в fillLayers foundation; raster preview берётся из composite`);
       }else warnings.push(`Слой «${record.name}» пропущен: пустые bounds`);
@@ -1931,6 +2172,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
       psdSmartObject: record.psdSmartObject,
       psdText: record.psdText,
       psdShape: record.psdShape,
+      stackIndex:recordIndex,
     });
   }
 
@@ -1947,6 +2189,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
     ...header,
     layers,
     fillLayers,
+    adjustmentLayers,
     groups,
     composite,
     compositePixelBuffer,
@@ -2206,6 +2449,13 @@ function writeShapeLayerExtras(writer,layer,version,phase='content') {
   }
 }
 
+function writeAdjustmentLayerExtras(writer,layer,version) {
+  const blocks=Array.isArray(layer?.psdAdjustment?.blocks)?layer.psdAdjustment.blocks:[];
+  for(const block of blocks.slice(0,12)){
+    writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_ADJUSTMENT_LAYER_KEYS,MAX_PSD_ADJUSTMENT_BLOCK_BYTES,'Adjustment layer block');
+  }
+}
+
 function writeLinkedLayerBlocks(writer,blocks,version) {
   if(!Array.isArray(blocks))return;
   for(const block of blocks.slice(0,MAX_PSD_LINKED_LAYER_BLOCKS)){
@@ -2458,6 +2708,16 @@ function writeLayerMaskExtra(writer, layer) {
 }
 
 function normalizeExportLayer(layer, index, maxPixels, version, bitsPerChannel, colorMode = PSD_COLOR_MODE_RGB) {
+  if(layer?.psdAdjustment){
+    const channelIds=Array.isArray(layer.psdAdjustment.channelIds)&&layer.psdAdjustment.channelIds.length
+      ? layer.psdAdjustment.channelIds.slice(0,16)
+      : [-1,0,1,2,-2];
+    return{
+      ...layer,
+      x:0,y:0,width:0,height:0,mask:null,
+      channels:channelIds.map(id=>({id:Number(id),data:new Uint8Array([0,0])})),
+    };
+  }
   const item = validateExportLayer(layer, index, maxPixels, colorMode);
   const cmyk=colorMode===PSD_COLOR_MODE_CMYK;
   const channels = cmyk
@@ -2746,6 +3006,7 @@ function writeLayerRecordAndData(layerRecords, channelData, layer, version, docu
   writeShapeLayerExtras(extra, layer, version, 'content');
   writeVectorMaskExtra(extra, layer, documentWidth, documentHeight);
   writeShapeLayerExtras(extra, layer, version, 'stroke');
+  writeAdjustmentLayerExtras(extra, layer, version);
   writeTextLayerExtra(extra, layer, version);
   writeSmartObjectLayerExtras(extra, layer, version);
   layerRecords.u32(extra.length).append(extra);
