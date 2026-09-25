@@ -752,3 +752,65 @@ test('PSB Stage 7a wire contract keeps 64-bit lengths and 32-bit RLE row counts 
   assert.match(psdSource, /export function encodePsb\(/);
   assert.match(psdSource, /export function encodePsbBlob\(/);
 });
+
+test('PSD/PSB Stage 10d round-trips native vmsk vector masks with Bezier knots and boolean operations', async()=>{
+  const width=100,height=80;
+  const composite=new Uint8Array(width*height*4);
+  const pixels=Uint8Array.from([120,80,40,255]);
+  const vectorMask={enabled:false,invert:true,linked:false,fillStartsWithAllPixels:true,subpaths:[
+    {closed:true,operation:'add',fillRule:'non-zero',points:[
+      {x:10,y:12,handleOut:{x:18,y:5},kind:'corner'},
+      {x:70,y:15,handleIn:{x:55,y:4},handleOut:{x:78,y:28},kind:'smooth'},
+      {x:65,y:60,handleIn:{x:75,y:50},kind:'corner'},
+    ]},
+    {closed:true,operation:'subtract',fillRule:'even-odd',points:[
+      {x:25,y:25},{x:45,y:25},{x:45,y:45},{x:25,y:45},
+    ]},
+    {closed:true,operation:'intersect',points:[{x:5,y:5},{x:90,y:5},{x:90,y:70},{x:5,y:70}]},
+    {closed:true,operation:'exclude',points:[{x:75,y:35},{x:90,y:35},{x:90,y:55},{x:75,y:55}]},
+  ]};
+  for(const encode of [encodePsd,encodePsb]){
+    const encoded=encode({width,height,composite,layers:[{name:'Native VM',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true,vectorMask}]});
+    const decoded=await decodePsd(encoded);
+    const mask=decoded.layers[0].vectorMask;
+    assert.ok(mask);
+    assert.equal(mask.enabled,false);assert.equal(mask.invert,true);assert.equal(mask.linked,false);assert.equal(mask.fillStartsWithAllPixels,true);
+    assert.deepEqual(mask.subpaths.map(path=>path.operation),['add','subtract','intersect','exclude']);
+    assert.equal(mask.subpaths[1].fillRule,'even-odd');
+    assert.ok(Math.abs(mask.subpaths[0].points[0].x-10)<1e-4);
+    assert.ok(Math.abs(mask.subpaths[0].points[1].handleIn.x-55)<1e-4);
+    assert.equal(mask.subpaths[0].points[1].kind,'smooth');
+  }
+});
+
+test('PSD/PSB Stage 10e preserves saved Path Information image resources', async()=>{
+  const width=64,height=48;
+  const composite=new Uint8Array(width*height*4);
+  const pixels=Uint8Array.from([1,2,3,255]);
+  const paths=[{id:2007,name:'Cut Path',fillStartsWithAllPixels:false,subpaths:[
+    {closed:false,operation:'add',fillRule:'even-odd',points:[
+      {x:4,y:5,handleOut:{x:12,y:2},kind:'corner'},
+      {x:50,y:35,handleIn:{x:42,y:40},kind:'smooth'},
+    ]},
+  ]}];
+  for(const encode of [encodePsd,encodePsb]){
+    const encoded=encode({width,height,composite,paths,layers:[{name:'Pixel',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true}]});
+    const decoded=await decodePsd(encoded);
+    assert.equal(decoded.paths.length,1);
+    assert.equal(decoded.paths[0].id,2007);
+    assert.equal(decoded.paths[0].name,'Cut Path');
+    assert.equal(decoded.paths[0].subpaths[0].closed,false);
+    assert.equal(decoded.paths[0].subpaths[0].fillRule,'even-odd');
+    assert.ok(Math.abs(decoded.paths[0].subpaths[0].points[0].handleOut.x-12)<1e-4);
+  }
+});
+
+test('PSD path writer rejects coordinates outside Photoshop 8.24 path range',()=>{
+  const pixels=Uint8Array.from([1,2,3,255]);
+  assert.throws(()=>encodePsd({
+    width:1,height:1,composite:pixels,
+    layers:[{name:'bad path',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true,vectorMask:{subpaths:[
+      {closed:true,operation:'add',points:[{x:0,y:0},{x:17,y:0},{x:0,y:1}]},
+    ]}}],
+  }),error=>error instanceof PsdImportError&&error.code==='PSD_EXPORT_PATH_RANGE');
+});

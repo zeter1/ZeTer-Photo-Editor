@@ -3003,6 +3003,56 @@ async function rgbaPixelsToDataUrl(width,height,pixels,label='PSD слой'){
   return canvasToDataURL(canvas,'image/png');
 }
 
+function importPsdVectorMask(sourceMask, layer) {
+  if(!sourceMask?.subpaths?.length)return null;
+  const localize=node=>{
+    const anchor=documentPointToLayerPixel(node,layer);
+    return{
+      x:anchor.x,y:anchor.y,
+      handleIn:node.handleIn?documentPointToLayerPixel(node.handleIn,layer):null,
+      handleOut:node.handleOut?documentPointToLayerPixel(node.handleOut,layer):null,
+      kind:node.kind==='smooth'?'smooth':'corner',
+    };
+  };
+  return createVectorMask({
+    enabled:sourceMask.enabled!==false,
+    invert:sourceMask.invert===true,
+    linked:sourceMask.linked!==false,
+    fillStartsWithAllPixels:sourceMask.fillStartsWithAllPixels===true,
+    subpaths:sourceMask.subpaths.map(subpath=>({
+      operation:['add','subtract','intersect','exclude'].includes(subpath.operation)?subpath.operation:'add',
+      closed:subpath.closed!==false,
+      fillRule:subpath.fillRule==='even-odd'?'even-odd':'non-zero',
+      points:(subpath.points||[]).map(localize),
+    })).filter(subpath=>subpath.points.length>=2),
+  });
+}
+
+function exportPsdVectorMask(layer) {
+  const source=layer?.vectorMask;
+  if(!source?.subpaths?.length)return null;
+  const documentize=node=>{
+    const anchor=layerPixelToDocumentPoint(node,layer);
+    return{
+      x:anchor.x,y:anchor.y,
+      handleIn:node.handleIn?layerPixelToDocumentPoint(node.handleIn,layer):null,
+      handleOut:node.handleOut?layerPixelToDocumentPoint(node.handleOut,layer):null,
+      kind:node.kind==='smooth'?'smooth':'corner',
+    };
+  };
+  return{
+    enabled:source.enabled!==false,
+    invert:source.invert===true,
+    linked:source.linked!==false,
+    fillStartsWithAllPixels:source.fillStartsWithAllPixels===true,
+    subpaths:source.subpaths.map(subpath=>({
+      operation:['add','subtract','intersect','exclude'].includes(subpath.operation)?subpath.operation:'add',
+      closed:subpath.closed!==false,
+      fillRule:subpath.fillRule==='even-odd'?'even-odd':'non-zero',
+      points:(subpath.points||[]).map(documentize),
+    })).filter(subpath=>subpath.points.length>=2),
+  };
+}
 async function openPsd(file){
   if(blockPendingDocumentEdit())return;
   if(!canReplaceDocument())return;
@@ -3067,7 +3117,7 @@ async function openPsd(file){
       const maskDataUrl=sourceLayer.mask
         ? await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.mask.pixels,`Маска PSD/PSB слоя «${sourceLayer.name}»`)
         : null;
-      prepared.push(createRasterLayer({
+      const importedLayer=createRasterLayer({
         name:sourceLayer.name||'PSD Layer',
         visible:sourceLayer.visible!==false,
         opacity:clamp(Number(sourceLayer.opacity),0,1),
@@ -3076,7 +3126,10 @@ async function openPsd(file){
         groupId:sourceLayer.groupKey?(groupIdByKey.get(sourceLayer.groupKey)??null):null,
         dataUrl,
         mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
-      }));
+      });
+      importedLayer.vectorMask=importPsdVectorMask(sourceLayer.vectorMask,importedLayer);
+      if(sourceLayer.vectorMask?.linked===false)warnings.push(`Слой «${sourceLayer.name}»: Photoshop vector mask unlinked-флаг сохранён, но ZPE при трансформациях пока перемещает её вместе со слоем`);
+      prepared.push(importedLayer);
       sourceLayer.pixelBuffer=null;
       sourceLayer.pixels=null;
       if(sourceLayer.mask)sourceLayer.mask.pixels=null;
@@ -3105,6 +3158,7 @@ async function openPsd(file){
     });
     next.layers=prepared;
     next.groups=importedGroups;
+    next.paths=structuredClone(parsed.paths||[]);
     next.colorProfile=parsed.iccProfile?{
       kind:'icc',
       untagged:Boolean(parsed.iccUntagged),
@@ -3123,8 +3177,8 @@ async function openPsd(file){
     markDirty(true);
     queueRecovery({immediate:true});
     fitToView();
-    setStatus(`PSD/PSB импортирован: ${prepared.length} слоёв, групп: ${importedGroups.length}. Сохраните проект как .zpe`);
-    toast(`PSD/PSB открыт: ${prepared.length} слоёв, групп: ${importedGroups.length}`,'success');
+    setStatus(`PSD/PSB импортирован: ${prepared.length} слоёв, групп: ${importedGroups.length}, paths: ${next.paths.length}. Сохраните проект как .zpe`);
+    toast(`PSD/PSB открыт: ${prepared.length} слоёв, групп: ${importedGroups.length}, paths: ${next.paths.length}`,'success');
     if(warnings.length){
       console.warn('PSD/PSB import warnings',warnings);
       toast(`PSD/PSB импортирован с ограничениями: ${warnings.length}. Подробности — в консоли`,'warn');
@@ -3213,6 +3267,7 @@ async function renderPsdLayerPixels(layer,bounds){
   ctx.translate(-bounds.x,-bounds.y);
   const preview=structuredClone(layer);
   preview.mask=null;
+  preview.vectorMask=null;
   preview.opacity=1;
   preview.blendMode='source-over';
   await renderLayer(ctx,preview);
@@ -3237,7 +3292,7 @@ async function renderPsdMaskPixels(layer,bounds){
 
 function layerNeedsSemanticRasterWarning(layer){
   if(layer.type!=='raster')return true;
-  if(layer.styles||layer.vectorMask)return true;
+  if(layer.styles)return true;
   const filters=sanitizeFilters(layer.filters);
   return Object.keys(DEFAULT_LAYER_FILTERS).some(key=>Math.abs(Number(filters[key])-Number(DEFAULT_LAYER_FILTERS[key]))>1e-9)||
     Math.abs(Number(layer.scaleX??1)-1)>1e-9||Math.abs(Number(layer.scaleY??1)-1)>1e-9||Math.abs(Number(layer.rotation)||0)>1e-9;
@@ -3275,8 +3330,8 @@ async function preparePsdExport(exportDoc){
       opacity:clamp(Number(group.opacity??1),0,1),
       blendMode:group.blendMode||'pass-through',
     }));
-  if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters, layer styles и vector masks экспортированы как raster preview соответствующих слоёв');
-  if(exportDoc.layers.some(layer=>layer.vectorMask))warnings.push('Векторные маски ZPE визуально сохранены в raster preview; native Photoshop vector-mask resource пока не записывается');
+  if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(sourceLayers.some(layer=>layer.vectorMask?.linked===false))warnings.push('Unlinked vector mask flag записывается в PSD/PSB, но ZPE при трансформациях пока перемещает такую маску вместе со слоем');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
 
   const prepared=[];
@@ -3293,6 +3348,7 @@ async function preparePsdExport(exportDoc){
         pixels:await renderPsdMaskPixels(layer,bounds),
         disabled:layer.mask.enabled===false,
       }:null,
+      vectorMask:exportPsdVectorMask(layer),
     });
   }
 
@@ -3316,7 +3372,7 @@ async function preparePsdExport(exportDoc){
   }
 
   if(exportDoc.colorProfile?.kind==='icc')warnings.push('ICC profile сохранён как metadata resource без явного color transform; пиксельные операции ZPE пока выполняются в unmanaged Canvas pipeline');
-  return{layers:[...prepared].reverse(),groups:exportGroups,composite,warnings};
+  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,warnings};
 }
 
 async function exportPsdDocument(exportDoc,{psb=false}={}){
@@ -3331,7 +3387,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
     : null;
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
-    layers:prepared.layers,groups:prepared.groups,composite:prepared.composite,
+    layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,composite:prepared.composite,
     iccProfile,iccUntagged:Boolean(profile?.untagged),
     maxPixels:48_000_000,maxLayers:500,
   });

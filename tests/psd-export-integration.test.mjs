@@ -113,3 +113,15 @@ test('PSD Color Management Stage 7g persists ICC bytes in ZPE and passes them ba
   assert.match(main,/dataUrlToBytes\(profile\.dataUrl,\{maxBytes:4\*1024\*1024\}\)/);
   assert.match(main,/iccProfile,iccUntagged:Boolean\(profile\?\.untagged\)/);
 });
+
+test('PSD Vector/Path Stage 10d-10e wires native masks and saved paths through UI and adapter',()=>{
+  assert.match(adapter,/parsePhotoshopPathRecords/);
+  assert.match(adapter,/key === 'vmsk' \|\| key === 'vsms'/);
+  assert.match(adapter,/writeVectorMaskExtra\(extra, layer, documentWidth, documentHeight\)/);
+  assert.match(adapter,/id >= 2000 && id <= 2997/);
+  assert.match(adapter,/writeSavedPathResources/);
+  assert.match(main,/importedLayer\.vectorMask=importPsdVectorMask\(sourceLayer\.vectorMask,importedLayer\)/);
+  assert.match(main,/next\.paths=structuredClone\(parsed\.paths\|\|\[\]\)/);
+  assert.match(main,/vectorMask:exportPsdVectorMask\(layer\)/);
+  assert.match(main,/paths:prepared\.paths/);
+});

@@ -72,6 +72,7 @@ export function createDocument({ name = 'Без имени', width = 1200, heigh
     height: size.height,
     background,
     colorProfile: null,
+    paths: [],
     layers: [],
     groups: [],
     selectedLayerId: null,
@@ -139,6 +140,8 @@ export function createVectorMask(overrides = {}) {
   return {
     enabled: true,
     invert: false,
+    linked: true,
+    fillStartsWithAllPixels: false,
     subpaths: [],
     ...overrides,
   };
@@ -537,7 +540,8 @@ export function sanitizeVectorMask(mask) {
       if (points.length < 3) return null;
       return {
         operation: VECTOR_MASK_OPERATIONS.has(subpath?.operation) ? subpath.operation : 'add',
-        closed: true,
+        closed: subpath?.closed !== false,
+        fillRule: subpath?.fillRule === 'even-odd' ? 'even-odd' : 'non-zero',
         points,
       };
     })
@@ -546,8 +550,39 @@ export function sanitizeVectorMask(mask) {
   return createVectorMask({
     enabled: mask.enabled !== false,
     invert: mask.invert === true,
+    linked: mask.linked !== false,
+    fillStartsWithAllPixels: mask.fillStartsWithAllPixels === true,
     subpaths,
   });
+}
+
+function sanitizeDocumentPath(path, index, usedIds) {
+  if (!path || typeof path !== 'object' || Array.isArray(path)) return null;
+  let id = Number.isInteger(path.id) && path.id >= 2000 && path.id <= 2997 ? path.id : null;
+  if (id !== null && usedIds.has(id)) id = null;
+  if (id !== null) usedIds.add(id);
+  const subpaths = (Array.isArray(path.subpaths) ? path.subpaths : [])
+    .slice(0, 128)
+    .map(subpath => {
+      const points = (Array.isArray(subpath?.points) ? subpath.points : [])
+        .slice(0, 2000)
+        .map(sanitizePathPoint);
+      if (points.length < 2) return null;
+      return {
+        operation: VECTOR_MASK_OPERATIONS.has(subpath?.operation) ? subpath.operation : 'add',
+        closed: subpath?.closed !== false,
+        fillRule: subpath?.fillRule === 'even-odd' ? 'even-odd' : 'non-zero',
+        points,
+      };
+    })
+    .filter(Boolean);
+  if (!subpaths.length) return null;
+  return {
+    id,
+    name: shortText(path.name, `Path ${index + 1}`, 240).trim() || `Path ${index + 1}`,
+    fillStartsWithAllPixels: path.fillStartsWithAllPixels === true,
+    subpaths,
+  };
 }
 
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
@@ -660,6 +695,10 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.height = size.height;
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
   doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
+  const usedPathIds = new Set();
+  doc.paths = Array.isArray(doc.paths)
+    ? doc.paths.slice(0, 998).map((path, index) => sanitizeDocumentPath(path, index, usedPathIds)).filter(Boolean)
+    : [];
   const usedGroupIds = new Set();
   doc.groups = Array.isArray(doc.groups) ? doc.groups.slice(0, 100).map(group => sanitizeGroup(group, usedGroupIds)) : [];
   normalizeGroupParents(doc.groups);

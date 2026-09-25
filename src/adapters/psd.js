@@ -8,6 +8,8 @@ const PSD_COLOR_MODE_RGB = 3;
 const PSD_SUPPORTED_DEPTHS = new Set([8, 16, 32]);
 const MAX_PSD_LAYERS = 500;
 const MAX_PSD_CHANNEL_BYTES = 256 * 1024 * 1024;
+const MAX_PSD_PATH_RECORDS = 262144;
+const PSD_PATH_BOOLEAN_OPERATIONS = Object.freeze(['exclude','add','subtract','intersect']);
 
 const PSD_BLEND_MODES = Object.freeze({
   norm: 'source-over',
@@ -182,10 +184,81 @@ function parseIccProfileHeader(bytes) {
   return summary;
 }
 
-function parseImageResources(reader, section, warnings, { maxIccBytes = 4 * 1024 * 1024 } = {}) {
+
+function readFixedPointPath32(reader) {
+  return reader.i32() / 0x01000000;
+}
+
+function readPhotoshopPathPoint(reader, width, height) {
+  const y = readFixedPointPath32(reader) * height;
+  const x = readFixedPointPath32(reader) * width;
+  return { x, y };
+}
+
+function pathPointEqual(a, b) {
+  return Math.abs(a.x - b.x) < 1e-7 && Math.abs(a.y - b.y) < 1e-7;
+}
+
+function parsePhotoshopPathRecords(bytes, width, height, warnings = [], label = 'Path') {
+  const reader = bytes instanceof Reader ? bytes : new Reader(asBytes(bytes));
+  const end = reader.end;
+  const subpaths = [];
+  let current = null;
+  let expectedKnots = 0;
+  let recordCount = 0;
+  let fillStartsWithAllPixels = false;
+  while (end - reader.offset >= 26) {
+    recordCount += 1;
+    if (recordCount > MAX_PSD_PATH_RECORDS) throw new PsdImportError(`${label}: слишком много path records`, 'PSD_PATH_LIMIT');
+    const recordStart = reader.offset;
+    const selector = reader.u16();
+    if (selector === 0 || selector === 3) {
+      if (current && current.points.length !== expectedKnots) warnings.push(`${label}: число knots не совпало с length record`);
+      expectedKnots = reader.u16();
+      const boolOp = reader.i16();
+      const flags = reader.u16();
+      reader.skip(18);
+      current = {
+        closed: selector === 0,
+        operation: PSD_PATH_BOOLEAN_OPERATIONS[boolOp] || 'add',
+        fillRule: flags === 1 ? 'even-odd' : 'non-zero',
+        points: [],
+      };
+      subpaths.push(current);
+      continue;
+    }
+    if ([1,2,4,5].includes(selector)) {
+      if (!current) { warnings.push(`${label}: knot без subpath length record пропущен`); reader.seek(recordStart + 26); continue; }
+      const handleIn = readPhotoshopPathPoint(reader, width, height);
+      const anchor = readPhotoshopPathPoint(reader, width, height);
+      const handleOut = readPhotoshopPathPoint(reader, width, height);
+      current.points.push({
+        x: anchor.x,
+        y: anchor.y,
+        handleIn: pathPointEqual(handleIn, anchor) ? null : handleIn,
+        handleOut: pathPointEqual(handleOut, anchor) ? null : handleOut,
+        kind: selector === 1 || selector === 4 ? 'smooth' : 'corner',
+      });
+      continue;
+    }
+    if (selector === 6) { reader.skip(24); continue; }
+    if (selector === 7) { reader.skip(24); continue; }
+    if (selector === 8) { fillStartsWithAllPixels = Boolean(reader.u16()); reader.skip(22); continue; }
+    warnings.push(`${label}: неизвестный path selector ${selector}; record пропущен`);
+    reader.seek(recordStart + 26);
+  }
+  if (current && current.points.length !== expectedKnots) warnings.push(`${label}: число knots не совпало с последним length record`);
+  if (reader.offset !== end) warnings.push(`${label}: ${end - reader.offset} trailing byte(s) после path records`);
+  return {
+    fillStartsWithAllPixels,
+    subpaths: subpaths.filter(path => path.points.length >= 2),
+  };
+}
+function parseImageResources(reader, section, warnings, { maxIccBytes = 4 * 1024 * 1024, width = 1, height = 1 } = {}) {
   const resources = {
     iccProfile: null,
     iccUntagged: false,
+    paths: [],
   };
   while (reader.offset < section.end) {
     if (section.end - reader.offset < 12) {
@@ -225,6 +298,13 @@ function parseImageResources(reader, section, warnings, { maxIccBytes = 4 * 1024
       };
     } else if (id === 1041) {
       resources.iccUntagged = Boolean(data[0]);
+    } else if (id >= 2000 && id <= 2997) {
+      if (resources.paths.length >= 998) {
+        warnings.push('Path Information: превышен лимит 998 saved paths; лишние ресурсы пропущены');
+        continue;
+      }
+      const parsed = parsePhotoshopPathRecords(data, width, height, warnings, `Path resource ${id}`);
+      if (parsed.subpaths.length) resources.paths.push({ id, name: name || `Path ${id - 1999}`, ...parsed });
     }
   }
   return resources;
@@ -265,7 +345,7 @@ function parseLayerMask(reader, length) {
   };
 }
 
-function parseAdditionalLayerInfo(reader, extraEnd, record, version) {
+function parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings) {
   while (reader.offset + 12 <= extraEnd) {
     const blockStart = reader.offset;
     const signature = reader.ascii(4);
@@ -281,6 +361,24 @@ function parseAdditionalLayerInfo(reader, extraEnd, record, version) {
       const byteLength = Math.min(count * 2, Math.max(0, dataEnd - reader.offset));
       const name = decodeUtf16Be(reader.take(byteLength));
       if (name) record.name = name;
+    } else if ((key === 'vmsk' || key === 'vsms') && length >= 8) {
+      const vectorVersion = reader.u32();
+      const flags = reader.u32();
+      if (vectorVersion !== 3) warnings.push(`Слой «${record.name}»: vector mask version ${vectorVersion} импортирован best-effort`);
+      const parsed = parsePhotoshopPathRecords(
+        new Reader(reader.bytes, reader.offset, dataEnd),
+        documentWidth,
+        documentHeight,
+        warnings,
+        `Vector mask «${record.name}»`,
+      );
+      record.vectorMask = {
+        enabled: (flags & 4) === 0,
+        invert: Boolean(flags & 1),
+        linked: (flags & 2) === 0,
+        fillStartsWithAllPixels: parsed.fillStartsWithAllPixels,
+        subpaths: parsed.subpaths,
+      };
     } else if ((key === 'lsct' || key === 'lsdk') && length >= 4) {
       record.sectionDivider = reader.u32();
       if (length >= 12 && reader.offset + 8 <= dataEnd) {
@@ -295,7 +393,7 @@ function parseAdditionalLayerInfo(reader, extraEnd, record, version) {
   }
 }
 
-function parseLayerRecord(reader, version) {
+function parseLayerRecord(reader, version, documentWidth, documentHeight, warnings) {
   const top = reader.i32();
   const left = reader.i32();
   const bottom = reader.i32();
@@ -328,8 +426,8 @@ function parseLayerRecord(reader, version) {
     const padding = (4 - (consumed % 4)) % 4;
     if (reader.offset + padding <= extraEnd) reader.skip(padding);
   }
-  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null };
-  parseAdditionalLayerInfo(reader, extraEnd, record, version);
+  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null };
+  parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings);
   reader.seek(extraEnd);
   return record;
 }
@@ -767,7 +865,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
   const colorMode = readLengthSection(reader, 'Color Mode Data'); reader.seek(colorMode.end);
   const warnings = [];
   const resources = readLengthSection(reader, 'Image Resources');
-  const imageResources = parseImageResources(reader, resources, warnings);
+  const imageResources = parseImageResources(reader, resources, warnings, { width:header.width, height:header.height });
   reader.seek(resources.end);
   const layerMaskLength = readVersionedLength(reader, header.version);
   const layerMaskEnd = reader.offset + layerMaskLength;
@@ -782,7 +880,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
       const layerCountSigned = reader.i16();
       const layerCount = Math.abs(layerCountSigned);
       if (layerCount > maxLayers) throw new PsdImportError(`PSD содержит слишком много слоёв: ${layerCount} > ${maxLayers}`, 'PSD_LAYER_LIMIT');
-      for (let index = 0; index < layerCount; index += 1) records.push(parseLayerRecord(reader, header.version));
+      for (let index = 0; index < layerCount; index += 1) records.push(parseLayerRecord(reader, header.version, header.width, header.height, warnings));
       for (const record of records) {
         const width = Math.max(0, record.right - record.left);
         const height = Math.max(0, record.bottom - record.top);
@@ -827,6 +925,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
       pixelBuffer,
       pixels: header.bitsPerChannel === 8 ? pixelBuffer.data : null,
       mask: maskRgba ? { pixels: maskRgba, disabled: Boolean(record.mask?.disabled) } : null,
+      vectorMask: record.vectorMask,
     });
   }
 
@@ -847,6 +946,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
     compositePixelBuffer,
     iccProfile: imageResources.iccProfile,
     iccUntagged: imageResources.iccUntagged,
+    paths: imageResources.paths,
     warnings,
   };
 }
@@ -939,6 +1039,62 @@ function encodeUtf16Be(value) {
   return bytes;
 }
 
+
+function writeFixedPointPath32(writer, value, label) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < -16 || number >= 16) {
+    throw new PsdImportError(`PSD/PSB writer: ${label} выходит за диапазон path fixed-point [-16, 16)`, 'PSD_EXPORT_PATH_RANGE');
+  }
+  return writer.i32(Math.round(number * 0x01000000));
+}
+
+function writePhotoshopPathPoint(writer, point, width, height, label) {
+  if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) {
+    throw new PsdImportError(`PSD/PSB writer: ${label} содержит некорректную точку`, 'PSD_EXPORT_PATH_POINT');
+  }
+  writeFixedPointPath32(writer, Number(point.y) / height, `${label}.y`);
+  writeFixedPointPath32(writer, Number(point.x) / width, `${label}.x`);
+}
+
+function writePhotoshopPathRecords(writer, pathData, width, height, label = 'Path') {
+  const subpaths = Array.isArray(pathData?.subpaths) ? pathData.subpaths : [];
+  if (!subpaths.length) throw new PsdImportError(`PSD/PSB writer: ${label} не содержит subpaths`, 'PSD_EXPORT_PATH_EMPTY');
+  writer.u16(6).push(new Uint8Array(24));
+  writer.u16(8).u16(pathData?.fillStartsWithAllPixels ? 1 : 0).push(new Uint8Array(22));
+  let recordCount = 2;
+  for (let subpathIndex = 0; subpathIndex < subpaths.length; subpathIndex += 1) {
+    const subpath = subpaths[subpathIndex];
+    const points = Array.isArray(subpath?.points) ? subpath.points : [];
+    if (points.length < 2 || points.length > 65535) {
+      throw new PsdImportError(`PSD/PSB writer: ${label} subpath #${subpathIndex + 1} имеет недопустимое число knots`, 'PSD_EXPORT_PATH_KNOTS');
+    }
+    recordCount += 1 + points.length;
+    if (recordCount > MAX_PSD_PATH_RECORDS) throw new PsdImportError(`PSD/PSB writer: ${label} превышает лимит path records`, 'PSD_EXPORT_PATH_LIMIT');
+    const closed = subpath?.closed !== false;
+    const operation = ['add','subtract','intersect','exclude'].includes(subpath?.operation) ? subpath.operation : 'add';
+    const boolOp = PSD_PATH_BOOLEAN_OPERATIONS.indexOf(operation);
+    writer.u16(closed ? 0 : 3).u16(points.length).i16(boolOp).u16(subpath?.fillRule === 'even-odd' ? 1 : 2).push(new Uint8Array(18));
+    for (let pointIndex = 0; pointIndex < points.length; pointIndex += 1) {
+      const point = points[pointIndex];
+      const linked = point?.kind === 'smooth';
+      writer.u16(closed ? (linked ? 1 : 2) : (linked ? 4 : 5));
+      writePhotoshopPathPoint(writer, point?.handleIn || point, width, height, `${label} handleIn`);
+      writePhotoshopPathPoint(writer, point, width, height, `${label} anchor`);
+      writePhotoshopPathPoint(writer, point?.handleOut || point, width, height, `${label} handleOut`);
+    }
+  }
+}
+
+function writeVectorMaskExtra(writer, layer, documentWidth, documentHeight) {
+  if (!layer.vectorMask?.subpaths?.length) return;
+  const vectorMask = layer.vectorMask;
+  const data = new Writer();
+  const flags = (vectorMask.invert ? 1 : 0) | (vectorMask.linked === false ? 2 : 0) | (vectorMask.enabled === false ? 4 : 0);
+  data.u32(3).u32(flags);
+  writePhotoshopPathRecords(data, vectorMask, documentWidth, documentHeight, `vector mask «${layer.name || 'Layer'}»`);
+  writer.ascii('8BIM').ascii('vmsk').u32(data.length).append(data);
+  if (data.length & 1) writer.u8(0);
+}
 function packBitsEncodeRow(row) {
   const out = [];
   let index = 0;
@@ -1239,7 +1395,25 @@ function writeImageResourceBlock(writer, id, data, name = '') {
   if (bytes.length & 1) writer.u8(0);
 }
 
-function buildImageResources({ iccProfile = null, iccUntagged = false, maxIccBytes = 4 * 1024 * 1024 } = {}) {
+
+function writeSavedPathResources(resources, paths, width, height) {
+  if (!Array.isArray(paths) || !paths.length) return;
+  const used = new Set();
+  let nextId = 2000;
+  const allocateId = requested => {
+    const candidate = Number.isInteger(requested) && requested >= 2000 && requested <= 2997 && !used.has(requested) ? requested : null;
+    if (candidate !== null) { used.add(candidate); return candidate; }
+    while (nextId <= 2997 && used.has(nextId)) nextId += 1;
+    if (nextId > 2997) throw new PsdImportError('PSD/PSB writer: исчерпан диапазон saved path resources 2000..2997', 'PSD_EXPORT_PATH_RESOURCE_LIMIT');
+    const id = nextId++; used.add(id); return id;
+  };
+  for (const path of paths.slice(0, 998)) {
+    const data = new Writer();
+    writePhotoshopPathRecords(data, path, width, height, `saved path «${path?.name || 'Path'}»`);
+    writeImageResourceBlock(resources, allocateId(path?.id), data.concat(), path?.name || 'Path');
+  }
+}
+function buildImageResources({ iccProfile = null, iccUntagged = false, paths = [], width = 1, height = 1, maxIccBytes = 4 * 1024 * 1024 } = {}) {
   const resources = new Writer();
   if (iccProfile) {
     const bytes = asBytes(iccProfile);
@@ -1252,10 +1426,11 @@ function buildImageResources({ iccProfile = null, iccUntagged = false, maxIccByt
     writeImageResourceBlock(resources, 1039, bytes);
   }
   if (iccUntagged) writeImageResourceBlock(resources, 1041, Uint8Array.of(1));
+  writeSavedPathResources(resources, paths, width, height);
   return resources;
 }
 
-function buildPsdWriter({ width, height, layers = [], groups = [], composite, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], composite, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
   if (version !== PSD_VERSION && version !== PSB_VERSION) throw new PsdImportError(`PSD/PSB writer: unsupported version ${version}`, 'PSD_EXPORT_VERSION');
   const documentWidth = Math.trunc(Number(width));
   const documentHeight = Math.trunc(Number(height));
@@ -1295,6 +1470,7 @@ function buildPsdWriter({ width, height, layers = [], groups = [], composite, ic
     writePascalLayerName(extra, layer.name || 'Layer');
     writeUnicodeLayerName(extra, layer.name || 'Layer');
     writeSectionDividerExtra(extra, layer);
+    writeVectorMaskExtra(extra, layer, documentWidth, documentHeight);
     layerRecords.u32(extra.length).append(extra);
 
     for (const channel of layer.channels) channelData.append(channel.data);
@@ -1311,7 +1487,7 @@ function buildPsdWriter({ width, height, layers = [], groups = [], composite, ic
   layerAndMask.u32(0);
 
   const compositeData = encodeCompositeRle(composite, documentWidth, documentHeight, version);
-  const imageResources = buildImageResources({iccProfile,iccUntagged});
+  const imageResources = buildImageResources({iccProfile,iccUntagged,paths,width:documentWidth,height:documentHeight});
   const out = new Writer();
   out.ascii('8BPS').u16(version).push(new Uint8Array(6));
   out.u16(4).u32(documentHeight).u32(documentWidth).u16(8).u16(PSD_COLOR_MODE_RGB);

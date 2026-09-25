@@ -319,6 +319,10 @@ function renderVectorMaskBitmap(vectorMask, width, height) {
   const ctx=canvas.getContext('2d',{alpha:true});
   const subpaths=Array.isArray(vectorMask?.subpaths)?vectorMask.subpaths:[];
   let initialized=false;
+  if(vectorMask?.fillStartsWithAllPixels===true){
+    ctx.save();ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+    initialized=true;
+  }
 
   for(const subpath of subpaths){
     const points=Array.isArray(subpath?.points)?subpath.points:[];
@@ -338,7 +342,7 @@ function renderVectorMaskBitmap(vectorMask, width, height) {
           : 'source-over';
     ctx.fillStyle='#fff';
     ctx.beginPath();
-    if(traceLayerBezierPath(ctx,points,true))ctx.fill();
+    if(traceLayerBezierPath(ctx,points,subpath.closed!==false))ctx.fill(subpath.fillRule==='even-odd'?'evenodd':'nonzero');
     ctx.restore();
     initialized=true;
   }

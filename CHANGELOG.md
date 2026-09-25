@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-25 — Native PSD/PSB Vector Masks + Saved Paths Stage 10d/10e
+
+- PSD/PSB import: `vmsk` и `vsms` читаются как version-3 vector mask metadata с invert/disable/not-link flags и 26-byte Photoshop path records.
+- PSD/PSB export: ZPE vector mask больше не bake-ится в layer RGBA; writer сохраняет source layer pixels и native `vmsk` отдельно.
+- Path codec: 8.24 fixed-point document coordinates, open/closed subpaths, linked/unlinked Bézier knots, initial fill, even-odd/non-zero fill rule и Add/Subtract/Intersect/Exclude.
+- Saved paths: Image Resources `2000..2997` импортируются в bounded `document.paths`, переживают `.zpe` snapshot/sanitize и экспортируются обратно в PSD/PSB.
+- Reliability: writer отклоняет path coordinates вне Photoshop fixed-point range вместо silent overflow; parser ограничен `MAX_PSD_PATH_RECORDS`.
+- Compatibility: Photoshop unlinked-vector-mask flag сохраняется, но ZPE transform behavior пока остаётся linked; import/export сообщает это ограничение.
+- Regression: native vector masks и saved paths проходят PSD + PSB encode/decode round-trip tests, включая handles, boolean ops и resource IDs.
+
 ### 2026-09-25 — Vector Mask Direct Edit Stage 10c
 
 - Added: «Редактировать векторную маску пером» в Layer/context menus.
