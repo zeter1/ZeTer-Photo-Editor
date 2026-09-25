@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDocument, sanitizeColorProfile, sanitizeProject } from '../src/core/state.js';
+import { createDocument, sanitizeColorProfile, sanitizeColorManagement, sanitizeProject } from '../src/core/state.js';
 import { bytesToDataUrl, dataUrlToBytes } from '../src/core/io.js';
 
 test('ICC binary data URL helpers round-trip bytes with a hard raw-size ceiling',()=>{
@@ -24,4 +24,15 @@ test('ICC profile metadata is bounded and survives project sanitization',()=>{
   assert.deepEqual(safe.colorProfile,profile);
   assert.equal(sanitizeColorProfile({kind:'icc',dataUrl:'javascript:alert(1)'}),null);
   assert.deepEqual(sanitizeColorProfile({kind:'untagged',untagged:true}),{kind:'untagged',untagged:true});
+});
+
+
+test('Stage 13b persists bounded rendering-intent and display-space policy',()=>{
+  assert.deepEqual(sanitizeColorManagement(),{renderingIntent:'perceptual',displaySpace:'srgb'});
+  assert.deepEqual(sanitizeColorManagement({renderingIntent:'relative',displaySpace:'srgb'}),{renderingIntent:'relative',displaySpace:'srgb'});
+  assert.deepEqual(sanitizeColorManagement({renderingIntent:'absolute',displaySpace:'display-p3'}),{renderingIntent:'absolute',displaySpace:'srgb'});
+  const doc=createDocument({name:'CM policy'});
+  doc.colorManagement={renderingIntent:'saturation',displaySpace:'srgb'};
+  const safe=sanitizeProject(doc);
+  assert.deepEqual(safe.colorManagement,{renderingIntent:'saturation',displaySpace:'srgb'});
 });

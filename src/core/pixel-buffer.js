@@ -445,6 +445,83 @@ export function compositePixelBufferLayers(width, height, layers = [], {
   return output;
 }
 
+
+export function compositeCmykPixelBufferLayers(width, height, layers = [], {
+  bitsPerChannel = 16,
+  colorSpace = 'device-cmyk',
+  background = null,
+  maxBytes = MAX_HIGH_DEPTH_COMPOSITE_BYTES,
+} = {}) {
+  const w=integer(width,'CMYK composite width');
+  const h=integer(height,'CMYK composite height');
+  const depth=integer(bitsPerChannel,'CMYK composite bitsPerChannel');
+  if(![8,16,32].includes(depth))throw new TypeError('CMYK composite поддерживает только 8/16/32-bit');
+  const sampleCount=w*h*5;
+  if(!Number.isSafeInteger(sampleCount))throw new RangeError('CMYK composite слишком большой для безопасной адресации');
+  const requiredBytes=sampleCount*(depth/8);
+  const limit=Math.trunc(Number(maxBytes));
+  if(!Number.isSafeInteger(limit)||limit<=0)throw new TypeError('CMYK composite maxBytes должен быть положительным целым числом');
+  if(requiredBytes>limit)throw new RangeError('CMYK composite требует '+requiredBytes+' байт, лимит '+limit);
+
+  const output=createPixelBuffer({
+    width:w,height:h,model:'cmyk',channels:5,bitsPerChannel:depth,
+    colorSpace:String(colorSpace||'device-cmyk'),alphaMode:'straight',
+  });
+  if(background){
+    const descriptor=Array.isArray(background)?{cmyk:background,alpha:1}:background;
+    const values=Array.isArray(descriptor?.cmyk)?descriptor.cmyk:null;
+    if(!values||values.length<4)throw new TypeError('CMYK composite background требует CMYK values');
+    const alpha=clampPreview01(descriptor.alpha??1);
+    for(let pixel=0;pixel<w*h;pixel+=1){
+      const offset=pixel*5;
+      for(let channel=0;channel<4;channel+=1)writeNormalizedSample(output,offset+channel,clampPreview01(values[channel]));
+      writeNormalizedSample(output,offset+4,alpha);
+    }
+  }
+
+  for(const entry of Array.isArray(layers)?layers:[]){
+    const source=entry?.buffer;
+    if(!isPixelBuffer(source)||source.model!=='cmyk'||![4,5].includes(source.channels)){
+      throw new TypeError('CMYK composite layer требует CMYK PixelBuffer');
+    }
+    const mode=entry?.blendMode||'source-over';
+    if(mode!=='source-over')throw new Error('CMYK composite Stage 13b поддерживает только Normal/source-over blend');
+    const opacity=clampPreview01(entry?.opacity??1);
+    if(opacity<=0)continue;
+    const x=Math.trunc(Number(entry?.x)||0),y=Math.trunc(Number(entry?.y)||0);
+    const mask=entry?.maskPixels||null;
+    if(mask&&(!ArrayBuffer.isView(mask)||mask.length<source.width*source.height*4)){
+      throw new RangeError('CMYK composite mask имеет неверный размер');
+    }
+    const left=Math.max(0,-x),top=Math.max(0,-y);
+    const right=Math.min(source.width,w-x),bottom=Math.min(source.height,h-y);
+    if(left>=right||top>=bottom)continue;
+    for(let sy=top;sy<bottom;sy+=1){
+      const dy=y+sy;
+      for(let sx=left;sx<right;sx+=1){
+        const dx=x+sx;
+        const sourcePixel=sy*source.width+sx;
+        const sourceOffset=sourcePixel*source.channels;
+        const targetOffset=(dy*w+dx)*5;
+        const maskAlpha=mask?clampPreview01(Number(mask[sourcePixel*4+3]??255)/255):1;
+        const sourceAlpha=clampPreview01((source.channels===5?sourceSampleValue(source,sourceOffset+4):1)*opacity*maskAlpha);
+        if(sourceAlpha<=0)continue;
+        const backdropAlpha=clampPreview01(normalizedSample(output,targetOffset+4));
+        const outputAlpha=sourceAlpha+backdropAlpha*(1-sourceAlpha);
+        if(outputAlpha<=0)continue;
+        const destFactor=backdropAlpha*(1-sourceAlpha);
+        for(let channel=0;channel<4;channel+=1){
+          const sourceInk=clampPreview01(sourceSampleValue(source,sourceOffset+channel));
+          const backdropInk=clampPreview01(normalizedSample(output,targetOffset+channel));
+          writeNormalizedSample(output,targetOffset+channel,(sourceInk*sourceAlpha+backdropInk*destFactor)/outputAlpha);
+        }
+        writeNormalizedSample(output,targetOffset+4,outputAlpha);
+      }
+    }
+  }
+  return output;
+}
+
 function uiSrgbRgbForBuffer(buffer, rgb8) {
   if (!Array.isArray(rgb8) || rgb8.length < 3) throw new TypeError('Для high-depth editing нужен RGB-цвет');
   const encoded = rgb8.slice(0,3).map(value=>clampPreview01((Number(value)||0)/255));

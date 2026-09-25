@@ -1261,35 +1261,46 @@ function encodeRleRgbaChannel(rgba, channel, width, height, version, options = {
   return writer;
 }
 
-function exportPixelSource(value, width, height, label, errorCode = 'PSD_EXPORT_PIXELS') {
+function exportPixelSource(value, width, height, label, errorCode = 'PSD_EXPORT_PIXELS', expectedModel = 'rgb') {
   const count = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   if (isPixelBuffer(value?.pixelBuffer)) {
     const buffer = value.pixelBuffer;
-    if (buffer.model !== 'rgb' || ![3,4].includes(buffer.channels) || buffer.width !== width || buffer.height !== height) {
-      throw new PsdImportError(`PSD/PSB writer: ${label} имеет несовместимый PixelBuffer`, errorCode);
+    const validChannels = expectedModel === 'cmyk' ? [4,5] : [3,4];
+    if (buffer.model !== expectedModel || !validChannels.includes(buffer.channels) || buffer.width !== width || buffer.height !== height) {
+      throw new PsdImportError('PSD/PSB writer: '+label+' имеет несовместимый '+expectedModel.toUpperCase()+' PixelBuffer', errorCode);
     }
-    return { kind:'pixel-buffer', buffer };
+    return { kind:'pixel-buffer', buffer, model:expectedModel };
+  }
+  if(expectedModel!=='rgb'){
+    throw new PsdImportError('PSD/PSB writer: '+label+' требует native CMYK PixelBuffer', errorCode);
   }
   const rgba = asBytes(value?.pixels);
   if (rgba.length !== count * 4) {
-    throw new PsdImportError(`PSD/PSB writer: ${label} имеет неверный RGBA-буфер`, errorCode);
+    throw new PsdImportError('PSD/PSB writer: '+label+' имеет неверный RGBA-буфер', errorCode);
   }
-  return { kind:'rgba8', pixels:rgba };
+  return { kind:'rgba8', pixels:rgba, model:'rgb' };
 }
 
 function exportSourceValue(source, pixel, channel) {
   if (source.kind === 'rgba8') return source.pixels[pixel * 4 + channel] / 255;
   const buffer = source.buffer;
   const offset = pixel * buffer.channels;
-  if (channel === 3 && buffer.channels === 3) return 1;
   const value = Number(buffer.data[offset + channel]);
   if (!Number.isFinite(value)) return 0;
   if (buffer.bitsPerChannel === 8) return value / 255;
   if (buffer.bitsPerChannel === 16) return value / 65535;
-  return channel === 3 ? Math.max(0, Math.min(1, value)) : value;
+  return value;
 }
 
-function writeExportSample(view, offset, value, bitsPerChannel, channel) {
+function exportSourceAlpha(source, pixel) {
+  if(source.kind==='rgba8')return source.pixels[pixel*4+3]/255;
+  const buffer=source.buffer;
+  const alphaIndex=buffer.model==='cmyk'?(buffer.channels===5?4:-1):(buffer.channels===4?3:-1);
+  if(alphaIndex<0)return 1;
+  return Math.max(0,Math.min(1,exportSourceValue(source,pixel,alphaIndex)));
+}
+
+function writeExportSample(view, offset, value, bitsPerChannel, { allowExtended = false } = {}) {
   const finite = Number.isFinite(Number(value)) ? Number(value) : 0;
   if (bitsPerChannel === 8) {
     view.setUint8(offset, Math.round(Math.max(0, Math.min(1, finite)) * 255));
@@ -1299,18 +1310,28 @@ function writeExportSample(view, offset, value, bitsPerChannel, channel) {
     view.setUint16(offset, Math.round(Math.max(0, Math.min(1, finite)) * 65535), false);
     return;
   }
-  view.setFloat32(offset, channel === 3 ? Math.max(0, Math.min(1, finite)) : finite, false);
+  view.setFloat32(offset, allowExtended ? finite : Math.max(0,Math.min(1,finite)), false);
 }
 
-function fillExportChannelRow(target, source, channel, width, row, bitsPerChannel, { whiteMatte=false } = {}) {
+function fillExportChannelRow(target, source, channel, width, row, bitsPerChannel, {
+  whiteMatte = false,
+  matte = null,
+  invert = false,
+  alpha = false,
+} = {}) {
   const sampleBytes = bytesPerSample(bitsPerChannel);
   const view = new DataView(target.buffer, target.byteOffset, target.byteLength);
   for (let x=0; x<width; x+=1) {
     const pixel = row * width + x;
-    const alpha = exportSourceValue(source, pixel, 3);
-    let value = exportSourceValue(source, pixel, channel);
-    if (whiteMatte && channel < 3 && alpha > 0 && alpha < 1) value = value * alpha + (1 - alpha);
-    writeExportSample(view, x * sampleBytes, value, bitsPerChannel, channel);
+    const sourceAlpha = exportSourceAlpha(source,pixel);
+    let value = alpha ? sourceAlpha : exportSourceValue(source, pixel, channel);
+    const matteValue = matte == null ? (whiteMatte ? 1 : null) : Number(matte);
+    if (!alpha && matteValue != null && sourceAlpha > 0 && sourceAlpha < 1) {
+      value = value * sourceAlpha + matteValue * (1 - sourceAlpha);
+    }
+    if(invert&&!alpha)value=1-Math.max(0,Math.min(1,value));
+    const allowExtended=!alpha&&!invert&&source.model==='rgb'&&bitsPerChannel===32;
+    writeExportSample(view, x * sampleBytes, value, bitsPerChannel, {allowExtended});
   }
   return target;
 }
@@ -1348,18 +1369,19 @@ function encodeRawExportChannel(source, channel, width, height, bitsPerChannel, 
 }
 
 function encodeExportChannel(source, channel, width, height, version, bitsPerChannel, options = {}) {
-  if (bitsPerChannel === 8 && source.kind === 'rgba8') {
+  if (bitsPerChannel === 8 && source.kind === 'rgba8' && !options.invert && !options.alpha && options.matte == null) {
     return encodeRleRgbaChannel(source.pixels, channel, width, height, version, options);
   }
   if (bitsPerChannel === 8) return encodeRleExportChannel(source, channel, width, height, version, options);
   return encodeRawExportChannel(source, channel, width, height, bitsPerChannel, options);
 }
 
-function validateExportLayer(layer, index, maxPixels) {
+function validateExportLayer(layer, index, maxPixels, colorMode = PSD_COLOR_MODE_RGB) {
   const width = Math.trunc(Number(layer?.width));
   const height = Math.trunc(Number(layer?.height));
   safeArea(width, height, maxPixels);
-  const source = exportPixelSource(layer, width, height, `слой #${index + 1}`);
+  const model=colorMode===PSD_COLOR_MODE_CMYK?'cmyk':'rgb';
+  const source = exportPixelSource(layer, width, height, 'слой #'+(index+1), 'PSD_EXPORT_PIXELS', model);
   const x = Math.trunc(Number(layer?.x) || 0);
   const y = Math.trunc(Number(layer?.y) || 0);
   return { ...layer, x, y, width, height, source };
@@ -1405,24 +1427,32 @@ function writeLayerMaskExtra(writer, layer) {
   writer.u16(0);
 }
 
-function normalizeExportLayer(layer, index, maxPixels, version, bitsPerChannel) {
-  const item = validateExportLayer(layer, index, maxPixels);
-  const channels = [
-    { id: 0, data: encodeExportChannel(item.source, 0, item.width, item.height, version, bitsPerChannel) },
-    { id: 1, data: encodeExportChannel(item.source, 1, item.width, item.height, version, bitsPerChannel) },
-    { id: 2, data: encodeExportChannel(item.source, 2, item.width, item.height, version, bitsPerChannel) },
-    { id: -1, data: encodeExportChannel(item.source, 3, item.width, item.height, version, bitsPerChannel) },
-  ];
+function normalizeExportLayer(layer, index, maxPixels, version, bitsPerChannel, colorMode = PSD_COLOR_MODE_RGB) {
+  const item = validateExportLayer(layer, index, maxPixels, colorMode);
+  const cmyk=colorMode===PSD_COLOR_MODE_CMYK;
+  const channels = cmyk
+    ? [
+        { id:0, data:encodeExportChannel(item.source,0,item.width,item.height,version,bitsPerChannel,{invert:true}) },
+        { id:1, data:encodeExportChannel(item.source,1,item.width,item.height,version,bitsPerChannel,{invert:true}) },
+        { id:2, data:encodeExportChannel(item.source,2,item.width,item.height,version,bitsPerChannel,{invert:true}) },
+        { id:3, data:encodeExportChannel(item.source,3,item.width,item.height,version,bitsPerChannel,{invert:true}) },
+        { id:-1, data:encodeExportChannel(item.source,0,item.width,item.height,version,bitsPerChannel,{alpha:true}) },
+      ]
+    : [
+        { id:0, data:encodeExportChannel(item.source,0,item.width,item.height,version,bitsPerChannel) },
+        { id:1, data:encodeExportChannel(item.source,1,item.width,item.height,version,bitsPerChannel) },
+        { id:2, data:encodeExportChannel(item.source,2,item.width,item.height,version,bitsPerChannel) },
+        { id:-1, data:encodeExportChannel(item.source,0,item.width,item.height,version,bitsPerChannel,{alpha:true}) },
+      ];
   let mask = null;
   if (item.mask?.pixels || isPixelBuffer(item.mask?.pixelBuffer)) {
-    const maskSource = exportPixelSource(item.mask, item.width, item.height, `маска слоя «${item.name || index + 1}»`, 'PSD_EXPORT_MASK');
+    const maskSource = exportPixelSource(item.mask, item.width, item.height, 'маска слоя '+(item.name || index + 1), 'PSD_EXPORT_MASK', 'rgb');
     mask = { disabled: Boolean(item.mask.disabled), pixels: true };
-    channels.push({ id: -2, data: encodeExportChannel(maskSource, 3, item.width, item.height, version, bitsPerChannel) });
+    channels.push({ id:-2, data:encodeExportChannel(maskSource,0,item.width,item.height,version,bitsPerChannel,{alpha:true}) });
   }
   const { pixels: _pixels, pixelBuffer: _pixelBuffer, source: _source, ...metadata } = item;
   return { ...metadata, mask, channels };
 }
-
 
 function normalizeExportGroups(groups = []) {
   if (!Array.isArray(groups)) return [];
@@ -1555,25 +1585,40 @@ function encodeCompositeRle(pixels, width, height, version) {
   return writer;
 }
 
-function encodeCompositeData({ composite, compositePixelBuffer }, width, height, version, bitsPerChannel) {
-  if (bitsPerChannel === 8 && !compositePixelBuffer) return encodeCompositeRle(composite, width, height, version);
+function encodeCompositeData({ composite, compositePixelBuffer }, width, height, version, bitsPerChannel, colorMode = PSD_COLOR_MODE_RGB) {
+  const cmyk=colorMode===PSD_COLOR_MODE_CMYK;
+  if (!cmyk && bitsPerChannel === 8 && !compositePixelBuffer) return encodeCompositeRle(composite, width, height, version);
   const source = exportPixelSource(
     compositePixelBuffer ? { pixelBuffer:compositePixelBuffer } : { pixels:composite },
     width,
     height,
     'composite',
+    'PSD_EXPORT_COMPOSITE',
+    cmyk?'cmyk':'rgb',
   );
+  const planeDescriptors=cmyk
+    ? [
+        {channel:0,options:{invert:true,matte:0}},
+        {channel:1,options:{invert:true,matte:0}},
+        {channel:2,options:{invert:true,matte:0}},
+        {channel:3,options:{invert:true,matte:0}},
+        {channel:0,options:{alpha:true}},
+      ]
+    : [
+        {channel:0,options:{whiteMatte:true}},
+        {channel:1,options:{whiteMatte:true}},
+        {channel:2,options:{whiteMatte:true}},
+        {channel:0,options:{alpha:true}},
+      ];
   if (bitsPerChannel === 8) {
     const writer = new Writer();
-    // Composite RLE has one compression header and a single row-length table for all planes,
-    // unlike per-layer channels.
     const rowLengthBytes = version === PSB_VERSION ? 4 : 2;
     const rows = [];
     const lengths = [];
     const raw = new Uint8Array(width);
-    for (let channel=0; channel<4; channel+=1) {
+    for (const descriptor of planeDescriptors) {
       for (let row=0; row<height; row+=1) {
-        fillExportChannelRow(raw, source, channel, width, row, 8, { whiteMatte:true });
+        fillExportChannelRow(raw, source, descriptor.channel, width, row, 8, descriptor.options);
         const packed = packBitsEncodeRow(raw);
         lengths.push(packed.length);
         rows.push(packed);
@@ -1587,16 +1632,15 @@ function encodeCompositeData({ composite, compositePixelBuffer }, width, height,
   const writer = new Writer();
   writer.u16(0);
   const rowBytes = width * bytesPerSample(bitsPerChannel);
-  for (let channel=0; channel<4; channel+=1) {
+  for (const descriptor of planeDescriptors) {
     for (let row=0; row<height; row+=1) {
       const bytes = new Uint8Array(rowBytes);
-      fillExportChannelRow(bytes, source, channel, width, row, bitsPerChannel, { whiteMatte:true });
+      fillExportChannelRow(bytes, source, descriptor.channel, width, row, bitsPerChannel, descriptor.options);
       writer.push(bytes);
     }
   }
   return writer;
 }
-
 
 function writePascalEven(writer, name = '') {
   const text = String(name || '').slice(0, 255);
@@ -1695,7 +1739,8 @@ function appendHighDepthLayerInfoBlock(writer, layerInfo, version, bitsPerChanne
   if (layerInfo.length & 1) writer.u8(0);
 }
 
-function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], composite, compositePixelBuffer = null, bitsPerChannel = 8, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], composite, compositePixelBuffer = null, bitsPerChannel = 8, colorMode = PSD_COLOR_MODE_RGB, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+  const mode=colorMode==='cmyk'||Number(colorMode)===PSD_COLOR_MODE_CMYK?PSD_COLOR_MODE_CMYK:PSD_COLOR_MODE_RGB;
   if (version !== PSD_VERSION && version !== PSB_VERSION) throw new PsdImportError(`PSD/PSB writer: unsupported version ${version}`, 'PSD_EXPORT_VERSION');
   const depth = Math.trunc(Number(bitsPerChannel));
   if (!PSD_SUPPORTED_DEPTHS.has(depth)) throw new PsdImportError(`PSD/PSB writer: unsupported bit depth ${bitsPerChannel}`, 'PSD_EXPORT_DEPTH');
@@ -1707,7 +1752,7 @@ function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], c
   }
   if (!layers.length) throw new PsdImportError('PSD/PSB writer: нужен хотя бы один слой', 'PSD_EXPORT_EMPTY');
 
-  const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version, depth));
+  const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version, depth, mode));
   const records = expandExportLayerGroups(normalized, groups);
   if (records.length > 32767) {
     throw new PsdImportError(`PSD/PSB writer: слишком много layer records после добавления групп: ${records.length}`, 'PSD_EXPORT_LAYER_RECORD_LIMIT');
@@ -1729,11 +1774,11 @@ function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], c
     appendHighDepthLayerInfoBlock(layerAndMask, layerInfo, version, depth);
   }
 
-  const compositeData = encodeCompositeData({ composite, compositePixelBuffer }, documentWidth, documentHeight, version, depth);
+  const compositeData = encodeCompositeData({ composite, compositePixelBuffer }, documentWidth, documentHeight, version, depth, mode);
   const imageResources = buildImageResources({iccProfile,iccUntagged,paths,width:documentWidth,height:documentHeight});
   const out = new Writer();
   out.ascii('8BPS').u16(version).push(new Uint8Array(6));
-  out.u16(4).u32(documentHeight).u32(documentWidth).u16(depth).u16(PSD_COLOR_MODE_RGB);
+  out.u16(mode===PSD_COLOR_MODE_CMYK?5:4).u32(documentHeight).u32(documentWidth).u16(depth).u16(mode);
   out.u32(0);
   out.u32(imageResources.length).append(imageResources);
   if (version === PSB_VERSION) out.u64(layerAndMask.length);

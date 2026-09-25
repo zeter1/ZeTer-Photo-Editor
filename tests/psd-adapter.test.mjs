@@ -950,3 +950,47 @@ test('Stage 12e high-depth writer can widen an RGBA8 fallback layer to the docum
   const fallback=decoded.layers.find(layer=>layer.name==='fallback').pixelBuffer.data;
   assert.deepEqual([...fallback],[17*257,91*257,203*257,128*257]);
 });
+
+
+test('Stage 13b PSD writer round-trips native CMYK/8-bit layer and composite channels', async()=>{
+  const profile=makeTestIccProfile({colorSpace:'CMYK',pcs:'Lab ',deviceClass:'prtr'});
+  const buffer=createPixelBuffer({
+    width:2,height:1,model:'cmyk',channels:5,bitsPerChannel:8,colorSpace:'device-cmyk',alphaMode:'straight',
+    data:new Uint8ClampedArray([0,20,40,60,255, 100,120,140,160,255]),
+  });
+  const encoded=encodePsd({
+    width:2,height:1,colorMode:'cmyk',bitsPerChannel:8,compositePixelBuffer:buffer,
+    iccProfile:profile,
+    layers:[{name:'CMYK native',x:0,y:0,width:2,height:1,pixelBuffer:buffer,opacity:1,blendMode:'source-over',visible:true}],
+  });
+  assert.deepEqual(inspectPsdHeader(encoded),{
+    signature:'8BPS',version:1,channels:5,width:2,height:1,bitsPerChannel:8,colorMode:4,
+  });
+  const decoded=await decodePsd(encoded);
+  assert.equal(decoded.layers.length,1);
+  assert.equal(decoded.layers[0].pixelBuffer.model,'cmyk');
+  assert.equal(decoded.layers[0].pixelBuffer.channels,5);
+  assert.deepEqual([...decoded.layers[0].pixelBuffer.data],[...buffer.data]);
+  assert.equal(decoded.iccProfile.colorSpace,'CMYK');
+});
+
+test('Stage 13b PSB writer round-trips native CMYK/16-bit channels through Lr16', async()=>{
+  const buffer=createPixelBuffer({
+    width:2,height:1,model:'cmyk',channels:5,bitsPerChannel:16,colorSpace:'device-cmyk',alphaMode:'straight',
+    data:new Uint16Array([12345,23456,34567,45678,65535, 54321,43210,32100,21000,65535]),
+  });
+  const encoded=encodePsb({
+    width:2,height:1,colorMode:4,bitsPerChannel:16,compositePixelBuffer:buffer,
+    layers:[{name:'CMYK16',x:0,y:0,width:2,height:1,pixelBuffer:buffer,opacity:1,blendMode:'source-over',visible:true}],
+  });
+  const header=inspectPsdHeader(encoded);
+  assert.equal(header.version,2);
+  assert.equal(header.channels,5);
+  assert.equal(header.colorMode,4);
+  assert.equal(header.bitsPerChannel,16);
+  const decoded=await decodePsd(encoded);
+  assert.equal(decoded.layers.length,1);
+  assert.equal(decoded.layers[0].pixelBuffer.model,'cmyk');
+  assert.ok(decoded.layers[0].pixelBuffer.data instanceof Uint16Array);
+  assert.deepEqual([...decoded.layers[0].pixelBuffer.data],[...buffer.data]);
+});

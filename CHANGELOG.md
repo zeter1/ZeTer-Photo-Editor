@@ -4,6 +4,22 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.30.0 — 2026-09-25
+
+### 2026-09-25 — Advanced ICC + Native CMYK Round-trip Stage 13b
+
+- ICC v4: `color-management.js` получил `lutAToBType (mAB )` с embedded `curveType`/`parametricCurveType`, A→CLUT→M→Matrix→B sequence и проверкой offsets/bounds/grid sizes.
+- ICC MPE: добавлен `multiProcessElementsType (mpet)` для `D2B0..D2B3`; поддерживаются float `clut`, `matf` и pass-through `bACS/eACS`. Неизвестные элементы fail-safe переводят profile transform в явный unmanaged fallback.
+- Rendering policy: `.zpe` хранит sanitized `renderingIntent` (`perceptual`, `relative`, `saturation`, `absolute`) и `displaySpace=srgb`.
+- UI: CMYK inspector позволяет менять rendering intent; display preview всех CMYK source пересчитывается из canonical PixelBuffer + embedded ICC без изменения native samples.
+- Native writer: PSD/PSB writer получил `colorMode='cmyk'|4`, header color mode 4 и layer/composite channels C/M/Y/K/alpha; внутренний ink-space при записи инвертируется обратно в Photoshop CMYK storage.
+- Precision: native CMYK writer поддерживает 8/16/32-bit PixelBuffer; 8-bit использует row-bounded PackBits, 16/32-bit — Raw big-endian и существующие `Lr16/Lr32`/`8B64` structures.
+- Native composite: `compositeCmykPixelBufferLayers()` собирает 5-channel CMYK+alpha source-over composite с layer opacity, position и bitmap mask coverage без RGB conversion; allocation ограничен 256 МБ.
+- Compatibility gate: mixed RGB/CMYK, text/shape, adjustment layers, active vector masks, isolated groups, non-transparent RGB background и видимый non-Normal blend оставляют RGB display-preview export и дают причину fallback.
+- ICC round-trip: embedded profile resource 1039 сохраняется вместе с native CMYK channels; экранный preview остаётся sRGB display conversion и не объявляется press proof.
+- Regression tests: synthetic `mAB`, float `D2B0/mpet`, intent fallback, display policy, typed CMYK composite и native CMYK PSD/PSB 8/16-bit writer round-trip.
+- Version: приложение синхронизировано на 1.30.0.
+
 ## 1.29.0 — 2026-09-25
 
 ### 2026-09-25 — CMYK / ICC Preview Foundation Stage 13a

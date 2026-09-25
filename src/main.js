@@ -3,13 +3,13 @@ import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constr
 import {
   createDocument, createRasterLayer, createTextLayer, createShapeLayer, createSmartObjectLayer, createSmartObjectLinkId, linkedSmartObjectLayers, createSmartFilter, createSmartFilterMask, createAdjustmentLayer, createLayerMask, createVectorMask, createLayerGroup, documentWithTextPreview,
   addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, moveLayerGroupIntoGroup, selectedLayer,
-  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters, sanitizeHighDepthPreview,
+  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters, sanitizeHighDepthPreview, sanitizeColorManagement,
   isLayerVisible, isLayerLocked, isGroupVisible, isGroupLocked, groupDepth,
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
-import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab, floodFillPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
+import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, compositeCmykPixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab, floodFillPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
 import { createCmykToSrgbTransform, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
@@ -1817,6 +1817,42 @@ function bindHighDepthPreviewControls(root,layer){
   root?.querySelector('[data-high-depth-preview-reset]')?.addEventListener('click',()=>resetHighDepthPreview(layer));
 }
 
+async function updateDocumentRenderingIntent(intent){
+  const current=sanitizeColorManagement(doc.colorManagement);
+  const next=sanitizeColorManagement({...current,renderingIntent:intent});
+  if(next.renderingIntent===current.renderingIntent)return true;
+  const targetDoc=doc;
+  const profile=targetDoc.colorProfile;
+  const profileBytes=profile?.kind==='icc'&&profile.dataUrl?dataUrlToBytes(profile.dataUrl,{maxBytes:4*1024*1024}):null;
+  const transform=createCmykToSrgbTransform(profileBytes,{intent:next.renderingIntent,displaySpace:next.displaySpace});
+  const updates=[];
+  setStatus('CMYK: пересчёт display preview для '+next.renderingIntent+' intent…');
+  for(const layer of targetDoc.layers){
+    if(layer.type!=='raster'||layer.highDepthSource?.model!=='cmyk')continue;
+    const buffer=deserializePixelBufferSource(layer.highDepthSource);
+    const rgba=cmykPixelBufferToRgba8Preview(buffer,transform);
+    const dataUrl=await rgbaPixelsToDataUrl(buffer.width,buffer.height,rgba,'CMYK preview «'+(layer.name||'Без имени')+'»');
+    updates.push({layer,dataUrl});
+  }
+  if(doc!==targetDoc){setStatus('CMYK preview отменён: активный документ изменился');return false;}
+  for(const update of updates){const old=update.layer.dataUrl;update.layer.dataUrl=update.dataUrl;invalidateImageCache(old);}
+  targetDoc.colorManagement=next;
+  commit('Изменить CMYK rendering intent');
+  const suffix=transform.warning?' • '+transform.warning:'';
+  setStatus('CMYK display policy: '+next.renderingIntent+' → '+next.displaySpace.toUpperCase()+suffix);
+  if(transform.warning)toast('CMYK preview пересчитан с ограничением ICC transform','warn');
+  return true;
+}
+
+function bindColorManagementControls(root){
+  const select=root?.querySelector('[data-cmyk-rendering-intent]');
+  if(!select)return;
+  select.addEventListener('change',async()=>{
+    select.disabled=true;
+    try{await updateDocumentRenderingIntent(select.value);}catch(error){console.error(error);toast('Не удалось пересчитать CMYK preview','error');setStatus('Ошибка CMYK color management: '+error.message);}
+    finally{if(select.isConnected)select.disabled=false;}
+  });
+}
 function updateProperties() {
   const l = selected();
   if (!l) { els.props.className = 'panel-content muted'; els.props.textContent = 'Выберите слой'; return; }
@@ -1842,7 +1878,10 @@ function updateProperties() {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
     if(source.model==='cmyk'){
-      extra = `<label>Нативный источник</label><span>${source.bitsPerChannel}-bit CMYK · ${sizeMb} МБ</span><label>Color management</label><span>CMYK source сохранён в .zpe; Canvas показывает sRGB preview, созданный через ICC transform либо явный Device CMYK fallback при импорте</span><label>Редактирование</label><span>Destructive RGB-инструмент растрирует display preview и снимает нативный CMYK source до появления native CMYK editing</span>`;
+      const policy=sanitizeColorManagement(doc.colorManagement);
+      const intentOptions=[['perceptual','Perceptual'],['relative','Relative colorimetric'],['saturation','Saturation'],['absolute','Absolute colorimetric']];
+      const intentSelect=intentOptions.map(([value,label])=>`<option value="${value}"${policy.renderingIntent===value?' selected':''}>${label}</option>`).join('');
+      extra = `<label>Нативный источник</label><span>${source.bitsPerChannel}-bit CMYK · ${sizeMb} МБ</span><label>Rendering intent</label><select data-cmyk-rendering-intent>${intentSelect}</select><label>Display space</label><span>${policy.displaySpace.toUpperCase()} (Stage 13b policy)</span><label>Color management</label><span>CMYK source сохранён в .zpe; display preview строится через ICC A2B/D2B transform либо явный Device CMYK fallback</span><label>Редактирование</label><span>Destructive RGB-инструмент растрирует display preview и снимает нативный CMYK source до появления native CMYK editing</span>`;
     }else if(Number(source.bitsPerChannel)>8){
       const preview=sanitizeHighDepthPreview(l.highDepthPreview);
       const resolvedAuto=source.bitsPerChannel===32?'ACES':'Clip';
@@ -1867,6 +1906,7 @@ function updateProperties() {
   </div>`;
   bindPropertyInputs(els.props);
   if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,l);
+  if(l.type==='raster'&&l.highDepthSource?.model==='cmyk')bindColorManagementControls(els.props);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
   if(smartObjectEdit)smartObjectEdit.addEventListener('click',()=>openSmartObjectContents(l));
   const smartObjectLinkCopy=els.props.querySelector('[data-smart-object-link-copy]');
@@ -3652,13 +3692,15 @@ async function openPsd(file){
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
     const isCmyk=parsed.colorMode===4;
-    const cmykTransform=isCmyk?createCmykToSrgbTransform(parsed.iccProfile?.bytes||null):null;
+    const colorPolicy=sanitizeColorManagement(targetDocument.colorManagement);
+    const cmykTransform=isCmyk?createCmykToSrgbTransform(parsed.iccProfile?.bytes||null,{intent:colorPolicy.renderingIntent,displaySpace:colorPolicy.displaySpace}):null;
     const previewPixelsFor=buffer=>buffer?.model==='cmyk'
       ? cmykPixelBufferToRgba8Preview(buffer,cmykTransform)
       : pixelBufferToRgba8Preview(buffer);
     if(isCmyk){
       if(cmykTransform.managed){
-        warnings.push(`CMYK preview: применён ICC ${cmykTransform.tag} ${cmykTransform.method} → ${cmykTransform.pcs} → sRGB display transform. Native CMYK samples сохраняются отдельно`);
+        warnings.push(`CMYK preview: применён ICC ${cmykTransform.tag} ${cmykTransform.method}, intent ${cmykTransform.intent} → ${cmykTransform.pcs} → ${cmykTransform.displaySpace.toUpperCase()} display transform. Native CMYK samples сохраняются отдельно`);
+        if(cmykTransform.warning)warnings.push(`CMYK ICC policy: ${cmykTransform.warning}`);
       }else{
         warnings.push(`CMYK preview: ${cmykTransform.warning}. Native CMYK samples сохраняются отдельно; display preview не следует считать proof/press simulation`);
       }
@@ -3780,6 +3822,7 @@ async function openPsd(file){
     next.layers=prepared;
     next.groups=importedGroups;
     next.paths=structuredClone(parsed.paths||[]);
+    next.colorManagement=colorPolicy;
     next.colorProfile=parsed.iccProfile?{
       kind:'icc',
       untagged:Boolean(parsed.iccUntagged),
@@ -3924,11 +3967,12 @@ function nativeHighDepthPsdSource(layer){
   if(!Number.isInteger(Number(layer.x))||!Number.isInteger(Number(layer.y)))return null;
   try{
     const buffer=deserializePixelBufferSource(layer.highDepthSource);
-    if(buffer.model!=='rgb'||![16,32].includes(buffer.bitsPerChannel))return null;
+    const supported=buffer.model==='cmyk'?[8,16,32].includes(buffer.bitsPerChannel):buffer.model==='rgb'&&[16,32].includes(buffer.bitsPerChannel);
+    if(!supported)return null;
     if(buffer.width!==Math.trunc(Number(layer.width))||buffer.height!==Math.trunc(Number(layer.height)))return null;
     return buffer;
   }catch(error){
-    console.warn(`PSD/PSB high-depth source «${layer.name||'Без имени'}» не прошёл export validation`,error);
+    console.warn(`PSD/PSB native source «${layer.name||'Без имени'}» не прошёл export validation`,error);
     return null;
   }
 }
@@ -4058,6 +4102,36 @@ function buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAd
   }
 }
 
+function cmykNativeExportEligibility(exportDoc,planned,hasAdjustmentLayers,bitsPerChannel){
+  if(hasAdjustmentLayers)return{eligible:false,reason:'видимые adjustment layers требуют RGB Canvas composite'};
+  if(!planned.length)return{eligible:false,reason:'нет native CMYK raster layers'};
+  const missing=planned.find(item=>item.nativePixelBuffer?.model!=='cmyk');
+  if(missing)return{eligible:false,reason:'слой «'+(missing.layer.name||'Без имени')+'» не имеет совместимого native CMYK source'};
+  const vector=planned.find(item=>item.layer.vectorMask?.enabled!==false&&item.layer.vectorMask?.subpaths?.length);
+  if(vector)return{eligible:false,reason:'vector mask слоя «'+(vector.layer.name||'Без имени')+'» пока требует RGB raster bridge'};
+  const blend=planned.find(item=>isLayerVisible(exportDoc,item.layer)&&(item.layer.blendMode||'source-over')!=='source-over');
+  if(blend)return{eligible:false,reason:'CMYK merged composite Stage 13b поддерживает только Normal blend; слой «'+(blend.layer.name||'Без имени')+'» использует '+blend.layer.blendMode};
+  const plan=highDepthCompositePlan(exportDoc,planned);
+  if(plan.reason)return{eligible:false,reason:plan.reason};
+  if(exportDoc.background&&exportDoc.background!=='transparent')return{eligible:false,reason:'непрозрачный RGB background пока не переводится в native CMYK'};
+  const required=exportDoc.width*exportDoc.height*5*(bitsPerChannel/8);
+  if(!Number.isSafeInteger(required)||required>MAX_HIGH_DEPTH_COMPOSITE_BYTES)return{eligible:false,reason:'native CMYK composite требует около '+Math.ceil(required/1048576)+' МБ при лимите '+Math.floor(MAX_HIGH_DEPTH_COMPOSITE_BYTES/1048576)+' МБ'};
+  return{eligible:true,reason:null,plan};
+}
+
+function buildNativeCmykComposite(exportDoc,planned,prepared,bitsPerChannel,eligibility){
+  const preparedByLayerId=new Map(planned.map((item,index)=>[item.layer.id,prepared[index]]));
+  const layers=[];
+  for(const item of eligibility.plan.items){
+    const exported=preparedByLayerId.get(item.layer.id);
+    if(!exported)continue;
+    const buffer=item.nativePixelBuffer;
+    if(!buffer||buffer.model!=='cmyk')throw new Error('Stage 13b CMYK composite потерял native source слоя «'+(item.layer.name||'Без имени')+'»');
+    layers.push({buffer,x:item.bounds.x,y:item.bounds.y,opacity:clamp(Number(item.layer.opacity??1),0,1),blendMode:'source-over',maskPixels:exported.mask&&!exported.mask.disabled?exported.mask.pixels:null});
+  }
+  return compositeCmykPixelBufferLayers(exportDoc.width,exportDoc.height,layers,{bitsPerChannel,colorSpace:'device-cmyk',maxBytes:MAX_HIGH_DEPTH_COMPOSITE_BYTES});
+}
+
 async function preparePsdExport(exportDoc){
   const warnings=[];
   const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment');
@@ -4066,7 +4140,12 @@ async function preparePsdExport(exportDoc){
     const nativePixelBuffer=nativeHighDepthPsdSource(layer);
     return{layer,nativePixelBuffer,bounds:nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer)};
   });
-  const nativeDepths=planned.map(item=>item.nativePixelBuffer?.bitsPerChannel||0);
+  const cmykDepths=planned.filter(item=>item.nativePixelBuffer?.model==='cmyk').map(item=>item.nativePixelBuffer.bitsPerChannel);
+  const tentativeCmykDepth=cmykDepths.includes(32)?32:cmykDepths.includes(16)?16:8;
+  const cmykEligibility=cmykNativeExportEligibility(exportDoc,planned,hasAdjustmentLayers,tentativeCmykDepth);
+  const colorMode=cmykEligibility.eligible?'cmyk':'rgb';
+  const writerNative=planned.map(item=>colorMode==='cmyk'?(item.nativePixelBuffer?.model==='cmyk'?item.nativePixelBuffer:null):(item.nativePixelBuffer?.model==='rgb'?item.nativePixelBuffer:null));
+  const nativeDepths=writerNative.map(buffer=>buffer?.bitsPerChannel||0);
   const bitsPerChannel=nativeDepths.includes(32)?32:nativeDepths.includes(16)?16:8;
   let totalPixels=exportDoc.width*exportDoc.height+planned.reduce((sum,item)=>sum+item.bounds.width*item.bounds.height,0);
   if(hasAdjustmentLayers)totalPixels+=exportDoc.width*exportDoc.height;
@@ -4097,15 +4176,18 @@ async function preparePsdExport(exportDoc){
     }));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   const cmykSources=planned.filter(item=>item.layer.highDepthSource?.model==='cmyk');
-  if(cmykSources.length)warnings.push(`Stage 13a: ${cmykSources.length} native CMYK source сохранены в .zpe, но текущий PSD/PSB writer остаётся RGB; экспорт использует их sRGB display preview`);
-  const downgradedHighDepth=planned.filter(item=>item.layer.highDepthSource?.model==='rgb'&&!item.nativePixelBuffer);
+  if(colorMode==='cmyk')warnings.push(`Stage 13b: ${cmykSources.length} native CMYK layer source экспортируются как настоящий CMYK PSD/PSB с сохранением channel precision`);
+  else if(cmykSources.length)warnings.push(`Stage 13b: native CMYK round-trip отключён для этого документа (${cmykEligibility.reason}); ${cmykSources.length} CMYK source экспортируются через sRGB display preview`);
+  const downgradedHighDepth=planned.filter((item,index)=>item.layer.highDepthSource?.model==='rgb'&&!writerNative[index]);
   if(downgradedHighDepth.length)warnings.push(`${downgradedHighDepth.length} high-depth RGB слой(я) с transform/filter/style или несовместимой геометрией экспортированы через 8-bit raster preview`);
-  if(bitsPerChannel>8&&planned.some(item=>!item.nativePixelBuffer))warnings.push(`Документ экспортируется как ${bitsPerChannel}-bit; raster-preview слои без native high-depth source расширены из 8-bit без восстановления утраченной точности`);
+  if(bitsPerChannel>8&&writerNative.some(buffer=>!buffer))warnings.push(`Документ экспортируется как ${bitsPerChannel}-bit; raster-preview слои без native source расширены из 8-bit без восстановления утраченной точности`);
   if(sourceLayers.some(layer=>layer.vectorMask?.linked===false))warnings.push('Unlinked vector mask flag записывается в PSD/PSB, но ZPE при трансформациях пока перемещает такую маску вместе со слоем');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
 
   const prepared=[];
-  for(const {layer,bounds,nativePixelBuffer} of planned){
+  for(let planIndex=0;planIndex<planned.length;planIndex+=1){
+    const {layer,bounds}=planned[planIndex];
+    const nativePixelBuffer=writerNative[planIndex];
     const item={
       name:layer.name||'ZPE Layer',
       x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
@@ -4124,13 +4206,18 @@ async function preparePsdExport(exportDoc){
     prepared.push(item);
   }
 
-  const compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
+  let compositePixelBuffer=null;
   let composite=null;
-  if(!compositePixelBuffer){
-    const compositeCanvas=document.createElement('canvas');
-    await renderDocument(compositeCanvas,exportDoc,{checker:false});
-    composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
-    if(bitsPerChannel>8)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite использует 8-bit Canvas fallback и затем расширяется до глубины документа`);
+  if(colorMode==='cmyk'){
+    compositePixelBuffer=buildNativeCmykComposite(exportDoc,planned,prepared,bitsPerChannel,cmykEligibility);
+  }else{
+    compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
+    if(!compositePixelBuffer){
+      const compositeCanvas=document.createElement('canvas');
+      await renderDocument(compositeCanvas,exportDoc,{checker:false});
+      composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
+      if(bitsPerChannel>8)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite использует 8-bit Canvas fallback и затем расширяется до глубины документа`);
+    }
   }
 
   if(hasAdjustmentLayers){
@@ -4148,15 +4235,19 @@ async function preparePsdExport(exportDoc){
     });
   }
 
-  if(exportDoc.colorProfile?.kind==='icc')warnings.push('ICC profile сохранён как metadata resource без явного color transform; пиксельные операции ZPE пока выполняются в unmanaged Canvas pipeline');
-  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,compositePixelBuffer,bitsPerChannel,warnings};
+  const policy=sanitizeColorManagement(exportDoc.colorManagement);
+  if(exportDoc.colorProfile?.kind==='icc'){
+    if(colorMode==='cmyk')warnings.push(`ICC profile embedded с native CMYK channels; display policy ZPE: ${policy.renderingIntent} → ${policy.displaySpace.toUpperCase()}`);
+    else warnings.push('ICC profile сохранён как metadata resource; RGB Canvas fallback не объявляется profile-converted');
+  }
+  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,compositePixelBuffer,bitsPerChannel,colorMode,warnings};
 }
 
 async function exportPsdDocument(exportDoc,{psb=false}={}){
   const format=psb?'PSB':'PSD';
   setStatus(`${format}: подготовка слоёв…`);
   const prepared=await preparePsdExport(exportDoc);
-  setStatus(`${format}: упаковка ${prepared.bitsPerChannel}-bit каналов…`);
+  setStatus(`${format}: упаковка ${prepared.colorMode.toUpperCase()} ${prepared.bitsPerChannel}-bit каналов…`);
   const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
   const profile=exportDoc.colorProfile;
   const iccProfile=profile?.kind==='icc'&&profile.dataUrl
@@ -4165,7 +4256,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
     layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,composite:prepared.composite,
-    compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,
+    compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,colorMode:prepared.colorMode,
     iccProfile,iccUntagged:Boolean(profile?.untagged),
     maxPixels:48_000_000,maxLayers:500,
   });
@@ -4181,7 +4272,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   }
 }
 
-async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — слои 8/16/32-bit'],['psb','PSB — Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
+async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — RGB/CMYK слои 8/16/32-bit'],['psb','PSB — RGB/CMYK Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
 
 function canvasToPngBlob(canvas) {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));

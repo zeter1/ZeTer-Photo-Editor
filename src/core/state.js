@@ -74,6 +74,7 @@ export function createDocument({ name = 'Без имени', width = 1200, heigh
     height: size.height,
     background,
     colorProfile: null,
+    colorManagement: sanitizeColorManagement(),
     paths: [],
     layers: [],
     groups: [],
@@ -503,6 +504,21 @@ export function restoreDocument(snapshot) {
 }
 
 
+export const COLOR_RENDERING_INTENTS = Object.freeze(['perceptual','relative','saturation','absolute']);
+export const COLOR_DISPLAY_SPACES = Object.freeze(['srgb']);
+export const DEFAULT_COLOR_MANAGEMENT = Object.freeze({
+  renderingIntent:'perceptual',
+  displaySpace:'srgb',
+});
+
+export function sanitizeColorManagement(value = {}) {
+  const source=value&&typeof value==='object'&&!Array.isArray(value)?value:{};
+  return {
+    renderingIntent:COLOR_RENDERING_INTENTS.includes(source.renderingIntent)?source.renderingIntent:DEFAULT_COLOR_MANAGEMENT.renderingIntent,
+    displaySpace:COLOR_DISPLAY_SPACES.includes(source.displaySpace)?source.displaySpace:DEFAULT_COLOR_MANAGEMENT.displaySpace,
+  };
+}
+
 export function sanitizeColorProfile(profile) {
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
   const untagged = profile.untagged === true;
@@ -775,6 +791,7 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.height = size.height;
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
   doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
+  doc.colorManagement = sanitizeColorManagement(doc.colorManagement);
   const usedPathIds = new Set();
   doc.paths = Array.isArray(doc.paths)
     ? doc.paths.slice(0, 998).map((path, index) => sanitizeDocumentPath(path, index, usedPathIds)).filter(Boolean)

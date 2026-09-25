@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import {
   createPixelBuffer,
   compositePixelBufferLayers,
+  compositeCmykPixelBufferLayers,
   MAX_HIGH_DEPTH_COMPOSITE_BYTES,
 } from '../src/core/pixel-buffer.js';
 
@@ -66,4 +67,29 @@ test('Stage 12g export planner keeps Canvas8 as explicit fallback instead of cla
   assert.match(main,/vector mask слоя/);
   assert.match(main,/isolated Canvas group composite/);
   assert.match(main,/if\(!compositePixelBuffer\)\{/);
+});
+
+
+test('Stage 13b composites native CMYK layers without RGB conversion or 8-bit quantization',()=>{
+  const bottom=createPixelBuffer({width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:16,colorSpace:'device-cmyk',alphaMode:'straight',data:new Uint16Array([10001,20003,30007,40009,65535])});
+  const top=createPixelBuffer({width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:16,colorSpace:'device-cmyk',alphaMode:'straight',data:new Uint16Array([50001,40003,30001,20011,32768])});
+  const out=compositeCmykPixelBufferLayers(1,1,[
+    {buffer:bottom,opacity:1,blendMode:'source-over'},
+    {buffer:top,opacity:.5,blendMode:'source-over'},
+  ],{bitsPerChannel:16});
+  assert.equal(out.model,'cmyk');
+  assert.equal(out.channels,5);
+  assert.ok(out.data instanceof Uint16Array);
+  assert.equal(out.data[4],65535);
+  assert.ok(out.data[0]>bottom.data[0]&&out.data[0]<top.data[0]);
+  assert.ok([...out.data.slice(0,4)].some(value=>value%257!==0));
+});
+
+test('Stage 13b CMYK composite applies raster-mask alpha and rejects unsupported blend modes',()=>{
+  const ink=createPixelBuffer({width:1,height:1,model:'cmyk',channels:5,bitsPerChannel:8,colorSpace:'device-cmyk',alphaMode:'straight',data:new Uint8ClampedArray([200,100,50,25,255])});
+  const mask=new Uint8ClampedArray([255,255,255,128]);
+  const out=compositeCmykPixelBufferLayers(1,1,[{buffer:ink,opacity:.5,maskPixels:mask}],{bitsPerChannel:8});
+  assert.ok(out.data[4]>=63&&out.data[4]<=65);
+  assert.deepEqual([...out.data.slice(0,4)],[200,100,50,25]);
+  assert.throws(()=>compositeCmykPixelBufferLayers(1,1,[{buffer:ink,blendMode:'multiply'}]),/только Normal/);
 });

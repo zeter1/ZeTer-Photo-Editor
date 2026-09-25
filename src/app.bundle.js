@@ -1488,6 +1488,81 @@ function compositePixelBufferLayers(width, height, layers = [], {
   }
   return output;
 }
+function compositeCmykPixelBufferLayers(width, height, layers = [], {
+  bitsPerChannel = 16,
+  colorSpace = 'device-cmyk',
+  background = null,
+  maxBytes = MAX_HIGH_DEPTH_COMPOSITE_BYTES,
+} = {}) {
+  const w=integer(width,'CMYK composite width');
+  const h=integer(height,'CMYK composite height');
+  const depth=integer(bitsPerChannel,'CMYK composite bitsPerChannel');
+  if(![8,16,32].includes(depth))throw new TypeError('CMYK composite поддерживает только 8/16/32-bit');
+  const sampleCount=w*h*5;
+  if(!Number.isSafeInteger(sampleCount))throw new RangeError('CMYK composite слишком большой для безопасной адресации');
+  const requiredBytes=sampleCount*(depth/8);
+  const limit=Math.trunc(Number(maxBytes));
+  if(!Number.isSafeInteger(limit)||limit<=0)throw new TypeError('CMYK composite maxBytes должен быть положительным целым числом');
+  if(requiredBytes>limit)throw new RangeError('CMYK composite требует '+requiredBytes+' байт, лимит '+limit);
+
+  const output=createPixelBuffer({
+    width:w,height:h,model:'cmyk',channels:5,bitsPerChannel:depth,
+    colorSpace:String(colorSpace||'device-cmyk'),alphaMode:'straight',
+  });
+  if(background){
+    const descriptor=Array.isArray(background)?{cmyk:background,alpha:1}:background;
+    const values=Array.isArray(descriptor?.cmyk)?descriptor.cmyk:null;
+    if(!values||values.length<4)throw new TypeError('CMYK composite background требует CMYK values');
+    const alpha=clampPreview01(descriptor.alpha??1);
+    for(let pixel=0;pixel<w*h;pixel+=1){
+      const offset=pixel*5;
+      for(let channel=0;channel<4;channel+=1)writeNormalizedSample(output,offset+channel,clampPreview01(values[channel]));
+      writeNormalizedSample(output,offset+4,alpha);
+    }
+  }
+
+  for(const entry of Array.isArray(layers)?layers:[]){
+    const source=entry?.buffer;
+    if(!isPixelBuffer(source)||source.model!=='cmyk'||![4,5].includes(source.channels)){
+      throw new TypeError('CMYK composite layer требует CMYK PixelBuffer');
+    }
+    const mode=entry?.blendMode||'source-over';
+    if(mode!=='source-over')throw new Error('CMYK composite Stage 13b поддерживает только Normal/source-over blend');
+    const opacity=clampPreview01(entry?.opacity??1);
+    if(opacity<=0)continue;
+    const x=Math.trunc(Number(entry?.x)||0),y=Math.trunc(Number(entry?.y)||0);
+    const mask=entry?.maskPixels||null;
+    if(mask&&(!ArrayBuffer.isView(mask)||mask.length<source.width*source.height*4)){
+      throw new RangeError('CMYK composite mask имеет неверный размер');
+    }
+    const left=Math.max(0,-x),top=Math.max(0,-y);
+    const right=Math.min(source.width,w-x),bottom=Math.min(source.height,h-y);
+    if(left>=right||top>=bottom)continue;
+    for(let sy=top;sy<bottom;sy+=1){
+      const dy=y+sy;
+      for(let sx=left;sx<right;sx+=1){
+        const dx=x+sx;
+        const sourcePixel=sy*source.width+sx;
+        const sourceOffset=sourcePixel*source.channels;
+        const targetOffset=(dy*w+dx)*5;
+        const maskAlpha=mask?clampPreview01(Number(mask[sourcePixel*4+3]??255)/255):1;
+        const sourceAlpha=clampPreview01((source.channels===5?sourceSampleValue(source,sourceOffset+4):1)*opacity*maskAlpha);
+        if(sourceAlpha<=0)continue;
+        const backdropAlpha=clampPreview01(normalizedSample(output,targetOffset+4));
+        const outputAlpha=sourceAlpha+backdropAlpha*(1-sourceAlpha);
+        if(outputAlpha<=0)continue;
+        const destFactor=backdropAlpha*(1-sourceAlpha);
+        for(let channel=0;channel<4;channel+=1){
+          const sourceInk=clampPreview01(sourceSampleValue(source,sourceOffset+channel));
+          const backdropInk=clampPreview01(normalizedSample(output,targetOffset+channel));
+          writeNormalizedSample(output,targetOffset+channel,(sourceInk*sourceAlpha+backdropInk*destFactor)/outputAlpha);
+        }
+        writeNormalizedSample(output,targetOffset+4,outputAlpha);
+      }
+    }
+  }
+  return output;
+}
 
 function uiSrgbRgbForBuffer(buffer, rgb8) {
   if (!Array.isArray(rgb8) || rgb8.length < 3) throw new TypeError('Для high-depth editing нужен RGB-цвет');
@@ -1979,6 +2054,265 @@ function iccParseProfile(bytesLike) {
   return{bytes,view,declared,colorSpace,pcs,tags};
 }
 
+
+function iccAlign4(value) {
+  return (Number(value) + 3) & ~3;
+}
+
+function iccS15Fixed16(view, offset) {
+  return view.getInt32(offset, false) / 65536;
+}
+
+function iccReadCurve(profile, offset, limit, label = 'ICC curve') {
+  const {bytes,view}=profile;
+  iccSpan(offset,12,limit,label);
+  const type=iccAscii(bytes,offset,4);
+  if(type==='curv'){
+    const count=view.getUint32(offset+8,false);
+    if(count>65536)throw new ColorManagementError(label+': слишком много curve samples','ICC_CURVE_LIMIT');
+    const rawSize=count===0?12:count===1?14:12+count*2;
+    iccSpan(offset,rawSize,limit,label);
+    if(count===0)return{size:iccAlign4(rawSize),apply:value=>iccClamp01(value)};
+    if(count===1){
+      const gamma=view.getUint16(offset+12,false)/256;
+      return{size:iccAlign4(rawSize),apply:value=>iccClamp01(value)**gamma};
+    }
+    const table=new Float32Array(count);
+    for(let index=0;index<count;index+=1)table[index]=view.getUint16(offset+12+index*2,false)/65535;
+    return{
+      size:iccAlign4(rawSize),
+      apply(value){
+        const position=iccClamp01(value)*(count-1);
+        const lower=Math.floor(position),upper=Math.min(count-1,lower+1),t=position-lower;
+        return table[lower]*(1-t)+table[upper]*t;
+      },
+    };
+  }
+  if(type==='para'){
+    const functionType=view.getUint16(offset+8,false);
+    const parameterCounts=[1,3,4,5,7];
+    const count=parameterCounts[functionType];
+    if(count==null)throw new ColorManagementError(label+': неподдерживаемый parametric curve type '+functionType,'ICC_PARAMETRIC_CURVE');
+    const rawSize=12+count*4;
+    iccSpan(offset,rawSize,limit,label);
+    const p=[];
+    for(let index=0;index<count;index+=1)p.push(iccS15Fixed16(view,offset+12+index*4));
+    const apply=value=>{
+      const x=iccClamp01(value);
+      if(functionType===0)return iccClamp01(x**p[0]);
+      if(functionType===1){
+        const [g,a,b]=p;
+        return iccClamp01(x>=-b/a?(a*x+b)**g:0);
+      }
+      if(functionType===2){
+        const [g,a,b,c]=p;
+        return iccClamp01(x>=-b/a?(a*x+b)**g+c:c);
+      }
+      if(functionType===3){
+        const [g,a,b,c,d]=p;
+        return iccClamp01(x>=d?(a*x+b)**g:c*x);
+      }
+      const [g,a,b,c,d,e,f]=p;
+      return iccClamp01(x>=d?(a*x+b)**g+e:c*x+f);
+    };
+    return{size:iccAlign4(rawSize),apply};
+  }
+  throw new ColorManagementError(label+': curve type '+JSON.stringify(type)+' не поддерживается','ICC_CURVE_TYPE');
+}
+
+function iccReadSequentialCurves(profile, tag, relativeOffset, count, label) {
+  if(!relativeOffset)return null;
+  const start=tag.offset+relativeOffset;
+  const limit=tag.offset+tag.size;
+  iccSpan(start,12,limit,label);
+  const curves=[];
+  let cursor=start;
+  for(let index=0;index<count;index+=1){
+    const curve=iccReadCurve(profile,cursor,limit,label+' #'+(index+1));
+    curves.push(curve);
+    cursor+=curve.size;
+    if(cursor>limit)throw new ColorManagementError(label+': curve set выходит за границы tag','ICC_CURVE_RANGE');
+  }
+  return curves;
+}
+
+function iccApplyCurves(curves, values) {
+  if(!curves)return Array.from(values);
+  if(curves.length!==values.length)throw new ColorManagementError('ICC curve-set channel mismatch','ICC_CURVE_CHANNELS');
+  return values.map((value,index)=>curves[index].apply(value));
+}
+
+function iccInterpolateClut(data, grid, outputs, values, { clampInput = true } = {}) {
+  const inputs=grid.length;
+  if(values.length!==inputs)throw new ColorManagementError('ICC CLUT input channel mismatch','ICC_CLUT_CHANNELS');
+  if(inputs<1||inputs>8)throw new ColorManagementError('ICC CLUT dimensions outside safe range 1..8','ICC_CLUT_DIMENSIONS');
+  const lower=new Int32Array(inputs),upper=new Int32Array(inputs),fraction=new Float64Array(inputs);
+  for(let channel=0;channel<inputs;channel+=1){
+    const normalized=clampInput?iccClamp01(values[channel]):Number(values[channel]);
+    const value=Number.isFinite(normalized)?normalized:0;
+    const position=Math.max(0,Math.min(1,value))*(grid[channel]-1);
+    lower[channel]=Math.floor(position);
+    upper[channel]=Math.min(grid[channel]-1,lower[channel]+1);
+    fraction[channel]=position-lower[channel];
+  }
+  const result=new Float64Array(outputs);
+  const corners=1<<inputs;
+  for(let corner=0;corner<corners;corner+=1){
+    let weight=1,node=0;
+    for(let channel=0;channel<inputs;channel+=1){
+      const high=(corner&(1<<channel))!==0;
+      const coordinate=high?upper[channel]:lower[channel];
+      weight*=high?fraction[channel]:1-fraction[channel];
+      node=node*grid[channel]+coordinate;
+    }
+    if(weight===0)continue;
+    const offset=node*outputs;
+    for(let output=0;output<outputs;output+=1)result[output]+=data[offset+output]*weight;
+  }
+  return Array.from(result);
+}
+
+function iccReadMab(profile, tag) {
+  const {bytes,view,pcs}=profile;
+  const start=tag.offset,end=start+tag.size;
+  if(tag.size<32)throw new ColorManagementError('ICC '+tag.signature+' mAB tag слишком короткий','ICC_MAB_TRUNCATED');
+  if(iccAscii(bytes,start,4)!=='mAB ')throw new ColorManagementError('ICC '+tag.signature+' не является lutAToBType','ICC_MAB_TYPE');
+  const inputs=bytes[start+8],outputs=bytes[start+9];
+  if(inputs!==4||outputs!==3)throw new ColorManagementError('ICC CMYK mAB ожидает 4 input / 3 output channels','ICC_MAB_CHANNELS');
+  const bOffset=view.getUint32(start+12,false);
+  const matrixOffset=view.getUint32(start+16,false);
+  const mOffset=view.getUint32(start+20,false);
+  const clutOffset=view.getUint32(start+24,false);
+  const aOffset=view.getUint32(start+28,false);
+  for(const [name,offset] of [['B',bOffset],['matrix',matrixOffset],['M',mOffset],['CLUT',clutOffset],['A',aOffset]]){
+    if(offset)iccSpan(start+offset,4,end,'ICC mAB '+name);
+  }
+  const aCurves=iccReadSequentialCurves(profile,tag,aOffset,inputs,'ICC mAB A curve');
+  const mCurves=iccReadSequentialCurves(profile,tag,mOffset,outputs,'ICC mAB M curve');
+  const bCurves=iccReadSequentialCurves(profile,tag,bOffset,outputs,'ICC mAB B curve');
+
+  let clut=null;
+  if(clutOffset){
+    const clutStart=start+clutOffset;
+    iccSpan(clutStart,20,end,'ICC mAB CLUT');
+    const grid=[];
+    for(let index=0;index<inputs;index+=1){
+      const points=bytes[clutStart+index];
+      if(points<2||points>65)throw new ColorManagementError('ICC mAB CLUT grid outside safe range 2..65','ICC_MAB_GRID');
+      grid.push(points);
+    }
+    const precision=bytes[clutStart+16];
+    if(precision!==1&&precision!==2)throw new ColorManagementError('ICC mAB CLUT precision должен быть 1 или 2 bytes','ICC_MAB_PRECISION');
+    const nodes=grid.reduce((product,value)=>product*value,1);
+    const samples=nodes*outputs;
+    const dataStart=clutStart+20;
+    iccSpan(dataStart,samples*precision,end,'ICC mAB CLUT data');
+    const data=new Float32Array(samples);
+    for(let index=0;index<samples;index+=1){
+      data[index]=precision===1?bytes[dataStart+index]/255:view.getUint16(dataStart+index*2,false)/65535;
+    }
+    clut={grid,outputs,data};
+  }
+  if(inputs!==outputs&&!clut)throw new ColorManagementError('ICC mAB с разным числом channels требует CLUT','ICC_MAB_CLUT_REQUIRED');
+
+  let matrix=null;
+  if(matrixOffset){
+    const matrixStart=start+matrixOffset;
+    iccSpan(matrixStart,48,end,'ICC mAB matrix');
+    const coefficients=new Float64Array(12);
+    for(let index=0;index<12;index+=1)coefficients[index]=iccS15Fixed16(view,matrixStart+index*4);
+    matrix=coefficients;
+  }
+  return{type:'mAB ',tag:tag.signature,pcs,inputs,outputs,aCurves,mCurves,bCurves,clut,matrix};
+}
+
+function iccApplyMab(transform, c, m, y, k) {
+  let values=iccApplyCurves(transform.aCurves,[c,m,y,k]);
+  if(transform.clut)values=iccInterpolateClut(transform.clut.data,transform.clut.grid,transform.clut.outputs,values);
+  values=iccApplyCurves(transform.mCurves,values);
+  if(transform.matrix){
+    if(values.length!==3)throw new ColorManagementError('ICC mAB matrix требует 3 channels','ICC_MAB_MATRIX_CHANNELS');
+    const q=transform.matrix;
+    values=[
+      q[0]*values[0]+q[1]*values[1]+q[2]*values[2]+q[9],
+      q[3]*values[0]+q[4]*values[1]+q[5]*values[2]+q[10],
+      q[6]*values[0]+q[7]*values[1]+q[8]*values[2]+q[11],
+    ];
+  }
+  return iccApplyCurves(transform.bCurves,values).map(iccClamp01);
+}
+
+function iccReadMpe(profile, tag) {
+  const {bytes,view,pcs}=profile;
+  const start=tag.offset,end=start+tag.size;
+  if(tag.size<24||iccAscii(bytes,start,4)!=='mpet')throw new ColorManagementError('ICC '+tag.signature+' не является multiProcessElementsType','ICC_MPE_TYPE');
+  const inputs=view.getUint16(start+8,false),outputs=view.getUint16(start+10,false);
+  const count=view.getUint32(start+12,false);
+  if(inputs!==4||outputs!==3)throw new ColorManagementError('ICC CMYK MPE ожидает 4 input / 3 output channels','ICC_MPE_CHANNELS');
+  if(count<1||count>32)throw new ColorManagementError('ICC MPE element count outside safe range 1..32','ICC_MPE_COUNT');
+  iccSpan(start+16,count*8,end,'ICC MPE positions');
+  const elements=[];
+  let currentChannels=inputs;
+  for(let index=0;index<count;index+=1){
+    const entry=start+16+index*8;
+    const relative=view.getUint32(entry,false),size=view.getUint32(entry+4,false);
+    const elementStart=start+relative;
+    iccSpan(elementStart,size,end,'ICC MPE element #'+(index+1));
+    if(size<12)throw new ColorManagementError('ICC MPE element слишком короткий','ICC_MPE_ELEMENT');
+    const type=iccAscii(bytes,elementStart,4);
+    const p=view.getUint16(elementStart+8,false),q=view.getUint16(elementStart+10,false);
+    if(p!==currentChannels)throw new ColorManagementError('ICC MPE element input channel mismatch','ICC_MPE_CHAIN');
+    if(type==='matf'){
+      const required=12+4*(p*q+q);
+      if(size<required)throw new ColorManagementError('ICC MPE matrix обрезана','ICC_MPE_MATRIX');
+      const coefficients=new Float32Array(p*q+q);
+      for(let sample=0;sample<coefficients.length;sample+=1)coefficients[sample]=view.getFloat32(elementStart+12+sample*4,false);
+      elements.push({type,p,q,coefficients});
+    }else if(type==='clut'){
+      const grid=[];
+      for(let channel=0;channel<p;channel+=1){
+        const points=bytes[elementStart+12+channel];
+        if(points<2||points>65)throw new ColorManagementError('ICC MPE CLUT grid outside safe range 2..65','ICC_MPE_GRID');
+        grid.push(points);
+      }
+      const nodes=grid.reduce((product,value)=>product*value,1);
+      const samples=nodes*q;
+      const dataStart=elementStart+28;
+      if(size<28+samples*4)throw new ColorManagementError('ICC MPE CLUT data обрезаны','ICC_MPE_CLUT');
+      const data=new Float32Array(samples);
+      for(let sample=0;sample<samples;sample+=1)data[sample]=view.getFloat32(dataStart+sample*4,false);
+      elements.push({type,p,q,grid,data});
+    }else if(type==='bACS'||type==='eACS'){
+      elements.push({type,p,q,passThrough:true});
+    }else{
+      throw new ColorManagementError('ICC MPE element '+JSON.stringify(type)+' пока не поддерживается; требуется fallback','ICC_MPE_ELEMENT_TYPE');
+    }
+    currentChannels=q;
+  }
+  if(currentChannels!==outputs)throw new ColorManagementError('ICC MPE final channel count mismatch','ICC_MPE_CHAIN');
+  return{type:'mpet',tag:tag.signature,pcs,inputs,outputs,elements};
+}
+
+function iccApplyMpe(transform, c, m, y, k) {
+  let values=[c,m,y,k];
+  for(const element of transform.elements){
+    if(element.passThrough)continue;
+    if(element.type==='matf'){
+      const next=new Array(element.q).fill(0);
+      const matrixCount=element.p*element.q;
+      for(let row=0;row<element.q;row+=1){
+        let value=element.coefficients[matrixCount+row];
+        for(let column=0;column<element.p;column+=1)value+=element.coefficients[row*element.p+column]*values[column];
+        next[row]=value;
+      }
+      values=next;
+    }else if(element.type==='clut'){
+      values=iccInterpolateClut(element.data,element.grid,element.q,values);
+    }
+  }
+  return values;
+}
+
 function iccReadMft(profile, tag) {
   const {bytes,view,pcs}=profile;
   if(tag.size<52)throw new ColorManagementError('ICC '+tag.signature+' LUT слишком короткий', 'ICC_LUT_TRUNCATED');
@@ -2127,6 +2461,65 @@ function iccLutOutputToSrgb(lut, raw) {
   return iccXyzD65ToSrgb(...iccXyzD50ToD65(...xyz));
 }
 
+
+function iccNormalizedPcsToSrgb(pcs, raw) {
+  if(pcs==='Lab '){
+    const lCode=iccClamp01(raw[0])*65535;
+    const aCode=iccClamp01(raw[1])*65535;
+    const bCode=iccClamp01(raw[2])*65535;
+    const l=Math.min(100,Math.max(0,lCode*100/65280));
+    const a=Math.min(127,Math.max(-128,aCode/256-128));
+    const b=Math.min(127,Math.max(-128,bCode/256-128));
+    return iccXyzD65ToSrgb(...iccXyzD50ToD65(...iccLabToXyzD50(l,a,b)));
+  }
+  const scale=65535/32768;
+  return iccXyzD65ToSrgb(...iccXyzD50ToD65(raw[0]*scale,raw[1]*scale,raw[2]*scale));
+}
+
+function iccFloatPcsToSrgb(pcs, raw) {
+  if(pcs==='Lab '){
+    return iccXyzD65ToSrgb(...iccXyzD50ToD65(...iccLabToXyzD50(Number(raw[0])||0,Number(raw[1])||0,Number(raw[2])||0)));
+  }
+  return iccXyzD65ToSrgb(...iccXyzD50ToD65(Number(raw[0])||0,Number(raw[1])||0,Number(raw[2])||0));
+}
+
+function iccIntentPlan(intent) {
+  const normalized=['perceptual','relative','saturation','absolute'].includes(intent)?intent:'perceptual';
+  if(normalized==='relative')return{requested:normalized,index:1,dTag:'D2B1',aTag:'A2B1'};
+  if(normalized==='saturation')return{requested:normalized,index:2,dTag:'D2B2',aTag:'A2B2'};
+  if(normalized==='absolute')return{requested:normalized,index:3,dTag:'D2B3',aTag:'A2B1'};
+  return{requested:'perceptual',index:0,dTag:'D2B0',aTag:'A2B0'};
+}
+
+function iccResolveDeviceToPcs(profile, intent) {
+  const plan=iccIntentPlan(intent);
+  const warnings=[];
+  let tag=profile.tags.get(plan.dTag);
+  if(tag){
+    const type=iccAscii(profile.bytes,tag.offset,4);
+    if(type==='mpet'){
+      return{transform:iccReadMpe(profile,tag),kind:'mpet',tag:tag.signature,resolvedIntent:plan.requested,warnings};
+    }
+    warnings.push(plan.dTag+' найден, но имеет неподдерживаемый type '+JSON.stringify(type));
+  }
+  tag=profile.tags.get(plan.aTag);
+  let resolvedIntent=plan.requested==='absolute'?'relative':plan.requested;
+  if(plan.requested==='absolute'&&tag)warnings.push('Absolute intent: D2B3 отсутствует; использован relative A2B1 transform');
+  if(!tag&&plan.aTag!=='A2B0'){
+    tag=profile.tags.get('A2B0');
+    if(tag){
+      resolvedIntent='perceptual';
+      warnings.push(plan.aTag+' отсутствует; использован A2B0 perceptual transform');
+    }
+  }
+  if(!tag)throw new ColorManagementError('ICC profile не содержит подходящий D2B/A2B device-to-PCS transform','ICC_DEVICE_TO_PCS_MISSING');
+  const type=iccAscii(profile.bytes,tag.offset,4);
+  if(type==='mft1'||type==='mft2')return{transform:iccReadMft(profile,tag),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mAB ')return{transform:iccReadMab(profile,tag),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mpet')return{transform:iccReadMpe(profile,tag),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  throw new ColorManagementError('ICC '+tag.signature+' использует неподдерживаемый transform type '+JSON.stringify(type),'ICC_TRANSFORM_TYPE');
+}
+
 function iccDeviceCmykFallback(c,m,y,k) {
   const cyan=iccClamp01(c),magenta=iccClamp01(m),yellow=iccClamp01(y),black=iccClamp01(k);
   return[
@@ -2135,33 +2528,50 @@ function iccDeviceCmykFallback(c,m,y,k) {
     (1-yellow)*(1-black),
   ];
 }
-function createCmykToSrgbTransform(profileBytes = null, { intent = 'perceptual' } = {}) {
+function createCmykToSrgbTransform(profileBytes = null, { intent = 'perceptual', displaySpace = 'srgb' } = {}) {
+  const requestedIntent=iccIntentPlan(intent).requested;
+  const requestedDisplay=String(displaySpace||'srgb').toLowerCase();
   const fallback=warning=>({
     managed:false,
     method:'device-cmyk-fallback',
     intent:'fallback',
+    requestedIntent,
+    displaySpace:'srgb',
     tag:null,
     pcs:null,
     warning,
     apply:iccDeviceCmykFallback,
   });
+  if(requestedDisplay!=='srgb')return fallback('Display space '+JSON.stringify(displaySpace)+' пока не поддерживается; доступен только sRGB display policy');
   if(!profileBytes)return fallback('ICC profile отсутствует; используется unmanaged Device CMYK approximation');
   try{
     const profile=iccParseProfile(profileBytes);
-    const preferred=intent==='relative'?'A2B1':intent==='saturation'?'A2B2':'A2B0';
-    const tag=profile.tags.get(preferred)||profile.tags.get('A2B0');
-    if(!tag)throw new ColorManagementError('ICC profile не содержит A2B0/A2B1/A2B2 device-to-PCS transform', 'ICC_A2B_MISSING');
-    const lut=iccReadMft(profile,tag);
+    const resolved=iccResolveDeviceToPcs(profile,requestedIntent);
+    const warnings=[...resolved.warnings];
+    const transform=resolved.transform;
+    let method;
+    if(resolved.kind==='mft1')method='icc-lut8';
+    else if(resolved.kind==='mft2')method='icc-lut16';
+    else if(resolved.kind==='mAB ')method='icc-mab';
+    else method='icc-mpe';
     return{
       managed:true,
-      method:lut.type==='mft1'?'icc-lut8':'icc-lut16',
-      intent:preferred==='A2B1'?'relative':preferred==='A2B2'?'saturation':'perceptual',
-      tag:tag.signature,
+      method,
+      intent:resolved.resolvedIntent,
+      requestedIntent,
+      displaySpace:'srgb',
+      tag:resolved.tag,
       pcs:profile.pcs.trim(),
-      warning:null,
+      warning:warnings.length?warnings.join('; '):null,
       apply(c,m,y,k){
-        const raw=iccApplyLut(lut,iccClamp01(c),iccClamp01(m),iccClamp01(y),iccClamp01(k));
-        return iccLutOutputToSrgb(lut,raw);
+        const inputs=[iccClamp01(c),iccClamp01(m),iccClamp01(y),iccClamp01(k)];
+        if(resolved.kind==='mft1'||resolved.kind==='mft2'){
+          return iccLutOutputToSrgb(transform,iccApplyLut(transform,...inputs));
+        }
+        if(resolved.kind==='mAB '){
+          return iccNormalizedPcsToSrgb(profile.pcs,iccApplyMab(transform,...inputs));
+        }
+        return iccFloatPcsToSrgb(profile.pcs,iccApplyMpe(transform,...inputs));
       },
     };
   }catch(error){
@@ -2601,6 +3011,7 @@ function createDocument({ name = 'Без имени', width = 1200, height = 800
     height: size.height,
     background,
     colorProfile: null,
+    colorManagement: sanitizeColorManagement(),
     paths: [],
     layers: [],
     groups: [],
@@ -2993,6 +3404,19 @@ function restoreDocument(snapshot) {
   }
   return doc;
 }
+const COLOR_RENDERING_INTENTS = Object.freeze(['perceptual','relative','saturation','absolute']);
+const COLOR_DISPLAY_SPACES = Object.freeze(['srgb']);
+const DEFAULT_COLOR_MANAGEMENT = Object.freeze({
+  renderingIntent:'perceptual',
+  displaySpace:'srgb',
+});
+function sanitizeColorManagement(value = {}) {
+  const source=value&&typeof value==='object'&&!Array.isArray(value)?value:{};
+  return {
+    renderingIntent:COLOR_RENDERING_INTENTS.includes(source.renderingIntent)?source.renderingIntent:DEFAULT_COLOR_MANAGEMENT.renderingIntent,
+    displaySpace:COLOR_DISPLAY_SPACES.includes(source.displaySpace)?source.displaySpace:DEFAULT_COLOR_MANAGEMENT.displaySpace,
+  };
+}
 function sanitizeColorProfile(profile) {
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
   const untagged = profile.untagged === true;
@@ -3258,6 +3682,7 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.height = size.height;
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
   doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
+  doc.colorManagement = sanitizeColorManagement(doc.colorManagement);
   const usedPathIds = new Set();
   doc.paths = Array.isArray(doc.paths)
     ? doc.paths.slice(0, 998).map((path, index) => sanitizeDocumentPath(path, index, usedPathIds)).filter(Boolean)
@@ -5547,35 +5972,46 @@ function encodeRleRgbaChannel(rgba, channel, width, height, version, options = {
   return writer;
 }
 
-function exportPixelSource(value, width, height, label, errorCode = 'PSD_EXPORT_PIXELS') {
+function exportPixelSource(value, width, height, label, errorCode = 'PSD_EXPORT_PIXELS', expectedModel = 'rgb') {
   const count = safeArea(width, height, Number.MAX_SAFE_INTEGER);
   if (isPixelBuffer(value?.pixelBuffer)) {
     const buffer = value.pixelBuffer;
-    if (buffer.model !== 'rgb' || ![3,4].includes(buffer.channels) || buffer.width !== width || buffer.height !== height) {
-      throw new PsdImportError(`PSD/PSB writer: ${label} имеет несовместимый PixelBuffer`, errorCode);
+    const validChannels = expectedModel === 'cmyk' ? [4,5] : [3,4];
+    if (buffer.model !== expectedModel || !validChannels.includes(buffer.channels) || buffer.width !== width || buffer.height !== height) {
+      throw new PsdImportError('PSD/PSB writer: '+label+' имеет несовместимый '+expectedModel.toUpperCase()+' PixelBuffer', errorCode);
     }
-    return { kind:'pixel-buffer', buffer };
+    return { kind:'pixel-buffer', buffer, model:expectedModel };
+  }
+  if(expectedModel!=='rgb'){
+    throw new PsdImportError('PSD/PSB writer: '+label+' требует native CMYK PixelBuffer', errorCode);
   }
   const rgba = asBytes(value?.pixels);
   if (rgba.length !== count * 4) {
-    throw new PsdImportError(`PSD/PSB writer: ${label} имеет неверный RGBA-буфер`, errorCode);
+    throw new PsdImportError('PSD/PSB writer: '+label+' имеет неверный RGBA-буфер', errorCode);
   }
-  return { kind:'rgba8', pixels:rgba };
+  return { kind:'rgba8', pixels:rgba, model:'rgb' };
 }
 
 function exportSourceValue(source, pixel, channel) {
   if (source.kind === 'rgba8') return source.pixels[pixel * 4 + channel] / 255;
   const buffer = source.buffer;
   const offset = pixel * buffer.channels;
-  if (channel === 3 && buffer.channels === 3) return 1;
   const value = Number(buffer.data[offset + channel]);
   if (!Number.isFinite(value)) return 0;
   if (buffer.bitsPerChannel === 8) return value / 255;
   if (buffer.bitsPerChannel === 16) return value / 65535;
-  return channel === 3 ? Math.max(0, Math.min(1, value)) : value;
+  return value;
 }
 
-function writeExportSample(view, offset, value, bitsPerChannel, channel) {
+function exportSourceAlpha(source, pixel) {
+  if(source.kind==='rgba8')return source.pixels[pixel*4+3]/255;
+  const buffer=source.buffer;
+  const alphaIndex=buffer.model==='cmyk'?(buffer.channels===5?4:-1):(buffer.channels===4?3:-1);
+  if(alphaIndex<0)return 1;
+  return Math.max(0,Math.min(1,exportSourceValue(source,pixel,alphaIndex)));
+}
+
+function writeExportSample(view, offset, value, bitsPerChannel, { allowExtended = false } = {}) {
   const finite = Number.isFinite(Number(value)) ? Number(value) : 0;
   if (bitsPerChannel === 8) {
     view.setUint8(offset, Math.round(Math.max(0, Math.min(1, finite)) * 255));
@@ -5585,18 +6021,28 @@ function writeExportSample(view, offset, value, bitsPerChannel, channel) {
     view.setUint16(offset, Math.round(Math.max(0, Math.min(1, finite)) * 65535), false);
     return;
   }
-  view.setFloat32(offset, channel === 3 ? Math.max(0, Math.min(1, finite)) : finite, false);
+  view.setFloat32(offset, allowExtended ? finite : Math.max(0,Math.min(1,finite)), false);
 }
 
-function fillExportChannelRow(target, source, channel, width, row, bitsPerChannel, { whiteMatte=false } = {}) {
+function fillExportChannelRow(target, source, channel, width, row, bitsPerChannel, {
+  whiteMatte = false,
+  matte = null,
+  invert = false,
+  alpha = false,
+} = {}) {
   const sampleBytes = bytesPerSample(bitsPerChannel);
   const view = new DataView(target.buffer, target.byteOffset, target.byteLength);
   for (let x=0; x<width; x+=1) {
     const pixel = row * width + x;
-    const alpha = exportSourceValue(source, pixel, 3);
-    let value = exportSourceValue(source, pixel, channel);
-    if (whiteMatte && channel < 3 && alpha > 0 && alpha < 1) value = value * alpha + (1 - alpha);
-    writeExportSample(view, x * sampleBytes, value, bitsPerChannel, channel);
+    const sourceAlpha = exportSourceAlpha(source,pixel);
+    let value = alpha ? sourceAlpha : exportSourceValue(source, pixel, channel);
+    const matteValue = matte == null ? (whiteMatte ? 1 : null) : Number(matte);
+    if (!alpha && matteValue != null && sourceAlpha > 0 && sourceAlpha < 1) {
+      value = value * sourceAlpha + matteValue * (1 - sourceAlpha);
+    }
+    if(invert&&!alpha)value=1-Math.max(0,Math.min(1,value));
+    const allowExtended=!alpha&&!invert&&source.model==='rgb'&&bitsPerChannel===32;
+    writeExportSample(view, x * sampleBytes, value, bitsPerChannel, {allowExtended});
   }
   return target;
 }
@@ -5634,18 +6080,19 @@ function encodeRawExportChannel(source, channel, width, height, bitsPerChannel, 
 }
 
 function encodeExportChannel(source, channel, width, height, version, bitsPerChannel, options = {}) {
-  if (bitsPerChannel === 8 && source.kind === 'rgba8') {
+  if (bitsPerChannel === 8 && source.kind === 'rgba8' && !options.invert && !options.alpha && options.matte == null) {
     return encodeRleRgbaChannel(source.pixels, channel, width, height, version, options);
   }
   if (bitsPerChannel === 8) return encodeRleExportChannel(source, channel, width, height, version, options);
   return encodeRawExportChannel(source, channel, width, height, bitsPerChannel, options);
 }
 
-function validateExportLayer(layer, index, maxPixels) {
+function validateExportLayer(layer, index, maxPixels, colorMode = PSD_COLOR_MODE_RGB) {
   const width = Math.trunc(Number(layer?.width));
   const height = Math.trunc(Number(layer?.height));
   safeArea(width, height, maxPixels);
-  const source = exportPixelSource(layer, width, height, `слой #${index + 1}`);
+  const model=colorMode===PSD_COLOR_MODE_CMYK?'cmyk':'rgb';
+  const source = exportPixelSource(layer, width, height, 'слой #'+(index+1), 'PSD_EXPORT_PIXELS', model);
   const x = Math.trunc(Number(layer?.x) || 0);
   const y = Math.trunc(Number(layer?.y) || 0);
   return { ...layer, x, y, width, height, source };
@@ -5691,24 +6138,32 @@ function writeLayerMaskExtra(writer, layer) {
   writer.u16(0);
 }
 
-function normalizeExportLayer(layer, index, maxPixels, version, bitsPerChannel) {
-  const item = validateExportLayer(layer, index, maxPixels);
-  const channels = [
-    { id: 0, data: encodeExportChannel(item.source, 0, item.width, item.height, version, bitsPerChannel) },
-    { id: 1, data: encodeExportChannel(item.source, 1, item.width, item.height, version, bitsPerChannel) },
-    { id: 2, data: encodeExportChannel(item.source, 2, item.width, item.height, version, bitsPerChannel) },
-    { id: -1, data: encodeExportChannel(item.source, 3, item.width, item.height, version, bitsPerChannel) },
-  ];
+function normalizeExportLayer(layer, index, maxPixels, version, bitsPerChannel, colorMode = PSD_COLOR_MODE_RGB) {
+  const item = validateExportLayer(layer, index, maxPixels, colorMode);
+  const cmyk=colorMode===PSD_COLOR_MODE_CMYK;
+  const channels = cmyk
+    ? [
+        { id:0, data:encodeExportChannel(item.source,0,item.width,item.height,version,bitsPerChannel,{invert:true}) },
+        { id:1, data:encodeExportChannel(item.source,1,item.width,item.height,version,bitsPerChannel,{invert:true}) },
+        { id:2, data:encodeExportChannel(item.source,2,item.width,item.height,version,bitsPerChannel,{invert:true}) },
+        { id:3, data:encodeExportChannel(item.source,3,item.width,item.height,version,bitsPerChannel,{invert:true}) },
+        { id:-1, data:encodeExportChannel(item.source,0,item.width,item.height,version,bitsPerChannel,{alpha:true}) },
+      ]
+    : [
+        { id:0, data:encodeExportChannel(item.source,0,item.width,item.height,version,bitsPerChannel) },
+        { id:1, data:encodeExportChannel(item.source,1,item.width,item.height,version,bitsPerChannel) },
+        { id:2, data:encodeExportChannel(item.source,2,item.width,item.height,version,bitsPerChannel) },
+        { id:-1, data:encodeExportChannel(item.source,0,item.width,item.height,version,bitsPerChannel,{alpha:true}) },
+      ];
   let mask = null;
   if (item.mask?.pixels || isPixelBuffer(item.mask?.pixelBuffer)) {
-    const maskSource = exportPixelSource(item.mask, item.width, item.height, `маска слоя «${item.name || index + 1}»`, 'PSD_EXPORT_MASK');
+    const maskSource = exportPixelSource(item.mask, item.width, item.height, 'маска слоя '+(item.name || index + 1), 'PSD_EXPORT_MASK', 'rgb');
     mask = { disabled: Boolean(item.mask.disabled), pixels: true };
-    channels.push({ id: -2, data: encodeExportChannel(maskSource, 3, item.width, item.height, version, bitsPerChannel) });
+    channels.push({ id:-2, data:encodeExportChannel(maskSource,0,item.width,item.height,version,bitsPerChannel,{alpha:true}) });
   }
   const { pixels: _pixels, pixelBuffer: _pixelBuffer, source: _source, ...metadata } = item;
   return { ...metadata, mask, channels };
 }
-
 
 function normalizeExportGroups(groups = []) {
   if (!Array.isArray(groups)) return [];
@@ -5841,25 +6296,40 @@ function encodeCompositeRle(pixels, width, height, version) {
   return writer;
 }
 
-function encodeCompositeData({ composite, compositePixelBuffer }, width, height, version, bitsPerChannel) {
-  if (bitsPerChannel === 8 && !compositePixelBuffer) return encodeCompositeRle(composite, width, height, version);
+function encodeCompositeData({ composite, compositePixelBuffer }, width, height, version, bitsPerChannel, colorMode = PSD_COLOR_MODE_RGB) {
+  const cmyk=colorMode===PSD_COLOR_MODE_CMYK;
+  if (!cmyk && bitsPerChannel === 8 && !compositePixelBuffer) return encodeCompositeRle(composite, width, height, version);
   const source = exportPixelSource(
     compositePixelBuffer ? { pixelBuffer:compositePixelBuffer } : { pixels:composite },
     width,
     height,
     'composite',
+    'PSD_EXPORT_COMPOSITE',
+    cmyk?'cmyk':'rgb',
   );
+  const planeDescriptors=cmyk
+    ? [
+        {channel:0,options:{invert:true,matte:0}},
+        {channel:1,options:{invert:true,matte:0}},
+        {channel:2,options:{invert:true,matte:0}},
+        {channel:3,options:{invert:true,matte:0}},
+        {channel:0,options:{alpha:true}},
+      ]
+    : [
+        {channel:0,options:{whiteMatte:true}},
+        {channel:1,options:{whiteMatte:true}},
+        {channel:2,options:{whiteMatte:true}},
+        {channel:0,options:{alpha:true}},
+      ];
   if (bitsPerChannel === 8) {
     const writer = new Writer();
-    // Composite RLE has one compression header and a single row-length table for all planes,
-    // unlike per-layer channels.
     const rowLengthBytes = version === PSB_VERSION ? 4 : 2;
     const rows = [];
     const lengths = [];
     const raw = new Uint8Array(width);
-    for (let channel=0; channel<4; channel+=1) {
+    for (const descriptor of planeDescriptors) {
       for (let row=0; row<height; row+=1) {
-        fillExportChannelRow(raw, source, channel, width, row, 8, { whiteMatte:true });
+        fillExportChannelRow(raw, source, descriptor.channel, width, row, 8, descriptor.options);
         const packed = packBitsEncodeRow(raw);
         lengths.push(packed.length);
         rows.push(packed);
@@ -5873,16 +6343,15 @@ function encodeCompositeData({ composite, compositePixelBuffer }, width, height,
   const writer = new Writer();
   writer.u16(0);
   const rowBytes = width * bytesPerSample(bitsPerChannel);
-  for (let channel=0; channel<4; channel+=1) {
+  for (const descriptor of planeDescriptors) {
     for (let row=0; row<height; row+=1) {
       const bytes = new Uint8Array(rowBytes);
-      fillExportChannelRow(bytes, source, channel, width, row, bitsPerChannel, { whiteMatte:true });
+      fillExportChannelRow(bytes, source, descriptor.channel, width, row, bitsPerChannel, descriptor.options);
       writer.push(bytes);
     }
   }
   return writer;
 }
-
 
 function writePascalEven(writer, name = '') {
   const text = String(name || '').slice(0, 255);
@@ -5981,7 +6450,8 @@ function appendHighDepthLayerInfoBlock(writer, layerInfo, version, bitsPerChanne
   if (layerInfo.length & 1) writer.u8(0);
 }
 
-function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], composite, compositePixelBuffer = null, bitsPerChannel = 8, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], composite, compositePixelBuffer = null, bitsPerChannel = 8, colorMode = PSD_COLOR_MODE_RGB, iccProfile = null, iccUntagged = false, version = PSD_VERSION, maxPixels = 48_000_000, maxLayers = MAX_PSD_LAYERS, maxBytes = 2_000_000_000 } = {}) {
+  const mode=colorMode==='cmyk'||Number(colorMode)===PSD_COLOR_MODE_CMYK?PSD_COLOR_MODE_CMYK:PSD_COLOR_MODE_RGB;
   if (version !== PSD_VERSION && version !== PSB_VERSION) throw new PsdImportError(`PSD/PSB writer: unsupported version ${version}`, 'PSD_EXPORT_VERSION');
   const depth = Math.trunc(Number(bitsPerChannel));
   if (!PSD_SUPPORTED_DEPTHS.has(depth)) throw new PsdImportError(`PSD/PSB writer: unsupported bit depth ${bitsPerChannel}`, 'PSD_EXPORT_DEPTH');
@@ -5993,7 +6463,7 @@ function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], c
   }
   if (!layers.length) throw new PsdImportError('PSD/PSB writer: нужен хотя бы один слой', 'PSD_EXPORT_EMPTY');
 
-  const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version, depth));
+  const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version, depth, mode));
   const records = expandExportLayerGroups(normalized, groups);
   if (records.length > 32767) {
     throw new PsdImportError(`PSD/PSB writer: слишком много layer records после добавления групп: ${records.length}`, 'PSD_EXPORT_LAYER_RECORD_LIMIT');
@@ -6015,11 +6485,11 @@ function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], c
     appendHighDepthLayerInfoBlock(layerAndMask, layerInfo, version, depth);
   }
 
-  const compositeData = encodeCompositeData({ composite, compositePixelBuffer }, documentWidth, documentHeight, version, depth);
+  const compositeData = encodeCompositeData({ composite, compositePixelBuffer }, documentWidth, documentHeight, version, depth, mode);
   const imageResources = buildImageResources({iccProfile,iccUntagged,paths,width:documentWidth,height:documentHeight});
   const out = new Writer();
   out.ascii('8BPS').u16(version).push(new Uint8Array(6));
-  out.u16(4).u32(documentHeight).u32(documentWidth).u16(depth).u16(PSD_COLOR_MODE_RGB);
+  out.u16(mode===PSD_COLOR_MODE_CMYK?5:4).u32(documentHeight).u32(documentWidth).u16(depth).u16(mode);
   out.u32(0);
   out.u32(imageResources.length).append(imageResources);
   if (version === PSB_VERSION) out.u64(layerAndMask.length);
@@ -7857,6 +8327,42 @@ function bindHighDepthPreviewControls(root,layer){
   root?.querySelector('[data-high-depth-preview-reset]')?.addEventListener('click',()=>resetHighDepthPreview(layer));
 }
 
+async function updateDocumentRenderingIntent(intent){
+  const current=sanitizeColorManagement(doc.colorManagement);
+  const next=sanitizeColorManagement({...current,renderingIntent:intent});
+  if(next.renderingIntent===current.renderingIntent)return true;
+  const targetDoc=doc;
+  const profile=targetDoc.colorProfile;
+  const profileBytes=profile?.kind==='icc'&&profile.dataUrl?dataUrlToBytes(profile.dataUrl,{maxBytes:4*1024*1024}):null;
+  const transform=createCmykToSrgbTransform(profileBytes,{intent:next.renderingIntent,displaySpace:next.displaySpace});
+  const updates=[];
+  setStatus('CMYK: пересчёт display preview для '+next.renderingIntent+' intent…');
+  for(const layer of targetDoc.layers){
+    if(layer.type!=='raster'||layer.highDepthSource?.model!=='cmyk')continue;
+    const buffer=deserializePixelBufferSource(layer.highDepthSource);
+    const rgba=cmykPixelBufferToRgba8Preview(buffer,transform);
+    const dataUrl=await rgbaPixelsToDataUrl(buffer.width,buffer.height,rgba,'CMYK preview «'+(layer.name||'Без имени')+'»');
+    updates.push({layer,dataUrl});
+  }
+  if(doc!==targetDoc){setStatus('CMYK preview отменён: активный документ изменился');return false;}
+  for(const update of updates){const old=update.layer.dataUrl;update.layer.dataUrl=update.dataUrl;invalidateImageCache(old);}
+  targetDoc.colorManagement=next;
+  commit('Изменить CMYK rendering intent');
+  const suffix=transform.warning?' • '+transform.warning:'';
+  setStatus('CMYK display policy: '+next.renderingIntent+' → '+next.displaySpace.toUpperCase()+suffix);
+  if(transform.warning)toast('CMYK preview пересчитан с ограничением ICC transform','warn');
+  return true;
+}
+
+function bindColorManagementControls(root){
+  const select=root?.querySelector('[data-cmyk-rendering-intent]');
+  if(!select)return;
+  select.addEventListener('change',async()=>{
+    select.disabled=true;
+    try{await updateDocumentRenderingIntent(select.value);}catch(error){console.error(error);toast('Не удалось пересчитать CMYK preview','error');setStatus('Ошибка CMYK color management: '+error.message);}
+    finally{if(select.isConnected)select.disabled=false;}
+  });
+}
 function updateProperties() {
   const l = selected();
   if (!l) { els.props.className = 'panel-content muted'; els.props.textContent = 'Выберите слой'; return; }
@@ -7882,7 +8388,10 @@ function updateProperties() {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
     if(source.model==='cmyk'){
-      extra = `<label>Нативный источник</label><span>${source.bitsPerChannel}-bit CMYK · ${sizeMb} МБ</span><label>Color management</label><span>CMYK source сохранён в .zpe; Canvas показывает sRGB preview, созданный через ICC transform либо явный Device CMYK fallback при импорте</span><label>Редактирование</label><span>Destructive RGB-инструмент растрирует display preview и снимает нативный CMYK source до появления native CMYK editing</span>`;
+      const policy=sanitizeColorManagement(doc.colorManagement);
+      const intentOptions=[['perceptual','Perceptual'],['relative','Relative colorimetric'],['saturation','Saturation'],['absolute','Absolute colorimetric']];
+      const intentSelect=intentOptions.map(([value,label])=>`<option value="${value}"${policy.renderingIntent===value?' selected':''}>${label}</option>`).join('');
+      extra = `<label>Нативный источник</label><span>${source.bitsPerChannel}-bit CMYK · ${sizeMb} МБ</span><label>Rendering intent</label><select data-cmyk-rendering-intent>${intentSelect}</select><label>Display space</label><span>${policy.displaySpace.toUpperCase()} (Stage 13b policy)</span><label>Color management</label><span>CMYK source сохранён в .zpe; display preview строится через ICC A2B/D2B transform либо явный Device CMYK fallback</span><label>Редактирование</label><span>Destructive RGB-инструмент растрирует display preview и снимает нативный CMYK source до появления native CMYK editing</span>`;
     }else if(Number(source.bitsPerChannel)>8){
       const preview=sanitizeHighDepthPreview(l.highDepthPreview);
       const resolvedAuto=source.bitsPerChannel===32?'ACES':'Clip';
@@ -7907,6 +8416,7 @@ function updateProperties() {
   </div>`;
   bindPropertyInputs(els.props);
   if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,l);
+  if(l.type==='raster'&&l.highDepthSource?.model==='cmyk')bindColorManagementControls(els.props);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
   if(smartObjectEdit)smartObjectEdit.addEventListener('click',()=>openSmartObjectContents(l));
   const smartObjectLinkCopy=els.props.querySelector('[data-smart-object-link-copy]');
@@ -9692,13 +10202,15 @@ async function openPsd(file){
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
     const isCmyk=parsed.colorMode===4;
-    const cmykTransform=isCmyk?createCmykToSrgbTransform(parsed.iccProfile?.bytes||null):null;
+    const colorPolicy=sanitizeColorManagement(targetDocument.colorManagement);
+    const cmykTransform=isCmyk?createCmykToSrgbTransform(parsed.iccProfile?.bytes||null,{intent:colorPolicy.renderingIntent,displaySpace:colorPolicy.displaySpace}):null;
     const previewPixelsFor=buffer=>buffer?.model==='cmyk'
       ? cmykPixelBufferToRgba8Preview(buffer,cmykTransform)
       : pixelBufferToRgba8Preview(buffer);
     if(isCmyk){
       if(cmykTransform.managed){
-        warnings.push(`CMYK preview: применён ICC ${cmykTransform.tag} ${cmykTransform.method} → ${cmykTransform.pcs} → sRGB display transform. Native CMYK samples сохраняются отдельно`);
+        warnings.push(`CMYK preview: применён ICC ${cmykTransform.tag} ${cmykTransform.method}, intent ${cmykTransform.intent} → ${cmykTransform.pcs} → ${cmykTransform.displaySpace.toUpperCase()} display transform. Native CMYK samples сохраняются отдельно`);
+        if(cmykTransform.warning)warnings.push(`CMYK ICC policy: ${cmykTransform.warning}`);
       }else{
         warnings.push(`CMYK preview: ${cmykTransform.warning}. Native CMYK samples сохраняются отдельно; display preview не следует считать proof/press simulation`);
       }
@@ -9820,6 +10332,7 @@ async function openPsd(file){
     next.layers=prepared;
     next.groups=importedGroups;
     next.paths=structuredClone(parsed.paths||[]);
+    next.colorManagement=colorPolicy;
     next.colorProfile=parsed.iccProfile?{
       kind:'icc',
       untagged:Boolean(parsed.iccUntagged),
@@ -9964,11 +10477,12 @@ function nativeHighDepthPsdSource(layer){
   if(!Number.isInteger(Number(layer.x))||!Number.isInteger(Number(layer.y)))return null;
   try{
     const buffer=deserializePixelBufferSource(layer.highDepthSource);
-    if(buffer.model!=='rgb'||![16,32].includes(buffer.bitsPerChannel))return null;
+    const supported=buffer.model==='cmyk'?[8,16,32].includes(buffer.bitsPerChannel):buffer.model==='rgb'&&[16,32].includes(buffer.bitsPerChannel);
+    if(!supported)return null;
     if(buffer.width!==Math.trunc(Number(layer.width))||buffer.height!==Math.trunc(Number(layer.height)))return null;
     return buffer;
   }catch(error){
-    console.warn(`PSD/PSB high-depth source «${layer.name||'Без имени'}» не прошёл export validation`,error);
+    console.warn(`PSD/PSB native source «${layer.name||'Без имени'}» не прошёл export validation`,error);
     return null;
   }
 }
@@ -10098,6 +10612,36 @@ function buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAd
   }
 }
 
+function cmykNativeExportEligibility(exportDoc,planned,hasAdjustmentLayers,bitsPerChannel){
+  if(hasAdjustmentLayers)return{eligible:false,reason:'видимые adjustment layers требуют RGB Canvas composite'};
+  if(!planned.length)return{eligible:false,reason:'нет native CMYK raster layers'};
+  const missing=planned.find(item=>item.nativePixelBuffer?.model!=='cmyk');
+  if(missing)return{eligible:false,reason:'слой «'+(missing.layer.name||'Без имени')+'» не имеет совместимого native CMYK source'};
+  const vector=planned.find(item=>item.layer.vectorMask?.enabled!==false&&item.layer.vectorMask?.subpaths?.length);
+  if(vector)return{eligible:false,reason:'vector mask слоя «'+(vector.layer.name||'Без имени')+'» пока требует RGB raster bridge'};
+  const blend=planned.find(item=>isLayerVisible(exportDoc,item.layer)&&(item.layer.blendMode||'source-over')!=='source-over');
+  if(blend)return{eligible:false,reason:'CMYK merged composite Stage 13b поддерживает только Normal blend; слой «'+(blend.layer.name||'Без имени')+'» использует '+blend.layer.blendMode};
+  const plan=highDepthCompositePlan(exportDoc,planned);
+  if(plan.reason)return{eligible:false,reason:plan.reason};
+  if(exportDoc.background&&exportDoc.background!=='transparent')return{eligible:false,reason:'непрозрачный RGB background пока не переводится в native CMYK'};
+  const required=exportDoc.width*exportDoc.height*5*(bitsPerChannel/8);
+  if(!Number.isSafeInteger(required)||required>MAX_HIGH_DEPTH_COMPOSITE_BYTES)return{eligible:false,reason:'native CMYK composite требует около '+Math.ceil(required/1048576)+' МБ при лимите '+Math.floor(MAX_HIGH_DEPTH_COMPOSITE_BYTES/1048576)+' МБ'};
+  return{eligible:true,reason:null,plan};
+}
+
+function buildNativeCmykComposite(exportDoc,planned,prepared,bitsPerChannel,eligibility){
+  const preparedByLayerId=new Map(planned.map((item,index)=>[item.layer.id,prepared[index]]));
+  const layers=[];
+  for(const item of eligibility.plan.items){
+    const exported=preparedByLayerId.get(item.layer.id);
+    if(!exported)continue;
+    const buffer=item.nativePixelBuffer;
+    if(!buffer||buffer.model!=='cmyk')throw new Error('Stage 13b CMYK composite потерял native source слоя «'+(item.layer.name||'Без имени')+'»');
+    layers.push({buffer,x:item.bounds.x,y:item.bounds.y,opacity:clamp(Number(item.layer.opacity??1),0,1),blendMode:'source-over',maskPixels:exported.mask&&!exported.mask.disabled?exported.mask.pixels:null});
+  }
+  return compositeCmykPixelBufferLayers(exportDoc.width,exportDoc.height,layers,{bitsPerChannel,colorSpace:'device-cmyk',maxBytes:MAX_HIGH_DEPTH_COMPOSITE_BYTES});
+}
+
 async function preparePsdExport(exportDoc){
   const warnings=[];
   const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment');
@@ -10106,7 +10650,12 @@ async function preparePsdExport(exportDoc){
     const nativePixelBuffer=nativeHighDepthPsdSource(layer);
     return{layer,nativePixelBuffer,bounds:nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer)};
   });
-  const nativeDepths=planned.map(item=>item.nativePixelBuffer?.bitsPerChannel||0);
+  const cmykDepths=planned.filter(item=>item.nativePixelBuffer?.model==='cmyk').map(item=>item.nativePixelBuffer.bitsPerChannel);
+  const tentativeCmykDepth=cmykDepths.includes(32)?32:cmykDepths.includes(16)?16:8;
+  const cmykEligibility=cmykNativeExportEligibility(exportDoc,planned,hasAdjustmentLayers,tentativeCmykDepth);
+  const colorMode=cmykEligibility.eligible?'cmyk':'rgb';
+  const writerNative=planned.map(item=>colorMode==='cmyk'?(item.nativePixelBuffer?.model==='cmyk'?item.nativePixelBuffer:null):(item.nativePixelBuffer?.model==='rgb'?item.nativePixelBuffer:null));
+  const nativeDepths=writerNative.map(buffer=>buffer?.bitsPerChannel||0);
   const bitsPerChannel=nativeDepths.includes(32)?32:nativeDepths.includes(16)?16:8;
   let totalPixels=exportDoc.width*exportDoc.height+planned.reduce((sum,item)=>sum+item.bounds.width*item.bounds.height,0);
   if(hasAdjustmentLayers)totalPixels+=exportDoc.width*exportDoc.height;
@@ -10137,15 +10686,18 @@ async function preparePsdExport(exportDoc){
     }));
   if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   const cmykSources=planned.filter(item=>item.layer.highDepthSource?.model==='cmyk');
-  if(cmykSources.length)warnings.push(`Stage 13a: ${cmykSources.length} native CMYK source сохранены в .zpe, но текущий PSD/PSB writer остаётся RGB; экспорт использует их sRGB display preview`);
-  const downgradedHighDepth=planned.filter(item=>item.layer.highDepthSource?.model==='rgb'&&!item.nativePixelBuffer);
+  if(colorMode==='cmyk')warnings.push(`Stage 13b: ${cmykSources.length} native CMYK layer source экспортируются как настоящий CMYK PSD/PSB с сохранением channel precision`);
+  else if(cmykSources.length)warnings.push(`Stage 13b: native CMYK round-trip отключён для этого документа (${cmykEligibility.reason}); ${cmykSources.length} CMYK source экспортируются через sRGB display preview`);
+  const downgradedHighDepth=planned.filter((item,index)=>item.layer.highDepthSource?.model==='rgb'&&!writerNative[index]);
   if(downgradedHighDepth.length)warnings.push(`${downgradedHighDepth.length} high-depth RGB слой(я) с transform/filter/style или несовместимой геометрией экспортированы через 8-bit raster preview`);
-  if(bitsPerChannel>8&&planned.some(item=>!item.nativePixelBuffer))warnings.push(`Документ экспортируется как ${bitsPerChannel}-bit; raster-preview слои без native high-depth source расширены из 8-bit без восстановления утраченной точности`);
+  if(bitsPerChannel>8&&writerNative.some(buffer=>!buffer))warnings.push(`Документ экспортируется как ${bitsPerChannel}-bit; raster-preview слои без native source расширены из 8-bit без восстановления утраченной точности`);
   if(sourceLayers.some(layer=>layer.vectorMask?.linked===false))warnings.push('Unlinked vector mask flag записывается в PSD/PSB, но ZPE при трансформациях пока перемещает такую маску вместе со слоем');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
 
   const prepared=[];
-  for(const {layer,bounds,nativePixelBuffer} of planned){
+  for(let planIndex=0;planIndex<planned.length;planIndex+=1){
+    const {layer,bounds}=planned[planIndex];
+    const nativePixelBuffer=writerNative[planIndex];
     const item={
       name:layer.name||'ZPE Layer',
       x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
@@ -10164,13 +10716,18 @@ async function preparePsdExport(exportDoc){
     prepared.push(item);
   }
 
-  const compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
+  let compositePixelBuffer=null;
   let composite=null;
-  if(!compositePixelBuffer){
-    const compositeCanvas=document.createElement('canvas');
-    await renderDocument(compositeCanvas,exportDoc,{checker:false});
-    composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
-    if(bitsPerChannel>8)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite использует 8-bit Canvas fallback и затем расширяется до глубины документа`);
+  if(colorMode==='cmyk'){
+    compositePixelBuffer=buildNativeCmykComposite(exportDoc,planned,prepared,bitsPerChannel,cmykEligibility);
+  }else{
+    compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
+    if(!compositePixelBuffer){
+      const compositeCanvas=document.createElement('canvas');
+      await renderDocument(compositeCanvas,exportDoc,{checker:false});
+      composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
+      if(bitsPerChannel>8)warnings.push(`${bitsPerChannel}-bit layer channels сохранены с native precision, но merged composite использует 8-bit Canvas fallback и затем расширяется до глубины документа`);
+    }
   }
 
   if(hasAdjustmentLayers){
@@ -10188,15 +10745,19 @@ async function preparePsdExport(exportDoc){
     });
   }
 
-  if(exportDoc.colorProfile?.kind==='icc')warnings.push('ICC profile сохранён как metadata resource без явного color transform; пиксельные операции ZPE пока выполняются в unmanaged Canvas pipeline');
-  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,compositePixelBuffer,bitsPerChannel,warnings};
+  const policy=sanitizeColorManagement(exportDoc.colorManagement);
+  if(exportDoc.colorProfile?.kind==='icc'){
+    if(colorMode==='cmyk')warnings.push(`ICC profile embedded с native CMYK channels; display policy ZPE: ${policy.renderingIntent} → ${policy.displaySpace.toUpperCase()}`);
+    else warnings.push('ICC profile сохранён как metadata resource; RGB Canvas fallback не объявляется profile-converted');
+  }
+  return{layers:[...prepared].reverse(),groups:exportGroups,paths:structuredClone(exportDoc.paths||[]),composite,compositePixelBuffer,bitsPerChannel,colorMode,warnings};
 }
 
 async function exportPsdDocument(exportDoc,{psb=false}={}){
   const format=psb?'PSB':'PSD';
   setStatus(`${format}: подготовка слоёв…`);
   const prepared=await preparePsdExport(exportDoc);
-  setStatus(`${format}: упаковка ${prepared.bitsPerChannel}-bit каналов…`);
+  setStatus(`${format}: упаковка ${prepared.colorMode.toUpperCase()} ${prepared.bitsPerChannel}-bit каналов…`);
   const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
   const profile=exportDoc.colorProfile;
   const iccProfile=profile?.kind==='icc'&&profile.dataUrl
@@ -10205,7 +10766,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
     layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,composite:prepared.composite,
-    compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,
+    compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,colorMode:prepared.colorMode,
     iccProfile,iccUntagged:Boolean(profile?.untagged),
     maxPixels:48_000_000,maxLayers:500,
   });
@@ -10221,7 +10782,7 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
   }
 }
 
-async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — слои 8/16/32-bit'],['psb','PSB — Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
+async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — RGB/CMYK слои 8/16/32-bit'],['psb','PSB — RGB/CMYK Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
 
 function canvasToPngBlob(canvas) {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));

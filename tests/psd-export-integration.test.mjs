@@ -70,7 +70,7 @@ test('PSD Group Export Stage 8b wires ZPE flat groups into the PSD/PSB writer',(
   assert.match(adapter,/groups = \[\]/);
   assert.match(main,/const exportGroups=\(exportDoc\.groups\|\|\[\]\)/);
   assert.match(main,/groupKey:layer\.groupId/);
-  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),composite,compositePixelBuffer,bitsPerChannel,warnings\}/);
+  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),composite,compositePixelBuffer,bitsPerChannel,colorMode,warnings\}/);
   assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,paths:prepared\.paths,composite:prepared\.composite/);
 });
 
@@ -132,13 +132,13 @@ test('PSD/PSB Stage 12e routes native 16/32-bit PixelBuffers into Lr16/Lr32 writ
   assert.match(adapter,/function appendHighDepthLayerInfoBlock\(/);
   assert.match(adapter,/bitsPerChannel === 16 \? 'Lr16' : bitsPerChannel === 32 \? 'Lr32'/);
   assert.match(adapter,/version === PSB_VERSION \? '8B64' : '8BIM'/);
-  assert.match(adapter,/out\.u16\(4\)\.u32\(documentHeight\)\.u32\(documentWidth\)\.u16\(depth\)/);
+  assert.match(adapter,/out\.u16\(mode===PSD_COLOR_MODE_CMYK\?5:4\)\.u32\(documentHeight\)\.u32\(documentWidth\)\.u16\(depth\)\.u16\(mode\)/);
   assert.match(adapter,/compositePixelBuffer = null, bitsPerChannel = 8/);
   assert.match(main,/function nativeHighDepthPsdSource\(/);
   assert.match(main,/nativePixelBuffer\?nativePsdBounds/);
   assert.match(main,/const bitsPerChannel=nativeDepths\.includes\(32\)\?32:nativeDepths\.includes\(16\)\?16:8/);
   assert.match(main,/if\(nativePixelBuffer\)item\.pixelBuffer=nativePixelBuffer/);
-  assert.match(main,/compositePixelBuffer:prepared\.compositePixelBuffer,bitsPerChannel:prepared\.bitsPerChannel/);
+  assert.match(main,/compositePixelBuffer:prepared\.compositePixelBuffer,bitsPerChannel:prepared\.bitsPerChannel,colorMode:prepared\.colorMode/);
 });
 
 test('Stage 12e keeps honest fallback semantics for transformed or effect-bearing high-depth layers',()=>{
@@ -164,6 +164,24 @@ test('Stage 13a wires CMYK PSD decode, ICC preview transform and bounded source 
   assert.match(main,/createCmykToSrgbTransform/);
   assert.match(main,/cmykPixelBufferToRgba8Preview/);
   assert.match(main,/sourceLayer\.pixelBuffer\.model==='cmyk'/);
-  assert.match(main,/Stage 13a: .*native CMYK source/);
+  assert.match(main,/sourceLayer\.pixelBuffer\.model==='cmyk'/);
   assert.match(main,/decoded\.model!=='rgb'/);
+});
+
+
+test('Stage 13b wires advanced ICC policy and native CMYK PSD/PSB export',()=>{
+  assert.match(main,/sanitizeColorManagement/);
+  assert.match(main,/data-cmyk-rendering-intent/);
+  assert.match(main,/updateDocumentRenderingIntent/);
+  assert.match(main,/createCmykToSrgbTransform\(parsed\.iccProfile\?\.bytes\|\|null,\{intent:colorPolicy\.renderingIntent,displaySpace:colorPolicy\.displaySpace\}\)/);
+  assert.match(main,/function cmykNativeExportEligibility\(/);
+  assert.match(main,/function buildNativeCmykComposite\(/);
+  assert.match(main,/compositeCmykPixelBufferLayers\(/);
+  assert.match(main,/const colorMode=cmykEligibility\.eligible\?'cmyk':'rgb'/);
+  assert.match(main,/colorMode:prepared\.colorMode/);
+  assert.match(adapter,/colorMode = PSD_COLOR_MODE_RGB/);
+  assert.match(adapter,/mode===PSD_COLOR_MODE_CMYK\?5:4/);
+  assert.match(adapter,/expectedModel === 'cmyk' \? \[4,5\] : \[3,4\]/);
+  assert.match(adapter,/\{ id:3, data:encodeExportChannel/);
+  assert.match(adapter,/invert:true,matte:0/);
 });
