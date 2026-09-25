@@ -99,6 +99,7 @@ export function baseLayer(type, overrides = {}) {
     filters: { ...DEFAULT_LAYER_FILTERS },
     styles: null,
     mask: null,
+    vectorMask: null,
     groupId: null,
     ...overrides,
   };
@@ -130,6 +131,15 @@ export function createLayerMask(overrides = {}) {
   return {
     enabled: true,
     dataUrl: null,
+    ...overrides,
+  };
+}
+
+export function createVectorMask(overrides = {}) {
+  return {
+    enabled: true,
+    invert: false,
+    subpaths: [],
     ...overrides,
   };
 }
@@ -514,6 +524,32 @@ export function sanitizePathPoint(point) {
   };
 }
 
+const VECTOR_MASK_OPERATIONS = new Set(['add','subtract','intersect','exclude']);
+
+export function sanitizeVectorMask(mask) {
+  if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
+  const subpaths = (Array.isArray(mask.subpaths) ? mask.subpaths : [])
+    .slice(0, 128)
+    .map(subpath => {
+      const points = (Array.isArray(subpath?.points) ? subpath.points : [])
+        .slice(0, 2000)
+        .map(sanitizePathPoint);
+      if (points.length < 3) return null;
+      return {
+        operation: VECTOR_MASK_OPERATIONS.has(subpath?.operation) ? subpath.operation : 'add',
+        closed: true,
+        points,
+      };
+    })
+    .filter(Boolean);
+  if (!subpaths.length) return null;
+  return createVectorMask({
+    enabled: mask.enabled !== false,
+    invert: mask.invert === true,
+    subpaths,
+  });
+}
+
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -542,6 +578,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     filters: sanitizeFilters(layer?.filters),
     styles: type === 'adjustment' ? null : sanitizeLayerStyles(layer?.styles),
     mask: sanitizeLayerMask(layer?.mask),
+    vectorMask: sanitizeVectorMask(layer?.vectorMask),
     groupId: validGroupIds.has(layer?.groupId) ? layer.groupId : null,
   };
   if (type === 'raster') {

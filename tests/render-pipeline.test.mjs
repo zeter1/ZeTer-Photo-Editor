@@ -45,9 +45,18 @@ test('render pipeline treats adjustment layers as cumulative stack operations', 
 });
 
 test('layer masks isolate layer content before destination-in compositing', () => {
-  assert.match(render, /layer\.mask\?\.enabled && layer\.mask\.dataUrl/);
-  assert.match(render, /globalCompositeOperation = 'destination-in'/);
+  assert.match(render, /const hasRasterMask=Boolean\(layer\.mask\?\.enabled && layer\.mask\.dataUrl\)/);
+  assert.match(render, /globalCompositeOperation='destination-in'/);
   assert.match(render, /mask: null/);
+});
+
+test('Stage 10 vector masks share the isolated mask pipeline and support boolean subpaths',()=>{
+  assert.match(render,/function renderVectorMaskBitmap\(vectorMask, width, height\)/);
+  assert.match(render,/operation==='subtract'[\s\S]*'destination-out'/);
+  assert.match(render,/operation==='intersect'[\s\S]*'destination-in'/);
+  assert.match(render,/operation==='exclude'[\s\S]*'xor'/);
+  assert.match(render,/vectorMask: null/);
+  assert.match(render,/renderVectorMaskBitmap\(layer\.vectorMask,masked\.width,masked\.height\)/);
 });
 
 

@@ -311,6 +311,44 @@ function traceLayerBezierPath(ctx, points, closed = false) {
   return true;
 }
 
+
+function renderVectorMaskBitmap(vectorMask, width, height) {
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.max(1,Math.ceil(width));
+  canvas.height=Math.max(1,Math.ceil(height));
+  const ctx=canvas.getContext('2d',{alpha:true});
+  const subpaths=Array.isArray(vectorMask?.subpaths)?vectorMask.subpaths:[];
+  let initialized=false;
+
+  for(const subpath of subpaths){
+    const points=Array.isArray(subpath?.points)?subpath.points:[];
+    if(points.length<3)continue;
+    const operation=['add','subtract','intersect','exclude'].includes(subpath.operation)?subpath.operation:'add';
+    if(!initialized && operation!=='add'){
+      ctx.save();ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+      initialized=true;
+    }
+    ctx.save();
+    ctx.globalCompositeOperation=operation==='subtract'
+      ? 'destination-out'
+      : operation==='intersect'
+        ? 'destination-in'
+        : operation==='exclude'
+          ? 'xor'
+          : 'source-over';
+    ctx.fillStyle='#fff';
+    ctx.beginPath();
+    if(traceLayerBezierPath(ctx,points,true))ctx.fill();
+    ctx.restore();
+    initialized=true;
+  }
+
+  if(vectorMask?.invert===true){
+    ctx.save();ctx.globalCompositeOperation='xor';ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+  }
+  return canvas;
+}
+
 export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
   ctx.save();
   try {
@@ -331,37 +369,43 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       ctx.drawImage(styled.canvas,styled.x,styled.y,styled.width,styled.height);
       return;
     }
-    if (layer.mask?.enabled && layer.mask.dataUrl) {
-      const mask = await getImage(layer.mask.dataUrl);
-      if (mask) {
-        const masked = document.createElement('canvas');
-        masked.width = Math.max(1, Math.ceil(w));
-        masked.height = Math.max(1, Math.ceil(h));
-        const maskedCtx = masked.getContext('2d', { alpha: true });
-        const plain = {
-          ...layer,
-          mask: null,
-          styles: null,
-          opacity: 1,
-          blendMode: 'source-over',
-          x: 0,
-          y: 0,
-          width: w,
-          height: h,
-          scaleX: 1,
-          scaleY: 1,
-          rotation: 0,
-        };
-        await renderLayer(maskedCtx, plain, { rasterOverride });
-        maskedCtx.save();
-        maskedCtx.globalCompositeOperation = 'destination-in';
-        maskedCtx.globalAlpha = 1;
-        maskedCtx.filter = 'none';
-        maskedCtx.drawImage(mask, 0, 0, masked.width, masked.height);
-        maskedCtx.restore();
-        ctx.drawImage(masked, 0, 0, w, h);
-        return;
+    const hasRasterMask=Boolean(layer.mask?.enabled && layer.mask.dataUrl);
+    const hasVectorMask=Boolean(layer.vectorMask?.enabled !== false && layer.vectorMask?.subpaths?.length);
+    if (hasRasterMask || hasVectorMask) {
+      const masked = document.createElement('canvas');
+      masked.width = Math.max(1, Math.ceil(w));
+      masked.height = Math.max(1, Math.ceil(h));
+      const maskedCtx = masked.getContext('2d', { alpha: true });
+      const plain = {
+        ...layer,
+        mask: null,
+        vectorMask: null,
+        styles: null,
+        opacity: 1,
+        blendMode: 'source-over',
+        x: 0,
+        y: 0,
+        width: w,
+        height: h,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+      };
+      await renderLayer(maskedCtx, plain, { rasterOverride });
+      if(hasRasterMask){
+        const mask = await getImage(layer.mask.dataUrl);
+        if(mask){
+          maskedCtx.save();maskedCtx.globalCompositeOperation='destination-in';maskedCtx.globalAlpha=1;maskedCtx.filter='none';
+          maskedCtx.drawImage(mask,0,0,masked.width,masked.height);maskedCtx.restore();
+        }
       }
+      if(hasVectorMask){
+        const vectorMask=renderVectorMaskBitmap(layer.vectorMask,masked.width,masked.height);
+        maskedCtx.save();maskedCtx.globalCompositeOperation='destination-in';maskedCtx.globalAlpha=1;maskedCtx.filter='none';
+        maskedCtx.drawImage(vectorMask,0,0,masked.width,masked.height);maskedCtx.restore();
+      }
+      ctx.drawImage(masked, 0, 0, w, h);
+      return;
     }
 
     ctx.filter = filterString(layer.filters);

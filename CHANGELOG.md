@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 2026-09-25 — Vector Masks Stage 10a + Path Operations Stage 10b
+
+- Added: first-class `vectorMask` в layer schema и `.zpe`, с enable/invert и bounded списком cubic Bézier subpaths.
+- Added: создать/заменить vector mask из текущего выделения; прямоугольник сохраняется как 4 anchors, ellipse — как 4 cubic Bézier segments.
+- Added: boolean contour operations для существующей vector mask: Add, Subtract, Intersect, Exclude.
+- Render: vector-mask subpaths композитятся локально через `source-over`, `destination-out`, `destination-in`, `xor`, после чего пересекаются с raster layer mask в одном isolated pipeline.
+- UI: Layer/context menus получили Replace/Add/Subtract/Intersect/Exclude, invert, enable/disable и remove; Properties показывает raster/vector mask state.
+- Safety: sanitizer ограничивает 128 subpaths × 2000 nodes, отбрасывает контуры короче 3 точек и нормализует неизвестные операции.
+- PSD/PSB: visual result сохраняется в raster preview; native Photoshop vector-mask resource пока не заявляется и export показывает warning.
+- Regression: `.zpe` round-trip Bezier handles/boolean operations, malformed payload normalization, render contracts и UI wiring.
+
 ### 2026-09-25 — Select & Mask View Modes Stage 9d
 
 - Added: четыре preview mode — «Чёрно-белая маска», «Наложение», «На чёрном», «На белом».

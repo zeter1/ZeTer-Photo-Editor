@@ -1615,6 +1615,7 @@ function baseLayer(type, overrides = {}) {
     filters: { ...DEFAULT_LAYER_FILTERS },
     styles: null,
     mask: null,
+    vectorMask: null,
     groupId: null,
     ...overrides,
   };
@@ -1642,6 +1643,14 @@ function createLayerMask(overrides = {}) {
   return {
     enabled: true,
     dataUrl: null,
+    ...overrides,
+  };
+}
+function createVectorMask(overrides = {}) {
+  return {
+    enabled: true,
+    invert: false,
+    subpaths: [],
     ...overrides,
   };
 }
@@ -1996,6 +2005,31 @@ function sanitizePathPoint(point) {
   };
 }
 
+const VECTOR_MASK_OPERATIONS = new Set(['add','subtract','intersect','exclude']);
+function sanitizeVectorMask(mask) {
+  if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
+  const subpaths = (Array.isArray(mask.subpaths) ? mask.subpaths : [])
+    .slice(0, 128)
+    .map(subpath => {
+      const points = (Array.isArray(subpath?.points) ? subpath.points : [])
+        .slice(0, 2000)
+        .map(sanitizePathPoint);
+      if (points.length < 3) return null;
+      return {
+        operation: VECTOR_MASK_OPERATIONS.has(subpath?.operation) ? subpath.operation : 'add',
+        closed: true,
+        points,
+      };
+    })
+    .filter(Boolean);
+  if (!subpaths.length) return null;
+  return createVectorMask({
+    enabled: mask.enabled !== false,
+    invert: mask.invert === true,
+    subpaths,
+  });
+}
+
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -2024,6 +2058,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     filters: sanitizeFilters(layer?.filters),
     styles: type === 'adjustment' ? null : sanitizeLayerStyles(layer?.styles),
     mask: sanitizeLayerMask(layer?.mask),
+    vectorMask: sanitizeVectorMask(layer?.vectorMask),
     groupId: validGroupIds.has(layer?.groupId) ? layer.groupId : null,
   };
   if (type === 'raster') {
@@ -2708,6 +2743,44 @@ function traceLayerBezierPath(ctx, points, closed = false) {
   }
   return true;
 }
+
+
+function renderVectorMaskBitmap(vectorMask, width, height) {
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.max(1,Math.ceil(width));
+  canvas.height=Math.max(1,Math.ceil(height));
+  const ctx=canvas.getContext('2d',{alpha:true});
+  const subpaths=Array.isArray(vectorMask?.subpaths)?vectorMask.subpaths:[];
+  let initialized=false;
+
+  for(const subpath of subpaths){
+    const points=Array.isArray(subpath?.points)?subpath.points:[];
+    if(points.length<3)continue;
+    const operation=['add','subtract','intersect','exclude'].includes(subpath.operation)?subpath.operation:'add';
+    if(!initialized && operation!=='add'){
+      ctx.save();ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+      initialized=true;
+    }
+    ctx.save();
+    ctx.globalCompositeOperation=operation==='subtract'
+      ? 'destination-out'
+      : operation==='intersect'
+        ? 'destination-in'
+        : operation==='exclude'
+          ? 'xor'
+          : 'source-over';
+    ctx.fillStyle='#fff';
+    ctx.beginPath();
+    if(traceLayerBezierPath(ctx,points,true))ctx.fill();
+    ctx.restore();
+    initialized=true;
+  }
+
+  if(vectorMask?.invert===true){
+    ctx.save();ctx.globalCompositeOperation='xor';ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+  }
+  return canvas;
+}
 async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
   ctx.save();
   try {
@@ -2728,37 +2801,43 @@ async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       ctx.drawImage(styled.canvas,styled.x,styled.y,styled.width,styled.height);
       return;
     }
-    if (layer.mask?.enabled && layer.mask.dataUrl) {
-      const mask = await getImage(layer.mask.dataUrl);
-      if (mask) {
-        const masked = document.createElement('canvas');
-        masked.width = Math.max(1, Math.ceil(w));
-        masked.height = Math.max(1, Math.ceil(h));
-        const maskedCtx = masked.getContext('2d', { alpha: true });
-        const plain = {
-          ...layer,
-          mask: null,
-          styles: null,
-          opacity: 1,
-          blendMode: 'source-over',
-          x: 0,
-          y: 0,
-          width: w,
-          height: h,
-          scaleX: 1,
-          scaleY: 1,
-          rotation: 0,
-        };
-        await renderLayer(maskedCtx, plain, { rasterOverride });
-        maskedCtx.save();
-        maskedCtx.globalCompositeOperation = 'destination-in';
-        maskedCtx.globalAlpha = 1;
-        maskedCtx.filter = 'none';
-        maskedCtx.drawImage(mask, 0, 0, masked.width, masked.height);
-        maskedCtx.restore();
-        ctx.drawImage(masked, 0, 0, w, h);
-        return;
+    const hasRasterMask=Boolean(layer.mask?.enabled && layer.mask.dataUrl);
+    const hasVectorMask=Boolean(layer.vectorMask?.enabled !== false && layer.vectorMask?.subpaths?.length);
+    if (hasRasterMask || hasVectorMask) {
+      const masked = document.createElement('canvas');
+      masked.width = Math.max(1, Math.ceil(w));
+      masked.height = Math.max(1, Math.ceil(h));
+      const maskedCtx = masked.getContext('2d', { alpha: true });
+      const plain = {
+        ...layer,
+        mask: null,
+        vectorMask: null,
+        styles: null,
+        opacity: 1,
+        blendMode: 'source-over',
+        x: 0,
+        y: 0,
+        width: w,
+        height: h,
+        scaleX: 1,
+        scaleY: 1,
+        rotation: 0,
+      };
+      await renderLayer(maskedCtx, plain, { rasterOverride });
+      if(hasRasterMask){
+        const mask = await getImage(layer.mask.dataUrl);
+        if(mask){
+          maskedCtx.save();maskedCtx.globalCompositeOperation='destination-in';maskedCtx.globalAlpha=1;maskedCtx.filter='none';
+          maskedCtx.drawImage(mask,0,0,masked.width,masked.height);maskedCtx.restore();
+        }
       }
+      if(hasVectorMask){
+        const vectorMask=renderVectorMaskBitmap(layer.vectorMask,masked.width,masked.height);
+        maskedCtx.save();maskedCtx.globalCompositeOperation='destination-in';maskedCtx.globalAlpha=1;maskedCtx.filter='none';
+        maskedCtx.drawImage(vectorMask,0,0,masked.width,masked.height);maskedCtx.restore();
+      }
+      ctx.drawImage(masked, 0, 0, w, h);
+      return;
     }
 
     ctx.filter = filterString(layer.filters);
@@ -5258,7 +5337,10 @@ function updateLayers() {
     if ((layer.type === 'raster' && layer.dataUrl) || (layer.type === 'smart-object' && layer.previewDataUrl)) { const img = new Image(); img.src = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl; thumb.append(img); }
     else thumb.textContent = layer.type === 'text' ? 'T' : layer.type === 'shape' ? '▭' : layer.type === 'adjustment' ? '◐' : layer.type === 'smart-object' ? '◇' : '▦';
     if (layer.type === 'smart-object') { thumb.title='Двойной клик: редактировать содержимое смарт-объекта'; thumb.ondblclick=e=>{e.stopPropagation();openSmartObjectContents(layer);}; }
-    if (layer.mask) thumb.title = layer.mask.enabled === false ? 'Маска отключена' : layer.mask.dataUrl ? 'Есть маска слоя' : 'Маска слоя: показать всё';
+    const maskHints=[];
+    if(layer.mask)maskHints.push(layer.mask.enabled===false?'Растровая маска отключена':layer.mask.dataUrl?'Есть растровая маска':'Растровая маска: показать всё');
+    if(layer.vectorMask)maskHints.push(`Векторная маска: ${layer.vectorMask.subpaths?.length||0} контур(ов)${layer.vectorMask.enabled===false?' · отключена':''}${layer.vectorMask.invert?' · инвертирована':''}`);
+    if(maskHints.length)thumb.title=[thumb.title,...maskHints].filter(Boolean).join(' · ');
     const name = document.createElement('div'); name.className = 'layer-name'; name.textContent = layer.name; name.title = layer.name;
     name.ondblclick = (e) => { e.stopPropagation(); renameLayer(layer); };
     const lock = document.createElement('button'); lock.className = 'layer-lock';
@@ -5661,12 +5743,12 @@ function updateProperties() {
   if (!l) { els.props.className = 'panel-content muted'; els.props.textContent = 'Выберите слой'; return; }
   els.props.className = 'panel-content';
   if (l.type === 'adjustment') {
-    const maskLabel = l.mask ? (l.mask.enabled === false ? 'отключена' : l.mask.dataUrl ? 'из выделения' : 'показать всё') : 'нет';
+    const maskLabel=layerMaskSummary(l);
     els.props.innerHTML = `<div class="prop-grid">
       <label>Имя</label><input data-prop="name" value="${escapeAttr(l.name)}">
       <label>Тип</label><span>Корректирующий слой</span>
       <label>Область</label><span>Нижележащий стек</span>
-      <label>Маска</label><span>${escapeHtml(maskLabel)}</span>
+      <label>Маски</label><span>${escapeHtml(maskLabel)}</span>
     </div>`;
     bindPropertyInputs(els.props);
     if (isLayerLocked(doc,l)) els.props.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
@@ -5685,6 +5767,7 @@ function updateProperties() {
     ${propField('Масштаб X','scaleX',Number(l.scaleX ?? 1).toFixed(2),'number','step="0.01" min="0.01" max="100"')}
     ${propField('Масштаб Y','scaleY',Number(l.scaleY ?? 1).toFixed(2),'number','step="0.01" min="0.01" max="100"')}
     ${propField('Поворот','rotation',Math.round(l.rotation ?? 0),'number','step="1"')}
+    <label>Маски</label><span>${escapeHtml(layerMaskSummary(l))}</span>
     ${extra}
   </div>`;
   bindPropertyInputs(els.props);
@@ -7392,7 +7475,7 @@ async function renderPsdMaskPixels(layer,bounds){
 
 function layerNeedsSemanticRasterWarning(layer){
   if(layer.type!=='raster')return true;
-  if(layer.styles)return true;
+  if(layer.styles||layer.vectorMask)return true;
   const filters=sanitizeFilters(layer.filters);
   return Object.keys(DEFAULT_LAYER_FILTERS).some(key=>Math.abs(Number(filters[key])-Number(DEFAULT_LAYER_FILTERS[key]))>1e-9)||
     Math.abs(Number(layer.scaleX??1)-1)>1e-9||Math.abs(Number(layer.scaleY??1)-1)>1e-9||Math.abs(Number(layer.rotation)||0)>1e-9;
@@ -7430,7 +7513,8 @@ async function preparePsdExport(exportDoc){
       opacity:clamp(Number(group.opacity??1),0,1),
       blendMode:group.blendMode||'pass-through',
     }));
-  if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(sourceLayers.some(layerNeedsSemanticRasterWarning))warnings.push('Text/shape, transforms, filters, layer styles и vector masks экспортированы как raster preview соответствующих слоёв');
+  if(exportDoc.layers.some(layer=>layer.vectorMask))warnings.push('Векторные маски ZPE визуально сохранены в raster preview; native Photoshop vector-mask resource пока не записывается');
   if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
 
   const prepared=[];
@@ -8045,6 +8129,16 @@ function layerContextMenu(id) {
     ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>selectedTarget() && editable() && !target().mask && Boolean(selectionShape)],
     ['Удалить маску','',removeSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
     ['sep'],
+    ['Создать векторную маску из выделения','',()=>applySelectionToVectorMask('replace'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&!target().vectorMask],
+    ['Заменить векторную маску выделением','',()=>applySelectionToVectorMask('replace'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
+    ['Добавить выделение к векторной маске','',()=>applySelectionToVectorMask('add'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
+    ['Вычесть выделение из векторной маски','',()=>applySelectionToVectorMask('subtract'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
+    ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
+    ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
+    ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
+    ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
+    ['Удалить векторную маску','',removeSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
+    ['sep'],
     ['Показать / скрыть','',toggleSelectedVisibility,()=>Boolean(target())],
     ['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=target();const group=layer?.groupId?doc.groups?.find(item=>item.id===layer.groupId):null;return Boolean(layer)&&!(group&&isGroupLocked(doc,group));}],
     ['sep'],
@@ -8217,6 +8311,93 @@ async function selectionRefineSourceRgba(layer,sourceWidth,sourceHeight,scale=1)
     ctx.setTransform(1,0,0,1,0,0);
   }
   return ctx.getImageData(0,0,width,height).data;
+}
+
+
+function selectionVectorMaskDocumentNodes(shape=selectionShape){
+  if(!shape)return[];
+  if(shape.type==='rect'){
+    const rect=selectionBounds(shape);
+    if(!rect||rect.width<=0||rect.height<=0)return[];
+    return[
+      {x:rect.x,y:rect.y},{x:rect.x+rect.width,y:rect.y},
+      {x:rect.x+rect.width,y:rect.y+rect.height},{x:rect.x,y:rect.y+rect.height},
+    ];
+  }
+  if(shape.type==='ellipse'){
+    const rect=selectionBounds(shape);
+    if(!rect||rect.width<=0||rect.height<=0)return[];
+    const cx=rect.x+rect.width/2,cy=rect.y+rect.height/2,rx=rect.width/2,ry=rect.height/2,k=.5522847498307936;
+    return[
+      {x:cx+rx,y:cy,handleIn:{x:cx+rx,y:cy-k*ry},handleOut:{x:cx+rx,y:cy+k*ry},kind:'smooth'},
+      {x:cx,y:cy+ry,handleIn:{x:cx+k*rx,y:cy+ry},handleOut:{x:cx-k*rx,y:cy+ry},kind:'smooth'},
+      {x:cx-rx,y:cy,handleIn:{x:cx-rx,y:cy+k*ry},handleOut:{x:cx-rx,y:cy-k*ry},kind:'smooth'},
+      {x:cx,y:cy-ry,handleIn:{x:cx-k*rx,y:cy-ry},handleOut:{x:cx+k*rx,y:cy-ry},kind:'smooth'},
+    ];
+  }
+  return selectionPathPoints(shape,72).map(point=>({x:point.x,y:point.y}));
+}
+
+function selectionVectorMaskSubpath(layer,operation='add'){
+  const nodes=selectionVectorMaskDocumentNodes();
+  if(nodes.length<3)return null;
+  const localize=node=>{
+    const anchor=documentPointToLayerPixel(node,layer);
+    return{
+      x:anchor.x,y:anchor.y,
+      handleIn:node.handleIn?documentPointToLayerPixel(node.handleIn,layer):null,
+      handleOut:node.handleOut?documentPointToLayerPixel(node.handleOut,layer):null,
+      kind:node.kind==='smooth'?'smooth':'corner',
+    };
+  };
+  return{operation:['add','subtract','intersect','exclude'].includes(operation)?operation:'add',closed:true,points:nodes.map(localize)};
+}
+
+function applySelectionToVectorMask(operation='replace'){
+  const layer=selected();
+  if(!layer){setStatus('Сначала выберите слой');return false;}
+  if(!selectionShape){setStatus('Сначала создайте выделение');return false;}
+  if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return false;}
+  const subpath=selectionVectorMaskSubpath(layer,operation==='replace'?'add':operation);
+  if(!subpath){setStatus('Выделение слишком мало для векторной маски');return false;}
+  if(operation==='replace'||!layer.vectorMask){
+    layer.vectorMask=createVectorMask({enabled:true,invert:false,subpaths:[subpath]});
+  }else{
+    if(layer.vectorMask.subpaths.length>=128){const message='Векторная маска ограничена 128 контурами';setStatus(message);toast(message,'warn');return false;}
+    layer.vectorMask.subpaths.push(subpath);layer.vectorMask.enabled=true;
+  }
+  const labels={
+    replace:'Создать векторную маску',add:'Добавить контур к векторной маске',
+    subtract:'Вычесть контур из векторной маски',intersect:'Пересечь контуры векторной маски',
+    exclude:'Исключить пересечение векторной маски',
+  };
+  commit(labels[operation]||labels.replace);
+  setStatus(`Векторная маска: ${layer.vectorMask.subpaths.length} контур(ов)`);
+  return true;
+}
+
+function toggleSelectedVectorMask(){
+  const layer=selected();if(!layer?.vectorMask||isLayerLocked(doc,layer))return;
+  layer.vectorMask.enabled=layer.vectorMask.enabled===false;
+  commit(layer.vectorMask.enabled?'Включить векторную маску':'Отключить векторную маску');
+}
+function invertSelectedVectorMask(){
+  const layer=selected();if(!layer?.vectorMask||isLayerLocked(doc,layer))return;
+  layer.vectorMask.invert=!layer.vectorMask.invert;
+  commit(layer.vectorMask.invert?'Инвертировать векторную маску':'Отменить инверсию векторной маски');
+}
+function removeSelectedVectorMask(){
+  const layer=selected();if(!layer?.vectorMask||isLayerLocked(doc,layer))return;
+  layer.vectorMask=null;commit('Удалить векторную маску');setStatus('Векторная маска удалена');
+}
+function layerMaskSummary(layer){
+  const parts=[];
+  if(layer?.mask)parts.push(layer.mask.enabled===false?'растровая отключена':layer.mask.dataUrl?'растровая':'растровая: показать всё');
+  if(layer?.vectorMask){
+    const count=layer.vectorMask.subpaths?.length||0,state=layer.vectorMask.enabled===false?'отключена':layer.vectorMask.invert?'инвертирована':'включена';
+    parts.push(`векторная: ${count} контур(ов), ${state}`);
+  }
+  return parts.join(' + ')||'нет';
 }
 
 async function selectionMaskDataUrl(layer,{smooth=0,shift=0,edgeRadius=0,edgeStrength=60,smartRadius=true,feather=0,contrast=0,invert=false}={}){
@@ -8505,6 +8686,16 @@ const menus={
     ['Уточнить выделение → маска…','',refineSelectionToLayerMask,()=>Boolean(selected())&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Удалить маску','',removeSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['sep'],
+    ['Создать векторную маску из выделения','',()=>applySelectionToVectorMask('replace'),()=>Boolean(selected())&&Boolean(selectionShape)&&!selected().vectorMask&&!isLayerLocked(doc,selected())],
+    ['Заменить векторную маску выделением','',()=>applySelectionToVectorMask('replace'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Добавить выделение к векторной маске','',()=>applySelectionToVectorMask('add'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Вычесть выделение из векторной маски','',()=>applySelectionToVectorMask('subtract'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
+    ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
+    ['Удалить векторную маску','',removeSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
+    ['sep'],
     ['Центрировать слой на холсте','',centerSelectedLayer,()=>isTransformableLayer(selected())&&!isLayerLocked(doc,selected())],
     ['Вписать слой в холст','',fitSelectedLayerToCanvas,()=>isTransformableLayer(selected())&&!isLayerLocked(doc,selected())],
     ['sep'],
@@ -8534,6 +8725,7 @@ const menus={
     ['Кадрировать по выделению','',cropToSelection,()=>Boolean(selectionRect)],
     ['sep'],
     ['Уточнить выделение → маска…','',refineSelectionToLayerMask,()=>Boolean(selectionShape)&&Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['Создать / заменить векторную маску','',()=>applySelectionToVectorMask('replace'),()=>Boolean(selectionShape)&&Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],
   view:[
     ['Вписать в окно','0',fitToView],
