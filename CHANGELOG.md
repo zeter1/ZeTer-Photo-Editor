@@ -15,6 +15,7 @@
 - Zero-bounds fill layers: Gradient/Pattern Fill records больше не теряются полностью — adapter возвращает их в `fillLayers`, при этом canvas честно использует PSD composite preview до semantic renderer.
 - Real compatibility fixtures: добавлены pinned MIT `psd-tools` minimal Gradient Fill и Pattern Fill PSD с size/SHA-256 provenance.
 - Regression: real solid Shape fixture проходит PSD + PSB after fill=`#112233`, stroke=`#445566`, width=3.5; source descriptor blocks не мутируются.
+- CI follow-up: Stage 8a group wiring regression допускает новый `fillLayers` return field между `layers` и `groups`, не ослабляя проверку group/import contract.
 - Version: приложение синхронизировано на 1.39.0.
 
 ## 1.38.0 — 2026-09-25
