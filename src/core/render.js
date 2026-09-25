@@ -2,11 +2,14 @@ import { isLayerVisible } from './state.js';
 import { hasLayerStyles, renderLayerStyles } from './layer-styles.js';
 import { colorAdjustmentSignature, hasAdvancedColorAdjustments } from './color.js';
 import { applyAdvancedColorAdjustmentsAsync } from './pixel-worker.js';
+import { deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview } from './pixel-buffer.js';
 
 const imageCache = new Map();
 const IMAGE_CACHE_LIMIT = 24;
 const adjustedRasterCache = new Map();
 const ADJUSTED_RASTER_CACHE_LIMIT = 24;
+const highDepthRasterCache = new Map();
+const HIGH_DEPTH_RASTER_CACHE_LIMIT = 2;
 const smartFilterCache = new Map();
 const SMART_FILTER_CACHE_LIMIT = 16;
 const fontLoads = new Map();
@@ -71,6 +74,45 @@ function trimAdjustedRasterCache() {
   }
 }
 
+
+function trimHighDepthRasterCache() {
+  while (highDepthRasterCache.size > HIGH_DEPTH_RASTER_CACHE_LIMIT) {
+    const oldest = highDepthRasterCache.keys().next().value;
+    highDepthRasterCache.delete(oldest);
+  }
+}
+
+async function makeHighDepthRasterSource(layer) {
+  const metadata = layer?.highDepthSource;
+  if (!metadata || layer?.type !== 'raster' || metadata.model !== 'rgb') return null;
+  const signature = `${metadata.bitsPerChannel}|${metadata.colorSpace || ''}|${colorAdjustmentSignature(layer.filters || {})}|auto-tone-v1`;
+  const sourceToken = metadata.dataUrl || '';
+  const cached = highDepthRasterCache.get(layer.id);
+  if (cached && cached.sourceToken === sourceToken && cached.signature === signature) {
+    highDepthRasterCache.delete(layer.id);
+    highDepthRasterCache.set(layer.id, cached);
+    return cached.canvas;
+  }
+  try {
+    const buffer = cached && cached.sourceToken === sourceToken && cached.buffer
+      ? cached.buffer
+      : deserializePixelBufferSource(metadata);
+    const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap:'auto' });
+    const canvas = document.createElement('canvas');
+    canvas.width = buffer.width; canvas.height = buffer.height;
+    const ctx = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
+    const image = ctx.createImageData(buffer.width, buffer.height);
+    image.data.set(rgba);
+    ctx.putImageData(image, 0, 0);
+    highDepthRasterCache.delete(layer.id);
+    highDepthRasterCache.set(layer.id, { sourceToken, signature, buffer, canvas });
+    trimHighDepthRasterCache();
+    return canvas;
+  } catch (error) {
+    console.warn('High-depth raster preview failed; falling back to RGBA8 layer preview', error);
+    return null;
+  }
+}
 
 function smartFilterStackSignature(layer) {
   return JSON.stringify({
@@ -548,12 +590,20 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
 
     ctx.filter = filterString(layer.filters);
 
-    if ((layer.type === 'raster' && (rasterOverride || layer.dataUrl)) || (layer.type === 'smart-object' && layer.previewDataUrl)) {
+    if ((layer.type === 'raster' && (rasterOverride || layer.dataUrl || layer.highDepthSource)) || (layer.type === 'smart-object' && layer.previewDataUrl)) {
       const dataUrl = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl;
-      const img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
+      let highDepthApplied = false;
+      let img = null;
+      if (layer.type === 'raster' && !rasterOverride && layer.highDepthSource) {
+        img = await makeHighDepthRasterSource(layer);
+        highDepthApplied = Boolean(img);
+      }
+      if (!img) img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
       if (img) {
         const filtered = layer.type === 'smart-object' ? await applySmartFilterStack(img, layer) : img;
-        const source = await makeAdjustedRasterSource(filtered, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
+        const source = highDepthApplied
+          ? filtered
+          : await makeAdjustedRasterSource(filtered, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
         ctx.drawImage(source, 0, 0, w, h);
       }
     } else if (layer.type === 'text') {
@@ -672,10 +722,12 @@ export async function compositeToBlob(doc, type = 'image/png', quality = 0.92) {
 export function invalidateImageCache(dataUrl) {
   if (dataUrl) imageCache.delete(dataUrl);
   adjustedRasterCache.clear();
+  highDepthRasterCache.clear();
   smartFilterCache.clear();
 }
 export function clearImageCache() {
   imageCache.clear();
   adjustedRasterCache.clear();
+  highDepthRasterCache.clear();
   smartFilterCache.clear();
 }

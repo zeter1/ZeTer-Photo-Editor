@@ -9,7 +9,7 @@ import {
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
-import { pixelBufferToRgba8Preview, serializePixelBufferSource, MAX_PIXEL_BUFFER_SOURCE_BYTES } from './core/pixel-buffer.js';
+import { pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, MAX_PIXEL_BUFFER_SOURCE_BYTES } from './core/pixel-buffer.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './adapters/psd.js';
@@ -1790,7 +1790,7 @@ function updateProperties() {
   if (l.type === 'raster' && l.highDepthSource) {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
-    extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit ${escapeHtml(String(source.model||'RGB').toUpperCase())} · ${sizeMb} МБ</span><label>High-depth</label><span>Сохранён в .zpe; Canvas preview/edit — 8-bit</span>`;
+    extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit ${escapeHtml(String(source.model||'RGB').toUpperCase())} · ${sizeMb} МБ</span><label>High-depth</label><span>Exposure/gamma/color работают до tone mapping; Canvas preview/edit — 8-bit</span>`;
   }
   if (l.type === 'smart-object') {
     const linkedCount=l.linkedSourceId?linkedSmartObjectLayers(doc,l.linkedSourceId).length:0;
@@ -2551,6 +2551,20 @@ async function drawLineOnCurrentRaster(start,end){
   finally{paintPersisting=false;}
 }
 
+function drawHighDepthRasterBase(layer, canvas, ctx) {
+  if(!layer?.highDepthSource)return false;
+  const buffer=deserializePixelBufferSource(layer.highDepthSource);
+  const rgba=pixelBufferToToneMappedRgba8Preview(buffer,{}, {toneMap:'auto'});
+  const source=document.createElement('canvas');
+  source.width=buffer.width;source.height=buffer.height;
+  const sourceCtx=source.getContext('2d',{alpha:true,willReadFrequently:true});
+  const image=sourceCtx.createImageData(buffer.width,buffer.height);
+  image.data.set(rgba);
+  sourceCtx.putImageData(image,0,0);
+  ctx.drawImage(source,0,0,canvas.width,canvas.height);
+  return true;
+}
+
 async function ensureRasterBuffer(l) {
   if (!isEditableRasterLayer(l)) return null;
   const paintSize = checkedCanvasSize(l.width, l.height, `Растровый слой «${l.name || 'Без имени'}»`);
@@ -2561,7 +2575,7 @@ async function ensureRasterBuffer(l) {
     brushCanvas.width = canvasWidth;
     brushCanvas.height = canvasHeight;
     brushCtx = brushCanvas.getContext('2d', { alpha:true });
-    if (l.dataUrl) {
+    if (!drawHighDepthRasterBase(l, brushCanvas, brushCtx) && l.dataUrl) {
       const img = await getImage(l.dataUrl);
       if (img) brushCtx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
     }
@@ -3766,7 +3780,7 @@ async function prepareClearedRasterDataUrl(layer) {
   const canvas=document.createElement('canvas');
   canvas.width=size.width;canvas.height=size.height;
   const ctx=canvas.getContext('2d',{alpha:true});
-  if(layer.dataUrl){
+  if(!drawHighDepthRasterBase(layer,canvas,ctx)&&layer.dataUrl){
     const image=await getImage(layer.dataUrl);
     if(image)ctx.drawImage(image,0,0,size.width,size.height);
   }

@@ -4,6 +4,19 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.23.0 — 2026-09-25
+
+### 2026-09-25 — High-depth Render Bridge Stage 12b
+
+- Render: raster layer с `highDepthSource` предпочитает сохранённый typed source вместо clipped RGBA8 fallback и только после high-depth corrections строит Canvas preview.
+- Color: exposure, gamma, temperature/tint, vibrance, highlights и shadows вычисляются над normalized `Uint16Array`/`Float32Array`; исходный source не мутируется.
+- HDR: 32-bit linear RGB использует ACES-style tone map и linear→sRGB display conversion; 16-bit sRGB проходит linearized correction и clip display bridge.
+- Performance: renderer держит bounded cache максимум двух декодированных high-depth layer sources и переиспользует typed buffer при изменении filter signature.
+- Editing boundary: destructive brush/fill/erase/clear/cut начинает с neutral tone-mapped high-depth base, после публикации 8-bit PNG существующий Stage 12a guard сбрасывает `highDepthSource`.
+- Fallback: malformed/unsupported high-depth preview не ломает документ — renderer логирует проблему и возвращается к сохранённому RGBA8 `dataUrl`.
+- Tests: добавлены 16-bit direct-color, Float32 HDR highlight separation, alpha/source immutability, render-cache/wiring и destructive-materialization contracts.
+- Version: приложение синхронизировано на 1.23.0.
+
 ## 1.22.0 — 2026-09-25
 
 ### 2026-09-25 — High-depth Raster Source Stage 12a

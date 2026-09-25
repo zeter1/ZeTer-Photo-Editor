@@ -1187,6 +1187,135 @@ function pixelBufferToRgba8Preview(buffer) {
   return rgba;
 }
 
+const clampPreview01 = value => Math.min(1, Math.max(0, Number.isFinite(Number(value)) ? Number(value) : 0));
+
+function sourceSampleValue(buffer, index) {
+  if (buffer.bitsPerChannel === 8) return buffer.data[index] / 255;
+  if (buffer.bitsPerChannel === 16) return buffer.data[index] / 65535;
+  const value = Number(buffer.data[index]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function srgbToLinear(value) {
+  const v = Math.max(0, Number(value) || 0);
+  return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+}
+
+function linearToSrgb(value) {
+  const v = Math.max(0, Number(value) || 0);
+  return v <= 0.0031308 ? 12.92 * v : 1.055 * (v ** (1 / 2.4)) - 0.055;
+}
+
+function acesToneMap(value) {
+  const v = Math.max(0, Number(value) || 0);
+  const mapped = (v * (2.51 * v + 0.03)) / (v * (2.43 * v + 0.59) + 0.14);
+  return clampPreview01(mapped);
+}
+
+function compileHighDepthAdjustments(filters = {}) {
+  return {
+    exposure: 2 ** Math.max(-4, Math.min(4, Number(filters.exposure) || 0)),
+    gammaPower: 1 / Math.max(0.1, Math.min(5, Number(filters.gamma) || 1)),
+    temperature: Math.max(-1, Math.min(1, (Number(filters.temperature) || 0) / 100)),
+    tint: Math.max(-1, Math.min(1, (Number(filters.tint) || 0) / 100)),
+    vibrance: Math.max(-1, Math.min(1, (Number(filters.vibrance) || 0) / 100)),
+    highlights: Math.max(-1, Math.min(1, (Number(filters.highlights) || 0) / 100)),
+    shadows: Math.max(-1, Math.min(1, (Number(filters.shadows) || 0) / 100)),
+  };
+}
+
+function adjustHighDepthRgb(r, g, b, compiled) {
+  let red = Math.max(0, r) * compiled.exposure;
+  let green = Math.max(0, g) * compiled.exposure;
+  let blue = Math.max(0, b) * compiled.exposure;
+
+  const temperature = compiled.temperature;
+  if (temperature) {
+    red *= 1 + temperature * 0.14;
+    green *= 1 + temperature * 0.018;
+    blue *= 1 - temperature * 0.14;
+  }
+  const tint = compiled.tint;
+  if (tint) {
+    red *= 1 + tint * 0.055;
+    green *= 1 - tint * 0.10;
+    blue *= 1 + tint * 0.055;
+  }
+
+  let luminance = Math.max(0, red * 0.2126 + green * 0.7152 + blue * 0.0722);
+  if (compiled.shadows) {
+    const weight = (1 - clampPreview01(luminance)) ** 2;
+    const strength = Math.abs(compiled.shadows) * weight * 0.72;
+    if (compiled.shadows > 0) {
+      red += (1 - Math.min(1, red)) * strength;
+      green += (1 - Math.min(1, green)) * strength;
+      blue += (1 - Math.min(1, blue)) * strength;
+    } else {
+      const factor = 1 - strength;
+      red *= factor; green *= factor; blue *= factor;
+    }
+  }
+
+  luminance = Math.max(0, red * 0.2126 + green * 0.7152 + blue * 0.0722);
+  if (compiled.highlights) {
+    const strength = Math.abs(compiled.highlights) * (clampPreview01(luminance) ** 2) * 0.72;
+    if (compiled.highlights > 0) {
+      const factor = 1 + strength * 0.35;
+      red *= factor; green *= factor; blue *= factor;
+    } else {
+      const factor = 1 - strength * 0.62;
+      red *= factor; green *= factor; blue *= factor;
+    }
+  }
+
+  if (compiled.vibrance) {
+    const maxChannel = Math.max(red, green, blue);
+    const minChannel = Math.min(red, green, blue);
+    const saturation = maxChannel > 1e-8 ? Math.min(1, (maxChannel - minChannel) / maxChannel) : 0;
+    const factor = Math.max(0, 1 + compiled.vibrance * (1 - saturation) * 0.85);
+    const gray = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+    red = gray + (red - gray) * factor;
+    green = gray + (green - gray) * factor;
+    blue = gray + (blue - gray) * factor;
+  }
+
+  if (Math.abs(compiled.gammaPower - 1) > 1e-9) {
+    red = Math.max(0, red) ** compiled.gammaPower;
+    green = Math.max(0, green) ** compiled.gammaPower;
+    blue = Math.max(0, blue) ** compiled.gammaPower;
+  }
+  return [Math.max(0, red), Math.max(0, green), Math.max(0, blue)];
+}
+function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { toneMap = 'auto' } = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  if (buffer.model !== 'rgb') throw new Error('High-depth preview пока поддерживает только RGB PixelBuffer');
+  const mode = toneMap === 'auto' ? (buffer.bitsPerChannel === 32 ? 'aces' : 'clip') : toneMap;
+  if (!['clip','aces'].includes(mode)) throw new TypeError(`Неподдерживаемый tone map: ${mode}`);
+  const encodedSrgb = /srgb/i.test(buffer.colorSpace || '') && !/linear/i.test(buffer.colorSpace || '');
+  const linearPipeline = encodedSrgb || /linear/i.test(buffer.colorSpace || '');
+  const compiled = compileHighDepthAdjustments(filters);
+  const pixels = buffer.width * buffer.height;
+  const rgba = new Uint8ClampedArray(pixels * 4);
+  const hasAlpha = buffer.channels === 4;
+  for (let pixel = 0; pixel < pixels; pixel += 1) {
+    const source = pixel * buffer.channels;
+    const target = pixel * 4;
+    let r = sourceSampleValue(buffer, source);
+    let g = sourceSampleValue(buffer, source + 1);
+    let b = sourceSampleValue(buffer, source + 2);
+    if (encodedSrgb) { r = srgbToLinear(r); g = srgbToLinear(g); b = srgbToLinear(b); }
+    [r,g,b] = adjustHighDepthRgb(r,g,b,compiled);
+    if (mode === 'aces') { r = acesToneMap(r); g = acesToneMap(g); b = acesToneMap(b); }
+    else { r = clampPreview01(r); g = clampPreview01(g); b = clampPreview01(b); }
+    if (linearPipeline) { r = linearToSrgb(r); g = linearToSrgb(g); b = linearToSrgb(b); }
+    rgba[target] = Math.round(clampPreview01(r) * 255);
+    rgba[target + 1] = Math.round(clampPreview01(g) * 255);
+    rgba[target + 2] = Math.round(clampPreview01(b) * 255);
+    rgba[target + 3] = hasAlpha ? Math.round(clampPreview01(sourceSampleValue(buffer, source + 3)) * 255) : 255;
+  }
+  return rgba;
+}
+
 function sourceSampleBytes(bitsPerChannel) {
   if (bitsPerChannel === 8) return 1;
   if (bitsPerChannel === 16) return 2;
@@ -2627,6 +2756,8 @@ const imageCache = new Map();
 const IMAGE_CACHE_LIMIT = 24;
 const adjustedRasterCache = new Map();
 const ADJUSTED_RASTER_CACHE_LIMIT = 24;
+const highDepthRasterCache = new Map();
+const HIGH_DEPTH_RASTER_CACHE_LIMIT = 2;
 const smartFilterCache = new Map();
 const SMART_FILTER_CACHE_LIMIT = 16;
 const fontLoads = new Map();
@@ -2690,6 +2821,45 @@ function trimAdjustedRasterCache() {
   }
 }
 
+
+function trimHighDepthRasterCache() {
+  while (highDepthRasterCache.size > HIGH_DEPTH_RASTER_CACHE_LIMIT) {
+    const oldest = highDepthRasterCache.keys().next().value;
+    highDepthRasterCache.delete(oldest);
+  }
+}
+
+async function makeHighDepthRasterSource(layer) {
+  const metadata = layer?.highDepthSource;
+  if (!metadata || layer?.type !== 'raster' || metadata.model !== 'rgb') return null;
+  const signature = `${metadata.bitsPerChannel}|${metadata.colorSpace || ''}|${colorAdjustmentSignature(layer.filters || {})}|auto-tone-v1`;
+  const sourceToken = metadata.dataUrl || '';
+  const cached = highDepthRasterCache.get(layer.id);
+  if (cached && cached.sourceToken === sourceToken && cached.signature === signature) {
+    highDepthRasterCache.delete(layer.id);
+    highDepthRasterCache.set(layer.id, cached);
+    return cached.canvas;
+  }
+  try {
+    const buffer = cached && cached.sourceToken === sourceToken && cached.buffer
+      ? cached.buffer
+      : deserializePixelBufferSource(metadata);
+    const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap:'auto' });
+    const canvas = document.createElement('canvas');
+    canvas.width = buffer.width; canvas.height = buffer.height;
+    const ctx = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
+    const image = ctx.createImageData(buffer.width, buffer.height);
+    image.data.set(rgba);
+    ctx.putImageData(image, 0, 0);
+    highDepthRasterCache.delete(layer.id);
+    highDepthRasterCache.set(layer.id, { sourceToken, signature, buffer, canvas });
+    trimHighDepthRasterCache();
+    return canvas;
+  } catch (error) {
+    console.warn('High-depth raster preview failed; falling back to RGBA8 layer preview', error);
+    return null;
+  }
+}
 
 function smartFilterStackSignature(layer) {
   return JSON.stringify({
@@ -3164,12 +3334,20 @@ async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
 
     ctx.filter = filterString(layer.filters);
 
-    if ((layer.type === 'raster' && (rasterOverride || layer.dataUrl)) || (layer.type === 'smart-object' && layer.previewDataUrl)) {
+    if ((layer.type === 'raster' && (rasterOverride || layer.dataUrl || layer.highDepthSource)) || (layer.type === 'smart-object' && layer.previewDataUrl)) {
       const dataUrl = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl;
-      const img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
+      let highDepthApplied = false;
+      let img = null;
+      if (layer.type === 'raster' && !rasterOverride && layer.highDepthSource) {
+        img = await makeHighDepthRasterSource(layer);
+        highDepthApplied = Boolean(img);
+      }
+      if (!img) img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
       if (img) {
         const filtered = layer.type === 'smart-object' ? await applySmartFilterStack(img, layer) : img;
-        const source = await makeAdjustedRasterSource(filtered, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
+        const source = highDepthApplied
+          ? filtered
+          : await makeAdjustedRasterSource(filtered, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
         ctx.drawImage(source, 0, 0, w, h);
       }
     } else if (layer.type === 'text') {
@@ -3286,11 +3464,13 @@ async function compositeToBlob(doc, type = 'image/png', quality = 0.92) {
 function invalidateImageCache(dataUrl) {
   if (dataUrl) imageCache.delete(dataUrl);
   adjustedRasterCache.clear();
+  highDepthRasterCache.clear();
   smartFilterCache.clear();
 }
 function clearImageCache() {
   imageCache.clear();
   adjustedRasterCache.clear();
+  highDepthRasterCache.clear();
   smartFilterCache.clear();
 }
 
@@ -6593,7 +6773,7 @@ function updateProperties() {
   if (l.type === 'raster' && l.highDepthSource) {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
-    extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit ${escapeHtml(String(source.model||'RGB').toUpperCase())} · ${sizeMb} МБ</span><label>High-depth</label><span>Сохранён в .zpe; Canvas preview/edit — 8-bit</span>`;
+    extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit ${escapeHtml(String(source.model||'RGB').toUpperCase())} · ${sizeMb} МБ</span><label>High-depth</label><span>Exposure/gamma/color работают до tone mapping; Canvas preview/edit — 8-bit</span>`;
   }
   if (l.type === 'smart-object') {
     const linkedCount=l.linkedSourceId?linkedSmartObjectLayers(doc,l.linkedSourceId).length:0;
@@ -7354,6 +7534,20 @@ async function drawLineOnCurrentRaster(start,end){
   finally{paintPersisting=false;}
 }
 
+function drawHighDepthRasterBase(layer, canvas, ctx) {
+  if(!layer?.highDepthSource)return false;
+  const buffer=deserializePixelBufferSource(layer.highDepthSource);
+  const rgba=pixelBufferToToneMappedRgba8Preview(buffer,{}, {toneMap:'auto'});
+  const source=document.createElement('canvas');
+  source.width=buffer.width;source.height=buffer.height;
+  const sourceCtx=source.getContext('2d',{alpha:true,willReadFrequently:true});
+  const image=sourceCtx.createImageData(buffer.width,buffer.height);
+  image.data.set(rgba);
+  sourceCtx.putImageData(image,0,0);
+  ctx.drawImage(source,0,0,canvas.width,canvas.height);
+  return true;
+}
+
 async function ensureRasterBuffer(l) {
   if (!isEditableRasterLayer(l)) return null;
   const paintSize = checkedCanvasSize(l.width, l.height, `Растровый слой «${l.name || 'Без имени'}»`);
@@ -7364,7 +7558,7 @@ async function ensureRasterBuffer(l) {
     brushCanvas.width = canvasWidth;
     brushCanvas.height = canvasHeight;
     brushCtx = brushCanvas.getContext('2d', { alpha:true });
-    if (l.dataUrl) {
+    if (!drawHighDepthRasterBase(l, brushCanvas, brushCtx) && l.dataUrl) {
       const img = await getImage(l.dataUrl);
       if (img) brushCtx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
     }
@@ -8569,7 +8763,7 @@ async function prepareClearedRasterDataUrl(layer) {
   const canvas=document.createElement('canvas');
   canvas.width=size.width;canvas.height=size.height;
   const ctx=canvas.getContext('2d',{alpha:true});
-  if(layer.dataUrl){
+  if(!drawHighDepthRasterBase(layer,canvas,ctx)&&layer.dataUrl){
     const image=await getImage(layer.dataUrl);
     if(image)ctx.drawImage(image,0,0,size.width,size.height);
   }
