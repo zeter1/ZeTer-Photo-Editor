@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-25 — High-depth ZIP Prediction Stage 7e
+
+- Added: PSD/PSB compression=3 (ZIP with prediction) для RGB 16-bit и 32-bit layer/composite channels.
+- 16-bit: predictor восстанавливается на уровне big-endian 16-bit samples с modulo-65536 delta decode.
+- 32-bit: после byte-level delta decode выполняется Photoshop byte-plane unshuffle обратно в big-endian IEEE-754 samples.
+- Safety: ZIP inflate теперь читается chunk-wise с жёстким expected-output ceiling; oversized decompression отклоняется как `PSD_ZIP_LIMIT` до сборки полного результата.
+- Regression: high-depth layer fixtures проверяют Raw/RLE/ZIP/ZIP-prediction, отдельно добавлен composite ZIP-prediction round-trip fixture для 16/32-bit.
+
 ### 2026-09-25 — Nested Groups UX Stage 8d
 
 - Added: group rows в панели слоёв стали draggable — группу можно вложить в другую группу.

@@ -2704,14 +2704,38 @@ function packBitsRow(source, expectedWidth) {
   return out;
 }
 
-async function inflateZlib(bytes) {
-  if (typeof DecompressionStream !== 'function' || typeof Blob !== 'function' || typeof Response !== 'function') {
+async function inflateZlib(bytes, maxOutputBytes = null) {
+  if (typeof DecompressionStream !== 'function' || typeof Blob !== 'function') {
     throw new PsdImportError('Этот браузер не поддерживает встроенную ZIP-декомпрессию PSD', 'PSD_ZIP_UNAVAILABLE');
   }
   try {
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
+    const reader = stream.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array) || !value.length) continue;
+      total += value.length;
+      if (Number.isFinite(maxOutputBytes) && total > maxOutputBytes) {
+        await reader.cancel().catch(() => {});
+        throw new PsdImportError(
+          `ZIP PSD/PSB распаковывается больше ожидаемого лимита: ${total} > ${maxOutputBytes} байт`,
+          'PSD_ZIP_LIMIT',
+        );
+      }
+      chunks.push(value);
+    }
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return out;
   } catch (error) {
+    if (error instanceof PsdImportError) throw error;
     throw new PsdImportError(`Не удалось распаковать ZIP-канал PSD: ${error?.message || error}`, 'PSD_ZIP');
   }
 }
@@ -2733,6 +2757,64 @@ function decodedChannelByteLength(width, height, bitsPerChannel, maxChannelBytes
     );
   }
   return bytes;
+}
+
+function decodeZipPredictionBytes(bytes, width, height, bitsPerChannel) {
+  const rowBytes = width * bytesPerSample(bitsPerChannel);
+  const expected = rowBytes * height;
+  if (bytes.length !== expected) {
+    throw new PsdImportError(
+      `ZIP prediction PSD/PSB: неверный размер после inflate: ${bytes.length} вместо ${expected}`,
+      'PSD_ZIP_PREDICTION',
+    );
+  }
+
+  if (bitsPerChannel === 8) {
+    for (let row = 0; row < height; row += 1) {
+      const start = row * rowBytes;
+      for (let x = 1; x < rowBytes; x += 1) bytes[start + x] = (bytes[start + x] + bytes[start + x - 1]) & 255;
+    }
+    return bytes;
+  }
+
+  if (bitsPerChannel === 16) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let row = 0; row < height; row += 1) {
+      const start = row * rowBytes;
+      let previous = view.getUint16(start, false);
+      for (let x = 1; x < width; x += 1) {
+        const offset = start + x * 2;
+        const value = (view.getUint16(offset, false) + previous) & 0xffff;
+        view.setUint16(offset, value, false);
+        previous = value;
+      }
+    }
+    return bytes;
+  }
+
+  if (bitsPerChannel === 32) {
+    for (let row = 0; row < height; row += 1) {
+      const start = row * rowBytes;
+      for (let x = 1; x < rowBytes; x += 1) bytes[start + x] = (bytes[start + x] + bytes[start + x - 1]) & 255;
+    }
+    const restored = new Uint8Array(bytes.length);
+    for (let row = 0; row < height; row += 1) {
+      const start = row * rowBytes;
+      for (let x = 0; x < width; x += 1) {
+        const target = start + x * 4;
+        restored[target] = bytes[start + x];
+        restored[target + 1] = bytes[start + width + x];
+        restored[target + 2] = bytes[start + width * 2 + x];
+        restored[target + 3] = bytes[start + width * 3 + x];
+      }
+    }
+    return restored;
+  }
+
+  throw new PsdImportError(
+    `ZIP prediction PSD/PSB: неподдерживаемая глубина ${bitsPerChannel}-bit`,
+    'PSD_ZIP_PREDICTION',
+  );
 }
 
 function decodeSamplePlane(bytes, bitsPerChannel) {
@@ -2785,22 +2867,10 @@ async function decodeChannel(reader, descriptor, width, height, maxChannelBytes,
       decodedBytes.set(packBitsRow(packed, rowBytes), row * rowBytes);
     }
   } else if (compression === 2 || compression === 3) {
-    if (compression === 3 && bitsPerChannel !== 8) {
-      throw new PsdImportError(
-        'ZIP prediction для high-depth (16/32-bit) PSD/PSB пока не поддерживается: используйте Raw/RLE/ZIP без prediction',
-        'PSD_ZIP_PREDICTION_DEPTH',
-      );
-    }
     const compressed = reader.take(channelEnd - reader.offset);
-    decodedBytes = await inflateZlib(compressed);
-    if (decodedBytes.length < expectedBytes) throw new PsdImportError('ZIP PSD-канал короче ожидаемого', 'PSD_ZIP_CHANNEL');
-    if (decodedBytes.length !== expectedBytes) decodedBytes = decodedBytes.subarray(0, expectedBytes);
-    if (compression === 3) {
-      for (let row = 0; row < height; row += 1) {
-        const start = row * rowBytes;
-        for (let x = 1; x < rowBytes; x += 1) decodedBytes[start + x] = (decodedBytes[start + x] + decodedBytes[start + x - 1]) & 255;
-      }
-    }
+    decodedBytes = await inflateZlib(compressed, expectedBytes);
+    if (decodedBytes.length !== expectedBytes) throw new PsdImportError('ZIP PSD-канал имеет неверный размер после распаковки', 'PSD_ZIP_CHANNEL');
+    if (compression === 3) decodedBytes = decodeZipPredictionBytes(decodedBytes, width, height, bitsPerChannel);
   } else {
     throw new PsdImportError(`Неподдерживаемое сжатие PSD-канала: ${compression}`, 'PSD_COMPRESSION');
   }
@@ -3012,25 +3082,15 @@ async function decodeComposite(reader, header, maxChannelBytes) {
       else if (channel === 3) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
     }
   } else if (compression === 2 || compression === 3) {
-    if (compression === 3 && header.bitsPerChannel !== 8) {
-      throw new PsdImportError(
-        'ZIP prediction для high-depth (16/32-bit) PSD/PSB composite пока не поддерживается',
-        'PSD_ZIP_PREDICTION_DEPTH',
-      );
-    }
-    const decoded = await inflateZlib(reader.take(reader.end - reader.offset));
     const expected = planeBytes * header.channels;
-    if (!Number.isSafeInteger(expected) || decoded.length < expected) {
-      throw new PsdImportError('Composite ZIP PSD/PSB короче ожидаемого', 'PSD_COMPOSITE_ZIP');
+    if (!Number.isSafeInteger(expected)) throw new PsdImportError('Composite ZIP PSD/PSB слишком большой', 'PSD_COMPOSITE_ZIP');
+    const decoded = await inflateZlib(reader.take(reader.end - reader.offset), expected);
+    if (decoded.length !== expected) {
+      throw new PsdImportError('Composite ZIP PSD/PSB имеет неверный размер после распаковки', 'PSD_COMPOSITE_ZIP');
     }
     for (let channel = 0; channel < header.channels; channel += 1) {
-      const bytes = decoded.slice(channel * planeBytes, (channel + 1) * planeBytes);
-      if (compression === 3) {
-        for (let row = 0; row < header.height; row += 1) {
-          const start = row * rowBytes;
-          for (let x = 1; x < rowBytes; x += 1) bytes[start + x] = (bytes[start + x] + bytes[start + x - 1]) & 255;
-        }
-      }
+      let bytes = decoded.slice(channel * planeBytes, (channel + 1) * planeBytes);
+      if (compression === 3) bytes = decodeZipPredictionBytes(bytes, header.width, header.height, header.bitsPerChannel);
       if (channel < 3) channels.set(channel, decodeSamplePlane(bytes, header.bitsPerChannel));
       else if (channel === 3) channels.set(-1, decodeSamplePlane(bytes, header.bitsPerChannel));
     }

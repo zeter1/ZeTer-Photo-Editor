@@ -139,6 +139,36 @@ function makeRlePsb({ depth = 8, colorMode = 3 } = {}) {
   return concat(out.parts);
 }
 
+function encodePredictionRow(row, depth, width) {
+  const source = Uint8Array.from(row);
+  if (depth === 8) {
+    for (let index = source.length - 1; index >= 1; index -= 1) source[index] = (source[index] - source[index - 1]) & 255;
+    return source;
+  }
+  if (depth === 16) {
+    const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
+    for (let x = width - 1; x >= 1; x -= 1) {
+      const current = view.getUint16(x * 2, false);
+      const previous = view.getUint16((x - 1) * 2, false);
+      view.setUint16(x * 2, (current - previous) & 0xffff, false);
+    }
+    return source;
+  }
+  if (depth === 32) {
+    const shuffled = new Uint8Array(source.length);
+    for (let x = 0; x < width; x += 1) {
+      const offset = x * 4;
+      shuffled[x] = source[offset];
+      shuffled[width + x] = source[offset + 1];
+      shuffled[width * 2 + x] = source[offset + 2];
+      shuffled[width * 3 + x] = source[offset + 3];
+    }
+    for (let index = shuffled.length - 1; index >= 1; index -= 1) shuffled[index] = (shuffled[index] - shuffled[index - 1]) & 255;
+    return shuffled;
+  }
+  throw new Error(`Unsupported prediction fixture depth: ${depth}`);
+}
+
 function makeZipPsd({ depth = 16, compression = 2 } = {}) {
   const out = writer();
   out.ascii('8BPS'); out.u16(1); out.bytes(0,0,0,0,0,0);
@@ -146,7 +176,7 @@ function makeZipPsd({ depth = 16, compression = 2 } = {}) {
   out.u32(0); out.u32(0);
 
   const rows = channelSamples(depth).map(samples => sampleRowBytes(samples, depth));
-  const compressedRows = rows.map(row => new Uint8Array(deflateSync(row)));
+  const compressedRows = rows.map(row => new Uint8Array(deflateSync(compression === 3 ? encodePredictionRow(row, depth, 2) : row)));
   const info = writer();
   info.i16(1);
   info.i32(0); info.i32(0); info.i32(1); info.i32(2);
@@ -172,6 +202,20 @@ function makeZipPsd({ depth = 16, compression = 2 } = {}) {
   return concat(out.parts);
 }
 
+
+
+function makeCompositeZipPsd({ depth = 16, compression = 3 } = {}) {
+  const out = writer();
+  out.ascii('8BPS'); out.u16(1); out.bytes(0,0,0,0,0,0);
+  out.u16(4); out.u32(1); out.u32(2); out.u16(depth); out.u16(3);
+  out.u32(0); out.u32(0);
+  out.u32(0);
+  const planes = channelSamples(depth).map(samples => sampleRowBytes(samples, depth));
+  const payload = concat(planes.map(row => compression === 3 ? encodePredictionRow(row, depth, 2) : row));
+  out.u16(compression);
+  out.push(new Uint8Array(deflateSync(payload)));
+  return concat(out.parts);
+}
 
 function makeNestedGroupPsd() {
   const out = writer();
@@ -277,7 +321,12 @@ test('PSD/PSB Stage 7c decodes RGB/16-bit Raw, RLE and ZIP without prediction in
     255,0,0,255,
     0,128,255,128,
   ];
-  for (const source of [makeRawPsd({ depth:16 }), makeRlePsb({ depth:16 }), makeZipPsd({ depth:16 })]) {
+  for (const source of [
+    makeRawPsd({ depth:16 }),
+    makeRlePsb({ depth:16 }),
+    makeZipPsd({ depth:16 }),
+    makeZipPsd({ depth:16, compression:3 }),
+  ]) {
     const decoded = await decodePsd(source);
     assert.equal(decoded.bitsPerChannel,16);
     assert.equal(decoded.layers.length,1);
@@ -298,7 +347,12 @@ test('PSD/PSB Stage 7d decodes RGB/32-bit float Raw, RLE and ZIP without predict
     0,0,255,255,
     255,64,255,128,
   ];
-  for (const source of [makeRawPsd({ depth:32 }), makeRlePsb({ depth:32 }), makeZipPsd({ depth:32 })]) {
+  for (const source of [
+    makeRawPsd({ depth:32 }),
+    makeRlePsb({ depth:32 }),
+    makeZipPsd({ depth:32 }),
+    makeZipPsd({ depth:32, compression:3 }),
+  ]) {
     const decoded = await decodePsd(source);
     assert.equal(decoded.bitsPerChannel,32);
     assert.equal(decoded.layers.length,1);
@@ -310,11 +364,23 @@ test('PSD/PSB Stage 7d decodes RGB/32-bit float Raw, RLE and ZIP without predict
   }
 });
 
-test('PSD/PSB high-depth import still rejects CMYK and ZIP prediction explicitly', async () => {
+test('PSD/PSB Stage 7e decodes high-depth ZIP prediction for composite image data', async () => {
+  for (const depth of [16,32]) {
+    const decoded = await decodePsd(makeCompositeZipPsd({ depth, compression:3 }));
+    assert.equal(decoded.layers.length,0);
+    assert.equal(decoded.composite,null);
+    assert.ok(decoded.compositePixelBuffer);
+    assert.equal(decoded.compositePixelBuffer.bitsPerChannel,depth);
+    const expected = depth === 16
+      ? [65535,0,0,65535, 0,32768,65535,32768]
+      : [0,-0.5,1,1, 2,0.25,4,0.5];
+    assert.deepEqual([...decoded.compositePixelBuffer.data],expected);
+  }
+});
+
+test('PSD/PSB high-depth import still rejects CMYK explicitly', async () => {
   await assert.rejects(() => decodePsd(makeRawPsd({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
   await assert.rejects(() => decodePsd(makeRlePsb({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
-  await assert.rejects(() => decodePsd(makeZipPsd({ depth:16, compression:3 })), error => error instanceof PsdImportError && error.code === 'PSD_ZIP_PREDICTION_DEPTH');
-  await assert.rejects(() => decodePsd(makeZipPsd({ depth:32, compression:3 })), error => error instanceof PsdImportError && error.code === 'PSD_ZIP_PREDICTION_DEPTH');
 });
 
 
