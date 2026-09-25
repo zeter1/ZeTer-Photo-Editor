@@ -7,6 +7,8 @@ const imageCache = new Map();
 const IMAGE_CACHE_LIMIT = 24;
 const adjustedRasterCache = new Map();
 const ADJUSTED_RASTER_CACHE_LIMIT = 24;
+const smartFilterCache = new Map();
+const SMART_FILTER_CACHE_LIMIT = 16;
 const fontLoads = new Map();
 const bundledFontStyles = new Map();
 const BUNDLED_FONT_PATHS = new Map([
@@ -69,13 +71,89 @@ function trimAdjustedRasterCache() {
   }
 }
 
+
+function smartFilterStackSignature(layer) {
+  return JSON.stringify((Array.isArray(layer?.smartFilters) ? layer.smartFilters : []).map(item => ({
+    id:item?.id || '',
+    enabled:item?.enabled !== false,
+    filters:item?.filters || {},
+  })));
+}
+
+function trimSmartFilterCache() {
+  while (smartFilterCache.size > SMART_FILTER_CACHE_LIMIT) {
+    const oldest = smartFilterCache.keys().next().value;
+    smartFilterCache.delete(oldest);
+  }
+}
+
+async function applyFilterSetToSource(source, filters = {}) {
+  const width = Math.max(1, Math.round(source.naturalWidth || source.videoWidth || source.width || 1));
+  const height = Math.max(1, Math.round(source.naturalHeight || source.videoHeight || source.height || 1));
+  let adjusted = source;
+  if (hasAdvancedColorAdjustments(filters)) {
+    const advanced = document.createElement('canvas');
+    advanced.width = width; advanced.height = height;
+    const advancedCtx = advanced.getContext('2d', { alpha:true, willReadFrequently:true });
+    advancedCtx.drawImage(source, 0, 0, width, height);
+    try {
+      let pixels = advancedCtx.getImageData(0, 0, width, height);
+      pixels = await applyAdvancedColorAdjustmentsAsync(pixels, filters, {
+        recover: () => advancedCtx.getImageData(0, 0, width, height),
+      });
+      advancedCtx.putImageData(pixels, 0, 0);
+      adjusted = advanced;
+    } catch (error) {
+      console.warn('Smart Filter advanced correction failed; basic pass will continue', error);
+    }
+  }
+  const output = document.createElement('canvas');
+  output.width = width; output.height = height;
+  const ctx = output.getContext('2d', { alpha:true });
+  ctx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+  ctx.filter = filterString(filters);
+  ctx.drawImage(adjusted, 0, 0, width, height);
+  return output;
+}
+
+async function applySmartFilterStack(source, layer) {
+  const stack = Array.isArray(layer?.smartFilters) ? layer.smartFilters : [];
+  if (!stack.some(item => item?.enabled !== false)) return source;
+  const signature = smartFilterStackSignature(layer);
+  const width = Math.max(1, Math.round(source.naturalWidth || source.videoWidth || source.width || 1));
+  const height = Math.max(1, Math.round(source.naturalHeight || source.videoHeight || source.height || 1));
+  const sourceToken = layer.previewDataUrl || '';
+  const cached = smartFilterCache.get(layer.id);
+  if (cached && cached.sourceToken === sourceToken && cached.signature === signature && cached.width === width && cached.height === height) {
+    smartFilterCache.delete(layer.id);
+    smartFilterCache.set(layer.id, cached);
+    return cached.canvas;
+  }
+  let current = source;
+  // The stack is displayed top-first. Smart Filters are applied bottom-up.
+  for (let index = stack.length - 1; index >= 0; index -= 1) {
+    const item = stack[index];
+    if (!item || item.enabled === false) continue;
+    current = await applyFilterSetToSource(current, item.filters || {});
+  }
+  smartFilterCache.delete(layer.id);
+  smartFilterCache.set(layer.id, { sourceToken, signature, width, height, canvas:current });
+  trimSmartFilterCache();
+  return current;
+}
+
 async function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {
   const filters = layer.filters || {};
   if (!hasAdvancedColorAdjustments(filters)) return source;
   const width = Math.max(1, Math.round(source.naturalWidth || source.videoWidth || source.width || layer.width || 1));
   const height = Math.max(1, Math.round(source.naturalHeight || source.videoHeight || source.height || layer.height || 1));
   const signature = colorAdjustmentSignature(filters);
-  const sourceToken = cacheable ? (layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl) : null;
+  const sourceToken = cacheable
+    ? (layer.type === 'smart-object'
+      ? `${layer.previewDataUrl || ''}|${smartFilterStackSignature(layer)}`
+      : layer.dataUrl)
+    : null;
   if (cacheable) {
     const cached = adjustedRasterCache.get(layer.id);
     if (cached && cached.sourceToken === sourceToken && cached.signature === signature && cached.width === width && cached.height === height) {
@@ -418,7 +496,8 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       const dataUrl = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl;
       const img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
       if (img) {
-        const source = await makeAdjustedRasterSource(img, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
+        const filtered = layer.type === 'smart-object' ? await applySmartFilterStack(img, layer) : img;
+        const source = await makeAdjustedRasterSource(filtered, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
         ctx.drawImage(source, 0, 0, w, h);
       }
     } else if (layer.type === 'text') {
@@ -534,5 +613,13 @@ export async function compositeToBlob(doc, type = 'image/png', quality = 0.92) {
   return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Экспорт не удался')), type, quality));
 }
 
-export function invalidateImageCache(dataUrl) { if (dataUrl) imageCache.delete(dataUrl); adjustedRasterCache.clear(); }
-export function clearImageCache() { imageCache.clear(); adjustedRasterCache.clear(); }
+export function invalidateImageCache(dataUrl) {
+  if (dataUrl) imageCache.delete(dataUrl);
+  adjustedRasterCache.clear();
+  smartFilterCache.clear();
+}
+export function clearImageCache() {
+  imageCache.clear();
+  adjustedRasterCache.clear();
+  smartFilterCache.clear();
+}

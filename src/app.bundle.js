@@ -1546,6 +1546,7 @@ const MIN_LAYER_SCALE = 0.01;
 const MAX_LAYER_SCALE = 100;
 const MAX_LAYER_POSITION = 120000;
 const MAX_ICC_PROFILE_DATA_URL = 5_700_000;
+const MAX_SMART_FILTERS = 24;
 function imageResizeTransforms(layers, sx, sy) {
   return layers.map(layer => {
     if (layer?.type === 'adjustment') return { x: 0, y: 0, scaleX: 1, scaleY: 1 };
@@ -1629,8 +1630,18 @@ function createSmartObjectLayer(overrides = {}) {
     name: 'Смарт-объект',
     previewDataUrl: null,
     embeddedDocument: null,
+    smartFilters: [],
     ...overrides,
   });
+}
+function createSmartFilter(overrides = {}) {
+  return {
+    id: uid('smart-filter'),
+    name: 'Смарт-фильтр',
+    enabled: true,
+    filters: { ...DEFAULT_LAYER_FILTERS },
+    ...overrides,
+  };
 }
 function createAdjustmentLayer(overrides = {}) {
   return baseLayer('adjustment', {
@@ -1982,6 +1993,21 @@ function sanitizeFilters(filters = {}) {
   }
   return result;
 }
+function sanitizeSmartFilters(value = []) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.slice(0, MAX_SMART_FILTERS).map((item,index) => {
+    let id = shortText(item?.id, '', 160).trim();
+    if (!id || seen.has(id)) id = uid('smart-filter');
+    seen.add(id);
+    return createSmartFilter({
+      id,
+      name: shortText(item?.name, `Смарт-фильтр ${index + 1}`, 160).trim() || `Смарт-фильтр ${index + 1}`,
+      enabled: item?.enabled !== false,
+      filters: sanitizeFilters(item?.filters),
+    });
+  });
+}
 function sanitizeLayerMask(mask) {
   if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
   const dataUrl = typeof mask.dataUrl === 'string' && /^data:image\//i.test(mask.dataUrl) ? mask.dataUrl : null;
@@ -2103,6 +2129,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
   } else if (type === 'smart-object') {
     checkedCanvasSize(result.width, result.height, `Смарт-объект «${result.name || 'Без имени'}»`);
     result.previewDataUrl = typeof layer?.previewDataUrl === 'string' && /^data:image\//i.test(layer.previewDataUrl) ? layer.previewDataUrl : null;
+    result.smartFilters = sanitizeSmartFilters(layer?.smartFilters);
     if (embeddedDepth >= MAX_EMBEDDED_DOCUMENT_DEPTH) {
       result.embeddedDocument = null;
     } else if (layer?.embeddedDocument && typeof layer.embeddedDocument === 'object' && !Array.isArray(layer.embeddedDocument)) {
@@ -2482,6 +2509,8 @@ const imageCache = new Map();
 const IMAGE_CACHE_LIMIT = 24;
 const adjustedRasterCache = new Map();
 const ADJUSTED_RASTER_CACHE_LIMIT = 24;
+const smartFilterCache = new Map();
+const SMART_FILTER_CACHE_LIMIT = 16;
 const fontLoads = new Map();
 const bundledFontStyles = new Map();
 const BUNDLED_FONT_PATHS = new Map([
@@ -2543,13 +2572,89 @@ function trimAdjustedRasterCache() {
   }
 }
 
+
+function smartFilterStackSignature(layer) {
+  return JSON.stringify((Array.isArray(layer?.smartFilters) ? layer.smartFilters : []).map(item => ({
+    id:item?.id || '',
+    enabled:item?.enabled !== false,
+    filters:item?.filters || {},
+  })));
+}
+
+function trimSmartFilterCache() {
+  while (smartFilterCache.size > SMART_FILTER_CACHE_LIMIT) {
+    const oldest = smartFilterCache.keys().next().value;
+    smartFilterCache.delete(oldest);
+  }
+}
+
+async function applyFilterSetToSource(source, filters = {}) {
+  const width = Math.max(1, Math.round(source.naturalWidth || source.videoWidth || source.width || 1));
+  const height = Math.max(1, Math.round(source.naturalHeight || source.videoHeight || source.height || 1));
+  let adjusted = source;
+  if (hasAdvancedColorAdjustments(filters)) {
+    const advanced = document.createElement('canvas');
+    advanced.width = width; advanced.height = height;
+    const advancedCtx = advanced.getContext('2d', { alpha:true, willReadFrequently:true });
+    advancedCtx.drawImage(source, 0, 0, width, height);
+    try {
+      let pixels = advancedCtx.getImageData(0, 0, width, height);
+      pixels = await applyAdvancedColorAdjustmentsAsync(pixels, filters, {
+        recover: () => advancedCtx.getImageData(0, 0, width, height),
+      });
+      advancedCtx.putImageData(pixels, 0, 0);
+      adjusted = advanced;
+    } catch (error) {
+      console.warn('Smart Filter advanced correction failed; basic pass will continue', error);
+    }
+  }
+  const output = document.createElement('canvas');
+  output.width = width; output.height = height;
+  const ctx = output.getContext('2d', { alpha:true });
+  ctx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
+  ctx.filter = filterString(filters);
+  ctx.drawImage(adjusted, 0, 0, width, height);
+  return output;
+}
+
+async function applySmartFilterStack(source, layer) {
+  const stack = Array.isArray(layer?.smartFilters) ? layer.smartFilters : [];
+  if (!stack.some(item => item?.enabled !== false)) return source;
+  const signature = smartFilterStackSignature(layer);
+  const width = Math.max(1, Math.round(source.naturalWidth || source.videoWidth || source.width || 1));
+  const height = Math.max(1, Math.round(source.naturalHeight || source.videoHeight || source.height || 1));
+  const sourceToken = layer.previewDataUrl || '';
+  const cached = smartFilterCache.get(layer.id);
+  if (cached && cached.sourceToken === sourceToken && cached.signature === signature && cached.width === width && cached.height === height) {
+    smartFilterCache.delete(layer.id);
+    smartFilterCache.set(layer.id, cached);
+    return cached.canvas;
+  }
+  let current = source;
+  // The stack is displayed top-first. Smart Filters are applied bottom-up.
+  for (let index = stack.length - 1; index >= 0; index -= 1) {
+    const item = stack[index];
+    if (!item || item.enabled === false) continue;
+    current = await applyFilterSetToSource(current, item.filters || {});
+  }
+  smartFilterCache.delete(layer.id);
+  smartFilterCache.set(layer.id, { sourceToken, signature, width, height, canvas:current });
+  trimSmartFilterCache();
+  return current;
+}
+
 async function makeAdjustedRasterSource(source, layer, { cacheable = true } = {}) {
   const filters = layer.filters || {};
   if (!hasAdvancedColorAdjustments(filters)) return source;
   const width = Math.max(1, Math.round(source.naturalWidth || source.videoWidth || source.width || layer.width || 1));
   const height = Math.max(1, Math.round(source.naturalHeight || source.videoHeight || source.height || layer.height || 1));
   const signature = colorAdjustmentSignature(filters);
-  const sourceToken = cacheable ? (layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl) : null;
+  const sourceToken = cacheable
+    ? (layer.type === 'smart-object'
+      ? `${layer.previewDataUrl || ''}|${smartFilterStackSignature(layer)}`
+      : layer.dataUrl)
+    : null;
   if (cacheable) {
     const cached = adjustedRasterCache.get(layer.id);
     if (cached && cached.sourceToken === sourceToken && cached.signature === signature && cached.width === width && cached.height === height) {
@@ -2889,7 +2994,8 @@ async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       const dataUrl = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl;
       const img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
       if (img) {
-        const source = await makeAdjustedRasterSource(img, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
+        const filtered = layer.type === 'smart-object' ? await applySmartFilterStack(img, layer) : img;
+        const source = await makeAdjustedRasterSource(filtered, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
         ctx.drawImage(source, 0, 0, w, h);
       }
     } else if (layer.type === 'text') {
@@ -3003,8 +3109,16 @@ async function compositeToBlob(doc, type = 'image/png', quality = 0.92) {
   await renderDocument(canvas, exportDoc, { checker: false });
   return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Экспорт не удался')), type, quality));
 }
-function invalidateImageCache(dataUrl) { if (dataUrl) imageCache.delete(dataUrl); adjustedRasterCache.clear(); }
-function clearImageCache() { imageCache.clear(); adjustedRasterCache.clear(); }
+function invalidateImageCache(dataUrl) {
+  if (dataUrl) imageCache.delete(dataUrl);
+  adjustedRasterCache.clear();
+  smartFilterCache.clear();
+}
+function clearImageCache() {
+  imageCache.clear();
+  adjustedRasterCache.clear();
+  smartFilterCache.clear();
+}
 
 // ---- src/adapters/psd.js ----
 const PSD_SIGNATURE = '8BPS';
@@ -6207,6 +6321,27 @@ function renderEffectControls(layer) {
   }
   return html;
 }
+
+function smartFilterStackMarkup(layer) {
+  const stack=Array.isArray(layer?.smartFilters)?layer.smartFilters:[];
+  const rows=stack.map((item,index)=>`
+    <div class="smart-filter-row${item.enabled===false?' is-disabled':''}">
+      <button type="button" class="smart-filter-toggle" data-smart-filter-toggle="${index}" title="${item.enabled===false?'Включить':'Отключить'} смарт-фильтр" aria-label="${item.enabled===false?'Включить':'Отключить'} смарт-фильтр">${item.enabled===false?'○':'◉'}</button>
+      <button type="button" class="smart-filter-name" data-smart-filter-edit="${index}" title="Редактировать смарт-фильтр">${escapeHtml(item.name||`Смарт-фильтр ${index+1}`)}</button>
+      <button type="button" class="smart-filter-order" data-smart-filter-up="${index}" title="Выше" aria-label="Переместить смарт-фильтр выше"${index===0?' disabled':''}>↑</button>
+      <button type="button" class="smart-filter-order" data-smart-filter-down="${index}" title="Ниже" aria-label="Переместить смарт-фильтр ниже"${index===stack.length-1?' disabled':''}>↓</button>
+      <button type="button" class="smart-filter-remove" data-smart-filter-remove="${index}" title="Удалить" aria-label="Удалить смарт-фильтр">×</button>
+    </div>`).join('');
+  return `<div class="wide smart-filter-stack">
+    <div class="smart-filter-heading"><strong>Смарт-фильтры</strong><span>верхние применяются последними</span></div>
+    ${rows||'<div class="smart-filter-empty">Нет смарт-фильтров</div>'}
+    <div class="smart-filter-actions">
+      <button type="button" class="mini-button" data-smart-filter-add>+ Добавить</button>
+      <button type="button" class="mini-button" data-smart-filter-clear${stack.length?'':' disabled'}>Очистить</button>
+    </div>
+  </div>`;
+}
+
 function bindPropertyInputs(root) {
   root?.querySelectorAll('[data-prop]').forEach(input => {
     if (input.type === 'range') {
@@ -6266,7 +6401,7 @@ function updateProperties() {
   if (l.type === 'shape') extra = l.shape === 'line'
     ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
     : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`;
-  if (l.type === 'smart-object') extra = `<label>Содержимое</label><button type="button" class="mini-button" data-smart-object-edit>Редактировать содержимое</button><label>Источник</label><span>${l.embeddedDocument ? `${l.embeddedDocument.width} × ${l.embeddedDocument.height}` : 'недоступен'}</span>`;
+  if (l.type === 'smart-object') extra = `<label>Содержимое</label><button type="button" class="mini-button" data-smart-object-edit>Редактировать содержимое</button><label>Источник</label><span>${l.embeddedDocument ? `${l.embeddedDocument.width} × ${l.embeddedDocument.height}` : 'недоступен'}</span>${smartFilterStackMarkup(l)}`;
   els.props.innerHTML = `<div class="prop-grid">
     <label>Имя</label><input data-prop="name" value="${escapeAttr(l.name)}">
     ${propField('X','x',Math.round(l.x))}${propField('Y','y',Math.round(l.y))}
@@ -6280,6 +6415,7 @@ function updateProperties() {
   bindPropertyInputs(els.props);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
   if(smartObjectEdit)smartObjectEdit.addEventListener('click',()=>openSmartObjectContents(l));
+  if(l.type==='smart-object')bindSmartFilterControls(els.props,l);
   const systemFontInput=els.props.querySelector('#system-font-name');
   if(systemFontInput)systemFontInput.addEventListener('change',()=>{
     const name=systemFontInput.value.trim().slice(0,120);
@@ -8698,6 +8834,8 @@ function layerContextMenu(id) {
   return [
     ['Параметры наложения…','',()=>openBlendingOptions(target()),editable],
     ['Редактировать содержимое смарт-объекта','',()=>openSmartObjectContents(target()),()=>Boolean(target())&&target().type==='smart-object'],
+    ['Добавить смарт-фильтр…','',()=>openSmartFilterDialog(target()),()=>Boolean(target())&&target().type==='smart-object'&&editable()&&(target().smartFilters?.length||0)<24],
+    ['Очистить смарт-фильтры','',()=>clearSmartFilters(target()),()=>Boolean(target())&&target().type==='smart-object'&&editable()&&Boolean(target().smartFilters?.length)],
     ['Преобразовать в смарт-объект','',()=>{if(selectedTarget())convertSelectedToSmartObject();},()=>selectedTarget()&&editable()&&!['smart-object','adjustment'].includes(target().type)],
     ['sep'],
     ['Переименовать…','F2',()=>renameLayer(target()),editable],
@@ -8742,6 +8880,140 @@ function groupContextMenu(id) {
   ];
 }
 function addBlankLayer(){addLayer(doc,createRasterLayer({name:'Новый слой',width:doc.width,height:doc.height,dataUrl:null}));brushCanvas=null;commit('Новый растровый слой');}
+
+function smartFilterTarget(owner,layerId){
+  if(doc!==owner)return null;
+  return doc.layers.find(item=>item.id===layerId&&item.type==='smart-object')||null;
+}
+
+function smartFilterDefaultName(layer){
+  const count=Array.isArray(layer?.smartFilters)?layer.smartFilters.length:0;
+  return `Смарт-фильтр ${count+1}`;
+}
+
+function moveSmartFilter(layer,index,direction){
+  if(!layer||layer.type!=='smart-object'||isLayerLocked(doc,layer))return false;
+  const stack=Array.isArray(layer.smartFilters)?layer.smartFilters:[];
+  const target=index+direction;
+  if(index<0||index>=stack.length||target<0||target>=stack.length)return false;
+  [stack[index],stack[target]]=[stack[target],stack[index]];
+  commit(direction<0?'Поднять смарт-фильтр':'Опустить смарт-фильтр');
+  return true;
+}
+
+function toggleSmartFilter(layer,index){
+  if(!layer||layer.type!=='smart-object'||isLayerLocked(doc,layer))return false;
+  const item=layer.smartFilters?.[index];if(!item)return false;
+  item.enabled=item.enabled===false;
+  commit(item.enabled?'Включить смарт-фильтр':'Отключить смарт-фильтр');
+  return true;
+}
+
+function removeSmartFilter(layer,index){
+  if(!layer||layer.type!=='smart-object'||isLayerLocked(doc,layer))return false;
+  if(!Array.isArray(layer.smartFilters)||index<0||index>=layer.smartFilters.length)return false;
+  layer.smartFilters.splice(index,1);
+  commit('Удалить смарт-фильтр');
+  return true;
+}
+
+function clearSmartFilters(layer=selected()){
+  if(!layer||layer.type!=='smart-object'||isLayerLocked(doc,layer)||!layer.smartFilters?.length)return false;
+  layer.smartFilters=[];
+  commit('Очистить смарт-фильтры');
+  return true;
+}
+
+function bindSmartFilterControls(root,layer){
+  root?.querySelector('[data-smart-filter-add]')?.addEventListener('click',()=>openSmartFilterDialog(layer));
+  root?.querySelector('[data-smart-filter-clear]')?.addEventListener('click',()=>clearSmartFilters(layer));
+  root?.querySelectorAll('[data-smart-filter-edit]').forEach(button=>button.addEventListener('click',()=>openSmartFilterDialog(layer,Number(button.dataset.smartFilterEdit))));
+  root?.querySelectorAll('[data-smart-filter-toggle]').forEach(button=>button.addEventListener('click',()=>toggleSmartFilter(layer,Number(button.dataset.smartFilterToggle))));
+  root?.querySelectorAll('[data-smart-filter-up]').forEach(button=>button.addEventListener('click',()=>moveSmartFilter(layer,Number(button.dataset.smartFilterUp),-1)));
+  root?.querySelectorAll('[data-smart-filter-down]').forEach(button=>button.addEventListener('click',()=>moveSmartFilter(layer,Number(button.dataset.smartFilterDown),1)));
+  root?.querySelectorAll('[data-smart-filter-remove]').forEach(button=>button.addEventListener('click',()=>removeSmartFilter(layer,Number(button.dataset.smartFilterRemove))));
+}
+
+function openSmartFilterDialog(layer=selected(),index=-1){
+  if(blockPendingDocumentEdit())return;
+  if(!layer||layer.type!=='smart-object'){setStatus('Смарт-фильтры доступны только для смарт-объектов');return;}
+  if(isLayerLocked(doc,layer)){setStatus('Смарт-объект или его группа заблокированы');return;}
+  const owner=doc,layerId=layer.id,original=structuredClone(layer.smartFilters||[]);
+  if(index<0&&original.length>=24){const message='Достигнут лимит: 24 смарт-фильтра';setStatus(message);toast(message,'warn');return;}
+  layer.smartFilters=structuredClone(original);
+  let targetIndex=index;
+  if(targetIndex<0){
+    layer.smartFilters.unshift(createSmartFilter({name:smartFilterDefaultName(layer)}));
+    targetIndex=0;
+  }
+  if(!layer.smartFilters[targetIndex])return;
+  const filterId=layer.smartFilters[targetIndex].id;
+  const isNew=index<0;
+  const previousFocus=document.activeElement;
+  const back=document.createElement('div');back.className='modal-backdrop';
+  const modal=document.createElement('form');modal.className='modal smart-filter-modal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label',isNew?'Добавить смарт-фильтр':'Редактировать смарт-фильтр');
+  modal.innerHTML='<header>'+(isNew?'Добавить смарт-фильтр':'Редактировать смарт-фильтр')+'</header><div class="modal-body smart-filter-body"><p class="muted smart-filter-hint">Изменения показываются на холсте сразу. Фильтры в списке применяются снизу вверх; верхний получает результат нижних.</p></div><footer><button type="button" class="secondary-button" data-reset>Сбросить</button><span class="modal-footer-spacer"></span><button type="button" class="secondary-button" data-cancel>Отмена</button><button type="submit" class="primary-button">Применить</button></footer>';
+  const body=modal.querySelector('.smart-filter-body');
+  const nameRow=document.createElement('label');nameRow.className='smart-filter-dialog-name';
+  const nameLabel=document.createElement('span');nameLabel.textContent='Название';
+  const nameInput=document.createElement('input');nameInput.type='text';nameInput.maxLength=160;nameInput.value=layer.smartFilters[targetIndex].name||smartFilterDefaultName(layer);
+  nameRow.append(nameLabel,nameInput);body.append(nameRow);
+
+  let currentGroup='';
+  for(const control of RASTER_EFFECT_CONTROLS){
+    if(control.group!==currentGroup){
+      currentGroup=control.group;
+      const heading=document.createElement('div');heading.className='color-correction-group';heading.textContent=currentGroup;body.append(heading);
+    }
+    const row=document.createElement('label');row.className='color-correction-row';
+    const label=document.createElement('span');label.textContent=control.label;
+    const input=document.createElement('input');input.type='range';input.name=control.key;input.min=String(control.min);input.max=String(control.max);input.step=String(control.step);
+    input.value=String(layer.smartFilters[targetIndex].filters?.[control.key]??DEFAULT_LAYER_FILTERS[control.key]);
+    const output=document.createElement('output');output.value=formatFilterValue(control.key,input.value);output.textContent=output.value;
+    row.append(label,input,output);body.append(row);
+    input.addEventListener('input',()=>{
+      const target=smartFilterTarget(owner,layerId),item=target?.smartFilters?.find(entry=>entry.id===filterId);
+      if(!item)return;
+      const [min,max]=FILTER_RANGES[control.key]||[control.min,control.max];
+      const value=clamp(Number(input.value),min,max);
+      item.filters[control.key]=value;output.value=formatFilterValue(control.key,value);output.textContent=output.value;render();
+    });
+  }
+
+  const liveItem=()=>smartFilterTarget(owner,layerId)?.smartFilters?.find(entry=>entry.id===filterId)||null;
+  nameInput.addEventListener('input',()=>{const item=liveItem();if(item)item.name=nameInput.value.slice(0,160);});
+  const close=()=>{els.modalRoot.replaceChildren();if(previousFocus instanceof HTMLElement)previousFocus.focus();};
+  const restore=()=>{
+    const target=smartFilterTarget(owner,layerId);
+    if(target){target.smartFilters=structuredClone(original);render();refreshInspectorPanels();}
+  };
+  back.append(modal);els.modalRoot.replaceChildren(back);
+  render();
+
+  modal.querySelector('[data-reset]').addEventListener('click',()=>{
+    for(const control of RASTER_EFFECT_CONTROLS){
+      const input=modal.elements.namedItem(control.key);
+      if(!(input instanceof HTMLInputElement))continue;
+      input.value=String(DEFAULT_LAYER_FILTERS[control.key]);input.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+  });
+  modal.querySelector('[data-cancel]').addEventListener('click',()=>{restore();close();setStatus('Изменения смарт-фильтра отменены');});
+  modal.addEventListener('keydown',event=>{
+    if(event.key==='Escape'){event.preventDefault();event.stopPropagation();restore();close();setStatus('Изменения смарт-фильтра отменены');}
+  });
+  modal.addEventListener('submit',event=>{
+    event.preventDefault();
+    const target=smartFilterTarget(owner,layerId),item=liveItem();
+    if(!target||!item){close();return;}
+    item.name=nameInput.value.trim().slice(0,160)||smartFilterDefaultName(target);
+    const changed=JSON.stringify(target.smartFilters)!==JSON.stringify(original);
+    close();
+    if(changed)commit(isNew?'Добавить смарт-фильтр':'Изменить смарт-фильтр');
+    else {target.smartFilters=structuredClone(original);render();refreshInspectorPanels();}
+  });
+  nameInput.focus();nameInput.select();
+}
+
 function smartObjectSessionDepth(session=currentSession()){
   let depth=0,current=session;
   const visited=new Set();
@@ -9268,6 +9540,8 @@ const menus={
     ['Новая группа слоёв','',addGroup],
     ['Преобразовать в смарт-объект','',convertSelectedToSmartObject,()=>Boolean(selected())&&!['smart-object','adjustment'].includes(selected().type)&&!isLayerLocked(doc,selected())],
     ['Редактировать содержимое смарт-объекта','',()=>openSmartObjectContents(selected()),()=>selected()?.type==='smart-object'&&Boolean(selected()?.embeddedDocument)],
+    ['Добавить смарт-фильтр…','',()=>openSmartFilterDialog(selected()),()=>selected()?.type==='smart-object'&&!isLayerLocked(doc,selected())&&(selected()?.smartFilters?.length||0)<24],
+    ['Очистить смарт-фильтры','',()=>clearSmartFilters(selected()),()=>selected()?.type==='smart-object'&&!isLayerLocked(doc,selected())&&Boolean(selected()?.smartFilters?.length)],
     ['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],

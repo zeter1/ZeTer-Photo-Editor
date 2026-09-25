@@ -63,6 +63,7 @@ test('layer blending menu targets the clicked layer and disables edits when lock
     toggleSelectedVisibility:()=>{}, toggleSelectedLock:()=>{}, rasterizeSelectedLayer:()=>{},
     addSelectedLayerMask:()=>{}, removeSelectedLayerMask:()=>{},
     applySelectionToVectorMask:()=>{}, editSelectedVectorMask:()=>{}, invertSelectedVectorMask:()=>{}, toggleSelectedVectorMask:()=>{}, removeSelectedVectorMask:()=>{},
+    openSmartObjectContents:()=>{}, convertSelectedToSmartObject:()=>{}, openSmartFilterDialog:()=>{}, clearSmartFilters:()=>{},
     selectionShape:null,
   };
   vm.runInNewContext(`${layerMenuFunction}\nglobalThis.getMenu=layerContextMenu;`,context);

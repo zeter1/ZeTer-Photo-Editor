@@ -26,6 +26,7 @@ export const MIN_LAYER_SCALE = 0.01;
 export const MAX_LAYER_SCALE = 100;
 export const MAX_LAYER_POSITION = 120000;
 export const MAX_ICC_PROFILE_DATA_URL = 5_700_000;
+export const MAX_SMART_FILTERS = 24;
 
 export function imageResizeTransforms(layers, sx, sy) {
   return layers.map(layer => {
@@ -115,8 +116,19 @@ export function createSmartObjectLayer(overrides = {}) {
     name: 'Смарт-объект',
     previewDataUrl: null,
     embeddedDocument: null,
+    smartFilters: [],
     ...overrides,
   });
+}
+
+export function createSmartFilter(overrides = {}) {
+  return {
+    id: uid('smart-filter'),
+    name: 'Смарт-фильтр',
+    enabled: true,
+    filters: { ...DEFAULT_LAYER_FILTERS },
+    ...overrides,
+  };
 }
 
 export function createAdjustmentLayer(overrides = {}) {
@@ -500,6 +512,22 @@ export function sanitizeFilters(filters = {}) {
   return result;
 }
 
+export function sanitizeSmartFilters(value = []) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.slice(0, MAX_SMART_FILTERS).map((item,index) => {
+    let id = shortText(item?.id, '', 160).trim();
+    if (!id || seen.has(id)) id = uid('smart-filter');
+    seen.add(id);
+    return createSmartFilter({
+      id,
+      name: shortText(item?.name, `Смарт-фильтр ${index + 1}`, 160).trim() || `Смарт-фильтр ${index + 1}`,
+      enabled: item?.enabled !== false,
+      filters: sanitizeFilters(item?.filters),
+    });
+  });
+}
+
 export function sanitizeLayerMask(mask) {
   if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
   const dataUrl = typeof mask.dataUrl === 'string' && /^data:image\//i.test(mask.dataUrl) ? mask.dataUrl : null;
@@ -623,6 +651,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
   } else if (type === 'smart-object') {
     checkedCanvasSize(result.width, result.height, `Смарт-объект «${result.name || 'Без имени'}»`);
     result.previewDataUrl = typeof layer?.previewDataUrl === 'string' && /^data:image\//i.test(layer.previewDataUrl) ? layer.previewDataUrl : null;
+    result.smartFilters = sanitizeSmartFilters(layer?.smartFilters);
     if (embeddedDepth >= MAX_EMBEDDED_DOCUMENT_DEPTH) {
       result.embeddedDocument = null;
     } else if (layer?.embeddedDocument && typeof layer.embeddedDocument === 'object' && !Array.isArray(layer.embeddedDocument)) {

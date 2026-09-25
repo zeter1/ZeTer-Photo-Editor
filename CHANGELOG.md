@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-25 — Smart Filters Stage 11a
+
+- Added: native ZPE Smart Filter stack для `smart-object`, максимум 24 entry с собственными name/enabled/filter payload.
+- UI: Properties показывает ordered stack; доступны add/edit с live preview, enable/disable, move up/down, delete и clear-all.
+- Semantics: список отображается top-first, а renderer применяет enabled Smart Filters снизу вверх; outer layer filters остаются отдельным совместимым этапом.
+- Rendering: каждый Smart Filter использует существующие advanced color corrections через Pixel Worker и basic Canvas filter pass, не изменяя embedded source document.
+- Cache correctness: Smart Filter cache и outer adjusted-raster cache учитывают `previewDataUrl + stack signature`, поэтому edit/reorder/content update инвалидируют результат без ручного cache-busting.
+- Reliability: Cancel восстанавливает исходный stack; Apply создаёт одну history entry; sanitizer ограничивает stack и чинит duplicate IDs.
+- Regression: state round-trip/clamping/limit, bottom-up render contract, cache-key contract, UI operations и isolated context-menu harness.
+
 ### 2026-09-25 — Paths Panel Stage 10f
 
 - Added: отдельная collapsible-панель «Контуры» со списком `document.paths` и Photoshop resource ID/числом subpaths/узлов.
