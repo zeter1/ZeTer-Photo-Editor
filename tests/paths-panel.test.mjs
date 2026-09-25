@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const sessions=await readFile(new URL('../src/workspace/session-controller.js',import.meta.url),'utf8');
 const html=await readFile(new URL('../index.html',import.meta.url),'utf8');
 const css=await readFile(new URL('../src/styles.css',import.meta.url),'utf8');
 
@@ -39,8 +40,8 @@ test('Stage 10f applies a saved path as a vector mask and direct-edits it in doc
 });
 
 test('Stage 10f keeps selected path per document session and clears edit mode on document replacement',()=>{
-  assert.match(main,/session\.selectedPathIndex = selectedDocumentPathIndex/);
-  assert.match(main,/selectedDocumentPathIndex = Number\.isInteger\(session\.selectedPathIndex\)/);
-  assert.match(main,/selectedPathIndex: -1/);
+  assert.match(sessions,/session\.selectedPathIndex = runtime\.selectedDocumentPathIndex/);
+  assert.match(sessions,/selectedPathIndex: Number\.isInteger\(session\.selectedPathIndex\)/);
+  assert.match(sessions,/selectedPathIndex: -1/);
   assert.match(main,/documentPathEditIndex = -1/);
 });

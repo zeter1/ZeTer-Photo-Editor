@@ -8,6 +8,7 @@
 - Architecture: `src/main.js` теперь только связывает controller с live editor state через явные getters/callbacks; document model остаётся в `src/core/state.js`, поэтому новый controller не становится вторым source of truth.
 - Tests: добавлен отдельный unit regression для session sync, уникальных имён новых вкладок и Smart Object parent guard; существующий document-tabs contract переведён на нового владельца.
 - Docs/AI: AGENTS, PROJECT и CODEMAP указывают `src/workspace/session-controller.js` как каноническую точку для задач по вкладкам/сессиям.
+- Regression follow-up: VM/source-contract проверки inactive rename/duplicate и per-document path state переведены со старого `src/main.js` на реальный `createDocumentSessionController`, чтобы тестировать нового владельца поведения, а не прежнее расположение функций.
 
 ### 2026-09-26T00:07:00+03:00 — Архитектурный рефакторинг и AI-friendly карта проекта
 
