@@ -100,7 +100,8 @@ test('Stage 12f retouch result survives canonical high-depth source serializatio
 
 test('Stage 12f routes blur, clone, heal, smudge, dodge and burn through native high-depth paint state',()=>{
   assert.match(main,/NATIVE_HIGH_DEPTH_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
-  assert.match(main,/applyPixelBufferToneDab\(highDepthPaintBuffer/);
+  assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferToneDab:applyPixelBufferToneDab/);
+  assert.match(main,/changed=fn\(highDepthPaintBuffer,point\.x,point\.y/);
   assert.match(main,/applyCmykPixelBufferBlurDab:applyPixelBufferBlurDab/);
   assert.match(main,/applyCmykPixelBufferCloneDab:applyPixelBufferCloneDab/);
   assert.match(main,/applyCmykPixelBufferSmudgeDab:applyPixelBufferSmudgeDab/);
