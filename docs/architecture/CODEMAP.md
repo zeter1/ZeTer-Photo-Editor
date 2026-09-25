@@ -18,7 +18,10 @@ Pure immutable-ish configuration: tool labels/help, control metadata, storage ke
 ### `tool-layout.js`
 Pure toolbar order/grid-slot helpers. Safe to unit-test without browser state.
 
-Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
+### `toolbar-controller.js`
+Narrow browser controller for toolbar-only DOM state: drag/drop reorder, persisted order, drop marker, tooltips and post-drag click suppression. It receives the toolbar element + status callback and deliberately does **not** own active tool or document/layer state.
+
+Future UI extractions should follow the same pattern: explicit dependencies, one narrow owner and no hidden document-state ownership.
 
 ## Core — `src/core/`
 
