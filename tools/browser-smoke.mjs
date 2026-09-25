@@ -311,6 +311,22 @@ async function runSmoke() {
     assert(initial.rows === 0, 'Fresh profile should start without layer rows', JSON.stringify(initial));
     assert(Object.values(initial.controls).every(value => value === true), 'Layer edit controls must be disabled when no layer is selected', JSON.stringify(initial.controls));
 
+    const toolbarBefore = await evaluate(client, `[...document.querySelectorAll('.toolbar .tool')].map(button => button.dataset.tool)`);
+    assert(toolbarBefore.length > 3, 'Toolbar must expose draggable tools', JSON.stringify(toolbarBefore));
+    const persistedToolbarOrder = [toolbarBefore.at(-1), ...toolbarBefore.slice(0, -1)];
+    await evaluate(client, `(() => {
+      localStorage.setItem('zeter-photo-editor.tool-order.v1', JSON.stringify(${JSON.stringify(persistedToolbarOrder)}));
+      document.documentElement.dataset.appReady = 'reloading';
+      location.reload();
+      return true;
+    })()`);
+    await waitFor('persisted toolbar order after reload', async () => evaluate(client, `document.documentElement?.dataset.appReady === 'true'
+      && document.querySelector('.toolbar .tool')?.dataset.tool === ${JSON.stringify(persistedToolbarOrder[0])}
+      && [...document.querySelectorAll('.toolbar .tool')].every(button => button.draggable)`));
+    const toolbarAfter = await evaluate(client, `[...document.querySelectorAll('.toolbar .tool')].map(button => button.dataset.tool)`);
+    assert(JSON.stringify(toolbarAfter) === JSON.stringify(persistedToolbarOrder), 'Toolbar order must survive reload', JSON.stringify({ toolbarBefore, toolbarAfter, persistedToolbarOrder }));
+    assertNoBrowserErrors(errors, stderrState);
+
     await evaluate(client, `document.querySelector('#addRasterBtn').click(); true`);
     await waitFor('new raster layer', async () => evaluate(client, `document.querySelectorAll('.layer-row').length === 1 && Boolean(document.querySelector('.layer-row.selected'))`));
 

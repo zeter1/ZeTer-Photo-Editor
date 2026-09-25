@@ -12,6 +12,7 @@ import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, 
 import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, compositeCmykPixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment, applyCmykPixelBufferToneDab, applyCmykPixelBufferBlurDab, applyCmykPixelBufferCloneDab, applyCmykPixelBufferSmudgeDab, floodFillPixelBuffer, floodFillCmykPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
+import { sanitizeToolOrder, moveToolInOrder } from './core/tool-layout.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
 import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustments.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText, rewritePsdShapeStyle, rewritePsdAdjustmentBlocks } from './adapters/psd.js';
@@ -87,6 +88,7 @@ const RASTER_EFFECT_CONTROLS = [
 ];
 const UI_COLLAPSE_STORAGE_KEY = 'zeter-photo-editor.ui-collapse.v1';
 const SMART_SNAP_STORAGE_KEY = 'zeter-photo-editor.smart-snap.v1';
+const TOOL_ORDER_STORAGE_KEY = 'zeter-photo-editor.tool-order.v1';
 const NATIVE_HIGH_DEPTH_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
 const NATIVE_CMYK_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
 const collapsedPanelIds = new Set();
@@ -97,6 +99,8 @@ let documentSessions = [];
 let activeSessionId = '';
 let nextSessionNumber = 1;
 let currentTool = 'move';
+let toolbarDragToolId = '';
+let suppressToolClick = false;
 let renderVersion = 0;
 let renderFrame = 0;
 let renderBusy = false;
@@ -170,10 +174,131 @@ let smartGuides = { x:null, y:null };
 const RECOVERY_DEBOUNCE_MS = 1500;
 
 function setStatus(message) { els.status.textContent = message; }
+
+function toolbarToolIds() {
+  return [...els.toolbar.querySelectorAll('.tool')].map(button => button.dataset.tool).filter(Boolean);
+}
+function applyToolbarToolOrder(order) {
+  const buttons = [...els.toolbar.querySelectorAll('.tool')];
+  const available = buttons.map(button => button.dataset.tool).filter(Boolean);
+  const normalized = sanitizeToolOrder(order, available);
+  const byTool = new Map(buttons.map(button => [button.dataset.tool, button]));
+  const anchor = els.toolbar.querySelector('.toolbar-spacer, .color-chip');
+  for (const tool of normalized) {
+    const button = byTool.get(tool);
+    if (button) els.toolbar.insertBefore(button, anchor);
+  }
+  return normalized;
+}
+function readToolbarToolOrder() {
+  let saved = null;
+  try {
+    saved = JSON.parse(localStorage.getItem(TOOL_ORDER_STORAGE_KEY) || 'null');
+  } catch (error) {
+    console.warn('Could not restore toolbar tool order', error);
+  }
+  return applyToolbarToolOrder(saved);
+}
+function persistToolbarToolOrder(order = toolbarToolIds()) {
+  try {
+    localStorage.setItem(TOOL_ORDER_STORAGE_KEY, JSON.stringify(order));
+    return true;
+  } catch (error) {
+    console.warn('Could not persist toolbar tool order', error);
+    return false;
+  }
+}
+function clearToolbarDropTarget() {
+  for (const button of els.toolbar.querySelectorAll('.tool-drop-target')) {
+    button.classList.remove('tool-drop-target');
+    delete button.dataset.dropAfter;
+  }
+  els.toolbar.classList.remove('tool-drop-at-end');
+}
+function toolDropAfterPointer(button, event) {
+  const rect = button.getBoundingClientRect();
+  const dx = (event.clientX - (rect.left + rect.width / 2)) / Math.max(rect.width, 1);
+  const dy = (event.clientY - (rect.top + rect.height / 2)) / Math.max(rect.height, 1);
+  return Math.abs(dx) > Math.abs(dy) ? dx > 0 : dy > 0;
+}
+function commitToolbarToolMove(targetTool = null, placeAfter = true) {
+  const next = moveToolInOrder(toolbarToolIds(), toolbarDragToolId, targetTool, placeAfter);
+  applyToolbarToolOrder(next);
+  return persistToolbarToolOrder(next);
+}
+function initToolbarReorder() {
+  readToolbarToolOrder();
+  els.toolbar.setAttribute('aria-label', 'Инструменты. Кнопки можно перетаскивать для изменения порядка.');
+  for (const button of els.toolbar.querySelectorAll('.tool')) {
+    button.draggable = true;
+    button.setAttribute('aria-roledescription', 'перетаскиваемый инструмент');
+    button.addEventListener('dragstart', event => {
+      toolbarDragToolId = button.dataset.tool || '';
+      if (!toolbarDragToolId) { event.preventDefault(); return; }
+      suppressToolClick = true;
+      button.classList.add('tool-dragging');
+      clearToolbarDropTarget();
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', `tool:${toolbarDragToolId}`);
+      }
+      setStatus(`Перемещение инструмента «${TOOL_LABELS[toolbarDragToolId] || toolbarDragToolId}»`);
+    });
+    button.addEventListener('dragover', event => {
+      if (!toolbarDragToolId || toolbarDragToolId === button.dataset.tool) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      clearToolbarDropTarget();
+      button.classList.add('tool-drop-target');
+      button.dataset.dropAfter = String(toolDropAfterPointer(button, event));
+    });
+    button.addEventListener('dragleave', event => {
+      if (event.relatedTarget && button.contains(event.relatedTarget)) return;
+      button.classList.remove('tool-drop-target');
+      delete button.dataset.dropAfter;
+    });
+    button.addEventListener('drop', event => {
+      if (!toolbarDragToolId || toolbarDragToolId === button.dataset.tool) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const movedLabel = TOOL_LABELS[toolbarDragToolId] || toolbarDragToolId;
+      const placeAfter = button.dataset.dropAfter === 'true' || toolDropAfterPointer(button, event);
+      const saved = commitToolbarToolMove(button.dataset.tool, placeAfter);
+      clearToolbarDropTarget();
+      setStatus(saved
+        ? `Инструмент «${movedLabel}» перемещён. Порядок сохранён.`
+        : `Инструмент «${movedLabel}» перемещён, но браузер не разрешил сохранить порядок.`);
+    });
+    button.addEventListener('dragend', () => {
+      button.classList.remove('tool-dragging');
+      clearToolbarDropTarget();
+      toolbarDragToolId = '';
+      setTimeout(() => { suppressToolClick = false; }, 0);
+    });
+  }
+  els.toolbar.addEventListener('dragover', event => {
+    if (!toolbarDragToolId || event.target.closest?.('.tool')) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    clearToolbarDropTarget();
+    els.toolbar.classList.add('tool-drop-at-end');
+  });
+  els.toolbar.addEventListener('drop', event => {
+    if (!toolbarDragToolId || event.target.closest?.('.tool')) return;
+    event.preventDefault();
+    const movedLabel = TOOL_LABELS[toolbarDragToolId] || toolbarDragToolId;
+    const saved = commitToolbarToolMove(null, true);
+    clearToolbarDropTarget();
+    setStatus(saved
+      ? `Инструмент «${movedLabel}» перемещён в конец. Порядок сохранён.`
+      : `Инструмент «${movedLabel}» перемещён, но браузер не разрешил сохранить порядок.`);
+  });
+}
 function initTooltips(){
   const tooltip=document.createElement('div');tooltip.id='toolTooltip';tooltip.className='tool-tooltip';tooltip.setAttribute('role','tooltip');tooltip.hidden=true;document.body.append(tooltip);
   const hide=()=>{tooltip.hidden=true;};
-  for(const button of $$('.tool')){const help=TOOL_HELP[button.dataset.tool];if(!help)continue;button.removeAttribute('title');button.setAttribute('aria-describedby',tooltip.id);const show=()=>{const rect=button.getBoundingClientRect();tooltip.innerHTML=`<strong>${TOOL_LABELS[button.dataset.tool]}</strong><span>${help.description}</span><kbd>${help.shortcut}</kbd>`;tooltip.hidden=false;const width=tooltip.offsetWidth;const height=tooltip.offsetHeight;tooltip.style.left=`${Math.min(window.innerWidth-width-10,rect.right+10)}px`;tooltip.style.top=`${clamp(rect.top+rect.height/2-height/2,8,window.innerHeight-height-8)}px`;};button.addEventListener('pointerenter',show);button.addEventListener('pointerleave',hide);button.addEventListener('focus',show);button.addEventListener('blur',hide);}
+  for(const button of $$('.tool')){const help=TOOL_HELP[button.dataset.tool];if(!help)continue;button.removeAttribute('title');button.setAttribute('aria-describedby',tooltip.id);const show=()=>{const rect=button.getBoundingClientRect();tooltip.innerHTML=`<strong>${TOOL_LABELS[button.dataset.tool]}</strong><span>${help.description}</span><kbd>${help.shortcut}</kbd>`;tooltip.hidden=false;const width=tooltip.offsetWidth;const height=tooltip.offsetHeight;tooltip.style.left=`${Math.min(window.innerWidth-width-10,rect.right+10)}px`;tooltip.style.top=`${clamp(rect.top+rect.height/2-height/2,8,window.innerHeight-height-8)}px`;};button.addEventListener('pointerenter',show);button.addEventListener('pointerleave',hide);button.addEventListener('focus',show);button.addEventListener('blur',hide);button.addEventListener('dragstart',hide);button.addEventListener('dragend',hide);}
 }
 function toast(message, tone = '') {
   const item = document.createElement('div');
@@ -6809,7 +6934,7 @@ els.viewport.addEventListener('contextmenu',e=>{
 });
 window.addEventListener('blur',()=>{closeMenu();spaceHeld=false;if(!drag)els.overlay.style.cursor=defaultToolCursor();});
 
-$$('.tool').forEach(b=>b.onclick=()=>setTool(b.dataset.tool));
+$$('.tool').forEach(b=>b.onclick=()=>{if(suppressToolClick)return;setTool(b.dataset.tool);});
 els.primaryColor.oninput=()=>els.colorChip.style.background=els.primaryColor.value;
 els.brushSize.oninput=()=>els.brushSizeValue.textContent=els.brushSize.value;
 els.toolOpacity.oninput=()=>els.toolOpacityValue.textContent=`${els.toolOpacity.value}%`;
@@ -7012,6 +7137,7 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 window.addEventListener('beforeunload',e=>{syncCurrentSession();if(documentSessions.some(session=>session.dirty)||documentEditPending()){e.preventDefault();e.returnValue='';}});
 
 async function bootstrap(){
+  initToolbarReorder();
   initTooltips();
   initCollapsiblePanels();
   readSmartSnapState();
