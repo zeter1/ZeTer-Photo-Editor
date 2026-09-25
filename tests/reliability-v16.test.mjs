@@ -72,7 +72,7 @@ test('layer menu has center and fit-to-canvas transforms', () => {
 
 
 test('modal submissions await async work, surface failures, and restore focus', () => {
-  const modal = main.match(/function showModal\(\{title,[^\n]*onSubmit\}\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  const modal = main.match(/function showModal\(\{title,[^\n]*onSubmit(?:,onMount=null)?\}\) \{[\s\S]*?\n\}/)?.[0] ?? '';
   assert.match(modal, /await onSubmit\?\.\(data,\(\)=>!closed&&modal\.isConnected\)/);
   assert.match(modal, /submit\.disabled=true/);
   assert.match(modal, /if\(result!==false\)close\(\)/);
