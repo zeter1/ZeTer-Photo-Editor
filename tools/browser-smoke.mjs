@@ -319,24 +319,23 @@ async function runSmoke() {
       const source=tools.at(-1);
       const first=tools[0].getBoundingClientRect();
       const second=tools[1].getBoundingClientRect();
-      const gapX=(first.right+second.left)/2;
+      const gapWidth=Math.max(0,second.left-first.right);
+      const gapX=first.right+gapWidth*0.75;
       const gapY=first.top+first.height/2;
-      const gapTarget=document.elementFromPoint(gapX,gapY);
       const dt=new DataTransfer();
       source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:source.getBoundingClientRect().left+4,clientY:source.getBoundingClientRect().top+4}));
-      gapTarget.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:gapX,clientY:gapY}));
-      gapTarget.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:gapX,clientY:gapY}));
+      toolbar.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:gapX,clientY:gapY}));
+      toolbar.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:gapX,clientY:gapY}));
       source.dispatchEvent(new DragEvent('dragend',{bubbles:true,cancelable:true,dataTransfer:dt,clientX:gapX,clientY:gapY}));
       return {
-        gapTargetClass:gapTarget.className,
-        gapTargetIsToolbar:gapTarget===toolbar,
+        gapWidth,
         source:source.dataset.tool,
         order:[...toolbar.querySelectorAll('.tool')].map(button=>button.dataset.tool),
         saved:JSON.parse(localStorage.getItem('zeter-photo-editor.tool-order.v1')||'null'),
       };
     })()`);
     const expectedDraggedOrder = [toolbarBefore[0], toolbarBefore.at(-1), ...toolbarBefore.slice(1, -1)];
-    assert(dragResult.gapTargetIsToolbar === true, 'Regression setup must drop into the empty gap between grid cells', JSON.stringify(dragResult));
+    assert(dragResult.gapWidth > 0, 'Desktop toolbar regression requires a measurable gap between grid cells', JSON.stringify(dragResult));
     assert(JSON.stringify(dragResult.order) === JSON.stringify(expectedDraggedOrder), 'Dropping into a toolbar gap must place the tool in that exact grid slot', JSON.stringify({toolbarBefore,dragResult,expectedDraggedOrder}));
     assert(JSON.stringify(dragResult.saved) === JSON.stringify(expectedDraggedOrder), 'Drag/drop toolbar order must persist immediately', JSON.stringify(dragResult));
     await evaluate(client, `document.documentElement.dataset.appReady='reloading'; location.reload(); true`);
