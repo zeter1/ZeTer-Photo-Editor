@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { makeRecoveryRecord, normalizeRecoveryRecord, RECOVERY_RECORD_VERSION, saveRecoverySnapshot, loadRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from '../src/core/recovery.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const sessions = await readFile(new URL('../src/workspace/session-controller.js', import.meta.url), 'utf8');
 const build = await readFile(new URL('../tools/build-bundle.mjs', import.meta.url), 'utf8');
 const recovery = await readFile(new URL('../src/core/recovery.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
@@ -261,7 +262,7 @@ test('autosave is debounce-driven, uses IndexedDB recovery, and serializes disca
   assert.match(main, /saveRecoverySnapshot\(snapshots, \{ activeIndex \}, \{ key: recoveryKey \}\)/);
   assert.match(main, /loadRecoverySnapshots\(\{includeInvalid:true\}\)/);
   assert.match(main, /if \(value\) queueRecovery\(\)/);
-  assert.match(main, /queueRecovery\(\{ immediate: true \}\)/);
+  assert.match(sessions, /queueRecovery\(\{ immediate:true \}\)/);
   assert.match(main, /visibilitychange/);
   assert.doesNotMatch(main, /localStorage\.setItem\([^\n]*snapshot/);
   assert.match(build, /src\/core\/recovery\.js/);

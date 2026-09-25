@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
+import { createDocumentSessionController } from '../src/workspace/session-controller.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const boundary = main.slice(main.indexOf('function documentEditPending()'), main.indexOf('function reportRecoveryFailure('));
 const fileCommands = main.slice(main.indexOf('function saveProject()'), main.indexOf('function canvasToPngBlob('));
-const switchTab = main.slice(main.indexOf('function activateDocumentTab('), main.indexOf('function addDocumentTab('));
 const jumpHistory = main.slice(main.indexOf('function jumpToHistory('), main.indexOf('function updateLayerControls('));
 const fillCommand = main.slice(main.indexOf('async function fillAtPoint('), main.indexOf('async function clearSelectedPixels('));
 const deleteCommand = main.slice(main.indexOf('function deleteSelected()'), main.indexOf('function duplicateSelected()'));
@@ -32,7 +32,18 @@ test('save and tab switch wait for a pending document edit', () => {
     updateAll: () => calls.push('update'),
     requestAnimationFrame: () => {}, els: { viewport: { focus: () => {} } },
   };
-  runInNewContext(`${boundary}\n${fileCommands}\n${switchTab}\n${jumpHistory}\nglobalThis.commands={saveProject,activateDocumentTab,jumpToHistory};`, context);
+  runInNewContext(`${boundary}\n${fileCommands}\n${jumpHistory}\nglobalThis.commands={saveProject,jumpToHistory};`, context);
+  const tabController = createDocumentSessionController({
+    getSessions:()=>context.documentSessions,
+    getActiveSessionId:()=>context.activeSessionId,
+    setActiveSessionId:value=>{context.activeSessionId=value;},
+    getRuntimeState:()=>({doc:context.doc,history:context.history,zoom:.75,dirty:context.dirty,cropRect:null,selectionRect:null,selectionShape:null,selectedDocumentPathIndex:-1}),
+    applyRuntimeState:()=>context.loadSession(),
+    cloneSelectionShape:shape=>shape?structuredClone(shape):null,
+    blockPendingDocumentEdit:()=>context.blockPendingDocumentEdit(),
+    updateAll:()=>context.updateAll(),
+  });
+  context.commands.activateDocumentTab=id=>tabController.activateDocumentTab(id);
   context.commands.saveProject();
   context.commands.activateDocumentTab('second');
   context.commands.jumpToHistory(0);
