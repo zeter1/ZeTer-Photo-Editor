@@ -6553,7 +6553,7 @@ function parseLinkedLayerRecord(reader,sourceKey,warnings) {
       timestamp={year,month,day,hour,minute,seconds};
     }
     fileSize=reader.u64();
-    if(version>2){
+    if(version>2&&dataSize>0){
       if(dataSize>reader.end-reader.offset)throw new PsdImportError('Linked external cached data обрезаны','PSD_LINKED_LAYER_DATA');
       const raw=reader.take(dataSize);
       if(dataSize<=MAX_PSD_LINKED_ASSET_BYTES)data=raw.slice();
@@ -6572,7 +6572,7 @@ function parseLinkedLayerRecord(reader,sourceKey,warnings) {
   if(version>=5)childId=readPsdUnicodeString(reader,'Linked Layer child id');
   if(version>=6)modTime=readPsdFloat64(reader);
   if(version>=7)lockState=reader.u8();
-  if(kindCode==='liFE'&&version===2){
+  if(kindCode==='liFE'&&version===2&&dataSize>0){
     if(dataSize>reader.end-reader.offset)throw new PsdImportError('Linked external v2 cached data обрезаны','PSD_LINKED_LAYER_DATA');
     const raw=reader.take(dataSize);
     if(dataSize<=MAX_PSD_LINKED_ASSET_BYTES)data=raw.slice();

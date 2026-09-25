@@ -14,6 +14,7 @@
 - External-link safety: пути `fullPath/relPath` из Photoshop descriptors не открываются автоматически и не дают PSD доступ к локальной файловой системе.
 - Round-trip invariant: неизменённый extracted embedded document сохраняет Stage 14a byte-for-byte native metadata/resource passthrough; после content edit preview/fingerprint меняется и native passthrough отключается до resource rewrite Stage 14c.
 - Real fixture expansion: MIT `psd-tools-placedLayer.psd` добавляет одновременно embedded PNG и external PNG/PSD Smart Objects; regression проверяет typed UUID matching и отсутствие filesystem resolution.
+- CI follow-up: external `liFE` records с `datasize=0` теперь имеют `data=null`, а не пустой `Uint8Array`, чтобы typed model отличал отсутствие cached payload от реально embedded zero-byte data.
 - Version: приложение синхронизировано на 1.34.0.
 
 ## 1.33.0 — 2026-09-25
