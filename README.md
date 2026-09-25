@@ -72,6 +72,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **PSD Export Stage 4**: экспортирует RGB/8-bit `.psd` с отдельными слоями, Unicode-именами, opacity, visibility, поддерживаемыми blend modes, merged transparency и bitmap user masks; каналы пишутся PackBits/RLE без CDN и внешних зависимостей. Text/shape/transforms/filters/styles растрируются в preview соответствующего слоя, а adjustment layers сохраняют визуальный результат через отдельный верхний `ZPE Composite Preview`;
 - **PSD Writer Stage 6b**: PackBits/RLE channels кодируются построчно с bounded row buffer, без полноразмерных временных channel planes; крупные writer sections собираются chunk-wise без промежуточных full-section копий. Это снижает peak memory и подготавливает streaming/PSB pipeline;
 - **PSD Blob Stage 6c**: браузерный экспорт собирает `Blob` прямо из готовых writer chunks вместо обязательного финального `Uint8Array` + второго `Blob`-обёртывания; byte-array API `encodePsd()` сохранён для совместимости и тестов;
+- **PSB Stage 7a**: импорт и экспорт RGB/8-bit `.psb` (Photoshop Large Document Format, version 2) с 64-bit section/channel lengths и 32-bit RLE scanline counts; текущие ZPE safety limits по памяти/Canvas сохраняются, поэтому это совместимость формата, а не снятие лимитов до 300 000 px;
 - **перетаскивание изображений с рабочего стола по всему окну редактора**;
 - **вставка изображения из буфера обмена через Ctrl+V** (включая скриншоты);
 - `Ctrl+V` использует нативную вставку и резервное чтение Clipboard API, когда браузер это разрешает;
@@ -80,7 +81,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **аварийное автосохранение и восстановление** через IndexedDB: каждое окно хранит отдельную копию своих несохранённых вкладок; при новом запуске можно восстановить найденные документы или отложить решение, сохранив копии; повреждённая копия не открывается без проверки и остаётся в хранилище;
 - автосохранение выполняется с задержкой после изменений и сериализует фоновые записи; `Ctrl+S` запускает скачивание `.zpe`, но браузер не подтверждает запись файла на диск, поэтому отметка несохранённых изменений и аварийная копия остаются;
 - собственный проект `.zpe` с embedded data URL;
-- экспорт PNG/JPEG/WebP и layered PSD Stage 4;
+- экспорт PNG/JPEG/WebP, layered PSD Stage 4 и RGB/8-bit PSB Stage 7a;
 - полнофункциональное верхнее меню: Файл, Правка, Слой, Изображение, Выделение, Вид, Помощь;
 - управление главным меню с клавиатуры: стрелка вниз открывает меню, ↑/↓ перемещают фокус, Esc закрывает;
 - горячие клавиши работают по `KeyboardEvent.code`, поэтому основные Ctrl-команды не зависят от русской/английской раскладки;
@@ -163,7 +164,7 @@ npm test
 - `src/core/io.js` — browser I/O helpers;
 - `src/core/pixels.js` — пиксельные операции, включая flood fill;
 - `src/core/recovery.js` — неблокирующее аварийное автосохранение/восстановление через IndexedDB;
-- `src/adapters/psd.js` — изолированный PSD Adapter: binary parser/writer, capability guards, Raw/RLE/ZIP decode, RLE encode и нормализованный RGB/8-bit raster contract;
+- `src/adapters/psd.js` — изолированный PSD/PSB Adapter: binary parser/writer, version-aware 32/64-bit lengths, Raw/RLE/ZIP decode, RLE encode и нормализованный RGB/8-bit raster contract;
 - `src/main.js` — исходный UI controller, меню, инструменты, drag/drop, clipboard и shortcuts;
 - `src/app.bundle.js` — готовая браузерная сборка для прямого запуска через `file://`;
 - `tools/build-bundle.mjs` — воспроизводимая сборка runtime без внешних зависимостей;
@@ -173,6 +174,6 @@ npm test
 
 ## Ограничения относительно Photopea
 
-PSD Import Stage 3 и PSD Export Stage 4 дают ограниченный RGB/8-bit layered round-trip, а ZPE Smart Objects Stage 5a добавляет нативные embedded smart-object documents внутри `.zpe`. Это ещё не полная Photoshop-семантика: нет PSB, native PSD text/vector/smart-object round-trip, вложенных PSD-групп, native Photoshop adjustment-layer mapping, CMYK/16/32-bit color pipeline и полного набора Photoshop-compatible effects. Экспорт сохраняет визуальный результат сложных ZPE-слоёв через raster preview; при наличии adjustment layers добавляется верхний `ZPE Composite Preview`, а исходные слои остаются скрытыми. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
+PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают ограниченный RGB/8-bit layered round-trip, а ZPE Smart Objects Stage 5a добавляет нативные embedded smart-object documents внутри `.zpe`. Это ещё не полная Photoshop-семантика: PSB работает в текущих ZPE memory/Canvas limits; нет native PSD/PSB text/vector/smart-object round-trip, вложенных Photoshop-групп, native Photoshop adjustment-layer mapping, CMYK/16/32-bit color pipeline и полного набора Photoshop-compatible effects. Экспорт сохраняет визуальный результат сложных ZPE-слоёв через raster preview; при наличии adjustment layers добавляется верхний `ZPE Composite Preview`, а исходные слои остаются скрытыми. Базовые layer masks и adjustment layers уже работают, а «Перо» создаёт и напрямую редактирует сохраняемые cubic Bézier-контуры.
 
 Следующие крупные направления развития: PSD mapping для embedded smart objects/text/vector/adjustment layers и групп, linked smart objects и smart filters, path operations и vector masks, сложные выделения и маски, PSB/16/32-bit/CMYK, более эффективная tiled-история растра и GPU/worker-ускорение для очень больших документов.

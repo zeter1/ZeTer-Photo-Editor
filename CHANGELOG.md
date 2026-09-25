@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-25 — PSB Stage 7a: RGB/8-bit Large Document Format
+
+- Added: `.psb` import/export как Photoshop Large Document Format version 2 в существующем offline PSD adapter.
+- Format: Layer and Mask section, Layer Info и per-channel lengths используют PSB 64-bit big-endian length fields; RLE scanline byte counts используют 32-bit fields.
+- Compatibility: Color Mode Data и Image Resources сохраняют стандартные 4-byte length fields; PSD version 1 API/format остаётся без изменений.
+- Added: `encodePsb()` и chunk-friendly `encodePsbBlob()`; UI принимает `.psb` и предлагает отдельный PSB export.
+- Added: независимый synthetic PSB fixture проверяет 64-bit section/channel lengths и 32-bit PackBits row counts без использования production writer; отдельный writer round-trip покрывает Unicode layer name, blend mode и bitmap mask.
+- Guardrails: Stage 7a остаётся RGB/8-bit и сохраняет текущие ZPE limits (48 МП import/export buffer budget, 512 МБ input guard, Canvas limits). CMYK/16/32-bit и истинные >2GB/tiled workflows пока не заявляются.
+- Spec basis: Adobe Photoshop File Formats Specification — PSB version 2, 8-byte Layer/Mask + Layer Info + channel lengths, 4-byte RLE row byte counts.
+
 ### 2026-09-24 — CI reliability: Chromium sandbox on hosted Linux
 
 - Fixed: browser smoke добавляет `--no-sandbox` только для root или Linux GitHub Actions, где hosted runner может запрещать usable Chromium sandbox через user-namespace/AppArmor policy.
