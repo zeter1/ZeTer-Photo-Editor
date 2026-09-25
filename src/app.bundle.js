@@ -3080,6 +3080,32 @@ function inspectDisplayIccProfile(profileBytes) {
   if(!transform.profileManaged)throw new ColorManagementError(transform.warning||'Display ICC profile не поддерживается','ICC_DISPLAY_TRANSFORM');
   return{colorSpace:profile.colorSpace.trim(),pcs:profile.pcs.trim(),tags:[...profile.tags.keys()].sort(),method:transform.method};
 }
+
+function iccInputTransformMethod(kind) {
+  if(kind==='mft1')return'icc-lut8';
+  if(kind==='mft2')return'icc-lut16';
+  if(kind==='mAB ')return'icc-mab';
+  return'icc-mpe';
+}
+function createCmykToPcsTransform(profileBytes,{intent='perceptual'}={}) {
+  if(!profileBytes)throw new ColorManagementError('CMYK→PCS transform требует ICC profile','ICC_PROFILE_REQUIRED');
+  const requestedIntent=iccIntentPlan(intent).requested;
+  const profile=iccParseProfile(profileBytes);
+  const sourceIn=iccDeviceToXyzTransform(profile,requestedIntent);
+  return{
+    managed:true,
+    method:iccInputTransformMethod(sourceIn.kind),
+    intent:sourceIn.resolvedIntent,
+    requestedIntent,
+    tag:sourceIn.tag,
+    pcs:profile.pcs.trim(),
+    warning:sourceIn.warnings.length?sourceIn.warnings.join('; '):null,
+    apply(c,m,y,k){
+      const xyz=sourceIn.apply([iccClamp01(c),iccClamp01(m),iccClamp01(y),iccClamp01(k)]);
+      return{xyz,lab:iccXyzD50ToLab(...xyz)};
+    },
+  };
+}
 function createSrgbToCmykTransform(profileBytes=null,{intent='relative'}={}) {
   const requestedIntent=iccIntentPlan(intent).requested;
   const fallback=warning=>({managed:false,method:'srgb-device-cmyk-fallback',intent:'fallback',requestedIntent,tag:null,warning,apply:(r,g,b)=>deviceCmykFromSrgb(r,g,b)});
@@ -3142,7 +3168,7 @@ function createCmykToSrgbTransform(profileBytes=null,{intent='perceptual',displa
   if(!profileBytes)return fallback('ICC profile отсутствует; используется unmanaged Device CMYK approximation');
   try{
     const profile=iccParseProfile(profileBytes),sourceIn=iccDeviceToXyzTransform(profile,requestedIntent);
-    const method=sourceIn.kind==='mft1'?'icc-lut8':sourceIn.kind==='mft2'?'icc-lut16':sourceIn.kind==='mAB '?'icc-mab':'icc-mpe',warnings=[...sourceIn.warnings,display.warning].filter(Boolean);
+    const method=iccInputTransformMethod(sourceIn.kind),warnings=[...sourceIn.warnings,display.warning].filter(Boolean);
     const applyWithGamut=(c,m,y,k)=>{const xyz=sourceIn.apply([iccClamp01(c),iccClamp01(m),iccClamp01(y),iccClamp01(k)]),displayResult=display.applyXyzDetailed(xyz);return{rgb:displayResult.rgb,outOfGamut:displayResult.outOfGamut,displayDeltaE:displayResult.deltaE||0};};
     return{managed:true,method,intent:sourceIn.resolvedIntent,requestedIntent,displaySpace:display.displaySpace,displayManaged:display.managed,displayProfileManaged:display.profileManaged,displayMethod:display.method,displayTag:display.tag,tag:sourceIn.tag,pcs:profile.pcs.trim(),gamutWarningThreshold:threshold,warning:warnings.length?warnings.join('; '):null,applyWithGamut,apply(c,m,y,k){return applyWithGamut(c,m,y,k).rgb;}};
   }catch(error){return fallback('ICC CMYK transform недоступен ('+(error instanceof Error?error.message:String(error))+'); используется unmanaged Device CMYK approximation');}

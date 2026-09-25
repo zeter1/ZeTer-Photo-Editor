@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "id": "compact-cgats-cmyk",
+      "file": "CGATS001Compat-v2-micro.icc",
+      "kind": "icc-cmyk",
+      "license": "CC0-1.0",
+      "sourceRepository": "saucecontrol/Compact-ICC-Profiles",
+      "sourceCommit": "bdd84663061bc4ae95ca70decff54f581e27f702",
+      "sourcePath": "profiles/CGATS001Compat-v2-micro.icc",
+      "sourceGitBlob": "b5a73495bfc7509837b300800d8197d94e83fab7",
+      "size": 8464,
+      "sha256": "73e1ba37d2bad5bab2a964f40a9eed96209666efc067c3322626214bbef234a0"
+    },
+    {
+      "id": "display-p3-v4",
+      "file": "DisplayP3-v4.icc",
+      "kind": "icc-rgb-display",
+      "license": "CC0-1.0",
+      "sourceRepository": "saucecontrol/Compact-ICC-Profiles",
+      "sourceCommit": "bdd84663061bc4ae95ca70decff54f581e27f702",
+      "sourcePath": "profiles/DisplayP3-v4.icc",
+      "sourceGitBlob": "4ee40fb5eeb6dfde851c989ecc7c3ebd496ba9fc",
+      "size": 480,
+      "sha256": "cb51de38e482ee974c0c76b9689e16aad04bad16e226fed2f30c842d15ff3a3d"
+    },
+    {
+      "id": "psd-tools-cmyk-4x4",
+      "file": "psd-tools-4x4-8bit-cmyk.psd",
+      "kind": "psd-cmyk",
+      "license": "MIT",
+      "sourceRepository": "psd-tools/psd-tools",
+      "sourceCommit": "8f9a25ea98202061365701db54ce938931b27c09",
+      "sourcePath": "tests/psd_files/colormodes/4x4_8bit_cmyk.psd",
+      "sourceGitBlob": "21ffe1c124468d6991a7b71553cb9dd787c4cbfd",
+      "size": 577446,
+      "sha256": "1b662e547d5edc6e10e9a84a03434988c6133795f8b416a03004afa9dd0334fa"
+    },
+    {
+      "id": "psd-tools-group-psb",
+      "file": "psd-tools-group.psb",
+      "kind": "psb-layered",
+      "license": "MIT",
+      "sourceRepository": "psd-tools/psd-tools",
+      "sourceCommit": "8f9a25ea98202061365701db54ce938931b27c09",
+      "sourcePath": "tests/psd_files/group.psb",
+      "sourceGitBlob": "762ade19b89edfe280c0c302567a7a9dbe52612d",
+      "size": 36590,
+      "sha256": "e5322646c91d54e068293e96580faebc3eae5d82d75ab3b38bd0e5c7cfb14ad2"
+    }
+  ]
+}

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.32.0 — 2026-09-25
+
+### 2026-09-25 — Real ICC / Photoshop Compatibility Corpus Stage 13e
+
+- Real ICC corpus: добавлены закреплённые CC0 profiles `CGATS001Compat-v2-micro.icc` и `DisplayP3-v4.icc` из `saucecontrol/Compact-ICC-Profiles` с upstream commit/blob, SHA-256 и полным CC0 notice.
+- Independent oracle: golden vectors сгенерированы Pillow 12.3.0 / LittleCMS 2.19 и проверяют Perceptual CMYK→PCS Lab/XYZ, sRGB и Display P3; expected values больше не вычисляются кодом ZPE.
+- PCS diagnostics: color-management core экспортирует `createCmykToPcsTransform()`, возвращающий managed XYZ D50 + Lab values из того же profile transform contract, что используется display/proof pipeline.
+- Real PSD fixture: MIT `psd-tools` 4×4 CMYK PSD с реальным ~557 КБ printer ICC декодируется в native CMYK PixelBuffer, проходит profile-managed Display-P3 preview и ZPE native raster/profile PSD round-trip без изменения ICC bytes.
+- Real PSB fixture: внешний layered PSB v2 проверяет группы, pass-through semantics, vector/raster mask presence и embedded RGB ICC на независимом контейнере, не созданном writer-ом ZPE.
+- Hermeticity: CI не скачивает fixtures и не зависит от сети; `corpus-manifest.json` проверяет размер + SHA-256 каждого бинарного fixture.
+- Maintenance: добавлен `tools/generate-icc-goldens.py` для осознанной регенерации reference vectors; в CI он не запускается, чтобы update oracle не мог маскировать regression.
+- Third-party hygiene: лицензии и provenance corpus лежат рядом с fixtures.
+- Version: приложение синхронизировано на 1.32.0.
+
 ## 1.31.0 — 2026-09-25
 
 ### 2026-09-25 — Production Color Proofing & Display Profiles Stage 13d

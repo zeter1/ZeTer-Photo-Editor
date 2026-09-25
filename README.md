@@ -9,7 +9,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 Для текста доступны встроенные шрифты с поддержкой кириллицы, загрузка своего файла шрифта и кнопка показа шрифтов компьютера (если браузер предоставит доступ). В окне текста параметры сразу видны на холсте и в предпросмотре фрагмента изображения; окно можно переместить за заголовок и изменить его размер за угол. Размер малого предпросмотра меняется за его нижний угол. «Отмена» убирает временный результат.
 
-## Что умеет версия 1.31.0
+## Что умеет версия 1.32.0
 
 - растровые, текстовые и фигурные слои;
 - видимость, блокировка, порядок, дублирование, непрозрачность и режимы наложения;
@@ -90,6 +90,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **Advanced ICC + Native CMYK Round-trip Stage 13b**: ICC engine теперь понимает v4 `lutAToBType (mAB )` с `curveType`/`parametricCurveType`, A→CLUT→M→Matrix→B pipeline и float `multiProcessElementsType (mpet)` для поддержанных `clut`/`matf` элементов `D2B0..D2B3`. Документ хранит `renderingIntent` + `displaySpace=sRGB`; intent можно переключать у CMYK-слоя, после чего display previews пересчитываются из canonical source. PSD/PSB writer получил настоящий color mode 4: C/M/Y/K снова инвертируются в Photoshop storage, alpha идёт отдельным каналом, 8/16/32-bit typed samples и ICC resource сохраняются native. Совместимый CMYK stack собирает merged image прямо в 5-channel PixelBuffer с opacity и bitmap masks; при mixed RGB, text/shape, adjustment/vector-mask/isolated-group semantics, non-Normal blend или RGB background экспорт честно остаётся на RGB preview fallback.
 - **Native CMYK Editing + Full Proofing Path Stage 13c**: Brush/Eraser/Fill/Clear/Line и typed Blur/Clone/Heal/Smudge/Dodge/Burn работают по canonical CMYK PixelBuffer без RGB raster round-trip; CMYK compositing поддерживает bounded component blend modes. ICC core понимает MPE `cvst/curf`, B2D/B2A и `mBA`, а soft proof выполняет source CMYK → PCS → proof CMYK → PCS → display с BPC.
 - **Production Color Proofing & Display Profiles Stage 13d**: `.zpe` хранит независимый RGB display ICC и отдельный proof intent. Preview проходит `CMYK source ICC → PCS → optional proof CMYK/BPC → RGB display ICC`; поддерживаются PCS→RGB LUT/MPE и типичные monitor `rXYZ/gXYZ/bXYZ + rTRC/gTRC/bTRC` matrix/TRC profiles. Gamut Warning строит magenta overlay по proof/display round-trip ΔE без изменения canonical CMYK samples. Выбранный display ICC симулируется внутри preview; физическую калибровку монитора завершает browser/OS compositor.
+- **Real ICC / Photoshop Compatibility Corpus Stage 13e**: tests теперь используют закреплённые реальные CC0 CMYK/Display-P3 ICC profiles и MIT PSD/PSB fixtures из внешних проектов, а не только synthetic bytes. Независимый oracle от Pillow 12.3.0 / LittleCMS 2.19 проверяет CMYK→PCS Lab/XYZ, sRGB и Display P3 с bounded tolerance; fixture manifest фиксирует upstream commit/blob, размер и SHA-256. Реальный 4×4 CMYK PSD с ~557 КБ printer ICC проходит native raster/profile round-trip, а внешний layered PSB v2 проверяет groups/vector mask/ICC import.
 - импорт PNG/JPEG/WebP/GIF/BMP/SVG;
 - **PSD Import Stage 3**: локальный offline decoder открывает RGB/8-bit `.psd` как редактируемый стек растровых слоёв, переносит bounds, visibility, opacity, поддерживаемые blend modes и bitmap layer masks; raw/RLE/ZIP channel compression декодируется без CDN и внешнего runtime;
 - **PSD Export Stage 4 + Stage 12e/12g + Stage 13b**: экспортирует RGB и совместимый native CMYK `.psd`; CMYK writer пишет color mode 4, C/M/Y/K + alpha и сохраняет 8/16/32-bit typed precision. Несовместимая семантика остаётся явным RGB preview fallback;
@@ -162,7 +163,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Запуск на Windows
 
-Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.31.0 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
+Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.32.0 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
 
 Если браузер показывает старую версию после обновления архива, закройте старую вкладку и откройте `index.html` из новой распакованной папки.
 
@@ -219,4 +220,4 @@ npm test
 
 PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip, Stage 12e–12g сохраняют native RGB 16/32-bit typed channels и совместимый high-depth merged composite, а Stage 13a–13d добавляют native CMYK import/edit/export, ICC source/proof/display transforms, BPC и gamut warning. Это ещё не полная Photoshop-семантика: нет native PSD/PSB text/vector/smart-object/adjustment-layer round-trip, полной parity isolated groups/vector-mask composites, внешних file-linked Smart Objects и полноценного tiled/streaming pipeline. Для color management остаётся важный следующий слой проверки — отдельный corpus реальных открытых CMYK/display ICC profiles и Photoshop/ICC reference outputs; текущие regression fixtures детерминированно моделируют production v4 matrix/TRC, MPE/mAB/mBA и сохраняют embedded ICC bytes.
 
-Следующий imaging-этап: **Stage 13e — Real ICC/Photoshop Compatibility Corpus**: добавить лицензированно безопасный набор реальных открытых display/CMYK ICC profiles, golden Lab/XYZ/RGB/CMYK vectors и PSD/PSB round-trip fixtures, сравниваемые с эталонными ICC-инструментами; затем расширять Photoshop-native smart objects/text/vector/adjustment mapping и tiled/worker/GPU pipeline.
+Следующий imaging-этап: **Stage 14a — Photoshop-native Smart Objects / Placed Layer Round-trip**: разобрать и сохранять реальные placed-layer descriptors/resources, linked/embedded asset identity, transforms и preview cache без преждевременной растризации. После этого — native Text/Shape/Adjustment mapping, более полная isolated-group/vector-mask parity и tiled/worker/GPU pipeline.
