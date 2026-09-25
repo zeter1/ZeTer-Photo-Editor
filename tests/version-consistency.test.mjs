@@ -14,7 +14,8 @@ const version=JSON.parse(packageText).version;
 
 test('public current-version markers stay aligned with package.json',()=>{
   assert.match(version,/^[0-9]+\.[0-9]+\.[0-9]+$/);
-  const capabilityVersions=[...readme.matchAll(/^## Что умеет версия ([0-9]+\.[0-9]+\.[0-9]+)$/gm)].map(match=>match[1]);
+  assert.match(readme,/^## Возможности$/m);
+  const capabilityVersions=[...readme.matchAll(/^\*\*Текущая версия:\*\* ([0-9]+\.[0-9]+\.[0-9]+)$/gm)].map(match=>match[1]);
   assert.deepEqual(capabilityVersions,[version]);
   const startupVersions=[...readme.matchAll(/Версия ([0-9]+\.[0-9]+\.[0-9]+) специально собрана/g)].map(match=>match[1]);
   assert.deepEqual(startupVersions,[version]);
