@@ -15,7 +15,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, too
 
 test('canonical UI and PSD boundaries stay out of legacy compatibility paths', () => {
   assert.match(main, /from '\.\/ui\/tool-config\.js'/);
-  assert.match(main, /from '\.\/ui\/tool-layout\.js'/);
+  assert.match(toolbarController, /from '\.\/tool-layout\.js'/);
   assert.match(main, /from '\.\/formats\/psd\.js'/);
   assert.doesNotMatch(main, /^const TOOL_LABELS\s*=/m);
 

@@ -8,6 +8,7 @@
 - Architecture: controller владеет только UI-механикой панели; `currentTool` и выбор активного инструмента остаются в `src/main.js`, а чистая grid/order математика остаётся в `src/ui/tool-layout.js`.
 - Browser contract: существующий real `file://` smoke продолжает проверять drag в межколоночный gap, DOM order, localStorage и восстановление после reload.
 - Docs/tests: architecture/source contracts и AI code map обновлены на нового канонического владельца toolbar lifecycle.
+- Regression follow-up: architecture gate теперь проверяет корректную цепочку `main.js → toolbar-controller.js → tool-layout.js`, а не требует старую прямую зависимость `main.js → tool-layout.js`.
 
 ### 2026-09-26 — Workspace/session controller extraction
 
