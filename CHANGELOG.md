@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-26 — Architecture & AI Navigation Refactor
+
+- Architecture: статическая конфигурация инструментов/эффектов/storage keys вынесена из большого `src/main.js` в `src/config/editor.js`.
+- UI boundary: drag-and-drop порядка инструментов, localStorage persistence, drop-slot и tooltips теперь принадлежат отдельному `src/ui/toolbar.js`; document/tool orchestration остаётся в composition root.
+- Build: новый `config/ → ui/ → main.js` dependency order добавлен в воспроизводимую `file://` сборку.
+- AI navigation: `AGENTS.md` и новые `docs/ai/START-HERE.md`, `docs/architecture/MODULE-MAP.md`, `docs/testing/VERIFICATION.md` дают task-oriented маршруты к владельцам кода вместо чтения всего репозитория.
+- Documentation split: прежний подробный `docs/PROJECT.md` сохранён как `docs/architecture/RUNTIME-CONTRACTS.md`, а `PROJECT.md` стал компактной картой проекта.
+- Regression: добавлен `tests/project-structure.test.mjs`, который защищает build order, delegation toolbar UI и AI navigation entrypoints.
+
+
 ### 2026-09-25T23:11:00+03:00 — Исправлено точное размещение инструментов при перетаскивании
 
 - Fixed: drop больше не зависит от попадания именно по кнопке инструмента; пустые промежутки и свободные ячейки двухколоночной панели теперь вычисляются как реальные позиции сетки.
