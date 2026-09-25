@@ -16,8 +16,10 @@ test('brush preview is frame-throttled and uses a live raster override', () => {
   assert.match(main, /paintPreviewFrame = requestAnimationFrame\(\(\) =>/);
   assert.match(main, /render\(\{ paintPreview: true \}\)/);
   assert.match(render, /rasterOverrides/);
-  assert.match(render, /layer\.type === 'raster' && rasterOverride \? rasterOverride : await getImage\(dataUrl\)/);
-  assert.match(render, /cacheable: !\(layer\.type === 'raster' && rasterOverride\)/);
+  assert.match(render, /const overrideSource = overrideEntry\?\.source \|\| overrideEntry \|\| null/);
+  assert.match(render, /layer\.type === 'raster' && overrideSource \? overrideSource : await getImage\(dataUrl\)/);
+  assert.match(render, /cacheable: !\(layer\.type === 'raster' && overrideSource\)/);
+  assert.match(render, /overrideSkipAdjustments/);
 });
 
 test('paintTo draws only the latest segment instead of restroking an ever-growing path', () => {
