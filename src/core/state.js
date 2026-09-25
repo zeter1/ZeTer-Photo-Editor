@@ -935,12 +935,12 @@ function sanitizePsdShape(value) {
   };
 }
 
-const PSD_ADJUSTMENT_BLOCK_KEYS = new Set(['brit','CgEd','expA','hue2','hue ','levl','curv']);
+const PSD_ADJUSTMENT_BLOCK_KEYS = new Set(['brit','CgEd','expA','hue2','hue ','levl','curv','nvrt','post','thrs']);
 const MAX_PSD_ADJUSTMENT_DATA_URL_CHARS = 6_000_000;
 
 function sanitizePsdAdjustment(value) {
   if(!value||typeof value!=='object'||Array.isArray(value))return null;
-  const kind=['brightness-contrast','exposure','hue-saturation','levels','curves'].includes(value.kind)?value.kind:null;
+  const kind=['brightness-contrast','exposure','hue-saturation','levels','curves','invert','posterize','threshold'].includes(value.kind)?value.kind:null;
   if(!kind)return null;
   const blocks=(Array.isArray(value.blocks)?value.blocks:[])
     .slice(0,12)

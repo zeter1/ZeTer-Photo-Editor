@@ -46,6 +46,9 @@ export function sanitizeAdjustmentModel(value) {
   if(kind==='hue-saturation'){
     return{kind,hue:intAdjustment(value.hue,-180,180,0),saturation:intAdjustment(value.saturation,-100,100,0),lightness:intAdjustment(value.lightness,-100,100,0),colorize:value.colorize===true};
   }
+  if(kind==='invert')return{kind};
+  if(kind==='posterize')return{kind,levels:intAdjustment(value.levels,2,255,4)};
+  if(kind==='threshold')return{kind,level:intAdjustment(value.level,1,255,128)};
   if(kind==='levels'){
     const channels=Array.isArray(value.channels)?value.channels.slice(0,8).map((entry,index)=>({
       id:intAdjustment(entry?.id,-1,32,index),
@@ -142,6 +145,18 @@ export function applyAdjustmentPixels(imageData,adjustment) {
       else{h=(h+model.hue+360)%360;s=Math.max(0,Math.min(1,s*(1+model.saturation/100)));}
       l=Math.max(0,Math.min(1,l+model.lightness/100));
       [r,g,b]=hslToRgb(h,s,l);
+    }else if(model.kind==='invert'){
+      r=1-r;g=1-g;b=1-b;
+    }else if(model.kind==='posterize'){
+      const levels=model.levels;
+      const correction=255/256;
+      r=Math.floor(correction*r*levels)/(levels-1);
+      g=Math.floor(correction*g*levels)/(levels-1);
+      b=Math.floor(correction*b*levels)/(levels-1);
+    }else if(model.kind==='threshold'){
+      const luminance=Math.round((.3*r+.59*g+.11*b)*255);
+      const value=luminance>=model.level?1:0;
+      r=value;g=value;b=value;
     }else if(model.kind==='levels'){
       r=applyLevels01(r,model.master);g=applyLevels01(g,model.master);b=applyLevels01(b,model.master);
       const byId=new Map(model.channels.map(entry=>[entry.id,entry]));

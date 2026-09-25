@@ -4070,6 +4070,9 @@ function adjustmentPropertiesMarkup(layer) {
   if(value.kind==='brightness-contrast')return adjustmentNumberField('Яркость','brightness',value.brightness,-150,150)+adjustmentNumberField('Контраст','contrast',value.contrast,-100,100)+clipping+nativeInfo;
   if(value.kind==='exposure')return adjustmentNumberField('Exposure','exposure',value.exposure,-20,20,'0.05')+adjustmentNumberField('Offset','offset',value.offset,-2,2,'0.005')+adjustmentNumberField('Gamma','gamma',value.gamma,.1,10,'0.01')+clipping+nativeInfo;
   if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+clipping+nativeInfo;
+  if(value.kind==='invert')return '<label>Инверсия</label><span>Параметров нет</span>'+clipping+nativeInfo;
+  if(value.kind==='posterize')return adjustmentNumberField('Уровни','levels',value.levels,2,255)+clipping+nativeInfo;
+  if(value.kind==='threshold')return adjustmentNumberField('Порог','level',value.level,1,255)+clipping+nativeInfo;
   if(value.kind==='levels'){
     const byId=new Map((value.channels||[]).map(channel=>[channel.id,channel]));
     return levelRecordMarkup('Master','master',value.master)+
@@ -4353,7 +4356,7 @@ async function openPsd(file){
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
     if(parsed.fillLayers?.length)warnings.push(`Stage 15d: найдено ${parsed.fillLayers.length} Photoshop gradient/pattern fill layer(s); bounded GdFl/PtFl metadata разобраны, но canvas пока использует composite preview до editable fill renderer`);
-    if(parsed.adjustmentLayers?.length)warnings.push(`Stage 16a: найдено ${parsed.adjustmentLayers.length} Photoshop adjustment layer(s): Brightness/Contrast, Exposure, Hue/Saturation, Levels и Curves мапятся semantic-first`);
+    if(parsed.adjustmentLayers?.length)warnings.push(`Stage 16c: найдено ${parsed.adjustmentLayers.length} Photoshop adjustment layer(s): Brightness/Contrast, Exposure, Hue/Saturation, Levels, Curves, Invert, Posterize и Threshold мапятся semantic-first`);
     const adjustmentOnlyComposite=Boolean(parsed.adjustmentLayers?.length&&!parsed.layers.length&&parsed.compositePixelBuffer);
     if(adjustmentOnlyComposite)warnings.push('Stage 16a: adjustment-only PSD не содержит base bitmap layers; используется composite preview, чтобы не применить adjustment повторно');
     const isCmyk=parsed.colorMode===4;

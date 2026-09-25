@@ -182,3 +182,25 @@ test('Stage 16b rebuilds real Photoshop point Curves after semantic point edits'
   }
 });
 
+
+test('Stage 16c round-trips native Invert, Posterize and Threshold records through PSD and PSB',async()=>{
+  const u16=value=>new Uint8Array([(value>>>8)&255,value&255]);
+  const cases=[
+    {kind:'invert',block:{signature:'8BIM',key:'nvrt',data:new Uint8Array(0)},model:{kind:'invert'},verify:parsed=>assert.deepEqual(parsed,{kind:'invert'})},
+    {kind:'posterize',block:{signature:'8BIM',key:'post',data:u16(4)},model:{kind:'posterize',levels:7},verify:parsed=>assert.equal(parsed.levels,7)},
+    {kind:'threshold',block:{signature:'8BIM',key:'thrs',data:u16(128)},model:{kind:'threshold',level:173},verify:parsed=>assert.equal(parsed.level,173)},
+  ];
+  for(const item of cases){
+    const rewritten=rewritePsdAdjustmentBlocks([item.block],item.model);
+    for(const [format,encoded] of [
+      ['PSD',encodePsd({width:2,height:1,bitsPerChannel:8,colorMode:3,layers:[{name:item.kind,x:0,y:0,width:0,height:0,opacity:1,blendMode:'source-over',visible:true,psdAdjustment:{kind:item.kind,blocks:rewritten.blocks,channelIds:[]}}],composite:new Uint8ClampedArray(8)})],
+      ['PSB',encodePsb({width:2,height:1,bitsPerChannel:8,colorMode:3,layers:[{name:item.kind,x:0,y:0,width:0,height:0,opacity:1,blendMode:'source-over',visible:true,psdAdjustment:{kind:item.kind,blocks:rewritten.blocks,channelIds:[]}}],composite:new Uint8ClampedArray(8)})],
+    ]){
+      const decoded=await decodePsd(encoded,{maxPixels:100,maxLayers:20});
+      assert.equal(decoded.adjustmentLayers.length,1,item.kind+' '+format);
+      const parsed=decoded.adjustmentLayers[0].psdAdjustment.parsed;
+      assert.equal(parsed.kind,item.kind,item.kind+' '+format+' kind');
+      item.verify(parsed);
+    }
+  }
+});

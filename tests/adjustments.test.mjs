@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyAdjustmentPixels, sanitizeAdjustmentModel, adjustmentModelEqual } from '../src/core/adjustments.js';
+import { sanitizeProject } from '../src/core/state.js';
 
 function pixel(r,g,b,a=255){return {data:new Uint8ClampedArray([r,g,b,a])};}
 
@@ -76,3 +77,40 @@ test('Stage 16b Levels applies channel-specific records after master and Curves 
   assert.ok(curves.data[2]>=207&&curves.data[2]<=209);
 });
 
+
+test('Stage 16c sanitizes Invert, Posterize and Threshold parameters',()=>{
+  assert.deepEqual(sanitizeAdjustmentModel({kind:'invert',garbage:true}),{kind:'invert'});
+  assert.deepEqual(sanitizeAdjustmentModel({kind:'posterize',levels:1}),{kind:'posterize',levels:2});
+  assert.deepEqual(sanitizeAdjustmentModel({kind:'threshold',level:999}),{kind:'threshold',level:255});
+});
+
+test('Stage 16c renders Invert, Posterize and Threshold while preserving alpha',()=>{
+  const inverted=pixel(10,20,30,77);
+  applyAdjustmentPixels(inverted,{kind:'invert'});
+  assert.deepEqual([...inverted.data],[245,235,225,77]);
+
+  const posterized=pixel(64,128,192,91);
+  applyAdjustmentPixels(posterized,{kind:'posterize',levels:4});
+  assert.deepEqual([...posterized.data],[85,170,255,91]);
+
+  const thresholded=pixel(200,120,100,63);
+  applyAdjustmentPixels(thresholded,{kind:'threshold',level:128});
+  assert.deepEqual([...thresholded.data],[255,255,255,63]);
+});
+
+test('Stage 16c project sanitizer preserves native simple adjustment metadata',()=>{
+  const sanitized=sanitizeProject({
+    width:2,height:1,name:'Adjustment persistence',background:'transparent',groups:[],selectedLayerId:'adj-1',
+    layers:[{
+      id:'adj-1',type:'adjustment',name:'Invert',visible:true,opacity:1,
+      adjustment:{kind:'invert'},
+      psdAdjustment:{
+        kind:'invert',baseline:{kind:'invert'},channelIds:[-1,0,1,2],
+        blocks:[{signature:'8BIM',key:'nvrt',dataUrl:'data:application/octet-stream;base64,'}],
+      },
+    }],
+  });
+  assert.deepEqual(sanitized.layers[0].adjustment,{kind:'invert'});
+  assert.equal(sanitized.layers[0].psdAdjustment.kind,'invert');
+  assert.equal(sanitized.layers[0].psdAdjustment.blocks[0].key,'nvrt');
+});

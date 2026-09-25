@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.42.0 — 2026-09-25
+
+### 2026-09-25 — Native Invert / Posterize / Threshold Adjustment Layers Stage 16c
+
+- PSD/PSB parser: allow-list adjustment records расширен `nvrt`, `post`, `thrs`; zero-bounds Invert, Posterize и Threshold теперь попадают в semantic adjustment stack.
+- Semantic model: Invert не имеет параметров; Posterize ограничен Photoshop-диапазоном 2–255 levels, Threshold — 1–255.
+- Renderer: Invert инвертирует RGB с сохранением alpha; Posterize использует Photoshop-compatible 8-bit quantization; Threshold использует RGB luminance 0.30/0.59/0.11 и не меняет alpha.
+- Properties: Posterize и Threshold редактируются численно, Invert явно показывается как parameterless adjustment; masks/clipping остаются общими Stage 16b controls.
+- Native writeback: `post` и `thrs` patch-ят только big-endian 16-bit payload, `nvrt` сохраняется byte-identical; unsupported metadata по-прежнему fail-safe уходит в composite fallback.
+- Project persistence: `.zpe` sanitizer allow-list синхронизирован с новыми adjustment kinds и native block keys.
+- Regression: semantic pixel tests, .zpe persistence и synthetic native PSD+PSB round-trip проверяют все три новых adjustment records без внешней сети.
+- Upstream format oracle: структуры подтверждены по pinned MIT `psd-tools` commit `8f9a25ea98202061365701db54ce938931b27c09`.
+- Version: приложение синхронизировано на 1.42.0.
+
 ## 1.41.0 — 2026-09-25
 
 ### 2026-09-25 — Adjustment Masks, Curves/Levels UI & Clipping Semantics Stage 16b

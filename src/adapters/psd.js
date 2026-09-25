@@ -7,7 +7,7 @@ const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt
 const PSD_SMART_OBJECT_LAYER_KEYS = new Set(['PlLd','SoLd','SoLE']);
 const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
 const PSD_SHAPE_LAYER_KEYS = new Set(['SoCo','GdFl','PtFl','vscg','vstk']);
-const PSD_ADJUSTMENT_LAYER_KEYS = new Set(['brit','CgEd','expA','hue2','hue ','levl','curv']);
+const PSD_ADJUSTMENT_LAYER_KEYS = new Set(['brit','CgEd','expA','hue2','hue ','levl','curv','nvrt','post','thrs']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
@@ -1204,6 +1204,16 @@ function parseHueSaturationAdjustment(block) {
   };
 }
 
+function parseSimpleAdjustment(block,kind,field=null) {
+  if(!block?.data)return null;
+  if(field){
+    if(block.data.length<2)return null;
+    const reader=new Reader(block.data);
+    return{kind,[field]:reader.u16()};
+  }
+  return{kind};
+}
+
 function parseLevelsAdjustment(block) {
   if(!block?.data||block.data.length<12)return null;
   const reader=new Reader(block.data);
@@ -1277,6 +1287,12 @@ function parsePsdAdjustmentBlocks(blocks,warnings,label) {
   if(levels)return parseLevelsAdjustment(levels);
   const curves=blocks.find(block=>block.key==='curv');
   if(curves)return parseCurvesAdjustment(curves,warnings,label);
+  const invert=blocks.find(block=>block.key==='nvrt');
+  if(invert)return parseSimpleAdjustment(invert,'invert');
+  const posterize=blocks.find(block=>block.key==='post');
+  if(posterize)return parseSimpleAdjustment(posterize,'posterize','levels');
+  const threshold=blocks.find(block=>block.key==='thrs');
+  if(threshold)return parseSimpleAdjustment(threshold,'threshold','level');
   return null;
 }
 
@@ -1402,6 +1418,17 @@ export function rewritePsdAdjustmentBlocks(blocks,adjustment) {
     }
     if(kind==='curves'&&block.key==='curv'){
       rewritten+=1;return{...block,data:encodeCurvesAdjustmentBlock(block,adjustment)};
+    }
+    if(kind==='invert'&&block.key==='nvrt'){
+      rewritten+=1;return{...block,data:bytes};
+    }
+    if(kind==='posterize'&&block.key==='post'&&bytes.length>=2){
+      view.setUint16(0,Math.round(Number(adjustment.levels)||4),false);
+      rewritten+=1;return{...block,data:bytes};
+    }
+    if(kind==='threshold'&&block.key==='thrs'&&bytes.length>=2){
+      view.setUint16(0,Math.round(Number(adjustment.level)||128),false);
+      rewritten+=1;return{...block,data:bytes};
     }
     return block;
   });
