@@ -1654,7 +1654,6 @@ function createSmartFilterMask(overrides = {}) {
     ...overrides,
   };
 }
-
 function createAdjustmentLayer(overrides = {}) {
   return baseLayer('adjustment', {
     name: 'Корректирующий слой',
@@ -2031,7 +2030,6 @@ function sanitizeSmartFilterMask(mask) {
     feather: bounded(mask.feather, 0, 0, 250),
   });
 }
-
 function sanitizeLayerMask(mask) {
   if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
   const dataUrl = typeof mask.dataUrl === 'string' && /^data:image\//i.test(mask.dataUrl) ? mask.dataUrl : null;
