@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 2026-09-25 — Paths Panel Stage 10f
+
+- Added: отдельная collapsible-панель «Контуры» со списком `document.paths` и Photoshop resource ID/числом subpaths/узлов.
+- Added: сохранить текущую vector mask, shape path или selection как saved path без растрирования.
+- Added: rename, duplicate, delete и контекстное меню saved paths; выбранный path хранится отдельно для каждой вкладки документа.
+- Added: «Перо» напрямую редактирует saved path anchors/handles в document coordinates; pointer cancel/history используют существующий path-control pipeline.
+- Added: выбранный saved path можно применить как native ZPE vector mask обычного слоя через document→layer-local transform.
+- UX: Paths panel участвует в общей persistent collapse-модели, поддерживает ArrowUp/ArrowDown и доступные SVG-иконки.
+- Safety: максимум 998 saved paths и диапазон resource IDs 2000..2997; adjustment-layer path→mask пока явно отключён до отдельного coordinate-contract этапа.
+- Regression: новый paths-panel test покрывает DOM, management actions, non-raster save/apply wiring, direct edit и per-tab selection state.
+
 ### 2026-09-25 — Native PSD/PSB Vector Masks + Saved Paths Stage 10d/10e
 
 - PSD/PSB import: `vmsk` и `vsms` читаются как version-3 vector mask metadata с invert/disable/not-link flags и 26-byte Photoshop path records.

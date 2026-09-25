@@ -24,10 +24,10 @@ test('all color-correction sliders are rendered in the dedicated color and effec
 });
 
 test('right sidebar cards expose persistent accessible collapse toggles', () => {
-  for (const id of ['properties', 'effects', 'layers', 'history']) {
+  for (const id of ['properties', 'effects', 'layers', 'paths', 'history']) {
     assert.match(html, new RegExp(`data-panel-id="${id}"`));
   }
-  assert.equal((html.match(/class="panel-toggle"/g) || []).length, 4);
+  assert.equal((html.match(/class="panel-toggle"/g) || []).length, 5);
   assert.match(main, /function initCollapsiblePanels\(\)/);
   assert.match(main, /UI_COLLAPSE_STORAGE_KEY/);
   assert.match(main, /aria-expanded/);

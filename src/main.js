@@ -20,7 +20,7 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const els = {
   canvas: $('#editorCanvas'), overlay: $('#overlayCanvas'), shell: $('#canvasShell'), viewport: $('#stageViewport'),
   title: $('#documentTitle'), tabs: $('#docTabs'), addTab: $('#addDocTabBtn'), dimensions: $('#docDimensions'), zoomLabel: $('#zoomLabel'), zoomRange: $('#zoomRange'),
-  status: $('#statusText'), pointer: $('#pointerInfo'), layers: $('#layersList'), history: $('#historyList'), props: $('#propertiesContent'), effects: $('#effectsContent'), emptyDrop: $('#emptyDrop'),
+  status: $('#statusText'), pointer: $('#pointerInfo'), layers: $('#layersList'), paths: $('#pathsList'), history: $('#historyList'), props: $('#propertiesContent'), effects: $('#effectsContent'), emptyDrop: $('#emptyDrop'),
   blend: $('#blendMode'), layerOpacity: $('#layerOpacity'), undo: $('#undoBtn'), redo: $('#redoBtn'),
   primaryColor: $('#primaryColor'), colorChip: $('#colorChip'), brushSize: $('#brushSize'), brushSizeValue: $('#brushSizeValue'), selectionType: $('#selectionType'), selectionCopyMode: $('#selectionCopyMode'),
   toolOpacity: $('#toolOpacity'), toolOpacityValue: $('#toolOpacityValue'), dodgeStrength: $('#dodgeStrength'), dodgeStrengthValue: $('#dodgeStrengthValue'), burnStrength: $('#burnStrength'), burnStrengthValue: $('#burnStrengthValue'), blurStrength: $('#blurStrength'), blurStrengthValue: $('#blurStrengthValue'), smudgeStrength: $('#smudgeStrength'), smudgeStrengthValue: $('#smudgeStrengthValue'), fillTolerance: $('#fillTolerance'), fillToleranceValue: $('#fillToleranceValue'), secondaryColor: $('#secondaryColor'), gradientType: $('#gradientType'), penClosed: $('#penClosed'), fontFamily: $('#fontFamily'), fontSize: $('#fontSize'), shapeKind: $('#shapeKind'),
@@ -114,6 +114,8 @@ let cloneSource = null;
 let cloneSnapshotCanvas = null;
 let penDraft = null;
 let vectorMaskEditLayerId = null;
+let documentPathEditIndex = -1;
+let selectedDocumentPathIndex = -1;
 let magneticDraft = null;
 let spaceHeld = false;
 let cropRect = null;
@@ -236,6 +238,7 @@ function syncCurrentSession() {
   session.cropRect = cloneRect(cropRect);
   session.selectionRect = cloneRect(selectionRect);
   session.selectionShape = cloneSelectionShape(selectionShape);
+  session.selectedPathIndex = selectedDocumentPathIndex;
 }
 function loadSession(session) {
   doc = session.doc;
@@ -245,6 +248,10 @@ function loadSession(session) {
   cropRect = cloneRect(session.cropRect);
   selectionRect = cloneRect(session.selectionRect);
   selectionShape = cloneSelectionShape(session.selectionShape) || (selectionRect ? {type:'rect',rect:cloneRect(selectionRect)} : null);
+  selectedDocumentPathIndex = Number.isInteger(session.selectedPathIndex) ? session.selectedPathIndex : -1;
+  documentPathEditIndex = -1;
+  vectorMaskEditLayerId = null;
+  penDraft = null;
   polygonDraft = null;
   drag = null;
   brushCanvas = null;
@@ -267,6 +274,7 @@ function buildSession(documentValue, { label = 'Новый документ', zo
     cropRect: null,
     selectionRect: null,
     selectionShape: null,
+    selectedPathIndex: -1,
   };
 }
 function renderDocumentTabs() {
@@ -509,6 +517,10 @@ function discardRecovery(key = recoveryKey) {
 function setDoc(next, { resetHistory = false, label = 'Состояние' } = {}) {
   doc = next;
   cropRect = null;
+  selectedDocumentPathIndex = -1;
+  documentPathEditIndex = -1;
+  vectorMaskEditLayerId = null;
+  penDraft = null;
   clearSelectionState();
   brushCanvas=null;brushCtx=null;brushLayerId=null;
   if (resetHistory) { clearImageCache(); history.reset(label, snapshotDocument(doc)); }
@@ -575,32 +587,47 @@ function layerPixelToDocumentPoint(point, layer) {
 }
 
 function selectedEditablePathTargets(){
+  if(documentPathEditIndex>=0){
+    const path=doc.paths?.[documentPathEditIndex];
+    if(path?.subpaths?.length){
+      return path.subpaths
+        .map((subpath,subpathIndex)=>({
+          layer:null,points:Array.isArray(subpath?.points)?subpath.points:[],
+          source:'document-path',documentPathIndex:documentPathEditIndex,subpathIndex,
+          closed:subpath?.closed!==false,operation:subpath?.operation||'add',
+        }))
+        .filter(target=>target.points.length);
+    }
+    documentPathEditIndex=-1;
+  }
   const layer=selected();
   if(!layer||!isLayerVisible(doc,layer))return[];
   if(vectorMaskEditLayerId===layer.id&&layer.vectorMask?.subpaths?.length){
     return layer.vectorMask.subpaths
       .map((subpath,subpathIndex)=>({
         layer,points:Array.isArray(subpath?.points)?subpath.points:[],
-        source:'vector-mask',subpathIndex,closed:true,operation:subpath?.operation||'add',
+        source:'vector-mask',documentPathIndex:null,subpathIndex,closed:subpath?.closed!==false,operation:subpath?.operation||'add',
       }))
       .filter(target=>target.points.length);
   }
   if(layer.type==='shape'&&layer.shape==='path'&&Array.isArray(layer.pathPoints)){
-    return[{layer,points:layer.pathPoints,source:'shape',subpathIndex:null,closed:Boolean(layer.pathClosed),operation:'add'}];
+    return[{layer,points:layer.pathPoints,source:'shape',documentPathIndex:null,subpathIndex:null,closed:Boolean(layer.pathClosed),operation:'add'}];
   }
   return[];
 }
-function pathTargetPoints(layer,source='shape',subpathIndex=null){
+function pathTargetPoints(layer,source='shape',subpathIndex=null,documentPathIndex=null){
+  if(source==='document-path')return doc.paths?.[documentPathIndex]?.subpaths?.[subpathIndex]?.points??null;
   if(source==='vector-mask')return layer?.vectorMask?.subpaths?.[subpathIndex]?.points??null;
   return layer?.pathPoints??null;
 }
 function pathControlDocumentPoint(layer,node,control='anchor'){
   const local=control==='anchor'?node:node?.[control];
-  return local?layerPixelToDocumentPoint(local,layer):null;
+  if(!local)return null;
+  return layer?layerPixelToDocumentPoint(local,layer):{x:local.x,y:local.y};
 }
 function hitSelectedPathControl(point,radius=8/zoom){
   for(const target of selectedEditablePathTargets()){
-    if(isLayerLocked(doc,target.layer))continue;
+    if(target.layer&&isLayerLocked(doc,target.layer))continue;
     for(let index=0;index<target.points.length;index+=1){
       const node=target.points[index];
       for(const control of ['handleIn','handleOut']){
@@ -640,10 +667,11 @@ function drawSelectedPathControls(ctx){
   if(!targets.length)return;
   ctx.save();ctx.setLineDash([]);ctx.lineWidth=1/zoom;ctx.fillStyle='#f8fbff';
   for(const target of targets){
-    const locked=isLayerLocked(doc,target.layer);
+    const locked=target.layer?isLayerLocked(doc,target.layer):false;
     const vector=target.source==='vector-mask';
-    ctx.strokeStyle=locked?'#aeb6c4':vector?'#ff78cf':'#8fc0ff';
-    if(vector){
+    const saved=target.source==='document-path';
+    ctx.strokeStyle=locked?'#aeb6c4':saved?'#77e3b1':vector?'#ff78cf':'#8fc0ff';
+    if(vector||saved){
       ctx.save();ctx.setLineDash([5/zoom,3/zoom]);ctx.beginPath();traceEditablePathTarget(ctx,target);ctx.stroke();ctx.restore();
     }
     for(const node of target.points){
@@ -665,33 +693,35 @@ function updatePenCursor(point){
   els.overlay.style.cursor=hitSelectedPathControl(point)?'pointer':'crosshair';
 }
 function restorePathControlDrag(d){
-  const layer=doc.layers.find(item=>item.id===d.layerId);
-  const points=pathTargetPoints(layer,d.pathSource,d.subpathIndex);
+  const layer=d.pathSource==='document-path'?null:doc.layers.find(item=>item.id===d.layerId);
+  const points=pathTargetPoints(layer,d.pathSource,d.subpathIndex,d.documentPathIndex);
   if(!points?.[d.nodeIndex])return false;
   points[d.nodeIndex]=structuredClone(d.initial);
   render();drawOverlay();return true;
 }
 function beginPathControlDrag(hit,point,event){
-  const points=pathTargetPoints(hit.layer,hit.source,hit.subpathIndex);
+  const points=pathTargetPoints(hit.layer,hit.source,hit.subpathIndex,hit.documentPathIndex);
   const node=points?.[hit.nodeIndex];
   if(!node)return false;
   if(hit.control==='anchor'&&event.altKey){
     const changed=Boolean(node.handleIn||node.handleOut||node.kind==='smooth');
     node.handleIn=null;node.handleOut=null;node.kind='corner';
-    if(changed)commit(hit.source==='vector-mask'?'Преобразовать узел векторной маски':'Преобразовать Bézier-узел в угловой');
+    if(changed)commit(hit.source==='document-path'?'Преобразовать узел сохранённого контура':hit.source==='vector-mask'?'Преобразовать узел векторной маски':'Преобразовать Bézier-узел в угловой');
     else setStatus('Bézier-узел уже угловой');
     return true;
   }
   const control=hit.control==='anchor'&&event.shiftKey?'handleOut':hit.control;
   drag={
-    kind:'path-control',layerId:hit.layer.id,nodeIndex:hit.nodeIndex,control,
-    pathSource:hit.source,subpathIndex:hit.subpathIndex,
-    startLocal:documentPointToLayerPixel(point,hit.layer),
+    kind:'path-control',layerId:hit.layer?.id??null,nodeIndex:hit.nodeIndex,control,
+    pathSource:hit.source,documentPathIndex:hit.documentPathIndex??null,subpathIndex:hit.subpathIndex,
+    startLocal:hit.layer?documentPointToLayerPixel(point,hit.layer):{...point},
     initial:structuredClone(node),moved:false,
   };
-  setStatus(hit.source==='vector-mask'
-    ? 'Векторная маска: перетаскивайте anchors/handles; Alt разрывает симметрию'
-    : control==='anchor'
+  setStatus(hit.source==='document-path'
+    ? 'Сохранённый контур: перетаскивайте anchors/handles; Alt разрывает симметрию'
+    : hit.source==='vector-mask'
+      ? 'Векторная маска: перетаскивайте anchors/handles; Alt разрывает симметрию'
+      : control==='anchor'
       ? 'Перо: перетаскивайте anchor; Shift+drag создаёт smooth handles'
       : 'Перо: перетаскивайте handle; Alt разрывает симметрию');
   return true;
@@ -983,7 +1013,7 @@ function updateAll() {
   els.dimensions.textContent = `${doc.width} × ${doc.height}`;
   els.undo.disabled = !history.canUndo(); els.redo.disabled = !history.canRedo();
   els.emptyDrop.hidden = doc.layers.length > 0;
-  updateCanvasSize(); updateLayers(); updateHistory(); refreshInspectorPanels(); updateLayerControls(); render();
+  updateCanvasSize(); updateLayers(); updatePathsPanel(); updateHistory(); refreshInspectorPanels(); updateLayerControls(); render();
   renderDocumentTabs();
 }
 
@@ -1298,6 +1328,215 @@ function updateLayers() {
   };
 
   renderLevel(null,0);
+}
+
+
+function normalizeSelectedDocumentPathIndex(){
+  const paths=Array.isArray(doc.paths)?doc.paths:[];
+  if(!paths.length){selectedDocumentPathIndex=-1;documentPathEditIndex=-1;return -1;}
+  if(!Number.isInteger(selectedDocumentPathIndex)||selectedDocumentPathIndex<0||selectedDocumentPathIndex>=paths.length)selectedDocumentPathIndex=0;
+  if(documentPathEditIndex>=paths.length)documentPathEditIndex=-1;
+  return selectedDocumentPathIndex;
+}
+function selectedDocumentPath(){
+  const index=normalizeSelectedDocumentPathIndex();
+  return index>=0?doc.paths[index]:null;
+}
+function allocateDocumentPathResourceId(){
+  const used=new Set((doc.paths||[]).map(path=>path?.id).filter(id=>Number.isInteger(id)&&id>=2000&&id<=2997));
+  for(let id=2000;id<=2997;id+=1)if(!used.has(id))return id;
+  return null;
+}
+function uniqueDocumentPathName(base='Контур'){
+  const names=new Set((doc.paths||[]).map(path=>String(path?.name||'').trim()).filter(Boolean));
+  const root=String(base||'Контур').trim().slice(0,220)||'Контур';
+  if(!names.has(root))return root;
+  let index=2;
+  while(names.has(`${root} ${index}`))index+=1;
+  return `${root} ${index}`;
+}
+function documentizePathNode(node,layer){
+  const anchor=layerPixelToDocumentPoint(node,layer);
+  return{
+    x:anchor.x,y:anchor.y,
+    handleIn:node.handleIn?layerPixelToDocumentPoint(node.handleIn,layer):null,
+    handleOut:node.handleOut?layerPixelToDocumentPoint(node.handleOut,layer):null,
+    kind:node.kind==='smooth'?'smooth':'corner',
+  };
+}
+function pathFromCurrentSource(){
+  const layer=selected();
+  if(layer?.vectorMask?.subpaths?.length){
+    const vector=exportPsdVectorMask(layer);
+    return{
+      name:uniqueDocumentPathName(`${layer.name||'Слой'} — маска`),
+      fillStartsWithAllPixels:vector.fillStartsWithAllPixels===true,
+      subpaths:structuredClone(vector.subpaths),
+    };
+  }
+  if(layer?.type==='shape'&&layer.shape==='path'&&Array.isArray(layer.pathPoints)&&layer.pathPoints.length>=2){
+    return{
+      name:uniqueDocumentPathName(`${layer.name||'Контур'} — путь`),
+      fillStartsWithAllPixels:false,
+      subpaths:[{
+        operation:'add',closed:Boolean(layer.pathClosed),fillRule:'non-zero',
+        points:layer.pathPoints.map(node=>documentizePathNode(node,layer)),
+      }],
+    };
+  }
+  if(selectionShape){
+    const nodes=selectionVectorMaskDocumentNodes();
+    if(nodes.length>=3){
+      return{
+        name:uniqueDocumentPathName('Контур из выделения'),
+        fillStartsWithAllPixels:false,
+        subpaths:[{operation:'add',closed:true,fillRule:'non-zero',points:nodes.map(node=>structuredClone(node))}],
+      };
+    }
+  }
+  return null;
+}
+function addDocumentPathFromCurrent(){
+  if((doc.paths?.length||0)>=998){setStatus('Достигнут лимит 998 сохранённых контуров');toast('Нельзя сохранить больше 998 Photoshop-compatible paths','warn');return false;}
+  const path=pathFromCurrentSource();
+  if(!path){setStatus('Нужен path-слой, векторная маска или активное выделение');toast('Нечего сохранять как контур','warn');return false;}
+  const id=allocateDocumentPathResourceId();
+  if(id===null){setStatus('Исчерпан диапазон Photoshop Path Resource ID 2000..2997');return false;}
+  doc.paths??=[];
+  doc.paths.push({id,...path});
+  selectedDocumentPathIndex=doc.paths.length-1;
+  commit('Сохранить контур');
+  setStatus(`Сохранён контур «${path.name}»`);
+  return true;
+}
+function renameSelectedDocumentPath(){
+  const path=selectedDocumentPath();
+  if(!path)return;
+  const targetIndex=selectedDocumentPathIndex;
+  showModal({
+    title:'Переименовать контур',
+    fields:[{name:'name',label:'Имя',value:path.name||'Контур',required:true}],
+    submitLabel:'Переименовать',
+    onSubmit:values=>{
+      const target=doc.paths?.[targetIndex];
+      const name=String(values.name||'').trim().slice(0,240);
+      if(!target||!name||name===target.name)return false;
+      target.name=name;selectedDocumentPathIndex=targetIndex;commit('Переименовать контур');
+    },
+  });
+}
+function duplicateSelectedDocumentPath(){
+  const path=selectedDocumentPath();
+  if(!path)return false;
+  if((doc.paths?.length||0)>=998){setStatus('Достигнут лимит 998 сохранённых контуров');return false;}
+  const id=allocateDocumentPathResourceId();
+  if(id===null)return false;
+  const copy=structuredClone(path);
+  copy.id=id;
+  copy.name=uniqueDocumentPathName(`${path.name||'Контур'} — копия`);
+  doc.paths.push(copy);
+  selectedDocumentPathIndex=doc.paths.length-1;
+  commit('Дублировать контур');
+  return true;
+}
+function deleteSelectedDocumentPath(){
+  const index=normalizeSelectedDocumentPathIndex();
+  if(index<0)return false;
+  const name=doc.paths[index]?.name||'Контур';
+  doc.paths.splice(index,1);
+  if(documentPathEditIndex===index)documentPathEditIndex=-1;
+  else if(documentPathEditIndex>index)documentPathEditIndex-=1;
+  selectedDocumentPathIndex=Math.min(index,doc.paths.length-1);
+  commit('Удалить контур');
+  setStatus(`Удалён контур «${name}»`);
+  return true;
+}
+function editSelectedDocumentPath(){
+  const index=normalizeSelectedDocumentPathIndex();
+  if(index<0)return false;
+  vectorMaskEditLayerId=null;
+  documentPathEditIndex=index;
+  setTool('pen');
+  documentPathEditIndex=index;
+  drawOverlay();
+  setStatus(`Перо: редактирование сохранённого контура «${doc.paths[index].name||'Контур'}»`);
+  return true;
+}
+function applySelectedDocumentPathAsVectorMask(){
+  const path=selectedDocumentPath();
+  const layer=selected();
+  if(!path){setStatus('Выберите сохранённый контур');return false;}
+  if(!layer){setStatus('Выберите слой для векторной маски');return false;}
+  if(layer.type==='adjustment'){setStatus('Сохранённый контур как vector mask пока применяется к обычным слоям, не к adjustment layer');return false;}
+  if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return false;}
+  const mask=importPsdVectorMask({enabled:true,invert:false,linked:true,fillStartsWithAllPixels:path.fillStartsWithAllPixels===true,subpaths:path.subpaths},layer);
+  if(!mask){setStatus('Контур не содержит пригодных subpaths');return false;}
+  layer.vectorMask=mask;
+  vectorMaskEditLayerId=null;
+  commit('Применить контур как векторную маску');
+  setStatus(`Контур «${path.name||'Контур'}» применён как векторная маска`);
+  return true;
+}
+function pathContextMenu(index){
+  const exists=()=>Boolean(doc.paths?.[index]);
+  return[
+    ['Редактировать пером','',()=>{selectedDocumentPathIndex=index;editSelectedDocumentPath();},exists],
+    ['Применить как векторную маску','',()=>{selectedDocumentPathIndex=index;applySelectedDocumentPathAsVectorMask();},()=>exists()&&Boolean(selected())&&selected().type!=='adjustment'&&!isLayerLocked(doc,selected())],
+    ['sep'],
+    ['Переименовать…','',()=>{selectedDocumentPathIndex=index;renameSelectedDocumentPath();},exists],
+    ['Дублировать','',()=>{selectedDocumentPathIndex=index;duplicateSelectedDocumentPath();},exists],
+    ['Удалить','',()=>{selectedDocumentPathIndex=index;deleteSelectedDocumentPath();},exists],
+  ];
+}
+function updatePathsPanel(){
+  if(!els.paths)return;
+  const paths=Array.isArray(doc.paths)?doc.paths:[];
+  normalizeSelectedDocumentPathIndex();
+  els.paths.replaceChildren();
+  if(!paths.length){
+    const empty=document.createElement('div');empty.className='paths-empty';empty.textContent='Нет сохранённых контуров';els.paths.append(empty);
+  }else{
+    paths.forEach((path,index)=>{
+      const row=document.createElement('button');row.type='button';row.className=`path-row${index===selectedDocumentPathIndex?' selected':''}`;
+      row.setAttribute('role','option');row.setAttribute('aria-selected',String(index===selectedDocumentPathIndex));
+      const name=document.createElement('span');name.className='path-row-name';name.textContent=path.name||`Контур ${index+1}`;
+      const count=(path.subpaths||[]).reduce((sum,subpath)=>sum+(subpath.points?.length||0),0);
+      const meta=document.createElement('span');meta.className='path-row-meta';meta.textContent=`${path.subpaths?.length||0} конт. · ${count} узл. · #${path.id??'auto'}`;
+      row.append(name,meta);
+      row.onclick=()=>{
+        selectedDocumentPathIndex=index;
+        if(documentPathEditIndex>=0&&currentTool==='pen')documentPathEditIndex=index;
+        updatePathsPanel();drawOverlay();
+      };
+      row.ondblclick=event=>{event.preventDefault();selectedDocumentPathIndex=index;renameSelectedDocumentPath();};
+      row.oncontextmenu=event=>{
+        event.preventDefault();event.stopPropagation();selectedDocumentPathIndex=index;updatePathsPanel();
+        openContextMenu(`path:${index}`,pathContextMenu(index),event,row);
+      };
+      row.onkeydown=event=>{
+        if(event.key!=='ArrowUp'&&event.key!=='ArrowDown')return;
+        event.preventDefault();
+        const next=clamp(index+(event.key==='ArrowDown'?1:-1),0,paths.length-1);
+        selectedDocumentPathIndex=next;
+        updatePathsPanel();
+        requestAnimationFrame(()=>els.paths.querySelectorAll('.path-row')[next]?.focus());
+        drawOverlay();
+      };
+      els.paths.append(row);
+    });
+  }
+  const path=selectedDocumentPath();
+  const layer=selected();
+  const canSave=Boolean(selectionShape||layer?.vectorMask?.subpaths?.length||(layer?.type==='shape'&&layer.shape==='path'&&layer.pathPoints?.length>=2))&&paths.length<998;
+  const controls={
+    addPathBtn:canSave,
+    editPathBtn:Boolean(path),
+    applyPathMaskBtn:Boolean(path&&layer&&layer.type!=='adjustment'&&!isLayerLocked(doc,layer)),
+    renamePathBtn:Boolean(path),
+    duplicatePathBtn:Boolean(path&&paths.length<998),
+    deletePathBtn:Boolean(path),
+  };
+  for(const [id,enabled] of Object.entries(controls)){const button=$(`#${id}`);if(button)button.disabled=!enabled;}
 }
 
 function updateHistory() {
@@ -1669,7 +1908,7 @@ function cycleSelectionType() {
 function setTool(tool) {
   if (tool !== currentTool && blockPendingDocumentEdit()) return;
   if (tool !== 'marquee' && polygonDraft) cancelPolygonDraft({restorePrevious:true});
-  if(tool!=='pen'){penDraft=null;vectorMaskEditLayerId=null;}
+  if(tool!=='pen'){penDraft=null;vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
   if(tool!=='magnetic')magneticDraft=null;
   currentTool = tool;
   $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
@@ -1810,6 +2049,10 @@ els.overlay.addEventListener('pointerdown', async (e) => {
   if (currentTool === 'pen') {
     const hit=!penDraft?hitSelectedPathControl(p):null;
     if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
+    if(documentPathEditIndex>=0){
+      setStatus('Сохранённый контур: перетаскивайте существующие anchors/handles; новые subpaths добавляются через маску/выделение и сохранение');
+      return;
+    }
     if(vectorMaskEditLayerId===selected()?.id){
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
       return;
@@ -1937,11 +2180,11 @@ function onOverlayPointerMove(e) {
   if (drag.kind === 'crop') { drag.current=p; cropRect=normalizeRect(drag.start,p); drawOverlay(); return; }
   if (drag.kind === 'gradient') { drag.current=p;previewGradient(drag.start,p);return; }
   if (drag.kind === 'path-control') {
-    const layer=doc.layers.find(item=>item.id===drag.layerId);
-    const points=pathTargetPoints(layer,drag.pathSource,drag.subpathIndex);
+    const layer=drag.pathSource==='document-path'?null:doc.layers.find(item=>item.id===drag.layerId);
+    const points=pathTargetPoints(layer,drag.pathSource,drag.subpathIndex,drag.documentPathIndex);
     const node=points?.[drag.nodeIndex];
-    if(!layer||!node||isLayerLocked(doc,layer))return;
-    const local=documentPointToLayerPixel(p,layer);
+    if(!node||(layer&&isLayerLocked(doc,layer)))return;
+    const local=layer?documentPointToLayerPixel(p,layer):p;
     const distance=Math.hypot(local.x-drag.startLocal.x,local.y-drag.startLocal.y);
     drag.moved=distance>1/zoom;
     if(drag.control==='anchor'){
@@ -2034,9 +2277,12 @@ els.overlay.addEventListener('pointerup', async (e) => {
   if (d.kind === 'path-control') {
     if(d.moved){
       const vector=d.pathSource==='vector-mask';
-      commit(vector
-        ? (d.control==='anchor'?'Переместить узел векторной маски':'Изменить ручку векторной маски')
-        : (d.control==='anchor'?'Переместить Bézier-узел':'Изменить Bézier-ручку'));
+      const saved=d.pathSource==='document-path';
+      commit(saved
+        ? (d.control==='anchor'?'Переместить узел сохранённого контура':'Изменить ручку сохранённого контура')
+        : vector
+          ? (d.control==='anchor'?'Переместить узел векторной маски':'Изменить ручку векторной маски')
+          : (d.control==='anchor'?'Переместить Bézier-узел':'Изменить Bézier-ручку'));
     }else drawOverlay();
   }
   if (d.kind === 'pen-handle') {
@@ -4753,6 +4999,12 @@ $$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSele
 els.undo.onclick=undo;els.redo.onclick=redo;$('#exportQuickBtn').onclick=exportDialog;
 $('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=()=>addGroup();$('#renameLayerBtn').onclick=()=>{const layer=selected();if(layer)renameLayer(layer);};$('#duplicateLayerBtn').onclick=duplicateSelected;$('#deleteLayerBtn').onclick=deleteSelected;
 $('#layerUpBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');};$('#layerDownBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');};
+$('#addPathBtn').onclick=addDocumentPathFromCurrent;
+$('#editPathBtn').onclick=editSelectedDocumentPath;
+$('#applyPathMaskBtn').onclick=applySelectedDocumentPathAsVectorMask;
+$('#renamePathBtn').onclick=renameSelectedDocumentPath;
+$('#duplicatePathBtn').onclick=duplicateSelectedDocumentPath;
+$('#deletePathBtn').onclick=deleteSelectedDocumentPath;
 els.layers.addEventListener('dragover',e=>{
   if((!layerDragId&&!groupDragId)||e.target!==els.layers)return;
   e.preventDefault();
