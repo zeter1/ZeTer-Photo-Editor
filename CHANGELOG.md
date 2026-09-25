@@ -16,6 +16,7 @@
 - Fail-safe: map-based/unknown Curves layout, invalid points, unsupported style/filter semantics по-прежнему переводят export в честный composite fallback вместо stale metadata.
 - Real compatibility corpus: добавлены MIT fixtures `adjustment-mask.psd`, `clip-adjustment.psd`, `curves-rgb.psd`, `levels-rgb.psd` с pinned upstream commit/blob/size/SHA-256.
 - Regression: mask/clipping проходят PSD+PSB round-trip; channel-specific Green Levels и edited real Curves повторно декодируются с изменёнными semantic values.
+- CI follow-up: render-pipeline wiring regression обновлён под новый `clippingMask` argument и продолжает проверять cumulative adjustment semantics вместо точной старой сигнатуры вызова.
 - Version: приложение синхронизировано на 1.41.0.
 
 ## 1.40.0 — 2026-09-25

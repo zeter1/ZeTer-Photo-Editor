@@ -38,10 +38,11 @@ test('resize interaction calculates every pointer move from the original transfo
   assert.match(main, /resizeLayerFromPoint\(\{ \.\.\.l, \.\.\.drag\.initial \}/);
 });
 
-test('render pipeline treats adjustment layers as cumulative stack operations', () => {
+test('render pipeline treats adjustment layers as cumulative stack operations and supports clipping masks', () => {
   assert.match(render, /layer\.type === 'adjustment'/);
-  assert.match(render, /applyAdjustmentLayer\(canvas, ctx, layer\)/);
+  assert.match(render, /applyAdjustmentLayer\(canvas, ctx, layer, \{ clippingMask \}\)/);
   assert.match(render, /sourceCtx\.drawImage\(canvas, 0, 0, width, height\)/);
+  assert.match(render, /sourceCtx\.drawImage\(clippingMask,0,0,width,height\)/);
 });
 
 test('layer masks isolate layer content before destination-in compositing', () => {
