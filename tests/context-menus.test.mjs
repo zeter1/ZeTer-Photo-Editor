@@ -62,7 +62,7 @@ test('layer blending menu targets the clicked layer and disables edits when lock
     openBlendingOptions:item=>{opened=item;},
     toggleSelectedVisibility:()=>{}, toggleSelectedLock:()=>{}, rasterizeSelectedLayer:()=>{},
     addSelectedLayerMask:()=>{}, removeSelectedLayerMask:()=>{},
-    applySelectionToVectorMask:()=>{}, invertSelectedVectorMask:()=>{}, toggleSelectedVectorMask:()=>{}, removeSelectedVectorMask:()=>{},
+    applySelectionToVectorMask:()=>{}, editSelectedVectorMask:()=>{}, invertSelectedVectorMask:()=>{}, toggleSelectedVectorMask:()=>{}, removeSelectedVectorMask:()=>{},
     selectionShape:null,
   };
   vm.runInNewContext(`${layerMenuFunction}\nglobalThis.getMenu=layerContextMenu;`,context);
