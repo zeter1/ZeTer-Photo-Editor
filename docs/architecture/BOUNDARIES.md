@@ -19,7 +19,8 @@ browser primitives (Canvas, Worker, storage, File APIs)
 ### UI
 - `src/ui/tool-config.js`: pure configuration only.
 - `src/ui/tool-layout.js`: pure layout/order math only.
-- DOM mutation, global event wiring and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API.
+- `src/ui/toolbar-controller.js`: owns only toolbar DOM/persistence/tooltip state through a narrow controller API.
+- Cross-feature/global event wiring and application state orchestration stay in `src/main.js`; extracted controllers receive explicit DOM elements/callbacks instead of importing application state.
 - UI modules must not become alternate owners of document/layer domain state.
 
 ### Core
