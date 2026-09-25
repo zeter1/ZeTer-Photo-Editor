@@ -213,7 +213,7 @@ export function documentWithTextPreview(doc, draft) {
 
 export function createShapeLayer(overrides = {}) {
   return baseLayer('shape', {
-    name: 'Фигура', shape: 'rect', fill: '#4f8cff', stroke: 'transparent', strokeWidth: 0, lineFlip: false, lineMode: 'diag', pathPoints: [], pathClosed: false,
+    name: 'Фигура', shape: 'rect', fill: '#4f8cff', stroke: 'transparent', strokeWidth: 0, lineFlip: false, lineMode: 'diag', pathPoints: [], pathClosed: false, psdShape: null,
     width: 180, height: 120, radius: 0, ...overrides,
   });
 }
@@ -854,6 +854,55 @@ function sanitizePsdText(value) {
   };
 }
 
+const PSD_SHAPE_BLOCK_KEYS = new Set(['SoCo','vscg','vstk']);
+const MAX_PSD_SHAPE_DATA_URL_CHARS = 6_000_000;
+
+function sanitizePsdShape(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const blocks=(Array.isArray(value.blocks)?value.blocks:[])
+    .slice(0,8)
+    .map(block=>{
+      if(!block||typeof block!=='object'||Array.isArray(block))return null;
+      const key=shortText(block.key,'',4);
+      if(!PSD_SHAPE_BLOCK_KEYS.has(key))return null;
+      const dataUrl=typeof block.dataUrl==='string'&&block.dataUrl.length<=MAX_PSD_SHAPE_DATA_URL_CHARS&&/^data:application\/octet-stream;base64,[a-z\d+/=]*$/i.test(block.dataUrl)
+        ? block.dataUrl:null;
+      if(!dataUrl)return null;
+      return{signature:block.signature==='8B64'?'8B64':'8BIM',key,dataUrl};
+    })
+    .filter(Boolean);
+  if(!blocks.length)return null;
+  const baseline=value.baseline&&typeof value.baseline==='object'&&!Array.isArray(value.baseline)?value.baseline:{};
+  const strokeStyle=value.strokeStyle&&typeof value.strokeStyle==='object'&&!Array.isArray(value.strokeStyle)?value.strokeStyle:null;
+  return{
+    fillType:value.fillType==='solid'?'solid':null,
+    fill:shortText(value.fill,'#000000',64),
+    fillEnabled:value.fillEnabled!==false,
+    stroke:shortText(value.stroke,'transparent',64),
+    strokeEnabled:value.strokeEnabled===true,
+    strokeWidth:bounded(value.strokeWidth,0,0,1000),
+    sourceContentKey:['SoCo','vscg'].includes(value.sourceContentKey)?value.sourceContentKey:null,
+    strokeStyle:strokeStyle?{
+      opacity:bounded(strokeStyle.opacity,100,0,100),
+      lineCap:shortText(strokeStyle.lineCap,'',160)||null,
+      lineJoin:shortText(strokeStyle.lineJoin,'',160)||null,
+      lineAlignment:shortText(strokeStyle.lineAlignment,'',160)||null,
+    }:null,
+    baseline:{
+      fill:shortText(baseline.fill,'transparent',64),
+      stroke:shortText(baseline.stroke,'transparent',64),
+      strokeWidth:bounded(baseline.strokeWidth,0,0,1000),
+      pathClosed:baseline.pathClosed!==false,
+      width:bounded(baseline.width,1,1,12000),
+      height:bounded(baseline.height,1,1,12000),
+      scaleX:bounded(baseline.scaleX,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      scaleY:bounded(baseline.scaleY,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      rotation:((finite(baseline.rotation,0)%360)+360)%360,
+    },
+    blocks,
+  };
+}
+
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -939,6 +988,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
       ? layer.pathPoints.slice(0,5000).map(sanitizePathPoint)
       : [];
     result.pathClosed = result.shape === 'path' && Boolean(layer?.pathClosed);
+    result.psdShape = sanitizePsdShape(layer?.psdShape);
   }
   return result;
 }

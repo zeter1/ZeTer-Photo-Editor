@@ -6,9 +6,11 @@ const PSB_VERSION = 2;
 const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt32','Mtrn','Alph','FMsk','lnk2','lnkD','lnkE','FEid','FXid','PxSD']);
 const PSD_SMART_OBJECT_LAYER_KEYS = new Set(['PlLd','SoLd','SoLE']);
 const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
+const PSD_SHAPE_LAYER_KEYS = new Set(['SoCo','vscg','vstk']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
+const MAX_PSD_SHAPE_BLOCK_BYTES = 4 * 1024 * 1024;
 const MAX_PSD_ENGINE_DATA_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCK_BYTES = 128 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCKS = 32;
@@ -709,6 +711,79 @@ function encodePsdRawDataValue(data) {
   return out;
 }
 
+function psdRgbDescriptorHex(descriptor) {
+  const color=descriptor?.items?.['Clr ']?.items;
+  if(!color||typeof color!=='object')return null;
+  const channel=key=>Math.max(0,Math.min(255,Math.round(Number(color[key])||0)));
+  const rgb=[channel('Rd  '),channel('Grn '),channel('Bl  ')];
+  return'#'+rgb.map(value=>value.toString(16).padStart(2,'0')).join('');
+}
+
+function parseShapeContentBlock(key,data,warnings,label) {
+  try{
+    const reader=new Reader(data);
+    let subtype=key;
+    if(key==='vscg')subtype=reader.ascii(4);
+    if(subtype!=='SoCo')return{sourceKey:key,subtype,fillType:null,fill:null};
+    const descriptor=readPsdDescriptorBlock(reader);
+    return{sourceKey:key,subtype,fillType:'solid',fill:psdRgbDescriptorHex(descriptor)};
+  }catch(error){
+    warnings.push(label+': '+key+' shape content не разобран ('+(error?.message||error)+'); opaque bytes сохранены');
+    return{sourceKey:key,subtype:null,fillType:null,fill:null};
+  }
+}
+
+function parseShapeStrokeBlock(data,warnings,label) {
+  try{
+    const descriptor=readPsdDescriptorBlock(new Reader(data));
+    const items=descriptor.items||{};
+    const width=Number(items.strokeStyleLineWidth?.value);
+    const color=psdRgbDescriptorHex(items.strokeStyleContent);
+    return{
+      strokeEnabled:items.strokeEnabled===true,
+      fillEnabled:items.fillEnabled!==false,
+      strokeWidth:Number.isFinite(width)&&width>=0?width:0,
+      stroke:color,
+      opacity:Number(items.strokeStyleOpacity?.value),
+      lineCap:items.strokeStyleLineCapType?.value||null,
+      lineJoin:items.strokeStyleLineJoinType?.value||null,
+      lineAlignment:items.strokeStyleLineAlignment?.value||null,
+    };
+  }catch(error){
+    warnings.push(label+': vstk stroke style не разобран ('+(error?.message||error)+'); opaque bytes сохранены');
+    return null;
+  }
+}
+
+function appendShapeLayerBlock(record,signature,key,data,warnings) {
+  if(!data)return;
+  if(!record.psdShape){
+    record.psdShape={
+      fillType:null,fill:null,fillEnabled:true,
+      stroke:null,strokeEnabled:false,strokeWidth:0,
+      sourceContentKey:null,strokeStyle:null,blocks:[],
+    };
+  }
+  record.psdShape.blocks.push({signature,key,data});
+  if(key==='SoCo'||key==='vscg'){
+    const parsed=parseShapeContentBlock(key,data,warnings,'Слой «'+record.name+'»');
+    if(parsed.fillType){
+      record.psdShape.fillType=parsed.fillType;
+      record.psdShape.fill=parsed.fill;
+      record.psdShape.sourceContentKey=key;
+    }
+  }else if(key==='vstk'){
+    const stroke=parseShapeStrokeBlock(data,warnings,'Слой «'+record.name+'»');
+    if(stroke){
+      record.psdShape.strokeStyle=stroke;
+      record.psdShape.strokeEnabled=stroke.strokeEnabled;
+      record.psdShape.fillEnabled=stroke.fillEnabled;
+      record.psdShape.strokeWidth=stroke.strokeWidth;
+      record.psdShape.stroke=stroke.stroke;
+    }
+  }
+}
+
 function parseTypeToolObject(data,warnings,label) {
   if(!(data instanceof Uint8Array)||data.length<60)return null;
   try{
@@ -902,6 +977,9 @@ function parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWid
     } else if (PSD_TEXT_LAYER_KEYS.has(key)) {
       const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_TEXT_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
       if(data)record.psdText={signature,key,data,parsed:parseTypeToolObject(data,warnings,`Слой «${record.name}»`)};
+    } else if (PSD_SHAPE_LAYER_KEYS.has(key)) {
+      const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_SHAPE_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
+      appendShapeLayerBlock(record,signature,key,data,warnings);
     } else if (key === 'luni' && length >= 4) {
       const count = reader.u32();
       const byteLength = Math.min(count * 2, Math.max(0, dataEnd - reader.offset));
@@ -972,7 +1050,7 @@ function parseLayerRecord(reader, version, documentWidth, documentHeight, warnin
     const padding = (4 - (consumed % 4)) % 4;
     if (reader.offset + padding <= extraEnd) reader.skip(padding);
   }
-  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null };
+  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null,psdShape:null };
   parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings);
   reader.seek(extraEnd);
   return record;
@@ -1675,6 +1753,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
       vectorMask: record.vectorMask,
       psdSmartObject: record.psdSmartObject,
       psdText: record.psdText,
+      psdShape: record.psdShape,
     });
   }
 
@@ -1938,6 +2017,15 @@ function writeTextLayerExtra(writer,layer,version) {
   const block=layer?.psdText;
   if(!block)return;
   writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_TEXT_LAYER_KEYS,MAX_PSD_TEXT_BLOCK_BYTES,'Text layer block');
+}
+
+function writeShapeLayerExtras(writer,layer,version,phase='content') {
+  const blocks=Array.isArray(layer?.psdShape?.blocks)?layer.psdShape.blocks:[];
+  for(const block of blocks.slice(0,8)){
+    const isStroke=block?.key==='vstk';
+    if((phase==='stroke')!==isStroke)continue;
+    writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_SHAPE_LAYER_KEYS,MAX_PSD_SHAPE_BLOCK_BYTES,'Shape layer block');
+  }
 }
 
 function writeLinkedLayerBlocks(writer,blocks,version) {
@@ -2477,7 +2565,9 @@ function writeLayerRecordAndData(layerRecords, channelData, layer, version, docu
   writePascalLayerName(extra, layer.name || 'Layer');
   writeUnicodeLayerName(extra, layer.name || 'Layer');
   writeSectionDividerExtra(extra, layer);
+  writeShapeLayerExtras(extra, layer, version, 'content');
   writeVectorMaskExtra(extra, layer, documentWidth, documentHeight);
+  writeShapeLayerExtras(extra, layer, version, 'stroke');
   writeTextLayerExtra(extra, layer, version);
   writeSmartObjectLayerExtras(extra, layer, version);
   layerRecords.u32(extra.length).append(extra);

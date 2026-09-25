@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "fixture": {
+    "id": "psd-tools-shape-layer",
+    "file": "psd-tools-shape-layer.psd",
+    "license": "MIT",
+    "sourceRepository": "psd-tools/psd-tools",
+    "sourceCommit": "8f9a25ea98202061365701db54ce938931b27c09",
+    "sourcePath": "tests/psd_files/layers/shape-layer.psd",
+    "sourceGitBlob": "5d5b2023d85ddfbad624f30e6406e78788795fca",
+    "size": 25391,
+    "sha256": "23b3cc8dfcaca161443ab7345e49fdcd5494ceb864c16221b61ad99473a53830"
+  }
+}

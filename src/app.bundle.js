@@ -3721,7 +3721,7 @@ function documentWithTextPreview(doc, draft) {
 }
 function createShapeLayer(overrides = {}) {
   return baseLayer('shape', {
-    name: 'Фигура', shape: 'rect', fill: '#4f8cff', stroke: 'transparent', strokeWidth: 0, lineFlip: false, lineMode: 'diag', pathPoints: [], pathClosed: false,
+    name: 'Фигура', shape: 'rect', fill: '#4f8cff', stroke: 'transparent', strokeWidth: 0, lineFlip: false, lineMode: 'diag', pathPoints: [], pathClosed: false, psdShape: null,
     width: 180, height: 120, radius: 0, ...overrides,
   });
 }
@@ -4327,6 +4327,55 @@ function sanitizePsdText(value) {
   };
 }
 
+const PSD_SHAPE_BLOCK_KEYS = new Set(['SoCo','vscg','vstk']);
+const MAX_PSD_SHAPE_DATA_URL_CHARS = 6_000_000;
+
+function sanitizePsdShape(value) {
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const blocks=(Array.isArray(value.blocks)?value.blocks:[])
+    .slice(0,8)
+    .map(block=>{
+      if(!block||typeof block!=='object'||Array.isArray(block))return null;
+      const key=shortText(block.key,'',4);
+      if(!PSD_SHAPE_BLOCK_KEYS.has(key))return null;
+      const dataUrl=typeof block.dataUrl==='string'&&block.dataUrl.length<=MAX_PSD_SHAPE_DATA_URL_CHARS&&/^data:application\/octet-stream;base64,[a-z\d+/=]*$/i.test(block.dataUrl)
+        ? block.dataUrl:null;
+      if(!dataUrl)return null;
+      return{signature:block.signature==='8B64'?'8B64':'8BIM',key,dataUrl};
+    })
+    .filter(Boolean);
+  if(!blocks.length)return null;
+  const baseline=value.baseline&&typeof value.baseline==='object'&&!Array.isArray(value.baseline)?value.baseline:{};
+  const strokeStyle=value.strokeStyle&&typeof value.strokeStyle==='object'&&!Array.isArray(value.strokeStyle)?value.strokeStyle:null;
+  return{
+    fillType:value.fillType==='solid'?'solid':null,
+    fill:shortText(value.fill,'#000000',64),
+    fillEnabled:value.fillEnabled!==false,
+    stroke:shortText(value.stroke,'transparent',64),
+    strokeEnabled:value.strokeEnabled===true,
+    strokeWidth:bounded(value.strokeWidth,0,0,1000),
+    sourceContentKey:['SoCo','vscg'].includes(value.sourceContentKey)?value.sourceContentKey:null,
+    strokeStyle:strokeStyle?{
+      opacity:bounded(strokeStyle.opacity,100,0,100),
+      lineCap:shortText(strokeStyle.lineCap,'',160)||null,
+      lineJoin:shortText(strokeStyle.lineJoin,'',160)||null,
+      lineAlignment:shortText(strokeStyle.lineAlignment,'',160)||null,
+    }:null,
+    baseline:{
+      fill:shortText(baseline.fill,'transparent',64),
+      stroke:shortText(baseline.stroke,'transparent',64),
+      strokeWidth:bounded(baseline.strokeWidth,0,0,1000),
+      pathClosed:baseline.pathClosed!==false,
+      width:bounded(baseline.width,1,1,12000),
+      height:bounded(baseline.height,1,1,12000),
+      scaleX:bounded(baseline.scaleX,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      scaleY:bounded(baseline.scaleY,1,MIN_LAYER_SCALE,MAX_LAYER_SCALE),
+      rotation:((finite(baseline.rotation,0)%360)+360)%360,
+    },
+    blocks,
+  };
+}
+
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -4412,6 +4461,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
       ? layer.pathPoints.slice(0,5000).map(sanitizePathPoint)
       : [];
     result.pathClosed = result.shape === 'path' && Boolean(layer?.pathClosed);
+    result.psdShape = sanitizePsdShape(layer?.psdShape);
   }
   return result;
 }
@@ -5488,9 +5538,11 @@ const PSB_VERSION = 2;
 const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt32','Mtrn','Alph','FMsk','lnk2','lnkD','lnkE','FEid','FXid','PxSD']);
 const PSD_SMART_OBJECT_LAYER_KEYS = new Set(['PlLd','SoLd','SoLE']);
 const PSD_TEXT_LAYER_KEYS = new Set(['TySh']);
+const PSD_SHAPE_LAYER_KEYS = new Set(['SoCo','vscg','vstk']);
 const PSD_LINKED_LAYER_KEYS = new Set(['lnk2','lnkD','lnkE']);
 const MAX_PSD_SMART_OBJECT_BLOCK_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_TEXT_BLOCK_BYTES = 16 * 1024 * 1024;
+const MAX_PSD_SHAPE_BLOCK_BYTES = 4 * 1024 * 1024;
 const MAX_PSD_ENGINE_DATA_BYTES = 8 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCK_BYTES = 128 * 1024 * 1024;
 const MAX_PSD_LINKED_LAYER_BLOCKS = 32;
@@ -6188,6 +6240,79 @@ function encodePsdRawDataValue(data) {
   return out;
 }
 
+function psdRgbDescriptorHex(descriptor) {
+  const color=descriptor?.items?.['Clr ']?.items;
+  if(!color||typeof color!=='object')return null;
+  const channel=key=>Math.max(0,Math.min(255,Math.round(Number(color[key])||0)));
+  const rgb=[channel('Rd  '),channel('Grn '),channel('Bl  ')];
+  return'#'+rgb.map(value=>value.toString(16).padStart(2,'0')).join('');
+}
+
+function parseShapeContentBlock(key,data,warnings,label) {
+  try{
+    const reader=new Reader(data);
+    let subtype=key;
+    if(key==='vscg')subtype=reader.ascii(4);
+    if(subtype!=='SoCo')return{sourceKey:key,subtype,fillType:null,fill:null};
+    const descriptor=readPsdDescriptorBlock(reader);
+    return{sourceKey:key,subtype,fillType:'solid',fill:psdRgbDescriptorHex(descriptor)};
+  }catch(error){
+    warnings.push(label+': '+key+' shape content не разобран ('+(error?.message||error)+'); opaque bytes сохранены');
+    return{sourceKey:key,subtype:null,fillType:null,fill:null};
+  }
+}
+
+function parseShapeStrokeBlock(data,warnings,label) {
+  try{
+    const descriptor=readPsdDescriptorBlock(new Reader(data));
+    const items=descriptor.items||{};
+    const width=Number(items.strokeStyleLineWidth?.value);
+    const color=psdRgbDescriptorHex(items.strokeStyleContent);
+    return{
+      strokeEnabled:items.strokeEnabled===true,
+      fillEnabled:items.fillEnabled!==false,
+      strokeWidth:Number.isFinite(width)&&width>=0?width:0,
+      stroke:color,
+      opacity:Number(items.strokeStyleOpacity?.value),
+      lineCap:items.strokeStyleLineCapType?.value||null,
+      lineJoin:items.strokeStyleLineJoinType?.value||null,
+      lineAlignment:items.strokeStyleLineAlignment?.value||null,
+    };
+  }catch(error){
+    warnings.push(label+': vstk stroke style не разобран ('+(error?.message||error)+'); opaque bytes сохранены');
+    return null;
+  }
+}
+
+function appendShapeLayerBlock(record,signature,key,data,warnings) {
+  if(!data)return;
+  if(!record.psdShape){
+    record.psdShape={
+      fillType:null,fill:null,fillEnabled:true,
+      stroke:null,strokeEnabled:false,strokeWidth:0,
+      sourceContentKey:null,strokeStyle:null,blocks:[],
+    };
+  }
+  record.psdShape.blocks.push({signature,key,data});
+  if(key==='SoCo'||key==='vscg'){
+    const parsed=parseShapeContentBlock(key,data,warnings,'Слой «'+record.name+'»');
+    if(parsed.fillType){
+      record.psdShape.fillType=parsed.fillType;
+      record.psdShape.fill=parsed.fill;
+      record.psdShape.sourceContentKey=key;
+    }
+  }else if(key==='vstk'){
+    const stroke=parseShapeStrokeBlock(data,warnings,'Слой «'+record.name+'»');
+    if(stroke){
+      record.psdShape.strokeStyle=stroke;
+      record.psdShape.strokeEnabled=stroke.strokeEnabled;
+      record.psdShape.fillEnabled=stroke.fillEnabled;
+      record.psdShape.strokeWidth=stroke.strokeWidth;
+      record.psdShape.stroke=stroke.stroke;
+    }
+  }
+}
+
 function parseTypeToolObject(data,warnings,label) {
   if(!(data instanceof Uint8Array)||data.length<60)return null;
   try{
@@ -6380,6 +6505,9 @@ function parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWid
     } else if (PSD_TEXT_LAYER_KEYS.has(key)) {
       const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_TEXT_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
       if(data)record.psdText={signature,key,data,parsed:parseTypeToolObject(data,warnings,`Слой «${record.name}»`)};
+    } else if (PSD_SHAPE_LAYER_KEYS.has(key)) {
+      const data=copyOpaquePsdBlock(reader.bytes,dataStart,dataEnd,MAX_PSD_SHAPE_BLOCK_BYTES,`Слой «${record.name}» ${key}`,warnings);
+      appendShapeLayerBlock(record,signature,key,data,warnings);
     } else if (key === 'luni' && length >= 4) {
       const count = reader.u32();
       const byteLength = Math.min(count * 2, Math.max(0, dataEnd - reader.offset));
@@ -6450,7 +6578,7 @@ function parseLayerRecord(reader, version, documentWidth, documentHeight, warnin
     const padding = (4 - (consumed % 4)) % 4;
     if (reader.offset + padding <= extraEnd) reader.skip(padding);
   }
-  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null };
+  const record = { top,left,bottom,right,channels,blendKey,opacity,flags,mask,name,sectionDivider:0,sectionBlendKey:null,sectionSubtype:0,groupKey:null,vectorMask:null,psdSmartObject:null,psdText:null,psdShape:null };
   parseAdditionalLayerInfo(reader, extraEnd, record, version, documentWidth, documentHeight, warnings);
   reader.seek(extraEnd);
   return record;
@@ -7152,6 +7280,7 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
       vectorMask: record.vectorMask,
       psdSmartObject: record.psdSmartObject,
       psdText: record.psdText,
+      psdShape: record.psdShape,
     });
   }
 
@@ -7414,6 +7543,15 @@ function writeTextLayerExtra(writer,layer,version) {
   const block=layer?.psdText;
   if(!block)return;
   writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_TEXT_LAYER_KEYS,MAX_PSD_TEXT_BLOCK_BYTES,'Text layer block');
+}
+
+function writeShapeLayerExtras(writer,layer,version,phase='content') {
+  const blocks=Array.isArray(layer?.psdShape?.blocks)?layer.psdShape.blocks:[];
+  for(const block of blocks.slice(0,8)){
+    const isStroke=block?.key==='vstk';
+    if((phase==='stroke')!==isStroke)continue;
+    writeOpaqueAdditionalInfoBlock(writer,block,version,PSD_SHAPE_LAYER_KEYS,MAX_PSD_SHAPE_BLOCK_BYTES,'Shape layer block');
+  }
 }
 
 function writeLinkedLayerBlocks(writer,blocks,version) {
@@ -7953,7 +8091,9 @@ function writeLayerRecordAndData(layerRecords, channelData, layer, version, docu
   writePascalLayerName(extra, layer.name || 'Layer');
   writeUnicodeLayerName(extra, layer.name || 'Layer');
   writeSectionDividerExtra(extra, layer);
+  writeShapeLayerExtras(extra, layer, version, 'content');
   writeVectorMaskExtra(extra, layer, documentWidth, documentHeight);
+  writeShapeLayerExtras(extra, layer, version, 'stroke');
   writeTextLayerExtra(extra, layer, version);
   writeSmartObjectLayerExtras(extra, layer, version);
   layerRecords.u32(extra.length).append(extra);
@@ -10004,9 +10144,13 @@ function updateProperties() {
     const nativeInfo=l.psdText?`<label>Photoshop Text</label><span>${nativeText?.eligible?'native TySh + EngineData round-trip':'raster fallback: '+escapeHtml(nativeText?.reason||'metadata unavailable')}</span>`:'';
     extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textFontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}${nativeInfo}`;
   }
-  if (l.type === 'shape') extra = l.shape === 'line'
-    ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
-    : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`;
+  if (l.type === 'shape') {
+    const nativeShape=l.psdShape?psdShapeNativePlan(l):null;
+    const nativeInfo=l.psdShape?`<label>Photoshop Shape</label><span>${nativeShape?.eligible?'native solid-fill + vector-mask round-trip':'raster fallback: '+escapeHtml(nativeShape?.reason||'metadata unavailable')}</span>`:'';
+    extra = (l.shape === 'line'
+      ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
+      : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`) + nativeInfo;
+  }
   if (l.type === 'raster' && l.highDepthSource) {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
@@ -11865,6 +12009,98 @@ function psdOpaqueBlockFromState(block,{maxBytes=8*1024*1024}={}){
   };
 }
 
+function canMapPsdSolidShape(sourceLayer) {
+  const shape=sourceLayer?.psdShape,mask=sourceLayer?.vectorMask;
+  if(shape?.fillType!=='solid'||!shape.fill||!mask?.subpaths?.length)return false;
+  if(mask.subpaths.length!==1)return false;
+  const path=mask.subpaths[0];
+  return path.closed!==false&&path.operation==='add'&&(path.points?.length||0)>=2;
+}
+
+function importPsdShapeMetadata(source,shapeLayer) {
+  if(!source?.blocks?.length)return null;
+  return{
+    fillType:source.fillType==='solid'?'solid':null,
+    fill:source.fill||null,
+    fillEnabled:source.fillEnabled!==false,
+    stroke:source.stroke||null,
+    strokeEnabled:source.strokeEnabled===true,
+    strokeWidth:Number(source.strokeWidth)||0,
+    sourceContentKey:['SoCo','vscg'].includes(source.sourceContentKey)?source.sourceContentKey:null,
+    strokeStyle:source.strokeStyle?{
+      opacity:Number(source.strokeStyle.opacity)||0,
+      lineCap:source.strokeStyle.lineCap||null,
+      lineJoin:source.strokeStyle.lineJoin||null,
+      lineAlignment:source.strokeStyle.lineAlignment||null,
+    }:null,
+    baseline:{
+      fill:String(shapeLayer.fill||'transparent'),
+      stroke:String(shapeLayer.stroke||'transparent'),
+      strokeWidth:Number(shapeLayer.strokeWidth)||0,
+      pathClosed:shapeLayer.pathClosed!==false,
+      width:Number(shapeLayer.width)||1,
+      height:Number(shapeLayer.height)||1,
+      scaleX:Number(shapeLayer.scaleX??1)||1,
+      scaleY:Number(shapeLayer.scaleY??1)||1,
+      rotation:Number(shapeLayer.rotation)||0,
+    },
+    blocks:source.blocks.map(psdOpaqueBlockToState).filter(Boolean),
+  };
+}
+
+function exportPsdShapePathMask(layer) {
+  const points=Array.isArray(layer?.pathPoints)?layer.pathPoints:[];
+  if(layer?.type!=='shape'||layer.shape!=='path'||points.length<2||layer.pathClosed===false)return null;
+  const documentize=node=>{
+    const anchor=layerPixelToDocumentPoint(node,layer);
+    return{
+      x:anchor.x,y:anchor.y,
+      handleIn:node.handleIn?layerPixelToDocumentPoint(node.handleIn,layer):null,
+      handleOut:node.handleOut?layerPixelToDocumentPoint(node.handleOut,layer):null,
+      kind:node.kind==='smooth'?'smooth':'corner',
+    };
+  };
+  return{
+    enabled:true,invert:false,linked:true,fillStartsWithAllPixels:false,
+    subpaths:[{
+      operation:'add',closed:true,fillRule:'non-zero',
+      points:points.map(documentize),
+    }],
+  };
+}
+
+function psdShapeNativePlan(layer) {
+  const source=layer?.psdShape,baseline=source?.baseline;
+  if(layer?.type!=='shape'||layer.shape!=='path'||!source?.blocks?.length||source.fillType!=='solid'||!baseline){
+    return{eligible:false,reason:'нет поддержанного imported solid-shape metadata',metadata:null,vectorMask:null};
+  }
+  const same=(left,right)=>Math.abs(Number(left)-Number(right))<=1e-9;
+  const styleSame=
+    String(layer.fill||'transparent')===String(baseline.fill||'transparent')&&
+    String(layer.stroke||'transparent')===String(baseline.stroke||'transparent')&&
+    same(layer.strokeWidth,baseline.strokeWidth)&&
+    Boolean(layer.pathClosed)!==false&&baseline.pathClosed!==false;
+  if(!styleSame)return{eligible:false,reason:'изменены fill/stroke/path-closure; descriptor rewrite будет отдельным этапом',metadata:null,vectorMask:null};
+  if(!same(layer.width,baseline.width)||!same(layer.height,baseline.height)||
+     !same(layer.scaleX??1,baseline.scaleX??1)||!same(layer.scaleY??1,baseline.scaleY??1)||
+     !same(layer.rotation??0,baseline.rotation??0)){
+    return{eligible:false,reason:'resize/scale/rotation требуют согласования Photoshop stroke geometry',metadata:null,vectorMask:null};
+  }
+  if(layer.styles)return{eligible:false,reason:'layer styles требуют raster preview',metadata:null,vectorMask:null};
+  const filters=sanitizeFilters(layer.filters);
+  if(Object.keys(DEFAULT_LAYER_FILTERS).some(key=>Math.abs(Number(filters[key])-Number(DEFAULT_LAYER_FILTERS[key]))>1e-9)){
+    return{eligible:false,reason:'pixel filters требуют raster preview',metadata:null,vectorMask:null};
+  }
+  const vectorMask=exportPsdShapePathMask(layer);
+  if(!vectorMask)return{eligible:false,reason:'path geometry недоступна',metadata:null,vectorMask:null};
+  try{
+    const blocks=source.blocks.map(block=>psdOpaqueBlockFromState(block,{maxBytes:4*1024*1024})).filter(Boolean);
+    return{eligible:true,reason:null,metadata:{...source,blocks},vectorMask};
+  }catch(error){
+    return{eligible:false,reason:'shape metadata повреждены: '+(error?.message||error),metadata:null,vectorMask:null};
+  }
+}
+
 function importPsdTextMetadata(source,sourceLayer,textLayer){
   if(!source?.data||!source?.parsed)return null;
   return{
@@ -12214,11 +12450,27 @@ async function openPsd(file){
         mask:maskDataUrl?createLayerMask({enabled:sourceLayer.mask.disabled!==true,dataUrl:maskDataUrl}):null,
       };
       const canMapText=Boolean(sourceLayer.psdText?.parsed)&&sourceLayer.psdText.parsed.orientation!=='Vrtc';
-      const embeddedDocument=!canMapText&&sourceLayer.psdSmartObject
+      const canMapShape=canMapPsdSolidShape(sourceLayer);
+      const embeddedDocument=!canMapShape&&!canMapText&&sourceLayer.psdSmartObject
         ? await importPsdEmbeddedAssetDocument(sourceLayer.psdSmartObject,sourceLayer.name||'Smart Object',warnings)
         : null;
       let importedLayer;
-      if(canMapText){
+      if(canMapShape){
+        importedLayer=createShapeLayer({
+          ...commonLayer,
+          shape:'path',
+          fill:sourceLayer.psdShape.fillEnabled===false?'transparent':sourceLayer.psdShape.fill,
+          stroke:sourceLayer.psdShape.strokeEnabled&&sourceLayer.psdShape.stroke?sourceLayer.psdShape.stroke:'transparent',
+          strokeWidth:sourceLayer.psdShape.strokeEnabled?Math.max(0,Number(sourceLayer.psdShape.strokeWidth)||0):0,
+          pathClosed:true,
+        });
+        const localMask=importPsdVectorMask(sourceLayer.vectorMask,importedLayer);
+        const subpath=localMask?.subpaths?.[0];
+        importedLayer.pathPoints=structuredClone(subpath?.points||[]);
+        importedLayer.pathClosed=subpath?.closed!==false;
+        importedLayer.psdShape=importPsdShapeMetadata(sourceLayer.psdShape,importedLayer);
+        warnings.push(`Слой «${sourceLayer.name}»: Photoshop solid-color vector shape импортирован как editable ZPE path; fill/stroke metadata сохраняются native, path geometry можно редактировать`);
+      }else if(canMapText){
         const parsedText=sourceLayer.psdText.parsed;
         const typography=parsedText.typography||{};
         importedLayer=createTextLayer({
@@ -12250,16 +12502,16 @@ async function openPsd(file){
       }else{
         importedLayer=createRasterLayer({...commonLayer,dataUrl,highDepthSource});
       }
-      importedLayer.vectorMask=importPsdVectorMask(sourceLayer.vectorMask,importedLayer);
-      if(!canMapText&&sourceLayer.psdText?.parsed?.orientation==='Vrtc'){
+      importedLayer.vectorMask=canMapShape?null:importPsdVectorMask(sourceLayer.vectorMask,importedLayer);
+      if(!canMapShape&&!canMapText&&sourceLayer.psdText?.parsed?.orientation==='Vrtc'){
         warnings.push(`Слой «${sourceLayer.name}»: vertical Photoshop text пока оставлен raster preview; TySh vertical mapping будет отдельным этапом`);
       }
-      if(!canMapText&&sourceLayer.psdSmartObject){
+      if(!canMapShape&&!canMapText&&sourceLayer.psdSmartObject){
         const asset=sourceLayer.psdSmartObject.asset;
         if(embeddedDocument)warnings.push(`Слой «${sourceLayer.name}»: embedded ${asset?.detectedFileType||'asset'} «${asset?.filename||''}» извлечён в editable content-tab; исходные Photoshop bytes сохраняются пока содержимое не изменено`);
         else warnings.push(`Слой «${sourceLayer.name}»: Photoshop Smart Object/Placed Layer сохранён как non-destructive preview + opaque native metadata; linked/unsupported payload не читается с внешней файловой системы`);
       }
-      if(sourceLayer.vectorMask?.linked===false)warnings.push(`Слой «${sourceLayer.name}»: Photoshop vector mask unlinked-флаг сохранён, но ZPE при трансформациях пока перемещает её вместе со слоем`);
+      if(!canMapShape&&sourceLayer.vectorMask?.linked===false)warnings.push(`Слой «${sourceLayer.name}»: Photoshop vector mask unlinked-флаг сохранён, но ZPE при трансформациях пока перемещает её вместе со слоем`);
       prepared.push(importedLayer);
       sourceLayer.pixelBuffer=null;
       sourceLayer.pixels=null;
@@ -12622,11 +12874,12 @@ async function preparePsdExport(exportDoc){
   const planned=sourceLayers.map(layer=>{
     const nativePixelBuffer=nativeHighDepthPsdSource(layer);
     const nativeText=layer.psdText?psdTextNativePlan(layer):null;
+    const nativeShape=layer.psdShape?psdShapeNativePlan(layer):null;
     const baseline=psdSmartPlan.eligible&&layer.psdSmartObject?layer.psdSmartObject.baseline:null;
     const bounds=nativeText?.eligible?nativeText.bounds:baseline
       ? {x:Math.trunc(Number(baseline.x)||0),y:Math.trunc(Number(baseline.y)||0),width:Math.max(1,Math.trunc(Number(baseline.width)||1)),height:Math.max(1,Math.trunc(Number(baseline.height)||1))}
       : nativePixelBuffer?nativePsdBounds(layer,nativePixelBuffer):psdExportBounds(layer);
-    return{layer,nativePixelBuffer,nativeText,bounds};
+    return{layer,nativePixelBuffer,nativeText,nativeShape,bounds};
   });
   const cmykDepths=planned.filter(item=>item.nativePixelBuffer?.model==='cmyk').map(item=>item.nativePixelBuffer.bitsPerChannel);
   const tentativeCmykDepth=cmykDepths.includes(32)?32:cmykDepths.includes(16)?16:8;
@@ -12662,11 +12915,15 @@ async function preparePsdExport(exportDoc){
       opacity:clamp(Number(group.opacity??1),0,1),
       blendMode:group.blendMode||'pass-through',
     }));
-  if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
+  if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&!item.nativeShape?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
   const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
   const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
   if(nativeTextCount)warnings.push(`Stage 15b: ${nativeTextCount} Photoshop TySh text layer(s) сохраняют native descriptor + EngineData + transform metadata`);
   for(const item of fallbackText)warnings.push(`Stage 15b: text layer «${item.layer.name||'Без имени'}» экспортируется raster preview (${item.nativeText?.reason||'native text mapping unavailable'})`);
+  const nativeShapeCount=planned.filter(item=>item.nativeShape?.eligible).length;
+  const fallbackShapes=planned.filter(item=>item.layer.psdShape&&!item.nativeShape?.eligible);
+  if(nativeShapeCount)warnings.push(`Stage 15c: ${nativeShapeCount} Photoshop solid vector shape layer(s) сохраняют native fill/stroke + vector-mask metadata`);
+  for(const item of fallbackShapes)warnings.push(`Stage 15c: shape layer «${item.layer.name||'Без имени'}» экспортируется raster preview (${item.nativeShape?.reason||'native shape mapping unavailable'})`);
   if(psdSmartPlan.imported.length){
     if(psdSmartPlan.eligible)warnings.push(`Stage 14a: ${psdSmartPlan.imported.length} Photoshop Smart Object layer(s) сохраняют opaque PlLd/SoLd/SoLE + linked-resource metadata`);
     else warnings.push(`Stage 14a: Photoshop Smart Object native passthrough отключён (${psdSmartPlan.reason}); сохранён безопасный raster preview без stale placed/linked metadata`);
@@ -12682,7 +12939,7 @@ async function preparePsdExport(exportDoc){
 
   const prepared=[];
   for(let planIndex=0;planIndex<planned.length;planIndex+=1){
-    const {layer,bounds,nativeText}=planned[planIndex];
+    const {layer,bounds,nativeText,nativeShape}=planned[planIndex];
     const nativePixelBuffer=writerNative[planIndex];
     const item={
       name:layer.name||'ZPE Layer',
@@ -12695,7 +12952,8 @@ async function preparePsdExport(exportDoc){
         pixels:await renderPsdMaskPixels(layer,bounds),
         disabled:layer.mask.enabled===false,
       }:null,
-      vectorMask:exportPsdVectorMask(layer),
+      vectorMask:nativeShape?.eligible?nativeShape.vectorMask:exportPsdVectorMask(layer),
+      psdShape:nativeShape?.eligible?nativeShape.metadata:null,
       psdSmartObject:psdSmartPlan.eligible&&layer.psdSmartObject?psdSmartObjectMetadataForExport(layer):null,
       psdText:nativeText?.eligible?nativeText.block:null,
     };

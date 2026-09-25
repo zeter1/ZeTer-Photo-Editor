@@ -269,3 +269,22 @@ test('Stage 15b wires EngineData typography import and single-run text writeback
   assert.match(main,/Stage 15b: .*EngineData/);
 });
 
+test('Stage 15c wires Photoshop solid vector shapes into editable ZPE paths and native PSD/PSB metadata',()=>{
+  assert.match(adapter,/PSD_SHAPE_LAYER_KEYS = new Set\(\['SoCo','vscg','vstk'\]\)/);
+  assert.match(adapter,/function parseShapeContentBlock\(/);
+  assert.match(adapter,/function parseShapeStrokeBlock\(/);
+  assert.match(adapter,/appendShapeLayerBlock/);
+  assert.match(adapter,/psdShape: record\.psdShape/);
+  assert.match(adapter,/writeShapeLayerExtras\(extra, layer, version, 'content'\)/);
+  assert.match(adapter,/writeShapeLayerExtras\(extra, layer, version, 'stroke'\)/);
+  assert.match(main,/function canMapPsdSolidShape\(/);
+  assert.match(main,/function importPsdShapeMetadata\(/);
+  assert.match(main,/function exportPsdShapePathMask\(/);
+  assert.match(main,/function psdShapeNativePlan\(/);
+  assert.match(main,/const canMapShape=canMapPsdSolidShape\(sourceLayer\)/);
+  assert.match(main,/createShapeLayer\(\{/);
+  assert.match(main,/psdShape:nativeShape\?\.eligible\?nativeShape\.metadata:null/);
+  assert.match(main,/Photoshop Shape/);
+  assert.match(main,/Stage 15c: .*solid vector shape/);
+});
+

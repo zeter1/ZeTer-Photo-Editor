@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.38.0 — 2026-09-25
+
+### 2026-09-25 — Photoshop-native Shape / Vector Fill Mapping Stage 15c
+
+- Shape metadata parser: PSD/PSB layer Additional Info теперь bounded-сохраняет `SoCo`, `vscg` и `vstk` blocks.
+- Solid fill semantics: ActionDescriptor RGB `Clr ` переводится в ZPE hex fill; `vscg` subtype проверяется и Stage 15c принимает только `SoCo`.
+- Stroke semantics: `vstk` parser извлекает stroke/fill enabled flags, line width, solid RGB stroke, opacity, cap, join и alignment.
+- Editable import: single closed/add Photoshop vector-mask subpath импортируется как ZPE `shape:'path'` с текущими Bezier/corner anchors, fill и stroke вместо обычного raster layer.
+- Native writer: `vscg/SoCo` и `vstk` descriptor bytes сохраняются opaque byte-for-byte, а `vmsk` vector path пересобирается из текущей ZPE geometry.
+- Safe path editing: move и path-anchor edits остаются native; width/height resize, scale/rotation, fill/stroke edit, filters или layer styles переводят export в raster fallback, чтобы не создавать несогласованные Photoshop descriptors.
+- Project persistence: `.zpe` sanitizer allow-list-ит только `SoCo/vscg/vstk`, bounded octet-stream payload и semantic baseline.
+- Real compatibility fixture: добавлен MIT `psd-tools` `layers/shape-layer.psd`; regression фиксирует cyan `#00ffff` fill, magenta `#ff00ff` 1px stroke, 5-point polygon и PSD/PSB vector rewrite.
+- UI: Properties показывает Photoshop Shape native round-trip / raster fallback status.
+- Version: приложение синхронизировано на 1.38.0.
+
 ## 1.37.0 — 2026-09-25
 
 ### 2026-09-25 — Photoshop EngineData Typography & Editable Text Writeback Stage 15b
