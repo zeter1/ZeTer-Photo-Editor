@@ -11,7 +11,7 @@ import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataU
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb } from './core/pixels.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
-import { decodePsd, encodePsdBlob, isPsdFile } from './adapters/psd.js';
+import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './adapters/psd.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -2871,23 +2871,23 @@ async function openPsd(file){
   if(blockPendingDocumentEdit())return;
   if(!canReplaceDocument())return;
   if(Number(file?.size)>512*1024*1024){
-    const message='PSD больше 512 МБ пока не импортируется: используйте уменьшенную копию или дождитесь tiled/PSB pipeline';
+    const message='PSD/PSB больше 512 МБ пока не импортируется: используйте уменьшенную копию или дождитесь tiled pipeline';
     toast(message,'error');setStatus(message);return;
   }
   const targetDocument=doc;
   const targetSessionId=activeSessionId;
   const targetHistoryEntry=history.current();
   const targetChangeSerial=documentChangeSerial;
-  setStatus('PSD: чтение структуры и каналов…');
+  setStatus('PSD/PSB: чтение структуры и каналов…');
   try{
     const parsed=await decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
     const warnings=[...parsed.warnings];
-    if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD пока не переносится как отдельный lock-режим ZPE');
+    if(parsed.layers.some(layer=>layer.transparencyProtected))warnings.push('Protect Transparency из PSD/PSB пока не переносится как отдельный lock-режим ZPE');
     const prepared=[];
     for(const sourceLayer of [...parsed.layers].reverse()){
-      const dataUrl=await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.pixels,`PSD слой «${sourceLayer.name}»`);
+      const dataUrl=await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.pixels,`PSD/PSB слой «${sourceLayer.name}»`);
       const maskDataUrl=sourceLayer.mask
-        ? await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.mask.pixels,`Маска PSD слоя «${sourceLayer.name}»`)
+        ? await rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.mask.pixels,`Маска PSD/PSB слоя «${sourceLayer.name}»`)
         : null;
       prepared.push(createRasterLayer({
         name:sourceLayer.name||'PSD Layer',
@@ -2903,40 +2903,40 @@ async function openPsd(file){
     }
     if(!prepared.length&&parsed.composite){
       prepared.push(createRasterLayer({
-        name:'PSD Composite',x:0,y:0,width:parsed.width,height:parsed.height,
-        dataUrl:await rgbaPixelsToDataUrl(parsed.width,parsed.height,parsed.composite,'PSD composite'),
+        name:'PSD/PSB Composite',x:0,y:0,width:parsed.width,height:parsed.height,
+        dataUrl:await rgbaPixelsToDataUrl(parsed.width,parsed.height,parsed.composite,'PSD/PSB composite'),
       }));
     }
-    if(!prepared.length)throw new Error('PSD не содержит bitmap-данных, которые Stage 3 может импортировать');
+    if(!prepared.length)throw new Error('PSD/PSB не содержит bitmap-данных, которые текущий RGB/8-bit pipeline может импортировать');
 
     if(doc!==targetDocument||activeSessionId!==targetSessionId||
       history.current()!==targetHistoryEntry||documentChangeSerial!==targetChangeSerial){
-      setStatus('Импорт PSD отменён: документ изменился во время декодирования');
-      toast('Повторите импорт PSD в нужной вкладке','warn');
+      setStatus('Импорт PSD/PSB отменён: документ изменился во время декодирования');
+      toast('Повторите импорт PSD/PSB в нужной вкладке','warn');
       return;
     }
     if(blockPendingDocumentEdit())return;
     const next=createDocument({
-      name:(file.name||'PSD').replace(/\.psd$/i,''),
+      name:(file.name||'PSD').replace(/\.ps[db]$/i,''),
       width:parsed.width,height:parsed.height,background:'transparent'
     });
     next.layers=prepared;
     next.selectedLayerId=prepared.at(-1)?.id??null;
     history=new HistoryStack(80);
-    setDoc(next,{resetHistory:true,label:'Импорт PSD'});
+    setDoc(next,{resetHistory:true,label:'Импорт PSD/PSB'});
     markDirty(true);
     queueRecovery({immediate:true});
     fitToView();
-    setStatus(`PSD импортирован: ${prepared.length} слоёв. Сохраните проект как .zpe`);
-    toast(`PSD открыт: ${prepared.length} слоёв`,'success');
+    setStatus(`PSD/PSB импортирован: ${prepared.length} слоёв. Сохраните проект как .zpe`);
+    toast(`PSD/PSB открыт: ${prepared.length} слоёв`,'success');
     if(warnings.length){
-      console.warn('PSD import warnings',warnings);
-      toast(`PSD импортирован с ограничениями: ${warnings.length}. Подробности — в консоли`,'warn');
+      console.warn('PSD/PSB import warnings',warnings);
+      toast(`PSD/PSB импортирован с ограничениями: ${warnings.length}. Подробности — в консоли`,'warn');
     }
   }catch(error){
-    console.error('PSD import failed',{name:file?.name,size:file?.size,error});
-    const message=`Не удалось импортировать PSD: ${error?.message||error}`;
-    alert(message);setStatus('Ошибка импорта PSD');toast(message,'error');
+    console.error('PSD/PSB import failed',{name:file?.name,size:file?.size,error});
+    const message=`Не удалось импортировать PSD/PSB: ${error?.message||error}`;
+    alert(message);setStatus('Ошибка импорта PSD/PSB');toast(message,'error');
   }
 }
 
@@ -2947,8 +2947,8 @@ async function handleIncomingFiles(files, anchor = null, source = 'Импорт'
   const images=incoming.filter(isImageFile);
   if(psdFiles.length){
     if(psdFiles.length!==1||incoming.length!==1){
-      toast('PSD открывается как отдельный документ: выберите один PSD-файл за раз','warn');
-      setStatus('Выберите один PSD-файл');return;
+      toast('PSD/PSB открывается как отдельный документ: выберите один Photoshop-файл за раз','warn');
+      setStatus('Выберите один PSD/PSB-файл');return;
     }
     await openPsd(psdFiles[0]);return;
   }
@@ -3079,7 +3079,7 @@ async function preparePsdExport(exportDoc){
 
   const compositeCanvas=document.createElement('canvas');
   await renderDocument(compositeCanvas,exportDoc,{checker:false});
-  const composite=canvasRgbaPixels(compositeCanvas,'PSD composite');
+  const composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
 
   if(hasAdjustmentLayers){
     warnings.push('Adjustment layers Stage 1 не имеют Photoshop-semantic mapping: визуальный результат сохранён через верхний Composite Preview, исходные слои оставлены скрытыми');
@@ -3099,28 +3099,30 @@ async function preparePsdExport(exportDoc){
   return{layers:[...prepared].reverse(),composite,warnings};
 }
 
-async function exportPsdDocument(exportDoc){
-  setStatus('PSD: подготовка слоёв…');
+async function exportPsdDocument(exportDoc,{psb=false}={}){
+  const format=psb?'PSB':'PSD';
+  setStatus(`${format}: подготовка слоёв…`);
   const prepared=await preparePsdExport(exportDoc);
-  setStatus('PSD: упаковка RLE-каналов…');
-  const blob=encodePsdBlob({
+  setStatus(`${format}: упаковка RLE-каналов…`);
+  const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
+  const blob=encodeBlob({
     width:exportDoc.width,height:exportDoc.height,
     layers:prepared.layers,composite:prepared.composite,
     maxPixels:48_000_000,maxLayers:500,
   });
-  const filename=`${safeFilename(exportDoc.name)}.psd`;
+  const filename=`${safeFilename(exportDoc.name)}.${psb?'psb':'psd'}`;
   downloadBlob(blob,filename);
   if(prepared.warnings.length){
-    console.warn('PSD export warnings',prepared.warnings);
+    console.warn(`${format} export warnings`,prepared.warnings);
     setStatus(`Экспортирован ${filename} с ограничениями: ${prepared.warnings.length}`);
-    toast(`PSD экспортирован с ограничениями: ${prepared.warnings.length}. Подробности — в консоли`,'warn');
+    toast(`${format} экспортирован с ограничениями: ${prepared.warnings.length}. Подробности — в консоли`,'warn');
   }else{
     setStatus(`Экспортирован ${filename}`);
-    toast('PSD экспортирован','success');
+    toast(`${format} экспортирован`,'success');
   }
 }
 
-async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — слои (Stage 4)']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
+async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — слои (Stage 4)'],['psb','PSB — Large Document (Stage 7a)']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
 
 function canvasToPngBlob(canvas) {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));
@@ -3883,7 +3885,7 @@ function fitToView(){const r=els.viewport.getBoundingClientRect();setZoom(fitZoo
 const menus={
   file:[
     ['Новый…','Ctrl+N',createNewDialog],
-    ['Открыть изображение / PSD…','Ctrl+O',()=>els.fileInput.click()],
+    ['Открыть изображение / PSD / PSB…','Ctrl+O',()=>els.fileInput.click()],
     ['Открыть проект…','',()=>els.projectInput.click()],
     ['Вставить изображение из буфера','Ctrl+V',pasteFromClipboard],
     ['sep'],

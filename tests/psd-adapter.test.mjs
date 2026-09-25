@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodePsd, encodePsd, encodePsdBlob, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
+import { decodePsd, encodePsd, encodePsdBlob, encodePsb, encodePsbBlob, inspectPsdHeader, isPsdFile, PsdImportError } from '../src/adapters/psd.js';
 import { readFile } from 'node:fs/promises';
 
 const encoder = new TextEncoder();
@@ -22,8 +22,13 @@ function writer() {
   const i16 = value => u16(value < 0 ? 0x10000 + value : value);
   const u32 = value => bytes((value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255);
   const i32 = value => u32(value < 0 ? 0x100000000 + value : value);
+  const u64 = value => {
+    const high = Math.floor(value / 0x100000000);
+    const low = value - high * 0x100000000;
+    u32(high); u32(low);
+  };
   const push = value => parts.push(value);
-  return { parts, bytes, ascii, u16, i16, u32, i32, push };
+  return { parts, bytes, ascii, u16, i16, u32, i32, u64, push };
 }
 
 function makeRawPsd({ version = 1, depth = 8, colorMode = 3 } = {}) {
@@ -51,6 +56,46 @@ function makeRawPsd({ version = 1, depth = 8, colorMode = 3 } = {}) {
   return concat(out.parts);
 }
 
+
+function makeRlePsb({ depth = 8, colorMode = 3 } = {}) {
+  const out = writer();
+  out.ascii('8BPS'); out.u16(2); out.bytes(0,0,0,0,0,0);
+  out.u16(4); out.u32(1); out.u32(2); out.u16(depth); out.u16(colorMode);
+  out.u32(0); // Color Mode Data remains 4-byte length in PSB.
+  out.u32(0); // Image Resources remains 4-byte length in PSB.
+
+  const info = writer();
+  info.i16(1);
+  info.i32(0); info.i32(0); info.i32(1); info.i32(2);
+  info.u16(4);
+  for (const id of [0,1,2,-1]) {
+    info.i16(id);
+    info.u64(9); // compression(2) + PSB row byte-count(4) + PackBits row(3)
+  }
+  info.ascii('8BIM'); info.ascii('norm'); info.bytes(255,0,0,0);
+  const extra = writer();
+  extra.u32(0); extra.u32(0); extra.bytes(5); extra.ascii('Layer'); extra.bytes(0,0);
+  const extraBytes = concat(extra.parts);
+  info.u32(extraBytes.length); info.push(extraBytes);
+
+  for (const data of [[255,0],[0,255],[0,0],[255,128]]) {
+    info.u16(1);
+    info.u32(3);
+    info.bytes(1, ...data);
+  }
+
+  const infoBytes = concat(info.parts);
+  const layerAndMask = writer();
+  layerAndMask.u64(infoBytes.length);
+  layerAndMask.push(infoBytes);
+  layerAndMask.u32(0);
+  const layerAndMaskBytes = concat(layerAndMask.parts);
+
+  out.u64(layerAndMaskBytes.length);
+  out.push(layerAndMaskBytes);
+  return concat(out.parts);
+}
+
 test('PSD adapter inspects and decodes layered raw RGB/8-bit PSD', async () => {
   const psd = makeRawPsd();
   assert.deepEqual(inspectPsdHeader(psd), {
@@ -63,14 +108,27 @@ test('PSD adapter inspects and decodes layered raw RGB/8-bit PSD', async () => {
   assert.deepEqual([...decoded.layers[0].pixels], [255,0,0,255, 0,255,0,128]);
 });
 
-test('PSD Stage 3 rejects PSB and high bit depth explicitly', async () => {
-  await assert.rejects(() => decodePsd(makeRawPsd({ version:2 })), error => error instanceof PsdImportError && error.code === 'PSD_VERSION');
-  await assert.rejects(() => decodePsd(makeRawPsd({ depth:16 })), error => error instanceof PsdImportError && error.code === 'PSD_BIT_DEPTH');
-  await assert.rejects(() => decodePsd(makeRawPsd({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
+test('PSB Stage 7a decodes version 2 with 64-bit section/channel lengths and 32-bit RLE row counts', async () => {
+  const psb = makeRlePsb();
+  assert.deepEqual(inspectPsdHeader(psb), {
+    signature:'8BPS', version:2, channels:4, width:2, height:1, bitsPerChannel:8, colorMode:3,
+  });
+  const decoded = await decodePsd(psb);
+  assert.equal(decoded.layers.length, 1);
+  assert.equal(decoded.layers[0].name, 'Layer');
+  assert.deepEqual([...decoded.layers[0].pixels], [255,0,0,255, 0,255,0,128]);
 });
 
-test('PSD detection uses extension or Photoshop MIME type', () => {
+test('PSD/PSB Stage 7a still rejects unsupported high bit depth and color modes explicitly', async () => {
+  await assert.rejects(() => decodePsd(makeRawPsd({ depth:16 })), error => error instanceof PsdImportError && error.code === 'PSD_BIT_DEPTH');
+  await assert.rejects(() => decodePsd(makeRlePsb({ depth:16 })), error => error instanceof PsdImportError && error.code === 'PSD_BIT_DEPTH');
+  await assert.rejects(() => decodePsd(makeRawPsd({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
+  await assert.rejects(() => decodePsd(makeRlePsb({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
+});
+
+test('PSD/PSB detection uses extensions or Photoshop MIME type', () => {
   assert.equal(isPsdFile({ name:'layout.PSD', type:'' }), true);
+  assert.equal(isPsdFile({ name:'layout.PSB', type:'' }), true);
   assert.equal(isPsdFile({ name:'layout.bin', type:'image/vnd.adobe.photoshop' }), true);
   assert.equal(isPsdFile({ name:'layout.png', type:'image/png' }), false);
 });
@@ -211,4 +269,55 @@ test('PSD Blob export keeps byte-array compatibility API separate from chunked B
   assert.match(psdSource, /export function encodePsd\(options = \{\}\)/);
   assert.match(psdSource, /export function encodePsdBlob\(options = \{\}\)/);
   assert.match(psdSource, /new Blob\(writer\.parts/);
+});
+
+
+test('PSB writer round-trips RGB/8-bit layers and masks with version 2 header', async () => {
+  const pixels=Uint8Array.from([
+    20,40,60,255,
+    80,100,120,128,
+  ]);
+  const mask=Uint8Array.from([
+    255,255,255,220,
+    255,255,255,70,
+  ]);
+  const options={
+    width:2,height:1,composite:pixels,
+    layers:[{
+      name:'PSB ✓',x:0,y:0,width:2,height:1,pixels,
+      opacity:.75,blendMode:'screen',visible:true,
+      mask:{pixels:mask,disabled:false},
+    }],
+  };
+  const encoded=encodePsb(options);
+  assert.equal(inspectPsdHeader(encoded).version,2);
+  const decoded=await decodePsd(encoded);
+  assert.equal(decoded.layers.length,1);
+  assert.equal(decoded.layers[0].name,'PSB ✓');
+  assert.equal(decoded.layers[0].blendMode,'screen');
+  assert.deepEqual([...decoded.layers[0].pixels],[...pixels]);
+  assert.deepEqual([...decoded.layers[0].mask.pixels],[...mask]);
+});
+
+test('PSB Blob export is byte-identical to encodePsb and keeps chunked output', async () => {
+  const pixels=Uint8Array.from([1,2,3,255]);
+  const options={
+    width:1,height:1,composite:pixels,
+    layers:[{name:'psb-blob',x:0,y:0,width:1,height:1,pixels,opacity:1,blendMode:'source-over',visible:true}],
+  };
+  const bytes=encodePsb(options);
+  const blob=encodePsbBlob(options);
+  assert.equal(blob.type,'image/vnd.adobe.photoshop');
+  assert.equal(blob.size,bytes.length);
+  assert.deepEqual([...new Uint8Array(await blob.arrayBuffer())],[...bytes]);
+});
+
+test('PSB Stage 7a wire contract keeps 64-bit lengths and 32-bit RLE row counts explicit', () => {
+  assert.match(psdSource, /const PSB_VERSION = 2/);
+  assert.match(psdSource, /readVersionedLength\(reader, version\)/);
+  assert.match(psdSource, /version === PSB_VERSION \? reader\.u32\(\) : reader\.u16\(\)/);
+  assert.match(psdSource, /if \(version === PSB_VERSION\) layerRecords\.u64\(channel\.data\.length\)/);
+  assert.match(psdSource, /if \(version === PSB_VERSION\) out\.u64\(layerAndMask\.length\)/);
+  assert.match(psdSource, /export function encodePsb\(/);
+  assert.match(psdSource, /export function encodePsbBlob\(/);
 });
