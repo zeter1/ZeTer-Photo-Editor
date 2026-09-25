@@ -4,7 +4,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 
 | Change area | Targeted tests / checks | Extra runtime gate |
 |---|---|---|
-| UI constants / toolbar math | `tests/tool-layout.test.mjs`, architecture test | browser smoke for drag/persistence |
+| UI config / toolbar controller / toolbar math | `tests/tool-layout.test.mjs`, toolbar-controller architecture test | browser smoke for drag/persistence/tooltips |
 | Menu/pointer/tool interaction | relevant interaction/selection/retouch tests | `npm run test:browser` |
 | Documents/layers/groups | core, layer-groups, document-tabs | browser smoke when UI path changes |
 | Smart objects/filters | smart-object / smart-filter tests | targeted browser check when dialogs change |
