@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-25 — RGB 32-bit Float PSD/PSB Import Stage 7d
+
+- Added: RGB 32-bit/channel PSD/PSB layer и composite samples читаются big-endian как IEEE-754 float и сохраняются в `Float32Array` PixelBuffer, включая HDR-значения вне диапазона 0..1.
+- Compression: Raw, PackBits/RLE и ZIP без prediction используют общий bytes-per-sample pipeline для 8/16/32-bit.
+- Guardrail: ZIP prediction для 16/32-bit остаётся отдельным unsupported path `PSD_ZIP_PREDICTION_DEPTH` вместо неподтверждённого декодирования.
+- Preview: текущий Canvas bridge явно остаётся 8-bit display boundary и ограничивает 32-bit preview диапазоном 0..1; HDR tone mapping/exposure и Float32 editing/export пока не заявляются.
+- Masks: Float32 mask samples приводятся к 8-bit alpha только на текущей render boundary.
+- Added: regression tests для 32-bit Raw PSD, RLE PSB, ZIP PSD, точного Float32 payload и clipped RGBA8 preview.
+
 ### 2026-09-25 — RGB 16-bit PSD/PSB Import Stage 7c
 
 - Added: RGB 16-bit/channel PSD/PSB layer и composite channels теперь декодируются в precision-preserving `Uint16Array` PixelBuffer.

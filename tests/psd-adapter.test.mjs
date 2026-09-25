@@ -42,6 +42,14 @@ function channelSamples(depth) {
       [65535, 32768],
     ];
   }
+  if (depth === 32) {
+    return [
+      [0, 2],
+      [-0.5, 0.25],
+      [1, 4],
+      [1, 0.5],
+    ];
+  }
   return [
     [255, 0],
     [0, 255],
@@ -51,10 +59,15 @@ function channelSamples(depth) {
 }
 
 function sampleRowBytes(samples, depth) {
-  if (depth !== 16) return Uint8Array.from(samples.map(value => value & 255));
-  const bytes = new Uint8Array(samples.length * 2);
+  if (depth === 8) return Uint8Array.from(samples.map(value => value & 255));
+  const bytesPerSample = depth === 16 ? 2 : 4;
+  const bytes = new Uint8Array(samples.length * bytesPerSample);
   const view = new DataView(bytes.buffer);
-  for (let index = 0; index < samples.length; index += 1) view.setUint16(index * 2, samples[index], false);
+  for (let index = 0; index < samples.length; index += 1) {
+    if (depth === 16) view.setUint16(index * 2, samples[index], false);
+    else if (depth === 32) view.setFloat32(index * 4, samples[index], false);
+    else throw new Error(`Unsupported fixture depth: ${depth}`);
+  }
   return bytes;
 }
 
@@ -126,13 +139,13 @@ function makeRlePsb({ depth = 8, colorMode = 3 } = {}) {
   return concat(out.parts);
 }
 
-function makeZipPsd16({ compression = 2 } = {}) {
+function makeZipPsd({ depth = 16, compression = 2 } = {}) {
   const out = writer();
   out.ascii('8BPS'); out.u16(1); out.bytes(0,0,0,0,0,0);
-  out.u16(4); out.u32(1); out.u32(2); out.u16(16); out.u16(3);
+  out.u16(4); out.u32(1); out.u32(2); out.u16(depth); out.u16(3);
   out.u32(0); out.u32(0);
 
-  const rows = channelSamples(16).map(samples => sampleRowBytes(samples, 16));
+  const rows = channelSamples(depth).map(samples => sampleRowBytes(samples, depth));
   const compressedRows = rows.map(row => new Uint8Array(deflateSync(row)));
   const info = writer();
   info.i16(1);
@@ -196,7 +209,7 @@ test('PSD/PSB Stage 7c decodes RGB/16-bit Raw, RLE and ZIP without prediction in
     255,0,0,255,
     0,128,255,128,
   ];
-  for (const source of [makeRawPsd({ depth:16 }), makeRlePsb({ depth:16 }), makeZipPsd16()]) {
+  for (const source of [makeRawPsd({ depth:16 }), makeRlePsb({ depth:16 }), makeZipPsd({ depth:16 })]) {
     const decoded = await decodePsd(source);
     assert.equal(decoded.bitsPerChannel,16);
     assert.equal(decoded.layers.length,1);
@@ -208,12 +221,32 @@ test('PSD/PSB Stage 7c decodes RGB/16-bit Raw, RLE and ZIP without prediction in
   }
 });
 
-test('PSD/PSB Stage 7c rejects 32-bit, CMYK and 16-bit ZIP prediction explicitly', async () => {
-  await assert.rejects(() => decodePsd(makeRawPsd({ depth:32 })), error => error instanceof PsdImportError && error.code === 'PSD_BIT_DEPTH');
-  await assert.rejects(() => decodePsd(makeRlePsb({ depth:32 })), error => error instanceof PsdImportError && error.code === 'PSD_BIT_DEPTH');
+test('PSD/PSB Stage 7d decodes RGB/32-bit float Raw, RLE and ZIP without prediction into Float32 PixelBuffers', async () => {
+  const expected32 = [
+    0,-0.5,1,1,
+    2,0.25,4,0.5,
+  ];
+  const expectedPreview = [
+    0,0,255,255,
+    255,64,255,128,
+  ];
+  for (const source of [makeRawPsd({ depth:32 }), makeRlePsb({ depth:32 }), makeZipPsd({ depth:32 })]) {
+    const decoded = await decodePsd(source);
+    assert.equal(decoded.bitsPerChannel,32);
+    assert.equal(decoded.layers.length,1);
+    assert.equal(decoded.layers[0].pixelBuffer.bitsPerChannel,32);
+    assert.ok(decoded.layers[0].pixelBuffer.data instanceof Float32Array);
+    assert.deepEqual([...decoded.layers[0].pixelBuffer.data],expected32);
+    assert.equal(decoded.layers[0].pixels,null);
+    assert.deepEqual([...pixelBufferToRgba8Preview(decoded.layers[0].pixelBuffer)],expectedPreview);
+  }
+});
+
+test('PSD/PSB high-depth import still rejects CMYK and ZIP prediction explicitly', async () => {
   await assert.rejects(() => decodePsd(makeRawPsd({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
   await assert.rejects(() => decodePsd(makeRlePsb({ colorMode:4 })), error => error instanceof PsdImportError && error.code === 'PSD_COLOR_MODE');
-  await assert.rejects(() => decodePsd(makeZipPsd16({ compression:3 })), error => error instanceof PsdImportError && error.code === 'PSD_ZIP_PREDICTION_DEPTH');
+  await assert.rejects(() => decodePsd(makeZipPsd({ depth:16, compression:3 })), error => error instanceof PsdImportError && error.code === 'PSD_ZIP_PREDICTION_DEPTH');
+  await assert.rejects(() => decodePsd(makeZipPsd({ depth:32, compression:3 })), error => error instanceof PsdImportError && error.code === 'PSD_ZIP_PREDICTION_DEPTH');
 });
 
 test('PSD/PSB detection uses extensions or Photoshop MIME type', () => {

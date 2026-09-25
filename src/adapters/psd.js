@@ -5,7 +5,7 @@ const PSD_VERSION = 1;
 const PSB_VERSION = 2;
 const PSB_LONG_ADDITIONAL_KEYS = new Set(['LMsk','Lr16','Lr32','Layr','Mt16','Mt32','Mtrn','Alph','FMsk','lnk2','FEid','FXid','PxSD']);
 const PSD_COLOR_MODE_RGB = 3;
-const PSD_SUPPORTED_DEPTHS = new Set([8, 16]);
+const PSD_SUPPORTED_DEPTHS = new Set([8, 16, 32]);
 const MAX_PSD_LAYERS = 500;
 const MAX_PSD_CHANNEL_BYTES = 256 * 1024 * 1024;
 
@@ -121,7 +121,7 @@ function requireImportCapabilities(header, maxPixels) {
   }
   if (!PSD_SUPPORTED_DEPTHS.has(header.bitsPerChannel)) {
     throw new PsdImportError(
-      `PSD/PSB import поддерживает RGB 8/16-bit/channel. Получено: ${header.bitsPerChannel}-bit. 32-bit/HDR требует отдельного rendering/tone-mapping этапа.`,
+      `PSD/PSB import поддерживает RGB 8/16/32-bit/channel. Получено: ${header.bitsPerChannel}-bit.`,
       'PSD_BIT_DEPTH',
     );
   }
@@ -278,6 +278,7 @@ async function inflateZlib(bytes) {
 function bytesPerSample(bitsPerChannel) {
   if (bitsPerChannel === 8) return 1;
   if (bitsPerChannel === 16) return 2;
+  if (bitsPerChannel === 32) return 4;
   throw new PsdImportError(`Неподдерживаемая глубина PSD/PSB sample: ${bitsPerChannel}-bit`, 'PSD_BIT_DEPTH');
 }
 
@@ -300,6 +301,13 @@ function decodeSamplePlane(bytes, bitsPerChannel) {
     const samples = new Uint16Array(bytes.length / 2);
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     for (let index = 0; index < samples.length; index += 1) samples[index] = view.getUint16(index * 2, false);
+    return samples;
+  }
+  if (bitsPerChannel === 32) {
+    if (bytes.length % 4) throw new PsdImportError('32-bit PSD/PSB канал имеет неверную длину', 'PSD_32BIT_CHANNEL');
+    const samples = new Float32Array(bytes.length / 4);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let index = 0; index < samples.length; index += 1) samples[index] = view.getFloat32(index * 4, false);
     return samples;
   }
   throw new PsdImportError(`Неподдерживаемая глубина PSD/PSB sample: ${bitsPerChannel}-bit`, 'PSD_BIT_DEPTH');
@@ -338,7 +346,7 @@ async function decodeChannel(reader, descriptor, width, height, maxChannelBytes,
   } else if (compression === 2 || compression === 3) {
     if (compression === 3 && bitsPerChannel !== 8) {
       throw new PsdImportError(
-        'ZIP prediction для 16-bit PSD/PSB пока не поддерживается: используйте Raw/RLE/ZIP без prediction',
+        'ZIP prediction для high-depth (16/32-bit) PSD/PSB пока не поддерживается: используйте Raw/RLE/ZIP без prediction',
         'PSD_ZIP_PREDICTION_DEPTH',
       );
     }
@@ -397,6 +405,26 @@ function composeRgbPixelBuffer(width, height, channels, bitsPerChannel) {
       data: rgba,
     });
   }
+  if (bitsPerChannel === 32) {
+    const rgba = new Float32Array(pixels * 4);
+    for (let index = 0; index < pixels; index += 1) {
+      const out = index * 4;
+      rgba[out] = red[index];
+      rgba[out + 1] = green[index];
+      rgba[out + 2] = blue[index];
+      rgba[out + 3] = alpha ? alpha[index] : 1;
+    }
+    return createPixelBuffer({
+      width,
+      height,
+      model: 'rgb',
+      channels: 4,
+      bitsPerChannel: 32,
+      colorSpace: 'linear-rgb-unmanaged',
+      alphaMode: 'straight',
+      data: rgba,
+    });
+  }
   return null;
 }
 
@@ -421,7 +449,11 @@ function buildMaskRgba(record, maskChannel, layerWidth, layerHeight) {
       const targetX = originX + x;
       if (targetX < 0 || targetX >= layerWidth) continue;
       const sample = maskChannel[y * maskWidth + x];
-      let value = maskChannel instanceof Uint16Array ? Math.round(sample / 257) : sample;
+      let value = maskChannel instanceof Uint16Array
+        ? Math.round(sample / 257)
+        : maskChannel instanceof Float32Array
+          ? Math.round(Math.min(1, Math.max(0, Number.isNaN(sample) ? 0 : sample)) * 255)
+          : sample;
       if (mask.inverted) value = 255 - value;
       rgba[(targetY * layerWidth + targetX) * 4 + 3] = value;
     }
@@ -465,7 +497,7 @@ async function decodeComposite(reader, header, maxChannelBytes) {
   } else if (compression === 2 || compression === 3) {
     if (compression === 3 && header.bitsPerChannel !== 8) {
       throw new PsdImportError(
-        'ZIP prediction для 16-bit PSD/PSB composite пока не поддерживается',
+        'ZIP prediction для high-depth (16/32-bit) PSD/PSB composite пока не поддерживается',
         'PSD_ZIP_PREDICTION_DEPTH',
       );
     }
