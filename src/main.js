@@ -9,7 +9,7 @@ import {
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
 import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
-import { pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, MAX_PIXEL_BUFFER_SOURCE_BYTES } from './core/pixel-buffer.js';
+import { pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, floodFillPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES } from './core/pixel-buffer.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './adapters/psd.js';
@@ -106,6 +106,9 @@ let drag = null;
 let brushCanvas = null;
 let brushCtx = null;
 let brushLayerId = null;
+let highDepthPaintBuffer = null;
+let highDepthPaintLayerId = null;
+let highDepthPaintPreviewDirty = false;
 let blurScratchCanvas = null;
 let blurScratchCtx = null;
 let retouchScratchCanvas = null;
@@ -257,6 +260,9 @@ function loadSession(session) {
   brushCanvas = null;
   brushCtx = null;
   brushLayerId = null;
+  highDepthPaintBuffer = null;
+  highDepthPaintLayerId = null;
+  highDepthPaintPreviewDirty = false;
   hoverPoint = null;
   activePrimaryPointerId = null;
   paintPersisting = false;
@@ -522,7 +528,7 @@ function setDoc(next, { resetHistory = false, label = 'Состояние' } = {
   vectorMaskEditLayerId = null;
   penDraft = null;
   clearSelectionState();
-  brushCanvas=null;brushCtx=null;brushLayerId=null;
+  brushCanvas=null;brushCtx=null;brushLayerId=null;highDepthPaintBuffer=null;highDepthPaintLayerId=null;highDepthPaintPreviewDirty=false;
   if (resetHistory) { clearImageCache(); history.reset(label, snapshotDocument(doc)); }
   updateAll();
 }
@@ -818,7 +824,7 @@ async function drainRenderQueue() {
   renderBusy = true;
   try {
     const rasterOverrides = request.paintPreview && brushCanvas && brushLayerId
-      ? new Map([[brushLayerId, brushCanvas]])
+      ? new Map([[brushLayerId, highDepthPaintLayerId===brushLayerId ? {source:brushCanvas,skipAdjustments:true} : brushCanvas]])
       : null;
     const previewDoc = documentWithTextPreview(doc, textDraft);
     await renderDocument(renderBuffer, previewDoc, { checker: false, rasterOverrides });
@@ -856,6 +862,10 @@ function schedulePaintPreview() {
     paintPreviewFrame = 0;
     if (!paintPreviewQueued || !drag || drag.kind !== 'paint') return;
     paintPreviewQueued = false;
+    if(highDepthPaintPreviewDirty&&highDepthPaintLayerId){
+      const layer=doc.layers.find(item=>item.id===highDepthPaintLayerId);
+      if(layer)refreshHighDepthPaintCanvas(layer,true);
+    }
     render({ paintPreview: true });
   });
 }
@@ -2583,14 +2593,114 @@ async function drawLineOnCurrentRaster(start,end){
   }
   paintPersisting=true;
   try{
-    await ensureRasterBuffer(layer);
     const from=documentPointToLayerPixel(start,layer),to=documentPointToLayerPixel(end,layer);
+    if(layer.highDepthSource){
+      const buffer=editableHighDepthBuffer(layer);
+      if(buffer){
+        const changed=applyPixelBufferStrokeSegment(buffer,from,to,Math.max(.5,(Number(els.brushSize.value)||1)/2),hexToRgb(els.primaryColor.value),{opacity:Number(els.toolOpacity.value)/100,isAllowed:rasterSelectionPredicate(layer)});
+        if(!changed){setStatus('Линия не изменила high-depth слой');return false;}
+        applyHighDepthMutation(layer,await prepareHighDepthMutation(layer,buffer));
+        brushCanvas=null;brushCtx=null;brushLayerId=null;clearHighDepthPaintState();
+        doc.selectedLayerId=layer.id;
+        commit('Нарисовать линию');setStatus(`Линия добавлена в high-depth слой «${layer.name}»`);return true;
+      }
+    }
+    await ensureRasterBuffer(layer);
     brushCtx.save();clipContextToSelection(brushCtx,layer);brushCtx.lineCap='round';brushCtx.lineJoin='round';brushCtx.lineWidth=Math.max(1,Number(els.brushSize.value)||1);brushCtx.globalAlpha=Number(els.toolOpacity.value)/100;brushCtx.globalCompositeOperation='source-over';brushCtx.strokeStyle=els.primaryColor.value;brushCtx.beginPath();brushCtx.moveTo(from.x,from.y);brushCtx.lineTo(to.x,to.y);brushCtx.stroke();brushCtx.restore();
     doc.selectedLayerId=layer.id;
     if(!await persistPaintLayer())throw new Error('Не удалось сохранить слой с линиями');
     commit('Нарисовать линию');setStatus(`Линия добавлена в слой «${layer.name}»`);return true;
   }catch(error){console.error(error);brushCanvas=null;brushCtx=null;brushLayerId=null;render();setStatus(`Ошибка линии: ${error.message}`);toast('Не удалось нарисовать линию','error');return false;}
   finally{paintPersisting=false;}
+}
+
+function clearHighDepthPaintState(){
+  highDepthPaintBuffer=null;highDepthPaintLayerId=null;highDepthPaintPreviewDirty=false;
+}
+
+function highDepthBudgetForLayer(layer){
+  const used=doc.layers.reduce((sum,item)=>item.id===layer?.id?sum:sum+Math.max(0,Number(item?.highDepthSource?.rawBytes)||0),0);
+  return Math.max(0,MAX_PIXEL_BUFFER_SOURCE_BYTES-used);
+}
+
+function editableHighDepthBuffer(layer,{requireAlpha=false}={}){
+  if(!layer?.highDepthSource)return null;
+  const decoded=deserializePixelBufferSource(layer.highDepthSource);
+  const working=requireAlpha?pixelBufferWithStraightAlpha(decoded):clonePixelBuffer(decoded);
+  if(pixelBufferByteLength(working)>highDepthBudgetForLayer(layer))return null;
+  return working;
+}
+
+function refreshHighDepthPaintCanvas(layer,withFilters=true){
+  if(!layer||highDepthPaintLayerId!==layer.id||!highDepthPaintBuffer||!brushCanvas||!brushCtx)return false;
+  const preview=sanitizeHighDepthPreview(layer.highDepthPreview);
+  const rgba=pixelBufferToToneMappedRgba8Preview(highDepthPaintBuffer,withFilters?(layer.filters||{}):{}, {toneMap:preview.toneMap,displayExposure:preview.displayExposure});
+  const image=brushCtx.createImageData(highDepthPaintBuffer.width,highDepthPaintBuffer.height);
+  image.data.set(rgba);
+  brushCtx.setTransform(1,0,0,1,0,0);brushCtx.globalAlpha=1;brushCtx.globalCompositeOperation='source-over';brushCtx.filter='none';
+  brushCtx.clearRect(0,0,brushCanvas.width,brushCanvas.height);
+  brushCtx.putImageData(image,0,0);
+  highDepthPaintPreviewDirty=false;
+  return true;
+}
+
+async function ensureNativeHighDepthPaintBuffer(layer,{requireAlpha=false}={}){
+  if(!layer?.highDepthSource)return false;
+  if(highDepthPaintLayerId===layer.id&&highDepthPaintBuffer&&(!requireAlpha||highDepthPaintBuffer.channels===4))return true;
+  const working=editableHighDepthBuffer(layer,{requireAlpha});
+  if(!working)return false;
+  const size=checkedCanvasSize(layer.width,layer.height,`High-depth слой «${layer.name||'Без имени'}»`);
+  if(working.width!==size.width||working.height!==size.height)return false;
+  brushCanvas=document.createElement('canvas');brushCanvas.width=size.width;brushCanvas.height=size.height;
+  brushCtx=brushCanvas.getContext('2d',{alpha:true,willReadFrequently:true});brushLayerId=layer.id;
+  highDepthPaintBuffer=working;highDepthPaintLayerId=layer.id;highDepthPaintPreviewDirty=true;
+  refreshHighDepthPaintCanvas(layer,true);
+  return true;
+}
+
+async function highDepthPreviewDataUrl(layer,buffer){
+  const preview=sanitizeHighDepthPreview(layer.highDepthPreview);
+  const rgba=pixelBufferToToneMappedRgba8Preview(buffer,{}, {toneMap:preview.toneMap,displayExposure:preview.displayExposure});
+  const canvas=document.createElement('canvas');canvas.width=buffer.width;canvas.height=buffer.height;
+  const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
+  const image=ctx.createImageData(buffer.width,buffer.height);image.data.set(rgba);ctx.putImageData(image,0,0);
+  return canvasToDataURL(canvas,'image/png');
+}
+
+async function prepareHighDepthMutation(layer,buffer){
+  const highDepthSource=serializePixelBufferSource(buffer,{maxBytes:highDepthBudgetForLayer(layer)});
+  const dataUrl=await highDepthPreviewDataUrl(layer,buffer);
+  return {highDepthSource,dataUrl,highDepthPreview:sanitizeHighDepthPreview(layer.highDepthPreview)};
+}
+
+function applyHighDepthMutation(layer,mutation){
+  const old=layer.dataUrl;
+  layer.highDepthSource=mutation.highDepthSource;layer.highDepthPreview=mutation.highDepthPreview;layer.dataUrl=mutation.dataUrl;
+  invalidateImageCache(old);
+}
+
+async function persistNativeHighDepthPaintLayer(){
+  const layer=doc.layers.find(item=>item.id===highDepthPaintLayerId);
+  if(!layer||!highDepthPaintBuffer)return false;
+  const mutation=await prepareHighDepthMutation(layer,highDepthPaintBuffer);
+  applyHighDepthMutation(layer,mutation);
+  brushCanvas=null;brushCtx=null;brushLayerId=null;
+  clearHighDepthPaintState();
+  return true;
+}
+
+function applyNativeHighDepthDab(layer,point,pointerEvent=null,erase=false){
+  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer)return false;
+  const changed=applyPixelBufferBrushDab(highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),hexToRgb(els.primaryColor.value),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)});
+  if(changed){highDepthPaintPreviewDirty=true;schedulePaintPreview();}
+  return changed>0;
+}
+
+function nativeHighDepthStrokeSegment(layer,from,to,pointerEvent=null,erase=false){
+  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer)return false;
+  const changed=applyPixelBufferStrokeSegment(highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),hexToRgb(els.primaryColor.value),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)});
+  if(changed){highDepthPaintPreviewDirty=true;schedulePaintPreview();}
+  return changed>0;
 }
 
 function drawHighDepthRasterBase(layer, canvas, ctx) {
@@ -2637,8 +2747,21 @@ async function fillAtPoint(point) {
   if(!layer){setStatus('Заливка работает по растровому слою');toast('Выберите растровый слой или щёлкните по изображению','warn');return false;}
   paintPersisting=true;
   try {
-    await ensureRasterBuffer(layer);
     const local=documentPointToLayerPixel(point,layer);
+    if(layer.highDepthSource){
+      const buffer=editableHighDepthBuffer(layer);
+      if(buffer){
+        const x=Math.floor(local.x),y=Math.floor(local.y);
+        if(x<0||y<0||x>=buffer.width||y>=buffer.height){setStatus('Точка заливки вне растрового слоя');return false;}
+        setStatus('High-depth заливка области…');
+        const filled=floodFillPixelBuffer(buffer,x,y,hexToRgb(els.primaryColor.value),{tolerance:Number(els.fillTolerance?.value)||0,opacity:Number(els.toolOpacity.value)/100,isAllowed:rasterSelectionPredicate(layer)});
+        if(!filled){setStatus('Заливка: подходящая область не найдена');return false;}
+        applyHighDepthMutation(layer,await prepareHighDepthMutation(layer,buffer));
+        brushCanvas=null;brushCtx=null;brushLayerId=null;clearHighDepthPaintState();
+        doc.selectedLayerId=layer.id;commit('Заливка');setStatus(`High-depth заливка: ${filled.toLocaleString('ru-RU')} px`);return true;
+      }
+    }
+    await ensureRasterBuffer(layer);
     const x=Math.floor(local.x),y=Math.floor(local.y);
     if(x<0||y<0||x>=brushCanvas.width||y>=brushCanvas.height){setStatus('Точка заливки вне растрового слоя');return false;}
     setStatus('Заливка области…');
@@ -2675,6 +2798,16 @@ async function clearSelectedPixels({ historyLabel = 'Очистить выдел
   if(!selectionIntersectsLayer(layer)){setStatus('Выделение не пересекает выбранный слой');return false;}
   paintPersisting=true;
   try {
+    if(layer.highDepthSource){
+      const buffer=editableHighDepthBuffer(layer,{requireAlpha:true});
+      if(buffer){
+        const cleared=clearPixelBufferPixels(buffer,{isAllowed:rasterSelectionPredicate(layer)});
+        if(!cleared){setStatus('В выделении нет непрозрачных high-depth пикселей');return false;}
+        applyHighDepthMutation(layer,await prepareHighDepthMutation(layer,buffer));
+        brushCanvas=null;brushCtx=null;brushLayerId=null;clearHighDepthPaintState();
+        commit(historyLabel);setStatus(`${successStatus} · high-depth: ${cleared.toLocaleString('ru-RU')} px`);return true;
+      }
+    }
     await ensureRasterBuffer(layer);
     brushCtx.save();
     clipContextToSelection(brushCtx,layer);
@@ -2717,7 +2850,10 @@ async function ensurePaintLayer(point, canContinue = () => true) {
     addLayer(doc,l);
   }
 
-  await ensureRasterBuffer(l);
+  const nativeHighDepth=l.highDepthSource&&['brush','eraser'].includes(currentTool)
+    ? await ensureNativeHighDepthPaintBuffer(l,{requireAlpha:currentTool==='eraser'})
+    : false;
+  if(!nativeHighDepth)await ensureRasterBuffer(l);
   doc.selectedLayerId = l.id;
   return l;
 }
@@ -2851,7 +2987,8 @@ async function beginPaint(p, pointerId, pointerEvent = null) {
     return false;
   }
   const localPoint = documentPointToLayerPixel(p, l);
-  drag = { kind:'paint', tool:currentTool, layerId:l.id, last:localPoint };
+  drag = { kind:'paint', tool:currentTool, layerId:l.id, last:localPoint, nativeHighDepth:highDepthPaintLayerId===l.id&&['brush','eraser'].includes(currentTool) };
+  if(drag.nativeHighDepth){applyNativeHighDepthDab(l,localPoint,pointerEvent,currentTool==='eraser');return true;}
   if (currentTool === 'dodge' || currentTool === 'burn') drag.toneCoverage={width:brushCanvas.width,tiles:new Map()};
   if (currentTool === 'blur') drag.blurCoverage={width:brushCanvas.width,tiles:new Map()};
   brushCtx.save();
@@ -2889,6 +3026,7 @@ function paintTo(p, pointerEvent = null) {
   if (!layer) return;
   const next = documentPointToLayerPixel(p, layer);
   const last=drag.last;
+  if(drag.nativeHighDepth){nativeHighDepthStrokeSegment(layer,last,next,pointerEvent,drag.tool==='eraser');drag.last=next;return;}
   if (drag.tool === 'blur') {
     blurStrokeSegment(layer,last,next,pointerEvent);
     drag.last=next;
@@ -2920,15 +3058,16 @@ async function persistPaintLayer() {
 }
 async function endPaint(paintTool = currentTool) {
   cancelPaintPreview();
-  if (!brushCtx || paintPersisting) return;
+  const nativeHighDepth=Boolean(highDepthPaintBuffer&&highDepthPaintLayerId===brushLayerId&&['brush','eraser'].includes(paintTool));
+  if ((!brushCtx&&!nativeHighDepth) || paintPersisting) return;
   const labels={eraser:'Ластик',blur:'Размытие кистью',clone:'Штамп',heal:'Лечебная кисть',smudge:'Палец / смазывание',dodge:'Осветлитель',burn:'Затемнитель',brush:'Кисть'};
   const label=labels[paintTool]||'Кисть';
-  brushCtx.restore();
+  if(!nativeHighDepth)brushCtx.restore();
   cloneSnapshotCanvas=null;
   paintPersisting=true;
   setStatus('Сохранение штриха…');
   try {
-    if (await persistPaintLayer()) {
+    if (nativeHighDepth ? await persistNativeHighDepthPaintLayer() : await persistPaintLayer()) {
       commit(label);
       setStatus('Готово');
     }
@@ -3819,6 +3958,15 @@ async function renderSelectionMergedToPng(bounds) {
   return canvasToPngBlob(canvas);
 }
 
+async function prepareClearedHighDepthMutation(layer){
+  if(!layer?.highDepthSource)return null;
+  const buffer=editableHighDepthBuffer(layer,{requireAlpha:true});
+  if(!buffer)return null;
+  const cleared=clearPixelBufferPixels(buffer,{isAllowed:rasterSelectionPredicate(layer)});
+  if(!cleared)return {cleared:0,mutation:null};
+  return {cleared,mutation:await prepareHighDepthMutation(layer,buffer)};
+}
+
 async function prepareClearedRasterDataUrl(layer) {
   const size=checkedCanvasSize(layer.width,layer.height,`Растровый слой «${layer.name||'Без имени'}»`);
   const canvas=document.createElement('canvas');
@@ -3873,12 +4021,17 @@ async function clearSelectionAcrossVisibleLayers({ historyLabel = 'Выреза�
     for(const layer of targets){
       const working=layer.type==='raster' ? layer : await rasterizeLayerForPixelEditing(layer);
       if(layer.type!=='raster')rasterized+=1;
-      prepared.push({layer,working,dataUrl:await prepareClearedRasterDataUrl(working)});
+      if(layer.type==='raster'&&working.highDepthSource){
+        const highDepth=await prepareClearedHighDepthMutation(working);
+        if(highDepth?.mutation){prepared.push({layer,working,dataUrl:highDepth.mutation.dataUrl,highDepthMutation:highDepth.mutation});continue;}
+      }
+      prepared.push({layer,working,dataUrl:await prepareClearedRasterDataUrl(working),highDepthMutation:null});
     }
-    for(const {layer,working,dataUrl} of prepared){
+    for(const {layer,working,dataUrl,highDepthMutation} of prepared){
       const index=doc.layers.findIndex(item=>item.id===layer.id);
       if(index<0)continue;
       if(layer.type==='raster'){
+        if(highDepthMutation){applyHighDepthMutation(layer,highDepthMutation);continue;}
         const old=layer.dataUrl;
         layer.dataUrl=dataUrl;
         layer.highDepthSource=null;

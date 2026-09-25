@@ -270,6 +270,197 @@ export function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { tone
   return rgba;
 }
 
+function editableSampleMax(buffer) {
+  if (buffer.bitsPerChannel === 8) return 255;
+  if (buffer.bitsPerChannel === 16) return 65535;
+  return 1;
+}
+
+function writeNormalizedSample(buffer, index, value) {
+  const normalized = Number.isFinite(Number(value)) ? Number(value) : 0;
+  if (buffer.bitsPerChannel === 8) buffer.data[index] = Math.round(clampPreview01(normalized) * 255);
+  else if (buffer.bitsPerChannel === 16) buffer.data[index] = Math.round(clampPreview01(normalized) * 65535);
+  else buffer.data[index] = normalized;
+}
+
+function normalizedSample(buffer, index) {
+  return sourceSampleValue(buffer, index);
+}
+
+function clonePixelData(data) {
+  return new data.constructor(data);
+}
+
+export function clonePixelBuffer(buffer) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  return createPixelBuffer({
+    width:buffer.width,height:buffer.height,model:buffer.model,channels:buffer.channels,bitsPerChannel:buffer.bitsPerChannel,
+    colorSpace:buffer.colorSpace,alphaMode:buffer.alphaMode,profileName:buffer.profileName,data:clonePixelData(buffer.data),
+  });
+}
+
+export function pixelBufferWithStraightAlpha(buffer) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  if (buffer.model !== 'rgb') throw new Error('High-depth pixel editing пока поддерживает только RGB PixelBuffer');
+  if (buffer.channels === 4) return clonePixelBuffer(buffer);
+  if (buffer.channels !== 3) throw new Error('Для RGB high-depth editing ожидается 3 или 4 канала');
+  const Type = expectedArrayConstructor(buffer.bitsPerChannel);
+  const output = new Type(buffer.width * buffer.height * 4);
+  const alpha = editableSampleMax(buffer);
+  for (let pixel=0; pixel<buffer.width*buffer.height; pixel+=1) {
+    const source=pixel*3,target=pixel*4;
+    output[target]=buffer.data[source];output[target+1]=buffer.data[source+1];output[target+2]=buffer.data[source+2];output[target+3]=alpha;
+  }
+  return createPixelBuffer({
+    width:buffer.width,height:buffer.height,model:'rgb',channels:4,bitsPerChannel:buffer.bitsPerChannel,
+    colorSpace:buffer.colorSpace,alphaMode:'straight',profileName:buffer.profileName,data:output,
+  });
+}
+
+function uiSrgbRgbForBuffer(buffer, rgb8) {
+  if (!Array.isArray(rgb8) || rgb8.length < 3) throw new TypeError('Для high-depth editing нужен RGB-цвет');
+  const encoded = rgb8.slice(0,3).map(value=>clampPreview01((Number(value)||0)/255));
+  if (/linear/i.test(buffer.colorSpace || '')) return encoded.map(srgbToLinear);
+  return encoded;
+}
+
+function highDepthBrushFalloff(distance, radius) {
+  const normalized = clampPreview01(distance / Math.max(radius, 0.001));
+  if (normalized <= 0.55) return 1;
+  const edge = (normalized - 0.55) / 0.45;
+  return 1 - edge * edge * (3 - 2 * edge);
+}
+
+function blendPixelBufferSourceOver(buffer, offset, color, opacity) {
+  const sourceAlpha=clampPreview01(opacity);
+  if(sourceAlpha<=0)return;
+  const hasAlpha=buffer.channels===4;
+  const destAlpha=hasAlpha?clampPreview01(normalizedSample(buffer,offset+3)):1;
+  const outAlpha=sourceAlpha+destAlpha*(1-sourceAlpha);
+  if(outAlpha<=0){
+    for(let channel=0;channel<buffer.channels;channel+=1)writeNormalizedSample(buffer,offset+channel,0);
+    return;
+  }
+  const destFactor=destAlpha*(1-sourceAlpha);
+  for(let channel=0;channel<3;channel+=1){
+    const dest=normalizedSample(buffer,offset+channel);
+    writeNormalizedSample(buffer,offset+channel,(color[channel]*sourceAlpha+dest*destFactor)/outAlpha);
+  }
+  if(hasAlpha)writeNormalizedSample(buffer,offset+3,outAlpha);
+}
+
+export function applyPixelBufferBrushDab(buffer, centerX, centerY, radius, rgb8, { opacity=1, erase=false, isAllowed=null } = {}) {
+  if (!isPixelBuffer(buffer) || buffer.model !== 'rgb' || ![3,4].includes(buffer.channels)) throw new TypeError('Нужен RGB PixelBuffer');
+  if (erase && buffer.channels !== 4) throw new Error('Для high-depth eraser требуется alpha channel');
+  const brushRadius=Math.max(0.5,Number(radius)||0.5);
+  const strength=clampPreview01(opacity);
+  if(strength<=0)return 0;
+  const color=erase?null:uiSrgbRgbForBuffer(buffer,rgb8);
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  let changed=0;
+  for(let y=top;y<=bottom;y+=1){
+    for(let x=left;x<=right;x+=1){
+      if(isAllowed&&!isAllowed(x,y))continue;
+      const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+      if(distance>brushRadius)continue;
+      const local=strength*highDepthBrushFalloff(distance,brushRadius);
+      if(local<=0)continue;
+      const offset=(y*buffer.width+x)*buffer.channels;
+      if(erase){
+        const alpha=clampPreview01(normalizedSample(buffer,offset+3));
+        const next=alpha*(1-local);
+        if(Math.abs(next-alpha)<1e-12)continue;
+        writeNormalizedSample(buffer,offset+3,next);
+      }else blendPixelBufferSourceOver(buffer,offset,color,local);
+      changed+=1;
+    }
+  }
+  return changed;
+}
+
+export function applyPixelBufferStrokeSegment(buffer, from, to, radius, rgb8, options = {}) {
+  const distance=Math.hypot(to.x-from.x,to.y-from.y);
+  const spacing=Math.max(0.75,Math.max(1,Number(radius)||1)*0.35);
+  const steps=Math.max(1,Math.ceil(distance/spacing));
+  let changed=0;
+  for(let index=1;index<=steps;index+=1){
+    const t=index/steps;
+    changed+=applyPixelBufferBrushDab(buffer,from.x+(to.x-from.x)*t,from.y+(to.y-from.y)*t,radius,rgb8,options);
+  }
+  return changed;
+}
+
+function pixelBufferDistanceSq(buffer, offset, target) {
+  let distance=0;
+  const count=Math.min(buffer.channels,4);
+  for(let channel=0;channel<count;channel+=1){
+    const delta=normalizedSample(buffer,offset+channel)-target[channel];
+    distance+=delta*delta;
+  }
+  return distance;
+}
+
+function highDepthBitIsSet(bits,index){return (bits[index>>3]&(1<<(index&7)))!==0;}
+function highDepthSetBit(bits,index){bits[index>>3]|=1<<(index&7);}
+
+export function floodFillPixelBuffer(buffer, startX, startY, rgb8, { tolerance=0, opacity=1, isAllowed=null } = {}) {
+  if (!isPixelBuffer(buffer) || buffer.model !== 'rgb' || ![3,4].includes(buffer.channels)) throw new TypeError('Нужен RGB PixelBuffer');
+  const sx=Math.max(0,Math.min(buffer.width-1,Math.trunc(startX)));
+  const sy=Math.max(0,Math.min(buffer.height-1,Math.trunc(startY)));
+  if(isAllowed&&!isAllowed(sx,sy))return 0;
+  const color=uiSrgbRgbForBuffer(buffer,rgb8);
+  const sourceAlpha=clampPreview01(opacity);
+  if(sourceAlpha<=0)return 0;
+  const startOffset=(sy*buffer.width+sx)*buffer.channels;
+  const target=[];
+  for(let channel=0;channel<Math.min(buffer.channels,4);channel+=1)target.push(normalizedSample(buffer,startOffset+channel));
+  const normalizedTolerance=Math.max(0,Math.min(100,Number(tolerance)||0));
+  const threshold=(normalizedTolerance/100)**2*Math.min(buffer.channels,4);
+  const visited=new Uint8Array(Math.ceil(buffer.width*buffer.height/8));
+  const stack=[[sx,sy]];
+  let filled=0;
+  const matches=(x,y)=>{
+    if(x<0||x>=buffer.width||y<0||y>=buffer.height)return false;
+    const index=y*buffer.width+x;
+    if(highDepthBitIsSet(visited,index))return false;
+    if(isAllowed&&!isAllowed(x,y))return false;
+    return pixelBufferDistanceSq(buffer,index*buffer.channels,target)<=threshold;
+  };
+  while(stack.length){
+    const [seedX,y]=stack.pop();
+    if(!matches(seedX,y))continue;
+    let left=seedX;
+    while(left>0&&matches(left-1,y))left-=1;
+    let spanAbove=false,spanBelow=false;
+    for(let x=left;x<buffer.width&&matches(x,y);x+=1){
+      const index=y*buffer.width+x;
+      highDepthSetBit(visited,index);
+      blendPixelBufferSourceOver(buffer,index*buffer.channels,color,sourceAlpha);
+      filled+=1;
+      if(y>0){const match=matches(x,y-1);if(match&&!spanAbove)stack.push([x,y-1]);spanAbove=match;}
+      if(y+1<buffer.height){const match=matches(x,y+1);if(match&&!spanBelow)stack.push([x,y+1]);spanBelow=match;}
+    }
+  }
+  return filled;
+}
+
+export function clearPixelBufferPixels(buffer, { isAllowed=null } = {}) {
+  if (!isPixelBuffer(buffer) || buffer.model !== 'rgb' || buffer.channels !== 4) throw new TypeError('Для high-depth clear нужен RGBA PixelBuffer');
+  let changed=0;
+  for(let y=0;y<buffer.height;y+=1){
+    for(let x=0;x<buffer.width;x+=1){
+      if(isAllowed&&!isAllowed(x,y))continue;
+      const offset=(y*buffer.width+x)*4;
+      const alpha=normalizedSample(buffer,offset+3);
+      if(alpha<=0)continue;
+      writeNormalizedSample(buffer,offset+3,0);
+      changed+=1;
+    }
+  }
+  return changed;
+}
+
 function sourceSampleBytes(bitsPerChannel) {
   if (bitsPerChannel === 8) return 1;
   if (bitsPerChannel === 16) return 2;

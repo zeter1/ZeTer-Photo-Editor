@@ -4,6 +4,20 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.25.0 — 2026-09-25
+
+### 2026-09-25 — Native High-depth Editing Foundation Stage 12d
+
+- PixelBuffer editing: добавлены clone/alpha-upgrade, source-over brush dab/stroke, typed flood fill и alpha clear для RGB 8/16/32-bit buffers без промежуточного RGBA8 round-trip.
+- Precision: 16-bit операции записывают `Uint16` samples напрямую; Float32 editing не клипует RGB к `0..1`, поэтому HDR headroom сохраняется при кисти/линии/заливке.
+- Brush/Eraser: high-depth raster использует отдельный working PixelBuffer; preview перестраивается максимум один раз на animation frame, commit сериализует обновлённый source обратно в `.zpe`.
+- Fill/Line/Clear: заливка, линия, очистка выделения и cut/clear across visible layers получили native high-depth mutation path; selection predicate применяется в координатах слоя.
+- Alpha: RGB source без alpha расширяется до straight RGBA только когда операция действительно требует прозрачности; если расширение превышает общий 48 МБ high-depth budget, сохраняется прежний безопасный Canvas8 fallback.
+- Render bridge: paint-preview override умеет `skipAdjustments`, чтобы уже high-depth-corrected preview не проходил повторно через legacy RGBA8 color pass.
+- Scope: blur/clone/heal/smudge/dodge/burn пока остаются Canvas8 fallback и при commit могут снять high-depth source; это явно оставлено на следующий typed-retouch этап.
+- Tests: добавлены 16-bit non-quantization, Float32 HDR headroom, alpha upgrade/eraser, typed flood fill, selection clear и UI/render wiring regression contracts.
+- Version: приложение синхронизировано на 1.25.0.
+
 ## 1.24.0 — 2026-09-25
 
 ### 2026-09-25 — HDR Preview Controls Stage 12c

@@ -595,18 +595,21 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
 
     if ((layer.type === 'raster' && (rasterOverride || layer.dataUrl || layer.highDepthSource)) || (layer.type === 'smart-object' && layer.previewDataUrl)) {
       const dataUrl = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl;
+      const overrideEntry = layer.type === 'raster' ? rasterOverride : null;
+      const overrideSource = overrideEntry?.source || overrideEntry || null;
+      const overrideSkipAdjustments = Boolean(overrideEntry?.skipAdjustments);
       let highDepthApplied = false;
       let img = null;
       if (layer.type === 'raster' && !rasterOverride && layer.highDepthSource) {
         img = await makeHighDepthRasterSource(layer);
         highDepthApplied = Boolean(img);
       }
-      if (!img) img = layer.type === 'raster' && rasterOverride ? rasterOverride : await getImage(dataUrl);
+      if (!img) img = layer.type === 'raster' && overrideSource ? overrideSource : await getImage(dataUrl);
       if (img) {
         const filtered = layer.type === 'smart-object' ? await applySmartFilterStack(img, layer) : img;
-        const source = highDepthApplied
+        const source = highDepthApplied || overrideSkipAdjustments
           ? filtered
-          : await makeAdjustedRasterSource(filtered, layer, { cacheable: !(layer.type === 'raster' && rasterOverride) });
+          : await makeAdjustedRasterSource(filtered, layer, { cacheable: !(layer.type === 'raster' && overrideSource) });
         ctx.drawImage(source, 0, 0, w, h);
       }
     } else if (layer.type === 'text') {
