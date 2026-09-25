@@ -6,6 +6,10 @@ import {
   isPixelBuffer,
   pixelBufferByteLength,
   pixelBufferToRgba8Preview,
+  serializePixelBufferSource,
+  sanitizeSerializedPixelBufferSource,
+  deserializePixelBufferSource,
+  MAX_PIXEL_BUFFER_SOURCE_BYTES,
 } from '../src/core/pixel-buffer.js';
 
 test('PixelBuffer keeps RGBA8 data zero-copy for the current Canvas bridge', () => {
@@ -55,4 +59,27 @@ test('PixelBuffer rejects mismatched channels, alpha semantics, sample types and
   assert.throws(() => createPixelBuffer({width:1,height:1,model:'rgb',channels:3,bitsPerChannel:8,alphaMode:'straight'}),RangeError);
   assert.throws(() => createPixelBuffer({width:1,height:1,model:'rgb',channels:4,bitsPerChannel:16,data:new Uint8ClampedArray(4)}),TypeError);
   assert.throws(() => createPixelBuffer({width:2,height:1,model:'rgb',channels:4,bitsPerChannel:8,data:new Uint8ClampedArray(4)}),RangeError);
+});
+
+test('Stage 12a serializes 16-bit and float PixelBuffers in canonical little-endian .zpe sources', () => {
+  const source16=createPixelBuffer({width:2,height:1,model:'rgb',channels:3,bitsPerChannel:16,data:new Uint16Array([0,1,65535,32768,40000,7])});
+  const packed16=serializePixelBufferSource(source16);
+  assert.equal(packed16.kind,'zpe-pixel-buffer-source-v1');
+  assert.equal(packed16.byteOrder,'little-endian');
+  assert.equal(packed16.rawBytes,12);
+  assert.deepEqual([...deserializePixelBufferSource(packed16).data],[0,1,65535,32768,40000,7]);
+  const source32=createPixelBuffer({width:1,height:1,model:'rgb',channels:4,bitsPerChannel:32,colorSpace:'linear-srgb',data:new Float32Array([-0.5,0.25,2,1])});
+  const packed32=serializePixelBufferSource(source32);
+  const roundTrip=deserializePixelBufferSource(packed32);
+  assert.deepEqual([...roundTrip.data],[-0.5,0.25,2,1]);
+  assert.equal(roundTrip.colorSpace,'linear-srgb');
+});
+
+test('serialized PixelBuffer sources are bounded and malformed payloads are rejected without decoding them', () => {
+  const buffer=createPixelBuffer({width:2,height:1,model:'rgb',channels:3,bitsPerChannel:16,data:new Uint16Array(6)});
+  assert.throws(()=>serializePixelBufferSource(buffer,{maxBytes:4}),RangeError);
+  const packed=serializePixelBufferSource(buffer);
+  assert.equal(sanitizeSerializedPixelBufferSource({...packed,rawBytes:999}),null);
+  assert.equal(sanitizeSerializedPixelBufferSource({...packed,dataUrl:packed.dataUrl+'AAAA'}),null);
+  assert.equal(MAX_PIXEL_BUFFER_SOURCE_BYTES,48*1024*1024);
 });

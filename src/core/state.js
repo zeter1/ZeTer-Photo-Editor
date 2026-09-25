@@ -1,5 +1,6 @@
 import { clamp } from './geometry.js';
 import { sanitizeLayerStyles } from './layer-styles.js';
+import { sanitizeSerializedPixelBufferSource } from './pixel-buffer.js';
 
 let layerCounter = 0;
 const uid = (prefix = 'layer') => `${prefix}-${Date.now().toString(36)}-${(++layerCounter).toString(36)}`;
@@ -108,7 +109,7 @@ export function baseLayer(type, overrides = {}) {
 }
 
 export function createRasterLayer(overrides = {}) {
-  return baseLayer('raster', { dataUrl: null, ...overrides });
+  return baseLayer('raster', { dataUrl: null, highDepthSource: null, ...overrides });
 }
 
 export function createSmartObjectLayer(overrides = {}) {
@@ -683,6 +684,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     checkedCanvasSize(result.width, result.height, `Растровый слой «${result.name || 'Без имени'}»`);
     const dataUrl = typeof layer?.dataUrl === 'string' && /^data:image\//i.test(layer.dataUrl) ? layer.dataUrl : null;
     result.dataUrl = dataUrl;
+    result.highDepthSource = sanitizeSerializedPixelBufferSource(layer?.highDepthSource);
   } else if (type === 'smart-object') {
     checkedCanvasSize(result.width, result.height, `Смарт-объект «${result.name || 'Без имени'}»`);
     result.previewDataUrl = typeof layer?.previewDataUrl === 'string' && /^data:image\//i.test(layer.previewDataUrl) ? layer.previewDataUrl : null;

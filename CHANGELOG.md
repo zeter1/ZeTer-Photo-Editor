@@ -4,6 +4,18 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.22.0 — 2026-09-25
+
+### 2026-09-25 — High-depth Raster Source Stage 12a
+
+- Added: canonical serializable PixelBuffer source (`zpe-pixel-buffer-source-v1`) с little-endian 8/16/32-bit sample encoding и безопасным deserialize round-trip.
+- `.zpe`: raster layer получил optional `highDepthSource`; sanitizer проверяет geometry/channels/depth/raw byte count/base64 shape без дорогостоящего decode.
+- PSD/PSB import: RGB 16/32-bit layer/composite source сохраняется вместе с 8-bit Canvas preview в пределах общего raw-budget 48 МБ; превышение бюджета даёт явный warning и не раздувает проект бесконтрольно.
+- Correctness: destructive Canvas publication (paint/fill/erase/retouch/clear/cut) сбрасывает `highDepthSource`, поэтому проект не заявляет старую precision после изменения preview.
+- UX: свойства raster layer показывают сохранённую bit depth/model/размер и честно отмечают 8-bit Canvas editing boundary.
+- Tests: добавлены binary round-trip, malformed payload guards, `.zpe` persistence и invalidation contracts.
+- Version: приложение синхронизировано на 1.22.0.
+
 ## 1.21.0 — 2026-09-25
 
 ### 2026-09-25 — Linked Smart Objects Stage 11c

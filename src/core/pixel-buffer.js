@@ -1,6 +1,12 @@
+import { bytesToDataUrl, dataUrlToBytes } from './io.js';
+
 export const PIXEL_BUFFER_KIND = 'zpe-pixel-buffer-v1';
 export const PIXEL_MODELS = Object.freeze(['rgb','cmyk']);
 export const PIXEL_DEPTHS = Object.freeze([8,16,32]);
+export const PIXEL_BUFFER_SOURCE_KIND = 'zpe-pixel-buffer-source-v1';
+export const PIXEL_BUFFER_SOURCE_MIME = 'application/x-zeter-pixel-buffer';
+export const MAX_PIXEL_BUFFER_SOURCE_BYTES = 48 * 1024 * 1024;
+export const MAX_PIXEL_BUFFER_SOURCE_DATA_URL = 4 * Math.ceil(MAX_PIXEL_BUFFER_SOURCE_BYTES / 3) + 128;
 
 function integer(value, label) {
   const number = Math.trunc(Number(value));
@@ -130,6 +136,89 @@ export function pixelBufferToRgba8Preview(buffer) {
     rgba[target + 3] = hasAlpha ? Math.round(sample01(buffer, source + 3) * 255) : 255;
   }
   return rgba;
+}
+
+function sourceSampleBytes(bitsPerChannel) {
+  if (bitsPerChannel === 8) return 1;
+  if (bitsPerChannel === 16) return 2;
+  if (bitsPerChannel === 32) return 4;
+  throw new TypeError(`Неподдерживаемая глубина PixelBuffer source: ${bitsPerChannel}-bit`);
+}
+
+function pixelBufferCanonicalBytes(buffer) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  const bytesPerSample = sourceSampleBytes(buffer.bitsPerChannel);
+  const bytes = new Uint8Array(buffer.data.length * bytesPerSample);
+  if (buffer.bitsPerChannel === 8) {
+    bytes.set(new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength));
+    return bytes;
+  }
+  const view = new DataView(bytes.buffer);
+  if (buffer.bitsPerChannel === 16) {
+    for (let index = 0; index < buffer.data.length; index += 1) view.setUint16(index * 2, buffer.data[index], true);
+  } else {
+    for (let index = 0; index < buffer.data.length; index += 1) view.setFloat32(index * 4, buffer.data[index], true);
+  }
+  return bytes;
+}
+
+function expectedSourceBytes({ width, height, channels, bitsPerChannel }) {
+  const samples = Number(width) * Number(height) * Number(channels);
+  const bytes = samples * sourceSampleBytes(Number(bitsPerChannel));
+  return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : 0;
+}
+
+export function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  const bytes = pixelBufferCanonicalBytes(buffer);
+  const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
+  if (bytes.byteLength > limit) throw new RangeError(`PixelBuffer source ${bytes.byteLength} байт превышает лимит ${limit} байт`);
+  return {
+    kind: PIXEL_BUFFER_SOURCE_KIND, width: buffer.width, height: buffer.height, model: buffer.model, channels: buffer.channels,
+    bitsPerChannel: buffer.bitsPerChannel, sampleType: buffer.sampleType, colorSpace: String(buffer.colorSpace || '').slice(0,120),
+    alphaMode: buffer.alphaMode, profileName: String(buffer.profileName || '').slice(0,240), byteOrder: 'little-endian',
+    rawBytes: bytes.byteLength, dataUrl: bytesToDataUrl(bytes, PIXEL_BUFFER_SOURCE_MIME),
+  };
+}
+
+export function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
+  if (!source || typeof source !== 'object' || Array.isArray(source) || source.kind !== PIXEL_BUFFER_SOURCE_KIND) return null;
+  const width=Math.trunc(Number(source.width)), height=Math.trunc(Number(source.height)), model=String(source.model||'').toLowerCase();
+  const channels=Math.trunc(Number(source.channels)), bitsPerChannel=Math.trunc(Number(source.bitsPerChannel));
+  if (width<1 || height<1 || !PIXEL_MODELS.includes(model) || !PIXEL_DEPTHS.includes(bitsPerChannel)) return null;
+  const range=channelRange(model); if(channels<range.min || channels>range.max) return null;
+  const expected=expectedSourceBytes({width,height,channels,bitsPerChannel});
+  const limit=Math.max(1,Math.trunc(Number(maxBytes)||0));
+  if(!expected || expected>limit || Number(source.rawBytes)!==expected) return null;
+  const dataUrl=typeof source.dataUrl==='string'?source.dataUrl:'';
+  if(dataUrl.length>MAX_PIXEL_BUFFER_SOURCE_DATA_URL) return null;
+  const prefix=`data:${PIXEL_BUFFER_SOURCE_MIME};base64,`;
+  if(!dataUrl.startsWith(prefix)) return null;
+  const base64=dataUrl.slice(prefix.length);
+  if(!/^[a-z\d+/=]+$/i.test(base64) || base64.length!==4*Math.ceil(expected/3)) return null;
+  const hasAlpha=channels===range.max;
+  return {kind:PIXEL_BUFFER_SOURCE_KIND,width,height,model,channels,bitsPerChannel,sampleType:bitsPerChannel===32?'float':'uint',
+    colorSpace:String(source.colorSpace||'').slice(0,120),alphaMode:hasAlpha?'straight':'none',profileName:String(source.profileName||'').slice(0,240),
+    byteOrder:'little-endian',rawBytes:expected,dataUrl};
+}
+
+export function deserializePixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
+  const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes});
+  if(!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
+  const bytes=dataUrlToBytes(safe.dataUrl,{maxBytes:safe.rawBytes});
+  if(bytes.byteLength!==safe.rawBytes) throw new RangeError('Serialized PixelBuffer source имеет неверный размер');
+  const samples=safe.width*safe.height*safe.channels;
+  let data;
+  if(safe.bitsPerChannel===8){ data=new Uint8ClampedArray(bytes); }
+  else if(safe.bitsPerChannel===16){
+    data=new Uint16Array(samples); const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    for(let index=0;index<samples;index+=1)data[index]=view.getUint16(index*2,true);
+  } else {
+    data=new Float32Array(samples); const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    for(let index=0;index<samples;index+=1)data[index]=view.getFloat32(index*4,true);
+  }
+  return createPixelBuffer({width:safe.width,height:safe.height,model:safe.model,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel,
+    colorSpace:safe.colorSpace,alphaMode:safe.alphaMode,profileName:safe.profileName,data});
 }
 
 export function pixelBufferByteLength(buffer) {
