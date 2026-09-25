@@ -18,6 +18,7 @@
 - Export honesty: текущий PSD/PSB writer остаётся RGB; наличие сохранённого CMYK source даёт отдельный Stage 13a warning и экспортирует display preview вместо ложного native CMYK round-trip.
 - Persistence: CMYK source сохраняется даже для 8-bit документов в пределах существующего 48 МБ raw budget; sanitizer не прикрепляет к CMYK HDR tone-map settings.
 - Tests: добавлены synthetic CMYK PSD layer/composite fixtures, channel inversion checks, synthetic CMYK→Lab `A2B0/mft1` ICC profile, managed preview, explicit fallback и alpha regressions.
+- CI regression fix: layer decoder сохраняет channel id `3` как K для CMYK documents; high-depth persistence test проверяет invariant очистки `highDepthSource + highDepthPreview`, а не UI-текст.
 - Version: приложение синхронизировано на 1.29.0.
 
 ## 1.28.0 — 2026-09-25

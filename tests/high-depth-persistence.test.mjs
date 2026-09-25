@@ -29,5 +29,6 @@ test('destructive Canvas raster publication invalidates preserved high-depth sou
   assert.ok(main.includes('layer.dataUrl=dataUrl;\n        layer.highDepthSource=null;'));
   assert.ok(main.includes('highDepthSource=serializePixelBufferSource(sourceLayer.pixelBuffer'));
   assert.ok(main.includes('MAX_PIXEL_BUFFER_SOURCE_BYTES-highDepthBytesUsed'));
-  assert.ok(main.includes('Canvas preview/edit — 8-bit'));
+  assert.ok(main.includes('l.highDepthSource=null;\n  l.highDepthPreview=null;'));
+  assert.ok(main.includes('layer.highDepthSource=null;\n        layer.highDepthPreview=null;'));
 });

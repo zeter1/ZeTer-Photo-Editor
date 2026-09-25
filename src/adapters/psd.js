@@ -920,7 +920,10 @@ async function parseLayerInfoBody(reader, layerInfoEnd, header, maxPixels, maxLa
         continue;
       }
       const data = await decodeChannel(reader, descriptor, channelWidth, channelHeight, maxChannelBytes, header.version, header.bitsPerChannel);
-      if ([0,1,2,-1,-2].includes(descriptor.id)) record.decodedChannels.set(descriptor.id, data);
+      const isColorChannel = header.colorMode === PSD_COLOR_MODE_CMYK
+        ? descriptor.id >= 0 && descriptor.id <= 3
+        : descriptor.id >= 0 && descriptor.id <= 2;
+      if (isColorChannel || descriptor.id === -1 || descriptor.id === -2) record.decodedChannels.set(descriptor.id, data);
     }
   }
   if (reader.offset > layerInfoEnd) throw new PsdImportError('PSD layer info channel data выходит за границы секции', 'PSD_LAYER_INFO');
