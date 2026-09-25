@@ -301,18 +301,20 @@ export function clonePixelBuffer(buffer) {
 
 export function pixelBufferWithStraightAlpha(buffer) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
-  if (buffer.model !== 'rgb') throw new Error('High-depth pixel editing пока поддерживает только RGB PixelBuffer');
-  if (buffer.channels === 4) return clonePixelBuffer(buffer);
-  if (buffer.channels !== 3) throw new Error('Для RGB high-depth editing ожидается 3 или 4 канала');
-  const Type = expectedArrayConstructor(buffer.bitsPerChannel);
-  const output = new Type(buffer.width * buffer.height * 4);
-  const alpha = editableSampleMax(buffer);
-  for (let pixel=0; pixel<buffer.width*buffer.height; pixel+=1) {
-    const source=pixel*3,target=pixel*4;
-    output[target]=buffer.data[source];output[target+1]=buffer.data[source+1];output[target+2]=buffer.data[source+2];output[target+3]=alpha;
+  const colorChannels=buffer.model==='cmyk'?4:3;
+  const alphaChannels=colorChannels+1;
+  if(buffer.channels===alphaChannels)return clonePixelBuffer(buffer);
+  if(buffer.channels!==colorChannels)throw new Error('PixelBuffer имеет несовместимое число цветовых каналов');
+  const Type=expectedArrayConstructor(buffer.bitsPerChannel);
+  const output=new Type(buffer.width*buffer.height*alphaChannels);
+  const alpha=editableSampleMax(buffer);
+  for(let pixel=0;pixel<buffer.width*buffer.height;pixel+=1){
+    const source=pixel*colorChannels,target=pixel*alphaChannels;
+    for(let channel=0;channel<colorChannels;channel+=1)output[target+channel]=buffer.data[source+channel];
+    output[target+colorChannels]=alpha;
   }
   return createPixelBuffer({
-    width:buffer.width,height:buffer.height,model:'rgb',channels:4,bitsPerChannel:buffer.bitsPerChannel,
+    width:buffer.width,height:buffer.height,model:buffer.model,channels:alphaChannels,bitsPerChannel:buffer.bitsPerChannel,
     colorSpace:buffer.colorSpace,alphaMode:'straight',profileName:buffer.profileName,data:output,
   });
 }
@@ -484,8 +486,7 @@ export function compositeCmykPixelBufferLayers(width, height, layers = [], {
     if(!isPixelBuffer(source)||source.model!=='cmyk'||![4,5].includes(source.channels)){
       throw new TypeError('CMYK composite layer требует CMYK PixelBuffer');
     }
-    const mode=entry?.blendMode||'source-over';
-    if(mode!=='source-over')throw new Error('CMYK composite Stage 13b поддерживает только Normal/source-over blend');
+    const mode=HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
     const opacity=clampPreview01(entry?.opacity??1);
     if(opacity<=0)continue;
     const x=Math.trunc(Number(entry?.x)||0),y=Math.trunc(Number(entry?.y)||0);
@@ -513,7 +514,9 @@ export function compositeCmykPixelBufferLayers(width, height, layers = [], {
         for(let channel=0;channel<4;channel+=1){
           const sourceInk=clampPreview01(sourceSampleValue(source,sourceOffset+channel));
           const backdropInk=clampPreview01(normalizedSample(output,targetOffset+channel));
-          writeNormalizedSample(output,targetOffset+channel,(sourceInk*sourceAlpha+backdropInk*destFactor)/outputAlpha);
+          const blendedInk=compositeBlendChannel(mode,backdropInk,sourceInk);
+          const premultiplied=sourceAlpha*((1-backdropAlpha)*sourceInk+backdropAlpha*blendedInk)+destFactor*backdropInk;
+          writeNormalizedSample(output,targetOffset+channel,premultiplied/outputAlpha);
         }
         writeNormalizedSample(output,targetOffset+4,outputAlpha);
       }
@@ -552,6 +555,203 @@ function blendPixelBufferSourceOver(buffer, offset, color, opacity) {
     writeNormalizedSample(buffer,offset+channel,(color[channel]*sourceAlpha+dest*destFactor)/outAlpha);
   }
   if(hasAlpha)writeNormalizedSample(buffer,offset+3,outAlpha);
+}
+
+
+function validateCmykEditBuffer(buffer,label='CMYK PixelBuffer') {
+  if(!isPixelBuffer(buffer)||buffer.model!=='cmyk'||![4,5].includes(buffer.channels))throw new TypeError(label+': нужен CMYK PixelBuffer');
+}
+
+function cmykInkColor(values) {
+  if(!Array.isArray(values)||values.length<4)throw new TypeError('Нужен CMYK-цвет [C,M,Y,K]');
+  return values.slice(0,4).map(clampPreview01);
+}
+
+function cmykAlphaIndex(buffer) {
+  return buffer.channels===5?4:-1;
+}
+
+function blendCmykSourceOver(buffer,offset,color,opacity,sourceCoverage=1) {
+  const sourceAlpha=clampPreview01(opacity)*clampPreview01(sourceCoverage);
+  if(sourceAlpha<=0)return;
+  const alphaIndex=cmykAlphaIndex(buffer);
+  const destAlpha=alphaIndex>=0?clampPreview01(normalizedSample(buffer,offset+alphaIndex)):1;
+  const outAlpha=sourceAlpha+destAlpha*(1-sourceAlpha);
+  if(outAlpha<=0){
+    for(let channel=0;channel<buffer.channels;channel+=1)writeNormalizedSample(buffer,offset+channel,0);
+    return;
+  }
+  const destFactor=destAlpha*(1-sourceAlpha);
+  for(let channel=0;channel<4;channel+=1){
+    const dest=clampPreview01(normalizedSample(buffer,offset+channel));
+    writeNormalizedSample(buffer,offset+channel,(color[channel]*sourceAlpha+dest*destFactor)/outAlpha);
+  }
+  if(alphaIndex>=0)writeNormalizedSample(buffer,offset+alphaIndex,outAlpha);
+}
+
+export function applyCmykPixelBufferBrushDab(buffer,centerX,centerY,radius,cmyk,{opacity=1,erase=false,isAllowed=null}={}) {
+  validateCmykEditBuffer(buffer,'CMYK brush');
+  if(erase&&buffer.channels!==5)throw new Error('Для CMYK eraser требуется alpha channel');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(opacity);
+  if(strength<=0)return 0;
+  const color=erase?null:cmykInkColor(cmyk);
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  let changed=0;
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    if(local<=0)continue;
+    const offset=(y*buffer.width+x)*buffer.channels;
+    if(erase){
+      const alpha=clampPreview01(normalizedSample(buffer,offset+4));
+      const next=alpha*(1-local);
+      if(Math.abs(next-alpha)<1e-12)continue;
+      writeNormalizedSample(buffer,offset+4,next);
+    }else blendCmykSourceOver(buffer,offset,color,local);
+    changed+=1;
+  }
+  return changed;
+}
+
+export function applyCmykPixelBufferStrokeSegment(buffer,from,to,radius,cmyk,options={}) {
+  const distance=Math.hypot(to.x-from.x,to.y-from.y);
+  const spacing=Math.max(.75,Math.max(1,Number(radius)||1)*.35);
+  const steps=Math.max(1,Math.ceil(distance/spacing));
+  let changed=0;
+  for(let index=1;index<=steps;index+=1){
+    const t=index/steps;
+    changed+=applyCmykPixelBufferBrushDab(buffer,from.x+(to.x-from.x)*t,from.y+(to.y-from.y)*t,radius,cmyk,options);
+  }
+  return changed;
+}
+
+function cmykPixelAlpha01(buffer,offset) {
+  return buffer.channels===5?clampPreview01(normalizedSample(buffer,offset+4)):1;
+}
+
+function sampleCmykBilinear(buffer,x,y) {
+  if(x<0||y<0||x>buffer.width-1||y>buffer.height-1)return null;
+  const x0=Math.floor(x),y0=Math.floor(y),x1=Math.min(buffer.width-1,x0+1),y1=Math.min(buffer.height-1,y0+1);
+  const tx=x-x0,ty=y-y0;
+  const weights=[[(1-tx)*(1-ty),x0,y0],[tx*(1-ty),x1,y0],[(1-tx)*ty,x0,y1],[tx*ty,x1,y1]];
+  const ink=[0,0,0,0];let alpha=0;
+  for(const [weight,sx,sy] of weights){
+    if(weight<=0)continue;
+    const offset=(sy*buffer.width+sx)*buffer.channels;
+    const a=cmykPixelAlpha01(buffer,offset);
+    for(let channel=0;channel<4;channel+=1)ink[channel]+=clampPreview01(normalizedSample(buffer,offset+channel))*weight;
+    alpha+=a*weight;
+  }
+  return{ink,alpha};
+}
+
+function cmykNeighborhoodMean(buffer,centerX,centerY,radius=3) {
+  const r=Math.max(1,Math.min(12,Math.trunc(radius)||3));
+  const left=Math.max(0,Math.floor(centerX)-r),right=Math.min(buffer.width-1,Math.floor(centerX)+r);
+  const top=Math.max(0,Math.floor(centerY)-r),bottom=Math.min(buffer.height-1,Math.floor(centerY)+r);
+  const sum=[0,0,0,0];let weight=0;
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    const offset=(y*buffer.width+x)*buffer.channels;
+    const alpha=cmykPixelAlpha01(buffer,offset);
+    if(alpha<=0)continue;
+    for(let channel=0;channel<4;channel+=1)sum[channel]+=clampPreview01(normalizedSample(buffer,offset+channel))*alpha;
+    weight+=alpha;
+  }
+  return weight>1e-9?sum.map(value=>value/weight):[0,0,0,0];
+}
+
+export function applyCmykPixelBufferBlurDab(buffer,centerX,centerY,radius,amount,{sampleRadius=3,isAllowed=null,strokeCoverage=null}={}) {
+  validateCmykEditBuffer(buffer,'CMYK blur');
+  const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
+  const kernel=Math.max(1,Math.min(8,Math.trunc(sampleRadius)||3));
+  if(strength<=0)return 0;
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  const pending=[];
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const offset=(y*buffer.width+x)*buffer.channels;
+    if(cmykPixelAlpha01(buffer,offset)<=0)continue;
+    const increment=retouchStrokeIncrement(strokeCoverage,x,y,strength*highDepthBrushFalloff(distance,brushRadius));
+    if(increment<=0)continue;
+    const sum=[0,0,0,0];let weight=0;
+    for(let sy=Math.max(0,y-kernel);sy<=Math.min(buffer.height-1,y+kernel);sy+=1)for(let sx=Math.max(0,x-kernel);sx<=Math.min(buffer.width-1,x+kernel);sx+=1){
+      const source=(sy*buffer.width+sx)*buffer.channels;
+      const alpha=cmykPixelAlpha01(buffer,source);
+      if(alpha<=0)continue;
+      for(let channel=0;channel<4;channel+=1)sum[channel]+=clampPreview01(normalizedSample(buffer,source+channel))*alpha;
+      weight+=alpha;
+    }
+    if(weight<=1e-9)continue;
+    pending.push({offset,ink:sum.map((value,channel)=> {
+      const blurred=value/weight,dest=clampPreview01(normalizedSample(buffer,offset+channel));
+      return dest*(1-increment)+blurred*increment;
+    })});
+  }
+  for(const item of pending)for(let channel=0;channel<4;channel+=1)writeNormalizedSample(buffer,item.offset+channel,item.ink[channel]);
+  return pending.length;
+}
+
+export function applyCmykPixelBufferCloneDab(buffer,snapshot,centerX,centerY,radius,sourceOffset,{opacity=1,healing=false,isAllowed=null}={}) {
+  validateCmykEditBuffer(buffer,'CMYK clone target');
+  validateCmykEditBuffer(snapshot,'CMYK clone source');
+  if(!buffersMatchForRetouch(buffer,snapshot))throw new TypeError('CMYK clone source должен совпадать с target PixelBuffer');
+  const brushRadius=Math.max(.5,Number(radius)||.5);
+  const strength=clampPreview01(opacity)*(healing?.68:1);
+  if(strength<=0)return 0;
+  const offsetX=Number(sourceOffset?.x)||0,offsetY=Number(sourceOffset?.y)||0;
+  let gain=null;
+  if(healing){
+    const localRadius=Math.max(2,Math.min(8,brushRadius*.25));
+    const sourceMean=cmykNeighborhoodMean(snapshot,centerX+offsetX,centerY+offsetY,localRadius);
+    const targetMean=cmykNeighborhoodMean(snapshot,centerX,centerY,localRadius);
+    gain=sourceMean.map((value,index)=>Math.max(.25,Math.min(4,(targetMean[index]+1e-6)/(value+1e-6))));
+  }
+  const left=Math.max(0,Math.floor(centerX-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(centerX+brushRadius));
+  const top=Math.max(0,Math.floor(centerY-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(centerY+brushRadius));
+  const pending=[];
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-centerX,y+.5-centerY);
+    if(distance>brushRadius)continue;
+    const sampled=sampleCmykBilinear(snapshot,x+offsetX,y+offsetY);
+    if(!sampled||sampled.alpha<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    if(local<=0)continue;
+    const ink=gain?sampled.ink.map((value,index)=>clampPreview01(value*gain[index])):sampled.ink;
+    pending.push({offset:(y*buffer.width+x)*buffer.channels,ink,alpha:sampled.alpha,local});
+  }
+  for(const item of pending)blendCmykSourceOver(buffer,item.offset,item.ink,item.local,item.alpha);
+  return pending.length;
+}
+
+export function applyCmykPixelBufferSmudgeDab(buffer,from,to,radius,amount,{isAllowed=null}={}) {
+  validateCmykEditBuffer(buffer,'CMYK smudge');
+  const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
+  if(strength<=0)return 0;
+  const dx=Number(from?.x)-Number(to?.x),dy=Number(from?.y)-Number(to?.y);
+  if(!Number.isFinite(dx)||!Number.isFinite(dy))return 0;
+  const left=Math.max(0,Math.floor(to.x-brushRadius)),right=Math.min(buffer.width-1,Math.ceil(to.x+brushRadius));
+  const top=Math.max(0,Math.floor(to.y-brushRadius)),bottom=Math.min(buffer.height-1,Math.ceil(to.y+brushRadius));
+  const pending=[];
+  for(let y=top;y<=bottom;y+=1)for(let x=left;x<=right;x+=1){
+    if(isAllowed&&!isAllowed(x,y))continue;
+    const distance=Math.hypot(x+.5-to.x,y+.5-to.y);
+    if(distance>brushRadius)continue;
+    const sampled=sampleCmykBilinear(buffer,x+dx,y+dy);
+    if(!sampled||sampled.alpha<=0)continue;
+    const local=strength*highDepthBrushFalloff(distance,brushRadius);
+    if(local<=0)continue;
+    pending.push({offset:(y*buffer.width+x)*buffer.channels,ink:sampled.ink,alpha:sampled.alpha,local});
+  }
+  for(const item of pending)blendCmykSourceOver(buffer,item.offset,item.ink,item.local,item.alpha);
+  return pending.length;
 }
 
 export function applyPixelBufferBrushDab(buffer, centerX, centerY, radius, rgb8, { opacity=1, erase=false, isAllowed=null } = {}) {
@@ -817,6 +1017,48 @@ function pixelBufferDistanceSq(buffer, offset, target) {
 function highDepthBitIsSet(bits,index){return (bits[index>>3]&(1<<(index&7)))!==0;}
 function highDepthSetBit(bits,index){bits[index>>3]|=1<<(index&7);}
 
+
+export function floodFillCmykPixelBuffer(buffer,startX,startY,cmyk,{tolerance=0,opacity=1,isAllowed=null}={}) {
+  validateCmykEditBuffer(buffer,'CMYK fill');
+  const sx=Math.max(0,Math.min(buffer.width-1,Math.trunc(startX)));
+  const sy=Math.max(0,Math.min(buffer.height-1,Math.trunc(startY)));
+  if(isAllowed&&!isAllowed(sx,sy))return 0;
+  const color=cmykInkColor(cmyk),sourceAlpha=clampPreview01(opacity);
+  if(sourceAlpha<=0)return 0;
+  const startOffset=(sy*buffer.width+sx)*buffer.channels;
+  const target=[0,1,2,3].map(channel=>clampPreview01(normalizedSample(buffer,startOffset+channel)));
+  const normalizedTolerance=Math.max(0,Math.min(100,Number(tolerance)||0));
+  const threshold=(normalizedTolerance/100)**2*4;
+  const visited=new Uint8Array(Math.ceil(buffer.width*buffer.height/8));
+  const stack=[[sx,sy]];
+  let filled=0;
+  const matches=(x,y)=>{
+    if(x<0||x>=buffer.width||y<0||y>=buffer.height)return false;
+    const index=y*buffer.width+x;
+    if(highDepthBitIsSet(visited,index))return false;
+    if(isAllowed&&!isAllowed(x,y))return false;
+    let distance=0,offset=index*buffer.channels;
+    for(let channel=0;channel<4;channel+=1){const delta=clampPreview01(normalizedSample(buffer,offset+channel))-target[channel];distance+=delta*delta;}
+    return distance<=threshold;
+  };
+  while(stack.length){
+    const [seedX,y]=stack.pop();
+    if(!matches(seedX,y))continue;
+    let left=seedX;
+    while(left>0&&matches(left-1,y))left-=1;
+    let spanAbove=false,spanBelow=false;
+    for(let x=left;x<buffer.width&&matches(x,y);x+=1){
+      const index=y*buffer.width+x;
+      highDepthSetBit(visited,index);
+      blendCmykSourceOver(buffer,index*buffer.channels,color,sourceAlpha);
+      filled+=1;
+      if(y>0){const match=matches(x,y-1);if(match&&!spanAbove)stack.push([x,y-1]);spanAbove=match;}
+      if(y+1<buffer.height){const match=matches(x,y+1);if(match&&!spanBelow)stack.push([x,y+1]);spanBelow=match;}
+    }
+  }
+  return filled;
+}
+
 export function floodFillPixelBuffer(buffer, startX, startY, rgb8, { tolerance=0, opacity=1, isAllowed=null } = {}) {
   if (!isPixelBuffer(buffer) || buffer.model !== 'rgb' || ![3,4].includes(buffer.channels)) throw new TypeError('Нужен RGB PixelBuffer');
   const sx=Math.max(0,Math.min(buffer.width-1,Math.trunc(startX)));
@@ -859,15 +1101,17 @@ export function floodFillPixelBuffer(buffer, startX, startY, rgb8, { tolerance=0
 }
 
 export function clearPixelBufferPixels(buffer, { isAllowed=null } = {}) {
-  if (!isPixelBuffer(buffer) || buffer.model !== 'rgb' || buffer.channels !== 4) throw new TypeError('Для high-depth clear нужен RGBA PixelBuffer');
+  if(!isPixelBuffer(buffer))throw new TypeError('Для high-depth clear нужен PixelBuffer');
+  const alphaIndex=buffer.model==='cmyk'?(buffer.channels===5?4:-1):(buffer.channels===4?3:-1);
+  if(alphaIndex<0)throw new TypeError('Для high-depth clear нужен PixelBuffer со straight alpha');
   let changed=0;
   for(let y=0;y<buffer.height;y+=1){
     for(let x=0;x<buffer.width;x+=1){
       if(isAllowed&&!isAllowed(x,y))continue;
-      const offset=(y*buffer.width+x)*4;
-      const alpha=normalizedSample(buffer,offset+3);
+      const offset=(y*buffer.width+x)*buffer.channels;
+      const alpha=normalizedSample(buffer,offset+alphaIndex);
       if(alpha<=0)continue;
-      writeNormalizedSample(buffer,offset+3,0);
+      writeNormalizedSample(buffer,offset+alphaIndex,0);
       changed+=1;
     }
   }

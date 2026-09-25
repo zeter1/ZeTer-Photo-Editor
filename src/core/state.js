@@ -74,6 +74,7 @@ export function createDocument({ name = 'Без имени', width = 1200, heigh
     height: size.height,
     background,
     colorProfile: null,
+    proofProfile: null,
     colorManagement: sanitizeColorManagement(),
     paths: [],
     layers: [],
@@ -496,6 +497,8 @@ export function restoreDocument(snapshot) {
   for (const group of doc.groups) if (!('parentGroupId' in group)) group.parentGroupId = null;
   normalizeGroupParents(doc.groups);
   doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
+  doc.proofProfile = sanitizeColorProfile(doc.proofProfile);
+  doc.colorManagement = sanitizeColorManagement(doc.colorManagement);
   const validGroupIds = new Set(doc.groups.map(group => group?.id).filter(Boolean));
   for (const layer of doc.layers) {
     if (!validGroupIds.has(layer?.groupId)) layer.groupId = null;
@@ -509,6 +512,8 @@ export const COLOR_DISPLAY_SPACES = Object.freeze(['srgb']);
 export const DEFAULT_COLOR_MANAGEMENT = Object.freeze({
   renderingIntent:'perceptual',
   displaySpace:'srgb',
+  softProofEnabled:false,
+  blackPointCompensation:true,
 });
 
 export function sanitizeColorManagement(value = {}) {
@@ -516,6 +521,8 @@ export function sanitizeColorManagement(value = {}) {
   return {
     renderingIntent:COLOR_RENDERING_INTENTS.includes(source.renderingIntent)?source.renderingIntent:DEFAULT_COLOR_MANAGEMENT.renderingIntent,
     displaySpace:COLOR_DISPLAY_SPACES.includes(source.displaySpace)?source.displaySpace:DEFAULT_COLOR_MANAGEMENT.displaySpace,
+    softProofEnabled:source.softProofEnabled===true,
+    blackPointCompensation:source.blackPointCompensation!==false,
   };
 }
 
@@ -791,6 +798,7 @@ function sanitizeProjectInternal(input, { allowMissingVersion = true, embeddedDe
   doc.height = size.height;
   doc.background = shortText(doc.background, 'transparent', 64) || 'transparent';
   doc.colorProfile = sanitizeColorProfile(doc.colorProfile);
+  doc.proofProfile = sanitizeColorProfile(doc.proofProfile);
   doc.colorManagement = sanitizeColorManagement(doc.colorManagement);
   const usedPathIds = new Set();
   doc.paths = Array.isArray(doc.paths)

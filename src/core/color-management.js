@@ -249,13 +249,120 @@ function iccApplyMab(transform, c, m, y, k) {
   return iccApplyCurves(transform.bCurves,values).map(iccClamp01);
 }
 
-function iccReadMpe(profile, tag) {
+function iccReadMpeFormulaSegment(profile,start,limit,label) {
+  const {bytes,view}=profile;
+  iccSpan(start,12,limit,label);
+  if(iccAscii(bytes,start,4)!=='parf')throw new ColorManagementError(label+': ожидался parf','ICC_MPE_CURVE_SEGMENT');
+  const type=view.getUint16(start+8,false);
+  const counts=[4,5,5];
+  const count=counts[type];
+  if(count==null)throw new ColorManagementError(label+': неподдерживаемая formula type '+type,'ICC_MPE_CURVE_FORMULA');
+  iccSpan(start+12,count*4,limit,label+' params');
+  const p=[];for(let i=0;i<count;i+=1)p.push(view.getFloat32(start+12+i*4,false));
+  const apply=value=>{
+    const x=Number(value);
+    if(!Number.isFinite(x))return 0;
+    if(type===0){
+      const [g,a,b,c]=p;
+      return (a*x+b)**g+c;
+    }
+    if(type===1){
+      const [g,a,b,c,d]=p;
+      const inside=b*(x**g)+c;
+      return inside>0?a*Math.log10(inside)+d:0;
+    }
+    const [a,b,c,d,e]=p;
+    return a*(b**(c*x+d))+e;
+  };
+  return{type:'parf',size:12+count*4,apply};
+}
+
+function iccReadMpeSampleSegment(profile,start,limit,label) {
+  const {bytes,view}=profile;
+  iccSpan(start,12,limit,label);
+  if(iccAscii(bytes,start,4)!=='samf')throw new ColorManagementError(label+': ожидался samf','ICC_MPE_CURVE_SEGMENT');
+  const count=view.getUint32(start+8,false);
+  if(count<1||count>65536)throw new ColorManagementError(label+': sampled curve count вне safe range','ICC_MPE_CURVE_SAMPLES');
+  iccSpan(start+12,count*4,limit,label+' samples');
+  const samples=new Float32Array(count);
+  for(let i=0;i<count;i+=1)samples[i]=view.getFloat32(start+12+i*4,false);
+  return{type:'samf',size:12+count*4,samples};
+}
+
+function iccReadMpeCurve(profile,start,size,label) {
+  const {bytes,view}=profile;
+  const limit=start+size;
+  iccSpan(start,size,profile.declared,label);
+  if(size<12||iccAscii(bytes,start,4)!=='curf')throw new ColorManagementError(label+': ожидался curf','ICC_MPE_CURVE');
+  const segments=view.getUint16(start+8,false);
+  if(segments<1||segments>1024)throw new ColorManagementError(label+': segment count вне safe range','ICC_MPE_CURVE_SEGMENTS');
+  const breakCount=segments-1;
+  iccSpan(start+12,breakCount*4,limit,label+' breakpoints');
+  const breaks=[];for(let i=0;i<breakCount;i+=1)breaks.push(view.getFloat32(start+12+i*4,false));
+  for(let i=1;i<breaks.length;i+=1)if(breaks[i]<breaks[i-1])throw new ColorManagementError(label+': breakpoints убывают','ICC_MPE_CURVE_BREAKS');
+  let cursor=start+12+breakCount*4;
+  const parts=[];
+  for(let index=0;index<segments;index+=1){
+    iccSpan(cursor,4,limit,label+' segment '+(index+1));
+    const type=iccAscii(bytes,cursor,4);
+    let segment;
+    if(type==='parf')segment=iccReadMpeFormulaSegment(profile,cursor,limit,label+' formula '+(index+1));
+    else if(type==='samf'){
+      if(index===0||index===segments-1)throw new ColorManagementError(label+': first/last curve segment должен быть formula','ICC_MPE_CURVE_ENDPOINT');
+      segment=iccReadMpeSampleSegment(profile,cursor,limit,label+' sampled '+(index+1));
+    }else throw new ColorManagementError(label+': segment type '+JSON.stringify(type)+' не поддерживается','ICC_MPE_CURVE_SEGMENT');
+    parts.push(segment);cursor+=segment.size;
+  }
+  if(cursor>limit)throw new ColorManagementError(label+': segments выходят за curve size','ICC_MPE_CURVE_RANGE');
+  const formulaAt=(index,x)=>parts[index].apply(x);
+  return{
+    apply(value){
+      const x=Number(value);
+      if(!Number.isFinite(x))return 0;
+      let index=breaks.findIndex(bp=>x<=bp);
+      if(index<0)index=segments-1;
+      const part=parts[index];
+      if(part.type==='parf')return formulaAt(index,x);
+      const low=breaks[index-1],high=breaks[index];
+      const left=formulaAt(index-1,low);
+      if(!(high>low))return part.samples.at(-1)??left;
+      const position=Math.max(0,Math.min(1,(x-low)/(high-low)))*part.samples.length;
+      if(position<=0)return left;
+      if(position>=part.samples.length)return part.samples[part.samples.length-1];
+      const step=Math.floor(position);
+      if(Math.abs(position-step)<1e-12&&step>0)return part.samples[step-1];
+      const previous=step===0?left:part.samples[step-1];
+      const current=part.samples[Math.min(part.samples.length-1,step)];
+      const local=position-step;
+      return previous*(1-local)+current*local;
+    },
+  };
+}
+
+function iccReadMpeCurveSet(profile,elementStart,size,p,q,label) {
+  const {view}=profile,end=elementStart+size;
+  if(p!==q)throw new ColorManagementError(label+': cvst требует p == q','ICC_MPE_CVST_CHANNELS');
+  iccSpan(elementStart+12,p*8,end,label+' positions');
+  const curves=[];
+  for(let channel=0;channel<p;channel+=1){
+    const entry=elementStart+12+channel*8;
+    const relative=view.getUint32(entry,false),curveSize=view.getUint32(entry+4,false);
+    if(relative<12+p*8)throw new ColorManagementError(label+': curve offset пересекает header','ICC_MPE_CVST_OFFSET');
+    iccSpan(elementStart+relative,curveSize,end,label+' curve '+(channel+1));
+    curves.push(iccReadMpeCurve(profile,elementStart+relative,curveSize,label+' curve '+(channel+1)));
+  }
+  return{type:'cvst',p,q,curves};
+}
+
+function iccReadMpe(profile, tag, { expectedInputs=null, expectedOutputs=null } = {}) {
   const {bytes,view,pcs}=profile;
   const start=tag.offset,end=start+tag.size;
   if(tag.size<24||iccAscii(bytes,start,4)!=='mpet')throw new ColorManagementError('ICC '+tag.signature+' не является multiProcessElementsType','ICC_MPE_TYPE');
   const inputs=view.getUint16(start+8,false),outputs=view.getUint16(start+10,false);
   const count=view.getUint32(start+12,false);
-  if(inputs!==4||outputs!==3)throw new ColorManagementError('ICC CMYK MPE ожидает 4 input / 3 output channels','ICC_MPE_CHANNELS');
+  if(expectedInputs!=null&&inputs!==expectedInputs)throw new ColorManagementError('ICC MPE input channels '+inputs+' != '+expectedInputs,'ICC_MPE_CHANNELS');
+  if(expectedOutputs!=null&&outputs!==expectedOutputs)throw new ColorManagementError('ICC MPE output channels '+outputs+' != '+expectedOutputs,'ICC_MPE_CHANNELS');
+  if(inputs<1||outputs<1||inputs>16||outputs>16)throw new ColorManagementError('ICC MPE channel count вне safe range 1..16','ICC_MPE_CHANNELS');
   if(count<1||count>32)throw new ColorManagementError('ICC MPE element count outside safe range 1..32','ICC_MPE_COUNT');
   iccSpan(start+16,count*8,end,'ICC MPE positions');
   const elements=[];
@@ -289,7 +396,10 @@ function iccReadMpe(profile, tag) {
       const data=new Float32Array(samples);
       for(let sample=0;sample<samples;sample+=1)data[sample]=view.getFloat32(dataStart+sample*4,false);
       elements.push({type,p,q,grid,data});
+    }else if(type==='cvst'){
+      elements.push(iccReadMpeCurveSet(profile,elementStart,size,p,q,'ICC MPE cvst #'+(index+1)));
     }else if(type==='bACS'||type==='eACS'){
+      if(p!==q)throw new ColorManagementError('ICC '+type+' требует p == q','ICC_MPE_ACS_CHANNELS');
       elements.push({type,p,q,passThrough:true});
     }else{
       throw new ColorManagementError('ICC MPE element '+JSON.stringify(type)+' пока не поддерживается; требуется fallback','ICC_MPE_ELEMENT_TYPE');
@@ -300,8 +410,9 @@ function iccReadMpe(profile, tag) {
   return{type:'mpet',tag:tag.signature,pcs,inputs,outputs,elements};
 }
 
-function iccApplyMpe(transform, c, m, y, k) {
-  let values=[c,m,y,k];
+function iccApplyMpe(transform, ...inputValues) {
+  if(inputValues.length!==transform.inputs)throw new ColorManagementError('ICC MPE apply input channel mismatch','ICC_MPE_APPLY_CHANNELS');
+  let values=inputValues.map(value=>Number.isFinite(Number(value))?Number(value):0);
   for(const element of transform.elements){
     if(element.passThrough)continue;
     if(element.type==='matf'){
@@ -315,12 +426,14 @@ function iccApplyMpe(transform, c, m, y, k) {
       values=next;
     }else if(element.type==='clut'){
       values=iccInterpolateClut(element.data,element.grid,element.q,values);
+    }else if(element.type==='cvst'){
+      values=values.map((value,index)=>element.curves[index].apply(value));
     }
   }
   return values;
 }
 
-function iccReadMft(profile, tag) {
+function iccReadMft(profile, tag, { expectedInputs=null, expectedOutputs=null } = {}) {
   const {bytes,view,pcs}=profile;
   if(tag.size<52)throw new ColorManagementError('ICC '+tag.signature+' LUT слишком короткий', 'ICC_LUT_TRUNCATED');
   const start=tag.offset,end=start+tag.size;
@@ -329,7 +442,9 @@ function iccReadMft(profile, tag) {
     throw new ColorManagementError('ICC '+tag.signature+' использует '+JSON.stringify(type)+', Stage 13a поддерживает mft1/mft2', 'ICC_LUT_TYPE');
   }
   const inputs=bytes[start+8],outputs=bytes[start+9],grid=bytes[start+10];
-  if(inputs!==4||outputs!==3)throw new ColorManagementError('ICC CMYK LUT ожидает 4 input / 3 output channels', 'ICC_LUT_CHANNELS');
+  if(expectedInputs!=null&&inputs!==expectedInputs)throw new ColorManagementError('ICC LUT input channels '+inputs+' != '+expectedInputs,'ICC_LUT_CHANNELS');
+  if(expectedOutputs!=null&&outputs!==expectedOutputs)throw new ColorManagementError('ICC LUT output channels '+outputs+' != '+expectedOutputs,'ICC_LUT_CHANNELS');
+  if(inputs<1||outputs<1||inputs>16||outputs>16)throw new ColorManagementError('ICC LUT channel count вне safe range','ICC_LUT_CHANNELS');
   if(grid<2||grid>33)throw new ColorManagementError('ICC LUT grid points вне безопасного диапазона 2..33', 'ICC_LUT_GRID');
   if(type==='mft1'&&pcs==='XYZ '){
     throw new ColorManagementError('mft1 + PCSXYZ не имеет переносимого 8-bit PCS encoding; нужен mft2/mAB profile', 'ICC_LUT8_XYZ');
@@ -346,6 +461,7 @@ function iccReadMft(profile, tag) {
     bytesPerEntry=2;
   }
   const clutNodes=grid**inputs;
+  if(!Number.isSafeInteger(clutNodes)||clutNodes*outputs>8_000_000)throw new ColorManagementError('ICC LUT CLUT превышает safe sample budget','ICC_LUT_CLUT_LIMIT');
   const inputSamples=inputs*inputEntries;
   const clutSamples=clutNodes*outputs;
   const outputSamples=outputs*outputEntries;
@@ -372,37 +488,37 @@ function iccTableLookup(table, entries, channel, value) {
   return table[base+lower]*(1-t)+table[base+upper]*t;
 }
 
-function iccApplyLut(lut, c, m, y, k) {
-  const source=[c,m,y,k];
-  const mapped=new Float64Array(4);
-  for(let channel=0;channel<4;channel+=1){
-    mapped[channel]=iccTableLookup(lut.inputTable,lut.inputEntries,channel,source[channel]);
+function iccApplyLut(lut, ...inputValues) {
+  if(inputValues.length!==lut.inputs)throw new ColorManagementError('ICC LUT apply input channel mismatch','ICC_LUT_APPLY_CHANNELS');
+  const mapped=new Float64Array(lut.inputs);
+  for(let channel=0;channel<lut.inputs;channel+=1){
+    mapped[channel]=iccTableLookup(lut.inputTable,lut.inputEntries,channel,inputValues[channel]);
   }
-  const lower=new Int32Array(4),upper=new Int32Array(4),fraction=new Float64Array(4);
-  for(let channel=0;channel<4;channel+=1){
+  const lower=new Int32Array(lut.inputs),upper=new Int32Array(lut.inputs),fraction=new Float64Array(lut.inputs);
+  for(let channel=0;channel<lut.inputs;channel+=1){
     const position=iccClamp01(mapped[channel])*(lut.grid-1);
     lower[channel]=Math.floor(position);
     upper[channel]=Math.min(lut.grid-1,lower[channel]+1);
     fraction[channel]=position-lower[channel];
   }
-  const pcsRaw=new Float64Array(3);
-  for(let corner=0;corner<16;corner+=1){
+  const raw=new Float64Array(lut.outputs);
+  const corners=1<<lut.inputs;
+  if(lut.inputs>20)throw new ColorManagementError('ICC LUT interpolation dimensions too large','ICC_LUT_DIMENSIONS');
+  for(let corner=0;corner<corners;corner+=1){
     let weight=1,node=0;
-    for(let channel=0;channel<4;channel+=1){
+    for(let channel=0;channel<lut.inputs;channel+=1){
       const high=(corner&(1<<channel))!==0;
       const coordinate=high?upper[channel]:lower[channel];
       weight*=high?fraction[channel]:1-fraction[channel];
       node=node*lut.grid+coordinate;
     }
     if(weight===0)continue;
-    const offset=node*3;
-    pcsRaw[0]+=lut.clut[offset]*weight;
-    pcsRaw[1]+=lut.clut[offset+1]*weight;
-    pcsRaw[2]+=lut.clut[offset+2]*weight;
+    const offset=node*lut.outputs;
+    for(let output=0;output<lut.outputs;output+=1)raw[output]+=lut.clut[offset+output]*weight;
   }
-  const output=new Float64Array(3);
-  for(let channel=0;channel<3;channel+=1){
-    output[channel]=iccTableLookup(lut.outputTable,lut.outputEntries,channel,pcsRaw[channel]);
+  const output=new Float64Array(lut.outputs);
+  for(let channel=0;channel<lut.outputs;channel+=1){
+    output[channel]=iccTableLookup(lut.outputTable,lut.outputEntries,channel,raw[channel]);
   }
   return output;
 }
@@ -505,7 +621,7 @@ function iccResolveDeviceToPcs(profile, intent) {
   if(tag){
     const type=iccAscii(profile.bytes,tag.offset,4);
     if(type==='mpet'){
-      return{transform:iccReadMpe(profile,tag),kind:'mpet',tag:tag.signature,resolvedIntent:plan.requested,warnings};
+      return{transform:iccReadMpe(profile,tag,{expectedInputs:4,expectedOutputs:3}),kind:'mpet',tag:tag.signature,resolvedIntent:plan.requested,warnings};
     }
     warnings.push(plan.dTag+' найден, но имеет неподдерживаемый type '+JSON.stringify(type));
   }
@@ -521,10 +637,256 @@ function iccResolveDeviceToPcs(profile, intent) {
   }
   if(!tag)throw new ColorManagementError('ICC profile не содержит подходящий D2B/A2B device-to-PCS transform','ICC_DEVICE_TO_PCS_MISSING');
   const type=iccAscii(profile.bytes,tag.offset,4);
-  if(type==='mft1'||type==='mft2')return{transform:iccReadMft(profile,tag),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mft1'||type==='mft2')return{transform:iccReadMft(profile,tag,{expectedInputs:4,expectedOutputs:3}),kind:type,tag:tag.signature,resolvedIntent,warnings};
   if(type==='mAB ')return{transform:iccReadMab(profile,tag),kind:type,tag:tag.signature,resolvedIntent,warnings};
-  if(type==='mpet')return{transform:iccReadMpe(profile,tag),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:4,expectedOutputs:3}),kind:type,tag:tag.signature,resolvedIntent,warnings};
   throw new ColorManagementError('ICC '+tag.signature+' использует неподдерживаемый transform type '+JSON.stringify(type),'ICC_TRANSFORM_TYPE');
+}
+
+
+function iccXyzD50ToLab(x,y,z) {
+  const delta=6/29;
+  const f=t=>t>delta**3?t**(1/3):t/(3*delta*delta)+4/29;
+  const fx=f(x/ICC_D50[0]),fy=f(y/ICC_D50[1]),fz=f(z/ICC_D50[2]);
+  return[116*fy-16,500*(fx-fy),200*(fy-fz)];
+}
+
+function iccLutOutputToXyzD50(lut,raw) {
+  if(lut.pcs==='Lab '){
+    let l,a,b;
+    if(lut.type==='mft1'){
+      l=iccClamp01(raw[0])*100;a=iccClamp01(raw[1])*255-128;b=iccClamp01(raw[2])*255-128;
+    }else{
+      const lCode=iccClamp01(raw[0])*65535,aCode=iccClamp01(raw[1])*65535,bCode=iccClamp01(raw[2])*65535;
+      l=Math.min(100,Math.max(0,lCode*100/65280));a=Math.min(127,Math.max(-128,aCode/256-128));b=Math.min(127,Math.max(-128,bCode/256-128));
+    }
+    return iccLabToXyzD50(l,a,b);
+  }
+  const scale=65535/32768;
+  return[raw[0]*scale,raw[1]*scale,raw[2]*scale];
+}
+
+function iccNormalizedPcsToXyzD50(pcs,raw) {
+  if(pcs==='Lab '){
+    const lCode=iccClamp01(raw[0])*65535,aCode=iccClamp01(raw[1])*65535,bCode=iccClamp01(raw[2])*65535;
+    return iccLabToXyzD50(Math.min(100,Math.max(0,lCode*100/65280)),Math.min(127,Math.max(-128,aCode/256-128)),Math.min(127,Math.max(-128,bCode/256-128)));
+  }
+  const scale=65535/32768;
+  return[raw[0]*scale,raw[1]*scale,raw[2]*scale];
+}
+
+function iccFloatPcsToXyzD50(pcs,raw) {
+  return pcs==='Lab '?iccLabToXyzD50(Number(raw[0])||0,Number(raw[1])||0,Number(raw[2])||0):[Number(raw[0])||0,Number(raw[1])||0,Number(raw[2])||0];
+}
+
+function iccXyzD50ToNormalizedPcs(pcs,xyz) {
+  if(pcs==='Lab '){
+    const [l,a,b]=iccXyzD50ToLab(...xyz);
+    return[iccClamp01((l*65280/100)/65535),iccClamp01(((a+128)*256)/65535),iccClamp01(((b+128)*256)/65535)];
+  }
+  const scale=65535/32768;
+  return xyz.map(value=>iccClamp01(value/scale));
+}
+
+function iccXyzD50ToFloatPcs(pcs,xyz) {
+  return pcs==='Lab '?iccXyzD50ToLab(...xyz):xyz.map(Number);
+}
+
+function iccReadMba(profile,tag) {
+  const {bytes,view,pcs}=profile;
+  const start=tag.offset,end=start+tag.size;
+  if(tag.size<32||iccAscii(bytes,start,4)!=='mBA ')throw new ColorManagementError('ICC '+tag.signature+' не является lutBToAType','ICC_MBA_TYPE');
+  const inputs=bytes[start+8],outputs=bytes[start+9];
+  if(inputs!==3||outputs!==4)throw new ColorManagementError('ICC CMYK output mBA ожидает PCS 3 input / CMYK 4 output','ICC_MBA_CHANNELS');
+  const bOffset=view.getUint32(start+12,false),matrixOffset=view.getUint32(start+16,false),mOffset=view.getUint32(start+20,false),clutOffset=view.getUint32(start+24,false),aOffset=view.getUint32(start+28,false);
+  for(const [name,offset] of [['B',bOffset],['matrix',matrixOffset],['M',mOffset],['CLUT',clutOffset],['A',aOffset]])if(offset)iccSpan(start+offset,4,end,'ICC mBA '+name);
+  const bCurves=iccReadSequentialCurves(profile,tag,bOffset,inputs,'ICC mBA B curve');
+  const mCurves=iccReadSequentialCurves(profile,tag,mOffset,inputs,'ICC mBA M curve');
+  const aCurves=iccReadSequentialCurves(profile,tag,aOffset,outputs,'ICC mBA A curve');
+  let matrix=null;
+  if(matrixOffset){
+    const matrixStart=start+matrixOffset;iccSpan(matrixStart,48,end,'ICC mBA matrix');
+    matrix=new Float64Array(12);for(let i=0;i<12;i+=1)matrix[i]=iccS15Fixed16(view,matrixStart+i*4);
+  }
+  let clut=null;
+  if(clutOffset){
+    const clutStart=start+clutOffset;iccSpan(clutStart,20,end,'ICC mBA CLUT');
+    const grid=[];for(let i=0;i<inputs;i+=1){const points=bytes[clutStart+i];if(points<2||points>65)throw new ColorManagementError('ICC mBA CLUT grid вне safe range','ICC_MBA_GRID');grid.push(points);}
+    const precision=bytes[clutStart+16];if(precision!==1&&precision!==2)throw new ColorManagementError('ICC mBA CLUT precision должен быть 1 или 2','ICC_MBA_PRECISION');
+    const nodes=grid.reduce((p,v)=>p*v,1),samples=nodes*outputs,dataStart=clutStart+20;
+    iccSpan(dataStart,samples*precision,end,'ICC mBA CLUT data');
+    const data=new Float32Array(samples);
+    for(let i=0;i<samples;i+=1)data[i]=precision===1?bytes[dataStart+i]/255:view.getUint16(dataStart+i*2,false)/65535;
+    clut={grid,outputs,data};
+  }
+  if(inputs!==outputs&&!clut)throw new ColorManagementError('ICC mBA 3→4 требует CLUT','ICC_MBA_CLUT_REQUIRED');
+  return{type:'mBA ',tag:tag.signature,pcs,inputs,outputs,bCurves,matrix,mCurves,clut,aCurves};
+}
+
+function iccApplyMba(transform,values) {
+  let out=iccApplyCurves(transform.bCurves,values);
+  if(transform.matrix){
+    const q=transform.matrix;
+    out=[
+      q[0]*out[0]+q[1]*out[1]+q[2]*out[2]+q[9],
+      q[3]*out[0]+q[4]*out[1]+q[5]*out[2]+q[10],
+      q[6]*out[0]+q[7]*out[1]+q[8]*out[2]+q[11],
+    ].map(iccClamp01);
+  }
+  out=iccApplyCurves(transform.mCurves,out);
+  if(transform.clut)out=iccInterpolateClut(transform.clut.data,transform.clut.grid,transform.clut.outputs,out);
+  return iccApplyCurves(transform.aCurves,out).map(iccClamp01);
+}
+
+function iccOutputIntentPlan(intent) {
+  const normalized=iccIntentPlan(intent).requested;
+  if(normalized==='relative')return{requested:normalized,dTag:'B2D1',aTag:'B2A1'};
+  if(normalized==='saturation')return{requested:normalized,dTag:'B2D2',aTag:'B2A2'};
+  if(normalized==='absolute')return{requested:normalized,dTag:'B2D3',aTag:'B2A1'};
+  return{requested:'perceptual',dTag:'B2D0',aTag:'B2A0'};
+}
+
+function iccResolvePcsToDevice(profile,intent) {
+  const plan=iccOutputIntentPlan(intent),warnings=[];
+  let tag=profile.tags.get(plan.dTag);
+  if(tag){
+    const type=iccAscii(profile.bytes,tag.offset,4);
+    if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:3,expectedOutputs:4}),kind:'mpet',tag:tag.signature,resolvedIntent:plan.requested,warnings};
+    warnings.push(plan.dTag+' найден, но имеет неподдерживаемый type '+JSON.stringify(type));
+  }
+  tag=profile.tags.get(plan.aTag);
+  let resolvedIntent=plan.requested==='absolute'?'relative':plan.requested;
+  if(plan.requested==='absolute'&&tag)warnings.push('Absolute intent: B2D3 отсутствует; использован relative B2A1 transform');
+  if(!tag&&plan.aTag!=='B2A0'){tag=profile.tags.get('B2A0');if(tag){resolvedIntent='perceptual';warnings.push(plan.aTag+' отсутствует; использован B2A0 perceptual transform');}}
+  if(!tag)throw new ColorManagementError('ICC profile не содержит подходящий B2D/B2A PCS-to-device transform','ICC_PCS_TO_DEVICE_MISSING');
+  const type=iccAscii(profile.bytes,tag.offset,4);
+  if(type==='mBA ')return{transform:iccReadMba(profile,tag),kind:'mBA ',tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mft1'||type==='mft2')return{transform:iccReadMft(profile,tag,{expectedInputs:3,expectedOutputs:4}),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  if(type==='mpet')return{transform:iccReadMpe(profile,tag,{expectedInputs:3,expectedOutputs:4}),kind:type,tag:tag.signature,resolvedIntent,warnings};
+  throw new ColorManagementError('ICC '+tag.signature+' uses unsupported PCS-to-device transform '+JSON.stringify(type),'ICC_PCS_TO_DEVICE_TYPE');
+}
+
+function iccDeviceToXyzTransform(profile,intent) {
+  const resolved=iccResolveDeviceToPcs(profile,intent),transform=resolved.transform;
+  return{
+    ...resolved,
+    apply(values){
+      if(!Array.isArray(values)||values.length!==4)throw new ColorManagementError('CMYK→PCS ожидает 4 channels','ICC_DEVICE_INPUT');
+      if(resolved.kind==='mft1'||resolved.kind==='mft2')return iccLutOutputToXyzD50(transform,iccApplyLut(transform,...values.map(iccClamp01)));
+      if(resolved.kind==='mAB ')return iccNormalizedPcsToXyzD50(profile.pcs,iccApplyMab(transform,...values.map(iccClamp01)));
+      return iccFloatPcsToXyzD50(profile.pcs,iccApplyMpe(transform,...values.map(iccClamp01)));
+    },
+  };
+}
+
+function iccPcsToDeviceTransform(profile,intent) {
+  const resolved=iccResolvePcsToDevice(profile,intent),transform=resolved.transform;
+  return{
+    ...resolved,
+    applyXyz(xyz){
+      let values;
+      if(resolved.kind==='mpet')values=iccApplyMpe(transform,...iccXyzD50ToFloatPcs(profile.pcs,xyz));
+      else if(resolved.kind==='mBA ')values=iccApplyMba(transform,iccXyzD50ToNormalizedPcs(profile.pcs,xyz));
+      else values=iccApplyLut(transform,...iccXyzD50ToNormalizedPcs(profile.pcs,xyz));
+      return Array.from(values,iccClamp01);
+    },
+  };
+}
+
+function srgbToXyzD50(r,g,b) {
+  const red=iccClamp01(r),green=iccClamp01(g),blue=iccClamp01(b);
+  const lin=[red,green,blue].map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);
+  const x65=.4124564*lin[0]+.3575761*lin[1]+.1804375*lin[2];
+  const y65=.2126729*lin[0]+.7151522*lin[1]+.0721750*lin[2];
+  const z65=.0193339*lin[0]+.1191920*lin[1]+.9503041*lin[2];
+  return[
+    1.0478112*x65+.0228866*y65-.0501270*z65,
+    .0295424*x65+.9904844*y65-.0170491*z65,
+    -.0092345*x65+.0150436*y65+.7521316*z65,
+  ];
+}
+
+function xyzD50ToSrgb(xyz) {
+  return iccXyzD65ToSrgb(...iccXyzD50ToD65(...xyz));
+}
+
+function deviceCmykFromSrgb(r,g,b) {
+  const red=iccClamp01(r),green=iccClamp01(g),blue=iccClamp01(b);
+  const k=1-Math.max(red,green,blue);
+  if(k>=1-1e-9)return[0,0,0,1];
+  const denom=1-k;
+  return[(1-red-k)/denom,(1-green-k)/denom,(1-blue-k)/denom,k].map(iccClamp01);
+}
+
+export function inspectCmykIccProfile(profileBytes) {
+  const profile=iccParseProfile(profileBytes);
+  return{colorSpace:profile.colorSpace.trim(),pcs:profile.pcs.trim(),tags:[...profile.tags.keys()].sort()};
+}
+
+export function createSrgbToCmykTransform(profileBytes=null,{intent='relative'}={}) {
+  const requestedIntent=iccIntentPlan(intent).requested;
+  const fallback=warning=>({managed:false,method:'srgb-device-cmyk-fallback',intent:'fallback',requestedIntent,tag:null,warning,apply:(r,g,b)=>deviceCmykFromSrgb(r,g,b)});
+  if(!profileBytes)return fallback('CMYK ICC profile отсутствует; RGB editing color переводится через Device-CMYK fallback');
+  try{
+    const profile=iccParseProfile(profileBytes),output=iccPcsToDeviceTransform(profile,requestedIntent);
+    return{managed:true,method:output.kind==='mpet'?'icc-b2d-mpe':output.kind==='mBA '?'icc-mba':'icc-b2a-lut',intent:output.resolvedIntent,requestedIntent,tag:output.tag,warning:output.warnings.length?output.warnings.join('; '):null,
+      apply(r,g,b){return output.applyXyz(srgbToXyzD50(r,g,b));}};
+  }catch(error){return fallback('RGB→CMYK ICC transform недоступен ('+(error?.message||error)+'); используется Device-CMYK fallback');}
+}
+
+function estimateProfileBlackY(profile) {
+  try{
+    const output=iccPcsToDeviceTransform(profile,'perceptual');
+    const relative=iccDeviceToXyzTransform(profile,'relative');
+    const deviceBlack=output.applyXyz([0,0,0]);
+    return Math.max(0,Math.min(.999999,relative.apply(deviceBlack)[1]));
+  }catch{
+    try{return Math.max(0,Math.min(.999999,iccDeviceToXyzTransform(profile,'relative').apply([1,1,1,1])[1]));}
+    catch{return 0;}
+  }
+}
+
+function applyBlackPointCompensationXyz(xyz,sourceBlackY,destBlackY) {
+  const denominator=1-sourceBlackY;
+  if(!(denominator>1e-9))return xyz;
+  const r=(1-destBlackY)/denominator;
+  return[
+    r*xyz[0]+(1-r)*ICC_D50[0],
+    r*xyz[1]+(1-r)*ICC_D50[1],
+    r*xyz[2]+(1-r)*ICC_D50[2],
+  ];
+}
+
+export function createCmykSoftProofTransform(sourceProfileBytes,proofProfileBytes,{intent='relative',blackPointCompensation=true}={}) {
+  const requestedIntent=iccIntentPlan(intent).requested;
+  if(!sourceProfileBytes||!proofProfileBytes){
+    const base=createCmykToSrgbTransform(sourceProfileBytes,{intent:requestedIntent});
+    return{...base,softProof:false,blackPointCompensation:false,warning:'Soft proof profile отсутствует; используется обычный CMYK display transform'+(base.warning?' • '+base.warning:'')};
+  }
+  try{
+    const source=iccParseProfile(sourceProfileBytes),proof=iccParseProfile(proofProfileBytes);
+    const sourceIn=iccDeviceToXyzTransform(source,requestedIntent);
+    const proofOut=iccPcsToDeviceTransform(proof,requestedIntent);
+    const proofIn=iccDeviceToXyzTransform(proof,'relative');
+    const sourceBlackY=blackPointCompensation?estimateProfileBlackY(source):0;
+    const proofBlackY=blackPointCompensation?estimateProfileBlackY(proof):0;
+    const warnings=[...sourceIn.warnings,...proofOut.warnings,...proofIn.warnings].filter(Boolean);
+    return{
+      managed:true,softProof:true,method:'icc-profile-to-profile-proof',intent:requestedIntent,requestedIntent,displaySpace:'srgb',
+      blackPointCompensation:Boolean(blackPointCompensation),sourceTag:sourceIn.tag,proofOutputTag:proofOut.tag,proofInputTag:proofIn.tag,
+      warning:warnings.length?warnings.join('; '):null,
+      apply(c,m,y,k){
+        let xyz=sourceIn.apply([iccClamp01(c),iccClamp01(m),iccClamp01(y),iccClamp01(k)]);
+        if(blackPointCompensation)xyz=applyBlackPointCompensationXyz(xyz,sourceBlackY,proofBlackY);
+        const proofDevice=proofOut.applyXyz(xyz);
+        const simulated=proofIn.apply(proofDevice);
+        return xyzD50ToSrgb(simulated);
+      },
+    };
+  }catch(error){
+    const base=createCmykToSrgbTransform(sourceProfileBytes,{intent:requestedIntent});
+    return{...base,softProof:false,blackPointCompensation:false,warning:'Soft proof недоступен ('+(error?.message||error)+'); используется обычный CMYK display transform'+(base.warning?' • '+base.warning:'')};
+  }
 }
 
 function iccDeviceCmykFallback(c,m,y,k) {
