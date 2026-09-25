@@ -16335,7 +16335,7 @@ els.viewport.addEventListener('contextmenu',e=>{
 });
 window.addEventListener('blur',()=>{closeMenu();spaceHeld=false;if(!drag)els.overlay.style.cursor=defaultToolCursor();});
 
-$('.tool').forEach(b=>b.onclick=()=>{if(toolbarController.isClickSuppressed())return;setTool(b.dataset.tool);});
+$$('.tool').forEach(b=>b.onclick=()=>{if(toolbarController.isClickSuppressed())return;setTool(b.dataset.tool);});
 els.primaryColor.oninput=()=>els.colorChip.style.background=els.primaryColor.value;
 els.brushSize.oninput=()=>els.brushSizeValue.textContent=els.brushSize.value;
 els.toolOpacity.oninput=()=>els.toolOpacityValue.textContent=`${els.toolOpacity.value}%`;

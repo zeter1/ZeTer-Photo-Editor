@@ -11,6 +11,19 @@
 - Regression follow-up: architecture gate теперь проверяет корректную цепочку `main.js → toolbar-controller.js → tool-layout.js`, а не требует старую прямую зависимость `main.js → tool-layout.js`.
 - Diagnostics: `tools/browser-smoke.mjs` теперь отдельно распознаёт `appReady="error"` и печатает fatal bootstrap message + browser errors вместо неинформативного timeout.
 - Diagnostics follow-up: smoke также останавливается на первом top-level `Runtime.exceptionThrown`, даже если bundle упал до вызова `bootstrap()`.
+- Fixed: toolbar wiring снова использует `$('.tool')` (querySelectorAll helper); предыдущий scripted replacement интерпретировал `$` как replacement token и случайно оставил одиночный `# Changelog
+
+## Unreleased
+
+### 2026-09-26 — Toolbar/tooltips controller extraction
+
+- Refactor: toolbar drag/drop, persisted order, exact grid drop-slot и rich tooltip lifecycle вынесены из `src/main.js` в `src/ui/toolbar-controller.js`.
+- Architecture: controller владеет только UI-механикой панели; `currentTool` и выбор активного инструмента остаются в `src/main.js`, а чистая grid/order математика остаётся в `src/ui/tool-layout.js`.
+- Browser contract: существующий real `file://` smoke продолжает проверять drag в межколоночный gap, DOM order, localStorage и восстановление после reload.
+- Docs/tests: architecture/source contracts и AI code map обновлены на нового канонического владельца toolbar lifecycle.
+- Regression follow-up: architecture gate теперь проверяет корректную цепочку `main.js → toolbar-controller.js → tool-layout.js`, а не требует старую прямую зависимость `main.js → tool-layout.js`.
+- Diagnostics: `tools/browser-smoke.mjs` теперь отдельно распознаёт `appReady="error"` и печатает fatal bootstrap message + browser errors вместо неинформативного timeout.
+, что ломало bootstrap до запуска editor runtime.
 
 ### 2026-09-26 — Workspace/session controller extraction
 

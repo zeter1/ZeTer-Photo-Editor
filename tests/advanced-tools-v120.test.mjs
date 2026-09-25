@@ -28,6 +28,7 @@ test('every toolbar tool receives a rich accessible tooltip instead of a short n
   assert.match(toolbar,/button\.removeAttribute\('title'\)/);
   assert.match(toolbar,/button\.setAttribute\('aria-describedby', tooltip\.id\)/);
   assert.match(css,/\.tool-tooltip \{/);
+  assert.match(main,/\$\$\('\.tool'\)\.forEach/);
 });
 
 test('about dialog identifies the developer and exposes safe contact links',()=>{
