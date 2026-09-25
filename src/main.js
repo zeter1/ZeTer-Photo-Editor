@@ -3,7 +3,7 @@ import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constr
 import {
   createDocument, createRasterLayer, createTextLayer, createShapeLayer, createSmartObjectLayer, createSmartObjectLinkId, linkedSmartObjectLayers, createSmartFilter, createSmartFilterMask, createAdjustmentLayer, createLayerMask, createVectorMask, createLayerGroup, documentWithTextPreview,
   addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, moveLayerGroupIntoGroup, selectedLayer,
-  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters,
+  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters, sanitizeHighDepthPreview,
   isLayerVisible, isLayerLocked, isGroupVisible, isGroupLocked, groupDepth,
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
@@ -1766,6 +1766,44 @@ function resetSelectedLayerEffects() {
   if (changed) commit('Сбросить цвет и эффекты');
   else setStatus('Цвет и эффекты уже сброшены');
 }
+function formatDisplayExposure(value){
+  const ev=Number(value)||0;
+  return `${ev>=0?'+':''}${ev.toFixed(1)} EV`;
+}
+
+function updateHighDepthPreviewSetting(layer,key,raw,shouldCommit=true){
+  if(!layer?.highDepthSource||layer.type!=='raster'||isLayerLocked(doc,layer))return false;
+  const current=sanitizeHighDepthPreview(layer.highDepthPreview);
+  const candidate={...current,[key]:key==='displayExposure'?Number(raw):raw};
+  layer.highDepthPreview=sanitizeHighDepthPreview(candidate);
+  markDirty(true);
+  if(shouldCommit)commit(key==='toneMap'?'Изменить HDR tone mapping':'Изменить HDR display exposure');
+  else render();
+  return true;
+}
+
+function resetHighDepthPreview(layer=selected()){
+  if(!layer?.highDepthSource||layer.type!=='raster'||isLayerLocked(doc,layer))return false;
+  layer.highDepthPreview=sanitizeHighDepthPreview();
+  commit('Сбросить HDR preview');
+  return true;
+}
+
+function bindHighDepthPreviewControls(root,layer){
+  const toneMap=root?.querySelector('[data-high-depth-tone-map]');
+  if(toneMap)toneMap.addEventListener('change',()=>updateHighDepthPreviewSetting(layer,'toneMap',toneMap.value,true));
+  const exposure=root?.querySelector('[data-high-depth-display-exposure]');
+  if(exposure){
+    const output=root.querySelector('[data-high-depth-display-output]');
+    exposure.addEventListener('input',()=>{
+      if(output)output.textContent=formatDisplayExposure(exposure.value);
+      updateHighDepthPreviewSetting(layer,'displayExposure',exposure.value,false);
+    });
+    exposure.addEventListener('change',()=>updateHighDepthPreviewSetting(layer,'displayExposure',exposure.value,true));
+  }
+  root?.querySelector('[data-high-depth-preview-reset]')?.addEventListener('click',()=>resetHighDepthPreview(layer));
+}
+
 function updateProperties() {
   const l = selected();
   if (!l) { els.props.className = 'panel-content muted'; els.props.textContent = 'Выберите слой'; return; }
@@ -1790,7 +1828,10 @@ function updateProperties() {
   if (l.type === 'raster' && l.highDepthSource) {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
-    extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit ${escapeHtml(String(source.model||'RGB').toUpperCase())} · ${sizeMb} МБ</span><label>High-depth</label><span>Exposure/gamma/color работают до tone mapping; Canvas preview/edit — 8-bit</span>`;
+    const preview=sanitizeHighDepthPreview(l.highDepthPreview);
+    const resolvedAuto=source.bitsPerChannel===32?'ACES':'Clip';
+    const displayLabel=formatDisplayExposure(preview.displayExposure);
+    extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit ${escapeHtml(String(source.model||'RGB').toUpperCase())} · ${sizeMb} МБ</span><label>High-depth</label><span>Exposure/gamma/color работают до tone mapping; Canvas preview/edit — 8-bit</span><label>Tone map</label><select data-high-depth-tone-map><option value="auto"${preview.toneMap==='auto'?' selected':''}>Auto (${resolvedAuto})</option><option value="clip"${preview.toneMap==='clip'?' selected':''}>Clip</option><option value="aces"${preview.toneMap==='aces'?' selected':''}>ACES</option></select><label>Display exposure</label><span class="range-with-value"><input type="range" min="-6" max="6" step="0.1" value="${preview.displayExposure}" data-high-depth-display-exposure><output data-high-depth-display-output>${displayLabel}</output></span><div class="wide"><button type="button" class="mini-button" data-high-depth-preview-reset>Сбросить HDR preview</button></div>`;
   }
   if (l.type === 'smart-object') {
     const linkedCount=l.linkedSourceId?linkedSmartObjectLayers(doc,l.linkedSourceId).length:0;
@@ -1808,6 +1849,7 @@ function updateProperties() {
     ${extra}
   </div>`;
   bindPropertyInputs(els.props);
+  if(l.type==='raster'&&l.highDepthSource)bindHighDepthPreviewControls(els.props,l);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
   if(smartObjectEdit)smartObjectEdit.addEventListener('click',()=>openSmartObjectContents(l));
   const smartObjectLinkCopy=els.props.querySelector('[data-smart-object-link-copy]');
@@ -2554,7 +2596,8 @@ async function drawLineOnCurrentRaster(start,end){
 function drawHighDepthRasterBase(layer, canvas, ctx) {
   if(!layer?.highDepthSource)return false;
   const buffer=deserializePixelBufferSource(layer.highDepthSource);
-  const rgba=pixelBufferToToneMappedRgba8Preview(buffer,{}, {toneMap:'auto'});
+  const preview=sanitizeHighDepthPreview(layer.highDepthPreview);
+  const rgba=pixelBufferToToneMappedRgba8Preview(buffer,{}, {toneMap:preview.toneMap,displayExposure:preview.displayExposure});
   const source=document.createElement('canvas');
   source.width=buffer.width;source.height=buffer.height;
   const sourceCtx=source.getContext('2d',{alpha:true,willReadFrequently:true});
@@ -2871,6 +2914,7 @@ async function persistPaintLayer() {
   const old=l.dataUrl;
   l.dataUrl=dataUrl;
   l.highDepthSource=null;
+  l.highDepthPreview=null;
   invalidateImageCache(old);
   return true;
 }
@@ -3838,6 +3882,7 @@ async function clearSelectionAcrossVisibleLayers({ historyLabel = 'Выреза�
         const old=layer.dataUrl;
         layer.dataUrl=dataUrl;
         layer.highDepthSource=null;
+        layer.highDepthPreview=null;
         invalidateImageCache(old);
       }else{
         working.dataUrl=dataUrl;

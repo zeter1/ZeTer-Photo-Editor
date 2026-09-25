@@ -85,7 +85,10 @@ function trimHighDepthRasterCache() {
 async function makeHighDepthRasterSource(layer) {
   const metadata = layer?.highDepthSource;
   if (!metadata || layer?.type !== 'raster' || metadata.model !== 'rgb') return null;
-  const signature = `${metadata.bitsPerChannel}|${metadata.colorSpace || ''}|${colorAdjustmentSignature(layer.filters || {})}|auto-tone-v1`;
+  const preview = layer.highDepthPreview || {};
+  const toneMap = ['auto','clip','aces'].includes(preview.toneMap) ? preview.toneMap : 'auto';
+  const displayExposure = Math.max(-6, Math.min(6, Number(preview.displayExposure) || 0));
+  const signature = `${metadata.bitsPerChannel}|${metadata.colorSpace || ''}|${colorAdjustmentSignature(layer.filters || {})}|${toneMap}|${displayExposure.toFixed(3)}|tone-v2`;
   const sourceToken = metadata.dataUrl || '';
   const cached = highDepthRasterCache.get(layer.id);
   if (cached && cached.sourceToken === sourceToken && cached.signature === signature) {
@@ -97,7 +100,7 @@ async function makeHighDepthRasterSource(layer) {
     const buffer = cached && cached.sourceToken === sourceToken && cached.buffer
       ? cached.buffer
       : deserializePixelBufferSource(metadata);
-    const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap:'auto' });
+    const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap, displayExposure });
     const canvas = document.createElement('canvas');
     canvas.width = buffer.width; canvas.height = buffer.height;
     const ctx = canvas.getContext('2d', { alpha:true, willReadFrequently:true });

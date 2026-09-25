@@ -109,7 +109,7 @@ export function baseLayer(type, overrides = {}) {
 }
 
 export function createRasterLayer(overrides = {}) {
-  return baseLayer('raster', { dataUrl: null, highDepthSource: null, ...overrides });
+  return baseLayer('raster', { dataUrl: null, highDepthSource: null, highDepthPreview: null, ...overrides });
 }
 
 export function createSmartObjectLayer(overrides = {}) {
@@ -527,6 +527,16 @@ export function sanitizeColorProfile(profile) {
   };
 }
 
+const HIGH_DEPTH_TONE_MAPS = new Set(['auto','clip','aces']);
+
+export function sanitizeHighDepthPreview(value = {}) {
+  const toneMap = HIGH_DEPTH_TONE_MAPS.has(value?.toneMap) ? value.toneMap : 'auto';
+  return {
+    toneMap,
+    displayExposure: bounded(value?.displayExposure, 0, -6, 6),
+  };
+}
+
 export function sanitizeFilters(filters = {}) {
   const result = {};
   for (const [key, fallback] of Object.entries(DEFAULT_LAYER_FILTERS)) {
@@ -685,6 +695,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     const dataUrl = typeof layer?.dataUrl === 'string' && /^data:image\//i.test(layer.dataUrl) ? layer.dataUrl : null;
     result.dataUrl = dataUrl;
     result.highDepthSource = sanitizeSerializedPixelBufferSource(layer?.highDepthSource);
+    result.highDepthPreview = result.highDepthSource ? sanitizeHighDepthPreview(layer?.highDepthPreview) : null;
   } else if (type === 'smart-object') {
     checkedCanvasSize(result.width, result.height, `Смарт-объект «${result.name || 'Без имени'}»`);
     result.previewDataUrl = typeof layer?.previewDataUrl === 'string' && /^data:image\//i.test(layer.previewDataUrl) ? layer.previewDataUrl : null;

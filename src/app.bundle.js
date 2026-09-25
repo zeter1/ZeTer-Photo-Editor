@@ -1286,7 +1286,7 @@ function adjustHighDepthRgb(r, g, b, compiled) {
   }
   return [Math.max(0, red), Math.max(0, green), Math.max(0, blue)];
 }
-function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { toneMap = 'auto' } = {}) {
+function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { toneMap = 'auto', displayExposure = 0 } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   if (buffer.model !== 'rgb') throw new Error('High-depth preview пока поддерживает только RGB PixelBuffer');
   const mode = toneMap === 'auto' ? (buffer.bitsPerChannel === 32 ? 'aces' : 'clip') : toneMap;
@@ -1294,6 +1294,7 @@ function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { toneMap = '
   const encodedSrgb = /srgb/i.test(buffer.colorSpace || '') && !/linear/i.test(buffer.colorSpace || '');
   const linearPipeline = encodedSrgb || /linear/i.test(buffer.colorSpace || '');
   const compiled = compileHighDepthAdjustments(filters);
+  const displayMultiplier = 2 ** Math.max(-6, Math.min(6, Number(displayExposure) || 0));
   const pixels = buffer.width * buffer.height;
   const rgba = new Uint8ClampedArray(pixels * 4);
   const hasAlpha = buffer.channels === 4;
@@ -1305,6 +1306,7 @@ function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { toneMap = '
     let b = sourceSampleValue(buffer, source + 2);
     if (encodedSrgb) { r = srgbToLinear(r); g = srgbToLinear(g); b = srgbToLinear(b); }
     [r,g,b] = adjustHighDepthRgb(r,g,b,compiled);
+    r *= displayMultiplier; g *= displayMultiplier; b *= displayMultiplier;
     if (mode === 'aces') { r = acesToneMap(r); g = acesToneMap(g); b = acesToneMap(b); }
     else { r = clampPreview01(r); g = clampPreview01(g); b = clampPreview01(b); }
     if (linearPipeline) { r = linearToSrgb(r); g = linearToSrgb(g); b = linearToSrgb(b); }
@@ -1836,7 +1838,7 @@ function baseLayer(type, overrides = {}) {
   };
 }
 function createRasterLayer(overrides = {}) {
-  return baseLayer('raster', { dataUrl: null, highDepthSource: null, ...overrides });
+  return baseLayer('raster', { dataUrl: null, highDepthSource: null, highDepthPreview: null, ...overrides });
 }
 function createSmartObjectLayer(overrides = {}) {
   return baseLayer('smart-object', {
@@ -2218,6 +2220,15 @@ function sanitizeColorProfile(profile) {
     signatureValid:profile.signatureValid === true,
   };
 }
+
+const HIGH_DEPTH_TONE_MAPS = new Set(['auto','clip','aces']);
+function sanitizeHighDepthPreview(value = {}) {
+  const toneMap = HIGH_DEPTH_TONE_MAPS.has(value?.toneMap) ? value.toneMap : 'auto';
+  return {
+    toneMap,
+    displayExposure: bounded(value?.displayExposure, 0, -6, 6),
+  };
+}
 function sanitizeFilters(filters = {}) {
   const result = {};
   for (const [key, fallback] of Object.entries(DEFAULT_LAYER_FILTERS)) {
@@ -2371,6 +2382,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     const dataUrl = typeof layer?.dataUrl === 'string' && /^data:image\//i.test(layer.dataUrl) ? layer.dataUrl : null;
     result.dataUrl = dataUrl;
     result.highDepthSource = sanitizeSerializedPixelBufferSource(layer?.highDepthSource);
+    result.highDepthPreview = result.highDepthSource ? sanitizeHighDepthPreview(layer?.highDepthPreview) : null;
   } else if (type === 'smart-object') {
     checkedCanvasSize(result.width, result.height, `Смарт-объект «${result.name || 'Без имени'}»`);
     result.previewDataUrl = typeof layer?.previewDataUrl === 'string' && /^data:image\//i.test(layer.previewDataUrl) ? layer.previewDataUrl : null;
@@ -2832,7 +2844,10 @@ function trimHighDepthRasterCache() {
 async function makeHighDepthRasterSource(layer) {
   const metadata = layer?.highDepthSource;
   if (!metadata || layer?.type !== 'raster' || metadata.model !== 'rgb') return null;
-  const signature = `${metadata.bitsPerChannel}|${metadata.colorSpace || ''}|${colorAdjustmentSignature(layer.filters || {})}|auto-tone-v1`;
+  const preview = layer.highDepthPreview || {};
+  const toneMap = ['auto','clip','aces'].includes(preview.toneMap) ? preview.toneMap : 'auto';
+  const displayExposure = Math.max(-6, Math.min(6, Number(preview.displayExposure) || 0));
+  const signature = `${metadata.bitsPerChannel}|${metadata.colorSpace || ''}|${colorAdjustmentSignature(layer.filters || {})}|${toneMap}|${displayExposure.toFixed(3)}|tone-v2`;
   const sourceToken = metadata.dataUrl || '';
   const cached = highDepthRasterCache.get(layer.id);
   if (cached && cached.sourceToken === sourceToken && cached.signature === signature) {
@@ -2844,7 +2859,7 @@ async function makeHighDepthRasterSource(layer) {
     const buffer = cached && cached.sourceToken === sourceToken && cached.buffer
       ? cached.buffer
       : deserializePixelBufferSource(metadata);
-    const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap:'auto' });
+    const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap, displayExposure });
     const canvas = document.createElement('canvas');
     canvas.width = buffer.width; canvas.height = buffer.height;
     const ctx = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
@@ -6749,6 +6764,44 @@ function resetSelectedLayerEffects() {
   if (changed) commit('Сбросить цвет и эффекты');
   else setStatus('Цвет и эффекты уже сброшены');
 }
+function formatDisplayExposure(value){
+  const ev=Number(value)||0;
+  return `${ev>=0?'+':''}${ev.toFixed(1)} EV`;
+}
+
+function updateHighDepthPreviewSetting(layer,key,raw,shouldCommit=true){
+  if(!layer?.highDepthSource||layer.type!=='raster'||isLayerLocked(doc,layer))return false;
+  const current=sanitizeHighDepthPreview(layer.highDepthPreview);
+  const candidate={...current,[key]:key==='displayExposure'?Number(raw):raw};
+  layer.highDepthPreview=sanitizeHighDepthPreview(candidate);
+  markDirty(true);
+  if(shouldCommit)commit(key==='toneMap'?'Изменить HDR tone mapping':'Изменить HDR display exposure');
+  else render();
+  return true;
+}
+
+function resetHighDepthPreview(layer=selected()){
+  if(!layer?.highDepthSource||layer.type!=='raster'||isLayerLocked(doc,layer))return false;
+  layer.highDepthPreview=sanitizeHighDepthPreview();
+  commit('Сбросить HDR preview');
+  return true;
+}
+
+function bindHighDepthPreviewControls(root,layer){
+  const toneMap=root?.querySelector('[data-high-depth-tone-map]');
+  if(toneMap)toneMap.addEventListener('change',()=>updateHighDepthPreviewSetting(layer,'toneMap',toneMap.value,true));
+  const exposure=root?.querySelector('[data-high-depth-display-exposure]');
+  if(exposure){
+    const output=root.querySelector('[data-high-depth-display-output]');
+    exposure.addEventListener('input',()=>{
+      if(output)output.textContent=formatDisplayExposure(exposure.value);
+      updateHighDepthPreviewSetting(layer,'displayExposure',exposure.value,false);
+    });
+    exposure.addEventListener('change',()=>updateHighDepthPreviewSetting(layer,'displayExposure',exposure.value,true));
+  }
+  root?.querySelector('[data-high-depth-preview-reset]')?.addEventListener('click',()=>resetHighDepthPreview(layer));
+}
+
 function updateProperties() {
   const l = selected();
   if (!l) { els.props.className = 'panel-content muted'; els.props.textContent = 'Выберите слой'; return; }
@@ -6773,7 +6826,10 @@ function updateProperties() {
   if (l.type === 'raster' && l.highDepthSource) {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
-    extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit ${escapeHtml(String(source.model||'RGB').toUpperCase())} · ${sizeMb} МБ</span><label>High-depth</label><span>Exposure/gamma/color работают до tone mapping; Canvas preview/edit — 8-bit</span>`;
+    const preview=sanitizeHighDepthPreview(l.highDepthPreview);
+    const resolvedAuto=source.bitsPerChannel===32?'ACES':'Clip';
+    const displayLabel=formatDisplayExposure(preview.displayExposure);
+    extra = `<label>Точность источника</label><span>${source.bitsPerChannel}-bit ${escapeHtml(String(source.model||'RGB').toUpperCase())} · ${sizeMb} МБ</span><label>High-depth</label><span>Exposure/gamma/color работают до tone mapping; Canvas preview/edit — 8-bit</span><label>Tone map</label><select data-high-depth-tone-map><option value="auto"${preview.toneMap==='auto'?' selected':''}>Auto (${resolvedAuto})</option><option value="clip"${preview.toneMap==='clip'?' selected':''}>Clip</option><option value="aces"${preview.toneMap==='aces'?' selected':''}>ACES</option></select><label>Display exposure</label><span class="range-with-value"><input type="range" min="-6" max="6" step="0.1" value="${preview.displayExposure}" data-high-depth-display-exposure><output data-high-depth-display-output>${displayLabel}</output></span><div class="wide"><button type="button" class="mini-button" data-high-depth-preview-reset>Сбросить HDR preview</button></div>`;
   }
   if (l.type === 'smart-object') {
     const linkedCount=l.linkedSourceId?linkedSmartObjectLayers(doc,l.linkedSourceId).length:0;
@@ -6791,6 +6847,7 @@ function updateProperties() {
     ${extra}
   </div>`;
   bindPropertyInputs(els.props);
+  if(l.type==='raster'&&l.highDepthSource)bindHighDepthPreviewControls(els.props,l);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
   if(smartObjectEdit)smartObjectEdit.addEventListener('click',()=>openSmartObjectContents(l));
   const smartObjectLinkCopy=els.props.querySelector('[data-smart-object-link-copy]');
@@ -7537,7 +7594,8 @@ async function drawLineOnCurrentRaster(start,end){
 function drawHighDepthRasterBase(layer, canvas, ctx) {
   if(!layer?.highDepthSource)return false;
   const buffer=deserializePixelBufferSource(layer.highDepthSource);
-  const rgba=pixelBufferToToneMappedRgba8Preview(buffer,{}, {toneMap:'auto'});
+  const preview=sanitizeHighDepthPreview(layer.highDepthPreview);
+  const rgba=pixelBufferToToneMappedRgba8Preview(buffer,{}, {toneMap:preview.toneMap,displayExposure:preview.displayExposure});
   const source=document.createElement('canvas');
   source.width=buffer.width;source.height=buffer.height;
   const sourceCtx=source.getContext('2d',{alpha:true,willReadFrequently:true});
@@ -7854,6 +7912,7 @@ async function persistPaintLayer() {
   const old=l.dataUrl;
   l.dataUrl=dataUrl;
   l.highDepthSource=null;
+  l.highDepthPreview=null;
   invalidateImageCache(old);
   return true;
 }
@@ -8821,6 +8880,7 @@ async function clearSelectionAcrossVisibleLayers({ historyLabel = 'Выреза�
         const old=layer.dataUrl;
         layer.dataUrl=dataUrl;
         layer.highDepthSource=null;
+        layer.highDepthPreview=null;
         invalidateImageCache(old);
       }else{
         working.dataUrl=dataUrl;

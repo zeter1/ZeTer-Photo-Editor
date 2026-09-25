@@ -47,16 +47,17 @@ test('Stage 12b keeps HDR exposure and gamma in the high-depth stage before tone
 test('renderer prefers the high-depth source, caches decoded typed data and skips the old 8-bit advanced pass',()=>{
   assert.match(render,/async function makeHighDepthRasterSource\(layer\)/);
   assert.match(render,/deserializePixelBufferSource\(metadata\)/);
-  assert.match(render,/pixelBufferToToneMappedRgba8Preview\(buffer, layer\.filters \|\| \{\}, \{ toneMap:'auto' \}\)/);
+  assert.match(render,/pixelBufferToToneMappedRgba8Preview\(buffer, layer\.filters \|\| \{\}, \{ toneMap, displayExposure \}\)/);
   assert.match(render,/HIGH_DEPTH_RASTER_CACHE_LIMIT = 2/);
   assert.match(render,/cached && cached\.sourceToken === sourceToken && cached\.buffer/);
   assert.match(render,/const source = highDepthApplied[\s\S]*\? filtered[\s\S]*: await makeAdjustedRasterSource/);
   assert.match(render,/rasterOverride \|\| layer\.dataUrl \|\| layer\.highDepthSource/);
 });
 
-test('destructive raster editing starts from a neutral tone-mapped high-depth base and then invalidates precision',()=>{
+test('destructive raster editing materializes the selected HDR preview and then invalidates precision',()=>{
   assert.match(main,/function drawHighDepthRasterBase\(layer, canvas, ctx\)/);
-  assert.match(main,/pixelBufferToToneMappedRgba8Preview\(buffer,\{\}, \{toneMap:'auto'\}\)/);
+  assert.match(main,/const preview=sanitizeHighDepthPreview\(layer\.highDepthPreview\)/);
+  assert.match(main,/pixelBufferToToneMappedRgba8Preview\(buffer,\{\}, \{toneMap:preview\.toneMap,displayExposure:preview\.displayExposure\}\)/);
   assert.match(main,/if \(!drawHighDepthRasterBase\(l, brushCanvas, brushCtx\) && l\.dataUrl\)/);
   assert.match(main,/l\.highDepthSource=null/);
   assert.match(main,/layer\.highDepthSource=null/);

@@ -4,6 +4,18 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.24.0 — 2026-09-25
+
+### 2026-09-25 — HDR Preview Controls Stage 12c
+
+- UX: high-depth raster Properties получили `Tone map` с режимами Auto / Clip / ACES и отдельный `Display exposure` от −6 до +6 EV плюс быстрый reset.
+- State: добавлен sanitized `highDepthPreview`; настройки сохраняются только рядом с валидным `highDepthSource`, неизвестные tone-map значения откатываются в Auto, EV ограничивается безопасным диапазоном.
+- Render: tone-map mode и display exposure входят в cache signature; изменение display controls переиспользует уже декодированный typed PixelBuffer и перестраивает только preview canvas.
+- HDR semantics: Auto выбирает ACES для 32-bit float и Clip для 16-bit; display exposure применяется после non-destructive high-depth color controls и до tone mapping.
+- Destructive boundary: brush/fill/erase/clear/cut материализуют текущий выбранный HDR display preview, после чего `highDepthSource` и `highDepthPreview` очищаются вместе, исключая stale metadata.
+- Tests: добавлены persistence/clamping, Auto-mode resolution, Clip-vs-ACES highlight behavior, display-EV response, UI/cache wiring и destructive-boundary contracts.
+- Version: приложение синхронизировано на 1.24.0.
+
 ## 1.23.0 — 2026-09-25
 
 ### 2026-09-25 — High-depth Render Bridge Stage 12b

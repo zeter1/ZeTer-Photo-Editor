@@ -238,7 +238,7 @@ function adjustHighDepthRgb(r, g, b, compiled) {
   return [Math.max(0, red), Math.max(0, green), Math.max(0, blue)];
 }
 
-export function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { toneMap = 'auto' } = {}) {
+export function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { toneMap = 'auto', displayExposure = 0 } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   if (buffer.model !== 'rgb') throw new Error('High-depth preview пока поддерживает только RGB PixelBuffer');
   const mode = toneMap === 'auto' ? (buffer.bitsPerChannel === 32 ? 'aces' : 'clip') : toneMap;
@@ -246,6 +246,7 @@ export function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { tone
   const encodedSrgb = /srgb/i.test(buffer.colorSpace || '') && !/linear/i.test(buffer.colorSpace || '');
   const linearPipeline = encodedSrgb || /linear/i.test(buffer.colorSpace || '');
   const compiled = compileHighDepthAdjustments(filters);
+  const displayMultiplier = 2 ** Math.max(-6, Math.min(6, Number(displayExposure) || 0));
   const pixels = buffer.width * buffer.height;
   const rgba = new Uint8ClampedArray(pixels * 4);
   const hasAlpha = buffer.channels === 4;
@@ -257,6 +258,7 @@ export function pixelBufferToToneMappedRgba8Preview(buffer, filters = {}, { tone
     let b = sourceSampleValue(buffer, source + 2);
     if (encodedSrgb) { r = srgbToLinear(r); g = srgbToLinear(g); b = srgbToLinear(b); }
     [r,g,b] = adjustHighDepthRgb(r,g,b,compiled);
+    r *= displayMultiplier; g *= displayMultiplier; b *= displayMultiplier;
     if (mode === 'aces') { r = acesToneMap(r); g = acesToneMap(g); b = acesToneMap(b); }
     else { r = clampPreview01(r); g = clampPreview01(g); b = clampPreview01(b); }
     if (linearPipeline) { r = linearToSrgb(r); g = linearToSrgb(g); b = linearToSrgb(b); }
