@@ -52,8 +52,8 @@ test('Linked Smart Objects Stage 11c wires shared content tabs, propagation, unl
   assert.ok(main.includes('function createLinkedSmartObjectCopy(layer=selected())'));
   assert.ok(main.includes('function unlinkSmartObject(layer=selected())'));
   assert.ok(main.includes('session.smartObjectLink?.linkedSourceId===linkedSourceId'));
-  assert.ok(main.includes('linkedSmartObjectLayers(parentSession.doc,linkedSourceId)'));
-  assert.ok(main.includes("parentSession.history.push(liveTargets.length>1?'Обновить связанные смарт-объекты':'Обновить смарт-объект'"));
+  assert.ok(main.includes('linkedSmartObjectLayers(owner,linkedSourceId)'));
+  assert.ok(main.includes("parentSession.history.push(liveTargets.length>1?'Обновить общий источник смарт-объектов':'Обновить смарт-объект'"));
   assert.ok(main.includes('Создать связанную копию смарт-объекта'));
   assert.ok(main.includes('Разорвать связь смарт-объекта'));
   assert.ok(main.includes('data-smart-object-link-copy'));

@@ -15,6 +15,7 @@
 - Round-trip gate: после успешного resource rewrite обновляются preview/content fingerprints и asset datasize, поэтому native passthrough остаётся допустимым; изменение intrinsic content size или unsupported payload сохраняют честный raster fallback.
 - UI/UX safety: обычная ZPE linked-copy отключена для imported Photoshop Smart Objects, чтобы не создавать дубли с неконсистентной native UUID/resource семантикой.
 - Regression: реальный MIT Smart Object fixture проверяет замену `liFD` payload, сохранение UUID, соседнего `lnkE` block и повторный PSD decode.
+- CI follow-up: wiring-regressions Stage 11/14 и PSD export import-check теперь проверяют пользовательский contract и допускают расширенный Photoshop source identity/import surface вместо хрупкой зависимости от точной строки реализации.
 - Version: приложение синхронизировано на 1.35.0.
 
 ## 1.34.0 — 2026-09-25
