@@ -118,8 +118,19 @@ export function createSmartObjectLayer(overrides = {}) {
     embeddedDocument: null,
     smartFilters: [],
     smartFilterMask: null,
+    linkedSourceId: null,
     ...overrides,
   });
+}
+
+export function createSmartObjectLinkId() {
+  return uid('smart-link');
+}
+
+export function linkedSmartObjectLayers(doc, linkedSourceId) {
+  const sourceId = shortText(linkedSourceId, '', 160).trim();
+  if (!sourceId) return [];
+  return (Array.isArray(doc?.layers) ? doc.layers : []).filter(layer => layer?.type === 'smart-object' && layer.linkedSourceId === sourceId);
 }
 
 export function createSmartFilter(overrides = {}) {
@@ -677,6 +688,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     result.previewDataUrl = typeof layer?.previewDataUrl === 'string' && /^data:image\//i.test(layer.previewDataUrl) ? layer.previewDataUrl : null;
     result.smartFilters = sanitizeSmartFilters(layer?.smartFilters);
     result.smartFilterMask = sanitizeSmartFilterMask(layer?.smartFilterMask);
+    result.linkedSourceId = shortText(layer?.linkedSourceId, '', 160).trim() || null;
     if (embeddedDepth >= MAX_EMBEDDED_DOCUMENT_DEPTH) {
       result.embeddedDocument = null;
     } else if (layer?.embeddedDocument && typeof layer.embeddedDocument === 'object' && !Array.isArray(layer.embeddedDocument)) {

@@ -4,6 +4,18 @@
 
 - Пока нет незарелизенных изменений.
 
+## 1.21.0 — 2026-09-25
+
+### 2026-09-25 — Linked Smart Objects Stage 11c
+
+- Added: `smart-object.linkedSourceId` и bounded source-ID helpers; `.zpe` sanitizer сохраняет связь обратно совместимо без повышения версии формата проекта.
+- UX: «Создать связанную копию смарт-объекта» связывает исходный слой и новую копию; «Разорвать связь» оставляет выбранному экземпляру текущее embedded contents как независимый источник.
+- Content tabs: экземпляры одной linked-группы переиспользуют одну вкладку содержимого вместо параллельных расходящихся редакторов.
+- Save semantics: `Ctrl+S` во вкладке linked contents обновляет embedded document, preview и размеры у всех экземпляров источника одной history entry; instance-level transforms, masks, Smart Filters и blending не перезаписываются.
+- Resilience: если исходный layer экземпляра удалён во время открытой content-tab, сохранение может продолжиться через оставшийся экземпляр того же linked source; preview caches инвалидируются для всех старых preview.
+- Scope: Stage 11c реализует внутрипроектные linked instances внутри `.zpe`; persistent external-file links намеренно оставлены на отдельный будущий этап.
+- Version hygiene: версия приложения поднята до 1.21.0, About читает номер из `application-version` meta вместо собственного hard-coded номера, а regression test теперь запрещает повторное расхождение.
+
 ## 1.20.0 — 2026-09-25
 
 ### 2026-09-25 — Smart Filter Masks Stage 11b

@@ -181,6 +181,7 @@ button:disabled { opacity: .45; cursor: default; }
 .prop-grid textarea { min-height: 72px; resize: vertical; }
 .prop-grid button[data-local-fonts] { width: 100%; text-align: left; }
 .prop-grid .wide { grid-column: 1 / -1; }
+.smart-object-link-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .smart-filter-stack { display: grid; gap: 5px; margin-top: 4px; padding-top: 8px; border-top: 1px solid #303641; }
 .smart-filter-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .smart-filter-heading strong { font-size: 11px; color: #eef2f7; }
