@@ -9,6 +9,7 @@
 - Browser contract: существующий real `file://` smoke продолжает проверять drag в межколоночный gap, DOM order, localStorage и восстановление после reload.
 - Docs/tests: architecture/source contracts и AI code map обновлены на нового канонического владельца toolbar lifecycle.
 - Regression follow-up: architecture gate теперь проверяет корректную цепочку `main.js → toolbar-controller.js → tool-layout.js`, а не требует старую прямую зависимость `main.js → tool-layout.js`.
+- Diagnostics: `tools/browser-smoke.mjs` теперь отдельно распознаёт `appReady="error"` и печатает fatal bootstrap message + browser errors вместо неинформативного timeout.
 
 ### 2026-09-26 — Workspace/session controller extraction
 

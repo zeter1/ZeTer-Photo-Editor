@@ -277,7 +277,14 @@ async function runSmoke() {
     const navigation = await client.send('Page.navigate', { url: INDEX_URL });
     if (navigation.errorText) fail('Browser could not open the editor', `${navigation.errorText}: ${INDEX_URL}`);
 
-    await waitFor('editor bootstrap', async () => evaluate(client, `document.documentElement?.dataset.appReady === 'true'`));
+    const bootstrapState = await waitFor('editor bootstrap', async () => evaluate(client, `(() => {
+      const state=document.documentElement?.dataset.appReady;
+      return state === 'true' || state === 'error' ? state : '';
+    })()`));
+    if (bootstrapState === 'error') {
+      const fatalText = await evaluate(client, `document.querySelector('.fatal-error')?.textContent || 'Unknown bootstrap failure'`);
+      fail('Editor bootstrap failed', `${fatalText}\n${errors.join('\n')}\n\nBrowser stderr tail:\n${stderrState.text.slice(-3_000)}`);
+    }
     assertNoBrowserErrors(errors, stderrState);
 
     const blobWorkerProbe = await evaluate(client, `(async () => {
