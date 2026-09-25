@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-26 — Workspace/session controller extraction
+
+- Refactor: lifecycle вкладок и document sessions вынесен из `src/main.js` в `src/workspace/session-controller.js`: создание/переключение/закрытие/переименование/дублирование вкладок, per-tab history/zoom/dirty/selection state и smart-object parent/child close guard.
+- Architecture: `src/main.js` теперь только связывает controller с live editor state через явные getters/callbacks; document model остаётся в `src/core/state.js`, поэтому новый controller не становится вторым source of truth.
+- Tests: добавлен отдельный unit regression для session sync, уникальных имён новых вкладок и Smart Object parent guard; существующий document-tabs contract переведён на нового владельца.
+- Docs/AI: AGENTS, PROJECT и CODEMAP указывают `src/workspace/session-controller.js` как каноническую точку для задач по вкладкам/сессиям.
+
 ### 2026-09-26T00:07:00+03:00 — Архитектурный рефакторинг и AI-friendly карта проекта
 
 - Refactor: чистая UI-конфигурация вынесена из большого `src/main.js` в `src/ui/tool-config.js`; toolbar layout получил канонический путь `src/ui/tool-layout.js`.

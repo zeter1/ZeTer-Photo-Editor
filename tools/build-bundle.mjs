@@ -15,6 +15,7 @@ const sources = [
   'src/core/layer-styles.js',
   'src/core/adjustments.js',
   'src/core/state.js',
+  'src/workspace/session-controller.js',
   'src/core/color.js',
   'src/core/pixel-worker.js',
   'src/core/render.js',

@@ -20,6 +20,13 @@ Pure toolbar order/grid-slot helpers. Safe to unit-test without browser state.
 
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 
+## Workspace boundary — `src/workspace/`
+
+### `session-controller.js`
+Owns document-tab/session lifecycle: session IDs and names, per-tab history/zoom/dirty/selection snapshots, tab rendering/actions, switching, close/rename/duplicate, and the parent-tab guard for open Smart Object content tabs.
+
+It does **not** own raster/document internals. `src/main.js` supplies the live runtime state bridge and application callbacks; `src/core/state.js` remains the document model owner.
+
 ## Core — `src/core/`
 
 - `state.js` — document/layer/group/smart-object models, sanitization and invariants.

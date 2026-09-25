@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
   readFile(new URL('src/core/tool-layout.js', root), 'utf8'),
   readFile(new URL('docs/PROJECT.md', root), 'utf8'),
+  readFile(new URL('src/workspace/session-controller.js', root), 'utf8'),
 ]);
 
 test('canonical UI and PSD boundaries stay out of legacy compatibility paths', () => {
@@ -26,4 +27,8 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(legacyToolLayout, /export \* from '\.\.\/ui\/tool-layout\.js'/);
   assert.match(project, /src\/formats\/psd\.js/);
   assert.match(project, /src\/ui\/tool-config\.js/);
+  assert.match(main, /from '\.\/workspace\/session-controller\.js'/);
+  assert.match(build, /'src\/workspace\/session-controller\.js'/);
+  assert.match(workspaceSessions, /export function createDocumentSessionController/);
+  assert.doesNotMatch(main, /function renderDocumentTabs\(\)/);
 });

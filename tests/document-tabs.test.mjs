@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+const sessions = await readFile(new URL("../src/workspace/session-controller.js", import.meta.url), "utf8");
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
 test("stage header exposes a tablist and add-tab button", () => {
@@ -16,13 +17,13 @@ test("stage header exposes a tablist and add-tab button", () => {
 test("editor maintains switchable document sessions for multiple tabs", () => {
   assert.match(main, /let documentSessions = \[\]/);
   assert.match(main, /let activeSessionId = ''/);
-  assert.match(main, /function renderDocumentTabs\(\)/);
-  assert.match(main, /function activateDocumentTab\(id/);
-  assert.match(main, /function addDocumentTab\(/);
-  assert.match(main, /function closeDocumentTab\(id\)/);
-  assert.match(main, /session\.history = history/);
-  assert.match(main, /session\.zoom = zoom/);
-  assert.match(main, /session\.dirty = dirty/);
+  assert.match(sessions, /function renderDocumentTabs\(\)/);
+  assert.match(sessions, /function activateDocumentTab\(id/);
+  assert.match(sessions, /function addDocumentTab\(/);
+  assert.match(sessions, /function closeDocumentTab\(id\)/);
+  assert.match(sessions, /session\.history = runtime\.history/);
+  assert.match(sessions, /session\.zoom = runtime\.zoom/);
+  assert.match(sessions, /session\.dirty = runtime\.dirty/);
   assert.match(main, /documentSessions\.some\(session=>session\.dirty\)/);
 });
 
@@ -35,7 +36,7 @@ test("tabs UI styles keep the add button directly after the last tab", () => {
 });
 
 test("smart object content tabs link to parent sessions and save back through parent history", () => {
-  assert.match(main, /smartObjectLink: smartObjectLink \? \{ \.\.\.smartObjectLink \} : null/);
+  assert.match(sessions, /smartObjectLink: smartObjectLink \? \{ \.\.\.smartObjectLink \} : null/);
   assert.match(main, /function openSmartObjectContents\(/);
   assert.match(main, /smartObjectLink:\{parentSessionId,layerId:layer\.id,linkedSourceId,photoshopSourceId\}/);
   assert.match(main, /function saveSmartObjectContent\(/);
@@ -45,8 +46,8 @@ test("smart object content tabs link to parent sessions and save back through pa
 });
 
 test("smart object parent tab cannot close while linked content tabs remain open", () => {
-  assert.match(main, /item=>item\.smartObjectLink\?\.parentSessionId===session\.id/);
-  assert.match(main, /Сначала закройте вкладки содержимого смарт-объектов этого документа/);
+  assert.match(sessions, /item => item\.smartObjectLink\?\.parentSessionId === session\.id/);
+  assert.match(sessions, /Сначала закройте вкладки содержимого смарт-объектов этого документа/);
 });
 
 test("smart object workflow is bounded and respects layer locks", () => {

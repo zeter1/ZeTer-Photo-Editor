@@ -8,7 +8,8 @@ ZeTer Photo Editor — локальный браузерный многосло�
 
 | Задача | Главные файлы | Сначала тесты |
 |---|---|---|
-| UI, события, меню, pointer/keyboard, вкладки | `src/main.js`, `src/ui/`, `src/styles.css`, `index.html` | interaction/browser tests |
+| UI, события, меню, pointer/keyboard | `src/main.js`, `src/ui/`, `src/styles.css`, `index.html` | interaction/browser tests |
+| Вкладки, document sessions, session history | `src/workspace/session-controller.js`, wiring в `src/main.js` | `tests/workspace-session-controller.test.mjs`, `tests/document-tabs.test.mjs` |
 | Порядок инструментов | `src/ui/tool-layout.js`, UI section в `src/main.js` | `tests/tool-layout.test.mjs`, browser smoke |
 | Документы, слои, groups, smart objects | `src/core/state.js` | core/layer/smart-object tests |
 | Рендеринг и composite | `src/core/render.js` | render/blending/high-depth tests |
@@ -26,6 +27,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 - `src/main.js` — runtime orchestrator. Это всё ещё большой файл; не читай его целиком без необходимости. Ищи конкретный symbol/event handler.
 - `src/ui/tool-config.js` — чистые UI-константы, labels/help/effect-control metadata/storage keys.
 - `src/ui/tool-layout.js` — чистая математика порядка/позиции toolbar.
+- `src/workspace/session-controller.js` — lifecycle document sessions: create/switch/close/rename/duplicate, per-tab history/zoom/dirty/selection state и smart-object parent/child tab guard.
 - `src/core/*.js` — domain, render, pixel, history, IO, recovery и color logic.
 - `src/formats/psd.js` — единственный канонический PSD/PSB implementation.
 - `src/app.bundle.js` — generated artifact для `file://`; править только через `npm run build`.
