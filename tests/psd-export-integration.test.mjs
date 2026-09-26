@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const textEditController=await readFile(new URL('../src/ui/text-edit-controller.js',import.meta.url),'utf8');
 const smartObjectController=await readFile(new URL('../src/document/smart-object-controller.js',import.meta.url),'utf8');
 const psdSmartObjectResource=await readFile(new URL('../src/document/psd-smart-object-resource.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
@@ -263,7 +264,8 @@ test('Stage 15a wires Photoshop TySh text mapping and safe native round-trip int
   assert.match(psdImportSemantics,/function importPsdTextMetadata\(/);
   assert.match(psdNativeMetadataPlans,/psdTextNativePlan/);
   assert.match(psdImportController,/canMapText/);
-  assert.match(main,/createTextLayer\(\{/);
+  assert.match(textEditController,/createTextLayer\(\{/);
+  assert.match(main,/createTextEditController\(\{/);
   assert.match(psdExportController,/psdText:nativeText\?\.eligible\?nativeText\.block:null/);
   assert.match(psdImportController,/Photoshop TySh imported as editable ZPE text|Photoshop TySh импортирован как editable ZPE text/);
   assert.match(psdExportController,/Stage 15b: .*TySh text layer/);
