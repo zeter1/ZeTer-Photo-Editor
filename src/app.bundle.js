@@ -7602,6 +7602,312 @@ function createRetouchController({
   };
 }
 
+// ---- src/painting/gesture-controller.js ----
+const EXISTING_RASTER_ONLY_TOOLS = new Set(['eraser','blur','clone','heal','smudge','dodge','burn']);
+const PAINT_HISTORY_LABELS = {
+  eraser:'Ластик',
+  blur:'Размытие кистью',
+  clone:'Штамп',
+  heal:'Лечебная кисть',
+  smudge:'Палец / смазывание',
+  dodge:'Осветлитель',
+  burn:'Затемнитель',
+  brush:'Кисть',
+};
+function createPaintGestureController({
+  rasterEdit,
+  retouch,
+  state,
+  target,
+  selection,
+  tools,
+  nativePaint,
+  ui,
+} = {}) {
+  if (!rasterEdit) throw new TypeError('rasterEdit is required');
+  if (!retouch) throw new TypeError('retouch is required');
+  if (typeof state?.getDocument !== 'function' || typeof state?.getDrag !== 'function' || typeof state?.setDrag !== 'function') {
+    throw new TypeError('paint gesture state bridge is required');
+  }
+  if (typeof target?.atPoint !== 'function' || typeof target?.toLocal !== 'function') {
+    throw new TypeError('paint gesture target bridge is required');
+  }
+  if (typeof state?.beginPersist !== 'function' || typeof state?.endPersist !== 'function') {
+    throw new TypeError('paint persistence bridge is required');
+  }
+
+  function currentDocument() {
+    const documentValue = state.getDocument();
+    if (!documentValue) throw new Error('Paint gesture controller has no active document');
+    return documentValue;
+  }
+
+  function status(message) {
+    ui?.setStatus?.(message);
+  }
+
+  function warn(message) {
+    status(message);
+    ui?.toast?.(message, 'warn');
+  }
+
+  function nativeToolSupported(layer, tool) {
+    const model = layer?.highDepthSource?.model;
+    if (!model) return false;
+    return model === 'cmyk'
+      ? NATIVE_CMYK_PAINT_TOOLS.has(tool)
+      : NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool);
+  }
+
+  async function ensurePaintLayer(point, tool, canContinue = () => true) {
+    const doc = currentDocument();
+    let layer = target.selected?.() ?? null;
+    const rasterAtPoint = target.atPoint(point);
+
+    if (EXISTING_RASTER_ONLY_TOOLS.has(tool)) {
+      layer = rasterAtPoint;
+      if (!layer) return null;
+    } else if (rasterAtPoint) {
+      layer = rasterAtPoint;
+    } else {
+      if (!canContinue()) return null;
+      layer = createRasterLayer({
+        name:'Рисование',
+        x:0,
+        y:0,
+        width:doc.width,
+        height:doc.height,
+        dataUrl:null,
+      });
+      addLayer(doc, layer);
+    }
+
+    const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
+      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(layer, { requireAlpha:tool === 'eraser' })
+      : false;
+    if (!nativeHighDepth) await rasterEdit.ensureRasterBuffer(layer);
+    doc.selectedLayerId = layer.id;
+    return layer;
+  }
+
+  function unavailableMessage(tool, cloneSource) {
+    if (tool === 'eraser') return 'Ластик работает только по растровому слою. Выберите слой с изображением или рисунком.';
+    if (tool === 'blur') return 'Размытие работает только по растровому слою. Выберите слой с изображением или рисунком.';
+    if (tool === 'clone' || tool === 'heal') {
+      return cloneSource
+        ? `${TOOL_LABELS[tool]} работает по слою заданного источника.`
+        : `${TOOL_LABELS[tool]}: сначала задайте источник через Alt+клик.`;
+    }
+    if (tool === 'smudge') return 'Палец работает только по существующему растровому слою.';
+    if (tool === 'dodge' || tool === 'burn') return 'Инструмент ретуши работает только по существующему растровому слою.';
+    return 'Не удалось подготовить растровый слой для рисования.';
+  }
+
+  function resetNativeStrokeState() {
+    rasterEdit.clearHighDepthPaintState();
+    retouch.resetStroke();
+  }
+
+  async function begin({
+    point,
+    pointerEvent = null,
+    tool,
+    canContinue = () => true,
+  } = {}) {
+    if (!point || !tool) return false;
+    if (selection?.containsPoint && !selection.containsPoint(point)) {
+      status('Рисование ограничено выделением');
+      return false;
+    }
+
+    const layer = await ensurePaintLayer(point, tool, canContinue);
+    if (!canContinue()) return false;
+
+    const cloneSource = retouch.getCloneSource();
+    if (!layer) {
+      warn(unavailableMessage(tool, cloneSource));
+      return false;
+    }
+
+    const localPoint = target.toLocal(point, layer);
+    const drag = {
+      kind:'paint',
+      tool,
+      layerId:layer.id,
+      last:localPoint,
+      nativeHighDepth:rasterEdit.highDepthPaintLayerId === layer.id && NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool),
+    };
+    state.setDrag(drag);
+
+    if (tool === 'dodge' || tool === 'burn') {
+      drag.toneCoverage = {
+        width:drag.nativeHighDepth ? rasterEdit.highDepthPaintBuffer.width : rasterEdit.brushCanvas.width,
+        tiles:new Map(),
+      };
+    }
+    if (tool === 'blur') {
+      drag.blurCoverage = {
+        width:drag.nativeHighDepth ? rasterEdit.highDepthPaintBuffer.width : rasterEdit.brushCanvas.width,
+        tiles:new Map(),
+      };
+    }
+
+    if (drag.nativeHighDepth) {
+      if (tool === 'clone' || tool === 'heal') {
+        drag.cloneOffset = retouch.prepareNativeHighDepthCloneStroke(layer, localPoint);
+        if (!drag.cloneOffset) {
+          resetNativeStrokeState();
+          rasterEdit.clearBrushBuffer();
+          state.setDrag(null);
+          status(cloneSource ? `${TOOL_LABELS[tool]}: рисуйте по слою источника` : `${TOOL_LABELS[tool]}: Alt+клик задаёт источник`);
+          ui?.toast?.('Сначала задайте источник на этом слое', 'warn');
+          return false;
+        }
+        retouch.applyNativeHighDepthCloneDab(layer, localPoint, drag.cloneOffset, pointerEvent, tool === 'heal');
+        return true;
+      }
+      if (tool === 'smudge') {
+        drag.smudgeStarted = true;
+        return true;
+      }
+      if (tool === 'dodge' || tool === 'burn') {
+        retouch.applyNativeHighDepthToneDab(layer, localPoint, pointerEvent, tool === 'dodge');
+        return true;
+      }
+      if (tool === 'blur') {
+        retouch.applyNativeHighDepthBlurDab(layer, localPoint, pointerEvent);
+        return true;
+      }
+      nativePaint?.dab?.(layer, localPoint, pointerEvent, tool === 'eraser');
+      return true;
+    }
+
+    const context = rasterEdit.brushContext;
+    context.save();
+    selection?.clipContext?.(context, layer);
+
+    if (tool === 'clone' || tool === 'heal') {
+      drag.cloneOffset = retouch.prepareCloneStroke(layer, localPoint);
+      if (!drag.cloneOffset) {
+        context.restore();
+        state.setDrag(null);
+        status(cloneSource ? `${TOOL_LABELS[tool]}: рисуйте по слою источника` : `${TOOL_LABELS[tool]}: Alt+клик задаёт источник`);
+        ui?.toast?.('Сначала задайте источник на этом слое', 'warn');
+        return false;
+      }
+      retouch.applyCloneDab(localPoint, drag.cloneOffset, pointerEvent, tool === 'heal');
+      rasterEdit.schedulePaintPreview();
+      return true;
+    }
+    if (tool === 'smudge') {
+      drag.smudgeStarted = true;
+      rasterEdit.schedulePaintPreview();
+      return true;
+    }
+    if (tool === 'dodge' || tool === 'burn') {
+      retouch.applyToneDab(layer, localPoint, pointerEvent, tool === 'dodge');
+      rasterEdit.schedulePaintPreview();
+      return true;
+    }
+    if (tool === 'blur') {
+      retouch.applyBlurDab(layer, localPoint, pointerEvent);
+      rasterEdit.schedulePaintPreview();
+      return true;
+    }
+
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.lineWidth = tools.brushWidth(pointerEvent);
+    context.globalAlpha = tools.opacity();
+    if (tool === 'eraser') context.globalCompositeOperation = 'destination-out';
+    else {
+      context.globalCompositeOperation = 'source-over';
+      context.strokeStyle = tools.primaryColor();
+    }
+
+    context.beginPath();
+    context.moveTo(localPoint.x, localPoint.y);
+    context.lineTo(localPoint.x + .01, localPoint.y + .01);
+    context.stroke();
+    rasterEdit.schedulePaintPreview();
+    return true;
+  }
+
+  function move(point, pointerEvent = null) {
+    const drag = state.getDrag();
+    if (!drag || drag.kind !== 'paint') return false;
+    const layer = currentDocument().layers.find(item => item.id === drag.layerId);
+    if (!layer) return false;
+
+    const next = target.toLocal(point, layer);
+    const last = drag.last;
+
+    if (drag.nativeHighDepth) {
+      if (drag.tool === 'blur') retouch.nativeHighDepthBlurSegment(layer, last, next, pointerEvent);
+      else if (drag.tool === 'clone' || drag.tool === 'heal') retouch.nativeHighDepthCloneSegment(layer, last, next, drag.cloneOffset, pointerEvent, drag.tool === 'heal');
+      else if (drag.tool === 'smudge') retouch.nativeHighDepthSmudgeSegment(layer, last, next, pointerEvent);
+      else if (drag.tool === 'dodge' || drag.tool === 'burn') retouch.nativeHighDepthToneSegment(layer, last, next, pointerEvent, drag.tool === 'dodge');
+      else nativePaint?.segment?.(layer, last, next, pointerEvent, drag.tool === 'eraser');
+      drag.last = next;
+      return true;
+    }
+
+    if (drag.tool === 'blur') retouch.blurStrokeSegment(layer, last, next, pointerEvent);
+    else if (drag.tool === 'clone' || drag.tool === 'heal') retouch.cloneStrokeSegment(last, next, drag.cloneOffset, pointerEvent, drag.tool === 'heal');
+    else if (drag.tool === 'smudge') retouch.smudgeStrokeSegment(last, next, pointerEvent);
+    else if (drag.tool === 'dodge' || drag.tool === 'burn') retouch.toneStrokeSegment(layer, last, next, pointerEvent, drag.tool === 'dodge');
+    else {
+      const context = rasterEdit.brushContext;
+      context.lineWidth = tools.brushWidth(pointerEvent);
+      context.beginPath();
+      context.moveTo(last.x, last.y);
+      context.lineTo(next.x, next.y);
+      context.stroke();
+    }
+    drag.last = next;
+    return true;
+  }
+
+  async function end(drag = state.getDrag()) {
+    rasterEdit.cancelPaintPreview();
+    const paintTool = drag?.tool;
+    const nativeHighDepth = Boolean(
+      rasterEdit.highDepthPaintBuffer &&
+      rasterEdit.highDepthPaintLayerId === rasterEdit.brushLayerId &&
+      NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool),
+    );
+    if ((!rasterEdit.brushContext && !nativeHighDepth) || !state.beginPersist()) return false;
+
+    const label = PAINT_HISTORY_LABELS[paintTool] || 'Кисть';
+    if (!nativeHighDepth) rasterEdit.brushContext.restore();
+    retouch.resetStroke();
+    status('Сохранение штриха…');
+
+    try {
+      const persisted = nativeHighDepth
+        ? await rasterEdit.persistNativeHighDepthPaintLayer()
+        : await rasterEdit.persistPaintLayer();
+      if (persisted) {
+        ui?.commit?.(label);
+        status('Готово');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error(error);
+      rasterEdit.clearBrushBuffer();
+      ui?.render?.();
+      status(`Ошибка сохранения штриха: ${error.message}`);
+      ui?.toast?.('Не удалось сохранить штрих', 'error');
+      return false;
+    } finally {
+      state.endPersist();
+    }
+  }
+
+  return { begin, move, end };
+}
+
 // ---- src/selection/clipboard-controller.js ----
 function canvasToPngBlob(canvas) {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));
@@ -11353,25 +11659,42 @@ const {
   getCloneSource:getRetouchCloneSource,
   setCloneSource:setRetouchCloneSource,
   resetStroke:resetRetouchStroke,
-  prepareCloneStroke,
-  applyCloneDab,
-  cloneStrokeSegment,
-  applySmudgeDab,
-  smudgeStrokeSegment,
-  applyToneDab,
-  toneStrokeSegment,
-  applyBlurDab,
-  blurStrokeSegment,
-  applyNativeHighDepthToneDab,
-  nativeHighDepthToneSegment,
-  applyNativeHighDepthBlurDab,
-  nativeHighDepthBlurSegment,
-  prepareNativeHighDepthCloneStroke,
-  applyNativeHighDepthCloneDab,
-  nativeHighDepthCloneSegment,
-  applyNativeHighDepthSmudgeDab,
-  nativeHighDepthSmudgeSegment,
 } = retouchController;
+
+const paintGesture = createPaintGestureController({
+  rasterEdit,
+  retouch: retouchController,
+  state: {
+    getDocument: () => doc,
+    getDrag: () => drag,
+    setDrag: value => { drag = value; },
+    beginPersist: () => {
+      if (paintPersisting) return false;
+      paintPersisting = true;
+      return true;
+    },
+    endPersist: () => { paintPersisting = false; },
+  },
+  target: {
+    selected,
+    atPoint: paintLayerAtPoint,
+    toLocal: documentPointToLayerPixel,
+  },
+  selection: {
+    containsPoint: point => !selectionRect || pointInsideSelection(point),
+    clipContext: clipContextToSelection,
+  },
+  tools: {
+    brushWidth: brushWidthForPointer,
+    primaryColor: () => els.primaryColor.value,
+    opacity: () => Number(els.toolOpacity.value) / 100,
+  },
+  nativePaint: {
+    dab: applyNativeHighDepthDab,
+    segment: nativeHighDepthStrokeSegment,
+  },
+  ui: { setStatus, toast, render, commit },
+});
 
 function toast(message, tone = '') {
   const item = document.createElement('div');
@@ -13322,7 +13645,7 @@ els.overlay.addEventListener('pointerdown', async (e) => {
     return;
   }
   if ((currentTool === 'clone' || currentTool === 'heal') && e.altKey) { await setCloneSource(p); return; }
-  if (RASTER_BRUSH_TOOLS.has(currentTool)) { await beginPaint(p, e.pointerId, e); return; }
+  if (RASTER_BRUSH_TOOLS.has(currentTool)) { await paintGesture.begin({ point:p, pointerEvent:e, tool:currentTool, canContinue:()=>activePrimaryPointerId===e.pointerId }); return; }
   if (currentTool === 'fill') { await fillAtPoint(p); return; }
   if (currentTool === 'gradient') { drag={kind:'gradient',start:p,current:p};drawOverlay();return; }
   if (currentTool === 'wand') { magicWandSelect(p);return; }
@@ -13435,7 +13758,7 @@ function onOverlayPointerMove(e) {
   }
   if (drag.kind === 'paint') {
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
-    for (const event of events.length ? events : [e]) paintTo(canvasPoint(event, { clampToDocument:false }), event);
+    for (const event of events.length ? events : [e]) paintGesture.move(canvasPoint(event, { clampToDocument:false }), event);
     rasterEdit.schedulePaintPreview();
     drawOverlay();
     return;
@@ -13514,7 +13837,7 @@ els.overlay.addEventListener('pointerup', async (e) => {
     const layer = doc.layers.find(item => item.id === drag.layerId);
     const releasePoint = canvasPoint(e, { clampToDocument:false });
     const localPoint = layer && documentPointToLayerPixel(releasePoint, layer);
-    if (localPoint && Math.hypot(localPoint.x-drag.last.x, localPoint.y-drag.last.y) > .01) paintTo(releasePoint, e);
+    if (localPoint && Math.hypot(localPoint.x-drag.last.x, localPoint.y-drag.last.y) > .01) paintGesture.move(releasePoint, e);
   }
   const d = drag; drag = null;
   if (['marquee','line','shape','crop','gradient'].includes(d.kind)) d.current = canvasPoint(e);
@@ -13523,7 +13846,7 @@ els.overlay.addEventListener('pointerup', async (e) => {
   if (d.kind === 'move' && d.moved) commit('Перемещение слоя');
   if (d.kind === 'resize' && d.moved) commit('Изменить размер слоя');
   if (d.kind === 'rotate' && d.moved) commit('Повернуть слой');
-  if (d.kind === 'paint') await endPaint(d.tool);
+  if (d.kind === 'paint') await paintGesture.end(d);
   if (d.kind === 'marquee') {
     if (d.selectionType === 'lasso') {
       const last=d.points.at(-1);const p=canvasPoint(e);
@@ -13581,7 +13904,7 @@ els.overlay.addEventListener('pointercancel', async (e) => {
   activePrimaryPointerId = null;
   if (!drag) return;
   const d=drag; drag=null; clearSmartGuides();
-  if (d.kind==='paint') { await endPaint(d.tool); }
+  if (d.kind==='paint') { await paintGesture.end(d); }
   else {
     if (d.kind==='move') {
       const l=doc.layers.find(x=>x.id===d.layerId); if(l){l.x=d.x;l.y=d.y;render();updateTransformPropertyValues(l);}
@@ -13915,36 +14238,6 @@ async function clearSelectedPixels({ historyLabel = 'Очистить выдел
   }
 }
 
-async function ensurePaintLayer(point, canContinue = () => true) {
-  let l = selected();
-  const rasterAtPoint = paintLayerAtPoint(point);
-
-  if (['eraser','blur','clone','heal','smudge','dodge','burn'].includes(currentTool)) {
-    l = rasterAtPoint;
-    if (!l) return null;
-  } else if (rasterAtPoint) {
-    l = rasterAtPoint;
-  } else {
-    if (!canContinue()) return null;
-    // A transparent raster layer does not need to be encoded as a full-size
-    // PNG before the first stroke. Keep it sparse until pixels actually exist.
-    l = createRasterLayer({
-      name:'Рисование',
-      x:0, y:0, width:doc.width, height:doc.height,
-      dataUrl:null
-    });
-    addLayer(doc,l);
-  }
-
-  const nativeModel=l.highDepthSource?.model;
-  const nativeToolSupported=nativeModel==='cmyk'?NATIVE_CMYK_PAINT_TOOLS.has(currentTool):NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(currentTool);
-  const nativeHighDepth=l.highDepthSource&&nativeToolSupported
-    ? await rasterEdit.ensureNativeHighDepthPaintBuffer(l,{requireAlpha:currentTool==='eraser'})
-    : false;
-  if(!nativeHighDepth)await rasterEdit.ensureRasterBuffer(l);
-  doc.selectedLayerId = l.id;
-  return l;
-}
 async function setCloneSource(point) {
   const layer=findTopEditableRasterLayerAt(point);
   if(!layer){setStatus(`${TOOL_LABELS[currentTool]}: источник должен находиться на растровом слое`);toast('Alt+кликните по растровому слою','warn');return false;}
@@ -13954,127 +14247,6 @@ async function setCloneSource(point) {
   setStatus(`Источник для «${TOOL_LABELS[currentTool]}» задан. Рисуйте по этому же слою.`);
   drawOverlay();
   return true;}
-async function beginPaint(p, pointerId, pointerEvent = null) {
-  if(selectionRect&&!pointInsideSelection(p)){setStatus('Рисование ограничено выделением');return false;}
-  const canContinue = () => activePrimaryPointerId === pointerId;
-  const l = await ensurePaintLayer(p, canContinue);
-  if (!canContinue()) return false;
-  const cloneSource = getRetouchCloneSource();
-  if (!l) {
-    const message = currentTool === 'eraser'
-      ? 'Ластик работает только по растровому слою. Выберите слой с изображением или рисунком.'
-      : currentTool === 'blur'
-        ? 'Размытие работает только по растровому слою. Выберите слой с изображением или рисунком.'
-        : currentTool === 'clone' || currentTool === 'heal'
-          ? (cloneSource ? `${TOOL_LABELS[currentTool]} работает по слою заданного источника.` : `${TOOL_LABELS[currentTool]}: сначала задайте источник через Alt+клик.`)
-          : currentTool === 'smudge'
-            ? 'Палец работает только по существующему растровому слою.'
-          : currentTool === 'dodge' || currentTool === 'burn'
-            ? 'Инструмент ретуши работает только по существующему растровому слою.'
-        : 'Не удалось подготовить растровый слой для рисования.';
-    setStatus(message);
-    toast(message, 'warn');
-    return false;
-  }
-  const localPoint = documentPointToLayerPixel(p, l);
-  drag = { kind:'paint', tool:currentTool, layerId:l.id, last:localPoint, nativeHighDepth:rasterEdit.highDepthPaintLayerId===l.id&&NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(currentTool) };
-  if (currentTool === 'dodge' || currentTool === 'burn') drag.toneCoverage={width:drag.nativeHighDepth?rasterEdit.highDepthPaintBuffer.width:rasterEdit.brushCanvas.width,tiles:new Map()};
-  if (currentTool === 'blur') drag.blurCoverage={width:drag.nativeHighDepth?rasterEdit.highDepthPaintBuffer.width:rasterEdit.brushCanvas.width,tiles:new Map()};
-  if(drag.nativeHighDepth){
-    if(currentTool==='clone'||currentTool==='heal'){
-      drag.cloneOffset=prepareNativeHighDepthCloneStroke(l,localPoint);
-      if(!drag.cloneOffset){clearHighDepthPaintState();rasterEdit.clearBrushBuffer();drag=null;setStatus(cloneSource?`${TOOL_LABELS[currentTool]}: рисуйте по слою источника`:`${TOOL_LABELS[currentTool]}: Alt+клик задаёт источник`);toast('Сначала задайте источник на этом слое','warn');return false;}
-      applyNativeHighDepthCloneDab(l,localPoint,drag.cloneOffset,pointerEvent,currentTool==='heal');return true;
-    }
-    if(currentTool==='smudge'){drag.smudgeStarted=true;return true;}
-    if(currentTool==='dodge'||currentTool==='burn'){applyNativeHighDepthToneDab(l,localPoint,pointerEvent,currentTool==='dodge');return true;}
-    if(currentTool==='blur'){applyNativeHighDepthBlurDab(l,localPoint,pointerEvent);return true;}
-    applyNativeHighDepthDab(l,localPoint,pointerEvent,currentTool==='eraser');return true;
-  }
-  rasterEdit.brushContext.save();
-  clipContextToSelection(rasterEdit.brushContext,l);
-  if (currentTool === 'clone' || currentTool === 'heal') {
-    drag.cloneOffset=prepareCloneStroke(l,localPoint);
-    if(!drag.cloneOffset){rasterEdit.brushContext.restore();drag=null;setStatus(cloneSource?`${TOOL_LABELS[currentTool]}: рисуйте по слою источника`:`${TOOL_LABELS[currentTool]}: Alt+клик задаёт источник`);toast('Сначала задайте источник на этом слое','warn');return false;}
-    applyCloneDab(localPoint,drag.cloneOffset,pointerEvent,currentTool==='heal');rasterEdit.schedulePaintPreview();return true;
-  }
-  if(currentTool==='smudge'){drag.smudgeStarted=true;rasterEdit.schedulePaintPreview();return true;}
-  if(currentTool==='dodge'||currentTool==='burn'){applyToneDab(l,localPoint,pointerEvent,currentTool==='dodge');rasterEdit.schedulePaintPreview();return true;}
-  if (currentTool === 'blur') {
-    applyBlurDab(l, localPoint, pointerEvent);
-    rasterEdit.schedulePaintPreview();
-    return true;
-  }
-  rasterEdit.brushContext.lineCap='round';
-  rasterEdit.brushContext.lineJoin='round';
-  rasterEdit.brushContext.lineWidth=brushWidthForPointer(pointerEvent);
-  rasterEdit.brushContext.globalAlpha=Number(els.toolOpacity.value)/100;
-  if (currentTool==='eraser') rasterEdit.brushContext.globalCompositeOperation='destination-out';
-  else { rasterEdit.brushContext.globalCompositeOperation='source-over'; rasterEdit.brushContext.strokeStyle=els.primaryColor.value; }
-  // Draw only the new segment. Keeping one ever-growing Canvas path makes each
-  // stroke() repaint the whole path again and becomes O(n²) on long strokes.
-  rasterEdit.brushContext.beginPath();
-  rasterEdit.brushContext.moveTo(localPoint.x,localPoint.y);
-  rasterEdit.brushContext.lineTo(localPoint.x+.01,localPoint.y+.01);
-  rasterEdit.brushContext.stroke();
-  rasterEdit.schedulePaintPreview();
-  return true;
-}
-function paintTo(p, pointerEvent = null) {
-  if (!drag || drag.kind!=='paint') return;
-  const layer = doc.layers.find(x => x.id === drag.layerId);
-  if (!layer) return;
-  const next = documentPointToLayerPixel(p, layer);
-  const last=drag.last;
-  if(drag.nativeHighDepth){
-    if(drag.tool==='blur')nativeHighDepthBlurSegment(layer,last,next,pointerEvent);
-    else if(drag.tool==='clone'||drag.tool==='heal')nativeHighDepthCloneSegment(layer,last,next,drag.cloneOffset,pointerEvent,drag.tool==='heal');
-    else if(drag.tool==='smudge')nativeHighDepthSmudgeSegment(layer,last,next,pointerEvent);
-    else if(drag.tool==='dodge'||drag.tool==='burn')nativeHighDepthToneSegment(layer,last,next,pointerEvent,drag.tool==='dodge');
-    else nativeHighDepthStrokeSegment(layer,last,next,pointerEvent,drag.tool==='eraser');
-    drag.last=next;return;
-  }
-  if (drag.tool === 'blur') {
-    blurStrokeSegment(layer,last,next,pointerEvent);
-    drag.last=next;
-    return;
-  }
-  if (drag.tool === 'clone' || drag.tool === 'heal') { cloneStrokeSegment(last,next,drag.cloneOffset,pointerEvent,drag.tool==='heal');drag.last=next;return; }
-  if (drag.tool === 'smudge') { smudgeStrokeSegment(last,next,pointerEvent);drag.last=next;return; }
-  if (drag.tool === 'dodge' || drag.tool === 'burn') { toneStrokeSegment(layer,last,next,pointerEvent,drag.tool==='dodge');drag.last=next;return; }
-  rasterEdit.brushContext.lineWidth=brushWidthForPointer(pointerEvent);
-  rasterEdit.brushContext.beginPath();
-  rasterEdit.brushContext.moveTo(last.x,last.y);
-  rasterEdit.brushContext.lineTo(next.x,next.y);
-  rasterEdit.brushContext.stroke();
-  drag.last=next;
-}
-async function endPaint(paintTool = currentTool) {
-  rasterEdit.cancelPaintPreview();
-  const nativeHighDepth=Boolean(rasterEdit.highDepthPaintBuffer&&rasterEdit.highDepthPaintLayerId===rasterEdit.brushLayerId&&NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool));
-  if ((!rasterEdit.brushContext&&!nativeHighDepth) || paintPersisting) return;
-  const labels={eraser:'Ластик',blur:'Размытие кистью',clone:'Штамп',heal:'Лечебная кисть',smudge:'Палец / смазывание',dodge:'Осветлитель',burn:'Затемнитель',brush:'Кисть'};
-  const label=labels[paintTool]||'Кисть';
-  if(!nativeHighDepth)rasterEdit.brushContext.restore();
-  resetRetouchStroke();
-  paintPersisting=true;
-  setStatus('Сохранение штриха…');
-  try {
-    if (nativeHighDepth ? await rasterEdit.persistNativeHighDepthPaintLayer() : await rasterEdit.persistPaintLayer()) {
-      commit(label);
-      setStatus('Готово');
-    }
-  } catch (error) {
-    console.error(error);
-    rasterEdit.clearBrushBuffer();
-    render();
-    setStatus(`Ошибка сохранения штриха: ${error.message}`);
-    toast('Не удалось сохранить штрих','error');
-  } finally {
-    paintPersisting=false;
-  }
-}
-
 function pickColor(p) {
   const ctx=els.canvas.getContext('2d', { alpha:true });
   const x=clamp(Math.floor(p.x),0,Math.max(0,doc.width-1));
