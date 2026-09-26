@@ -312,6 +312,8 @@ const psdImportSemantics = createPsdImportSemantics({
   dimensionsFromDataUrl,
   importVectorMask: importPsdVectorMask,
   opaqueBlockToState: psdOpaqueBlockToState,
+  previewFingerprint: psdPreviewFingerprint,
+  embeddedDocumentFingerprint: psdEmbeddedDocumentFingerprint,
 });
 
 const psdImportController = createPsdImportController({
