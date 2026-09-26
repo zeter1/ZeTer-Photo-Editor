@@ -21,6 +21,7 @@
 - Brush/eraser + retouch stroke gesture lifecycle (begin/move/end): `src/painting/gesture-controller.js`
 - Clone/heal/smudge/blur/dodge/burn mechanics (Canvas8 + high-depth/CMYK): `src/retouch/controller.js`
 - UI config + toolbar/menu/modal/workspace-layout/saved-Paths/color-management controllers: `src/ui/`
+- Layers panel/tree DOM, recursive presentation, row keyboard focus and layer/group DnD lifecycle: `src/ui/layers-panel-controller.js`; layer/group schema + reusable mutations stay in `src/core/state.js`, feature context-menu semantics/history stay in `src/main.js`.
 - Saved Paths selection/CRUD/panel/context-menu/vector-mask apply orchestration: `src/ui/paths-controller.js`; Pen geometry stays in `src/main.js`, PSD codec in `src/formats/psd.js`.
 - CMYK/ICC policy/profile UI orchestration, preview/edit transform caches and async preview rebuild ownership: `src/ui/color-management-controller.js`; ICC math stays in `src/core/color-management.js`, PSD/PSB codec in `src/formats/psd.js`.
 - Smart Filter stack/mask markup, commands, DOM bindings and edit-modal lifecycle: `src/ui/smart-filter-controller.js`; Smart Filter schema/limits stay in `src/core/state.js`, pixel composition in `src/core/render.js`.

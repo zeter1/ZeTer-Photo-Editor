@@ -37,6 +37,9 @@ Owns generic modal/dialog mechanics: field rendering, numeric normalization, asy
 ### `workspace-layout-controller.js`
 Owns editor-shell layout state that is independent of document contents: persisted sidebar collapse IDs, legacy collapse-state migration, accessible panel toggle state and canvas-mode visibility with viewport-center preservation. It receives DOM/runtime geometry through narrow ports and does not own document/layer/history/tool state.
 
+### `layers-panel-controller.js`
+Owns the Layers panel DOM tree and panel-local interaction lifecycle: recursive group/layer presentation, selected/effective ancestor state, thumbnails/mask hints, row keyboard focus and layer/group drag identity/drop cleanup including root drop. Event callbacks are bound to the rendered document identity. Layer/group schema + reusable mutation primitives remain in `src/core/state.js`; feature context menus/history stay behind runtime action ports.
+
 ### `paths-controller.js`
 Owns Saved Paths UI/state orchestration: selected path index, bounded Photoshop path-resource allocation, save/rename/duplicate/delete actions, accessible list/keyboard/context-menu wiring and applying a saved path as a vector mask through grouped explicit ports. The document model remains in core, Pen direct-edit geometry/transient edit index remains in `src/main.js`, and PSD/PSB binary semantics remain in `src/formats/psd.js`.
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -15,6 +15,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/menu-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/workspace-layout-controller.js', root), 'utf8'),
+  readFile(new URL('src/ui/layers-panel-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/paths-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/color-management-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/layer-blending-controller.js', root), 'utf8'),
@@ -96,6 +97,16 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   }
   assert.doesNotMatch(main, /const collapsedPanelIds = new Set/);
   assert.doesNotMatch(main, /let panelsVisible = true/);
+  assert.match(main, /from '\.\/ui\/layers-panel-controller\.js'/);
+  assert.match(build, /'src\/ui\/layers-panel-controller\.js'/);
+  assert.match(layersPanelController, /export function createLayersPanelController/);
+  assert.match(main, /createLayersPanelController\(\{/);
+  assert.match(main, /layersPanelController\.render\(\)/);
+  assert.match(main, /layersPanelController\.bind\(\)/);
+  assert.doesNotMatch(main, /function updateLayers\(/);
+  assert.doesNotMatch(main, /function clearLayerDragDecorations\(/);
+  assert.doesNotMatch(main, /\blet (?:layerDragId|groupDragId)\b/);
+  assert.doesNotMatch(main, /els\.layers\.addEventListener\(['"]dragover/);
   assert.match(main, /from '\.\/ui\/paths-controller\.js'/);
   assert.match(build, /'src\/ui\/paths-controller\.js'/);
   assert.match(pathsController, /export function createPathsController/);

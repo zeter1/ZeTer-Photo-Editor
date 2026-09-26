@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-26 — Layers panel/tree controller extraction
+
+- Refactor: recursive Layers tree rendering, row accessibility/focus, thumbnails/mask hints and panel-local layer/group drag/drop lifecycle moved out of the remaining `src/main.js` composition root into `src/ui/layers-panel-controller.js`.
+- Reliability: rendered-row callbacks and drag identity are now bound to the exact originating document, so a tab switch cannot let stale DOM mutate the newly active document; all drop/drag-end/destroy paths clear local drag identity and decorations.
+- Lock correctness: relative layer reorder now rejects a locked target layer as well as a locked source/ancestor, preventing a drop from publishing order history through a protected target.
+- Boundaries/tests/docs: layer/group schema and mutation primitives remain in `src/core/state.js`, feature-heavy context-menu/history semantics remain runtime ports, direct fake-DOM regressions cover hierarchy/focus/DnD/stale ownership, and AI routing docs point to the canonical panel owner.
+
 ### 2026-09-26 — Selection Vector Mask controller extraction
 
 - Refactor: selection-driven Vector Mask geometry, boolean subpath publication, 128-contour guard and selected-mask edit/toggle/invert/remove commands moved from the large `src/main.js` into `src/selection/vector-mask-controller.js`.
