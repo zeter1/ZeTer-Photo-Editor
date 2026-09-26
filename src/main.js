@@ -1,7 +1,7 @@
 import { HistoryStack } from './core/history.js';
 import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, alignLayerToCanvas, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
-  createDocument, createRasterLayer, createTextLayer, createShapeLayer, createSmartObjectLayer, createSmartObjectLinkId, linkedSmartObjectLayers, createSmartFilter, createSmartFilterMask, createAdjustmentLayer, createLayerMask, createVectorMask, createLayerGroup, documentWithTextPreview,
+  createDocument, createRasterLayer, createTextLayer, createShapeLayer, linkedSmartObjectLayers, createSmartFilter, createSmartFilterMask, createAdjustmentLayer, createLayerMask, createVectorMask, createLayerGroup, documentWithTextPreview,
   addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, moveLayerGroupIntoGroup, selectedLayer,
   snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters, sanitizeHighDepthPreview, sanitizeColorManagement,
   isLayerVisible, isLayerLocked, isGroupVisible, isGroupLocked, groupDepth,
@@ -20,7 +20,7 @@ import {
   SMART_SNAP_STORAGE_KEY, TOOL_ORDER_STORAGE_KEY,
   NATIVE_HIGH_DEPTH_PAINT_TOOLS, NATIVE_CMYK_PAINT_TOOLS,
 } from './ui/tool-config.js';
-import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
+import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles } from './core/layer-styles.js';
 import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustments.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset } from './formats/psd.js';
 import { createDocumentSessionController } from './workspace/session-controller.js';
@@ -36,6 +36,7 @@ import { createSelectionGestureController, cloneSelectionShape } from './selecti
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
 import { createSelectionRasterMutationController } from './selection/raster-mutation-controller.js';
 import { createDocumentImportController } from './document/import-controller.js';
+import { createSmartObjectController } from './document/smart-object-controller.js';
 import { createPsdImportController } from './document/psd-import-controller.js';
 import { createPsdImportSemantics } from './document/psd-import-semantics.js';
 import { createPsdExportController } from './document/psd-export-controller.js';
@@ -569,6 +570,63 @@ const {
   duplicateDocumentTab,
   documentTabMenu,
 } = documentSessionController;
+
+
+const smartObjectController = createSmartObjectController({
+  runtime: {
+    getDocument: () => doc,
+    getActiveSessionId: () => activeSessionId,
+    setActiveSessionId: value => { activeSessionId = value; },
+    getSelectedLayer: selected,
+    getZoom: () => zoom,
+    blockPendingDocumentEdit,
+    isLayerLocked,
+    commit,
+    updateAll,
+    fitToView,
+    queueRecovery,
+    invalidateImageCache,
+    setActiveDocument: value => { doc = value; },
+    setDirty: value => { dirty = value; },
+  },
+  sessions: {
+    getAll: () => documentSessions,
+    current: currentSession,
+    syncCurrent: syncCurrentSession,
+    build: buildSession,
+    load: loadSession,
+    activate: activateDocumentTab,
+    renderTabs: renderDocumentTabs,
+  },
+  rendering: {
+    renderPreview: async embeddedDocument => {
+      const canvas = document.createElement('canvas');
+      await renderDocument(canvas, embeddedDocument, { checker:false });
+      return canvasToDataURL(canvas, 'image/png');
+    },
+  },
+  photoshop: {
+    isLayer: layer => Boolean(layer?.psdSmartObject),
+    sourceId: layer => layer?.psdSmartObject?.uniqueId || null,
+    findLayers: (owner, uniqueId) => {
+      if (!owner || !uniqueId) return [];
+      return (owner.layers || []).filter(layer =>
+        layer?.type === 'smart-object' && layer.psdSmartObject?.uniqueId === uniqueId
+      );
+    },
+    rewriteEmbeddedSource: rewritePhotoshopEmbeddedSource,
+    updateTargetAfterRewrite: updatePhotoshopSmartObjectRewriteMetadata,
+  },
+  ui: { setStatus, toast, consoleRef:console },
+});
+const {
+  createLinkedCopy: createLinkedSmartObjectCopy,
+  unlink: unlinkSmartObject,
+  convertSelected: convertSelectedToSmartObject,
+  openContents: openSmartObjectContents,
+  saveContent: saveSmartObjectContent,
+} = smartObjectController;
+
 
 function isEditingTarget(target = document.activeElement) {
   const tag = target?.tagName;
@@ -3344,67 +3402,6 @@ function openSmartFilterDialog(layer=selected(),index=-1){
   nameInput.focus();nameInput.select();
 }
 
-function photoshopSmartObjectLayers(owner,uniqueId){
-  if(!owner||!uniqueId)return[];
-  return (owner.layers||[]).filter(layer=>layer?.type==='smart-object'&&layer.psdSmartObject?.uniqueId===uniqueId);
-}
-function smartObjectLinkedCount(layer,owner=doc){
-  if(layer?.psdSmartObject?.uniqueId)return Math.max(1,photoshopSmartObjectLayers(owner,layer.psdSmartObject.uniqueId).length);
-  if(!layer?.linkedSourceId)return 1;
-  return Math.max(1,linkedSmartObjectLayers(owner,layer.linkedSourceId).length);
-}
-function createLinkedSmartObjectCopy(layer=selected()){
-  if(blockPendingDocumentEdit())return null;
-  if(!layer||layer.type!=='smart-object'||!layer.embeddedDocument){setStatus('Нужен смарт-объект со встроенным содержимым');return null;}
-  if(layer.psdSmartObject){setStatus('Photoshop Smart Object уже использует native UUID/source identity; обычная ZPE linked-copy для него отключена');return null;}
-  if(isLayerLocked(doc,layer)){setStatus('Смарт-объект или его группа заблокированы');return null;}
-  const linkedSourceId=layer.linkedSourceId||createSmartObjectLinkId();
-  const copy=duplicateLayer(doc,layer.id);
-  if(!copy)return null;
-  layer.linkedSourceId=linkedSourceId;
-  copy.linkedSourceId=linkedSourceId;
-  copy.name=`${layer.name||'Смарт-объект'} — связанная копия`;
-  commit('Создать связанную копию смарт-объекта');
-  setStatus(`Создана связанная копия. Экземпляров источника: ${smartObjectLinkedCount(copy)}`);
-  return copy;
-}
-function unlinkSmartObject(layer=selected()){
-  if(blockPendingDocumentEdit())return false;
-  if(!layer||layer.type!=='smart-object'||isLayerLocked(doc,layer))return false;
-  if(!layer.linkedSourceId){setStatus('Смарт-объект уже независимый');return false;}
-  layer.linkedSourceId=null;
-  commit('Разорвать связь смарт-объекта');
-  setStatus('Смарт-объект стал независимым; текущее встроенное содержимое сохранено');
-  return true;
-}
-
-function smartObjectSessionDepth(session=currentSession()){
-  let depth=0,current=session;
-  const visited=new Set();
-  while(current?.smartObjectLink){
-    if(visited.has(current.id))break;
-    visited.add(current.id);depth+=1;
-    current=documentSessions.find(item=>item.id===current.smartObjectLink.parentSessionId);
-  }
-  return depth;
-}
-function smartObjectSourceBounds(layer){
-  const scale=Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1));
-  const blur=Math.max(0,Number(layer.filters?.blur)||0)*scale*3;
-  const stroke=layer.type==='shape'?Math.max(0,Number(layer.strokeWidth)||0)*scale/2:0;
-  const bounds=frameBounds(layer,Math.ceil(blur+stroke+layerStyleOutset(layer.styles)*scale+2));
-  const x=Math.floor(bounds.x),y=Math.floor(bounds.y);
-  const width=Math.max(1,Math.ceil(bounds.x+bounds.width)-x);
-  const height=Math.max(1,Math.ceil(bounds.y+bounds.height)-y);
-  checkedCanvasSize(width,height,`Смарт-объект «${layer.name||'Без имени'}»`);
-  return{x,y,width,height};
-}
-async function smartObjectPreviewDataUrl(embeddedDocument){
-  const canvas=document.createElement('canvas');
-  await renderDocument(canvas,embeddedDocument,{checker:false});
-  return canvasToDataURL(canvas,'image/png');
-}
-
 async function serializePhotoshopEmbeddedAsset(embedded,source,previewDataUrl){
   const type=String(source?.asset?.detectedFileType||'').toLowerCase();
   if(type==='png'){
@@ -3447,162 +3444,23 @@ async function rewritePhotoshopEmbeddedSource(parentDoc,layer,embedded,previewDa
   parentDoc.psdLinkedLayerBlocks=rewritten.blocks.map(psdOpaqueBlockToState).filter(Boolean);
   return{rewritten:true,newSize:rewritten.newSize,oldSize:rewritten.oldSize,sourceKey:rewritten.sourceKey,type:asset.detectedFileType};
 }
-async function convertSelectedToSmartObject(){
-  if(blockPendingDocumentEdit())return;
-  const source=selected();
-  if(!source||source.type==='smart-object'||source.type==='adjustment'||isLayerLocked(doc,source))return;
-  if(smartObjectSessionDepth()>=3){
-    const message='Достигнут лимит вложенности смарт-объектов: 3 уровня';
-    setStatus(message);toast(message,'warn');return;
-  }
-  const owner=doc,targetSessionId=activeSessionId,index=doc.layers.indexOf(source),original=JSON.stringify(source);
-  const bounds=smartObjectSourceBounds(source);
-  const embedded=createDocument({
-    name:`${source.name||'Слой'} — содержимое`,
-    width:bounds.width,height:bounds.height,background:'transparent'
-  });
-  const inner=structuredClone(source);
-  inner.x-=bounds.x;inner.y-=bounds.y;inner.opacity=1;inner.blendMode='source-over';inner.visible=true;inner.locked=false;inner.groupId=null;
-  embedded.layers=[inner];embedded.selectedLayerId=inner.id;
-  setStatus('Создание смарт-объекта…');
-  try{
-    const previewDataUrl=await smartObjectPreviewDataUrl(embedded);
-    if(doc!==owner||activeSessionId!==targetSessionId||doc.layers[index]!==source||JSON.stringify(source)!==original){
-      setStatus('Преобразование в смарт-объект отменено: слой изменился');return;
-    }
-    const smart=createSmartObjectLayer({
-      id:source.id,name:source.name||'Смарт-объект',visible:source.visible,locked:false,
-      opacity:source.opacity,blendMode:source.blendMode,groupId:source.groupId??null,
-      x:bounds.x,y:bounds.y,width:bounds.width,height:bounds.height,
-      previewDataUrl,embeddedDocument:embedded,
-    });
-    doc.layers.splice(index,1,smart);doc.selectedLayerId=smart.id;
-    commit('Преобразовать в смарт-объект');
-    setStatus('Слой преобразован в смарт-объект');
-  }catch(error){
-    console.error(error);setStatus(`Ошибка создания смарт-объекта: ${error.message}`);toast('Не удалось создать смарт-объект','error');
-  }
-}
-function openSmartObjectContents(layer=selected()){
-  if(blockPendingDocumentEdit())return;
-  if(!layer||layer.type!=='smart-object'||!layer.embeddedDocument){setStatus('У смарт-объекта нет встроенного содержимого');return;}
-  if(isLayerLocked(doc,layer)){setStatus('Смарт-объект или его группа заблокированы');return;}
-  syncCurrentSession();
-  const parentSessionId=activeSessionId;
-  const linkedSourceId=layer.linkedSourceId||null;
-  const photoshopSourceId=layer.psdSmartObject?.uniqueId||null;
-  const existing=documentSessions.find(session=>session.smartObjectLink?.parentSessionId===parentSessionId&&(
-    linkedSourceId?session.smartObjectLink?.linkedSourceId===linkedSourceId:
-    photoshopSourceId?session.smartObjectLink?.photoshopSourceId===photoshopSourceId:
-    session.smartObjectLink?.layerId===layer.id
-  ));
-  if(existing){activateDocumentTab(existing.id,{focusViewport:true});return;}
-  const content=restoreDocument(snapshotDocument(layer.embeddedDocument));
-  content.name=`${layer.name||'Смарт-объект'} — содержимое`;
-  const session=buildSession(content,{
-    label:'Содержимое смарт-объекта',zoomLevel:zoom,dirtyState:false,
-    smartObjectLink:{parentSessionId,layerId:layer.id,linkedSourceId,photoshopSourceId},
-  });
-  const parentIndex=documentSessions.findIndex(item=>item.id===parentSessionId);
-  documentSessions.splice(parentIndex+1,0,session);
-  activeSessionId=session.id;loadSession(session);updateAll();fitToView();
-  const count=smartObjectLinkedCount(layer);
-  setStatus((linkedSourceId||photoshopSourceId)?`Содержимое общего источника открыто. Ctrl+S обновит ${count} экземпляр(а).`:'Содержимое смарт-объекта открыто. Ctrl+S обновит родительский слой.');
-}
-async function saveSmartObjectContent(session=currentSession()){
-  if(!session?.smartObjectLink)return false;
-  if(blockPendingDocumentEdit())return false;
-  syncCurrentSession();
-  const link=session.smartObjectLink;
-  const parentSession=documentSessions.find(item=>item.id===link.parentSessionId);
-  let parentLayer=parentSession?.doc?.layers?.find(layer=>layer.id===link.layerId&&layer.type==='smart-object')||null;
-  if(!parentLayer&&parentSession&&link.linkedSourceId)parentLayer=linkedSmartObjectLayers(parentSession.doc,link.linkedSourceId)[0]||null;
-  if(!parentLayer&&parentSession&&link.photoshopSourceId)parentLayer=photoshopSmartObjectLayers(parentSession.doc,link.photoshopSourceId)[0]||null;
-  if(!parentSession||!parentLayer){
-    const message='Родительский смарт-объект больше недоступен';
-    setStatus(message);toast(message,'error');return false;
-  }
-  if(isLayerLocked(parentSession.doc,parentLayer)){
-    const message='Родительский смарт-объект заблокирован: разблокируйте его перед сохранением содержимого';
-    setStatus(message);toast(message,'warn');return false;
-  }
-  const linkedSourceId=parentLayer.linkedSourceId||null;
-  const photoshopSourceId=parentLayer.psdSmartObject?.uniqueId||link.photoshopSourceId||null;
-  const targetsFor=(owner,layer)=>linkedSourceId
-    ? linkedSmartObjectLayers(owner,linkedSourceId)
-    : photoshopSourceId?photoshopSmartObjectLayers(owner,photoshopSourceId):[layer];
-  const initialTargets=targetsFor(parentSession.doc,parentLayer);
-  const embedded=restoreDocument(snapshotDocument(session.doc));
-  setStatus((linkedSourceId||photoshopSourceId)?`Обновление общего источника: ${initialTargets.length} экземпляр(а)…`:'Обновление смарт-объекта…');
-  try{
-    const previewDataUrl=await smartObjectPreviewDataUrl(embedded);
-    const liveParent=documentSessions.find(item=>item.id===link.parentSessionId);
-    let liveLayer=liveParent?.doc?.layers?.find(layer=>layer.id===link.layerId&&layer.type==='smart-object')||null;
-    if(!liveLayer&&liveParent&&linkedSourceId)liveLayer=linkedSmartObjectLayers(liveParent.doc,linkedSourceId)[0]||null;
-    if(!liveLayer&&liveParent&&photoshopSourceId)liveLayer=photoshopSmartObjectLayers(liveParent.doc,photoshopSourceId)[0]||null;
-    if(liveParent!==parentSession||!liveLayer||
-      (linkedSourceId&&liveLayer.linkedSourceId!==linkedSourceId)||
-      (photoshopSourceId&&liveLayer.psdSmartObject?.uniqueId!==photoshopSourceId)){
-      setStatus('Обновление смарт-объекта отменено: родитель изменился');return false;
-    }
-    const liveTargets=targetsFor(liveParent.doc,liveLayer);
-    if(!liveTargets.length){
-      setStatus('Обновление смарт-объекта отменено: связанные экземпляры удалены');return false;
-    }
 
-    let photoshopRewrite=null;
-    if(photoshopSourceId){
-      try{
-        photoshopRewrite=await rewritePhotoshopEmbeddedSource(liveParent.doc,liveLayer,embedded,previewDataUrl);
-      }catch(error){
-        console.warn('Photoshop Smart Object resource rewrite skipped',error);
-        photoshopRewrite={rewritten:false,reason:error?.message||String(error)};
-      }
-    }
-
-    const embeddedSnapshot=snapshotDocument(embedded);
-    const oldPreviews=new Set();
-    const previewFingerprint=psdPreviewFingerprint(previewDataUrl);
-    const embeddedFingerprint=psdEmbeddedDocumentFingerprint(embedded);
-    for(const target of liveTargets){
-      if(target.previewDataUrl)oldPreviews.add(target.previewDataUrl);
-      target.embeddedDocument=restoreDocument(embeddedSnapshot);
-      target.previewDataUrl=previewDataUrl;
-      if(!target.psdSmartObject){
-        target.width=embedded.width;target.height=embedded.height;
-      }else if(photoshopRewrite?.rewritten){
-        target.psdSmartObject.asset={...(target.psdSmartObject.asset||{}),dataSize:photoshopRewrite.newSize,sourceKey:photoshopRewrite.sourceKey||target.psdSmartObject.asset?.sourceKey||null};
-        target.psdSmartObject.baseline={
-          ...target.psdSmartObject.baseline,
-          previewFingerprint,embeddedFingerprint,
-          embeddedWidth:embedded.width,embeddedHeight:embedded.height,
-        };
-      }
-    }
-    touch(parentSession.doc);
-    parentSession.history.push(liveTargets.length>1?'Обновить общий источник смарт-объектов':'Обновить смарт-объект',snapshotDocument(parentSession.doc));
-    parentSession.dirty=true;
-    session.doc=embedded;doc=embedded;session.dirty=false;dirty=false;
-    session.smartObjectLink={...link,layerId:liveLayer.id,linkedSourceId,photoshopSourceId};
-    for(const oldPreview of oldPreviews)invalidateImageCache(oldPreview);
-    renderDocumentTabs();queueRecovery({immediate:true});
-    if(photoshopSourceId){
-      if(photoshopRewrite?.rewritten){
-        setStatus(`Photoshop Smart Object обновлён: embedded ${photoshopRewrite.type||'asset'} переписан в native linked resource (${photoshopRewrite.newSize} bytes), экземпляров: ${liveTargets.length}`);
-        toast('Embedded Photoshop Smart Object обновлён без raster fallback','success');
-      }else{
-        setStatus(`Содержимое обновлено; native Photoshop passthrough отключён: ${photoshopRewrite?.reason||'resource rewrite недоступен'}`);
-        toast('Содержимое сохранено; PSD/PSB использует безопасный raster fallback','warn');
-      }
-    }else{
-      setStatus(liveTargets.length>1?`Связанный источник обновлён: ${liveTargets.length} экземпляр(а)`:'Смарт-объект обновлён в родительском документе');
-      toast(liveTargets.length>1?'Связанные смарт-объекты обновлены':'Содержимое смарт-объекта сохранено','success');
-    }
-    return true;
-  }catch(error){
-    console.error(error);setStatus(`Ошибка обновления смарт-объекта: ${error.message}`);toast('Не удалось обновить смарт-объект','error');return false;
-  }
+function updatePhotoshopSmartObjectRewriteMetadata(target,{rewrite,previewDataUrl,embedded}){
+  if(!target?.psdSmartObject||!rewrite?.rewritten)return;
+  target.psdSmartObject.asset={
+    ...(target.psdSmartObject.asset||{}),
+    dataSize:rewrite.newSize,
+    sourceKey:rewrite.sourceKey||target.psdSmartObject.asset?.sourceKey||null,
+  };
+  target.psdSmartObject.baseline={
+    ...target.psdSmartObject.baseline,
+    previewFingerprint:psdPreviewFingerprint(previewDataUrl),
+    embeddedFingerprint:psdEmbeddedDocumentFingerprint(embedded),
+    embeddedWidth:embedded.width,
+    embeddedHeight:embedded.height,
+  };
 }
+
 function addAdjustmentLayer(){
   const layer=createAdjustmentLayer({name:'Корректирующий слой',width:doc.width,height:doc.height});
   addLayer(doc,layer);commit('Новый корректирующий слой');
