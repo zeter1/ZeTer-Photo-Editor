@@ -56,6 +56,7 @@ export function createSmartObjectController({
       );
     },
     rewriteEmbeddedSource = async () => ({ rewritten:false, reason:'resource rewrite недоступен' }),
+    publishEmbeddedSourceRewrite = () => {},
     updateTargetAfterRewrite = () => {},
   } = photoshop;
   const {
@@ -283,6 +284,10 @@ export function createSmartObjectController({
     const link = session.smartObjectLink;
     const originatingSessionId = session.id;
     const sourceSnapshot = snapshotDocument(session.doc);
+    const contentStillCurrent = () =>
+      getActiveSessionId() === originatingSessionId &&
+      currentSession() === session &&
+      snapshotDocument(session.doc) === sourceSnapshot;
     const parentSession = getSessions().find(item => item.id === link.parentSessionId);
     const parentLayer = parentLayerFor(parentSession, link);
     if (!parentSession || !parentLayer) {
@@ -313,11 +318,7 @@ export function createSmartObjectController({
 
     try {
       const previewDataUrl = await renderPreview(embedded);
-      if (
-        getActiveSessionId() !== originatingSessionId ||
-        currentSession() !== session ||
-        snapshotDocument(session.doc) !== sourceSnapshot
-      ) {
+      if (!contentStillCurrent()) {
         setStatus('Обновление смарт-объекта отменено: содержимое или активная вкладка изменились');
         return false;
       }
@@ -338,12 +339,6 @@ export function createSmartObjectController({
         return false;
       }
 
-      const liveTargets = targetsFor(liveParent.doc, liveLayer);
-      if (!liveTargets.length) {
-        setStatus('Обновление смарт-объекта отменено: связанные экземпляры удалены');
-        return false;
-      }
-
       let photoshopRewrite = null;
       if (photoshopId) {
         try {
@@ -352,6 +347,35 @@ export function createSmartObjectController({
           consoleRef?.warn?.('Photoshop Smart Object resource rewrite skipped', error);
           photoshopRewrite = { rewritten:false, reason:error?.message || String(error) };
         }
+      }
+
+      if (!contentStillCurrent()) {
+        setStatus('Обновление смарт-объекта отменено: содержимое или активная вкладка изменились');
+        return false;
+      }
+      const publishParent = getSessions().find(item => item.id === link.parentSessionId);
+      const publishLayer = parentLayerFor(publishParent, {
+        ...link,
+        linkedSourceId,
+        photoshopSourceId:photoshopId,
+      });
+      if (
+        publishParent !== parentSession ||
+        !publishLayer ||
+        (linkedSourceId && publishLayer.linkedSourceId !== linkedSourceId) ||
+        (photoshopId && photoshopSourceId(publishLayer) !== photoshopId)
+      ) {
+        setStatus('Обновление смарт-объекта отменено: родитель изменился');
+        return false;
+      }
+
+      const liveTargets = targetsFor(publishParent.doc, publishLayer);
+      if (!liveTargets.length) {
+        setStatus('Обновление смарт-объекта отменено: связанные экземпляры удалены');
+        return false;
+      }
+      if (photoshopRewrite?.rewritten) {
+        publishEmbeddedSourceRewrite(publishParent.doc, photoshopRewrite);
       }
 
       const embeddedSnapshot = snapshotDocument(embedded);
@@ -384,7 +408,7 @@ export function createSmartObjectController({
       setDirty(false);
       session.smartObjectLink = {
         ...link,
-        layerId:liveLayer.id,
+        layerId:publishLayer.id,
         linkedSourceId,
         photoshopSourceId:photoshopId,
       };
