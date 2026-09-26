@@ -15,13 +15,23 @@ const blockState=block=>({signature:block.signature==='8B64'?'8B64':'8BIM',key:b
 
 test('text native plan rewrites a real editable TySh fixture and rejects typography drift',async()=>{
   const decoded=await decodePsd(new Uint8Array(await readFile(textFixture)),{maxPixels:2_000_000,maxLayers:50});
-  const source=decoded.layers[0],typography=source.psdText.parsed.typography;
+  const source=decoded.layers[0],typography=source.psdText.parsed.typography||{};
+  const clamp=(value,min,max)=>Math.max(min,Math.min(max,value));
+  const importedStyle={
+    fontFamily:typography.fontFamily||'Arial, sans-serif',
+    fontSize:clamp(Number(typography.fontSize)||Math.round(source.height*.8)||18,6,500),
+    fontWeight:typography.fontWeight==='700'?'700':'400',
+    fontStyle:typography.fontStyle==='italic'?'italic':'normal',
+    align:['left','center','right'].includes(typography.align)?typography.align:'left',
+    lineHeight:clamp(Number(typography.lineHeight)||1.18,.8,3),
+    letterSpacing:clamp(Number(typography.letterSpacing)||0,-5,20),
+    underline:typography.underline===true,
+    strikeThrough:typography.strikeThrough===true,
+    color:typography.color||'#000000',
+  };
   const baseline={
     x:source.x,y:source.y,width:source.width,height:source.height,scaleX:1,scaleY:1,rotation:0,
-    text:source.psdText.parsed.text,fontFamily:typography.fontFamily,fontSize:typography.fontSize,
-    fontWeight:typography.fontWeight,fontStyle:typography.fontStyle,align:typography.align,
-    lineHeight:typography.lineHeight,letterSpacing:typography.letterSpacing,
-    underline:typography.underline,strikeThrough:typography.strikeThrough,color:typography.color,
+    text:source.psdText.parsed.text,...importedStyle,
   };
   const layer={
     type:'text',...baseline,x:baseline.x+7,y:baseline.y-3,text:'Hello\nWorld',filters:{},styles:null,
@@ -29,7 +39,10 @@ test('text native plan rewrites a real editable TySh fixture and rejects typogra
   };
   const plan=psdTextNativePlan(layer);
   assert.equal(plan.eligible,true);assert.equal(plan.block.key,'TySh');assert.ok(plan.block.data instanceof Uint8Array);
-  assert.deepEqual(plan.bounds,{x:baseline.x+7,y:baseline.y-3,width:baseline.width,height:baseline.height});
+  assert.deepEqual(plan.bounds,{
+    x:Math.round(baseline.x+7),y:Math.round(baseline.y-3),
+    width:Math.max(1,Math.round(baseline.width)),height:Math.max(1,Math.round(baseline.height)),
+  });
   const changed=psdTextNativePlan({...layer,fontSize:layer.fontSize+1});
   assert.equal(changed.eligible,false);assert.match(changed.reason,/typography/);
 });

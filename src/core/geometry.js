@@ -268,15 +268,25 @@ export function rotationFromDrag(initialRotation, center, startPoint, currentPoi
 }
 
 export function layerPixelToDocumentPoint(point, layer) {
-  const width=Math.max(1,Number(layer.width)||1),height=Math.max(1,Number(layer.height)||1);
-  const scaleX=Number(layer.scaleX)||1,scaleY=Number(layer.scaleY)||1;
-  const boundsWidth=width*scaleX,boundsHeight=height*scaleY;
-  const cx=(Number(layer.x)||0)+boundsWidth/2,cy=(Number(layer.y)||0)+boundsHeight/2;
-  const unrotatedX=(Number(layer.x)||0)+Number(point?.x||0)*scaleX;
-  const unrotatedY=(Number(layer.y)||0)+Number(point?.y||0)*scaleY;
-  const radians=(Number(layer.rotation)||0)*Math.PI/180,dx=unrotatedX-cx,dy=unrotatedY-cy;
-  const cos=Math.cos(radians),sin=Math.sin(radians);
-  return{x:cx+dx*cos-dy*sin,y:cy+dx*sin+dy*cos};
+  const width = Math.max(1, Number(layer.width) || 1);
+  const height = Math.max(1, Number(layer.height) || 1);
+  const scaleX = Number(layer.scaleX) || 1;
+  const scaleY = Number(layer.scaleY) || 1;
+  const boundsWidth = width * scaleX;
+  const boundsHeight = height * scaleY;
+  const cx = layer.x + boundsWidth / 2;
+  const cy = layer.y + boundsHeight / 2;
+  const unrotatedX = layer.x + point.x * scaleX;
+  const unrotatedY = layer.y + point.y * scaleY;
+  const radians = (layer.rotation ?? 0) * Math.PI / 180;
+  const dx = unrotatedX - cx;
+  const dy = unrotatedY - cy;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  };
 }
 
 function distanceToSegment(point, a, b) {
