@@ -32,6 +32,8 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - `src/ui/tool-layout.js`: pure layout/order math only.
 - `src/ui/workspace-layout-controller.js` owns only editor-shell layout state: sidebar collapse persistence/migration plus canvas-mode chrome visibility and viewport-center preservation.
 - The layout controller receives DOM/runtime geometry through explicit ports and must not own document/layer/history/tool state; do not recreate `collapsedPanelIds`, `panelsVisible` or its layout functions in `src/main.js`.
+- `src/ui/paths-controller.js` owns Saved Paths selected-index state, bounded ID/name allocation, CRUD, panel/context-menu/keyboard wiring and apply-as-vector-mask orchestration. It receives live state/vector/edit/UI dependencies through grouped explicit ports.
+- Saved Paths controller must not become a second PSD codec or Pen geometry owner: resource serialization stays in `src/formats/psd.js`; direct-edit target geometry and transient `documentPathEditIndex` stay in `src/main.js`. Do not recreate Saved Paths CRUD/render state in `src/main.js`.
 - DOM mutation and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API. Generic overlay pointer lifecycle is the explicit exception owned by `src/interaction/pointer-lifecycle-router.js`.
 - UI modules must not become alternate owners of document/layer domain state.
 

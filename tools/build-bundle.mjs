@@ -7,6 +7,7 @@ const sources = [
   'src/ui/tool-layout.js',
   'src/ui/tool-config.js',
   'src/ui/workspace-layout-controller.js',
+  'src/ui/paths-controller.js',
   'src/ui/toolbar-controller.js',
   'src/ui/menu-controller.js',
   'src/ui/modal-controller.js',

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-26 — Saved Paths controller extraction
+
+- Refactor: selected saved-path index, Photoshop-compatible resource allocation, CRUD, panel rendering, keyboard/context-menu wiring и apply-as-vector-mask orchestration вынесены из большого `src/main.js` в `src/ui/paths-controller.js`.
+- Boundaries: Pen direct-edit geometry/transient `documentPathEditIndex` остаются runtime-owned, а PSD/PSB binary codec остаётся в `src/formats/psd.js`; новый controller получает зависимости через grouped narrow ports.
+- Tests: добавлены прямые controller regressions для ID range/998 limit, CRUD, adjustment/lock guards, accessible list/keyboard/context-menu behavior; session test дополнительно доказывает восстановление selected path per document.
+- Architecture/AI: ownership maps, AI routing и test matrix обновлены; architecture guard запрещает возвращать Saved Paths CRUD/render state в `src/main.js`.
+- Build: canonical file:// bundle graph включает `src/ui/paths-controller.js`; generated `src/app.bundle.js` синхронизирован из source modules.
+
 ### 2026-09-26 — Workspace layout controller extraction
 
 - Refactor: persistent collapse state правой панели и canvas-mode visibility/viewport-centering вынесены из большого `src/main.js` в `src/ui/workspace-layout-controller.js`; runtime теперь только подключает DOM/runtime ports.

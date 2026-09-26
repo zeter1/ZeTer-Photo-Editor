@@ -92,3 +92,20 @@ test('workspace controller refuses to close a parent while smart-object child ta
   assert.equal(h.sessions.length,2);
   assert.ok(h.events.some(value => String(value).includes('Сначала закройте вкладки содержимого')));
 });
+
+test('workspace controller restores each session saved-path selection through the runtime bridge',()=>{
+  const h=harness();
+  const first=h.controller.buildSession(h.runtime.doc);
+  const second=h.controller.buildSession(createDocument({name:'B',width:40,height:30}));
+  first.selectedPathIndex=1;
+  second.selectedPathIndex=3;
+  h.sessions=[first,second];
+
+  h.activeSessionId=first.id;
+  h.controller.loadSession(first);
+  assert.equal(h.runtime.selectedDocumentPathIndex,1);
+
+  h.activeSessionId=second.id;
+  h.controller.loadSession(second);
+  assert.equal(h.runtime.selectedDocumentPathIndex,3);
+});
