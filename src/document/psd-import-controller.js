@@ -20,8 +20,8 @@ import { bytesToDataUrl } from '../core/io.js';
  *
  * The binary codec stays in formats/psd.js and is injected through `codec`.
  * Browser raster encoding and runtime publication are explicit effectful ports.
- * Import-specific Photoshop semantic helpers are temporary narrow ports until
- * their own bounded extraction; export planning is deliberately out of scope.
+ * Photoshop Text/Shape/Adjustment/Smart Object mapping is supplied by the
+ * dedicated psd-import-semantics boundary; export planning is out of scope.
  */
 export function createPsdImportController({
   codec = {},
