@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
+import { createSelectionClipboardController } from '../src/selection/clipboard-controller.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 
@@ -264,62 +265,78 @@ test('new-document submission replaces the document before scheduling recovery r
   assert.equal(context.doc, other);
 });
 
-test('clipboard menu paste does not follow a tab switch while reading', async () => {
-  const read = deferred();
-  const original = { name: 'Первый' };
-  const other = { name: 'Второй' };
-  let imports = 0;
-  const context = {
-    doc: original,
-    activeSessionId: 'first',
-    navigator: { clipboard: { read: () => {} } },
-    readClipboardImageFiles: () => read.promise,
-    importImages: () => { imports += 1; },
-    visibleCanvasCenter: () => ({ x: 0, y: 0 }),
-    toast: () => {},
-    setStatus: () => {},
-    console,
-    pasteGeneration: 0,
-  };
-  runInNewContext(functionSource('async function pasteFromClipboard()', 'function armPasteShortcutFallback()')
-    + '\nglobalThis.pasteFromClipboard = pasteFromClipboard;', context);
+class TestClipboardFile {
+  constructor(parts,name,{type}={}) { this.parts=parts;this.name=name;this.type=type; }
+}
 
-  const pasting = context.pasteFromClipboard();
-  context.doc = other;
-  context.activeSessionId = 'second';
-  read.resolve([{ name: 'clipboard.png' }]);
+function clipboardImageItem() {
+  return { types:['image/png'], getType:async()=>({type:'image/png'}) };
+}
+
+function asyncClipboardController({state,read,importImages,setTimeoutFn=globalThis.setTimeout,clearTimeoutFn=globalThis.clearTimeout}) {
+  return createSelectionClipboardController({
+    getDocument:()=>state.doc,
+    getActiveSessionId:()=>state.activeSessionId,
+    getSelectionRect:()=>null,
+    getCopyMode:()=> 'merged',
+    getSelectedLayer:()=>null,
+    isEditableRasterLayer:()=>false,
+    clipContextToDocumentSelection:()=>{},
+    clearSelectionAcrossVisibleLayers:async()=>null,
+    clearSelectedPixels:async()=>false,
+    clearSelectionState:()=>{},
+    setTool:()=>{},
+    setStatus:()=>{},
+    toast:()=>{},
+    importImages,
+    visibleCanvasCenter:()=>({x:0,y:0}),
+    isImageFile:()=>true,
+    navigatorTarget:{clipboard:{read:()=>read.promise}},
+    FileClass:TestClipboardFile,
+    setTimeoutFn,
+    clearTimeoutFn,
+  });
+}
+
+test('clipboard menu paste does not follow a tab switch while reading', async () => {
+  const read=deferred();
+  const original={name:'Первый'};
+  const other={name:'Второй'};
+  const state={doc:original,activeSessionId:'first'};
+  let imports=0;
+  const controller=asyncClipboardController({
+    state,read,
+    importImages:()=>{imports+=1;return Promise.resolve();},
+  });
+
+  const pasting=controller.pasteFromClipboard();
+  state.doc=other;
+  state.activeSessionId='second';
+  read.resolve([clipboardImageItem()]);
   await pasting;
-  assert.equal(imports, 0);
+  assert.equal(imports,0);
 });
 
 test('shortcut clipboard fallback does not paste into a later active tab', async () => {
-  const read = deferred();
-  const timers = [];
-  let imports = 0;
-  const context = {
-    doc: { name: 'Первый' },
-    activeSessionId: 'first',
-    navigator: { clipboard: { read: () => {} } },
-    readClipboardImageFiles: () => read.promise,
-    importImages: () => { imports += 1; return Promise.resolve(); },
-    visibleCanvasCenter: () => ({ x: 0, y: 0 }),
-    setTimeout: callback => { timers.push(callback); return timers.length; },
-    clearTimeout: () => {},
-    setStatus: () => {},
-    toast: () => {},
-    console,
-    pasteGeneration: 0,
-    pasteFallbackTimer: null,
-  };
-  runInNewContext(functionSource('function armPasteShortcutFallback()', 'function toggleSelectedVisibility()')
-    + '\nglobalThis.armPasteShortcutFallback = armPasteShortcutFallback;', context);
+  const read=deferred();
+  const timers=[];
+  const state={doc:{name:'Первый'},activeSessionId:'first'};
+  let imports=0;
+  const controller=asyncClipboardController({
+    state,read,
+    importImages:()=>{imports+=1;return Promise.resolve();},
+    setTimeoutFn:callback=>{timers.push(callback);return timers.length;},
+    clearTimeoutFn:()=>{},
+  });
 
-  context.armPasteShortcutFallback();
-  context.doc = { name: 'Второй' };
-  context.activeSessionId = 'second';
-  read.resolve([{ name: 'clipboard.png' }]);
+  controller.armPasteShortcutFallback();
+  state.doc={name:'Второй'};
+  state.activeSessionId='second';
+  read.resolve([clipboardImageItem()]);
   await Promise.resolve();
   await Promise.resolve();
-  timers.forEach(callback => callback());
-  assert.equal(imports, 0);
+  await Promise.resolve();
+  timers.forEach(callback=>callback());
+  await Promise.resolve();
+  assert.equal(imports,0);
 });
