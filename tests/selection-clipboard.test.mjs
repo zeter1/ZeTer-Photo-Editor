@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { selectionPixelBounds } from '../src/core/geometry.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const clipboard = await readFile(new URL('../src/selection/clipboard-controller.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
 test('selectionPixelBounds keeps every touched pixel while clipping to the document', () => {
@@ -27,8 +28,8 @@ test('selection tool exposes merged and selected-layer clipboard modes', () => {
 });
 
 test('Ctrl+C and Ctrl+X are wired to image clipboard commands', () => {
-  assert.match(main, /function copySelection\(\) \{ return copySelectionToClipboard\(\); \}/);
-  assert.match(main, /function cutSelection\(\) \{ return copySelectionToClipboard\(\{cut:true\}\); \}/);
+  assert.match(clipboard, /function copySelection\(\) \{ return copySelectionToClipboard\(\); \}/);
+  assert.match(clipboard, /function cutSelection\(\) \{ return copySelectionToClipboard\(\{cut:true\}\); \}/);
   assert.match(main, /if\(ctrl&&e\.code==='KeyC'\)/);
   assert.match(main, /if\(ctrl&&e\.code==='KeyX'\)/);
   assert.match(main, /\['Копировать выделение','Ctrl\+C',copySelection/);
@@ -38,19 +39,19 @@ test('Ctrl+C and Ctrl+X are wired to image clipboard commands', () => {
 });
 
 test('merged clipboard mode renders the complete document pipeline and selected mode renders one layer', () => {
-  const start = main.indexOf('async function renderSelectionMergedToPng(bounds) {');
-  const end = main.indexOf('\nasync function prepareClearedRasterDataUrl', start);
-  const fn = start >= 0 && end > start ? main.slice(start, end) : '';
+  const start = clipboard.indexOf('async function renderSelectionMergedToPng(bounds) {');
+  const end = clipboard.indexOf('\n  function finishSelectionClipboardAction', start);
+  const fn = start >= 0 && end > start ? clipboard.slice(start, end) : '';
   assert.match(fn, /await renderDocument\(full,doc,\{checker:false\}\)/);
   assert.match(fn, /clipContextToDocumentSelection\(ctx\)/);
   assert.match(fn, /ctx\.drawImage\(full,0,0\)/);
-  assert.match(main, /selectionCopyMode==='merged'[\s\S]*renderSelectionMergedToPng\(bounds\)[\s\S]*renderSelectionLayerToPng\(layer,bounds\)/);
+  assert.match(clipboard, /copyMode==='merged'[\s\S]*renderSelectionMergedToPng\(bounds\)[\s\S]*renderSelectionLayerToPng\(layer,bounds\)/);
 });
 
 test('clipboard writes PNG before cut mutates raster pixels', () => {
-  const start = main.indexOf('async function copySelectionToClipboard({ cut = false } = {}) {');
-  const end = main.indexOf('\nfunction copySelection()', start);
-  const fn = start >= 0 && end > start ? main.slice(start, end) : '';
+  const start = clipboard.indexOf('async function copySelectionToClipboard({ cut = false } = {}) {');
+  const end = clipboard.indexOf('\n  function copySelection()', start);
+  const fn = start >= 0 && end > start ? clipboard.slice(start, end) : '';
   assert.match(fn, /new ClipboardItem\(\{'image\/png':pngPromise\}\)/);
   assert.match(fn, /await navigator\.clipboard\.write\(\[item\]\)/);
   assert.match(fn, /clearSelectionAcrossVisibleLayers/);
@@ -71,7 +72,7 @@ test('merged cut rasterizes editable pixel layers while leaving adjustment layer
 });
 
 test('successful copy or cut clears the marquee and switches to move for immediate paste positioning', () => {
-  assert.match(main, /function finishSelectionClipboardAction\(message\) \{[\s\S]*clearSelectionState\(\);[\s\S]*setTool\('move'\)/);
-  assert.match(main, /finishSelectionClipboardAction\(`Скопировано/);
-  assert.match(main, /finishSelectionClipboardAction\(`Вырезано/);
+  assert.match(clipboard, /function finishSelectionClipboardAction\(message\) \{[\s\S]*clearSelectionState\(\);[\s\S]*setTool\('move'\)/);
+  assert.match(clipboard, /finishSelectionClipboardAction\(`Скопировано/);
+  assert.match(clipboard, /finishSelectionClipboardAction\(`Вырезано/);
 });
