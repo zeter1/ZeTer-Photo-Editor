@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController, documentImportController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -14,6 +14,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, too
   readFile(new URL('src/ui/menu-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
+  readFile(new URL('src/document/import-controller.js', root), 'utf8'),
 ]);
 
 test('canonical UI and PSD boundaries stay out of legacy compatibility paths', () => {
@@ -68,4 +69,11 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /\bpasteFallbackTimer\b/);
   assert.doesNotMatch(main, /\bopenMenuKey\b/);
   assert.match(main, /menuController\.isOpen\(\)/);
+  assert.match(main, /from '\.\/document\/import-controller\.js'/);
+  assert.match(build, /'src\/document\/import-controller\.js'/);
+  assert.match(documentImportController, /export function createDocumentImportController/);
+  assert.doesNotMatch(main, /function isImageFile\(/);
+  assert.doesNotMatch(main, /function isProjectFile\(/);
+  assert.doesNotMatch(main, /async function importImages\(/);
+  assert.doesNotMatch(main, /async function handleIncomingFiles\(/);
 });

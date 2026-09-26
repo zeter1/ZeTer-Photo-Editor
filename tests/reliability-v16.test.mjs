@@ -6,6 +6,7 @@ import { checkedCanvasSize, createDocument, sanitizeProject, MAX_CANVAS_PIXELS }
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
 const modalController = await readFile(new URL('../src/ui/modal-controller.js', import.meta.url), 'utf8');
+const documentImportController = await readFile(new URL('../src/document/import-controller.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 test('canvas allocation has a pixel budget in addition to per-axis bounds', () => {
@@ -50,9 +51,9 @@ test('raster decode cache is bounded and corrupt embedded images do not reject t
 });
 
 test('multi-image import validates all inputs before changing document state', () => {
-  const importFn = main.match(/async function importImages\(files,[\s\S]*?\n\}/)?.[0] ?? '';
+  const importFn = documentImportController.match(/async function importImages\(files,[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.match(importFn, /const prepared=\[\]/);
-  assert.match(importFn, /checkedCanvasSize\(d\.width,d\.height/);
+  assert.match(importFn, /checkedCanvasSize\(dimensions\.width,dimensions\.height/);
   assert.ok(importFn.indexOf('prepared.push') < importFn.indexOf('addLayer(doc'), 'all files should be prepared before the first layer mutation');
 });
 

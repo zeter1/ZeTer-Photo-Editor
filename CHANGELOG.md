@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-26 — Document import controller extraction
+
+- Refactor: file classification, multi-image import и drag/drop/file-input routing вынесены из `src/main.js` в `src/document/import-controller.js`.
+- Reliability: controller сохраняет decode/validate-all-before-mutate semantics и повторно проверяет исходные document/session перед первым изменением, поэтому поздний decode не импортирует слой в другую вкладку.
+- Architecture: PSD/PSB parsing и project open/save остаются отдельными callbacks; import controller не поглощает format/persistence ownership.
+- Tests: async document-context regressions теперь вызывают реальный import controller API; reliability contract читает нового владельца import transaction.
+- Docs/AI: PROJECT, CODEMAP, BOUNDARIES и AGENTS получили отдельную document-import boundary, чтобы file/import задачи находились без поиска по `src/main.js`.
+
+
 ### 2026-09-26 — Selection clipboard controller extraction
 
 - Refactor: copy/cut/paste lifecycle выделения вынесен из `src/main.js` в `src/selection/clipboard-controller.js`: PNG preparation, merged/selected copy modes, Clipboard API, native paste и Ctrl+V fallback state.

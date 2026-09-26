@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { createSelectionClipboardController } from '../src/selection/clipboard-controller.js';
+import { createDocumentImportController } from '../src/document/import-controller.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 
@@ -19,70 +20,66 @@ function deferred() {
   return { promise, resolve };
 }
 
-test('an image decoded after switching tabs never lands in the new document', async () => {
-  const read = deferred();
-  const original = { name: 'Без имени', width: 100, height: 100, layers: [] };
-  const other = { name: 'Другой', width: 100, height: 100, layers: [] };
-  const commits = [];
-  const context = {
-    doc: original,
-    activeSessionId: 'first',
-    isImageFile: () => true,
-    readFileAsDataURL: () => read.promise,
-    dimensionsFromDataUrl: async () => ({ width: 20, height: 20 }),
-    checkedCanvasSize: () => {},
-    createRasterLayer: options => options,
-    addLayer: (documentValue, layer) => documentValue.layers.push(layer),
-    commit: label => commits.push(label),
-    blockPendingDocumentEdit: () => false,
-    setStatus: () => {},
-    toast: () => {},
-    fitToView: () => {},
-    visibleCanvasCenter: () => ({ x: 50, y: 50 }),
-    brushCanvas: null,
-    Date,
-  };
-  runInNewContext(functionSource('async function importImages(', 'async function handleIncomingFiles(')
-    + '\nglobalThis.importImages = importImages;', context);
+function importControllerForTest({state,readFileAsDataURL,dimensionsFromDataUrl,commits}) {
+  return createDocumentImportController({
+    getDocument:()=>state.doc,
+    getActiveSessionId:()=>state.activeSessionId,
+    isPsdFile:()=>false,
+    readFileAsDataURL,
+    dimensionsFromDataUrl,
+    checkedCanvasSize:()=>{},
+    createRasterLayer:options=>options,
+    addLayer:(documentValue,layer)=>documentValue.layers.push(layer),
+    blockPendingDocumentEdit:()=>false,
+    commit:label=>commits.push(label),
+    setStatus:()=>{},
+    toast:()=>{},
+    fitToView:()=>{},
+    visibleCanvasCenter:()=>({x:50,y:50}),
+    openPsd:async()=>{},
+    openProject:async()=>{},
+    resetBrushBuffer:()=>{},
+    DateClass:Date,
+  });
+}
 
-  const importing = context.importImages([{ name: 'photo.png', type: 'image/png' }]);
-  context.doc = other;
-  context.activeSessionId = 'second';
+test('an image decoded after switching tabs never lands in the new document', async () => {
+  const read=deferred();
+  const original={name:'Без имени',width:100,height:100,layers:[]};
+  const other={name:'Другой',width:100,height:100,layers:[]};
+  const state={doc:original,activeSessionId:'first'};
+  const commits=[];
+  const controller=importControllerForTest({
+    state,commits,
+    readFileAsDataURL:()=>read.promise,
+    dimensionsFromDataUrl:async()=>({width:20,height:20}),
+  });
+
+  const importing=controller.importImages([{name:'photo.png',type:'image/png'}]);
+  state.doc=other;
+  state.activeSessionId='second';
   read.resolve('data:image/png;base64,AAAA');
-  assert.equal(await importing, 0);
-  assert.equal(original.layers.length, 0);
-  assert.equal(other.layers.length, 0);
-  assert.deepEqual(commits, []);
+  assert.equal(await importing,0);
+  assert.equal(original.layers.length,0);
+  assert.equal(other.layers.length,0);
+  assert.deepEqual(commits,[]);
 });
 
 test('an image still imports into its original active document', async () => {
-  const documentValue = { name: 'Без имени', width: 100, height: 100, layers: [] };
-  const commits = [];
-  const context = {
-    doc: documentValue,
-    activeSessionId: 'first',
-    isImageFile: () => true,
-    readFileAsDataURL: async () => 'data:image/png;base64,AAAA',
-    dimensionsFromDataUrl: async () => ({ width: 20, height: 30 }),
-    checkedCanvasSize: () => {},
-    createRasterLayer: options => options,
-    addLayer: (target, layer) => target.layers.push(layer),
-    commit: label => commits.push(label),
-    blockPendingDocumentEdit: () => false,
-    setStatus: () => {},
-    toast: () => {},
-    fitToView: () => {},
-    brushCanvas: null,
-    Date,
-  };
-  runInNewContext(functionSource('async function importImages(', 'async function handleIncomingFiles(')
-    + '\nglobalThis.importImages = importImages;', context);
+  const documentValue={name:'Без имени',width:100,height:100,layers:[]};
+  const state={doc:documentValue,activeSessionId:'first'};
+  const commits=[];
+  const controller=importControllerForTest({
+    state,commits,
+    readFileAsDataURL:async()=> 'data:image/png;base64,AAAA',
+    dimensionsFromDataUrl:async()=>({width:20,height:30}),
+  });
 
-  assert.equal(await context.importImages([{ name: 'photo.png', type: 'image/png' }]), 1);
-  assert.equal(documentValue.layers.length, 1);
-  assert.equal(documentValue.width, 20);
-  assert.equal(documentValue.height, 30);
-  assert.deepEqual(commits, ['Импорт изображения']);
+  assert.equal(await controller.importImages([{name:'photo.png',type:'image/png'}]),1);
+  assert.equal(documentValue.layers.length,1);
+  assert.equal(documentValue.width,20);
+  assert.equal(documentValue.height,30);
+  assert.deepEqual(commits,['Импорт изображения']);
 });
 
 test('late rasterization cannot replace the last layer of another tab', async () => {
@@ -253,7 +250,7 @@ test('new-document submission replaces the document before scheduling recovery r
     setStatus: () => {},
     toast: () => {},
   };
-  runInNewContext(functionSource('async function createNewDialog()', 'function isImageFile(file)')
+  runInNewContext(functionSource('async function createNewDialog()', 'function visibleCanvasCenter()')
     + '\nglobalThis.createNewDialog = createNewDialog;', context);
 
   await context.createNewDialog();

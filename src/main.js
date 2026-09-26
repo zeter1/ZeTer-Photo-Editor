@@ -28,6 +28,7 @@ import { createToolbarController } from './ui/toolbar-controller.js';
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
+import { createDocumentImportController } from './document/import-controller.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -150,6 +151,27 @@ const modalController = createModalController({
   },
 });
 const { showModal, showInfoModal, showRecoveryModal } = modalController;
+
+const documentImportController = createDocumentImportController({
+  getDocument: () => doc,
+  getActiveSessionId: () => activeSessionId,
+  isPsdFile,
+  readFileAsDataURL,
+  dimensionsFromDataUrl,
+  checkedCanvasSize,
+  createRasterLayer,
+  addLayer,
+  blockPendingDocumentEdit,
+  commit,
+  setStatus,
+  toast,
+  fitToView,
+  visibleCanvasCenter,
+  openPsd,
+  openProject,
+  resetBrushBuffer: () => { brushCanvas=null; },
+});
+const { isImageFile, isProjectFile, importImages, handleIncomingFiles } = documentImportController;
 
 const selectionClipboardController = createSelectionClipboardController({
   getDocument: () => doc,
@@ -3400,10 +3422,6 @@ async function createNewDialog() {
   showModal({title:'Новый документ',fields:[{name:'name',label:'Название',value:'Без имени'},{name:'width',label:'Ширина',type:'number',value:'1200',min:'1',max:'12000',required:true},{name:'height',label:'Высота',type:'number',value:'800',min:'1',max:'12000',required:true},{name:'background',label:'Фон',type:'select',value:'transparent',options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный']] }],submitLabel:'Создать',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{const next=createDocument({name:v.name||'Без имени',width:Number(v.width),height:Number(v.height),background:v.background});history=new HistoryStack(80);setDoc(next,{resetHistory:true,label:'Новый документ'});markDirty(false);queueRecovery({immediate:true});fitToView();}catch(error){toast(error.message,'error');setStatus(error.message);return false;}}});
 }
 
-function isImageFile(file) {
-  return Boolean(file) && !isPsdFile(file) && (String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
-}
-function isProjectFile(file) { return Boolean(file) && /\.(zpe|pixforge|json)$/i.test(file.name || ''); }
 function visibleCanvasCenter() {
   const vr=els.viewport.getBoundingClientRect();
   const cr=els.overlay.getBoundingClientRect();
@@ -3418,51 +3436,6 @@ function clientPointToCanvas(clientX, clientY) {
     x: clamp((clientX-r.left)/zoom, 0, doc.width),
     y: clamp((clientY-r.top)/zoom, 0, doc.height),
   };
-}
-
-async function importImages(files, { anchor = null, source = 'Импорт' } = {}) {
-  const images=[...files].filter(isImageFile); if(!images.length)return 0;
-  const targetDocument=doc;
-  const targetSessionId=activeSessionId;
-  setStatus(`${source}: чтение изображений…`);
-
-  // Decode and validate everything before mutating the document. If the third
-  // file is corrupt or unreasonably large, the first two must not appear as a
-  // half-finished import with no matching history entry.
-  const prepared=[];
-  for(const file of images){
-    const dataUrl=await readFileAsDataURL(file);
-    const d=await dimensionsFromDataUrl(dataUrl);
-    checkedCanvasSize(d.width,d.height,`Изображение «${file.name || 'Без имени'}»`);
-    prepared.push({file,dataUrl,width:d.width,height:d.height});
-  }
-
-  if(doc!==targetDocument||activeSessionId!==targetSessionId){
-    setStatus('Импорт отменён: активный документ изменился');
-    toast('Повторите импорт в нужной вкладке','warn');
-    return 0;
-  }
-  if(blockPendingDocumentEdit())return 0;
-  const emptyDocument = doc.layers.length===0 && doc.name==='Без имени';
-  if(emptyDocument){
-    const first=prepared[0];
-    doc.width=first.width;doc.height=first.height;doc.name=(first.file.name || 'Изображение').replace(/\.[^.]+$/,'');
-  }
-  let offset=0;
-  for(const item of prepared){
-    const target = emptyDocument ? {x:doc.width/2,y:doc.height/2} : (anchor || visibleCanvasCenter());
-    addLayer(doc,createRasterLayer({
-      name:item.file.name || `Вставка ${new Date().toLocaleTimeString('ru-RU')}`,
-      x:target.x-item.width/2+offset,y:target.y-item.height/2+offset,width:item.width,height:item.height,dataUrl:item.dataUrl,
-    }));
-    offset+=18;
-  }
-  brushCanvas=null;
-  commit(images.length===1?`${source} изображения`:`${source}: ${images.length} изображений`);
-  if (emptyDocument) fitToView();
-  setStatus(`${source} завершён`);
-  toast(images.length===1?'Изображение добавлено как слой':`Добавлено слоёв: ${images.length}`,'success');
-  return images.length;
 }
 
 async function rgbaPixelsToDataUrl(width,height,pixels,label='PSD слой'){
@@ -4336,25 +4309,6 @@ async function openPsd(file){
     const message=`Не удалось импортировать PSD/PSB: ${error?.message||error}`;
     alert(message);setStatus('Ошибка импорта PSD/PSB');toast(message,'error');
   }
-}
-
-async function handleIncomingFiles(files, anchor = null, source = 'Импорт') {
-  const incoming=[...files];
-  const psdFiles=incoming.filter(isPsdFile);
-  const project=incoming.find(isProjectFile);
-  const images=incoming.filter(isImageFile);
-  if(psdFiles.length){
-    if(psdFiles.length!==1||incoming.length!==1){
-      toast('PSD/PSB открывается как отдельный документ: выберите один Photoshop-файл за раз','warn');
-      setStatus('Выберите один PSD/PSB-файл');return;
-    }
-    await openPsd(psdFiles[0]);return;
-  }
-  if (project && images.length===0) { await openProject(project); return; }
-  if (images.length) { await importImages(images,{anchor,source}); return; }
-  if (project) { await openProject(project); return; }
-  toast('Формат файла не поддерживается','error');
-  setStatus('Неподдерживаемый файл');
 }
 
 async function openProject(file) {
