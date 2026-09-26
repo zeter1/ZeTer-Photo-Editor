@@ -6,7 +6,8 @@ const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 test('middle mouse and Space provide temporary canvas panning without changing tools', () => {
-  assert.match(main, /const wantsPan = e\.button === 1 \|\| \(e\.button === 0 && \(spaceHeld \|\| currentTool === 'hand'\)\)/);
+  assert.match(main, /function pointerWantsPan\(event\)[\s\S]*?event\.button === 1[\s\S]*?spaceHeld \|\| currentTool === 'hand'/);
+  assert.match(main, /const wantsPan = pointerWantsPan\(e\)/);
   assert.match(main, /if \(e\.button === 1\) e\.preventDefault\(\)/);
   assert.match(main, /drag = \{ kind:'pan'/);
   assert.match(main, /auxclick[\s\S]*?e\.button === 1/);

@@ -40,6 +40,6 @@ test('finished strokes use asynchronous canvas encoding instead of synchronous t
 });
 
 test('paint start is cancelled when the primary pointer was released during async layer preparation', () => {
-  assert.match(main, /canContinue:\(\)=>activePrimaryPointerId===e\.pointerId/);
+  assert.match(main, /canContinue:\(\)=>pointerLifecycle\.isActivePointer\(e\.pointerId\)/);
   assert.match(gesture, /const layer = await ensurePaintLayer\(point, tool, canContinue\);[\s\S]*?if \(!canContinue\(\)\) return false/);
 });

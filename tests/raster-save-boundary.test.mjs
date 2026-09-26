@@ -14,7 +14,8 @@ const deleteCommand = main.slice(main.indexOf('function deleteSelected()'), main
 test('save and tab switch wait for a pending document edit', () => {
   const calls = [];
   const context = {
-    paintPersisting: true, drag: null, activePrimaryPointerId: null,
+    paintPersisting: true, drag: null, pointerActive: false,
+    pointerLifecycle: { hasActivePointer: () => context.pointerActive },
     RASTER_BRUSH_TOOLS: new Set(['brush']), currentTool: 'brush',
     doc: { name: 'Тест', layers: [] }, dirty: true,
     safeFilename: value => value,
@@ -60,10 +61,10 @@ test('save and tab switch wait for a pending document edit', () => {
   assert.equal(calls.includes('download'), false);
   context.drag = null;
   context.currentTool = 'fill';
-  context.activePrimaryPointerId = 9;
+  context.pointerActive = true;
   context.commands.saveProject();
   assert.equal(calls.includes('download'), false);
-  context.activePrimaryPointerId = null;
+  context.pointerActive = false;
   context.commands.saveProject();
   assert.equal(context.dirty, true);
   assert.ok(calls.includes('download'));
@@ -75,7 +76,8 @@ test('export submits one document snapshot and blocks while raster data is pendi
   let modal;
   const downloads = [];
   const context = {
-    paintPersisting: false, drag: null, activePrimaryPointerId: null,
+    paintPersisting: false, drag: null,
+    pointerLifecycle: { hasActivePointer: () => false },
     RASTER_BRUSH_TOOLS: new Set(['brush']), currentTool: 'brush',
     doc: { name: 'До', layers: [{ id: 'one' }] },
     showModal: options => { modal = options; },
@@ -165,7 +167,8 @@ test('fill protects the document while its raster buffer is decoding', async () 
 test('selected raster layer cannot be deleted before its stroke is committed', () => {
   let removals = 0;
   const context = {
-    paintPersisting: true, drag: null, activePrimaryPointerId: null,
+    paintPersisting: true, drag: null,
+    pointerLifecycle: { hasActivePointer: () => false },
     RASTER_BRUSH_TOOLS: new Set(['brush']), currentTool: 'brush',
     doc: { layers: [{ id: 'painted' }] },
     selected: () => ({ id: 'painted' }),
