@@ -6,7 +6,7 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar/workspace-layout/saved-Paths and retouch mechanics, are delegated to their canonical owners.
+Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`, while raster layer-mask / Select & Mask orchestration is delegated to `src/selection/mask-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar/workspace-layout/saved-Paths and retouch mechanics, are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
@@ -48,7 +48,7 @@ It deliberately does **not** own ICC parser/transform math (`src/core/color-mana
 ### `smart-filter-controller.js`
 Owns Smart Filter UI/orchestration as one feature boundary: stack/mask markup, reorder/toggle/remove/clear commands, selection-mask prepare-before-publish, properties-panel bindings and the add/edit modal lifecycle. Runtime/document/selection/render/DOM effects enter through narrow ports; stable Smart Filter state/geometry/config dependencies remain direct imports.
 
-It deliberately does **not** own the persisted Smart Filter schema, sanitization or `MAX_SMART_FILTERS` definition (`src/core/state.js`), filter pixel application/mask composition (`src/core/render.js`), or the shared selection-mask rasterizer still used by layer masks in `src/main.js`. Async selection-mask publication revalidates the originating document/layer after the await.
+It deliberately does **not** own the persisted Smart Filter schema, sanitization or `MAX_SMART_FILTERS` definition (`src/core/state.js`), filter pixel application/mask composition (`src/core/render.js`), or the shared selection-mask rasterizer in `src/selection/mask-controller.js`. Smart Filter consumes that rasterizer through a narrow port but keeps its own mask mutation/publication transaction; async publication revalidates the originating document/layer after the await.
 
 ### `layer-blending-controller.js`
 Owns the Blending Options / Layer Styles dialog as one UI transaction: draft blend mode/opacity/style edits, live preview on/off, preview-canvas crop/copy + resize cleanup, Apply/Cancel/Escape/backdrop lifecycle and stale document/layer rollback. It imports stable style/geometry/lock primitives directly and receives live document/history/render/DOM capabilities through narrow ports.
@@ -132,6 +132,11 @@ Owns selection copy/cut/paste orchestration: selected-vs-merged PNG preparation,
 
 ### `raster-mutation-controller.js`
 Owns destructive selection-to-layer orchestration: merged cut across visible unlocked pixel layers, prepare-all-before-mutate staging, native high-depth clear publication, non-raster pixel-edit rasterization and the selected-layer rasterize command with document/session stale guards. It does not own selection shape/pointer state or Clipboard APIs.
+
+### `mask-controller.js`
+Owns selection-shape → raster layer-mask / Select & Mask orchestration: regular-layer local coordinates versus adjustment/document coordinates, bounded refine preparation, shared `selectionMaskDataUrl()`, add/remove mask commands, non-destructive preview lifecycle and final Apply publication.
+
+Stable mask schema/lock/geometry/pixel primitives remain in core. Runtime state, render/source-canvas and modal/DOM/RAF effects enter as narrow ports. Every awaited mutation path revalidates the originating document, exact selected layer and lock state before publication; preview additionally uses a per-modal generation token so stale async work cannot attach listeners or repaint a foreign modal. Smart Filter reuses only the shared rasterizer and retains its own target/history transaction. Vector Mask/Pen semantics remain outside this owner.
 
 ## Workspace boundary — `src/workspace/`
 
