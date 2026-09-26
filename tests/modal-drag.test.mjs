@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRapidRightClickTracker, makeModalDraggable } from '../src/ui/modal-controller.js';
+import { createRapidDoubleClickTracker, makeModalDraggable } from '../src/ui/modal-controller.js';
 
 test('shared modal drag stays inside the viewport and stops on pointer release',()=>{
   const events=new Map();
@@ -33,8 +33,8 @@ test('shared modal drag stays inside the viewport and stops on pointer release',
 });
 
 
-test('rapid right-click tracker fires only for the same project inside the threshold',()=> {
-  const tracker=createRapidRightClickTracker({thresholdMs:360});
+test('rapid double-click tracker fires only for the same project inside the threshold',()=> {
+  const tracker=createRapidDoubleClickTracker({thresholdMs:360});
   assert.equal(tracker.register('project-a',1000),false);
   assert.equal(tracker.register('project-a',1280),true);
   assert.equal(tracker.register('project-a',1300),false);
