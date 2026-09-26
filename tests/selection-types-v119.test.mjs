@@ -41,7 +41,7 @@ test('non-rectangular selections clip copy, raster editing and fill through the 
   assert.match(main, /function clipContextToDocumentSelection\(ctx\)/);
   assert.match(clipboard, /renderSelectionLayerToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
   assert.match(clipboard, /renderSelectionMergedToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
-  assert.match(main, /function selectionPolygonForLayer\(layer\)[\s\S]*selectionPathPoints\(selectionShape, 72\)/);
+  assert.match(main, /function selectionPolygonForLayer\(layer, shape = selectionShape\)[\s\S]*selectionPathPoints\(shape, 72\)/);
   assert.match(main, /function rasterSelectionPredicate\(layer\)[\s\S]*pointInsideSelection/);
 });
 
