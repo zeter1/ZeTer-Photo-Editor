@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
   readFile(new URL('src/core/tool-layout.js', root), 'utf8'),
   readFile(new URL('docs/PROJECT.md', root), 'utf8'),
   readFile(new URL('src/workspace/session-controller.js', root), 'utf8'),
+  readFile(new URL('src/workspace/recovery-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/toolbar-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/menu-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
@@ -43,6 +44,16 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(build, /'src\/workspace\/session-controller\.js'/);
   assert.match(workspaceSessions, /export function createDocumentSessionController/);
   assert.doesNotMatch(main, /function renderDocumentTabs\(\)/);
+  assert.match(main, /from '\.\/workspace\/recovery-controller\.js'/);
+  assert.match(build, /'src\/workspace\/recovery-controller\.js'/);
+  assert.match(workspaceRecovery, /export function createRecoveryController/);
+  assert.match(workspaceRecovery, /export function createRecoveryWindowKey/);
+  assert.match(main, /createRecoveryController\(\{/);
+  for (const name of ['createRecoveryKey','reportRecoveryFailure','cancelRecoveryTimer','discardRecovery']) {
+    assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  }
+  assert.doesNotMatch(main, /let (?:recoveryTimer|recoveryGeneration|recoveryWritePromise|recoveryStorageAvailable|recoveryFailureNotified|unrestoredRecoveryDocuments)\b/);
+  assert.doesNotMatch(main, /async function restoreRecoveryIfAvailable\(\)/);
   assert.match(main, /from '\.\/ui\/toolbar-controller\.js'/);
   assert.match(build, /'src\/ui\/toolbar-controller\.js'/);
   assert.match(toolbarController, /export function createToolbarController/);

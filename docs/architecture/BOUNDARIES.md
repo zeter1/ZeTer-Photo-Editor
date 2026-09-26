@@ -8,6 +8,7 @@ These rules keep the project understandable and prevent the large app controller
 index.html / styles
         ↓
 src/main.js  ─────→  src/ui/*
+    │  ├──────→  src/workspace/*
     │  ├──────→  src/interaction/*
     │  ├──────→  src/selection/*
     │  ├──────→  src/document/*
@@ -31,6 +32,15 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - `src/ui/tool-layout.js`: pure layout/order math only.
 - DOM mutation and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API. Generic overlay pointer lifecycle is the explicit exception owned by `src/interaction/pointer-lifecycle-router.js`.
 - UI modules must not become alternate owners of document/layer domain state.
+
+### Workspace
+- `src/workspace/session-controller.js` owns document-tab/session lifecycle and per-session UI/runtime snapshots.
+- `src/workspace/recovery-controller.js` owns recovery orchestration state: window identity, debounce/generation, serialized persistence queue, unreadable-sibling carry-forward and restore/discard policy.
+- `src/core/recovery.js` stays a low-level IndexedDB/record adapter; it must not gain session/tab/UI ownership.
+- Recovery controller receives storage/project/session/runtime/UI dependencies through explicit ports. Do not recreate recovery timers, write promises or window keys in `src/main.js`.
+- Multi-window ownership is a controller invariant, not only a modal affordance: foreign recovery entries may be inspected/restored but not deleted by this window.
+- Async recovery writes/discard must remain serialized; unreadable sibling records must not be silently lost when valid siblings are restored.
+
 
 ### Document import
 - `src/document/import-controller.js` may classify incoming files and mutate the active document only after every image is decoded/validated.

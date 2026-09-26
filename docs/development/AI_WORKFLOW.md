@@ -33,6 +33,7 @@ Useful routing:
 - rendering → render
 - ICC/CMYK → color-management
 - PSD/PSB → formats/psd
+- recovery/autosave / dirty-tab snapshot / restore/discard / multi-window ownership → `workspace/recovery-controller`; IndexedDB record/storage bug → `core/recovery`
 - startup/file:// → build-bundle + browser-smoke
 
 ## 3. PLAN
@@ -44,7 +45,8 @@ Prefer a bounded diff. Preserve existing behaviour not named by the task. If mov
 - edit canonical modules, never generated bundle directly;
 - keep old import paths only as tiny compatibility shims when migration risk justifies them;
 - do not hide failures with broad try/catch, disabled tests or weak assertions;
-- add regression coverage for fixed behaviour.
+- add regression coverage for fixed behaviour;
+- prefer public/controller API tests over VM/source slicing of private function text; keep structural source tests only for architecture ownership contracts.
 
 ## 5. VERIFY
 
@@ -53,6 +55,8 @@ Minimum source change gate: `npm run check`.
 Also use `npm run test:browser` for startup, DOM, toolbar, menus, persistence and real `file://` behaviour.
 
 A green syntax check is not proof of Canvas/pointer/format/runtime behaviour. Report NOT VERIFIED for layers you could not exercise.
+
+For non-trivial refactor/debug/reliability work, use `docs/development/QUALITY_PLAYBOOK.md` for the evidence/test-oracle/review checklist.
 
 ## 6. REVIEW
 
