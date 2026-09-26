@@ -184,8 +184,10 @@ test('new text and shape layers inherit the tool opacity like brush, fill, and l
   assert.match(css, /\.toast\.warn/);
   assert.doesNotMatch(modalController, /data-later/);
   assert.match(modalController, /Переименовать проект/);
-  assert.match(modalController, /createRapidRightClickTracker/);
-  assert.match(modalController, /event\.button !== 2/);
+  assert.match(modalController, /createRapidDoubleClickTracker/);
+  assert.match(modalController, /event\.button !== 0/);
+  assert.match(modalController, /trigger:'primary-double-click'/);
+  assert.doesNotMatch(modalController, /event\.button !== 2|secondary-double-click/);
   assert.match(workspaceRecovery, /action\.action === 'rename'/);
   assert.match(workspaceRecovery, /savedAt:payload\.savedAt/);
   assert.match(modalController, /recovery-project-list/);
