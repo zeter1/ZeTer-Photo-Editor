@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-26 — Selection clipboard controller extraction
+
+- Refactor: copy/cut/paste lifecycle выделения вынесен из `src/main.js` в `src/selection/clipboard-controller.js`: PNG preparation, merged/selected copy modes, Clipboard API, native paste и Ctrl+V fallback state.
+- Architecture: controller не владеет document/layer mutation; очистка выбранного или всех видимых слоёв остаётся явным callback boundary в `src/main.js`, сохраняя lock/high-depth/Undo semantics.
+- Async safety: paste generation/timer state теперь локален controller-у, а direct/fallback paste сохраняют guard по исходному document/session при переключении вкладок.
+- Regression: async clipboard tests вызывают реальный controller API вместо source slicing; architecture gate запрещает возвращать clipboard state/functions в `src/main.js`.
+- Fixed: global keyboard handler больше не читает приватный `openMenuKey` после menu-controller extraction; используется публичный `menuController.isOpen()`, и architecture test запрещает утечку внутреннего menu state.
+- Docs/AI: PROJECT, CODEMAP, BOUNDARIES и AGENTS получили отдельную selection boundary, чтобы задачи copy/cut/paste находились без чтения большого runtime orchestrator.
+
+
 ### 2026-09-26 — Modal/dialog controller extraction
 
 - Refactor: generic modal shell вынесен из `src/main.js` в `src/ui/modal-controller.js`: form fields, numeric normalization, async submit lifecycle, focus restore, backdrop/Escape close и draggable text-modal behavior.
