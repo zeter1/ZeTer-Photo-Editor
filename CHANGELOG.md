@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-26 — Photoshop Smart Object resource owner extraction
+
+- Refactor: embedded Photoshop Smart Object PNG/PSD/PSB payload serialization, bounded `liFD` linked-resource rewrite preparation/publication and native baseline metadata refresh moved from the large `src/main.js` into `src/document/psd-smart-object-resource.js`.
+- Boundaries: generic content/session lifecycle and stale-tab revalidation remain in `smart-object-controller.js`; document-to-writer preparation remains in `psd-export-controller.js`; low-level PSD/PSB encoding and linked-record byte surgery remain in `src/formats/psd.js`.
+- Reliability: resource rewrite keeps prepare-before-publish semantics, so parent linked blocks and target metadata are not mutated until the generic controller has revalidated the originating content tab and parent identity after async preparation. Existing 40 MiB asset, 4 MiB ICC, 128 MiB linked-block, 12 MP and 200-layer safety bounds are preserved.
+- Tests/docs: direct regressions cover PNG/PSD/PSB serialization selection, unsafe eligibility/fallback paths, real-fixture `liFD` preparation without parent mutation, explicit publication and identity-preserving baseline refresh; AI routing and architecture ownership docs now point directly to the resource owner.
+
+
 ### 2026-09-26 — Smart Object content lifecycle controller extraction
 
 - Refactor: generic Smart Object convert/open/save/link/unlink orchestration, nesting/source-bounds rules, shared-source propagation and content-tab lifecycle moved from the large `src/main.js` into `src/document/smart-object-controller.js`.
