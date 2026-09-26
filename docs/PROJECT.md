@@ -17,7 +17,8 @@ ZeTer Photo Editor — локальный браузерный многосло�
 | Пиксельные операции | `src/core/pixels.js`, `src/core/pixel-buffer.js` | pixel/retouch/high-depth tests |
 | ICC/CMYK/soft proof | `src/core/color-management.js` | color-management/corpus tests |
 | PSD/PSB import/export | `src/formats/psd.js` | `tests/psd-*.test.mjs` |
-| Recovery / IO | `src/core/recovery.js`, `src/core/io.js` | recovery/reliability tests |
+| Document import / drag-drop routing | `src/document/import-controller.js`, PSD/project callbacks in `src/main.js` | async document context / reliability tests |
+| Recovery / low-level IO | `src/core/recovery.js`, `src/core/io.js` | recovery/reliability tests |
 | Bundle/build | `tools/build-bundle.mjs` | `npm run check` |
 | Реальный startup по file:// | `tools/browser-smoke.mjs` | `npm run test:browser` |
 
@@ -33,6 +34,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 - `src/ui/tool-layout.js` — чистая математика порядка/позиции toolbar.
 - `src/workspace/session-controller.js` — lifecycle document sessions: create/switch/close/rename/duplicate, per-tab history/zoom/dirty/selection state и smart-object parent/child tab guard.
 - `src/selection/clipboard-controller.js` — selection copy/cut/paste boundary: PNG preparation, system Clipboard API, native paste/fallback generation guards и tab-switch safety; actual raster clearing остаётся callback-ом из `src/main.js`.
+- `src/document/import-controller.js` — file classification и image import transaction: decode/validate-all-before-mutate, empty-document sizing, drag/drop/file-input routing к image/PSD/project paths и tab-switch guard.
 - `src/core/*.js` — domain, render, pixel, history, IO, recovery и color logic.
 - `src/formats/psd.js` — единственный канонический PSD/PSB implementation.
 - `src/app.bundle.js` — generated artifact для `file://`; править только через `npm run build`.
