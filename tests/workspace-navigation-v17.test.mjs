@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const workspaceLayout = await readFile(new URL('../src/ui/workspace-layout-controller.js', import.meta.url), 'utf8');
+const layersPanel = await readFile(new URL('../src/ui/layers-panel-controller.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 test('middle mouse and Space provide temporary canvas panning without changing tools', () => {
@@ -43,13 +44,15 @@ test('global single-key shortcuts do not steal keyboard activation from controls
 });
 
 test('layer list is keyboard navigable and supports F2 rename', () => {
-  assert.match(main, /row\.tabIndex = layer\.id === doc\.selectedLayerId \? 0 : -1/);
-  assert.match(main, /e\.key === 'ArrowUp' \|\| e\.key === 'ArrowDown'/);
-  assert.match(main, /e\.key === 'Home' \|\| e\.key === 'End'/);
-  assert.match(main, /e\.key === 'Enter' \|\| e\.code === 'F2'/);
+  assert.match(main, /from '\.\/ui\/layers-panel-controller\.js'/);
+  assert.match(layersPanel, /row\.tabIndex = layer\.id === owner\.selectedLayerId \? 0 : -1/);
+  assert.match(layersPanel, /event\.key === 'ArrowUp' \|\| event\.key === 'ArrowDown'/);
+  assert.match(layersPanel, /event\.key === 'Home' \|\| event\.key === 'End'/);
+  assert.match(layersPanel, /event\.key === 'Enter' \|\| event\.code === 'F2'/);
   assert.match(main, /if\(e\.code==='F2'\)[\s\S]*?renameLayer/);
   assert.match(css, /\.layer-row:focus-visible/);
 });
+
 test('smart snapping keeps explicit runtime state after workspace refactors', () => {
   assert.match(main, /let smartSnapEnabled = true;/);
   assert.match(main, /let smartGuides = \{ x:null, y:null \};/);
