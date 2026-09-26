@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -16,6 +16,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/workspace-layout-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/paths-controller.js', root), 'utf8'),
+  readFile(new URL('src/ui/color-management-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pointer-lifecycle-router.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
@@ -94,6 +95,14 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /selectedDocumentPathIndex: pathsController\.getSelectedIndex\(\)/);
   assert.doesNotMatch(main, /let selectedDocumentPathIndex =/);
   for (const name of ['pathFromCurrentSource','addDocumentPathFromCurrent','renameSelectedDocumentPath','duplicateSelectedDocumentPath','deleteSelectedDocumentPath','applySelectedDocumentPathAsVectorMask','pathContextMenu','updatePathsPanel']) {
+    assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  }
+  assert.match(main, /from '\.\/ui\/color-management-controller\.js'/);
+  assert.match(build, /'src\/ui\/color-management-controller\.js'/);
+  assert.match(colorManagementController, /export function createColorManagementController/);
+  assert.match(main, /createColorManagementController\(\{/);
+  assert.doesNotMatch(main, /let cmyk(?:Preview|Editing)TransformCache\b/);
+  for (const name of ['colorManagementPolicyKey','rebuildDocumentCmykPreviews','updateDocumentColorManagement','loadDocumentProofProfile','loadDocumentDisplayProfile']) {
     assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
   }
   assert.match(main, /from '\.\/interaction\/pointer-lifecycle-router\.js'/);
