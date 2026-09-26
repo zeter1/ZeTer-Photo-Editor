@@ -82,6 +82,11 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - Pixel/color/render code owns math and data transforms, not dialogs or toasts.
 - State sanitization remains the gate for persisted/untrusted project structures.
 
+### Document / PSD import mapping
+- `src/document/psd-import-controller.js` owns PSD/PSB file guard + decode orchestration + decoded-payload mapping + stale-context validation + publish coordination.
+- It may depend directly on stable core state/pixel/color contracts. Binary decode is injected from `src/formats/psd.js`; DOM/canvas data-URL encoding and runtime mutation are ports.
+- It must not absorb export preparation, PSD byte parsing/writing, workspace/session ownership or generic file routing. Do not recreate `openPsd()` in `src/main.js`.
+
 ### Document / PSD export preparation
 - `src/document/psd-export-controller.js` owns document-to-writer preparation only: bounds, group mapping, native-vs-raster eligibility, prepared layer payloads, merged composite choice and export warnings.
 - Stable core math/data dependencies may be imported directly. Browser rendering and Photoshop semantic plans that still belong to runtime enter through explicit ports; this keeps the owner directly testable without copying DOM globals into it.

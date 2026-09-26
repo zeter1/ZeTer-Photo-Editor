@@ -76,8 +76,11 @@ It does **not** own document/history/global pointer state or the shared raster e
 ### `import-controller.js`
 Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or project persistence; those remain separate runtime/format concerns.
 
+### `psd-import-controller.js`
+Owns the import transaction from a PSD/PSB file to a canonical ZPE document after codec decode: size guard, decoded layer/group/path mapping, native high-depth/CMYK preservation, ICC preview policy, temporary-buffer budgeting, stale document/session checks and publish coordination. Stable core transforms are direct dependencies; binary decode, browser raster encoding, runtime publication and still-local Photoshop import semantics are explicit narrow ports.
+
 ### `psd-export-controller.js`
-Owns document-to-PSD/PSB writer preparation: export bounds, group ancestry, native high-depth/CMYK eligibility, raster/native layer payloads, merged composite selection and bounded export warnings. It imports stable core math/data contracts directly, while Photoshop semantic rewrite plans and browser rendering enter through explicit ports so the native path is directly Node-testable. Binary PSD/PSB parsing/writing stays in `src/formats/psd.js`; import mapping remains a separate bounded runtime seam.
+Owns document-to-PSD/PSB writer preparation: export bounds, group ancestry, native high-depth/CMYK eligibility, raster/native layer payloads, merged composite selection and bounded export warnings. It imports stable core math/data contracts directly, while Photoshop semantic rewrite plans and browser rendering enter through explicit ports so the native path is directly Node-testable. Binary PSD/PSB parsing/writing stays in `src/formats/psd.js`.
 
 ## Selection boundary — `src/selection/`
 
