@@ -101,13 +101,15 @@ test('subpath localizes anchors and Bezier handles through the document-to-layer
   const path = h.controller.selectionVectorMaskSubpath(h.layer, 'subtract');
   assert.equal(path.operation, 'subtract');
   assert.equal(path.closed, true);
-  assert.deepEqual(path.points[0], {
-    x:40,
-    y:10,
-    handleIn:{ x:40, y:10-.5522847498307936*10 },
-    handleOut:{ x:40, y:10+.5522847498307936*10 },
-    kind:'smooth',
-  });
+  const first = path.points[0];
+  const k = .5522847498307936;
+  assert.equal(first.x, 40);
+  assert.equal(first.y, 10);
+  assert.equal(first.kind, 'smooth');
+  assert.equal(first.handleIn.x, 40);
+  assert.equal(first.handleOut.x, 40);
+  assert.ok(Math.abs(first.handleIn.y - (10-k*10)) < 1e-12);
+  assert.ok(Math.abs(first.handleOut.y - (10+k*10)) < 1e-12);
   assert.equal(calls.length, 12);
   assert.ok(calls.every(([, layerId]) => layerId === h.layer.id));
 });
@@ -183,6 +185,12 @@ test('no-layer, no-selection, locked and too-small guards do not publish history
   assert.equal(h.statuses.at(-1), 'Слой или его группа заблокированы');
 
   h.layer.locked = false;
+  h.layer.groupId = 'locked-group';
+  h.documentValue.groups.push({ id:'locked-group', locked:true, parentGroupId:null });
+  assert.equal(h.controller.applySelectionToVectorMask('replace'), false);
+  assert.equal(h.statuses.at(-1), 'Слой или его группа заблокированы');
+
+  h.layer.groupId = null;
   h.setSelectionShape({ type:'polygon', points:[{x:0,y:0},{x:1,y:1}] });
   assert.equal(h.controller.applySelectionToVectorMask('replace'), false);
   assert.equal(h.statuses.at(-1), 'Выделение слишком мало для векторной маски');
@@ -193,6 +201,10 @@ test('no-layer, no-selection, locked and too-small guards do not publish history
 
 test('edit command enters the narrow Pen port exactly once with exact layer identity', () => {
   const h = harness();
+  assert.equal(h.controller.editSelectedVectorMask(), false);
+  assert.deepEqual(h.beginEditCalls, []);
+  assert.equal(h.statuses.at(-1), 'У выбранного слоя нет векторной маски');
+
   h.layer.vectorMask = createVectorMask({
     subpaths:[{ operation:'add', points:[{x:0,y:0},{x:1,y:0},{x:0,y:1}] }],
   });
