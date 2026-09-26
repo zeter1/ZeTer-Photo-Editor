@@ -6,6 +6,7 @@ import { pointInLayer, snapLineEnd } from '../src/core/geometry.js';
 import { createShapeLayer, sanitizeProject } from '../src/core/state.js';
 
 const main = fs.readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+const gesture = fs.readFileSync(new URL('../src/painting/gesture-controller.js', import.meta.url), 'utf8');
 
 function rgbaGrid(width, height, color = [255, 255, 255, 255]) {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -81,7 +82,8 @@ test('v1.8 tools are wired to toolbar, menus, shortcuts, selection clipping and 
   assert.match(main, /KeyZ:'zoom'/);
   assert.match(main, /ctrl&&e\.code==='KeyA'/);
   assert.match(main, /ctrl&&e\.code==='KeyD'/);
-  assert.match(main, /clipContextToSelection\(rasterEdit\.brushContext,l\)/);
+  assert.match(main, /clipContext: clipContextToSelection/);
+  assert.match(gesture, /selection\?\.clipContext\?\.\(context, layer\)/);
   assert.match(main, /isAllowed:rasterSelectionPredicate\(layer\)/);
 });
 
