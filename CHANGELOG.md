@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-26 — Selection Vector Mask controller extraction
+
+- Refactor: selection-driven Vector Mask geometry, boolean subpath publication, 128-contour guard and selected-mask edit/toggle/invert/remove commands moved from the large `src/main.js` into `src/selection/vector-mask-controller.js`.
+- Pen boundary fix: entering Vector Mask edit now clears a competing Saved Path edit target before publishing the exact Vector Mask layer ID, and the old duplicate `vectorMaskEditLayerId` assignment around `setTool('pen')` is replaced by one explicit runtime edit port.
+- Boundaries: Pen anchor/handle geometry and edit state remain in `src/main.js`; Saved Paths remain in `src/ui/paths-controller.js`; PSD/PSB vector-mask import/export conversion and codec ownership remain outside the new selection controller.
+- Tests/docs: direct regressions cover rect/ellipse/path conversion, 72-point bridge usage, anchor/handle localization, boolean operations, re-enable/128-limit/guard paths and edit/lifecycle semantics; source guards and AI maps prevent the command cluster drifting back into the composition root.
+
 ### 2026-09-26 — Selection raster-mask / Select & Mask controller extraction
 
 - Refactor: selection → raster layer-mask generation, Select & Mask option normalization, edge-aware preparation, non-destructive preview lifecycle and add/remove/final Apply transactions moved from the large `src/main.js` into `src/selection/mask-controller.js`.

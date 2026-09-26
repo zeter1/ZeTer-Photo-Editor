@@ -6,7 +6,7 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`, while raster layer-mask / Select & Mask orchestration is delegated to `src/selection/mask-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar/workspace-layout/saved-Paths and retouch mechanics, are delegated to their canonical owners.
+Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`; raster layer-mask / Select & Mask orchestration to `src/selection/mask-controller.js`; selection-driven Vector Mask command/policy to `src/selection/vector-mask-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar/workspace-layout/saved-Paths and retouch mechanics, are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
@@ -137,6 +137,11 @@ Owns destructive selection-to-layer orchestration: merged cut across visible unl
 Owns selection-shape → raster layer-mask / Select & Mask orchestration: regular-layer local coordinates versus adjustment/document coordinates, bounded refine preparation, shared `selectionMaskDataUrl()`, add/remove mask commands, non-destructive preview lifecycle and final Apply publication.
 
 Stable mask schema/lock/geometry/pixel primitives remain in core. Runtime state, render/source-canvas and modal/DOM/RAF effects enter as narrow ports. Every awaited mutation path revalidates the originating document, exact selected layer and lock state before publication; preview additionally uses a per-modal generation token so stale async work cannot attach listeners or repaint a foreign modal. Smart Filter reuses only the shared rasterizer and retains its own target/history transaction. Vector Mask/Pen semantics remain outside this owner.
+
+### `vector-mask-controller.js`
+Owns the selection-driven Vector Mask command/policy seam: exact rectangle and cubic-Bézier ellipse conversion, bounded generic selection-path conversion, document→layer localization for anchors/handles, boolean subpath publication, the 128-subpath guard and selected-mask edit-entry/toggle/invert/remove commands.
+
+It deliberately does **not** own Pen direct-edit state/geometry, Saved Paths CRUD/UI or PSD/PSB vector-mask conversion. Those stay in `src/main.js`, `src/ui/paths-controller.js` and the runtime/format boundary respectively; the controller reaches Pen mode only through narrow begin/clear edit ports.
 
 ## Workspace boundary — `src/workspace/`
 
