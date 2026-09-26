@@ -34,6 +34,9 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - The layout controller receives DOM/runtime geometry through explicit ports and must not own document/layer/history/tool state; do not recreate `collapsedPanelIds`, `panelsVisible` or its layout functions in `src/main.js`.
 - `src/ui/paths-controller.js` owns Saved Paths selected-index state, bounded ID/name allocation, CRUD, panel/context-menu/keyboard wiring and apply-as-vector-mask orchestration. It receives live state/vector/edit/UI dependencies through grouped explicit ports.
 - Saved Paths controller must not become a second PSD codec or Pen geometry owner: resource serialization stays in `src/formats/psd.js`; direct-edit target geometry and transient `documentPathEditIndex` stay in `src/main.js`. Do not recreate Saved Paths CRUD/render state in `src/main.js`.
+- `src/ui/color-management-controller.js` owns document-level CMYK/ICC orchestration: preview/edit transform caches, invalidation, policy/profile transaction + rollback, native-CMYK preview rebuild and properties-panel bindings. Dependencies arrive through explicit state/color/pixel/IO/render/UI ports.
+- ICC parser/transform math stays in `src/core/color-management.js`, document schema/sanitization in `src/core/state.js`, and PSD/PSB binary semantics in `src/formats/psd.js`. Do not recreate color-management caches or profile UI actions in `src/main.js`.
+- Color-management async preview publication must verify that the initiating document is still active before replacing layer previews; stale/failing rebuilds roll policy/profile state back and invalidate transform caches before returning/throwing.
 - DOM mutation and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API. Generic overlay pointer lifecycle is the explicit exception owned by `src/interaction/pointer-lifecycle-router.js`.
 - UI modules must not become alternate owners of document/layer domain state.
 
