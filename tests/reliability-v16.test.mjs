@@ -53,7 +53,7 @@ test('raster decode cache is bounded and corrupt embedded images do not reject t
 test('multi-image import validates all inputs before changing document state', () => {
   const importFn = documentImportController.match(/async function importImages\(files,[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.match(importFn, /const prepared=\[\]/);
-  assert.match(importFn, /checkedCanvasSize\(d\.width,d\.height/);
+  assert.match(importFn, /checkedCanvasSize\(dimensions\.width,dimensions\.height/);
   assert.ok(importFn.indexOf('prepared.push') < importFn.indexOf('addLayer(doc'), 'all files should be prepared before the first layer mutation');
 });
 
