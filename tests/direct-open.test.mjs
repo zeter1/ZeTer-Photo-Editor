@@ -5,8 +5,11 @@ import { readFile } from 'node:fs/promises';
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const bundle = await readFile(new URL('../src/app.bundle.js', import.meta.url), 'utf8');
 
-test('index uses classic bundle so direct file:// opening does not depend on ES module imports', () => {
-  assert.match(index, /<script\s+src="\.\/src\/app\.bundle\.js"\s+defer><\/script>/);
+test('index keeps a classic-script file:// startup path without ES module imports', () => {
+  assert.match(index, /location\.protocol === 'file:'/);
+  assert.match(index, /loadApp\(currentBuild, false\)/);
+  assert.match(index, /document\.createElement\('script'\)/);
+  assert.match(index, /'\.\/src\/app\.bundle\.js'/);
   assert.doesNotMatch(index, /type=["']module["']/);
 });
 
