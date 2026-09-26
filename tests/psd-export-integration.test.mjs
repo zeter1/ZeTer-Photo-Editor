@@ -7,6 +7,7 @@ const painting=await readFile(new URL('../src/painting/controller.js',import.met
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
 const adapter=await readFile(new URL('../src/formats/psd.js',import.meta.url),'utf8');
+const colorManagement=await readFile(new URL('../src/ui/color-management-controller.js',import.meta.url),'utf8');
 
 test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
   assert.match(main,/import \{[^}]*decodePsd[^}]*encodePsdBlob[^}]*encodePsbBlob[^}]*isPsdFile[^}]*\} from '\.\/formats\/psd\.js'/);
@@ -176,7 +177,7 @@ test('Stage 13a wires CMYK PSD decode, ICC preview transform and bounded source 
 test('Stage 13b wires advanced ICC policy and native CMYK PSD/PSB export',()=>{
   assert.match(main,/sanitizeColorManagement/);
   assert.match(main,/data-cmyk-rendering-intent/);
-  assert.match(main,/updateDocumentRenderingIntent/);
+  assert.match(colorManagement,/function updateDocumentRenderingIntent\(intent\)/);
   assert.match(main,/createCmykToSrgbTransform\(sourceProfileBytes,\{intent:colorPolicy\.renderingIntent,displaySpace:colorPolicy\.displaySpace,displayProfileBytes/);
   assert.match(main,/function cmykNativeExportEligibility\(/);
   assert.match(main,/function buildNativeCmykComposite\(/);
@@ -197,7 +198,7 @@ test('Stage 13d wires independent display ICC, proof intent and gamut warning in
   assert.match(main,/data-cmyk-gamut-warning/);
   assert.match(main,/gamutWarningThreshold/);
   assert.match(main,/displayProfileBytes/);
-  assert.match(main,/cmykPixelBufferToRgba8Preview\(buffer,transform,\{gamutWarning:policy\.gamutWarningEnabled\}\)/);
+  assert.match(colorManagement,/cmykPixelBufferToRgba8Preview\(buffer,\s*transform,\s*\{\s*gamutWarning:policy\.gamutWarningEnabled,?\s*\}\)/);
 });
 
 test('Stage 14a wires Photoshop Smart Object / Placed Layer opaque metadata through import and export',()=>{

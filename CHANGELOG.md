@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-26 — Color-management UI controller extraction
+
+- Refactor: document-level CMYK/ICC policy/profile actions, preview/edit transform caches, async native-CMYK preview rebuild and properties-panel bindings moved from the large `src/main.js` into `src/ui/color-management-controller.js`; runtime keeps only narrow painting/PSD-preview bridges.
+- Reliability: stale document switches during async preview generation roll policy/profile state back without publishing prepared pixels, and both transform caches are invalidated after rollback/failure.
+- Tests: added direct controller regressions for cache reuse/invalidation, stale-document rollback, proof-profile transactions and DOM error/disabled-state behavior; architecture guard prevents cache/action ownership drifting back into `src/main.js`.
+- Architecture/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES and TEST_MATRIX now route UI orchestration to the controller while preserving ICC math in `src/core/color-management.js` and PSD/PSB bytes in `src/formats/psd.js`.
+- Build: canonical `file://` source graph includes the new controller; generated `src/app.bundle.js` is rebuilt from canonical modules before CI.
+
 ### 2026-09-26 — Saved Paths controller extraction
 
 - Refactor: selected saved-path index, Photoshop-compatible resource allocation, CRUD, panel rendering, keyboard/context-menu wiring и apply-as-vector-mask orchestration вынесены из большого `src/main.js` в `src/ui/paths-controller.js`.
