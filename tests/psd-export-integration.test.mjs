@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
 const adapter=await readFile(new URL('../src/formats/psd.js',import.meta.url),'utf8');
@@ -168,7 +169,7 @@ test('Stage 13a wires CMYK PSD decode, ICC preview transform and bounded source 
   assert.match(main,/cmykPixelBufferToRgba8Preview/);
   assert.match(main,/sourceLayer\.pixelBuffer\.model==='cmyk'/);
   assert.match(main,/sourceLayer\.pixelBuffer\.model==='cmyk'/);
-  assert.match(main,/decoded\.model!=='rgb'/);
+  assert.match(painting,/decoded\.model !== 'rgb'/);
 });
 
 

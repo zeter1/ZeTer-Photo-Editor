@@ -73,7 +73,7 @@ test('Stage 12d routes brush, eraser, fill, line and selection clear through nat
 });
 
 test('Stage 12d paint preview can bypass the legacy RGBA8 adjustment pass after typed rendering',()=>{
-  assert.match(main,/skipAdjustments:true/);
+  assert.match(painting,/skipAdjustments:\s*true/);
   assert.match(render,/overrideSkipAdjustments/);
   assert.match(render,/highDepthApplied \|\| overrideSkipAdjustments/);
 });

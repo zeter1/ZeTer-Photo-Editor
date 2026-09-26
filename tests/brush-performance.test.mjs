@@ -33,7 +33,7 @@ test('paintTo draws only the latest segment instead of restroking an ever-growin
 test('finished strokes use asynchronous canvas encoding instead of synchronous toDataURL', () => {
   const persist = painting.match(/async function persistPaintLayer\(\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.ok(persist, 'persistPaintLayer function not found');
-  assert.match(persist, /await canvasToDataURL\(canvas,'image\/png'\)/);
+  assert.match(persist, /await canvasToDataURL\(canvas,\s*'image\/png'\)/);
   assert.doesNotMatch(persist, /\.toDataURL\(/);
   assert.match(io, /canvas\.toBlob\(/);
 });
