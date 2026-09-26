@@ -15,6 +15,7 @@ const render=await readFile(new URL('../src/core/render.js',import.meta.url),'ut
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
 const adapter=await readFile(new URL('../src/formats/psd.js',import.meta.url),'utf8');
 const colorManagement=await readFile(new URL('../src/ui/color-management-controller.js',import.meta.url),'utf8');
+const layersPanelController=await readFile(new URL('../src/ui/layers-panel-controller.js',import.meta.url),'utf8');
 
 test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
   assert.match(main,/import \{[^}]*decodePsd[^}]*encodePsdBlob[^}]*encodePsbBlob[^}]*isPsdFile[^}]*\} from '\.\/formats\/psd\.js'/);
@@ -92,8 +93,8 @@ test('PSD Group Stage 8c carries native parent relationships through ZPE and wri
   assert.match(adapter,/function exportGroupLineage\(/);
   assert.match(psdImportController,/group\.parentGroupId=sourceGroup\.parentKey/);
   assert.match(psdExportController,/parentKey:group\.parentGroupId/);
-  assert.match(main,/isGroupVisible\(doc, group\)/);
-  assert.match(main,/isGroupLocked\(doc, group\)/);
+  assert.match(layersPanelController,/isGroupVisible\(owner, group\)/);
+  assert.match(layersPanelController,/isGroupLocked\(owner, group\)/);
 });
 
 
