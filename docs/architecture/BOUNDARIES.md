@@ -8,7 +8,8 @@ These rules keep the project understandable and prevent the large app controller
 index.html / styles
         ↓
 src/main.js  ─────→  src/ui/*
-    │  └──────→  src/selection/*
+    │  ├──────→  src/selection/*
+    │  └──────→  src/document/*
     ↓   ↓
 src/core/*  ←────  src/formats/*
         ↓
@@ -22,6 +23,11 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - `src/ui/tool-layout.js`: pure layout/order math only.
 - DOM mutation, global event wiring and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API.
 - UI modules must not become alternate owners of document/layer domain state.
+
+### Document import
+- `src/document/import-controller.js` may classify incoming files and mutate the active document only after every image is decoded/validated.
+- Async import must re-check originating document/session before the first mutation.
+- PSD parsing stays in `src/formats/psd.js`; project open/save stays outside the import controller until extracted behind its own boundary.
 
 ### Selection
 - `src/selection/clipboard-controller.js` may orchestrate browser Clipboard APIs and call render helpers, but document mutation remains explicit callbacks.
