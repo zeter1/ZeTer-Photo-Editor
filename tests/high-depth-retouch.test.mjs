@@ -9,6 +9,7 @@ import {
 } from '../src/core/pixel-buffer.js';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const gesture=await readFile(new URL('../src/painting/gesture-controller.js',import.meta.url),'utf8');
 const retouch=await readFile(new URL('../src/retouch/controller.js',import.meta.url),'utf8');
 const toolConfig=await readFile(new URL('../src/ui/tool-config.js',import.meta.url),'utf8');
 
@@ -110,7 +111,7 @@ test('Stage 12f routes blur, clone, heal, smudge, dodge and burn through native 
     'prepareNativeHighDepthCloneStroke','nativeHighDepthCloneSegment',
     'nativeHighDepthSmudgeSegment','nativeHighDepthToneSegment','nativeHighDepthBlurSegment',
   ]) assert.match(retouch,new RegExp(symbol));
-  assert.match(main,/NATIVE_HIGH_DEPTH_PAINT_TOOLS\.has\(paintTool\)/);
+  assert.match(gesture,/NATIVE_HIGH_DEPTH_PAINT_TOOLS\.has\(paintTool\)/);
   assert.match(main,/if\(!layer\.highDepthSource\)await rasterEdit\.ensureRasterBuffer\(layer\)/);
 });
 
