@@ -82,6 +82,12 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - Pixel/color/render code owns math and data transforms, not dialogs or toasts.
 - State sanitization remains the gate for persisted/untrusted project structures.
 
+### Document / Smart Object content lifecycle
+- `src/document/smart-object-controller.js` owns generic Smart Object convert/open/save/link/unlink orchestration, nested-content depth/source-bounds rules, shared-source propagation and content-tab stale-context protection.
+- It may import stable core state/geometry/style helpers directly. Browser preview rendering, workspace/session bridges, history/recovery publication hooks and Photoshop-native resource rewrite enter as explicit ports.
+- Photoshop embedded PSD/PSB/PNG serialization, linked-resource byte rewrite and native metadata fingerprint updates must not migrate into the generic lifecycle controller; binary operations stay in the PSD/runtime boundary.
+- Async convert/save must revalidate the originating document/session/content before publishing, and shared-source counts must be computed against the parent owner rather than whichever content tab becomes active.
+
 ### Document / PSD import mapping
 - `src/document/psd-import-controller.js` owns PSD/PSB file guard + decode orchestration + decoded-payload mapping + stale-context validation + publish coordination.
 - It may depend directly on stable core state/pixel/color contracts. Binary decode is injected from `src/formats/psd.js`; DOM/canvas data-URL encoding, Photoshop import semantics and runtime mutation are ports.
