@@ -35,6 +35,7 @@ const sources = [
   'src/selection/raster-mutation-controller.js',
   'src/selection/clipboard-controller.js',
   'src/document/import-controller.js',
+  'src/document/psd-import-controller.js',
   'src/document/psd-export-controller.js',
   'src/formats/psd.js',
   'src/main.js',

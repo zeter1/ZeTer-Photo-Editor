@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-26 — PSD/PSB import-mapping controller extraction
+
+- Refactor: PSD/PSB file guard, codec orchestration, decoded layer/group/path mapping, native high-depth/CMYK preservation, ICC preview policy, bounded source budgeting, stale document/session guard and final publish coordination moved from the large `src/main.js` into `src/document/psd-import-controller.js`.
+- Boundaries: `src/formats/psd.js` remains the binary decoder/writer; generic incoming-file routing stays in `src/document/import-controller.js`; export preparation remains in `src/document/psd-export-controller.js`. Existing Photoshop import-semantic helpers are temporary explicit ports rather than silently moving unrelated export planning.
+- Reliability: the original validate → decode/prepare → revalidate originating document/session/history/change-serial → publish sequence is preserved, including the 512 MB file guard, 48 MP codec bound and bounded native PixelBuffer persistence budget.
+- Tests: added direct controller regressions for RGB16 precision/group/path mapping, stale-tab cancellation and pre-decode oversize rejection; source contracts now follow the canonical import owner instead of assuming implementation lives in `src/main.js`.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow and TEST_MATRIX route PSD import work directly to the new controller; canonical `file://` bundle graph includes it.
+
+
 ### 2026-09-26 — PSD/PSB export-preparation controller extraction
 
 - Refactor: bounded document→PSD/PSB writer preparation moved from the large `src/main.js` into `src/document/psd-export-controller.js`: export bounds, group ancestry, native high-depth/CMYK eligibility, prepared raster/native payloads, merged composite choice and bounded warnings.

@@ -5,6 +5,7 @@ import { createDocument, createRasterLayer, addLayer, sanitizeProject, snapshotD
 import { createPixelBuffer, serializePixelBufferSource, deserializePixelBufferSource } from '../src/core/pixel-buffer.js';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const psdImportController=await readFile(new URL('../src/document/psd-import-controller.js',import.meta.url),'utf8');
 const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
 const selectionMutations=await readFile(new URL('../src/selection/raster-mutation-controller.js',import.meta.url),'utf8');
 
@@ -29,8 +30,8 @@ test('Stage 12a does not trust malformed persisted high-depth raster metadata',(
 test('destructive Canvas raster publication invalidates preserved high-depth source',()=>{
   assert.match(painting,/layer\.dataUrl = dataUrl;[\s\S]*?layer\.highDepthSource = null;/);
   assert.match(selectionMutations,/layer\.dataUrl = dataUrl;[\s\S]*?layer\.highDepthSource = null;/);
-  assert.ok(main.includes('highDepthSource=serializePixelBufferSource(sourceLayer.pixelBuffer'));
-  assert.ok(main.includes('MAX_PIXEL_BUFFER_SOURCE_BYTES-highDepthBytesUsed'));
+  assert.ok(psdImportController.includes('highDepthSource=serializePixelBufferSource(sourceLayer.pixelBuffer'));
+  assert.ok(psdImportController.includes('MAX_PIXEL_BUFFER_SOURCE_BYTES-highDepthBytesUsed'));
   assert.match(painting,/layer\.highDepthSource = null;[\s\S]*?layer\.highDepthPreview = null;/);
   assert.match(selectionMutations,/layer\.highDepthSource = null;[\s\S]*?layer\.highDepthPreview = null;/);
 });
