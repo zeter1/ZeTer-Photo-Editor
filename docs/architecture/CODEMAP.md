@@ -79,8 +79,13 @@ Owns incoming-file classification and image import orchestration: image/project 
 ### `psd-import-controller.js`
 Owns the import transaction from a PSD/PSB file to a canonical ZPE document after codec decode: size guard, decoded layer/group/path mapping, native high-depth/CMYK preservation, ICC preview policy, temporary-buffer budgeting, stale document/session checks and publish coordination. Stable core transforms are direct dependencies; binary decode, browser raster encoding, runtime publication and still-local Photoshop import semantics are explicit narrow ports.
 
+### `psd-native-metadata-plans.js`
+Owns Photoshop-native export compatibility decisions and bounded metadata rewrites for editable Text/TySh, solid vector Shape, Adjustment and Smart Object records. It imports public rewrite primitives from `src/formats/psd.js`, shared sanitizers from core and contains no browser/UI orchestration.
+
+The planner also owns persisted opaque-block decoding plus Smart Object preview/embedded fingerprints used to prove native passthrough is still safe. Unsupported or stale metadata returns an explicit ineligible plan; raster fallback remains the export controller's responsibility.
+
 ### `psd-export-controller.js`
-Owns document-to-PSD/PSB writer preparation: export bounds, group ancestry, native high-depth/CMYK eligibility, raster/native layer payloads, merged composite selection and bounded export warnings. It imports stable core math/data contracts directly, while Photoshop semantic rewrite plans and browser rendering enter through explicit ports so the native path is directly Node-testable. Binary PSD/PSB parsing/writing stays in `src/formats/psd.js`.
+Owns document-to-PSD/PSB writer preparation: export bounds, group ancestry, native high-depth/CMYK eligibility, raster/native layer payloads, merged composite selection and bounded export warnings. Photoshop semantic plans are direct dependencies from `psd-native-metadata-plans.js`; browser rendering and the generic vector-mask bridge remain explicit ports so native preparation stays directly Node-testable. Binary PSD/PSB parsing/writing stays in `src/formats/psd.js`.
 
 ## Selection boundary — `src/selection/`
 

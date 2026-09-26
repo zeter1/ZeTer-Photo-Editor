@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -28,6 +28,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/retouch/controller.js', root), 'utf8'),
   readFile(new URL('src/document/psd-export-controller.js', root), 'utf8'),
   readFile(new URL('src/document/psd-import-controller.js', root), 'utf8'),
+  readFile(new URL('src/document/psd-native-metadata-plans.js', root), 'utf8'),
 ]);
 
 test('canonical UI and PSD boundaries stay out of legacy compatibility paths', () => {
@@ -211,9 +212,24 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   ]) assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
   assert.doesNotMatch(main, /let (?:cloneSource|cloneSnapshotCanvas|highDepthCloneSnapshotBuffer|blurScratchCanvas|retouchScratchCanvas)\b/);
   assert.match(main, /from '\.\/document\/psd-export-controller\.js'/);
+  assert.match(main, /from '\.\/document\/psd-native-metadata-plans\.js'/);
+  assert.match(build, /'src\/document\/psd-native-metadata-plans\.js'/);
   assert.match(build, /'src\/document\/psd-export-controller\.js'/);
+  assert.match(psdExportController, /from '\.\/psd-native-metadata-plans\.js'/);
+  assert.doesNotMatch(psdExportController, /semantics:/);
+  assert.match(psdExportController, /vectors: \{ exportPsdVectorMask \}/);
   assert.match(psdExportController, /export function createPsdExportController/);
+  for (const name of [
+    'psdTextNativePlan','psdShapeNativePlan','psdAdjustmentNativePlan',
+    'psdSmartObjectRoundTripPlan','psdSmartObjectMetadataForExport',
+    'psdOpaqueBlockFromState','psdPreviewFingerprint','psdEmbeddedDocumentFingerprint',
+  ]) {
+    assert.match(psdNativeMetadataPlans, new RegExp(`export function ${name}\\(`));
+    assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  }
+  assert.doesNotMatch(main, /function exportPsdShapePathMask\(/);
   assert.match(main, /createPsdExportController\(\{/);
+  assert.match(main, /vectors: \{ exportPsdVectorMask \}/);
   assert.match(main, /prepareDocument: preparePsdExport/);
   for (const name of [
     'psdExportBounds','renderPsdLayerPixels','renderPsdMaskPixels',

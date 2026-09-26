@@ -10,24 +10,18 @@ import {
   MAX_HIGH_DEPTH_COMPOSITE_BYTES,
 } from '../core/pixel-buffer.js';
 import { layerStyleOutset } from '../core/layer-styles.js';
+import { psdAdjustmentNativePlan, psdShapeNativePlan, psdSmartObjectMetadataForExport, psdSmartObjectRoundTripPlan, psdTextNativePlan } from './psd-native-metadata-plans.js';
 
 /**
  * Owns PSD/PSB document-to-writer preparation.
  *
- * Binary parsing/writing remains in formats/psd.js. Photoshop metadata rewrite
- * plans still live with the runtime for now and enter through `semantics`.
- * Browser canvas/render effects enter through `rendering`, keeping native
- * high-depth/CMYK preparation directly testable without a DOM.
+ * Binary parsing/writing remains in formats/psd.js. Photoshop native metadata
+ * eligibility/rewrite planning lives in psd-native-metadata-plans.js. Browser
+ * canvas/render effects and the shared vector-mask bridge remain explicit ports,
+ * keeping native high-depth/CMYK preparation directly testable without a DOM.
  */
 export function createPsdExportController({
-  semantics: {
-    psdSmartObjectRoundTripPlan,
-    psdAdjustmentNativePlan,
-    psdTextNativePlan,
-    psdShapeNativePlan,
-    exportPsdVectorMask,
-    psdSmartObjectMetadataForExport,
-  } = {},
+  vectors: { exportPsdVectorMask } = {},
   rendering: { createCanvas, renderLayer, renderDocument } = {},
 } = {}) {
   function psdExportBounds(layer){

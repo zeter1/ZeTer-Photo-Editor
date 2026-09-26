@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-26 — Photoshop native export metadata-plan boundary
+
+- Refactor: Text/TySh, solid Shape, Adjustment and Smart Object native-export eligibility/rewrite planning moved from the large `src/main.js` into `src/document/psd-native-metadata-plans.js`; `psd-export-controller` now imports that canonical owner directly instead of receiving six runtime semantic callbacks.
+- Boundaries: persisted opaque-block decoding and Smart Object baseline fingerprints are centralized with the planner; shared layer-local→document point math moved to `src/core/geometry.js`. PSD/PSB container parsing/writing and descriptor rewrite primitives remain in `src/formats/psd.js`.
+- Reliability: all previous native eligibility guards, bounded metadata budgets, TySh single-run rule, Shape geometry/style checks, Adjustment fallback rules and Smart Object stale-metadata invalidation are preserved; unsupported cases still produce explicit raster/composite fallback reasons.
+- Tests: added direct real-fixture regressions for supported/unsupported Text, Shape and Adjustment plans plus Smart Object identity invalidation; architecture/source contracts prevent the plan cluster drifting back into `src/main.js`.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow and TEST_MATRIX now route Photoshop export compatibility work to the new owner; canonical `file://` bundle graph includes it.
+
 ### 2026-09-26 — PSD/PSB import-mapping controller extraction
 
 - Refactor: PSD/PSB file guard, codec orchestration, decoded layer/group/path mapping, native high-depth/CMYK preservation, ICC preview policy, bounded source budgeting, stale document/session guard and final publish coordination moved from the large `src/main.js` into `src/document/psd-import-controller.js`.
