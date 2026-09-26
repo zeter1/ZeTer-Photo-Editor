@@ -64,7 +64,7 @@ test('Stage 12g bounds typed merged-composite allocation',()=>{
 
 test('Stage 12g export planner keeps Canvas8 as explicit fallback instead of claiming precision',()=>{
   assert.match(psdExportController,/function buildHighDepthComposite\(/);
-  assert.match(main,/Stage 12g: merged composite оставлен на Canvas8 fallback/);
+  assert.match(psdExportController,/Stage 12g: merged composite оставлен на Canvas8 fallback/);
   assert.match(main,/vector mask слоя/);
   assert.match(main,/isolated Canvas group composite/);
   assert.match(main,/if\(!compositePixelBuffer\)\{/);

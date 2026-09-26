@@ -46,7 +46,7 @@ test('Stage 10 UI exposes vector masks and selection-driven boolean path operati
   assert.match(main,/function importPsdVectorMask\(/);
   assert.match(main,/function exportPsdVectorMask\(/);
   assert.match(psdExportController,/preview\.vectorMask=null/);
-  assert.match(main,/vectorMask:exportPsdVectorMask\(layer\)/);
+  assert.match(psdExportController,/vectorMask:exportPsdVectorMask\(layer\)/);
 });
 
 
