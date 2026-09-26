@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-26 — Modal/dialog controller extraction
+
+- Refactor: generic modal shell вынесен из `src/main.js` в `src/ui/modal-controller.js`: form fields, numeric normalization, async submit lifecycle, focus restore, backdrop/Escape close и draggable text-modal behavior.
+- Architecture: info/recovery dialogs также перенесены в UI controller; text preview и editor mutations остаются callback-ами в `src/main.js`, поэтому controller не владеет document state.
+- Tests: modal number/drag tests теперь импортируют канонические helpers напрямую вместо source slicing из большого orchestrator; reliability/recovery contracts читают нового владельца.
+- Build: `tools/build-bundle.mjs` и generated `src/app.bundle.js` включают новый controller для сохранения прямого `file://` запуска.
+- Docs/AI: PROJECT, CODEMAP и AGENTS указывают точную границу modal/dialog задач, сокращая необходимость искать generic UI plumbing в `src/main.js`.
+
+
 ### 2026-09-26 — Menu/context-menu controller extraction
 
 - Refactor: generic lifecycle верхнего меню и context-menu вынесен из `src/main.js` в `src/ui/menu-controller.js`: DOM rendering, enabled-state evaluation, popup positioning, focus restoration, keyboard navigation и outside-click close.
