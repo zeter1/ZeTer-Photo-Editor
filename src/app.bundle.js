@@ -7158,6 +7158,183 @@ function createTextEditController({ state = {}, text = {}, renderApi = {}, ui = 
   return { open, getDraft, documentWithPreview, previewLayer, syncPreviewCanvas };
 }
 
+// ---- src/ui/text-settings-controller.js ----
+const TEXT_WEIGHT_OPTIONS = [['400', 'Обычный'], ['700', 'Жирный']];
+const TEXT_STYLE_OPTIONS = [['normal', 'Прямой'], ['italic', 'Курсив']];
+const TEXT_ALIGN_OPTIONS = [['left', 'Слева'], ['center', 'По центру'], ['right', 'Справа']];
+
+const TEXT_SETTINGS_MAX_LOCAL_FONTS = 1000;
+const TEXT_SETTINGS_MAX_CUSTOM_FONT_BYTES = 5_000_000;
+const CUSTOM_FONT_FILE_ERROR = 'Выберите файл WOFF, WOFF2, TTF или OTF размером до 5 МБ';
+const LOCAL_FONTS_UNAVAILABLE_ERROR = 'Этот браузер не показывает список шрифтов компьютера. Можно загрузить файл шрифта ниже.';
+const LOCAL_FONTS_PERMISSION_ERROR = 'Браузер не разрешил доступ к шрифтам компьютера. Разрешите доступ или загрузите файл шрифта.';
+function createTextSettingsController({
+  fontFamilyControl = null,
+  fontSizeControl = null,
+  primaryColorControl = null,
+  windowTarget = globalThis.window,
+  documentRef = globalThis.document,
+  FileClass = globalThis.File,
+  readFile = readFileAsDataURL,
+  loadFont = ensureTextFont,
+  createFontFamily = () => `ZPE-font-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+} = {}) {
+  let discoveredFonts = [];
+  const manualFonts = new Map();
+  const customFontReads = new WeakMap();
+
+  function localFontOptions() {
+    const options = [];
+    const seen = new Set();
+    for (const source of [manualFonts, discoveredFonts]) {
+      for (const [value, label] of source) {
+        if (seen.has(value)) continue;
+        seen.add(value);
+        options.push([value, label]);
+        if (options.length >= TEXT_SETTINGS_MAX_LOCAL_FONTS) return options;
+      }
+    }
+    return options;
+  }
+
+  function fontOptions(value, label = '') {
+    const options = [];
+    const seen = new Set();
+    const add = (font, name) => {
+      if (!font || seen.has(font)) return;
+      seen.add(font);
+      options.push([font, name]);
+    };
+    for (const option of fontFamilyControl?.options ?? []) add(option.value, option.textContent);
+    for (const [font, name] of localFontOptions()) add(font, name);
+    if (value && !seen.has(value)) add(value, label ? `Свой: ${label}` : value.replace(/^"(.*)"$/, '$1'));
+    return options;
+  }
+
+  function registerSystemFont(name) {
+    const label = String(name || '').trim().slice(0, 120);
+    if (!label) return '';
+    const value = JSON.stringify(label);
+    if (manualFonts.has(value)) manualFonts.delete(value);
+    manualFonts.set(value, label);
+    while (manualFonts.size > TEXT_SETTINGS_MAX_LOCAL_FONTS) {
+      manualFonts.delete(manualFonts.keys().next().value);
+    }
+    return value;
+  }
+
+  async function loadComputerFonts(select) {
+    const queryLocalFonts = windowTarget?.queryLocalFonts;
+    if (typeof queryLocalFonts !== 'function') throw new Error(LOCAL_FONTS_UNAVAILABLE_ERROR);
+    let faces;
+    try {
+      faces = await queryLocalFonts.call(windowTarget);
+    } catch {
+      throw new Error(LOCAL_FONTS_PERMISSION_ERROR);
+    }
+    const names = [...new Set(faces
+      .map(face => face.family)
+      .filter(name => typeof name === 'string' && name.trim() && name.length <= 160))];
+    names.sort((a, b) => a.localeCompare(b, 'ru'));
+    discoveredFonts = names.slice(0, TEXT_SETTINGS_MAX_LOCAL_FONTS).map(name => [JSON.stringify(name), name]);
+
+    if (select) {
+      const current = select.value;
+      for (const [value, name] of localFontOptions()) {
+        if ([...select.options].some(option => option.value === value)) continue;
+        const option = documentRef.createElement('option');
+        option.value = value;
+        option.textContent = name;
+        select.append(option);
+      }
+      select.value = current;
+    }
+    return discoveredFonts.length;
+  }
+
+  async function loadCustomFont(file) {
+    const extension = file.name.toLowerCase().match(/\.(woff2?|ttf|otf)$/)?.[1];
+    if (!extension || !file.size || file.size > TEXT_SETTINGS_MAX_CUSTOM_FONT_BYTES) {
+      throw new Error(CUSTOM_FONT_FILE_ERROR);
+    }
+    const fontData = (await readFile(file)).replace(/^data:[^,]*,/, `data:font/${extension};base64,`);
+    const fontFamily = createFontFamily();
+    try {
+      await loadFont(fontFamily, fontData);
+    } catch {
+      throw new Error('Не удалось открыть файл шрифта');
+    }
+    return { fontFamily, fontData, fontLabel: file.name.slice(0, 160) };
+  }
+
+  async function readCustomFont(file) {
+    if (typeof FileClass !== 'function' || !(file instanceof FileClass) || !file.name) return null;
+    if (customFontReads.has(file)) return customFontReads.get(file);
+    const loading = loadCustomFont(file).catch(error => {
+      customFontReads.delete(file);
+      throw error;
+    });
+    customFontReads.set(file, loading);
+    return loading;
+  }
+
+  function modalFields(layer, width) {
+    const fontFamily = layer?.fontFamily || fontFamilyControl?.value;
+    return [
+      {name:'text',label:'Текст',type:'textarea',value:layer?.text || 'Текст'},
+      {name:'fontFamily',label:'Шрифт',type:'select',value:fontFamily,options:fontOptions(fontFamily, layer?.fontLabel)},
+      {name:'computerFonts',label:'Шрифты ПК',type:'fontPicker'},
+      {name:'systemFontName',label:'Или имя шрифта ПК',type:'text',value:'',placeholder:'Например, Segoe UI'},
+      {name:'fontFile',label:'Свой шрифт',type:'file',accept:'.woff,.woff2,.ttf,.otf'},
+      {name:'fontSize',label:'Размер, px',type:'number',value:layer?.fontSize || fontSizeControl?.value,min:'6',max:'500'},
+      {name:'fontWeight',label:'Начертание',type:'select',value:layer?.fontWeight || '400',options:TEXT_WEIGHT_OPTIONS},
+      {name:'fontStyle',label:'Стиль',type:'select',value:layer?.fontStyle || 'normal',options:TEXT_STYLE_OPTIONS},
+      {name:'align',label:'Выравнивание',type:'select',value:layer?.align || 'left',options:TEXT_ALIGN_OPTIONS},
+      {name:'lineHeight',label:'Межстрочный',type:'number',value:layer?.lineHeight ?? 1.18,min:'0.8',max:'3',step:'0.01'},
+      {name:'letterSpacing',label:'Межбуквенный, px',type:'number',value:layer?.letterSpacing ?? 0,min:'-5',max:'20',step:'0.5'},
+      {name:'underline',label:'Подчёркивание',type:'select',value:layer?.underline ? 'yes' : 'no',options:[['no','Нет'],['yes','Да']]},
+      {name:'strikeThrough',label:'Зачёркивание',type:'select',value:layer?.strikeThrough ? 'yes' : 'no',options:[['no','Нет'],['yes','Да']]},
+      {name:'width',label:'Ширина блока, px',type:'number',value:width,min:'1',max:'12000'},
+      {name:'color',label:'Цвет',type:'color',value:layer?.color || primaryColorControl?.value},
+    ];
+  }
+
+  async function settingsFromForm(values, layer = null) {
+    const custom = await readCustomFont(values.fontFile);
+    const systemName = String(values.systemFontName || '').trim().slice(0, 120);
+    const systemFont = !custom && systemName ? registerSystemFont(systemName) : '';
+    const fontFamily = custom?.fontFamily || systemFont || values.fontFamily;
+    return {
+      text:values.text || 'Текст',
+      fontFamily,
+      fontData:custom?.fontData || (fontFamily === layer?.fontFamily ? layer.fontData : null),
+      fontLabel:custom?.fontLabel || (fontFamily === layer?.fontFamily ? layer.fontLabel : ''),
+      fontSize:clamp(Number(values.fontSize) || 48, 6, 500),
+      fontWeight:TEXT_WEIGHT_OPTIONS.some(([option]) => option === values.fontWeight) ? values.fontWeight : '400',
+      fontStyle:values.fontStyle === 'italic' ? 'italic' : 'normal',
+      align:TEXT_ALIGN_OPTIONS.some(([option]) => option === values.align) ? values.align : 'left',
+      lineHeight:clamp(Number(values.lineHeight) || 1.18, 0.8, 3),
+      letterSpacing:clamp(Number(values.letterSpacing) || 0, -5, 20),
+      underline:values.underline === 'yes',
+      strikeThrough:values.strikeThrough === 'yes',
+      width:clamp(Number(values.width) || layer?.width || 240, 1, 12000),
+      color:values.color || layer?.color || primaryColorControl?.value,
+    };
+  }
+
+  return {
+    fontOptions,
+    loadComputerFonts,
+    registerSystemFont,
+    readCustomFont,
+    modalFields,
+    settingsFromForm,
+    isWeight: value => TEXT_WEIGHT_OPTIONS.some(([option]) => option === value),
+    isStyle: value => TEXT_STYLE_OPTIONS.some(([option]) => option === value),
+    isAlign: value => TEXT_ALIGN_OPTIONS.some(([option]) => option === value),
+  };
+}
+
 // ---- src/ui/smart-filter-controller.js ----
 function createSmartFilterController({
   state = {},
@@ -16574,12 +16751,21 @@ const menuController = createMenuController({
 const { closeMenu, openContextMenu } = menuController;
 menuController.init();
 
+const textSettingsController = createTextSettingsController({
+  fontFamilyControl: els.fontFamily,
+  fontSizeControl: els.fontSize,
+  primaryColorControl: els.primaryColor,
+  windowTarget: window,
+  documentRef: document,
+  FileClass: File,
+});
+
 const modalController = createModalController({
   modalRoot: els.modalRoot,
   escapeHtml,
   setStatus,
   toast,
-  loadComputerFonts,
+  loadComputerFonts: textSettingsController.loadComputerFonts,
 });
 const { showModal, showInfoModal, showRecoveryModal } = modalController;
 const textEditController = createTextEditController({
@@ -16591,8 +16777,8 @@ const textEditController = createTextEditController({
     commit,
   },
   text: {
-    fields: textModalFields,
-    settingsFromForm: textSettingsFromForm,
+    fields: textSettingsController.modalFields,
+    settingsFromForm: textSettingsController.settingsFromForm,
   },
   renderApi: {
     render,
@@ -17837,90 +18023,6 @@ function updateLayerControls() {
 function propField(label, key, value, type='number', attrs='') {
   return `<label for="prop-${key}">${label}</label><input id="prop-${key}" data-prop="${key}" type="${type}" value="${String(value).replaceAll('"','&quot;')}" ${attrs}>`;
 }
-const TEXT_WEIGHT_OPTIONS = [['400', 'Обычный'], ['700', 'Жирный']];
-const TEXT_STYLE_OPTIONS = [['normal', 'Прямой'], ['italic', 'Курсив']];
-const TEXT_ALIGN_OPTIONS = [['left', 'Слева'], ['center', 'По центру'], ['right', 'Справа']];
-let localTextFonts = [];
-const customFontReads = new WeakMap();
-function textFontOptions(value, label = '') {
-  const options = [...els.fontFamily.options].map(option => [option.value, option.textContent]);
-  for (const [font, name] of localTextFonts) if (!options.some(([option]) => option === font)) options.push([font, name]);
-  if (value && !options.some(([font]) => font === value)) options.push([value, label ? `Свой: ${label}` : value.replace(/^"(.*)"$/, '$1')]);
-  return options;
-}
-async function loadComputerFonts(select) {
-  if (typeof window.queryLocalFonts !== 'function') throw new Error('Этот браузер не показывает список шрифтов компьютера. Можно загрузить файл шрифта ниже.');
-  let faces;
-  try { faces = await window.queryLocalFonts(); }
-  catch { throw new Error('Браузер не разрешил доступ к шрифтам компьютера. Разрешите доступ или загрузите файл шрифта.'); }
-  const names = [...new Set(faces.map(face => face.family).filter(name => typeof name === 'string' && name.trim() && name.length <= 160))];
-  names.sort((a, b) => a.localeCompare(b, 'ru'));
-  localTextFonts = names.slice(0, 1000).map(name => [JSON.stringify(name), name]);
-  const current = select.value;
-  for (const [value, name] of localTextFonts) {
-    if ([...select.options].some(option => option.value === value)) continue;
-    const option = document.createElement('option'); option.value = value; option.textContent = name; select.append(option);
-  }
-  select.value = current;
-  return localTextFonts.length;
-}
-async function readCustomTextFont(file) {
-  if (!(file instanceof File) || !file.name) return null;
-  if (customFontReads.has(file)) return customFontReads.get(file);
-  const loading = loadCustomTextFont(file).catch(error => { customFontReads.delete(file); throw error; });
-  customFontReads.set(file, loading);
-  return loading;
-}
-async function loadCustomTextFont(file) {
-  const extension = file.name.toLowerCase().match(/\.(woff2?|ttf|otf)$/)?.[1];
-  if (!extension || !file.size || file.size > 5_000_000) throw new Error('Выберите файл WOFF, WOFF2, TTF или OTF размером до 5 МБ');
-  const fontData = (await readFileAsDataURL(file)).replace(/^data:[^,]*,/, `data:font/${extension};base64,`);
-  const fontFamily = `ZPE-font-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  try { await ensureTextFont(fontFamily, fontData); }
-  catch { throw new Error('Не удалось открыть файл шрифта'); }
-  return { fontFamily, fontData, fontLabel: file.name.slice(0, 160) };
-}
-function textModalFields(layer, width) {
-  const fontFamily = layer?.fontFamily || els.fontFamily.value;
-  return [
-    {name:'text',label:'Текст',type:'textarea',value:layer?.text || 'Текст'},
-    {name:'fontFamily',label:'Шрифт',type:'select',value:fontFamily,options:textFontOptions(fontFamily, layer?.fontLabel)},
-    {name:'computerFonts',label:'Шрифты ПК',type:'fontPicker'},
-    {name:'systemFontName',label:'Или имя шрифта ПК',type:'text',value:'',placeholder:'Например, Segoe UI'},
-    {name:'fontFile',label:'Свой шрифт',type:'file',accept:'.woff,.woff2,.ttf,.otf'},
-    {name:'fontSize',label:'Размер, px',type:'number',value:layer?.fontSize || els.fontSize.value,min:'6',max:'500'},
-    {name:'fontWeight',label:'Начертание',type:'select',value:layer?.fontWeight || '400',options:TEXT_WEIGHT_OPTIONS},
-    {name:'fontStyle',label:'Стиль',type:'select',value:layer?.fontStyle || 'normal',options:TEXT_STYLE_OPTIONS},
-    {name:'align',label:'Выравнивание',type:'select',value:layer?.align || 'left',options:TEXT_ALIGN_OPTIONS},
-    {name:'lineHeight',label:'Межстрочный',type:'number',value:layer?.lineHeight ?? 1.18,min:'0.8',max:'3',step:'0.01'},
-    {name:'letterSpacing',label:'Межбуквенный, px',type:'number',value:layer?.letterSpacing ?? 0,min:'-5',max:'20',step:'0.5'},
-    {name:'underline',label:'Подчёркивание',type:'select',value:layer?.underline ? 'yes' : 'no',options:[['no','Нет'],['yes','Да']]},
-    {name:'strikeThrough',label:'Зачёркивание',type:'select',value:layer?.strikeThrough ? 'yes' : 'no',options:[['no','Нет'],['yes','Да']]},
-    {name:'width',label:'Ширина блока, px',type:'number',value:width,min:'1',max:'12000'},
-    {name:'color',label:'Цвет',type:'color',value:layer?.color || els.primaryColor.value},
-  ];
-}
-async function textSettingsFromForm(values, layer = null) {
-  const custom = await readCustomTextFont(values.fontFile);
-  const systemName=String(values.systemFontName || '').trim().slice(0,120);
-  const fontFamily = custom?.fontFamily || (systemName ? JSON.stringify(systemName) : values.fontFamily);
-  return {
-    text:values.text || 'Текст',
-    fontFamily,
-    fontData:custom?.fontData || (fontFamily === layer?.fontFamily ? layer.fontData : null),
-    fontLabel:custom?.fontLabel || (fontFamily === layer?.fontFamily ? layer.fontLabel : ''),
-    fontSize:clamp(Number(values.fontSize) || 48, 6, 500),
-    fontWeight:TEXT_WEIGHT_OPTIONS.some(([option]) => option === values.fontWeight) ? values.fontWeight : '400',
-    fontStyle:values.fontStyle === 'italic' ? 'italic' : 'normal',
-    align:TEXT_ALIGN_OPTIONS.some(([option]) => option === values.align) ? values.align : 'left',
-    lineHeight:clamp(Number(values.lineHeight) || 1.18, 0.8, 3),
-    letterSpacing:clamp(Number(values.letterSpacing) || 0, -5, 20),
-    underline:values.underline === 'yes',
-    strikeThrough:values.strikeThrough === 'yes',
-    width:clamp(Number(values.width) || layer?.width || 240, 1, 12000),
-    color:values.color || layer?.color || els.primaryColor.value,
-  };
-}
 function propSelectField(label, key, value, options) {
   return `<label for="prop-${key}">${label}</label><select id="prop-${key}" data-prop="${key}">${options.map(([option, name]) => `<option value="${escapeAttr(option)}"${option === value ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('')}</select>`;
 }
@@ -18054,7 +18156,7 @@ function updateProperties() {
   if (l.type === 'text') {
     const nativeText=l.psdText?psdTextNativePlan(l):null;
     const nativeInfo=l.psdText?`<label>Photoshop Text</label><span>${nativeText?.eligible?'native TySh + EngineData round-trip':'raster fallback: '+escapeHtml(nativeText?.reason||'metadata unavailable')}</span>`:'';
-    extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textFontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}${nativeInfo}`;
+    extra = `<label>Текст</label><textarea data-prop="text">${escapeHtml(l.text || '')}</textarea>${propSelectField('Шрифт', 'fontFamily', l.fontFamily, textSettingsController.fontOptions(l.fontFamily, l.fontLabel))}<label>Шрифты ПК</label><button type="button" class="mini-button" data-local-fonts>Показать список</button><label for="system-font-name">Или имя шрифта ПК</label><input id="system-font-name" type="text" placeholder="Например, Segoe UI"><label for="text-font-file">Свой шрифт</label><input id="text-font-file" type="file" accept=".woff,.woff2,.ttf,.otf" aria-label="Загрузить свой шрифт">${propField('Размер', 'fontSize', l.fontSize, 'number','min="6" max="500"')}${propSelectField('Начертание', 'fontWeight', l.fontWeight, TEXT_WEIGHT_OPTIONS)}${propSelectField('Стиль', 'fontStyle', l.fontStyle ?? 'normal', TEXT_STYLE_OPTIONS)}${propSelectField('Выравнивание', 'align', l.align, TEXT_ALIGN_OPTIONS)}${propField('Межстрочный', 'lineHeight', l.lineHeight ?? 1.18, 'number', 'min="0.8" max="3" step="0.01"')}${propField('Межбуквенный', 'letterSpacing', l.letterSpacing ?? 0, 'number', 'min="-5" max="20" step="0.5"')}${propSelectField('Подчёркивание', 'underline', l.underline ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propSelectField('Зачёркивание', 'strikeThrough', l.strikeThrough ? 'yes' : 'no', [['no','Нет'],['yes','Да']])}${propField('Цвет','color',l.color,'color')}${nativeInfo}`;
   }
   if (l.type === 'shape') {
     const nativeShape=l.psdShape?psdShapeNativePlan(l):null;
@@ -18118,16 +18220,14 @@ function updateProperties() {
   if(l.type==='smart-object')bindSmartFilterControls(els.props,l);
   const systemFontInput=els.props.querySelector('#system-font-name');
   if(systemFontInput)systemFontInput.addEventListener('change',()=>{
-    const name=systemFontInput.value.trim().slice(0,120);
-    if(!name)return;
-    const value=JSON.stringify(name);
-    localTextFonts.push([value,name]);
+    const value=textSettingsController.registerSystemFont(systemFontInput.value);
+    if(!value)return;
     applyProperty('fontFamily',value,systemFontInput,true);
   });
   const localFontsButton = els.props.querySelector('[data-local-fonts]');
   if (localFontsButton) localFontsButton.addEventListener('click', async () => {
     localFontsButton.disabled = true;
-    try { const count = await loadComputerFonts(els.props.querySelector('[data-prop="fontFamily"]')); setStatus(`Доступно шрифтов компьютера: ${count}`); }
+    try { const count = await textSettingsController.loadComputerFonts(els.props.querySelector('[data-prop="fontFamily"]')); setStatus(`Доступно шрифтов компьютера: ${count}`); }
     catch (error) { toast(error.message, 'warn'); setStatus(error.message); }
     finally { if (localFontsButton.isConnected) localFontsButton.disabled = false; }
   });
@@ -18136,7 +18236,7 @@ function updateProperties() {
     const targetDoc = doc, targetLayer = l;
     fontInput.disabled = true;
     try {
-      const custom = await readCustomTextFont(fontInput.files?.[0]);
+      const custom = await textSettingsController.readCustomFont(fontInput.files?.[0]);
       if (!custom || doc !== targetDoc || selected() !== targetLayer || isLayerLocked(doc,targetLayer)) return;
       Object.assign(targetLayer, custom);
       commit('Изменить шрифт текста');
@@ -18195,10 +18295,10 @@ function applyProperty(path, raw, input, shouldCommit = true) {
   if (path === 'x' || path === 'y') value = clamp(value, -120000, 120000);
   if (path === 'rotation') value = ((value % 360) + 360) % 360;
   if (path === 'fontSize') value = clamp(value, 6, 500);
-  if (path === 'fontWeight' && !TEXT_WEIGHT_OPTIONS.some(([option]) => option === value)) return;
-  if (path === 'fontStyle' && !TEXT_STYLE_OPTIONS.some(([option]) => option === value)) return;
-  if (path === 'align' && !TEXT_ALIGN_OPTIONS.some(([option]) => option === value)) return;
-  if (path === 'fontFamily' && !textFontOptions(l.fontFamily).some(([option]) => option === value)) return;
+  if (path === 'fontWeight' && !textSettingsController.isWeight(value)) return;
+  if (path === 'fontStyle' && !textSettingsController.isStyle(value)) return;
+  if (path === 'align' && !textSettingsController.isAlign(value)) return;
+  if (path === 'fontFamily' && !textSettingsController.fontOptions(l.fontFamily).some(([option]) => option === value)) return;
   if (path === 'fontFamily' && value !== l.fontFamily) { l.fontData = null; l.fontLabel = ''; }
   if (path === 'lineHeight') value = clamp(value, 0.8, 3);
   if (path === 'letterSpacing') value = clamp(value, -5, 20);
