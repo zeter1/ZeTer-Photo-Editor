@@ -45,6 +45,11 @@ Owns document-facing CMYK/ICC orchestration: preview/edit transform caches and i
 
 It deliberately does **not** own ICC parser/transform math (`src/core/color-management.js`), PixelBuffer math, the canonical document schema, or PSD/PSB binary resources (`src/formats/psd.js`). `src/main.js` keeps only narrow bridges needed by painting and PSD import preview.
 
+### `smart-filter-controller.js`
+Owns Smart Filter UI/orchestration as one feature boundary: stack/mask markup, reorder/toggle/remove/clear commands, selection-mask prepare-before-publish, properties-panel bindings and the add/edit modal lifecycle. Runtime/document/selection/render/DOM effects enter through narrow ports; stable Smart Filter state/geometry/config dependencies remain direct imports.
+
+It deliberately does **not** own the persisted Smart Filter schema, sanitization or `MAX_SMART_FILTERS` definition (`src/core/state.js`), filter pixel application/mask composition (`src/core/render.js`), or the shared selection-mask rasterizer still used by layer masks in `src/main.js`. Async selection-mask publication revalidates the originating document/layer after the await.
+
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 
 ## Painting boundary — `src/painting/`
