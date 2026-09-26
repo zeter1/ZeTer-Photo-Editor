@@ -322,7 +322,7 @@ export function createSmartFilterController({
       if (item) item.name = nameInput.value.slice(0, 160);
     });
     const close = () => {
-      modalRoot?.replaceChildren();
+      modalRoot.replaceChildren();
       const HTMLElementCtor = documentRef?.defaultView?.HTMLElement ?? globalThis.HTMLElement;
       if (HTMLElementCtor ? previousFocus instanceof HTMLElementCtor : typeof previousFocus?.focus === 'function') previousFocus.focus();
     };
@@ -335,7 +335,7 @@ export function createSmartFilterController({
       }
     };
     back.append(modal);
-    modalRoot?.replaceChildren(back);
+    modalRoot.replaceChildren(back);
     render();
 
     modal.querySelector('[data-reset]').addEventListener('click', () => {
