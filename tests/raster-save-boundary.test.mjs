@@ -6,7 +6,7 @@ import { createDocumentSessionController } from '../src/workspace/session-contro
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const boundary = main.slice(main.indexOf('function documentEditPending()'), main.indexOf('function reportRecoveryFailure('));
-const fileCommands = main.slice(main.indexOf('function saveProject()'), main.indexOf('function canvasToPngBlob('));
+const fileCommands = main.slice(main.indexOf('function saveProject()'), main.indexOf('async function prepareClearedHighDepthMutation'));
 const jumpHistory = main.slice(main.indexOf('function jumpToHistory('), main.indexOf('function updateLayerControls('));
 const fillCommand = main.slice(main.indexOf('async function fillAtPoint('), main.indexOf('async function clearSelectedPixels('));
 const deleteCommand = main.slice(main.indexOf('function deleteSelected()'), main.indexOf('function duplicateSelected()'));
