@@ -12706,6 +12706,46 @@ function encodePsbBlob(options = {}) {
 }
 
 // ---- src/main.js ----
+import { HistoryStack } from './core/history.js';
+import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, alignLayerToCanvas, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
+import {
+  createDocument, createRasterLayer, createTextLayer, createShapeLayer, createSmartObjectLayer, createSmartObjectLinkId, linkedSmartObjectLayers, createSmartFilter, createSmartFilterMask, createAdjustmentLayer, createLayerMask, createVectorMask, createLayerGroup, documentWithTextPreview,
+  addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, moveLayerGroupIntoGroup, selectedLayer,
+  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters, sanitizeHighDepthPreview, sanitizeColorManagement,
+  isLayerVisible, isLayerLocked, isGroupVisible, isGroupLocked, groupDepth,
+} from './core/state.js';
+import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, ensureTextFont } from './core/render.js';
+import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
+import { hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
+import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, compositeCmykPixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
+import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
+import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
+import {
+  TOOL_LABELS, RASTER_BRUSH_TOOLS,
+  SELECTION_TYPE_LABELS, SELECTION_TYPES, MIME_EXT,
+  COLOR_CORRECTION_CONTROLS, COLOR_CORRECTION_KEYS,
+  BASIC_EFFECT_CONTROLS, RASTER_EFFECT_CONTROLS,
+  UI_COLLAPSE_STORAGE_KEY, SMART_SNAP_STORAGE_KEY, TOOL_ORDER_STORAGE_KEY,
+  NATIVE_HIGH_DEPTH_PAINT_TOOLS, NATIVE_CMYK_PAINT_TOOLS,
+} from './ui/tool-config.js';
+import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
+import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustments.js';
+import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText, rewritePsdShapeStyle, rewritePsdAdjustmentBlocks } from './formats/psd.js';
+import { createDocumentSessionController } from './workspace/session-controller.js';
+import { createRecoveryController } from './workspace/recovery-controller.js';
+import { createToolbarController } from './ui/toolbar-controller.js';
+import { createMenuController } from './ui/menu-controller.js';
+import { createModalController } from './ui/modal-controller.js';
+import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
+import { createSelectionGestureController, cloneSelectionShape } from './selection/gesture-controller.js';
+import { createSelectionClipboardController } from './selection/clipboard-controller.js';
+import { createSelectionRasterMutationController } from './selection/raster-mutation-controller.js';
+import { createDocumentImportController } from './document/import-controller.js';
+import { createRasterEditController } from './painting/controller.js';
+import { createRasterCommandController } from './painting/command-controller.js';
+import { createPaintGestureController } from './painting/gesture-controller.js';
+import { createRetouchController } from './retouch/controller.js';
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -12756,6 +12796,8 @@ let panelsVisible = true;
 let pointerLifecycle = null;
 let paintPersisting = false;
 let hoverPoint = null;
+let smartSnapEnabled = true;
+let smartGuides = { x:null, y:null };
 
 function setStatus(message) { els.status.textContent = message; }
 

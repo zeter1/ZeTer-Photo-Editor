@@ -46,3 +46,9 @@ test('layer list is keyboard navigable and supports F2 rename', () => {
   assert.match(main, /if\(e\.code==='F2'\)[\s\S]*?renameLayer/);
   assert.match(css, /\.layer-row:focus-visible/);
 });
+test('smart snapping keeps explicit runtime state after workspace refactors', () => {
+  assert.match(main, /let smartSnapEnabled = true;/);
+  assert.match(main, /let smartGuides = \{ x:null, y:null \};/);
+  assert.match(main, /function readSmartSnapState\(\)[\s\S]*?smartSnapEnabled = saved === null \? true : saved !== 'false'/);
+  assert.match(main, /if \(smartSnapEnabled && !e\.ctrlKey && !e\.metaKey\)/);
+});

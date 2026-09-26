@@ -88,6 +88,8 @@ let panelsVisible = true;
 let pointerLifecycle = null;
 let paintPersisting = false;
 let hoverPoint = null;
+let smartSnapEnabled = true;
+let smartGuides = { x:null, y:null };
 
 function setStatus(message) { els.status.textContent = message; }
 
