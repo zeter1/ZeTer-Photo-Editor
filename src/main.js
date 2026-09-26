@@ -615,6 +615,7 @@ const smartObjectController = createSmartObjectController({
       );
     },
     rewriteEmbeddedSource: rewritePhotoshopEmbeddedSource,
+    publishEmbeddedSourceRewrite: applyPhotoshopEmbeddedSourceRewrite,
     updateTargetAfterRewrite: updatePhotoshopSmartObjectRewriteMetadata,
   },
   ui: { setStatus, toast, consoleRef:console },
@@ -3441,8 +3442,15 @@ async function rewritePhotoshopEmbeddedSource(parentDoc,layer,embedded,previewDa
   const assetBytes=await serializePhotoshopEmbeddedAsset(embedded,source,previewDataUrl);
   const rewritten=rewriteEmbeddedLinkedLayerAsset(blocks,source.uniqueId,assetBytes);
   if(rewritten.rewritten<1)return{rewritten:false,reason:'liFD resource с matching UUID не найден'};
-  parentDoc.psdLinkedLayerBlocks=rewritten.blocks.map(psdOpaqueBlockToState).filter(Boolean);
-  return{rewritten:true,newSize:rewritten.newSize,oldSize:rewritten.oldSize,sourceKey:rewritten.sourceKey,type:asset.detectedFileType};
+  return{
+    rewritten:true,
+    linkedLayerBlocks:rewritten.blocks.map(psdOpaqueBlockToState).filter(Boolean),
+    newSize:rewritten.newSize,oldSize:rewritten.oldSize,sourceKey:rewritten.sourceKey,type:asset.detectedFileType,
+  };
+}
+function applyPhotoshopEmbeddedSourceRewrite(parentDoc,rewrite){
+  if(!parentDoc||!rewrite?.rewritten||!Array.isArray(rewrite.linkedLayerBlocks))return;
+  parentDoc.psdLinkedLayerBlocks=rewrite.linkedLayerBlocks;
 }
 
 function updatePhotoshopSmartObjectRewriteMetadata(target,{rewrite,previewDataUrl,embedded}){
