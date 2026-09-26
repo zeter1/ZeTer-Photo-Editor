@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, layerBlendingController, textEditController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -19,6 +19,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/color-management-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/layer-blending-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/text-edit-controller.js', root), 'utf8'),
+  readFile(new URL('src/ui/text-settings-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pointer-lifecycle-router.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
@@ -134,6 +135,17 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /textEditController\.syncPreviewCanvas\(\)/);
   assert.doesNotMatch(modalController, /attachTextPreview/);
   assert.doesNotMatch(modalController, /onModalClose/);
+
+  assert.match(main, /from '\.\/ui\/text-settings-controller\.js'/);
+  assert.match(build, /'src\/ui\/text-settings-controller\.js'/);
+  assert.match(textSettingsController, /export function createTextSettingsController/);
+  assert.match(textSettingsController, /from '\.\.\/core\/render\.js'/);
+  assert.match(main, /createTextSettingsController\(\{/);
+  assert.doesNotMatch(main, /\b(?:let|const) localTextFonts\b/);
+  assert.doesNotMatch(main, /\bconst customFontReads\b/);
+  for (const name of ['textFontOptions','loadComputerFonts','readCustomTextFont','loadCustomTextFont','textModalFields','textSettingsFromForm']) {
+    assert.doesNotMatch(main, new RegExp(`(?:async\\s+)?function ${name}\\(`));
+  }
 
   assert.match(main, /from '\.\/interaction\/pointer-lifecycle-router\.js'/);
   assert.match(build, /'src\/interaction\/pointer-lifecycle-router\.js'/);
