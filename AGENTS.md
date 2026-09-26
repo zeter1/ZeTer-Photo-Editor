@@ -6,6 +6,7 @@
 
 - UI/runtime orchestration: `src/main.js`
 - Workspace/session/tab lifecycle: `src/workspace/session-controller.js`
+- Selection copy/cut/paste lifecycle: `src/selection/clipboard-controller.js`
 - UI config + toolbar/menu/modal controllers/layout: `src/ui/`
 - Core domain/render/pixel logic: `src/core/`
 - PSD/PSB format boundary: `src/formats/psd.js`
