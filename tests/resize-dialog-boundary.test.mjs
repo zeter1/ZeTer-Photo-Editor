@@ -5,10 +5,68 @@ import { runInNewContext } from 'node:vm';
 import { checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION } from '../src/core/state.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
-const imageStart = main.indexOf('function resizeImageDialog(){');
-const canvasStart = main.indexOf('function resizeCanvasDialog(){');
-const imageDialog = main.slice(imageStart, main.indexOf('function setZoom(', imageStart));
-const canvasDialog = main.slice(canvasStart, main.indexOf('function closeMenu(', canvasStart));
+
+function extractNamedFunction(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `Function ${name} not found`);
+  const bodyStart = source.indexOf('{', start);
+  assert.notEqual(bodyStart, -1, `Function ${name} has no body`);
+
+  let depth = 0;
+  let quote = '';
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = bodyStart; index < source.length; index++) {
+    const char = source[index];
+    const next = source[index + 1];
+
+    if (lineComment) {
+      if (char === '\n') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (char === '*' && next === '/') {
+        blockComment = false;
+        index++;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) quote = '';
+      continue;
+    }
+    if (char === '/' && next === '/') {
+      lineComment = true;
+      index++;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      blockComment = true;
+      index++;
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '{') depth++;
+    else if (char === '}' && --depth === 0) return source.slice(start, index + 1);
+  }
+  throw new Error(`Function ${name} body is not balanced`);
+}
+
+const imageDialog = extractNamedFunction(main, 'resizeImageDialog');
+const canvasDialog = extractNamedFunction(main, 'resizeCanvasDialog');
 
 for (const [name, source] of [['изображения', imageDialog], ['холста', canvasDialog]]) {
   test(`изменение размера ${name} ждёт завершения правки и снимает старое выделение`, () => {

@@ -25,6 +25,7 @@ import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustment
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText, rewritePsdShapeStyle, rewritePsdAdjustmentBlocks } from './formats/psd.js';
 import { createDocumentSessionController } from './workspace/session-controller.js';
 import { createToolbarController } from './ui/toolbar-controller.js';
+import { createMenuController } from './ui/menu-controller.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -88,8 +89,6 @@ let selectionCopyMode = 'merged';
 let dragDepth = 0;
 let layerDragId = null;
 let groupDragId = null;
-let openMenuKey = null;
-let menuReturnFocus = null;
 let panelsVisible = true;
 let pasteGeneration = 0;
 let pasteFallbackTimer = null;
@@ -127,6 +126,17 @@ const toolbarController = createToolbarController({
   setStatus,
 });
 const { initReorder:initToolbarReorder, initTooltips } = toolbarController;
+const menuController = createMenuController({
+  menu: els.menu,
+  viewport: els.viewport,
+  menuButtons: $$('.menu-button'),
+  getItems: key => menus[key] || [],
+  escapeHtml,
+  toast,
+});
+const { closeMenu, openContextMenu } = menuController;
+menuController.init();
+
 function toast(message, tone = '') {
   const item = document.createElement('div');
   item.className = `toast${tone ? ` ${tone}` : ''}`;
@@ -6516,67 +6526,6 @@ function resizeCanvasDialog(){if(blockPendingDocumentEdit())return;showModal({ti
   for(const layer of doc.layers){layer.x+=shiftX;layer.y+=shiftY;}
   doc.width=width;doc.height=height;cropRect=null;clearSelectionState();brushCanvas=null;brushCtx=null;brushLayerId=null;commit('Размер холста');fitToView();
 }});}
-function closeMenu({restoreFocus=false}={}) {
-  const active=$('.menu-button.active');
-  const focusTarget=menuReturnFocus || active;
-  openMenuKey=null; menuReturnFocus=null; els.menu.hidden=true; els.menu.replaceChildren();
-  $$('.menu-button').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-expanded','false');});
-  if (restoreFocus) (focusTarget?.isConnected ? focusTarget : els.viewport)?.focus();
-}
-function populateMenu(items){
-  els.menu.replaceChildren();
-  for(const item of items){
-    if(item[0]==='sep'){const sep=document.createElement('div');sep.className='menu-sep';sep.setAttribute('role','separator');els.menu.append(sep);continue;}
-    const [label,shortcut,action,enabled]=item;
-    const b=document.createElement('button');b.type='button';b.className='menu-item';b.setAttribute('role','menuitem');
-    b.disabled=enabled ? !enabled() : false;
-    b.innerHTML=`<span>${escapeHtml(label)}</span><span class="menu-shortcut">${escapeHtml(shortcut)}</span>`;
-    b.onclick=()=>{if(b.disabled)return;closeMenu();Promise.resolve(action()).catch(error=>{console.error(error);toast(error.message||'Ошибка команды','error');});};
-    els.menu.append(b);
-  }
-}
-function positionMenu(x,y,{focusFirst=false}={}){
-  els.menu.hidden=false;
-  const rect=els.menu.getBoundingClientRect();
-  els.menu.style.left=`${Math.max(6,Math.min(x,window.innerWidth-rect.width-6))}px`;
-  els.menu.style.top=`${Math.max(6,Math.min(y,window.innerHeight-rect.height-6))}px`;
-  if(focusFirst)els.menu.querySelector('.menu-item:not(:disabled)')?.focus();
-}
-function openMenu(button,key,{focusFirst=false}={}){
-  openMenuKey=key; menuReturnFocus=button;
-  $$('.menu-button').forEach(b=>{const active=b===button;b.classList.toggle('active',active);b.setAttribute('aria-expanded',String(active));});
-  populateMenu(menus[key]||[]);
-  const r=button.getBoundingClientRect();
-  positionMenu(r.left,r.bottom+3,{focusFirst});
-}
-function openContextMenu(key,items,event,focusTarget=event.target){
-  openMenuKey=key; menuReturnFocus=focusTarget;
-  $$('.menu-button').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-expanded','false');});
-  populateMenu(items);
-  const keyboard=event.clientX===0 && event.clientY===0;
-  const rect=focusTarget?.getBoundingClientRect?.();
-  positionMenu(keyboard && rect ? rect.left+8 : event.clientX, keyboard && rect ? rect.bottom : event.clientY,{focusFirst:keyboard});
-}
-const menuButtons=$$('.menu-button');
-menuButtons.forEach((b,index)=>{
-  b.type='button'; b.setAttribute('aria-haspopup','menu'); b.setAttribute('aria-expanded','false');
-  b.addEventListener('click',e=>{e.stopPropagation();if(openMenuKey===b.dataset.menu)closeMenu();else openMenu(b,b.dataset.menu);});
-  b.addEventListener('mouseenter',()=>{if(openMenuKey && openMenuKey!==b.dataset.menu)openMenu(b,b.dataset.menu);});
-  b.addEventListener('keydown',e=>{
-    if(e.key==='ArrowDown'){e.preventDefault();openMenu(b,b.dataset.menu,{focusFirst:true});}
-    if(e.key==='ArrowRight'||e.key==='ArrowLeft'){
-      e.preventDefault();const delta=e.key==='ArrowRight'?1:-1;const next=menuButtons[(index+delta+menuButtons.length)%menuButtons.length];next.focus();if(openMenuKey)openMenu(next,next.dataset.menu);
-    }
-  });
-});
-els.menu.setAttribute('role','menu');
-els.menu.addEventListener('keydown',e=>{
-  const items=[...els.menu.querySelectorAll('.menu-item:not(:disabled)')]; const index=items.indexOf(document.activeElement);
-  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMenu({restoreFocus:true});return;}
-  if(e.key==='ArrowDown'&&items.length){e.preventDefault();items[(index+1+items.length)%items.length].focus();}
-  if(e.key==='ArrowUp'&&items.length){e.preventDefault();items[(index-1+items.length)%items.length].focus();}
-});
-document.addEventListener('pointerdown',e=>{if(openMenuKey&&!els.menu.contains(e.target)&&!e.target.closest?.('.menu-button'))closeMenu();});
 els.tabs.addEventListener('contextmenu',e=>{
   if(e.target!==els.tabs)return;
   e.preventDefault();

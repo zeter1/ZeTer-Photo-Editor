@@ -6,7 +6,7 @@
 
 - UI/runtime orchestration: `src/main.js`
 - Workspace/session/tab lifecycle: `src/workspace/session-controller.js`
-- UI config + toolbar controller/layout: `src/ui/`
+- UI config + toolbar/menu controllers/layout: `src/ui/`
 - Core domain/render/pixel logic: `src/core/`
 - PSD/PSB format boundary: `src/formats/psd.js`
 - Generated file:// bundle: `src/app.bundle.js` — **не редактировать вручную**
