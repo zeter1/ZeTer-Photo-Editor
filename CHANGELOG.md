@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Открытие recovery-проекта двойным левым кликом
+
+- Bug fix: быстрый двойной клик по карточке автосохранённого проекта теперь обрабатывается только основной (левой) кнопкой мыши; двойной правый клик больше не запускает восстановление.
+- Cleanup: detector переименован из right-click-specific в нейтральный `createRapidDoubleClickTracker`, а recovery action теперь помечается `primary-double-click`.
+- Regression coverage: unit/source-contract тесты фиксируют primary-button contract и запрещают возврат `button === 2`/secondary-double-click поведения.
+- Cache busting: runtime-изменение создало новый build ID `c36bc347c1d8ccfa`, поэтому HTTP/HTTPS-публикация получит исправленный bundle через существующий механизм автообновления.
+
 ### 2026-09-26 — Instagram в окне «О программе»
 
 - About UI: карточка разработчика дополнена ссылкой `Instagram: @zeter1992` на `https://www.instagram.com/zeter1992/` с безопасным открытием в новой вкладке.
