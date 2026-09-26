@@ -8,7 +8,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 
 | Задача | Главные файлы | Сначала тесты |
 |---|---|---|
-| UI, события, меню, pointer/keyboard | `src/main.js`, `src/ui/menu-controller.js`, `src/ui/`, `src/styles.css`, `index.html` | interaction/browser tests |
+| UI, события, меню, dialogs, pointer/keyboard | `src/main.js`, `src/ui/menu-controller.js`, `src/ui/modal-controller.js`, `src/ui/`, `src/styles.css`, `index.html` | interaction/browser tests |
 | Вкладки, document sessions, session history | `src/workspace/session-controller.js`, wiring в `src/main.js` | `tests/workspace-session-controller.test.mjs`, `tests/document-tabs.test.mjs` |
 | Порядок инструментов, drag/drop, tooltips | `src/ui/toolbar-controller.js`, `src/ui/tool-layout.js`, `src/ui/tool-config.js` | `tests/tool-layout.test.mjs`, browser smoke |
 | Документы, слои, groups, smart objects | `src/core/state.js` | core/layer/smart-object tests |
@@ -28,6 +28,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 - `src/ui/tool-config.js` — чистые UI-константы, labels/help/effect-control metadata/storage keys.
 - `src/ui/toolbar-controller.js` — drag/drop/persistence/drop-slot и rich tooltip lifecycle панели инструментов; выбор текущего tool остаётся в `src/main.js`.
 - `src/ui/menu-controller.js` — lifecycle верхнего меню и context-menu: DOM items, позиционирование, focus/keyboard navigation, outside-click close и безопасный async action dispatch; доменные списки команд остаются в `src/main.js`.
+- `src/ui/modal-controller.js` — generic modal/dialog shell: form fields, numeric normalization, focus restore, backdrop/Escape close, draggable text-modal lifecycle, info/recovery dialogs; editor-specific preview/mutations приходят callback-ами из `src/main.js`.
 - `src/ui/tool-layout.js` — чистая математика порядка/позиции toolbar.
 - `src/workspace/session-controller.js` — lifecycle document sessions: create/switch/close/rename/duplicate, per-tab history/zoom/dirty/selection state и smart-object parent/child tab guard.
 - `src/core/*.js` — domain, render, pixel, history, IO, recovery и color logic.
