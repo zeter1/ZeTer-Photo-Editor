@@ -10019,7 +10019,7 @@ const { initReorder:initToolbarReorder, initTooltips } = toolbarController;
 const menuController = createMenuController({
   menu: els.menu,
   viewport: els.viewport,
-  menuButtons: $('.menu-button'),
+  menuButtons: $$('.menu-button'),
   getItems: key => menus[key] || [],
   escapeHtml,
   toast,
