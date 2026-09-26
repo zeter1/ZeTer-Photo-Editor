@@ -37,6 +37,7 @@ const sources = [
   'src/painting/gesture-controller.js',
   'src/selection/gesture-controller.js',
   'src/selection/raster-mutation-controller.js',
+  'src/selection/mask-controller.js',
   'src/selection/clipboard-controller.js',
   'src/document/import-controller.js',
   'src/document/smart-object-controller.js',
