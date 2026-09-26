@@ -416,12 +416,12 @@ test('architecture guard keeps generic lifecycle and Photoshop resource policy o
     readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   ]);
 
-  assert.match(main, /from '\\.\\/document\\/smart-object-controller\\.js'/);
-  assert.match(main, /from '\\.\\/document\\/psd-smart-object-resource\\.js'/);
-  assert.match(source, /export function createSmartObjectController/);
-  assert.match(resource, /export function createPsdSmartObjectResource/);
-  assert.match(build, /'src\\/document\\/smart-object-controller\\.js'/);
-  assert.match(build, /'src\\/document\\/psd-smart-object-resource\\.js'/);
+  assert.ok(main.includes("from './document/smart-object-controller.js'"));
+  assert.ok(main.includes("from './document/psd-smart-object-resource.js'"));
+  assert.ok(source.includes('export function createSmartObjectController'));
+  assert.ok(resource.includes('export function createPsdSmartObjectResource'));
+  assert.ok(build.includes("'src/document/smart-object-controller.js'"));
+  assert.ok(build.includes("'src/document/psd-smart-object-resource.js'"));
   for (const name of [
     'smartObjectLinkedCount',
     'createLinkedSmartObjectCopy',
@@ -432,25 +432,22 @@ test('architecture guard keeps generic lifecycle and Photoshop resource policy o
     'convertSelectedToSmartObject',
     'openSmartObjectContents',
     'saveSmartObjectContent',
-  ]) {
-    assert.doesNotMatch(main, new RegExp('(?:async\\\\s+)?function ' + name + '\\\\('));
-  }
-  for (const name of [
     'serializePhotoshopEmbeddedAsset',
     'rewritePhotoshopEmbeddedSource',
     'applyPhotoshopEmbeddedSourceRewrite',
     'updatePhotoshopSmartObjectRewriteMetadata',
   ]) {
-    assert.doesNotMatch(main, new RegExp('(?:async\\\\s+)?function ' + name + '\\\\('));
+    assert.equal(main.includes('function ' + name + '('), false, name + ' must not be owned by main');
+    assert.equal(main.includes('async function ' + name + '('), false, name + ' must not be owned by main');
   }
-  assert.match(main, /psdSmartObjectResource\\.rewriteEmbeddedSource/);
-  assert.match(main, /psdSmartObjectResource\\.publishEmbeddedSourceRewrite/);
-  assert.match(main, /psdSmartObjectResource\\.updateTargetAfterRewrite/);
-  assert.match(source, /publishEmbeddedSourceRewrite/);
-  assert.match(resource, /rewriteEmbeddedLinkedLayerAsset/);
-  assert.match(resource, /encodePsdBlob/);
-  assert.match(resource, /encodePsbBlob/);
-  assert.match(resource, /psdOpaqueBlockFromState/);
+  assert.ok(main.includes('psdSmartObjectResource.rewriteEmbeddedSource'));
+  assert.ok(main.includes('psdSmartObjectResource.publishEmbeddedSourceRewrite'));
+  assert.ok(main.includes('psdSmartObjectResource.updateTargetAfterRewrite'));
+  assert.ok(source.includes('publishEmbeddedSourceRewrite'));
+  assert.ok(resource.includes('rewriteEmbeddedLinkedLayerAsset'));
+  assert.ok(resource.includes('encodePsdBlob'));
+  assert.ok(resource.includes('encodePsbBlob'));
+  assert.ok(resource.includes('psdOpaqueBlockFromState'));
   assert.doesNotMatch(resource, /getActiveSessionId|currentSession|renderDocumentTabs|queueRecovery/);
   assert.doesNotMatch(source, /rewriteEmbeddedLinkedLayerAsset|encodePsdBlob|encodePsbBlob|psdOpaqueBlockFromState/);
 });

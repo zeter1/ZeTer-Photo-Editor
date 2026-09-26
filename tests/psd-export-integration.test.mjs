@@ -234,7 +234,7 @@ test('Stage 14b wires typed Photoshop descriptors and embedded asset extraction 
   assert.match(adapter,/detectedFileType/);
   assert.match(psdImportSemantics,/function importPsdEmbeddedAssetDocument\(/);
   assert.match(psdImportSemantics,/function importPsdNestedDocument\(/);
-  assert.match(main,/embeddedFingerprint/);
+  assert.match(psdImportSemantics,/embeddedFingerprint/);
   assert.match(main,/Редактировать извлечённое содержимое/);
   assert.match(main,/linked\/unsupported payload остаётся opaque/);
 });
