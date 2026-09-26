@@ -187,5 +187,5 @@ test('new text and shape layers inherit the tool opacity like brush, fill, and l
   assert.match(modalController, /Начать новый проект/);
   assert.match(modalController, /Удалить проект/);
   assert.match(modalController, /Восстановить выбранный/);
-  assert.match(css, /\\.recovery-project\\.selected/);
+  assert.match(css, /\.recovery-project\.selected/);
 });
