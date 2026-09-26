@@ -85,7 +85,7 @@ browser primitives (Canvas, Worker, storage, File APIs)
 ### Document / PSD import mapping
 - `src/document/psd-import-controller.js` owns PSD/PSB file guard + decode orchestration + decoded-payload mapping + stale-context validation + publish coordination.
 - It may depend directly on stable core state/pixel/color contracts. Binary decode is injected from `src/formats/psd.js`; DOM/canvas data-URL encoding, Photoshop import semantics and runtime mutation are ports.
-- `src/document/psd-import-semantics.js` owns Photoshop Text/Shape/Adjustment/Smart Object import metadata interpretation and editable embedded-asset mapping. It may import stable core/domain transforms directly; codec/browser effects and shared cross-feature vector-mask / opaque-resource conversions remain explicit ports.
+- `src/document/psd-import-semantics.js` owns Photoshop Text/Shape/Adjustment/Smart Object import metadata interpretation and editable embedded-asset mapping. It may import stable core/domain transforms directly; codec/browser effects and shared cross-feature vector-mask / opaque-resource conversions plus Smart Object fingerprint helpers remain explicit ports.
 - Import semantics must not publish documents, own session/history state, rewrite export metadata, or become a second PSD binary codec. Shared vector-mask localization and opaque-resource state conversion stay with their broader runtime/resource owners until a separate cohesive seam exists.
 - The import controller must not absorb export preparation, PSD byte parsing/writing, workspace/session ownership or generic file routing. Do not recreate `openPsd()` in `src/main.js`.
 
