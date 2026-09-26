@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const main = await readFile(new URL("../src/main.js", import.meta.url), "utf8");
+const smartObjects = await readFile(new URL("../src/document/smart-object-controller.js", import.meta.url), "utf8");
 const sessions = await readFile(new URL("../src/workspace/session-controller.js", import.meta.url), "utf8");
 const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
@@ -37,12 +38,16 @@ test("tabs UI styles keep the add button directly after the last tab", () => {
 
 test("smart object content tabs link to parent sessions and save back through parent history", () => {
   assert.match(sessions, /smartObjectLink: smartObjectLink \? \{ \.\.\.smartObjectLink \} : null/);
-  assert.match(main, /function openSmartObjectContents\(/);
-  assert.match(main, /smartObjectLink:\{parentSessionId,layerId:layer\.id,linkedSourceId,photoshopSourceId\}/);
-  assert.match(main, /function saveSmartObjectContent\(/);
-  assert.match(main, /parentSession\.history\.push\(liveTargets\.length>1\?'Обновить общий источник смарт-объектов':'Обновить смарт-объект'/);
-  assert.match(main, /parentSession\.dirty=true/);
-  assert.match(main, /session\.dirty=false;dirty=false/);
+  assert.match(smartObjects, /function openContents\(/);
+  assert.match(smartObjects, /smartObjectLink:\{/);
+  assert.match(smartObjects, /parentSessionId,/);
+  assert.match(smartObjects, /layerId:layer\.id/);
+  assert.match(smartObjects, /function saveContent\(/);
+  assert.match(smartObjects, /parentSession\.history\.push\(/);
+  assert.match(smartObjects, /parentSession\.dirty = true/);
+  assert.match(smartObjects, /session\.dirty = false/);
+  assert.match(main, /openContents: openSmartObjectContents/);
+  assert.match(main, /saveContent: saveSmartObjectContent/);
 });
 
 test("smart object parent tab cannot close while linked content tabs remain open", () => {
@@ -51,8 +56,8 @@ test("smart object parent tab cannot close while linked content tabs remain open
 });
 
 test("smart object workflow is bounded and respects layer locks", () => {
-  assert.match(main, /function smartObjectSessionDepth\(/);
-  assert.match(main, /smartObjectSessionDepth\(\)>=3/);
-  assert.match(main, /Смарт-объект или его группа заблокированы/);
-  assert.match(main, /Родительский смарт-объект заблокирован/);
+  assert.match(smartObjects, /function sessionDepth\(/);
+  assert.match(smartObjects, /sessionDepth\(\) >= maxNestedDepth/);
+  assert.match(smartObjects, /Смарт-объект или его группа заблокированы/);
+  assert.match(smartObjects, /Родительский смарт-объект заблокирован/);
 });
