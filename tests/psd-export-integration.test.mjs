@@ -6,6 +6,7 @@ const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
 const psdNativeMetadataPlans=await readFile(new URL('../src/document/psd-native-metadata-plans.js',import.meta.url),'utf8');
 const psdImportController=await readFile(new URL('../src/document/psd-import-controller.js',import.meta.url),'utf8');
+const psdImportSemantics=await readFile(new URL('../src/document/psd-import-semantics.js',import.meta.url),'utf8');
 const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
@@ -213,6 +214,7 @@ test('Stage 14a wires Photoshop Smart Object / Placed Layer opaque metadata thro
   assert.match(adapter,/writeSmartObjectLayerExtras\(extra, layer, version\)/);
   assert.match(adapter,/writeLinkedLayerBlocks\(layerAndMask,linkedLayerBlocks,version\)/);
   assert.match(psdImportController,/importPsdSmartObjectMetadata/);
+  assert.match(psdImportSemantics,/function importPsdSmartObjectMetadata\(/);
   assert.match(psdImportController,/createSmartObjectLayer\(\{/);
   assert.match(psdNativeMetadataPlans,/psdSmartObjectRoundTripPlan/);
   assert.match(psdExportController,/psdSmartObject:psdSmartPlan\.eligible/);
@@ -228,8 +230,8 @@ test('Stage 14b wires typed Photoshop descriptors and embedded asset extraction 
   assert.match(adapter,/function parseLinkedLayerRecord\(/);
   assert.match(adapter,/linkedLayerEntries/);
   assert.match(adapter,/detectedFileType/);
-  assert.match(main,/function importPsdEmbeddedAssetDocument\(/);
-  assert.match(main,/function importPsdNestedDocument\(/);
+  assert.match(psdImportSemantics,/function importPsdEmbeddedAssetDocument\(/);
+  assert.match(psdImportSemantics,/function importPsdNestedDocument\(/);
   assert.match(main,/embeddedFingerprint/);
   assert.match(main,/Редактировать извлечённое содержимое/);
   assert.match(main,/linked\/unsupported payload остаётся opaque/);
@@ -252,7 +254,7 @@ test('Stage 15a wires Photoshop TySh text mapping and safe native round-trip int
   assert.match(adapter,/function parseTypeToolObject\(/);
   assert.match(adapter,/export function rewriteTypeToolText\(/);
   assert.match(adapter,/writeTextLayerExtra\(extra, layer, version\)/);
-  assert.match(main,/importPsdTextMetadata/);
+  assert.match(psdImportSemantics,/function importPsdTextMetadata\(/);
   assert.match(psdNativeMetadataPlans,/psdTextNativePlan/);
   assert.match(psdImportController,/canMapText/);
   assert.match(main,/createTextLayer\(\{/);
@@ -285,8 +287,8 @@ test('Stage 15c wires Photoshop solid vector shapes into editable ZPE paths and 
   assert.match(adapter,/psdShape: record\.psdShape/);
   assert.match(adapter,/writeShapeLayerExtras\(extra, layer, version, 'content'\)/);
   assert.match(adapter,/writeShapeLayerExtras\(extra, layer, version, 'stroke'\)/);
-  assert.match(main,/function canMapPsdSolidShape\(/);
-  assert.match(main,/function importPsdShapeMetadata\(/);
+  assert.match(psdImportSemantics,/function canMapPsdSolidShape\(/);
+  assert.match(psdImportSemantics,/function importPsdShapeMetadata\(/);
   assert.match(psdNativeMetadataPlans,/function exportPsdShapePathMask\(/);
   assert.match(psdNativeMetadataPlans,/function psdShapeNativePlan\(/);
   assert.match(psdImportController,/const canMapShape=semantics\.canMapPsdSolidShape\(sourceLayer\)/);
@@ -315,7 +317,7 @@ test('Stage 16c wires Photoshop adjustment records into semantic ZPE layers and 
   assert.match(adapter,/export function rewritePsdAdjustmentBlocks\(/);
   assert.match(adapter,/const adjustmentLayers = \[\]/);
   assert.match(adapter,/writeAdjustmentLayerExtras\(extra, layer, version\)/);
-  assert.match(main,/importPsdAdjustmentMetadata/);
+  assert.match(psdImportSemantics,/function importPsdAdjustmentMetadata\(/);
   assert.match(psdNativeMetadataPlans,/psdAdjustmentNativePlan/);
   assert.match(psdImportController,/adjustmentSources/);
   assert.match(psdImportController,/createAdjustmentLayer\(\{/);
