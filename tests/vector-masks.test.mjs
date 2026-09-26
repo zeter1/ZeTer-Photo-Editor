@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createDocument, createShapeLayer, createVectorMask, addLayer, sanitizeProject, snapshotDocument } from '../src/core/state.js';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
 
 test('vector mask state survives .zpe sanitization with Bezier handles and boolean operations',()=>{
   const doc=createDocument({width:300,height:200});
@@ -44,7 +45,7 @@ test('Stage 10 UI exposes vector masks and selection-driven boolean path operati
   assert.match(main,/const cx=rect\.x\+rect\.width\/2,cy=rect\.y\+rect\.height\/2,rx=rect\.width\/2,ry=rect\.height\/2,k=\.5522847498307936/);
   assert.match(main,/function importPsdVectorMask\(/);
   assert.match(main,/function exportPsdVectorMask\(/);
-  assert.match(main,/preview\.vectorMask=null/);
+  assert.match(psdExportController,/preview\.vectorMask=null/);
   assert.match(main,/vectorMask:exportPsdVectorMask\(layer\)/);
 });
 

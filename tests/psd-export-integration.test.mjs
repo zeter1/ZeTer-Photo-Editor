@@ -21,7 +21,7 @@ test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
   assert.match(main,/downloadBlob\(blob,filename\)/);
   assert.match(main,/image\/vnd\.adobe\.photoshop/);
   assert.match(psdExportController,/48_000_000/);
-  assert.match(main,/ZPE Composite Preview \(adjustments baked\)/);
+  assert.match(psdExportController,/ZPE Composite Preview \(adjustments baked\)/);
 });
 
 test('PSD Stage 4 writer exposes Photoshop-compatible layered export primitives',()=>{
@@ -150,7 +150,7 @@ test('PSD/PSB Stage 12e routes native 16/32-bit PixelBuffers into Lr16/Lr32 writ
 test('Stage 12e keeps honest fallback semantics for transformed or effect-bearing high-depth layers',()=>{
   assert.match(psdExportController,/layerNeedsSemanticRasterWarning\(layer\)/);
   assert.match(psdExportController,/downgradedHighDepth/);
-  assert.match(main,/экспортированы через 8-bit raster preview/);
+  assert.match(psdExportController,/экспортированы через 8-bit raster preview/);
 });
 
 test('Stage 12g routes compatible multi-layer merged composites through typed PixelBuffers',()=>{
@@ -319,7 +319,7 @@ test('Stage 16c wires Photoshop adjustment records into semantic ZPE layers and 
   assert.match(main,/createAdjustmentLayer\(\{/);
   assert.match(psdExportController,/needsAdjustmentRasterFallback/);
   assert.match(psdExportController,/psdAdjustment:nativeAdjustment\.metadata/);
-  assert.match(main,/Stage 16[ab]: .*adjustment layer/);
+  assert.match(psdExportController,/Stage 16[ab]: .*adjustment layer/);
 });
 
 test('Stage 16b wires adjustment masks, clipping, Levels channels and editable Curves end-to-end',()=>{
@@ -333,7 +333,7 @@ test('Stage 16b wires adjustment masks, clipping, Levels channels and editable C
   assert.match(main,/data-adjustment-curve-channel/);
   assert.ok(main.includes("match(/^channels\\.(\\d+)\\."));
   assert.match(psdExportController,/clipping:layer\.clipping===true/);
-  assert.match(main,/Stage 16b: .*adjustment layer/);
+  assert.match(psdExportController,/Stage 16b: .*adjustment layer/);
   assert.match(render,/async function applyAdjustmentLayer\(canvas, ctx, layer, \{ clippingMask = null \} = \{\}\)/);
   assert.match(render,/function renderClippingBase|async function renderClippingBase/);
   assert.match(render,/entry\.layer\?\.clipping===true/);
