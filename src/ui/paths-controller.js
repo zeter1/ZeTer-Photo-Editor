@@ -115,8 +115,8 @@ export function createPathsController({
       const vector = exportVectorMask(layer);
       return {
         name: uniqueName(`${layer.name || 'Слой'} — маска`),
-        fillStartsWithAllPixels: vector?.fillStartsWithAllPixels === true,
-        subpaths: clone(vector?.subpaths || []),
+        fillStartsWithAllPixels: vector.fillStartsWithAllPixels === true,
+        subpaths: clone(vector.subpaths),
       };
     }
     if (layer?.type === 'shape' && layer.shape === 'path' && Array.isArray(layer.pathPoints) && layer.pathPoints.length >= 2) {
