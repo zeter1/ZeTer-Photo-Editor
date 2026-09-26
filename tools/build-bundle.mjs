@@ -22,6 +22,7 @@ const sources = [
   'src/core/color.js',
   'src/core/pixel-worker.js',
   'src/core/render.js',
+  'src/selection/clipboard-controller.js',
   'src/formats/psd.js',
   'src/main.js',
 ];

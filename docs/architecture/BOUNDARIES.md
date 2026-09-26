@@ -8,6 +8,7 @@ These rules keep the project understandable and prevent the large app controller
 index.html / styles
         ↓
 src/main.js  ─────→  src/ui/*
+    │  └──────→  src/selection/*
     ↓   ↓
 src/core/*  ←────  src/formats/*
         ↓
@@ -21,6 +22,11 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - `src/ui/tool-layout.js`: pure layout/order math only.
 - DOM mutation, global event wiring and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API.
 - UI modules must not become alternate owners of document/layer domain state.
+
+### Selection
+- `src/selection/clipboard-controller.js` may orchestrate browser Clipboard APIs and call render helpers, but document mutation remains explicit callbacks.
+- Selection modules must not own layer/document state or silently bypass lock/high-depth/Undo semantics.
+- Async clipboard operations must stay bound to the document/session that initiated them.
 
 ### Core
 - Core modules should not know about menu labels, DOM selectors or CSS classes.

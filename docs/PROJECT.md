@@ -13,6 +13,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 | Порядок инструментов, drag/drop, tooltips | `src/ui/toolbar-controller.js`, `src/ui/tool-layout.js`, `src/ui/tool-config.js` | `tests/tool-layout.test.mjs`, browser smoke |
 | Документы, слои, groups, smart objects | `src/core/state.js` | core/layer/smart-object tests |
 | Рендеринг и composite | `src/core/render.js` | render/blending/high-depth tests |
+| Selection clipboard / copy-cut-paste | `src/selection/clipboard-controller.js`, selection mutations в `src/main.js` | `tests/selection-clipboard.test.mjs`, async context tests |
 | Пиксельные операции | `src/core/pixels.js`, `src/core/pixel-buffer.js` | pixel/retouch/high-depth tests |
 | ICC/CMYK/soft proof | `src/core/color-management.js` | color-management/corpus tests |
 | PSD/PSB import/export | `src/formats/psd.js` | `tests/psd-*.test.mjs` |
@@ -31,6 +32,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 - `src/ui/modal-controller.js` — generic modal/dialog shell: form fields, numeric normalization, focus restore, backdrop/Escape close, draggable text-modal lifecycle, info/recovery dialogs; editor-specific preview/mutations приходят callback-ами из `src/main.js`.
 - `src/ui/tool-layout.js` — чистая математика порядка/позиции toolbar.
 - `src/workspace/session-controller.js` — lifecycle document sessions: create/switch/close/rename/duplicate, per-tab history/zoom/dirty/selection state и smart-object parent/child tab guard.
+- `src/selection/clipboard-controller.js` — selection copy/cut/paste boundary: PNG preparation, system Clipboard API, native paste/fallback generation guards и tab-switch safety; actual raster clearing остаётся callback-ом из `src/main.js`.
 - `src/core/*.js` — domain, render, pixel, history, IO, recovery и color logic.
 - `src/formats/psd.js` — единственный канонический PSD/PSB implementation.
 - `src/app.bundle.js` — generated artifact для `file://`; править только через `npm run build`.

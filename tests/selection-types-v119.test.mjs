@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { pointInSelection, selectionBounds, selectionPathPoints } from '../src/core/geometry.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const clipboard = await readFile(new URL('../src/selection/clipboard-controller.js', import.meta.url), 'utf8');
 const toolConfig = await readFile(new URL('../src/ui/tool-config.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
@@ -37,8 +38,8 @@ test('selection toolbar exposes all four selection types and Shift+M cycling', (
 
 test('non-rectangular selections clip copy, raster editing and fill through the same selection shape', () => {
   assert.match(main, /function clipContextToDocumentSelection\(ctx\)/);
-  assert.match(main, /renderSelectionLayerToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
-  assert.match(main, /renderSelectionMergedToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
+  assert.match(clipboard, /renderSelectionLayerToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
+  assert.match(clipboard, /renderSelectionMergedToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
   assert.match(main, /function selectionPolygonForLayer\(layer\)[\s\S]*selectionPathPoints\(selectionShape, 72\)/);
   assert.match(main, /function rasterSelectionPredicate\(layer\)[\s\S]*pointInsideSelection/);
 });

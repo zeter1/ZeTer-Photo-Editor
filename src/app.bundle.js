@@ -6881,6 +6881,229 @@ function clearImageCache() {
   smartFilterCache.clear();
 }
 
+// ---- src/selection/clipboard-controller.js ----
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));
+}
+function createSelectionClipboardController({
+  getDocument,
+  getActiveSessionId,
+  getSelectionRect,
+  getCopyMode,
+  getSelectedLayer,
+  isEditableRasterLayer,
+  clipContextToDocumentSelection,
+  clearSelectionAcrossVisibleLayers,
+  clearSelectedPixels,
+  clearSelectionState,
+  setTool,
+  setStatus,
+  toast,
+  importImages,
+  visibleCanvasCenter,
+  isImageFile,
+  documentTarget=globalThis.document,
+  navigatorTarget=globalThis.navigator,
+  ClipboardItemClass=globalThis.ClipboardItem,
+  FileClass=globalThis.File,
+  DateClass=globalThis.Date,
+  setTimeoutFn=globalThis.setTimeout,
+  clearTimeoutFn=globalThis.clearTimeout,
+} = {}) {
+  let pasteGeneration=0;
+  let pasteFallbackTimer=null;
+
+  async function renderSelectionLayerToPng(layer,bounds) {
+    const canvas=documentTarget.createElement('canvas');
+    canvas.width=bounds.width;canvas.height=bounds.height;
+    const ctx=canvas.getContext('2d',{alpha:true});
+    ctx.clearRect(0,0,bounds.width,bounds.height);
+    ctx.save();
+    ctx.translate(-bounds.x,-bounds.y);
+    clipContextToDocumentSelection(ctx);
+    const clipboardLayer=structuredClone(layer);
+    clipboardLayer.blendMode='source-over';
+    await renderLayer(ctx,clipboardLayer);
+    ctx.restore();
+    return canvasToPngBlob(canvas);
+  }
+
+  async function renderSelectionMergedToPng(bounds) {
+    const full=documentTarget.createElement('canvas');
+    await renderDocument(full,getDocument(),{checker:false});
+    const canvas=documentTarget.createElement('canvas');
+    canvas.width=bounds.width;canvas.height=bounds.height;
+    const ctx=canvas.getContext('2d',{alpha:true});
+    ctx.clearRect(0,0,bounds.width,bounds.height);
+    ctx.save();
+    ctx.translate(-bounds.x,-bounds.y);
+    clipContextToDocumentSelection(ctx);
+    ctx.drawImage(full,0,0);
+    ctx.restore();
+    return canvasToPngBlob(canvas);
+  }
+
+  function finishSelectionClipboardAction(message) {
+    clearSelectionState();
+    setTool('move');
+    setStatus(message);
+  }
+
+  async function copySelectionToClipboard({ cut = false } = {}) {
+    const selectionRect=getSelectionRect();
+    if(!selectionRect){setStatus('Сначала выделите область инструментом выделения');toast('Нет активного выделения','warn');return false;}
+    const layer=getSelectedLayer();
+    const copyMode=getCopyMode();
+    if(copyMode==='selected'&&!layer){setStatus('Нет выбранного слоя');toast('Выберите слой для копирования','warn');return false;}
+    if(cut&&copyMode==='selected'&&!isEditableRasterLayer(layer)){setStatus('Вырезание выбранного слоя доступно только на незаблокированном растровом слое');toast('Для вырезания выберите незаблокированный растровый слой','warn');return false;}
+    const documentValue=getDocument();
+    const bounds=selectionPixelBounds(selectionRect,documentValue.width,documentValue.height);
+    if(!bounds){setStatus('Выделение пустое');return false;}
+    if(!navigatorTarget?.clipboard?.write||typeof ClipboardItemClass!=='function'){
+      setStatus('Копирование изображения в системный буфер недоступно в этом браузере');
+      toast('Браузер не поддерживает запись изображений в буфер обмена','error');
+      return false;
+    }
+    try {
+      const pngPromise=copyMode==='merged'
+        ? renderSelectionMergedToPng(bounds)
+        : renderSelectionLayerToPng(layer,bounds);
+      const item=new ClipboardItemClass({'image/png':pngPromise});
+      await navigatorTarget.clipboard.write([item]);
+      if(cut){
+        if(copyMode==='merged'){
+          const result=await clearSelectionAcrossVisibleLayers({historyLabel:'Вырезать выделение со всех слоёв'});
+          if(!result)return false;
+          const details=[];
+          if(result.rasterized)details.push(`растрировано слоёв: ${result.rasterized}`);
+          if(result.locked)details.push(`заблокировано и не изменено: ${result.locked}`);
+          const message=result.cleared
+            ? `Вырезано со всех видимых слоёв: ${bounds.width} × ${bounds.height} px${details.length?` • ${details.join(' • ')}`:''}`
+            : `Скопировано объединённое выделение: ${bounds.width} × ${bounds.height} px • очищать нечего`;
+          finishSelectionClipboardAction(message);
+          toast(result.cleared?'Выделение вырезано со всех доступных видимых слоёв':'Объединённое выделение скопировано; доступных слоёв для очистки нет',result.cleared?'success':'warn');
+          return true;
+        }
+        const cleared=await clearSelectedPixels({
+          historyLabel:'Вырезать выделение',
+          successStatus:`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`,
+        });
+        if(!cleared){toast('Область скопирована, но удалить пиксели со слоя не удалось','warn');return false;}
+        finishSelectionClipboardAction(`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`);
+        toast('Выделенная область вырезана в буфер обмена','success');
+        return true;
+      }
+      const sourceLabel=copyMode==='merged'?'со всех видимых слоёв':'с выбранного слоя';
+      finishSelectionClipboardAction(`Скопировано ${sourceLabel}: ${bounds.width} × ${bounds.height} px`);
+      toast(`Выделенная область скопирована ${sourceLabel}`,'success');
+      return true;
+    } catch(error) {
+      console.warn('Clipboard image write failed',error);
+      setStatus(`Не удалось записать выделение в буфер: ${error.message||'доступ запрещён'}`);
+      toast('Не удалось скопировать изображение в системный буфер','error');
+      return false;
+    }
+  }
+
+  function copySelection() { return copySelectionToClipboard(); }
+  function cutSelection() { return copySelectionToClipboard({cut:true}); }
+
+  async function readClipboardImageFiles() {
+    if (!navigatorTarget?.clipboard?.read) return [];
+    const clipboardItems=await navigatorTarget.clipboard.read();
+    const files=[];
+    for (const item of clipboardItems) {
+      const type=item.types.find(value=>value.startsWith('image/'));
+      if (!type) continue;
+      const blob=await item.getType(type);
+      const ext=MIME_EXT[type] || type.split('/')[1] || 'png';
+      files.push(new FileClass([blob],`Вставка-${DateClass.now()}.${ext}`,{type}));
+    }
+    return files;
+  }
+
+  async function pasteFromClipboard() {
+    if (!navigatorTarget?.clipboard?.read) {
+      toast('Для вставки используйте Ctrl+V — прямое чтение буфера недоступно браузеру','error');
+      return;
+    }
+    const targetDocument=getDocument();
+    const targetSessionId=getActiveSessionId();
+    try {
+      const files=await readClipboardImageFiles();
+      if (!files.length) { toast('В буфере обмена нет изображения','error'); return; }
+      if(getDocument()!==targetDocument||getActiveSessionId()!==targetSessionId){
+        setStatus('Вставка отменена: активный документ изменился');
+        return;
+      }
+      pasteGeneration+=1;
+      await importImages(files,{anchor:visibleCanvasCenter(),source:'Вставка'});
+    } catch (error) {
+      console.warn('Clipboard read failed',error);
+      toast('Браузер не разрешил прямое чтение буфера. Нажмите Ctrl+V','error');
+    }
+  }
+
+  function armPasteShortcutFallback() {
+    const generation=++pasteGeneration;
+    const targetDocument=getDocument();
+    const targetSessionId=getActiveSessionId();
+    setStatus('Вставка из буфера…');
+    clearTimeoutFn(pasteFallbackTimer);
+    pasteFallbackTimer=setTimeoutFn(()=>{
+      if(generation===pasteGeneration&&getDocument()===targetDocument&&getActiveSessionId()===targetSessionId)
+        setStatus('Буфер не передал изображение — попробуйте скопировать изображение снова или перетащить файл');
+    },900);
+    if (!navigatorTarget?.clipboard?.read) return;
+    readClipboardImageFiles().then(files=>{
+      if(!files.length)return;
+      setTimeoutFn(()=>{
+        if(generation!==pasteGeneration||getDocument()!==targetDocument||getActiveSessionId()!==targetSessionId)return;
+        pasteGeneration+=1;
+        clearTimeoutFn(pasteFallbackTimer);
+        importImages(files,{anchor:visibleCanvasCenter(),source:'Вставка'}).catch(error=>{
+          console.error(error);toast(error.message||'Ошибка вставки','error');
+        });
+      },80);
+    }).catch(error=>{
+      console.debug('Clipboard fallback unavailable',error);
+    });
+  }
+
+  function handleNativePasteEvent(event) {
+    const files=[];
+    for(const item of [...(event.clipboardData?.items||[])]){
+      if(item.kind==='file'&&item.type.startsWith('image/')){
+        const file=item.getAsFile();if(file)files.push(file);
+      }
+    }
+    if(!files.length){
+      for(const file of [...(event.clipboardData?.files||[])])if(isImageFile(file))files.push(file);
+    }
+    if(!files.length){
+      const hasClipboardPayload=(event.clipboardData?.items?.length||0)>0 || (event.clipboardData?.files?.length||0)>0;
+      if(hasClipboardPayload)toast('В буфере есть данные, но браузер не передал их как изображение','error');
+      return false;
+    }
+    event.preventDefault();
+    pasteGeneration+=1;
+    clearTimeoutFn(pasteFallbackTimer);
+    importImages(files,{anchor:visibleCanvasCenter(),source:'Вставка'}).catch(error=>{
+      console.error(error);toast(error.message||'Ошибка вставки','error');
+    });
+    return true;
+  }
+
+  return {
+    copySelection,
+    cutSelection,
+    pasteFromClipboard,
+    armPasteShortcutFallback,
+    handleNativePasteEvent,
+    readClipboardImageFiles,
+  };
+}
+
 // ---- src/formats/psd.js ----
 const PSD_SIGNATURE = '8BPS';
 const PSD_VERSION = 1;
@@ -10185,8 +10408,6 @@ let dragDepth = 0;
 let layerDragId = null;
 let groupDragId = null;
 let panelsVisible = true;
-let pasteGeneration = 0;
-let pasteFallbackTimer = null;
 let paintPreviewFrame = 0;
 let paintPreviewQueued = false;
 let activePrimaryPointerId = null;
@@ -10245,6 +10466,26 @@ const modalController = createModalController({
   },
 });
 const { showModal, showInfoModal, showRecoveryModal } = modalController;
+
+const selectionClipboardController = createSelectionClipboardController({
+  getDocument: () => doc,
+  getActiveSessionId: () => activeSessionId,
+  getSelectionRect: () => selectionRect,
+  getCopyMode: () => selectionCopyMode,
+  getSelectedLayer: selected,
+  isEditableRasterLayer,
+  clipContextToDocumentSelection,
+  clearSelectionAcrossVisibleLayers,
+  clearSelectedPixels,
+  clearSelectionState,
+  setTool,
+  setStatus,
+  toast,
+  importImages,
+  visibleCanvasCenter,
+  isImageFile,
+});
+const { copySelection, cutSelection, pasteFromClipboard, armPasteShortcutFallback, handleNativePasteEvent } = selectionClipboardController;
 
 function toast(message, tone = '') {
   const item = document.createElement('div');
@@ -14881,40 +15122,6 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
 
 async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — RGB/CMYK слои 8/16/32-bit'],['psb','PSB — RGB/CMYK Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
 
-function canvasToPngBlob(canvas) {
-  return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));
-}
-
-async function renderSelectionLayerToPng(layer,bounds) {
-  const canvas=document.createElement('canvas');
-  canvas.width=bounds.width;canvas.height=bounds.height;
-  const ctx=canvas.getContext('2d',{alpha:true});
-  ctx.clearRect(0,0,bounds.width,bounds.height);
-  ctx.save();
-  ctx.translate(-bounds.x,-bounds.y);
-  clipContextToDocumentSelection(ctx);
-  const clipboardLayer=structuredClone(layer);
-  clipboardLayer.blendMode='source-over';
-  await renderLayer(ctx,clipboardLayer);
-  ctx.restore();
-  return canvasToPngBlob(canvas);
-}
-
-async function renderSelectionMergedToPng(bounds) {
-  const full=document.createElement('canvas');
-  await renderDocument(full,doc,{checker:false});
-  const canvas=document.createElement('canvas');
-  canvas.width=bounds.width;canvas.height=bounds.height;
-  const ctx=canvas.getContext('2d',{alpha:true});
-  ctx.clearRect(0,0,bounds.width,bounds.height);
-  ctx.save();
-  ctx.translate(-bounds.x,-bounds.y);
-  clipContextToDocumentSelection(ctx);
-  ctx.drawImage(full,0,0);
-  ctx.restore();
-  return canvasToPngBlob(canvas);
-}
-
 async function prepareClearedHighDepthMutation(layer){
   if(!layer?.highDepthSource)return null;
   const buffer=editableHighDepthBuffer(layer,{requireAlpha:true});
@@ -15012,134 +15219,6 @@ async function clearSelectionAcrossVisibleLayers({ historyLabel = 'Выреза�
   } finally {
     paintPersisting=false;
   }
-}
-
-function finishSelectionClipboardAction(message) {
-  clearSelectionState();
-  setTool('move');
-  setStatus(message);
-}
-
-async function copySelectionToClipboard({ cut = false } = {}) {
-  if(!selectionRect){setStatus('Сначала выделите область инструментом выделения');toast('Нет активного выделения','warn');return false;}
-  const layer=selected();
-  if(selectionCopyMode==='selected'&&!layer){setStatus('Нет выбранного слоя');toast('Выберите слой для копирования','warn');return false;}
-  if(cut&&selectionCopyMode==='selected'&&!isEditableRasterLayer(layer)){setStatus('Вырезание выбранного слоя доступно только на незаблокированном растровом слое');toast('Для вырезания выберите незаблокированный растровый слой','warn');return false;}
-  const bounds=selectionPixelBounds(selectionRect,doc.width,doc.height);
-  if(!bounds){setStatus('Выделение пустое');return false;}
-  if(!navigator.clipboard?.write||typeof ClipboardItem!=='function'){
-    setStatus('Копирование изображения в системный буфер недоступно в этом браузере');
-    toast('Браузер не поддерживает запись изображений в буфер обмена','error');
-    return false;
-  }
-  try {
-    // ClipboardItem accepts Promise<Blob>, so the clipboard write is initiated
-    // while Ctrl+C / Ctrl+X still owns the browser user activation.
-    const pngPromise=selectionCopyMode==='merged'
-      ? renderSelectionMergedToPng(bounds)
-      : renderSelectionLayerToPng(layer,bounds);
-    const item=new ClipboardItem({'image/png':pngPromise});
-    await navigator.clipboard.write([item]);
-    if(cut){
-      if(selectionCopyMode==='merged'){
-        const result=await clearSelectionAcrossVisibleLayers({historyLabel:'Вырезать выделение со всех слоёв'});
-        if(!result)return false;
-        const details=[];
-        if(result.rasterized)details.push(`растрировано слоёв: ${result.rasterized}`);
-        if(result.locked)details.push(`заблокировано и не изменено: ${result.locked}`);
-        const message=result.cleared
-          ? `Вырезано со всех видимых слоёв: ${bounds.width} × ${bounds.height} px${details.length?` • ${details.join(' • ')}`:''}`
-          : `Скопировано объединённое выделение: ${bounds.width} × ${bounds.height} px • очищать нечего`;
-        finishSelectionClipboardAction(message);
-        toast(result.cleared?'Выделение вырезано со всех доступных видимых слоёв':'Объединённое выделение скопировано; доступных слоёв для очистки нет',result.cleared?'success':'warn');
-        return true;
-      }
-      const cleared=await clearSelectedPixels({
-        historyLabel:'Вырезать выделение',
-        successStatus:`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`,
-      });
-      if(!cleared){toast('Область скопирована, но удалить пиксели со слоя не удалось','warn');return false;}
-      finishSelectionClipboardAction(`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`);
-      toast('Выделенная область вырезана в буфер обмена','success');
-      return true;
-    }
-    const sourceLabel=selectionCopyMode==='merged'?'со всех видимых слоёв':'с выбранного слоя';
-    finishSelectionClipboardAction(`Скопировано ${sourceLabel}: ${bounds.width} × ${bounds.height} px`);
-    toast(`Выделенная область скопирована ${sourceLabel}`,'success');
-    return true;
-  } catch(error) {
-    console.warn('Clipboard image write failed',error);
-    setStatus(`Не удалось записать выделение в буфер: ${error.message||'доступ запрещён'}`);
-    toast('Не удалось скопировать изображение в системный буфер','error');
-    return false;
-  }
-}
-
-function copySelection() { return copySelectionToClipboard(); }
-function cutSelection() { return copySelectionToClipboard({cut:true}); }
-
-async function readClipboardImageFiles() {
-  if (!navigator.clipboard?.read) return [];
-  const clipboardItems=await navigator.clipboard.read();
-  const files=[];
-  for (const item of clipboardItems) {
-    const type=item.types.find(t=>t.startsWith('image/'));
-    if (!type) continue;
-    const blob=await item.getType(type);
-    const ext=MIME_EXT[type] || type.split('/')[1] || 'png';
-    files.push(new File([blob],`Вставка-${Date.now()}.${ext}`,{type}));
-  }
-  return files;
-}
-
-async function pasteFromClipboard() {
-  if (!navigator.clipboard?.read) {
-    toast('Для вставки используйте Ctrl+V — прямое чтение буфера недоступно браузеру','error');
-    return;
-  }
-  const targetDocument=doc;
-  const targetSessionId=activeSessionId;
-  try {
-    const files=await readClipboardImageFiles();
-    if (!files.length) { toast('В буфере обмена нет изображения','error'); return; }
-    if(doc!==targetDocument||activeSessionId!==targetSessionId){
-      setStatus('Вставка отменена: активный документ изменился');
-      return;
-    }
-    pasteGeneration+=1;
-    await importImages(files,{anchor:visibleCanvasCenter(),source:'Вставка'});
-  } catch (error) {
-    console.warn('Clipboard read failed',error);
-    toast('Браузер не разрешил прямое чтение буфера. Нажмите Ctrl+V','error');
-  }
-}
-
-function armPasteShortcutFallback() {
-  const generation=++pasteGeneration;
-  const targetDocument=doc;
-  const targetSessionId=activeSessionId;
-  setStatus('Вставка из буфера…');
-  clearTimeout(pasteFallbackTimer);
-  pasteFallbackTimer=setTimeout(()=>{
-    if(generation===pasteGeneration&&doc===targetDocument&&activeSessionId===targetSessionId)
-      setStatus('Буфер не передал изображение — попробуйте скопировать изображение снова или перетащить файл');
-  },900);
-  if (!navigator.clipboard?.read) return;
-  // Start while the keydown still has user activation. Native `paste` remains enabled and wins when it supplies an image.
-  readClipboardImageFiles().then(files=>{
-    if(!files.length)return;
-    setTimeout(()=>{
-      if(generation!==pasteGeneration||doc!==targetDocument||activeSessionId!==targetSessionId)return;
-      pasteGeneration+=1;
-      clearTimeout(pasteFallbackTimer);
-      importImages(files,{anchor:visibleCanvasCenter(),source:'Вставка'}).catch(error=>{
-        console.error(error);toast(error.message||'Ошибка вставки','error');
-      });
-    },80);
-  }).catch(error=>{
-    // Permission errors are expected in some browsers; the native paste event still gets its chance.
-    console.debug('Clipboard fallback unavailable',error);
-  });
 }
 
 function toggleSelectedVisibility() {
@@ -16642,26 +16721,8 @@ window.addEventListener('cut',e=>{
 
 window.addEventListener('paste',e=>{
   if(isEditingTarget(e.target))return;
-  const files=[];
-  for(const item of [...(e.clipboardData?.items||[])]){
-    if(item.kind==='file'&&item.type.startsWith('image/')){
-      const file=item.getAsFile();if(file)files.push(file);
-    }
-  }
-  if(!files.length){
-    for(const file of [...(e.clipboardData?.files||[])])if(isImageFile(file))files.push(file);
-  }
-  if(!files.length){
-    const hasClipboardPayload=(e.clipboardData?.items?.length||0)>0 || (e.clipboardData?.files?.length||0)>0;
-    if(hasClipboardPayload)toast('В буфере есть данные, но браузер не передал их как изображение','error');
-    return;
-  }
-  e.preventDefault();
-  pasteGeneration+=1;
-  clearTimeout(pasteFallbackTimer);
-  importImages(files,{anchor:visibleCanvasCenter(),source:'Вставка'}).catch(error=>{console.error(error);toast(error.message||'Ошибка вставки','error');});
+  handleNativePasteEvent(e);
 });
-
 els.viewport.addEventListener('wheel',e=>{
   if(!e.ctrlKey&&!e.altKey)return;
   e.preventDefault();
@@ -16676,7 +16737,7 @@ window.addEventListener('keydown',e=>{
   if(editing)return;
   const ctrl=e.ctrlKey||e.metaKey;
   if(e.key==='Escape'){
-    if(openMenuKey){e.preventDefault();closeMenu({restoreFocus:true});return;}
+    if(menuController.isOpen()){e.preventDefault();closeMenu({restoreFocus:true});return;}
     if(drag && drag.kind!=='paint'){
       e.preventDefault();
       const d=drag;drag=null;activePrimaryPointerId=null;clearSmartGuides();
@@ -16696,7 +16757,7 @@ window.addEventListener('keydown',e=>{
     if(selectionRect){deselectPixels();return;}
   }
   if(e.target instanceof Node && els.modalRoot.contains(e.target))return;
-  if(openMenuKey && (els.menu.contains(e.target)||e.target.closest?.('.menu-button')))return;
+  if(menuController.isOpen() && (els.menu.contains(e.target)||e.target.closest?.('.menu-button')))return;
   if(e.key==='Enter'&&polygonDraft&&currentTool==='marquee'){e.preventDefault();finishPolygonSelection();return;}
   if(e.key==='Enter'&&penDraft&&currentTool==='pen'){e.preventDefault();finishPenPath();return;}
   if(e.key==='Enter'&&magneticDraft&&currentTool==='magnetic'){e.preventDefault();finishMagneticSelection();return;}
