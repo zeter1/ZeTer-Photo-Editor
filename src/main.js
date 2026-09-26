@@ -1,7 +1,7 @@
 import { HistoryStack } from './core/history.js';
 import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, alignLayerToCanvas, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
-  createDocument, createRasterLayer, createTextLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createLayerMask, createVectorMask, createLayerGroup, documentWithTextPreview,
+  createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createLayerMask, createVectorMask, createLayerGroup,
   addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, moveLayerGroupIntoGroup, selectedLayer,
   snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters, sanitizeHighDepthPreview, sanitizeColorManagement,
   isLayerVisible, isLayerLocked, isGroupVisible, isGroupLocked, groupDepth,
@@ -30,6 +30,7 @@ import { createPathsController } from './ui/paths-controller.js';
 import { createColorManagementController } from './ui/color-management-controller.js';
 import { createSmartFilterController } from './ui/smart-filter-controller.js';
 import { createLayerBlendingController } from './ui/layer-blending-controller.js';
+import { createTextEditController } from './ui/text-edit-controller.js';
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
@@ -72,7 +73,6 @@ let currentTool = 'move';
 let renderVersion = 0;
 let renderFrame = 0;
 let renderBusy = false;
-let textDraft = null;
 let renderPending = null;
 const renderBuffer = document.createElement('canvas');
 let dirty = false;
@@ -297,13 +297,39 @@ const modalController = createModalController({
   setStatus,
   toast,
   loadComputerFonts,
-  attachTextPreview: ({modal,body,textPreviewLayer,textPreviewPoint}) =>
-    attachTextPreview(modal,body,textPreviewLayer,textPreviewPoint),
-  onModalClose: modal => {
-    if(textDraft?.owner===modal){textDraft=null;render();}
-  },
 });
 const { showModal, showInfoModal, showRecoveryModal } = modalController;
+const textEditController = createTextEditController({
+  state: {
+    getDocument: () => doc,
+    getSelectedLayer: selected,
+    selectLayer: (documentValue, layer) => { documentValue.selectedLayerId = layer.id; },
+    addLayer,
+    commit,
+  },
+  text: {
+    fields: textModalFields,
+    settingsFromForm: textSettingsFromForm,
+  },
+  renderApi: {
+    render,
+    updateLayers,
+    refreshInspectorPanels,
+    drawOverlay,
+    getSourceCanvas: () => renderBuffer,
+    getZoom: () => zoom,
+    getToolOpacity: () => Number(els.toolOpacity.value) / 100,
+  },
+  ui: {
+    showModal,
+    setStatus,
+    toast,
+    documentRef: document,
+    windowTarget: window,
+    ResizeObserverClass: window.ResizeObserver,
+    FormDataClass: window.FormData,
+  },
+});
 
 const pathsController = createPathsController({
   state: {
@@ -1010,7 +1036,7 @@ async function drainRenderQueue() {
   renderBusy = true;
   try {
     const rasterOverrides = request.paintPreview ? rasterEdit.paintPreviewOverrides() : null;
-    const previewDoc = documentWithTextPreview(doc, textDraft);
+    const previewDoc = textEditController.documentWithPreview(doc);
     await renderDocument(renderBuffer, previewDoc, { checker: false, rasterOverrides });
     if (request.version !== renderVersion) return;
     if (els.canvas.width !== doc.width) els.canvas.width = doc.width;
@@ -1018,7 +1044,7 @@ async function drainRenderQueue() {
     const visibleCtx = els.canvas.getContext('2d', { alpha: true });
     visibleCtx.clearRect(0, 0, doc.width, doc.height);
     visibleCtx.drawImage(renderBuffer, 0, 0);
-    if (textDraft?.document === doc) syncTextPreviewCanvas();
+    textEditController.syncPreviewCanvas();
     layerBlendingController.syncPreviewCanvas();
     if (!request.paintPreview) {
       if (els.overlay.width !== doc.width) els.overlay.width = doc.width;
@@ -1127,7 +1153,7 @@ function drawOverlay() {
     }
     ctx.restore();
   }
-  const layer = textDraft?.document === doc ? textDraft.layer : selected();
+  const layer = textEditController.previewLayer(doc) || selected();
   if (!layer || !isLayerVisible(doc, layer) || !isTransformableLayer(layer)) return;
   const frame = layerFrame(layer);
   const moveMode=currentTool==='move';
@@ -1938,7 +1964,6 @@ function canvasPoint(event, { clampToDocument = true } = {}) {
 }
 function isTransformableLayer(layer) { return Boolean(layer) && layer.type !== 'adjustment'; }
 function topLayerAt(point) { return [...doc.layers].reverse().find(l => isTransformableLayer(l) && isLayerVisible(doc,l) && !isLayerLocked(doc,l) && pointInLayer(point,l)) ?? null; }
-function topTextLayerAt(point) { return [...doc.layers].reverse().find(l => isLayerVisible(doc,l) && l.type === 'text' && pointInLayer(point,l)) ?? null; }
 function updateTransformPropertyValues(layer) {
   const values = {
     x: Math.round(layer.x), y: Math.round(layer.y),
@@ -2075,7 +2100,7 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'line') { drag = { kind:'line', start:p, current:p }; previewLine(p,p); return; }
   if (currentTool === 'shape') { drag = { kind:'shape', start:p, current:p }; return; }
   if (currentTool === 'crop') { drag = { kind:'crop', start:p, current:p }; cropRect = {x:p.x,y:p.y,width:0,height:0}; drawOverlay(); return; }
-  if (currentTool === 'text') { openTextModal(p); return; }
+  if (currentTool === 'text') { textEditController.open(p); return; }
   if (currentTool === 'eyedropper') { pickColor(p); return; }
   if (currentTool === 'zoom') { setZoomAtClientPoint(zoom*(e.altKey ? 1/1.5 : 1.5),e.clientX,e.clientY); return; }
 }
@@ -2483,103 +2508,6 @@ function applyCrop(r) {
 function selectAllPixels(){setSelectionShape({type:'rect',rect:{x:0,y:0,width:doc.width,height:doc.height}});drawOverlay();setStatus('Выделен весь холст');}
 function deselectPixels(){if(!selectionRect&&!selectionGestures.hasPolygonDraft())return;clearSelectionState();drawOverlay();setStatus('Выделение снято');}
 function cropToSelection(){if(!selectionRect){setStatus('Нет активного выделения');return;}if(selectionRect.width<1||selectionRect.height<1)return;applyCrop({...selectionRect});}
-
-function openTextModal(point) {
-  const existing=topTextLayerAt(point);
-  if(existing){
-    doc.selectedLayerId=existing.id;updateLayers();refreshInspectorPanels();drawOverlay();
-    if(isLayerLocked(doc,existing)){setStatus('Текстовый слой заблокирован');toast('Сначала разблокируйте слой или его группу','warn');return;}
-    const targetDoc = doc;
-    showModal({ title:'Редактировать текст', className:'text-modal', textPreviewLayer:existing, fields:textModalFields(existing,existing.width), submitLabel:'Применить', onSubmit:async(v,isActive)=>{
-      const settings = await textSettingsFromForm(v, existing);
-      if (!isActive() || doc !== targetDoc || selected() !== existing || isLayerLocked(doc,existing)) return false;
-      Object.assign(existing, settings);
-      textDraft = null;
-      commit('Редактировать текст');
-    }});
-    return;
-  }
-  const targetDoc = doc;
-  const defaultWidth = Math.max(240,Math.min(doc.width-point.x,600));
-  showModal({ title:'Добавить текст', className:'text-modal', textPreviewPoint:point, fields:textModalFields(null,defaultWidth), submitLabel:'Добавить', onSubmit:async(v,isActive)=>{
-    const settings = await textSettingsFromForm(v);
-    if (!isActive() || doc !== targetDoc) return false;
-    textDraft = null;
-    addLayer(doc,createTextLayer({x:point.x,y:point.y,...settings,opacity:Number(els.toolOpacity.value)/100,height:Math.min(12000,Math.max(settings.fontSize*2.4,settings.fontSize*settings.lineHeight*2))}));
-    commit('Добавить текст');
-  } });
-}
-
-function attachTextPreview(modal, body, layer, point) {
-  const sourceDoc=doc;
-  const preview=document.createElement('section');preview.className='text-preview';
-  const heading=document.createElement('strong');heading.textContent='Предпросмотр';
-  const canvas=document.createElement('canvas');canvas.setAttribute('aria-label','Предпросмотр текста на фоне изображения');
-  const status=document.createElement('small');status.textContent='Фрагмент холста в месте текста';
-  preview.append(heading,canvas,status);body.prepend(preview);
-  const observer=typeof ResizeObserver==='function' ? new ResizeObserver(()=>syncTextPreviewCanvas()) : null;
-  observer?.observe(canvas);
-  modal.previewCleanup=()=>observer?.disconnect();
-  let version=0;
-  const update=async()=>{
-    const current=++version;
-    if(doc!==sourceDoc)return;
-    try {
-      const values=Object.fromEntries(new FormData(modal));
-      const settings=await textSettingsFromForm(values,layer);
-      if(current!==version||!modal.isConnected||doc!==sourceDoc)return;
-      const draftLayer=createTextLayer({
-        ...(layer || {}), ...settings,
-        x:layer?.x ?? point?.x ?? 0, y:layer?.y ?? point?.y ?? 0,
-        height:layer?.height ?? Math.min(12000,Math.max(settings.fontSize*2.4,settings.fontSize*settings.lineHeight*2)),
-        opacity:layer?.opacity ?? Number(els.toolOpacity.value)/100,
-      });
-      textDraft={owner:modal,document:doc,originalId:layer?.id ?? null,layer:draftLayer,previewCanvas:canvas};
-      render();
-      status.textContent='Фрагмент холста в месте текста';
-    } catch(error) { if(current===version)status.textContent=error.message; }
-  };
-  modal.addEventListener('input',event=>{
-    if(event.target.name==='systemFontName' && event.target.value.trim())modal.elements.fontFile.value='';
-    if(event.target.matches('input,textarea,select'))update();
-  });
-  modal.addEventListener('change',event=>{
-    if(event.target.name==='fontFamily'){
-      modal.elements.systemFontName.value='';
-      modal.elements.fontFile.value='';
-    }
-    if(event.target.name==='fontFile' && event.target.files?.[0]?.name)modal.elements.systemFontName.value='';
-    if(event.target.matches('input,textarea,select'))update();
-  });
-  update();
-}
-
-function syncTextPreviewCanvas() {
-  const draft=textDraft;
-  const canvas=draft?.previewCanvas;
-  if (!canvas?.isConnected || draft.document!==doc) return;
-  const pixelRatio=window.devicePixelRatio||1;
-  const width=Math.max(1,Math.round(canvas.clientWidth*pixelRatio));
-  const height=Math.max(1,Math.round(canvas.clientHeight*pixelRatio));
-  if(canvas.width!==width)canvas.width=width;
-  if(canvas.height!==height)canvas.height=height;
-  const scale=zoom;
-  const bounds=frameBounds(draft.layer);
-  const visibleWidth=width/(scale*pixelRatio);
-  const margin=16/scale;
-  const sourceX=draft.layer.align==='right' ? bounds.x+bounds.width-visibleWidth+margin
-    : draft.layer.align==='center' ? bounds.x+bounds.width/2-visibleWidth/2
-    : bounds.x-margin;
-  const sourceY=bounds.y-margin;
-  const context=canvas.getContext('2d');
-  context.clearRect(0,0,width,height);
-  context.setTransform(scale*pixelRatio,0,0,scale*pixelRatio,-sourceX*scale*pixelRatio,-sourceY*scale*pixelRatio);
-  context.drawImage(renderBuffer,0,0);
-  context.setTransform(1,0,0,1,0,0);
-  const offsetX=-sourceX*scale,offsetY=-sourceY*scale;
-  canvas.style.setProperty('--preview-bg-x',`${offsetX}px`);
-  canvas.style.setProperty('--preview-bg-y',`${offsetY}px`);
-}
 
 function canReplaceDocument() {
   return !dirty || window.confirm('В документе есть несохранённые изменения. Продолжить без сохранения?');

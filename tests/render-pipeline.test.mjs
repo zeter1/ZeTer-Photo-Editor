@@ -9,7 +9,7 @@ test('full renders are serialized and only the latest completed frame reaches th
   assert.match(main, /let renderBusy = false/);
   assert.match(main, /let renderPending = null/);
   assert.match(main, /const renderBuffer = document\.createElement\('canvas'\)/);
-  assert.match(main, /const previewDoc = documentWithTextPreview\(doc, textDraft\)/);
+  assert.match(main, /const previewDoc = textEditController\.documentWithPreview\(doc\)/);
   assert.match(main, /await renderDocument\(renderBuffer, previewDoc/);
   assert.match(main, /if \(request\.version !== renderVersion\) return/);
   assert.doesNotMatch(main, /await renderDocument\(els\.canvas, doc/);

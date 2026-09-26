@@ -13,6 +13,7 @@ import {
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const modalController = await readFile(new URL('../src/ui/modal-controller.js', import.meta.url), 'utf8');
+const textEditController = await readFile(new URL('../src/ui/text-edit-controller.js', import.meta.url), 'utf8');
 const sessions = await readFile(new URL('../src/workspace/session-controller.js', import.meta.url), 'utf8');
 const workspaceRecovery = await readFile(new URL('../src/workspace/recovery-controller.js', import.meta.url), 'utf8');
 const build = await readFile(new URL('../tools/build-bundle.mjs', import.meta.url), 'utf8');
@@ -175,7 +176,8 @@ test('recovery UI restores sanitized project data but keeps it dirty until expli
 
 test('new text and shape layers inherit the tool opacity like brush, fill, and line tools', () => {
   assert.match(main, /createShapeLayer\(\{[^}]*opacity:Number\(els\.toolOpacity\.value\)\/100/);
-  assert.match(main, /createTextLayer\(\{[^}]*opacity:Number\(els\.toolOpacity\.value\)\/100/);
+  assert.match(main, /getToolOpacity: \(\) => Number\(els\.toolOpacity\.value\) \/ 100/);
+  assert.match(textEditController, /opacity: getToolOpacity\(\)/);
   assert.match(main, /name:'Линия'[\s\S]*?opacity:Number\(els\.toolOpacity\.value\)\/100/);
   assert.match(main, /function previewRect[\s\S]*?const opacity=Number\(els\.toolOpacity\.value\)\/100/);
   assert.match(css, /\.toast\.warn/);

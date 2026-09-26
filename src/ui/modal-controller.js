@@ -62,8 +62,6 @@ export function createModalController({
   setStatus=()=>{},
   toast=()=>{},
   loadComputerFonts=null,
-  attachTextPreview=null,
-  onModalClose=null,
   documentTarget=globalThis.document,
   windowTarget=globalThis.window,
   ResizeObserverClass=globalThis.ResizeObserver,
@@ -77,7 +75,7 @@ export function createModalController({
     if(HTMLElementClass && previousFocus instanceof HTMLElementClass)previousFocus.focus();
   };
 
-  function showModal({title,className='',textPreviewLayer=null,textPreviewPoint=null,fields=[],submitLabel='OK',onSubmit,onMount=null}) {
+  function showModal({title,className='',fields=[],submitLabel='OK',onSubmit,onMount=null,onClose=null}) {
     const previousFocus=documentTarget.activeElement;
     const back=documentTarget.createElement('div'); back.className='modal-backdrop';
     const modal=documentTarget.createElement('form'); modal.className=`modal ${className}`;modal.noValidate=true;modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label',title);
@@ -133,7 +131,7 @@ export function createModalController({
       if(closed)return;
       closed=true;
       modal.previewCleanup?.();
-      onModalClose?.(modal);
+      onClose?.({modal});
       modalRoot.replaceChildren();
       restoreFocus(previousFocus);
     };
@@ -147,7 +145,6 @@ export function createModalController({
     });
     if(className==='text-modal'){
       back.classList.add('text-modal-backdrop');
-      attachTextPreview?.({modal,body,textPreviewLayer,textPreviewPoint});
       makeModalDraggable(modal,{windowTarget,ResizeObserverClass});
     }
     modal.querySelector('[data-cancel]').onclick=close;
