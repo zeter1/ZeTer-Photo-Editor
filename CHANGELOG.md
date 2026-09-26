@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 2026-09-26 — Painting / raster edit state controller extraction
+
+- Refactor: добавлен канонический `src/painting/controller.js` — единый владелец reusable Canvas8 paint buffer/context/layer id, native 16/32-bit/CMYK working buffer, high-depth mutation/persistence и paint-preview frame lifecycle.
+- Architecture: `src/main.js` больше не хранит `brushCanvas/brushCtx/brushLayerId`, high-depth paint state и preview queue; runtime оставляет только gesture/transaction orchestration и обращается к painting controller через узкий API.
+- Retouch integration: `src/retouch/controller.js` получает shared raster/high-depth state через painting-controller bridge, сохраняя private clone/heal/smudge/blur/dodge/burn scratch ownership отдельно.
+- Reliability: document/session reset, undo/redo, resize/crop/rasterize/import и destructive raster paths сбрасывают канонический paint state через controller вместо разрозненных присваиваний в runtime.
+- Tests: добавлен direct `tests/painting-controller.test.mjs`; architecture, brush-performance, high-depth, async document, resize, selection и retouch source-contract regressions переведены на нового владельца.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow и test matrix теперь направляют raster-edit задачи сразу в `src/painting/controller.js`, чтобы ChatGPT/Codex не перечитывали большой `src/main.js`.
+- Build: `tools/build-bundle.mjs` включает painting controller в канонический source graph; `src/app.bundle.js` пересобран из обновлённых source chunks.
+
+
 ### 2026-09-26 — Retouch controller extraction
 
 - Refactor: Canvas8 и native high-depth/CMYK mechanics для clone/heal/smudge/blur/dodge/burn вынесены из `src/main.js` в `src/retouch/controller.js`.

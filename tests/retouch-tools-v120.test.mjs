@@ -21,7 +21,7 @@ test('clone stamp requires Alt-click source and paints from an immutable stroke 
   assert.match(retouch, /function prepareCloneStroke\(layer, destinationPoint\)/);
   assert.match(retouch, /cloneSnapshotCanvas\.getContext\('2d'/);
   assert.match(retouch, /function cloneStrokeSegment\(from, to, offset, pointerEvent = null, healing = false\)/);
-  assert.match(main, /clipContextToSelection\(brushCtx,l\)/);
+  assert.match(main, /clipContextToSelection\(rasterEdit\.brushContext,l\)/);
 });
 
 test('retouch tools edit only an existing raster layer and keep dedicated history labels', () => {

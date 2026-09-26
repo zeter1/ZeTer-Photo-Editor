@@ -100,9 +100,7 @@ test('late rasterization cannot replace the last layer of another tab', async ()
     toast: () => {},
     commit: label => commits.push(label),
     console,
-    brushCanvas: null,
-    brushCtx: null,
-    brushLayerId: null,
+    rasterEdit: { clearBrushBuffer: () => {} },
     paintPersisting: false,
   };
   runInNewContext(functionSource('async function rasterizeSelectedLayer()', 'function resizeImageDialog()')
@@ -135,9 +133,7 @@ test('rasterization finishes on the selected layer and releases the edit guard',
     toast: () => {},
     commit: label => commits.push(label),
     console,
-    brushCanvas: null,
-    brushCtx: null,
-    brushLayerId: null,
+    rasterEdit: { clearBrushBuffer: () => {} },
     paintPersisting: false,
   };
   runInNewContext(functionSource('async function rasterizeSelectedLayer()', 'function resizeImageDialog()')

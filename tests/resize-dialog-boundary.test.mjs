@@ -81,7 +81,7 @@ for (const [name, source] of [['изображения', imageDialog], ['хол�
       checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION,
       clearSelectionState: () => { selectionClears++; },
       commit: () => { commits++; }, fitToView: () => {}, toast: () => {}, setStatus: () => {},
-      brushCanvas: null, brushCtx: null, brushLayerId: null, cropRect: null,
+      rasterEdit: { clearBrushBuffer: () => {} }, cropRect: null,
     };
     const functionName = name === 'изображения' ? 'resizeImageDialog' : 'resizeCanvasDialog';
     runInNewContext(`${source}\nglobalThis.dialog = ${functionName};`, context);

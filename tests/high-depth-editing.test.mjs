@@ -9,6 +9,7 @@ import {
 } from '../src/core/pixel-buffer.js';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
 const toolConfig=await readFile(new URL('../src/ui/tool-config.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 
@@ -62,12 +63,12 @@ test('Stage 12d clear respects a selection predicate at high depth',()=>{
 });
 
 test('Stage 12d routes brush, eraser, fill, line and selection clear through native high-depth mutations',()=>{
-  assert.match(main,/function ensureNativeHighDepthPaintBuffer\(/);
-  assert.match(main,/applyPixelBufferBrushDab\(highDepthPaintBuffer/);
-  assert.match(main,/applyPixelBufferStrokeSegment\(highDepthPaintBuffer/);
+  assert.match(painting,/function ensureNativeHighDepthPaintBuffer\(/);
+  assert.match(main,/applyPixelBufferBrushDab\(rasterEdit\.highDepthPaintBuffer/);
+  assert.match(main,/applyPixelBufferStrokeSegment\(rasterEdit\.highDepthPaintBuffer/);
   assert.match(main,/floodFillPixelBuffer\(buffer,x,y/);
   assert.match(main,/clearPixelBufferPixels\(buffer,\{isAllowed:rasterSelectionPredicate\(layer\)\}\)/);
-  assert.match(main,/applyHighDepthMutation\(layer,await prepareHighDepthMutation\(layer,buffer\)\)/);
+  assert.match(main,/rasterEdit\.applyHighDepthMutation\(layer,await rasterEdit\.prepareHighDepthMutation\(layer,buffer\)\)/);
   assert.match(main,/prepareClearedHighDepthMutation/);
 });
 
@@ -130,9 +131,9 @@ test('Stage 13c flood fill stays in CMYK source space and respects selection pre
 
 test('Stage 13c routes CMYK brush, fill, line and clear through canonical PixelBuffer mutations',()=>{
   assert.match(toolConfig,/export const NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
-  assert.match(main,/applyCmykPixelBufferBrushDab\(highDepthPaintBuffer/);
-  assert.match(main,/applyCmykPixelBufferStrokeSegment\(highDepthPaintBuffer/);
+  assert.match(main,/applyCmykPixelBufferBrushDab\(rasterEdit\.highDepthPaintBuffer/);
+  assert.match(main,/applyCmykPixelBufferStrokeSegment\(rasterEdit\.highDepthPaintBuffer/);
   assert.match(main,/floodFillCmykPixelBuffer\(buffer,x,y/);
   assert.match(main,/buffer\.model==='cmyk'/);
-  assert.match(main,/highDepthPreview:buffer\.model==='cmyk'\?null/);
+  assert.match(painting,/highDepthPreview:\s*buffer\.model === 'cmyk' \? null/);
 });

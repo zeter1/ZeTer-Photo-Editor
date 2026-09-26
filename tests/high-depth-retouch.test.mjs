@@ -111,7 +111,7 @@ test('Stage 12f routes blur, clone, heal, smudge, dodge and burn through native 
     'nativeHighDepthSmudgeSegment','nativeHighDepthToneSegment','nativeHighDepthBlurSegment',
   ]) assert.match(retouch,new RegExp(symbol));
   assert.match(main,/NATIVE_HIGH_DEPTH_PAINT_TOOLS\.has\(paintTool\)/);
-  assert.match(main,/if\(!layer\.highDepthSource\)await ensureRasterBuffer\(layer\)/);
+  assert.match(main,/if\(!layer\.highDepthSource\)await rasterEdit\.ensureRasterBuffer\(layer\)/);
 });
 
 

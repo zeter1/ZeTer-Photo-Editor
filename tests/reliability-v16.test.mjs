@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { checkedCanvasSize, createDocument, sanitizeProject, MAX_CANVAS_PIXELS } from '../src/core/state.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const painting = await readFile(new URL('../src/painting/controller.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
 const modalController = await readFile(new URL('../src/ui/modal-controller.js', import.meta.url), 'utf8');
 const documentImportController = await readFile(new URL('../src/document/import-controller.js', import.meta.url), 'utf8');
@@ -28,7 +29,7 @@ test('new paint and blank layers stay sparse until pixels are actually drawn', (
 test('drawing supports pen pressure while mouse width remains stable', () => {
   assert.match(main, /function brushWidthForPointer\(event\)/);
   assert.match(main, /event\?\.pointerType !== 'pen'/);
-  assert.match(main, /brushCtx\.lineWidth=brushWidthForPointer\(pointerEvent\)/);
+  assert.match(main, /rasterEdit\.brushContext\.lineWidth=brushWidthForPointer\(pointerEvent\)/);
   assert.match(main, /paintTo\(canvasPoint\(event, \{ clampToDocument:false \}\), event\)/);
 });
 
@@ -92,9 +93,9 @@ test('brush outline and painting stay bound to the selected visible raster layer
 
 test('manual raster dimensions cannot bypass the canvas pixel budget', () => {
   assert.match(main, /if \(l\.type === 'raster'\) \{[\s\S]*?checkedCanvasSize\(path === 'width' \? value : l\.width, path === 'height' \? value : l\.height/);
-  assert.match(main, /const paintSize = checkedCanvasSize\(l\.width, l\.height, `Растровый слой/);
-  assert.match(main, /const canvasWidth = paintSize\.width/);
-  assert.match(main, /const canvasHeight = paintSize\.height/);
+  assert.match(painting, /const paintSize = checkedCanvasSize\(layer\.width, layer\.height, `Растровый слой/);
+  assert.match(painting, /const canvasWidth = paintSize\.width/);
+  assert.match(painting, /const canvasHeight = paintSize\.height/);
 });
 
 test('rotation handle is clamped into the interactive canvas area at document edges', () => {

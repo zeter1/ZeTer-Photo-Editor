@@ -10,6 +10,7 @@ index.html / styles
 src/main.js  ─────→  src/ui/*
     │  ├──────→  src/selection/*
     │  ├──────→  src/document/*
+    │  ├──────→  src/painting/* ───→ src/core/*
     │  └──────→  src/retouch/*  ───→ src/core/*
     ↓
 src/core/*  ←────  src/formats/*
@@ -35,10 +36,16 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - Selection modules must not own layer/document state or silently bypass lock/high-depth/Undo semantics.
 - Async clipboard operations must stay bound to the document/session that initiated them.
 
+### Painting
+- `src/painting/controller.js` is the single owner of reusable raster edit buffers: Canvas/context/layer identity, native high-depth/CMYK working state, paint-preview scheduling/override and raster publication.
+- It may depend on core state/render/IO/pixel/color primitives, but must not own `currentTool`, pointer gestures, selection state, history or the global pending-edit transaction guard.
+- `src/main.js` keeps gesture orchestration (`beginPaint → paintTo → endPaint`) and explicitly asks the painting controller to materialize/persist buffers.
+- Do not recreate `brushCanvas`, `brushCtx`, `brushLayerId` or high-depth paint state in `src/main.js`.
+
 ### Retouch
 - `src/retouch/controller.js` owns clone/heal/smudge/blur/dodge/burn mechanics and only their private scratch/snapshot state.
-- The controller may depend on core geometry/pixel primitives, but must not become a second owner of document, layer, selection, history or pointer gesture state.
-- Generic brush/eraser/fill/line preparation and mutation transaction guards stay in `src/main.js` until a separate painting boundary is extracted.
+- The controller may depend on core geometry/pixel primitives, but must not become a second owner of document, layer, selection, history, shared painting state or pointer gesture state.
+- Generic raster edit storage/persistence belongs to `src/painting/controller.js`; gesture/transaction coordination remains in `src/main.js`.
 - High-depth/CMYK retouch must stay on typed-buffer primitives; do not silently route it through Canvas8.
 
 ### Core

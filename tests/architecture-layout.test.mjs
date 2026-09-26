@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController, documentImportController, retouchController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController, documentImportController, paintingController, retouchController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -15,6 +15,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, too
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/document/import-controller.js', root), 'utf8'),
+  readFile(new URL('src/painting/controller.js', root), 'utf8'),
   readFile(new URL('src/retouch/controller.js', root), 'utf8'),
 ]);
 
@@ -77,6 +78,18 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /function isProjectFile\(/);
   assert.doesNotMatch(main, /async function importImages\(/);
   assert.doesNotMatch(main, /async function handleIncomingFiles\(/);
+  assert.match(main, /from '\.\/painting\/controller\.js'/);
+  assert.match(build, /'src\/painting\/controller\.js'/);
+  assert.match(paintingController, /export function createRasterEditController/);
+  for (const name of [
+    'ensureRasterBuffer','ensureNativeHighDepthPaintBuffer','prepareHighDepthMutation',
+    'applyHighDepthMutation','persistNativeHighDepthPaintLayer','persistPaintLayer',
+    'drawHighDepthRasterBase','schedulePaintPreview','cancelPaintPreview',
+  ]) assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  assert.doesNotMatch(main, /let (?:brushCanvas|brushCtx|brushLayerId|highDepthPaintBuffer|highDepthPaintLayerId|highDepthPaintPreviewDirty|paintPreviewFrame|paintPreviewQueued)\b/);
+  assert.match(main, /rasterEdit\.paintPreviewOverrides\(\)/);
+  assert.match(main, /rasterEdit\.ensureRasterBuffer\(/);
+
   assert.match(main, /from '\.\/retouch\/controller\.js'/);
   assert.match(build, /'src\/retouch\/controller\.js'/);
   assert.match(retouchController, /export function createRetouchController/);

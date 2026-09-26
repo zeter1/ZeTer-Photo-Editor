@@ -81,7 +81,7 @@ test('v1.8 tools are wired to toolbar, menus, shortcuts, selection clipping and 
   assert.match(main, /KeyZ:'zoom'/);
   assert.match(main, /ctrl&&e\.code==='KeyA'/);
   assert.match(main, /ctrl&&e\.code==='KeyD'/);
-  assert.match(main, /clipContextToSelection\(brushCtx,l\)/);
+  assert.match(main, /clipContextToSelection\(rasterEdit\.brushContext,l\)/);
   assert.match(main, /isAllowed:rasterSelectionPredicate\(layer\)/);
 });
 

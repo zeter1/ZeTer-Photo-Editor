@@ -109,10 +109,16 @@ test('fill protects the document while its raster buffer is decoding', async () 
   const context = {
     paintPersisting: false, selectionRect: null,
     paintLayerAtPoint: () => ({ id: 'raster' }),
-    ensureRasterBuffer: () => new Promise(resolve => { finishDecode = resolve; }),
+    rasterEdit: {
+      ensureRasterBuffer: () => new Promise(resolve => { finishDecode = resolve; }),
+      brushCanvas: { width: 10, height: 10 },
+      brushContext: {
+        getImageData: () => ({ data: new Uint8ClampedArray(400) }),
+        putImageData: () => {},
+      },
+      clearBrushBuffer: () => {},
+    },
     documentPointToLayerPixel: () => ({ x: 1, y: 1 }),
-    brushCanvas: { width: 10, height: 10 },
-    brushCtx: { getImageData: () => ({ data: new Uint8ClampedArray(400) }) },
     floodFillPixels: () => 0,
     hexToRgb: () => [0, 0, 0],
     els: { primaryColor: { value: '#000000' }, fillTolerance: { value: '0' }, toolOpacity: { value: '100' } },

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const painting = await readFile(new URL('../src/painting/controller.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
 const io = await readFile(new URL('../src/core/io.js', import.meta.url), 'utf8');
 
@@ -13,8 +14,9 @@ test('brush pointer movement never PNG-encodes the canvas', () => {
 });
 
 test('brush preview is frame-throttled and uses a live raster override', () => {
-  assert.match(main, /paintPreviewFrame = requestAnimationFrame\(\(\) =>/);
-  assert.match(main, /render\(\{ paintPreview: true \}\)/);
+  assert.match(painting, /paintPreviewFrame = requestFrame\(\(\) =>/);
+  assert.match(painting, /renderPaintPreview\(\)/);
+  assert.match(main, /rasterEdit\.paintPreviewOverrides\(\)/);
   assert.match(render, /rasterOverrides/);
   assert.match(render, /const overrideSource = overrideEntry\?\.source \|\| overrideEntry \|\| null/);
   assert.match(render, /layer\.type === 'raster' && overrideSource \? overrideSource : await getImage\(dataUrl\)/);
@@ -29,7 +31,7 @@ test('paintTo draws only the latest segment instead of restroking an ever-growin
 });
 
 test('finished strokes use asynchronous canvas encoding instead of synchronous toDataURL', () => {
-  const persist = main.match(/async function persistPaintLayer\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  const persist = painting.match(/async function persistPaintLayer\(\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.ok(persist, 'persistPaintLayer function not found');
   assert.match(persist, /await canvasToDataURL\(canvas,'image\/png'\)/);
   assert.doesNotMatch(persist, /\.toDataURL\(/);
