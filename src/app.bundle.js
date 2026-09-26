@@ -10609,6 +10609,7 @@ function psdSmartObjectMetadataForExport(layer) {
  * - rgbaPixelsToDataUrl / dimensionsFromDataUrl: browser raster boundary
  * - importVectorMask: shared document↔layer vector-mask localization
  * - opaqueBlockToState: shared Photoshop opaque-resource persistence bridge
+ * - previewFingerprint / embeddedDocumentFingerprint: shared Smart Object identity
  *
  * This module does not own document publication, session/history state, or
  * PSD/PSB binary writing.
@@ -10619,6 +10620,8 @@ function createPsdImportSemantics({
   dimensionsFromDataUrl,
   importVectorMask,
   opaqueBlockToState,
+  previewFingerprint,
+  embeddedDocumentFingerprint,
 } = {}) {
   function requirePort(port, name) {
     if (typeof port !== 'function') throw new TypeError(`PSD import semantics requires ${name}`);
@@ -10817,8 +10820,8 @@ function createPsdImportSemantics({
         x:Number(sourceLayer.x)||0,y:Number(sourceLayer.y)||0,
         width:Number(sourceLayer.width)||1,height:Number(sourceLayer.height)||1,
         scaleX:1,scaleY:1,rotation:0,
-        previewFingerprint:psdPreviewFingerprint(previewDataUrl),
-        embeddedFingerprint:psdEmbeddedDocumentFingerprint(embeddedDocument),
+        previewFingerprint:requirePort(previewFingerprint, 'previewFingerprint')(previewDataUrl),
+        embeddedFingerprint:requirePort(embeddedDocumentFingerprint, 'embeddedDocumentFingerprint')(embeddedDocument),
         embeddedWidth:Number(embeddedDocument?.width)||1,
         embeddedHeight:Number(embeddedDocument?.height)||1,
       },
@@ -15047,6 +15050,8 @@ const psdImportSemantics = createPsdImportSemantics({
   dimensionsFromDataUrl,
   importVectorMask: importPsdVectorMask,
   opaqueBlockToState: psdOpaqueBlockToState,
+  previewFingerprint: psdPreviewFingerprint,
+  embeddedDocumentFingerprint: psdEmbeddedDocumentFingerprint,
 });
 
 const psdImportController = createPsdImportController({
