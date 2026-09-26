@@ -291,7 +291,7 @@ test('Stage 15c wires Photoshop solid vector shapes into editable ZPE paths and 
   assert.match(psdImportController,/const canMapShape=semantics\.canMapPsdSolidShape\(sourceLayer\)/);
   assert.match(psdImportController,/createShapeLayer\(\{/);
   assert.match(psdExportController,/psdShape:nativeShape\?\.eligible\?nativeShape\.metadata:null/);
-  assert.match(psdImportController,/Photoshop Shape/);
+  assert.match(psdImportController,/Photoshop solid-color vector shape/);
   assert.match(psdExportController,/Stage 15c: .*solid vector shape/);
 });
 
