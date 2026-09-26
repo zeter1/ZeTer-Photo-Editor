@@ -9,6 +9,7 @@ import {
 } from '../src/core/pixel-buffer.js';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
 
 test('Stage 12g composites multiple 16-bit layers without collapsing samples to 8-bit steps',()=>{
   const bottom=createPixelBuffer({width:1,height:1,model:'rgb',channels:4,bitsPerChannel:16,colorSpace:'srgb',data:new Uint16Array([10001,20003,30007,65535])});
@@ -62,11 +63,11 @@ test('Stage 12g bounds typed merged-composite allocation',()=>{
 });
 
 test('Stage 12g export planner keeps Canvas8 as explicit fallback instead of claiming precision',()=>{
-  assert.match(main,/function buildHighDepthComposite\(/);
-  assert.match(main,/Stage 12g: merged composite оставлен на Canvas8 fallback/);
-  assert.match(main,/vector mask слоя/);
-  assert.match(main,/isolated Canvas group composite/);
-  assert.match(main,/if\(!compositePixelBuffer\)\{/);
+  assert.match(psdExportController,/function buildHighDepthComposite\(/);
+  assert.match(psdExportController,/Stage 12g: merged composite оставлен на Canvas8 fallback/);
+  assert.match(psdExportController,/vector mask слоя/);
+  assert.match(psdExportController,/isolated Canvas group composite/);
+  assert.match(psdExportController,/if\(!compositePixelBuffer\)\{/);
 });
 
 
@@ -102,8 +103,8 @@ test('Stage 13c CMYK composite applies raster-mask alpha and component blend mod
 
 
 test('Stage 13c export planner no longer forces native CMYK layers with supported component blends to RGB fallback',()=>{
-  assert.doesNotMatch(main,/CMYK merged composite Stage 13b поддерживает только Normal blend/);
-  assert.match(main,/blendMode:item\.layer\.blendMode\|\|'source-over'/);
+  assert.doesNotMatch(psdExportController,/CMYK merged composite Stage 13b поддерживает только Normal blend/);
+  assert.match(psdExportController,/blendMode:item\.layer\.blendMode\|\|'source-over'/);
 });
 
 test('Stage 12g/13c typed compositors implement the expanded Photoshop-compatible component blend modes',()=>{

@@ -82,6 +82,11 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - Pixel/color/render code owns math and data transforms, not dialogs or toasts.
 - State sanitization remains the gate for persisted/untrusted project structures.
 
+### Document / PSD export preparation
+- `src/document/psd-export-controller.js` owns document-to-writer preparation only: bounds, group mapping, native-vs-raster eligibility, prepared layer payloads, merged composite choice and export warnings.
+- Stable core math/data dependencies may be imported directly. Browser rendering and Photoshop semantic plans that still belong to runtime enter through explicit ports; this keeps the owner directly testable without copying DOM globals into it.
+- Do not move PSD binary layout or codec responsibilities into the controller, and do not let `src/main.js` regain the extracted preparation helpers.
+
 ### Formats
 - `src/formats/psd.js` may depend on core data contracts such as PixelBuffer.
 - Core modules must not depend on PSD-specific binary layout.

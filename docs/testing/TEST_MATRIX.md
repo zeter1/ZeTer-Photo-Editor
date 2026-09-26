@@ -19,7 +19,8 @@ Use the smallest relevant set while developing; finish source changes with the r
 | Brush/eraser/retouch stroke gesture lifecycle | `tests/painting-gesture-controller.test.mjs`, brush-performance, retouch/high-depth tests, architecture test | `npm run test:browser` for pointer wiring |
 | 16/32-bit editing/composite | high-depth-* tests | format round-trip when export changes |
 | ICC/CMYK policy/profile UI orchestration + cache ownership | `tests/color-management-controller.test.mjs`, `tests/color-management.test.mjs`, `tests/color-profile.test.mjs`, `tests/color-compatibility-corpus.test.mjs`, architecture test | fixture-based verification + `npm run test:browser` when properties-panel wiring changes |
-| PSD/PSB codec | `tests/psd-*.test.mjs` | fixture/golden round-trip |
+| PSD/PSB export preparation / document mapping | `tests/psd-export-controller.test.mjs`, `tests/psd-export-integration.test.mjs`, architecture test | relevant PSD/high-depth/CMYK fixtures + `npm run test:browser` after composition-root wiring |
+| PSD/PSB binary codec / Photoshop metadata rewrite | `tests/psd-*.test.mjs` | fixture/golden round-trip |
 | Recovery/autosave orchestration | `tests/workspace-recovery-controller.test.mjs`, `tests/recovery-v110.test.mjs`, architecture test | browser smoke for startup/reload/visibility flows |
 | Low-level IndexedDB recovery / IO | `tests/recovery-v110.test.mjs`, reliability/direct-open tests | browser smoke when browser storage or file IO changes |
 | Bundle/source graph | architecture test + `npm run build` | CI generated-bundle diff |

@@ -76,6 +76,9 @@ It does **not** own document/history/global pointer state or the shared raster e
 ### `import-controller.js`
 Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or project persistence; those remain separate runtime/format concerns.
 
+### `psd-export-controller.js`
+Owns document-to-PSD/PSB writer preparation: export bounds, group ancestry, native high-depth/CMYK eligibility, raster/native layer payloads, merged composite selection and bounded export warnings. It imports stable core math/data contracts directly, while Photoshop semantic rewrite plans and browser rendering enter through explicit ports so the native path is directly Node-testable. Binary PSD/PSB parsing/writing stays in `src/formats/psd.js`; import mapping remains a separate bounded runtime seam.
+
 ## Selection boundary — `src/selection/`
 
 ### `gesture-controller.js`

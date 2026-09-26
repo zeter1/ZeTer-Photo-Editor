@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
 const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
@@ -13,14 +14,14 @@ test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
   assert.match(main,/import \{[^}]*decodePsd[^}]*encodePsdBlob[^}]*encodePsbBlob[^}]*isPsdFile[^}]*\} from '\.\/formats\/psd\.js'/);
   assert.match(main,/PSD — RGB\/CMYK слои 8\/16\/32-bit/);
   assert.match(main,/PSB — RGB\/CMYK Large Document 8\/16\/32-bit/);
-  assert.match(main,/async function preparePsdExport\(exportDoc\)/);
+  assert.match(psdExportController,/async function preparePsdExport\(exportDoc\)/);
   assert.match(main,/async function exportPsdDocument\(exportDoc,\{psb=false\}=\{\}\)/);
   assert.match(main,/const encodeBlob=psb\?encodePsbBlob:encodePsdBlob/);
   assert.match(main,/if\(type==='psb'\)\{await exportPsdDocument\(exportDoc,\{psb:true\}\);return;\}/);
   assert.match(main,/downloadBlob\(blob,filename\)/);
   assert.match(main,/image\/vnd\.adobe\.photoshop/);
-  assert.match(main,/48_000_000/);
-  assert.match(main,/ZPE Composite Preview \(adjustments baked\)/);
+  assert.match(psdExportController,/48_000_000/);
+  assert.match(psdExportController,/ZPE Composite Preview \(adjustments baked\)/);
 });
 
 test('PSD Stage 4 writer exposes Photoshop-compatible layered export primitives',()=>{
@@ -73,9 +74,9 @@ test('PSD Group Export Stage 8b wires ZPE flat groups into the PSD/PSB writer',(
   assert.match(adapter,/function expandExportLayerGroups\(/);
   assert.match(adapter,/writeSectionDividerExtra\(extra, layer\)/);
   assert.match(adapter,/groups = \[\]/);
-  assert.match(main,/const exportGroups=\(exportDoc\.groups\|\|\[\]\)/);
-  assert.match(main,/groupKey:layer\.groupId/);
-  assert.match(main,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),linkedLayerBlocks:/);
+  assert.match(psdExportController,/const exportGroups=\(exportDoc\.groups\|\|\[\]\)/);
+  assert.match(psdExportController,/groupKey:layer\.groupId/);
+  assert.match(psdExportController,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),linkedLayerBlocks:/);
   assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,paths:prepared\.paths,linkedLayerBlocks:prepared\.linkedLayerBlocks,composite:prepared\.composite/);
 });
 
@@ -84,7 +85,7 @@ test('PSD Group Stage 8c carries native parent relationships through ZPE and wri
   assert.match(adapter,/parentKey: group\.parent\?\.key \?\? null/);
   assert.match(adapter,/function exportGroupLineage\(/);
   assert.match(main,/group\.parentGroupId=sourceGroup\.parentKey/);
-  assert.match(main,/parentKey:group\.parentGroupId/);
+  assert.match(psdExportController,/parentKey:group\.parentGroupId/);
   assert.match(main,/isGroupVisible\(doc, group\)/);
   assert.match(main,/isGroupLocked\(doc, group\)/);
 });
@@ -97,7 +98,7 @@ test('PSD Group Stage 8e maps opacity and blend mode through ZPE and lsct folder
   assert.match(adapter,/opacity: folder \? group\.opacity : 1/);
   assert.match(main,/opacity:clamp\(Number\(sourceGroup\.opacity\?\?1\),0,1\)/);
   assert.match(main,/blendMode:sourceGroup\.blendMode\|\|'pass-through'/);
-  assert.match(main,/opacity:clamp\(Number\(group\.opacity\?\?1\),0,1\)/);
+  assert.match(psdExportController,/opacity:clamp\(Number\(group\.opacity\?\?1\),0,1\)/);
 });
 
 
@@ -127,7 +128,7 @@ test('PSD Vector/Path Stage 10d-10e wires native masks and saved paths through U
   assert.match(adapter,/writeSavedPathResources/);
   assert.match(main,/importedLayer\.vectorMask=canMapShape\?null:importPsdVectorMask\(sourceLayer\.vectorMask,importedLayer\)/);
   assert.match(main,/next\.paths=structuredClone\(parsed\.paths\|\|\[\]\)/);
-  assert.match(main,/vectorMask:nativeShape\?\.eligible\?nativeShape\.vectorMask:exportPsdVectorMask\(layer\)/);
+  assert.match(psdExportController,/vectorMask:nativeShape\?\.eligible\?nativeShape\.vectorMask:exportPsdVectorMask\(layer\)/);
   assert.match(main,/paths:prepared\.paths/);
 });
 
@@ -139,26 +140,26 @@ test('PSD/PSB Stage 12e routes native 16/32-bit PixelBuffers into Lr16/Lr32 writ
   assert.match(adapter,/version === PSB_VERSION \? '8B64' : '8BIM'/);
   assert.match(adapter,/out\.u16\(mode===PSD_COLOR_MODE_CMYK\?5:4\)\.u32\(documentHeight\)\.u32\(documentWidth\)\.u16\(depth\)\.u16\(mode\)/);
   assert.match(adapter,/compositePixelBuffer = null, bitsPerChannel = 8/);
-  assert.match(main,/function nativeHighDepthPsdSource\(/);
-  assert.match(main,/nativePixelBuffer\?nativePsdBounds/);
-  assert.match(main,/const bitsPerChannel=nativeDepths\.includes\(32\)\?32:nativeDepths\.includes\(16\)\?16:8/);
-  assert.match(main,/if\(nativePixelBuffer\)item\.pixelBuffer=nativePixelBuffer/);
+  assert.match(psdExportController,/function nativeHighDepthPsdSource\(/);
+  assert.match(psdExportController,/nativePixelBuffer\?nativePsdBounds/);
+  assert.match(psdExportController,/const bitsPerChannel=nativeDepths\.includes\(32\)\?32:nativeDepths\.includes\(16\)\?16:8/);
+  assert.match(psdExportController,/if\(nativePixelBuffer\)item\.pixelBuffer=nativePixelBuffer/);
   assert.match(main,/compositePixelBuffer:prepared\.compositePixelBuffer,bitsPerChannel:prepared\.bitsPerChannel,colorMode:prepared\.colorMode/);
 });
 
 test('Stage 12e keeps honest fallback semantics for transformed or effect-bearing high-depth layers',()=>{
-  assert.match(main,/layerNeedsSemanticRasterWarning\(layer\)/);
-  assert.match(main,/downgradedHighDepth/);
-  assert.match(main,/экспортированы через 8-bit raster preview/);
+  assert.match(psdExportController,/layerNeedsSemanticRasterWarning\(layer\)/);
+  assert.match(psdExportController,/downgradedHighDepth/);
+  assert.match(psdExportController,/экспортированы через 8-bit raster preview/);
 });
 
 test('Stage 12g routes compatible multi-layer merged composites through typed PixelBuffers',()=>{
-  assert.match(main,/function highDepthCompositePlan\(/);
-  assert.match(main,/function buildHighDepthComposite\(/);
-  assert.match(main,/compositePixelBufferLayers\(exportDoc\.width,exportDoc\.height,layers/);
-  assert.match(main,/createRgba8PixelBuffer\(exported\.width,exported\.height,exported\.pixels/);
-  assert.match(main,/MAX_HIGH_DEPTH_COMPOSITE_BYTES/);
-  assert.match(main,/merged composite использует 8-bit Canvas fallback/);
+  assert.match(psdExportController,/function highDepthCompositePlan\(/);
+  assert.match(psdExportController,/function buildHighDepthComposite\(/);
+  assert.match(psdExportController,/compositePixelBufferLayers\(exportDoc\.width,exportDoc\.height,layers/);
+  assert.match(psdExportController,/createRgba8PixelBuffer\(exported\.width,exported\.height,exported\.pixels/);
+  assert.match(psdExportController,/MAX_HIGH_DEPTH_COMPOSITE_BYTES/);
+  assert.match(psdExportController,/merged composite использует 8-bit Canvas fallback/);
   assert.doesNotMatch(main,/function exactHighDepthCompositeCandidate\(/);
 });
 
@@ -179,10 +180,10 @@ test('Stage 13b wires advanced ICC policy and native CMYK PSD/PSB export',()=>{
   assert.match(main,/data-cmyk-rendering-intent/);
   assert.match(colorManagement,/function updateDocumentRenderingIntent\(intent\)/);
   assert.match(main,/createCmykToSrgbTransform\(sourceProfileBytes,\{intent:colorPolicy\.renderingIntent,displaySpace:colorPolicy\.displaySpace,displayProfileBytes/);
-  assert.match(main,/function cmykNativeExportEligibility\(/);
-  assert.match(main,/function buildNativeCmykComposite\(/);
-  assert.match(main,/compositeCmykPixelBufferLayers\(/);
-  assert.match(main,/const colorMode=cmykEligibility\.eligible\?'cmyk':'rgb'/);
+  assert.match(psdExportController,/function cmykNativeExportEligibility\(/);
+  assert.match(psdExportController,/function buildNativeCmykComposite\(/);
+  assert.match(psdExportController,/compositeCmykPixelBufferLayers\(/);
+  assert.match(psdExportController,/const colorMode=cmykEligibility\.eligible\?'cmyk':'rgb'/);
   assert.match(main,/colorMode:prepared\.colorMode/);
   assert.match(adapter,/colorMode = PSD_COLOR_MODE_RGB/);
   assert.match(adapter,/mode===PSD_COLOR_MODE_CMYK\?5:4/);
@@ -212,11 +213,11 @@ test('Stage 14a wires Photoshop Smart Object / Placed Layer opaque metadata thro
   assert.match(main,/importPsdSmartObjectMetadata/);
   assert.match(main,/createSmartObjectLayer\(\{/);
   assert.match(main,/psdSmartObjectRoundTripPlan/);
-  assert.match(main,/psdSmartObject:psdSmartPlan\.eligible/);
+  assert.match(psdExportController,/psdSmartObject:psdSmartPlan\.eligible/);
   assert.match(main,/next\.psdLinkedLayerBlocks=/);
   assert.match(main,/next\.psdSmartObjectSourceCount=/);
   assert.match(main,/linkedLayerBlocks:prepared\.linkedLayerBlocks/);
-  assert.match(main,/Photoshop Smart Object native passthrough отключён/);
+  assert.match(psdExportController,/Photoshop Smart Object native passthrough отключён/);
 });
 
 test('Stage 14b wires typed Photoshop descriptors and embedded asset extraction into editable smart-object content',()=>{
@@ -253,9 +254,9 @@ test('Stage 15a wires Photoshop TySh text mapping and safe native round-trip int
   assert.match(main,/psdTextNativePlan/);
   assert.match(main,/canMapText/);
   assert.match(main,/createTextLayer\(\{/);
-  assert.match(main,/psdText:nativeText\?\.eligible\?nativeText\.block:null/);
+  assert.match(psdExportController,/psdText:nativeText\?\.eligible\?nativeText\.block:null/);
   assert.match(main,/Photoshop TySh imported as editable ZPE text|Photoshop TySh импортирован как editable ZPE text/);
-  assert.match(main,/Stage 15b: .*TySh text layer/);
+  assert.match(psdExportController,/Stage 15b: .*TySh text layer/);
 });
 
 test('Stage 15b wires EngineData typography import and single-run text writeback',()=>{
@@ -271,7 +272,7 @@ test('Stage 15b wires EngineData typography import and single-run text writeback
   assert.match(main,/fontSize:clamp\(Number\(typography\.fontSize\)/);
   assert.match(main,/editableSingleStyle/);
   assert.match(main,/native TySh \+ EngineData round-trip/);
-  assert.match(main,/Stage 15b: .*EngineData/);
+  assert.match(psdExportController,/Stage 15b: .*EngineData/);
 });
 
 test('Stage 15c wires Photoshop solid vector shapes into editable ZPE paths and native PSD/PSB metadata',()=>{
@@ -288,9 +289,9 @@ test('Stage 15c wires Photoshop solid vector shapes into editable ZPE paths and 
   assert.match(main,/function psdShapeNativePlan\(/);
   assert.match(main,/const canMapShape=canMapPsdSolidShape\(sourceLayer\)/);
   assert.match(main,/createShapeLayer\(\{/);
-  assert.match(main,/psdShape:nativeShape\?\.eligible\?nativeShape\.metadata:null/);
+  assert.match(psdExportController,/psdShape:nativeShape\?\.eligible\?nativeShape\.metadata:null/);
   assert.match(main,/Photoshop Shape/);
-  assert.match(main,/Stage 15c: .*solid vector shape/);
+  assert.match(psdExportController,/Stage 15c: .*solid vector shape/);
 });
 
 test('Stage 15d wires solid shape descriptor rewrite plus gradient/pattern fill metadata foundation',()=>{
@@ -316,9 +317,9 @@ test('Stage 16c wires Photoshop adjustment records into semantic ZPE layers and 
   assert.match(main,/psdAdjustmentNativePlan/);
   assert.match(main,/adjustmentSources/);
   assert.match(main,/createAdjustmentLayer\(\{/);
-  assert.match(main,/needsAdjustmentRasterFallback/);
-  assert.match(main,/psdAdjustment:nativeAdjustment\.metadata/);
-  assert.match(main,/Stage 16[ab]: .*adjustment layer/);
+  assert.match(psdExportController,/needsAdjustmentRasterFallback/);
+  assert.match(psdExportController,/psdAdjustment:nativeAdjustment\.metadata/);
+  assert.match(psdExportController,/Stage 16[ab]: .*adjustment layer/);
 });
 
 test('Stage 16b wires adjustment masks, clipping, Levels channels and editable Curves end-to-end',()=>{
@@ -331,8 +332,8 @@ test('Stage 16b wires adjustment masks, clipping, Levels channels and editable C
   assert.match(main,/adjustmentMaskDataUrl/);
   assert.match(main,/data-adjustment-curve-channel/);
   assert.ok(main.includes("match(/^channels\\.(\\d+)\\."));
-  assert.match(main,/clipping:layer\.clipping===true/);
-  assert.match(main,/Stage 16b: .*adjustment layer/);
+  assert.match(psdExportController,/clipping:layer\.clipping===true/);
+  assert.match(psdExportController,/Stage 16b: .*adjustment layer/);
   assert.match(render,/async function applyAdjustmentLayer\(canvas, ctx, layer, \{ clippingMask = null \} = \{\}\)/);
   assert.match(render,/function renderClippingBase|async function renderClippingBase/);
   assert.match(render,/entry\.layer\?\.clipping===true/);
