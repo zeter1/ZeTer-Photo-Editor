@@ -11,7 +11,8 @@ Use the smallest relevant set while developing; finish source changes with the r
 | Menu/tool-specific interaction | relevant interaction/selection/retouch tests | `npm run test:browser` |
 | Selection gesture state / marquee / lasso / polygon / magnetic | `tests/selection-gesture-controller.test.mjs`, `tests/selection-types-v119.test.mjs`, `tests/pointer-release-tools.test.mjs`, architecture test | `npm run test:browser` when global pointer/keyboard wiring changes |
 | Documents/layers/groups | core, layer-groups, document-tabs | browser smoke when UI path changes |
-| Smart objects/filters | smart-object / smart-filter tests | targeted browser check when dialogs change |
+| Smart Object content lifecycle / linked sources / content tabs | `tests/smart-object-controller.test.mjs`, `tests/linked-smart-objects.test.mjs`, PSD Smart Object round-trip tests, architecture/source guard | `npm run test:browser` after composition-root wiring changes |
+| Smart filters | smart-filter tests | targeted browser check when dialogs change |
 | RGBA pixel operations | pixel/retouch tests | visual/runtime when pointer stroke changes |
 | Raster edit state / paint buffer / preview / persistence | `tests/painting-controller.test.mjs`, raster-save-boundary, architecture test | browser smoke when startup/render wiring changes |
 | Fill / raster line / current-layer selection clear commands | `tests/painting-command-controller.test.mjs`, selection-fill-line, high-depth-editing, raster-save-boundary, architecture test | `npm run test:browser` when click/release wiring changes |

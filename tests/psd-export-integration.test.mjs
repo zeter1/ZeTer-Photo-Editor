@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const smartObjectController=await readFile(new URL('../src/document/smart-object-controller.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
 const psdNativeMetadataPlans=await readFile(new URL('../src/document/psd-native-metadata-plans.js',import.meta.url),'utf8');
 const psdImportController=await readFile(new URL('../src/document/psd-import-controller.js',import.meta.url),'utf8');
@@ -242,11 +243,11 @@ test('Stage 14c wires editable embedded Smart Object saves into native liFD reso
   assert.match(adapter,/locateEmbeddedLinkedLayerRecord/);
   assert.match(main,/function serializePhotoshopEmbeddedAsset\(/);
   assert.match(main,/function rewritePhotoshopEmbeddedSource\(/);
-  assert.match(main,/photoshopSmartObjectLayers/);
+  assert.match(smartObjectController,/findPhotoshopLayers/);
   assert.match(main,/embeddedWidth/);
   assert.match(main,/embeddedHeight/);
-  assert.match(main,/Embedded Photoshop Smart Object обновлён без raster fallback/);
-  assert.match(main,/native Photoshop passthrough отключён/);
+  assert.match(smartObjectController,/Embedded Photoshop Smart Object обновлён без raster fallback/);
+  assert.match(smartObjectController,/native Photoshop passthrough отключён/);
 });
 
 test('Stage 15a wires Photoshop TySh text mapping and safe native round-trip into import/export',()=>{
