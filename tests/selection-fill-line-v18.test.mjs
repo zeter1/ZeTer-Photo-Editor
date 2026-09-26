@@ -6,6 +6,7 @@ import { pointInLayer, snapLineEnd } from '../src/core/geometry.js';
 import { createShapeLayer, sanitizeProject } from '../src/core/state.js';
 
 const main = fs.readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+const commands = fs.readFileSync(new URL('../src/painting/command-controller.js', import.meta.url), 'utf8');
 const gesture = fs.readFileSync(new URL('../src/painting/gesture-controller.js', import.meta.url), 'utf8');
 
 function rgbaGrid(width, height, color = [255, 255, 255, 255]) {
@@ -83,15 +84,18 @@ test('v1.8 tools are wired to toolbar, menus, shortcuts, selection clipping and 
   assert.match(main, /ctrl&&e\.code==='KeyA'/);
   assert.match(main, /ctrl&&e\.code==='KeyD'/);
   assert.match(main, /clipContext: clipContextToSelection/);
+  assert.match(main, /predicate: rasterSelectionPredicate/);
   assert.match(gesture, /selection\?\.clipContext\?\.\(context, layer\)/);
-  assert.match(main, /isAllowed:rasterSelectionPredicate\(layer\)/);
+  assert.match(commands, /selection\?\.predicate\?\.\(layer\)/);
 });
 
-test('line tool paints into the current raster layer instead of creating one shape layer per stroke',()=>{
-  assert.match(main,/async function drawLineOnCurrentRaster\(start,end\)/);
-  assert.match(main,/let layer=selected\(\)/);
-  assert.match(main,/if\(!isEditableRasterLayer\(layer\)\)[\s\S]*?name:'Линии'/);
+test('line tool delegates raster mutation to the painting command controller',()=>{
+  assert.match(main,/drawLine: drawLineOnCurrentRaster/);
+  assert.match(commands,/async function drawLine\(start, end\)/);
+  assert.match(commands,/let layer = target\.selected\?\.\(\) \?\? null/);
+  assert.match(commands,/name:'Линии'/);
   assert.match(main,/await drawLineOnCurrentRaster\(d\.start,end\)/);
+  assert.doesNotMatch(main,/async function drawLineOnCurrentRaster\(/);
   assert.doesNotMatch(main,/if\(Math\.hypot\(end\.x-d\.start\.x,end\.y-d\.start\.y\)>2\)\{addLayer\(doc,createLineLayerFromPoints/);
-  assert.match(main,/commit\('Нарисовать линию'\)/);
+  assert.match(commands,/ui\?\.commit\?\.\('Нарисовать линию'\)/);
 });

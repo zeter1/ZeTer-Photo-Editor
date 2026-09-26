@@ -9,6 +9,7 @@
 - Document import / file routing: `src/document/import-controller.js`
 - Selection copy/cut/paste lifecycle: `src/selection/clipboard-controller.js`
 - Raster edit state, Canvas/high-depth buffers, persistence and paint preview: `src/painting/controller.js`
+- Fill / raster line / current-layer selection clear commands: `src/painting/command-controller.js`
 - Brush/eraser + retouch stroke gesture lifecycle (begin/move/end): `src/painting/gesture-controller.js`
 - Clone/heal/smudge/blur/dodge/burn mechanics (Canvas8 + high-depth/CMYK): `src/retouch/controller.js`
 - UI config + toolbar/menu/modal controllers/layout: `src/ui/`

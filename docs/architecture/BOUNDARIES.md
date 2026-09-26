@@ -38,10 +38,12 @@ browser primitives (Canvas, Worker, storage, File APIs)
 
 ### Painting
 - `src/painting/controller.js` is the single owner of reusable raster edit buffers: Canvas/context/layer identity, native high-depth/CMYK working state, paint-preview scheduling/override and raster publication.
+- `src/painting/command-controller.js` owns bounded one-shot raster mutations: fill, raster line and selection clear on the current raster layer. It receives document/target/selection/tool/transaction/UI state through grouped explicit ports and preserves Canvas8 plus native RGB/CMYK high-depth paths.
+- The command controller must not install DOM listeners, own selection-shape/history state or replace the application-wide pending-edit guard. Multi-layer clearing used by merged Clipboard cut remains in the selection/runtime boundary because it may rasterize heterogeneous layers.
 - `src/painting/gesture-controller.js` owns one paint stroke lifecycle (`begin → move → end`) for brush/eraser and retouch routing. It receives the current tool and caller-owned pointer validity per gesture instead of reading global runtime state.
 - The gesture controller talks to document/selection/tool/UI/runtime state through grouped explicit ports. It must not install global DOM listeners, own `currentTool`, own selection/history state or replace the application-wide pending-edit guard.
-- `src/main.js` owns global pointer capture/routing and the shared transaction/history boundaries; it delegates stroke mechanics to `paintGesture` and passes the completed drag to `end` after clearing global drag state.
-- Do not recreate `brushCanvas`, `brushCtx`, high-depth paint state or `beginPaint/paintTo/endPaint` implementations in `src/main.js`.
+- `src/main.js` owns global pointer capture/routing and the shared transaction/history boundaries; it delegates stroke mechanics to `paintGesture` and one-shot raster mutations to `rasterCommands`.
+- Do not recreate `brushCanvas`, `brushCtx`, high-depth paint state, `beginPaint/paintTo/endPaint` or fill/line/current-layer selection-clear implementations in `src/main.js`.
 
 ### Retouch
 - `src/retouch/controller.js` owns clone/heal/smudge/blur/dodge/burn mechanics and only their private scratch/snapshot state.

@@ -23,6 +23,7 @@ const sources = [
   'src/core/pixel-worker.js',
   'src/core/render.js',
   'src/painting/controller.js',
+  'src/painting/command-controller.js',
   'src/retouch/controller.js',
   'src/painting/gesture-controller.js',
   'src/selection/clipboard-controller.js',

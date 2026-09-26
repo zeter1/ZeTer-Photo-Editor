@@ -24,7 +24,8 @@ Useful routing:
 - clone/heal/smudge/blur/dodge/burn mechanics → retouch/controller + painting/controller state; include painting/gesture-controller when the bug is in stroke begin/move/end routing
 - raster edit buffer / high-depth working state / persistence / paint preview → painting/controller
 - brush/eraser/retouch stroke begin/move/end → painting/gesture-controller + painting/controller + retouch/controller
-- fill/line/selection-clear orchestration → main + painting/controller + pixel-buffer/pixels
+- fill / raster line / current-layer selection clear → painting/command-controller + painting/controller + pixel-buffer/pixels; main only supplies selection/tool/transaction ports
+- merged Clipboard cut / multi-layer selection clear → selection/clipboard-controller + bounded helpers in main
 - pixels/precision → pixel-buffer/pixels
 - rendering → render
 - ICC/CMYK → color-management

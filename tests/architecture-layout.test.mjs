@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController, documentImportController, paintingController, paintGestureController, retouchController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -16,6 +16,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, too
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/document/import-controller.js', root), 'utf8'),
   readFile(new URL('src/painting/controller.js', root), 'utf8'),
+  readFile(new URL('src/painting/command-controller.js', root), 'utf8'),
   readFile(new URL('src/painting/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/retouch/controller.js', root), 'utf8'),
 ]);
@@ -90,6 +91,19 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /let (?:brushCanvas|brushCtx|brushLayerId|highDepthPaintBuffer|highDepthPaintLayerId|highDepthPaintPreviewDirty|paintPreviewFrame|paintPreviewQueued)\b/);
   assert.match(main, /rasterEdit\.paintPreviewOverrides\(\)/);
   assert.match(main, /rasterEdit\.ensureRasterBuffer\(/);
+  assert.match(main, /from '\.\/painting\/command-controller\.js'/);
+  assert.match(build, /'src\/painting\/command-controller\.js'/);
+  assert.match(paintCommandController, /export function createRasterCommandController/);
+  assert.match(paintCommandController, /async function drawLine\(/);
+  assert.match(paintCommandController, /async function fillAt\(/);
+  assert.match(paintCommandController, /async function clearSelection\(/);
+  assert.match(main, /drawLine: drawLineOnCurrentRaster/);
+  assert.match(main, /fillAt: fillAtPoint/);
+  assert.match(main, /clearSelection: clearSelectedPixels/);
+  assert.doesNotMatch(main, /async function drawLineOnCurrentRaster\(/);
+  assert.doesNotMatch(main, /async function fillAtPoint\(/);
+  assert.doesNotMatch(main, /async function clearSelectedPixels\(/);
+  assert.doesNotMatch(main, /function clearHighDepthPaintState\(/);
   assert.match(main, /from '\.\/painting\/gesture-controller\.js'/);
   assert.match(build, /'src\/painting\/gesture-controller\.js'/);
   assert.match(paintGestureController, /export function createPaintGestureController/);

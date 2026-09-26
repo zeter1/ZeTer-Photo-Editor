@@ -8,8 +8,8 @@ import {
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
-import { floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
-import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, compositeCmykPixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment, floodFillPixelBuffer, floodFillCmykPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
+import { hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
+import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, compositeCmykPixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import {
@@ -30,6 +30,7 @@ import { createModalController } from './ui/modal-controller.js';
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
 import { createDocumentImportController } from './document/import-controller.js';
 import { createRasterEditController } from './painting/controller.js';
+import { createRasterCommandController } from './painting/command-controller.js';
 import { createPaintGestureController } from './painting/gesture-controller.js';
 import { createRetouchController } from './retouch/controller.js';
 
@@ -117,6 +118,50 @@ const rasterEdit = createRasterEditController({
   renderPaintPreview: () => render({ paintPreview: true }),
   documentRef: document,
 });
+
+const rasterCommands = createRasterCommandController({
+  rasterEdit,
+  state: {
+    getDocument: () => doc,
+    isPersisting: () => paintPersisting,
+    beginPersist: () => {
+      if (paintPersisting) return false;
+      paintPersisting = true;
+      return true;
+    },
+    endPersist: () => { paintPersisting = false; },
+    resetPaintState: () => {
+      rasterEdit.clearHighDepthPaintState();
+      retouchController.resetStroke();
+    },
+  },
+  target: {
+    selected,
+    isEditableRasterLayer,
+    atPoint: paintLayerAtPoint,
+    toLocal: documentPointToLayerPixel,
+  },
+  selection: {
+    hasActive: () => Boolean(selectionRect),
+    containsPoint: pointInsideSelection,
+    intersectsLayer: selectionIntersectsLayer,
+    predicate: rasterSelectionPredicate,
+    clipContext: clipContextToSelection,
+  },
+  tools: {
+    primaryColor: () => els.primaryColor.value,
+    brushSize: () => Number(els.brushSize.value) || 1,
+    opacity: () => Number(els.toolOpacity.value) / 100,
+    fillTolerance: () => Number(els.fillTolerance?.value) || 0,
+    rgbToCmyk: rgb8ToDocumentCmyk,
+  },
+  ui: { setStatus, toast, render, commit },
+});
+const {
+  drawLine: drawLineOnCurrentRaster,
+  fillAt: fillAtPoint,
+  clearSelection: clearSelectedPixels,
+} = rasterCommands;
 
 const toolbarController = createToolbarController({
   toolbar: els.toolbar,
@@ -2636,43 +2681,7 @@ function createLineLayerFromPoints(start,end) {
   });
 }
 
-async function drawLineOnCurrentRaster(start,end){
-  if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return false;}
-  let layer=selected();
-  if(!isEditableRasterLayer(layer)){
-    layer=createRasterLayer({name:'Линии',x:0,y:0,width:doc.width,height:doc.height,dataUrl:null});
-    addLayer(doc,layer);
-  }
-  paintPersisting=true;
-  try{
-    const from=documentPointToLayerPixel(start,layer),to=documentPointToLayerPixel(end,layer);
-    if(layer.highDepthSource){
-      const buffer=rasterEdit.editableHighDepthBuffer(layer);
-      if(buffer){
-        const rgb=hexToRgb(els.primaryColor.value);
-        const changed=buffer.model==='cmyk'
-          ? applyCmykPixelBufferStrokeSegment(buffer,from,to,Math.max(.5,(Number(els.brushSize.value)||1)/2),rgb8ToDocumentCmyk(rgb),{opacity:Number(els.toolOpacity.value)/100,isAllowed:rasterSelectionPredicate(layer)})
-          : applyPixelBufferStrokeSegment(buffer,from,to,Math.max(.5,(Number(els.brushSize.value)||1)/2),rgb,{opacity:Number(els.toolOpacity.value)/100,isAllowed:rasterSelectionPredicate(layer)});
-        if(!changed){setStatus('Линия не изменила high-depth слой');return false;}
-        rasterEdit.applyHighDepthMutation(layer,await rasterEdit.prepareHighDepthMutation(layer,buffer));
-        rasterEdit.clearBrushBuffer();clearHighDepthPaintState();
-        doc.selectedLayerId=layer.id;
-        commit('Нарисовать линию');setStatus(`Линия добавлена в high-depth слой «${layer.name}»`);return true;
-      }
-    }
-    await rasterEdit.ensureRasterBuffer(layer);
-    rasterEdit.brushContext.save();clipContextToSelection(rasterEdit.brushContext,layer);rasterEdit.brushContext.lineCap='round';rasterEdit.brushContext.lineJoin='round';rasterEdit.brushContext.lineWidth=Math.max(1,Number(els.brushSize.value)||1);rasterEdit.brushContext.globalAlpha=Number(els.toolOpacity.value)/100;rasterEdit.brushContext.globalCompositeOperation='source-over';rasterEdit.brushContext.strokeStyle=els.primaryColor.value;rasterEdit.brushContext.beginPath();rasterEdit.brushContext.moveTo(from.x,from.y);rasterEdit.brushContext.lineTo(to.x,to.y);rasterEdit.brushContext.stroke();rasterEdit.brushContext.restore();
-    doc.selectedLayerId=layer.id;
-    if(!await rasterEdit.persistPaintLayer())throw new Error('Не удалось сохранить слой с линиями');
-    commit('Нарисовать линию');setStatus(`Линия добавлена в слой «${layer.name}»`);return true;
-  }catch(error){console.error(error);rasterEdit.clearBrushBuffer();render();setStatus(`Ошибка линии: ${error.message}`);toast('Не удалось нарисовать линию','error');return false;}
-  finally{paintPersisting=false;}
-}
 
-function clearHighDepthPaintState(){
-  rasterEdit.clearHighDepthPaintState();
-  resetRetouchStroke();
-}
 
 function applyNativeHighDepthDab(layer,point,pointerEvent=null,erase=false){
   if(rasterEdit.highDepthPaintLayerId!==layer?.id||!rasterEdit.highDepthPaintBuffer)return false;
@@ -2694,100 +2703,7 @@ function nativeHighDepthStrokeSegment(layer,from,to,pointerEvent=null,erase=fals
   return changed>0;
 }
 
-async function fillAtPoint(point) {
-  if (paintPersisting) { setStatus('Сохраняется предыдущая растровая операция…'); return false; }
-  if (selectionRect && !pointInsideSelection(point)) {
-    setStatus('Заливка: щёлкните внутри активного выделения');
-    return false;
-  }
-  const layer=paintLayerAtPoint(point);
-  if(!layer){setStatus('Заливка работает по растровому слою');toast('Выберите растровый слой или щёлкните по изображению','warn');return false;}
-  paintPersisting=true;
-  try {
-    const local=documentPointToLayerPixel(point,layer);
-    if(layer.highDepthSource){
-      const buffer=rasterEdit.editableHighDepthBuffer(layer);
-      if(buffer){
-        const x=Math.floor(local.x),y=Math.floor(local.y);
-        if(x<0||y<0||x>=buffer.width||y>=buffer.height){setStatus('Точка заливки вне растрового слоя');return false;}
-        setStatus('High-depth заливка области…');
-        const rgb=hexToRgb(els.primaryColor.value);
-        const filled=buffer.model==='cmyk'
-          ? floodFillCmykPixelBuffer(buffer,x,y,rgb8ToDocumentCmyk(rgb),{tolerance:Number(els.fillTolerance?.value)||0,opacity:Number(els.toolOpacity.value)/100,isAllowed:rasterSelectionPredicate(layer)})
-          : floodFillPixelBuffer(buffer,x,y,rgb,{tolerance:Number(els.fillTolerance?.value)||0,opacity:Number(els.toolOpacity.value)/100,isAllowed:rasterSelectionPredicate(layer)});
-        if(!filled){setStatus('Заливка: подходящая область не найдена');return false;}
-        rasterEdit.applyHighDepthMutation(layer,await rasterEdit.prepareHighDepthMutation(layer,buffer));
-        rasterEdit.clearBrushBuffer();clearHighDepthPaintState();
-        doc.selectedLayerId=layer.id;commit('Заливка');setStatus(`High-depth заливка: ${filled.toLocaleString('ru-RU')} px`);return true;
-      }
-    }
-    await rasterEdit.ensureRasterBuffer(layer);
-    const x=Math.floor(local.x),y=Math.floor(local.y);
-    if(x<0||y<0||x>=rasterEdit.brushCanvas.width||y>=rasterEdit.brushCanvas.height){setStatus('Точка заливки вне растрового слоя');return false;}
-    setStatus('Заливка области…');
-    const imageData=rasterEdit.brushContext.getImageData(0,0,rasterEdit.brushCanvas.width,rasterEdit.brushCanvas.height);
-    const filled=floodFillPixels(imageData.data,rasterEdit.brushCanvas.width,rasterEdit.brushCanvas.height,x,y,hexToRgb(els.primaryColor.value),{
-      tolerance:Number(els.fillTolerance?.value)||0,
-      opacity:Number(els.toolOpacity.value)/100,
-      isAllowed:rasterSelectionPredicate(layer),
-    });
-    if(!filled){setStatus('Заливка: подходящая область не найдена');return false;}
-    rasterEdit.brushContext.putImageData(imageData,0,0);
-    doc.selectedLayerId=layer.id;
-    if (!await rasterEdit.persistPaintLayer()) throw new Error('Не удалось сохранить растровый слой');
-    commit('Заливка');
-    setStatus(`Заливка: ${filled.toLocaleString('ru-RU')} px`);
-    return true;
-  } catch (error) {
-    console.error(error);
-    rasterEdit.clearBrushBuffer();
-    render();
-    setStatus(`Ошибка заливки: ${error.message}`);
-    toast('Не удалось выполнить заливку','error');
-    return false;
-  } finally {
-    paintPersisting=false;
-  }
-}
 
-async function clearSelectedPixels({ historyLabel = 'Очистить выделение', successStatus = 'Пиксели внутри выделения очищены' } = {}) {
-  if(!selectionRect)return false;
-  if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return false;}
-  const layer=selected();
-  if(!isEditableRasterLayer(layer)){setStatus('Для очистки выделения выберите незаблокированный растровый слой');toast('Выделение очищает пиксели только на растровом слое','warn');return false;}
-  if(!selectionIntersectsLayer(layer)){setStatus('Выделение не пересекает выбранный слой');return false;}
-  paintPersisting=true;
-  try {
-    if(layer.highDepthSource){
-      const buffer=rasterEdit.editableHighDepthBuffer(layer,{requireAlpha:true});
-      if(buffer){
-        const cleared=clearPixelBufferPixels(buffer,{isAllowed:rasterSelectionPredicate(layer)});
-        if(!cleared){setStatus('В выделении нет непрозрачных high-depth пикселей');return false;}
-        rasterEdit.applyHighDepthMutation(layer,await rasterEdit.prepareHighDepthMutation(layer,buffer));
-        rasterEdit.clearBrushBuffer();clearHighDepthPaintState();
-        commit(historyLabel);setStatus(`${successStatus} · high-depth: ${cleared.toLocaleString('ru-RU')} px`);return true;
-      }
-    }
-    await rasterEdit.ensureRasterBuffer(layer);
-    rasterEdit.brushContext.save();
-    clipContextToSelection(rasterEdit.brushContext,layer);
-    rasterEdit.brushContext.clearRect(0,0,rasterEdit.brushCanvas.width,rasterEdit.brushCanvas.height);
-    rasterEdit.brushContext.restore();
-    if (!await rasterEdit.persistPaintLayer()) throw new Error('Не удалось сохранить растровый слой');
-    commit(historyLabel);
-    setStatus(successStatus);
-    return true;
-  } catch (error) {
-    console.error(error);
-    rasterEdit.clearBrushBuffer();
-    render();
-    setStatus(`Ошибка очистки выделения: ${error.message}`);
-    toast('Не удалось очистить выделение','error');
-    return false;
-  } finally {
-    paintPersisting=false;
-  }
-}
 
 async function setCloneSource(point) {
   const layer=findTopEditableRasterLayerAt(point);

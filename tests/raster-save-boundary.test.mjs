@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { createDocumentSessionController } from '../src/workspace/session-controller.js';
+import { createRasterCommandController } from '../src/painting/command-controller.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const boundary = main.slice(main.indexOf('function documentEditPending()'), main.indexOf('function reportRecoveryFailure('));
 const fileCommands = main.slice(main.indexOf('function saveProject()'), main.indexOf('async function prepareClearedHighDepthMutation'));
 const jumpHistory = main.slice(main.indexOf('function jumpToHistory('), main.indexOf('function updateLayerControls('));
-const fillCommand = main.slice(main.indexOf('async function fillAtPoint('), main.indexOf('async function clearSelectedPixels('));
 const deleteCommand = main.slice(main.indexOf('function deleteSelected()'), main.indexOf('function duplicateSelected()'));
 
 test('save and tab switch wait for a pending document edit', () => {
@@ -106,32 +106,60 @@ test('export submits one document snapshot and blocks while raster data is pendi
 
 test('fill protects the document while its raster buffer is decoding', async () => {
   let finishDecode;
-  const context = {
-    paintPersisting: false, selectionRect: null,
-    paintLayerAtPoint: () => ({ id: 'raster' }),
-    rasterEdit: {
-      ensureRasterBuffer: () => new Promise(resolve => { finishDecode = resolve; }),
-      brushCanvas: { width: 10, height: 10 },
-      brushContext: {
-        getImageData: () => ({ data: new Uint8ClampedArray(400) }),
-        putImageData: () => {},
-      },
-      clearBrushBuffer: () => {},
+  let paintPersisting = false;
+  const pixels = new Uint8ClampedArray(10 * 10 * 4);
+  for (let index = 0; index < 100; index += 1) pixels.set([255,255,255,255], index * 4);
+  const layer = { id:'raster', type:'raster', width:10, height:10, highDepthSource:null };
+  const rasterEdit = {
+    brushCanvas:{ width:10, height:10 },
+    brushContext:{
+      getImageData:() => ({ data:pixels }),
+      putImageData:() => {},
     },
-    documentPointToLayerPixel: () => ({ x: 1, y: 1 }),
-    floodFillPixels: () => 0,
-    hexToRgb: () => [0, 0, 0],
-    els: { primaryColor: { value: '#000000' }, fillTolerance: { value: '0' }, toolOpacity: { value: '100' } },
-    rasterSelectionPredicate: () => () => true,
-    doc: { selectedLayerId: null },
-    setStatus: () => {}, toast: () => {},
+    ensureRasterBuffer:() => new Promise(resolve => { finishDecode = resolve; }),
+    persistPaintLayer:async() => true,
+    clearBrushBuffer:() => {},
   };
-  runInNewContext(`${fillCommand}\nglobalThis.fillAtPoint=fillAtPoint;`, context);
-  const fill = context.fillAtPoint({ x: 1, y: 1 });
-  assert.equal(context.paintPersisting, true);
+  const controller = createRasterCommandController({
+    rasterEdit,
+    state:{
+      getDocument:() => ({ selectedLayerId:null }),
+      isPersisting:() => paintPersisting,
+      beginPersist:() => {
+        if (paintPersisting) return false;
+        paintPersisting = true;
+        return true;
+      },
+      endPersist:() => { paintPersisting = false; },
+    },
+    target:{
+      selected:() => layer,
+      atPoint:() => layer,
+      isEditableRasterLayer:() => true,
+      toLocal:() => ({ x:1, y:1 }),
+    },
+    selection:{
+      hasActive:() => false,
+      containsPoint:() => true,
+      intersectsLayer:() => true,
+      predicate:() => () => true,
+      clipContext:() => {},
+    },
+    tools:{
+      primaryColor:() => '#ff0000',
+      brushSize:() => 1,
+      opacity:() => 1,
+      fillTolerance:() => 0,
+      rgbToCmyk:() => [0,1,1,0],
+    },
+    ui:{ setStatus:() => {}, toast:() => {}, render:() => {}, commit:() => {} },
+  });
+
+  const fill = controller.fillAt({ x:1, y:1 });
+  assert.equal(paintPersisting, true);
   finishDecode();
   await fill;
-  assert.equal(context.paintPersisting, false);
+  assert.equal(paintPersisting, false);
 });
 
 test('selected raster layer cannot be deleted before its stroke is committed', () => {

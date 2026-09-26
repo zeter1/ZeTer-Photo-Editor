@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-26 — Raster command controller extraction
+
+- Refactor: fill, raster-line и очистка пикселей текущего raster layer внутри активного выделения вынесены из большого `src/main.js` в новый `src/painting/command-controller.js`.
+- Architecture: новый controller получает document/target/selection/tool/transaction/UI через grouped ports, использует общий `paintPersisting` guard из runtime и не становится владельцем global pointer events, selection/history state или multi-layer Clipboard cut.
+- Precision: сохранены оба destructive paths — Canvas8 и native 16/32-bit RGB/CMYK PixelBuffer — включая selection predicate, CMYK ink conversion, high-depth mutation publication и async raster persistence.
+- Reliability: line/fill/clear по-прежнему блокируют пересекающиеся raster operations; отдельный regression закрепляет раннюю установку pending-edit guard до async raster decode.
+- Tests: добавлен direct `tests/painting-command-controller.test.mjs`; selection/fill/line, high-depth, raster-save-boundary и architecture contracts переведены на нового владельца.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow и test matrix теперь направляют one-shot raster commands сразу в `src/painting/command-controller.js`, а merged multi-layer cut явно оставляют в selection/runtime boundary.
+- Build: `tools/build-bundle.mjs` включает command controller в canonical source graph; generated `src/app.bundle.js` синхронизирован с новым модулем.
+
 ### 2026-09-26 — Painting gesture controller extraction
 
 - Refactor: lifecycle одного brush/eraser/retouch stroke вынесен из большого `src/main.js` в новый `src/painting/gesture-controller.js`: выбор raster target, native high-depth/CMYK vs Canvas8 path, `begin → move → end`, preview scheduling и финальная persistence/commit coordination.

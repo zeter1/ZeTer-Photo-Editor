@@ -10,6 +10,7 @@ import {
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
+const commands=await readFile(new URL('../src/painting/command-controller.js',import.meta.url),'utf8');
 const toolConfig=await readFile(new URL('../src/ui/tool-config.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 
@@ -62,13 +63,14 @@ test('Stage 12d clear respects a selection predicate at high depth',()=>{
   assert.equal(buffer.data[7],0);
 });
 
-test('Stage 12d routes brush, eraser, fill, line and selection clear through native high-depth mutations',()=>{
+test('Stage 12d routes brush/eraser gestures and one-shot raster commands through native high-depth mutations',()=>{
   assert.match(painting,/function ensureNativeHighDepthPaintBuffer\(/);
   assert.match(main,/applyPixelBufferBrushDab\(rasterEdit\.highDepthPaintBuffer/);
   assert.match(main,/applyPixelBufferStrokeSegment\(rasterEdit\.highDepthPaintBuffer/);
-  assert.match(main,/floodFillPixelBuffer\(buffer,x,y/);
-  assert.match(main,/clearPixelBufferPixels\(buffer,\{isAllowed:rasterSelectionPredicate\(layer\)\}\)/);
-  assert.match(main,/rasterEdit\.applyHighDepthMutation\(layer,await rasterEdit\.prepareHighDepthMutation\(layer,buffer\)\)/);
+  assert.match(commands,/floodFillPixelBuffer\(/);
+  assert.match(commands,/clearPixelBufferPixels\(buffer, \{ isAllowed:selectionPredicate\(layer\) \}\)/);
+  assert.match(commands,/applyPixelBufferStrokeSegment\(/);
+  assert.match(commands,/rasterEdit\.applyHighDepthMutation\(layer, await rasterEdit\.prepareHighDepthMutation\(layer, buffer\)\)/);
   assert.match(main,/prepareClearedHighDepthMutation/);
 });
 
@@ -129,11 +131,12 @@ test('Stage 13c flood fill stays in CMYK source space and respects selection pre
   assert.equal(buffer.data[10],60001);
 });
 
-test('Stage 13c routes CMYK brush, fill, line and clear through canonical PixelBuffer mutations',()=>{
+test('Stage 13c routes CMYK brush gestures and raster commands through canonical PixelBuffer mutations',()=>{
   assert.match(toolConfig,/export const NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
   assert.match(main,/applyCmykPixelBufferBrushDab\(rasterEdit\.highDepthPaintBuffer/);
   assert.match(main,/applyCmykPixelBufferStrokeSegment\(rasterEdit\.highDepthPaintBuffer/);
-  assert.match(main,/floodFillCmykPixelBuffer\(buffer,x,y/);
-  assert.match(main,/buffer\.model==='cmyk'/);
+  assert.match(commands,/floodFillCmykPixelBuffer\(/);
+  assert.match(commands,/applyCmykPixelBufferStrokeSegment\(/);
+  assert.match(commands,/buffer\.model === 'cmyk'/);
   assert.match(painting,/highDepthPreview:\s*buffer\.model === 'cmyk' \? null/);
 });
