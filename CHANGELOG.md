@@ -7,6 +7,7 @@
 - Refactor: persistent collapse state правой панели и canvas-mode visibility/viewport-centering вынесены из большого `src/main.js` в `src/ui/workspace-layout-controller.js`; runtime теперь только подключает DOM/runtime ports.
 - Reliability: storage parsing/persistence остаются fail-soft, legacy `propertySections: ["color-effects"]` мигрирует в panel id `effects`, а переключение canvas mode сохраняет тот же canvas point в центре viewport.
 - Tests: добавлены прямые controller regressions для migration, malformed storage, accessibility/persistence, click wiring и viewport-centering; architecture guard запрещает возврат layout state/functions в `src/main.js`.
+- CI follow-up: legacy `workspace-navigation-v17` source-contract теперь проверяет canvas-mode implementation в каноническом `workspace-layout-controller.js`, а `src/main.js` — только как wiring boundary; это убирает stale slice по удалённой функции.
 - Browser: `file://` smoke теперь реально сворачивает panel, проверяет localStorage после reload и переключает canvas mode клавишей Tab.
 - Docs/AI: карты владельцев обновлены, а `task/` добавлен как versioned bounded queue для следующих небольших AI/Codex проходок; одна задача = один Markdown-файл, завершённая задача удаляется только после merge + green CI.
 - Build: canonical source graph включает workspace layout controller; generated `src/app.bundle.js` синхронизирован из source modules.

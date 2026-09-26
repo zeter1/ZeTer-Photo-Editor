@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const workspaceLayout = await readFile(new URL('../src/ui/workspace-layout-controller.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 test('middle mouse and Space provide temporary canvas panning without changing tools', () => {
@@ -21,12 +22,15 @@ test('canvas zoom supports professional keyboard and wheel navigation', () => {
   assert.match(main, /ctrl&&\(e\.code==='Minus'\|\|e\.code==='NumpadSubtract'\)/);
 });
 
-test('Tab canvas mode hides both side panels and preserves the viewed canvas point', () => {
-  const fn = main.match(/function togglePanels\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';
-  assert.match(fn, /clientPointToCanvas/);
-  assert.match(fn, /classList\.toggle\('panels-hidden'/);
-  assert.match(fn, /scrollLeft \+=/);
-  assert.match(fn, /scrollTop \+=/);
+test('Tab canvas mode delegates shell layout while CSS keeps both side panels hidden', () => {
+  assert.match(main, /from '\.\/ui\/workspace-layout-controller\.js'/);
+  assert.match(main, /const \{ initCollapsiblePanels, togglePanels \} = workspaceLayoutController/);
+  assert.doesNotMatch(main, /function togglePanels\(\)/);
+  assert.match(workspaceLayout, /function togglePanels\(\)/);
+  assert.match(workspaceLayout, /clientPointToCanvas/);
+  assert.match(workspaceLayout, /classList\?\.toggle\('panels-hidden'/);
+  assert.match(workspaceLayout, /scrollLeft \+=/);
+  assert.match(workspaceLayout, /scrollTop \+=/);
   assert.match(css, /\.workspace\.panels-hidden \{ grid-template-columns: minmax\(0, 1fr\); \}/);
   assert.match(css, /\.workspace\.panels-hidden \.toolbar, \.workspace\.panels-hidden \.right-panel \{ display: none; \}/);
 });
