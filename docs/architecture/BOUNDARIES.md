@@ -57,8 +57,8 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - `src/workspace/recovery-controller.js` owns recovery orchestration state: window identity, debounce/generation, serialized persistence queue, unreadable-sibling carry-forward and restore/discard policy.
 - `src/core/recovery.js` stays a low-level IndexedDB/record adapter; it must not gain session/tab/UI ownership.
 - Recovery controller receives storage/project/session/runtime/UI dependencies through explicit ports. Do not recreate recovery timers, write promises or window keys in `src/main.js`.
-- Multi-window ownership is a controller invariant, not only a modal affordance: foreign recovery entries may be inspected/restored but not deleted by this window.
-- Async recovery writes/discard must remain serialized; unreadable sibling records must not be silently lost when valid siblings are restored.
+- Multi-window ownership is a controller invariant: foreign recovery entries may be inspected/restored, while deletion is rejected by default and is allowed only through the explicit user-confirmed project-manager path (`allowForeign:true`).
+- Async recovery writes/discard must remain serialized; unreadable sibling records must not be silently lost when valid siblings are restored. Leaving recovery for a disk/new project must rotate a reserved current-window key before new autosave publication can occur.
 
 
 ### Document import

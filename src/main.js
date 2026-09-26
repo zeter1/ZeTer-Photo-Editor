@@ -826,9 +826,13 @@ const recoveryController = createRecoveryController({
   runtime: {
     updateAll,
     markDirty,
+    startNewProject: () => createNewDialog(),
   },
   ui: {
-    showRecoveryModal,
+    showRecoveryModal: (entries, options) => showRecoveryModal(entries, {
+      ...options,
+      onLoadProject: () => els.projectInput?.click(),
+    }),
     setStatus,
     toast,
   },

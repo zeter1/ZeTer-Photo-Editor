@@ -182,21 +182,112 @@ export function createModalController({
     modal.querySelector('[data-close]').focus();
   }
 
-  function showRecoveryModal(record, { canRestore = true, canDiscard = false } = {}) {
+  function showRecoveryModal(entriesOrRecord, {
+    canRestore = true,
+    canDiscard = false,
+    onLoadProject = null,
+  } = {}) {
     return new Promise(resolve => {
-      const back=documentTarget.createElement('div');back.className='modal-backdrop';
-      const modal=documentTarget.createElement('div');modal.className='modal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Восстановление проекта');
-      const savedAt=new Date(record.savedAt);
-      const time=Number.isNaN(savedAt.getTime())?'неизвестно':savedAt.toLocaleString('ru-RU');
-      const names=record.documents.map(item=>escapeHtml(item.docName)).join(', ');
-      modal.innerHTML=`<header>Восстановление проекта</header><div class="modal-body info-modal"><p>Найдены автоматически сохранённые документы: <b>${names}</b>.</p><p>Последняя копия: ${escapeHtml(time)}.</p><p class="muted">Копия может относиться к другому открытому окну редактора. «Позже» оставит её в хранилище. ${canRestore?'Восстановленные документы останутся несохранёнными до подтверждения файла на диске.':'Копия повреждена и не может быть открыта.'}</p></div><footer>${canDiscard?'<button type="button" class="danger-button" data-discard>Удалить копию</button>':''}<button type="button" data-later>Позже</button>${canRestore?'<button type="button" class="primary-button" data-restore>Восстановить</button>':''}</footer>`;
-      back.append(modal);modalRoot.replaceChildren(back);
-      const close=action=>{modalRoot.replaceChildren();resolve(action);};
-      if(canDiscard)modal.querySelector('[data-discard]').onclick=()=>close('discard');
-      modal.querySelector('[data-later]').onclick=()=>close('later');
-      if(canRestore)modal.querySelector('[data-restore]').onclick=()=>close('restore');
-      modal.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close('later');}});
-      modal.querySelector(canRestore?'[data-restore]':'[data-later]').focus();
+      const previousFocus = documentTarget.activeElement;
+      const sourceEntries = Array.isArray(entriesOrRecord)
+        ? entriesOrRecord
+        : [{ key:'latest', record:entriesOrRecord, canRestore, canDiscard, isCurrent:true, invalidCount:0 }];
+      const entries = sourceEntries.map((entry, index) => ({
+        key: String(entry?.key || `recovery-${index}`),
+        record: entry?.record || null,
+        canRestore: entry?.canRestore !== false && Boolean(entry?.record),
+        canDiscard: entry?.canDiscard === true,
+        isCurrent: entry?.isCurrent === true,
+        invalidCount: Math.max(0, Number(entry?.invalidCount) || 0),
+      }));
+
+      const back = documentTarget.createElement('div'); back.className = 'modal-backdrop';
+      const modal = documentTarget.createElement('div'); modal.className = 'modal recovery-modal';
+      modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true'); modal.setAttribute('aria-labelledby', 'recovery-modal-title');
+
+      const header = documentTarget.createElement('header'); header.id = 'recovery-modal-title'; header.textContent = 'Восстановление проектов';
+      const body = documentTarget.createElement('div'); body.className = 'modal-body recovery-modal-body';
+      const intro = documentTarget.createElement('p'); intro.className = 'recovery-intro'; intro.tabIndex = -1;
+      intro.textContent = 'Найдены автосохранённые проекты на этом устройстве. Выберите проект для восстановления или начните другую работу.';
+      body.append(intro);
+
+      const list = documentTarget.createElement('div'); list.className = 'recovery-project-list'; list.setAttribute('role', 'list');
+      const rows = [];
+      function entryTitle(entry) {
+        const docs = entry.record?.documents || [];
+        return docs[entry.record?.activeIndex]?.docName || docs[0]?.docName || 'Повреждённая автокопия';
+      }
+      function formatSavedAt(entry) {
+        const value = new Date(entry.record?.savedAt);
+        return Number.isNaN(value.getTime()) ? 'Время сохранения неизвестно' : `Сохранено: ${value.toLocaleString('ru-RU')}`;
+      }
+
+      const defaultIndex = entries.findIndex(item => item.canRestore);
+      entries.forEach((entry, index) => {
+        const row = documentTarget.createElement('label'); row.className = 'recovery-project'; row.setAttribute('role', 'listitem');
+        const radio = documentTarget.createElement('input'); radio.type = 'radio'; radio.name = 'recovery-project';
+        radio.checked = index === (defaultIndex >= 0 ? defaultIndex : 0);
+        const content = documentTarget.createElement('span'); content.className = 'recovery-project-content';
+        const title = documentTarget.createElement('strong'); title.className = 'recovery-project-title'; title.textContent = entryTitle(entry);
+        const meta = documentTarget.createElement('span'); meta.className = 'recovery-project-meta';
+        const docCount = entry.record?.documents?.length || 0; meta.textContent = `${formatSavedAt(entry)} · Документов: ${docCount}`;
+        const names = documentTarget.createElement('span'); names.className = 'recovery-project-documents';
+        const docNames = (entry.record?.documents || []).map(item => item.docName).filter(Boolean);
+        names.textContent = docNames.length ? docNames.slice(0, 4).join(' · ') + (docNames.length > 4 ? ` · +${docNames.length - 4}` : '') : 'Содержимое автокопии повреждено или имеет неподдерживаемый формат.';
+        content.append(title, meta, names);
+        const badges = documentTarget.createElement('span'); badges.className = 'recovery-project-badges';
+        const ownership = documentTarget.createElement('span'); ownership.className = 'recovery-badge'; ownership.textContent = entry.isCurrent ? 'Это окно' : 'Другое окно'; badges.append(ownership);
+        if (!entry.canRestore || entry.invalidCount > 0) {
+          const warning = documentTarget.createElement('span'); warning.className = 'recovery-badge warning';
+          warning.textContent = entry.canRestore ? `Повреждено: ${entry.invalidCount}` : 'Повреждена'; badges.append(warning);
+        }
+        row.append(radio, content, badges); list.append(row); rows.push({ row, radio, entry });
+      });
+      body.append(list);
+
+      const footer = documentTarget.createElement('footer'); footer.className = 'recovery-footer';
+      const startActions = documentTarget.createElement('div'); startActions.className = 'recovery-footer-start';
+      const endActions = documentTarget.createElement('div'); endActions.className = 'recovery-footer-end';
+      const makeButton = (textValue, className, attribute) => {
+        const button = documentTarget.createElement('button'); button.type = 'button'; button.className = className; button.textContent = textValue; button.setAttribute(attribute, ''); return button;
+      };
+      const loadButton = makeButton('Загрузить проект', 'secondary-button', 'data-load-project');
+      const newButton = makeButton('Начать новый проект', 'secondary-button', 'data-new-project');
+      const laterButton = makeButton('Позже', 'secondary-button', 'data-later');
+      const deleteButton = makeButton('Удалить проект', 'danger-button', 'data-discard');
+      const restoreButton = makeButton('Восстановить выбранный', 'primary-button', 'data-restore');
+      startActions.append(loadButton, newButton); endActions.append(laterButton, deleteButton, restoreButton); footer.append(startActions, endActions);
+      modal.append(header, body, footer); back.append(modal); modalRoot.replaceChildren(back);
+
+      let closed = false;
+      const selectedRow = () => rows.find(item => item.radio.checked) || rows[0] || null;
+      const close = result => { if (closed) return; closed = true; modalRoot.replaceChildren(); restoreFocus(previousFocus); resolve(result); };
+      const syncSelection = () => {
+        const selected = selectedRow();
+        rows.forEach(item => item.row.classList.toggle('selected', item === selected));
+        restoreButton.disabled = !selected?.entry.canRestore;
+        deleteButton.disabled = !selected?.entry.canDiscard;
+      };
+      rows.forEach(item => item.radio.addEventListener('change', syncSelection));
+      loadButton.addEventListener('click', () => { onLoadProject?.(); close({ action:'load-project', key:selectedRow()?.entry.key || '' }); });
+      newButton.addEventListener('click', () => close({ action:'new-project', key:selectedRow()?.entry.key || '' }));
+      laterButton.addEventListener('click', () => close({ action:'later', key:selectedRow()?.entry.key || '' }));
+      restoreButton.addEventListener('click', () => { const selected = selectedRow(); if (selected?.entry.canRestore) close({ action:'restore', key:selected.entry.key }); });
+      deleteButton.addEventListener('click', () => {
+        const selected = selectedRow(); if (!selected?.entry.canDiscard) return;
+        const confirmed = typeof windowTarget.confirm === 'function' ? windowTarget.confirm(`Удалить автосохранённый проект «${entryTitle(selected.entry)}»? Отменить это действие нельзя.`) : false;
+        if (confirmed) close({ action:'discard', key:selected.entry.key, confirmed:true });
+      });
+      modal.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close({ action:'later', key:selectedRow()?.entry.key || '' }); return; }
+        if (event.key !== 'Tab') return;
+        const tabbable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])')];
+        if (!tabbable.length) { event.preventDefault(); return; }
+        const first = tabbable[0], last = tabbable[tabbable.length - 1];
+        if (event.shiftKey && (!tabbable.includes(documentTarget.activeElement) || documentTarget.activeElement === first)) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && documentTarget.activeElement === last) { event.preventDefault(); first.focus(); }
+      });
+      syncSelection(); intro.focus();
     });
   }
 

@@ -63,7 +63,8 @@ export function createRecoveryController({
 
   const updateAll = runtime.updateAll || (() => {});
   const markDirty = runtime.markDirty || (() => {});
-  const showRecoveryModal = ui.showRecoveryModal || (async () => 'later');
+  const startNewProject = runtime.startNewProject || (() => {});
+  const showRecoveryModal = ui.showRecoveryModal || (async () => ({ action:'later' }));
   const setStatus = ui.setStatus || (() => {});
   const toast = ui.toast || (() => {});
 
@@ -120,8 +121,9 @@ export function createRecoveryController({
     return recoveryWritePromise;
   }
 
-  function discardRecovery(key = recoveryKey) {
-    if (key !== recoveryKey && key !== 'latest') {
+  function discardRecovery(key = recoveryKey, { allowForeign = false } = {}) {
+    const ownsKey = key === recoveryKey || key === 'latest';
+    if (!ownsKey && !allowForeign) {
       consoleRef?.warn?.('Ignored recovery discard request for another editor window', { key });
       return Promise.resolve(false);
     }
@@ -131,7 +133,7 @@ export function createRecoveryController({
       .catch(() => {})
       .then(() => clearSnapshot({ key }))
       .then(() => {
-        unrestoredRecoveryDocuments = [];
+        if (ownsKey) unrestoredRecoveryDocuments = [];
         return true;
       })
       .catch(error => {
@@ -141,54 +143,87 @@ export function createRecoveryController({
     return recoveryWritePromise;
   }
 
+  function parseStoredEntry({ key, record }) {
+    const recovered = [];
+    const invalid = [];
+    for (const [index, item] of (record?.documents || []).entries()) {
+      try {
+        recovered.push({ doc:sanitizeProject(JSON.parse(item.snapshot)), index });
+      } catch (error) {
+        invalid.push(item);
+        consoleRef?.warn?.('Invalid recovery document was preserved in storage', error);
+      }
+    }
+    return {
+      key,
+      record,
+      recovered,
+      invalid,
+      canRestore: recovered.length > 0,
+      canDiscard: true,
+      isCurrent: key === recoveryKey || key === 'latest',
+      invalidCount: invalid.length,
+    };
+  }
+
+  function normalizeRecoveryAction(value, fallbackKey = '') {
+    if (typeof value === 'string') return { action:value, key:fallbackKey, confirmed:false };
+    return {
+      action: value?.action || 'later',
+      key: value?.key || fallbackKey,
+      confirmed: value?.confirmed === true,
+    };
+  }
+
+  function reserveFreshKeyIfNeeded(entries) {
+    if (entries.some(item => item.key === recoveryKey)) recoveryKey = createKey(true);
+  }
+
   async function restoreRecoveryIfAvailable() {
     if (!recoveryStorageAvailable) return false;
-    let stored;
-    try {
-      const entries = await loadSnapshots({ includeInvalid:true });
-      if (entries.some(item => item.key === recoveryKey && !item.record)) recoveryKey = createKey(true);
-      stored = entries.filter(item => item.record);
-    } catch (error) {
-      reportRecoveryFailure(error);
-      return false;
-    }
-    if (!stored.length) return false;
 
-    stored.sort((a, b) => b.record.savedAt - a.record.savedAt);
-    for (const { key, record } of stored) {
-      const recovered = [];
-      const invalid = [];
-      record.documents.forEach((item, index) => {
-        try {
-          recovered.push({ doc:sanitizeProject(JSON.parse(item.snapshot)), index });
-        } catch (error) {
-          invalid.push(item);
-          consoleRef?.warn?.('Invalid recovery document was preserved in storage', error);
-        }
-      });
-
-      const canDiscard = key === recoveryKey || key === 'latest';
-      const action = await showRecoveryModal(record, { canRestore:recovered.length > 0, canDiscard });
-      if (action === 'later') {
-        if (key === recoveryKey) recoveryKey = createKey(true);
-        continue;
+    while (recoveryStorageAvailable) {
+      let stored;
+      try {
+        const entries = await loadSnapshots({ includeInvalid:true });
+        if (entries.some(item => item.key === recoveryKey && !item.record)) recoveryKey = createKey(true);
+        stored = entries.slice().sort((a, b) => (b.record?.savedAt || 0) - (a.record?.savedAt || 0));
+      } catch (error) {
+        reportRecoveryFailure(error);
+        return false;
       }
-      if (action === 'discard') {
-        if (!canDiscard) {
-          consoleRef?.warn?.('Ignored recovery discard request for another editor window', { key });
-          continue;
-        }
-        const removed = await discardRecovery(key);
-        toast(removed ? 'Автосохранённая копия удалена' : 'Не удалось удалить автокопию', removed ? 'success' : 'error');
+      if (!stored.length) return false;
+
+      const prepared = stored.map(parseStoredEntry);
+      const summaries = prepared.map(({ recovered, invalid, ...entry }) => entry);
+      const modalResult = await showRecoveryModal(summaries);
+      const action = normalizeRecoveryAction(modalResult, prepared[0]?.key);
+      const selected = prepared.find(item => item.key === action.key) || prepared[0];
+
+      if (action.action === 'later' || action.action === 'load-project') {
+        reserveFreshKeyIfNeeded(stored);
+        return false;
+      }
+
+      if (action.action === 'new-project') {
+        reserveFreshKeyIfNeeded(stored);
+        await startNewProject();
+        return false;
+      }
+
+      if (action.action === 'discard') {
+        const removed = await discardRecovery(selected.key, { allowForeign:action.confirmed });
+        toast(removed ? 'Автосохранённый проект удалён' : 'Не удалось удалить автосохранённый проект', removed ? 'success' : 'error');
         if (!removed) return false;
         continue;
       }
-      if (action !== 'restore' || !recovered.length) continue;
 
-      unrestoredRecoveryDocuments = invalid;
-      if (key !== recoveryKey && stored.some(item => item.key === recoveryKey)) recoveryKey = createKey(true);
-      const nextSessions = recovered.map(item => buildSession(item.doc, { label:'Автовосстановление', dirtyState:true }));
-      const activeIndex = Math.max(0, recovered.findIndex(item => item.index === record.activeIndex));
+      if (action.action !== 'restore' || !selected.canRestore) continue;
+
+      unrestoredRecoveryDocuments = selected.invalid;
+      if (selected.key !== recoveryKey && stored.some(item => item.key === recoveryKey)) recoveryKey = createKey(true);
+      const nextSessions = selected.recovered.map(item => buildSession(item.doc, { label:'Автовосстановление', dirtyState:true }));
+      const activeIndex = Math.max(0, selected.recovered.findIndex(item => item.index === selected.record.activeIndex));
       setSessions(nextSessions);
       setActiveSessionId(nextSessions[activeIndex].id);
       loadSession(nextSessions[activeIndex]);

@@ -7,7 +7,7 @@
 - UI/runtime orchestration and tool-specific pointer dispatch: `src/main.js`
 - Global overlay pointer lifecycle, capture/release and active-pointer routing: `src/interaction/pointer-lifecycle-router.js`
 - Workspace/session/tab lifecycle: `src/workspace/session-controller.js`
-- Recovery/autosave orchestration, window ownership, debounce/restore: `src/workspace/recovery-controller.js`; IndexedDB persistence only: `src/core/recovery.js`
+- Recovery/autosave orchestration, saved-project manager actions, window ownership, debounce/restore/delete policy: `src/workspace/recovery-controller.js`; recovery dialog DOM/actions: `src/ui/modal-controller.js`; IndexedDB persistence only: `src/core/recovery.js`
 - Document import / file routing: `src/document/import-controller.js`
 - Smart Object content lifecycle (convert/open/save/link/unlink, shared-source propagation and content-tab stale guards): `src/document/smart-object-controller.js`.
 - Photoshop Smart Object embedded PNG/PSD/PSB serialization, `liFD` linked-resource prepare/publish and baseline metadata refresh: `src/document/psd-smart-object-resource.js`; low-level PSD/PSB bytes stay in `src/formats/psd.js`.

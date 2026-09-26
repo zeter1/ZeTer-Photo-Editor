@@ -182,4 +182,10 @@ test('new text and shape layers inherit the tool opacity like brush, fill, and l
   assert.match(main, /function previewRect[\s\S]*?const opacity=Number\(els\.toolOpacity\.value\)\/100/);
   assert.match(css, /\.toast\.warn/);
   assert.match(modalController, /data-later/);
+  assert.match(modalController, /recovery-project-list/);
+  assert.match(modalController, /Загрузить проект/);
+  assert.match(modalController, /Начать новый проект/);
+  assert.match(modalController, /Удалить проект/);
+  assert.match(modalController, /Восстановить выбранный/);
+  assert.match(css, /\\.recovery-project\\.selected/);
 });

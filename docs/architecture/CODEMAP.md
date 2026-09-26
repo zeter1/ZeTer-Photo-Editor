@@ -32,7 +32,7 @@ Owns toolbar drag/drop, persisted order, drop-slot rendering and rich accessible
 Owns generic top-menu/context-menu mechanics: rendering menu items, enabled state evaluation, popup positioning, focus restoration, keyboard navigation, outside-click close and async action error surfacing. Domain command lists and editor mutations stay in `src/main.js`.
 
 ### `modal-controller.js`
-Owns generic modal/dialog mechanics: field rendering, numeric normalization, async submit lifecycle, focus restoration, backdrop/Escape close, draggable text-modal shell, info dialogs and recovery-choice dialog. Feature state remains outside the shell; Text draft/preview belongs to `text-edit-controller.js` and Text font/settings policy belongs to `text-settings-controller.js`.
+Owns generic modal/dialog mechanics: field rendering, numeric normalization, async submit lifecycle, focus restoration, backdrop/Escape close, draggable text-modal shell, info dialogs and the saved-project recovery manager (list/select/load/new/delete/restore actions). Feature state remains outside the shell; Text draft/preview belongs to `text-edit-controller.js` and Text font/settings policy belongs to `text-settings-controller.js`.
 
 ### `workspace-layout-controller.js`
 Owns editor-shell layout state that is independent of document contents: persisted sidebar collapse IDs, legacy collapse-state migration, accessible panel toggle state and canvas-mode visibility with viewport-center preservation. It receives DOM/runtime geometry through narrow ports and does not own document/layer/history/tool state.

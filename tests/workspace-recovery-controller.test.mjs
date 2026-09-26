@@ -25,7 +25,7 @@ function createHarness({
 } = {}) {
   let allSessions = initialSessions;
   let currentActiveId = activeId;
-  const calls = { saves:[], clears:[], loaded:[], statuses:[], toasts:[], warnings:[], dirty:0, updates:0, syncs:0 };
+  const calls = { saves:[], clears:[], loaded:[], statuses:[], toasts:[], warnings:[], dirty:0, updates:0, syncs:0, starts:0 };
   const controller = createRecoveryController({
     storage: {
       save: save || (async (documents, options, config) => { calls.saves.push({ documents, options, config }); }),
@@ -45,6 +45,7 @@ function createHarness({
     runtime: {
       updateAll: () => { calls.updates += 1; },
       markDirty: () => { calls.dirty += 1; },
+      startNewProject: () => { calls.starts += 1; },
     },
     ui: {
       showRecoveryModal: modal,
@@ -162,7 +163,10 @@ test('newer foreign recovery rotates before publish so an unseen own copy is not
   let keyCounter = 0;
   const harness = createHarness({
     records:[{ key:'workspace:own', record:own }, { key:'workspace:other', record:foreign }],
-    modal: async record => record.documents[0].docName === 'B' ? 'restore' : 'later',
+    modal: async entries => {
+      assert.deepEqual(entries.map(item => item.record.documents[0].docName), ['B','A']);
+      return { action:'restore', key:'workspace:other' };
+    },
     createKey: forceNew => forceNew ? `workspace:new-${++keyCounter}` : 'workspace:own',
     save: async (documents, options, config) => {
       writes.set(config.key, documents.map(item => item.name || item.docName).join(','));
@@ -176,6 +180,26 @@ test('newer foreign recovery rotates before publish so an unseen own copy is not
   assert.match(harness.controller.getRecoveryKey(), /^workspace:new-/);
   assert.equal(writes.get('workspace:own'), 'A');
   assert.equal(writes.get(harness.controller.getRecoveryKey()), 'B');
+});
+
+test('explicit confirmed manager deletion may remove a selected foreign recovery key', async () => {
+  const { controller, calls } = createHarness();
+  assert.equal(await controller.discardRecovery('workspace:other', { allowForeign:true }), true);
+  assert.deepEqual(calls.clears, [{ key:'workspace:other' }]);
+});
+
+test('starting a new project from recovery preserves the old snapshot under a fresh window key', async () => {
+  const own = makeRecord([{ docName:'A', snapshot:'{"name":"A"}' }], { savedAt:100 });
+  const generated = [];
+  const { controller, calls } = createHarness({
+    records:[{ key:'workspace:own', record:own }],
+    modal: async entries => ({ action:'new-project', key:entries[0].key }),
+    createKey: forceNew => { generated.push(forceNew); return forceNew ? 'workspace:fresh' : 'workspace:own'; },
+  });
+  assert.equal(await controller.restoreRecoveryIfAvailable(), false);
+  assert.equal(calls.starts, 1);
+  assert.equal(controller.getRecoveryKey(), 'workspace:fresh');
+  assert.deepEqual(generated, [false, true]);
 });
 
 test('discard is serialized after a pending save', async () => {

@@ -277,6 +277,31 @@ button:disabled { opacity: .45; cursor: default; }
   .blending-field select { grid-column: 1 / -1; }
 }
 .info-modal { color: #d5dce8; font-size: 13px; line-height: 1.55; }
+.recovery-modal { width: min(760px, 96vw); overflow: hidden; }
+.recovery-modal-body { max-height: min(560px, 66vh); overflow-y: auto; align-content: start; }
+.recovery-intro { margin: 0; color: #cbd4e1; line-height: 1.5; }
+.recovery-intro:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 4px; border-radius: 3px; }
+.recovery-project-list { display: grid; gap: 8px; }
+.recovery-project { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: start; min-width: 0; padding: 11px 12px; border: 1px solid #3b4350; border-radius: 8px; background: #1b1f26; cursor: pointer; }
+.recovery-project:hover { border-color: #536078; background: #202630; }
+.recovery-project.selected { border-color: #6b9fff; background: #26344a; box-shadow: inset 0 0 0 1px #4f8cff55; }
+.recovery-project:focus-within { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+.recovery-project > input { margin: 3px 0 0; accent-color: var(--accent); }
+.recovery-project-content { display: grid; gap: 4px; min-width: 0; }
+.recovery-project-title { overflow: hidden; color: #fff; text-overflow: ellipsis; white-space: nowrap; }
+.recovery-project-meta, .recovery-project-documents { overflow: hidden; color: #aeb8c7; font-size: 11px; line-height: 1.4; text-overflow: ellipsis; }
+.recovery-project-documents { color: #8f9bad; white-space: nowrap; }
+.recovery-project-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; max-width: 150px; }
+.recovery-badge { padding: 3px 6px; border: 1px solid #485467; border-radius: 999px; background: #2b3340; color: #c8d2e2; font-size: 10px; white-space: nowrap; }
+.recovery-badge.warning { border-color: #80632f; background: #40351f; color: #f0ce8a; }
+.modal footer.recovery-footer { justify-content: space-between; flex-wrap: wrap; }
+.recovery-footer-start, .recovery-footer-end { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 620px) {
+  .recovery-project { grid-template-columns: auto minmax(0,1fr); }
+  .recovery-project-badges { grid-column: 2; justify-content: flex-start; max-width: none; }
+  .recovery-footer-start, .recovery-footer-end { width: 100%; }
+  .recovery-footer-start button, .recovery-footer-end button { flex: 1 1 145px; }
+}
 .shortcut-list { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px 16px; align-items: baseline; }
 .shortcut-list b { color: #fff; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .about-copy p { margin: 8px 0 0; color: #b9c2d0; }
