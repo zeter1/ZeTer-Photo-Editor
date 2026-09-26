@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPsdImportSemantics } from '../src/document/psd-import-semantics.js';
+import { psdPreviewFingerprint, psdEmbeddedDocumentFingerprint } from '../src/document/psd-native-metadata-plans.js';
 
 function block(key='TySh') {
   return { signature:'8BIM', key, data:new Uint8Array([1,2,3]) };
@@ -10,6 +11,8 @@ function makeSemantics(overrides={}) {
   return createPsdImportSemantics({
     importVectorMask:()=>null,
     opaqueBlockToState:value=>value?.key?{key:value.key}:null,
+    previewFingerprint:psdPreviewFingerprint,
+    embeddedDocumentFingerprint:psdEmbeddedDocumentFingerprint,
     ...overrides,
   });
 }
