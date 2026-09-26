@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const smartObjectController=await readFile(new URL('../src/document/smart-object-controller.js',import.meta.url),'utf8');
+const psdSmartObjectResource=await readFile(new URL('../src/document/psd-smart-object-resource.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
 const psdNativeMetadataPlans=await readFile(new URL('../src/document/psd-native-metadata-plans.js',import.meta.url),'utf8');
 const psdImportController=await readFile(new URL('../src/document/psd-import-controller.js',import.meta.url),'utf8');
@@ -241,13 +242,17 @@ test('Stage 14b wires typed Photoshop descriptors and embedded asset extraction 
 test('Stage 14c wires editable embedded Smart Object saves into native liFD resource rewrite',()=>{
   assert.match(adapter,/export function rewriteEmbeddedLinkedLayerAsset\(/);
   assert.match(adapter,/locateEmbeddedLinkedLayerRecord/);
-  assert.match(main,/function serializePhotoshopEmbeddedAsset\(/);
-  assert.match(main,/function rewritePhotoshopEmbeddedSource\(/);
+  assert.match(psdSmartObjectResource,/function serializeEmbeddedAsset\(/);
+  assert.match(psdSmartObjectResource,/function rewriteEmbeddedSource\(/);
+  assert.match(psdSmartObjectResource,/function publishEmbeddedSourceRewrite\(/);
+  assert.match(psdSmartObjectResource,/function updateTargetAfterRewrite\(/);
   assert.match(smartObjectController,/findPhotoshopLayers/);
-  assert.match(main,/embeddedWidth/);
-  assert.match(main,/embeddedHeight/);
+  assert.match(psdSmartObjectResource,/embeddedWidth/);
+  assert.match(psdSmartObjectResource,/embeddedHeight/);
   assert.match(smartObjectController,/Embedded Photoshop Smart Object обновлён без raster fallback/);
   assert.match(smartObjectController,/native Photoshop passthrough отключён/);
+  assert.doesNotMatch(main,/function serializePhotoshopEmbeddedAsset\(/);
+  assert.doesNotMatch(main,/function rewritePhotoshopEmbeddedSource\(/);
 });
 
 test('Stage 15a wires Photoshop TySh text mapping and safe native round-trip into import/export',()=>{
