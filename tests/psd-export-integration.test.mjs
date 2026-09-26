@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
+const psdNativeMetadataPlans=await readFile(new URL('../src/document/psd-native-metadata-plans.js',import.meta.url),'utf8');
 const psdImportController=await readFile(new URL('../src/document/psd-import-controller.js',import.meta.url),'utf8');
 const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
@@ -213,7 +214,7 @@ test('Stage 14a wires Photoshop Smart Object / Placed Layer opaque metadata thro
   assert.match(adapter,/writeLinkedLayerBlocks\(layerAndMask,linkedLayerBlocks,version\)/);
   assert.match(psdImportController,/importPsdSmartObjectMetadata/);
   assert.match(psdImportController,/createSmartObjectLayer\(\{/);
-  assert.match(main,/psdSmartObjectRoundTripPlan/);
+  assert.match(psdNativeMetadataPlans,/psdSmartObjectRoundTripPlan/);
   assert.match(psdExportController,/psdSmartObject:psdSmartPlan\.eligible/);
   assert.match(psdImportController,/next\.psdLinkedLayerBlocks=/);
   assert.match(psdImportController,/next\.psdSmartObjectSourceCount=/);
@@ -252,7 +253,7 @@ test('Stage 15a wires Photoshop TySh text mapping and safe native round-trip int
   assert.match(adapter,/export function rewriteTypeToolText\(/);
   assert.match(adapter,/writeTextLayerExtra\(extra, layer, version\)/);
   assert.match(main,/importPsdTextMetadata/);
-  assert.match(main,/psdTextNativePlan/);
+  assert.match(psdNativeMetadataPlans,/psdTextNativePlan/);
   assert.match(psdImportController,/canMapText/);
   assert.match(main,/createTextLayer\(\{/);
   assert.match(psdExportController,/psdText:nativeText\?\.eligible\?nativeText\.block:null/);
@@ -271,7 +272,7 @@ test('Stage 15b wires EngineData typography import and single-run text writeback
   assert.match(psdImportController,/const typography=parsedText\.typography\|\|\{\}/);
   assert.match(psdImportController,/fontFamily:typography\.fontFamily/);
   assert.match(psdImportController,/fontSize:clamp\(Number\(typography\.fontSize\)/);
-  assert.match(main,/editableSingleStyle/);
+  assert.match(psdNativeMetadataPlans,/editableSingleStyle/);
   assert.match(main,/native TySh \+ EngineData round-trip/);
   assert.match(psdExportController,/Stage 15b: .*EngineData/);
 });
@@ -286,8 +287,8 @@ test('Stage 15c wires Photoshop solid vector shapes into editable ZPE paths and 
   assert.match(adapter,/writeShapeLayerExtras\(extra, layer, version, 'stroke'\)/);
   assert.match(main,/function canMapPsdSolidShape\(/);
   assert.match(main,/function importPsdShapeMetadata\(/);
-  assert.match(main,/function exportPsdShapePathMask\(/);
-  assert.match(main,/function psdShapeNativePlan\(/);
+  assert.match(psdNativeMetadataPlans,/function exportPsdShapePathMask\(/);
+  assert.match(psdNativeMetadataPlans,/function psdShapeNativePlan\(/);
   assert.match(psdImportController,/const canMapShape=semantics\.canMapPsdSolidShape\(sourceLayer\)/);
   assert.match(psdImportController,/createShapeLayer\(\{/);
   assert.match(psdExportController,/psdShape:nativeShape\?\.eligible\?nativeShape\.metadata:null/);
@@ -302,8 +303,8 @@ test('Stage 15d wires solid shape descriptor rewrite plus gradient/pattern fill 
   assert.match(adapter,/function psdGradientSummary\(/);
   assert.match(adapter,/function psdPatternSummary\(/);
   assert.match(adapter,/const fillLayers = \[\]/);
-  assert.match(main,/rewritePsdShapeStyle/);
-  assert.match(main,/shape descriptor rewrite недоступен/);
+  assert.match(psdNativeMetadataPlans,/rewritePsdShapeStyle/);
+  assert.match(psdNativeMetadataPlans,/shape descriptor rewrite недоступен/);
   assert.match(psdImportController,/parsed\.fillLayers\?\.length/);
   assert.match(psdImportController,/GdFl\/PtFl metadata/);
 });
@@ -315,7 +316,7 @@ test('Stage 16c wires Photoshop adjustment records into semantic ZPE layers and 
   assert.match(adapter,/const adjustmentLayers = \[\]/);
   assert.match(adapter,/writeAdjustmentLayerExtras\(extra, layer, version\)/);
   assert.match(main,/importPsdAdjustmentMetadata/);
-  assert.match(main,/psdAdjustmentNativePlan/);
+  assert.match(psdNativeMetadataPlans,/psdAdjustmentNativePlan/);
   assert.match(psdImportController,/adjustmentSources/);
   assert.match(psdImportController,/createAdjustmentLayer\(\{/);
   assert.match(psdExportController,/needsAdjustmentRasterFallback/);

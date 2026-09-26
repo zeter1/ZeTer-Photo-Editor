@@ -37,7 +37,7 @@ Useful routing:
 - rendering → render
 - ICC/CMYK → color-management
 - PSD/PSB import transaction / decoded layer-group-path mapping / high-depth-CMYK source preservation / stale-tab import guard → `document/psd-import-controller`
-- PSD/PSB export preparation / bounds / group mapping / native high-depth-CMYK eligibility / merged composite → `document/psd-export-controller`; binary parse/write/rewrite → `formats/psd`
+- Photoshop Text/Shape/Adjustment/Smart Object native export eligibility or metadata rewrite decision → `document/psd-native-metadata-plans`; PSD/PSB export preparation / bounds / group mapping / native high-depth-CMYK eligibility / merged composite → `document/psd-export-controller`; binary parse/write/rewrite primitives → `formats/psd`
 - recovery/autosave / dirty-tab snapshot / restore/discard / multi-window ownership → `workspace/recovery-controller`; IndexedDB record/storage bug → `core/recovery`
 - startup/file:// → build-bundle + browser-smoke
 

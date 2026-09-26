@@ -22,7 +22,8 @@
 - Core domain/render/pixel logic + low-level storage primitives: `src/core/`
 - PSD/PSB import transaction and decoded-payload → ZPE mapping: `src/document/psd-import-controller.js`; binary decode stays in `src/formats/psd.js`, effectful publication comes from runtime ports.
 - PSD/PSB export preparation (layer/group mapping, native high-depth/CMYK eligibility, raster/native payloads, merged composite): `src/document/psd-export-controller.js`
-- PSD/PSB binary codec + Photoshop metadata parsing/writing/rewrite: `src/formats/psd.js`
+- Photoshop-native Text/Shape/Adjustment/Smart Object export eligibility + metadata rewrite plans: `src/document/psd-native-metadata-plans.js`
+- PSD/PSB binary codec + Photoshop metadata parsing/writing/rewrite primitives: `src/formats/psd.js`
 - Generated file:// bundle: `src/app.bundle.js` — **не редактировать вручную**
 - Tests: `tests/`
 - Build/smoke tooling: `tools/`

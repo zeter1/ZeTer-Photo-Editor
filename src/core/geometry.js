@@ -267,6 +267,28 @@ export function rotationFromDrag(initialRotation, center, startPoint, currentPoi
   return ((next % 360) + 360) % 360;
 }
 
+export function layerPixelToDocumentPoint(point, layer) {
+  const width = Math.max(1, Number(layer.width) || 1);
+  const height = Math.max(1, Number(layer.height) || 1);
+  const scaleX = Number(layer.scaleX) || 1;
+  const scaleY = Number(layer.scaleY) || 1;
+  const boundsWidth = width * scaleX;
+  const boundsHeight = height * scaleY;
+  const cx = layer.x + boundsWidth / 2;
+  const cy = layer.y + boundsHeight / 2;
+  const unrotatedX = layer.x + point.x * scaleX;
+  const unrotatedY = layer.y + point.y * scaleY;
+  const radians = (layer.rotation ?? 0) * Math.PI / 180;
+  const dx = unrotatedX - cx;
+  const dy = unrotatedY - cy;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  };
+}
+
 function distanceToSegment(point, a, b) {
   const vx = b.x - a.x;
   const vy = b.y - a.y;

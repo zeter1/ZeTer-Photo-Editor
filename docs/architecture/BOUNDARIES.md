@@ -87,10 +87,15 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - It may depend directly on stable core state/pixel/color contracts. Binary decode is injected from `src/formats/psd.js`; DOM/canvas data-URL encoding and runtime mutation are ports.
 - It must not absorb export preparation, PSD byte parsing/writing, workspace/session ownership or generic file routing. Do not recreate `openPsd()` in `src/main.js`.
 
+### Document / PSD native metadata planning
+- `src/document/psd-native-metadata-plans.js` owns export eligibility and bounded rewrite planning for Photoshop Text/TySh, solid Shape, Adjustment and Smart Object metadata.
+- It may depend on stable core sanitizers/geometry and public rewrite primitives from `src/formats/psd.js`; it must not parse/write the PSD container, render Canvas pixels or mutate editor state.
+- Unsafe, changed or unsupported native metadata must return an explicit ineligible plan so the export controller can surface an honest raster/composite fallback.
+
 ### Document / PSD export preparation
 - `src/document/psd-export-controller.js` owns document-to-writer preparation only: bounds, group mapping, native-vs-raster eligibility, prepared layer payloads, merged composite choice and export warnings.
-- Stable core math/data dependencies may be imported directly. Browser rendering and Photoshop semantic plans that still belong to runtime enter through explicit ports; this keeps the owner directly testable without copying DOM globals into it.
-- Do not move PSD binary layout or codec responsibilities into the controller, and do not let `src/main.js` regain the extracted preparation helpers.
+- Native Photoshop metadata plans are direct dependencies from `psd-native-metadata-plans.js`. Browser rendering and the shared generic vector-mask exporter remain explicit ports.
+- Do not move PSD binary layout or codec responsibilities into the controller, and do not let `src/main.js` regain the extracted preparation helpers or native metadata-plan implementations.
 
 ### Formats
 - `src/formats/psd.js` may depend on core data contracts such as PixelBuffer.

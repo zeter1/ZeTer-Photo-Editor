@@ -3,15 +3,8 @@ import assert from 'node:assert/strict';
 import { createPixelBuffer, serializePixelBufferSource } from '../src/core/pixel-buffer.js';
 import { createPsdExportController } from '../src/document/psd-export-controller.js';
 
-function semantics() {
-  return {
-    psdSmartObjectRoundTripPlan: () => ({ eligible:false, imported:[], expected:0, reason:'none', linkedLayerBlocks:[] }),
-    psdAdjustmentNativePlan: () => ({ eligible:false, reason:'none', metadata:null }),
-    psdTextNativePlan: () => ({ eligible:false, reason:'none', block:null }),
-    psdShapeNativePlan: () => ({ eligible:false, reason:'none', metadata:null, vectorMask:null }),
-    exportPsdVectorMask: () => null,
-    psdSmartObjectMetadataForExport: () => null,
-  };
+function vectors() {
+  return { exportPsdVectorMask: () => null };
 }
 function nativeOnlyRendering() {
   const unexpected=name=>()=>{ throw new Error(`unexpected Canvas fallback: ${name}`); };
@@ -32,7 +25,7 @@ test('native 16-bit RGB preparation preserves typed precision and group lineage 
       filters:{},styles:null,mask:null,vectorMask:null,highDepthSource:serializePixelBufferSource(source),
     }],
   };
-  const prepared=await createPsdExportController({semantics:semantics(),rendering:nativeOnlyRendering()}).prepareDocument(documentValue);
+  const prepared=await createPsdExportController({vectors:vectors(),rendering:nativeOnlyRendering()}).prepareDocument(documentValue);
   assert.equal(prepared.colorMode,'rgb');
   assert.equal(prepared.bitsPerChannel,16);
   assert.equal(prepared.layers.length,1);
@@ -45,7 +38,7 @@ test('native 16-bit RGB preparation preserves typed precision and group lineage 
 });
 
 test('preparation rejects the bounded 48 MP temporary-buffer budget before rendering', async () => {
-  const controller=createPsdExportController({semantics:semantics(),rendering:nativeOnlyRendering()});
+  const controller=createPsdExportController({vectors:vectors(),rendering:nativeOnlyRendering()});
   await assert.rejects(
     controller.prepareDocument({width:7000,height:7000,background:'transparent',colorManagement:{},colorProfile:null,paths:[],groups:[],layers:[]}),
     /48 МП временных RGBA-буферов/,
