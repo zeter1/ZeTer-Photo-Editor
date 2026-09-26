@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -14,6 +14,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/toolbar-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/menu-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
+  readFile(new URL('src/ui/workspace-layout-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pointer-lifecycle-router.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
@@ -77,6 +78,15 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /function makeModalDraggable\(/);
   assert.doesNotMatch(main, /function showInfoModal\(/);
   assert.doesNotMatch(main, /function showRecoveryModal\(/);
+  assert.match(main, /from '\.\/ui\/workspace-layout-controller\.js'/);
+  assert.match(build, /'src\/ui\/workspace-layout-controller\.js'/);
+  assert.match(workspaceLayoutController, /export function createWorkspaceLayoutController/);
+  assert.match(main, /const \{ initCollapsiblePanels, togglePanels \} = workspaceLayoutController/);
+  for (const name of ['readCollapseState','persistCollapseState','setPanelCollapsed','initCollapsiblePanels','togglePanels']) {
+    assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  }
+  assert.doesNotMatch(main, /const collapsedPanelIds = new Set/);
+  assert.doesNotMatch(main, /let panelsVisible = true/);
   assert.match(main, /from '\.\/interaction\/pointer-lifecycle-router\.js'/);
   assert.match(build, /'src\/interaction\/pointer-lifecycle-router\.js'/);
   assert.match(pointerLifecycleRouter, /export function createPointerLifecycleRouter/);

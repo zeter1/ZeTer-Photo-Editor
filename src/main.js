@@ -17,7 +17,7 @@ import {
   SELECTION_TYPE_LABELS, SELECTION_TYPES, MIME_EXT,
   COLOR_CORRECTION_CONTROLS, COLOR_CORRECTION_KEYS,
   BASIC_EFFECT_CONTROLS, RASTER_EFFECT_CONTROLS,
-  UI_COLLAPSE_STORAGE_KEY, SMART_SNAP_STORAGE_KEY, TOOL_ORDER_STORAGE_KEY,
+  SMART_SNAP_STORAGE_KEY, TOOL_ORDER_STORAGE_KEY,
   NATIVE_HIGH_DEPTH_PAINT_TOOLS, NATIVE_CMYK_PAINT_TOOLS,
 } from './ui/tool-config.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleOutset } from './core/layer-styles.js';
@@ -26,6 +26,7 @@ import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLink
 import { createDocumentSessionController } from './workspace/session-controller.js';
 import { createRecoveryController } from './workspace/recovery-controller.js';
 import { createToolbarController } from './ui/toolbar-controller.js';
+import { createWorkspaceLayoutController } from './ui/workspace-layout-controller.js';
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
@@ -53,7 +54,6 @@ const els = {
   dropOverlay: $('#dropOverlay'), toastRegion: $('#toastRegion'), workspace: $('.workspace'), toolbar: $('.toolbar'), rightPanel: $('.right-panel'),
 };
 
-const collapsedPanelIds = new Set();
 let doc = createDocument();
 let history = new HistoryStack(80);
 let zoom = 0.75;
@@ -84,7 +84,6 @@ let selectionCopyMode = 'merged';
 let dragDepth = 0;
 let layerDragId = null;
 let groupDragId = null;
-let panelsVisible = true;
 let pointerLifecycle = null;
 let paintPersisting = false;
 let hoverPoint = null;
@@ -92,6 +91,19 @@ let smartSnapEnabled = true;
 let smartGuides = { x:null, y:null };
 
 function setStatus(message) { els.status.textContent = message; }
+
+const workspaceLayoutController = createWorkspaceLayoutController({
+  panelCards: $$('.panel-card[data-panel-id]'),
+  workspace: els.workspace,
+  toolbar: els.toolbar,
+  rightPanel: els.rightPanel,
+  viewport: els.viewport,
+  overlay: els.overlay,
+  getZoom: () => zoom,
+  clientPointToCanvas,
+  setStatus,
+});
+const { initCollapsiblePanels, togglePanels } = workspaceLayoutController;
 
 const rasterEdit = createRasterEditController({
   getDocument: () => doc,
@@ -311,24 +323,6 @@ function toast(message, tone = '') {
   setTimeout(() => item.remove(), 3000);
 }
 
-function readCollapseState() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(UI_COLLAPSE_STORAGE_KEY) || '{}');
-    for (const id of Array.isArray(parsed.panels) ? parsed.panels : []) collapsedPanelIds.add(String(id));
-    if (Array.isArray(parsed.propertySections) && parsed.propertySections.includes('color-effects')) collapsedPanelIds.add('effects');
-  } catch (error) {
-    console.warn('Could not restore panel collapse state', error);
-  }
-}
-function persistCollapseState() {
-  try {
-    localStorage.setItem(UI_COLLAPSE_STORAGE_KEY, JSON.stringify({
-      panels: [...collapsedPanelIds],
-    }));
-  } catch (error) {
-    console.warn('Could not persist panel collapse state', error);
-  }
-}
 function readSmartSnapState() {
   try {
     const saved = localStorage.getItem(SMART_SNAP_STORAGE_KEY);
@@ -452,28 +446,6 @@ const {
   documentTabMenu,
 } = documentSessionController;
 
-function setPanelCollapsed(panel, collapsed, { persist = true } = {}) {
-  const id = panel?.dataset?.panelId;
-  if (!panel || !id) return;
-  panel.classList.toggle('is-collapsed', collapsed);
-  const toggle = panel.querySelector(':scope > header .panel-toggle');
-  if (toggle) {
-    toggle.setAttribute('aria-expanded', String(!collapsed));
-    const name = toggle.querySelector('strong')?.textContent?.trim() || 'раздел';
-    toggle.title = `${collapsed ? 'Развернуть' : 'Свернуть'} раздел «${name}»`;
-  }
-  if (collapsed) collapsedPanelIds.add(id); else collapsedPanelIds.delete(id);
-  if (persist) persistCollapseState();
-}
-function initCollapsiblePanels() {
-  readCollapseState();
-  $$('.panel-card[data-panel-id]').forEach(panel => {
-    const toggle = panel.querySelector(':scope > header .panel-toggle');
-    if (!toggle) return;
-    setPanelCollapsed(panel, collapsedPanelIds.has(panel.dataset.panelId), { persist: false });
-    toggle.addEventListener('click', () => setPanelCollapsed(panel, !panel.classList.contains('is-collapsed')));
-  });
-}
 function isEditingTarget(target = document.activeElement) {
   const tag = target?.tagName;
   return ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || target?.isContentEditable;
@@ -4189,21 +4161,6 @@ function fitSelectedLayerToCanvas() {
 
 function setDocumentBackground() {
   showModal({title:'Фон документа',fields:[{name:'background',label:'Фон',type:'select',value:doc.background,options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный'],[els.primaryColor.value,'Основной цвет']]}],submitLabel:'Применить',onSubmit:v=>{doc.background=v.background;commit('Фон документа');}});
-}
-function togglePanels() {
-  const before = els.viewport.getBoundingClientRect();
-  const centerPoint = clientPointToCanvas(before.left + before.width / 2, before.top + before.height / 2);
-  panelsVisible=!panelsVisible;
-  els.workspace.classList.toggle('panels-hidden',!panelsVisible);
-  els.toolbar.setAttribute('aria-hidden', String(!panelsVisible));
-  els.rightPanel.setAttribute('aria-hidden', String(!panelsVisible));
-  requestAnimationFrame(() => {
-    const viewportRect = els.viewport.getBoundingClientRect();
-    const canvasRect = els.overlay.getBoundingClientRect();
-    els.viewport.scrollLeft += canvasRect.left + centerPoint.x * zoom - (viewportRect.left + viewportRect.width / 2);
-    els.viewport.scrollTop += canvasRect.top + centerPoint.y * zoom - (viewportRect.top + viewportRect.height / 2);
-  });
-  setStatus(panelsVisible ? 'Панели показаны' : 'Режим холста: панели скрыты');
 }
 async function toggleFullscreen() {
   try {

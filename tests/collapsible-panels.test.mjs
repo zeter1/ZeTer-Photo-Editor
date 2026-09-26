@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const toolConfig = await readFile(new URL('../src/ui/tool-config.js', import.meta.url), 'utf8');
+const workspaceLayout = await readFile(new URL('../src/ui/workspace-layout-controller.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
@@ -29,14 +30,16 @@ test('right sidebar cards expose persistent accessible collapse toggles', () => 
     assert.match(html, new RegExp(`data-panel-id="${id}"`));
   }
   assert.equal((html.match(/class="panel-toggle"/g) || []).length, 5);
-  assert.match(main, /function initCollapsiblePanels\(\)/);
-  assert.match(main, /UI_COLLAPSE_STORAGE_KEY/);
-  assert.match(main, /aria-expanded/);
+  assert.match(workspaceLayout, /export function createWorkspaceLayoutController/);
+  assert.match(workspaceLayout, /function initCollapsiblePanels\(\)/);
+  assert.match(workspaceLayout, /UI_COLLAPSE_STORAGE_KEY/);
+  assert.match(workspaceLayout, /aria-expanded/);
+  assert.doesNotMatch(main, /function initCollapsiblePanels\(\)/);
   assert.match(css, /\.panel-card\.is-collapsed > :not\(header\)/);
 });
 
 test('legacy nested color section state migrates to the dedicated effects panel', () => {
   assert.doesNotMatch(main, /function setPropertySectionCollapsed\(section, collapsed\)/);
-  assert.match(main, /parsed\.propertySections/);
-  assert.match(main, /collapsedPanelIds\.add\('effects'\)/);
+  assert.match(workspaceLayout, /parsed\.propertySections/);
+  assert.match(workspaceLayout, /collapsedPanelIds\.add\('effects'\)/);
 });

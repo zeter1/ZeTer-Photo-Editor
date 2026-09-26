@@ -6,7 +6,7 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics, are delegated to their canonical owners.
+Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar/workspace-layout and retouch mechanics, are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
@@ -33,6 +33,9 @@ Owns generic top-menu/context-menu mechanics: rendering menu items, enabled stat
 
 ### `modal-controller.js`
 Owns generic modal/dialog mechanics: field rendering, numeric normalization, async submit lifecycle, focus restoration, backdrop/Escape close, draggable text-modal shell, info dialogs and recovery-choice dialog. Text preview rendering and editor mutations remain callbacks owned by `src/main.js`.
+
+### `workspace-layout-controller.js`
+Owns editor-shell layout state that is independent of document contents: persisted sidebar collapse IDs, legacy collapse-state migration, accessible panel toggle state and canvas-mode visibility with viewport-center preservation. It receives DOM/runtime geometry through narrow ports and does not own document/layer/history/tool state.
 
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 

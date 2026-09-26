@@ -358,6 +358,27 @@ async function runSmoke() {
       && JSON.stringify([...document.querySelectorAll('.toolbar .tool')].map(button => button.dataset.tool)) === ${JSON.stringify(JSON.stringify(expectedDraggedOrder))}`));
     assertNoBrowserErrors(errors, stderrState);
 
+    const layoutState = await evaluate(client, `(() => {
+      const panel=document.querySelector('[data-panel-id="history"]');
+      const toggle=panel?.querySelector(':scope > header .panel-toggle');
+      toggle?.click();
+      const stored=JSON.parse(localStorage.getItem('zeter-photo-editor.ui-collapse.v1')||'{}');
+      return { collapsed:Boolean(panel?.classList.contains('is-collapsed')), expanded:toggle?.getAttribute('aria-expanded'), stored:stored.panels||[] };
+    })()`);
+    assert(layoutState.collapsed && layoutState.expanded === 'false', 'Sidebar panel collapse must update DOM and aria-expanded', JSON.stringify(layoutState));
+    assert(layoutState.stored.includes('history'), 'Sidebar panel collapse must persist in localStorage', JSON.stringify(layoutState));
+    await evaluate(client, `document.documentElement.dataset.appReady='reloading'; location.reload(); true`);
+    await waitFor('persisted collapsed panel after reload', async () => evaluate(client, `document.documentElement?.dataset.appReady === 'true' && document.querySelector('[data-panel-id="history"]')?.classList.contains('is-collapsed')`));
+    await evaluate(client, `document.querySelector('[data-panel-id="history"] .panel-toggle')?.click(); true`);
+    const canvasMode = await evaluate(client, `(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',code:'Tab',bubbles:true,cancelable:true}));
+      return { hidden:document.querySelector('.workspace')?.classList.contains('panels-hidden'), toolbarHidden:document.querySelector('.toolbar')?.getAttribute('aria-hidden'), rightHidden:document.querySelector('.right-panel')?.getAttribute('aria-hidden') };
+    })()`);
+    assert(canvasMode.hidden && canvasMode.toolbarHidden === 'true' && canvasMode.rightHidden === 'true', 'Canvas mode must hide both editor chrome panels', JSON.stringify(canvasMode));
+    await evaluate(client, `window.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',code:'Tab',bubbles:true,cancelable:true})); true`);
+    await waitFor('canvas mode restores panels', async () => evaluate(client, `!document.querySelector('.workspace')?.classList.contains('panels-hidden')`));
+    assertNoBrowserErrors(errors, stderrState);
+
     await evaluate(client, `document.querySelector('#addRasterBtn').click(); true`);
     await waitFor('new raster layer', async () => evaluate(client, `document.querySelectorAll('.layer-row').length === 1 && Boolean(document.querySelector('.layer-row.selected'))`));
 

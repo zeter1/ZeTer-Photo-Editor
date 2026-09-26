@@ -11,6 +11,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 | UI, события, меню, dialogs, pointer/keyboard | `src/interaction/pointer-lifecycle-router.js` для capture/active-pointer lifecycle; `src/main.js` для tool-specific dispatch; `src/ui/menu-controller.js`, `src/ui/modal-controller.js`, `src/ui/`, `src/styles.css`, `index.html` | `tests/pointer-lifecycle-router.test.mjs`, `tests/pointer-release-tools.test.mjs`, interaction/browser tests |
 | Вкладки, document sessions, session history | `src/workspace/session-controller.js`, wiring в `src/main.js` | `tests/workspace-session-controller.test.mjs`, `tests/document-tabs.test.mjs` |
 | Порядок инструментов, drag/drop, tooltips | `src/ui/toolbar-controller.js`, `src/ui/tool-layout.js`, `src/ui/tool-config.js` | `tests/tool-layout.test.mjs`, browser smoke |
+| Сворачивание sidebar-карточек, сохранение layout state, canvas mode (Tab) | `src/ui/workspace-layout-controller.js` | `tests/workspace-layout-controller.test.mjs`, `tests/collapsible-panels.test.mjs`, browser smoke |
 | Документы, слои, groups, smart objects | `src/core/state.js` | core/layer/smart-object tests |
 | Рендеринг и composite | `src/core/render.js` | render/blending/high-depth tests |
 | Selection gestures / marquee, lasso, polygon, magnetic | `src/selection/gesture-controller.js`; pointer lifecycle в `src/interaction/pointer-lifecycle-router.js`; tool/keyboard dispatch в `src/main.js` | `tests/selection-gesture-controller.test.mjs`, `tests/selection-types-v119.test.mjs`, `tests/pointer-lifecycle-router.test.mjs`, `tests/pointer-release-tools.test.mjs` |
@@ -38,6 +39,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 - `src/ui/toolbar-controller.js` — drag/drop/persistence/drop-slot и rich tooltip lifecycle панели инструментов; выбор текущего tool остаётся в `src/main.js`.
 - `src/ui/menu-controller.js` — lifecycle верхнего меню и context-menu: DOM items, позиционирование, focus/keyboard navigation, outside-click close и безопасный async action dispatch; доменные списки команд остаются в `src/main.js`.
 - `src/ui/modal-controller.js` — generic modal/dialog shell: form fields, numeric normalization, focus restore, backdrop/Escape close, draggable text-modal lifecycle, info/recovery dialogs; editor-specific preview/mutations приходят callback-ами из `src/main.js`.
+- `src/ui/workspace-layout-controller.js` — shell-layout owner: persisted collapse state sidebar-карточек, legacy migration, ARIA/title update и canvas mode hide/show с сохранением canvas point в центре viewport; не владеет document/layer state.
 - `src/ui/tool-layout.js` — чистая математика порядка/позиции toolbar.
 - `src/workspace/session-controller.js` — lifecycle document sessions: create/switch/close/rename/duplicate, per-tab history/zoom/dirty/selection state и smart-object parent/child tab guard.
 - `src/workspace/recovery-controller.js` — application-level recovery owner: per-window key ownership, debounce/write serialization, dirty-session snapshots, startup restore/discard policy and preservation of unreadable sibling snapshots. It receives storage/project/session/UI ports explicitly; IndexedDB records stay in `src/core/recovery.js`.
@@ -88,3 +90,5 @@ INSPECT → DIAGNOSE → PLAN → CHANGE → VERIFY → REVIEW → DELIVER.
 Не загружай весь `src/main.js` или всю PSD-историю заранее. Сначала прочитай карту, найди symbol через search, затем открой небольшой диапазон вокруг него и соответствующий regression test.
 
 Подробно: [development/AI_WORKFLOW.md](development/AI_WORKFLOW.md). Для non-trivial refactor/debug/review/test-oracle работы: [development/QUALITY_PLAYBOOK.md](development/QUALITY_PLAYBOOK.md).
+
+Если работа идёт несколькими небольшими проходками, открой `task/README.md`, затем только одну верхнюю релевантную задачу. `task/*.md` хранит будущий intent, но текущий код/логи/CI всегда имеют приоритет.
