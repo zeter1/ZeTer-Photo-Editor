@@ -9,6 +9,7 @@ import {
 } from '../src/core/pixel-buffer.js';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const retouch=await readFile(new URL('../src/retouch/controller.js',import.meta.url),'utf8');
 const toolConfig=await readFile(new URL('../src/ui/tool-config.js',import.meta.url),'utf8');
 
 test('Stage 12f dodge/burn operates in high-depth working space and preserves Float32 HDR headroom',()=>{
@@ -101,16 +102,14 @@ test('Stage 12f retouch result survives canonical high-depth source serializatio
 
 test('Stage 12f routes blur, clone, heal, smudge, dodge and burn through native high-depth paint state',()=>{
   assert.match(toolConfig,/export const NATIVE_HIGH_DEPTH_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
-  assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferToneDab:applyPixelBufferToneDab/);
-  assert.match(main,/changed=fn\(highDepthPaintBuffer,point\.x,point\.y/);
-  assert.match(main,/applyCmykPixelBufferBlurDab:applyPixelBufferBlurDab/);
-  assert.match(main,/applyCmykPixelBufferCloneDab:applyPixelBufferCloneDab/);
-  assert.match(main,/applyCmykPixelBufferSmudgeDab:applyPixelBufferSmudgeDab/);
-  assert.match(main,/prepareNativeHighDepthCloneStroke/);
-  assert.match(main,/nativeHighDepthCloneSegment/);
-  assert.match(main,/nativeHighDepthSmudgeSegment/);
-  assert.match(main,/nativeHighDepthToneSegment/);
-  assert.match(main,/nativeHighDepthBlurSegment/);
+  for (const symbol of [
+    'applyCmykPixelBufferToneDab','applyPixelBufferToneDab',
+    'applyCmykPixelBufferBlurDab','applyPixelBufferBlurDab',
+    'applyCmykPixelBufferCloneDab','applyPixelBufferCloneDab',
+    'applyCmykPixelBufferSmudgeDab','applyPixelBufferSmudgeDab',
+    'prepareNativeHighDepthCloneStroke','nativeHighDepthCloneSegment',
+    'nativeHighDepthSmudgeSegment','nativeHighDepthToneSegment','nativeHighDepthBlurSegment',
+  ]) assert.match(retouch,new RegExp(symbol));
   assert.match(main,/NATIVE_HIGH_DEPTH_PAINT_TOOLS\.has\(paintTool\)/);
   assert.match(main,/if\(!layer\.highDepthSource\)await ensureRasterBuffer\(layer\)/);
 });
@@ -195,9 +194,9 @@ test('Stage 13c CMYK Dodge/Burn edits native ink density without changing alpha 
 
 test('Stage 13c routes the full CMYK retouch set through native typed buffers',()=>{
   assert.match(toolConfig,/export const NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
-  assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferBlurDab/);
-  assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferCloneDab/);
-  assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferSmudgeDab/);
-  assert.match(main,/highDepthPaintBuffer\.model==='cmyk'\?applyCmykPixelBufferToneDab:applyPixelBufferToneDab/);
+  assert.match(retouch,/buffer\.model === 'cmyk' \? applyCmykPixelBufferBlurDab : applyPixelBufferBlurDab/);
+  assert.match(retouch,/buffer\.model === 'cmyk' \? applyCmykPixelBufferCloneDab : applyPixelBufferCloneDab/);
+  assert.match(retouch,/buffer\.model === 'cmyk' \? applyCmykPixelBufferSmudgeDab : applyPixelBufferSmudgeDab/);
+  assert.match(retouch,/buffer\.model === 'cmyk' \? applyCmykPixelBufferToneDab : applyPixelBufferToneDab/);
   assert.doesNotMatch(main,/CMYK Dodge\/Burn Stage 13c пока не реализован/);
 });

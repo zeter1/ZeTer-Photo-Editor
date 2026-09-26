@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const retouch = await readFile(new URL('../src/retouch/controller.js', import.meta.url), 'utf8');
 const toolConfig = await readFile(new URL('../src/ui/tool-config.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
@@ -21,17 +22,18 @@ test('blur brush edits only an existing editable raster layer', () => {
 });
 
 test('blur brush uses localized buffers and a feathered edge instead of reprocessing the full layer', () => {
-  const dab = main.match(/function applyBlurDab\(layer, point, pointerEvent = null\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  const dab = retouch.match(/function applyBlurDab\(layer, point, pointerEvent = null\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.ok(dab, 'applyBlurDab function not found');
   assert.match(dab, /ensureBlurScratch\(width, height\)/);
-  assert.match(dab, /softenedCtx\.filter=`blur\(\$\{blurRadius\}px\)`/);
-  assert.match(dab, /applyBlurBrushPixels\(imageData\.data,blurredData\.data/);
+  assert.match(dab, /softenedCtx\.filter\s*=\s*`blur\(\$\{blurRadius\}px\)`/);
+  assert.match(dab, /applyBlurBrushPixels\(/);
+  assert.match(dab, /imageData\.data,blurredData\.data/);
   assert.match(dab, /strokeCoverage:drag\?\.blurCoverage/);
   assert.doesNotMatch(dab, /canvasToDataURL|toDataURL|toBlob/);
 });
 
 test('blur stroke is continuous and history receives a dedicated label', () => {
-  assert.match(main, /function blurStrokeSegment\(layer, from, to, pointerEvent = null\)/);
+  assert.match(retouch, /function blurStrokeSegment\(layer, from, to, pointerEvent = null\)/);
   assert.match(main, /Math\.ceil\(distance \/ spacing\)/);
   assert.match(main, /drag\.tool === 'blur'/);
   assert.match(main, /blur:'Размытие кистью'/);

@@ -8,8 +8,8 @@ import {
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache, getImage, ensureTextFont } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
-import { applyBlurBrushPixels, applyToneBrushPixels, floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
-import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, compositeCmykPixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyPixelBufferToneDab, applyPixelBufferBlurDab, applyPixelBufferCloneDab, applyPixelBufferSmudgeDab, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment, applyCmykPixelBufferToneDab, applyCmykPixelBufferBlurDab, applyCmykPixelBufferCloneDab, applyCmykPixelBufferSmudgeDab, floodFillPixelBuffer, floodFillCmykPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
+import { floodFillPixels, hexToRgb, refineMaskAlpha, composeMaskPreviewRgba } from './core/pixels.js';
+import { createRgba8PixelBuffer, pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, compositePixelBufferLayers, compositeCmykPixelBufferLayers, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment, floodFillPixelBuffer, floodFillCmykPixelBuffer, clearPixelBufferPixels, MAX_PIXEL_BUFFER_SOURCE_BYTES, MAX_HIGH_DEPTH_COMPOSITE_BYTES } from './core/pixel-buffer.js';
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import {
@@ -29,6 +29,7 @@ import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
 import { createDocumentImportController } from './document/import-controller.js';
+import { createRetouchController } from './retouch/controller.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -68,15 +69,8 @@ let brushLayerId = null;
 let highDepthPaintBuffer = null;
 let highDepthPaintLayerId = null;
 let highDepthPaintPreviewDirty = false;
-let highDepthCloneSnapshotBuffer = null;
 let cmykPreviewTransformCache = { document:null, source:null, proof:null, display:null, policyKey:'', transform:null };
 let cmykEditingTransformCache = { document:null, source:null, policyKey:'', transform:null };
-let blurScratchCanvas = null;
-let blurScratchCtx = null;
-let retouchScratchCanvas = null;
-let retouchScratchCtx = null;
-let cloneSource = null;
-let cloneSnapshotCanvas = null;
 let penDraft = null;
 let vectorMaskEditLayerId = null;
 let documentPathEditIndex = -1;
@@ -193,6 +187,47 @@ const selectionClipboardController = createSelectionClipboardController({
 });
 const { copySelection, cutSelection, pasteFromClipboard, armPasteShortcutFallback, handleNativePasteEvent } = selectionClipboardController;
 
+const retouchController = createRetouchController({
+  getBrushCanvas: () => brushCanvas,
+  getBrushContext: () => brushCtx,
+  getDrag: () => drag,
+  getHighDepthPaintBuffer: () => highDepthPaintBuffer,
+  getHighDepthPaintLayerId: () => highDepthPaintLayerId,
+  markHighDepthPreviewDirty: () => { highDepthPaintPreviewDirty = true; },
+  brushWidthForPointer,
+  rasterSelectionPredicate,
+  schedulePaintPreview,
+  getToolOpacity: () => Number(els.toolOpacity.value) / 100,
+  getSmudgeStrength: () => Number(els.smudgeStrength?.value || 45) / 100,
+  getDodgeStrength: () => Number(els.dodgeStrength.value) / 100,
+  getBurnStrength: () => Number(els.burnStrength.value) / 100,
+  getBlurStrength: () => Number(els.blurStrength.value) / 100,
+  documentRef: document,
+});
+const {
+  getCloneSource:getRetouchCloneSource,
+  setCloneSource:setRetouchCloneSource,
+  resetStroke:resetRetouchStroke,
+  prepareCloneStroke,
+  applyCloneDab,
+  cloneStrokeSegment,
+  applySmudgeDab,
+  smudgeStrokeSegment,
+  applyToneDab,
+  toneStrokeSegment,
+  applyBlurDab,
+  blurStrokeSegment,
+  applyNativeHighDepthToneDab,
+  nativeHighDepthToneSegment,
+  applyNativeHighDepthBlurDab,
+  nativeHighDepthBlurSegment,
+  prepareNativeHighDepthCloneStroke,
+  applyNativeHighDepthCloneDab,
+  nativeHighDepthCloneSegment,
+  applyNativeHighDepthSmudgeDab,
+  nativeHighDepthSmudgeSegment,
+} = retouchController;
+
 function toast(message, tone = '') {
   const item = document.createElement('div');
   item.className = `toast${tone ? ` ${tone}` : ''}`;
@@ -267,6 +302,7 @@ const documentSessionController = createDocumentSessionController({
     highDepthPaintBuffer = null;
     highDepthPaintLayerId = null;
     highDepthPaintPreviewDirty = false;
+    resetRetouchStroke();
     hoverPoint = null;
     activePrimaryPointerId = null;
     paintPersisting = false;
@@ -830,8 +866,9 @@ function drawOverlay() {
     ctx.beginPath();ctx.ellipse(hoverPoint.x,hoverPoint.y,radius*scaleX,radius*scaleY,rotation,0,Math.PI*2);ctx.stroke();
     ctx.restore();
   }
-  if ((currentTool === 'clone' || currentTool === 'heal') && cloneSource?.documentPoint) {
-    const point=cloneSource.documentPoint;
+  const retouchCloneSource=getRetouchCloneSource();
+  if ((currentTool === 'clone' || currentTool === 'heal') && retouchCloneSource?.documentPoint) {
+    const point=retouchCloneSource.documentPoint;
     ctx.save();ctx.strokeStyle='#65d8ff';ctx.lineWidth=1.5/zoom;ctx.setLineDash([]);
     ctx.beginPath();ctx.arc(point.x,point.y,7/zoom,0,Math.PI*2);ctx.stroke();
     ctx.beginPath();ctx.moveTo(point.x-10/zoom,point.y);ctx.lineTo(point.x+10/zoom,point.y);ctx.moveTo(point.x,point.y-10/zoom);ctx.lineTo(point.x,point.y+10/zoom);ctx.stroke();ctx.restore();
@@ -2053,7 +2090,7 @@ function setTool(tool) {
   $$('.move-only').forEach(x => x.style.display = tool === 'move' ? '' : 'none');
   els.overlay.style.cursor = defaultToolCursor();
   cropRect = null; hoverPoint = null; clearSmartGuides(); drawOverlay();
-  if ((tool === 'clone' || tool === 'heal') && !cloneSource) setStatus(`${TOOL_LABELS[tool]}: Alt+клик по растровому слою задаёт источник`);
+  if ((tool === 'clone' || tool === 'heal') && !getRetouchCloneSource()) setStatus(`${TOOL_LABELS[tool]}: Alt+клик по растровому слою задаёт источник`);
 }
 
 function canvasPoint(event, { clampToDocument = true } = {}) {
@@ -2642,7 +2679,7 @@ async function drawLineOnCurrentRaster(start,end){
 }
 
 function clearHighDepthPaintState(){
-  highDepthPaintBuffer=null;highDepthPaintLayerId=null;highDepthPaintPreviewDirty=false;highDepthCloneSnapshotBuffer=null;
+  highDepthPaintBuffer=null;highDepthPaintLayerId=null;highDepthPaintPreviewDirty=false;resetRetouchStroke();
 }
 
 function highDepthBudgetForLayer(layer){
@@ -2739,74 +2776,6 @@ function nativeHighDepthStrokeSegment(layer,from,to,pointerEvent=null,erase=fals
     : applyPixelBufferStrokeSegment(highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb,{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)});
   if(changed){highDepthPaintPreviewDirty=true;schedulePaintPreview();}
   return changed>0;
-}
-
-function markNativeHighDepthRetouchChanged(changed){
-  if(changed>0){highDepthPaintPreviewDirty=true;schedulePaintPreview();return true;}
-  return false;
-}
-
-function applyNativeHighDepthToneDab(layer,point,pointerEvent=null,brighten=true){
-  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer)return false;
-  const strength=Number(brighten?els.dodgeStrength.value:els.burnStrength.value)/100;
-  const fn=highDepthPaintBuffer.model==='cmyk'?applyCmykPixelBufferToneDab:applyPixelBufferToneDab;
-  const changed=fn(highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),strength,{brighten,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:drag?.toneCoverage});
-  return markNativeHighDepthRetouchChanged(changed);
-}
-
-function nativeHighDepthToneSegment(layer,from,to,pointerEvent=null,brighten=true){
-  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);
-  const distance=Math.hypot(to.x-from.x,to.y-from.y),steps=Math.max(1,Math.ceil(distance/spacing));
-  for(let index=1;index<=steps;index+=1){const t=index/steps;applyNativeHighDepthToneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent,brighten);}
-}
-
-function applyNativeHighDepthBlurDab(layer,point,pointerEvent=null){
-  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer)return false;
-  const fn=highDepthPaintBuffer.model==='cmyk'?applyCmykPixelBufferBlurDab:applyPixelBufferBlurDab;
-  const changed=fn(highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),Number(els.blurStrength.value)/100,{sampleRadius:3,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:drag?.blurCoverage});
-  return markNativeHighDepthRetouchChanged(changed);
-}
-
-function nativeHighDepthBlurSegment(layer,from,to,pointerEvent=null){
-  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.22);
-  const distance=Math.hypot(to.x-from.x,to.y-from.y),steps=Math.max(1,Math.ceil(distance/spacing));
-  for(let index=1;index<=steps;index+=1){const t=index/steps;applyNativeHighDepthBlurDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent);}
-}
-
-function prepareNativeHighDepthCloneStroke(layer,destinationPoint){
-  if(!cloneSource||cloneSource.layerId!==layer?.id||!highDepthPaintBuffer)return false;
-  highDepthCloneSnapshotBuffer=clonePixelBuffer(highDepthPaintBuffer);
-  return{x:cloneSource.localPoint.x-destinationPoint.x,y:cloneSource.localPoint.y-destinationPoint.y};
-}
-
-function applyNativeHighDepthCloneDab(layer,point,offset,pointerEvent=null,healing=false){
-  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer||!highDepthCloneSnapshotBuffer||!offset)return false;
-  const fn=highDepthPaintBuffer.model==='cmyk'?applyCmykPixelBufferCloneDab:applyPixelBufferCloneDab;
-  const changed=fn(highDepthPaintBuffer,highDepthCloneSnapshotBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),offset,{opacity:Number(els.toolOpacity.value)/100,healing,isAllowed:rasterSelectionPredicate(layer)});
-  return markNativeHighDepthRetouchChanged(changed);
-}
-
-function nativeHighDepthCloneSegment(layer,from,to,offset,pointerEvent=null,healing=false){
-  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);
-  const distance=Math.hypot(to.x-from.x,to.y-from.y),steps=Math.max(1,Math.ceil(distance/spacing));
-  for(let index=1;index<=steps;index+=1){const t=index/steps;applyNativeHighDepthCloneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},offset,pointerEvent,healing);}
-}
-
-function applyNativeHighDepthSmudgeDab(layer,from,to,pointerEvent=null){
-  if(highDepthPaintLayerId!==layer?.id||!highDepthPaintBuffer)return false;
-  const fn=highDepthPaintBuffer.model==='cmyk'?applyCmykPixelBufferSmudgeDab:applyPixelBufferSmudgeDab;
-  const changed=fn(highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),Number(els.smudgeStrength?.value||45)/100,{isAllowed:rasterSelectionPredicate(layer)});
-  return markNativeHighDepthRetouchChanged(changed);
-}
-
-function nativeHighDepthSmudgeSegment(layer,from,to,pointerEvent=null){
-  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.14);
-  const distance=Math.hypot(to.x-from.x,to.y-from.y),steps=Math.max(1,Math.ceil(distance/spacing));
-  let previous=from;
-  for(let index=1;index<=steps;index+=1){
-    const t=index/steps,point={x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t};
-    applyNativeHighDepthSmudgeDab(layer,previous,point,pointerEvent);previous=point;
-  }
 }
 
 function drawHighDepthRasterBase(layer, canvas, ctx) {
@@ -2974,115 +2943,17 @@ async function setCloneSource(point) {
   const layer=findTopEditableRasterLayerAt(point);
   if(!layer){setStatus(`${TOOL_LABELS[currentTool]}: источник должен находиться на растровом слое`);toast('Alt+кликните по растровому слою','warn');return false;}
   if(!layer.highDepthSource)await ensureRasterBuffer(layer);
-  cloneSource={layerId:layer.id,documentPoint:{...point},localPoint:documentPointToLayerPixel(point,layer)};
+  setRetouchCloneSource({layerId:layer.id,documentPoint:{...point},localPoint:documentPointToLayerPixel(point,layer)});
   doc.selectedLayerId=layer.id;
   setStatus(`Источник для «${TOOL_LABELS[currentTool]}» задан. Рисуйте по этому же слою.`);
   drawOverlay();
   return true;}
-function prepareCloneStroke(layer, destinationPoint) {
-  if(!cloneSource || cloneSource.layerId!==layer.id)return false;
-  cloneSnapshotCanvas=document.createElement('canvas');
-  cloneSnapshotCanvas.width=brushCanvas.width;cloneSnapshotCanvas.height=brushCanvas.height;
-  cloneSnapshotCanvas.getContext('2d',{alpha:true}).drawImage(brushCanvas,0,0);
-  return {x:cloneSource.localPoint.x-destinationPoint.x,y:cloneSource.localPoint.y-destinationPoint.y};
-}
-function ensureRetouchScratch(width,height){
-  if(!retouchScratchCanvas)retouchScratchCanvas=document.createElement('canvas');
-  if(retouchScratchCanvas.width!==width||retouchScratchCanvas.height!==height){retouchScratchCanvas.width=width;retouchScratchCanvas.height=height;retouchScratchCtx=retouchScratchCanvas.getContext('2d',{alpha:true});}
-  else if(!retouchScratchCtx)retouchScratchCtx=retouchScratchCanvas.getContext('2d',{alpha:true});
-  retouchScratchCtx.setTransform(1,0,0,1,0,0);retouchScratchCtx.globalAlpha=1;retouchScratchCtx.globalCompositeOperation='source-over';retouchScratchCtx.filter='none';retouchScratchCtx.clearRect(0,0,width,height);
-  return{canvas:retouchScratchCanvas,ctx:retouchScratchCtx};
-}
-function applyFeatherMask(ctx,centerX,centerY,radius){
-  const gradient=ctx.createRadialGradient(centerX,centerY,Math.max(0,radius*.55),centerX,centerY,Math.max(.5,radius));
-  gradient.addColorStop(0,'rgba(255,255,255,1)');gradient.addColorStop(1,'rgba(255,255,255,0)');
-  ctx.save();ctx.globalAlpha=1;ctx.globalCompositeOperation='destination-in';ctx.fillStyle=gradient;ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);ctx.restore();
-}
-function applyCloneDab(point, offset, pointerEvent=null, healing=false) {
-  if(!cloneSnapshotCanvas || !offset)return false;
-  const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);const padding=2;const left=Math.floor(point.x-radius-padding),top=Math.floor(point.y-radius-padding);const size=Math.max(2,Math.ceil(radius*2+padding*2));const {canvas:scratch,ctx:scratchCtx}=ensureRetouchScratch(size,size);
-  scratchCtx.drawImage(cloneSnapshotCanvas,-left-offset.x,-top-offset.y);applyFeatherMask(scratchCtx,point.x-left,point.y-top,radius);
-  brushCtx.save();brushCtx.globalAlpha=clamp(Number(els.toolOpacity.value)/100,0,1)*(healing?.68:1);brushCtx.globalCompositeOperation=healing?'soft-light':'source-over';brushCtx.drawImage(scratch,left,top);brushCtx.restore();return true;
-}
-function cloneStrokeSegment(from,to,offset,pointerEvent=null,healing=false) {
-  const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);const distance=Math.hypot(to.x-from.x,to.y-from.y);const steps=Math.max(1,Math.ceil(distance/spacing));
-  for(let index=1;index<=steps;index+=1){const t=index/steps;applyCloneDab({x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},offset,pointerEvent,healing);}
-}
-function applySmudgeDab(from,to,pointerEvent=null){
-  if(!brushCanvas||!brushCtx)return false;const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);const left=Math.max(0,Math.floor(from.x-radius-2));const top=Math.max(0,Math.floor(from.y-radius-2));const right=Math.min(brushCanvas.width,Math.ceil(from.x+radius+2));const bottom=Math.min(brushCanvas.height,Math.ceil(from.y+radius+2));const width=right-left,height=bottom-top;if(width<=0||height<=0)return false;
-  const {canvas:scratch,ctx:scratchCtx}=ensureBlurScratch(width,height);scratchCtx.setTransform(1,0,0,1,0,0);scratchCtx.globalCompositeOperation='source-over';scratchCtx.clearRect(0,0,width,height);scratchCtx.drawImage(brushCanvas,left,top,width,height,0,0,width,height);applyFeatherMask(scratchCtx,from.x-left,from.y-top,radius);
-  brushCtx.save();brushCtx.globalAlpha=clamp(Number(els.smudgeStrength?.value||45)/100,0.01,1);brushCtx.globalCompositeOperation='source-over';brushCtx.drawImage(scratch,0,0,width,height,to.x-(from.x-left),to.y-(from.y-top),width,height);brushCtx.restore();return true;
-}
-function smudgeStrokeSegment(from,to,pointerEvent=null){const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.14);const distance=Math.hypot(to.x-from.x,to.y-from.y);const steps=Math.max(1,Math.ceil(distance/spacing));let previous=from;for(let index=1;index<=steps;index+=1){const t=index/steps;const point={x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t};applySmudgeDab(previous,point,pointerEvent);previous=point;}}
-function applyToneDab(layer,point,pointerEvent=null,brighten=true){
-  if(!brushCanvas||!brushCtx||!layer)return false;const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);const left=Math.max(0,Math.floor(point.x-radius));const top=Math.max(0,Math.floor(point.y-radius));const right=Math.min(brushCanvas.width,Math.ceil(point.x+radius));const bottom=Math.min(brushCanvas.height,Math.ceil(point.y+radius));const width=right-left,height=bottom-top;if(width<=0||height<=0)return false;
-  const strength=Number(brighten?els.dodgeStrength.value:els.burnStrength.value)/100;
-  const imageData=brushCtx.getImageData(left,top,width,height);const selectionAllows=rasterSelectionPredicate(layer);const changed=applyToneBrushPixels(imageData.data,width,height,point.x-left,point.y-top,radius,strength,{brighten,isAllowed:selectionAllows?(x,y)=>selectionAllows(left+x,top+y):null,strokeCoverage:drag?.toneCoverage,originX:left,originY:top});
-  if(changed)brushCtx.putImageData(imageData,left,top);return changed>0;
-}
-function toneStrokeSegment(layer,from,to,pointerEvent=null,brighten=true){const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);const distance=Math.hypot(to.x-from.x,to.y-from.y);const steps=Math.max(1,Math.ceil(distance/spacing));for(let index=1;index<=steps;index+=1){const t=index/steps;applyToneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent,brighten);}}
-function ensureBlurScratch(width, height) {
-  if (!blurScratchCanvas) blurScratchCanvas = document.createElement('canvas');
-  if (blurScratchCanvas.width !== width || blurScratchCanvas.height !== height) {
-    blurScratchCanvas.width = width;
-    blurScratchCanvas.height = height;
-    blurScratchCtx = blurScratchCanvas.getContext('2d', { alpha:true });
-  } else if (!blurScratchCtx) {
-    blurScratchCtx = blurScratchCanvas.getContext('2d', { alpha:true });
-  }
-  return { canvas:blurScratchCanvas, ctx:blurScratchCtx };
-}
-
-function applyBlurDab(layer, point, pointerEvent = null) {
-  if (!brushCanvas || !brushCtx || !layer) return false;
-  const diameter = Math.max(1, brushWidthForPointer(pointerEvent));
-  const radius = diameter / 2;
-  const blurRadius = 5;
-  const margin = Math.ceil(blurRadius * 3 + 2);
-  const left = Math.max(0, Math.floor(point.x - radius - margin));
-  const top = Math.max(0, Math.floor(point.y - radius - margin));
-  const right = Math.min(brushCanvas.width, Math.ceil(point.x + radius + margin));
-  const bottom = Math.min(brushCanvas.height, Math.ceil(point.y + radius + margin));
-  const width = right - left;
-  const height = bottom - top;
-  if (width <= 0 || height <= 0) return false;
-
-  const { canvas:scratch, ctx:scratchCtx } = ensureBlurScratch(width, height);
-  scratchCtx.save();
-  scratchCtx.setTransform(1,0,0,1,0,0);
-  scratchCtx.globalAlpha = 1;
-  scratchCtx.globalCompositeOperation = 'source-over';
-  scratchCtx.filter = 'none';
-  scratchCtx.clearRect(0,0,width,height);
-  scratchCtx.drawImage(brushCanvas,left,top,width,height,0,0,width,height);
-  scratchCtx.restore();
-
-  const {ctx:softenedCtx}=ensureRetouchScratch(width,height);
-  softenedCtx.save();softenedCtx.filter=`blur(${blurRadius}px)`;softenedCtx.drawImage(scratch,0,0);softenedCtx.restore();
-  const imageData=brushCtx.getImageData(left,top,width,height);
-  const blurredData=softenedCtx.getImageData(0,0,width,height);
-  const selectionAllows=rasterSelectionPredicate(layer);
-  const changed=applyBlurBrushPixels(imageData.data,blurredData.data,width,height,point.x-left,point.y-top,radius,Number(els.blurStrength.value)/100,{isAllowed:selectionAllows?(x,y)=>selectionAllows(left+x,top+y):null,strokeCoverage:drag?.blurCoverage,originX:left,originY:top});
-  if(changed)brushCtx.putImageData(imageData,left,top);
-  return changed>0;
-}
-
-function blurStrokeSegment(layer, from, to, pointerEvent = null) {
-  const diameter = Math.max(1, brushWidthForPointer(pointerEvent));
-  const spacing = Math.max(1, diameter * 0.22);
-  const distance = Math.hypot(to.x - from.x, to.y - from.y);
-  const steps = Math.max(1, Math.ceil(distance / spacing));
-  for (let index = 1; index <= steps; index += 1) {
-    const t = index / steps;
-    applyBlurDab(layer, { x:from.x + (to.x-from.x)*t, y:from.y + (to.y-from.y)*t }, pointerEvent);
-  }
-}
-
 async function beginPaint(p, pointerId, pointerEvent = null) {
   if(selectionRect&&!pointInsideSelection(p)){setStatus('Рисование ограничено выделением');return false;}
   const canContinue = () => activePrimaryPointerId === pointerId;
   const l = await ensurePaintLayer(p, canContinue);
   if (!canContinue()) return false;
+  const cloneSource = getRetouchCloneSource();
   if (!l) {
     const message = currentTool === 'eraser'
       ? 'Ластик работает только по растровому слою. Выберите слой с изображением или рисунком.'
@@ -3193,7 +3064,7 @@ async function endPaint(paintTool = currentTool) {
   const labels={eraser:'Ластик',blur:'Размытие кистью',clone:'Штамп',heal:'Лечебная кисть',smudge:'Палец / смазывание',dodge:'Осветлитель',burn:'Затемнитель',brush:'Кисть'};
   const label=labels[paintTool]||'Кисть';
   if(!nativeHighDepth)brushCtx.restore();
-  cloneSnapshotCanvas=null;
+  resetRetouchStroke();
   paintPersisting=true;
   setStatus('Сохранение штриха…');
   try {

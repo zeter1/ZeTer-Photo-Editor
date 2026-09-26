@@ -14,7 +14,8 @@ ZeTer Photo Editor — локальный браузерный многосло�
 | Документы, слои, groups, smart objects | `src/core/state.js` | core/layer/smart-object tests |
 | Рендеринг и composite | `src/core/render.js` | render/blending/high-depth tests |
 | Selection clipboard / copy-cut-paste | `src/selection/clipboard-controller.js`, selection mutations в `src/main.js` | `tests/selection-clipboard.test.mjs`, async context tests |
-| Пиксельные операции | `src/core/pixels.js`, `src/core/pixel-buffer.js` | pixel/retouch/high-depth tests |
+| Ретушь clone/heal/smudge/blur/dodge/burn | `src/retouch/controller.js`, math в `src/core/pixels.js` / `src/core/pixel-buffer.js` | `tests/retouch-controller.test.mjs`, retouch/high-depth tests |
+| Пиксельные операции и generic brush/fill/line math | `src/core/pixels.js`, `src/core/pixel-buffer.js`, orchestration в `src/main.js` | pixel/retouch/high-depth tests |
 | ICC/CMYK/soft proof | `src/core/color-management.js` | color-management/corpus tests |
 | PSD/PSB import/export | `src/formats/psd.js` | `tests/psd-*.test.mjs` |
 | Document import / drag-drop routing | `src/document/import-controller.js`, PSD/project callbacks in `src/main.js` | async document context / reliability tests |
@@ -35,6 +36,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 - `src/workspace/session-controller.js` — lifecycle document sessions: create/switch/close/rename/duplicate, per-tab history/zoom/dirty/selection state и smart-object parent/child tab guard.
 - `src/selection/clipboard-controller.js` — selection copy/cut/paste boundary: PNG preparation, system Clipboard API, native paste/fallback generation guards и tab-switch safety; actual raster clearing остаётся callback-ом из `src/main.js`.
 - `src/document/import-controller.js` — file classification и image import transaction: decode/validate-all-before-mutate, empty-document sizing, drag/drop/file-input routing к image/PSD/project paths и tab-switch guard.
+- `src/retouch/controller.js` — destructive retouch boundary: clone/heal source и immutable stroke snapshots, smudge/blur/dodge/burn, Canvas scratch state и native 16/32-bit/CMYK dispatch; document/history/pointer state остаются в `src/main.js`.
 - `src/core/*.js` — domain, render, pixel, history, IO, recovery и color logic.
 - `src/formats/psd.js` — единственный канонический PSD/PSB implementation.
 - `src/app.bundle.js` — generated artifact для `file://`; править только через `npm run build`.

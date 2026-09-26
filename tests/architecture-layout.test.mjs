@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController, documentImportController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController, documentImportController, retouchController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -15,6 +15,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, too
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/document/import-controller.js', root), 'utf8'),
+  readFile(new URL('src/retouch/controller.js', root), 'utf8'),
 ]);
 
 test('canonical UI and PSD boundaries stay out of legacy compatibility paths', () => {
@@ -76,4 +77,17 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /function isProjectFile\(/);
   assert.doesNotMatch(main, /async function importImages\(/);
   assert.doesNotMatch(main, /async function handleIncomingFiles\(/);
+  assert.match(main, /from '\.\/retouch\/controller\.js'/);
+  assert.match(build, /'src\/retouch\/controller\.js'/);
+  assert.match(retouchController, /export function createRetouchController/);
+  for (const name of [
+    'prepareCloneStroke','applyCloneDab','cloneStrokeSegment',
+    'applySmudgeDab','smudgeStrokeSegment','applyToneDab','toneStrokeSegment',
+    'applyBlurDab','blurStrokeSegment','prepareNativeHighDepthCloneStroke',
+    'applyNativeHighDepthCloneDab','nativeHighDepthCloneSegment',
+    'applyNativeHighDepthSmudgeDab','nativeHighDepthSmudgeSegment',
+    'applyNativeHighDepthToneDab','nativeHighDepthToneSegment',
+    'applyNativeHighDepthBlurDab','nativeHighDepthBlurSegment',
+  ]) assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  assert.doesNotMatch(main, /let (?:cloneSource|cloneSnapshotCanvas|highDepthCloneSnapshotBuffer|blurScratchCanvas|retouchScratchCanvas)\b/);
 });

@@ -9,8 +9,9 @@ index.html / styles
         ↓
 src/main.js  ─────→  src/ui/*
     │  ├──────→  src/selection/*
-    │  └──────→  src/document/*
-    ↓   ↓
+    │  ├──────→  src/document/*
+    │  └──────→  src/retouch/*  ───→ src/core/*
+    ↓
 src/core/*  ←────  src/formats/*
         ↓
 browser primitives (Canvas, Worker, storage, File APIs)
@@ -33,6 +34,12 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - `src/selection/clipboard-controller.js` may orchestrate browser Clipboard APIs and call render helpers, but document mutation remains explicit callbacks.
 - Selection modules must not own layer/document state or silently bypass lock/high-depth/Undo semantics.
 - Async clipboard operations must stay bound to the document/session that initiated them.
+
+### Retouch
+- `src/retouch/controller.js` owns clone/heal/smudge/blur/dodge/burn mechanics and only their private scratch/snapshot state.
+- The controller may depend on core geometry/pixel primitives, but must not become a second owner of document, layer, selection, history or pointer gesture state.
+- Generic brush/eraser/fill/line preparation and mutation transaction guards stay in `src/main.js` until a separate painting boundary is extracted.
+- High-depth/CMYK retouch must stay on typed-buffer primitives; do not silently route it through Canvas8.
 
 ### Core
 - Core modules should not know about menu labels, DOM selectors or CSS classes.

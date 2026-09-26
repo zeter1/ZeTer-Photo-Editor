@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-26 — Retouch controller extraction
+
+- Refactor: Canvas8 и native high-depth/CMYK mechanics для clone/heal/smudge/blur/dodge/burn вынесены из `src/main.js` в `src/retouch/controller.js`.
+- Architecture: controller владеет только retouch source/scratch/per-stroke snapshot state; document/history/pointer lifecycle и generic brush/fill/line transactions остаются в runtime orchestrator, а pixel math — в `src/core/pixels.js` и `src/core/pixel-buffer.js`.
+- Precision: high-depth и CMYK retouch по-прежнему маршрутизируется напрямую в typed-buffer primitives без Canvas8-квантизации.
+- Tests: добавлен direct controller regression для Canvas8 tone, native high-depth tone и clone snapshot/reset semantics; architecture/source contracts переведены на нового владельца.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES и AI workflow получили отдельный retouch owner, чтобы такие задачи находились без чтения большого `src/main.js`.
+
 ### 2026-09-26 — Document import controller extraction
 
 - Refactor: file classification, multi-image import и drag/drop/file-input routing вынесены из `src/main.js` в `src/document/import-controller.js`.

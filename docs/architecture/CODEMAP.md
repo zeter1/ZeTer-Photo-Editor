@@ -6,7 +6,7 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: sessions/tabs, UI events, tool state, pointer/keyboard interaction, save/export flows and coordination between core modules.
+Application orchestrator: UI events, generic pointer/keyboard gesture lifecycle, brush/fill/line preparation, save/export flows and coordination between domain/controllers. Extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
@@ -28,6 +28,13 @@ Owns generic top-menu/context-menu mechanics: rendering menu items, enabled stat
 Owns generic modal/dialog mechanics: field rendering, numeric normalization, async submit lifecycle, focus restoration, backdrop/Escape close, draggable text-modal shell, info dialogs and recovery-choice dialog. Text preview rendering and editor mutations remain callbacks owned by `src/main.js`.
 
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
+
+## Retouch boundary — `src/retouch/`
+
+### `controller.js`
+Owns destructive retouch mechanics for Canvas8 and native typed RGB/CMYK paths: clone/heal source + immutable per-stroke snapshots, smudge, blur, dodge/burn, private scratch canvases and high-depth retouch dispatch.
+
+It does **not** own document/history/pointer gesture state or generic brush/eraser/fill/line preparation. Runtime orchestration remains in `src/main.js`; pixel math remains in `src/core/pixels.js` and `src/core/pixel-buffer.js`.
 
 ## Document boundary — `src/document/`
 
