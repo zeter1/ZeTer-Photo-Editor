@@ -8,4 +8,5 @@ test('about dialog exposes developer contact links', () => {
   assert.match(mainSource, /href="mailto:zeter11@gmail\.com">zeter11@gmail\.com<\/a>/);
   assert.match(mainSource, /href="https:\/\/t\.me\/zeterchat" target="_blank" rel="noopener noreferrer">Telegram: @zeterchat<\/a>/);
   assert.match(mainSource, /href="https:\/\/github\.com\/zeter1" target="_blank" rel="noopener noreferrer">GitHub: @zeter1<\/a>/);
+  assert.match(mainSource, /href="https:\/\/www\.facebook\.com\/zeter1" target="_blank" rel="noopener noreferrer">Facebook: @zeter1<\/a>/);
 });

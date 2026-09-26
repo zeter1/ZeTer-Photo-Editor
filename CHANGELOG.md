@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-09-26 — Facebook в окне «О программе»
+
+- About UI: карточка разработчика дополнена ссылкой `Facebook: @zeter1` на `https://www.facebook.com/zeter1` с безопасным открытием в новой вкладке.
+- Regression coverage: тест контактов разработчика теперь фиксирует email, Telegram, GitHub и Facebook.
+- Cache-busting proof: изменение runtime породило новый build ID `7d62ac5cdc7f5524`, поэтому опубликованная HTTP/HTTPS-версия должна автоматически запросить обновлённый bundle без `Ctrl+F5`.
+
 ### 2026-09-26 — Автообновление web-сборки без Ctrl+F5
 
 - Runtime bootstrap: HTTP/HTTPS-запуск перед стартом приложения получает `version.json` через `cache: no-store` + уникальный query и сравнивает server build ID с build ID текущего `index.html`.
