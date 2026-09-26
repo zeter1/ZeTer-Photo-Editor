@@ -433,5 +433,11 @@ test('architecture guard keeps generic lifecycle out of main and PSD bytes out o
   }
   assert.match(main, /async function serializePhotoshopEmbeddedAsset\(/);
   assert.match(main, /async function rewritePhotoshopEmbeddedSource\(/);
+  assert.match(main, /function applyPhotoshopEmbeddedSourceRewrite\(/);
+  assert.match(source, /publishEmbeddedSourceRewrite/);
+  const rewriteStart = main.indexOf('async function rewritePhotoshopEmbeddedSource');
+  const publishStart = main.indexOf('function applyPhotoshopEmbeddedSourceRewrite', rewriteStart);
+  assert.ok(rewriteStart >= 0 && publishStart > rewriteStart);
+  assert.doesNotMatch(main.slice(rewriteStart, publishStart), /parentDoc\.psdLinkedLayerBlocks\s*=/);
   assert.doesNotMatch(source, /rewriteEmbeddedLinkedLayerAsset|encodePsdBlob|encodePsbBlob|psdOpaqueBlockFromState/);
 });
