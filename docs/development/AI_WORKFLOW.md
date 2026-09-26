@@ -21,9 +21,10 @@ For bugs, start from observable evidence: failing test, browser error, traceback
 Useful routing:
 - DOM/tool interaction → main + ui
 - document/layer invariant → state
-- clone/heal/smudge/blur/dodge/burn mechanics → retouch/controller + painting/controller state + pixel-buffer/pixels
+- clone/heal/smudge/blur/dodge/burn mechanics → retouch/controller + painting/controller state; include painting/gesture-controller when the bug is in stroke begin/move/end routing
 - raster edit buffer / high-depth working state / persistence / paint preview → painting/controller
-- generic brush/eraser/fill/line gesture lifecycle → main + painting/controller + pixel-buffer/pixels
+- brush/eraser/retouch stroke begin/move/end → painting/gesture-controller + painting/controller + retouch/controller
+- fill/line/selection-clear orchestration → main + painting/controller + pixel-buffer/pixels
 - pixels/precision → pixel-buffer/pixels
 - rendering → render
 - ICC/CMYK → color-management
