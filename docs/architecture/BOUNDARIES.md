@@ -28,6 +28,9 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - Pointer ownership must be cleared even when a release/cancel callback fails; an unexpected `lostpointercapture` must enter the same domain cancellation path rather than leave a stuck gesture.
 
 ### UI
+- `src/ui/layers-panel-controller.js` owns only Layers tree/panel DOM and panel-local interaction state. It may import stable lock/visibility queries from core, but layer/group mutations/history/feature commands enter through explicit runtime ports.
+- A rendered Layers-row callback must prove its originating document is still active before selecting, renaming, deleting, opening feature UI or publishing a drag/drop action. Drag identity is controller-local and every drop/end/destroy path clears decorations + identity.
+- Relative layer DnD must reject locked source **and locked target**; nested effective lock/visibility presentation uses canonical recursive core queries rather than duplicating ancestor logic.
 - `src/ui/tool-config.js`: pure configuration only.
 - `src/ui/tool-layout.js`: pure layout/order math only.
 - `src/ui/workspace-layout-controller.js` owns only editor-shell layout state: sidebar collapse persistence/migration plus canvas-mode chrome visibility and viewport-center preservation.

@@ -6,6 +6,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 |---|---|---|
 | UI constants / toolbar math | `tests/tool-layout.test.mjs`, architecture test | browser smoke for drag/persistence |
 | Workspace shell layout / sidebar collapse / canvas mode | `tests/workspace-layout-controller.test.mjs`, `tests/collapsible-panels.test.mjs`, architecture test | `npm run test:browser` for persistence + Tab hide/show integration |
+| Layers panel/tree DOM + keyboard focus + layer/group DnD | `tests/layers-panel-controller.test.mjs`, `tests/layer-groups.test.mjs`, architecture/source guard | `npm run test:browser` after panel/composition-root wiring changes |
 | Saved Paths panel / CRUD / selected-index bridge / vector-mask apply | `tests/paths-controller.test.mjs`, `tests/paths-panel.test.mjs`, `tests/workspace-session-controller.test.mjs`, `tests/vector-masks.test.mjs`, architecture test | `npm run test:browser` for full file:// startup after wiring changes |
 | Global overlay pointer lifecycle / capture / cancellation | `tests/pointer-lifecycle-router.test.mjs`, `tests/pointer-release-tools.test.mjs`, architecture test | `npm run test:browser` |
 | Menu/tool-specific interaction | relevant interaction/selection/retouch tests | `npm run test:browser` |

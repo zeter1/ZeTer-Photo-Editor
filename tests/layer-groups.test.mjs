@@ -8,6 +8,7 @@ import {
 } from '../src/core/state.js';
 
 const main=fs.readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
+const layersPanel=fs.readFileSync(new URL('../src/ui/layers-panel-controller.js',import.meta.url),'utf8');
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const css=fs.readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
 
@@ -195,37 +196,31 @@ test('group opacity and blend mode survive project sanitization',()=>{
   assert.equal(safe.groups[1].blendMode,'pass-through');
 });
 
-test('layer panel exposes rename and group controls with drag-to-group wiring',()=>{
+test('layer panel has one canonical tree/DnD owner while domain commands stay in runtime/core',()=>{
   assert.match(html,/id="addGroupBtn"/);
   assert.match(html,/id="renameLayerBtn"/);
-  assert.match(main,/function addGroup\(parentGroupId=null\)/);
-  assert.match(main,/moveLayerIntoGroup\(doc, draggedLayerId, group\.id\)/);
-  assert.match(main,/moveLayerGroupIntoGroup\(doc, draggedGroupId, group\.id\)/);
-  assert.match(main,/moveLayerGroupIntoGroup\(doc,draggedGroupId,null\)/);
+  assert.match(main,/from '\.\/ui\/layers-panel-controller\.js'/);
+  assert.match(main,/createLayersPanelController\(\{/);
+  assert.match(layersPanel,/export function createLayersPanelController/);
+  assert.match(layersPanel,/const renderLevel = \(parentGroupId = null, depth = 0\) =>/);
+  assert.match(layersPanel,/function clearDragDecorations\(\)/);
+  assert.match(layersPanel,/function onRootDrop\(event\)/);
+  assert.match(layersPanel,/isLayerLocked\(owner, target\)/);
+  assert.match(main,/moveLayerIntoGroup\(owner, layerId, groupId\)/);
+  assert.match(main,/moveLayerGroupIntoGroup\(owner, groupId, targetGroupId\)/);
+  assert.match(main,/moveLayerGroupIntoGroup\(owner, groupId, null\)/);
   assert.match(main,/\['Создать подгруппу'/);
   assert.match(main,/\['Параметры группы…'/);
   assert.match(main,/function editGroupProperties\(group\)/);
   assert.match(main,/function renameGroup\(group\)/);
-  assert.match(main,/group\.visible = group\.visible === false/);
-  assert.match(main,/group\.locked = !group\.locked/);
   assert.match(main,/isLayerLocked\(doc, layer\)/);
-  assert.match(main,/if\(isLayerLocked\(doc,l\)\)\{setStatus\('Слой или его группа заблокированы'\);return;\}if\(duplicateLayer\(doc,l\.id\)\)commit\('Дублировать слой'\)/);
-  assert.match(main,/\['Дублировать слой','Ctrl\+J',duplicateSelected,\(\)=>Boolean\(selected\(\)\)&&!isLayerLocked\(doc,selected\(\)\)\]/);
-  assert.match(main,/\['Удалить слой','Delete',deleteSelected,\(\)=>Boolean\(selected\(\)\)&&!isLayerLocked\(doc,selected\(\)\)\]/);
-  assert.ok(main.includes("const editable = Boolean(layer) && !isLayerLocked(doc, layer);"));
-  assert.ok(main.includes("els.blend.disabled = !editable; els.layerOpacity.disabled = !editable;"));
-  assert.ok(main.includes("['renameLayerBtn','duplicateLayerBtn','deleteLayerBtn','layerUpBtn','layerDownBtn','resetColorEffectsBtn']"));
-  assert.ok(main.includes("const control = $`#${id}`;") === false);
-  assert.ok(main.includes("const control = $(`#${id}`);"));
-  assert.ok(main.includes("['Переименовать слой','F2',()=>{const layer=selected();if(layer)renameLayer(layer);},()=>Boolean(selected())&&!isLayerLocked(doc,selected())]"));
-  assert.ok(main.includes("['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=selected();return Boolean(layer)&&!doc.groups?.find(group=>group.id===layer.groupId)?.locked;}]"));
-  assert.ok(main.includes("['Поднять слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())]"));
-  assert.ok(main.includes("['Опустить слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())]"));
-  assert.match(main,/Переименовать слой/);
+  assert.doesNotMatch(main,/function updateLayers\(/);
+  assert.doesNotMatch(main,/function clearLayerDragDecorations\(/);
+  assert.doesNotMatch(main,/\blet (?:layerDragId|groupDragId)\b/);
+  assert.doesNotMatch(main,/els\.layers\.addEventListener\('dragover'/);
   assert.match(css,/\.layer-group-row\.drop-into/);
   assert.match(css,/\.layer-group-row\.dragging/);
   assert.match(css,/\.layer-row\.in-group/);
   assert.match(css,/--group-depth/);
-  assert.match(main,/const renderLevel = \(parentGroupId = null, depth = 0\) =>/);
   assert.match(css,/\.layer-group-row \{ grid-template-columns:/);
 });
