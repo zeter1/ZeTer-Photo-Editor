@@ -1,41 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import vm from 'node:vm';
+import { blendingPreviewCrop, syncBlendingPreviewCanvas } from '../src/ui/layer-blending-controller.js';
 
-const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
-const source=main.slice(main.indexOf('function blendingPreviewCrop('),main.indexOf('function attachTextPreview('));
+test('blending preview crop stays centered, padded and bounded by the document', () => {
+  const documentValue = { width:1000, height:800 };
+  const layer = { x:400, y:300, width:200, height:80, scaleX:1, scaleY:1, rotation:0 };
+  assert.deepEqual(blendingPreviewCrop(documentValue, layer), { x:220, y:120, width:560, height:440 });
+  const oversized = blendingPreviewCrop(
+    { width:120, height:90 },
+    { x:-500, y:-500, width:400, height:400, scaleX:1, scaleY:1, rotation:0 },
+  );
+  assert.deepEqual(oversized, { x:0, y:0, width:120, height:90 });
+});
 
-test('blending preview copies the accepted composite around the layer and follows resize',()=>{
-  const draws=[];
-  const context={clearRect(){},drawImage(...args){draws.push(args);}};
-  const sourceCanvas={width:1000,height:800};
-  const previewCanvas={clientWidth:500,clientHeight:200,width:0,height:0,isConnected:true,getContext:()=>context};
-  const layer={id:'layer-1',scaleX:1,scaleY:1};
-  const documentValue={width:1000,height:800,layers:[layer]};
-  const sandbox={
-    doc:documentValue,els:{canvas:sourceCanvas},window:{devicePixelRatio:1.5},
-    frameBounds:(_layer,padding)=>({x:400-padding,y:300-padding,width:200+padding*2,height:80+padding*2}),
-    clamp:(value,min,max)=>Math.max(min,Math.min(max,value)),
-  };
-  vm.runInNewContext(`${source}\nconst crop=blendingPreviewCrop(doc,doc.layers[0]);globalThis.runPreview=syncBlendingPreviewCanvas;globalThis.setPreview=value=>{blendingPreview=value};globalThis.getCrop=()=>crop;`,sandbox);
-  sandbox.setPreview({document:documentValue,layer,canvas:previewCanvas,crop:sandbox.getCrop()});
-  sandbox.runPreview();
-  assert.equal(draws.length,1);
-  assert.equal(draws[0][0],sourceCanvas);
-  assert.equal(draws[0][1],220);
-  assert.equal(draws[0][2],120);
-  assert.equal(draws[0][3],560);
-  assert.equal(draws[0][4],440);
-  assert.equal(previewCanvas.width,750);
-  assert.equal(previewCanvas.height,300);
-  previewCanvas.clientWidth=600;
-  previewCanvas.clientHeight=300;
-  sandbox.runPreview();
-  assert.equal(draws.length,2);
-  assert.equal(previewCanvas.width,900);
-  assert.equal(previewCanvas.height,450);
-  documentValue.layers=[];
-  sandbox.runPreview();
-  assert.equal(draws.length,2);
+test('blending preview copies the accepted composite around the layer and follows resize', () => {
+  const draws = [];
+  const context = { clearRect(){}, drawImage(...args){ draws.push(args); } };
+  const sourceCanvas = { width:1000, height:800 };
+  const previewCanvas = { clientWidth:500, clientHeight:200, width:0, height:0, isConnected:true, getContext:() => context };
+  const layer = { id:'layer-1' };
+  const documentValue = { width:1000, height:800, layers:[layer] };
+  const preview = { document:documentValue, layer, canvas:previewCanvas, crop:{ x:220, y:120, width:560, height:440 } };
+  const windowTarget = { devicePixelRatio:1.5 };
+  assert.equal(syncBlendingPreviewCanvas(preview, { documentValue, sourceCanvas, windowTarget }), true);
+  assert.equal(draws.length, 1);
+  assert.equal(draws[0][0], sourceCanvas);
+  assert.deepEqual(draws[0].slice(1, 5), [220, 120, 560, 440]);
+  assert.equal(previewCanvas.width, 750);
+  assert.equal(previewCanvas.height, 300);
+  previewCanvas.clientWidth = 600; previewCanvas.clientHeight = 300;
+  assert.equal(syncBlendingPreviewCanvas(preview, { documentValue, sourceCanvas, windowTarget }), true);
+  assert.equal(previewCanvas.width, 900);
+  assert.equal(previewCanvas.height, 450);
+  documentValue.layers = [];
+  assert.equal(syncBlendingPreviewCanvas(preview, { documentValue, sourceCanvas, windowTarget }), false);
+  assert.equal(draws.length, 2);
 });

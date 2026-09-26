@@ -20,7 +20,6 @@ import {
   SMART_SNAP_STORAGE_KEY, TOOL_ORDER_STORAGE_KEY,
   NATIVE_HIGH_DEPTH_PAINT_TOOLS, NATIVE_CMYK_PAINT_TOOLS,
 } from './ui/tool-config.js';
-import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles } from './core/layer-styles.js';
 import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustments.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './formats/psd.js';
 import { createDocumentSessionController } from './workspace/session-controller.js';
@@ -30,6 +29,7 @@ import { createWorkspaceLayoutController } from './ui/workspace-layout-controlle
 import { createPathsController } from './ui/paths-controller.js';
 import { createColorManagementController } from './ui/color-management-controller.js';
 import { createSmartFilterController } from './ui/smart-filter-controller.js';
+import { createLayerBlendingController } from './ui/layer-blending-controller.js';
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
@@ -73,7 +73,6 @@ let renderVersion = 0;
 let renderFrame = 0;
 let renderBusy = false;
 let textDraft = null;
-let blendingPreview = null;
 let renderPending = null;
 const renderBuffer = document.createElement('canvas');
 let dirty = false;
@@ -160,6 +159,27 @@ const {
   bindSmartFilterControls,
   openSmartFilterDialog,
 } = smartFilterController;
+
+const layerBlendingController = createLayerBlendingController({
+  state: {
+    getDocument: () => doc,
+    commit,
+    markTransientChange: () => { documentChangeSerial += 1; },
+    blockPendingDocumentEdit,
+  },
+  renderApi: { render, updateLayerControls, getSourceCanvas: () => els.canvas },
+  ui: {
+    modalRoot: els.modalRoot,
+    blendControl: els.blend,
+    documentRef: document,
+    windowTarget: window,
+    ResizeObserverClass: globalThis.ResizeObserver,
+    HTMLElementClass: globalThis.HTMLElement,
+    setStatus,
+    escapeHtml,
+  },
+});
+const { openBlendingOptions } = layerBlendingController;
 
 const workspaceLayoutController = createWorkspaceLayoutController({
   panelCards: $$('.panel-card[data-panel-id]'),
@@ -999,7 +1019,7 @@ async function drainRenderQueue() {
     visibleCtx.clearRect(0, 0, doc.width, doc.height);
     visibleCtx.drawImage(renderBuffer, 0, 0);
     if (textDraft?.document === doc) syncTextPreviewCanvas();
-    syncBlendingPreviewCanvas();
+    layerBlendingController.syncPreviewCanvas();
     if (!request.paintPreview) {
       if (els.overlay.width !== doc.width) els.overlay.width = doc.width;
       if (els.overlay.height !== doc.height) els.overlay.height = doc.height;
@@ -2490,44 +2510,6 @@ function openTextModal(point) {
   } });
 }
 
-function blendingPreviewCrop(documentValue, layer) {
-  const scale=Math.max(Math.abs(layer.scaleX || 1),Math.abs(layer.scaleY || 1));
-  const bounds=frameBounds(layer,Math.min(180*scale,Math.max(documentValue.width,documentValue.height)));
-  const width=Math.min(documentValue.width,Math.max(160,bounds.width));
-  const height=Math.min(documentValue.height,Math.max(120,bounds.height));
-  return {
-    x:clamp(bounds.x+bounds.width/2-width/2,0,documentValue.width-width),
-    y:clamp(bounds.y+bounds.height/2-height/2,0,documentValue.height-height),
-    width,height,
-  };
-}
-
-function syncBlendingPreviewCanvas() {
-  const preview=blendingPreview;
-  if(!preview || preview.document!==doc || !preview.canvas.isConnected ||
-    doc.layers.find(item=>item.id===preview.layer.id)!==preview.layer ||
-    els.canvas.width!==doc.width || els.canvas.height!==doc.height)return;
-  const canvas=preview.canvas;
-  const width=canvas.clientWidth;
-  const height=canvas.clientHeight;
-  if(width<1 || height<1)return;
-  const ratio=Math.min(window.devicePixelRatio || 1,2);
-  const pixelWidth=Math.max(1,Math.round(width*ratio));
-  const pixelHeight=Math.max(1,Math.round(height*ratio));
-  if(canvas.width!==pixelWidth)canvas.width=pixelWidth;
-  if(canvas.height!==pixelHeight)canvas.height=pixelHeight;
-  const context=canvas.getContext('2d',{alpha:true});
-  context.clearRect(0,0,pixelWidth,pixelHeight);
-  const crop=preview.crop;
-  const fit=Math.min(pixelWidth/crop.width,pixelHeight/crop.height);
-  const drawnWidth=crop.width*fit;
-  const drawnHeight=crop.height*fit;
-  context.imageSmoothingEnabled=true;
-  context.imageSmoothingQuality='high';
-  context.drawImage(els.canvas,crop.x,crop.y,crop.width,crop.height,
-    (pixelWidth-drawnWidth)/2,(pixelHeight-drawnHeight)/2,drawnWidth,drawnHeight);
-}
-
 function attachTextPreview(modal, body, layer, point) {
   const sourceDoc=doc;
   const preview=document.createElement('section');preview.className='text-preview';
@@ -3028,129 +3010,6 @@ function deleteLayerGroup(group){
   if(!group)return;
   if(isGroupLocked(doc,group)){setStatus('Сначала разблокируйте группу и её родителей');return;}
   if(removeLayerGroup(doc,group.id)){commit('Удалить группу слоёв');setStatus('Группа удалена, содержимое перенесено на уровень выше');}
-}
-function openBlendingOptions(layer) {
-  if (!layer || isLayerLocked(doc, layer) || blockPendingDocumentEdit()) return;
-  const owner=doc;
-  const original={blendMode:layer.blendMode || 'source-over',opacity:layer.opacity ?? 1,styles:layer.styles ? structuredClone(layer.styles) : null};
-  const originalStyles=sanitizeLayerStyles(original.styles) || createLayerStyles();
-  const draft={blendMode:original.blendMode,opacity:Math.round(original.opacity*100),styles:structuredClone(originalStyles)};
-  const previousFocus=document.activeElement;
-  const back=document.createElement('div'); back.className='modal-backdrop';
-  const modal=document.createElement('form'); modal.className='modal blending-modal';
-  modal.setAttribute('role','dialog'); modal.setAttribute('aria-modal','true'); modal.setAttribute('aria-label','Параметры наложения');
-  modal.innerHTML=`<header>Параметры наложения</header><div class="blending-layout"><nav class="blending-list" aria-label="Стили слоя"></nav><div class="blending-details"><p class="muted blending-hint">Слой: ${escapeHtml(layer.name)}</p><div class="blending-fields"></div><section class="blending-canvas-preview" aria-label="Предпросмотр слоя на холсте"><strong>На холсте</strong><canvas aria-label="Фрагмент холста вокруг слоя"></canvas></section></div></div><footer><label class="blending-preview"><input type="checkbox" checked> Предпросмотр</label><span class="modal-footer-spacer"></span><button type="button" class="secondary-button" data-cancel>Отмена</button><button type="submit" class="primary-button">Применить</button></footer>`;
-  const list=modal.querySelector('.blending-list');
-  const fields=modal.querySelector('.blending-fields');
-  const previewCanvas=modal.querySelector('.blending-canvas-preview canvas');
-  const previewToggle=modal.querySelector('.blending-preview input');
-  const names={size:'Размер, px',strength:'Сила',angle:'Угол, °',distance:'Смещение, px',blur:'Размытие, px',color:'Цвет',color1:'Начальный цвет',color2:'Конечный цвет',opacity:'Непрозрачность',pattern:'Узор',scale:'Шаг, px'};
-  let selectedStyle='general';
-  let closed=false;
-  const stillCurrent=()=>doc===owner && doc.layers.find(item=>item.id===layer.id)===layer && !isLayerLocked(doc,layer);
-  const assign=(useDraft)=>{
-    if(!stillCurrent())return;
-    layer.blendMode=useDraft?draft.blendMode:original.blendMode;
-    layer.opacity=useDraft?draft.opacity/100:original.opacity;
-    layer.styles=useDraft?sanitizeLayerStyles(draft.styles):original.styles;
-    documentChangeSerial+=1;
-    updateLayerControls();
-    render();
-  };
-  const preview=()=>assign(previewToggle.checked);
-  const addRange=(parent,label,value,min,max,onChange)=>{
-    const row=document.createElement('label');row.className='blending-field';
-    const caption=document.createElement('span');caption.textContent=label;
-    const control=document.createElement('input');control.type='range';control.min=String(min);control.max=String(max);control.step='1';control.value=String(value);
-    const output=document.createElement('output');output.textContent=`${value}${label.includes('px')?' px':label.includes('°')?'°':'%'}`;
-    control.addEventListener('input',()=>{output.textContent=`${control.value}${label.includes('px')?' px':label.includes('°')?'°':'%'}`;onChange(Number(control.value));preview();});
-    row.append(caption,control,output);parent.append(row);
-  };
-  const addColor=(parent,label,value,onChange)=>{
-    const row=document.createElement('label');row.className='blending-field';
-    const caption=document.createElement('span');caption.textContent=label;
-    const control=document.createElement('input');control.type='color';control.value=value;
-    control.addEventListener('input',()=>{onChange(control.value);preview();});
-    row.append(caption,control);parent.append(row);
-  };
-  const showFields=()=>{
-    fields.replaceChildren();
-    for(const button of list.querySelectorAll('.blending-style-select'))button.classList.toggle('active',button.dataset.style===selectedStyle);
-    if(selectedStyle==='general'){
-      const modeRow=document.createElement('label');modeRow.className='blending-field';
-      const caption=document.createElement('span');caption.textContent='Режим наложения';
-      const mode=document.createElement('select');
-      for(const option of els.blend.options)mode.append(option.cloneNode(true));
-      mode.value=draft.blendMode;
-      mode.addEventListener('change',()=>{draft.blendMode=mode.value;preview();});
-      modeRow.append(caption,mode);fields.append(modeRow);
-      addRange(fields,'Непрозрачность',draft.opacity,0,100,value=>{draft.opacity=value;});
-      addRange(fields,'Непрозрачность заливки',draft.styles.fillOpacity,0,100,value=>{draft.styles.fillOpacity=value;});
-      const hint=document.createElement('p');hint.className='muted blending-note';hint.textContent='Непрозрачность заливки меняет содержимое слоя, сохраняя видимость включённых стилей.';fields.append(hint);
-      return;
-    }
-    const item=draft.styles[selectedStyle];
-    const title=document.createElement('h3');title.textContent=LAYER_STYLE_FIELDS[selectedStyle].label;fields.append(title);
-    for(const [key,rule] of Object.entries(LAYER_STYLE_FIELDS[selectedStyle].fields)){
-      if(rule[0]==='range')addRange(fields,names[key],item[key],rule[1],rule[2],value=>{item[key]=value;});
-      else if(rule[0]==='color')addColor(fields,names[key],item[key],value=>{item[key]=value;});
-      else {
-        const row=document.createElement('label');row.className='blending-field';
-        const caption=document.createElement('span');caption.textContent=names[key];
-        const select=document.createElement('select');
-        for(const [value,text] of [['stripes','Полосы'],['dots','Точки'],['checker','Шахматный']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}
-        select.value=item[key];select.addEventListener('change',()=>{item[key]=select.value;preview();});
-        row.append(caption,select);fields.append(row);
-      }
-    }
-  };
-  const addChoice=(key,label)=>{
-    const row=document.createElement('div');row.className='blending-style-row';
-    if(key!=='general'){
-      const toggle=document.createElement('input');toggle.type='checkbox';toggle.checked=draft.styles[key].enabled;toggle.setAttribute('aria-label',`Включить: ${label}`);
-      toggle.addEventListener('change',()=>{draft.styles[key].enabled=toggle.checked;preview();});
-      row.append(toggle);
-    }
-    const button=document.createElement('button');button.type='button';button.className='blending-style-select';button.dataset.style=key;button.textContent=label;
-    button.addEventListener('click',()=>{selectedStyle=key;showFields();});
-    row.append(button);list.append(row);
-  };
-  addChoice('general','Общие параметры');
-  for(const [key,spec] of Object.entries(LAYER_STYLE_FIELDS))addChoice(key,spec.label);
-  showFields();
-  const finish=(apply=false)=>{
-    if(closed)return;
-    closed=true;
-    modal.previewCleanup?.();
-    if(blendingPreview?.canvas===previewCanvas)blendingPreview=null;
-    const valid=stillCurrent();
-    const styleChanged=JSON.stringify(draft.styles)!==JSON.stringify(originalStyles);
-    const changed=valid && (draft.blendMode!==original.blendMode || draft.opacity!==Math.round(original.opacity*100) || styleChanged);
-    els.modalRoot.replaceChildren();
-    if(valid){
-      if(apply && changed){
-        layer.blendMode=draft.blendMode;layer.opacity=draft.opacity/100;
-        layer.styles=styleChanged || original.styles ? sanitizeLayerStyles(draft.styles) : null;
-        commit('Параметры наложения слоя');
-      } else assign(false);
-    }
-    if(previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
-    setStatus(apply && changed ? 'Параметры наложения применены' : 'Параметры наложения без изменений');
-  };
-  previewToggle.addEventListener('change',preview);
-  modal.querySelector('[data-cancel]').onclick=()=>finish();
-  back.addEventListener('mousedown',e=>{if(e.target===back)finish();});
-  modal.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();finish();}});
-  modal.addEventListener('submit',e=>{e.preventDefault();finish(true);});
-  back.append(modal);els.modalRoot.replaceChildren(back);
-  makeModalDraggable(modal);
-  blendingPreview={document:owner,layer,canvas:previewCanvas,crop:blendingPreviewCrop(owner,layer)};
-  const previewObserver=typeof ResizeObserver==='function' ? new ResizeObserver(syncBlendingPreviewCanvas) : null;
-  previewObserver?.observe(previewCanvas);
-  const priorCleanup=modal.previewCleanup;
-  modal.previewCleanup=()=>{previewObserver?.disconnect();priorCleanup?.();};
-  syncBlendingPreviewCanvas();
-  list.querySelector('button')?.focus();
 }
 function layerContextMenu(id) {
   const owner=doc;
