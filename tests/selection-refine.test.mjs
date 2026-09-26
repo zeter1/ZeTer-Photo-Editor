@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { refineMaskAlpha, refineMaskEdgeAware, composeMaskPreviewRgba } from '../src/core/pixels.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const maskController = await readFile(new URL('../src/selection/mask-controller.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 const mask = (width,height,points) => {
@@ -123,45 +124,44 @@ test('Select & Mask preview compositor supports mask, overlay, black and white v
   assert.deepEqual([...overlay.slice(4,8)],[255,0,0,255]);
 });
 
-test('Select & Mask Stage 9a is wired to layer masks with bounded processing',()=>{
-  assert.match(main,/refineMaskAlpha/);
-  assert.match(main,/async function refineSelectionToLayerMask\(\)/);
-  assert.match(main,/Уточнить выделение → маска/);
-  assert.match(main,/pixels>12_000_000/);
-  assert.match(main,/selectionMaskDataUrl\(layer,options\)/);
+test('Select & Mask Stage 9a is routed through the canonical raster-mask controller',()=>{
+  assert.match(main,/createSelectionMaskController/);
+  assert.match(maskController,/refineMaskAlpha/);
+  assert.match(maskController,/async function refineSelectionToLayerMask\(\)/);
+  assert.match(maskController,/Уточнить выделение → маска/);
+  assert.match(maskController,/pixels\s*>\s*12_000_000/);
+  assert.match(maskController,/selectionMaskDataUrlForOwner\(layer, options/);
 });
 
-
-test('Select & Mask Stage 9b provides a non-destructive live mask preview',()=>{
-  assert.match(main,/function selectionRefineOptionsFromValues\(/);
-  assert.match(main,/function buildSelectionRefinePreviewSource\(/);
-  assert.match(main,/function attachSelectionRefinePreview\(/);
-  assert.match(main,/onMount:\(\{modal,body\}\)=>\{void attachSelectionRefinePreview\(modal,body,layer,scale\)/);
-  assert.match(main,/requestAnimationFrame\(renderPreview\)/);
-  assert.match(main,/document changed only after application|документ изменится только после применения/i);
-  assert.match(main,/const replacing=Boolean\(layer\.mask\)/);
+test('Select & Mask Stage 9b keeps non-destructive preview lifecycle in the canonical owner',()=>{
+  assert.match(maskController,/function selectionRefineOptionsFromValues\(/);
+  assert.match(maskController,/async function buildSelectionRefinePreviewSource\(/);
+  assert.match(maskController,/async function attachSelectionRefinePreview\(/);
+  assert.match(maskController,/const previewOwners = new WeakMap\(\)/);
+  assert.match(maskController,/modal\.previewCleanup = \(\) =>/);
+  assert.match(maskController,/requestFrame\(renderPreview\)/);
+  assert.match(maskController,/документ изменится только после применения/i);
+  assert.match(maskController,/const replacing = Boolean\(layer\.mask\)/);
   assert.match(styles,/\.selection-refine-preview/);
   assert.match(styles,/\.selection-refine-modal/);
 });
 
-
-test('Select & Mask Stage 9c adds edge detection radius and smart radius to preview and final masks',()=>{
-  assert.match(main,/async function selectionRefineSourceRgba\(/);
-  assert.match(main,/sourceRgba=detectionRadius>0\?await selectionRefineSourceRgba/);
-  assert.match(main,/sourceRgba:source\.sourceRgba/);
-  assert.match(main,/name:'edgeRadius'/);
-  assert.match(main,/name:'edgeStrength'/);
-  assert.match(main,/name:'smartRadius'/);
-  assert.match(main,/pixels\*Math\.max\(1,detectionRadius\)>48_000_000/);
+test('Select & Mask Stage 9c keeps bounded edge-aware refinement in the canonical owner',()=>{
+  assert.match(maskController,/async function selectionRefineSourceRgba\(/);
+  assert.match(maskController,/detectionRadius > 0/);
+  assert.match(maskController,/sourceRgba/);
+  assert.match(maskController,/name:'edgeRadius'/);
+  assert.match(maskController,/name:'edgeStrength'/);
+  assert.match(maskController,/name:'smartRadius'/);
+  assert.match(maskController,/pixels \* Math\.max\(1, detectionRadius\) > 48_000_000/);
 });
 
-
 test('Select & Mask Stage 9d exposes professional preview modes without mutating output settings',()=>{
-  assert.match(main,/name:'viewMode'/);
-  assert.match(main,/Чёрно-белая маска/);
-  assert.match(main,/Наложение/);
-  assert.match(main,/На чёрном/);
-  assert.match(main,/На белом/);
-  assert.match(main,/composeMaskPreviewRgba\(source\.sourceRgba,alpha/);
-  assert.match(main,/mode:values\.viewMode\|\|'mask'/);
+  assert.match(maskController,/name:'viewMode'/);
+  assert.match(maskController,/Чёрно-белая маска/);
+  assert.match(maskController,/Наложение/);
+  assert.match(maskController,/На чёрном/);
+  assert.match(maskController,/На белом/);
+  assert.match(maskController,/composeMaskPreviewRgba\(/);
+  assert.match(maskController,/mode:values\.viewMode \|\| 'mask'/);
 });
