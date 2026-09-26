@@ -5,7 +5,7 @@
 ### 2026-09-26 — PSD import semantics owner extraction
 
 - Refactor: Photoshop import-specific Text, solid Shape, Adjustment and Smart Object metadata mapping plus editable embedded-asset decoding moved from the large `src/main.js` into `src/document/psd-import-semantics.js`.
-- Architecture: `src/document/psd-import-controller.js` remains the transaction/publish owner; binary codec stays in `src/formats/psd.js`. Shared vector-mask localization and opaque Photoshop resource conversion deliberately remain outside the new module and enter as explicit ports instead of creating duplicate owners.
+- Architecture: `src/document/psd-import-controller.js` remains the transaction/publish owner; binary codec stays in `src/formats/psd.js`. Shared vector-mask localization, opaque Photoshop resource conversion and Smart Object fingerprint helpers deliberately remain outside the new module and enter as explicit ports instead of creating duplicate owners or an import→export-plan dependency.
 - Behavior preservation: TySh/EngineData baselines, shape eligibility/style metadata, adjustment normalization/channel bounds, Smart Object fingerprints and embedded PNG/JPEG/WebP/GIF/BMP/PSD/PSB editable-content fallbacks keep their existing import contracts.
 - Tests/docs: direct semantics regressions cover supported/unsupported shape mapping, immutable metadata baselines, Smart Object identity, raster embedded assets, failure fallback and bounded nested-PSD decode; architecture/source contracts and AI navigation now follow the canonical owner.
 
