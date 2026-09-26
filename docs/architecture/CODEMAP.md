@@ -40,6 +40,11 @@ Owns editor-shell layout state that is independent of document contents: persist
 ### `paths-controller.js`
 Owns Saved Paths UI/state orchestration: selected path index, bounded Photoshop path-resource allocation, save/rename/duplicate/delete actions, accessible list/keyboard/context-menu wiring and applying a saved path as a vector mask through grouped explicit ports. The document model remains in core, Pen direct-edit geometry/transient edit index remains in `src/main.js`, and PSD/PSB binary semantics remain in `src/formats/psd.js`.
 
+### `color-management-controller.js`
+Owns document-facing CMYK/ICC orchestration: preview/edit transform caches and invalidation, color-policy/profile transactions, asynchronous native-CMYK preview rebuild with active-document rollback, ICC profile load/remove actions and properties-panel control bindings. It receives state/color/pixel/IO/render/UI capabilities through explicit ports.
+
+It deliberately does **not** own ICC parser/transform math (`src/core/color-management.js`), PixelBuffer math, the canonical document schema, or PSD/PSB binary resources (`src/formats/psd.js`). `src/main.js` keeps only narrow bridges needed by painting and PSD import preview.
+
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 
 ## Painting boundary — `src/painting/`
