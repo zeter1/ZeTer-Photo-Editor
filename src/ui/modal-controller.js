@@ -18,7 +18,7 @@ export function normalizeNumberInput(input) {
   input.value=String(value);
 }
 
-export function createRapidRightClickTracker({ thresholdMs = 360 } = {}) {
+export function createRapidDoubleClickTracker({ thresholdMs = 360 } = {}) {
   const threshold = Math.min(1000, Math.max(100, Number(thresholdMs) || 360));
   let previousKey = '';
   let previousAt = -Infinity;
@@ -240,7 +240,7 @@ export function createModalController({
 
       const list = documentTarget.createElement('div'); list.className = 'recovery-project-list'; list.setAttribute('role', 'list');
       const rows = [];
-      const rapidRightClick = createRapidRightClickTracker();
+      const rapidDoubleClick = createRapidDoubleClickTracker();
       function entryTitle(entry) {
         const docs = entry.record?.documents || [];
         return docs[entry.record?.activeIndex]?.docName || docs[0]?.docName || 'Повреждённая автокопия';
@@ -270,19 +270,18 @@ export function createModalController({
           warning.textContent = entry.canRestore ? `Повреждено: ${entry.invalidCount}` : 'Повреждена'; badges.append(warning);
         }
         row.append(radio, content, badges);
-        row.addEventListener('contextmenu', event => event.preventDefault());
         row.addEventListener('pointerdown', event => {
-          if (event.button !== 2) return;
+          if (event.button !== 0) return;
           radio.checked = true;
           syncSelection();
           if (!entry.canRestore) {
-            rapidRightClick.reset();
+            rapidDoubleClick.reset();
             return;
           }
-          if (!rapidRightClick.register(entry.key, Date.now())) return;
+          if (!rapidDoubleClick.register(entry.key, Date.now())) return;
           event.preventDefault();
           event.stopPropagation();
-          close({ action:'restore', key:entry.key, trigger:'secondary-double-click' });
+          close({ action:'restore', key:entry.key, trigger:'primary-double-click' });
         });
         list.append(row); rows.push({ row, radio, entry });
       });
