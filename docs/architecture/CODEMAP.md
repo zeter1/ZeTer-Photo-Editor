@@ -73,6 +73,11 @@ It does **not** own document/history/global pointer state or the shared raster e
 
 ## Document boundary — `src/document/`
 
+### `smart-object-controller.js`
+Owns generic Smart Object content lifecycle: convert selected layer, linked-copy/unlink, nested-content depth and source bounds, content-tab open/deduplication, save propagation to shared instances, parent/content stale-context guards, dirty/history/recovery publication and preview-cache invalidation.
+
+Stable document/geometry helpers are direct dependencies. Browser preview rendering, workspace session bridges and Photoshop native embedded-resource rewrite are explicit narrow ports. Photoshop PSD/PSB serialization/resource bytes deliberately stay outside this controller so generic ZPE Smart Object behavior remains directly Node-testable.
+
 ### `import-controller.js`
 Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or project persistence; those remain separate runtime/format concerns.
 
