@@ -20,7 +20,7 @@
 - Saved Paths selection/CRUD/panel/context-menu/vector-mask apply orchestration: `src/ui/paths-controller.js`; Pen geometry stays in `src/main.js`, PSD codec in `src/formats/psd.js`.
 - CMYK/ICC policy/profile UI orchestration, preview/edit transform caches and async preview rebuild ownership: `src/ui/color-management-controller.js`; ICC math stays in `src/core/color-management.js`, PSD/PSB codec in `src/formats/psd.js`.
 - Core domain/render/pixel logic + low-level storage primitives: `src/core/`
-- PSD/PSB import transaction and decoded-payload → ZPE mapping: `src/document/psd-import-controller.js`; binary decode stays in `src/formats/psd.js`, effectful publication comes from runtime ports.
+- PSD/PSB import transaction / decoded-payload mapping: `src/document/psd-import-controller.js`; Photoshop Text/Shape/Adjustment/Smart Object import semantics + embedded-asset mapping: `src/document/psd-import-semantics.js`; binary decode stays in `src/formats/psd.js`.
 - PSD/PSB export preparation (layer/group mapping, native high-depth/CMYK eligibility, raster/native payloads, merged composite): `src/document/psd-export-controller.js`
 - Photoshop-native Text/Shape/Adjustment/Smart Object export eligibility + metadata rewrite plans: `src/document/psd-native-metadata-plans.js`
 - PSD/PSB binary codec + Photoshop metadata parsing/writing/rewrite primitives: `src/formats/psd.js`

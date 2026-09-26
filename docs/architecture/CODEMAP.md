@@ -77,7 +77,10 @@ It does **not** own document/history/global pointer state or the shared raster e
 Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or project persistence; those remain separate runtime/format concerns.
 
 ### `psd-import-controller.js`
-Owns the import transaction from a PSD/PSB file to a canonical ZPE document after codec decode: size guard, decoded layer/group/path mapping, native high-depth/CMYK preservation, ICC preview policy, temporary-buffer budgeting, stale document/session checks and publish coordination. Stable core transforms are direct dependencies; binary decode, browser raster encoding, runtime publication and still-local Photoshop import semantics are explicit narrow ports.
+Owns the import transaction from a PSD/PSB file to a canonical ZPE document after codec decode: size guard, decoded layer/group/path mapping, native high-depth/CMYK preservation, ICC preview policy, temporary-buffer budgeting, stale document/session checks and publish coordination. Stable core transforms are direct dependencies; binary decode, browser raster encoding, runtime publication and Photoshop semantics are explicit narrow ports.
+
+### `psd-import-semantics.js`
+Owns Photoshop-specific import interpretation below that transaction: solid-shape eligibility and native baselines, TySh text metadata snapshots, adjustment metadata baselines, Smart Object metadata/fingerprints and editable embedded PNG/JPEG/WebP/GIF/BMP/PSD/PSB content mapping. It imports stable core/domain transforms directly. Effectful codec/browser work plus shared vector-mask localization, opaque-resource conversion and Smart Object fingerprint primitives are explicit ports, so this owner stays directly testable without taking session/history/publication ownership or depending on the export-plan module.
 
 ### `psd-native-metadata-plans.js`
 Owns Photoshop-native export compatibility decisions and bounded metadata rewrites for editable Text/TySh, solid vector Shape, Adjustment and Smart Object records. It imports public rewrite primitives from `src/formats/psd.js`, shared sanitizers from core and contains no browser/UI orchestration.

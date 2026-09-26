@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -28,6 +28,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/retouch/controller.js', root), 'utf8'),
   readFile(new URL('src/document/psd-export-controller.js', root), 'utf8'),
   readFile(new URL('src/document/psd-import-controller.js', root), 'utf8'),
+  readFile(new URL('src/document/psd-import-semantics.js', root), 'utf8'),
   readFile(new URL('src/document/psd-native-metadata-plans.js', root), 'utf8'),
 ]);
 
@@ -245,5 +246,25 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /async function openPsd\(file\)/);
   assert.match(psdImportController, /runtime\.getDocument\(\)!==targetDocument/);
   assert.match(psdImportController, /runtime\.publishDocument\(next,\{label:'Импорт PSD\/PSB'\}\)/);
+  assert.match(main, /from '\.\/document\/psd-import-semantics\.js'/);
+  assert.match(build, /'src\/document\/psd-import-semantics\.js'/);
+  assert.match(psdImportSemantics, /export function createPsdImportSemantics/);
+  assert.match(main, /const psdImportSemantics = createPsdImportSemantics\(\{/);
+  assert.match(main, /semantics: psdImportSemantics/);
+  for (const name of [
+    'canMapPsdSolidShape','importPsdShapeMetadata','importPsdTextMetadata',
+    'importPsdAdjustmentMetadata','psdEmbeddedAssetMime','importPsdNestedDocument',
+    'importPsdEmbeddedAssetDocument','importPsdSmartObjectMetadata',
+  ]) {
+    assert.match(psdImportSemantics, new RegExp(`(?:async\\s+)?function ${name}\\(`));
+    assert.doesNotMatch(main, new RegExp(`(?:async\\s+)?function ${name}\\(`));
+  }
+  assert.match(main, /function importPsdVectorMask\(/);
+  assert.match(main, /function psdOpaqueBlockToState\(/);
+  assert.doesNotMatch(psdImportSemantics, /function importPsdVectorMask\(/);
+  assert.doesNotMatch(psdImportSemantics, /function psdOpaqueBlockToState\(/);
+  assert.doesNotMatch(psdImportSemantics, /psd-native-metadata-plans\.js/);
+  assert.match(main, /previewFingerprint: psdPreviewFingerprint/);
+  assert.match(main, /embeddedDocumentFingerprint: psdEmbeddedDocumentFingerprint/);
 
 });
