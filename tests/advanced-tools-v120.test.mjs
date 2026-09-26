@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const retouch=await readFile(new URL('../src/retouch/controller.js',import.meta.url),'utf8');
 const toolConfig=await readFile(new URL('../src/ui/tool-config.js',import.meta.url),'utf8');
 const html=await readFile(new URL('../index.html',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
@@ -49,9 +50,9 @@ test('selected layer is highlighted on canvas outside move mode with corners and
 });
 
 test('smudge strength, healing source, gradient, edge snapping and wand selection are wired',()=>{
-  assert.match(main,/function applySmudgeDab\(from,to,pointerEvent=null\)/);
+  assert.match(retouch,/function applySmudgeDab\(from, to, pointerEvent = null\)/);
   assert.match(main,/els\.smudgeStrength\?\.value/);
-  assert.match(main,/healing\?'soft-light':'source-over'/);
+  assert.match(retouch,/healing \? 'soft-light' : 'source-over'/);
   assert.match(main,/async function applyGradient\(start,end\)/);
   assert.match(main,/function findMagneticEdgePoint\(point\)/);
   assert.match(main,/function magicWandSelect\(point\)/);

@@ -24,7 +24,7 @@ test('blur brush edits only an existing editable raster layer', () => {
 test('blur brush uses localized buffers and a feathered edge instead of reprocessing the full layer', () => {
   const dab = retouch.match(/function applyBlurDab\(layer, point, pointerEvent = null\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.ok(dab, 'applyBlurDab function not found');
-  assert.match(dab, /ensureBlurScratch\(width, height\)/);
+  assert.match(dab, /ensureBlurScratch\(width,\s*height\)/);
   assert.match(dab, /softenedCtx\.filter\s*=\s*`blur\(\$\{blurRadius\}px\)`/);
   assert.match(dab, /applyBlurBrushPixels\(/);
   assert.match(dab, /imageData\.data,blurredData\.data/);
@@ -34,7 +34,7 @@ test('blur brush uses localized buffers and a feathered edge instead of reproces
 
 test('blur stroke is continuous and history receives a dedicated label', () => {
   assert.match(retouch, /function blurStrokeSegment\(layer, from, to, pointerEvent = null\)/);
-  assert.match(main, /Math\.ceil\(distance \/ spacing\)/);
+  assert.match(retouch, /Math\.ceil\(distance\s*\/\s*spacing\)/);
   assert.match(main, /drag\.tool === 'blur'/);
   assert.match(main, /blur:'Размытие кистью'/);
 });
