@@ -250,7 +250,7 @@ test('new-document submission replaces the document before scheduling recovery r
     setStatus: () => {},
     toast: () => {},
   };
-  runInNewContext(functionSource('async function createNewDialog()', 'function isImageFile(file)')
+  runInNewContext(functionSource('async function createNewDialog()', 'function visibleCanvasCenter()')
     + '\nglobalThis.createNewDialog = createNewDialog;', context);
 
   await context.createNewDialog();
