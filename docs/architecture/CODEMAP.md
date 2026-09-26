@@ -55,6 +55,11 @@ Owns the Blending Options / Layer Styles dialog as one UI transaction: draft ble
 
 It deliberately does **not** own persisted Layer Styles schema/sanitization or pixel effects (`src/core/layer-styles.js` / `src/core/render.js`). Transient preview state is controller-owned, and closing or invalidating the dialog restores the originating exact layer rather than leaving preview values in an inactive document.
 
+### `text-edit-controller.js`
+Owns the Text tool add/edit UI transaction: hit resolution for visible text layers, exact-owner Apply guards, controller-owned transient draft, latest-wins async preview publication, preview canvas/observer lifecycle and narrow render/overlay read APIs. Generic modal construction remains in `modal-controller.js`; the modal shell exposes only generic per-instance mount/close hooks and does not own Text state.
+
+It deliberately does **not** own persisted text-layer schema or render-only projection (`src/core/state.js`), text rasterization/font loading (`src/core/render.js`), PSD text semantics, or shared font discovery/form normalization still used by Properties in `src/main.js`.
+
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 
 ## Painting boundary — `src/painting/`

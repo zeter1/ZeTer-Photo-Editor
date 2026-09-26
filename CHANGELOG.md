@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-26 — Text edit / live-preview controller extraction
+
+- Refactor: Text-tool add/edit modal transaction, visible-text hit routing, transient draft ownership, async live-preview generation and preview-canvas synchronization moved from the large `src/main.js` into `src/ui/text-edit-controller.js`.
+- Reliability: async preview is explicitly latest-wins and revalidates the originating document + exact edit-layer identity after awaited font/settings resolution; final Edit Apply also revalidates the exact selected layer and lock state before mutation.
+- Boundaries: generic `src/ui/modal-controller.js` no longer receives Text-specific preview/close callbacks; reusable per-modal `onMount`/`onClose` lifecycle keeps feature state in its owner while shared text font/form helpers remain outside until their own bounded extraction.
+- Tests/docs: direct controller regressions cover latest-wins/stale/closed preview, exact-selection Apply, locked-target rejection, Add semantics, preview-canvas DPR/zoom alignment and source ownership; AI routing docs and generated file:// bundle graph now point to the canonical Text owner.
+
 ### 2026-09-26 — Layer Blending / Layer Styles controller extraction
 
 - Refactor: Blending Options / Layer Styles dialog construction, draft/live-preview transaction, preview-canvas crop/sync and modal lifecycle moved from the large `src/main.js` into `src/ui/layer-blending-controller.js`.
