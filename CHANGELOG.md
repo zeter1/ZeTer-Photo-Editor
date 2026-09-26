@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-09-26 — Instagram в окне «О программе»
+
+- About UI: карточка разработчика дополнена ссылкой `Instagram: @zeter1992` на `https://www.instagram.com/zeter1992/` с безопасным открытием в новой вкладке.
+- Regression coverage: тест контактов разработчика теперь фиксирует email, Telegram, GitHub, Facebook и Instagram.
+- Cache-busting proof: runtime-изменение создало новый build ID `8820a951ecb14661`, поэтому после корректной выкладки HTTP/HTTPS-версия должна получить обновлённый bundle без `Ctrl+F5`.
+
 ### 2026-09-26 — Facebook в окне «О программе»
 
 - About UI: карточка разработчика дополнена ссылкой `Facebook: @zeter1` на `https://www.facebook.com/zeter1` с безопасным открытием в новой вкладке.
