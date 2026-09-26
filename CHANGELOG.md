@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-26 — Selection raster-mask / Select & Mask controller extraction
+
+- Refactor: selection → raster layer-mask generation, Select & Mask option normalization, edge-aware preparation, non-destructive preview lifecycle and add/remove/final Apply transactions moved from the large `src/main.js` into `src/selection/mask-controller.js`.
+- Reliability fix: final refined Apply and add-from-selection now follow prepare → exact document/layer/lock revalidation → publish, so a tab switch, selected-layer change or lock change during awaited preparation creates neither a stale mask nor a history entry.
+- Preview safety: async preview preparation is bound to the originating document/layer and a per-modal generation token; stale/closed work cannot attach listeners or repaint another modal, and cleanup cancels queued animation work.
+- Boundaries/tests: Smart Filter reuses the canonical `selectionMaskDataUrl()` bridge while retaining its own mutation transaction; direct controller regressions cover dimensions, safety bounds, valid publication, document/layer/lock races and preview cleanup, while legacy Select & Mask source contracts now target the canonical owner.
+
 ### 2026-09-26 — Shared Text typography/font settings controller extraction
 
 - Refactor: shared Text typography/font UI policy moved from the large `src/main.js` into `src/ui/text-settings-controller.js`: option sets, local-font discovery/private registry, custom-font validation/read cache, modal fields and form normalization.
