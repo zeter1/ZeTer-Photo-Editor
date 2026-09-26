@@ -29,6 +29,11 @@ Owns generic modal/dialog mechanics: field rendering, numeric normalization, asy
 
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 
+## Document boundary — `src/document/`
+
+### `import-controller.js`
+Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or project persistence; those remain separate runtime/format concerns.
+
 ## Selection boundary — `src/selection/`
 
 ### `clipboard-controller.js`
