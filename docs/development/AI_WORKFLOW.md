@@ -14,6 +14,8 @@ Read in this order:
 
 Avoid opening all of `src/main.js`, `src/formats/psd.js`, `CHANGELOG.md` or historical docs unless the task truly spans them.
 
+For a multi-pass continuation, read `task/README.md`, then open only the highest-priority task that matches the request. A task file is pending intent, not evidence: current code, logs and CI override it.
+
 ## 2. DIAGNOSE
 
 For bugs, start from observable evidence: failing test, browser error, traceback, exact UI reproduction or corrupted format fixture. Classify the owner before editing.
@@ -21,6 +23,7 @@ For bugs, start from observable evidence: failing test, browser error, traceback
 Useful routing:
 - generic overlay pointer capture / active-pointer ownership / up-cancel-lost-capture → `interaction/pointer-lifecycle-router`
 - tool-specific pointer branches (move/transform/paint/path/crop) → `main` + the relevant domain controller
+- sidebar collapse / canvas-mode shell visibility → `ui/workspace-layout-controller`
 - other DOM/menu/dialog interaction → main + ui
 - document/layer invariant → state
 - clone/heal/smudge/blur/dodge/burn mechanics → retouch/controller + painting/controller state; include painting/gesture-controller when the bug is in stroke begin/move/end routing

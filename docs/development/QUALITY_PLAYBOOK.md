@@ -102,6 +102,8 @@ The current CI intentionally uses read-only contents permission and concurrency 
 
 Keep `AGENTS.md` short and navigational. Put deeper rules in targeted docs and keep code maps current. A future agent should be able to answer “which file owns this?” before opening large source files.
 
+For long refactors, keep a small versioned queue in `task/`: one bounded task per Markdown file with owner, contracts, tests, verification and done gate. Read only one relevant task per pass. The queue records future work, never overrides current code/logs/CI, and completed task files are deleted only after merge plus green CI. This follows the repository-local execution-plan pattern while matching this project’s requested lightweight workflow.
+
 When a new subsystem is extracted:
 - add it to `AGENTS.md` and `PROJECT.md`;
 - add ownership and non-ownership to `CODEMAP.md` / `BOUNDARIES.md`;
@@ -110,7 +112,7 @@ When a new subsystem is extracted:
 
 ## Source checkpoints
 
-- OpenAI, “Harness engineering: leveraging Codex in an agent-first world” (2026-02-11): repository-local knowledge, short `AGENTS.md`, progressive disclosure, mechanically enforced architecture.
+- OpenAI, “Harness engineering: leveraging Codex in an agent-first world” (2026-02-11): repository-local knowledge, short `AGENTS.md`, progressive disclosure, versioned active/completed execution plans, mechanically enforced architecture.
   https://openai.com/index/harness-engineering/
 - Google Engineering Practices, “Small CLs” and code-review guidance: self-contained changes, related tests, design/functionality/test review.
   https://google.github.io/eng-practices/review/developer/small-cls.html

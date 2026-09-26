@@ -16,12 +16,13 @@
 - Fill / raster line / current-layer selection clear commands: `src/painting/command-controller.js`
 - Brush/eraser + retouch stroke gesture lifecycle (begin/move/end): `src/painting/gesture-controller.js`
 - Clone/heal/smudge/blur/dodge/burn mechanics (Canvas8 + high-depth/CMYK): `src/retouch/controller.js`
-- UI config + toolbar/menu/modal controllers/layout: `src/ui/`
+- UI config + toolbar/menu/modal/workspace-layout controllers: `src/ui/`
 - Core domain/render/pixel logic + low-level storage primitives: `src/core/`
 - PSD/PSB format boundary: `src/formats/psd.js`
 - Generated file:// bundle: `src/app.bundle.js` — **не редактировать вручную**
 - Tests: `tests/`
 - Build/smoke tooling: `tools/`
+- Future-pass queue/handoff: `task/README.md` — читай только одну верхнюю релевантную задачу, а не всю очередь.
 
 `src/adapters/psd.js` и `src/core/tool-layout.js` — только compatibility shims. Новую логику туда не добавлять.
 
@@ -32,6 +33,7 @@
 - как работать AI/Codex → `docs/development/AI_WORKFLOW.md`
 - как делать refactor/debug/review/tests с доказательствами → `docs/development/QUALITY_PLAYBOOK.md`
 - какие проверки запускать → `docs/testing/TEST_MATRIX.md`
+- что делать в следующей небольшой проходке → `task/README.md`
 - подробная историческая инженерная летопись → `docs/reference/PROJECT_HISTORY.md`
 
 ## Обязательные инварианты

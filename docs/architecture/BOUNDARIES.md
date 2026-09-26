@@ -30,6 +30,8 @@ browser primitives (Canvas, Worker, storage, File APIs)
 ### UI
 - `src/ui/tool-config.js`: pure configuration only.
 - `src/ui/tool-layout.js`: pure layout/order math only.
+- `src/ui/workspace-layout-controller.js` owns only editor-shell layout state: sidebar collapse persistence/migration plus canvas-mode chrome visibility and viewport-center preservation.
+- The layout controller receives DOM/runtime geometry through explicit ports and must not own document/layer/history/tool state; do not recreate `collapsedPanelIds`, `panelsVisible` or its layout functions in `src/main.js`.
 - DOM mutation and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API. Generic overlay pointer lifecycle is the explicit exception owned by `src/interaction/pointer-lifecycle-router.js`.
 - UI modules must not become alternate owners of document/layer domain state.
 
