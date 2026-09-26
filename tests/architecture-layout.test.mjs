@@ -263,5 +263,8 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /function psdOpaqueBlockToState\(/);
   assert.doesNotMatch(psdImportSemantics, /function importPsdVectorMask\(/);
   assert.doesNotMatch(psdImportSemantics, /function psdOpaqueBlockToState\(/);
+  assert.doesNotMatch(psdImportSemantics, /psd-native-metadata-plans\.js/);
+  assert.match(main, /previewFingerprint: psdPreviewFingerprint/);
+  assert.match(main, /embeddedDocumentFingerprint: psdEmbeddedDocumentFingerprint/);
 
 });
