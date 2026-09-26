@@ -8235,6 +8235,263 @@ function createPaintGestureController({
   return { begin, move, end };
 }
 
+// ---- src/selection/raster-mutation-controller.js ----
+function createSelectionRasterMutationController({
+  rasterEdit,
+  state,
+  selection,
+  ui,
+  documentRef = globalThis.document,
+  operations = {},
+} = {}) {
+  if (!rasterEdit) throw new TypeError('rasterEdit is required');
+  if (
+    typeof state?.getDocument !== 'function' ||
+    typeof state?.getActiveSessionId !== 'function' ||
+    typeof state?.getSelectedLayer !== 'function' ||
+    typeof state?.isPersisting !== 'function' ||
+    typeof state?.beginPersist !== 'function' ||
+    typeof state?.endPersist !== 'function' ||
+    typeof state?.blockPendingDocumentEdit !== 'function'
+  ) {
+    throw new TypeError('selection raster mutation state bridge is required');
+  }
+  if (
+    typeof selection?.hasActive !== 'function' ||
+    typeof selection?.intersectsLayer !== 'function' ||
+    typeof selection?.predicate !== 'function' ||
+    typeof selection?.clipContext !== 'function'
+  ) {
+    throw new TypeError('selection raster mutation selection bridge is required');
+  }
+
+  function currentDocument() {
+    const documentValue = state.getDocument();
+    if (!documentValue) throw new Error('Selection raster mutation controller has no active document');
+    return documentValue;
+  }
+
+  function status(message) {
+    ui?.setStatus?.(message);
+  }
+
+  function beginPersist() {
+    if (state.beginPersist()) return true;
+    status('Сохраняется предыдущая растровая операция…');
+    return false;
+  }
+
+  async function prepareClearedHighDepthMutation(layer) {
+    if (!layer?.highDepthSource) return null;
+    const buffer = rasterEdit.editableHighDepthBuffer(layer, { requireAlpha:true });
+    if (!buffer) return null;
+    const cleared = clearPixelBufferPixels(buffer, { isAllowed:selection.predicate(layer) });
+    if (!cleared) return { cleared:0, mutation:null };
+    return {
+      cleared,
+      mutation:await rasterEdit.prepareHighDepthMutation(layer, buffer),
+    };
+  }
+
+  async function prepareClearedRasterDataUrl(layer) {
+    if (!documentRef?.createElement) throw new Error('Canvas document is unavailable');
+    const size = checkedCanvasSize(layer.width, layer.height, 'Растровый слой «' + (layer.name || 'Без имени') + '»');
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext('2d', { alpha:true });
+    if (!rasterEdit.drawHighDepthRasterBase(layer, canvas, context) && layer.dataUrl) {
+      const image = await getImage(layer.dataUrl);
+      if (image) context.drawImage(image, 0, 0, size.width, size.height);
+    }
+    context.save();
+    selection.clipContext(context, layer);
+    context.clearRect(0, 0, size.width, size.height);
+    context.restore();
+    return canvasToDataURL(canvas, 'image/png');
+  }
+
+  async function rasterizeLayerForPixelEditing(layer, { suffixName = true } = {}) {
+    if (!layer) return null;
+    if (layer.type === 'adjustment') {
+      throw new Error('Корректирующий слой нельзя растрировать отдельно от результата нижележащего стека');
+    }
+    if (layer.type === 'raster') return layer;
+    if (!documentRef?.createElement) throw new Error('Canvas document is unavailable');
+
+    const scale = Math.max(Math.abs(Number(layer.scaleX) || 1), Math.abs(Number(layer.scaleY) || 1));
+    const blur = Math.max(0, Number(layer.filters?.blur) || 0) * scale * 3;
+    const stroke = layer.type === 'shape' ? Math.max(0, Number(layer.strokeWidth) || 0) * scale / 2 : 0;
+    const bounds = frameBounds(layer, Math.ceil(blur + stroke + layerStyleOutset(layer.styles) * scale + 2));
+    const x = Math.floor(bounds.x);
+    const y = Math.floor(bounds.y);
+    const width = Math.max(1, Math.ceil(bounds.x + bounds.width) - x);
+    const height = Math.max(1, Math.ceil(bounds.y + bounds.height) - y);
+    checkedCanvasSize(width, height, 'Растеризация слоя «' + (layer.name || 'Без имени') + '»');
+
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { alpha:true });
+    context.translate(-x, -y);
+    const baked = structuredClone(layer);
+    baked.opacity = 1;
+    baked.blendMode = 'source-over';
+    await renderLayer(context, baked);
+
+    return createRasterLayer({
+      id:layer.id,
+      name:suffixName ? layer.name + ' — растр' : layer.name,
+      visible:layer.visible,
+      locked:false,
+      opacity:layer.opacity,
+      blendMode:layer.blendMode,
+      groupId:layer.groupId ?? null,
+      x,
+      y,
+      width,
+      height,
+      dataUrl:await canvasToDataURL(canvas, 'image/png'),
+    });
+  }
+
+  const rasterizeLayer = operations.rasterizeLayerForPixelEditing || rasterizeLayerForPixelEditing;
+  const prepareRasterDataUrl = operations.prepareClearedRasterDataUrl || prepareClearedRasterDataUrl;
+  const prepareHighDepthMutation = operations.prepareClearedHighDepthMutation || prepareClearedHighDepthMutation;
+
+  async function clearAcrossVisibleLayers({ historyLabel = 'Вырезать выделение' } = {}) {
+    if (!selection.hasActive()) return { cleared:0, locked:0, rasterized:0 };
+    if (state.isPersisting()) {
+      status('Сохраняется предыдущая растровая операция…');
+      return null;
+    }
+
+    const documentValue = currentDocument();
+    const targetSessionId = state.getActiveSessionId();
+    const intersecting = documentValue.layers.filter(
+      layer => isLayerVisible(documentValue, layer) && selection.intersectsLayer(layer),
+    );
+    const pixelTargets = intersecting.filter(layer => layer.type !== 'adjustment');
+    const targets = pixelTargets.filter(layer => !isLayerLocked(documentValue, layer));
+    const locked = pixelTargets.length - targets.length;
+    if (!targets.length) return { cleared:0, locked, rasterized:0 };
+    if (!beginPersist()) return null;
+
+    try {
+      const prepared = [];
+      let rasterized = 0;
+      for (const layer of targets) {
+        const working = layer.type === 'raster' ? layer : await rasterizeLayer(layer);
+        if (!working) throw new Error('Не удалось подготовить слой к очистке');
+        if (layer.type !== 'raster') rasterized += 1;
+        if (layer.type === 'raster' && working.highDepthSource) {
+          const highDepth = await prepareHighDepthMutation(working);
+          if (highDepth?.mutation) {
+            prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
+            continue;
+          }
+        }
+        prepared.push({ layer, working, dataUrl:await prepareRasterDataUrl(working), highDepthMutation:null });
+      }
+
+      if (state.getDocument() !== documentValue || state.getActiveSessionId() !== targetSessionId) {
+        status('Очистка выделения отменена: активный документ изменился');
+        return null;
+      }
+
+      for (const { layer, working, dataUrl, highDepthMutation } of prepared) {
+        const index = documentValue.layers.findIndex(item => item.id === layer.id);
+        if (index < 0) continue;
+        if (layer.type === 'raster') {
+          if (highDepthMutation) {
+            rasterEdit.applyHighDepthMutation(layer, highDepthMutation);
+            continue;
+          }
+          const oldDataUrl = layer.dataUrl;
+          layer.dataUrl = dataUrl;
+          layer.highDepthSource = null;
+          layer.highDepthPreview = null;
+          invalidateImageCache(oldDataUrl);
+        } else {
+          working.dataUrl = dataUrl;
+          documentValue.layers.splice(index, 1, working);
+        }
+      }
+
+      rasterEdit.clearBrushBuffer();
+      ui?.commit?.(historyLabel);
+      return { cleared:prepared.length, locked, rasterized };
+    } catch (error) {
+      console.error(error);
+      rasterEdit.clearBrushBuffer();
+      ui?.render?.();
+      status('Ошибка вырезания со всех слоёв: ' + error.message);
+      ui?.toast?.('Не удалось очистить выделение на всех слоях', 'error');
+      return null;
+    } finally {
+      state.endPersist();
+    }
+  }
+
+  async function rasterizeSelectedLayer() {
+    if (state.blockPendingDocumentEdit()) return false;
+    const layer = state.getSelectedLayer();
+    if (!layer) return false;
+
+    const documentValue = currentDocument();
+    if (isLayerLocked(documentValue, layer)) {
+      status('Слой или его группа заблокированы');
+      return false;
+    }
+    if (layer.type === 'raster') {
+      status('Слой уже растровый');
+      return false;
+    }
+    if (layer.type === 'adjustment') {
+      status('Корректирующий слой нельзя растрировать отдельно');
+      return false;
+    }
+
+    const targetSessionId = state.getActiveSessionId();
+    const originalLayer = JSON.stringify(layer);
+    if (!beginPersist()) return false;
+    status('Растеризация слоя…');
+
+    try {
+      const raster = await rasterizeLayer(layer);
+      const activeDocument = state.getDocument();
+      const index = activeDocument?.layers?.indexOf(layer) ?? -1;
+      if (
+        activeDocument !== documentValue ||
+        state.getActiveSessionId() !== targetSessionId ||
+        index < 0 ||
+        state.getSelectedLayer() !== layer ||
+        isLayerLocked(activeDocument, layer) ||
+        JSON.stringify(layer) !== originalLayer
+      ) {
+        status('Растеризация отменена: документ или слой изменился');
+        return false;
+      }
+
+      activeDocument.layers.splice(index, 1, raster);
+      activeDocument.selectedLayerId = raster.id;
+      rasterEdit.clearBrushBuffer();
+      ui?.commit?.('Растеризовать слой');
+      status('Слой растрирован: ' + raster.width + ' × ' + raster.height);
+      return true;
+    } catch (error) {
+      console.error(error);
+      status('Ошибка растеризации: ' + error.message);
+      ui?.toast?.('Не удалось растрировать слой', 'error');
+      return false;
+    } finally {
+      state.endPersist();
+    }
+  }
+
+  return { clearAcrossVisibleLayers, rasterizeSelectedLayer };
+}
+
 // ---- src/selection/clipboard-controller.js ----
 function canvasToPngBlob(canvas) {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));
@@ -11937,6 +12194,35 @@ const {
   fillAt: fillAtPoint,
   clearSelection: clearSelectedPixels,
 } = rasterCommands;
+
+const selectionRasterMutations = createSelectionRasterMutationController({
+  rasterEdit,
+  state: {
+    getDocument: () => doc,
+    getActiveSessionId: () => activeSessionId,
+    getSelectedLayer: selected,
+    isPersisting: () => paintPersisting,
+    beginPersist: () => {
+      if (paintPersisting) return false;
+      paintPersisting = true;
+      return true;
+    },
+    endPersist: () => { paintPersisting = false; },
+    blockPendingDocumentEdit,
+  },
+  selection: {
+    hasActive: () => Boolean(selectionRect),
+    intersectsLayer: selectionIntersectsLayer,
+    predicate: rasterSelectionPredicate,
+    clipContext: clipContextToSelection,
+  },
+  ui: { setStatus, toast, render, commit },
+  documentRef: document,
+});
+const {
+  clearAcrossVisibleLayers: clearSelectionAcrossVisibleLayers,
+  rasterizeSelectedLayer,
+} = selectionRasterMutations;
 
 const toolbarController = createToolbarController({
   toolbar: els.toolbar,
@@ -16037,105 +16323,6 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
 
 async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — RGB/CMYK слои 8/16/32-bit'],['psb','PSB — RGB/CMYK Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
 
-async function prepareClearedHighDepthMutation(layer){
-  if(!layer?.highDepthSource)return null;
-  const buffer=rasterEdit.editableHighDepthBuffer(layer,{requireAlpha:true});
-  if(!buffer)return null;
-  const cleared=clearPixelBufferPixels(buffer,{isAllowed:rasterSelectionPredicate(layer)});
-  if(!cleared)return {cleared:0,mutation:null};
-  return {cleared,mutation:await rasterEdit.prepareHighDepthMutation(layer,buffer)};
-}
-
-async function prepareClearedRasterDataUrl(layer) {
-  const size=checkedCanvasSize(layer.width,layer.height,`Растровый слой «${layer.name||'Без имени'}»`);
-  const canvas=document.createElement('canvas');
-  canvas.width=size.width;canvas.height=size.height;
-  const ctx=canvas.getContext('2d',{alpha:true});
-  if(!rasterEdit.drawHighDepthRasterBase(layer,canvas,ctx)&&layer.dataUrl){
-    const image=await getImage(layer.dataUrl);
-    if(image)ctx.drawImage(image,0,0,size.width,size.height);
-  }
-  ctx.save();
-  clipContextToSelection(ctx,layer);
-  ctx.clearRect(0,0,size.width,size.height);
-  ctx.restore();
-  return canvasToDataURL(canvas,'image/png');
-}
-
-async function rasterizeLayerForPixelEditing(layer,{suffixName=true}={}) {
-  if(!layer)return null;
-  if(layer.type==='adjustment')throw new Error('Корректирующий слой нельзя растрировать отдельно от результата нижележащего стека');
-  if(layer.type==='raster')return layer;
-  const scale=Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1));
-  const blur=Math.max(0,Number(layer.filters?.blur)||0) * scale * 3;
-  const stroke=layer.type==='shape' ? Math.max(0,Number(layer.strokeWidth)||0) * scale / 2 : 0;
-  const bounds=frameBounds(layer,Math.ceil(blur+stroke+layerStyleOutset(layer.styles)*scale+2));
-  const x=Math.floor(bounds.x), y=Math.floor(bounds.y);
-  const width=Math.max(1,Math.ceil(bounds.x+bounds.width)-x), height=Math.max(1,Math.ceil(bounds.y+bounds.height)-y);
-  checkedCanvasSize(width,height,`Растеризация слоя «${layer.name||'Без имени'}»`);
-  const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
-  const ctx=canvas.getContext('2d',{alpha:true});
-  ctx.translate(-x,-y);
-  const baked=structuredClone(layer);baked.opacity=1;baked.blendMode='source-over';
-  await renderLayer(ctx,baked);
-  return createRasterLayer({
-    id:layer.id,name:suffixName?`${layer.name} — растр`:layer.name,visible:layer.visible,locked:false,
-    opacity:layer.opacity,blendMode:layer.blendMode,groupId:layer.groupId??null,
-    x,y,width,height,dataUrl:await canvasToDataURL(canvas,'image/png')
-  });
-}
-
-async function clearSelectionAcrossVisibleLayers({ historyLabel = 'Вырезать выделение' } = {}) {
-  if(!selectionRect)return {cleared:0,locked:0,rasterized:0};
-  if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return null;}
-  const intersecting=doc.layers.filter(layer=>isLayerVisible(doc,layer)&&selectionIntersectsLayer(layer));
-  const pixelTargets=intersecting.filter(layer=>layer.type!=='adjustment');
-  const targets=pixelTargets.filter(layer=>!isLayerLocked(doc,layer));
-  const locked=pixelTargets.length-targets.length;
-  if(!targets.length)return {cleared:0,locked,rasterized:0};
-  paintPersisting=true;
-  try {
-    const prepared=[];
-    let rasterized=0;
-    for(const layer of targets){
-      const working=layer.type==='raster' ? layer : await rasterizeLayerForPixelEditing(layer);
-      if(layer.type!=='raster')rasterized+=1;
-      if(layer.type==='raster'&&working.highDepthSource){
-        const highDepth=await prepareClearedHighDepthMutation(working);
-        if(highDepth?.mutation){prepared.push({layer,working,dataUrl:highDepth.mutation.dataUrl,highDepthMutation:highDepth.mutation});continue;}
-      }
-      prepared.push({layer,working,dataUrl:await prepareClearedRasterDataUrl(working),highDepthMutation:null});
-    }
-    for(const {layer,working,dataUrl,highDepthMutation} of prepared){
-      const index=doc.layers.findIndex(item=>item.id===layer.id);
-      if(index<0)continue;
-      if(layer.type==='raster'){
-        if(highDepthMutation){rasterEdit.applyHighDepthMutation(layer,highDepthMutation);continue;}
-        const old=layer.dataUrl;
-        layer.dataUrl=dataUrl;
-        layer.highDepthSource=null;
-        layer.highDepthPreview=null;
-        invalidateImageCache(old);
-      }else{
-        working.dataUrl=dataUrl;
-        doc.layers.splice(index,1,working);
-      }
-    }
-    rasterEdit.clearBrushBuffer();
-    commit(historyLabel);
-    return {cleared:prepared.length,locked,rasterized};
-  } catch(error) {
-    console.error(error);
-    rasterEdit.clearBrushBuffer();
-    render();
-    setStatus(`Ошибка вырезания со всех слоёв: ${error.message}`);
-    toast('Не удалось очистить выделение на всех слоях','error');
-    return null;
-  } finally {
-    paintPersisting=false;
-  }
-}
-
 function toggleSelectedVisibility() {
   const l=selected(); if(!l)return;
   l.visible=!l.visible; commit(l.visible?'Показать слой':'Скрыть слой');
@@ -17253,35 +17440,6 @@ function removeSelectedLayerMask(){
   const layer=selected();
   if(!layer?.mask||isLayerLocked(doc,layer))return;
   layer.mask=null;commit('Удалить маску слоя');setStatus('Маска слоя удалена');
-}
-async function rasterizeSelectedLayer(){
-  if(blockPendingDocumentEdit())return;
-  const layer=selected();
-  if(!layer)return;
-  if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}
-  if(layer.type==='raster'){setStatus('Слой уже растровый');return;}
-  if(layer.type==='adjustment'){setStatus('Корректирующий слой нельзя растрировать отдельно');return;}
-  const targetDocument=doc;
-  const targetSessionId=activeSessionId;
-  const originalLayer=JSON.stringify(layer);
-  paintPersisting=true;
-  setStatus('Растеризация слоя…');
-  try{
-    const raster=await rasterizeLayerForPixelEditing(layer);
-    const index=doc.layers.indexOf(layer);
-    if(doc!==targetDocument||activeSessionId!==targetSessionId||index<0||
-      selected()!==layer||isLayerLocked(doc,layer)||JSON.stringify(layer)!==originalLayer){
-      setStatus('Растеризация отменена: документ или слой изменился');
-      return;
-    }
-    doc.layers.splice(index,1,raster);doc.selectedLayerId=raster.id;
-    rasterEdit.clearBrushBuffer();commit('Растеризовать слой');
-    setStatus(`Слой растрирован: ${raster.width} × ${raster.height}`);
-  }catch(error){
-    console.error(error);setStatus(`Ошибка растеризации: ${error.message}`);toast('Не удалось растрировать слой','error');
-  }finally{
-    paintPersisting=false;
-  }
 }
 function resizeImageDialog(){
   if(blockPendingDocumentEdit())return;

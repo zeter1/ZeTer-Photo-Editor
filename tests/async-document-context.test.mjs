@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { createSelectionClipboardController } from '../src/selection/clipboard-controller.js';
+import { createSelectionRasterMutationController } from '../src/selection/raster-mutation-controller.js';
 import { createDocumentImportController } from '../src/document/import-controller.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
@@ -82,69 +83,68 @@ test('an image still imports into its original active document', async () => {
   assert.deepEqual(commits,['Импорт изображения']);
 });
 
+function rasterMutationHarness({ state, rasterizeLayerForPixelEditing, commits }) {
+  let persisting = false;
+  const controller = createSelectionRasterMutationController({
+    rasterEdit:{ clearBrushBuffer:() => {} },
+    state:{
+      getDocument:() => state.doc,
+      getActiveSessionId:() => state.activeSessionId,
+      getSelectedLayer:() => state.doc.layers.find(layer => layer.id === state.doc.selectedLayerId) || null,
+      isPersisting:() => persisting,
+      beginPersist:() => {
+        if (persisting) return false;
+        persisting = true;
+        return true;
+      },
+      endPersist:() => { persisting = false; },
+      blockPendingDocumentEdit:() => false,
+    },
+    selection:{ hasActive:() => false, intersectsLayer:() => false, predicate:() => null, clipContext:() => {} },
+    ui:{ setStatus:() => {}, toast:() => {}, render:() => {}, commit:label => commits.push(label) },
+    operations:{ rasterizeLayerForPixelEditing },
+  });
+  return { controller, isPersisting:() => persisting };
+}
+
 test('late rasterization cannot replace the last layer of another tab', async () => {
   const rasterizing = deferred();
-  const sourceLayer = { id: 'source', type: 'text', name: 'Текст' };
-  const otherLayer = { id: 'other', type: 'raster', name: 'Другой слой' };
-  const original = { layers: [sourceLayer], selectedLayerId: 'source' };
-  const other = { layers: [otherLayer], selectedLayerId: 'other' };
+  const sourceLayer = { id:'source', type:'text', name:'Текст' };
+  const otherLayer = { id:'other', type:'raster', name:'Другой слой' };
+  const original = { layers:[sourceLayer], groups:[], selectedLayerId:'source' };
+  const other = { layers:[otherLayer], groups:[], selectedLayerId:'other' };
+  const state = { doc:original, activeSessionId:'first' };
   const commits = [];
-  const context = {
-    doc: original,
-    activeSessionId: 'first',
-    selected: () => context.doc.layers.find(layer => layer.id === context.doc.selectedLayerId),
-    isLayerLocked: () => false,
-    rasterizeLayerForPixelEditing: () => rasterizing.promise,
-    blockPendingDocumentEdit: () => false,
-    setStatus: () => {},
-    toast: () => {},
-    commit: label => commits.push(label),
-    console,
-    rasterEdit: { clearBrushBuffer: () => {} },
-    paintPersisting: false,
-  };
-  runInNewContext(functionSource('async function rasterizeSelectedLayer()', 'function resizeImageDialog()')
-    + '\nglobalThis.rasterizeSelectedLayer = rasterizeSelectedLayer;', context);
+  const harness = rasterMutationHarness({ state, rasterizeLayerForPixelEditing:() => rasterizing.promise, commits });
 
-  const operation = context.rasterizeSelectedLayer();
-  context.doc = other;
-  context.activeSessionId = 'second';
-  rasterizing.resolve({ id: 'source', type: 'raster', name: 'Текст — растр' });
+  const operation = harness.controller.rasterizeSelectedLayer();
+  state.doc = other;
+  state.activeSessionId = 'second';
+  rasterizing.resolve({ id:'source', type:'raster', name:'Текст — растр', width:20, height:30 });
   await operation;
+
   assert.equal(original.layers[0], sourceLayer);
   assert.equal(other.layers[0], otherLayer);
   assert.deepEqual(commits, []);
+  assert.equal(harness.isPersisting(), false);
 });
 
 test('rasterization finishes on the selected layer and releases the edit guard', async () => {
   const rasterizing = deferred();
-  const sourceLayer = { id: 'source', type: 'text', name: 'Текст' };
-  const rasterLayer = { id: 'source', type: 'raster', name: 'Текст — растр', width: 20, height: 30 };
-  const documentValue = { layers: [sourceLayer], selectedLayerId: 'source' };
+  const sourceLayer = { id:'source', type:'text', name:'Текст' };
+  const rasterLayer = { id:'source', type:'raster', name:'Текст — растр', width:20, height:30 };
+  const documentValue = { layers:[sourceLayer], groups:[], selectedLayerId:'source' };
+  const state = { doc:documentValue, activeSessionId:'first' };
   const commits = [];
-  const context = {
-    doc: documentValue,
-    activeSessionId: 'first',
-    selected: () => context.doc.layers.find(layer => layer.id === context.doc.selectedLayerId),
-    isLayerLocked: () => false,
-    rasterizeLayerForPixelEditing: () => rasterizing.promise,
-    blockPendingDocumentEdit: () => false,
-    setStatus: () => {},
-    toast: () => {},
-    commit: label => commits.push(label),
-    console,
-    rasterEdit: { clearBrushBuffer: () => {} },
-    paintPersisting: false,
-  };
-  runInNewContext(functionSource('async function rasterizeSelectedLayer()', 'function resizeImageDialog()')
-    + '\nglobalThis.rasterizeSelectedLayer = rasterizeSelectedLayer;', context);
+  const harness = rasterMutationHarness({ state, rasterizeLayerForPixelEditing:() => rasterizing.promise, commits });
 
-  const operation = context.rasterizeSelectedLayer();
-  assert.equal(context.paintPersisting, true);
+  const operation = harness.controller.rasterizeSelectedLayer();
+  assert.equal(harness.isPersisting(), true);
   rasterizing.resolve(rasterLayer);
-  await operation;
+  assert.equal(await operation, true);
+
   assert.equal(documentValue.layers[0], rasterLayer);
-  assert.equal(context.paintPersisting, false);
+  assert.equal(harness.isPersisting(), false);
   assert.deepEqual(commits, ['Растеризовать слой']);
 });
 

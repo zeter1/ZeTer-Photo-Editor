@@ -11,6 +11,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 | RGBA pixel operations | pixel/retouch tests | visual/runtime when pointer stroke changes |
 | Raster edit state / paint buffer / preview / persistence | `tests/painting-controller.test.mjs`, raster-save-boundary, architecture test | browser smoke when startup/render wiring changes |
 | Fill / raster line / current-layer selection clear commands | `tests/painting-command-controller.test.mjs`, selection-fill-line, high-depth-editing, raster-save-boundary, architecture test | `npm run test:browser` when click/release wiring changes |
+| Merged selection cut / multi-layer clear / selected-layer rasterization | `tests/selection-raster-mutation-controller.test.mjs`, selection-clipboard, async-document-context, high-depth-editing, architecture test | `npm run test:browser` when menu/clipboard/rasterize wiring changes |
 | Brush/eraser/retouch stroke gesture lifecycle | `tests/painting-gesture-controller.test.mjs`, brush-performance, retouch/high-depth tests, architecture test | `npm run test:browser` for pointer wiring |
 | 16/32-bit editing/composite | high-depth-* tests | format round-trip when export changes |
 | ICC/CMYK | color-management, color-profile, compatibility corpus | fixture-based verification |

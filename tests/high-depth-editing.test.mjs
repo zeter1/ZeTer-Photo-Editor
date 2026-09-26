@@ -11,6 +11,7 @@ import {
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
 const commands=await readFile(new URL('../src/painting/command-controller.js',import.meta.url),'utf8');
+const selectionMutations=await readFile(new URL('../src/selection/raster-mutation-controller.js',import.meta.url),'utf8');
 const toolConfig=await readFile(new URL('../src/ui/tool-config.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 
@@ -71,7 +72,7 @@ test('Stage 12d routes brush/eraser gestures and one-shot raster commands throug
   assert.match(commands,/clearPixelBufferPixels\(buffer, \{ isAllowed:selectionPredicate\(layer\) \}\)/);
   assert.match(commands,/applyPixelBufferStrokeSegment\(/);
   assert.match(commands,/rasterEdit\.applyHighDepthMutation\(layer, await rasterEdit\.prepareHighDepthMutation\(layer, buffer\)\)/);
-  assert.match(main,/prepareClearedHighDepthMutation/);
+  assert.match(selectionMutations,/async function prepareClearedHighDepthMutation\(/);
 });
 
 test('Stage 12d paint preview can bypass the legacy RGBA8 adjustment pass after typed rendering',()=>{

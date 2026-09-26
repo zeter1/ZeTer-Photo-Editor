@@ -6,7 +6,7 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: global DOM/pointer/keyboard routing, tool selection, history/transaction coordination and save/export flows. Paint-stroke lifecycle, one-shot raster commands and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics, are delegated to their canonical owners.
+Application orchestrator: global DOM/pointer/keyboard routing, tool selection, history/transaction coordination and save/export flows. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics, are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
@@ -39,7 +39,7 @@ It deliberately does **not** own tool choice, stroke routing, selection semantic
 ### `command-controller.js`
 Owns bounded one-shot raster commands: flood fill, raster line and clearing pixels on the current raster layer inside the active selection. Canvas8 and native RGB/CMYK high-depth paths share the same injected target, selection, tool, transaction and UI ports.
 
-It deliberately does **not** own global pointer events, selection-shape state, history storage or the application-wide pending-edit flag. Multi-layer selection clearing used by merged Clipboard cut remains a separate selection/runtime boundary rather than being folded into this controller.
+It deliberately does **not** own global pointer events, selection-shape state, history storage or the application-wide pending-edit flag. Multi-layer selection clearing used by merged Clipboard cut belongs to `src/selection/raster-mutation-controller.js` rather than this current-layer command controller.
 
 ### `gesture-controller.js`
 Owns the bounded lifecycle of one brush/eraser/retouch stroke: choose existing/new raster target, choose native high-depth/CMYK vs Canvas8 path, initialize per-stroke retouch state, route movement segments and persist on end. Dependencies are grouped ports (`state`, `target`, `selection`, `tools`, `nativePaint`, `ui`) instead of a long flat callback list.
@@ -61,7 +61,10 @@ Owns incoming-file classification and image import orchestration: image/project 
 ## Selection boundary — `src/selection/`
 
 ### `clipboard-controller.js`
-Owns selection copy/cut/paste orchestration: selected-vs-merged PNG preparation, browser Clipboard API, native paste payload handling, shortcut fallback timers/generation and tab-switch guards. It does not own document mutation internals: clearing/rasterization callbacks remain in `src/main.js` and core pixel modules.
+Owns selection copy/cut/paste orchestration: selected-vs-merged PNG preparation, browser Clipboard API, native paste payload handling, shortcut fallback timers/generation and tab-switch guards. It does not own document mutation internals: destructive clearing is delegated to the raster-mutation controller.
+
+### `raster-mutation-controller.js`
+Owns destructive selection-to-layer orchestration: merged cut across visible unlocked pixel layers, prepare-all-before-mutate staging, native high-depth clear publication, non-raster pixel-edit rasterization and the selected-layer rasterize command with document/session stale guards. It does not own selection shape/pointer state or Clipboard APIs.
 
 ## Workspace boundary — `src/workspace/`
 

@@ -7,7 +7,7 @@ import { createRasterCommandController } from '../src/painting/command-controlle
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const boundary = main.slice(main.indexOf('function documentEditPending()'), main.indexOf('function reportRecoveryFailure('));
-const fileCommands = main.slice(main.indexOf('function saveProject()'), main.indexOf('async function prepareClearedHighDepthMutation'));
+const fileCommands = main.slice(main.indexOf('function saveProject()'), main.indexOf('function toggleSelectedVisibility()'));
 const jumpHistory = main.slice(main.indexOf('function jumpToHistory('), main.indexOf('function updateLayerControls('));
 const deleteCommand = main.slice(main.indexOf('function deleteSelected()'), main.indexOf('function duplicateSelected()'));
 

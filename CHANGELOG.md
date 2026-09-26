@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-26 — Selection raster mutation controller extraction
+
+- Refactor: destructive merged-selection clearing and selected-layer rasterization вынесены из большого `src/main.js` в новый `src/selection/raster-mutation-controller.js`.
+- Architecture: Clipboard orchestration остаётся в `selection/clipboard-controller.js`; current-layer fill/line/clear — в `painting/command-controller.js`; новый controller владеет heterogeneous multi-layer clearing, non-raster pixel-edit rasterization и guarded publication.
+- Reliability: merged clear сохраняет prepare-all-before-mutate semantics и теперь повторно проверяет originating document/session перед публикацией async результатов, поэтому поздняя операция не переезжает в другую вкладку.
+- Precision: native 16/32-bit RGB/CMYK selection clear по-прежнему проходит через typed PixelBuffer mutation и публикацию `painting/controller.js`, без принудительного Canvas8 fallback.
+- Tests: добавлены direct controller regressions для visible/locked/adjustment filtering, non-raster replacement, tab-switch cancellation и high-depth clear; async rasterization tests теперь вызывают реальный controller вместо VM-slicing `main.js`.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow и test matrix направляют merged-cut/rasterization задачи прямо к новому владельцу.
+- Build: canonical bundle graph включает новый selection controller; generated `src/app.bundle.js` синхронизируется только из source modules.
+
 ### 2026-09-26 — Raster command controller extraction
 
 - Refactor: fill, raster-line и очистка пикселей текущего raster layer внутри активного выделения вынесены из большого `src/main.js` в новый `src/painting/command-controller.js`.

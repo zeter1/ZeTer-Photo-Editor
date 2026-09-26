@@ -13,7 +13,8 @@ ZeTer Photo Editor — локальный браузерный многосло�
 | Порядок инструментов, drag/drop, tooltips | `src/ui/toolbar-controller.js`, `src/ui/tool-layout.js`, `src/ui/tool-config.js` | `tests/tool-layout.test.mjs`, browser smoke |
 | Документы, слои, groups, smart objects | `src/core/state.js` | core/layer/smart-object tests |
 | Рендеринг и composite | `src/core/render.js` | render/blending/high-depth tests |
-| Selection clipboard / copy-cut-paste | `src/selection/clipboard-controller.js`, selection mutations в `src/main.js` | `tests/selection-clipboard.test.mjs`, async context tests |
+| Selection clipboard / copy-cut-paste | `src/selection/clipboard-controller.js` | `tests/selection-clipboard.test.mjs`, async context tests |
+| Destructive selection raster mutation / merged cut / rasterize selected layer | `src/selection/raster-mutation-controller.js`, `src/painting/controller.js` | `tests/selection-raster-mutation-controller.test.mjs`, async context, high-depth tests |
 | Ретушь clone/heal/smudge/blur/dodge/burn | `src/retouch/controller.js`, math в `src/core/pixels.js` / `src/core/pixel-buffer.js` | `tests/retouch-controller.test.mjs`, retouch/high-depth tests |
 | Raster edit buffers, high-depth/CMYK working state и persistence | `src/painting/controller.js`, math в `src/core/pixels.js` / `src/core/pixel-buffer.js` | `tests/painting-controller.test.mjs`, pixel/high-depth tests |
 | Fill / raster line / очистка выделения на текущем raster layer | `src/painting/command-controller.js`, `src/painting/controller.js`; selection/tool/transaction ports в `src/main.js` | `tests/painting-command-controller.test.mjs`, `tests/selection-fill-line-v18.test.mjs`, `tests/high-depth-editing.test.mjs` |
@@ -36,7 +37,8 @@ ZeTer Photo Editor — локальный браузерный многосло�
 - `src/ui/modal-controller.js` — generic modal/dialog shell: form fields, numeric normalization, focus restore, backdrop/Escape close, draggable text-modal lifecycle, info/recovery dialogs; editor-specific preview/mutations приходят callback-ами из `src/main.js`.
 - `src/ui/tool-layout.js` — чистая математика порядка/позиции toolbar.
 - `src/workspace/session-controller.js` — lifecycle document sessions: create/switch/close/rename/duplicate, per-tab history/zoom/dirty/selection state и smart-object parent/child tab guard.
-- `src/selection/clipboard-controller.js` — selection copy/cut/paste boundary: PNG preparation, system Clipboard API, native paste/fallback generation guards и tab-switch safety; actual raster clearing остаётся callback-ом из `src/main.js`.
+- `src/selection/clipboard-controller.js` — selection copy/cut/paste boundary: PNG preparation, system Clipboard API, native paste/fallback generation guards и tab-switch safety; destructive pixel mutation вызывается через отдельный selection raster-mutation callback.
+- `src/selection/raster-mutation-controller.js` — владелец destructive selection raster mutations: merged cut по видимым незаблокированным pixel layers, prepare-all-before-mutate, high-depth clear, rasterization non-raster layers и команда rasterize selected layer с document/session stale guard.
 - `src/document/import-controller.js` — file classification и image import transaction: decode/validate-all-before-mutate, empty-document sizing, drag/drop/file-input routing к image/PSD/project paths и tab-switch guard.
 - `src/painting/controller.js` — единый владелец raster edit state: reusable Canvas8 buffer/context/layer id, native high-depth/CMYK paint buffer, paint-preview frame lifecycle/override, materialization и persistence.
 - `src/painting/command-controller.js` — one-shot raster commands для fill, raster line и очистки пикселей текущего raster layer внутри активного выделения. Он получает target/selection/tool/transaction/UI через grouped ports; глобальные pointer events, selection state, history storage и multi-layer clipboard cut остаются вне него.

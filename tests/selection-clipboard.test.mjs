@@ -5,6 +5,7 @@ import { selectionPixelBounds } from '../src/core/geometry.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const clipboard = await readFile(new URL('../src/selection/clipboard-controller.js', import.meta.url), 'utf8');
+const mutations = await readFile(new URL('../src/selection/raster-mutation-controller.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
 test('selectionPixelBounds keeps every touched pixel while clipping to the document', () => {
@@ -60,15 +61,12 @@ test('clipboard writes PNG before cut mutates raster pixels', () => {
 });
 
 
-test('merged cut rasterizes editable pixel layers while leaving adjustment layers non-destructive', () => {
-  const start = main.indexOf('async function clearSelectionAcrossVisibleLayers(');
-  const end = main.indexOf('\nfunction toggleSelectedVisibility()', start);
-  const fn = start >= 0 && end > start ? main.slice(start, end) : '';
-  assert.match(fn, /const pixelTargets=intersecting\.filter\(layer=>layer\.type!=='adjustment'\)/);
-  assert.match(fn, /const targets=pixelTargets\.filter\(layer=>!isLayerLocked\(doc,layer\)\)/);
-  assert.match(fn, /layer\.type==='raster' \? layer : await rasterizeLayerForPixelEditing\(layer\)/);
-  assert.match(fn, /doc\.layers\.splice\(index,1,working\)/);
-  assert.match(fn, /rasterized\+=1/);
+test('merged cut delegates destructive multi-layer work to the selection raster mutation controller', () => {
+  assert.match(main, /clearAcrossVisibleLayers: clearSelectionAcrossVisibleLayers/);
+  assert.match(mutations, /async function clearAcrossVisibleLayers\(/);
+  assert.match(mutations, /layer\.type !== 'adjustment'/);
+  assert.match(mutations, /await rasterizeLayer\(layer\)/);
+  assert.match(mutations, /documentValue\.layers\.splice\(index, 1, working\)/);
 });
 
 test('successful copy or cut clears the marquee and switches to move for immediate paste positioning', () => {

@@ -32,17 +32,18 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - PSD parsing stays in `src/formats/psd.js`; project open/save stays outside the import controller until extracted behind its own boundary.
 
 ### Selection
-- `src/selection/clipboard-controller.js` may orchestrate browser Clipboard APIs and call render helpers, but document mutation remains explicit callbacks.
-- Selection modules must not own layer/document state or silently bypass lock/high-depth/Undo semantics.
-- Async clipboard operations must stay bound to the document/session that initiated them.
+- `src/selection/clipboard-controller.js` may orchestrate browser Clipboard APIs and call render helpers, but destructive document mutation remains an explicit callback into `src/selection/raster-mutation-controller.js` or the current-layer painting command controller.
+- `src/selection/raster-mutation-controller.js` owns merged-cut clearing across visible unlocked pixel layers, the reusable non-adjustment layer rasterization primitive and the selected-layer rasterize command. It must stage async preparation before mutation and re-check document/session identity before publishing results.
+- Selection modules must not own the canonical layer/document model or silently bypass lock/high-depth/Undo semantics; they receive live state through explicit ports and mutate only through the guarded transaction boundary.
+- Async clipboard and raster-mutation operations must stay bound to the document/session that initiated them.
 
 ### Painting
 - `src/painting/controller.js` is the single owner of reusable raster edit buffers: Canvas/context/layer identity, native high-depth/CMYK working state, paint-preview scheduling/override and raster publication.
 - `src/painting/command-controller.js` owns bounded one-shot raster mutations: fill, raster line and selection clear on the current raster layer. It receives document/target/selection/tool/transaction/UI state through grouped explicit ports and preserves Canvas8 plus native RGB/CMYK high-depth paths.
-- The command controller must not install DOM listeners, own selection-shape/history state or replace the application-wide pending-edit guard. Multi-layer clearing used by merged Clipboard cut remains in the selection/runtime boundary because it may rasterize heterogeneous layers.
+- The command controller must not install DOM listeners, own selection-shape/history state or replace the application-wide pending-edit guard. Multi-layer clearing used by merged Clipboard cut is owned by `src/selection/raster-mutation-controller.js` because it may rasterize heterogeneous layers.
 - `src/painting/gesture-controller.js` owns one paint stroke lifecycle (`begin → move → end`) for brush/eraser and retouch routing. It receives the current tool and caller-owned pointer validity per gesture instead of reading global runtime state.
 - The gesture controller talks to document/selection/tool/UI/runtime state through grouped explicit ports. It must not install global DOM listeners, own `currentTool`, own selection/history state or replace the application-wide pending-edit guard.
-- `src/main.js` owns global pointer capture/routing and the shared transaction/history boundaries; it delegates stroke mechanics to `paintGesture` and one-shot raster mutations to `rasterCommands`.
+- `src/main.js` owns global pointer capture/routing and the shared transaction/history boundaries; it delegates stroke mechanics to `paintGesture`, one-shot current-layer mutations to `rasterCommands` and destructive multi-layer selection/rasterization orchestration to `selectionRasterMutations`.
 - Do not recreate `brushCanvas`, `brushCtx`, high-depth paint state, `beginPaint/paintTo/endPaint` or fill/line/current-layer selection-clear implementations in `src/main.js`.
 
 ### Retouch

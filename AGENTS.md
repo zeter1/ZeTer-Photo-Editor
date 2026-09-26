@@ -8,6 +8,7 @@
 - Workspace/session/tab lifecycle: `src/workspace/session-controller.js`
 - Document import / file routing: `src/document/import-controller.js`
 - Selection copy/cut/paste lifecycle: `src/selection/clipboard-controller.js`
+- Destructive selection raster mutation, merged-cut clearing and selected-layer rasterization: `src/selection/raster-mutation-controller.js`
 - Raster edit state, Canvas/high-depth buffers, persistence and paint preview: `src/painting/controller.js`
 - Fill / raster line / current-layer selection clear commands: `src/painting/command-controller.js`
 - Brush/eraser + retouch stroke gesture lifecycle (begin/move/end): `src/painting/gesture-controller.js`
