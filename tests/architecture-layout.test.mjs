@@ -41,7 +41,7 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /from '\.\/ui\/menu-controller\.js'/);
   assert.match(build, /'src\/ui\/menu-controller\.js'/);
   assert.match(menuController, /export function createMenuController/);
-  assert.match(main, /menuButtons: \\$\\$\\('\.menu-button'\\)/);
+  assert.ok(main.includes("menuButtons: $('.menu-button')"));
   assert.doesNotMatch(main, /function populateMenu\(/);
   assert.doesNotMatch(main, /function openMenu\(/);
   assert.doesNotMatch(main, /function openContextMenu\(/);
