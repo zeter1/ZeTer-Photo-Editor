@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-26 — Layer Blending / Layer Styles controller extraction
+
+- Refactor: Blending Options / Layer Styles dialog construction, draft/live-preview transaction, preview-canvas crop/sync and modal lifecycle moved from the large `src/main.js` into `src/ui/layer-blending-controller.js`.
+- Reliability: stale document/layer Apply and lock-after-preview now roll transient draft values back to the exact originating layer instead of leaving preview state behind; Cancel/Preview-off remain history-free and real Apply still commits exactly `Параметры наложения слоя`.
+- Module hygiene: the controller imports `makeModalDraggable()` explicitly, removing a hidden dependency that previously worked only because the generated file:// bundle flattened module scopes.
+- Tests/docs: direct session regressions cover preview/rollback/no-op/real Apply/stale-owner/lock guards, preview-canvas tests now import the canonical owner instead of VM-slicing `main.js`, and AI routing docs identify the new boundary.
+
 ### 2026-09-26 — Smart Filter UI/controller extraction
 
 - Refactor: Smart Filter stack/mask markup, reorder/toggle/remove/clear commands, mask transactions, properties-panel bindings and add/edit modal lifecycle moved from the large `src/main.js` into `src/ui/smart-filter-controller.js`.

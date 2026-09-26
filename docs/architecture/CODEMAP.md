@@ -50,6 +50,11 @@ Owns Smart Filter UI/orchestration as one feature boundary: stack/mask markup, r
 
 It deliberately does **not** own the persisted Smart Filter schema, sanitization or `MAX_SMART_FILTERS` definition (`src/core/state.js`), filter pixel application/mask composition (`src/core/render.js`), or the shared selection-mask rasterizer still used by layer masks in `src/main.js`. Async selection-mask publication revalidates the originating document/layer after the await.
 
+### `layer-blending-controller.js`
+Owns the Blending Options / Layer Styles dialog as one UI transaction: draft blend mode/opacity/style edits, live preview on/off, preview-canvas crop/copy + resize cleanup, Apply/Cancel/Escape/backdrop lifecycle and stale document/layer rollback. It imports stable style/geometry/lock primitives directly and receives live document/history/render/DOM capabilities through narrow ports.
+
+It deliberately does **not** own persisted Layer Styles schema/sanitization or pixel effects (`src/core/layer-styles.js` / `src/core/render.js`). Transient preview state is controller-owned, and closing or invalidating the dialog restores the originating exact layer rather than leaving preview values in an inactive document.
+
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 
 ## Painting boundary — `src/painting/`

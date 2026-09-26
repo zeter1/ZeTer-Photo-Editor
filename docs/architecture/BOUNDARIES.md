@@ -40,6 +40,8 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - `src/ui/smart-filter-controller.js` owns Smart Filter stack/mask markup, mutation commands, properties-panel bindings and edit-modal orchestration. It receives live document/selection/history/render/DOM capabilities through narrow ports.
 - Smart Filter schema/sanitization/`MAX_SMART_FILTERS` stay in `src/core/state.js`; ordered pixel filtering and mask composition stay in `src/core/render.js`; the shared selection-mask rasterizer stays outside the controller while layer masks also use it. Do not recreate Smart Filter policy functions in `src/main.js`.
 - Async Smart Filter mask creation must prepare the selection raster first, then re-resolve the originating document + layer identity immediately before publication; a document switch publishes neither mask nor history.
+- `src/ui/layer-blending-controller.js` owns Blending Options / Layer Styles modal construction, draft/live-preview transaction state, preview-canvas crop/sync and observer cleanup. Layer Style schema/sanitization/rendering remain in `src/core/layer-styles.js` / `src/core/render.js`.
+- Blending preview writes are transient and history-free. Apply may commit only after revalidating the originating document + exact layer identity + lock state; Cancel, stale Apply, Escape or backdrop close must restore the original layer values. The controller must not expose mutable preview state back to `src/main.js`.
 - DOM mutation and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API. Generic overlay pointer lifecycle is the explicit exception owned by `src/interaction/pointer-lifecycle-router.js`.
 - UI modules must not become alternate owners of document/layer domain state.
 

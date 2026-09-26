@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, pathsController, colorManagementController, layerBlendingController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -17,6 +17,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/workspace-layout-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/paths-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/color-management-controller.js', root), 'utf8'),
+  readFile(new URL('src/ui/layer-blending-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pointer-lifecycle-router.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
@@ -109,6 +110,16 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   for (const name of ['colorManagementPolicyKey','rebuildDocumentCmykPreviews','updateDocumentColorManagement','loadDocumentProofProfile','loadDocumentDisplayProfile']) {
     assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
   }
+  assert.match(main, /from '\.\/ui\/layer-blending-controller\.js'/);
+  assert.match(build, /'src\/ui\/layer-blending-controller\.js'/);
+  assert.match(layerBlendingController, /export function createLayerBlendingController/);
+  assert.match(layerBlendingController, /from '\.\/modal-controller\.js'/);
+  assert.doesNotMatch(main, /let blendingPreview\s*=/);
+  for (const name of ['blendingPreviewCrop','syncBlendingPreviewCanvas','openBlendingOptions']) {
+    assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  }
+  assert.match(main, /layerBlendingController\.syncPreviewCanvas\(\)/);
+
   assert.match(main, /from '\.\/interaction\/pointer-lifecycle-router\.js'/);
   assert.match(build, /'src\/interaction\/pointer-lifecycle-router\.js'/);
   assert.match(pointerLifecycleRouter, /export function createPointerLifecycleRouter/);

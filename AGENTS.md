@@ -22,6 +22,7 @@
 - Saved Paths selection/CRUD/panel/context-menu/vector-mask apply orchestration: `src/ui/paths-controller.js`; Pen geometry stays in `src/main.js`, PSD codec in `src/formats/psd.js`.
 - CMYK/ICC policy/profile UI orchestration, preview/edit transform caches and async preview rebuild ownership: `src/ui/color-management-controller.js`; ICC math stays in `src/core/color-management.js`, PSD/PSB codec in `src/formats/psd.js`.
 - Smart Filter stack/mask markup, commands, DOM bindings and edit-modal lifecycle: `src/ui/smart-filter-controller.js`; Smart Filter schema/limits stay in `src/core/state.js`, pixel composition in `src/core/render.js`.
+- Layer Blending Options / Layer Styles dialog, draft/live-preview transaction, stale-owner rollback and preview-canvas lifecycle: `src/ui/layer-blending-controller.js`; style schema/rendering stay in `src/core/layer-styles.js` and `src/core/render.js`.
 - Core domain/render/pixel logic + low-level storage primitives: `src/core/`
 - PSD/PSB import transaction / decoded-payload mapping: `src/document/psd-import-controller.js`; Photoshop Text/Shape/Adjustment/Smart Object import semantics + embedded-asset mapping: `src/document/psd-import-semantics.js`; binary decode stays in `src/formats/psd.js`.
 - PSD/PSB export preparation (layer/group mapping, native high-depth/CMYK eligibility, raster/native payloads, merged composite): `src/document/psd-export-controller.js`
