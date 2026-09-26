@@ -18,7 +18,8 @@ Use the smallest relevant set while developing; finish source changes with the r
 | 16/32-bit editing/composite | high-depth-* tests | format round-trip when export changes |
 | ICC/CMYK | color-management, color-profile, compatibility corpus | fixture-based verification |
 | PSD/PSB codec | `tests/psd-*.test.mjs` | fixture/golden round-trip |
-| Recovery/IO | recovery/reliability tests | browser smoke for startup/reload flows |
+| Recovery/autosave orchestration | `tests/workspace-recovery-controller.test.mjs`, `tests/recovery-v110.test.mjs`, architecture test | browser smoke for startup/reload/visibility flows |
+| Low-level IndexedDB recovery / IO | `tests/recovery-v110.test.mjs`, reliability/direct-open tests | browser smoke when browser storage or file IO changes |
 | Bundle/source graph | architecture test + `npm run build` | CI generated-bundle diff |
 | General source change | `npm run check` | `npm run test:browser` when browser contract involved |
 

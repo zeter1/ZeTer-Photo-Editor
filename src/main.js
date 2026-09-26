@@ -24,6 +24,7 @@ import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles, layerStyleO
 import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustments.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset, rewriteTypeToolText, rewritePsdShapeStyle, rewritePsdAdjustmentBlocks } from './formats/psd.js';
 import { createDocumentSessionController } from './workspace/session-controller.js';
+import { createRecoveryController } from './workspace/recovery-controller.js';
 import { createToolbarController } from './ui/toolbar-controller.js';
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
@@ -87,27 +88,6 @@ let panelsVisible = true;
 let pointerLifecycle = null;
 let paintPersisting = false;
 let hoverPoint = null;
-let recoveryTimer = 0;
-let recoveryGeneration = 0;
-let recoveryWritePromise = Promise.resolve();
-let recoveryStorageAvailable = true;
-let recoveryFailureNotified = false;
-let unrestoredRecoveryDocuments = [];
-function createRecoveryKey(forceNew = false) {
-  const key = `workspace:${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
-  try {
-    const storageKey = 'zeter-photo-editor.recovery-window.v1';
-    const previous = sessionStorage.getItem(storageKey);
-    const navigation = performance.getEntriesByType('navigation')[0]?.type;
-    if (!forceNew && navigation === 'reload' && previous?.startsWith('workspace:')) return previous;
-    sessionStorage.setItem(storageKey, key);
-  } catch (error) { console.warn('Recovery window identity is not persistent', error); }
-  return key;
-}
-let recoveryKey = createRecoveryKey();
-let smartSnapEnabled = true;
-let smartGuides = { x:null, y:null };
-const RECOVERY_DEBOUNCE_MS = 1500;
 
 function setStatus(message) { els.status.textContent = message; }
 
@@ -384,7 +364,39 @@ const selectionGestures = createSelectionGestureController({
     drawOverlay: () => drawOverlay(),
   },
 });
-const documentSessionController = createDocumentSessionController({
+let documentSessionController = null;
+const recoveryController = createRecoveryController({
+  storage: {
+    save: saveRecoverySnapshot,
+    loadAll: loadRecoverySnapshots,
+    clear: clearRecoverySnapshot,
+  },
+  projects: {
+    snapshot: snapshotDocument,
+    sanitize: sanitizeProject,
+  },
+  sessions: {
+    getAll: () => documentSessions,
+    replaceAll: value => { documentSessions = value; },
+    getActiveId: () => activeSessionId,
+    setActiveId: value => { activeSessionId = value; },
+    syncCurrent: () => documentSessionController?.syncCurrentSession(),
+    build: (...args) => documentSessionController.buildSession(...args),
+    load: session => documentSessionController.loadSession(session),
+  },
+  runtime: {
+    updateAll,
+    markDirty,
+  },
+  ui: {
+    showRecoveryModal,
+    setStatus,
+    toast,
+  },
+});
+const { queueRecovery, restoreRecoveryIfAvailable } = recoveryController;
+
+documentSessionController = createDocumentSessionController({
   getSessions: () => documentSessions,
   getActiveSessionId: () => activeSessionId,
   setActiveSessionId: value => { activeSessionId = value; },
@@ -486,51 +498,6 @@ function blockPendingDocumentEdit() {
   setStatus(message);
   toast(message, 'warn');
   return true;
-}
-function reportRecoveryFailure(error, { notify = false } = {}) {
-  recoveryStorageAvailable = false;
-  console.warn('ZeTer Photo Editor recovery storage unavailable', error);
-  if (notify && !recoveryFailureNotified) {
-    recoveryFailureNotified = true;
-    toast('Автовосстановление недоступно в этом режиме браузера', 'warn');
-  }
-}
-function cancelRecoveryTimer() {
-  recoveryGeneration += 1;
-  if (recoveryTimer) clearTimeout(recoveryTimer);
-  recoveryTimer = 0;
-}
-function queueRecovery({ immediate = false } = {}) {
-  if (!recoveryStorageAvailable) return;
-  cancelRecoveryTimer();
-  const generation = recoveryGeneration;
-  const write = () => {
-    if (generation !== recoveryGeneration || !recoveryStorageAvailable) return;
-    recoveryTimer = 0;
-    syncCurrentSession();
-    const sessions = documentSessions.filter(session => session.dirty);
-    const snapshots = [...unrestoredRecoveryDocuments, ...sessions.map(session => ({
-      name: session.doc.name,
-      modifiedAt: session.doc.modifiedAt,
-      snapshot: snapshotDocument(session.doc),
-    }))];
-    const activeIndex = unrestoredRecoveryDocuments.length + Math.max(0, sessions.findIndex(session => session.id === activeSessionId));
-    recoveryWritePromise = recoveryWritePromise
-      .then(() => snapshots.length ? saveRecoverySnapshot(snapshots, { activeIndex }, { key: recoveryKey }) : clearRecoverySnapshot({ key: recoveryKey }))
-      .catch(error => reportRecoveryFailure(error, { notify: true }));
-  };
-  if (immediate) write();
-  else recoveryTimer = setTimeout(write, RECOVERY_DEBOUNCE_MS);
-}
-function discardRecovery(key = recoveryKey) {
-  cancelRecoveryTimer();
-  if (!recoveryStorageAvailable) return Promise.resolve(false);
-  recoveryWritePromise = recoveryWritePromise
-    .catch(() => {})
-    .then(() => clearRecoverySnapshot({ key }))
-    .then(() => { unrestoredRecoveryDocuments = []; return true; })
-    .catch(error => { console.warn('Could not clear recovery snapshot', error); return false; });
-  return recoveryWritePromise;
 }
 function setDoc(next, { resetHistory = false, label = 'Состояние' } = {}) {
   doc = next;
@@ -2810,51 +2777,6 @@ function syncTextPreviewCanvas() {
   const offsetX=-sourceX*scale,offsetY=-sourceY*scale;
   canvas.style.setProperty('--preview-bg-x',`${offsetX}px`);
   canvas.style.setProperty('--preview-bg-y',`${offsetY}px`);
-}
-
-async function restoreRecoveryIfAvailable() {
-  if (!recoveryStorageAvailable) return false;
-  let stored;
-  try {
-    const entries=await loadRecoverySnapshots({includeInvalid:true});
-    if(entries.some(item=>item.key===recoveryKey&&!item.record))recoveryKey=createRecoveryKey(true);
-    stored=entries.filter(item=>item.record);
-  }
-  catch(error){ reportRecoveryFailure(error); return false; }
-  if(!stored.length)return false;
-  stored.sort((a,b)=>b.record.savedAt-a.record.savedAt);
-  for(const {key,record} of stored){
-    const recovered=[];
-    const invalid=[];
-    record.documents.forEach((item,index)=>{
-      try { recovered.push({ doc:sanitizeProject(JSON.parse(item.snapshot)), index }); }
-      catch(error){ invalid.push(item); console.warn('Invalid recovery document was preserved in storage',error); }
-    });
-    const canDiscard=key===recoveryKey||key==='latest';
-    const action=await showRecoveryModal(record,{canRestore:recovered.length>0,canDiscard});
-    if(action==='later'){
-      if(key===recoveryKey)recoveryKey=createRecoveryKey(true);
-      continue;
-    }
-    if(action==='discard'){
-      const removed=await discardRecovery(key);
-      toast(removed?'Автосохранённая копия удалена':'Не удалось удалить автокопию',removed?'success':'error');
-      if(!removed)return false;
-      continue;
-    }
-    unrestoredRecoveryDocuments=invalid;
-    if(key!==recoveryKey&&stored.some(item=>item.key===recoveryKey))recoveryKey=createRecoveryKey(true);
-    documentSessions=recovered.map(item=>buildSession(item.doc,{label:'Автовосстановление',dirtyState:true}));
-    const activeIndex=Math.max(0,recovered.findIndex(item=>item.index===record.activeIndex));
-    activeSessionId=documentSessions[activeIndex].id;
-    loadSession(documentSessions[activeIndex]);
-    updateAll();
-    markDirty(true);
-    setStatus('Проект восстановлен из автосохранения');
-    toast('Документы восстановлены. Сохраните каждый через Ctrl+S.','success');
-    return true;
-  }
-  return false;
 }
 
 function canReplaceDocument() {

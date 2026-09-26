@@ -7,6 +7,7 @@
 - UI/runtime orchestration and tool-specific pointer dispatch: `src/main.js`
 - Global overlay pointer lifecycle, capture/release and active-pointer routing: `src/interaction/pointer-lifecycle-router.js`
 - Workspace/session/tab lifecycle: `src/workspace/session-controller.js`
+- Recovery/autosave orchestration, window ownership, debounce/restore: `src/workspace/recovery-controller.js`; IndexedDB persistence only: `src/core/recovery.js`
 - Document import / file routing: `src/document/import-controller.js`
 - Selection shape gestures (marquee/lasso/polygon/magnetic), draft lifecycle: `src/selection/gesture-controller.js`
 - Selection copy/cut/paste lifecycle: `src/selection/clipboard-controller.js`
@@ -16,7 +17,7 @@
 - Brush/eraser + retouch stroke gesture lifecycle (begin/move/end): `src/painting/gesture-controller.js`
 - Clone/heal/smudge/blur/dodge/burn mechanics (Canvas8 + high-depth/CMYK): `src/retouch/controller.js`
 - UI config + toolbar/menu/modal controllers/layout: `src/ui/`
-- Core domain/render/pixel logic: `src/core/`
+- Core domain/render/pixel logic + low-level storage primitives: `src/core/`
 - PSD/PSB format boundary: `src/formats/psd.js`
 - Generated file:// bundle: `src/app.bundle.js` — **не редактировать вручную**
 - Tests: `tests/`
@@ -29,6 +30,7 @@
 - где находится код → `docs/architecture/CODEMAP.md`
 - какие зависимости допустимы → `docs/architecture/BOUNDARIES.md`
 - как работать AI/Codex → `docs/development/AI_WORKFLOW.md`
+- как делать refactor/debug/review/tests с доказательствами → `docs/development/QUALITY_PLAYBOOK.md`
 - какие проверки запускать → `docs/testing/TEST_MATRIX.md`
 - подробная историческая инженерная летопись → `docs/reference/PROJECT_HISTORY.md`
 

@@ -23,7 +23,8 @@ ZeTer Photo Editor — локальный браузерный многосло�
 | ICC/CMYK/soft proof | `src/core/color-management.js` | color-management/corpus tests |
 | PSD/PSB import/export | `src/formats/psd.js` | `tests/psd-*.test.mjs` |
 | Document import / drag-drop routing | `src/document/import-controller.js`, PSD/project callbacks in `src/main.js` | async document context / reliability tests |
-| Recovery / low-level IO | `src/core/recovery.js`, `src/core/io.js` | recovery/reliability tests |
+| Recovery/autosave orchestration | `src/workspace/recovery-controller.js`; storage adapter `src/core/recovery.js` | `tests/workspace-recovery-controller.test.mjs`, `tests/recovery-v110.test.mjs`, reliability tests |
+| Low-level browser IO | `src/core/io.js` | reliability / direct-open tests |
 | Bundle/build | `tools/build-bundle.mjs` | `npm run check` |
 | Реальный startup по file:// | `tools/browser-smoke.mjs` | `npm run test:browser` |
 
@@ -39,6 +40,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 - `src/ui/modal-controller.js` — generic modal/dialog shell: form fields, numeric normalization, focus restore, backdrop/Escape close, draggable text-modal lifecycle, info/recovery dialogs; editor-specific preview/mutations приходят callback-ами из `src/main.js`.
 - `src/ui/tool-layout.js` — чистая математика порядка/позиции toolbar.
 - `src/workspace/session-controller.js` — lifecycle document sessions: create/switch/close/rename/duplicate, per-tab history/zoom/dirty/selection state и smart-object parent/child tab guard.
+- `src/workspace/recovery-controller.js` — application-level recovery owner: per-window key ownership, debounce/write serialization, dirty-session snapshots, startup restore/discard policy and preservation of unreadable sibling snapshots. It receives storage/project/session/UI ports explicitly; IndexedDB records stay in `src/core/recovery.js`.
 - `src/selection/gesture-controller.js` — канонический владелец transient selection gesture state: selection type, marquee/lasso drag lifecycle, polygon/magnetic drafts, edge snapping и draft overlay. Generic pointer capture/ownership живёт в `src/interaction/pointer-lifecycle-router.js`; `src/main.js` оставляет tool/keyboard dispatch и canonical selection shape bridge.
 - `src/selection/clipboard-controller.js` — selection copy/cut/paste boundary: PNG preparation, system Clipboard API, native paste/fallback generation guards и tab-switch safety; destructive pixel mutation вызывается через отдельный selection raster-mutation callback.
 - `src/selection/raster-mutation-controller.js` — владелец destructive selection raster mutations: merged cut по видимым незаблокированным pixel layers, prepare-all-before-mutate, high-depth clear, rasterization non-raster layers и команда rasterize selected layer с document/session stale guard.
@@ -85,4 +87,4 @@ INSPECT → DIAGNOSE → PLAN → CHANGE → VERIFY → REVIEW → DELIVER.
 
 Не загружай весь `src/main.js` или всю PSD-историю заранее. Сначала прочитай карту, найди symbol через search, затем открой небольшой диапазон вокруг него и соответствующий regression test.
 
-Подробно: [development/AI_WORKFLOW.md](development/AI_WORKFLOW.md).
+Подробно: [development/AI_WORKFLOW.md](development/AI_WORKFLOW.md). Для non-trivial refactor/debug/review/test-oracle работы: [development/QUALITY_PLAYBOOK.md](development/QUALITY_PLAYBOOK.md).

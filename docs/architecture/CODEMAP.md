@@ -85,6 +85,11 @@ Owns document-tab/session lifecycle: session IDs and names, per-tab history/zoom
 
 It does **not** own raster/document internals. `src/main.js` supplies the live runtime state bridge and application callbacks; `src/core/state.js` remains the document model owner.
 
+### `recovery-controller.js`
+Owns workspace recovery orchestration: reload-stable per-window identity, debounce/cancellation, serialized writes/discard, dirty-tab snapshot collection, startup recovery selection and safe publication into document sessions.
+
+It deliberately does **not** implement IndexedDB or project schemas. `src/core/recovery.js` owns record normalization/storage, while `src/main.js` only wires explicit storage/project/session/runtime/UI ports. Ownership is enforced in the controller too: a recovery record belonging to another live editor window cannot be discarded merely because UI returns an invalid action.
+
 ## Core — `src/core/`
 
 - `state.js` — document/layer/group/smart-object models, sanitization and invariants.
@@ -98,7 +103,7 @@ It does **not** own raster/document internals. `src/main.js` supplies the live r
 - `geometry.js` — selection/layer geometry and transforms.
 - `history.js` — history stack.
 - `io.js` — browser file/data-url/download helpers.
-- `recovery.js` — recovery persistence.
+- `recovery.js` — low-level IndexedDB recovery record normalization/read/write/clear adapter; no session/UI orchestration.
 - `pixel-worker.js` — bounded worker path for heavy pixel operations.
 
 ## Formats — `src/formats/`
