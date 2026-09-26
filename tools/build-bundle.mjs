@@ -24,6 +24,7 @@ const sources = [
   'src/core/state.js',
   'src/ui/layer-blending-controller.js',
   'src/ui/text-edit-controller.js',
+  'src/ui/text-settings-controller.js',
   'src/ui/smart-filter-controller.js',
   'src/workspace/session-controller.js',
   'src/workspace/recovery-controller.js',
