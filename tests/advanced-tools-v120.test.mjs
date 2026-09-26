@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const retouch=await readFile(new URL('../src/retouch/controller.js',import.meta.url),'utf8');
+const selectionGestures=await readFile(new URL('../src/selection/gesture-controller.js',import.meta.url),'utf8');
 const toolConfig=await readFile(new URL('../src/ui/tool-config.js',import.meta.url),'utf8');
 const html=await readFile(new URL('../index.html',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
@@ -54,7 +55,7 @@ test('smudge strength, healing source, gradient, edge snapping and wand selectio
   assert.match(main,/els\.smudgeStrength\?\.value/);
   assert.match(retouch,/healing \? 'soft-light' : 'source-over'/);
   assert.match(main,/async function applyGradient\(start,end\)/);
-  assert.match(main,/function findMagneticEdgePoint\(point\)/);
+  assert.match(selectionGestures,/function findMagneticEdgePoint\(point\)/);
   assert.match(main,/function magicWandSelect\(point\)/);
   assert.match(main,/const selectedMask=new Uint8Array\(total\)/);
 });

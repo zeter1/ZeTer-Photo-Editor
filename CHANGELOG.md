@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-26 — Selection gesture controller extraction
+
+- Refactor: transient selection interaction вынесен из большого `src/main.js` в новый `src/selection/gesture-controller.js`: rectangle/ellipse/free-lasso marquee lifecycle, polygon draft, magnetic edge snapping/draft и их overlay rendering.
+- Architecture: `src/main.js` сохраняет только global pointer/keyboard capture/routing и canonical selection shape/session bridge; controller получает geometry/runtime/UI через явные grouped ports и не устанавливает DOM listeners.
+- Reliability: document/session reset теперь очищает и polygon, и magnetic draft через единый controller reset; раньше session switch явно сбрасывал polygon draft, но magnetic draft мог пережить смену вкладки.
+- Tests: добавлен прямой `tests/selection-gesture-controller.test.mjs`; source-contract тесты selection/magnetic routing переведены на нового канонического владельца, а global pointer-release regressions остаются на runtime boundary.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow и test matrix направляют selection gesture задачи сразу в `src/selection/gesture-controller.js`, чтобы следующий ChatGPT/Codex не перечитывал большой runtime.
+- Build: canonical `file://` bundle graph включает новый controller; generated `src/app.bundle.js` должен оставаться точной сборкой source modules.
+
 ### 2026-09-26 — Selection raster mutation controller extraction
 
 - Refactor: destructive merged-selection clearing and selected-layer rasterization вынесены из большого `src/main.js` в новый `src/selection/raster-mutation-controller.js`.

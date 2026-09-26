@@ -7,6 +7,7 @@
 - UI/runtime orchestration: `src/main.js`
 - Workspace/session/tab lifecycle: `src/workspace/session-controller.js`
 - Document import / file routing: `src/document/import-controller.js`
+- Selection shape gestures (marquee/lasso/polygon/magnetic), draft lifecycle: `src/selection/gesture-controller.js`
 - Selection copy/cut/paste lifecycle: `src/selection/clipboard-controller.js`
 - Destructive selection raster mutation, merged-cut clearing and selected-layer rasterization: `src/selection/raster-mutation-controller.js`
 - Raster edit state, Canvas/high-depth buffers, persistence and paint preview: `src/painting/controller.js`

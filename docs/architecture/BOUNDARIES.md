@@ -32,6 +32,8 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - PSD parsing stays in `src/formats/psd.js`; project open/save stays outside the import controller until extracted behind its own boundary.
 
 ### Selection
+- `src/selection/gesture-controller.js` owns transient selection interaction state: marquee type, rectangle/ellipse/free-lasso drag transitions, polygon/magnetic drafts, magnetic edge sampling and draft overlay drawing. It receives geometry, canonical selection shape and UI/runtime access through grouped ports.
+- The gesture controller must not install global pointer/keyboard listeners, own document/session/history state, or become the canonical owner of persisted selection shape. Global event routing and session snapshots stay in `src/main.js` until a separate boundary is proven.
 - `src/selection/clipboard-controller.js` may orchestrate browser Clipboard APIs and call render helpers, but destructive document mutation remains an explicit callback into `src/selection/raster-mutation-controller.js` or the current-layer painting command controller.
 - `src/selection/raster-mutation-controller.js` owns merged-cut clearing across visible unlocked pixel layers, the reusable non-adjustment layer rasterization primitive and the selected-layer rasterize command. It must stage async preparation before mutation and re-check document/session identity before publishing results.
 - Selection modules must not own the canonical layer/document model or silently bypass lock/high-depth/Undo semantics; they receive live state through explicit ports and mutate only through the guarded transaction boundary.

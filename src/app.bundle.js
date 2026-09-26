@@ -8235,6 +8235,340 @@ function createPaintGestureController({
   return { begin, move, end };
 }
 
+// ---- src/selection/gesture-controller.js ----
+function cloneSelectionShape(shape) {
+  if (!shape) return null;
+  if (shape.rect) return { ...shape, rect:{...shape.rect} };
+  if (Array.isArray(shape.points)) return { ...shape, points:shape.points.map(point=>({...point})) };
+  return { ...shape };
+}
+function createSelectionGestureController({
+  selectionTypes = [],
+  selectionTypeLabels = {},
+  geometry = {},
+  selection = {},
+  runtime = {},
+  ui = {},
+} = {}) {
+  const { clamp, constrainedRect, normalizeRect, selectionBounds } = geometry;
+  for (const [name, fn] of Object.entries({ clamp, constrainedRect, normalizeRect, selectionBounds })) {
+    if (typeof fn !== 'function') throw new TypeError(`Selection gesture controller requires geometry.${name}`);
+  }
+
+  let selectionType = selectionTypes.includes('rect') ? 'rect' : (selectionTypes[0] || 'rect');
+  let polygonDraft = null;
+  let magneticDraft = null;
+
+  const currentTool = () => runtime.getCurrentTool?.() || '';
+  const zoom = () => Math.max(0.01, Number(runtime.getZoom?.()) || 1);
+  const documentState = () => runtime.getDocument?.() || { width:0, height:0 };
+  const selectionShape = () => selection.getShape?.() ?? null;
+  const setSelectionShape = shape => selection.setShape?.(shape) ?? null;
+  const setPreviewShape = shape => selection.setPreviewShape?.(shape) ?? setSelectionShape(shape);
+  const setStatus = message => ui.setStatus?.(message);
+  const drawOverlay = () => ui.drawOverlay?.();
+
+  function getType() {
+    return selectionType;
+  }
+
+  function hasPolygonDraft() {
+    return Boolean(polygonDraft);
+  }
+
+  function hasMagneticDraft() {
+    return Boolean(magneticDraft);
+  }
+
+  function cancelPolygonDraft({ restorePrevious = true, announce = false, draw = true } = {}) {
+    if (!polygonDraft) return false;
+    const previous = polygonDraft.previousSelection;
+    polygonDraft = null;
+    if (restorePrevious) setSelectionShape(previous);
+    if (draw) drawOverlay();
+    if (announce) setStatus('Многоугольное выделение отменено');
+    return true;
+  }
+
+  function finishPolygonSelection() {
+    if (!polygonDraft) return false;
+    const points = polygonDraft.points || [];
+    const previousSelection = polygonDraft.previousSelection;
+    polygonDraft = null;
+    if (points.length < 3) {
+      setSelectionShape(previousSelection);
+      drawOverlay();
+      setStatus('Для многоугольного выделения нужно минимум 3 точки');
+      return false;
+    }
+    setSelectionShape({type:'polygon',points});
+    drawOverlay();
+    setStatus(`Многоугольное выделение: ${points.length} точек`);
+    return true;
+  }
+
+  function setType(type, { announce = true } = {}) {
+    const fallback = selectionTypes.includes('rect') ? 'rect' : selectionType;
+    const next = selectionTypes.includes(type) ? type : fallback;
+    if (polygonDraft) cancelPolygonDraft({restorePrevious:true});
+    selectionType = next;
+    ui.setSelectionTypeValue?.(next);
+    ui.updateToolLabel?.();
+    if (announce && currentTool() === 'marquee') setStatus(`Тип выделения: ${selectionTypeLabels[next] || next}`);
+    drawOverlay();
+    return next;
+  }
+
+  function cycleType() {
+    const index = Math.max(0, selectionTypes.indexOf(selectionType));
+    return setType(selectionTypes[(index + 1) % Math.max(1, selectionTypes.length)] || selectionType);
+  }
+
+  function prepareToolChange(nextTool) {
+    if (nextTool !== 'marquee' && polygonDraft) cancelPolygonDraft({restorePrevious:true, draw:false});
+    if (nextTool !== 'magnetic') magneticDraft = null;
+  }
+
+  function resetDrafts() {
+    polygonDraft = null;
+    magneticDraft = null;
+  }
+
+  function beginMarquee(point, { detail = 1 } = {}) {
+    const previousSelection = cloneSelectionShape(selectionShape());
+    if (selectionType === 'polygon') {
+      if (!polygonDraft) {
+        polygonDraft = { points:[{...point}], hover:{...point}, previousSelection };
+        setPreviewShape(null);
+        setStatus('Многоугольное лассо: ставьте точки, двойной щелчок или Enter — завершить');
+      } else {
+        const first = polygonDraft.points[0];
+        const nearFirst = polygonDraft.points.length >= 3 && Math.hypot(point.x-first.x,point.y-first.y) <= 10/zoom();
+        const last = polygonDraft.points.at(-1);
+        if (!last || Math.hypot(point.x-last.x,point.y-last.y) > 1/zoom()) polygonDraft.points.push({...point});
+        polygonDraft.hover = {...point};
+        if (nearFirst || detail >= 2) finishPolygonSelection();
+      }
+      drawOverlay();
+      return { drag:null, preventDefault:true };
+    }
+
+    const drag = {
+      kind:'marquee',
+      selectionType,
+      start:{...point},
+      current:{...point},
+      previousSelection,
+      points:selectionType === 'lasso' ? [{...point}] : null,
+      lockAspect:false,
+    };
+    const shape = selectionType === 'lasso'
+      ? {type:'lasso',points:[{...point}]}
+      : {type:selectionType,rect:{x:point.x,y:point.y,width:0,height:0}};
+    setPreviewShape(shape);
+    drawOverlay();
+    return { drag, preventDefault:false };
+  }
+
+  function updateIdleHover(point) {
+    if (polygonDraft && currentTool() === 'marquee' && selectionType === 'polygon') polygonDraft.hover = {...point};
+    if (magneticDraft && currentTool() === 'magnetic') magneticDraft.hover = findMagneticEdgePoint(point);
+  }
+
+  function updateMarquee(drag, point, { shiftKey = false } = {}) {
+    if (!drag || drag.kind !== 'marquee') return false;
+    drag.current = {...point};
+    if (drag.selectionType === 'lasso') {
+      const last = drag.points.at(-1);
+      const minDistance = Math.max(.5,1.5/zoom());
+      if (!last || Math.hypot(point.x-last.x,point.y-last.y) >= minDistance) drag.points.push({...point});
+      setPreviewShape({type:'lasso',points:drag.points.map(item=>({...item}))});
+    } else {
+      drag.lockAspect = Boolean(shiftKey);
+      const rect = shiftKey ? constrainedRect(drag.start,point,true) : normalizeRect(drag.start,point);
+      setPreviewShape({type:drag.selectionType,rect});
+    }
+    drawOverlay();
+    return true;
+  }
+
+  function finishMarquee(drag, point, { shiftKey = false } = {}) {
+    if (!drag || drag.kind !== 'marquee') return false;
+    drag.current = {...point};
+    if (drag.selectionType === 'lasso') {
+      const last = drag.points.at(-1);
+      if (!last || Math.hypot(point.x-last.x,point.y-last.y) > 1/zoom()) drag.points.push({...point});
+      const shape = {type:'lasso',points:drag.points.map(item=>({...item}))};
+      const bounds = selectionBounds(shape);
+      if (drag.points.length >= 3 && bounds && bounds.width >= 1 && bounds.height >= 1) setSelectionShape(shape);
+      else setSelectionShape(null);
+    } else {
+      const rect = (shiftKey || drag.lockAspect) ? constrainedRect(drag.start,drag.current,true) : normalizeRect(drag.start,drag.current);
+      if (rect.width >= 1 && rect.height >= 1) setSelectionShape({type:drag.selectionType,rect});
+      else setSelectionShape(null);
+    }
+    drawOverlay();
+    const active = selectionShape();
+    const bounds = active ? selectionBounds(active) : null;
+    const label = selectionTypeLabels[drag.selectionType] || 'Выделение';
+    setStatus(bounds ? `${label}: ${Math.round(bounds.width)} × ${Math.round(bounds.height)} px` : 'Выделение снято');
+    return true;
+  }
+
+  function cancelMarquee(drag, { draw = false } = {}) {
+    if (!drag || drag.kind !== 'marquee') return false;
+    setSelectionShape(drag.previousSelection);
+    if (draw) drawOverlay();
+    return true;
+  }
+
+  function drawPolygonDraft(ctx) {
+    if (!polygonDraft?.points?.length) return false;
+    const points = polygonDraft.points;
+    const z = zoom();
+    ctx.save();
+    ctx.lineWidth = 1/z;
+    ctx.setLineDash([5/z,4/z]);
+    ctx.strokeStyle = '#79a7ff';
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(points[0].x,points[0].y);
+    for (let i=1;i<points.length;i+=1) ctx.lineTo(points[i].x,points[i].y);
+    if (polygonDraft.hover) ctx.lineTo(polygonDraft.hover.x,polygonDraft.hover.y);
+    ctx.stroke();
+    const radius = 3/z;
+    for (const point of points) {
+      ctx.beginPath();
+      ctx.arc(point.x,point.y,radius,0,Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+    return true;
+  }
+
+  function findMagneticEdgePoint(point) {
+    const ctx = runtime.getCanvasContext?.();
+    const documentValue = documentState();
+    if (!ctx || documentValue.width < 3 || documentValue.height < 3) return {...point};
+    const radius = Math.max(4,Math.round(10/zoom()));
+    const cx = Math.round(point.x), cy = Math.round(point.y);
+    const left = clamp(cx-radius,1,Math.max(1,documentValue.width-2));
+    const top = clamp(cy-radius,1,Math.max(1,documentValue.height-2));
+    const right = clamp(cx+radius,2,documentValue.width-1);
+    const bottom = clamp(cy+radius,2,documentValue.height-1);
+    const width = right-left+1, height = bottom-top+1;
+    if (width < 3 || height < 3) return {...point};
+    const data = ctx.getImageData(left-1,top-1,width+2,height+2).data;
+    const stride = width+2;
+    const luminance = (x,y) => {
+      const index = (y*stride+x)*4;
+      return data[index]*.2126 + data[index+1]*.7152 + data[index+2]*.0722;
+    };
+    let best = {x:cx,y:cy,score:-1};
+    for (let y=1;y<=height;y+=1) {
+      for (let x=1;x<=width;x+=1) {
+        const gx = Math.abs(luminance(x+1,y)-luminance(x-1,y));
+        const gy = Math.abs(luminance(x,y+1)-luminance(x,y-1));
+        const candidateX = left+x-1, candidateY = top+y-1;
+        const score = gx+gy-Math.hypot(candidateX-point.x,candidateY-point.y)*1.5;
+        if (score > best.score) best = {x:candidateX,y:candidateY,score};
+      }
+    }
+    return {x:best.x,y:best.y};
+  }
+
+  function magneticSegmentPoints(from,to) {
+    const distance = Math.hypot(to.x-from.x,to.y-from.y);
+    const step = Math.max(5,12/zoom());
+    const steps = Math.min(256,Math.max(1,Math.ceil(distance/step)));
+    const result = [];
+    for (let index=1;index<=steps;index+=1) {
+      const t = index/steps;
+      const snapped = findMagneticEdgePoint({x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t});
+      const previous = result.at(-1) || from;
+      if (Math.hypot(snapped.x-previous.x,snapped.y-previous.y) > 1/zoom()) result.push(snapped);
+    }
+    return result;
+  }
+
+  function addMagneticPoint(point, { finish = false } = {}) {
+    const snapped = findMagneticEdgePoint(point);
+    if (!magneticDraft) magneticDraft = {points:[],hover:snapped};
+    const last = magneticDraft.points.at(-1);
+    if (last) magneticDraft.points.push(...magneticSegmentPoints(last,snapped));
+    else magneticDraft.points.push(snapped);
+    magneticDraft.hover = snapped;
+    if (finish && magneticDraft.points.length >= 3) return finishMagneticSelection();
+    setStatus(`Магнитное лассо: ${magneticDraft.points.length} точек • Enter или двойной щелчок — завершить`);
+    drawOverlay();
+    return true;
+  }
+
+  function finishMagneticSelection() {
+    if (!magneticDraft || magneticDraft.points.length < 3) return false;
+    const points = magneticDraft.points;
+    magneticDraft = null;
+    setSelectionShape({type:'polygon',points});
+    drawOverlay();
+    setStatus(`Магнитное выделение: ${points.length} точек`);
+    return true;
+  }
+
+  function cancelMagneticDraft({ announce = false, draw = true } = {}) {
+    if (!magneticDraft) return false;
+    magneticDraft = null;
+    if (draw) drawOverlay();
+    if (announce) setStatus('Магнитное выделение отменено');
+    return true;
+  }
+
+  function drawMagneticDraft(ctx) {
+    if (!magneticDraft?.points?.length) return false;
+    const points = magneticDraft.points;
+    const z = zoom();
+    ctx.save();
+    ctx.lineWidth = 1.5/z;
+    ctx.strokeStyle = '#ff5fa8';
+    ctx.fillStyle = '#fff';
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(points[0].x,points[0].y);
+    for (let i=1;i<points.length;i+=1) ctx.lineTo(points[i].x,points[i].y);
+    if (magneticDraft.hover) ctx.lineTo(magneticDraft.hover.x,magneticDraft.hover.y);
+    ctx.stroke();
+    for (const point of points) {
+      ctx.beginPath();
+      ctx.arc(point.x,point.y,2.5/z,0,Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+    return true;
+  }
+
+  return {
+    getType,
+    setType,
+    cycleType,
+    prepareToolChange,
+    resetDrafts,
+    hasPolygonDraft,
+    hasMagneticDraft,
+    cancelPolygonDraft,
+    finishPolygonSelection,
+    beginMarquee,
+    updateIdleHover,
+    updateMarquee,
+    finishMarquee,
+    cancelMarquee,
+    addMagneticPoint,
+    finishMagneticSelection,
+    cancelMagneticDraft,
+    drawPolygonDraft,
+    drawMagneticDraft,
+  };
+}
+
 // ---- src/selection/raster-mutation-controller.js ----
 function createSelectionRasterMutationController({
   rasterEdit,
@@ -12104,13 +12438,10 @@ let penDraft = null;
 let vectorMaskEditLayerId = null;
 let documentPathEditIndex = -1;
 let selectedDocumentPathIndex = -1;
-let magneticDraft = null;
 let spaceHeld = false;
 let cropRect = null;
 let selectionRect = null;
 let selectionShape = null;
-let selectionType = 'rect';
-let polygonDraft = null;
 let selectionCopyMode = 'merged';
 let dragDepth = 0;
 let layerDragId = null;
@@ -12394,12 +12725,28 @@ function persistSmartSnapState() {
   catch (error) { console.warn('Could not persist smart snap setting', error); }
 }
 function clearSmartGuides() { smartGuides = { x:null, y:null }; }
-function cloneSelectionShape(shape) {
-  if (!shape) return null;
-  if (shape.rect) return { ...shape, rect:{...shape.rect} };
-  if (Array.isArray(shape.points)) return { ...shape, points:shape.points.map(point=>({...point})) };
-  return { ...shape };
-}
+const selectionGestures = createSelectionGestureController({
+  selectionTypes: SELECTION_TYPES,
+  selectionTypeLabels: SELECTION_TYPE_LABELS,
+  geometry: { clamp, constrainedRect, normalizeRect, selectionBounds },
+  selection: {
+    getShape: () => selectionShape,
+    setShape: shape => setSelectionShape(shape),
+    setPreviewShape: shape => setSelectionPreviewShape(shape),
+  },
+  runtime: {
+    getCurrentTool: () => currentTool,
+    getZoom: () => zoom,
+    getDocument: () => doc,
+    getCanvasContext: () => els.canvas.getContext('2d', { alpha:true }),
+  },
+  ui: {
+    setSelectionTypeValue: value => { if (els.selectionType) els.selectionType.value = value; },
+    updateToolLabel: () => updateToolLabel(),
+    setStatus,
+    drawOverlay: () => drawOverlay(),
+  },
+});
 const documentSessionController = createDocumentSessionController({
   getSessions: () => documentSessions,
   getActiveSessionId: () => activeSessionId,
@@ -12419,7 +12766,7 @@ const documentSessionController = createDocumentSessionController({
     documentPathEditIndex = -1;
     vectorMaskEditLayerId = null;
     penDraft = null;
-    polygonDraft = null;
+    selectionGestures.resetDrafts();
     drag = null;
     rasterEdit.reset();
     resetRetouchStroke();
@@ -12761,9 +13108,14 @@ function beginPathControlDrag(hit,point,event){
   return true;
 }
 
-function setSelectionShape(shape) {
+function setSelectionPreviewShape(shape) {
   selectionShape = cloneSelectionShape(shape);
   selectionRect = selectionBounds(selectionShape);
+  return selectionShape;
+}
+
+function setSelectionShape(shape) {
+  setSelectionPreviewShape(shape);
   if (!selectionRect || selectionRect.width < 1e-6 || selectionRect.height < 1e-6) {
     selectionShape = null;
     selectionRect = null;
@@ -12774,7 +13126,7 @@ function setSelectionShape(shape) {
 function clearSelectionState() {
   selectionShape = null;
   selectionRect = null;
-  polygonDraft = null;
+  selectionGestures.resetDrafts();
 }
 
 function pointInsideSelection(point) {
@@ -12913,21 +13265,7 @@ function drawOverlay() {
     if (traceDocumentSelectionPath(ctx)) ctx.stroke();
     ctx.restore();
   }
-  if (polygonDraft?.points?.length) {
-    const points=polygonDraft.points;
-    ctx.save();
-    ctx.lineWidth=1/zoom;
-    ctx.setLineDash([5/zoom,4/zoom]);
-    ctx.strokeStyle='#79a7ff';
-    ctx.fillStyle='#ffffff';
-    ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);
-    for(let i=1;i<points.length;i+=1)ctx.lineTo(points[i].x,points[i].y);
-    if(polygonDraft.hover)ctx.lineTo(polygonDraft.hover.x,polygonDraft.hover.y);
-    ctx.stroke();
-    const radius=3/zoom;
-    for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,radius,0,Math.PI*2);ctx.fill();ctx.stroke();}
-    ctx.restore();
-  }
+  selectionGestures.drawPolygonDraft(ctx);
   if(penDraft?.points?.length){
     const points=penDraft.points;
     ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#72a7ff';ctx.fillStyle='#fff';ctx.setLineDash([]);
@@ -12943,8 +13281,8 @@ function drawOverlay() {
     ctx.fillStyle='#fff';ctx.strokeStyle='#3976ea';
     for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,3/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();}
     ctx.restore();
-  } else if(magneticDraft?.points?.length){
-    const points=magneticDraft.points;ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#ff5fa8';ctx.fillStyle='#fff';ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i+=1)ctx.lineTo(points[i].x,points[i].y);if(magneticDraft.hover)ctx.lineTo(magneticDraft.hover.x,magneticDraft.hover.y);ctx.stroke();for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,2.5/zoom,0,Math.PI*2);ctx.fill();}ctx.restore();
+  } else {
+    selectionGestures.drawMagneticDraft(ctx);
   }
   drawSelectedPathControls(ctx);
   if (RASTER_BRUSH_TOOLS.has(currentTool) && hoverPoint) {
@@ -14120,56 +14458,14 @@ function applyProperty(path, raw, input, shouldCommit = true) {
 }
 
 function updateToolLabel() {
+  const selectionType = selectionGestures.getType();
   els.toolLabel.textContent = currentTool === 'marquee' ? (SELECTION_TYPE_LABELS[selectionType] || TOOL_LABELS.marquee) : (TOOL_LABELS[currentTool] || currentTool);
-}
-
-function cancelPolygonDraft({ restorePrevious = true, announce = false } = {}) {
-  if (!polygonDraft) return false;
-  const previous = polygonDraft.previousSelection;
-  polygonDraft = null;
-  if (restorePrevious) setSelectionShape(previous);
-  drawOverlay();
-  if (announce) setStatus('Многоугольное выделение отменено');
-  return true;
-}
-
-function finishPolygonSelection() {
-  if (!polygonDraft) return false;
-  const points = polygonDraft.points || [];
-  const previousSelection = polygonDraft.previousSelection;
-  polygonDraft = null;
-  if (points.length < 3) {
-    setSelectionShape(previousSelection);
-    drawOverlay();
-    setStatus('Для многоугольного выделения нужно минимум 3 точки');
-    return false;
-  }
-  setSelectionShape({type:'polygon',points});
-  drawOverlay();
-  setStatus(`Многоугольное выделение: ${points.length} точек`);
-  return true;
-}
-
-function setSelectionType(type, { announce = true } = {}) {
-  const next = SELECTION_TYPES.includes(type) ? type : 'rect';
-  if (polygonDraft) cancelPolygonDraft({restorePrevious:true});
-  selectionType = next;
-  if (els.selectionType) els.selectionType.value = next;
-  updateToolLabel();
-  if (announce && currentTool === 'marquee') setStatus(`Тип выделения: ${SELECTION_TYPE_LABELS[next]}`);
-  drawOverlay();
-}
-
-function cycleSelectionType() {
-  const index = Math.max(0, SELECTION_TYPES.indexOf(selectionType));
-  setSelectionType(SELECTION_TYPES[(index + 1) % SELECTION_TYPES.length]);
 }
 
 function setTool(tool) {
   if (tool !== currentTool && blockPendingDocumentEdit()) return;
-  if (tool !== 'marquee' && polygonDraft) cancelPolygonDraft({restorePrevious:true});
+  selectionGestures.prepareToolChange(tool);
   if(tool!=='pen'){penDraft=null;vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
-  if(tool!=='magnetic')magneticDraft=null;
   currentTool = tool;
   $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   updateToolLabel();
@@ -14319,29 +14615,12 @@ els.overlay.addEventListener('pointerdown', async (e) => {
     }
     beginPenPoint(p,e.detail>=2);return;
   }
-  if (currentTool === 'magnetic') { addMagneticPoint(p,e.detail>=2);return; }
+  if (currentTool === 'magnetic') { selectionGestures.addMagneticPoint(p,{finish:e.detail>=2});return; }
   if (currentTool === 'marquee') {
-    const previousSelection=cloneSelectionShape(selectionShape);
-    if (selectionType === 'polygon') {
-      e.preventDefault();
-      if (!polygonDraft) {
-        polygonDraft={points:[p],hover:p,previousSelection};
-        selectionShape=null;selectionRect=null;
-        setStatus('Многоугольное лассо: ставьте точки, двойной щелчок или Enter — завершить');
-      } else {
-        const first=polygonDraft.points[0];
-        const nearFirst=polygonDraft.points.length>=3&&Math.hypot(p.x-first.x,p.y-first.y)<=10/zoom;
-        const last=polygonDraft.points.at(-1);
-        if (!last || Math.hypot(p.x-last.x,p.y-last.y)>1/zoom) polygonDraft.points.push(p);
-        polygonDraft.hover=p;
-        if (nearFirst || e.detail>=2) finishPolygonSelection();
-      }
-      drawOverlay();return;
-    }
-    drag={kind:'marquee',selectionType,start:p,current:p,previousSelection,points:selectionType==='lasso'?[p]:null,lockAspect:false};
-    selectionShape=selectionType==='lasso'?{type:'lasso',points:[p]}:{type:selectionType,rect:{x:p.x,y:p.y,width:0,height:0}};
-    selectionRect={x:p.x,y:p.y,width:0,height:0};
-    drawOverlay();return;
+    const result = selectionGestures.beginMarquee(p,{detail:e.detail});
+    if (result?.preventDefault) e.preventDefault();
+    if (result?.drag) drag = result.drag;
+    return;
   }
   if (currentTool === 'line') { drag = { kind:'line', start:p, current:p }; previewLine(p,p); return; }
   if (currentTool === 'shape') { drag = { kind:'shape', start:p, current:p }; return; }
@@ -14359,9 +14638,8 @@ function onOverlayPointerMove(e) {
   els.pointer.textContent = `x: ${Math.round(p.x)} y: ${Math.round(p.y)}`;
   hoverPoint = p;
   if (!drag) {
-    if (polygonDraft && currentTool === 'marquee' && selectionType === 'polygon') polygonDraft.hover=p;
+    selectionGestures.updateIdleHover(p);
     if(penDraft&&currentTool==='pen')penDraft.hover=p;
-    if(magneticDraft&&currentTool==='magnetic')magneticDraft.hover=findMagneticEdgePoint(p);
     if (currentTool === 'zoom') els.overlay.style.cursor=e.altKey?'zoom-out':'zoom-in';
     else if(currentTool==='pen'&&!penDraft)updatePenCursor(p);
     else updateMoveCursor(p);
@@ -14420,21 +14698,7 @@ function onOverlayPointerMove(e) {
     drawOverlay();
     return;
   }
-  if (drag.kind === 'marquee') {
-    drag.current=p;
-    if (drag.selectionType === 'lasso') {
-      const last=drag.points.at(-1);
-      const minDistance=Math.max(.5,1.5/zoom);
-      if (!last || Math.hypot(p.x-last.x,p.y-last.y)>=minDistance) drag.points.push(p);
-      selectionShape={type:'lasso',points:drag.points.map(point=>({...point}))};
-      selectionRect=selectionBounds(selectionShape);
-    } else {
-      drag.lockAspect=e.shiftKey;
-      const r=e.shiftKey?constrainedRect(drag.start,p,true):normalizeRect(drag.start,p);
-      selectionShape={type:drag.selectionType,rect:r};selectionRect=r;
-    }
-    drawOverlay();return;
-  }
+  if (drag.kind === 'marquee') { selectionGestures.updateMarquee(drag,p,{shiftKey:e.shiftKey}); return; }
   if (drag.kind === 'line') { drag.current=e.shiftKey?snapLineEnd(drag.start,p,45):p; previewLine(drag.start,drag.current); return; }
   if (drag.kind === 'shape') { drag.current=p; drag.lockAspect=e.shiftKey; const r=constrainedRect(drag.start,p,e.shiftKey); previewRect(r, els.primaryColor.value); return; }
   if (drag.kind === 'crop') { drag.current=p; cropRect=normalizeRect(drag.start,p); drawOverlay(); return; }
@@ -14504,21 +14768,7 @@ els.overlay.addEventListener('pointerup', async (e) => {
   if (d.kind === 'resize' && d.moved) commit('Изменить размер слоя');
   if (d.kind === 'rotate' && d.moved) commit('Повернуть слой');
   if (d.kind === 'paint') await paintGesture.end(d);
-  if (d.kind === 'marquee') {
-    if (d.selectionType === 'lasso') {
-      const last=d.points.at(-1);const p=canvasPoint(e);
-      if(!last||Math.hypot(p.x-last.x,p.y-last.y)>1/zoom)d.points.push(p);
-      const bounds=selectionBounds({type:'lasso',points:d.points});
-      if(d.points.length>=3&&bounds&&bounds.width>=1&&bounds.height>=1)setSelectionShape({type:'lasso',points:d.points});
-      else setSelectionShape(null);
-    } else {
-      const r=(e.shiftKey||d.lockAspect)?constrainedRect(d.start,d.current,true):normalizeRect(d.start,d.current);
-      if(r.width>=1&&r.height>=1)setSelectionShape({type:d.selectionType,rect:r});else setSelectionShape(null);
-    }
-    drawOverlay();
-    const label=SELECTION_TYPE_LABELS[d.selectionType]||'Выделение';
-    setStatus(selectionRect?`${label}: ${Math.round(selectionRect.width)} × ${Math.round(selectionRect.height)} px`:'Выделение снято');
-  }
+  if (d.kind === 'marquee') selectionGestures.finishMarquee(d,d.current,{shiftKey:e.shiftKey});
   if (d.kind === 'line') {
     const end=e.shiftKey?snapLineEnd(d.start,d.current,45):d.current;
     if(Math.hypot(end.x-d.start.x,end.y-d.start.y)>2)await drawLineOnCurrentRaster(d.start,end);
@@ -14573,7 +14823,7 @@ els.overlay.addEventListener('pointercancel', async (e) => {
       const l=doc.layers.find(x=>x.id===d.layerId); if(l){l.rotation=d.initialRotation;render();updateTransformPropertyValues(l);}
     }
     if (d.kind==='crop') cropRect=null;
-    if (d.kind==='marquee') setSelectionShape(d.previousSelection);
+    if (d.kind==='marquee') selectionGestures.cancelMarquee(d);
     if (d.kind==='pen-handle'&&penDraft){
       penDraft.points.splice(d.nodeIndex,1);
       if(!penDraft.points.length)penDraft=null;
@@ -14707,20 +14957,6 @@ function finishPenPath(){
   commit('Добавить Bézier-контур');setStatus('Bézier-контур добавлен');drawOverlay();return true;
 }
 
-function findMagneticEdgePoint(point){
-  const ctx=els.canvas.getContext('2d',{alpha:true});const radius=Math.max(4,Math.round(10/zoom));const cx=Math.round(point.x),cy=Math.round(point.y);const left=clamp(cx-radius,1,Math.max(1,doc.width-2));const top=clamp(cy-radius,1,Math.max(1,doc.height-2));const right=clamp(cx+radius,2,doc.width-1);const bottom=clamp(cy+radius,2,doc.height-1);const width=right-left+1,height=bottom-top+1;if(width<3||height<3)return point;
-  const data=ctx.getImageData(left-1,top-1,width+2,height+2).data;const stride=width+2;const lum=(x,y)=>{const i=(y*stride+x)*4;return data[i]*.2126+data[i+1]*.7152+data[i+2]*.0722;};let best={x:cx,y:cy,score:-1};for(let y=1;y<=height;y+=1)for(let x=1;x<=width;x+=1){const gx=Math.abs(lum(x+1,y)-lum(x-1,y));const gy=Math.abs(lum(x,y+1)-lum(x,y-1));const score=gx+gy-Math.hypot(left+x-1-point.x,top+y-1-point.y)*1.5;if(score>best.score)best={x:left+x-1,y:top+y-1,score};}return{x:best.x,y:best.y};
-}
-function magneticSegmentPoints(from,to){
-  const distance=Math.hypot(to.x-from.x,to.y-from.y);const step=Math.max(5,12/zoom);const steps=Math.min(256,Math.max(1,Math.ceil(distance/step)));const result=[];
-  for(let index=1;index<=steps;index+=1){const t=index/steps;const snapped=findMagneticEdgePoint({x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t});const previous=result.at(-1)||from;if(Math.hypot(snapped.x-previous.x,snapped.y-previous.y)>1/zoom)result.push(snapped);}
-  return result;
-}
-function addMagneticPoint(point,finish=false){
-  const snapped=findMagneticEdgePoint(point);if(!magneticDraft)magneticDraft={points:[],hover:snapped};const last=magneticDraft.points.at(-1);if(last){magneticDraft.points.push(...magneticSegmentPoints(last,snapped));}else{magneticDraft.points.push(snapped);}magneticDraft.hover=snapped;if(finish&&magneticDraft.points.length>=3)finishMagneticSelection();else{setStatus(`Магнитное лассо: ${magneticDraft.points.length} точек • Enter или двойной щелчок — завершить`);drawOverlay();}
-}
-function finishMagneticSelection(){if(!magneticDraft||magneticDraft.points.length<3)return false;const points=magneticDraft.points;magneticDraft=null;setSelectionShape({type:'polygon',points});drawOverlay();setStatus(`Магнитное выделение: ${points.length} точек`);return true;}
-
 function magicWandSelect(point){
   const width=els.canvas.width,height=els.canvas.height,total=width*height;if(total>8_000_000){toast('Волшебная палочка: изображение слишком большое для безопасного выделения','warn');setStatus('Уменьшите изображение до 8 МП для волшебной палочки');return false;}
   const x0=clamp(Math.floor(point.x),0,width-1),y0=clamp(Math.floor(point.y),0,height-1);const data=els.canvas.getContext('2d',{alpha:true}).getImageData(0,0,width,height).data;const seed=(y0*width+x0)*4;const target=[data[seed],data[seed+1],data[seed+2],data[seed+3]];const tolerance=(Number(els.fillTolerance?.value)||0)*4.42;const selectedMask=new Uint8Array(total);const queue=new Int32Array(total);let head=0,tail=0;queue[tail++]=y0*width+x0;selectedMask[y0*width+x0]=1;
@@ -14792,7 +15028,7 @@ function applyCrop(r) {
 }
 
 function selectAllPixels(){setSelectionShape({type:'rect',rect:{x:0,y:0,width:doc.width,height:doc.height}});drawOverlay();setStatus('Выделен весь холст');}
-function deselectPixels(){if(!selectionRect&&!polygonDraft)return;clearSelectionState();drawOverlay();setStatus('Выделение снято');}
+function deselectPixels(){if(!selectionRect&&!selectionGestures.hasPolygonDraft())return;clearSelectionState();drawOverlay();setStatus('Выделение снято');}
 function cropToSelection(){if(!selectionRect){setStatus('Нет активного выделения');return;}if(selectionRect.width<1||selectionRect.height<1)return;applyCrop({...selectionRect});}
 
 function openTextModal(point) {
@@ -17699,7 +17935,7 @@ els.burnStrength.oninput=()=>els.burnStrengthValue.textContent=`${els.burnStreng
 if(els.blurStrength)els.blurStrength.oninput=()=>els.blurStrengthValue.textContent=`${els.blurStrength.value}%`;
 if(els.smudgeStrength)els.smudgeStrength.oninput=()=>els.smudgeStrengthValue.textContent=`${els.smudgeStrength.value}%`;
 if(els.fillTolerance)els.fillTolerance.oninput=()=>els.fillToleranceValue.textContent=els.fillTolerance.value;
-if(els.selectionType)els.selectionType.onchange=()=>setSelectionType(els.selectionType.value);
+if(els.selectionType)els.selectionType.onchange=()=>selectionGestures.setType(els.selectionType.value);
 if(els.selectionCopyMode)els.selectionCopyMode.onchange=()=>{selectionCopyMode=els.selectionCopyMode.value==='selected'?'selected':'merged';setStatus(selectionCopyMode==='merged'?'Выделение: копирование со всех видимых слоёв':'Выделение: копирование с выбранного слоя');};
 if(els.smartSnapToggle)els.smartSnapToggle.onchange=()=>{smartSnapEnabled=els.smartSnapToggle.checked;persistSmartSnapState();clearSmartGuides();drawOverlay();setStatus(smartSnapEnabled?'Умная привязка включена':'Умная привязка выключена');};
 $$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSelectedLayer(button.dataset.align)));
@@ -17820,20 +18056,20 @@ window.addEventListener('keydown',e=>{
       if(d.kind==='pen-handle'&&penDraft){penDraft.points.splice(d.nodeIndex,1);if(!penDraft.points.length)penDraft=null;}
       if(d.kind==='path-control')restorePathControlDrag(d);
       if(d.kind==='crop')cropRect=null;
-      if(d.kind==='marquee')setSelectionShape(d.previousSelection);
+      if(d.kind==='marquee')selectionGestures.cancelMarquee(d);
       els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;
     }
-    if(polygonDraft){e.preventDefault();cancelPolygonDraft({restorePrevious:true,announce:true});return;}
+    if(selectionGestures.hasPolygonDraft()){e.preventDefault();selectionGestures.cancelPolygonDraft({restorePrevious:true,announce:true});return;}
     if(penDraft){e.preventDefault();penDraft=null;drawOverlay();setStatus('Контур отменён');return;}
-    if(magneticDraft){e.preventDefault();magneticDraft=null;drawOverlay();setStatus('Магнитное выделение отменено');return;}
+    if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropRect){cropRect=null;drawOverlay();setStatus('Кадрирование отменено');return;}
     if(selectionRect){deselectPixels();return;}
   }
   if(e.target instanceof Node && els.modalRoot.contains(e.target))return;
   if(menuController.isOpen() && (els.menu.contains(e.target)||e.target.closest?.('.menu-button')))return;
-  if(e.key==='Enter'&&polygonDraft&&currentTool==='marquee'){e.preventDefault();finishPolygonSelection();return;}
+  if(e.key==='Enter'&&selectionGestures.hasPolygonDraft()&&currentTool==='marquee'){e.preventDefault();selectionGestures.finishPolygonSelection();return;}
   if(e.key==='Enter'&&penDraft&&currentTool==='pen'){e.preventDefault();finishPenPath();return;}
-  if(e.key==='Enter'&&magneticDraft&&currentTool==='magnetic'){e.preventDefault();finishMagneticSelection();return;}
+  if(e.key==='Enter'&&selectionGestures.hasMagneticDraft()&&currentTool==='magnetic'){e.preventDefault();selectionGestures.finishMagneticSelection();return;}
   if(ctrl&&e.code==='Digit0'){e.preventDefault();fitToView();return;}
   if(ctrl&&e.code==='Digit1'){e.preventDefault();setZoom(1);return;}
   if(ctrl&&(e.code==='Equal'||e.code==='NumpadAdd')){e.preventDefault();setZoom(zoom+.1);return;}
@@ -17860,7 +18096,7 @@ window.addEventListener('keydown',e=>{
     e.preventDefault();const step=e.shiftKey?10:1;
     if(e.code==='ArrowLeft')nudgeSelected(-step,0);if(e.code==='ArrowRight')nudgeSelected(step,0);if(e.code==='ArrowUp')nudgeSelected(0,-step);if(e.code==='ArrowDown')nudgeSelected(0,step);return;
   }
-  if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyM'){e.preventDefault();if(currentTool!=='marquee')setTool('marquee');cycleSelectionType();return;}
+  if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyM'){e.preventDefault();if(currentTool!=='marquee')setTool('marquee');selectionGestures.cycleType();return;}
   if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyO'){e.preventDefault();setTool('burn');return;}
   if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyG'){e.preventDefault();setTool('gradient');return;}
   const map={KeyV:'move',KeyM:'marquee',KeyB:'brush',KeyS:'clone',KeyJ:'heal',KeyN:'smudge',KeyO:'dodge',KeyR:'blur',KeyE:'eraser',KeyG:'fill',KeyP:'pen',KeyA:'magnetic',KeyW:'wand',KeyL:'line',KeyT:'text',KeyU:'shape',KeyC:'crop',KeyI:'eyedropper',KeyH:'hand',KeyZ:'zoom'}; if(!ctrl&&!e.altKey&&map[e.code]){setTool(map[e.code]);return;}

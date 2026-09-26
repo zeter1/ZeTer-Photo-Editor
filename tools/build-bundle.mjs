@@ -26,6 +26,7 @@ const sources = [
   'src/painting/command-controller.js',
   'src/retouch/controller.js',
   'src/painting/gesture-controller.js',
+  'src/selection/gesture-controller.js',
   'src/selection/raster-mutation-controller.js',
   'src/selection/clipboard-controller.js',
   'src/document/import-controller.js',

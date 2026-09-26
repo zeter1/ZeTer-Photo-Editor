@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const gesture = await readFile(new URL('../src/painting/gesture-controller.js', import.meta.url), 'utf8');
+const selectionGestures = await readFile(new URL('../src/selection/gesture-controller.js', import.meta.url), 'utf8');
 const retouch = await readFile(new URL('../src/retouch/controller.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
@@ -46,6 +47,6 @@ test('destructive raster tools keep editing bound to the selected visible layer'
 test('retouch dabs use feathered masks and magnetic lasso traces intermediate edge points', () => {
   assert.match(retouch, /function applyFeatherMask\(ctx, centerX, centerY, radius\)/);
   assert.match(retouch, /applyFeatherMask\(scratchCtx, point\.x-left, point\.y-top, radius\)/);
-  assert.match(main, /function magneticSegmentPoints\(from,to\)/);
-  assert.match(main, /magneticDraft\.points\.push\(\.\.\.magneticSegmentPoints\(last,snapped\)\)/);
+  assert.match(selectionGestures, /function magneticSegmentPoints\(from,to\)/);
+  assert.match(selectionGestures, /magneticDraft\.points\.push\(\.\.\.magneticSegmentPoints\(last,snapped\)\)/);
 });

@@ -6,7 +6,7 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: global DOM/pointer/keyboard routing, tool selection, history/transaction coordination and save/export flows. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics, are delegated to their canonical owners.
+Application orchestrator: global DOM/pointer/keyboard routing, tool selection, history/transaction coordination and save/export flows. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics, are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
@@ -59,6 +59,11 @@ It does **not** own document/history/global pointer state or the shared raster e
 Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or project persistence; those remain separate runtime/format concerns.
 
 ## Selection boundary — `src/selection/`
+
+### `gesture-controller.js`
+Owns transient selection gesture mechanics: active marquee type, rectangle/ellipse/free-lasso drag lifecycle, polygon draft completion/cancellation, magnetic-edge sampling/drafts and their overlay drawing. It receives canonical selection shape, rendered-canvas and UI operations through explicit ports and deliberately does not install global DOM listeners.
+
+Global pointer capture/keyboard routing and canonical selection shape/session state remain in `src/main.js`; geometry math remains in `src/core/geometry.js`.
 
 ### `clipboard-controller.js`
 Owns selection copy/cut/paste orchestration: selected-vs-merged PNG preparation, browser Clipboard API, native paste payload handling, shortcut fallback timers/generation and tab-switch guards. It does not own document mutation internals: destructive clearing is delegated to the raster-mutation controller.

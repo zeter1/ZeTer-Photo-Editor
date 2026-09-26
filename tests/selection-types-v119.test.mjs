@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { pointInSelection, selectionBounds, selectionPathPoints } from '../src/core/geometry.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const selectionGestures = await readFile(new URL('../src/selection/gesture-controller.js', import.meta.url), 'utf8');
 const clipboard = await readFile(new URL('../src/selection/clipboard-controller.js', import.meta.url), 'utf8');
 const toolConfig = await readFile(new URL('../src/ui/tool-config.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
@@ -32,8 +33,8 @@ test('selection toolbar exposes all four selection types and Shift+M cycling', (
   assert.match(index, /value="lasso">Свободное лассо/);
   assert.match(index, /value="polygon">Многоугольное лассо/);
   assert.match(toolConfig, /export const SELECTION_TYPE_LABELS = \{ rect:'Прямоугольное выделение', ellipse:'Эллиптическое выделение', lasso:'Свободное лассо', polygon:'Многоугольное лассо' \}/);
-  assert.match(main, /function cycleSelectionType\(\)/);
-  assert.match(main, /e\.shiftKey&&e\.code==='KeyM'/);
+  assert.match(selectionGestures, /function cycleType\(\)/);
+  assert.match(main, /e\.shiftKey&&e\.code==='KeyM'[\s\S]*selectionGestures\.cycleType\(\)/);
 });
 
 test('non-rectangular selections clip copy, raster editing and fill through the same selection shape', () => {
@@ -44,9 +45,12 @@ test('non-rectangular selections clip copy, raster editing and fill through the 
   assert.match(main, /function rasterSelectionPredicate\(layer\)[\s\S]*pointInsideSelection/);
 });
 
-test('polygonal lasso supports click vertices, Enter completion and Escape cancellation', () => {
-  assert.match(main, /polygonDraft=\{points:\[p\],hover:p,previousSelection\}/);
-  assert.match(main, /e\.detail>=2/);
-  assert.match(main, /e\.key==='Enter'&&polygonDraft&&currentTool==='marquee'/);
-  assert.match(main, /if\(polygonDraft\)\{e\.preventDefault\(\);cancelPolygonDraft/);
+test('polygonal lasso lifecycle lives in the selection gesture controller while keyboard routing stays global', () => {
+  assert.match(selectionGestures, /function beginMarquee\(/);
+  assert.match(selectionGestures, /polygonDraft = \{ points:/);
+  assert.match(selectionGestures, /detail >= 2/);
+  assert.match(selectionGestures, /function finishPolygonSelection\(/);
+  assert.match(main, /selectionGestures\.hasPolygonDraft\(\).*currentTool==='marquee'/);
+  assert.match(main, /selectionGestures\.finishPolygonSelection\(\)/);
+  assert.match(main, /selectionGestures\.cancelPolygonDraft\(/);
 });

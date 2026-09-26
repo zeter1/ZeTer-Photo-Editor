@@ -25,6 +25,7 @@ Useful routing:
 - raster edit buffer / high-depth working state / persistence / paint preview → painting/controller
 - brush/eraser/retouch stroke begin/move/end → painting/gesture-controller + painting/controller + retouch/controller
 - fill / raster line / current-layer selection clear → painting/command-controller + painting/controller + pixel-buffer/pixels; main only supplies selection/tool/transaction ports
+- marquee / ellipse / free-lasso / polygon / magnetic selection gesture → selection/gesture-controller; inspect main only for global pointer/keyboard routing
 - merged Clipboard cut / multi-layer selection clear / rasterize selected layer → selection/clipboard-controller + selection/raster-mutation-controller
 - pixels/precision → pixel-buffer/pixels
 - rendering → render

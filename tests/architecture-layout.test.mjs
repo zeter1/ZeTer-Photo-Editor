@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -13,6 +13,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, too
   readFile(new URL('src/ui/toolbar-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/menu-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
+  readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/raster-mutation-controller.js', root), 'utf8'),
   readFile(new URL('src/document/import-controller.js', root), 'utf8'),
@@ -64,6 +65,20 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /function makeModalDraggable\(/);
   assert.doesNotMatch(main, /function showInfoModal\(/);
   assert.doesNotMatch(main, /function showRecoveryModal\(/);
+  assert.match(main, /from '\.\/selection\/gesture-controller\.js'/);
+  assert.match(build, /'src\/selection\/gesture-controller\.js'/);
+  assert.match(selectionGestureController, /export function createSelectionGestureController/);
+  assert.match(selectionGestureController, /function beginMarquee\(/);
+  assert.match(selectionGestureController, /function updateMarquee\(/);
+  assert.match(selectionGestureController, /function finishMarquee\(/);
+  assert.match(selectionGestureController, /function findMagneticEdgePoint\(/);
+  assert.match(main, /selectionGestures\.beginMarquee\(/);
+  assert.match(main, /selectionGestures\.updateMarquee\(/);
+  assert.match(main, /selectionGestures\.finishMarquee\(/);
+  assert.doesNotMatch(main, /let (?:selectionType|polygonDraft|magneticDraft)\b/);
+  for (const name of ['cancelPolygonDraft','finishPolygonSelection','setSelectionType','cycleSelectionType','findMagneticEdgePoint','magneticSegmentPoints','addMagneticPoint','finishMagneticSelection']) {
+    assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  }
   assert.match(main, /from '\.\/selection\/clipboard-controller\.js'/);
   assert.match(build, /'src\/selection\/clipboard-controller\.js'/);
   assert.match(selectionClipboardController, /export function createSelectionClipboardController/);
