@@ -8,18 +8,18 @@ ZeTer Photo Editor — локальный браузерный многосло�
 
 | Задача | Главные файлы | Сначала тесты |
 |---|---|---|
-| UI, события, меню, dialogs, pointer/keyboard | `src/main.js`, `src/ui/menu-controller.js`, `src/ui/modal-controller.js`, `src/ui/`, `src/styles.css`, `index.html` | interaction/browser tests |
+| UI, события, меню, dialogs, pointer/keyboard | `src/interaction/pointer-lifecycle-router.js` для capture/active-pointer lifecycle; `src/main.js` для tool-specific dispatch; `src/ui/menu-controller.js`, `src/ui/modal-controller.js`, `src/ui/`, `src/styles.css`, `index.html` | `tests/pointer-lifecycle-router.test.mjs`, `tests/pointer-release-tools.test.mjs`, interaction/browser tests |
 | Вкладки, document sessions, session history | `src/workspace/session-controller.js`, wiring в `src/main.js` | `tests/workspace-session-controller.test.mjs`, `tests/document-tabs.test.mjs` |
 | Порядок инструментов, drag/drop, tooltips | `src/ui/toolbar-controller.js`, `src/ui/tool-layout.js`, `src/ui/tool-config.js` | `tests/tool-layout.test.mjs`, browser smoke |
 | Документы, слои, groups, smart objects | `src/core/state.js` | core/layer/smart-object tests |
 | Рендеринг и composite | `src/core/render.js` | render/blending/high-depth tests |
-| Selection gestures / marquee, lasso, polygon, magnetic | `src/selection/gesture-controller.js`; global pointer/keyboard routing в `src/main.js` | `tests/selection-gesture-controller.test.mjs`, `tests/selection-types-v119.test.mjs`, `tests/pointer-release-tools.test.mjs` |
+| Selection gestures / marquee, lasso, polygon, magnetic | `src/selection/gesture-controller.js`; pointer lifecycle в `src/interaction/pointer-lifecycle-router.js`; tool/keyboard dispatch в `src/main.js` | `tests/selection-gesture-controller.test.mjs`, `tests/selection-types-v119.test.mjs`, `tests/pointer-lifecycle-router.test.mjs`, `tests/pointer-release-tools.test.mjs` |
 | Selection clipboard / copy-cut-paste | `src/selection/clipboard-controller.js` | `tests/selection-clipboard.test.mjs`, async context tests |
 | Destructive selection raster mutation / merged cut / rasterize selected layer | `src/selection/raster-mutation-controller.js`, `src/painting/controller.js` | `tests/selection-raster-mutation-controller.test.mjs`, async context, high-depth tests |
 | Ретушь clone/heal/smudge/blur/dodge/burn | `src/retouch/controller.js`, math в `src/core/pixels.js` / `src/core/pixel-buffer.js` | `tests/retouch-controller.test.mjs`, retouch/high-depth tests |
 | Raster edit buffers, high-depth/CMYK working state и persistence | `src/painting/controller.js`, math в `src/core/pixels.js` / `src/core/pixel-buffer.js` | `tests/painting-controller.test.mjs`, pixel/high-depth tests |
 | Fill / raster line / очистка выделения на текущем raster layer | `src/painting/command-controller.js`, `src/painting/controller.js`; selection/tool/transaction ports в `src/main.js` | `tests/painting-command-controller.test.mjs`, `tests/selection-fill-line-v18.test.mjs`, `tests/high-depth-editing.test.mjs` |
-| Brush/eraser/retouch stroke begin → move → end | `src/painting/gesture-controller.js`, `src/painting/controller.js`, `src/retouch/controller.js`; global pointer routing в `src/main.js` | `tests/painting-gesture-controller.test.mjs`, brush-performance, retouch/high-depth tests |
+| Brush/eraser/retouch stroke begin → move → end | `src/painting/gesture-controller.js`, `src/painting/controller.js`, `src/retouch/controller.js`; capture/active pointer в `src/interaction/pointer-lifecycle-router.js`; tool routing в `src/main.js` | `tests/painting-gesture-controller.test.mjs`, `tests/pointer-lifecycle-router.test.mjs`, brush-performance, retouch/high-depth tests |
 | ICC/CMYK/soft proof | `src/core/color-management.js` | color-management/corpus tests |
 | PSD/PSB import/export | `src/formats/psd.js` | `tests/psd-*.test.mjs` |
 | Document import / drag-drop routing | `src/document/import-controller.js`, PSD/project callbacks in `src/main.js` | async document context / reliability tests |
@@ -31,20 +31,21 @@ ZeTer Photo Editor — локальный браузерный многосло�
 
 ## 2. Source of truth
 
-- `src/main.js` — runtime orchestrator. Это всё ещё большой файл; не читай его целиком без необходимости. Ищи конкретный symbol/event handler.
+- `src/main.js` — runtime orchestrator и владелец tool-specific pointer/keyboard dispatch. Это всё ещё большой файл; не читай его целиком без необходимости. Ищи конкретный symbol/event handler.
+- `src/interaction/pointer-lifecycle-router.js` — generic lifecycle overlay-pointer: один active pointer, capture/release, фильтрация чужих move/up/cancel и fail-safe отмена при `lostpointercapture`; не знает про move/paint/crop/path semantics.
 - `src/ui/tool-config.js` — чистые UI-константы, labels/help/effect-control metadata/storage keys.
 - `src/ui/toolbar-controller.js` — drag/drop/persistence/drop-slot и rich tooltip lifecycle панели инструментов; выбор текущего tool остаётся в `src/main.js`.
 - `src/ui/menu-controller.js` — lifecycle верхнего меню и context-menu: DOM items, позиционирование, focus/keyboard navigation, outside-click close и безопасный async action dispatch; доменные списки команд остаются в `src/main.js`.
 - `src/ui/modal-controller.js` — generic modal/dialog shell: form fields, numeric normalization, focus restore, backdrop/Escape close, draggable text-modal lifecycle, info/recovery dialogs; editor-specific preview/mutations приходят callback-ами из `src/main.js`.
 - `src/ui/tool-layout.js` — чистая математика порядка/позиции toolbar.
 - `src/workspace/session-controller.js` — lifecycle document sessions: create/switch/close/rename/duplicate, per-tab history/zoom/dirty/selection state и smart-object parent/child tab guard.
-- `src/selection/gesture-controller.js` — канонический владелец transient selection gesture state: selection type, marquee/lasso drag lifecycle, polygon/magnetic drafts, edge snapping и draft overlay. `src/main.js` оставляет только global pointer/keyboard routing и canonical selection shape bridge.
+- `src/selection/gesture-controller.js` — канонический владелец transient selection gesture state: selection type, marquee/lasso drag lifecycle, polygon/magnetic drafts, edge snapping и draft overlay. Generic pointer capture/ownership живёт в `src/interaction/pointer-lifecycle-router.js`; `src/main.js` оставляет tool/keyboard dispatch и canonical selection shape bridge.
 - `src/selection/clipboard-controller.js` — selection copy/cut/paste boundary: PNG preparation, system Clipboard API, native paste/fallback generation guards и tab-switch safety; destructive pixel mutation вызывается через отдельный selection raster-mutation callback.
 - `src/selection/raster-mutation-controller.js` — владелец destructive selection raster mutations: merged cut по видимым незаблокированным pixel layers, prepare-all-before-mutate, high-depth clear, rasterization non-raster layers и команда rasterize selected layer с document/session stale guard.
 - `src/document/import-controller.js` — file classification и image import transaction: decode/validate-all-before-mutate, empty-document sizing, drag/drop/file-input routing к image/PSD/project paths и tab-switch guard.
 - `src/painting/controller.js` — единый владелец raster edit state: reusable Canvas8 buffer/context/layer id, native high-depth/CMYK paint buffer, paint-preview frame lifecycle/override, materialization и persistence.
 - `src/painting/command-controller.js` — one-shot raster commands для fill, raster line и очистки пикселей текущего raster layer внутри активного выделения. Он получает target/selection/tool/transaction/UI через grouped ports; глобальные pointer events, selection state, history storage и multi-layer clipboard cut остаются вне него.
-- `src/painting/gesture-controller.js` — lifecycle одного brush/eraser/retouch stroke: target selection, native-vs-Canvas path, begin/move/end, preview scheduling и публикация результата через узкие grouped ports. `currentTool`, global pointer capture/routing, selection/history ownership и общий async edit guard остаются в `src/main.js`.
+- `src/painting/gesture-controller.js` — lifecycle одного brush/eraser/retouch stroke: target selection, native-vs-Canvas path, begin/move/end, preview scheduling и публикация результата через узкие grouped ports. `currentTool`, tool-specific dispatch, selection/history ownership и общий async edit guard остаются в `src/main.js`; generic capture/active-pointer routing вынесен в `src/interaction/pointer-lifecycle-router.js`.
 - `src/retouch/controller.js` — destructive retouch boundary: clone/heal source и immutable stroke snapshots, smudge/blur/dodge/burn, private scratch state и native 16/32-bit/CMYK dispatch; общий raster edit buffer приходит из `src/painting/controller.js`, а stroke orchestration — из `src/painting/gesture-controller.js`.
 - `src/core/*.js` — domain, render, pixel, history, IO, recovery и color logic.
 - `src/formats/psd.js` — единственный канонический PSD/PSB implementation.

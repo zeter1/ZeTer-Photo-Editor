@@ -8,6 +8,7 @@ These rules keep the project understandable and prevent the large app controller
 index.html / styles
         ↓
 src/main.js  ─────→  src/ui/*
+    │  ├──────→  src/interaction/*
     │  ├──────→  src/selection/*
     │  ├──────→  src/document/*
     │  ├──────→  src/painting/* ───→ src/core/*
@@ -20,10 +21,15 @@ browser primitives (Canvas, Worker, storage, File APIs)
 
 ## Rules
 
+### Interaction
+- `src/interaction/pointer-lifecycle-router.js` owns only generic overlay Pointer Events lifecycle: one active pointer, capture/release, active-pointer filtering and `pointerup` / `pointercancel` / `lostpointercapture` termination.
+- It must not branch on editor tool names or own drag/domain state. Move/transform/paint/path/selection/crop semantics stay in `src/main.js` or their domain controllers.
+- Pointer ownership must be cleared even when a release/cancel callback fails; an unexpected `lostpointercapture` must enter the same domain cancellation path rather than leave a stuck gesture.
+
 ### UI
 - `src/ui/tool-config.js`: pure configuration only.
 - `src/ui/tool-layout.js`: pure layout/order math only.
-- DOM mutation, global event wiring and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API.
+- DOM mutation and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API. Generic overlay pointer lifecycle is the explicit exception owned by `src/interaction/pointer-lifecycle-router.js`.
 - UI modules must not become alternate owners of document/layer domain state.
 
 ### Document import
@@ -33,7 +39,7 @@ browser primitives (Canvas, Worker, storage, File APIs)
 
 ### Selection
 - `src/selection/gesture-controller.js` owns transient selection interaction state: marquee type, rectangle/ellipse/free-lasso drag transitions, polygon/magnetic drafts, magnetic edge sampling and draft overlay drawing. It receives geometry, canonical selection shape and UI/runtime access through grouped ports.
-- The gesture controller must not install global pointer/keyboard listeners, own document/session/history state, or become the canonical owner of persisted selection shape. Global event routing and session snapshots stay in `src/main.js` until a separate boundary is proven.
+- The gesture controller must not install global pointer/keyboard listeners, own document/session/history state, or become the canonical owner of persisted selection shape. Generic overlay pointer capture/ownership is routed by `src/interaction/pointer-lifecycle-router.js`; tool/keyboard dispatch and session snapshots stay in `src/main.js`.
 - `src/selection/clipboard-controller.js` may orchestrate browser Clipboard APIs and call render helpers, but destructive document mutation remains an explicit callback into `src/selection/raster-mutation-controller.js` or the current-layer painting command controller.
 - `src/selection/raster-mutation-controller.js` owns merged-cut clearing across visible unlocked pixel layers, the reusable non-adjustment layer rasterization primitive and the selected-layer rasterize command. It must stage async preparation before mutation and re-check document/session identity before publishing results.
 - Selection modules must not own the canonical layer/document model or silently bypass lock/high-depth/Undo semantics; they receive live state through explicit ports and mutate only through the guarded transaction boundary.
@@ -45,7 +51,7 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - The command controller must not install DOM listeners, own selection-shape/history state or replace the application-wide pending-edit guard. Multi-layer clearing used by merged Clipboard cut is owned by `src/selection/raster-mutation-controller.js` because it may rasterize heterogeneous layers.
 - `src/painting/gesture-controller.js` owns one paint stroke lifecycle (`begin → move → end`) for brush/eraser and retouch routing. It receives the current tool and caller-owned pointer validity per gesture instead of reading global runtime state.
 - The gesture controller talks to document/selection/tool/UI/runtime state through grouped explicit ports. It must not install global DOM listeners, own `currentTool`, own selection/history state or replace the application-wide pending-edit guard.
-- `src/main.js` owns global pointer capture/routing and the shared transaction/history boundaries; it delegates stroke mechanics to `paintGesture`, one-shot current-layer mutations to `rasterCommands` and destructive multi-layer selection/rasterization orchestration to `selectionRasterMutations`.
+- `src/interaction/pointer-lifecycle-router.js` owns global overlay capture/release and active-pointer routing; `src/main.js` owns tool-specific dispatch plus shared transaction/history boundaries. Runtime delegates stroke mechanics to `paintGesture`, one-shot current-layer mutations to `rasterCommands` and destructive multi-layer selection/rasterization orchestration to `selectionRasterMutations`.
 - Do not recreate `brushCanvas`, `brushCtx`, high-depth paint state, `beginPaint/paintTo/endPaint` or fill/line/current-layer selection-clear implementations in `src/main.js`.
 
 ### Retouch

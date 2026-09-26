@@ -6,9 +6,16 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: global DOM/pointer/keyboard routing, tool selection, history/transaction coordination and save/export flows. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics, are delegated to their canonical owners.
+Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics, are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
+
+## Interaction boundary — `src/interaction/`
+
+### `pointer-lifecycle-router.js`
+Owns the generic overlay Pointer Events lifecycle: one active pointer at a time, capture/release, routing of idle hover vs active-pointer movement, matching up/cancel, and fail-safe cancellation when `lostpointercapture` arrives unexpectedly.
+
+It deliberately does **not** know tool names or mutate layers, selections, paths, crop geometry or paint buffers. Those domain branches remain in `src/main.js` and the dedicated selection/painting controllers.
 
 ## UI boundary — `src/ui/`
 
@@ -44,7 +51,7 @@ It deliberately does **not** own global pointer events, selection-shape state, h
 ### `gesture-controller.js`
 Owns the bounded lifecycle of one brush/eraser/retouch stroke: choose existing/new raster target, choose native high-depth/CMYK vs Canvas8 path, initialize per-stroke retouch state, route movement segments and persist on end. Dependencies are grouped ports (`state`, `target`, `selection`, `tools`, `nativePaint`, `ui`) instead of a long flat callback list.
 
-It deliberately does **not** own global pointer events/capture, `currentTool`, document/session identity, selection/history state or the global pending-edit flag. Those remain in `src/main.js`; storage/persistence stays in `src/painting/controller.js`; pixel math stays in core.
+It deliberately does **not** own global pointer events/capture, `currentTool`, document/session identity, selection/history state or the global pending-edit flag. Generic capture/active-pointer ownership lives in `src/interaction/pointer-lifecycle-router.js`; tool-specific routing and the other application state remain in `src/main.js`; storage/persistence stays in `src/painting/controller.js`; pixel math stays in core.
 
 ## Retouch boundary — `src/retouch/`
 
@@ -63,7 +70,7 @@ Owns incoming-file classification and image import orchestration: image/project 
 ### `gesture-controller.js`
 Owns transient selection gesture mechanics: active marquee type, rectangle/ellipse/free-lasso drag lifecycle, polygon draft completion/cancellation, magnetic-edge sampling/drafts and their overlay drawing. It receives canonical selection shape, rendered-canvas and UI operations through explicit ports and deliberately does not install global DOM listeners.
 
-Global pointer capture/keyboard routing and canonical selection shape/session state remain in `src/main.js`; geometry math remains in `src/core/geometry.js`.
+Generic pointer capture/active-pointer routing lives in `src/interaction/pointer-lifecycle-router.js`; tool/keyboard dispatch and canonical selection shape/session state remain in `src/main.js`; geometry math remains in `src/core/geometry.js`.
 
 ### `clipboard-controller.js`
 Owns selection copy/cut/paste orchestration: selected-vs-merged PNG preparation, browser Clipboard API, native paste payload handling, shortcut fallback timers/generation and tab-switch guards. It does not own document mutation internals: destructive clearing is delegated to the raster-mutation controller.

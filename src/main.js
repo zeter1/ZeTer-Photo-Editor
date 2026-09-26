@@ -27,6 +27,7 @@ import { createDocumentSessionController } from './workspace/session-controller.
 import { createToolbarController } from './ui/toolbar-controller.js';
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
+import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
 import { createSelectionGestureController, cloneSelectionShape } from './selection/gesture-controller.js';
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
 import { createSelectionRasterMutationController } from './selection/raster-mutation-controller.js';
@@ -83,7 +84,7 @@ let dragDepth = 0;
 let layerDragId = null;
 let groupDragId = null;
 let panelsVisible = true;
-let activePrimaryPointerId = null;
+let pointerLifecycle = null;
 let paintPersisting = false;
 let hoverPoint = null;
 let recoveryTimer = 0;
@@ -407,7 +408,7 @@ const documentSessionController = createDocumentSessionController({
     rasterEdit.reset();
     resetRetouchStroke();
     hoverPoint = null;
-    activePrimaryPointerId = null;
+    pointerLifecycle?.releaseActivePointer();
     paintPersisting = false;
   },
   cloneSelectionShape,
@@ -477,7 +478,7 @@ function markDirty(value = true) {
 }
 function documentEditPending() {
   return paintPersisting || Boolean(drag && !['pan','marquee'].includes(drag.kind)) ||
-    (activePrimaryPointerId !== null && (RASTER_BRUSH_TOOLS.has(currentTool) || currentTool === 'fill'));
+    (pointerLifecycle?.hasActivePointer() && (RASTER_BRUSH_TOOLS.has(currentTool) || currentTool === 'fill'));
 }
 function blockPendingDocumentEdit() {
   if (!documentEditPending()) return false;
@@ -2193,16 +2194,22 @@ function visibleSnapTargetRects(layerId) {
     .map(layer => frameBounds(layer));
 }
 
-els.overlay.addEventListener('pointerdown', async (e) => {
-  if (!e.isPrimary || ![0, 1].includes(e.button)) return;
-  const wantsPan = e.button === 1 || (e.button === 0 && (spaceHeld || currentTool === 'hand'));
-  if (e.button === 1) e.preventDefault();
-  if (!wantsPan && paintPersisting && (RASTER_BRUSH_TOOLS.has(currentTool) || currentTool === 'fill' || currentTool === 'line' || currentTool === 'gradient')) {
+function pointerWantsPan(event) {
+  return event.button === 1 || (event.button === 0 && (spaceHeld || currentTool === 'hand'));
+}
+
+function shouldStartOverlayPointer(event) {
+  if (!event.isPrimary || ![0, 1].includes(event.button)) return false;
+  if (!pointerWantsPan(event) && paintPersisting && (RASTER_BRUSH_TOOLS.has(currentTool) || currentTool === 'fill' || currentTool === 'line' || currentTool === 'gradient')) {
     setStatus('Сохраняется предыдущая растровая операция…');
-    return;
+    return false;
   }
-  activePrimaryPointerId = e.pointerId;
-  els.overlay.setPointerCapture(e.pointerId);
+  return true;
+}
+
+async function onOverlayPointerDown(e) {
+  const wantsPan = pointerWantsPan(e);
+  if (e.button === 1) e.preventDefault();
   const p = canvasPoint(e);
   if (wantsPan) {
     drag = { kind:'pan', x:e.clientX, y:e.clientY, left:els.viewport.scrollLeft, top:els.viewport.scrollTop }; els.overlay.style.cursor='grabbing'; return;
@@ -2234,7 +2241,7 @@ els.overlay.addEventListener('pointerdown', async (e) => {
     return;
   }
   if ((currentTool === 'clone' || currentTool === 'heal') && e.altKey) { await setCloneSource(p); return; }
-  if (RASTER_BRUSH_TOOLS.has(currentTool)) { await paintGesture.begin({ point:p, pointerEvent:e, tool:currentTool, canContinue:()=>activePrimaryPointerId===e.pointerId }); return; }
+  if (RASTER_BRUSH_TOOLS.has(currentTool)) { await paintGesture.begin({ point:p, pointerEvent:e, tool:currentTool, canContinue:()=>pointerLifecycle.isActivePointer(e.pointerId) }); return; }
   if (currentTool === 'fill') { await fillAtPoint(p); return; }
   if (currentTool === 'gradient') { drag={kind:'gradient',start:p,current:p};drawOverlay();return; }
   if (currentTool === 'wand') { magicWandSelect(p);return; }
@@ -2264,10 +2271,9 @@ els.overlay.addEventListener('pointerdown', async (e) => {
   if (currentTool === 'text') { openTextModal(p); return; }
   if (currentTool === 'eyedropper') { pickColor(p); return; }
   if (currentTool === 'zoom') { setZoomAtClientPoint(zoom*(e.altKey ? 1/1.5 : 1.5),e.clientX,e.clientY); return; }
-});
+}
 
 function onOverlayPointerMove(e) {
-  if (drag && e.pointerId !== activePrimaryPointerId) return;
   const allowOutside = drag && ['move','resize','rotate','paint','path-control'].includes(drag.kind);
   const p = canvasPoint(e, { clampToDocument: !allowOutside });
   if (drag && ['move','resize','rotate'].includes(drag.kind)) drag.lastPointer = p;
@@ -2380,15 +2386,12 @@ function onOverlayPointerMove(e) {
     penDraft.hover=p;drawOverlay();return;
   }
 }
-els.overlay.addEventListener('pointermove', onOverlayPointerMove);
-els.overlay.addEventListener('pointerup', async (e) => {
-  if (activePrimaryPointerId !== e.pointerId) return;
+async function onOverlayPointerUp(e) {
   if (drag?.kind === 'pan') onOverlayPointerMove(e);
   else if (drag && ['move','resize','rotate'].includes(drag.kind)) {
     const releasePoint = canvasPoint(e, { clampToDocument:false });
     if (Math.hypot(releasePoint.x-drag.lastPointer.x, releasePoint.y-drag.lastPointer.y) > .01) onOverlayPointerMove(e);
   }
-  activePrimaryPointerId = null;
   if (!drag) return;
   if (drag.kind === 'paint') {
     const layer = doc.layers.find(item => item.id === drag.layerId);
@@ -2439,12 +2442,10 @@ els.overlay.addEventListener('pointerup', async (e) => {
     drawOverlay();
   }
   updateMoveCursor(canvasPoint(e));
-});
+}
 els.overlay.addEventListener('pointerleave', () => { els.pointer.textContent='x: — y: —';hoverPoint=null;drawOverlay(); });
 els.overlay.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
-els.overlay.addEventListener('pointercancel', async (e) => {
-  if (activePrimaryPointerId !== e.pointerId) return;
-  activePrimaryPointerId = null;
+async function onOverlayPointerCancel(e) {
   if (!drag) return;
   const d=drag; drag=null; clearSmartGuides();
   if (d.kind==='paint') { await paintGesture.end(d); }
@@ -2468,6 +2469,15 @@ els.overlay.addEventListener('pointercancel', async (e) => {
     if (d.kind==='pan') els.overlay.style.cursor=defaultToolCursor();
     rasterEdit.cancelPaintPreview(); drawOverlay(); setStatus('Действие отменено');
   }
+}
+
+pointerLifecycle = createPointerLifecycleRouter({
+  target: els.overlay,
+  shouldStartPointer: shouldStartOverlayPointer,
+  onPointerDown: onOverlayPointerDown,
+  onPointerMove: onOverlayPointerMove,
+  onPointerUp: onOverlayPointerUp,
+  onPointerCancel: onOverlayPointerCancel,
 });
 
 function previewRect(rect, color) {
@@ -5685,7 +5695,7 @@ window.addEventListener('keydown',e=>{
     if(menuController.isOpen()){e.preventDefault();closeMenu({restoreFocus:true});return;}
     if(drag && drag.kind!=='paint'){
       e.preventDefault();
-      const d=drag;drag=null;activePrimaryPointerId=null;clearSmartGuides();
+      const d=drag;drag=null;pointerLifecycle?.releaseActivePointer();clearSmartGuides();
       if(d.kind==='move'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){l.x=d.x;l.y=d.y;render();updateTransformPropertyValues(l);}}
       if(d.kind==='resize'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){Object.assign(l,d.initial);render();updateTransformPropertyValues(l);}}
       if(d.kind==='rotate'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){l.rotation=d.initialRotation;render();updateTransformPropertyValues(l);}}

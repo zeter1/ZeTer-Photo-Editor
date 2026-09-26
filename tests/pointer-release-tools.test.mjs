@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { constrainedRect, normalizeRect } from '../src/core/geometry.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
-const start = main.indexOf("els.overlay.addEventListener('pointerup', async (e) => {");
+const start = main.indexOf('async function onOverlayPointerUp(e) {');
 const end = main.indexOf("els.overlay.addEventListener('pointerleave'", start);
 assert.ok(start >= 0 && end > start);
 const pointerUpSource = main.slice(start, end);
@@ -15,12 +15,10 @@ const pointerMoveSource = main.slice(pointerMoveStart, start);
 
 function release(drag, point, pointerId = 1, shiftKey = false) {
   const calls = [];
-  let handler;
   const context = {
     drag,
-    activePrimaryPointerId: 1,
     doc: { layers: [{ id:'paint-layer' }] },
-    els: { overlay: { style:{}, addEventListener: (_, callback) => { handler = callback; } } },
+    els: { overlay: { style:{} } },
     canvasPoint: event => event.point,
     documentPointToLayerPixel: p => p,
     paintGesture: {
@@ -54,8 +52,8 @@ function release(drag, point, pointerId = 1, shiftKey = false) {
   context.els.shapeKind = { value:'rect' };
   context.els.primaryColor = { value:'#123456' };
   context.els.toolOpacity = { value:'100' };
-  runInNewContext(pointerUpSource, context);
-  return handler({ pointerId, point, shiftKey }).then(() => calls);
+  runInNewContext(`${pointerUpSource}\nglobalThis.__pointerUp = onOverlayPointerUp;`, context);
+  return context.__pointerUp({ pointerId, point, shiftKey }).then(() => calls);
 }
 
 test('drawing tools use the release position even without a final pointermove', async () => {
@@ -73,10 +71,6 @@ test('paint draws the final segment once and ignores an unchanged release point'
   assert.deepEqual(await release({ kind:'paint', tool:'brush', layerId:'paint-layer', last:{ x:20, y:20 } }, { x:20, y:20 }), []);
 });
 
-test('another pointer cannot finish the active drawing gesture', async () => {
-  assert.deepEqual(await release({ kind:'line', start:{x:10,y:10}, current:{x:20,y:20} }, {x:40,y:50}, 2), []);
-});
-
 test('transform tools apply the release position before committing', async () => {
   for (const [kind, label] of [
     ['move', 'Перемещение слоя'],
@@ -87,7 +81,6 @@ test('transform tools apply the release position before committing', async () =>
       ['transform',40,50],
       ['commit',label],
     ]);
-    assert.deepEqual(await release({ kind, moved:false, lastPointer:{x:10,y:10} }, {x:40,y:50 }, 2), []);
     assert.deepEqual(await release({ kind, moved:false, lastPointer:{x:40,y:50} }, {x:40,y:50 }), []);
   }
 });
@@ -102,7 +95,6 @@ test('shape honors Shift pressed at the release point', async () => {
 
 test('real move and hand handlers apply a release with no intermediate move event', async () => {
   for (const kind of ['move', 'pan']) {
-    const handlers = {};
     const layer = {id:'layer', x:10, y:20};
     const drag = kind === 'move'
       ? {kind, layerId:'layer', px:5, py:5, x:10, y:20, moved:false, lastPointer:{x:5,y:5}}
@@ -110,15 +102,15 @@ test('real move and hand handlers apply a release with no intermediate move even
     const commits = [];
     const viewport = {scrollLeft:30, scrollTop:40};
     const context = {
-      drag, activePrimaryPointerId:1, doc:{layers:[layer]},
-      els:{overlay:{style:{},addEventListener:(name,handler)=>{handlers[name]=handler;}},pointer:{},viewport},
+      drag, doc:{layers:[layer]},
+      els:{overlay:{style:{}},pointer:{},viewport},
       canvasPoint:event=>event.point, isLayerLocked:()=>false, smartSnapEnabled:false,
       clearSmartGuides:()=>{}, render:()=>{}, updateTransformPropertyValues:()=>{},
       drawOverlay:()=>{}, updateMoveCursor:()=>{}, defaultToolCursor:()=> 'default',
       commit:label=>commits.push(label), currentTool:'move', spaceHeld:false,
     };
-    runInNewContext(pointerMoveSource + pointerUpSource, context);
-    await handlers.pointerup({pointerId:1,point:{x:15,y:25},clientX:115,clientY:125});
+    runInNewContext(pointerMoveSource + pointerUpSource + '\nglobalThis.__pointerUp = onOverlayPointerUp;', context);
+    await context.__pointerUp({pointerId:1,point:{x:15,y:25},clientX:115,clientY:125});
     if (kind === 'move') {
       assert.deepEqual([layer.x,layer.y], [20,40]);
       assert.deepEqual(commits, ['Перемещение слоя']);

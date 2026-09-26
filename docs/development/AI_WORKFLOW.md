@@ -19,7 +19,9 @@ Avoid opening all of `src/main.js`, `src/formats/psd.js`, `CHANGELOG.md` or hist
 For bugs, start from observable evidence: failing test, browser error, traceback, exact UI reproduction or corrupted format fixture. Classify the owner before editing.
 
 Useful routing:
-- DOM/tool interaction → main + ui
+- generic overlay pointer capture / active-pointer ownership / up-cancel-lost-capture → `interaction/pointer-lifecycle-router`
+- tool-specific pointer branches (move/transform/paint/path/crop) → `main` + the relevant domain controller
+- other DOM/menu/dialog interaction → main + ui
 - document/layer invariant → state
 - clone/heal/smudge/blur/dodge/burn mechanics → retouch/controller + painting/controller state; include painting/gesture-controller when the bug is in stroke begin/move/end routing
 - raster edit buffer / high-depth working state / persistence / paint preview → painting/controller
@@ -68,4 +70,4 @@ State what changed, what was actually verified, and any remaining NOT VERIFIED l
 
 ## Token-saving search strategy
 
-Use path → symbol → bounded range → nearest test. Historical notes are last resort, not the first context loaded.
+Use path → symbol → bounded range → nearest test. For pointer bugs, inspect `src/interaction/pointer-lifecycle-router.js` first when the symptom is capture/ownership/cancel, and `src/main.js` only for the specific tool branch. Historical notes are last resort, not the first context loaded.

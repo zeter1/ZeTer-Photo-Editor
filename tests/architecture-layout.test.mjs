@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -13,6 +13,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, too
   readFile(new URL('src/ui/toolbar-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/menu-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
+  readFile(new URL('src/interaction/pointer-lifecycle-router.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/raster-mutation-controller.js', root), 'utf8'),
@@ -65,6 +66,16 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /function makeModalDraggable\(/);
   assert.doesNotMatch(main, /function showInfoModal\(/);
   assert.doesNotMatch(main, /function showRecoveryModal\(/);
+  assert.match(main, /from '\.\/interaction\/pointer-lifecycle-router\.js'/);
+  assert.match(build, /'src\/interaction\/pointer-lifecycle-router\.js'/);
+  assert.match(pointerLifecycleRouter, /export function createPointerLifecycleRouter/);
+  assert.match(pointerLifecycleRouter, /lostpointercapture/);
+  assert.doesNotMatch(main, /\bactivePrimaryPointerId\b/);
+  for (const eventName of ['pointerdown','pointermove','pointerup','pointercancel']) {
+    assert.doesNotMatch(main, new RegExp(`els\\.overlay\\.addEventListener\\(['"]${eventName}['"]`));
+  }
+  assert.match(main, /pointerLifecycle = createPointerLifecycleRouter\(\{/);
+  assert.match(main, /canContinue:\(\)=>pointerLifecycle\.isActivePointer\(e\.pointerId\)/);
   assert.match(main, /from '\.\/selection\/gesture-controller\.js'/);
   assert.match(build, /'src\/selection\/gesture-controller\.js'/);
   assert.match(selectionGestureController, /export function createSelectionGestureController/);

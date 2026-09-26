@@ -4,7 +4,8 @@
 
 ## Канонические границы
 
-- UI/runtime orchestration: `src/main.js`
+- UI/runtime orchestration and tool-specific pointer dispatch: `src/main.js`
+- Global overlay pointer lifecycle, capture/release and active-pointer routing: `src/interaction/pointer-lifecycle-router.js`
 - Workspace/session/tab lifecycle: `src/workspace/session-controller.js`
 - Document import / file routing: `src/document/import-controller.js`
 - Selection shape gestures (marquee/lasso/polygon/magnetic), draft lifecycle: `src/selection/gesture-controller.js`

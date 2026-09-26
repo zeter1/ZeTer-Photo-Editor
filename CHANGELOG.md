@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-26 — Pointer lifecycle router extraction
+
+- Refactor: generic overlay `pointerdown → pointermove → pointerup/pointercancel` ownership вынесен из большого `src/main.js` в новый `src/interaction/pointer-lifecycle-router.js`; tool-specific move/transform/paint/path/selection/crop dispatch остаётся в runtime orchestrator.
+- Reliability: router владеет одним active pointer, явно управляет capture/release, игнорирует чужие active-gesture events и переводит неожиданный `lostpointercapture` в тот же cancellation path, чтобы жест не оставался «залипшим».
+- Async safety: paint preparation по-прежнему проверяет жив ли исходный pointer через `pointerLifecycle.isActivePointer(pointerId)`, поэтому поздний async begin не стартует штрих после release/cancel.
+- Tests: добавлены direct lifecycle regressions для capture, foreign-pointer filtering, cancel/lost-capture, external release и cleanup при rejected release callback; release-position regressions переведены с DOM-listener source slicing на tool-domain handler.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow и test matrix получили отдельный interaction owner, чтобы pointer lifecycle находился без чтения всего `src/main.js`.
+- Build: canonical `file://` bundle graph включает interaction router; generated `src/app.bundle.js` остаётся производным artifact.
+
 ### 2026-09-26 — Selection gesture controller extraction
 
 - Refactor: transient selection interaction вынесен из большого `src/main.js` в новый `src/selection/gesture-controller.js`: rectangle/ellipse/free-lasso marquee lifecycle, polygon draft, magnetic edge snapping/draft и их overlay rendering.

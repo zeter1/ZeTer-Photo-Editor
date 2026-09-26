@@ -5,7 +5,8 @@ Use the smallest relevant set while developing; finish source changes with the r
 | Change area | Targeted tests / checks | Extra runtime gate |
 |---|---|---|
 | UI constants / toolbar math | `tests/tool-layout.test.mjs`, architecture test | browser smoke for drag/persistence |
-| Menu/pointer/tool interaction | relevant interaction/selection/retouch tests | `npm run test:browser` |
+| Global overlay pointer lifecycle / capture / cancellation | `tests/pointer-lifecycle-router.test.mjs`, `tests/pointer-release-tools.test.mjs`, architecture test | `npm run test:browser` |
+| Menu/tool-specific interaction | relevant interaction/selection/retouch tests | `npm run test:browser` |
 | Selection gesture state / marquee / lasso / polygon / magnetic | `tests/selection-gesture-controller.test.mjs`, `tests/selection-types-v119.test.mjs`, `tests/pointer-release-tools.test.mjs`, architecture test | `npm run test:browser` when global pointer/keyboard wiring changes |
 | Documents/layers/groups | core, layer-groups, document-tabs | browser smoke when UI path changes |
 | Smart objects/filters | smart-object / smart-filter tests | targeted browser check when dialogs change |
