@@ -29,6 +29,11 @@ Owns generic modal/dialog mechanics: field rendering, numeric normalization, asy
 
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 
+## Selection boundary — `src/selection/`
+
+### `clipboard-controller.js`
+Owns selection copy/cut/paste orchestration: selected-vs-merged PNG preparation, browser Clipboard API, native paste payload handling, shortcut fallback timers/generation and tab-switch guards. It does not own document mutation internals: clearing/rasterization callbacks remain in `src/main.js` and core pixel modules.
+
 ## Workspace boundary — `src/workspace/`
 
 ### `session-controller.js`
