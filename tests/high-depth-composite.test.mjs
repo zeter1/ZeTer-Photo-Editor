@@ -65,9 +65,9 @@ test('Stage 12g bounds typed merged-composite allocation',()=>{
 test('Stage 12g export planner keeps Canvas8 as explicit fallback instead of claiming precision',()=>{
   assert.match(psdExportController,/function buildHighDepthComposite\(/);
   assert.match(psdExportController,/Stage 12g: merged composite оставлен на Canvas8 fallback/);
-  assert.match(main,/vector mask слоя/);
-  assert.match(main,/isolated Canvas group composite/);
-  assert.match(main,/if\(!compositePixelBuffer\)\{/);
+  assert.match(psdExportController,/vector mask слоя/);
+  assert.match(psdExportController,/isolated Canvas group composite/);
+  assert.match(psdExportController,/if\(!compositePixelBuffer\)\{/);
 });
 
 
@@ -103,7 +103,7 @@ test('Stage 13c CMYK composite applies raster-mask alpha and component blend mod
 
 
 test('Stage 13c export planner no longer forces native CMYK layers with supported component blends to RGB fallback',()=>{
-  assert.doesNotMatch(main,/CMYK merged composite Stage 13b поддерживает только Normal blend/);
+  assert.doesNotMatch(psdExportController,/CMYK merged composite Stage 13b поддерживает только Normal blend/);
   assert.match(psdExportController,/blendMode:item\.layer\.blendMode\|\|'source-over'/);
 });
 
