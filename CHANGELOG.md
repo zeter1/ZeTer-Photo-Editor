@@ -4,9 +4,9 @@
 
 ### 2026-09-26 — Smart Object content lifecycle controller extraction
 
-- Refactor: generic Smart Object convert/open/save/link/unlink orchestration, nesting/source-bounds rules, shared-source propagation and content-tab lifecycle moved from the large \`src/main.js\` into \`src/document/smart-object-controller.js\`.
+- Refactor: generic Smart Object convert/open/save/link/unlink orchestration, nesting/source-bounds rules, shared-source propagation and content-tab lifecycle moved from the large `src/main.js` into `src/document/smart-object-controller.js`.
 - Boundaries: stable core state/geometry dependencies stay direct; browser preview rendering, workspace/session publication and Photoshop embedded-resource rewrite are narrow ports. PSD/PSB/PNG embedded serialization and linked-resource byte rewrite remain outside the generic controller.
-- Bug fixes: linked Smart Object open status now counts instances against the parent document after the content tab is loaded, and async content save now cancels if the originating content tab or its document changes while preview preparation is in flight instead of publishing a stale snapshot into another active tab.
+- Bug fixes: linked Smart Object open status now counts instances against the parent document after the content tab is loaded, and async content save now revalidates the originating content tab/document after preview generation and after Photoshop embedded-resource preparation, preventing stale snapshots or native resource blocks from publishing after a tab switch.
 - Tests/docs: direct controller regressions cover linked-copy/unlink, conversion stale guards, parent-owner instance counts, shared-source save propagation, stale-tab cancellation and Photoshop rewrite port isolation; AI routing/boundary/test-matrix docs now point to the canonical lifecycle owner.
 
 
