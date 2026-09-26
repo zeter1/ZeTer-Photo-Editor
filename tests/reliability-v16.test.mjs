@@ -5,6 +5,7 @@ import { checkedCanvasSize, createDocument, sanitizeProject, MAX_CANVAS_PIXELS }
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
+const modalController = await readFile(new URL('../src/ui/modal-controller.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 test('canvas allocation has a pixel budget in addition to per-axis bounds', () => {
@@ -72,11 +73,11 @@ test('layer menu has center and fit-to-canvas transforms', () => {
 
 
 test('modal submissions await async work, surface failures, and restore focus', () => {
-  const modal = main.match(/function showModal\(\{title,[^\n]*onSubmit(?:,onMount=null)?\}\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  const modal = modalController.match(/function showModal\(\{title,[^\n]*onSubmit,onMount=null\}\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.match(modal, /await onSubmit\?\.\(data,\(\)=>!closed&&modal\.isConnected\)/);
   assert.match(modal, /submit\.disabled=true/);
   assert.match(modal, /if\(result!==false\)close\(\)/);
-  assert.match(modal, /previousFocus instanceof HTMLElement/);
+  assert.match(modalController, /previousFocus instanceof HTMLElementClass/);
   assert.match(modal, /aria-modal/);
 });
 

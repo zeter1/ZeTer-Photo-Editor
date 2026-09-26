@@ -1,10 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import vm from 'node:vm';
-
-const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
-const source=main.slice(main.indexOf('function makeModalDraggable(modal) {'),main.indexOf('function attachTextPreview('));
+import { makeModalDraggable } from '../src/ui/modal-controller.js';
 
 test('shared modal drag stays inside the viewport and stops on pointer release',()=>{
   const events=new Map();
@@ -17,12 +13,12 @@ test('shared modal drag stays inside the viewport and stops on pointer release',
     querySelector:()=>header,getBoundingClientRect:()=>({left:530,top:270}),
   };
   const windowEvents=new Map();
-  const context={
-    window:{innerWidth:1920,innerHeight:1080,addEventListener:(name,handler)=>windowEvents.set(name,handler),removeEventListener:name=>windowEvents.delete(name)},
-    clamp:(value,min,max)=>Math.max(min,Math.min(max,value)),
+  const windowTarget={
+    innerWidth:1920,innerHeight:1080,
+    addEventListener:(name,handler)=>windowEvents.set(name,handler),
+    removeEventListener:name=>windowEvents.delete(name),
   };
-  vm.runInNewContext(`${source}\nglobalThis.makeDraggable=makeModalDraggable;`,context);
-  context.makeDraggable(modal);
+  makeModalDraggable(modal,{windowTarget,ResizeObserverClass:null});
   assert.equal(modal.style.left,'530px');
   assert.equal(modal.style.top,'270px');
   events.get('pointerdown')({button:0,pointerId:7,clientX:600,clientY:300,preventDefault(){}});

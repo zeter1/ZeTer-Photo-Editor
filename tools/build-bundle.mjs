@@ -8,6 +8,7 @@ const sources = [
   'src/ui/tool-config.js',
   'src/ui/toolbar-controller.js',
   'src/ui/menu-controller.js',
+  'src/ui/modal-controller.js',
   'src/core/history.js',
   'src/core/io.js',
   'src/core/pixels.js',

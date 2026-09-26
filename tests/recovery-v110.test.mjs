@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { makeRecoveryRecord, normalizeRecoveryRecord, RECOVERY_RECORD_VERSION, saveRecoverySnapshot, loadRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from '../src/core/recovery.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const modalController = await readFile(new URL('../src/ui/modal-controller.js', import.meta.url), 'utf8');
 const sessions = await readFile(new URL('../src/workspace/session-controller.js', import.meta.url), 'utf8');
 const build = await readFile(new URL('../tools/build-bundle.mjs', import.meta.url), 'utf8');
 const recovery = await readFile(new URL('../src/core/recovery.js', import.meta.url), 'utf8');
@@ -284,5 +285,5 @@ test('new text and shape layers inherit the tool opacity like brush, fill, and l
   assert.match(main, /name:'Линия'[\s\S]*?opacity:Number\(els\.toolOpacity\.value\)\/100/);
   assert.match(main, /function previewRect[\s\S]*?const opacity=Number\(els\.toolOpacity\.value\)\/100/);
   assert.match(css, /\.toast\.warn/);
-  assert.match(main, /data-later/);
+  assert.match(modalController, /data-later/);
 });
