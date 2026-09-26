@@ -9,6 +9,7 @@
 - Reliability: merged clear сохраняет prepare-all-before-mutate semantics и теперь повторно проверяет originating document/session перед публикацией async результатов, поэтому поздняя операция не переезжает в другую вкладку.
 - Precision: native 16/32-bit RGB/CMYK selection clear по-прежнему проходит через typed PixelBuffer mutation и публикацию `painting/controller.js`, без принудительного Canvas8 fallback.
 - Tests: добавлены direct controller regressions для visible/locked/adjustment filtering, non-raster replacement, tab-switch cancellation и high-depth clear; async rasterization tests теперь вызывают реальный controller вместо VM-slicing `main.js`.
+- Regression follow-up: high-depth persistence/preview/render source-contract tests переведены с прежнего расположения mutation-кода в `src/main.js` на нового канонического владельца `src/selection/raster-mutation-controller.js` после CI #177.
 - Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow и test matrix направляют merged-cut/rasterization задачи прямо к новому владельцу.
 - Build: canonical bundle graph включает новый selection controller; generated `src/app.bundle.js` синхронизируется только из source modules.
 

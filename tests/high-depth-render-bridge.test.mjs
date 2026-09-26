@@ -6,6 +6,7 @@ import { createPixelBuffer, pixelBufferToToneMappedRgba8Preview } from '../src/c
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
+const selectionMutations=await readFile(new URL('../src/selection/raster-mutation-controller.js',import.meta.url),'utf8');
 
 test('Stage 12b applies advanced color controls directly from 16-bit samples before the RGBA8 bridge',()=>{
   const source=new Uint16Array([32768,32768,32768,65535]);
@@ -61,5 +62,5 @@ test('destructive raster editing materializes the selected HDR preview and then 
   assert.match(painting,/pixelBufferToToneMappedRgba8Preview\([\s\S]*?buffer,[\s\S]*?toneMap: preview\.toneMap,[\s\S]*?displayExposure: preview\.displayExposure/);
   assert.match(painting,/if \(!drawHighDepthRasterBase\(layer, brushCanvas, brushContext\) && layer\.dataUrl\)/);
   assert.match(painting,/layer\.highDepthSource = null/);
-  assert.match(main,/layer\.highDepthSource=null/);
+  assert.match(selectionMutations,/layer\.highDepthSource = null/);
 });

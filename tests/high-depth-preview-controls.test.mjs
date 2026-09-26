@@ -6,6 +6,7 @@ import { createPixelBuffer, serializePixelBufferSource, pixelBufferToToneMappedR
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
+const selectionMutations=await readFile(new URL('../src/selection/raster-mutation-controller.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
 
 test('Stage 12c sanitizes and persists per-layer HDR preview controls only while a high-depth source exists',()=>{
@@ -55,5 +56,5 @@ test('Stage 12c UI and renderer wire tone-map mode and display exposure into cac
 test('Stage 12c destructive materialization bakes preview controls once and clears their stale state',()=>{
   assert.match(painting,/pixelBufferToToneMappedRgba8Preview\([\s\S]*?buffer,[\s\S]*?toneMap: preview\.toneMap,[\s\S]*?displayExposure: preview\.displayExposure/);
   assert.match(painting,/layer\.highDepthSource = null;[\s\S]*?layer\.highDepthPreview = null;/);
-  assert.match(main,/layer\.highDepthSource=null;\n        layer\.highDepthPreview=null;/);
+  assert.match(selectionMutations,/layer\.highDepthSource = null;[\s\S]*?layer\.highDepthPreview = null;/);
 });
