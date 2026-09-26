@@ -14,6 +14,7 @@
 - Selection shape gestures (marquee/lasso/polygon/magnetic), draft lifecycle: `src/selection/gesture-controller.js`
 - Selection copy/cut/paste lifecycle: `src/selection/clipboard-controller.js`
 - Destructive selection raster mutation, merged-cut clearing and selected-layer rasterization: `src/selection/raster-mutation-controller.js`
+- Selection → raster layer mask / Select & Mask preparation, non-destructive preview and guarded Apply: `src/selection/mask-controller.js`; Smart Filter consumes its shared rasterizer through a narrow port, while Vector Mask/Pen semantics stay separate.
 - Raster edit state, Canvas/high-depth buffers, persistence and paint preview: `src/painting/controller.js`
 - Fill / raster line / current-layer selection clear commands: `src/painting/command-controller.js`
 - Brush/eraser + retouch stroke gesture lifecycle (begin/move/end): `src/painting/gesture-controller.js`
