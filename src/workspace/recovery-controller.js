@@ -143,6 +143,50 @@ export function createRecoveryController({
     return recoveryWritePromise;
   }
 
+  function recoveryRenamePayload(entry, requestedName) {
+    const name = String(requestedName || '').trim().slice(0, 240);
+    const record = entry?.record;
+    if (!name || !record?.documents?.length) return null;
+    const activeIndex = Math.min(Math.max(0, Number(record.activeIndex) || 0), record.documents.length - 1);
+    const documents = record.documents.map((item, index) => {
+      let snapshot = item.snapshot;
+      let docName = item.docName || 'Без имени';
+      if (index === activeIndex) {
+        docName = name;
+        try {
+          const parsed = JSON.parse(snapshot);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            parsed.name = name;
+            snapshot = JSON.stringify(parsed);
+          }
+        } catch (error) {
+          consoleRef?.warn?.('Could not rewrite recovery snapshot title', error);
+        }
+      }
+      return { name:docName, modifiedAt:item.modifiedAt || '', snapshot };
+    });
+    return { name, documents, activeIndex, savedAt:record.savedAt };
+  }
+
+  function renameRecovery(entry, requestedName) {
+    const payload = recoveryRenamePayload(entry, requestedName);
+    if (!payload || !recoveryStorageAvailable) return Promise.resolve(false);
+    cancelPendingWrite();
+    recoveryWritePromise = recoveryWritePromise
+      .catch(() => {})
+      .then(() => saveSnapshot(
+        payload.documents,
+        { activeIndex:payload.activeIndex },
+        { key:entry.key, savedAt:payload.savedAt },
+      ))
+      .then(() => true)
+      .catch(error => {
+        reportRecoveryFailure(error, { notify:true });
+        return false;
+      });
+    return recoveryWritePromise;
+  }
+
   function parseStoredEntry({ key, record }) {
     const recovered = [];
     const invalid = [];
@@ -161,6 +205,7 @@ export function createRecoveryController({
       invalid,
       canRestore: recovered.length > 0,
       canDiscard: true,
+      canRename: Boolean(record?.documents?.length),
       isCurrent: key === recoveryKey || key === 'latest',
       invalidCount: invalid.length,
     };
@@ -171,6 +216,7 @@ export function createRecoveryController({
     return {
       action: value?.action || 'later',
       key: value?.key || fallbackKey,
+      name: typeof value?.name === 'string' ? value.name : '',
       confirmed: value?.confirmed === true,
     };
   }
@@ -209,6 +255,13 @@ export function createRecoveryController({
         reserveFreshKeyIfNeeded(stored);
         await startNewProject();
         return false;
+      }
+
+      if (action.action === 'rename') {
+        const renamed = await renameRecovery(selected, action.name);
+        toast(renamed ? 'Проект переименован' : 'Не удалось переименовать проект', renamed ? 'success' : 'error');
+        if (!renamed) return false;
+        continue;
       }
 
       if (action.action === 'discard') {

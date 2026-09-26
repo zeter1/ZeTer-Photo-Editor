@@ -18,6 +18,32 @@ export function normalizeNumberInput(input) {
   input.value=String(value);
 }
 
+export function createRapidRightClickTracker({ thresholdMs = 360 } = {}) {
+  const threshold = Math.min(1000, Math.max(100, Number(thresholdMs) || 360));
+  let previousKey = '';
+  let previousAt = -Infinity;
+
+  return {
+    register(key, at = Date.now()) {
+      const nextKey = String(key ?? '');
+      const nextAt = Number(at);
+      if (!nextKey || !Number.isFinite(nextAt)) {
+        previousKey = '';
+        previousAt = -Infinity;
+        return false;
+      }
+      const matched = nextKey === previousKey && nextAt >= previousAt && nextAt - previousAt <= threshold;
+      previousKey = matched ? '' : nextKey;
+      previousAt = matched ? -Infinity : nextAt;
+      return matched;
+    },
+    reset() {
+      previousKey = '';
+      previousAt = -Infinity;
+    },
+  };
+}
+
 export function makeModalDraggable(modal, {
   windowTarget=globalThis.window,
   ResizeObserverClass=globalThis.ResizeObserver,
@@ -197,6 +223,7 @@ export function createModalController({
         record: entry?.record || null,
         canRestore: entry?.canRestore !== false && Boolean(entry?.record),
         canDiscard: entry?.canDiscard === true,
+        canRename: entry?.canRename !== false && Boolean(entry?.record?.documents?.length),
         isCurrent: entry?.isCurrent === true,
         invalidCount: Math.max(0, Number(entry?.invalidCount) || 0),
       }));
@@ -213,6 +240,7 @@ export function createModalController({
 
       const list = documentTarget.createElement('div'); list.className = 'recovery-project-list'; list.setAttribute('role', 'list');
       const rows = [];
+      const rapidRightClick = createRapidRightClickTracker();
       function entryTitle(entry) {
         const docs = entry.record?.documents || [];
         return docs[entry.record?.activeIndex]?.docName || docs[0]?.docName || 'Повреждённая автокопия';
@@ -241,7 +269,22 @@ export function createModalController({
           const warning = documentTarget.createElement('span'); warning.className = 'recovery-badge warning';
           warning.textContent = entry.canRestore ? `Повреждено: ${entry.invalidCount}` : 'Повреждена'; badges.append(warning);
         }
-        row.append(radio, content, badges); list.append(row); rows.push({ row, radio, entry });
+        row.append(radio, content, badges);
+        row.addEventListener('contextmenu', event => event.preventDefault());
+        row.addEventListener('pointerdown', event => {
+          if (event.button !== 2) return;
+          radio.checked = true;
+          syncSelection();
+          if (!entry.canRestore) {
+            rapidRightClick.reset();
+            return;
+          }
+          if (!rapidRightClick.register(entry.key, Date.now())) return;
+          event.preventDefault();
+          event.stopPropagation();
+          close({ action:'restore', key:entry.key, trigger:'secondary-double-click' });
+        });
+        list.append(row); rows.push({ row, radio, entry });
       });
       body.append(list);
 
@@ -253,10 +296,10 @@ export function createModalController({
       };
       const loadButton = makeButton('Загрузить проект', 'secondary-button', 'data-load-project');
       const newButton = makeButton('Начать новый проект', 'secondary-button', 'data-new-project');
-      const laterButton = makeButton('Позже', 'secondary-button', 'data-later');
+      const renameButton = makeButton('Переименовать проект', 'secondary-button', 'data-rename');
       const deleteButton = makeButton('Удалить проект', 'danger-button', 'data-discard');
       const restoreButton = makeButton('Восстановить выбранный', 'primary-button', 'data-restore');
-      startActions.append(loadButton, newButton); endActions.append(laterButton, deleteButton, restoreButton); footer.append(startActions, endActions);
+      startActions.append(loadButton, newButton, renameButton); endActions.append(deleteButton, restoreButton); footer.append(startActions, endActions);
       modal.append(header, body, footer); back.append(modal); modalRoot.replaceChildren(back);
 
       let closed = false;
@@ -266,12 +309,24 @@ export function createModalController({
         const selected = selectedRow();
         rows.forEach(item => item.row.classList.toggle('selected', item === selected));
         restoreButton.disabled = !selected?.entry.canRestore;
+        renameButton.disabled = !selected?.entry.canRename;
         deleteButton.disabled = !selected?.entry.canDiscard;
       };
       rows.forEach(item => item.radio.addEventListener('change', syncSelection));
       loadButton.addEventListener('click', () => { onLoadProject?.(); close({ action:'load-project', key:selectedRow()?.entry.key || '' }); });
       newButton.addEventListener('click', () => close({ action:'new-project', key:selectedRow()?.entry.key || '' }));
-      laterButton.addEventListener('click', () => close({ action:'later', key:selectedRow()?.entry.key || '' }));
+      renameButton.addEventListener('click', () => {
+        const selected = selectedRow();
+        if (!selected?.entry.canRename || typeof windowTarget.prompt !== 'function') return;
+        const proposed = windowTarget.prompt('Новое название проекта', entryTitle(selected.entry));
+        if (proposed === null) return;
+        const name = String(proposed).trim().slice(0, 240);
+        if (!name) {
+          toast('Название проекта не может быть пустым', 'warn');
+          return;
+        }
+        close({ action:'rename', key:selected.entry.key, name });
+      });
       restoreButton.addEventListener('click', () => { const selected = selectedRow(); if (selected?.entry.canRestore) close({ action:'restore', key:selected.entry.key }); });
       deleteButton.addEventListener('click', () => {
         const selected = selectedRow(); if (!selected?.entry.canDiscard) return;
@@ -279,7 +334,7 @@ export function createModalController({
         if (confirmed) close({ action:'discard', key:selected.entry.key, confirmed:true });
       });
       modal.addEventListener('keydown', event => {
-        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close({ action:'later', key:selectedRow()?.entry.key || '' }); return; }
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); return; }
         if (event.key !== 'Tab') return;
         const tabbable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])')];
         if (!tabbable.length) { event.preventDefault(); return; }

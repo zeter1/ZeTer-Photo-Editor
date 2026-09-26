@@ -121,11 +121,15 @@ export function normalizeRecoveryRecord(value) {
   };
 }
 
-export async function saveRecoverySnapshot(snapshot, doc, { indexedDBFactory = globalThis.indexedDB, key = RECOVERY_KEY } = {}) {
+export async function saveRecoverySnapshot(snapshot, doc, {
+  indexedDBFactory = globalThis.indexedDB,
+  key = RECOVERY_KEY,
+  savedAt = Date.now(),
+} = {}) {
   const database = await openRecoveryDatabase(indexedDBFactory);
   try {
     const transaction = database.transaction(RECOVERY_STORE_NAME, 'readwrite');
-    transaction.objectStore(RECOVERY_STORE_NAME).put(makeRecoveryRecord(snapshot, doc), key);
+    transaction.objectStore(RECOVERY_STORE_NAME).put(makeRecoveryRecord(snapshot, doc, savedAt), key);
     await transactionDone(transaction);
   } finally {
     database.close();

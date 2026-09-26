@@ -202,6 +202,43 @@ test('starting a new project from recovery preserves the old snapshot under a fr
   assert.deepEqual(generated, [false, true]);
 });
 
+test('rename action rewrites the active recovery title and preserves its saved timestamp', async () => {
+  const records=[{
+    key:'workspace:other',
+    record:makeRecord([
+      { docName:'Старое имя', modifiedAt:'2026-09-24', snapshot:'{"name":"Старое имя","value":1}' },
+      { docName:'Вторая вкладка', modifiedAt:'2026-09-24', snapshot:'{"name":"Вторая вкладка","value":2}' },
+    ], { savedAt:321, activeIndex:0 }),
+  }];
+  let saved=null;
+  let modalCalls=0;
+  const { controller }=createHarness({
+    records,
+    modal:async entries=>{
+      modalCalls+=1;
+      if(modalCalls===1)return {action:'rename',key:entries[0].key,name:'Новый проект'};
+      assert.equal(entries[0].record.documents[0].docName,'Новый проект');
+      return {action:'load-project',key:entries[0].key};
+    },
+    save:async (documents,options,config)=>{
+      saved={documents,options,config};
+      records[0].record=makeRecord(documents.map(item=>({
+        docName:item.name,
+        modifiedAt:item.modifiedAt,
+        snapshot:item.snapshot,
+      })),{savedAt:config.savedAt,activeIndex:options.activeIndex});
+    },
+  });
+
+  assert.equal(await controller.restoreRecoveryIfAvailable(),false);
+  assert.equal(saved.config.key,'workspace:other');
+  assert.equal(saved.config.savedAt,321);
+  assert.equal(saved.options.activeIndex,0);
+  assert.equal(saved.documents[0].name,'Новый проект');
+  assert.equal(JSON.parse(saved.documents[0].snapshot).name,'Новый проект');
+  assert.equal(saved.documents[1].name,'Вторая вкладка');
+});
+
 test('discard is serialized after a pending save', async () => {
   const order = [];
   let releaseSave;

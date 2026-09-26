@@ -101,10 +101,11 @@ test('recovery records reject malformed or unsupported payloads', () => {
 
 test('IndexedDB recovery adapter round-trips and clears the latest snapshot', async () => {
   const { factory, values } = createFakeIndexedDB();
-  await saveRecoverySnapshot('{"version":1,"layers":[]}', { name:'Demo', modifiedAt:'2026-09-21T12:00:00.000Z' }, { indexedDBFactory:factory });
+  await saveRecoverySnapshot('{"version":1,"layers":[]}', { name:'Demo', modifiedAt:'2026-09-21T12:00:00.000Z' }, { indexedDBFactory:factory, savedAt:777 });
   assert.equal(values.size, 1);
   const loaded = await loadRecoverySnapshot({ indexedDBFactory:factory });
   assert.equal(loaded?.documents[0].docName, 'Demo');
+  assert.equal(loaded?.savedAt, 777);
   assert.equal(loaded?.documents[0].snapshot, '{"version":1,"layers":[]}');
   assert.equal((await loadRecoverySnapshots({ indexedDBFactory:factory }))[0].key, 'latest');
   await clearRecoverySnapshot({ indexedDBFactory:factory });
@@ -181,7 +182,12 @@ test('new text and shape layers inherit the tool opacity like brush, fill, and l
   assert.match(main, /name:'Линия'[\s\S]*?opacity:Number\(els\.toolOpacity\.value\)\/100/);
   assert.match(main, /function previewRect[\s\S]*?const opacity=Number\(els\.toolOpacity\.value\)\/100/);
   assert.match(css, /\.toast\.warn/);
-  assert.match(modalController, /data-later/);
+  assert.doesNotMatch(modalController, /data-later/);
+  assert.match(modalController, /Переименовать проект/);
+  assert.match(modalController, /createRapidRightClickTracker/);
+  assert.match(modalController, /event\.button !== 2/);
+  assert.match(workspaceRecovery, /action\.action === 'rename'/);
+  assert.match(workspaceRecovery, /savedAt:payload\.savedAt/);
   assert.match(modalController, /recovery-project-list/);
   assert.match(modalController, /Загрузить проект/);
   assert.match(modalController, /Начать новый проект/);
