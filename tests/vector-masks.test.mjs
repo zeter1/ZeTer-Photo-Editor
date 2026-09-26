@@ -5,6 +5,8 @@ import { createDocument, createShapeLayer, createVectorMask, addLayer, sanitizeP
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
+const selectionVectorMaskController=await readFile(new URL('../src/selection/vector-mask-controller.js',import.meta.url),'utf8');
+const build=await readFile(new URL('../tools/build-bundle.mjs',import.meta.url),'utf8');
 
 test('vector mask state survives .zpe sanitization with Bezier handles and boolean operations',()=>{
   const doc=createDocument({width:300,height:200});
@@ -35,14 +37,16 @@ test('vector mask sanitizer drops invalid paths and normalizes unknown operation
   assert.equal(empty.layers[0].vectorMask,null);
 });
 
-test('Stage 10 UI exposes vector masks and selection-driven boolean path operations',()=>{
-  assert.match(main,/function selectionVectorMaskDocumentNodes\(/);
-  assert.match(main,/function selectionVectorMaskSubpath\(/);
-  assert.match(main,/createVectorMask\(\{enabled:true,invert:false,subpaths:\[subpath\]\}\)/);
+test('Stage 10 UI exposes vector masks through the canonical selection owner',()=>{
+  assert.match(main,/createSelectionVectorMaskController/);
   assert.match(main,/applySelectionToVectorMask\('subtract'\)/);
   assert.match(main,/applySelectionToVectorMask\('intersect'\)/);
   assert.match(main,/applySelectionToVectorMask\('exclude'\)/);
-  assert.match(main,/const cx=rect\.x\+rect\.width\/2,cy=rect\.y\+rect\.height\/2,rx=rect\.width\/2,ry=rect\.height\/2,k=\.5522847498307936/);
+  assert.match(selectionVectorMaskController,/function selectionVectorMaskDocumentNodes\(/);
+  assert.match(selectionVectorMaskController,/function selectionVectorMaskSubpath\(/);
+  assert.match(selectionVectorMaskController,/createVectorMask\(\{ enabled:true, invert:false, subpaths:\[subpath\] \}\)/);
+  assert.match(selectionVectorMaskController,/const k = \.5522847498307936/);
+  assert.match(build,/src\/selection\/vector-mask-controller\.js/);
   assert.match(main,/function importPsdVectorMask\(/);
   assert.match(main,/function exportPsdVectorMask\(/);
   assert.match(psdExportController,/preview\.vectorMask=null/);
@@ -57,7 +61,8 @@ test('Stage 10c edits vector-mask anchors and handles through the Pen direct-edi
   assert.match(main,/function pathTargetPoints\(layer,source='shape',subpathIndex=null,documentPathIndex=null\)/);
   assert.match(main,/pathSource:hit\.source,documentPathIndex:hit\.documentPathIndex\?\?null,subpathIndex:hit\.subpathIndex/);
   assert.match(main,/const points=pathTargetPoints\(layer,drag\.pathSource,drag\.subpathIndex,drag\.documentPathIndex\)/);
-  assert.match(main,/function editSelectedVectorMask\(\)/);
+  assert.match(main,/beginVectorMaskEdit:\s*layerId\s*=>/);
+  assert.match(main,/documentPathEditIndex\s*=\s*-1;\s*vectorMaskEditLayerId\s*=\s*layerId;/);
   assert.match(main,/Редактировать векторную маску пером/);
   assert.match(main,/vectorMaskEditLayerId===selected\(\)\?\.id/);
 });
