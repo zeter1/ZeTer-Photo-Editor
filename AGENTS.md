@@ -20,7 +20,8 @@
 - Saved Paths selection/CRUD/panel/context-menu/vector-mask apply orchestration: `src/ui/paths-controller.js`; Pen geometry stays in `src/main.js`, PSD codec in `src/formats/psd.js`.
 - CMYK/ICC policy/profile UI orchestration, preview/edit transform caches and async preview rebuild ownership: `src/ui/color-management-controller.js`; ICC math stays in `src/core/color-management.js`, PSD/PSB codec in `src/formats/psd.js`.
 - Core domain/render/pixel logic + low-level storage primitives: `src/core/`
-- PSD/PSB format boundary: `src/formats/psd.js`
+- PSD/PSB export preparation (layer/group mapping, native high-depth/CMYK eligibility, raster/native payloads, merged composite): `src/document/psd-export-controller.js`
+- PSD/PSB binary codec + Photoshop metadata parsing/writing/rewrite: `src/formats/psd.js`; import mapping still enters through the bounded PSD section in `src/main.js`
 - Generated file:// bundle: `src/app.bundle.js` — **не редактировать вручную**
 - Tests: `tests/`
 - Build/smoke tooling: `tools/`

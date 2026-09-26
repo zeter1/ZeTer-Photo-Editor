@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-26 — PSD/PSB export-preparation controller extraction
+
+- Refactor: bounded document→PSD/PSB writer preparation moved from the large `src/main.js` into `src/document/psd-export-controller.js`: export bounds, group ancestry, native high-depth/CMYK eligibility, prepared raster/native payloads, merged composite choice and bounded warnings.
+- Boundaries: binary PSD/PSB parsing/writing and Photoshop block rewrite remain in `src/formats/psd.js`; import mapping and existing Text/Shape/Adjustment/Smart Object semantic plans stay outside this pass and enter the controller through explicit ports.
+- Precision/reliability: native 16/32-bit RGB and 8/16/32-bit CMYK paths, 48 MP temporary-buffer guard, bounded typed-composite memory, raster fallbacks and Photoshop metadata passthrough contracts are preserved without algorithm rewrites.
+- Tests: added direct `tests/psd-export-controller.test.mjs` for a no-Canvas native 16-bit path and the 48 MP safety bound; legacy PSD export source contracts now target the canonical owner and architecture tests forbid the helper cluster drifting back into `src/main.js`.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow and TEST_MATRIX route export-preparation work directly to the new owner; canonical `file://` bundle graph includes the controller.
+
+
 ### 2026-09-26 — Color-management UI controller extraction
 
 - Refactor: document-level CMYK/ICC policy/profile actions, preview/edit transform caches, async native-CMYK preview rebuild and properties-panel bindings moved from the large `src/main.js` into `src/ui/color-management-controller.js`; runtime keeps only narrow painting/PSD-preview bridges.
