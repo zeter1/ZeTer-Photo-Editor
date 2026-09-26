@@ -37,6 +37,9 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - `src/ui/color-management-controller.js` owns document-level CMYK/ICC orchestration: preview/edit transform caches, invalidation, policy/profile transaction + rollback, native-CMYK preview rebuild and properties-panel bindings. Dependencies arrive through explicit state/color/pixel/IO/render/UI ports.
 - ICC parser/transform math stays in `src/core/color-management.js`, document schema/sanitization in `src/core/state.js`, and PSD/PSB binary semantics in `src/formats/psd.js`. Do not recreate color-management caches or profile UI actions in `src/main.js`.
 - Color-management async preview publication must verify that the initiating document is still active before replacing layer previews; stale/failing rebuilds roll policy/profile state back and invalidate transform caches before returning/throwing.
+- `src/ui/smart-filter-controller.js` owns Smart Filter stack/mask markup, mutation commands, properties-panel bindings and edit-modal orchestration. It receives live document/selection/history/render/DOM capabilities through narrow ports.
+- Smart Filter schema/sanitization/`MAX_SMART_FILTERS` stay in `src/core/state.js`; ordered pixel filtering and mask composition stay in `src/core/render.js`; the shared selection-mask rasterizer stays outside the controller while layer masks also use it. Do not recreate Smart Filter policy functions in `src/main.js`.
+- Async Smart Filter mask creation must prepare the selection raster first, then re-resolve the originating document + layer identity immediately before publication; a document switch publishes neither mask nor history.
 - DOM mutation and application state orchestration stay in `src/main.js` until extracted behind a narrow controller API. Generic overlay pointer lifecycle is the explicit exception owned by `src/interaction/pointer-lifecycle-router.js`.
 - UI modules must not become alternate owners of document/layer domain state.
 
