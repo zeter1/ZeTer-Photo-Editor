@@ -32,7 +32,7 @@ Owns toolbar drag/drop, persisted order, drop-slot rendering and rich accessible
 Owns generic top-menu/context-menu mechanics: rendering menu items, enabled state evaluation, popup positioning, focus restoration, keyboard navigation, outside-click close and async action error surfacing. Domain command lists and editor mutations stay in `src/main.js`.
 
 ### `modal-controller.js`
-Owns generic modal/dialog mechanics: field rendering, numeric normalization, async submit lifecycle, focus restoration, backdrop/Escape close, draggable text-modal shell, info dialogs and recovery-choice dialog. Text preview rendering and editor mutations remain callbacks owned by `src/main.js`.
+Owns generic modal/dialog mechanics: field rendering, numeric normalization, async submit lifecycle, focus restoration, backdrop/Escape close, draggable text-modal shell, info dialogs and recovery-choice dialog. Feature state remains outside the shell; Text draft/preview belongs to `text-edit-controller.js` and Text font/settings policy belongs to `text-settings-controller.js`.
 
 ### `workspace-layout-controller.js`
 Owns editor-shell layout state that is independent of document contents: persisted sidebar collapse IDs, legacy collapse-state migration, accessible panel toggle state and canvas-mode visibility with viewport-center preservation. It receives DOM/runtime geometry through narrow ports and does not own document/layer/history/tool state.
@@ -58,7 +58,12 @@ It deliberately does **not** own persisted Layer Styles schema/sanitization or p
 ### `text-edit-controller.js`
 Owns the Text tool add/edit UI transaction: hit resolution for visible text layers, exact-owner Apply guards, controller-owned transient draft, latest-wins async preview publication, preview canvas/observer lifecycle and narrow render/overlay read APIs. Generic modal construction remains in `modal-controller.js`; the modal shell exposes only generic per-instance mount/close hooks and does not own Text state.
 
-It deliberately does **not** own persisted text-layer schema or render-only projection (`src/core/state.js`), text rasterization/font loading (`src/core/render.js`), PSD text semantics, or shared font discovery/form normalization still used by Properties in `src/main.js`.
+It deliberately does **not** own persisted text-layer schema or render-only projection (`src/core/state.js`), text rasterization/font loading (`src/core/render.js`), PSD text semantics, or shared font/settings policy.
+
+### `text-settings-controller.js`
+Owns the shared Text typography/font UI policy used by both Text add/edit and Properties: canonical weight/style/alignment options, private local-font registry, permission-gated `queryLocalFonts()` discovery/filter/sort/cap, custom-font file cache/validation/loading bridge, modal field construction and form normalization/clamping.
+
+It deliberately does **not** own persisted Text schema, Canvas text rendering or the renderer's FontFace cache. Properties markup, history commits and exact document/layer stale-publication guards remain runtime orchestration in `src/main.js`; custom font bytes are validated/prepared here and actual FontFace loading stays in `src/core/render.js`.
 
 Future UI extractions should land here when they can be expressed as pure config/helpers or narrow controllers rather than adding more unrelated responsibility to `src/main.js`.
 
