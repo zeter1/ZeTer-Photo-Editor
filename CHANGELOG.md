@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-26 — Smart Filter UI/controller extraction
+
+- Refactor: Smart Filter stack/mask markup, reorder/toggle/remove/clear commands, mask transactions, properties-panel bindings and add/edit modal lifecycle moved from the large `src/main.js` into `src/ui/smart-filter-controller.js`.
+- Boundaries: Smart Filter schema, sanitization and the canonical `MAX_SMART_FILTERS` limit remain in `src/core/state.js`; ordered pixel filtering and mask composition remain in `src/core/render.js`; the shared selection-mask rasterizer remains a narrow runtime port because layer masks also use it.
+- Reliability: selection-mask creation preserves prepare-before-publish ownership checks, so switching documents while rasterization awaits cannot mutate or commit into the wrong document. Live density/feather preview still renders without history until the final change event.
+- Tests/docs: direct controller regressions cover stack commands, lock guards, last-filter mask cleanup, mask lifecycle, stale-document async cancellation, clamp/live-preview semantics and the canonical stack limit; architecture routing docs now point fresh AI/Codex sessions directly to the Smart Filter owner.
+
+
 ### 2026-09-26 — Photoshop Smart Object resource owner extraction
 
 - Refactor: embedded Photoshop Smart Object PNG/PSD/PSB payload serialization, bounded `liFD` linked-resource rewrite preparation/publication and native baseline metadata refresh moved from the large `src/main.js` into `src/document/psd-smart-object-resource.js`.
