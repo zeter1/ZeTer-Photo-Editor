@@ -41,6 +41,7 @@ const sources = [
   'src/document/psd-import-controller.js',
   'src/document/psd-export-controller.js',
   'src/formats/psd.js',
+  'src/document/psd-smart-object-resource.js',
   'src/main.js',
 ];
 

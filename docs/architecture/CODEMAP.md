@@ -78,6 +78,11 @@ Owns generic Smart Object content lifecycle: convert selected layer, linked-copy
 
 Stable document/geometry helpers are direct dependencies. Browser preview rendering, workspace session bridges and Photoshop native embedded-resource rewrite are explicit narrow ports. Photoshop PSD/PSB serialization/resource bytes deliberately stay outside this controller so generic ZPE Smart Object behavior remains directly Node-testable.
 
+### `psd-smart-object-resource.js`
+Owns Photoshop-specific embedded Smart Object resource policy: PNG preview payload extraction, PSD/PSB re-encoding through prepared export data, bounded linked-layer block rewrite, explicit publish of prepared `liFD` blocks and per-target native baseline/fingerprint refresh.
+
+Stable binary primitives stay in `src/formats/psd.js`; fingerprint/opaque-block decoding primitives stay in `psd-native-metadata-plans.js`. The owner receives PSD export preparation and the shared opaque-block-to-state bridge as narrow ports. Rewrite preparation does not mutate the parent document; the generic Smart Object controller revalidates content/parent identity after every await and only then calls the publish/update ports.
+
 ### `import-controller.js`
 Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or project persistence; those remain separate runtime/format concerns.
 

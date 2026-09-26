@@ -22,7 +22,7 @@ import {
 } from './ui/tool-config.js';
 import { LAYER_STYLE_FIELDS, createLayerStyles, sanitizeLayerStyles } from './core/layer-styles.js';
 import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustments.js';
-import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile, rewriteEmbeddedLinkedLayerAsset } from './formats/psd.js';
+import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './formats/psd.js';
 import { createDocumentSessionController } from './workspace/session-controller.js';
 import { createRecoveryController } from './workspace/recovery-controller.js';
 import { createToolbarController } from './ui/toolbar-controller.js';
@@ -37,10 +37,11 @@ import { createSelectionClipboardController } from './selection/clipboard-contro
 import { createSelectionRasterMutationController } from './selection/raster-mutation-controller.js';
 import { createDocumentImportController } from './document/import-controller.js';
 import { createSmartObjectController } from './document/smart-object-controller.js';
+import { createPsdSmartObjectResource } from './document/psd-smart-object-resource.js';
 import { createPsdImportController } from './document/psd-import-controller.js';
 import { createPsdImportSemantics } from './document/psd-import-semantics.js';
 import { createPsdExportController } from './document/psd-export-controller.js';
-import { psdAdjustmentNativePlan, psdEmbeddedDocumentFingerprint, psdOpaqueBlockFromState, psdPreviewFingerprint, psdShapeNativePlan, psdTextNativePlan } from './document/psd-native-metadata-plans.js';
+import { psdAdjustmentNativePlan, psdEmbeddedDocumentFingerprint, psdPreviewFingerprint, psdShapeNativePlan, psdTextNativePlan } from './document/psd-native-metadata-plans.js';
 import { createRasterEditController } from './painting/controller.js';
 import { createRasterCommandController } from './painting/command-controller.js';
 import { createPaintGestureController } from './painting/gesture-controller.js';
@@ -306,6 +307,11 @@ const psdExportController = createPsdExportController({
   },
 });
 const { prepareDocument: preparePsdExport } = psdExportController;
+
+const psdSmartObjectResource = createPsdSmartObjectResource({
+  prepareDocument: preparePsdExport,
+  opaqueBlockToState: psdOpaqueBlockToState,
+});
 
 const psdImportSemantics = createPsdImportSemantics({
   decodePsd,
@@ -614,9 +620,9 @@ const smartObjectController = createSmartObjectController({
         layer?.type === 'smart-object' && layer.psdSmartObject?.uniqueId === uniqueId
       );
     },
-    rewriteEmbeddedSource: rewritePhotoshopEmbeddedSource,
-    publishEmbeddedSourceRewrite: applyPhotoshopEmbeddedSourceRewrite,
-    updateTargetAfterRewrite: updatePhotoshopSmartObjectRewriteMetadata,
+    rewriteEmbeddedSource: psdSmartObjectResource.rewriteEmbeddedSource,
+    publishEmbeddedSourceRewrite: psdSmartObjectResource.publishEmbeddedSourceRewrite,
+    updateTargetAfterRewrite: psdSmartObjectResource.updateTargetAfterRewrite,
   },
   ui: { setStatus, toast, consoleRef:console },
 });
@@ -3401,72 +3407,6 @@ function openSmartFilterDialog(layer=selected(),index=-1){
     else {target.smartFilters=structuredClone(original);render();refreshInspectorPanels();}
   });
   nameInput.focus();nameInput.select();
-}
-
-async function serializePhotoshopEmbeddedAsset(embedded,source,previewDataUrl){
-  const type=String(source?.asset?.detectedFileType||'').toLowerCase();
-  if(type==='png'){
-    return dataUrlToBytes(previewDataUrl,{maxBytes:40*1024*1024});
-  }
-  if(type==='psd'||type==='psb'){
-    const prepared=await preparePsdExport(embedded);
-    const profile=embedded.colorProfile;
-    const iccProfile=profile?.kind==='icc'&&profile.dataUrl
-      ? dataUrlToBytes(profile.dataUrl,{maxBytes:4*1024*1024})
-      : null;
-    const encodeBlob=type==='psb'?encodePsbBlob:encodePsdBlob;
-    const blob=encodeBlob({
-      width:embedded.width,height:embedded.height,
-      layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,linkedLayerBlocks:prepared.linkedLayerBlocks,composite:prepared.composite,
-      compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,colorMode:prepared.colorMode,
-      iccProfile,iccUntagged:Boolean(profile?.untagged),
-      maxPixels:12_000_000,maxLayers:200,
-    });
-    const bytes=new Uint8Array(await blob.arrayBuffer());
-    if(bytes.byteLength>40*1024*1024)throw new Error('Пересобранный embedded PSD/PSB превышает лимит 40 МБ');
-    return bytes;
-  }
-  throw new Error('Stage 14c resource rewrite поддерживает embedded PNG/PSD/PSB; '+(type||'тип payload не определён'));
-}
-
-async function rewritePhotoshopEmbeddedSource(parentDoc,layer,embedded,previewDataUrl){
-  const source=layer?.psdSmartObject,asset=source?.asset,baseline=source?.baseline;
-  if(!source?.uniqueId||asset?.kind!=='data')return{rewritten:false,reason:'источник не является embedded Photoshop data asset'};
-  if(!baseline)return{rewritten:false,reason:'нет import baseline для безопасного rewrite'};
-  if(Number(embedded.width)!==Number(baseline.embeddedWidth)||Number(embedded.height)!==Number(baseline.embeddedHeight)){
-    return{rewritten:false,reason:'размер embedded документа изменён; PlLd transform пока не пересчитывается'};
-  }
-  const blocks=(parentDoc.psdLinkedLayerBlocks||[])
-    .map(block=>psdOpaqueBlockFromState(block,{maxBytes:128*1024*1024}))
-    .filter(Boolean);
-  const assetBytes=await serializePhotoshopEmbeddedAsset(embedded,source,previewDataUrl);
-  const rewritten=rewriteEmbeddedLinkedLayerAsset(blocks,source.uniqueId,assetBytes);
-  if(rewritten.rewritten<1)return{rewritten:false,reason:'liFD resource с matching UUID не найден'};
-  return{
-    rewritten:true,
-    linkedLayerBlocks:rewritten.blocks.map(psdOpaqueBlockToState).filter(Boolean),
-    newSize:rewritten.newSize,oldSize:rewritten.oldSize,sourceKey:rewritten.sourceKey,type:asset.detectedFileType,
-  };
-}
-function applyPhotoshopEmbeddedSourceRewrite(parentDoc,rewrite){
-  if(!parentDoc||!rewrite?.rewritten||!Array.isArray(rewrite.linkedLayerBlocks))return;
-  parentDoc.psdLinkedLayerBlocks=rewrite.linkedLayerBlocks;
-}
-
-function updatePhotoshopSmartObjectRewriteMetadata(target,{rewrite,previewDataUrl,embedded}){
-  if(!target?.psdSmartObject||!rewrite?.rewritten)return;
-  target.psdSmartObject.asset={
-    ...(target.psdSmartObject.asset||{}),
-    dataSize:rewrite.newSize,
-    sourceKey:rewrite.sourceKey||target.psdSmartObject.asset?.sourceKey||null,
-  };
-  target.psdSmartObject.baseline={
-    ...target.psdSmartObject.baseline,
-    previewFingerprint:psdPreviewFingerprint(previewDataUrl),
-    embeddedFingerprint:psdEmbeddedDocumentFingerprint(embedded),
-    embeddedWidth:embedded.width,
-    embeddedHeight:embedded.height,
-  };
 }
 
 function addAdjustmentLayer(){
