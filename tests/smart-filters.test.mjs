@@ -7,7 +7,7 @@ import {
 } from '../src/core/state.js';
 
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
-const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const smartFilterController=await readFile(new URL('../src/ui/smart-filter-controller.js',import.meta.url),'utf8');
 const styles=await readFile(new URL('../src/styles.css',import.meta.url),'utf8');
 
 test('Smart Filters Stage 11b survives .zpe sanitization and clamps filter/mask payloads',()=>{
@@ -42,13 +42,13 @@ test('Smart Filter renderer composites the ordered stack through a separate mask
   assert.ok(render.includes('const result = await applySmartFilterMask(source, current, layer.smartFilterMask, width, height);'));
 });
 
-test('Smart Filter UI supports mask creation, invert, visibility, density, feather and removal',()=>{
-  assert.ok(main.includes('async function setSmartFilterMask(layer=selected(),fromSelection=false)'));
-  assert.ok(main.includes('function toggleSmartFilterMask(layer=selected())'));
-  assert.ok(main.includes('function invertSmartFilterMask(layer=selected())'));
-  assert.ok(main.includes('function removeSmartFilterMask(layer=selected())'));
-  assert.ok(main.includes('data-smart-filter-mask-density'));
-  assert.ok(main.includes('data-smart-filter-mask-feather'));
-  assert.ok(main.includes('Маска смарт-фильтров из выделения'));
+test('Smart Filter controller owns mask UI markup while styles remain in the shell',()=>{
+  assert.ok(smartFilterController.includes('async function setSmartFilterMask'));
+  assert.ok(smartFilterController.includes('function toggleSmartFilterMask'));
+  assert.ok(smartFilterController.includes('function invertSmartFilterMask'));
+  assert.ok(smartFilterController.includes('function removeSmartFilterMask'));
+  assert.ok(smartFilterController.includes('data-smart-filter-mask-density'));
+  assert.ok(smartFilterController.includes('data-smart-filter-mask-feather'));
+  assert.ok(smartFilterController.includes('Маска смарт-фильтров из выделения'));
   assert.ok(styles.includes('.smart-filter-mask'));
 });
