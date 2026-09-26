@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, toolbarController, menuController, modalController, selectionClipboardController] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -13,6 +13,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, too
   readFile(new URL('src/ui/toolbar-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/menu-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
+  readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
 ]);
 
 test('canonical UI and PSD boundaries stay out of legacy compatibility paths', () => {
@@ -57,4 +58,14 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /function makeModalDraggable\(/);
   assert.doesNotMatch(main, /function showInfoModal\(/);
   assert.doesNotMatch(main, /function showRecoveryModal\(/);
+  assert.match(main, /from '\.\/selection\/clipboard-controller\.js'/);
+  assert.match(build, /'src\/selection\/clipboard-controller\.js'/);
+  assert.match(selectionClipboardController, /export function createSelectionClipboardController/);
+  assert.doesNotMatch(main, /function copySelectionToClipboard\(/);
+  assert.doesNotMatch(main, /function readClipboardImageFiles\(/);
+  assert.doesNotMatch(main, /function armPasteShortcutFallback\(/);
+  assert.doesNotMatch(main, /\bpasteGeneration\b/);
+  assert.doesNotMatch(main, /\bpasteFallbackTimer\b/);
+  assert.doesNotMatch(main, /\bopenMenuKey\b/);
+  assert.match(main, /menuController\.isOpen\(\)/);
 });
