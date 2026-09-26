@@ -127,7 +127,7 @@ test('PSD Vector/Path Stage 10d-10e wires native masks and saved paths through U
   assert.match(adapter,/writeVectorMaskExtra\(extra, layer, documentWidth, documentHeight\)/);
   assert.match(adapter,/id >= 2000 && id <= 2997/);
   assert.match(adapter,/writeSavedPathResources/);
-  assert.match(psdImportController,/importedLayer\.vectorMask=canMapShape\?null:importPsdVectorMask\(sourceLayer\.vectorMask,importedLayer\)/);
+  assert.match(psdImportController,/importedLayer\.vectorMask=canMapShape\?null:semantics\.importPsdVectorMask\(sourceLayer\.vectorMask,importedLayer\)/);
   assert.match(psdImportController,/next\.paths=structuredClone\(parsed\.paths\|\|\[\]\)/);
   assert.match(psdExportController,/vectorMask:nativeShape\?\.eligible\?nativeShape\.vectorMask:exportPsdVectorMask\(layer\)/);
   assert.match(main,/paths:prepared\.paths/);
@@ -199,7 +199,7 @@ test('Stage 13d wires independent display ICC, proof intent and gamut warning in
   assert.match(main,/data-cmyk-proof-intent/);
   assert.match(main,/data-cmyk-gamut-warning/);
   assert.match(main,/gamutWarningThreshold/);
-  assert.match(main,/displayProfileBytes/);
+  assert.match(psdImportController,/displayProfileBytes/);
   assert.match(colorManagement,/cmykPixelBufferToRgba8Preview\(buffer,\s*transform,\s*\{\s*gamutWarning:policy\.gamutWarningEnabled,?\s*\}\)/);
 });
 
@@ -253,7 +253,7 @@ test('Stage 15a wires Photoshop TySh text mapping and safe native round-trip int
   assert.match(adapter,/writeTextLayerExtra\(extra, layer, version\)/);
   assert.match(main,/importPsdTextMetadata/);
   assert.match(main,/psdTextNativePlan/);
-  assert.match(main,/canMapText/);
+  assert.match(psdImportController,/canMapText/);
   assert.match(main,/createTextLayer\(\{/);
   assert.match(psdExportController,/psdText:nativeText\?\.eligible\?nativeText\.block:null/);
   assert.match(psdImportController,/Photoshop TySh imported as editable ZPE text|Photoshop TySh импортирован как editable ZPE text/);
@@ -288,7 +288,7 @@ test('Stage 15c wires Photoshop solid vector shapes into editable ZPE paths and 
   assert.match(main,/function importPsdShapeMetadata\(/);
   assert.match(main,/function exportPsdShapePathMask\(/);
   assert.match(main,/function psdShapeNativePlan\(/);
-  assert.match(psdImportController,/const canMapShape=canMapPsdSolidShape\(sourceLayer\)/);
+  assert.match(psdImportController,/const canMapShape=semantics\.canMapPsdSolidShape\(sourceLayer\)/);
   assert.match(psdImportController,/createShapeLayer\(\{/);
   assert.match(psdExportController,/psdShape:nativeShape\?\.eligible\?nativeShape\.metadata:null/);
   assert.match(psdImportController,/Photoshop Shape/);

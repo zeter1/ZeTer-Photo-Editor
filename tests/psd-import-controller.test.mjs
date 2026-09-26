@@ -111,7 +111,7 @@ test('late decode never publishes into a different document/session context', as
   await opening;
 
   assert.equal(h.published.length,0);
-  assert.ok(h.statuses.some(value=>value.includes('импорт PSD/PSB отменён')));
+  assert.ok(h.statuses.some(value=>value.includes('Импорт PSD/PSB отменён')));
   assert.ok(h.toasts.some(item=>item.type==='warn'));
 });
 
