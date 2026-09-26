@@ -121,6 +121,10 @@ export function createRecoveryController({
   }
 
   function discardRecovery(key = recoveryKey) {
+    if (key !== recoveryKey && key !== 'latest') {
+      consoleRef?.warn?.('Ignored recovery discard request for another editor window', { key });
+      return Promise.resolve(false);
+    }
     cancelPendingWrite();
     if (!recoveryStorageAvailable) return Promise.resolve(false);
     recoveryWritePromise = recoveryWritePromise

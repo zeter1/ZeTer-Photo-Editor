@@ -148,6 +148,13 @@ test('foreign recovery cannot be discarded even if the UI returns an invalid dis
   assert.equal(calls.warnings.some(args => String(args[0]).includes('another editor window')), true);
 });
 
+test('public discard refuses a foreign recovery key', async () => {
+  const { controller, calls } = createHarness();
+  assert.equal(await controller.discardRecovery('workspace:other'), false);
+  assert.deepEqual(calls.clears, []);
+  assert.equal(calls.warnings.some(args => String(args[0]).includes('another editor window')), true);
+});
+
 test('newer foreign recovery rotates before publish so an unseen own copy is not overwritten', async () => {
   const own = makeRecord([{ docName:'A', snapshot:'{"name":"A"}' }], { savedAt:100 });
   const foreign = makeRecord([{ docName:'B', snapshot:'{"name":"B"}' }], { savedAt:200 });

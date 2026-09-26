@@ -6,7 +6,7 @@
 
 - Refactor: window recovery/autosave orchestration вынесена из большого `src/main.js` в `src/workspace/recovery-controller.js`: reload-stable window key, debounce/generation cancellation, serialized save/discard queue, dirty-tab snapshot collection и startup restore policy.
 - Architecture: IndexedDB/record implementation остаётся в `src/core/recovery.js`; новый workspace controller получает storage/project/session/runtime/UI через явные grouped ports, а `src/main.js` остаётся composition root без собственного recovery state.
-- Reliability: controller теперь сам запрещает удаление recovery entry другого окна даже при некорректном UI action; unreadable sibling snapshots по-прежнему сохраняются при восстановлении валидных документов.
+- Reliability: controller теперь сам запрещает удаление recovery entry другого окна и через restore UI, и через публичный `discardRecovery(key)`; unreadable sibling snapshots по-прежнему сохраняются при восстановлении валидных документов.
 - Tests: добавлен прямой `tests/workspace-recovery-controller.test.mjs` для debounce, serialized discard, malformed siblings, key rotation, multi-window ownership и storage failure; legacy recovery tests больше не исполняют приватные куски `main.js` через VM slicing.
 - CI follow-up: `tests/raster-save-boundary.test.mjs` больше не использует удалённый recovery helper как slice-marker для pending-edit guard; boundary теперь заканчивается на соседнем `setDoc`, поэтому тест не захватывает остальной runtime после extraction.
 - Browser-smoke follow-up: восстановлены соседние `smartSnapEnabled` / `smartGuides`, случайно попавшие в механический recovery state range; `workspace-navigation-v17` теперь отдельно фиксирует наличие этого runtime state после будущих workspace extractions.
