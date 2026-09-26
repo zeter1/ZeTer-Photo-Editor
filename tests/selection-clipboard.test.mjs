@@ -42,7 +42,7 @@ test('merged clipboard mode renders the complete document pipeline and selected 
   const start = clipboard.indexOf('async function renderSelectionMergedToPng(bounds) {');
   const end = clipboard.indexOf('\n  function finishSelectionClipboardAction', start);
   const fn = start >= 0 && end > start ? clipboard.slice(start, end) : '';
-  assert.match(fn, /await renderDocument\(full,doc,\{checker:false\}\)/);
+  assert.match(fn, /await renderDocument\(full,getDocument\(\),\{checker:false\}\)/);
   assert.match(fn, /clipContextToDocumentSelection\(ctx\)/);
   assert.match(fn, /ctx\.drawImage\(full,0,0\)/);
   assert.match(clipboard, /copyMode==='merged'[\s\S]*renderSelectionMergedToPng\(bounds\)[\s\S]*renderSelectionLayerToPng\(layer,bounds\)/);
@@ -52,17 +52,17 @@ test('clipboard writes PNG before cut mutates raster pixels', () => {
   const start = clipboard.indexOf('async function copySelectionToClipboard({ cut = false } = {}) {');
   const end = clipboard.indexOf('\n  function copySelection()', start);
   const fn = start >= 0 && end > start ? clipboard.slice(start, end) : '';
-  assert.match(fn, /new ClipboardItem\(\{'image\/png':pngPromise\}\)/);
-  assert.match(fn, /await navigator\.clipboard\.write\(\[item\]\)/);
+  assert.match(fn, /new ClipboardItemClass\(\{'image\/png':pngPromise\}\)/);
+  assert.match(fn, /await navigatorTarget\.clipboard\.write\(\[item\]\)/);
   assert.match(fn, /clearSelectionAcrossVisibleLayers/);
   assert.match(fn, /await clearSelectedPixels/);
-  assert.ok(fn.indexOf('navigator.clipboard.write') < fn.indexOf('clearSelectionAcrossVisibleLayers'));
+  assert.ok(fn.indexOf('navigatorTarget.clipboard.write') < fn.indexOf('clearSelectionAcrossVisibleLayers'));
 });
 
 
 test('merged cut rasterizes editable pixel layers while leaving adjustment layers non-destructive', () => {
   const start = main.indexOf('async function clearSelectionAcrossVisibleLayers(');
-  const end = main.indexOf('\nfunction finishSelectionClipboardAction', start);
+  const end = main.indexOf('\nfunction toggleSelectedVisibility()', start);
   const fn = start >= 0 && end > start ? main.slice(start, end) : '';
   assert.match(fn, /const pixelTargets=intersecting\.filter\(layer=>layer\.type!=='adjustment'\)/);
   assert.match(fn, /const targets=pixelTargets\.filter\(layer=>!isLayerLocked\(doc,layer\)\)/);
