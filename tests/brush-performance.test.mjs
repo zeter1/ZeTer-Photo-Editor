@@ -4,13 +4,14 @@ import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const painting = await readFile(new URL('../src/painting/controller.js', import.meta.url), 'utf8');
+const gesture = await readFile(new URL('../src/painting/gesture-controller.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
 const io = await readFile(new URL('../src/core/io.js', import.meta.url), 'utf8');
 
 test('brush pointer movement never PNG-encodes the canvas', () => {
-  const paintTo = main.match(/function paintTo\(p, pointerEvent = null\) \{[\s\S]*?\n\}/)?.[0] ?? '';
-  assert.ok(paintTo, 'paintTo function not found');
-  assert.doesNotMatch(paintTo, /toDataURL|toBlob|canvasToDataURL|invalidateImageCache|render\(/);
+  const move = gesture.match(/function move\(point, pointerEvent = null\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.ok(move, 'paint gesture move function not found');
+  assert.doesNotMatch(move, /toDataURL|toBlob|canvasToDataURL|invalidateImageCache|render\(/);
 });
 
 test('brush preview is frame-throttled and uses a live raster override', () => {
@@ -24,10 +25,10 @@ test('brush preview is frame-throttled and uses a live raster override', () => {
   assert.match(render, /overrideSkipAdjustments/);
 });
 
-test('paintTo draws only the latest segment instead of restroking an ever-growing path', () => {
-  const paintTo = main.match(/function paintTo\(p, pointerEvent = null\) \{[\s\S]*?\n\}/)?.[0] ?? '';
-  assert.match(paintTo, /beginPath\(\)/);
-  assert.match(paintTo, /moveTo\(last\.x,last\.y\)/);
+test('paint gesture move draws only the latest segment instead of restroking an ever-growing path', () => {
+  const move = gesture.match(/function move\(point, pointerEvent = null\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(move, /beginPath\(\)/);
+  assert.match(move, /moveTo\(last\.x, last\.y\)/);
 });
 
 test('finished strokes use asynchronous canvas encoding instead of synchronous toDataURL', () => {
@@ -39,7 +40,6 @@ test('finished strokes use asynchronous canvas encoding instead of synchronous t
 });
 
 test('paint start is cancelled when the primary pointer was released during async layer preparation', () => {
-  const begin = main.match(/async function beginPaint\(p, pointerId, pointerEvent = null\) \{[\s\S]*?\n\}/)?.[0] ?? '';
-  assert.match(begin, /activePrimaryPointerId === pointerId/);
-  assert.match(begin, /if \(!canContinue\(\)\) return false/);
+  assert.match(main, /canContinue:\(\)=>activePrimaryPointerId===e\.pointerId/);
+  assert.match(gesture, /const layer = await ensurePaintLayer\(point, tool, canContinue\);[\s\S]*?if \(!canContinue\(\)\) return false/);
 });

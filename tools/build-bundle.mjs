@@ -24,6 +24,7 @@ const sources = [
   'src/core/render.js',
   'src/painting/controller.js',
   'src/retouch/controller.js',
+  'src/painting/gesture-controller.js',
   'src/selection/clipboard-controller.js',
   'src/document/import-controller.js',
   'src/formats/psd.js',

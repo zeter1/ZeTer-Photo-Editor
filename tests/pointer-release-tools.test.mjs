@@ -23,8 +23,10 @@ function release(drag, point, pointerId = 1, shiftKey = false) {
     els: { overlay: { style:{}, addEventListener: (_, callback) => { handler = callback; } } },
     canvasPoint: event => event.point,
     documentPointToLayerPixel: p => p,
-    paintTo: p => calls.push(['paint', p.x, p.y]),
-    endPaint: async () => {},
+    paintGesture: {
+      move: p => calls.push(['paint', p.x, p.y]),
+      end: async () => {},
+    },
     clearSmartGuides: () => {},
     updateMoveCursor: () => {},
     onOverlayPointerMove: event => {

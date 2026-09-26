@@ -5,6 +5,7 @@ import { checkedCanvasSize, createDocument, sanitizeProject, MAX_CANVAS_PIXELS }
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const painting = await readFile(new URL('../src/painting/controller.js', import.meta.url), 'utf8');
+const gesture = await readFile(new URL('../src/painting/gesture-controller.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
 const modalController = await readFile(new URL('../src/ui/modal-controller.js', import.meta.url), 'utf8');
 const documentImportController = await readFile(new URL('../src/document/import-controller.js', import.meta.url), 'utf8');
@@ -20,7 +21,7 @@ test('canvas allocation has a pixel budget in addition to per-axis bounds', () =
 
 test('new paint and blank layers stay sparse until pixels are actually drawn', () => {
   assert.doesNotMatch(main, /function blankRasterData/);
-  const ensure = main.match(/async function ensurePaintLayer\(point, canContinue = \(\) => true\) \{[\s\S]*?\n\}/)?.[0] ?? '';
+  const ensure = gesture.match(/async function ensurePaintLayer\(point, tool, canContinue = \(\) => true\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.match(ensure, /dataUrl:null/);
   assert.doesNotMatch(ensure, /canvasToDataURL/);
   assert.match(main, /function addBlankLayer\(\)\{addLayer\(doc,createRasterLayer\(\{name:'Новый слой',width:doc\.width,height:doc\.height,dataUrl:null\}\)\)/);
@@ -29,8 +30,9 @@ test('new paint and blank layers stay sparse until pixels are actually drawn', (
 test('drawing supports pen pressure while mouse width remains stable', () => {
   assert.match(main, /function brushWidthForPointer\(event\)/);
   assert.match(main, /event\?\.pointerType !== 'pen'/);
-  assert.match(main, /rasterEdit\.brushContext\.lineWidth=brushWidthForPointer\(pointerEvent\)/);
-  assert.match(main, /paintTo\(canvasPoint\(event, \{ clampToDocument:false \}\), event\)/);
+  assert.match(main, /brushWidth: brushWidthForPointer/);
+  assert.match(gesture, /context\.lineWidth = tools\.brushWidth\(pointerEvent\)/);
+  assert.match(main, /paintGesture\.move\(canvasPoint\(event, \{ clampToDocument:false \}\), event\)/);
 });
 
 test('brush size has layout-independent bracket shortcuts', () => {
@@ -88,7 +90,8 @@ test('brush outline and painting stay bound to the selected visible raster layer
   assert.match(helper, /const layer = selected\(\)/);
   assert.match(helper, /isEditableRasterLayer\(layer\) && isLayerVisible\(doc, layer\) && pointInLayer\(point, layer\) \? layer : null/);
   assert.match(main, /const paintLayer = paintLayerAtPoint\(hoverPoint\)/);
-  assert.match(main, /const rasterAtPoint = paintLayerAtPoint\(point\)/);
+  assert.match(main, /atPoint: paintLayerAtPoint/);
+  assert.match(gesture, /const rasterAtPoint = target\.atPoint\(point\)/);
 });
 
 test('manual raster dimensions cannot bypass the canvas pixel budget', () => {

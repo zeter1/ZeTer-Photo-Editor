@@ -6,7 +6,7 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: UI events, generic pointer/keyboard gesture lifecycle, tool routing, history/transaction coordination and save/export flows. Raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics, are delegated to their canonical owners.
+Application orchestrator: global DOM/pointer/keyboard routing, tool selection, history/transaction coordination and save/export flows. Paint-stroke lifecycle and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar and retouch mechanics, are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
@@ -34,14 +34,19 @@ Future UI extractions should land here when they can be expressed as pure config
 ### `controller.js`
 Owns reusable raster-edit state shared by brush/eraser/fill/line and retouch routing: Canvas8 buffer/context/layer identity, native high-depth/CMYK working buffer, preview invalidation/frame throttling, render overrides, raster materialization and publication back to the layer.
 
-It deliberately does **not** own `currentTool`, pointer gesture state (`beginPaint → paintTo → endPaint`), selection semantics, history commits or the application-wide pending-edit guard. Those remain orchestration concerns in `src/main.js`; pixel math remains in `src/core/pixels.js` and `src/core/pixel-buffer.js`.
+It deliberately does **not** own tool choice, stroke routing, selection semantics, history commits or the application-wide pending-edit guard.
+
+### `gesture-controller.js`
+Owns the bounded lifecycle of one brush/eraser/retouch stroke: choose existing/new raster target, choose native high-depth/CMYK vs Canvas8 path, initialize per-stroke retouch state, route movement segments and persist on end. Dependencies are grouped ports (`state`, `target`, `selection`, `tools`, `nativePaint`, `ui`) instead of a long flat callback list.
+
+It deliberately does **not** own global pointer events/capture, `currentTool`, document/session identity, selection/history state or the global pending-edit flag. Those remain in `src/main.js`; storage/persistence stays in `src/painting/controller.js`; pixel math stays in core.
 
 ## Retouch boundary — `src/retouch/`
 
 ### `controller.js`
 Owns destructive retouch mechanics for Canvas8 and native typed RGB/CMYK paths: clone/heal source + immutable per-stroke snapshots, smudge, blur, dodge/burn, private scratch canvases and high-depth retouch dispatch.
 
-It does **not** own document/history/pointer gesture state or the shared raster edit buffer. Runtime orchestration remains in `src/main.js`; shared paint state/persistence lives in `src/painting/controller.js`; pixel math remains in `src/core/pixels.js` and `src/core/pixel-buffer.js`.
+It does **not** own document/history/global pointer state or the shared raster edit buffer. Per-stroke routing lives in `src/painting/gesture-controller.js`; global event/transaction orchestration remains in `src/main.js`; shared paint state/persistence lives in `src/painting/controller.js`; pixel math remains in core.
 
 ## Document boundary — `src/document/`
 

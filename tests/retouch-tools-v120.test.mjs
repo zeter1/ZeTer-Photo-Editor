@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const gesture = await readFile(new URL('../src/painting/gesture-controller.js', import.meta.url), 'utf8');
 const retouch = await readFile(new URL('../src/retouch/controller.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
@@ -21,13 +22,14 @@ test('clone stamp requires Alt-click source and paints from an immutable stroke 
   assert.match(retouch, /function prepareCloneStroke\(layer, destinationPoint\)/);
   assert.match(retouch, /cloneSnapshotCanvas\.getContext\('2d'/);
   assert.match(retouch, /function cloneStrokeSegment\(from, to, offset, pointerEvent = null, healing = false\)/);
-  assert.match(main, /clipContextToSelection\(rasterEdit\.brushContext,l\)/);
+  assert.match(main, /clipContext: clipContextToSelection/);
+  assert.match(gesture, /selection\?\.clipContext\?\.\(context, layer\)/);
 });
 
 test('retouch tools edit only an existing raster layer and keep dedicated history labels', () => {
-  const ensurePaintLayer = main.match(/async function ensurePaintLayer\(point, canContinue = \(\) => true\) \{[\s\S]*?\n\}/)?.[0] ?? '';
-  assert.match(ensurePaintLayer, /\['eraser','blur','clone','heal','smudge','dodge','burn'\]\.includes\(currentTool\)/);
-  assert.match(main, /clone:'Штамп',heal:'Лечебная кисть',smudge:'Палец \/ смазывание',dodge:'Осветлитель',burn:'Затемнитель'/);
+  const ensurePaintLayer = gesture.match(/async function ensurePaintLayer\(point, tool, canContinue = \(\) => true\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(ensurePaintLayer, /EXISTING_RASTER_ONLY_TOOLS\.has\(tool\)/);
+  assert.match(gesture, /clone:'Штамп',[\s\S]*?heal:'Лечебная кисть',[\s\S]*?smudge:'Палец \/ смазывание',[\s\S]*?dodge:'Осветлитель',[\s\S]*?burn:'Затемнитель'/);
   assert.match(retouch, /function applyToneDab\(layer, point, pointerEvent = null, brighten = true\)/);
   assert.match(retouch, /applyToneBrushPixels\(/);
   assert.doesNotMatch(main, /currentTool==='dodge'\?'#ffffff':currentTool==='burn'\?'#000000'/);
