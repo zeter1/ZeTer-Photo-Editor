@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-26 — Shared Text typography/font settings controller extraction
+
+- Refactor: shared Text typography/font UI policy moved from the large `src/main.js` into `src/ui/text-settings-controller.js`: option sets, local-font discovery/private registry, custom-font validation/read cache, modal fields and form normalization.
+- Behavior preservation: `queryLocalFonts()` fallback/permission messages, Russian locale sorting + 1,000-font bound, stored-font fallback options, WOFF/WOFF2/TTF/OTF 5 MB validation, embedded `fontData`/`fontLabel` retention and typography clamps remain explicit controller contracts.
+- Properties safety: manual system fonts and custom font files now use the same canonical owner as Text add/edit; async custom-font publication still revalidates the originating document, exact selected layer and lock state before mutation/history commit.
+- Tests/docs: direct controller regressions cover local-font capability/error paths, de-duplication/sort/cap/select preservation, bounded manual registry, custom-font cache retry semantics, precedence/normalization and source ownership; AI maps distinguish Text transaction ownership from Text settings/font policy.
+
 ### 2026-09-26 — Text edit / live-preview controller extraction
 
 - Refactor: Text-tool add/edit modal transaction, visible-text hit routing, transient draft ownership, async live-preview generation and preview-canvas synchronization moved from the large `src/main.js` into `src/ui/text-edit-controller.js`.
