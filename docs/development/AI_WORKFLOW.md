@@ -24,6 +24,7 @@ Useful routing:
 - generic overlay pointer capture / active-pointer ownership / up-cancel-lost-capture → `interaction/pointer-lifecycle-router`
 - tool-specific pointer branches (move/transform/paint/path/crop) → `main` + the relevant domain controller
 - sidebar collapse / canvas-mode shell visibility → `ui/workspace-layout-controller`
+- Saved Paths selection/CRUD/panel/context menu/apply-as-vector-mask → `ui/paths-controller`; Pen anchor/handle geometry → `main`; PSD resource codec → `formats/psd`
 - other DOM/menu/dialog interaction → main + ui
 - document/layer invariant → state
 - clone/heal/smudge/blur/dodge/burn mechanics → retouch/controller + painting/controller state; include painting/gesture-controller when the bug is in stroke begin/move/end routing

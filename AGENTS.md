@@ -16,7 +16,8 @@
 - Fill / raster line / current-layer selection clear commands: `src/painting/command-controller.js`
 - Brush/eraser + retouch stroke gesture lifecycle (begin/move/end): `src/painting/gesture-controller.js`
 - Clone/heal/smudge/blur/dodge/burn mechanics (Canvas8 + high-depth/CMYK): `src/retouch/controller.js`
-- UI config + toolbar/menu/modal/workspace-layout controllers: `src/ui/`
+- UI config + toolbar/menu/modal/workspace-layout/saved-Paths controllers: `src/ui/`
+- Saved Paths selection/CRUD/panel/context-menu/vector-mask apply orchestration: `src/ui/paths-controller.js`; Pen geometry stays in `src/main.js`, PSD codec in `src/formats/psd.js`.
 - Core domain/render/pixel logic + low-level storage primitives: `src/core/`
 - PSD/PSB format boundary: `src/formats/psd.js`
 - Generated file:// bundle: `src/app.bundle.js` — **не редактировать вручную**

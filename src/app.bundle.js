@@ -656,6 +656,423 @@ function createWorkspaceLayoutController({
   };
 }
 
+// ---- src/ui/paths-controller.js ----
+const SAVED_PATH_RESOURCE_MIN = 2000;
+const SAVED_PATH_RESOURCE_MAX = 2997;
+const SAVED_PATH_LIMIT = 998;
+function createPathsController({
+  state = {},
+  vectors = {},
+  edit = {},
+  ui = {},
+  clone = value => globalThis.structuredClone(value),
+} = {}) {
+  const {
+    getDocument = () => null,
+    getSelectedLayer = () => null,
+    getSelectionShape = () => null,
+    isLayerLocked = () => false,
+    commit = () => {},
+  } = state;
+  const {
+    exportVectorMask = () => null,
+    importVectorMask = () => null,
+    layerPixelToDocumentPoint = point => ({ ...point }),
+    selectionDocumentNodes = () => [],
+  } = vectors;
+  const {
+    beginPathEdit = () => {},
+    syncPathEditSelection = () => {},
+    onPathDeleted = () => {},
+    normalizePathEditIndex = () => {},
+    clearVectorMaskEdit = () => {},
+    drawOverlay = () => {},
+  } = edit;
+  const {
+    setStatus = () => {},
+    toast = () => {},
+    showModal = () => {},
+    openContextMenu = () => {},
+    pathList = null,
+    controls = {},
+    documentRef = globalThis.document,
+    requestFrame = callback => (globalThis.requestAnimationFrame ? globalThis.requestAnimationFrame(callback) : callback()),
+  } = ui;
+
+  let selectedIndex = -1;
+
+  const documentValue = () => getDocument?.() || null;
+  const paths = () => {
+    const value = documentValue()?.paths;
+    return Array.isArray(value) ? value : [];
+  };
+
+  function normalizeSelectedIndex() {
+    const list = paths();
+    if (!list.length) {
+      selectedIndex = -1;
+      normalizePathEditIndex(0);
+      return -1;
+    }
+    if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= list.length) selectedIndex = 0;
+    normalizePathEditIndex(list.length);
+    return selectedIndex;
+  }
+
+  function getSelectedIndex() {
+    return selectedIndex;
+  }
+
+  function setSelectedIndex(index, { syncEdit = false, render = false, draw = false } = {}) {
+    selectedIndex = Number.isInteger(index) ? index : -1;
+    const normalized = normalizeSelectedIndex();
+    if (syncEdit && normalized >= 0) syncPathEditSelection(normalized);
+    if (render) updatePathsPanel();
+    if (draw) drawOverlay();
+    return normalized;
+  }
+
+  function selectedPath() {
+    const index = normalizeSelectedIndex();
+    return index >= 0 ? paths()[index] : null;
+  }
+
+  function allocateResourceId() {
+    const used = new Set(paths()
+      .map(path => path?.id)
+      .filter(id => Number.isInteger(id) && id >= SAVED_PATH_RESOURCE_MIN && id <= SAVED_PATH_RESOURCE_MAX));
+    for (let id = SAVED_PATH_RESOURCE_MIN; id <= SAVED_PATH_RESOURCE_MAX; id += 1) {
+      if (!used.has(id)) return id;
+    }
+    return null;
+  }
+
+  function uniqueName(base = 'Контур') {
+    const names = new Set(paths().map(path => String(path?.name || '').trim()).filter(Boolean));
+    const root = String(base || 'Контур').trim().slice(0, 220) || 'Контур';
+    if (!names.has(root)) return root;
+    let index = 2;
+    while (names.has(`${root} ${index}`)) index += 1;
+    return `${root} ${index}`;
+  }
+
+  function toDocumentNode(node, layer) {
+    const anchor = layerPixelToDocumentPoint(node, layer);
+    return {
+      x: anchor.x,
+      y: anchor.y,
+      handleIn: node.handleIn ? layerPixelToDocumentPoint(node.handleIn, layer) : null,
+      handleOut: node.handleOut ? layerPixelToDocumentPoint(node.handleOut, layer) : null,
+      kind: node.kind === 'smooth' ? 'smooth' : 'corner',
+    };
+  }
+
+  function pathFromCurrentSource() {
+    const layer = getSelectedLayer?.();
+    if (layer?.vectorMask?.subpaths?.length) {
+      const vector = exportVectorMask(layer);
+      return {
+        name: uniqueName(`${layer.name || 'Слой'} — маска`),
+        fillStartsWithAllPixels: vector.fillStartsWithAllPixels === true,
+        subpaths: clone(vector.subpaths),
+      };
+    }
+    if (layer?.type === 'shape' && layer.shape === 'path' && Array.isArray(layer.pathPoints) && layer.pathPoints.length >= 2) {
+      return {
+        name: uniqueName(`${layer.name || 'Контур'} — путь`),
+        fillStartsWithAllPixels: false,
+        subpaths: [{
+          operation: 'add',
+          closed: Boolean(layer.pathClosed),
+          fillRule: 'non-zero',
+          points: layer.pathPoints.map(node => toDocumentNode(node, layer)),
+        }],
+      };
+    }
+    if (getSelectionShape?.()) {
+      const nodes = selectionDocumentNodes() || [];
+      if (nodes.length >= 3) {
+        return {
+          name: uniqueName('Контур из выделения'),
+          fillStartsWithAllPixels: false,
+          subpaths: [{
+            operation: 'add',
+            closed: true,
+            fillRule: 'non-zero',
+            points: nodes.map(node => clone(node)),
+          }],
+        };
+      }
+    }
+    return null;
+  }
+
+  function addDocumentPathFromCurrent() {
+    const doc = documentValue();
+    if (!doc) return false;
+    if (paths().length >= SAVED_PATH_LIMIT) {
+      setStatus('Достигнут лимит 998 сохранённых контуров');
+      toast('Нельзя сохранить больше 998 Photoshop-compatible paths', 'warn');
+      return false;
+    }
+    const path = pathFromCurrentSource();
+    if (!path) {
+      setStatus('Нужен path-слой, векторная маска или активное выделение');
+      toast('Нечего сохранять как контур', 'warn');
+      return false;
+    }
+    const id = allocateResourceId();
+    if (id === null) {
+      setStatus('Исчерпан диапазон Photoshop Path Resource ID 2000..2997');
+      return false;
+    }
+    if (!Array.isArray(doc.paths)) doc.paths = [];
+    doc.paths.push({ id, ...path });
+    selectedIndex = doc.paths.length - 1;
+    commit('Сохранить контур');
+    setStatus(`Сохранён контур «${path.name}»`);
+    return true;
+  }
+
+  function renameSelectedDocumentPath() {
+    const path = selectedPath();
+    if (!path) return false;
+    const targetIndex = selectedIndex;
+    showModal({
+      title: 'Переименовать контур',
+      fields: [{ name:'name', label:'Имя', value:path.name || 'Контур', required:true }],
+      submitLabel: 'Переименовать',
+      onSubmit: values => {
+        const target = paths()[targetIndex];
+        const name = String(values.name || '').trim().slice(0, 240);
+        if (!target || !name || name === target.name) return false;
+        target.name = name;
+        selectedIndex = targetIndex;
+        commit('Переименовать контур');
+        return true;
+      },
+    });
+    return true;
+  }
+
+  function duplicateSelectedDocumentPath() {
+    const path = selectedPath();
+    if (!path) return false;
+    const doc = documentValue();
+    if (!doc) return false;
+    if (paths().length >= SAVED_PATH_LIMIT) {
+      setStatus('Достигнут лимит 998 сохранённых контуров');
+      return false;
+    }
+    const id = allocateResourceId();
+    if (id === null) return false;
+    const copy = clone(path);
+    copy.id = id;
+    copy.name = uniqueName(`${path.name || 'Контур'} — копия`);
+    doc.paths.push(copy);
+    selectedIndex = doc.paths.length - 1;
+    commit('Дублировать контур');
+    return true;
+  }
+
+  function deleteSelectedDocumentPath() {
+    const index = normalizeSelectedIndex();
+    if (index < 0) return false;
+    const doc = documentValue();
+    const name = paths()[index]?.name || 'Контур';
+    doc.paths.splice(index, 1);
+    onPathDeleted(index);
+    selectedIndex = Math.min(index, doc.paths.length - 1);
+    normalizePathEditIndex(doc.paths.length);
+    commit('Удалить контур');
+    setStatus(`Удалён контур «${name}»`);
+    return true;
+  }
+
+  function editSelectedDocumentPath() {
+    const index = normalizeSelectedIndex();
+    if (index < 0) return false;
+    beginPathEdit(index);
+    const path = paths()[index];
+    setStatus(`Перо: редактирование сохранённого контура «${path?.name || 'Контур'}»`);
+    return true;
+  }
+
+  function canApplyPath(path = selectedPath(), layer = getSelectedLayer?.()) {
+    return Boolean(path && layer && layer.type !== 'adjustment' && !isLayerLocked(layer, documentValue()));
+  }
+
+  function applySelectedDocumentPathAsVectorMask() {
+    const path = selectedPath();
+    const layer = getSelectedLayer?.();
+    if (!path) {
+      setStatus('Выберите сохранённый контур');
+      return false;
+    }
+    if (!layer) {
+      setStatus('Выберите слой для векторной маски');
+      return false;
+    }
+    if (layer.type === 'adjustment') {
+      setStatus('Сохранённый контур как vector mask пока применяется к обычным слоям, не к adjustment layer');
+      return false;
+    }
+    if (isLayerLocked(layer, documentValue())) {
+      setStatus('Слой или его группа заблокированы');
+      return false;
+    }
+    const mask = importVectorMask({
+      enabled: true,
+      invert: false,
+      linked: true,
+      fillStartsWithAllPixels: path.fillStartsWithAllPixels === true,
+      subpaths: path.subpaths,
+    }, layer);
+    if (!mask) {
+      setStatus('Контур не содержит пригодных subpaths');
+      return false;
+    }
+    layer.vectorMask = mask;
+    clearVectorMaskEdit();
+    commit('Применить контур как векторную маску');
+    setStatus(`Контур «${path.name || 'Контур'}» применён как векторная маска`);
+    return true;
+  }
+
+  function selectForAction(index) {
+    setSelectedIndex(index);
+    return selectedIndex;
+  }
+
+  function pathContextMenu(index) {
+    const exists = () => Boolean(paths()[index]);
+    return [
+      ['Редактировать пером', '', () => { selectForAction(index); editSelectedDocumentPath(); }, exists],
+      ['Применить как векторную маску', '', () => { selectForAction(index); applySelectedDocumentPathAsVectorMask(); }, () => exists() && canApplyPath(paths()[index], getSelectedLayer?.())],
+      ['sep'],
+      ['Переименовать…', '', () => { selectForAction(index); renameSelectedDocumentPath(); }, exists],
+      ['Дублировать', '', () => { selectForAction(index); duplicateSelectedDocumentPath(); }, exists],
+      ['Удалить', '', () => { selectForAction(index); deleteSelectedDocumentPath(); }, exists],
+    ];
+  }
+
+  function updateControls(list) {
+    const path = selectedPath();
+    const layer = getSelectedLayer?.();
+    const canSave = Boolean(
+      getSelectionShape?.()
+      || layer?.vectorMask?.subpaths?.length
+      || (layer?.type === 'shape' && layer.shape === 'path' && layer.pathPoints?.length >= 2)
+    ) && list.length < SAVED_PATH_LIMIT;
+    const enabled = {
+      add: canSave,
+      edit: Boolean(path),
+      applyMask: canApplyPath(path, layer),
+      rename: Boolean(path),
+      duplicate: Boolean(path && list.length < SAVED_PATH_LIMIT),
+      delete: Boolean(path),
+    };
+    for (const [key, value] of Object.entries(enabled)) {
+      if (controls[key]) controls[key].disabled = !value;
+    }
+    return enabled;
+  }
+
+  function updatePathsPanel() {
+    const list = paths();
+    normalizeSelectedIndex();
+    if (pathList && documentRef?.createElement) {
+      pathList.replaceChildren();
+      if (!list.length) {
+        const empty = documentRef.createElement('div');
+        empty.className = 'paths-empty';
+        empty.textContent = 'Нет сохранённых контуров';
+        pathList.append(empty);
+      } else {
+        list.forEach((path, index) => {
+          const row = documentRef.createElement('button');
+          row.type = 'button';
+          row.className = `path-row${index === selectedIndex ? ' selected' : ''}`;
+          row.setAttribute('role', 'option');
+          row.setAttribute('aria-selected', String(index === selectedIndex));
+          const name = documentRef.createElement('span');
+          name.className = 'path-row-name';
+          name.textContent = path.name || `Контур ${index + 1}`;
+          const count = (path.subpaths || []).reduce((sum, subpath) => sum + (subpath.points?.length || 0), 0);
+          const meta = documentRef.createElement('span');
+          meta.className = 'path-row-meta';
+          meta.textContent = `${path.subpaths?.length || 0} конт. · ${count} узл. · #${path.id ?? 'auto'}`;
+          row.append(name, meta);
+          row.onclick = () => {
+            setSelectedIndex(index, { syncEdit:true });
+            updatePathsPanel();
+            drawOverlay();
+          };
+          row.ondblclick = event => {
+            event.preventDefault();
+            setSelectedIndex(index);
+            renameSelectedDocumentPath();
+          };
+          row.oncontextmenu = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            setSelectedIndex(index);
+            updatePathsPanel();
+            openContextMenu(`path:${index}`, pathContextMenu(index), event, row);
+          };
+          row.onkeydown = event => {
+            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+            event.preventDefault();
+            const next = Math.max(0, Math.min(list.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+            setSelectedIndex(next);
+            updatePathsPanel();
+            requestFrame(() => pathList.querySelectorAll('.path-row')[next]?.focus());
+            drawOverlay();
+          };
+          pathList.append(row);
+        });
+      }
+    }
+    updateControls(list);
+    return { selectedIndex, count:list.length };
+  }
+
+  function bindControls() {
+    const bindings = {
+      add: addDocumentPathFromCurrent,
+      edit: editSelectedDocumentPath,
+      applyMask: applySelectedDocumentPathAsVectorMask,
+      rename: renameSelectedDocumentPath,
+      duplicate: duplicateSelectedDocumentPath,
+      delete: deleteSelectedDocumentPath,
+    };
+    let bound = 0;
+    for (const [key, handler] of Object.entries(bindings)) {
+      if (!controls[key]) continue;
+      controls[key].onclick = handler;
+      bound += 1;
+    }
+    return bound;
+  }
+
+  return {
+    getSelectedIndex,
+    setSelectedIndex,
+    normalizeSelectedIndex,
+    selectedPath,
+    pathFromCurrentSource,
+    addDocumentPathFromCurrent,
+    renameSelectedDocumentPath,
+    duplicateSelectedDocumentPath,
+    deleteSelectedDocumentPath,
+    editSelectedDocumentPath,
+    applySelectedDocumentPathAsVectorMask,
+    pathContextMenu,
+    updatePathsPanel,
+    bindControls,
+  };
+}
+
 // ---- src/ui/toolbar-controller.js ----
 function createToolbarController({ toolbar, setStatus = () => {} } = {}) {
   let dragToolId = '';
@@ -12865,7 +13282,6 @@ let cmykEditingTransformCache = { document:null, source:null, policyKey:'', tran
 let penDraft = null;
 let vectorMaskEditLayerId = null;
 let documentPathEditIndex = -1;
-let selectedDocumentPathIndex = -1;
 let spaceHeld = false;
 let cropRect = null;
 let selectionRect = null;
@@ -13005,6 +13421,60 @@ const modalController = createModalController({
   },
 });
 const { showModal, showInfoModal, showRecoveryModal } = modalController;
+
+const pathsController = createPathsController({
+  state: {
+    getDocument: () => doc,
+    getSelectedLayer: selected,
+    getSelectionShape: () => selectionShape,
+    isLayerLocked: layer => isLayerLocked(doc, layer),
+    commit,
+  },
+  vectors: {
+    exportVectorMask: exportPsdVectorMask,
+    importVectorMask: importPsdVectorMask,
+    layerPixelToDocumentPoint,
+    selectionDocumentNodes: selectionVectorMaskDocumentNodes,
+  },
+  edit: {
+    beginPathEdit: index => {
+      vectorMaskEditLayerId = null;
+      documentPathEditIndex = index;
+      setTool('pen');
+      documentPathEditIndex = index;
+      drawOverlay();
+    },
+    syncPathEditSelection: index => {
+      if (documentPathEditIndex >= 0 && currentTool === 'pen') documentPathEditIndex = index;
+    },
+    onPathDeleted: index => {
+      if (documentPathEditIndex === index) documentPathEditIndex = -1;
+      else if (documentPathEditIndex > index) documentPathEditIndex -= 1;
+    },
+    normalizePathEditIndex: pathCount => {
+      if (documentPathEditIndex >= pathCount) documentPathEditIndex = -1;
+    },
+    clearVectorMaskEdit: () => { vectorMaskEditLayerId = null; },
+    drawOverlay,
+  },
+  ui: {
+    setStatus,
+    toast,
+    showModal,
+    openContextMenu,
+    pathList: els.paths,
+    controls: {
+      add: $('#addPathBtn'),
+      edit: $('#editPathBtn'),
+      applyMask: $('#applyPathMaskBtn'),
+      rename: $('#renamePathBtn'),
+      duplicate: $('#duplicatePathBtn'),
+      delete: $('#deletePathBtn'),
+    },
+    documentRef: document,
+  },
+});
+const { updatePathsPanel } = pathsController;
 
 const documentImportController = createDocumentImportController({
   getDocument: () => doc,
@@ -13187,7 +13657,8 @@ documentSessionController = createDocumentSessionController({
   getActiveSessionId: () => activeSessionId,
   setActiveSessionId: value => { activeSessionId = value; },
   getRuntimeState: () => ({
-    doc, history, zoom, dirty, cropRect, selectionRect, selectionShape, selectedDocumentPathIndex,
+    doc, history, zoom, dirty, cropRect, selectionRect, selectionShape,
+    selectedDocumentPathIndex: pathsController.getSelectedIndex(),
   }),
   applyRuntimeState: state => {
     doc = state.doc;
@@ -13197,7 +13668,7 @@ documentSessionController = createDocumentSessionController({
     cropRect = state.cropRect;
     selectionRect = state.selectionRect;
     selectionShape = state.selectionShape;
-    selectedDocumentPathIndex = state.selectedPathIndex;
+    pathsController.setSelectedIndex(state.selectedPathIndex);
     documentPathEditIndex = -1;
     vectorMaskEditLayerId = null;
     penDraft = null;
@@ -13266,7 +13737,7 @@ function blockPendingDocumentEdit() {
 function setDoc(next, { resetHistory = false, label = 'Состояние' } = {}) {
   doc = next;
   cropRect = null;
-  selectedDocumentPathIndex = -1;
+  pathsController.setSelectedIndex(-1);
   documentPathEditIndex = -1;
   vectorMaskEditLayerId = null;
   penDraft = null;
@@ -14053,214 +14524,6 @@ function updateLayers() {
   renderLevel(null,0);
 }
 
-
-function normalizeSelectedDocumentPathIndex(){
-  const paths=Array.isArray(doc.paths)?doc.paths:[];
-  if(!paths.length){selectedDocumentPathIndex=-1;documentPathEditIndex=-1;return -1;}
-  if(!Number.isInteger(selectedDocumentPathIndex)||selectedDocumentPathIndex<0||selectedDocumentPathIndex>=paths.length)selectedDocumentPathIndex=0;
-  if(documentPathEditIndex>=paths.length)documentPathEditIndex=-1;
-  return selectedDocumentPathIndex;
-}
-function selectedDocumentPath(){
-  const index=normalizeSelectedDocumentPathIndex();
-  return index>=0?doc.paths[index]:null;
-}
-function allocateDocumentPathResourceId(){
-  const used=new Set((doc.paths||[]).map(path=>path?.id).filter(id=>Number.isInteger(id)&&id>=2000&&id<=2997));
-  for(let id=2000;id<=2997;id+=1)if(!used.has(id))return id;
-  return null;
-}
-function uniqueDocumentPathName(base='Контур'){
-  const names=new Set((doc.paths||[]).map(path=>String(path?.name||'').trim()).filter(Boolean));
-  const root=String(base||'Контур').trim().slice(0,220)||'Контур';
-  if(!names.has(root))return root;
-  let index=2;
-  while(names.has(`${root} ${index}`))index+=1;
-  return `${root} ${index}`;
-}
-function documentizePathNode(node,layer){
-  const anchor=layerPixelToDocumentPoint(node,layer);
-  return{
-    x:anchor.x,y:anchor.y,
-    handleIn:node.handleIn?layerPixelToDocumentPoint(node.handleIn,layer):null,
-    handleOut:node.handleOut?layerPixelToDocumentPoint(node.handleOut,layer):null,
-    kind:node.kind==='smooth'?'smooth':'corner',
-  };
-}
-function pathFromCurrentSource(){
-  const layer=selected();
-  if(layer?.vectorMask?.subpaths?.length){
-    const vector=exportPsdVectorMask(layer);
-    return{
-      name:uniqueDocumentPathName(`${layer.name||'Слой'} — маска`),
-      fillStartsWithAllPixels:vector.fillStartsWithAllPixels===true,
-      subpaths:structuredClone(vector.subpaths),
-    };
-  }
-  if(layer?.type==='shape'&&layer.shape==='path'&&Array.isArray(layer.pathPoints)&&layer.pathPoints.length>=2){
-    return{
-      name:uniqueDocumentPathName(`${layer.name||'Контур'} — путь`),
-      fillStartsWithAllPixels:false,
-      subpaths:[{
-        operation:'add',closed:Boolean(layer.pathClosed),fillRule:'non-zero',
-        points:layer.pathPoints.map(node=>documentizePathNode(node,layer)),
-      }],
-    };
-  }
-  if(selectionShape){
-    const nodes=selectionVectorMaskDocumentNodes();
-    if(nodes.length>=3){
-      return{
-        name:uniqueDocumentPathName('Контур из выделения'),
-        fillStartsWithAllPixels:false,
-        subpaths:[{operation:'add',closed:true,fillRule:'non-zero',points:nodes.map(node=>structuredClone(node))}],
-      };
-    }
-  }
-  return null;
-}
-function addDocumentPathFromCurrent(){
-  if((doc.paths?.length||0)>=998){setStatus('Достигнут лимит 998 сохранённых контуров');toast('Нельзя сохранить больше 998 Photoshop-compatible paths','warn');return false;}
-  const path=pathFromCurrentSource();
-  if(!path){setStatus('Нужен path-слой, векторная маска или активное выделение');toast('Нечего сохранять как контур','warn');return false;}
-  const id=allocateDocumentPathResourceId();
-  if(id===null){setStatus('Исчерпан диапазон Photoshop Path Resource ID 2000..2997');return false;}
-  doc.paths??=[];
-  doc.paths.push({id,...path});
-  selectedDocumentPathIndex=doc.paths.length-1;
-  commit('Сохранить контур');
-  setStatus(`Сохранён контур «${path.name}»`);
-  return true;
-}
-function renameSelectedDocumentPath(){
-  const path=selectedDocumentPath();
-  if(!path)return;
-  const targetIndex=selectedDocumentPathIndex;
-  showModal({
-    title:'Переименовать контур',
-    fields:[{name:'name',label:'Имя',value:path.name||'Контур',required:true}],
-    submitLabel:'Переименовать',
-    onSubmit:values=>{
-      const target=doc.paths?.[targetIndex];
-      const name=String(values.name||'').trim().slice(0,240);
-      if(!target||!name||name===target.name)return false;
-      target.name=name;selectedDocumentPathIndex=targetIndex;commit('Переименовать контур');
-    },
-  });
-}
-function duplicateSelectedDocumentPath(){
-  const path=selectedDocumentPath();
-  if(!path)return false;
-  if((doc.paths?.length||0)>=998){setStatus('Достигнут лимит 998 сохранённых контуров');return false;}
-  const id=allocateDocumentPathResourceId();
-  if(id===null)return false;
-  const copy=structuredClone(path);
-  copy.id=id;
-  copy.name=uniqueDocumentPathName(`${path.name||'Контур'} — копия`);
-  doc.paths.push(copy);
-  selectedDocumentPathIndex=doc.paths.length-1;
-  commit('Дублировать контур');
-  return true;
-}
-function deleteSelectedDocumentPath(){
-  const index=normalizeSelectedDocumentPathIndex();
-  if(index<0)return false;
-  const name=doc.paths[index]?.name||'Контур';
-  doc.paths.splice(index,1);
-  if(documentPathEditIndex===index)documentPathEditIndex=-1;
-  else if(documentPathEditIndex>index)documentPathEditIndex-=1;
-  selectedDocumentPathIndex=Math.min(index,doc.paths.length-1);
-  commit('Удалить контур');
-  setStatus(`Удалён контур «${name}»`);
-  return true;
-}
-function editSelectedDocumentPath(){
-  const index=normalizeSelectedDocumentPathIndex();
-  if(index<0)return false;
-  vectorMaskEditLayerId=null;
-  documentPathEditIndex=index;
-  setTool('pen');
-  documentPathEditIndex=index;
-  drawOverlay();
-  setStatus(`Перо: редактирование сохранённого контура «${doc.paths[index].name||'Контур'}»`);
-  return true;
-}
-function applySelectedDocumentPathAsVectorMask(){
-  const path=selectedDocumentPath();
-  const layer=selected();
-  if(!path){setStatus('Выберите сохранённый контур');return false;}
-  if(!layer){setStatus('Выберите слой для векторной маски');return false;}
-  if(layer.type==='adjustment'){setStatus('Сохранённый контур как vector mask пока применяется к обычным слоям, не к adjustment layer');return false;}
-  if(isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return false;}
-  const mask=importPsdVectorMask({enabled:true,invert:false,linked:true,fillStartsWithAllPixels:path.fillStartsWithAllPixels===true,subpaths:path.subpaths},layer);
-  if(!mask){setStatus('Контур не содержит пригодных subpaths');return false;}
-  layer.vectorMask=mask;
-  vectorMaskEditLayerId=null;
-  commit('Применить контур как векторную маску');
-  setStatus(`Контур «${path.name||'Контур'}» применён как векторная маска`);
-  return true;
-}
-function pathContextMenu(index){
-  const exists=()=>Boolean(doc.paths?.[index]);
-  return[
-    ['Редактировать пером','',()=>{selectedDocumentPathIndex=index;editSelectedDocumentPath();},exists],
-    ['Применить как векторную маску','',()=>{selectedDocumentPathIndex=index;applySelectedDocumentPathAsVectorMask();},()=>exists()&&Boolean(selected())&&selected().type!=='adjustment'&&!isLayerLocked(doc,selected())],
-    ['sep'],
-    ['Переименовать…','',()=>{selectedDocumentPathIndex=index;renameSelectedDocumentPath();},exists],
-    ['Дублировать','',()=>{selectedDocumentPathIndex=index;duplicateSelectedDocumentPath();},exists],
-    ['Удалить','',()=>{selectedDocumentPathIndex=index;deleteSelectedDocumentPath();},exists],
-  ];
-}
-function updatePathsPanel(){
-  if(!els.paths)return;
-  const paths=Array.isArray(doc.paths)?doc.paths:[];
-  normalizeSelectedDocumentPathIndex();
-  els.paths.replaceChildren();
-  if(!paths.length){
-    const empty=document.createElement('div');empty.className='paths-empty';empty.textContent='Нет сохранённых контуров';els.paths.append(empty);
-  }else{
-    paths.forEach((path,index)=>{
-      const row=document.createElement('button');row.type='button';row.className=`path-row${index===selectedDocumentPathIndex?' selected':''}`;
-      row.setAttribute('role','option');row.setAttribute('aria-selected',String(index===selectedDocumentPathIndex));
-      const name=document.createElement('span');name.className='path-row-name';name.textContent=path.name||`Контур ${index+1}`;
-      const count=(path.subpaths||[]).reduce((sum,subpath)=>sum+(subpath.points?.length||0),0);
-      const meta=document.createElement('span');meta.className='path-row-meta';meta.textContent=`${path.subpaths?.length||0} конт. · ${count} узл. · #${path.id??'auto'}`;
-      row.append(name,meta);
-      row.onclick=()=>{
-        selectedDocumentPathIndex=index;
-        if(documentPathEditIndex>=0&&currentTool==='pen')documentPathEditIndex=index;
-        updatePathsPanel();drawOverlay();
-      };
-      row.ondblclick=event=>{event.preventDefault();selectedDocumentPathIndex=index;renameSelectedDocumentPath();};
-      row.oncontextmenu=event=>{
-        event.preventDefault();event.stopPropagation();selectedDocumentPathIndex=index;updatePathsPanel();
-        openContextMenu(`path:${index}`,pathContextMenu(index),event,row);
-      };
-      row.onkeydown=event=>{
-        if(event.key!=='ArrowUp'&&event.key!=='ArrowDown')return;
-        event.preventDefault();
-        const next=clamp(index+(event.key==='ArrowDown'?1:-1),0,paths.length-1);
-        selectedDocumentPathIndex=next;
-        updatePathsPanel();
-        requestAnimationFrame(()=>els.paths.querySelectorAll('.path-row')[next]?.focus());
-        drawOverlay();
-      };
-      els.paths.append(row);
-    });
-  }
-  const path=selectedDocumentPath();
-  const layer=selected();
-  const canSave=Boolean(selectionShape||layer?.vectorMask?.subpaths?.length||(layer?.type==='shape'&&layer.shape==='path'&&layer.pathPoints?.length>=2))&&paths.length<998;
-  const controls={
-    addPathBtn:canSave,
-    editPathBtn:Boolean(path),
-    applyPathMaskBtn:Boolean(path&&layer&&layer.type!=='adjustment'&&!isLayerLocked(doc,layer)),
-    renamePathBtn:Boolean(path),
-    duplicatePathBtn:Boolean(path&&paths.length<998),
-    deletePathBtn:Boolean(path),
-  };
-  for(const [id,enabled] of Object.entries(controls)){const button=$(`#${id}`);if(button)button.disabled=!enabled;}
-}
 
 function updateHistory() {
   els.history.replaceChildren();
@@ -18259,12 +18522,7 @@ $$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSele
 els.undo.onclick=undo;els.redo.onclick=redo;$('#exportQuickBtn').onclick=exportDialog;
 $('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=()=>addGroup();$('#renameLayerBtn').onclick=()=>{const layer=selected();if(layer)renameLayer(layer);};$('#duplicateLayerBtn').onclick=duplicateSelected;$('#deleteLayerBtn').onclick=deleteSelected;
 $('#layerUpBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');};$('#layerDownBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');};
-$('#addPathBtn').onclick=addDocumentPathFromCurrent;
-$('#editPathBtn').onclick=editSelectedDocumentPath;
-$('#applyPathMaskBtn').onclick=applySelectedDocumentPathAsVectorMask;
-$('#renamePathBtn').onclick=renameSelectedDocumentPath;
-$('#duplicatePathBtn').onclick=duplicateSelectedDocumentPath;
-$('#deletePathBtn').onclick=deleteSelectedDocumentPath;
+pathsController.bindControls();
 els.layers.addEventListener('dragover',e=>{
   if((!layerDragId&&!groupDragId)||e.target!==els.layers)return;
   e.preventDefault();
