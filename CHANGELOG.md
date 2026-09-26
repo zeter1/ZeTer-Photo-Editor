@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 2026-09-26 — Painting gesture controller extraction
+
+- Refactor: lifecycle одного brush/eraser/retouch stroke вынесен из большого `src/main.js` в новый `src/painting/gesture-controller.js`: выбор raster target, native high-depth/CMYK vs Canvas8 path, `begin → move → end`, preview scheduling и финальная persistence/commit coordination.
+- Architecture: глобальный pointer capture/routing, `currentTool`, selection/history ownership и общий `paintPersisting` guard остаются в runtime; controller получает их через небольшие grouped ports и не превращается в новый глобальный state owner.
+- Retouch integration: clone/heal/smudge/blur/dodge/burn mechanics остаются в `src/retouch/controller.js`, а shared raster buffers/persistence — в `src/painting/controller.js`; gesture controller только связывает эти owners в пределах одного штриха.
+- Reliability: сохранён async pointer-release guard — если pointer исчез во время подготовки raster buffer, поздний `begin` не запускает штрих; preview scheduling по-прежнему видит live paint-drag до первого кадра.
+- Tests: добавлен direct `tests/painting-gesture-controller.test.mjs`; brush-performance и architecture contracts теперь проверяют нового владельца gesture lifecycle и запрещают возвращать `ensurePaintLayer/beginPaint/paintTo/endPaint` в `src/main.js`.
+- Docs/AI: AGENTS, PROJECT, CODEMAP, BOUNDARIES, AI workflow и test matrix указывают точный owner для paint gestures, чтобы ChatGPT/Codex не искали stroke lifecycle по всему runtime.
+- Build: `tools/build-bundle.mjs` включает новый controller в canonical source graph; generated `src/app.bundle.js` синхронизируется с исходниками.
+
 ### 2026-09-26 — Painting / raster edit state controller extraction
 
 - Refactor: добавлен канонический `src/painting/controller.js` — единый владелец reusable Canvas8 paint buffer/context/layer id, native 16/32-bit/CMYK working buffer, high-depth mutation/persistence и paint-preview frame lifecycle.
