@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
   <meta name="application-version" content="1.42.0" />
+  <meta name="application-build" content="1c59dc747c0e05ca" />
   <title>ZeTer Photo Editor — локальный редактор изображений</title>
   <link rel="stylesheet" href="./src/styles.css" />
 </head>
@@ -299,7 +300,64 @@
   <input id="fileInput" type="file" accept="image/*,.svg,.avif,.psd,.psb,image/vnd.adobe.photoshop" multiple hidden />
   <input id="projectInput" type="file" accept="application/json,.json,.zpe,.pixforge" hidden />
 
-  <script src="./src/app.bundle.js" defer></script>
+  <script>
+    (() => {
+      const BUILD_ID_PATTERN = /^[0-9a-f]{16}$/;
+      const currentBuild = document.querySelector('meta[name="application-build"]')?.content?.trim() || '';
+      const stylesheet = document.querySelector('link[rel="stylesheet"][href^="./src/styles.css"]');
+
+      function loadApp(buildId, useCacheKey) {
+        if (useCacheKey && stylesheet && BUILD_ID_PATTERN.test(buildId)) {
+          stylesheet.href = `./src/styles.css?v=${encodeURIComponent(buildId)}`;
+        }
+        const script = document.createElement('script');
+        script.src = useCacheKey && BUILD_ID_PATTERN.test(buildId)
+          ? `./src/app.bundle.js?v=${encodeURIComponent(buildId)}`
+          : './src/app.bundle.js';
+        document.body.append(script);
+      }
+
+      if (location.protocol === 'file:') {
+        loadApp(currentBuild, false);
+        return;
+      }
+
+      const manifestUrl = new URL('./version.json', location.href);
+      manifestUrl.searchParams.set('_', String(Date.now()));
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+      fetch(manifestUrl, { cache: 'no-store', signal: controller.signal })
+        .then(response => {
+          if (!response.ok) throw new Error(`Version manifest HTTP ${response.status}`);
+          return response.json();
+        })
+        .then(manifest => {
+          const remoteBuild = typeof manifest?.build === 'string' ? manifest.build.trim() : '';
+          if (!BUILD_ID_PATTERN.test(remoteBuild)) {
+            loadApp(currentBuild, true);
+            return;
+          }
+
+          const pageUrl = new URL(location.href);
+          const requestedBuild = pageUrl.searchParams.get('zpe_build');
+          if (remoteBuild !== currentBuild && requestedBuild !== remoteBuild) {
+            pageUrl.searchParams.set('zpe_build', remoteBuild);
+            location.replace(pageUrl.href);
+            return;
+          }
+
+          if (remoteBuild === currentBuild && requestedBuild === remoteBuild) {
+            pageUrl.searchParams.delete('zpe_build');
+            history.replaceState(history.state, '', pageUrl.href);
+          }
+
+          loadApp(remoteBuild, true);
+        })
+        .catch(() => loadApp(currentBuild, true))
+        .finally(() => clearTimeout(timeoutId));
+    })();
+  </script>
   <noscript><div class="fatal-error">Для работы ZeTer Photo Editor необходимо включить JavaScript.</div></noscript>
 </body>
 </html>

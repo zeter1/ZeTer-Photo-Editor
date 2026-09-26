@@ -34,8 +34,8 @@ jobs:
       - name: Build and test
         run: npm run check
 
-      - name: Verify generated bundle is current
-        run: git diff --exit-code -- src/app.bundle.js
+      - name: Verify generated browser artifacts are current
+        run: git diff --exit-code -- src/app.bundle.js index.html version.json
 
       - name: Browser smoke (file://)
         run: npm run test:browser

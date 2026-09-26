@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-26 — Автообновление web-сборки без Ctrl+F5
+
+- Runtime bootstrap: HTTP/HTTPS-запуск перед стартом приложения получает `version.json` через `cache: no-store` + уникальный query и сравнивает server build ID с build ID текущего `index.html`.
+- Cache busting: при новом build страница один раз открывается с `zpe_build=<build-id>`, после чего `src/styles.css` и `src/app.bundle.js` загружаются с тем же versioned query; защита от повторного reload не допускает цикла, если хостинг игнорирует query для HTML.
+- Local compatibility: `file://` по-прежнему не требует HTTP-сервера и запускает bundle напрямую без сетевой проверки.
+- Build/CI: `tools/build-bundle.mjs` теперь детерминированно вычисляет 64-bit build ID из HTML/CSS/bundle, обновляет `application-build` и генерирует `version.json`; CI проверяет все generated browser artifacts, а regression-тест фиксирует manifest/reload/file contracts.
+- Deployment hygiene: README документирует выкладку `version.json` последним, чтобы ручное обновление на статическом хостинге не публиковало новый build marker раньше файлов приложения.
+
 ### 2026-09-26 — GitHub в окне «О программе»
 
 - About UI: карточка разработчика дополнена ссылкой `GitHub: @zeter1` на профиль `https://github.com/zeter1`; ссылка открывается в новой вкладке с `noopener noreferrer`.
