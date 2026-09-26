@@ -6,7 +6,10 @@ import {
   addLayer, duplicateLayer, sanitizeProject, snapshotDocument,
 } from '../src/core/state.js';
 
-const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const [main,smartObjects]=await Promise.all([
+  readFile(new URL('../src/main.js',import.meta.url),'utf8'),
+  readFile(new URL('../src/document/smart-object-controller.js',import.meta.url),'utf8'),
+]);
 
 test('linked smart-object source IDs survive project round-trip and remain bounded',()=>{
   const doc=createDocument({name:'linked',width:100,height:100});
@@ -49,11 +52,12 @@ test('unlinked smart-object copies remain independent until user explicitly crea
 });
 
 test('Linked Smart Objects Stage 11c wires shared content tabs, propagation, unlink and UI commands',()=>{
-  assert.ok(main.includes('function createLinkedSmartObjectCopy(layer=selected())'));
-  assert.ok(main.includes('function unlinkSmartObject(layer=selected())'));
-  assert.ok(main.includes('session.smartObjectLink?.linkedSourceId===linkedSourceId'));
-  assert.ok(main.includes('linkedSmartObjectLayers(owner,linkedSourceId)'));
-  assert.ok(main.includes("parentSession.history.push(liveTargets.length>1?'Обновить общий источник смарт-объектов':'Обновить смарт-объект'"));
+  assert.match(main,/from '\.\/document\/smart-object-controller\.js'/);
+  assert.ok(smartObjects.includes('function createLinkedCopy(layer = getSelectedLayer())'));
+  assert.ok(smartObjects.includes('function unlink(layer = getSelectedLayer())'));
+  assert.ok(smartObjects.includes('session.smartObjectLink?.linkedSourceId === linkedSourceId'));
+  assert.ok(smartObjects.includes('linkedSmartObjectLayers(owner, linkedSourceId)'));
+  assert.ok(smartObjects.includes("liveTargets.length > 1 ? 'Обновить общий источник смарт-объектов' : 'Обновить смарт-объект'"));
   assert.ok(main.includes('Создать связанную копию смарт-объекта'));
   assert.ok(main.includes('Разорвать связь смарт-объекта'));
   assert.ok(main.includes('data-smart-object-link-copy'));
