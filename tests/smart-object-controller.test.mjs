@@ -313,6 +313,7 @@ test('Photoshop resource rewrite remains an injected narrow port', async () => {
   state.activeSessionId = 'child';
   state.sessions = [parent, child];
   let rewriteCalls = 0;
+  let publishCalls = 0;
   const updated = [];
   const controller = makeController(state, {
     photoshop: {
@@ -321,7 +322,11 @@ test('Photoshop resource rewrite remains an injected narrow port', async () => {
       findLayers: (owner, uniqueId) => owner.layers.filter(layer => layer.psdSmartObject?.uniqueId === uniqueId),
       rewriteEmbeddedSource: async () => {
         rewriteCalls += 1;
-        return { rewritten:true, newSize:123, sourceKey:'lnk2', type:'psd' };
+        return { rewritten:true, linkedLayerBlocks:[{ key:'lnk2' }], newSize:123, sourceKey:'lnk2', type:'psd' };
+      },
+      publishEmbeddedSourceRewrite: (owner, rewrite) => {
+        publishCalls += 1;
+        owner.psdLinkedLayerBlocks = rewrite.linkedLayerBlocks;
       },
       updateTargetAfterRewrite: (target, payload) => updated.push([target.id, payload.rewrite.newSize]),
     },
@@ -329,10 +334,77 @@ test('Photoshop resource rewrite remains an injected narrow port', async () => {
 
   assert.equal(await controller.saveContent(child), true);
   assert.equal(rewriteCalls, 1);
+  assert.equal(publishCalls, 1);
+  assert.deepEqual(parentDoc.psdLinkedLayerBlocks, [{ key:'lnk2' }]);
   assert.equal(updated.length, 2);
   assert.equal(first.width, 22);
   assert.equal(second.width, 33);
   assert.match(state.statuses.at(-1), /native linked resource/);
+});
+
+
+test('Photoshop save revalidates the content tab after async resource preparation', async () => {
+  const embedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({
+    name:'PS',
+    width:20,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD',
+    embeddedDocument:embedded,
+    psdSmartObject:{ uniqueId:'ps-race', asset:{ kind:'data' }, baseline:{} },
+  });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const childDoc = createDocument({ name:'inside', width:10, height:10 });
+  let historyPushed = false;
+  const parent = {
+    id:'parent',
+    doc:parentDoc,
+    history:{ push() { historyPushed = true; } },
+    dirty:false,
+    smartObjectLink:null,
+  };
+  const child = {
+    id:'child',
+    doc:childDoc,
+    history:{ push() {} },
+    dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:'ps-race' },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.sessions = [parent, child];
+  const rewritePending = deferred();
+  let publishCalls = 0;
+  const controller = makeController(state, {
+    renderPreview: async () => 'data:image/png;base64,NEW',
+    photoshop: {
+      isLayer: layer => Boolean(layer?.psdSmartObject),
+      sourceId: layer => layer?.psdSmartObject?.uniqueId || null,
+      findLayers: (owner, uniqueId) => owner.layers.filter(layer => layer.psdSmartObject?.uniqueId === uniqueId),
+      rewriteEmbeddedSource: () => rewritePending.promise,
+      publishEmbeddedSourceRewrite: () => { publishCalls += 1; },
+      updateTargetAfterRewrite: () => {},
+    },
+  });
+
+  const save = controller.saveContent(child);
+  await Promise.resolve();
+  state.activeSessionId = 'parent';
+  state.doc = parentDoc;
+  rewritePending.resolve({
+    rewritten:true,
+    linkedLayerBlocks:[{ key:'lnk2' }],
+    newSize:321,
+    sourceKey:'lnk2',
+    type:'psd',
+  });
+
+  assert.equal(await save, false);
+  assert.equal(publishCalls, 0);
+  assert.equal(historyPushed, false);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,OLD');
+  assert.match(state.statuses.at(-1), /активная вкладка изменились/);
 });
 
 test('architecture guard keeps generic lifecycle out of main and PSD bytes out of the controller', async () => {
