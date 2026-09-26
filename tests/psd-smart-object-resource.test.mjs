@@ -84,13 +84,13 @@ test('embedded PSD and PSB serialization selects the matching writer while prese
   }
 
   const source = await readFile(new URL('../src/document/psd-smart-object-resource.js', import.meta.url), 'utf8');
-  assert.match(source, /MAX_EMBEDDED_ASSET_BYTES = 40 \* 1024 \* 1024/);
-  assert.match(source, /MAX_ICC_PROFILE_BYTES = 4 \* 1024 \* 1024/);
-  assert.match(source, /MAX_LINKED_LAYER_BLOCK_BYTES = 128 \* 1024 \* 1024/);
-  assert.match(source, /MAX_EMBEDDED_EXPORT_PIXELS = 12_000_000/);
-  assert.match(source, /MAX_EMBEDDED_EXPORT_LAYERS = 200/);
-  assert.match(source, /maxPixels:MAX_EMBEDDED_EXPORT_PIXELS/);
-  assert.match(source, /maxLayers:MAX_EMBEDDED_EXPORT_LAYERS/);
+  assert.match(source, /PSD_SMART_OBJECT_MAX_EMBEDDED_ASSET_BYTES = 40 \* 1024 \* 1024/);
+  assert.match(source, /PSD_SMART_OBJECT_MAX_ICC_PROFILE_BYTES = 4 \* 1024 \* 1024/);
+  assert.match(source, /PSD_SMART_OBJECT_MAX_LINKED_LAYER_BLOCK_BYTES = 128 \* 1024 \* 1024/);
+  assert.match(source, /PSD_SMART_OBJECT_MAX_EMBEDDED_EXPORT_PIXELS = 12_000_000/);
+  assert.match(source, /PSD_SMART_OBJECT_MAX_EMBEDDED_EXPORT_LAYERS = 200/);
+  assert.match(source, /maxPixels:PSD_SMART_OBJECT_MAX_EMBEDDED_EXPORT_PIXELS/);
+  assert.match(source, /maxLayers:PSD_SMART_OBJECT_MAX_EMBEDDED_EXPORT_LAYERS/);
 });
 
 test('rewrite eligibility fails before publication for unsafe Photoshop sources', async () => {

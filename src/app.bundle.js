@@ -15237,11 +15237,11 @@ function encodePsbBlob(options = {}) {
 }
 
 // ---- src/document/psd-smart-object-resource.js ----
-const MAX_EMBEDDED_ASSET_BYTES = 40 * 1024 * 1024;
-const MAX_ICC_PROFILE_BYTES = 4 * 1024 * 1024;
-const MAX_LINKED_LAYER_BLOCK_BYTES = 128 * 1024 * 1024;
-const MAX_EMBEDDED_EXPORT_PIXELS = 12_000_000;
-const MAX_EMBEDDED_EXPORT_LAYERS = 200;
+const PSD_SMART_OBJECT_MAX_EMBEDDED_ASSET_BYTES = 40 * 1024 * 1024;
+const PSD_SMART_OBJECT_MAX_ICC_PROFILE_BYTES = 4 * 1024 * 1024;
+const PSD_SMART_OBJECT_MAX_LINKED_LAYER_BLOCK_BYTES = 128 * 1024 * 1024;
+const PSD_SMART_OBJECT_MAX_EMBEDDED_EXPORT_PIXELS = 12_000_000;
+const PSD_SMART_OBJECT_MAX_EMBEDDED_EXPORT_LAYERS = 200;
 
 /**
  * Owns Photoshop Smart Object embedded-resource preparation and publication.
@@ -15257,13 +15257,13 @@ function createPsdSmartObjectResource({
   async function serializeEmbeddedAsset(embedded, source, previewDataUrl) {
     const type = String(source?.asset?.detectedFileType || '').toLowerCase();
     if (type === 'png') {
-      return dataUrlToBytes(previewDataUrl, { maxBytes:MAX_EMBEDDED_ASSET_BYTES });
+      return dataUrlToBytes(previewDataUrl, { maxBytes:PSD_SMART_OBJECT_MAX_EMBEDDED_ASSET_BYTES });
     }
     if (type === 'psd' || type === 'psb') {
       const prepared = await prepareDocument(embedded);
       const profile = embedded.colorProfile;
       const iccProfile = profile?.kind === 'icc' && profile.dataUrl
-        ? dataUrlToBytes(profile.dataUrl, { maxBytes:MAX_ICC_PROFILE_BYTES })
+        ? dataUrlToBytes(profile.dataUrl, { maxBytes:PSD_SMART_OBJECT_MAX_ICC_PROFILE_BYTES })
         : null;
       const encodeBlob = type === 'psb' ? encodePsbBlob : encodePsdBlob;
       const blob = encodeBlob({
@@ -15279,11 +15279,11 @@ function createPsdSmartObjectResource({
         colorMode:prepared.colorMode,
         iccProfile,
         iccUntagged:Boolean(profile?.untagged),
-        maxPixels:MAX_EMBEDDED_EXPORT_PIXELS,
-        maxLayers:MAX_EMBEDDED_EXPORT_LAYERS,
+        maxPixels:PSD_SMART_OBJECT_MAX_EMBEDDED_EXPORT_PIXELS,
+        maxLayers:PSD_SMART_OBJECT_MAX_EMBEDDED_EXPORT_LAYERS,
       });
       const bytes = new Uint8Array(await blob.arrayBuffer());
-      if (bytes.byteLength > MAX_EMBEDDED_ASSET_BYTES) {
+      if (bytes.byteLength > PSD_SMART_OBJECT_MAX_EMBEDDED_ASSET_BYTES) {
         throw new Error('Пересобранный embedded PSD/PSB превышает лимит 40 МБ');
       }
       return bytes;
@@ -15312,7 +15312,7 @@ function createPsdSmartObjectResource({
     }
 
     const blocks = (parentDoc.psdLinkedLayerBlocks || [])
-      .map(block => psdOpaqueBlockFromState(block, { maxBytes:MAX_LINKED_LAYER_BLOCK_BYTES }))
+      .map(block => psdOpaqueBlockFromState(block, { maxBytes:PSD_SMART_OBJECT_MAX_LINKED_LAYER_BLOCK_BYTES }))
       .filter(Boolean);
     const assetBytes = await serializeEmbeddedAsset(embedded, source, previewDataUrl);
     const rewritten = rewriteEmbeddedLinkedLayerAsset(blocks, source.uniqueId, assetBytes);
