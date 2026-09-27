@@ -66,6 +66,22 @@ A stale native result returns `false`; callers must publish no history entry and
 
 This yields one reusable rule for both raster modes: **the authority proven after the last await must be at least as strict as the authority that created the working buffer**.
 
+
+## Multi-layer selection batch contract
+
+`src/selection/raster-mutation-controller.js::clearAcrossVisibleLayers()` owns a separate destructive batch transaction for merged Clipboard cut / multi-layer selection clearing. It may reuse low-level Canvas/high-depth preparation helpers, but it must establish publication authority for the **whole target set** itself.
+
+The batch follows **capture target set → prepare all → await → revalidate all → publish all**:
+
+1. capture the originating document object, active session and every exact source-layer object selected for the batch;
+2. finish rasterization, PNG encoding and native high-depth mutation preparation without persisted writes;
+3. after the final await and immediately before the first persisted write, revalidate the exact document/session plus every exact source-layer object with object identity and current effective lock state;
+4. derive publication slots from the exact source objects (for example `owner.layers.indexOf(sourceLayer)`), never from `layer.id`;
+5. if any target was removed, replaced — including by a same-ID object — or became effectively locked, reject the entire batch: apply no prepared high-depth mutation, replace no rasterized layer and publish no history/success result;
+6. once the full plan is validated, publish synchronously with no intervening await. A raster source is mutated only through its exact captured object; a rasterized non-raster source replaces only its exact validated slot.
+
+This is an all-or-none authority gate over publication, not a generic rollback framework. Preparation errors remain real errors; the shared raster-persistence guard is still released in `finally`.
+
 ## Caller contract
 
 Raster callers must capture the owner and exact layer before asynchronous work and pass both explicitly:
@@ -99,7 +115,8 @@ The nearest tests are:
 - `tests/painting-controller.test.mjs`: exact cache identity, normal publish, document switch, same-ID document/layer replacement and encoding failure;
 - `tests/painting-command-controller.test.mjs`: explicit owner/target handoff plus stale result suppressing history/success;
 - `tests/painting-gesture-controller.test.mjs`: drag owner/target identity, stale movement rejection and stale end suppression;
-- `tests/architecture-layout.test.mjs`: source-level ownership guard;
+- `tests/selection-raster-mutation-controller.test.mjs`: merged-batch success, same-ID replacement/removal/effective-lock rejection, high-depth all-or-none publication and preparation-failure cleanup;
+- `tests/architecture-layout.test.mjs`: source-level ownership guards, including rejection of ID-only merged-batch publication;
 - canonical `npm run check` + `npm run test:browser`: integration, generated bundle and file:// startup.
 
 Prefer deferred or deterministic Promise boundaries over timing-based sleeps for future stale-result regressions.

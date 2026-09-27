@@ -473,6 +473,9 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(selectionRasterMutationController, /async function clearAcrossVisibleLayers\(/);
   assert.match(selectionRasterMutationController, /async function rasterizeLayerForPixelEditing\(/);
   assert.match(selectionRasterMutationController, /async function rasterizeSelectedLayer\(/);
+  assert.match(selectionRasterMutationController, /documentValue\.layers\.indexOf\(entry\.layer\)/);
+  assert.match(selectionRasterMutationController, /isLayerLocked\(documentValue, layer\)/);
+  assert.doesNotMatch(selectionRasterMutationController, /findIndex\(item => item\.id === layer\.id\)/);
   assert.match(main, /clearAcrossVisibleLayers: clearSelectionAcrossVisibleLayers/);
   assert.doesNotMatch(main, /async function clearSelectionAcrossVisibleLayers\(/);
   assert.doesNotMatch(main, /async function rasterizeLayerForPixelEditing\(/);

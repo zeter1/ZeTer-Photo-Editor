@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+
+### 2026-09-27 — Atomic exact-target merged selection clearing
+
+- Correctness: merged multi-layer selection clearing now validates the complete exact source-layer set after async raster/high-depth preparation; same-ID replacements and removed targets cannot receive or authorize a late prepared result.
+- Transaction safety: effective locks are rechecked immediately before publication and any stale target rejects the whole batch before the first persisted write, so prepared high-depth mutations, rasterized replacements and history publish all-or-none.
+- Regression/docs: deterministic stale-target, removal, late-lock, high-depth and preparation-failure tests plus an architecture guard reject the previous ID-only publication seam; the canonical raster-persistence spec now documents the reusable multi-target contract.
+
+
 ### 2026-09-27 — Exact-owner native high-depth raster persistence
 
 - Correctness: native 16/32-bit RGB and CMYK paint caches now bind to the exact originating document and exact raster-layer objects; same-ID replacement documents/layers cannot inherit a stale typed working buffer or preview override.

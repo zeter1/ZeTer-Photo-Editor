@@ -222,7 +222,9 @@ Generic pointer capture/active-pointer routing lives in `src/interaction/pointer
 Owns selection copy/cut/paste orchestration: selected-vs-merged PNG preparation, browser Clipboard API, native paste payload handling, shortcut fallback timers/generation and tab-switch guards. It does not own document mutation internals: destructive clearing is delegated to the raster-mutation controller.
 
 ### `raster-mutation-controller.js`
-Owns destructive selection-to-layer orchestration: merged cut across visible unlocked pixel layers, prepare-all-before-mutate staging, native high-depth clear publication, non-raster pixel-edit rasterization and the selected-layer rasterize command with document/session stale guards. It does not own selection shape/pointer state or Clipboard APIs.
+Owns destructive selection-to-layer orchestration: merged cut across visible unlocked pixel layers, prepare-all-before-mutate staging, native high-depth clear publication, non-raster pixel-edit rasterization and the selected-layer rasterize command.
+
+For merged multi-layer clearing, the publication gate is all-or-none: after every async preparation step completes, the controller revalidates the exact document/session and the whole exact source-layer set plus effective locks, derives slots by object identity, then publishes synchronously. Same-ID replacements, removals and late locks reject the batch before any persisted write or history publication. See `RASTER_PERSISTENCE.md`. It does not own selection shape/pointer state or Clipboard APIs.
 
 ### `mask-controller.js`
 Owns selection-shape → raster layer-mask / Select & Mask orchestration: regular-layer local coordinates versus adjustment/document coordinates, bounded refine preparation, shared `selectionMaskDataUrl()`, add/remove mask commands, non-destructive preview lifecycle and final Apply publication.
