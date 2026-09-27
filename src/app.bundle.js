@@ -7722,6 +7722,30 @@ function createPathControlSurfaceController({
     return target.layer?.pathPoints ?? null;
   }
 
+  function sameTargetIdentity(candidate, target) {
+    if (!candidate || candidate.source !== target?.source || candidate.points !== target?.points) {
+      return false;
+    }
+    if (candidate.source === 'document-path') {
+      return (
+        candidate.documentPathIndex === target.documentPathIndex &&
+        candidate.subpathIndex === target.subpathIndex
+      );
+    }
+    if (candidate.layer !== target.layer) return false;
+    return candidate.source !== 'vector-mask' || candidate.subpathIndex === target.subpathIndex;
+  }
+
+  function resolveTarget(target) {
+    const nodeIndex = Number.isInteger(target?.nodeIndex) ? target.nodeIndex : -1;
+    if (nodeIndex < 0) return null;
+    const current = selectedTargets().find(candidate => sameTargetIdentity(candidate, target)) ?? null;
+    const node = current?.points?.[nodeIndex] ?? null;
+    return current && node
+      ? { ...current, node, nodeIndex, control: target.control }
+      : null;
+  }
+
   function documentPoint(target, node, control = 'anchor') {
     const local = control === 'anchor' ? node : node?.[control];
     if (!local) return null;
@@ -7873,11 +7897,80 @@ function createPathControlSurfaceController({
   return {
     selectedTargets,
     targetPoints,
+    resolveTarget,
     hit,
     trace,
     draw,
     updateCursor,
   };
+}
+
+// ---- src/interaction/path-control-command-controller.js ----
+const PATH_CONTROL_COMMAND_RESULT = Object.freeze({
+  COMMITTED: 'committed',
+  NOOP: 'noop',
+  IGNORED: 'ignored',
+  REJECTED: 'rejected',
+});
+
+const PATH_CONTROL_CORNER_LABELS = Object.freeze({
+  shape: 'Преобразовать Bézier-узел в угловой',
+  'vector-mask': 'Преобразовать узел векторной маски',
+  'document-path': 'Преобразовать узел сохранённого контура',
+});
+function createPathControlCommandController({
+  state,
+  targets,
+  transaction,
+  ui,
+} = {}) {
+  if (typeof state?.getDocument !== 'function') {
+    throw new TypeError('path control command state bridge is required');
+  }
+  if (typeof targets?.resolve !== 'function') {
+    throw new TypeError('path control command targets.resolve bridge is required');
+  }
+  if (typeof transaction?.commit !== 'function') {
+    throw new TypeError('path control command transaction bridge is required');
+  }
+  if (typeof ui?.setStatus !== 'function') {
+    throw new TypeError('path control command ui.setStatus bridge is required');
+  }
+
+  function convertAnchorToCorner(owner, target, modifiers = {}) {
+    if (target?.control !== 'anchor' || !modifiers.altKey) {
+      return PATH_CONTROL_COMMAND_RESULT.IGNORED;
+    }
+    if (!owner || state.getDocument() !== owner) {
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    }
+
+    const resolved = targets.resolve(target);
+    const label = PATH_CONTROL_CORNER_LABELS[resolved?.source];
+    if (
+      !resolved?.node ||
+      !label ||
+      (resolved.layer && isLayerLocked(owner, resolved.layer))
+    ) {
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    }
+
+    const node = resolved.node;
+    const changed = Boolean(node.handleIn || node.handleOut || node.kind === 'smooth');
+    node.handleIn = null;
+    node.handleOut = null;
+    node.kind = 'corner';
+
+    if (!changed) {
+      ui.setStatus('Bézier-узел уже угловой');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+
+    transaction.commit(label);
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  return { convertAnchorToCorner };
 }
 
 // ---- src/interaction/path-control-gesture-controller.js ----
@@ -21353,6 +21446,12 @@ const pathControlSurface = createPathControlSurfaceController({
   },
   geometry: { layerToDocument: layerPixelToDocumentPoint },
 });
+const pathControlCommands = createPathControlCommandController({
+  state: { getDocument: () => doc },
+  targets: { resolve: target => pathControlSurface.resolveTarget(target) },
+  transaction: { commit },
+  ui: { setStatus },
+});
 const pathControlGestures = createPathControlGestureController({
   state: { getDocument: () => doc },
   transaction: { commit },
@@ -21640,16 +21739,8 @@ function documentPointToLayerPixel(point, layer) {
 }
 
 function beginPathControlDrag(hit,point,event){
-  const points=pathControlSurface.targetPoints(hit);
-  const node=points?.[hit.nodeIndex];
-  if(!node)return false;
-  if(hit.control==='anchor'&&event.altKey){
-    const changed=Boolean(node.handleIn||node.handleOut||node.kind==='smooth');
-    node.handleIn=null;node.handleOut=null;node.kind='corner';
-    if(changed)commit(hit.source==='document-path'?'Преобразовать узел сохранённого контура':hit.source==='vector-mask'?'Преобразовать узел векторной маски':'Преобразовать Bézier-узел в угловой');
-    else setStatus('Bézier-узел уже угловой');
-    return true;
-  }
+  const commandResult=pathControlCommands.convertAnchorToCorner(doc,hit,{altKey:event.altKey});
+  if(commandResult!==PATH_CONTROL_COMMAND_RESULT.IGNORED)return true;
   const gesture=pathControlGestures.begin(doc,hit,point,{shiftKey:event.shiftKey});
   if(!gesture)return false;
   drag=gesture;
