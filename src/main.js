@@ -1,8 +1,8 @@
 import { HistoryStack } from './core/history.js';
 import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, alignLayerToCanvas, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
-  createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask, createLayerGroup,
-  addLayer, removeLayer, duplicateLayer, moveLayer, addLayerGroup, removeLayerGroup, moveLayerIntoGroup, moveLayerGroupIntoGroup, selectedLayer,
+  createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
+  addLayer, selectedLayer,
   snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters, sanitizeHighDepthPreview, sanitizeColorManagement,
   isLayerVisible, isLayerLocked, isGroupLocked, groupDepth,
 } from './core/state.js';
@@ -27,6 +27,7 @@ import { createRecoveryController } from './workspace/recovery-controller.js';
 import { createToolbarController } from './ui/toolbar-controller.js';
 import { createWorkspaceLayoutController } from './ui/workspace-layout-controller.js';
 import { createLayersPanelController } from './ui/layers-panel-controller.js';
+import { createLayerGroupCommandController } from './layers/command-controller.js';
 import { createPathsController } from './ui/paths-controller.js';
 import { createColorManagementController } from './ui/color-management-controller.js';
 import { createSmartFilterController } from './ui/smart-filter-controller.js';
@@ -326,6 +327,18 @@ const menuController = createMenuController({
 const { closeMenu, openContextMenu } = menuController;
 menuController.init();
 
+const layerGroupCommandController = createLayerGroupCommandController({
+  state: { getDocument: () => doc },
+  transaction: {
+    commit,
+    blockPendingEdit: blockPendingDocumentEdit,
+  },
+  ui: {
+    showModal: options => showModal(options),
+    setStatus,
+  },
+});
+
 const layersPanelController = createLayersPanelController({
   container: els.layers,
   state: {
@@ -339,43 +352,10 @@ const layersPanelController = createLayersPanelController({
   },
   actions: {
     layer: {
-      toggleVisibility: (owner, layerId) => {
-        if (doc !== owner) return false;
-        const layer = owner.layers.find(item => item.id === layerId);
-        if (!layer) return false;
-        layer.visible = !layer.visible;
-        commit(layer.visible ? 'Показать слой' : 'Скрыть слой');
-        return true;
-      },
-      toggleLock: (owner, layerId) => {
-        if (doc !== owner) return false;
-        const layer = owner.layers.find(item => item.id === layerId);
-        if (!layer) return false;
-        const group = layer.groupId ? owner.groups?.find(item => item.id === layer.groupId) : null;
-        if (group && isGroupLocked(owner, group)) return false;
-        layer.locked = !layer.locked;
-        commit(layer.locked ? 'Заблокировать слой' : 'Разблокировать слой');
-        return true;
-      },
-      rename: (owner, layerId) => {
-        if (doc !== owner) return false;
-        const layer = owner.layers.find(item => item.id === layerId);
-        if (!layer) return false;
-        renameLayer(layer);
-        return true;
-      },
-      remove: (owner, layerId) => {
-        if (doc !== owner || blockPendingDocumentEdit()) return false;
-        const layer = owner.layers.find(item => item.id === layerId);
-        if (!layer) return false;
-        if (isLayerLocked(owner, layer)) {
-          setStatus('Слой или его группа заблокированы');
-          return false;
-        }
-        removeLayer(owner, layer.id);
-        commit('Удалить слой');
-        return true;
-      },
+      toggleVisibility: layerGroupCommandController.toggleLayerVisibility,
+      toggleLock: layerGroupCommandController.toggleLayerLock,
+      rename: layerGroupCommandController.renameLayer,
+      remove: layerGroupCommandController.deleteLayer,
       openSmartObject: (owner, layerId) => {
         if (doc !== owner) return false;
         const layer = owner.layers.find(item => item.id === layerId);
@@ -396,38 +376,10 @@ const layersPanelController = createLayersPanelController({
       },
     },
     group: {
-      toggleVisibility: (owner, groupId) => {
-        if (doc !== owner) return false;
-        const group = owner.groups?.find(item => item.id === groupId);
-        if (!group) return false;
-        group.visible = group.visible === false;
-        commit(group.visible ? 'Показать группу слоёв' : 'Скрыть группу слоёв');
-        return true;
-      },
-      toggleLock: (owner, groupId) => {
-        if (doc !== owner) return false;
-        const group = owner.groups?.find(item => item.id === groupId);
-        if (!group) return false;
-        const parent = group.parentGroupId ? owner.groups?.find(item => item.id === group.parentGroupId) : null;
-        if (parent && isGroupLocked(owner, parent)) return false;
-        group.locked = !group.locked;
-        commit(group.locked ? 'Заблокировать группу слоёв' : 'Разблокировать группу слоёв');
-        return true;
-      },
-      rename: (owner, groupId) => {
-        if (doc !== owner) return false;
-        const group = owner.groups?.find(item => item.id === groupId);
-        if (!group) return false;
-        renameGroup(group);
-        return true;
-      },
-      remove: (owner, groupId) => {
-        if (doc !== owner) return false;
-        const group = owner.groups?.find(item => item.id === groupId);
-        if (!group) return false;
-        deleteLayerGroup(group);
-        return true;
-      },
+      toggleVisibility: layerGroupCommandController.toggleGroupVisibility,
+      toggleLock: layerGroupCommandController.toggleGroupLock,
+      rename: layerGroupCommandController.renameGroup,
+      remove: layerGroupCommandController.deleteGroup,
       openContextMenu: (owner, groupId, event, row) => {
         if (doc !== owner) return false;
         const group = owner.groups?.find(item => item.id === groupId);
@@ -437,37 +389,11 @@ const layersPanelController = createLayersPanelController({
       },
     },
     drag: {
-      moveLayerRelative: (owner, layerId, targetId, aboveInDisplay) => {
-        if (doc !== owner || !moveLayerRelativeToTarget(layerId, targetId, aboveInDisplay)) return false;
-        commit('Изменить порядок слоёв');
-        return true;
-      },
-      moveLayerIntoGroup: (owner, layerId, groupId) => {
-        if (doc !== owner) return false;
-        const group = owner.groups?.find(item => item.id === groupId);
-        if (!group || !moveLayerIntoGroup(owner, layerId, groupId)) return false;
-        group.collapsed = false;
-        commit('Переместить слой в группу');
-        return true;
-      },
-      moveGroupIntoGroup: (owner, groupId, targetGroupId) => {
-        if (doc !== owner) return false;
-        const target = owner.groups?.find(item => item.id === targetGroupId);
-        if (!target || !moveLayerGroupIntoGroup(owner, groupId, targetGroupId)) return false;
-        target.collapsed = false;
-        commit('Переместить группу в группу');
-        return true;
-      },
-      moveLayerToRoot: (owner, layerId) => {
-        if (doc !== owner || !moveLayerToRootTop(layerId)) return false;
-        commit('Вынести слой из группы');
-        return true;
-      },
-      moveGroupToRoot: (owner, groupId) => {
-        if (doc !== owner || !moveLayerGroupIntoGroup(owner, groupId, null)) return false;
-        commit('Вынести группу на верхний уровень');
-        return true;
-      },
+      moveLayerRelative: layerGroupCommandController.moveLayerRelative,
+      moveLayerIntoGroup: layerGroupCommandController.moveLayerIntoGroup,
+      moveGroupIntoGroup: layerGroupCommandController.moveGroupIntoGroup,
+      moveLayerToRoot: layerGroupCommandController.moveLayerToRoot,
+      moveGroupToRoot: layerGroupCommandController.moveGroupToRoot,
     },
   },
   ui: { setStatus, requestFrame: callback => requestAnimationFrame(callback), documentRef: document },
@@ -1432,45 +1358,6 @@ function updateAll() {
   updateCanvasSize(); layersPanelController.render(); updatePathsPanel(); updateHistory(); refreshInspectorPanels(); updateLayerControls(); render();
   renderDocumentTabs();
 }
-
-function moveLayerRelativeToTarget(layerId, targetId, aboveInDisplay) {
-  if (layerId === targetId) return false;
-  const sourceIndex = doc.layers.findIndex(item => item.id === layerId);
-  const targetLayer = doc.layers.find(item => item.id === targetId);
-  if (sourceIndex < 0 || !targetLayer) return false;
-  const beforeOrder = doc.layers.map(item => item.id).join('|');
-  const source = doc.layers[sourceIndex];
-  if (isLayerLocked(doc, source) || isLayerLocked(doc, targetLayer)) return false;
-  const beforeGroupId = source.groupId ?? null;
-  doc.layers.splice(sourceIndex, 1);
-  const targetIndex = doc.layers.findIndex(item => item.id === targetId);
-  if (targetIndex < 0) {
-    doc.layers.splice(Math.min(sourceIndex, doc.layers.length), 0, source);
-    return false;
-  }
-  source.groupId = targetLayer.groupId ?? null;
-  const insertIndex = aboveInDisplay ? targetIndex + 1 : targetIndex;
-  doc.layers.splice(insertIndex, 0, source);
-  const changed = beforeOrder !== doc.layers.map(item => item.id).join('|') || beforeGroupId !== (source.groupId ?? null);
-  if (changed) touch(doc);
-  return changed;
-}
-
-function moveLayerToRootTop(layerId) {
-  const index = doc.layers.findIndex(item => item.id === layerId);
-  if (index < 0) return false;
-  const layer = doc.layers[index];
-  if (isLayerLocked(doc, layer)) return false;
-  const beforeGroupId = layer.groupId ?? null;
-  const alreadyTop = index === doc.layers.length - 1;
-  if (beforeGroupId == null && alreadyTop) return false;
-  doc.layers.splice(index, 1);
-  layer.groupId = null;
-  doc.layers.push(layer);
-  touch(doc);
-  return true;
-}
-
 
 function updateHistory() {
   els.history.replaceChildren();
@@ -2659,16 +2546,8 @@ async function exportPsdDocument(exportDoc,{psb=false}={}){
 
 async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — RGB/CMYK слои 8/16/32-bit'],['psb','PSB — RGB/CMYK Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
 
-function toggleSelectedVisibility() {
-  const l=selected(); if(!l)return;
-  l.visible=!l.visible; commit(l.visible?'Показать слой':'Скрыть слой');
-}
-function toggleSelectedLock() {
-  const l=selected(); if(!l)return;
-  const group=l.groupId ? doc.groups?.find(item=>item.id===l.groupId) : null;
-  if(group?.locked){setStatus('Слой заблокирован группой');return;}
-  l.locked=!l.locked; commit(l.locked?'Заблокировать слой':'Разблокировать слой');
-}
+function toggleSelectedVisibility() { return layerGroupCommandController.toggleSelectedLayerVisibility(); }
+function toggleSelectedLock() { return layerGroupCommandController.toggleSelectedLayerLock(); }
 function nudgeSelected(dx,dy) {
   const l=selected(); if(!l || isLayerLocked(doc,l))return;
   l.x+=dx; l.y+=dy; commit('Сдвинуть слой');
@@ -2748,60 +2627,13 @@ function showAbout() {
 
 function undo(){if(blockPendingDocumentEdit())return;const entry=history.undo();if(!entry)return;doc=restoreDocument(entry.snapshot);clearSelectionState();rasterEdit.clearBrushBuffer();updateAll();markDirty(true);setStatus(`Отменено → ${entry.label}`);}
 function redo(){if(blockPendingDocumentEdit())return;const entry=history.redo();if(!entry)return;doc=restoreDocument(entry.snapshot);clearSelectionState();rasterEdit.clearBrushBuffer();updateAll();markDirty(true);setStatus(`Повторено → ${entry.label}`);}
-function deleteSelected(){if(blockPendingDocumentEdit())return;const l=selected();if(!l)return;if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}removeLayer(doc,l.id);commit('Удалить слой');}
-function duplicateSelected(){const l=selected();if(!l)return;if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}if(duplicateLayer(doc,l.id))commit('Дублировать слой');}
-function renameLayer(layer){if(!layer||isLayerLocked(doc,layer)){setStatus('Слой или его группа заблокированы');return;}showModal({title:'Переименовать слой',fields:[{name:'name',label:'Имя',value:layer.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===layer.name)return;layer.name=name;commit('Переименовать слой');}});}
-function addGroup(parentGroupId=null){
-  const parent=parentGroupId?doc.groups?.find(group=>group.id===parentGroupId):null;
-  if(parentGroupId&&!parent){setStatus('Родительская группа не найдена');return null;}
-  if(parent&&isGroupLocked(doc,parent)){setStatus('Родительская группа заблокирована');return null;}
-  const number=(doc.groups?.length||0)+1;
-  const group=addLayerGroup(doc,createLayerGroup({name:`Группа ${number}`,parentGroupId:parent?.id??null}));
-  if(parent)parent.collapsed=false;
-  commit(parent?'Новая подгруппа':'Новая группа слоёв');
-  setStatus(parent?`Создана подгруппа «${group.name}» в «${parent.name}»`:`Создана группа «${group.name}». Перетащите на неё нужные слои.`);
-  return group;
-}
-const GROUP_BLEND_OPTIONS=[
-  ['pass-through','Пропускать (Pass Through)'],
-  ['source-over','Обычный (Normal)'],
-  ['multiply','Умножение'],
-  ['screen','Экран'],
-  ['overlay','Перекрытие'],
-  ['soft-light','Мягкий свет'],
-  ['hard-light','Жёсткий свет'],
-  ['darken','Затемнение'],
-  ['lighten','Осветление'],
-  ['color-dodge','Осветление основы'],
-  ['color-burn','Затемнение основы'],
-  ['difference','Разница'],
-  ['exclusion','Исключение'],
-];
-function renameGroup(group){if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}showModal({title:'Переименовать группу',fields:[{name:'name',label:'Имя',value:group.name,required:true}],submitLabel:'Переименовать',onSubmit:v=>{const name=String(v.name||'').trim();if(!name||name===group.name)return;group.name=name;commit('Переименовать группу');}});}
-function editGroupProperties(group){
-  if(!group||isGroupLocked(doc,group)){setStatus('Группа или её родитель заблокированы');return;}
-  showModal({
-    title:'Параметры группы',
-    fields:[
-      {name:'blendMode',label:'Режим наложения',type:'select',value:group.blendMode||'pass-through',options:GROUP_BLEND_OPTIONS},
-      {name:'opacity',label:'Непрозрачность, %',type:'number',value:Math.round(clamp(Number(group.opacity??1),0,1)*100),min:0,max:100,step:1,required:true},
-    ],
-    submitLabel:'Применить',
-    onSubmit:v=>{
-      const blendMode=GROUP_BLEND_OPTIONS.some(([value])=>value===v.blendMode)?v.blendMode:'pass-through';
-      const opacity=clamp(Number(v.opacity)/100,0,1);
-      if(group.blendMode===blendMode&&Math.abs(Number(group.opacity??1)-opacity)<1e-9)return;
-      group.blendMode=blendMode;
-      group.opacity=opacity;
-      commit('Параметры группы');
-    },
-  });
-}
-function deleteLayerGroup(group){
-  if(!group)return;
-  if(isGroupLocked(doc,group)){setStatus('Сначала разблокируйте группу и её родителей');return;}
-  if(removeLayerGroup(doc,group.id)){commit('Удалить группу слоёв');setStatus('Группа удалена, содержимое перенесено на уровень выше');}
-}
+function deleteSelected(){return layerGroupCommandController.deleteSelectedLayer();}
+function duplicateSelected(){return layerGroupCommandController.duplicateSelectedLayer();}
+function renameLayer(layer){return layer ? layerGroupCommandController.renameLayer(doc,layer.id) : false;}
+function addGroup(parentGroupId=null){return layerGroupCommandController.createGroup(doc,parentGroupId);}
+function renameGroup(group){return group ? layerGroupCommandController.renameGroup(doc,group.id) : false;}
+function editGroupProperties(group){return group ? layerGroupCommandController.editGroupProperties(doc,group.id) : false;}
+function deleteLayerGroup(group){return group ? layerGroupCommandController.deleteGroup(doc,group.id) : false;}
 function layerContextMenu(id) {
   const owner=doc;
   const target = () => doc===owner ? doc.layers.find(item => item.id === id) : null;
@@ -2821,9 +2653,9 @@ function layerContextMenu(id) {
     ['Удалить маску смарт-фильтров','',()=>removeSmartFilterMask(target()),()=>Boolean(target()?.smartFilterMask)&&editable()],
     ['Преобразовать в смарт-объект','',()=>{if(selectedTarget())convertSelectedToSmartObject();},()=>selectedTarget()&&editable()&&!['smart-object','adjustment'].includes(target().type)],
     ['sep'],
-    ['Переименовать…','F2',()=>renameLayer(target()),editable],
-    ['Дублировать','Ctrl+J',()=>{if(selectedTarget())duplicateSelected();},()=>selectedTarget() && editable()],
-    ['Удалить','Delete',()=>{if(selectedTarget())deleteSelected();},()=>selectedTarget() && editable()],
+    ['Переименовать…','F2',()=>layerGroupCommandController.renameLayer(owner,id),editable],
+    ['Дублировать','Ctrl+J',()=>layerGroupCommandController.duplicateLayer(owner,id),()=>selectedTarget() && editable()],
+    ['Удалить','Delete',()=>layerGroupCommandController.deleteLayer(owner,id),()=>selectedTarget() && editable()],
     ['sep'],
     ['Добавить маску (показать всё)','',()=>addSelectedLayerMask(false),()=>selectedTarget() && editable() && !target().mask],
     ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>selectedTarget() && editable() && !target().mask && Boolean(selectionShape)],
@@ -2840,11 +2672,11 @@ function layerContextMenu(id) {
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['sep'],
-    ['Показать / скрыть','',toggleSelectedVisibility,()=>Boolean(target())],
-    ['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=target();const group=layer?.groupId?doc.groups?.find(item=>item.id===layer.groupId):null;return Boolean(layer)&&!(group&&isGroupLocked(doc,group));}],
+    ['Показать / скрыть','',()=>layerGroupCommandController.toggleLayerVisibility(owner,id),()=>Boolean(target())],
+    ['Заблокировать / разблокировать','',()=>layerGroupCommandController.toggleLayerLock(owner,id),()=>{const layer=target();const group=layer?.groupId?owner.groups?.find(item=>item.id===layer.groupId):null;return Boolean(layer)&&!(group&&isGroupLocked(owner,group));}],
     ['sep'],
-    ['Поднять слой','',()=>{if(moveLayer(doc,id,1))commit('Поднять слой');},editable],
-    ['Опустить слой','',()=>{if(moveLayer(doc,id,-1))commit('Опустить слой');},editable],
+    ['Поднять слой','',()=>layerGroupCommandController.moveLayer(owner,id,1),editable],
+    ['Опустить слой','',()=>layerGroupCommandController.moveLayer(owner,id,-1),editable],
     ['Растеризовать','',rasterizeSelectedLayer,()=>editable() && target().type !== 'raster' && target().type !== 'adjustment'],
   ];
 }
@@ -2852,14 +2684,14 @@ function groupContextMenu(id) {
   const owner=doc;
   const target = () => doc===owner ? doc.groups?.find(item => item.id === id) : null;
   return [
-    ['Создать подгруппу','',()=>addGroup(id),()=>Boolean(target()) && !isGroupLocked(doc,target())],
-    ['Параметры группы…','',()=>editGroupProperties(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
-    ['Переименовать…','',()=>renameGroup(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
+    ['Создать подгруппу','',()=>layerGroupCommandController.createGroup(owner,id),()=>Boolean(target()) && !isGroupLocked(owner,target())],
+    ['Параметры группы…','',()=>layerGroupCommandController.editGroupProperties(owner,id),()=>Boolean(target()) && !isGroupLocked(owner,target())],
+    ['Переименовать…','',()=>layerGroupCommandController.renameGroup(owner,id),()=>Boolean(target()) && !isGroupLocked(owner,target())],
     ['Свернуть / развернуть','',()=>{const group=target();if(group){group.collapsed=!group.collapsed;layersPanelController.render();}},()=>Boolean(target())],
-    ['Показать / скрыть','',()=>{const group=target();if(group){group.visible=group.visible===false;commit(group.visible?'Показать группу слоёв':'Скрыть группу слоёв');}},()=>Boolean(target())],
-    ['Заблокировать / разблокировать','',()=>{const group=target();if(group&&!group.parentGroupId||group&&!isGroupLocked(doc,doc.groups?.find(item=>item.id===group.parentGroupId))){group.locked=!group.locked;commit(group.locked?'Заблокировать группу слоёв':'Разблокировать группу слоёв');}},()=>{const group=target();const parent=group?.parentGroupId?doc.groups?.find(item=>item.id===group.parentGroupId):null;return Boolean(group)&&!(parent&&isGroupLocked(doc,parent));}],
+    ['Показать / скрыть','',()=>layerGroupCommandController.toggleGroupVisibility(owner,id),()=>Boolean(target())],
+    ['Заблокировать / разблокировать','',()=>layerGroupCommandController.toggleGroupLock(owner,id),()=>{const group=target();const parent=group?.parentGroupId?owner.groups?.find(item=>item.id===group.parentGroupId):null;return Boolean(group)&&!(parent&&isGroupLocked(owner,parent));}],
     ['sep'],
-    ['Удалить группу (содержимое останется)','',()=>deleteLayerGroup(target()),()=>Boolean(target()) && !isGroupLocked(doc,target())],
+    ['Удалить группу (содержимое останется)','',()=>layerGroupCommandController.deleteGroup(owner,id),()=>Boolean(target()) && !isGroupLocked(owner,target())],
   ];
 }
 function addBlankLayer(){addLayer(doc,createRasterLayer({name:'Новый слой',width:doc.width,height:doc.height,dataUrl:null}));rasterEdit.clearBrushBuffer();commit('Новый растровый слой');}
@@ -2989,10 +2821,10 @@ const menus={
     ['Вписать слой в холст','',fitSelectedLayerToCanvas,()=>isTransformableLayer(selected())&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Показать / скрыть слой','',toggleSelectedVisibility,()=>Boolean(selected())],
-    ['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=selected();return Boolean(layer)&&!doc.groups?.find(group=>group.id===layer.groupId)?.locked;}],
+    ['Заблокировать / разблокировать','',toggleSelectedLock,()=>{const layer=selected();const group=layer?.groupId?doc.groups?.find(item=>item.id===layer.groupId):null;return Boolean(layer)&&!(group&&isGroupLocked(doc,group));}],
     ['sep'],
-    ['Поднять слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
-    ['Опустить слой','',()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['Поднять слой','',()=>layerGroupCommandController.moveSelectedLayer(1),()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['Опустить слой','',()=>layerGroupCommandController.moveSelectedLayer(-1),()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],
   image:[
     ['Цветокоррекция…','',openColorCorrectionDialog,()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
@@ -3148,7 +2980,7 @@ if(els.smartSnapToggle)els.smartSnapToggle.onchange=()=>{smartSnapEnabled=els.sm
 $$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSelectedLayer(button.dataset.align)));
 els.undo.onclick=undo;els.redo.onclick=redo;$('#exportQuickBtn').onclick=exportDialog;
 $('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=()=>addGroup();$('#renameLayerBtn').onclick=()=>{const layer=selected();if(layer)renameLayer(layer);};$('#duplicateLayerBtn').onclick=duplicateSelected;$('#deleteLayerBtn').onclick=deleteSelected;
-$('#layerUpBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,1))commit('Поднять слой');};$('#layerDownBtn').onclick=()=>{if(moveLayer(doc,doc.selectedLayerId,-1))commit('Опустить слой');};
+$('#layerUpBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(1);$('#layerDownBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(-1);
 pathsController.bindControls();
 layersPanelController.bind();
 $('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateHistory();updateAll();};
