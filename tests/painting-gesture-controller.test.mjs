@@ -22,10 +22,18 @@ function paintContext() {
   return { context, calls };
 }
 
-function makeHarness({ doc = createDocument({ width:8, height:8 }), atPoint = () => null, ensureRasterBuffer } = {}) {
+function makeHarness({
+  doc = createDocument({ width:8, height:8 }),
+  atPoint = () => null,
+  ensureRasterBuffer,
+  persistResult = true,
+} = {}) {
+  let activeDocument = doc;
   let drag = null;
   let persisting = false;
   let persistCalls = 0;
+  const ensureCalls = [];
+  const persistArgs = [];
   let previewSawPaintDrag = false;
   const commits = [];
   const statuses = [];
@@ -38,8 +46,9 @@ function makeHarness({ doc = createDocument({ width:8, height:8 }), atPoint = ()
     highDepthPaintBuffer:null,
     highDepthPaintLayerId:null,
     async ensureNativeHighDepthPaintBuffer() { return false; },
-    async ensureRasterBuffer(layer) {
-      if (ensureRasterBuffer) return ensureRasterBuffer.call(this, layer, context);
+    async ensureRasterBuffer(owner, layer) {
+      ensureCalls.push([owner, layer]);
+      if (ensureRasterBuffer) return ensureRasterBuffer.call(this, owner, layer, context);
       this.brushCanvas = { width:layer.width, height:layer.height };
       this.brushContext = context;
       this.brushLayerId = layer.id;
@@ -47,7 +56,11 @@ function makeHarness({ doc = createDocument({ width:8, height:8 }), atPoint = ()
     },
     schedulePaintPreview() { previewSawPaintDrag ||= drag?.kind === 'paint'; },
     cancelPaintPreview() {},
-    async persistPaintLayer() { persistCalls += 1; return true; },
+    async persistPaintLayer(owner, layer) {
+      persistCalls += 1;
+      persistArgs.push([owner, layer]);
+      return typeof persistResult === 'function' ? persistResult(owner, layer) : persistResult;
+    },
     async persistNativeHighDepthPaintLayer() { throw new Error('native path should not run'); },
     clearBrushBuffer() {
       this.brushCanvas = null;
@@ -68,7 +81,7 @@ function makeHarness({ doc = createDocument({ width:8, height:8 }), atPoint = ()
     rasterEdit,
     retouch,
     state:{
-      getDocument:() => doc,
+      getDocument:() => activeDocument,
       getDrag:() => drag,
       setDrag:value => { drag = value; },
       beginPersist:() => {
@@ -79,7 +92,7 @@ function makeHarness({ doc = createDocument({ width:8, height:8 }), atPoint = ()
       endPersist:() => { persisting = false; },
     },
     target:{
-      selected:() => doc.layers.find(layer => layer.id === doc.selectedLayerId) || null,
+      selected:() => activeDocument.layers.find(layer => layer.id === activeDocument.selectedLayerId) || null,
       atPoint,
       toLocal:point => ({ ...point }),
     },
@@ -111,7 +124,10 @@ function makeHarness({ doc = createDocument({ width:8, height:8 }), atPoint = ()
     getDrag:() => drag,
     setDrag:value => { drag = value; },
     getPersistCalls:() => persistCalls,
+    getEnsureCalls:() => ensureCalls,
+    getPersistArgs:() => persistArgs,
     getPersisting:() => persisting,
+    setDocument:value => { activeDocument = value; },
     previewSawPaintDrag:() => previewSawPaintDrag,
   };
 }
@@ -130,6 +146,8 @@ test('paint gesture controller owns brush begin/move/end while main state remain
   assert.equal(doc.layers.length, 1, 'brush should lazily create one sparse raster layer');
   assert.equal(harness.getDrag()?.kind, 'paint');
   assert.equal(harness.getDrag()?.tool, 'brush');
+  assert.equal(harness.getDrag()?.owner, doc);
+  assert.equal(harness.getDrag()?.layer, doc.layers[0]);
   assert.equal(harness.previewSawPaintDrag(), true, 'preview scheduling must see the live paint drag');
   assert.equal(harness.context.globalAlpha, .75);
   assert.equal(harness.context.strokeStyle, '#123456');
@@ -144,6 +162,10 @@ test('paint gesture controller owns brush begin/move/end while main state remain
   assert.equal(await harness.controller.end(finishedDrag), true);
   assert.equal(harness.getPersistCalls(), 1);
   assert.equal(harness.getPersisting(), false);
+  assert.equal(harness.getEnsureCalls()[0][0], doc);
+  assert.equal(harness.getEnsureCalls()[0][1], doc.layers[0]);
+  assert.equal(harness.getPersistArgs()[0][0], doc);
+  assert.equal(harness.getPersistArgs()[0][1], doc.layers[0]);
   assert.equal(harness.calls.restore, 1);
   assert.deepEqual(harness.commits, ['Кисть']);
   assert.equal(harness.statuses.at(-1), 'Готово');
@@ -158,7 +180,8 @@ test('paint begin re-checks the caller-owned pointer guard after async raster pr
   const harness = makeHarness({
     doc,
     atPoint:() => layer,
-    ensureRasterBuffer(layerValue, context) {
+    ensureRasterBuffer(owner, layerValue, context) {
+      assert.equal(owner, doc);
       return new Promise(resolve => {
         releaseDecode = () => {
           this.brushCanvas = { width:layerValue.width, height:layerValue.height };
@@ -183,4 +206,53 @@ test('paint begin re-checks the caller-owned pointer guard after async raster pr
   assert.equal(await pending, false);
   assert.equal(harness.getDrag(), null);
   assert.equal(harness.getPersistCalls(), 0);
+});
+
+
+test('paint gesture suppresses Canvas8 history and success when persistence is stale', async () => {
+  const doc = createDocument({ width:8, height:8 });
+  const harness = makeHarness({ doc, persistResult:false });
+
+  assert.equal(await harness.controller.begin({
+    point:{ x:1, y:2 },
+    tool:'brush',
+    canContinue:() => true,
+  }), true);
+
+  const finishedDrag = harness.getDrag();
+  harness.setDrag(null);
+  assert.equal(await harness.controller.end(finishedDrag), false);
+  assert.equal(harness.getPersistCalls(), 1);
+  assert.equal(harness.getPersisting(), false);
+  assert.deepEqual(harness.commits, []);
+  assert.notEqual(harness.statuses.at(-1), 'Готово');
+});
+
+test('paint move rejects a same-ID replacement document instead of redirecting the stroke', async () => {
+  const origin = createDocument({ width:8, height:8 });
+  const harness = makeHarness({ doc:origin });
+
+  assert.equal(await harness.controller.begin({
+    point:{ x:1, y:2 },
+    tool:'brush',
+    canContinue:() => true,
+  }), true);
+  const originLayer = harness.getDrag().layer;
+  const replacement = createDocument({ width:8, height:8 });
+  replacement.id = origin.id;
+  const replacementLayer = createRasterLayer({
+    id:originLayer.id,
+    name:'Replacement',
+    width:8,
+    height:8,
+    dataUrl:null,
+  });
+  addLayer(replacement, replacementLayer);
+  harness.setDocument(replacement);
+
+  const strokesBefore = harness.calls.stroke;
+  assert.equal(harness.controller.move({ x:4, y:5 }), false);
+  assert.equal(harness.calls.stroke, strokesBefore);
+  assert.equal(harness.getDrag().layer, originLayer);
+  assert.notEqual(harness.getDrag().layer, replacementLayer);
 });
