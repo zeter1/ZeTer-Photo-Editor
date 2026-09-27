@@ -22,9 +22,9 @@ For bugs, start from observable evidence: failing test, browser error, traceback
 
 Useful routing:
 - generic overlay pointer capture / active-pointer ownership / up-cancel-lost-capture → `interaction/pointer-lifecycle-router`
-- tool-specific pointer branches (move/transform/paint/path/crop) → `main` + the relevant domain controller
+- tool-specific pointer branches → generic capture in `interaction/pointer-lifecycle-router`; Move/Resize/Rotate transaction in `interaction/layer-transform-gesture-controller`; existing Bézier anchor/handle transaction in `interaction/path-control-gesture-controller`; hit-testing/new Pen draft/paint/crop dispatch in `main` + the relevant domain controller
 - sidebar collapse / canvas-mode shell visibility → `ui/workspace-layout-controller`
-- Saved Paths selection/CRUD/panel/context menu/apply-as-vector-mask → `ui/paths-controller`; Pen anchor/handle geometry → `main`; PSD resource codec → `formats/psd`
+- Saved Paths selection/CRUD/panel/context menu/apply-as-vector-mask → `ui/paths-controller`; existing Shape/Vector Mask/Saved Path anchor-handle drag transaction → `interaction/path-control-gesture-controller`; Pen hit-testing/control drawing/new-path draft → `main`; PSD resource codec → `formats/psd`
 - other DOM/menu/dialog interaction → main + ui
 - document/layer invariant → state
 - clone/heal/smudge/blur/dodge/burn mechanics → retouch/controller + painting/controller state; include painting/gesture-controller when the bug is in stroke begin/move/end routing
@@ -79,4 +79,4 @@ State what changed, what was actually verified, and any remaining NOT VERIFIED l
 
 ## Token-saving search strategy
 
-Use path → symbol → bounded range → nearest test. For pointer bugs, inspect `src/interaction/pointer-lifecycle-router.js` first when the symptom is capture/ownership/cancel, and `src/main.js` only for the specific tool branch. Historical notes are last resort, not the first context loaded.
+Use path → symbol → bounded range → nearest test. For pointer bugs, inspect `src/interaction/pointer-lifecycle-router.js` first when the symptom is capture/ownership/lost-capture; inspect `src/interaction/layer-transform-gesture-controller.js` for layer transform transaction semantics; inspect `src/interaction/path-control-gesture-controller.js` for existing Bézier drag/threshold/history/cancel semantics; open `src/main.js` only for the specific tool dispatch/hit-test/new-draft branch. Historical notes are last resort, not the first context loaded.

@@ -6,7 +6,7 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`; selected-layer Move/Resize/Rotate transaction state, geometry publication, final history and rollback are delegated to `src/interaction/layer-transform-gesture-controller.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`; raster layer-mask / Select & Mask orchestration to `src/selection/mask-controller.js`; selection-driven Vector Mask command/policy to `src/selection/vector-mask-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar/workspace-layout/saved-Paths and retouch mechanics, are delegated to their canonical owners.
+Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`; selected-layer Move/Resize/Rotate transaction state, geometry publication, final history and rollback are delegated to `src/interaction/layer-transform-gesture-controller.js`; existing Bézier anchor/handle drag transaction, exact path identity, threshold/no-op/history and rollback are delegated to `src/interaction/path-control-gesture-controller.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`; raster layer-mask / Select & Mask orchestration to `src/selection/mask-controller.js`; selection-driven Vector Mask command/policy to `src/selection/vector-mask-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar/workspace-layout/saved-Paths and retouch mechanics, are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
@@ -18,9 +18,15 @@ Owns the generic overlay Pointer Events lifecycle: one active pointer at a time,
 It deliberately does **not** know tool names or mutate layers, selections, paths, crop geometry or paint buffers. Those domain branches remain in `src/main.js` and dedicated domain controllers.
 
 ### `layer-transform-gesture-controller.js`
+
 Owns one interactive selected-layer Move / Resize / Rotate transaction from captured baseline through live pointer updates to exactly-one history publication or cancel rollback. It binds the originating document, stable layer ID and object identity; revalidates recursive locks on every update/finalize/cancel; owns Shift axis-lock, Smart Snap/Ctrl bypass, resize modifiers/min-size and rotate snapping by delegating to canonical core geometry.
 
 It deliberately does **not** install DOM listeners, choose the selected layer, hit-test handles, own pointer capture, render the Layers tree or absorb one-shot nudge/align/fit commands. Generic capture stays in `pointer-lifecycle-router.js`; hit-testing/cursor/tool dispatch stay in `src/main.js`; discrete transform commands stay in `src/layers/transform-command-controller.js`.
+
+### `path-control-gesture-controller.js`
+Owns one drag transaction for an existing Bézier anchor or handle across Shape paths, Vector Masks and Saved Paths. It captures the originating document plus exact target identities, uses stable Saved Path IDs when available, localizes layer-backed points, applies Shift/Alt semantics, restores sub-threshold/no-op previews, applies the final release point, publishes one exact history label and shares one cancel primitive for pointer-cancel/Escape.
+
+It deliberately does **not** own hit-testing, control drawing, status strings, Alt-click corner conversion or new `penDraft` / `pen-handle` creation; those stay in `src/main.js`. Saved Paths CRUD stays in `src/ui/paths-controller.js`; Vector Mask lifecycle stays in `src/selection/vector-mask-controller.js`.
 
 ## UI boundary — `src/ui/`
 
@@ -73,7 +79,7 @@ Owns the Color Correction dialog as one UI transaction: exact originating docume
 It deliberately does **not** own generic Properties mutation policy (`src/layers/property-command-controller.js`), persisted filter schema/ranges (`src/core/state.js`), control metadata (`src/ui/tool-config.js`) or pixel filtering (`src/core/render.js`). `src/main.js` only composes the controller and routes the Image menu action.
 
 ### `paths-controller.js`
-Owns Saved Paths UI/state orchestration: selected path index, bounded Photoshop path-resource allocation, save/rename/duplicate/delete actions, accessible list/keyboard/context-menu wiring and applying a saved path as a vector mask through grouped explicit ports. The document model remains in core, Pen direct-edit geometry/transient edit index remains in `src/main.js`, and PSD/PSB binary semantics remain in `src/formats/psd.js`.
+Owns Saved Paths UI/state orchestration: selected path index, bounded Photoshop path-resource allocation, save/rename/duplicate/delete actions, accessible list/keyboard/context-menu wiring and applying a saved path as a vector mask through grouped explicit ports. The document model remains in core; existing anchor/handle drag transaction lives in `src/interaction/path-control-gesture-controller.js`; target discovery/control drawing/new Pen drafting and the transient edit index remain in `src/main.js`; PSD/PSB binary semantics remain in `src/formats/psd.js`.
 
 ### `color-management-controller.js`
 Owns document-facing CMYK/ICC orchestration: preview/edit transform caches and invalidation, color-policy/profile transactions, asynchronous native-CMYK preview rebuild with active-document rollback, ICC profile load/remove actions and properties-panel control bindings. It receives state/color/pixel/IO/render/UI capabilities through explicit ports.
@@ -191,7 +197,7 @@ Stable mask schema/lock/geometry/pixel primitives remain in core. Runtime state,
 ### `vector-mask-controller.js`
 Owns the selection-driven Vector Mask command/policy seam: exact rectangle and cubic-Bézier ellipse conversion, bounded generic selection-path conversion, document→layer localization for anchors/handles, boolean subpath publication, the 128-subpath guard and selected-mask edit-entry/toggle/invert/remove commands.
 
-It deliberately does **not** own Pen direct-edit state/geometry, Saved Paths CRUD/UI or PSD/PSB vector-mask conversion. Those stay in `src/main.js`, `src/ui/paths-controller.js` and the runtime/format boundary respectively; the controller reaches Pen mode only through narrow begin/clear edit ports.
+It deliberately does **not** own existing anchor/handle drag transaction, Pen target discovery/drawing/new-path draft, Saved Paths CRUD/UI or PSD/PSB vector-mask conversion. Those stay in `src/interaction/path-control-gesture-controller.js`, `src/main.js`, `src/ui/paths-controller.js` and the runtime/format boundary respectively; the controller reaches Pen mode only through narrow begin/clear edit ports.
 
 ## Workspace boundary — `src/workspace/`
 

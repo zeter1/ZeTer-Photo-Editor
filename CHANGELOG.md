@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical existing Bézier path-control gesture controller
+
+- Refactor: dragging existing Shape-path, Vector Mask and Saved Path anchors/handles moves from direct mutation/history logic in `src/main.js` into `src/interaction/path-control-gesture-controller.js`; hit-testing, control drawing/status, Alt-click corner conversion and new `penDraft` / `pen-handle` creation remain in the composition root.
+- Exact-owner safety: each gesture captures the originating document plus exact layer/path/subpath/node identities, uses stable Saved Path resource IDs when available, re-resolves those identities on update/finalize/cancel, and honors recursive effective layer locks so stale/same-ID replacement targets cannot receive redirected writes.
+- Correctness fix: the `1 / zoom` drag threshold is now a mutation boundary as well as a history boundary — sub-threshold previews are restored to the captured baseline, closing the previous case where a micro-move could persist without an Undo entry. Returning to baseline likewise publishes zero history, while a real edit preserves the six established anchor/handle labels.
+- Gesture semantics/reliability: layer-backed coordinates still localize through `documentPointToLayerPixel`; anchor moves translate both handles, Shift+anchor starts `handleOut`, smooth handles mirror until Alt breaks symmetry, final pointer-release geometry is applied even without a last `pointermove`, and pointercancel/Escape share the same exact-target rollback primitive.
+- Regression/docs/build: direct controller tests cover Shape/Vector Mask/Saved Path edits, stable Saved Path identity, modifiers, threshold/no-op, final release, stale/replaced/missing/locked targets and rollback; legacy source tests and architecture guards are retargeted to the canonical owner, AI routing/docs are updated, and the generated file:// bundle graph includes the module.
+
 ### 2026-09-27 — Canonical interactive layer transform gesture controller
 
 - Refactor: selected-layer Move / Resize / Rotate drag transactions move from direct geometry/history mutation in `src/main.js` into `src/interaction/layer-transform-gesture-controller.js`; generic Pointer Events capture remains in `pointer-lifecycle-router.js`, while hit-testing/cursor/tool dispatch stay in the composition root.

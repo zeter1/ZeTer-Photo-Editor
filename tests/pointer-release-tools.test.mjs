@@ -31,6 +31,10 @@ function release(drag, point, pointerId = 1, shiftKey = false) {
       isGesture: value => ['move','resize','rotate'].includes(value?.kind),
       finish: (value, releasePoint, modifiers) => calls.push(['finish', value.kind, releasePoint.x, releasePoint.y, Boolean(modifiers.shiftKey)]),
     },
+    pathControlGestures: {
+      isGesture: value => value?.kind === 'path-control',
+      finish: (value, releasePoint, modifiers) => calls.push(['path-finish', releasePoint.x, releasePoint.y, Boolean(modifiers.altKey)]),
+    },
     onOverlayPointerMove: event => {
       calls.push(['transform', event.point.x, event.point.y]);
     },
@@ -85,6 +89,12 @@ test('transform tools delegate final release geometry to the canonical gesture o
   }
 });
 
+test('path-control gesture delegates final release point and Alt state to the canonical owner', async () => {
+  assert.deepEqual(await release({kind:'path-control'}, {x:40,y:50}), [
+    ['path-finish',40,50,false],
+  ]);
+});
+
 test('hand tool uses the release position for the final pan', async () => {
   assert.deepEqual(await release({kind:'pan'}, {x:40,y:50}), [['transform',40,50]]);
 });
@@ -105,6 +115,7 @@ test('real transform pointermove delegates point and modifiers to the canonical 
       isGesture:value=>value===transformDrag,
       update:(value,point,modifiers)=>calls.push([value.kind,point.x,point.y,Boolean(modifiers.shiftKey),Boolean(modifiers.altKey),Boolean(modifiers.ctrlKey),Boolean(modifiers.metaKey)]),
     },
+    pathControlGestures:{isGesture:()=>false},
   };
   runInNewContext(pointerMoveSource + '\nglobalThis.__pointerMove = onOverlayPointerMove;', context);
   context.__pointerMove({point:{x:15,y:25},shiftKey:true,altKey:true,ctrlKey:true,metaKey:false});
@@ -117,4 +128,24 @@ test('real transform pointermove delegates point and modifiers to the canonical 
     true,
     false,
   ]]);
+});
+
+
+test('real path-control pointermove delegates the point and Alt modifier to the canonical gesture owner', () => {
+  const pathDrag = {kind:'path-control'};
+  const calls = [];
+  const context = {
+    drag:pathDrag,
+    els:{pointer:{}},
+    canvasPoint:event=>event.point,
+    hoverPoint:null,
+    layerTransformGestures:{isGesture:()=>false},
+    pathControlGestures:{
+      isGesture:value=>value===pathDrag,
+      update:(value,point,modifiers)=>calls.push([value.kind,point.x,point.y,Boolean(modifiers.altKey)]),
+    },
+  };
+  runInNewContext(pointerMoveSource + '\nglobalThis.__pointerMove = onOverlayPointerMove;', context);
+  context.__pointerMove({point:{x:15,y:25},altKey:true});
+  assert.deepEqual(calls, [['path-control',15,25,true]]);
 });
