@@ -80,6 +80,11 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - All resize math that can fail must be staged before the first persisted write: Image Size uses canonical `checkedCanvasSize()` + `imageResizeTransforms()`; Canvas Size builds every shifted layer position and validates `MAX_LAYER_POSITION` before mutation. Invalid or semantic no-op requests publish nothing.
 - Successful resize clears caller-owned geometry transient state and publishes exactly one history entry, then fits the same active document. Resize modal DOM/status stays in `src/main.js`; Crop, pointer gestures, zoom/viewport policy and reusable document limits remain separate owners.
 
+### Document background
+- `src/document/background-command-controller.js` is the single semantic owner for persisted Document Background mutation/history. The modal captures the originating document object and passes it to the command; object identity, not structural equality, is authoritative.
+- Apply must revalidate `state.getDocument() === owner` immediately before writing. A tab/document switch or replacement object rejects the stale command without touching either document or publishing history.
+- Same-value background is a semantic no-op. A real value change preserves existing accepted UI values and publishes exactly one `Фон документа` history entry. Modal/options/status stay in `src/main.js`; schema/default and rendering stay in core owners. Do not merge Background, Resize and Crop into a generic document-property owner without a demonstrated shared contract.
+
 ### Selection
 - `src/selection/gesture-controller.js` owns transient selection interaction state: marquee type, rectangle/ellipse/free-lasso drag transitions, polygon/magnetic drafts, magnetic edge sampling and draft overlay drawing. It receives geometry, canonical selection shape and UI/runtime access through grouped ports.
 - The gesture controller must not install global pointer/keyboard listeners, own document/session/history state, or become the canonical owner of persisted selection shape. Generic overlay pointer capture/ownership is routed by `src/interaction/pointer-lifecycle-router.js`; tool/keyboard dispatch and session snapshots stay in `src/main.js`.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -31,6 +31,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/raster-mutation-controller.js', root), 'utf8'),
   readFile(new URL('src/document/import-controller.js', root), 'utf8'),
+  readFile(new URL('src/document/background-command-controller.js', root), 'utf8'),
   readFile(new URL('src/document/resize-command-controller.js', root), 'utf8'),
   readFile(new URL('src/painting/controller.js', root), 'utf8'),
   readFile(new URL('src/painting/command-controller.js', root), 'utf8'),
@@ -248,6 +249,15 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /\bopenMenuKey\b/);
   assert.match(main, /menuController\.isOpen\(\)/);
   assert.match(main, /from '\.\/document\/import-controller\.js'/);
+  assert.match(main, /from '\.\/document\/background-command-controller\.js'/);
+  assert.match(build, /'src\/document\/background-command-controller\.js'/);
+  assert.match(documentBackgroundCommandController, /export function createDocumentBackgroundCommandController/);
+  assert.match(documentBackgroundCommandController, /state\.getDocument\(\) === owner/);
+  assert.match(documentBackgroundCommandController, /transaction\.commit\('Фон документа'\)/);
+  assert.match(main, /createDocumentBackgroundCommandController\(\{/);
+  assert.match(main, /const owner=doc;\s*showModal\(\{\s*title:'Фон документа'/);
+  assert.match(main, /documentBackgroundCommandController\.setBackground\(owner,v\.background\)/);
+  assert.doesNotMatch(main, /doc\.background\s*=/);
   assert.match(main, /from '\.\/document\/resize-command-controller\.js'/);
   assert.match(build, /'src\/document\/resize-command-controller\.js'/);
   assert.match(documentResizeCommandController, /export function createDocumentResizeCommandController/);
