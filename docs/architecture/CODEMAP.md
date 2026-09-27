@@ -141,6 +141,11 @@ Owns synchronous persisted Image Size and Canvas Size commands. It binds each de
 
 It deliberately does **not** own resize modal DOM, Crop tool/pointer lifecycle, zoom/viewport state, document schema, or core size/scale/position limits. Those remain in `src/main.js`, interaction owners and `src/core/state.js` respectively.
 
+### `background-command-controller.js`
+Owns the persisted Document Background command transaction. The modal captures the originating document object, the controller revalidates that exact object immediately before mutation, same-value Apply is a semantic no-op, and a real change publishes exactly one `Фон документа` history entry.
+
+It deliberately does **not** own modal DOM/options, background schema/defaults, renderer behavior, Crop or resize. Those stay in `src/main.js`, `src/core/state.js`, render owners and `resize-command-controller.js`.
+
 ### `psd-import-controller.js`
 Owns the import transaction from a PSD/PSB file to a canonical ZPE document after codec decode: size guard, decoded layer/group/path mapping, native high-depth/CMYK preservation, ICC preview policy, temporary-buffer budgeting, stale document/session checks and publish coordination. Stable core transforms are direct dependencies; binary decode, browser raster encoding, runtime publication and Photoshop semantics are explicit narrow ports.
 
