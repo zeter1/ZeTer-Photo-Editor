@@ -45,6 +45,13 @@ Owns primitive layer/group command policy shared by the Layers panel, menus, but
 
 It deliberately does **not** render the Layers tree, own drag identity, define persisted layer/group schema, store history, or absorb Smart Object/mask/blending feature menus. Stable model mutations remain in `src/core/state.js`; `src/main.js` is the composition root for transaction/modal/status ports and feature-heavy menu lists.
 
+### `src/layers/property-command-controller.js`
+Owns generic Layer Properties mutation/transaction policy shared by the Properties/Color & Effects panels and persistent layer controls: exact active-document + layer-ID re-resolution, effective-lock checks, numeric/text/shape/filter normalization, raster canvas-size safety, custom-font publication, layer blend/opacity commands and HDR display-preview update/reset.
+
+Range-style live preview records an owner/layer/property baseline, mutates only the exact live target, increments the transient change serial and renders without history; the final `change` publishes at most one commit relative to that original baseline. Stale callbacks, invalid values, locked targets and semantic no-ops publish no history.
+
+It deliberately does **not** own Properties markup, Adjustment Layer controls, Smart Filter UI, Blending Options, Text add/edit modal state or persisted schema. Markup/bindings remain in `src/main.js`; stable clamps/sanitizers live in `src/core/state.js`; Text option/capability policy stays in `src/ui/text-settings-controller.js`.
+
 ### `paths-controller.js`
 Owns Saved Paths UI/state orchestration: selected path index, bounded Photoshop path-resource allocation, save/rename/duplicate/delete actions, accessible list/keyboard/context-menu wiring and applying a saved path as a vector mask through grouped explicit ports. The document model remains in core, Pen direct-edit geometry/transient edit index remains in `src/main.js`, and PSD/PSB binary semantics remain in `src/formats/psd.js`.
 
