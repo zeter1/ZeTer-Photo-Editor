@@ -71,16 +71,18 @@ This yields one reusable rule for both raster modes: **the authority proven afte
 
 `src/selection/raster-mutation-controller.js::clearAcrossVisibleLayers()` owns a separate destructive batch transaction for merged Clipboard cut / multi-layer selection clearing. It may reuse low-level Canvas/high-depth preparation helpers, but it must establish publication authority for the **whole target set** itself.
 
-The batch follows **capture target set → prepare all → await → revalidate all → publish all**:
+The batch has **two frozen inputs**: publication authority and selection semantics. Before target discovery it captures one cloned full selection shape — rectangle, ellipse or complete polygon/lasso/magnetic point geometry, not only its bounds. Target intersection, native high-depth predicate generation and Canvas clipping must all consume that same snapshot. A newer live selection may be edited or cleared while preparation is pending; it must neither change the pixels prepared for later batch targets nor be restored/overwritten when the older batch completes.
 
-1. capture the originating document object, active session and every exact source-layer object selected for the batch;
-2. finish rasterization, PNG encoding and native high-depth mutation preparation without persisted writes;
+The batch follows **capture selection + target set → prepare all → await → revalidate all → publish all**:
+
+1. capture one full selection-shape snapshot, the originating document object, active session and every exact source-layer object selected for the batch;
+2. derive every target intersection / high-depth predicate / Canvas clip from that captured selection snapshot and finish rasterization, PNG encoding and native high-depth mutation preparation without persisted writes;
 3. after the final await and immediately before the first persisted write, revalidate the exact document/session plus every exact source-layer object with object identity and current effective lock state;
 4. derive publication slots from the exact source objects (for example `owner.layers.indexOf(sourceLayer)`), never from `layer.id`;
 5. if any target was removed, replaced — including by a same-ID object — or became effectively locked, reject the entire batch: apply no prepared high-depth mutation, replace no rasterized layer and publish no history/success result;
 6. once the full plan is validated, publish synchronously with no intervening await. A raster source is mutated only through its exact captured object; a rasterized non-raster source replaces only its exact validated slot.
 
-This is an all-or-none authority gate over publication, not a generic rollback framework. Preparation errors remain real errors; the shared raster-persistence guard is still released in `finally`.
+This is an all-or-none authority gate over publication plus an immutable-input snapshot for preparation, not a generic rollback framework. Preparation errors remain real errors; the shared raster-persistence guard is still released in `finally`.
 
 ## Caller contract
 

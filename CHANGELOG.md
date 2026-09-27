@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Frozen selection semantics for merged raster batches
+
+- Correctness: merged multi-layer selection clearing now captures one cloned full selection-shape snapshot before target discovery and async preparation, so later targets cannot silently switch to a newer marquee/lasso/polygon/magnetic selection while the batch is pending.
+- Precision/path consistency: target intersection, native 16/32-bit RGB/CMYK selection predicates and Canvas8 clipping consume the same captured geometry; clearing or replacing the live selection during an await no longer turns a later target into a full-layer or differently shaped clear.
+- State ownership: the batch never restores or overwrites a newer live selection; the existing exact document/session/target-set/effective-lock all-or-none publication gate remains unchanged.
+- Regression/docs: deterministic snapshot handoff tests and source guards pin the immutable-input contract, and the raster persistence/boundary/AI-routing docs now distinguish frozen preparation inputs from exact publication authority.
+
 
 ### 2026-09-27 — Atomic exact-target merged selection clearing
 

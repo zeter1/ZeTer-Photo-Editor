@@ -15454,6 +15454,7 @@ function createSelectionRasterMutationController({
   }
   if (
     typeof selection?.hasActive !== 'function' ||
+    typeof selection?.captureSnapshot !== 'function' ||
     typeof selection?.intersectsLayer !== 'function' ||
     typeof selection?.predicate !== 'function' ||
     typeof selection?.clipContext !== 'function'
@@ -15477,11 +15478,11 @@ function createSelectionRasterMutationController({
     return false;
   }
 
-  async function prepareClearedHighDepthMutation(layer) {
+  async function prepareClearedHighDepthMutation(layer, selectionSnapshot) {
     if (!layer?.highDepthSource) return null;
     const buffer = rasterEdit.editableHighDepthBuffer(layer, { requireAlpha:true });
     if (!buffer) return null;
-    const cleared = clearPixelBufferPixels(buffer, { isAllowed:selection.predicate(layer) });
+    const cleared = clearPixelBufferPixels(buffer, { isAllowed:selection.predicate(layer, selectionSnapshot) });
     if (!cleared) return { cleared:0, mutation:null };
     return {
       cleared,
@@ -15489,7 +15490,7 @@ function createSelectionRasterMutationController({
     };
   }
 
-  async function prepareClearedRasterDataUrl(layer) {
+  async function prepareClearedRasterDataUrl(layer, selectionSnapshot) {
     if (!documentRef?.createElement) throw new Error('Canvas document is unavailable');
     const size = checkedCanvasSize(layer.width, layer.height, 'Растровый слой «' + (layer.name || 'Без имени') + '»');
     const canvas = documentRef.createElement('canvas');
@@ -15501,7 +15502,7 @@ function createSelectionRasterMutationController({
       if (image) context.drawImage(image, 0, 0, size.width, size.height);
     }
     context.save();
-    selection.clipContext(context, layer);
+    selection.clipContext(context, layer, selectionSnapshot);
     context.clearRect(0, 0, size.width, size.height);
     context.restore();
     return canvasToDataURL(canvas, 'image/png');
@@ -15562,10 +15563,13 @@ function createSelectionRasterMutationController({
       return null;
     }
 
+    const selectionSnapshot = selection.captureSnapshot();
+    if (!selectionSnapshot) return { cleared:0, locked:0, rasterized:0 };
+
     const documentValue = currentDocument();
     const targetSessionId = state.getActiveSessionId();
     const intersecting = documentValue.layers.filter(
-      layer => isLayerVisible(documentValue, layer) && selection.intersectsLayer(layer),
+      layer => isLayerVisible(documentValue, layer) && selection.intersectsLayer(layer, selectionSnapshot),
     );
     const pixelTargets = intersecting.filter(layer => layer.type !== 'adjustment');
     const targets = pixelTargets.filter(layer => !isLayerLocked(documentValue, layer));
@@ -15581,13 +15585,13 @@ function createSelectionRasterMutationController({
         if (!working) throw new Error('Не удалось подготовить слой к очистке');
         if (layer.type !== 'raster') rasterized += 1;
         if (layer.type === 'raster' && working.highDepthSource) {
-          const highDepth = await prepareHighDepthMutation(working);
+          const highDepth = await prepareHighDepthMutation(working, selectionSnapshot);
           if (highDepth?.mutation) {
             prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
             continue;
           }
         }
-        prepared.push({ layer, working, dataUrl:await prepareRasterDataUrl(working), highDepthMutation:null });
+        prepared.push({ layer, working, dataUrl:await prepareRasterDataUrl(working, selectionSnapshot), highDepthMutation:null });
       }
 
       if (state.getDocument() !== documentValue || state.getActiveSessionId() !== targetSessionId) {
@@ -22117,6 +22121,7 @@ const selectionRasterMutations = createSelectionRasterMutationController({
   },
   selection: {
     hasActive: () => Boolean(selectionRect),
+    captureSnapshot: () => selectionShape ? cloneSelectionShape(selectionShape) : null,
     intersectsLayer: selectionIntersectsLayer,
     predicate: rasterSelectionPredicate,
     clipContext: clipContextToSelection,
@@ -22956,9 +22961,9 @@ function clearSelectionState() {
   selectionGestures.resetDrafts();
 }
 
-function pointInsideSelection(point) {
-  if (!selectionShape) return true;
-  return pointInSelection(point, selectionShape);
+function pointInsideSelection(point, shape = selectionShape) {
+  if (!shape) return true;
+  return pointInSelection(point, shape);
 }
 
 function selectionPolygonForLayer(layer, shape = selectionShape) {
@@ -22993,8 +22998,8 @@ function clipContextToDocumentSelection(ctx) {
   if (traceDocumentSelectionPath(ctx)) ctx.clip();
 }
 
-function clipContextToSelection(ctx, layer) {
-  const polygon = selectionPolygonForLayer(layer);
+function clipContextToSelection(ctx, layer, shape = selectionShape) {
+  const polygon = selectionPolygonForLayer(layer, shape);
   if (!polygon) return;
   ctx.beginPath();
   ctx.moveTo(polygon[0].x, polygon[0].y);
@@ -23003,15 +23008,16 @@ function clipContextToSelection(ctx, layer) {
   ctx.clip();
 }
 
-function rasterSelectionPredicate(layer) {
-  if (!selectionShape) return null;
-  return (x,y) => pointInsideSelection(layerPixelToDocumentPoint({x:x+.5,y:y+.5},layer));
+function rasterSelectionPredicate(layer, shape = selectionShape) {
+  if (!shape) return null;
+  return (x,y) => pointInsideSelection(layerPixelToDocumentPoint({x:x+.5,y:y+.5},layer), shape);
 }
 
-function selectionIntersectsLayer(layer) {
-  if (!selectionRect) return false;
+function selectionIntersectsLayer(layer, shape = selectionShape) {
+  const selectionBoundsSnapshot = shape === selectionShape ? selectionRect : selectionBounds(shape);
+  if (!selectionBoundsSnapshot) return false;
   const bounds=frameBounds(layer);
-  return selectionRect.x < bounds.x+bounds.width && selectionRect.x+selectionRect.width > bounds.x && selectionRect.y < bounds.y+bounds.height && selectionRect.y+selectionRect.height > bounds.y;
+  return selectionBoundsSnapshot.x < bounds.x+bounds.width && selectionBoundsSnapshot.x+selectionBoundsSnapshot.width > bounds.x && selectionBoundsSnapshot.y < bounds.y+bounds.height && selectionBoundsSnapshot.y+selectionBoundsSnapshot.height > bounds.y;
 }
 
 function render({ paintPreview = false } = {}) {
