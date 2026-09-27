@@ -3,7 +3,7 @@ import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constr
 import {
   createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
   addLayer, selectedLayer,
-  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, FILTER_RANGES, sanitizeFilters, sanitizeHighDepthPreview, sanitizeColorManagement,
+  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, sanitizeFilters, sanitizeHighDepthPreview, sanitizeColorManagement,
   isLayerVisible, isLayerLocked, isGroupLocked, groupDepth,
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache } from './core/render.js';
@@ -15,7 +15,7 @@ import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } fr
 import {
   TOOL_LABELS, RASTER_BRUSH_TOOLS,
   SELECTION_TYPE_LABELS, SELECTION_TYPES, MIME_EXT,
-  COLOR_CORRECTION_CONTROLS, COLOR_CORRECTION_KEYS,
+  COLOR_CORRECTION_KEYS,
   BASIC_EFFECT_CONTROLS, RASTER_EFFECT_CONTROLS,
   SMART_SNAP_STORAGE_KEY, TOOL_ORDER_STORAGE_KEY,
   NATIVE_HIGH_DEPTH_PAINT_TOOLS, NATIVE_CMYK_PAINT_TOOLS,
@@ -29,6 +29,7 @@ import { createWorkspaceLayoutController } from './ui/workspace-layout-controlle
 import { createLayersPanelController } from './ui/layers-panel-controller.js';
 import { createLayerGroupCommandController } from './layers/command-controller.js';
 import { createLayerPropertyCommandController } from './layers/property-command-controller.js';
+import { createColorCorrectionController } from './ui/color-correction-controller.js';
 import { createPathsController } from './ui/paths-controller.js';
 import { createColorManagementController } from './ui/color-management-controller.js';
 import { createSmartFilterController } from './ui/smart-filter-controller.js';
@@ -428,6 +429,23 @@ const layerPropertyCommandController = createLayerPropertyCommandController({
     filterKeysForLayer: layer => (layer.type === 'raster' || layer.type === 'adjustment'
       ? RASTER_EFFECT_CONTROLS
       : BASIC_EFFECT_CONTROLS).map(control => control.key),
+  },
+});
+
+const colorCorrectionController = createColorCorrectionController({
+  state: { getDocument: () => doc },
+  transaction: {
+    commit,
+    markTransientChange: () => { documentChangeSerial += 1; },
+  },
+  rendering: { render, refreshInspectorPanels },
+  ui: {
+    modalRoot: els.modalRoot,
+    documentRef: document,
+    HTMLElementClass: HTMLElement,
+    setStatus,
+    toast,
+    formatFilterValue,
   },
 });
 
@@ -2764,7 +2782,7 @@ const menus={
     ['Опустить слой','',()=>layerGroupCommandController.moveSelectedLayer(-1),()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],
   image:[
-    ['Цветокоррекция…','',openColorCorrectionDialog,()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
+    ['Цветокоррекция…','',()=>colorCorrectionController.open(selected()),()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
     ['Сбросить цветокоррекцию','',()=>{const l=selected();if(l?.type==='raster'&&!isLayerLocked(doc,l)){const current=sanitizeFilters(l.filters);for(const key of COLOR_CORRECTION_KEYS)current[key]=DEFAULT_LAYER_FILTERS[key];l.filters=current;commit('Сбросить цветокоррекцию');}},()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Размер изображения…','',resizeImageDialog],
@@ -2799,53 +2817,6 @@ const menus={
     ['О программе','',showAbout],
   ],
 };
-function openColorCorrectionDialog(){
-  const layer=selected();
-  if(!layer||layer.type!=='raster'){toast('Цветокоррекция доступна для растрового слоя','warn');setStatus('Выберите растровый слой');return;}
-  if(isLayerLocked(doc,layer)){toast('Слой или его группа заблокированы','warn');return;}
-  const layerId=layer.id;
-  const original=sanitizeFilters(layer.filters);
-  layer.filters={...original};
-  const previousFocus=document.activeElement;
-  const back=document.createElement('div');back.className='modal-backdrop';
-  const modal=document.createElement('form');modal.className='modal color-correction-modal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Цветокоррекция');
-  modal.innerHTML='<header>Цветокоррекция</header><div class="modal-body color-correction-body"><p class="muted color-correction-hint">Настройки применяются неразрушающе к выбранному растровому слою. Изменения сразу видны на холсте.</p></div><footer><button type="button" class="secondary-button" data-reset>Сбросить</button><span class="modal-footer-spacer"></span><button type="button" class="secondary-button" data-cancel>Отмена</button><button type="submit" class="primary-button">Применить</button></footer>';
-  const body=modal.querySelector('.color-correction-body');
-  let currentGroup='';
-  for(const control of COLOR_CORRECTION_CONTROLS){
-    if(control.group!==currentGroup){currentGroup=control.group;const heading=document.createElement('div');heading.className='color-correction-group';heading.textContent=currentGroup;body.append(heading);}
-    const row=document.createElement('label');row.className='color-correction-row';
-    const label=document.createElement('span');label.textContent=control.label;
-    const input=document.createElement('input');input.type='range';input.name=control.key;input.min=String(control.min);input.max=String(control.max);input.step=String(control.step);input.value=String(layer.filters[control.key] ?? DEFAULT_LAYER_FILTERS[control.key]);
-    const output=document.createElement('output');output.value=formatFilterValue(control.key,input.value);output.textContent=output.value;
-    row.append(label,input,output);body.append(row);
-    input.addEventListener('input',()=>{
-      const target=doc.layers.find(item=>item.id===layerId);if(!target)return;
-      const [min,max]=FILTER_RANGES[control.key]||[control.min,control.max];
-      const value=clamp(Number(input.value),min,max);target.filters[control.key]=value;output.value=formatFilterValue(control.key,value);output.textContent=output.value;render();
-    });
-  }
-  const close=()=>{els.modalRoot.replaceChildren();if(previousFocus instanceof HTMLElement)previousFocus.focus();};
-  const restore=()=>{const target=doc.layers.find(item=>item.id===layerId);if(target){target.filters={...original};render();refreshInspectorPanels();}};
-  back.append(modal);els.modalRoot.replaceChildren(back);
-  modal.querySelector('[data-reset]').addEventListener('click',()=>{
-    for(const control of COLOR_CORRECTION_CONTROLS){
-      const input=modal.elements.namedItem(control.key);if(!(input instanceof HTMLInputElement))continue;
-      input.value=String(DEFAULT_LAYER_FILTERS[control.key]);input.dispatchEvent(new Event('input',{bubbles:true}));
-    }
-  });
-  modal.querySelector('[data-cancel]').addEventListener('click',()=>{restore();close();setStatus('Цветокоррекция отменена');});
-  modal.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();restore();close();setStatus('Цветокоррекция отменена');}});
-  modal.addEventListener('submit',e=>{
-    e.preventDefault();const target=doc.layers.find(item=>item.id===layerId);if(!target){close();return;}
-    const changed=COLOR_CORRECTION_CONTROLS.some(control=>Math.abs((target.filters[control.key]??DEFAULT_LAYER_FILTERS[control.key])-(original[control.key]??DEFAULT_LAYER_FILTERS[control.key]))>1e-9);
-    close();
-    if(changed){commit('Цветокоррекция слоя');setStatus('Цветокоррекция применена');}
-    else {target.filters={...original};render();setStatus('Цветокоррекция без изменений');}
-  });
-  modal.querySelector('input[type="range"]')?.focus();
-}
-
 function resizeCanvasDialog(){if(blockPendingDocumentEdit())return;showModal({title:'Размер холста',fields:[
   {name:'width',label:'Ширина',type:'number',value:doc.width,min:'1',max:'12000',required:true},
   {name:'height',label:'Высота',type:'number',value:doc.height,min:'1',max:'12000',required:true},

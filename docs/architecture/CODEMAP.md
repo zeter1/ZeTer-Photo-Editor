@@ -52,6 +52,11 @@ Range-style live preview records an owner/layer/property baseline, mutates only 
 
 It deliberately does **not** own Properties markup, Adjustment Layer controls, Smart Filter UI, Blending Options, Text add/edit modal state or persisted schema. Markup/bindings remain in `src/main.js`; stable clamps/sanitizers live in `src/core/state.js`; Text option/capability policy stays in `src/ui/text-settings-controller.js`.
 
+### `color-correction-controller.js`
+Owns the Color Correction dialog as one UI transaction: exact originating document/layer identity, canonical filter draft/original snapshots, bounded live range preview without history, batched Reset, guarded Apply, Cancel/Escape/backdrop rollback and idempotent modal/focus cleanup. Stale document callbacks, deleted/replaced layers and lock changes publish no history into another session; rollback may still restore the originating transient state when the exact target survives.
+
+It deliberately does **not** own generic Properties mutation policy (`src/layers/property-command-controller.js`), persisted filter schema/ranges (`src/core/state.js`), control metadata (`src/ui/tool-config.js`) or pixel filtering (`src/core/render.js`). `src/main.js` only composes the controller and routes the Image menu action.
+
 ### `paths-controller.js`
 Owns Saved Paths UI/state orchestration: selected path index, bounded Photoshop path-resource allocation, save/rename/duplicate/delete actions, accessible list/keyboard/context-menu wiring and applying a saved path as a vector mask through grouped explicit ports. The document model remains in core, Pen direct-edit geometry/transient edit index remains in `src/main.js`, and PSD/PSB binary semantics remain in `src/formats/psd.js`.
 
