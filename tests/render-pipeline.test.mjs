@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
+const layerTransformGestureController = await readFile(new URL('../src/interaction/layer-transform-gesture-controller.js', import.meta.url), 'utf8');
 
 test('full renders are serialized and only the latest completed frame reaches the visible canvas', () => {
   assert.match(main, /let renderBusy = false/);
@@ -33,9 +34,12 @@ test('scaled raster rendering requests high-quality image smoothing', () => {
   assert.match(render, /ctx\.imageSmoothingQuality = 'high'/);
 });
 
-test('resize interaction calculates every pointer move from the original transform', () => {
-  assert.match(main, /initial:\{x:l\.x,y:l\.y,width:l\.width,height:l\.height,scaleX:l\.scaleX,scaleY:l\.scaleY,rotation:l\.rotation\}/);
-  assert.match(main, /resizeLayerFromPoint\(\{ \.\.\.l, \.\.\.drag\.initial \}/);
+test('resize interaction calculates every pointer move from the captured transform baseline', () => {
+  assert.match(layerTransformGestureController, /function numericBaseline\(layer\)/);
+  assert.match(layerTransformGestureController, /width: finiteNumber\(layer\.width\) \?\? 1/);
+  assert.match(layerTransformGestureController, /scaleX: finiteNumber\(layer\.scaleX\) \?\? 1/);
+  assert.match(layerTransformGestureController, /rotation: finiteNumber\(layer\.rotation\) \?\? 0/);
+  assert.match(layerTransformGestureController, /resizeLayerFromPoint\([\s\S]*?\{ \.\.\.layer, \.\.\.gesture\.baseline \}/);
 });
 
 test('render pipeline treats adjustment layers as cumulative stack operations and supports clipping masks', () => {

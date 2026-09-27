@@ -6,7 +6,7 @@
 DOM skeleton, menus, toolbar, panels, dialogs and version meta. Runtime uses generated `src/app.bundle.js`.
 
 ### `src/main.js`
-Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`; raster layer-mask / Select & Mask orchestration to `src/selection/mask-controller.js`; selection-driven Vector Mask command/policy to `src/selection/vector-mask-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar/workspace-layout/saved-Paths and retouch mechanics, are delegated to their canonical owners.
+Application orchestrator: tool-specific pointer/keyboard dispatch, tool selection, history/transaction coordination and save/export flows. Generic overlay pointer capture/active-pointer lifecycle is delegated to `src/interaction/pointer-lifecycle-router.js`; selected-layer Move/Resize/Rotate transaction state, geometry publication, final history and rollback are delegated to `src/interaction/layer-transform-gesture-controller.js`. Selection gesture mechanics are delegated to `src/selection/gesture-controller.js`; raster layer-mask / Select & Mask orchestration to `src/selection/mask-controller.js`; selection-driven Vector Mask command/policy to `src/selection/vector-mask-controller.js`. Paint-stroke lifecycle, one-shot raster commands, destructive selection raster mutations and raster edit buffers/persistence, plus extracted session, clipboard, import, menu/modal/toolbar/workspace-layout/saved-Paths and retouch mechanics, are delegated to their canonical owners.
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
@@ -15,7 +15,12 @@ Application orchestrator: tool-specific pointer/keyboard dispatch, tool selectio
 ### `pointer-lifecycle-router.js`
 Owns the generic overlay Pointer Events lifecycle: one active pointer at a time, capture/release, routing of idle hover vs active-pointer movement, matching up/cancel, and fail-safe cancellation when `lostpointercapture` arrives unexpectedly.
 
-It deliberately does **not** know tool names or mutate layers, selections, paths, crop geometry or paint buffers. Those domain branches remain in `src/main.js` and the dedicated selection/painting controllers.
+It deliberately does **not** know tool names or mutate layers, selections, paths, crop geometry or paint buffers. Those domain branches remain in `src/main.js` and dedicated domain controllers.
+
+### `layer-transform-gesture-controller.js`
+Owns one interactive selected-layer Move / Resize / Rotate transaction from captured baseline through live pointer updates to exactly-one history publication or cancel rollback. It binds the originating document, stable layer ID and object identity; revalidates recursive locks on every update/finalize/cancel; owns Shift axis-lock, Smart Snap/Ctrl bypass, resize modifiers/min-size and rotate snapping by delegating to canonical core geometry.
+
+It deliberately does **not** install DOM listeners, choose the selected layer, hit-test handles, own pointer capture, render the Layers tree or absorb one-shot nudge/align/fit commands. Generic capture stays in `pointer-lifecycle-router.js`; hit-testing/cursor/tool dispatch stay in `src/main.js`; discrete transform commands stay in `src/layers/transform-command-controller.js`.
 
 ## UI boundary — `src/ui/`
 
@@ -48,7 +53,7 @@ It deliberately does **not** render the Layers tree, own drag identity, define p
 ### `src/layers/transform-command-controller.js`
 Owns synchronous one-shot selected-layer layout transforms shared by keyboard/menu routes: nudge, center, six canvas alignments and fit-to-canvas. It re-resolves the exact active layer by stable ID, applies recursive effective-lock and transformability guards, delegates rotated/scaled frame math to `src/core/geometry.js`, suppresses semantic no-ops and publishes one history entry only after a real transform.
 
-It deliberately does **not** own pointer Move/Resize/Rotate gesture state or generic Properties live-preview transactions; those remain in `src/main.js` and `src/layers/property-command-controller.js` respectively. `src/main.js` keeps only selected-layer/status wrappers.
+It deliberately does **not** own pointer Move/Resize/Rotate gesture state or generic Properties live-preview transactions; those belong to `src/interaction/layer-transform-gesture-controller.js` and `src/layers/property-command-controller.js` respectively. `src/main.js` keeps only selected-layer/status wrappers.
 
 ### `src/layers/property-command-controller.js`
 Owns generic Layer Properties mutation/transaction policy shared by the Properties/Color & Effects panels, discrete Image-menu filter resets and persistent layer controls: exact active-document + layer-ID re-resolution, effective-lock checks, numeric/text/shape/filter normalization, raster canvas-size safety, custom-font publication, layer blend/opacity commands and HDR display-preview update/reset.
