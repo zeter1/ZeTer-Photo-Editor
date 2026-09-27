@@ -7,6 +7,7 @@
 | С чего начать и где что лежит | [PROJECT.md](PROJECT.md) |
 | Карта исходников и владельцы кода | [architecture/CODEMAP.md](architecture/CODEMAP.md) |
 | Архитектурные границы и запрещённые зависимости | [architecture/BOUNDARIES.md](architecture/BOUNDARIES.md) |
+| Спецификация Crop: gesture/session/overlay vs persisted command | [architecture/CROP_INTERACTION.md](architecture/CROP_INTERACTION.md) |
 | Рабочий цикл ChatGPT/Codex | [development/AI_WORKFLOW.md](development/AI_WORKFLOW.md) |
 | Refactoring, debugging, code review и test-oracle правила | [development/QUALITY_PLAYBOOK.md](development/QUALITY_PLAYBOOK.md) |
 | Какие тесты соответствуют изменению | [testing/TEST_MATRIX.md](testing/TEST_MATRIX.md) |
