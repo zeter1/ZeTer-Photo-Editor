@@ -67,7 +67,7 @@ function release(drag, point, pointerId = 1, shiftKey = false, altKey = false) {
       if (['Перемещение слоя', 'Изменить размер слоя', 'Повернуть слой'].includes(label)) calls.push(['commit', label]);
     },
     applyCrop: (owner, rect) => calls.push(['crop', owner?.id, rect.width, rect.height]),
-    applyGradient: (from, to) => calls.push(['gradient', to.x, to.y]),
+    gradientCommands: { apply: (owner, from, to) => calls.push(['gradient', owner?.id, to.x, to.y]) },
     setSelectionShape: () => {},
     drawOverlay: () => {},
     setStatus: () => {},
@@ -90,7 +90,7 @@ test('drawing tools use the release position even without a final pointermove', 
   assert.deepEqual(await release({ kind:'line', start, current }, end), [['line',10,10,40,50]]);
   assert.deepEqual(await release({ kind:'shape', start, current, lockAspect:false }, end), [['shape',30,40]]);
   assert.deepEqual(await release({ kind:'crop', start, current, owner:{id:'crop-owner'} }, end), [['crop','crop-owner',30,40]]);
-  assert.deepEqual(await release({ kind:'gradient', start, current }, end), [['gradient',40,50]]);
+  assert.deepEqual(await release({ kind:'gradient', owner:{id:'gradient-owner'}, start, current }, end), [['gradient','gradient-owner',40,50]]);
 });
 
 test('paint draws the final segment once and ignores an unchanged release point', async () => {
