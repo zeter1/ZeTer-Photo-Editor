@@ -103,7 +103,7 @@ test('real transform pointermove delegates point and modifiers to the canonical 
     hoverPoint:null,
     layerTransformGestures:{
       isGesture:value=>value===transformDrag,
-      update:(value,point,modifiers)=>calls.push([value.kind,point.x,point.y,modifiers]),
+      update:(value,point,modifiers)=>calls.push([value.kind,point.x,point.y,Boolean(modifiers.shiftKey),Boolean(modifiers.altKey),Boolean(modifiers.ctrlKey),Boolean(modifiers.metaKey)]),
     },
   };
   runInNewContext(pointerMoveSource + '\nglobalThis.__pointerMove = onOverlayPointerMove;', context);
@@ -112,6 +112,9 @@ test('real transform pointermove delegates point and modifiers to the canonical 
     'move',
     15,
     25,
-    {shiftKey:true,altKey:true,ctrlKey:true,metaKey:false},
+    true,
+    true,
+    true,
+    false,
   ]]);
 });

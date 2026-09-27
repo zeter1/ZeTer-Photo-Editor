@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const transformCommands = await readFile(new URL('../src/layers/transform-command-controller.js', import.meta.url), 'utf8');
+const transformGestures = await readFile(new URL('../src/interaction/layer-transform-gesture-controller.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 const mark = await readFile(new URL('../assets/zeter-mark.svg', import.meta.url), 'utf8');
@@ -22,18 +23,17 @@ test('move tool exposes persisted smart snapping and six canvas alignment comman
 });
 
 test('move dragging supports smart guides, screen-space snap threshold, axis lock, and temporary Ctrl bypass', () => {
-  const move = main.match(/if \(drag\.kind === 'move'\) \{[\s\S]*?drawOverlay\(\); return;\n  \}/)?.[0] ?? '';
-  assert.match(move, /if \(e\.shiftKey\)/);
-  assert.match(move, /lockedAxis = 'y'/);
-  assert.match(move, /lockedAxis = 'x'/);
-  assert.match(move, /lockedAxis === 'x' \? drag\.x : snapped\.x/);
-  assert.match(move, /lockedAxis === 'y' \? drag\.y : snapped\.y/);
-  assert.match(move, /smartSnapEnabled && !e\.ctrlKey && !e\.metaKey/);
-  assert.match(move, /threshold: 8 \/ zoom/);
-  assert.match(move, /visibleSnapTargetRects\(l\.id\)/);
-  assert.match(move, /smartGuides = \{/);
-  assert.match(move, /snapped\.guides\.x/);
-  assert.match(move, /snapped\.guides\.y/);
+  assert.match(transformGestures, /if \(modifiers\.shiftKey\)/);
+  assert.match(transformGestures, /lockedAxis = 'y'/);
+  assert.match(transformGestures, /lockedAxis = 'x'/);
+  assert.match(transformGestures, /lockedAxis === 'x' \? gesture\.baseline\.x : snappedX/);
+  assert.match(transformGestures, /lockedAxis === 'y' \? gesture\.baseline\.y : snappedY/);
+  assert.match(transformGestures, /runtime\.isSmartSnapEnabled\(\) && !modifiers\.ctrlKey && !modifiers\.metaKey/);
+  assert.match(transformGestures, /threshold: 8 \/ zoom/);
+  assert.match(transformGestures, /runtime\.visibleSnapTargetRects\(gesture\.owner, gesture\.layerId\)/);
+  assert.match(transformGestures, /runtime\.setSmartGuides\(\{/);
+  assert.match(transformGestures, /snapped\?\.guides\?\.x/);
+  assert.match(transformGestures, /snapped\?\.guides\?\.y/);
   assert.match(main, /strokeStyle = '#ff61d8'/);
   assert.match(main, /smartGuides\.x !== null/);
   assert.match(main, /smartGuides\.y !== null/);
