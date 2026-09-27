@@ -14,6 +14,7 @@
 8. **Завершённую задачу удалить из `task/` только после merge + green main CI.** README остаётся.
 9. Если задача стала неактуальной из-за нового кода/решения, удали или перепиши её отдельным docs-only изменением; не сохраняй stale queue.
 10. Не читай все task-файлы «для контекста»: это снова тратит токены и ухудшает фокус.
+11. Перед extraction функции/owner-а проверь не только production callers, но и тесты, которые вырезают/eval-ят source (`runInNewContext`, `vm`, `eval`, `slice/indexOf`, regex/source guards): их explicit harness dependencies нужно обновлять в той же проходке, не маскируя CI runtime-fallback'ами.
 
 ## Минимальный шаблон задачи
 
