@@ -314,7 +314,7 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
     assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
   }
   assert.match(main, /textEditController\.documentWithPreview\(doc\)/);
-  assert.match(main, /textEditController\.previewLayer\(doc\)/);
+  assert.match(main, /getDisplayLayer: owner => textEditController\.previewLayer\(owner\) \|\| selectedLayer\(owner\)/);
   assert.match(main, /textEditController\.syncPreviewCanvas\(\)/);
   assert.doesNotMatch(modalController, /attachTextPreview/);
   assert.doesNotMatch(modalController, /onModalClose/);

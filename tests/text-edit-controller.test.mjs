@@ -142,7 +142,7 @@ test('text edit transaction has one controller owner and generic modal shell sta
   assert.match(main,/createTextEditController/);
   assert.match(main,/textEditController\.documentWithPreview\(doc\)/);
   assert.match(main,/textEditController\.syncPreviewCanvas\(\)/);
-  assert.match(main,/textEditController\.previewLayer\(doc\)/);
+  assert.match(main,/getDisplayLayer: owner => textEditController\.previewLayer\(owner\) \|\| selectedLayer\(owner\)/);
   assert.match(build,/'src\/ui\/text-edit-controller\.js'/);
   assert.match(controller,/from '\.\.\/core\/state\.js'/);
   assert.doesNotMatch(main,/let textDraft\s*=/);
