@@ -168,9 +168,16 @@ export function createSelectionRasterMutationController({
         return null;
       }
 
-      for (const { layer, working, dataUrl, highDepthMutation } of prepared) {
-        const index = documentValue.layers.findIndex(item => item.id === layer.id);
-        if (index < 0) continue;
+      const publication = prepared.map(entry => ({
+        ...entry,
+        index:documentValue.layers.indexOf(entry.layer),
+      }));
+      if (publication.some(({ layer, index }) => index < 0 || isLayerLocked(documentValue, layer))) {
+        status('Очистка выделения отменена: целевой слой изменился или заблокирован');
+        return null;
+      }
+
+      for (const { layer, working, dataUrl, highDepthMutation, index } of publication) {
         if (layer.type === 'raster') {
           if (highDepthMutation) {
             rasterEdit.applyHighDepthMutation(layer, highDepthMutation);
