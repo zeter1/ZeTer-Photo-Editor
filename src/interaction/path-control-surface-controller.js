@@ -113,6 +113,30 @@ export function createPathControlSurfaceController({
     return target.layer?.pathPoints ?? null;
   }
 
+  function sameTargetIdentity(candidate, target) {
+    if (!candidate || candidate.source !== target?.source || candidate.points !== target?.points) {
+      return false;
+    }
+    if (candidate.source === 'document-path') {
+      return (
+        candidate.documentPathIndex === target.documentPathIndex &&
+        candidate.subpathIndex === target.subpathIndex
+      );
+    }
+    if (candidate.layer !== target.layer) return false;
+    return candidate.source !== 'vector-mask' || candidate.subpathIndex === target.subpathIndex;
+  }
+
+  function resolveTarget(target) {
+    const nodeIndex = Number.isInteger(target?.nodeIndex) ? target.nodeIndex : -1;
+    if (nodeIndex < 0) return null;
+    const current = selectedTargets().find(candidate => sameTargetIdentity(candidate, target)) ?? null;
+    const node = current?.points?.[nodeIndex] ?? null;
+    return current && node
+      ? { ...current, node, nodeIndex, control: target.control }
+      : null;
+  }
+
   function documentPoint(target, node, control = 'anchor') {
     const local = control === 'anchor' ? node : node?.[control];
     if (!local) return null;
@@ -264,6 +288,7 @@ export function createPathControlSurfaceController({
   return {
     selectedTargets,
     targetPoints,
+    resolveTarget,
     hit,
     trace,
     draw,
