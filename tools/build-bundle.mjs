@@ -47,6 +47,7 @@ const sources = [
   'src/selection/vector-mask-controller.js',
   'src/selection/clipboard-controller.js',
   'src/document/import-controller.js',
+  'src/document/resize-command-controller.js',
   'src/document/smart-object-controller.js',
   'src/document/psd-native-metadata-plans.js',
   'src/document/psd-import-semantics.js',

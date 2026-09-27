@@ -75,6 +75,11 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - Async import must re-check originating document/session before the first mutation.
 - PSD parsing stays in `src/formats/psd.js`; project open/save stays outside the import controller until extracted behind its own boundary.
 
+### Document resize
+- `src/document/resize-command-controller.js` is the single semantic owner for persisted Image Size / Canvas Size commands. Modal opening captures the originating document and Apply must pass that exact owner into the controller; a different current document is a rejected stale command with no mutation, cleanup or history.
+- All resize math that can fail must be staged before the first persisted write: Image Size uses canonical `checkedCanvasSize()` + `imageResizeTransforms()`; Canvas Size builds every shifted layer position and validates `MAX_LAYER_POSITION` before mutation. Invalid or semantic no-op requests publish nothing.
+- Successful resize clears caller-owned geometry transient state and publishes exactly one history entry, then fits the same active document. Resize modal DOM/status stays in `src/main.js`; Crop, pointer gestures, zoom/viewport policy and reusable document limits remain separate owners.
+
 ### Selection
 - `src/selection/gesture-controller.js` owns transient selection interaction state: marquee type, rectangle/ellipse/free-lasso drag transitions, polygon/magnetic drafts, magnetic edge sampling and draft overlay drawing. It receives geometry, canonical selection shape and UI/runtime access through grouped ports.
 - The gesture controller must not install global pointer/keyboard listeners, own document/session/history state, or become the canonical owner of persisted selection shape. Generic overlay pointer capture/ownership is routed by `src/interaction/pointer-lifecycle-router.js`; tool/keyboard dispatch and session snapshots stay in `src/main.js`.

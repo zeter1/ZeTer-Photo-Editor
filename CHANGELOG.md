@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical document resize command controller
+
+- Refactor: persisted Image Size and Canvas Size mutation/validation/history policy moves from delayed modal callbacks in `src/main.js` into `src/document/resize-command-controller.js`; modal markup, pending-edit UI guard and status presentation remain in the composition root.
+- Stale-document fix: each dialog captures its originating document and Apply revalidates that exact owner immediately before mutation, so switching tabs while a resize modal is open cannot resize the newly active document.
+- Atomicity/history: Image Size stages `checkedCanvasSize` + `imageResizeTransforms`; Canvas Size stages all nine-anchor shifts + `MAX_LAYER_POSITION` validation before writing. Invalid/no-op/stale paths leave document, transient selection/crop state and history untouched; real commands publish once.
+- Tests/docs/build: the VM/source-slicing resize test is replaced by direct controller regressions; architecture/AI-routing docs and the canonical file:// build graph point to the new owner.
+
+
 ### 2026-09-27 — Canonical discrete layer transform command controller
 
 - Refactor: synchronous selected-layer nudge, center, canvas alignment and fit-to-canvas commands move from direct geometry mutation in `src/main.js` into `src/layers/transform-command-controller.js`; pointer Move/Resize/Rotate gestures and Properties live preview stay unchanged.

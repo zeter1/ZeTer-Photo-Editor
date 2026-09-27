@@ -136,6 +136,11 @@ Stable binary primitives stay in `src/formats/psd.js`; fingerprint/opaque-block 
 ### `import-controller.js`
 Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or project persistence; those remain separate runtime/format concerns.
 
+### `resize-command-controller.js`
+Owns synchronous persisted Image Size and Canvas Size commands. It binds each delayed modal Apply to the originating document object, stages the full layer transform/shift plan through canonical `src/core/state.js` helpers, revalidates active ownership immediately before mutation, suppresses semantic no-ops, and publishes one history entry plus geometry transient cleanup only after a real change.
+
+It deliberately does **not** own resize modal DOM, Crop tool/pointer lifecycle, zoom/viewport state, document schema, or core size/scale/position limits. Those remain in `src/main.js`, interaction owners and `src/core/state.js` respectively.
+
 ### `psd-import-controller.js`
 Owns the import transaction from a PSD/PSB file to a canonical ZPE document after codec decode: size guard, decoded layer/group/path mapping, native high-depth/CMYK preservation, ICC preview policy, temporary-buffer budgeting, stale document/session checks and publish coordination. Stable core transforms are direct dependencies; binary decode, browser raster encoding, runtime publication and Photoshop semantics are explicit narrow ports.
 
