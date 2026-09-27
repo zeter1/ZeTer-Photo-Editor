@@ -150,6 +150,11 @@ Owns bounded one-shot raster commands: flood fill, raster line and clearing pixe
 
 It deliberately does **not** own global pointer events, selection-shape state, history storage or the application-wide pending-edit flag. Multi-layer selection clearing used by merged Clipboard cut belongs to `src/selection/raster-mutation-controller.js` rather than this current-layer command controller.
 
+### `gradient-command-controller.js`
+Owns the persisted Gradient raster-layer transaction. `src/main.js` captures the exact originating document in the Gradient drag and keeps the visual preview; the command owner acquires the shared raster-persistence guard, prepares the selection-clipped Canvas using captured dimensions, awaits PNG serialization, revalidates exact document object identity and only then publishes the Raster layer + one history entry.
+
+A switched/replaced document — including a same-ID replacement — is stale and receives no redirected publication. See `GRADIENT_COMMAND.md` before changing this path.
+
 ### `gesture-controller.js`
 Owns the bounded lifecycle of one brush/eraser/retouch stroke: choose existing/new raster target, choose native high-depth/CMYK vs Canvas8 path, initialize per-stroke retouch state, route movement segments and persist on end. Dependencies are grouped ports (`state`, `target`, `selection`, `tools`, `nativePaint`, `ui`) instead of a long flat callback list.
 
