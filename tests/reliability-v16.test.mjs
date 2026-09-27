@@ -23,7 +23,7 @@ test('canvas allocation has a pixel budget in addition to per-axis bounds', () =
 
 test('new paint and blank layers stay sparse until pixels are actually drawn', () => {
   assert.doesNotMatch(main, /function blankRasterData/);
-  const ensure = gesture.match(/async function ensurePaintLayer\(point, tool, canContinue = \(\) => true\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const ensure = gesture.match(/async function ensurePaintLayer\(owner, point, tool, canContinue = \(\) => true\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.match(ensure, /dataUrl:null/);
   assert.doesNotMatch(ensure, /canvasToDataURL/);
   assert.match(main, /function addBlankLayer\(\)\{addLayer\(doc,createRasterLayer\(\{name:'Новый слой',width:doc\.width,height:doc\.height,dataUrl:null\}\)\)/);

@@ -18,7 +18,7 @@ test('blur brush is exposed as a first-class tool with strength control and shor
 
 test('blur brush edits only an existing editable raster layer', () => {
   assert.match(gesture, /const EXISTING_RASTER_ONLY_TOOLS = new Set\(\['eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
-  const ensurePaintLayer = gesture.match(/async function ensurePaintLayer\(point, tool, canContinue = \(\) => true\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const ensurePaintLayer = gesture.match(/async function ensurePaintLayer\(owner, point, tool, canContinue = \(\) => true\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.ok(ensurePaintLayer, 'ensurePaintLayer function not found');
   assert.match(ensurePaintLayer, /if \(EXISTING_RASTER_ONLY_TOOLS\.has\(tool\)\) \{[\s\S]*?layer = rasterAtPoint;[\s\S]*?if \(!layer\) return null/);
 });

@@ -60,7 +60,7 @@ test('destructive raster editing materializes the selected HDR preview and then 
   assert.match(painting,/function drawHighDepthRasterBase\(layer, canvas, context\)/);
   assert.match(painting,/const preview = sanitizeHighDepthPreview\(layer\.highDepthPreview\)/);
   assert.match(painting,/pixelBufferToToneMappedRgba8Preview\([\s\S]*?buffer,[\s\S]*?toneMap: preview\.toneMap,[\s\S]*?displayExposure: preview\.displayExposure/);
-  assert.match(painting,/if \(!drawHighDepthRasterBase\(layer, brushCanvas, brushContext\) && layer\.dataUrl\)/);
+  assert.match(painting,/if \(!drawHighDepthRasterBase\(layer, canvas, context\) && layer\.dataUrl\)/);
   assert.match(painting,/layer\.highDepthSource = null/);
   assert.match(selectionMutations,/layer\.highDepthSource = null/);
 });
