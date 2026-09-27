@@ -98,10 +98,6 @@ export function createPathControlGestureController({
     Object.assign(node, restored);
   }
 
-  function cloneHandle(handle) {
-    return handle ? { x: handle.x, y: handle.y } : null;
-  }
-
   function activeOwner(owner) {
     return Boolean(owner && state.getDocument() === owner);
   }
@@ -271,7 +267,6 @@ export function createPathControlGestureController({
     const opposite = gesture.control === 'handleIn' ? 'handleOut' : 'handleIn';
     if (modifiers.altKey) {
       node.kind = 'corner';
-      node[opposite] = cloneHandle(gesture.baseline[opposite]);
       return;
     }
     node.kind = 'smooth';
