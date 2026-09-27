@@ -164,12 +164,13 @@ test('Canvas8 buffer cache is bound to exact document and layer identity, not re
 });
 
 test('Canvas8 persistence writes only to the exact captured owner and target', async () => {
-  const layer = rasterLayer({ dataUrl:'data:image/png;base64,old' });
+  const layer = rasterLayer();
   const doc = { width:2, height:1, layers:[layer], groups:[] };
   const { documentRef } = canvasHarness({ toDataURL:() => 'data:image/png;base64,new' });
   const controller = createRasterEditController({ getDocument:() => doc, documentRef });
 
   await controller.ensureRasterBuffer(doc, layer);
+  layer.dataUrl = 'data:image/png;base64,old';
   assert.equal(await controller.persistPaintLayer(doc, layer), true);
   assert.equal(layer.dataUrl, 'data:image/png;base64,new');
   assert.equal(layer.highDepthSource, null);
@@ -177,7 +178,7 @@ test('Canvas8 persistence writes only to the exact captured owner and target', a
 });
 
 test('Canvas8 persistence rejects an active-document switch during PNG encoding', async () => {
-  const originLayer = rasterLayer({ id:'shared-layer-id', dataUrl:'data:image/png;base64,origin' });
+  const originLayer = rasterLayer({ id:'shared-layer-id' });
   const origin = { id:'shared-document-id', width:2, height:1, layers:[originLayer], groups:[] };
   const replacementLayer = rasterLayer({ id:'shared-layer-id', dataUrl:'data:image/png;base64,replacement' });
   const replacement = { id:'shared-document-id', width:2, height:1, layers:[replacementLayer], groups:[] };
@@ -186,6 +187,7 @@ test('Canvas8 persistence rejects an active-document switch during PNG encoding'
   const controller = createRasterEditController({ getDocument:() => activeDocument, documentRef });
 
   await controller.ensureRasterBuffer(origin, originLayer);
+  originLayer.dataUrl = 'data:image/png;base64,origin';
   const pending = controller.persistPaintLayer(origin, originLayer);
   activeDocument = replacement;
 
@@ -195,13 +197,14 @@ test('Canvas8 persistence rejects an active-document switch during PNG encoding'
 });
 
 test('Canvas8 persistence rejects a same-ID layer replacement inside the captured owner', async () => {
-  const originLayer = rasterLayer({ id:'shared-layer-id', dataUrl:'data:image/png;base64,origin' });
+  const originLayer = rasterLayer({ id:'shared-layer-id' });
   const replacementLayer = rasterLayer({ id:'shared-layer-id', dataUrl:'data:image/png;base64,replacement' });
   const doc = { width:2, height:1, layers:[originLayer], groups:[] };
   const { documentRef } = canvasHarness({ toDataURL:() => 'data:image/png;base64,late' });
   const controller = createRasterEditController({ getDocument:() => doc, documentRef });
 
   await controller.ensureRasterBuffer(doc, originLayer);
+  originLayer.dataUrl = 'data:image/png;base64,origin';
   const pending = controller.persistPaintLayer(doc, originLayer);
   doc.layers[0] = replacementLayer;
 
@@ -212,12 +215,13 @@ test('Canvas8 persistence rejects a same-ID layer replacement inside the capture
 
 test('Canvas8 serialization errors propagate without mutating the captured layer', async () => {
   const failure = new Error('encode failed');
-  const layer = rasterLayer({ dataUrl:'data:image/png;base64,origin' });
+  const layer = rasterLayer();
   const doc = { width:2, height:1, layers:[layer], groups:[] };
   const { documentRef } = canvasHarness({ toDataURL:() => { throw failure; } });
   const controller = createRasterEditController({ getDocument:() => doc, documentRef });
 
   await controller.ensureRasterBuffer(doc, layer);
+  layer.dataUrl = 'data:image/png;base64,origin';
   await assert.rejects(controller.persistPaintLayer(doc, layer), failure);
   assert.equal(layer.dataUrl, 'data:image/png;base64,origin');
 });
