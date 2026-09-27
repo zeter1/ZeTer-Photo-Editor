@@ -14832,18 +14832,14 @@ function createPaintGestureController({
 
     const owner = currentDocument();
     const layer = await ensurePaintLayer(owner, point, tool, canContinue);
-    if (
-      !canContinue() ||
-      !layer ||
-      state.getDocument() !== owner ||
-      !owner.layers.includes(layer)
-    ) return false;
+    if (!canContinue() || state.getDocument() !== owner) return false;
 
     const cloneSource = retouch.getCloneSource();
     if (!layer) {
       warn(unavailableMessage(tool, cloneSource));
       return false;
     }
+    if (!owner.layers.includes(layer)) return false;
 
     const localPoint = target.toLocal(point, layer);
     const drag = {

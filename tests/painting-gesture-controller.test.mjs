@@ -37,6 +37,7 @@ function makeHarness({
   let previewSawPaintDrag = false;
   const commits = [];
   const statuses = [];
+  const toasts = [];
   const { context, calls } = paintContext();
 
   const rasterEdit = {
@@ -108,7 +109,7 @@ function makeHarness({
     nativePaint:{},
     ui:{
       setStatus:value => statuses.push(value),
-      toast() {},
+      toast:(message, tone) => toasts.push([message, tone]),
       render() {},
       commit:value => commits.push(value),
     },
@@ -121,6 +122,7 @@ function makeHarness({
     calls,
     commits,
     statuses,
+    toasts,
     getDrag:() => drag,
     setDrag:value => { drag = value; },
     getPersistCalls:() => persistCalls,
@@ -169,6 +171,26 @@ test('paint gesture controller owns brush begin/move/end while main state remain
   assert.equal(harness.calls.restore, 1);
   assert.deepEqual(harness.commits, ['Кисть']);
   assert.equal(harness.statuses.at(-1), 'Готово');
+});
+
+test('existing-raster-only tools preserve the unavailable-target warning', async () => {
+  const doc = createDocument({ width:8, height:8 });
+  const harness = makeHarness({ doc, atPoint:() => null });
+
+  assert.equal(await harness.controller.begin({
+    point:{ x:2, y:2 },
+    tool:'eraser',
+    canContinue:() => true,
+  }), false);
+  assert.equal(
+    harness.statuses.at(-1),
+    'Ластик работает только по растровому слою. Выберите слой с изображением или рисунком.',
+  );
+  assert.deepEqual(
+    harness.toasts.at(-1),
+    ['Ластик работает только по растровому слою. Выберите слой с изображением или рисунком.', 'warn'],
+  );
+  assert.equal(harness.getDrag(), null);
 });
 
 test('paint begin re-checks the caller-owned pointer guard after async raster preparation', async () => {
