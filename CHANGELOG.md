@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical persisted Gradient command controller
+
+- Refactor: persisted Gradient Canvas preparation, PNG serialization, Raster-layer creation and history publication move out of the large `src/main.js` composition root into `src/painting/gradient-command-controller.js`; visual Gradient preview stays in `src/main.js`.
+- Exact-owner reliability: Gradient drag now captures the originating document object. The command validates that exact owner before consuming live selection state and again immediately after async PNG serialization, so tab switches and same-ID document replacements cannot redirect a late Gradient into another document.
+- Behavior/transaction hygiene: linear/radial geometry, colors + white fallback, opacity, selection clipping, shared `paintPersisting` exclusion, Raster schema, Russian statuses/toast and the single `Добавить градиент` history label are preserved; the busy guard is released in `finally` for success/error/stale outcomes.
+- Regression/docs/build: direct delayed-serialization tests cover stale/same-ID replacement, busy/error cleanup and Canvas semantics; pointer source harness + architecture guards are retargeted; `GRADIENT_COMMAND.md` records the reusable capture → prepare → await → revalidate → publish pattern, and the canonical file:// build graph includes the new owner.
+
 ### 2026-09-27 — Canonical transient Crop gesture / overlay controller
 
 - Refactor: transient Crop gesture ownership, normalized draft rectangle, final-release geometry, 10×10 pointer acceptance gate, per-document session-safe draft snapshot/restore and crop overlay/grid move out of the large `src/main.js` composition root into `src/interaction/crop-gesture-controller.js`.
