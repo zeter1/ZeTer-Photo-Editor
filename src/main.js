@@ -66,6 +66,7 @@ import { createPsdExportController } from './document/psd-export-controller.js';
 import { psdAdjustmentNativePlan, psdEmbeddedDocumentFingerprint, psdPreviewFingerprint, psdShapeNativePlan, psdTextNativePlan } from './document/psd-native-metadata-plans.js';
 import { createRasterEditController } from './painting/controller.js';
 import { createRasterCommandController } from './painting/command-controller.js';
+import { createGradientCommandController } from './painting/gradient-command-controller.js';
 import { createPaintGestureController } from './painting/gesture-controller.js';
 import { createRetouchController } from './retouch/controller.js';
 
@@ -294,6 +295,31 @@ const {
   fillAt: fillAtPoint,
   clearSelection: clearSelectedPixels,
 } = rasterCommands;
+
+const gradientCommands = createGradientCommandController({
+  rasterEdit,
+  state: {
+    getDocument: () => doc,
+    isPersisting: () => paintPersisting,
+    beginPersist: () => {
+      if (paintPersisting) return false;
+      paintPersisting = true;
+      return true;
+    },
+    endPersist: () => { paintPersisting = false; },
+  },
+  runtime: { createCanvas: () => document.createElement('canvas') },
+  selection: { clipContext: clipContextToDocumentSelection },
+  tools: {
+    type: () => els.gradientType?.value || 'linear',
+    primaryColor: () => els.primaryColor.value,
+    secondaryColor: () => els.secondaryColor?.value || '#ffffff',
+    opacity: () => Number(els.toolOpacity.value) / 100,
+  },
+  io: { canvasToDataURL },
+  transaction: { commit },
+  ui: { setStatus, toast, consoleRef:console },
+});
 
 const selectionRasterMutations = createSelectionRasterMutationController({
   rasterEdit,
@@ -1707,7 +1733,7 @@ async function onOverlayPointerDown(e) {
   if ((currentTool === 'clone' || currentTool === 'heal') && e.altKey) { await setCloneSource(p); return; }
   if (RASTER_BRUSH_TOOLS.has(currentTool)) { await paintGesture.begin({ point:p, pointerEvent:e, tool:currentTool, canContinue:()=>pointerLifecycle.isActivePointer(e.pointerId) }); return; }
   if (currentTool === 'fill') { await fillAtPoint(p); return; }
-  if (currentTool === 'gradient') { drag={kind:'gradient',start:p,current:p};drawOverlay();return; }
+  if (currentTool === 'gradient') { drag={kind:'gradient',owner:doc,start:p,current:p};drawOverlay();return; }
   if (currentTool === 'wand') { magicWandSelect(p);return; }
   if (currentTool === 'pen') {
     const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
@@ -1829,7 +1855,7 @@ async function onOverlayPointerUp(e) {
     if (cropResult.accepted) applyCrop(cropResult.owner,cropResult.rect);
     else drawOverlay();
   }
-  if (d.kind === 'gradient') await applyGradient(d.start,d.current);
+  if (d.kind === 'gradient') await gradientCommands.apply(d.owner,d.start,d.current);
   if (penDraftGestures.isGesture(d)) {
     const penResult=penDraftGestures.finish(d,canvasPoint(e),{altKey:e.altKey});
     if(penResult.status)setStatus(penResult.status);
@@ -1901,18 +1927,6 @@ function previewGradient(start,end) {
   ctx.fillStyle='#fff';ctx.setLineDash([]);
   for(const point of [start,end]){ctx.beginPath();ctx.arc(point.x,point.y,3/zoom,0,Math.PI*2);ctx.fill();}
   ctx.restore();
-}
-
-async function applyGradient(start,end){
-  const distance=Math.hypot(end.x-start.x,end.y-start.y);if(distance<2){setStatus('Градиент: протяните линию по холсту');return false;}
-  if(paintPersisting){setStatus('Сохраняется предыдущая растровая операция…');return false;}
-  const canvas=document.createElement('canvas');canvas.width=doc.width;canvas.height=doc.height;const ctx=canvas.getContext('2d',{alpha:true});
-  const gradient=els.gradientType?.value==='radial'?ctx.createRadialGradient(start.x,start.y,0,start.x,start.y,distance):ctx.createLinearGradient(start.x,start.y,end.x,end.y);
-  gradient.addColorStop(0,els.primaryColor.value);gradient.addColorStop(1,els.secondaryColor?.value||'#ffffff');ctx.fillStyle=gradient;ctx.globalAlpha=Number(els.toolOpacity.value)/100;
-  ctx.save();clipContextToDocumentSelection(ctx);ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
-  paintPersisting=true;
-  try{const dataUrl=await canvasToDataURL(canvas,'image/png');addLayer(doc,createRasterLayer({name:'Градиент',x:0,y:0,width:doc.width,height:doc.height,dataUrl}));rasterEdit.clearBrushBuffer();commit('Добавить градиент');setStatus('Градиент добавлен на новый слой');return true;}catch(error){console.error(error);toast('Не удалось создать градиент','error');return false;}
-  finally{paintPersisting=false;}
 }
 
 function tracePenDraftPath(ctx,points,hover=null){
