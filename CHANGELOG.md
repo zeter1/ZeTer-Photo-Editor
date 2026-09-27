@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical document Crop command controller
+
+- Refactor: persisted Crop geometry mutation/history moves from `src/main.js` into `src/document/crop-command-controller.js`; pointer gesture/overlay/cancel state and Crop-to-Selection UI gates stay with their existing interaction owners.
+- Atomicity/safety: Crop now validates finite positive input, preserves legacy rounding, proves canvas safety, stages every final layer position against `MAX_LAYER_POSITION`, and revalidates the exact originating document immediately before the first persisted write.
+- History hygiene: a full-document crop is a persisted semantic no-op with zero Undo/dirty publication while still completing the existing transient crop/selection/brush cleanup and viewport fit once; real crops publish exactly one preserved `Кадрирование` entry.
+- Regression/docs/build: direct controller coverage adds stale/replacement/pre-write guards, invalid geometry and overflow atomicity; pointer/source guards and AI-routing docs point to the canonical owner, and the file:// build graph includes it.
+
 ### 2026-09-27 — Canonical document background command controller
 
 - Refactor: persisted Image → «Фон документа…» mutation/history policy moves from the delayed modal callback in `src/main.js` into `src/document/background-command-controller.js`; modal markup/options/status and persisted schema/rendering remain with their existing owners.
