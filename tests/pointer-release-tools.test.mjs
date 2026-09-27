@@ -35,6 +35,13 @@ function release(drag, point, pointerId = 1, shiftKey = false) {
       isGesture: value => value?.kind === 'path-control',
       finish: (value, releasePoint, modifiers) => calls.push(['path-finish', releasePoint.x, releasePoint.y, Boolean(modifiers.altKey)]),
     },
+    penDraftGestures: {
+      isGesture: value => value?.kind === 'pen-draft-handle',
+      finish: (value, releasePoint, modifiers) => {
+        calls.push(['pen-draft-finish', releasePoint.x, releasePoint.y, Boolean(modifiers.altKey)]);
+        return { status:'pen release status' };
+      },
+    },
     onOverlayPointerMove: event => {
       calls.push(['transform', event.point.x, event.point.y]);
     },
@@ -93,6 +100,16 @@ test('path-control gesture delegates final release point and Alt state to the ca
   assert.deepEqual(await release({kind:'path-control'}, {x:40,y:50}), [
     ['path-finish',40,50,false],
   ]);
+});
+
+test('new Pen draft gesture delegates the final release point and Alt state to its canonical owner', async () => {
+  assert.deepEqual(await release({kind:'pen-draft-handle'}, {x:40,y:50}), [
+    ['pen-draft-finish',40,50,false],
+  ]);
+  const withAlt = [];
+  const calls = await release({kind:'pen-draft-handle'}, {x:42,y:52});
+  withAlt.push(...calls);
+  assert.deepEqual(withAlt, [['pen-draft-finish',42,52,false]]);
 });
 
 test('hand tool uses the release position for the final pan', async () => {
