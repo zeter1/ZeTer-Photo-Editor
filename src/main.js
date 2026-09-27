@@ -3,7 +3,7 @@ import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constr
 import {
   createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
   addLayer, selectedLayer,
-  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, sanitizeFilters, sanitizeHighDepthPreview, sanitizeColorManagement,
+  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, sanitizeHighDepthPreview, sanitizeColorManagement,
   isLayerVisible, isLayerLocked, isGroupLocked, groupDepth,
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache } from './core/render.js';
@@ -426,6 +426,7 @@ const layerPropertyCommandController = createLayerPropertyCommandController({
     fontOptions: textSettingsController.fontOptions,
   },
   effects: {
+    colorCorrectionKeys: COLOR_CORRECTION_KEYS,
     filterKeysForLayer: layer => (layer.type === 'raster' || layer.type === 'adjustment'
       ? RASTER_EFFECT_CONTROLS
       : BASIC_EFFECT_CONTROLS).map(control => control.key),
@@ -2783,13 +2784,13 @@ const menus={
   ],
   image:[
     ['Цветокоррекция…','',()=>colorCorrectionController.open(selected()),()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
-    ['Сбросить цветокоррекцию','',()=>{const l=selected();if(l?.type==='raster'&&!isLayerLocked(doc,l)){const current=sanitizeFilters(l.filters);for(const key of COLOR_CORRECTION_KEYS)current[key]=DEFAULT_LAYER_FILTERS[key];l.filters=current;commit('Сбросить цветокоррекцию');}},()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
+    ['Сбросить цветокоррекцию','',()=>layerPropertyCommandController.resetSelectedColorCorrection(),()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Размер изображения…','',resizeImageDialog],
     ['Размер холста…','',resizeCanvasDialog],
     ['Фон документа…','',setDocumentBackground],
     ['sep'],
-    ['Сбросить все фильтры слоя','',()=>{const l=selected();if(l&&!isLayerLocked(doc,l)){l.filters={...DEFAULT_LAYER_FILTERS};commit('Сбросить фильтры');}},()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
+    ['Сбросить все фильтры слоя','',()=>layerPropertyCommandController.resetSelectedFilters(),()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],
   select:[
     ['Выделить всё','Ctrl+A',selectAllPixels],
