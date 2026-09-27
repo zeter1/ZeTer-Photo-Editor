@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const workspaceLayout = await readFile(new URL('../src/ui/workspace-layout-controller.js', import.meta.url), 'utf8');
 const layersPanel = await readFile(new URL('../src/ui/layers-panel-controller.js', import.meta.url), 'utf8');
+const layerTransformGestureController = await readFile(new URL('../src/interaction/layer-transform-gesture-controller.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 test('middle mouse and Space provide temporary canvas panning without changing tools', () => {
@@ -53,9 +54,10 @@ test('layer list is keyboard navigable and supports F2 rename', () => {
   assert.match(css, /\.layer-row:focus-visible/);
 });
 
-test('smart snapping keeps explicit runtime state after workspace refactors', () => {
+test('smart snapping keeps explicit runtime state and canonical gesture policy after workspace refactors', () => {
   assert.match(main, /let smartSnapEnabled = true;/);
   assert.match(main, /let smartGuides = \{ x:null, y:null \};/);
   assert.match(main, /function readSmartSnapState\(\)[\s\S]*?smartSnapEnabled = saved === null \? true : saved !== 'false'/);
-  assert.match(main, /if \(smartSnapEnabled && !e\.ctrlKey && !e\.metaKey\)/);
+  assert.match(main, /isSmartSnapEnabled: \(\) => smartSnapEnabled/);
+  assert.match(layerTransformGestureController, /runtime\.isSmartSnapEnabled\(\) && !modifiers\.ctrlKey && !modifiers\.metaKey/);
 });
