@@ -6,6 +6,7 @@ import { createDocument, createShapeLayer, createVectorMask, addLayer, sanitizeP
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
 const selectionVectorMaskController=await readFile(new URL('../src/selection/vector-mask-controller.js',import.meta.url),'utf8');
+const pathControlSurface=await readFile(new URL('../src/interaction/path-control-surface-controller.js',import.meta.url),'utf8');
 const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
 const build=await readFile(new URL('../tools/build-bundle.mjs',import.meta.url),'utf8');
 
@@ -55,11 +56,13 @@ test('Stage 10 UI exposes vector masks through the canonical selection owner',()
 });
 
 
-test('Stage 10c vector-mask anchor and handle transactions route through the canonical path-control owner',()=>{
+test('Stage 10c vector-mask controls route through canonical surface and gesture owners',()=>{
   assert.match(main,/let vectorMaskEditLayerId = null/);
-  assert.match(main,/function selectedEditablePathTargets\(\)/);
-  assert.match(main,/source:'vector-mask',documentPathIndex:null,subpathIndex/);
-  assert.match(main,/function pathTargetPoints\(layer,source='shape',subpathIndex=null,documentPathIndex=null\)/);
+  assert.match(main,/pathControlSurface\.hit\(p\)/);
+  assert.match(main,/pathControlSurface\.targetPoints\(hit\)/);
+  assert.match(pathControlSurface,/state\.getVectorMaskEditLayerId\(\) === layer\.id/);
+  assert.match(pathControlSurface,/source: 'vector-mask'/);
+  assert.match(pathControlSurface,/isLayerLocked\(owner, target\.layer\)/);
   assert.match(main,/pathControlGestures\.begin\(doc,hit,point,\{shiftKey:event\.shiftKey\}\)/);
   assert.match(pathControlGestures,/PATH_CONTROL_GESTURE_SOURCES = new Set\(\['shape', 'vector-mask', 'document-path'\]\)/);
   assert.match(pathControlGestures,/layer\.vectorMask !== gesture\.vectorMaskTarget/);
@@ -69,6 +72,7 @@ test('Stage 10c vector-mask anchor and handle transactions route through the can
   assert.match(main,/documentPathEditIndex\s*=\s*-1;\s*vectorMaskEditLayerId\s*=\s*layerId;/);
   assert.match(main,/Редактировать векторную маску пером/);
   assert.match(main,/vectorMaskEditLayerId===selected\(\)\?\.id/);
+  assert.match(build,/src\/interaction\/path-control-surface-controller\.js/);
   assert.match(build,/src\/interaction\/path-control-gesture-controller\.js/);
 });
 

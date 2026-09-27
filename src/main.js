@@ -42,6 +42,7 @@ import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
 import { createLayerTransformGestureController } from './interaction/layer-transform-gesture-controller.js';
+import { createPathControlSurfaceController } from './interaction/path-control-surface-controller.js';
 import { createPathControlGestureController } from './interaction/path-control-gesture-controller.js';
 import { createSelectionGestureController, cloneSelectionShape } from './selection/gesture-controller.js';
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
@@ -782,6 +783,22 @@ const layerTransformGestures = createLayerTransformGestureController({
     redrawOverlay: () => drawOverlay(),
   },
 });
+const pathControlSurface = createPathControlSurfaceController({
+  state: {
+    getDocument: () => doc,
+    getDocumentPathEditIndex: () => documentPathEditIndex,
+    setDocumentPathEditIndex: value => { documentPathEditIndex = value; },
+    getVectorMaskEditLayerId: () => vectorMaskEditLayerId,
+  },
+  runtime: {
+    getCurrentTool: () => currentTool,
+    getZoom: () => zoom,
+    hasPenDraft: () => Boolean(penDraft),
+    hasActiveInteraction: () => Boolean(drag),
+    setCursor: cursor => { els.overlay.style.cursor = cursor; },
+  },
+  geometry: { layerToDocument: layerPixelToDocumentPoint },
+});
 const pathControlGestures = createPathControlGestureController({
   state: { getDocument: () => doc },
   transaction: { commit },
@@ -1068,114 +1085,8 @@ function documentPointToLayerPixel(point, layer) {
   };
 }
 
-function selectedEditablePathTargets(){
-  if(documentPathEditIndex>=0){
-    const path=doc.paths?.[documentPathEditIndex];
-    if(path?.subpaths?.length){
-      return path.subpaths
-        .map((subpath,subpathIndex)=>({
-          layer:null,points:Array.isArray(subpath?.points)?subpath.points:[],
-          source:'document-path',documentPathIndex:documentPathEditIndex,subpathIndex,
-          closed:subpath?.closed!==false,operation:subpath?.operation||'add',
-        }))
-        .filter(target=>target.points.length);
-    }
-    documentPathEditIndex=-1;
-  }
-  const layer=selected();
-  if(!layer||!isLayerVisible(doc,layer))return[];
-  if(vectorMaskEditLayerId===layer.id&&layer.vectorMask?.subpaths?.length){
-    return layer.vectorMask.subpaths
-      .map((subpath,subpathIndex)=>({
-        layer,points:Array.isArray(subpath?.points)?subpath.points:[],
-        source:'vector-mask',documentPathIndex:null,subpathIndex,closed:subpath?.closed!==false,operation:subpath?.operation||'add',
-      }))
-      .filter(target=>target.points.length);
-  }
-  if(layer.type==='shape'&&layer.shape==='path'&&Array.isArray(layer.pathPoints)){
-    return[{layer,points:layer.pathPoints,source:'shape',documentPathIndex:null,subpathIndex:null,closed:Boolean(layer.pathClosed),operation:'add'}];
-  }
-  return[];
-}
-function pathTargetPoints(layer,source='shape',subpathIndex=null,documentPathIndex=null){
-  if(source==='document-path')return doc.paths?.[documentPathIndex]?.subpaths?.[subpathIndex]?.points??null;
-  if(source==='vector-mask')return layer?.vectorMask?.subpaths?.[subpathIndex]?.points??null;
-  return layer?.pathPoints??null;
-}
-function pathControlDocumentPoint(layer,node,control='anchor'){
-  const local=control==='anchor'?node:node?.[control];
-  if(!local)return null;
-  return layer?layerPixelToDocumentPoint(local,layer):{x:local.x,y:local.y};
-}
-function hitSelectedPathControl(point,radius=8/zoom){
-  for(const target of selectedEditablePathTargets()){
-    if(target.layer&&isLayerLocked(doc,target.layer))continue;
-    for(let index=0;index<target.points.length;index+=1){
-      const node=target.points[index];
-      for(const control of ['handleIn','handleOut']){
-        const p=pathControlDocumentPoint(target.layer,node,control);
-        if(p&&Math.hypot(point.x-p.x,point.y-p.y)<=radius)return{...target,nodeIndex:index,control};
-      }
-    }
-    for(let index=0;index<target.points.length;index+=1){
-      const node=target.points[index],p=pathControlDocumentPoint(target.layer,node,'anchor');
-      if(p&&Math.hypot(point.x-p.x,point.y-p.y)<=radius)return{...target,nodeIndex:index,control:'anchor'};
-    }
-  }
-  return null;
-}
-function traceEditablePathTarget(ctx,target){
-  const points=target?.points||[];
-  if(!points.length)return false;
-  const documentNodes=points.map(node=>({
-    ...pathControlDocumentPoint(target.layer,node,'anchor'),
-    handleIn:pathControlDocumentPoint(target.layer,node,'handleIn'),
-    handleOut:pathControlDocumentPoint(target.layer,node,'handleOut'),
-  }));
-  ctx.moveTo(documentNodes[0].x,documentNodes[0].y);
-  const segment=(from,to)=>{
-    if(from.handleOut||to.handleIn){
-      const cp1=from.handleOut||from,cp2=to.handleIn||to;
-      ctx.bezierCurveTo(cp1.x,cp1.y,cp2.x,cp2.y,to.x,to.y);
-    }else ctx.lineTo(to.x,to.y);
-  };
-  for(let index=1;index<documentNodes.length;index+=1)segment(documentNodes[index-1],documentNodes[index]);
-  if(target.closed&&documentNodes.length>1){segment(documentNodes.at(-1),documentNodes[0]);ctx.closePath();}
-  return true;
-}
-function drawSelectedPathControls(ctx){
-  if(currentTool!=='pen'||penDraft)return;
-  const targets=selectedEditablePathTargets();
-  if(!targets.length)return;
-  ctx.save();ctx.setLineDash([]);ctx.lineWidth=1/zoom;ctx.fillStyle='#f8fbff';
-  for(const target of targets){
-    const locked=target.layer?isLayerLocked(doc,target.layer):false;
-    const vector=target.source==='vector-mask';
-    const saved=target.source==='document-path';
-    ctx.strokeStyle=locked?'#aeb6c4':saved?'#77e3b1':vector?'#ff78cf':'#8fc0ff';
-    if(vector||saved){
-      ctx.save();ctx.setLineDash([5/zoom,3/zoom]);ctx.beginPath();traceEditablePathTarget(ctx,target);ctx.stroke();ctx.restore();
-    }
-    for(const node of target.points){
-      const anchor=pathControlDocumentPoint(target.layer,node,'anchor');
-      if(!anchor)continue;
-      for(const control of ['handleIn','handleOut']){
-        const handle=pathControlDocumentPoint(target.layer,node,control);
-        if(!handle)continue;
-        ctx.beginPath();ctx.moveTo(anchor.x,anchor.y);ctx.lineTo(handle.x,handle.y);ctx.stroke();
-        const size=5/zoom;ctx.fillRect(handle.x-size/2,handle.y-size/2,size,size);ctx.strokeRect(handle.x-size/2,handle.y-size/2,size,size);
-      }
-      ctx.beginPath();ctx.arc(anchor.x,anchor.y,4/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();
-    }
-  }
-  ctx.restore();
-}
-function updatePenCursor(point){
-  if(currentTool!=='pen'||drag||penDraft)return;
-  els.overlay.style.cursor=hitSelectedPathControl(point)?'pointer':'crosshair';
-}
 function beginPathControlDrag(hit,point,event){
-  const points=pathTargetPoints(hit.layer,hit.source,hit.subpathIndex,hit.documentPathIndex);
+  const points=pathControlSurface.targetPoints(hit);
   const node=points?.[hit.nodeIndex];
   if(!node)return false;
   if(hit.control==='anchor'&&event.altKey){
@@ -1375,7 +1286,7 @@ function drawOverlay() {
   } else {
     selectionGestures.drawMagneticDraft(ctx);
   }
-  drawSelectedPathControls(ctx);
+  pathControlSurface.draw(ctx);
   if (RASTER_BRUSH_TOOLS.has(currentTool) && hoverPoint) {
     const paintLayer = paintLayerAtPoint(hoverPoint);
     const radius = Math.max(.5, Number(els.brushSize.value) / 2);
@@ -1851,7 +1762,7 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'gradient') { drag={kind:'gradient',start:p,current:p};drawOverlay();return; }
   if (currentTool === 'wand') { magicWandSelect(p);return; }
   if (currentTool === 'pen') {
-    const hit=!penDraft?hitSelectedPathControl(p):null;
+    const hit=!penDraft?pathControlSurface.hit(p):null;
     if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
     if(documentPathEditIndex>=0){
       setStatus('Сохранённый контур: перетаскивайте существующие anchors/handles; новые subpaths добавляются через маску/выделение и сохранение');
@@ -1887,7 +1798,7 @@ function onOverlayPointerMove(e) {
     selectionGestures.updateIdleHover(p);
     if(penDraft&&currentTool==='pen')penDraft.hover=p;
     if (currentTool === 'zoom') els.overlay.style.cursor=e.altKey?'zoom-out':'zoom-in';
-    else if(currentTool==='pen'&&!penDraft)updatePenCursor(p);
+    else if(currentTool==='pen')pathControlSurface.updateCursor(p);
     else updateMoveCursor(p);
     drawOverlay(); return;
   }

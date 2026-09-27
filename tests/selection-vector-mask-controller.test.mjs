@@ -249,10 +249,11 @@ test('toggle, invert and remove preserve exact state/history semantics and clear
   assert.equal(h.statuses.at(-1), 'Векторная маска удалена');
 });
 
-test('selection Vector Mask commands have one owner while Pen geometry and PSD bridges stay in runtime', async () => {
-  const [main, owner, build] = await Promise.all([
+test('selection Vector Mask commands have one owner while Pen surface and PSD bridges keep separate owners', async () => {
+  const [main, owner, pathControlSurface, build] = await Promise.all([
     readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/selection/vector-mask-controller.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/interaction/path-control-surface-controller.js', import.meta.url), 'utf8'),
     readFile(new URL('../tools/build-bundle.mjs', import.meta.url), 'utf8'),
   ]);
 
@@ -260,6 +261,7 @@ test('selection Vector Mask commands have one owner while Pen geometry and PSD b
   assert.match(main, /beginVectorMaskEdit:\s*layerId\s*=>/);
   assert.match(main, /documentPathEditIndex\s*=\s*-1;\s*vectorMaskEditLayerId\s*=\s*layerId;/);
   assert.match(build, /src\/selection\/vector-mask-controller\.js/);
+  assert.match(build, /src\/interaction\/path-control-surface-controller\.js/);
 
   for (const definition of [
     'function selectionVectorMaskDocumentNodes(',
@@ -276,12 +278,24 @@ test('selection Vector Mask commands have one owner while Pen geometry and PSD b
 
   for (const runtimeOwner of [
     'let vectorMaskEditLayerId = null',
-    'function selectedEditablePathTargets()',
-    'function pathTargetPoints(',
     'function importPsdVectorMask(',
     'function exportPsdVectorMask(',
   ]) {
     assert.equal(main.includes(runtimeOwner), true, runtimeOwner + ' must remain on the runtime/PSD boundary');
     assert.equal(owner.includes(runtimeOwner), false, runtimeOwner + ' must not leak into the selection controller');
+    assert.equal(pathControlSurface.includes(runtimeOwner), false, runtimeOwner + ' must not leak into the read-only Pen surface');
+  }
+
+  for (const surfaceOwner of [
+    'function selectedTargets()',
+    'function targetPoints(',
+    'function hit(',
+    'function trace(',
+    'function draw(',
+    'function updateCursor(',
+  ]) {
+    assert.equal(main.includes(surfaceOwner), false, surfaceOwner + ' must not drift back into main.js');
+    assert.equal(owner.includes(surfaceOwner), false, surfaceOwner + ' must not leak into the selection controller');
+    assert.equal(pathControlSurface.includes(surfaceOwner), true, surfaceOwner + ' must stay in the path-control surface controller');
   }
 });
