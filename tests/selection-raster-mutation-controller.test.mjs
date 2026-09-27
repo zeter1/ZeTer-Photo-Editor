@@ -141,3 +141,191 @@ test('merged high-depth clear keeps typed samples and publishes through the rast
   assert.deepEqual(harness.commits, ['Вырезать выделение']);
   assert.equal(harness.getPersisting(), false);
 });
+
+test('merged selection clear rejects a same-id raster replacement before publication', async () => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const originalLayer = { id:'raster', type:'raster', name:'Raster', visible:true, locked:false, dataUrl:'original' };
+  const replacement = { id:'raster', type:'raster', name:'Replacement', visible:true, locked:false, dataUrl:'replacement' };
+  const documentValue = { layers:[originalLayer], groups:[], selectedLayerId:'raster' };
+  const harness = createHarness({
+    documentValue,
+    operations:{ prepareClearedRasterDataUrl:async() => pending },
+  });
+
+  const clearing = harness.controller.clearAcrossVisibleLayers();
+  documentValue.layers[0] = replacement;
+  release('cleared');
+  const result = await clearing;
+
+  assert.equal(result, null);
+  assert.equal(originalLayer.dataUrl, 'original');
+  assert.equal(replacement.dataUrl, 'replacement');
+  assert.deepEqual(harness.commits, []);
+  assert.equal(harness.getPersisting(), false);
+  assert.match(harness.statuses.at(-1), /целевой слой изменился или заблокирован/);
+});
+
+test('merged selection clear rejects a same-id non-raster replacement instead of redirecting rasterized splice', async () => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const source = { id:'text', type:'text', name:'Text', visible:true, locked:false };
+  const replacement = { id:'text', type:'text', name:'Replacement', visible:true, locked:false, marker:'keep' };
+  const documentValue = { layers:[source], groups:[], selectedLayerId:'text' };
+  const harness = createHarness({
+    documentValue,
+    operations:{
+      rasterizeLayerForPixelEditing:async layer => ({
+        ...layer,
+        type:'raster',
+        width:10,
+        height:10,
+        dataUrl:'rendered-' + layer.id,
+      }),
+      prepareClearedRasterDataUrl:async() => pending,
+    },
+  });
+
+  const clearing = harness.controller.clearAcrossVisibleLayers();
+  documentValue.layers[0] = replacement;
+  release('cleared-text');
+  const result = await clearing;
+
+  assert.equal(result, null);
+  assert.equal(documentValue.layers[0], replacement);
+  assert.equal(replacement.type, 'text');
+  assert.equal(replacement.marker, 'keep');
+  assert.deepEqual(harness.commits, []);
+  assert.equal(harness.getPersisting(), false);
+});
+
+test('merged selection clear publishes none of a prepared batch when one exact target is removed', async () => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const first = { id:'first', type:'raster', name:'First', visible:true, locked:false, dataUrl:'first-original' };
+  const second = { id:'second', type:'raster', name:'Second', visible:true, locked:false, dataUrl:'second-original' };
+  const documentValue = { layers:[first, second], groups:[], selectedLayerId:'first' };
+  const harness = createHarness({
+    documentValue,
+    operations:{
+      prepareClearedRasterDataUrl:async layer => layer === first ? 'first-cleared' : pending,
+    },
+  });
+
+  const clearing = harness.controller.clearAcrossVisibleLayers();
+  documentValue.layers.splice(documentValue.layers.indexOf(first), 1);
+  release('second-cleared');
+  const result = await clearing;
+
+  assert.equal(result, null);
+  assert.equal(first.dataUrl, 'first-original');
+  assert.equal(second.dataUrl, 'second-original');
+  assert.deepEqual(harness.commits, []);
+  assert.equal(harness.getPersisting(), false);
+});
+
+test('merged selection clear aborts the whole batch when a target becomes effectively locked', async () => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const layer = {
+    id:'grouped',
+    type:'raster',
+    name:'Grouped',
+    visible:true,
+    locked:false,
+    groupId:'group',
+    dataUrl:'original',
+  };
+  const group = { id:'group', name:'Group', visible:true, locked:false, parentGroupId:null };
+  const documentValue = { layers:[layer], groups:[group], selectedLayerId:'grouped' };
+  const harness = createHarness({
+    documentValue,
+    operations:{ prepareClearedRasterDataUrl:async() => pending },
+  });
+
+  const clearing = harness.controller.clearAcrossVisibleLayers();
+  group.locked = true;
+  release('cleared');
+  const result = await clearing;
+
+  assert.equal(result, null);
+  assert.equal(layer.dataUrl, 'original');
+  assert.deepEqual(harness.commits, []);
+  assert.equal(harness.getPersisting(), false);
+  assert.match(harness.statuses.at(-1), /целевой слой изменился или заблокирован/);
+});
+
+test('merged selection clear does not apply a prepared high-depth mutation when another batch target is stale', async () => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const hdr = {
+    id:'hdr',
+    type:'raster',
+    name:'HDR',
+    visible:true,
+    locked:false,
+    dataUrl:'hdr-original',
+    highDepthSource:{ model:'rgb' },
+  };
+  const other = { id:'other', type:'raster', name:'Other', visible:true, locked:false, dataUrl:'other-original' };
+  const replacement = { ...other, dataUrl:'replacement' };
+  const documentValue = { layers:[hdr, other], groups:[], selectedLayerId:'hdr' };
+  let applied = 0;
+  const harness = createHarness({
+    documentValue,
+    rasterEdit:{
+      applyHighDepthMutation:() => { applied += 1; },
+    },
+    operations:{
+      prepareClearedHighDepthMutation:async layer => (
+        layer === hdr
+          ? { cleared:1, mutation:{ dataUrl:'hdr-cleared', highDepthSource:{ model:'rgb' } } }
+          : null
+      ),
+      prepareClearedRasterDataUrl:async layer => layer === other ? pending : 'unused',
+    },
+  });
+
+  const clearing = harness.controller.clearAcrossVisibleLayers();
+  documentValue.layers[1] = replacement;
+  release('other-cleared');
+  const result = await clearing;
+
+  assert.equal(result, null);
+  assert.equal(applied, 0);
+  assert.equal(hdr.dataUrl, 'hdr-original');
+  assert.equal(replacement.dataUrl, 'replacement');
+  assert.deepEqual(harness.commits, []);
+  assert.equal(harness.getPersisting(), false);
+});
+
+test('merged selection clear keeps every persisted target unchanged when preparation fails', async () => {
+  const first = { id:'first', type:'raster', name:'First', visible:true, locked:false, dataUrl:'first-original' };
+  const second = { id:'second', type:'raster', name:'Second', visible:true, locked:false, dataUrl:'second-original' };
+  const documentValue = { layers:[first, second], groups:[], selectedLayerId:'first' };
+  const harness = createHarness({
+    documentValue,
+    operations:{
+      prepareClearedRasterDataUrl:async layer => {
+        if (layer === first) return 'first-cleared';
+        throw new Error('prepare failed');
+      },
+    },
+  });
+  const previousError = console.error;
+  console.error = () => {};
+  let result;
+  try {
+    result = await harness.controller.clearAcrossVisibleLayers();
+  } finally {
+    console.error = previousError;
+  }
+
+  assert.equal(result, null);
+  assert.equal(first.dataUrl, 'first-original');
+  assert.equal(second.dataUrl, 'second-original');
+  assert.deepEqual(harness.commits, []);
+  assert.equal(harness.getPersisting(), false);
+  assert.equal(harness.getClearCount(), 1);
+  assert.match(harness.statuses.at(-1), /prepare failed/);
+});
