@@ -16,6 +16,7 @@ const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8
 const adapter=await readFile(new URL('../src/formats/psd.js',import.meta.url),'utf8');
 const colorManagement=await readFile(new URL('../src/ui/color-management-controller.js',import.meta.url),'utf8');
 const layersPanelController=await readFile(new URL('../src/ui/layers-panel-controller.js',import.meta.url),'utf8');
+const adjustmentCommandController=await readFile(new URL('../src/layers/adjustment-command-controller.js',import.meta.url),'utf8');
 
 test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
   assert.match(main,/import \{[^}]*decodePsd[^}]*encodePsdBlob[^}]*encodePsbBlob[^}]*isPsdFile[^}]*\} from '\.\/formats\/psd\.js'/);
@@ -344,7 +345,7 @@ test('Stage 16b wires adjustment masks, clipping, Levels channels and editable C
   assert.match(adapter,/layerRecords\.u8\(opacity\)\.u8\(layer\.clipping \? 1 : 0\)/);
   assert.match(psdImportController,/adjustmentMaskDataUrl/);
   assert.match(main,/data-adjustment-curve-channel/);
-  assert.ok(main.includes("match(/^channels\\.(\\d+)\\."));
+  assert.ok(adjustmentCommandController.includes("match(/^channels\\.(\\d+)\\."));
   assert.match(psdExportController,/clipping:layer\.clipping===true/);
   assert.match(psdExportController,/Stage 16b: .*adjustment layer/);
   assert.match(render,/async function applyAdjustmentLayer\(canvas, ctx, layer, \{ clippingMask = null \} = \{\}\)/);

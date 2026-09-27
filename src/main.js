@@ -20,7 +20,7 @@ import {
   SMART_SNAP_STORAGE_KEY, TOOL_ORDER_STORAGE_KEY,
   NATIVE_HIGH_DEPTH_PAINT_TOOLS, NATIVE_CMYK_PAINT_TOOLS,
 } from './ui/tool-config.js';
-import { sanitizeAdjustmentModel, adjustmentModelEqual } from './core/adjustments.js';
+import { sanitizeAdjustmentModel } from './core/adjustments.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './formats/psd.js';
 import { createDocumentSessionController } from './workspace/session-controller.js';
 import { createRecoveryController } from './workspace/recovery-controller.js';
@@ -29,6 +29,7 @@ import { createWorkspaceLayoutController } from './ui/workspace-layout-controlle
 import { createLayersPanelController } from './ui/layers-panel-controller.js';
 import { createLayerGroupCommandController } from './layers/command-controller.js';
 import { createLayerPropertyCommandController } from './layers/property-command-controller.js';
+import { ADJUSTMENT_COMMAND_RESULT, createAdjustmentLayerCommandController } from './layers/adjustment-command-controller.js';
 import { createColorCorrectionController } from './ui/color-correction-controller.js';
 import { createPathsController } from './ui/paths-controller.js';
 import { createColorManagementController } from './ui/color-management-controller.js';
@@ -409,6 +410,11 @@ const textSettingsController = createTextSettingsController({
   windowTarget: window,
   documentRef: document,
   FileClass: File,
+});
+
+const adjustmentLayerCommandController = createAdjustmentLayerCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
 });
 
 const layerPropertyCommandController = createLayerPropertyCommandController({
@@ -1527,7 +1533,7 @@ function updateProperties() {
       ${adjustmentPropertiesMarkup(l)}
     </div>`;
     bindPropertyInputs(els.props,doc,l.id);
-    bindAdjustmentControls(els.props,l);
+    bindAdjustmentControls(els.props,doc,l.id);
     if (isLayerLocked(doc,l)) els.props.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
     return;
   }
@@ -2373,70 +2379,29 @@ function adjustmentPropertiesMarkup(layer) {
   return clipping+nativeInfo;
 }
 
-function updateAdjustmentProperty(layer,path,raw) {
-  if(!layer||layer.type!=='adjustment'||isLayerLocked(doc,layer))return false;
-  const current=structuredClone(sanitizeAdjustmentModel(layer.adjustment));
-  if(!current)return false;
-  const value=Number(raw);if(!Number.isFinite(value))return false;
-  if(path.startsWith('master.')){
-    if(!current.master)return false;
-    current.master[path.split('.')[1]]=value;
-  }else{
-    const channelMatch=String(path).match(/^channels\.(\d+)\.(inputBlack|inputWhite|gamma|outputBlack|outputWhite)$/);
-    if(channelMatch&&current.kind==='levels'){
-      const id=Number(channelMatch[1]),key=channelMatch[2];
-      let channel=(current.channels||[]).find(item=>item.id===id);
-      if(!channel){
-        channel={id,inputBlack:0,inputWhite:255,gamma:1,outputBlack:0,outputWhite:255};
-        current.channels=[...(current.channels||[]),channel];
-      }
-      channel[key]=value;
-    }else current[path]=value;
-  }
-  layer.adjustment=sanitizeAdjustmentModel(current);
-  markDirty(true);commit('Изменить Photoshop adjustment');return true;
+function handleAdjustmentCommandResult(result,invalidMessage='') {
+  if(result===ADJUSTMENT_COMMAND_RESULT.COMMITTED)return true;
+  refreshInspectorPanels();
+  if(result===ADJUSTMENT_COMMAND_RESULT.INVALID&&invalidMessage)setStatus(invalidMessage);
+  return false;
 }
 
-function parseCurvePointsInput(raw) {
-  const tokens=String(raw||'').split(/[;,]+/).map(item=>item.trim()).filter(Boolean);
-  if(tokens.length<2||tokens.length>19)return null;
-  const points=tokens.map(token=>{
-    const match=token.match(/^(\d{1,3})\s*:\s*(\d{1,3})$/);
-    if(!match)return null;
-    return{input:Number(match[1]),output:Number(match[2])};
-  });
-  if(points.some(point=>!point||point.input<0||point.input>255||point.output<0||point.output>255))return null;
-  points.sort((a,b)=>a.input-b.input);
-  for(let index=1;index<points.length;index+=1)if(points[index].input<=points[index-1].input)return null;
-  return points;
-}
-
-function updateAdjustmentCurveChannel(layer,id,raw) {
-  if(!layer||layer.type!=='adjustment'||isLayerLocked(doc,layer))return false;
-  const current=structuredClone(sanitizeAdjustmentModel(layer.adjustment));
-  if(current?.kind!=='curves')return false;
-  const points=parseCurvePointsInput(raw);
-  if(!points)return false;
-  const channelId=Number(id);
-  current.channels=(current.channels||[]).filter(channel=>channel.id!==channelId);
-  current.channels.push({id:channelId,points});
-  current.channels.sort((a,b)=>a.id-b.id);
-  layer.adjustment=sanitizeAdjustmentModel(current);
-  markDirty(true);commit('Изменить точки Photoshop Curves');return true;
-}
-
-function bindAdjustmentControls(root,layer) {
+function bindAdjustmentControls(root,owner,layerId) {
   root?.querySelectorAll('[data-adjustment-prop]').forEach(input=>input.addEventListener('change',()=>{
-    if(!updateAdjustmentProperty(layer,input.dataset.adjustmentProp,input.value)){refreshInspectorPanels();setStatus('Некорректный параметр adjustment layer');}
+    handleAdjustmentCommandResult(
+      adjustmentLayerCommandController.updateProperty(owner,layerId,input.dataset.adjustmentProp,input.value),
+      'Некорректный параметр adjustment layer',
+    );
   }));
   root?.querySelectorAll('[data-adjustment-curve-channel]').forEach(input=>input.addEventListener('change',()=>{
-    if(!updateAdjustmentCurveChannel(layer,input.dataset.adjustmentCurveChannel,input.value)){refreshInspectorPanels();setStatus('Curves: используйте 2–19 точек в формате input:output, 0..255');}
+    handleAdjustmentCommandResult(
+      adjustmentLayerCommandController.updateCurveChannel(owner,layerId,input.dataset.adjustmentCurveChannel,input.value),
+      'Curves: используйте 2–19 точек в формате input:output, 0..255',
+    );
   }));
   const clippingInput=root?.querySelector('[data-adjustment-clipping]');
   clippingInput?.addEventListener('change',()=>{
-    if(isLayerLocked(doc,layer)){refreshInspectorPanels();return;}
-    layer.clipping=clippingInput.checked;
-    markDirty(true);commit('Изменить clipping adjustment layer');
+    handleAdjustmentCommandResult(adjustmentLayerCommandController.setClipping(owner,layerId,clippingInput.checked));
   });
 }
 async function openProject(file) {

@@ -26,6 +26,7 @@ const sources = [
   'src/ui/color-correction-controller.js',
   'src/layers/command-controller.js',
   'src/layers/property-command-controller.js',
+  'src/layers/adjustment-command-controller.js',
   'src/ui/layer-blending-controller.js',
   'src/ui/text-edit-controller.js',
   'src/ui/text-settings-controller.js',

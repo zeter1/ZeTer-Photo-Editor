@@ -8421,6 +8421,145 @@ function createLayerPropertyCommandController({
   };
 }
 
+// ---- src/layers/adjustment-command-controller.js ----
+const ADJUSTMENT_COMMAND_RESULT = Object.freeze({
+  COMMITTED: 'committed',
+  NOOP: 'noop',
+  INVALID: 'invalid',
+  REJECTED: 'rejected',
+});
+
+const ADJUSTMENT_LEVEL_KEYS = new Set([
+  'inputBlack', 'inputWhite', 'gamma', 'outputBlack', 'outputWhite',
+]);
+const ADJUSTMENT_SCALAR_PATHS = Object.freeze({
+  'brightness-contrast': new Set(['brightness', 'contrast']),
+  exposure: new Set(['exposure', 'offset', 'gamma']),
+  'hue-saturation': new Set(['hue', 'saturation', 'lightness']),
+  posterize: new Set(['levels']),
+  threshold: new Set(['level']),
+});
+
+function defaultLevelChannel(id) {
+  return { id, inputBlack: 0, inputWhite: 255, gamma: 1, outputBlack: 0, outputWhite: 255 };
+}
+function createAdjustmentLayerCommandController({ state, transaction } = {}) {
+  if (typeof state?.getDocument !== 'function') {
+    throw new TypeError('adjustment command state bridge is required');
+  }
+  if (typeof transaction?.commit !== 'function') {
+    throw new TypeError('adjustment command transaction bridge is required');
+  }
+
+  function activeDocument(owner) {
+    return Boolean(owner) && state.getDocument() === owner;
+  }
+
+  function exactEditableLayer(owner, layerId) {
+    if (!activeDocument(owner) || !layerId) return null;
+    const layer = owner.layers?.find(item => item.id === layerId) ?? null;
+    if (!layer || layer.type !== 'adjustment' || isLayerLocked(owner, layer)) return null;
+    return layer;
+  }
+
+  function publish(owner, label) {
+    if (!activeDocument(owner)) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    transaction.commit(label);
+    return ADJUSTMENT_COMMAND_RESULT.COMMITTED;
+  }
+
+  function parseCurvePointsInput(raw) {
+    const tokens = String(raw || '').split(/[;,]+/).map(item => item.trim()).filter(Boolean);
+    if (tokens.length < 2 || tokens.length > 19) return null;
+    const points = tokens.map(token => {
+      const match = token.match(/^(\d{1,3})\s*:\s*(\d{1,3})$/);
+      if (!match) return null;
+      return { input: Number(match[1]), output: Number(match[2]) };
+    });
+    if (points.some(point => !point || point.input < 0 || point.input > 255 || point.output < 0 || point.output > 255)) return null;
+    points.sort((left, right) => left.input - right.input);
+    for (let index = 1; index < points.length; index += 1) {
+      if (points[index].input <= points[index - 1].input) return null;
+    }
+    return points;
+  }
+
+  function updateProperty(owner, layerId, path, raw) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    const current = sanitizeAdjustmentModel(layer.adjustment);
+    if (!current) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+
+    const candidate = structuredClone(current);
+    const propertyPath = String(path || '');
+    if (current.kind === 'levels') {
+      const masterMatch = propertyPath.match(/^master\.(inputBlack|inputWhite|gamma|outputBlack|outputWhite)$/);
+      const channelMatch = propertyPath.match(/^channels\.(\d+)\.(inputBlack|inputWhite|gamma|outputBlack|outputWhite)$/);
+      if (masterMatch && ADJUSTMENT_LEVEL_KEYS.has(masterMatch[1])) {
+        candidate.master[masterMatch[1]] = value;
+      } else if (channelMatch) {
+        const channelId = Number(channelMatch[1]);
+        const key = channelMatch[2];
+        if (![1, 2, 3].includes(channelId) || !ADJUSTMENT_LEVEL_KEYS.has(key)) {
+          return ADJUSTMENT_COMMAND_RESULT.INVALID;
+        }
+        let channel = (candidate.channels || []).find(item => item.id === channelId);
+        if (!channel) {
+          channel = defaultLevelChannel(channelId);
+          candidate.channels = [...(candidate.channels || []), channel];
+        }
+        channel[key] = value;
+      } else {
+        return ADJUSTMENT_COMMAND_RESULT.INVALID;
+      }
+    } else {
+      const allowed = ADJUSTMENT_SCALAR_PATHS[current.kind];
+      if (!allowed?.has(propertyPath)) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+      candidate[propertyPath] = value;
+    }
+
+    const next = sanitizeAdjustmentModel(candidate);
+    if (!next) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    if (adjustmentModelEqual(layer.adjustment, next)) return ADJUSTMENT_COMMAND_RESULT.NOOP;
+    layer.adjustment = next;
+    return publish(owner, 'Изменить Photoshop adjustment');
+  }
+
+  function updateCurveChannel(owner, layerId, id, raw) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    const current = sanitizeAdjustmentModel(layer.adjustment);
+    if (current?.kind !== 'curves') return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    const channelId = Number(id);
+    if (!Number.isInteger(channelId) || channelId < 0 || channelId > 3) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const points = parseCurvePointsInput(raw);
+    if (!points) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+
+    const candidate = structuredClone(current);
+    candidate.channels = (candidate.channels || []).filter(channel => channel.id !== channelId);
+    candidate.channels.push({ id: channelId, points });
+    candidate.channels.sort((left, right) => left.id - right.id);
+    const next = sanitizeAdjustmentModel(candidate);
+    if (!next) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    if (adjustmentModelEqual(layer.adjustment, next)) return ADJUSTMENT_COMMAND_RESULT.NOOP;
+    layer.adjustment = next;
+    return publish(owner, 'Изменить точки Photoshop Curves');
+  }
+
+  function setClipping(owner, layerId, checked) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    const next = Boolean(checked);
+    if (Boolean(layer.clipping) === next) return ADJUSTMENT_COMMAND_RESULT.NOOP;
+    layer.clipping = next;
+    return publish(owner, 'Изменить clipping adjustment layer');
+  }
+
+  return { updateProperty, updateCurveChannel, setClipping };
+}
+
 // ---- src/ui/layer-blending-controller.js ----
 function blendingPreviewCrop(documentValue, layer) {
   const scale = Math.max(Math.abs(layer.scaleX || 1), Math.abs(layer.scaleY || 1));
@@ -19379,6 +19518,11 @@ const textSettingsController = createTextSettingsController({
   FileClass: File,
 });
 
+const adjustmentLayerCommandController = createAdjustmentLayerCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+});
+
 const layerPropertyCommandController = createLayerPropertyCommandController({
   state: { getDocument: () => doc },
   transaction: {
@@ -20495,7 +20639,7 @@ function updateProperties() {
       ${adjustmentPropertiesMarkup(l)}
     </div>`;
     bindPropertyInputs(els.props,doc,l.id);
-    bindAdjustmentControls(els.props,l);
+    bindAdjustmentControls(els.props,doc,l.id);
     if (isLayerLocked(doc,l)) els.props.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
     return;
   }
@@ -21341,70 +21485,29 @@ function adjustmentPropertiesMarkup(layer) {
   return clipping+nativeInfo;
 }
 
-function updateAdjustmentProperty(layer,path,raw) {
-  if(!layer||layer.type!=='adjustment'||isLayerLocked(doc,layer))return false;
-  const current=structuredClone(sanitizeAdjustmentModel(layer.adjustment));
-  if(!current)return false;
-  const value=Number(raw);if(!Number.isFinite(value))return false;
-  if(path.startsWith('master.')){
-    if(!current.master)return false;
-    current.master[path.split('.')[1]]=value;
-  }else{
-    const channelMatch=String(path).match(/^channels\.(\d+)\.(inputBlack|inputWhite|gamma|outputBlack|outputWhite)$/);
-    if(channelMatch&&current.kind==='levels'){
-      const id=Number(channelMatch[1]),key=channelMatch[2];
-      let channel=(current.channels||[]).find(item=>item.id===id);
-      if(!channel){
-        channel={id,inputBlack:0,inputWhite:255,gamma:1,outputBlack:0,outputWhite:255};
-        current.channels=[...(current.channels||[]),channel];
-      }
-      channel[key]=value;
-    }else current[path]=value;
-  }
-  layer.adjustment=sanitizeAdjustmentModel(current);
-  markDirty(true);commit('Изменить Photoshop adjustment');return true;
+function handleAdjustmentCommandResult(result,invalidMessage='') {
+  if(result===ADJUSTMENT_COMMAND_RESULT.COMMITTED)return true;
+  refreshInspectorPanels();
+  if(result===ADJUSTMENT_COMMAND_RESULT.INVALID&&invalidMessage)setStatus(invalidMessage);
+  return false;
 }
 
-function parseCurvePointsInput(raw) {
-  const tokens=String(raw||'').split(/[;,]+/).map(item=>item.trim()).filter(Boolean);
-  if(tokens.length<2||tokens.length>19)return null;
-  const points=tokens.map(token=>{
-    const match=token.match(/^(\d{1,3})\s*:\s*(\d{1,3})$/);
-    if(!match)return null;
-    return{input:Number(match[1]),output:Number(match[2])};
-  });
-  if(points.some(point=>!point||point.input<0||point.input>255||point.output<0||point.output>255))return null;
-  points.sort((a,b)=>a.input-b.input);
-  for(let index=1;index<points.length;index+=1)if(points[index].input<=points[index-1].input)return null;
-  return points;
-}
-
-function updateAdjustmentCurveChannel(layer,id,raw) {
-  if(!layer||layer.type!=='adjustment'||isLayerLocked(doc,layer))return false;
-  const current=structuredClone(sanitizeAdjustmentModel(layer.adjustment));
-  if(current?.kind!=='curves')return false;
-  const points=parseCurvePointsInput(raw);
-  if(!points)return false;
-  const channelId=Number(id);
-  current.channels=(current.channels||[]).filter(channel=>channel.id!==channelId);
-  current.channels.push({id:channelId,points});
-  current.channels.sort((a,b)=>a.id-b.id);
-  layer.adjustment=sanitizeAdjustmentModel(current);
-  markDirty(true);commit('Изменить точки Photoshop Curves');return true;
-}
-
-function bindAdjustmentControls(root,layer) {
+function bindAdjustmentControls(root,owner,layerId) {
   root?.querySelectorAll('[data-adjustment-prop]').forEach(input=>input.addEventListener('change',()=>{
-    if(!updateAdjustmentProperty(layer,input.dataset.adjustmentProp,input.value)){refreshInspectorPanels();setStatus('Некорректный параметр adjustment layer');}
+    handleAdjustmentCommandResult(
+      adjustmentLayerCommandController.updateProperty(owner,layerId,input.dataset.adjustmentProp,input.value),
+      'Некорректный параметр adjustment layer',
+    );
   }));
   root?.querySelectorAll('[data-adjustment-curve-channel]').forEach(input=>input.addEventListener('change',()=>{
-    if(!updateAdjustmentCurveChannel(layer,input.dataset.adjustmentCurveChannel,input.value)){refreshInspectorPanels();setStatus('Curves: используйте 2–19 точек в формате input:output, 0..255');}
+    handleAdjustmentCommandResult(
+      adjustmentLayerCommandController.updateCurveChannel(owner,layerId,input.dataset.adjustmentCurveChannel,input.value),
+      'Curves: используйте 2–19 точек в формате input:output, 0..255',
+    );
   }));
   const clippingInput=root?.querySelector('[data-adjustment-clipping]');
   clippingInput?.addEventListener('change',()=>{
-    if(isLayerLocked(doc,layer)){refreshInspectorPanels();return;}
-    layer.clipping=clippingInput.checked;
-    markDirty(true);commit('Изменить clipping adjustment layer');
+    handleAdjustmentCommandResult(adjustmentLayerCommandController.setClipping(owner,layerId,clippingInput.checked));
   });
 }
 async function openProject(file) {
