@@ -28,6 +28,7 @@ import { createToolbarController } from './ui/toolbar-controller.js';
 import { createWorkspaceLayoutController } from './ui/workspace-layout-controller.js';
 import { createLayersPanelController } from './ui/layers-panel-controller.js';
 import { createLayerGroupCommandController } from './layers/command-controller.js';
+import { createLayerPropertyCommandController } from './layers/property-command-controller.js';
 import { createPathsController } from './ui/paths-controller.js';
 import { createColorManagementController } from './ui/color-management-controller.js';
 import { createSmartFilterController } from './ui/smart-filter-controller.js';
@@ -407,6 +408,27 @@ const textSettingsController = createTextSettingsController({
   windowTarget: window,
   documentRef: document,
   FileClass: File,
+});
+
+const layerPropertyCommandController = createLayerPropertyCommandController({
+  state: { getDocument: () => doc },
+  transaction: {
+    commit,
+    markTransientChange: () => { documentChangeSerial += 1; },
+  },
+  rendering: { render, drawOverlay, refreshInspectorPanels },
+  ui: { setStatus, toast },
+  text: {
+    isWeight: textSettingsController.isWeight,
+    isStyle: textSettingsController.isStyle,
+    isAlign: textSettingsController.isAlign,
+    fontOptions: textSettingsController.fontOptions,
+  },
+  effects: {
+    filterKeysForLayer: layer => (layer.type === 'raster' || layer.type === 'adjustment'
+      ? RASTER_EFFECT_CONTROLS
+      : BASIC_EFFECT_CONTROLS).map(control => control.key),
+  },
 });
 
 const modalController = createModalController({
@@ -1429,21 +1451,21 @@ function renderEffectControls(layer) {
   return html;
 }
 
-function bindPropertyInputs(root) {
+function bindPropertyInputs(root, owner = doc, layerId = owner?.selectedLayerId ?? null) {
   root?.querySelectorAll('[data-prop]').forEach(input => {
     if (input.type === 'range') {
       input.addEventListener('input', () => {
         const key = input.dataset.prop.startsWith('filters.') ? input.dataset.prop.split('.')[1] : input.dataset.prop;
         const output = input.closest('.range-with-value')?.querySelector('output');
         if (output) output.textContent = formatFilterValue(key, input.value);
-        applyProperty(input.dataset.prop, input.value, input, false);
+        layerPropertyCommandController.applyProperty(owner, layerId, input.dataset.prop, input.value, { commit: false });
       });
-      input.addEventListener('change', () => applyProperty(input.dataset.prop, input.value, input, true));
+      input.addEventListener('change', () => layerPropertyCommandController.applyProperty(owner, layerId, input.dataset.prop, input.value, { commit: true }));
     } else if(input.type === 'number') {
       input.dataset.initialValue=input.value;
-      input.addEventListener('change',()=>{normalizeNumberInput(input);applyProperty(input.dataset.prop,input.value,input,true);});
+      input.addEventListener('change',()=>{normalizeNumberInput(input);layerPropertyCommandController.applyProperty(owner, layerId, input.dataset.prop, input.value, { commit: true });});
     } else {
-      input.addEventListener('change', () => applyProperty(input.dataset.prop, input.value, input, true));
+      input.addEventListener('change', () => layerPropertyCommandController.applyProperty(owner, layerId, input.dataset.prop, input.value, { commit: true }));
     }
   });
 }
@@ -1451,58 +1473,24 @@ function refreshInspectorPanels() {
   updateProperties();
   updateEffectsPanel();
 }
-function resetSelectedLayerEffects() {
-  const layer = selected();
-  if (!layer || isLayerLocked(doc,layer)) return;
-  const controls = layer.type === 'raster' || layer.type === 'adjustment' ? RASTER_EFFECT_CONTROLS : BASIC_EFFECT_CONTROLS;
-  layer.filters = sanitizeFilters(layer.filters);
-  let changed = false;
-  for (const control of controls) {
-    const fallback = DEFAULT_LAYER_FILTERS[control.key];
-    if (layer.filters[control.key] !== fallback) {
-      layer.filters[control.key] = fallback;
-      changed = true;
-    }
-  }
-  if (changed) commit('Сбросить цвет и эффекты');
-  else setStatus('Цвет и эффекты уже сброшены');
-}
 function formatDisplayExposure(value){
   const ev=Number(value)||0;
   return `${ev>=0?'+':''}${ev.toFixed(1)} EV`;
 }
 
-function updateHighDepthPreviewSetting(layer,key,raw,shouldCommit=true){
-  if(!layer?.highDepthSource||layer.type!=='raster'||isLayerLocked(doc,layer))return false;
-  const current=sanitizeHighDepthPreview(layer.highDepthPreview);
-  const candidate={...current,[key]:key==='displayExposure'?Number(raw):raw};
-  layer.highDepthPreview=sanitizeHighDepthPreview(candidate);
-  markDirty(true);
-  if(shouldCommit)commit(key==='toneMap'?'Изменить HDR tone mapping':'Изменить HDR display exposure');
-  else render();
-  return true;
-}
-
-function resetHighDepthPreview(layer=selected()){
-  if(!layer?.highDepthSource||layer.type!=='raster'||isLayerLocked(doc,layer))return false;
-  layer.highDepthPreview=sanitizeHighDepthPreview();
-  commit('Сбросить HDR preview');
-  return true;
-}
-
-function bindHighDepthPreviewControls(root,layer){
+function bindHighDepthPreviewControls(root, owner, layerId){
   const toneMap=root?.querySelector('[data-high-depth-tone-map]');
-  if(toneMap)toneMap.addEventListener('change',()=>updateHighDepthPreviewSetting(layer,'toneMap',toneMap.value,true));
+  if(toneMap)toneMap.addEventListener('change',()=>layerPropertyCommandController.updateHighDepthPreview(owner,layerId,'toneMap',toneMap.value,{commit:true}));
   const exposure=root?.querySelector('[data-high-depth-display-exposure]');
   if(exposure){
     const output=root.querySelector('[data-high-depth-display-output]');
     exposure.addEventListener('input',()=>{
       if(output)output.textContent=formatDisplayExposure(exposure.value);
-      updateHighDepthPreviewSetting(layer,'displayExposure',exposure.value,false);
+      layerPropertyCommandController.updateHighDepthPreview(owner,layerId,'displayExposure',exposure.value,{commit:false});
     });
-    exposure.addEventListener('change',()=>updateHighDepthPreviewSetting(layer,'displayExposure',exposure.value,true));
+    exposure.addEventListener('change',()=>layerPropertyCommandController.updateHighDepthPreview(owner,layerId,'displayExposure',exposure.value,{commit:true}));
   }
-  root?.querySelector('[data-high-depth-preview-reset]')?.addEventListener('click',()=>resetHighDepthPreview(layer));
+  root?.querySelector('[data-high-depth-preview-reset]')?.addEventListener('click',()=>layerPropertyCommandController.resetHighDepthPreview(owner,layerId));
 }
 
 function updateProperties() {
@@ -1519,7 +1507,7 @@ function updateProperties() {
       <label>Маски</label><span>${escapeHtml(maskLabel)}</span>
       ${adjustmentPropertiesMarkup(l)}
     </div>`;
-    bindPropertyInputs(els.props);
+    bindPropertyInputs(els.props,doc,l.id);
     bindAdjustmentControls(els.props,l);
     if (isLayerLocked(doc,l)) els.props.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
     return;
@@ -1580,8 +1568,9 @@ function updateProperties() {
     <label>Маски</label><span>${escapeHtml(layerMaskSummary(l))}</span>
     ${extra}
   </div>`;
-  bindPropertyInputs(els.props);
-  if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,l);
+  const propertyOwner=doc, propertyLayerId=l.id;
+  bindPropertyInputs(els.props,propertyOwner,propertyLayerId);
+  if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='cmyk')bindColorManagementControls(els.props);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
   if(smartObjectEdit)smartObjectEdit.addEventListener('click',()=>openSmartObjectContents(l));
@@ -1594,7 +1583,7 @@ function updateProperties() {
   if(systemFontInput)systemFontInput.addEventListener('change',()=>{
     const value=textSettingsController.registerSystemFont(systemFontInput.value);
     if(!value)return;
-    applyProperty('fontFamily',value,systemFontInput,true);
+    layerPropertyCommandController.applyProperty(propertyOwner,propertyLayerId,'fontFamily',value,{commit:true});
   });
   const localFontsButton = els.props.querySelector('[data-local-fonts]');
   if (localFontsButton) localFontsButton.addEventListener('click', async () => {
@@ -1605,13 +1594,12 @@ function updateProperties() {
   });
   const fontInput = els.props.querySelector('#text-font-file');
   if (fontInput) fontInput.addEventListener('change', async () => {
-    const targetDoc = doc, targetLayer = l;
+    const targetDoc = propertyOwner, targetLayerId = propertyLayerId;
     fontInput.disabled = true;
     try {
       const custom = await textSettingsController.readCustomFont(fontInput.files?.[0]);
-      if (!custom || doc !== targetDoc || selected() !== targetLayer || isLayerLocked(doc,targetLayer)) return;
-      Object.assign(targetLayer, custom);
-      commit('Изменить шрифт текста');
+      if (!custom || doc !== targetDoc || selected()?.id !== targetLayerId) return;
+      layerPropertyCommandController.applyCustomFont(targetDoc,targetLayerId,custom);
     } catch (error) { toast(error.message, 'error'); setStatus(error.message); }
     finally { if (fontInput.isConnected) fontInput.disabled = false; }
   });
@@ -1626,62 +1614,11 @@ function updateEffectsPanel() {
   }
   els.effects.className = 'panel-content';
   els.effects.innerHTML = `<div class="prop-effects-grid">${renderEffectControls(l)}</div>`;
-  bindPropertyInputs(els.effects);
+  bindPropertyInputs(els.effects,doc,l.id);
   if (isLayerLocked(doc,l)) els.effects.querySelectorAll('input,textarea,select').forEach(control => { control.disabled = true; });
 }
 function escapeHtml(v) { const d=document.createElement('div'); d.textContent=v; return d.innerHTML; }
 function escapeAttr(v) { return escapeHtml(v).replaceAll('"','&quot;'); }
-function applyProperty(path, raw, input, shouldCommit = true) {
-  const l = selected(); if (!l || isLayerLocked(doc,l)) return;
-  const stringProps = ['name','text','color','fill','stroke','fontFamily','fontWeight','fontStyle','align','underline','strikeThrough'];
-  let value = stringProps.includes(path) ? raw : Number(raw);
-  if (!stringProps.includes(path) && !Number.isFinite(value)) {
-    refreshInspectorPanels();
-    setStatus('Некорректное числовое значение');
-    return;
-  }
-  if (path.startsWith('filters.')) {
-    const key = path.split('.')[1];
-    const [min,max] = FILTER_RANGES[key] || [0,400];
-    value = clamp(value, min, max);
-    l.filters = sanitizeFilters(l.filters);
-    l.filters[key] = value;
-    markDirty(true);
-    if (shouldCommit) commit('Изменить фильтр слоя'); else render();
-    return;
-  }
-  if (path === 'width' || path === 'height') {
-    value = clamp(value, 1, 12000);
-    if (l.type === 'raster') {
-      try {
-        checkedCanvasSize(path === 'width' ? value : l.width, path === 'height' ? value : l.height, `Растровый слой «${l.name || 'Без имени'}»`);
-      } catch (error) {
-        refreshInspectorPanels();
-        setStatus(error.message);
-        toast(error.message, 'warn');
-        return;
-      }
-    }
-  }
-  if (path === 'scaleX' || path === 'scaleY') value = clamp(value, .01, 100);
-  if (path === 'x' || path === 'y') value = clamp(value, -120000, 120000);
-  if (path === 'rotation') value = ((value % 360) + 360) % 360;
-  if (path === 'fontSize') value = clamp(value, 6, 500);
-  if (path === 'fontWeight' && !textSettingsController.isWeight(value)) return;
-  if (path === 'fontStyle' && !textSettingsController.isStyle(value)) return;
-  if (path === 'align' && !textSettingsController.isAlign(value)) return;
-  if (path === 'fontFamily' && !textSettingsController.fontOptions(l.fontFamily).some(([option]) => option === value)) return;
-  if (path === 'fontFamily' && value !== l.fontFamily) { l.fontData = null; l.fontLabel = ''; }
-  if (path === 'lineHeight') value = clamp(value, 0.8, 3);
-  if (path === 'letterSpacing') value = clamp(value, -5, 20);
-  if (path === 'underline' || path === 'strikeThrough') value = value === 'yes';
-  if (path === 'strokeWidth') value = clamp(value, 0, 1000);
-  l[path] = value;
-  markDirty(true);
-  if (shouldCommit) commit(`Изменить ${path}`);
-  else { render(); drawOverlay(); }
-}
-
 function updateToolLabel() {
   const selectionType = selectionGestures.getType();
   els.toolLabel.textContent = currentTool === 'marquee' ? (SELECTION_TYPE_LABELS[selectionType] || TOOL_LABELS.marquee) : (TOOL_LABELS[currentTool] || currentTool);
@@ -2984,11 +2921,11 @@ $('#layerUpBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(1);$(
 pathsController.bindControls();
 layersPanelController.bind();
 $('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateHistory();updateAll();};
-$('#resetColorEffectsBtn').onclick=resetSelectedLayerEffects;
+$('#resetColorEffectsBtn').onclick=layerPropertyCommandController.resetSelectedEffects;
 els.addTab.onclick=()=>addDocumentTab();
-els.blend.onchange=()=>{const l=selected();if(l&&!isLayerLocked(doc,l)){l.blendMode=els.blend.value;commit('Режим наложения');}};
-els.layerOpacity.oninput=()=>{const l=selected();if(l&&!isLayerLocked(doc,l)){l.opacity=Number(els.layerOpacity.value)/100;markDirty(true);render();}};
-els.layerOpacity.onchange=()=>{const l=selected();if(l&&!isLayerLocked(doc,l)){l.opacity=Number(els.layerOpacity.value)/100;commit('Непрозрачность слоя');}};
+els.blend.onchange=()=>layerPropertyCommandController.setSelectedBlendMode(els.blend.value);
+els.layerOpacity.oninput=()=>layerPropertyCommandController.setSelectedOpacity(els.layerOpacity.value,{commit:false});
+els.layerOpacity.onchange=()=>layerPropertyCommandController.setSelectedOpacity(els.layerOpacity.value,{commit:true});
 $('#zoomOutBtn').onclick=()=>setZoom(zoom-.1);$('#zoomInBtn').onclick=()=>setZoom(zoom+.1);$('#fitBtn').onclick=fitToView;els.zoomRange.oninput=()=>setZoom(Number(els.zoomRange.value)/100,false);
 els.fileInput.onchange=()=>{handleIncomingFiles(els.fileInput.files,null,'Импорт').catch(e=>{console.error(e);alert(e.message);});els.fileInput.value='';};
 els.projectInput.onchange=()=>{const f=els.projectInput.files[0];if(f)openProject(f);els.projectInput.value='';};
