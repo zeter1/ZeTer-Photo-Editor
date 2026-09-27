@@ -6,6 +6,7 @@ import { createDocument, createShapeLayer, createVectorMask, addLayer, sanitizeP
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
 const selectionVectorMaskController=await readFile(new URL('../src/selection/vector-mask-controller.js',import.meta.url),'utf8');
+const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
 const build=await readFile(new URL('../tools/build-bundle.mjs',import.meta.url),'utf8');
 
 test('vector mask state survives .zpe sanitization with Bezier handles and boolean operations',()=>{
@@ -54,17 +55,21 @@ test('Stage 10 UI exposes vector masks through the canonical selection owner',()
 });
 
 
-test('Stage 10c edits vector-mask anchors and handles through the Pen direct-edit pipeline',()=>{
+test('Stage 10c vector-mask anchor and handle transactions route through the canonical path-control owner',()=>{
   assert.match(main,/let vectorMaskEditLayerId = null/);
   assert.match(main,/function selectedEditablePathTargets\(\)/);
   assert.match(main,/source:'vector-mask',documentPathIndex:null,subpathIndex/);
   assert.match(main,/function pathTargetPoints\(layer,source='shape',subpathIndex=null,documentPathIndex=null\)/);
-  assert.match(main,/pathSource:hit\.source,documentPathIndex:hit\.documentPathIndex\?\?null,subpathIndex:hit\.subpathIndex/);
-  assert.match(main,/const points=pathTargetPoints\(layer,drag\.pathSource,drag\.subpathIndex,drag\.documentPathIndex\)/);
+  assert.match(main,/pathControlGestures\.begin\(doc,hit,point,\{shiftKey:event\.shiftKey\}\)/);
+  assert.match(pathControlGestures,/source === 'vector-mask'/);
+  assert.match(pathControlGestures,/layer\.vectorMask !== gesture\.vectorMaskTarget/);
+  assert.match(pathControlGestures,/Переместить узел векторной маски/);
+  assert.match(pathControlGestures,/Изменить ручку векторной маски/);
   assert.match(main,/beginVectorMaskEdit:\s*layerId\s*=>/);
   assert.match(main,/documentPathEditIndex\s*=\s*-1;\s*vectorMaskEditLayerId\s*=\s*layerId;/);
   assert.match(main,/Редактировать векторную маску пером/);
   assert.match(main,/vectorMaskEditLayerId===selected\(\)\?\.id/);
+  assert.match(build,/src\/interaction\/path-control-gesture-controller\.js/);
 });
 
 test('document saved paths survive .zpe sanitization with open/closed Bezier subpaths',()=>{
