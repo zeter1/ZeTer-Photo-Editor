@@ -61,7 +61,7 @@ test('Stage 10c vector-mask anchor and handle transactions route through the can
   assert.match(main,/source:'vector-mask',documentPathIndex:null,subpathIndex/);
   assert.match(main,/function pathTargetPoints\(layer,source='shape',subpathIndex=null,documentPathIndex=null\)/);
   assert.match(main,/pathControlGestures\.begin\(doc,hit,point,\{shiftKey:event\.shiftKey\}\)/);
-  assert.match(pathControlGestures,/source === 'vector-mask'/);
+  assert.match(pathControlGestures,/PATH_CONTROL_GESTURE_SOURCES = new Set\(\['shape', 'vector-mask', 'document-path'\]\)/);
   assert.match(pathControlGestures,/layer\.vectorMask !== gesture\.vectorMaskTarget/);
   assert.match(pathControlGestures,/Переместить узел векторной маски/);
   assert.match(pathControlGestures,/Изменить ручку векторной маски/);
