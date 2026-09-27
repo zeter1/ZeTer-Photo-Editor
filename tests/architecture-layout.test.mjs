@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -31,6 +31,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/interaction/path-control-surface-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/path-control-command-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/path-control-gesture-controller.js', root), 'utf8'),
+  readFile(new URL('src/interaction/pen-draft-gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/raster-mutation-controller.js', root), 'utf8'),
@@ -201,6 +202,21 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /pathControlGestures\.finish\(d,canvasPoint\(e,\{clampToDocument:false\}\),\{altKey:e\.altKey\}\)/);
   assert.doesNotMatch(main, /function restorePathControlDrag\(/);
   assert.doesNotMatch(main, /if \(drag\.kind === 'path-control'\)/);
+  assert.match(main, /from '\.\/interaction\/pen-draft-gesture-controller\.js'/);
+  assert.match(build, /'src\/interaction\/pen-draft-gesture-controller\.js'/);
+  assert.match(penDraftGestureController, /export function createPenDraftGestureController/);
+  assert.match(penDraftGestureController, /4 \/ currentZoom\(\)/);
+  assert.match(penDraftGestureController, /1 \/ currentZoom\(\)/);
+  assert.match(penDraftGestureController, /resolved\.draft\.points\.splice\(gesture\.nodeIndex, 1\)/);
+  assert.match(main, /penDraftGestures\.beginPoint\(p,\{finish:e\.detail>=2\}\)/);
+  assert.match(main, /penDraftGestures\.update\(drag,p,\{altKey:e\.altKey\}\)/);
+  assert.match(main, /penDraftGestures\.finish\(d,canvasPoint\(e\),\{altKey:e\.altKey\}\)/);
+  assert.match(main, /penDraftGestures\.cancelPoint\(d\)/);
+  assert.doesNotMatch(main, /let penDraft\s*=/);
+  assert.doesNotMatch(main, /kind:'pen-handle'/);
+  assert.doesNotMatch(main, /penDraft\.points\.splice/);
+  assert.doesNotMatch(main, /function beginPenPoint\(/);
+  assert.doesNotMatch(penDraftGestureController, /\b(?:commit|addLayer|createShapeLayer)\b/);
   assert.match(main, /layerTransformGestures\.beginRotate\(doc,l\.id,p,frame\.center\)/);
   assert.match(main, /layerTransformGestures\.update\(drag,p,/);
   assert.match(main, /layerTransformGestures\.finish\(d,canvasPoint\(e,\{clampToDocument:false\}\),/);

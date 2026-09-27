@@ -45,6 +45,7 @@ import { createLayerTransformGestureController } from './interaction/layer-trans
 import { createPathControlSurfaceController } from './interaction/path-control-surface-controller.js';
 import { PATH_CONTROL_COMMAND_RESULT, createPathControlCommandController } from './interaction/path-control-command-controller.js';
 import { createPathControlGestureController } from './interaction/path-control-gesture-controller.js';
+import { PEN_DRAFT_BEGIN_RESULT, createPenDraftGestureController } from './interaction/pen-draft-gesture-controller.js';
 import { createSelectionGestureController, cloneSelectionShape } from './selection/gesture-controller.js';
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
 import { createSelectionRasterMutationController } from './selection/raster-mutation-controller.js';
@@ -94,7 +95,6 @@ const renderBuffer = document.createElement('canvas');
 let dirty = false;
 let documentChangeSerial = 0;
 let drag = null;
-let penDraft = null;
 let vectorMaskEditLayerId = null;
 let documentPathEditIndex = -1;
 let spaceHeld = false;
@@ -784,6 +784,9 @@ const layerTransformGestures = createLayerTransformGestureController({
     redrawOverlay: () => drawOverlay(),
   },
 });
+const penDraftGestures = createPenDraftGestureController({
+  runtime: { getZoom: () => zoom },
+});
 const pathControlSurface = createPathControlSurfaceController({
   state: {
     getDocument: () => doc,
@@ -794,7 +797,7 @@ const pathControlSurface = createPathControlSurfaceController({
   runtime: {
     getCurrentTool: () => currentTool,
     getZoom: () => zoom,
-    hasPenDraft: () => Boolean(penDraft),
+    hasPenDraft: () => penDraftGestures.hasDraft(),
     hasActiveInteraction: () => Boolean(drag),
     setCursor: cursor => { els.overlay.style.cursor = cursor; },
   },
@@ -921,7 +924,7 @@ documentSessionController = createDocumentSessionController({
     pathsController.setSelectedIndex(state.selectedPathIndex);
     documentPathEditIndex = -1;
     vectorMaskEditLayerId = null;
-    penDraft = null;
+    penDraftGestures.reset();
     selectionGestures.resetDrafts();
     drag = null;
     rasterEdit.reset();
@@ -1048,7 +1051,7 @@ function setDoc(next, { resetHistory = false, label = 'Состояние' } = {
   pathsController.setSelectedIndex(-1);
   documentPathEditIndex = -1;
   vectorMaskEditLayerId = null;
-  penDraft = null;
+  penDraftGestures.reset();
   clearSelectionState();
   rasterEdit.reset();
   if (resetHistory) { clearImageCache(); history.reset(label, snapshotDocument(doc)); }
@@ -1267,10 +1270,11 @@ function drawOverlay() {
     ctx.restore();
   }
   selectionGestures.drawPolygonDraft(ctx);
+  const penDraft=penDraftGestures.snapshot();
   if(penDraft?.points?.length){
     const points=penDraft.points;
     ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#72a7ff';ctx.fillStyle='#fff';ctx.setLineDash([]);
-    ctx.beginPath();tracePenDraftPath(ctx,points,drag?.kind==='pen-handle'?null:penDraft.hover);ctx.stroke();
+    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover);ctx.stroke();
     ctx.lineWidth=1/zoom;ctx.strokeStyle='#8fc0ff';
     for(const point of points){
       for(const handle of [point.handleIn,point.handleOut]){
@@ -1618,7 +1622,7 @@ function updateToolLabel() {
 function setTool(tool) {
   if (tool !== currentTool && blockPendingDocumentEdit()) return;
   selectionGestures.prepareToolChange(tool);
-  if(tool!=='pen'){penDraft=null;vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
+  if(tool!=='pen'){penDraftGestures.reset();vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
   currentTool = tool;
   $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   updateToolLabel();
@@ -1761,7 +1765,7 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'gradient') { drag={kind:'gradient',start:p,current:p};drawOverlay();return; }
   if (currentTool === 'wand') { magicWandSelect(p);return; }
   if (currentTool === 'pen') {
-    const hit=!penDraft?pathControlSurface.hit(p):null;
+    const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
     if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
     if(documentPathEditIndex>=0){
       setStatus('Сохранённый контур: перетаскивайте существующие anchors/handles; новые subpaths добавляются через маску/выделение и сохранение');
@@ -1771,7 +1775,13 @@ async function onOverlayPointerDown(e) {
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
       return;
     }
-    beginPenPoint(p,e.detail>=2);return;
+    const penResult=penDraftGestures.beginPoint(p,{finish:e.detail>=2});
+    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
+    else{
+      if(penResult.status)setStatus(penResult.status);
+      if(penResult.result===PEN_DRAFT_BEGIN_RESULT.STARTED){drag=penResult.gesture;drawOverlay();}
+    }
+    return;
   }
   if (currentTool === 'magnetic') { selectionGestures.addMagneticPoint(p,{finish:e.detail>=2});return; }
   if (currentTool === 'marquee') {
@@ -1795,7 +1805,7 @@ function onOverlayPointerMove(e) {
   hoverPoint = p;
   if (!drag) {
     selectionGestures.updateIdleHover(p);
-    if(penDraft&&currentTool==='pen')penDraft.hover=p;
+    if(currentTool==='pen')penDraftGestures.updateIdleHover(p);
     if (currentTool === 'zoom') els.overlay.style.cursor=e.altKey?'zoom-out':'zoom-in';
     else if(currentTool==='pen')pathControlSurface.updateCursor(p);
     else updateMoveCursor(p);
@@ -1827,20 +1837,9 @@ function onOverlayPointerMove(e) {
   if (drag.kind === 'shape') { drag.current=p; drag.lockAspect=e.shiftKey; const r=constrainedRect(drag.start,p,e.shiftKey); previewRect(r, els.primaryColor.value); return; }
   if (drag.kind === 'crop') { drag.current=p; cropRect=normalizeRect(drag.start,p); drawOverlay(); return; }
   if (drag.kind === 'gradient') { drag.current=p;previewGradient(drag.start,p);return; }
-  if (drag.kind === 'pen-handle') {
-    const node=penDraft?.points?.[drag.nodeIndex];
-    if(!node)return;
-    const dx=p.x-drag.anchor.x,dy=p.y-drag.anchor.y;
-    const moved=Math.hypot(dx,dy)>1/zoom;
-    drag.moved=moved;
-    if(moved){
-      node.handleOut={x:p.x,y:p.y};
-      if(e.altKey){node.handleIn=null;node.kind='corner';}
-      else{node.handleIn={x:drag.anchor.x-dx,y:drag.anchor.y-dy};node.kind='smooth';}
-    }else{
-      node.handleIn=null;node.handleOut=null;node.kind='corner';
-    }
-    penDraft.hover=p;drawOverlay();return;
+  if (penDraftGestures.isGesture(drag)) {
+    penDraftGestures.update(drag,p,{altKey:e.altKey});
+    drawOverlay();return;
   }
 }
 async function onOverlayPointerUp(e) {
@@ -1885,11 +1884,9 @@ async function onOverlayPointerUp(e) {
     if (r.width >= 10 && r.height >= 10) applyCrop(d.owner,r); else { cropRect=null; drawOverlay(); }
   }
   if (d.kind === 'gradient') await applyGradient(d.start,d.current);
-  if (d.kind === 'pen-handle') {
-    if(penDraft)penDraft.hover=canvasPoint(e);
-    setStatus(d.moved
-      ? (penDraft?.points?.[d.nodeIndex]?.kind==='smooth'?'Перо: гладкая точка с симметричными ручками':'Перо: угловая точка с независимой ручкой')
-      : 'Перо: угловая точка');
+  if (penDraftGestures.isGesture(d)) {
+    const penResult=penDraftGestures.finish(d,canvasPoint(e),{altKey:e.altKey});
+    if(penResult.status)setStatus(penResult.status);
     drawOverlay();
   }
   updateMoveCursor(canvasPoint(e));
@@ -1904,10 +1901,7 @@ async function onOverlayPointerCancel(e) {
     if (layerTransformGestures.isGesture(d)) layerTransformGestures.cancel(d);
     if (d.kind==='crop') cropRect=null;
     if (d.kind==='marquee') selectionGestures.cancelMarquee(d);
-    if (d.kind==='pen-handle'&&penDraft){
-      penDraft.points.splice(d.nodeIndex,1);
-      if(!penDraft.points.length)penDraft=null;
-    }
+    if(penDraftGestures.isGesture(d))penDraftGestures.cancelPoint(d);
     if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
     if (d.kind==='pan') els.overlay.style.cursor=defaultToolCursor();
     rasterEdit.cancelPaintPreview(); drawOverlay(); setStatus('Действие отменено');
@@ -1993,21 +1987,6 @@ function tracePenDraftPath(ctx,points,hover=null){
   }
   return true;
 }
-function beginPenPoint(point,finish=false){
-  if(!penDraft)penDraft={points:[],hover:point};
-  const last=penDraft.points.at(-1);
-  const nearLast=last&&Math.hypot(point.x-last.x,point.y-last.y)<=4/zoom;
-  if(finish&&nearLast){
-    if(penDraft.points.length>=2)finishPenPath();
-    else setStatus('Перо: для контура нужно минимум 2 точки');
-    return false;
-  }
-  const node={x:point.x,y:point.y,handleIn:null,handleOut:null,kind:'corner'};
-  penDraft.points.push(node);penDraft.hover=point;
-  drag={kind:'pen-handle',nodeIndex:penDraft.points.length-1,anchor:{...point},moved:false};
-  setStatus('Перо: клик — угловая точка, тяните — гладкая, Alt+drag — независимая ручка');
-  drawOverlay();return true;
-}
 function penDraftBounds(points){
   const coords=[];
   for(const point of points||[]){
@@ -2029,9 +2008,9 @@ function localizePenNode(point,bounds){
   };
 }
 function finishPenPath(){
-  if(!penDraft||penDraft.points.length<2){penDraft=null;drag=null;drawOverlay();return false;}
-  const points=penDraft.points;penDraft=null;
-  if(drag?.kind==='pen-handle')drag=null;
+  const points=penDraftGestures.consumePoints();
+  if(points.length<2){if(penDraftGestures.isGesture(drag))drag=null;drawOverlay();return false;}
+  if(penDraftGestures.isGesture(drag))drag=null;
   const bounds=penDraftBounds(points);
   if(!bounds||Math.max(bounds.width,bounds.height)<1)return false;
   const localPoints=points.map(point=>localizePenNode(point,bounds));
@@ -2847,14 +2826,14 @@ window.addEventListener('keydown',e=>{
       e.preventDefault();
       const d=drag;drag=null;pointerLifecycle?.releaseActivePointer();clearSmartGuides();
       if(layerTransformGestures.isGesture(d))layerTransformGestures.cancel(d);
-      if(d.kind==='pen-handle'&&penDraft){penDraft.points.splice(d.nodeIndex,1);if(!penDraft.points.length)penDraft=null;}
+      if(penDraftGestures.isGesture(d))penDraftGestures.cancelPoint(d);
       if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
       if(d.kind==='crop')cropRect=null;
       if(d.kind==='marquee')selectionGestures.cancelMarquee(d);
       els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;
     }
     if(selectionGestures.hasPolygonDraft()){e.preventDefault();selectionGestures.cancelPolygonDraft({restorePrevious:true,announce:true});return;}
-    if(penDraft){e.preventDefault();penDraft=null;drawOverlay();setStatus('Контур отменён');return;}
+    if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropRect){cropRect=null;drawOverlay();setStatus('Кадрирование отменено');return;}
     if(selectionRect){deselectPixels();return;}
@@ -2862,7 +2841,7 @@ window.addEventListener('keydown',e=>{
   if(e.target instanceof Node && els.modalRoot.contains(e.target))return;
   if(menuController.isOpen() && (els.menu.contains(e.target)||e.target.closest?.('.menu-button')))return;
   if(e.key==='Enter'&&selectionGestures.hasPolygonDraft()&&currentTool==='marquee'){e.preventDefault();selectionGestures.finishPolygonSelection();return;}
-  if(e.key==='Enter'&&penDraft&&currentTool==='pen'){e.preventDefault();finishPenPath();return;}
+  if(e.key==='Enter'&&penDraftGestures.hasDraft()&&currentTool==='pen'){e.preventDefault();finishPenPath();return;}
   if(e.key==='Enter'&&selectionGestures.hasMagneticDraft()&&currentTool==='magnetic'){e.preventDefault();selectionGestures.finishMagneticSelection();return;}
   if(ctrl&&e.code==='Digit0'){e.preventDefault();fitToView();return;}
   if(ctrl&&e.code==='Digit1'){e.preventDefault();setZoom(1);return;}
