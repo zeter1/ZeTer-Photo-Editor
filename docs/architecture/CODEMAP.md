@@ -52,6 +52,11 @@ Range-style live preview records an owner/layer/property baseline, mutates only 
 
 It deliberately does **not** own Properties markup, Adjustment Layer controls, Smart Filter UI, Blending Options, Text add/edit modal state or persisted schema. Markup/bindings remain in `src/main.js`; stable clamps/sanitizers live in `src/core/state.js`; Text option/capability policy stays in `src/ui/text-settings-controller.js`.
 
+### `src/layers/adjustment-command-controller.js`
+Owns persisted Adjustment Layer command policy for the existing Properties controls: scalar/Levels edits, Curves point validation/replacement and clipping toggle. Every command carries the originating document + stable layer ID, re-resolves the exact live Adjustment layer, checks recursive effective lock, canonicalizes through `sanitizeAdjustmentModel`, suppresses semantic no-ops and publishes at most one history entry.
+
+It deliberately does **not** own Adjustment Properties markup/formatting, render math or Photoshop-native metadata planning. Markup and display formatting stay in `src/main.js`; model sanitization/equality/pixel math stay in `src/core/adjustments.js`; PSD-native import/export eligibility and metadata rewrite stay in document/format boundaries.
+
 ### `color-correction-controller.js`
 Owns the Color Correction dialog as one UI transaction: exact originating document/layer identity, canonical filter draft/original snapshots, bounded live range preview without history, batched Reset, guarded Apply, Cancel/Escape/backdrop rollback and idempotent modal/focus cleanup. Stale document callbacks, deleted/replaced layers and lock changes publish no history into another session; rollback may still restore the originating transient state when the exact target survives.
 
