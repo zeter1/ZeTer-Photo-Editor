@@ -17,6 +17,7 @@ const pathControlCommands=await readFile(new URL('../src/interaction/path-contro
 const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
 const penDraftGestures=await readFile(new URL('../src/interaction/pen-draft-gesture-controller.js',import.meta.url),'utf8');
 const penPathCommands=await readFile(new URL('../src/interaction/pen-path-command-controller.js',import.meta.url),'utf8');
+const cropGestures=await readFile(new URL('../src/interaction/crop-gesture-controller.js',import.meta.url),'utf8');
 
 test('requested advanced tools have dedicated vector icons and toolbar controls',()=>{
   for(const tool of ['heal','smudge','gradient','pen','magnetic','wand'])assert.match(html,new RegExp(`data-tool="${tool}"`));
@@ -94,7 +95,8 @@ test('gradient and crop provide useful live previews before committing',()=>{
   assert.match(main,/function previewGradient\(start,end\)/);
   assert.match(main,/ctx\.fillStyle=gradient/);
   assert.match(main,/drag\.kind === 'gradient'[\s\S]*?previewGradient\(drag\.start,p\)/);
-  assert.match(main,/for \(const fraction of \[1 \/ 3, 2 \/ 3\]\)/);
+  assert.match(main,/cropGestures\.draw\(ctx/);
+  assert.match(cropGestures,/for \(const fraction of \[1 \/ 3, 2 \/ 3\]\)/);
 });
 
 test('existing Bezier paths delegate surface, one-shot command and drag transaction to separate canonical owners',()=>{
