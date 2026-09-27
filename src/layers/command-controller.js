@@ -5,6 +5,7 @@ import {
   removeLayerGroup,
   moveLayerIntoGroup,
   moveLayerGroupIntoGroup,
+  moveLayer,
   removeLayer,
   duplicateLayer,
   isLayerLocked,
@@ -301,6 +302,13 @@ export function createLayerGroupCommandController({
     return true;
   }
 
+  function commandMoveLayer(owner, layerId, direction) {
+    const layer = exactLayer(owner, layerId);
+    if (!layer || isLayerLocked(owner, layer) || !direction) return false;
+    if (!moveLayer(owner, layerId, direction)) return false;
+    return publish(owner, direction > 0 ? 'Поднять слой' : 'Опустить слой');
+  }
+
   function commandMoveLayerRelative(owner, layerId, targetId, aboveInDisplay) {
     if (!activeDocument(owner) || layerId === targetId) return false;
     const sourceIndex = owner.layers?.findIndex(item => item.id === layerId) ?? -1;
@@ -392,6 +400,8 @@ export function createLayerGroupCommandController({
     renameGroup: commandRenameGroup,
     editGroupProperties: commandEditGroupProperties,
     deleteGroup: commandDeleteGroup,
+    moveLayer: commandMoveLayer,
+    moveSelectedLayer: direction => selectedCommand((owner, layerId) => commandMoveLayer(owner, layerId, direction)),
     moveLayerRelative: commandMoveLayerRelative,
     moveLayerIntoGroup: commandMoveLayerIntoGroup,
     moveGroupIntoGroup: commandMoveGroupIntoGroup,
