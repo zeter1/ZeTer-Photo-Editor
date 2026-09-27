@@ -38,7 +38,12 @@ Owns generic modal/dialog mechanics: field rendering, numeric normalization, asy
 Owns editor-shell layout state that is independent of document contents: persisted sidebar collapse IDs, legacy collapse-state migration, accessible panel toggle state and canvas-mode visibility with viewport-center preservation. It receives DOM/runtime geometry through narrow ports and does not own document/layer/history/tool state.
 
 ### `layers-panel-controller.js`
-Owns the Layers panel DOM tree and panel-local interaction lifecycle: recursive group/layer presentation, selected/effective ancestor state, thumbnails/mask hints, row keyboard focus and layer/group drag identity/drop cleanup including root drop. Event callbacks are bound to the rendered document identity. Layer/group schema + reusable mutation primitives remain in `src/core/state.js`; feature context menus/history stay behind runtime action ports.
+Owns the Layers panel DOM tree and panel-local interaction lifecycle: recursive group/layer presentation, selected/effective ancestor state, thumbnails/mask hints, row keyboard focus and layer/group drag identity/drop cleanup including root drop. Event callbacks are bound to the rendered document identity. Semantic layer/group actions are explicit ports into the canonical command owner rather than a second mutation/history policy.
+
+### `src/layers/command-controller.js`
+Owns primitive layer/group command policy shared by the Layers panel, menus, buttons and keyboard routes: exact active-document/entity guards, recursive effective-lock checks, create/rename/delete/duplicate/visibility/lock/group-properties commands, step/relative/root moves and history publication only after a real mutation. Rename/property modals re-resolve the originating owner and target on Apply, so a tab switch or deleted target becomes a no-op.
+
+It deliberately does **not** render the Layers tree, own drag identity, define persisted layer/group schema, store history, or absorb Smart Object/mask/blending feature menus. Stable model mutations remain in `src/core/state.js`; `src/main.js` is the composition root for transaction/modal/status ports and feature-heavy menu lists.
 
 ### `paths-controller.js`
 Owns Saved Paths UI/state orchestration: selected path index, bounded Photoshop path-resource allocation, save/rename/duplicate/delete actions, accessible list/keyboard/context-menu wiring and applying a saved path as a vector mask through grouped explicit ports. The document model remains in core, Pen direct-edit geometry/transient edit index remains in `src/main.js`, and PSD/PSB binary semantics remain in `src/formats/psd.js`.

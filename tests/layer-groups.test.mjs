@@ -9,6 +9,7 @@ import {
 
 const main=fs.readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
 const layersPanel=fs.readFileSync(new URL('../src/ui/layers-panel-controller.js',import.meta.url),'utf8');
+const layerCommands=fs.readFileSync(new URL('../src/layers/command-controller.js',import.meta.url),'utf8');
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const css=fs.readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
 
@@ -196,24 +197,34 @@ test('group opacity and blend mode survive project sanitization',()=>{
   assert.equal(safe.groups[1].blendMode,'pass-through');
 });
 
-test('layer panel has one canonical tree/DnD owner while domain commands stay in runtime/core',()=>{
+test('layer panel delegates primitive mutation policy to one canonical command owner',()=>{
   assert.match(html,/id="addGroupBtn"/);
   assert.match(html,/id="renameLayerBtn"/);
   assert.match(main,/from '\.\/ui\/layers-panel-controller\.js'/);
+  assert.match(main,/from '\.\/layers\/command-controller\.js'/);
   assert.match(main,/createLayersPanelController\(\{/);
+  assert.match(main,/createLayerGroupCommandController\(\{/);
   assert.match(layersPanel,/export function createLayersPanelController/);
+  assert.match(layerCommands,/export function createLayerGroupCommandController/);
   assert.match(layersPanel,/const renderLevel = \(parentGroupId = null, depth = 0\) =>/);
   assert.match(layersPanel,/function clearDragDecorations\(\)/);
   assert.match(layersPanel,/function onRootDrop\(event\)/);
   assert.match(layersPanel,/isLayerLocked\(owner, target\)/);
-  assert.match(main,/moveLayerIntoGroup\(owner, layerId, groupId\)/);
-  assert.match(main,/moveLayerGroupIntoGroup\(owner, groupId, targetGroupId\)/);
-  assert.match(main,/moveLayerGroupIntoGroup\(owner, groupId, null\)/);
-  assert.match(main,/\['Создать подгруппу'/);
-  assert.match(main,/\['Параметры группы…'/);
-  assert.match(main,/function editGroupProperties\(group\)/);
-  assert.match(main,/function renameGroup\(group\)/);
-  assert.match(main,/isLayerLocked\(doc, layer\)/);
+  assert.match(main,/toggleVisibility: layerGroupCommandController\.toggleLayerVisibility/);
+  assert.match(main,/toggleLock: layerGroupCommandController\.toggleLayerLock/);
+  assert.match(main,/moveLayerRelative: layerGroupCommandController\.moveLayerRelative/);
+  assert.match(main,/moveGroupToRoot: layerGroupCommandController\.moveGroupToRoot/);
+  assert.match(layerCommands,/moveLayerIntoGroup\(owner, layerId, groupId\)/);
+  assert.match(layerCommands,/moveLayerGroupIntoGroup\(owner, groupId, targetGroupId\)/);
+  assert.match(layerCommands,/moveLayerGroupIntoGroup\(owner, groupId, null\)/);
+  assert.match(layerCommands,/isLayerLocked\(owner, liveLayer\)/);
+  assert.match(layerCommands,/isGroupLocked\(owner, liveGroup\)/);
+  assert.match(main,/\['Создать подгруппу'.*layerGroupCommandController\.createGroup/);
+  assert.match(main,/\['Параметры группы…'.*layerGroupCommandController\.editGroupProperties/);
+  assert.match(main,/function editGroupProperties\(group\)\{return group \? layerGroupCommandController\.editGroupProperties/);
+  assert.match(main,/function renameGroup\(group\)\{return group \? layerGroupCommandController\.renameGroup/);
+  assert.doesNotMatch(main,/function moveLayerRelativeToTarget\(/);
+  assert.doesNotMatch(main,/function moveLayerToRootTop\(/);
   assert.doesNotMatch(main,/function updateLayers\(/);
   assert.doesNotMatch(main,/function clearLayerDragDecorations\(/);
   assert.doesNotMatch(main,/\blet (?:layerDragId|groupDragId)\b/);

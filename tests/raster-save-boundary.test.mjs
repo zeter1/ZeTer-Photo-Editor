@@ -4,12 +4,13 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { createDocumentSessionController } from '../src/workspace/session-controller.js';
 import { createRasterCommandController } from '../src/painting/command-controller.js';
+import { createLayerGroupCommandController } from '../src/layers/command-controller.js';
+import { createDocument, createRasterLayer, addLayer } from '../src/core/state.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const boundary = main.slice(main.indexOf('function documentEditPending()'), main.indexOf('function setDoc('));
 const fileCommands = main.slice(main.indexOf('function saveProject()'), main.indexOf('function toggleSelectedVisibility()'));
 const jumpHistory = main.slice(main.indexOf('function jumpToHistory('), main.indexOf('function updateLayerControls('));
-const deleteCommand = main.slice(main.indexOf('function deleteSelected()'), main.indexOf('function duplicateSelected()'));
 
 test('save and tab switch wait for a pending document edit', () => {
   const calls = [];
@@ -165,21 +166,32 @@ test('fill protects the document while its raster buffer is decoding', async () 
 });
 
 test('selected raster layer cannot be deleted before its stroke is committed', () => {
-  let removals = 0;
   const context = {
     paintPersisting: true, drag: null,
     pointerLifecycle: { hasActivePointer: () => false },
     RASTER_BRUSH_TOOLS: new Set(['brush']), currentTool: 'brush',
-    doc: { layers: [{ id: 'painted' }] },
-    selected: () => ({ id: 'painted' }),
-    isLayerLocked: () => false,
-    removeLayer: () => { removals += 1; },
-    commit: () => {}, setStatus: () => {}, toast: () => {},
+    setStatus: () => {}, toast: () => {},
   };
-  runInNewContext(`${boundary}\n${deleteCommand}\nglobalThis.deleteSelected=deleteSelected;`, context);
-  context.deleteSelected();
-  assert.equal(removals, 0);
+  runInNewContext(`${boundary}\nglobalThis.blockPendingDocumentEdit=blockPendingDocumentEdit;`, context);
+
+  const doc = createDocument({ width: 16, height: 16 });
+  const layer = addLayer(doc, createRasterLayer({ name: 'Painted', width: 16, height: 16 }));
+  const commits = [];
+  const commands = createLayerGroupCommandController({
+    state: { getDocument: () => doc },
+    transaction: {
+      commit: label => commits.push(label),
+      blockPendingEdit: () => context.blockPendingDocumentEdit(),
+    },
+    ui: { showModal: () => {}, setStatus: () => {} },
+  });
+
+  assert.equal(commands.deleteSelectedLayer(), false);
+  assert.equal(doc.layers.some(item => item.id === layer.id), true);
+  assert.deepEqual(commits, []);
+
   context.paintPersisting = false;
-  context.deleteSelected();
-  assert.equal(removals, 1);
+  assert.equal(commands.deleteSelectedLayer(), true);
+  assert.equal(doc.layers.some(item => item.id === layer.id), false);
+  assert.deepEqual(commits, ['Удалить слой']);
 });

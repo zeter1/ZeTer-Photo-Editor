@@ -31,6 +31,8 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - `src/ui/layers-panel-controller.js` owns only Layers tree/panel DOM and panel-local interaction state. It may import stable lock/visibility queries from core, but layer/group mutations/history/feature commands enter through explicit runtime ports.
 - A rendered Layers-row callback must prove its originating document is still active before selecting, renaming, deleting, opening feature UI or publishing a drag/drop action. Drag identity is controller-local and every drop/end/destroy path clears decorations + identity.
 - Relative layer DnD must reject locked source **and locked target**; nested effective lock/visibility presentation uses canonical recursive core queries rather than duplicating ancestor logic.
+- `src/layers/command-controller.js` is the single semantic owner for primitive layer/group commands used by panel/menu/button/keyboard paths. Every exact command first proves the originating document is still active and resolves the target by ID; modal Apply repeats that proof before mutation.
+- Effective lock checks are recursive through `src/core/state.js`; failed/stale/no-op commands publish no history. The controller may call stable core mutations directly, but it must not own Layers DOM/DnD state, feature-heavy Smart Object/mask/blending menus, or history storage.
 - `src/ui/tool-config.js`: pure configuration only.
 - `src/ui/tool-layout.js`: pure layout/order math only.
 - `src/ui/workspace-layout-controller.js` owns only editor-shell layout state: sidebar collapse persistence/migration plus canvas-mode chrome visibility and viewport-center preservation.
