@@ -423,6 +423,12 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /from '\.\/painting\/controller\.js'/);
   assert.match(build, /'src\/painting\/controller\.js'/);
   assert.match(paintingController, /export function createRasterEditController/);
+  assert.match(paintingController, /async function ensureRasterBuffer\(owner, layer\)/);
+  assert.match(paintingController, /async function persistPaintLayer\(owner, layer\)/);
+  assert.match(paintingController, /brushOwner === owner/);
+  assert.match(paintingController, /brushLayer === layer/);
+  assert.match(paintingController, /isCurrentCanvasTarget\(owner, layer\)/);
+  assert.doesNotMatch(paintingController, /async function persistPaintLayer\(\)/);
   for (const name of [
     'ensureRasterBuffer','ensureNativeHighDepthPaintBuffer','prepareHighDepthMutation',
     'applyHighDepthMutation','persistNativeHighDepthPaintLayer','persistPaintLayer',
@@ -430,13 +436,14 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   ]) assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
   assert.doesNotMatch(main, /let (?:brushCanvas|brushCtx|brushLayerId|highDepthPaintBuffer|highDepthPaintLayerId|highDepthPaintPreviewDirty|paintPreviewFrame|paintPreviewQueued)\b/);
   assert.match(main, /rasterEdit\.paintPreviewOverrides\(\)/);
-  assert.match(main, /rasterEdit\.ensureRasterBuffer\(/);
+  assert.match(main, /rasterEdit\.ensureRasterBuffer\(owner,layer\)/);
   assert.match(main, /from '\.\/painting\/command-controller\.js'/);
   assert.match(build, /'src\/painting\/command-controller\.js'/);
   assert.match(paintCommandController, /export function createRasterCommandController/);
   assert.match(paintCommandController, /async function drawLine\(/);
   assert.match(paintCommandController, /async function fillAt\(/);
   assert.match(paintCommandController, /async function clearSelection\(/);
+  assert.match(paintCommandController, /persistPaintLayer\(doc, layer\)/);
   assert.match(main, /drawLine: drawLineOnCurrentRaster/);
   assert.match(main, /fillAt: fillAtPoint/);
   assert.match(main, /clearSelection: clearSelectedPixels/);
@@ -468,6 +475,9 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /from '\.\/painting\/gesture-controller\.js'/);
   assert.match(build, /'src\/painting\/gesture-controller\.js'/);
   assert.match(paintGestureController, /export function createPaintGestureController/);
+  assert.match(paintGestureController, /owner,/);
+  assert.match(paintGestureController, /layer,/);
+  assert.match(paintGestureController, /persistPaintLayer\(drag\?\.owner, drag\?\.layer\)/);
   assert.match(paintGestureController, /async function ensurePaintLayer\(/);
   assert.match(paintGestureController, /async function begin\(/);
   assert.match(paintGestureController, /function move\(/);
