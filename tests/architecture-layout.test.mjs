@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -27,6 +27,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/text-edit-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/text-settings-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pointer-lifecycle-router.js', root), 'utf8'),
+  readFile(new URL('src/interaction/crop-gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/layer-transform-surface-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/layer-transform-gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/path-control-surface-controller.js', root), 'utf8'),
@@ -375,6 +376,22 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /const owner=doc;\s*showModal\(\{\s*title:'Фон документа'/);
   assert.match(main, /documentBackgroundCommandController\.setBackground\(owner,v\.background\)/);
   assert.doesNotMatch(main, /doc\.background\s*=/);
+  assert.match(main, /from '\.\/interaction\/crop-gesture-controller\.js'/);
+  assert.match(build, /'src\/interaction\/crop-gesture-controller\.js'/);
+  assert.match(cropGestureController, /export function createCropGestureController/);
+  assert.match(cropGestureController, /normalizeRect/);
+  assert.match(cropGestureController, /state\.getDocument\(\) === gesture\?\.owner/);
+  assert.match(cropGestureController, /CROP_GESTURE_MIN_SIZE = 10/);
+  assert.doesNotMatch(cropGestureController, /transaction|commit\(/);
+  assert.match(main, /createCropGestureController\(\{/);
+  assert.match(main, /cropGestures\.begin\(doc,p\)/);
+  assert.match(main, /cropGestures\.update\(drag,p\)/);
+  assert.match(main, /cropGestures\.finish\(d,canvasPoint\(e\)\)/);
+  assert.match(main, /cropRect: cropGestures\.snapshot\(\)/);
+  assert.match(main, /cropGestures\.restore\(state\.cropRect\)/);
+  assert.match(main, /cropGestures\.draw\(ctx, \{ zoom, width:doc\.width, height:doc\.height \}\)/);
+  assert.doesNotMatch(main, /let cropRect\b/);
+  assert.doesNotMatch(main, /fillStyle = '#0008'/);
   assert.match(main, /from '\.\/document\/crop-command-controller\.js'/);
   assert.match(build, /'src\/document\/crop-command-controller\.js'/);
   assert.match(documentCropCommandController, /export function createDocumentCropCommandController/);
@@ -383,9 +400,8 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(documentCropCommandController, /state\.getDocument\(\) === owner/);
   assert.match(documentCropCommandController, /transaction\.commit\('Кадрирование'\)/);
   assert.match(main, /createDocumentCropCommandController\(\{/);
-  assert.match(main, /kind:'crop', start:p, current:p, owner:doc/);
   assert.match(main, /documentCropCommandController\.crop\(owner,r\)/);
-  assert.match(main, /applyCrop\(d\.owner,r\)/);
+  assert.match(main, /applyCrop\(cropResult\.owner,cropResult\.rect\)/);
   assert.doesNotMatch(main, /commit\('Кадрирование'\)/);
   assert.match(main, /from '\.\/document\/resize-command-controller\.js'/);
   assert.match(build, /'src\/document\/resize-command-controller\.js'/);
