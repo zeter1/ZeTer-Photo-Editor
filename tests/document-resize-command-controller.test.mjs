@@ -220,6 +220,40 @@ test('canvas resize rejects unsafe size or layer position atomically', () => {
   assert.deepEqual(overflowHarness.runtime, { resets:0, fits:0 });
 });
 
+test('controller revalidates owner after planning and before the first persisted write', () => {
+  for (const command of ['image','canvas']) {
+    const origin = createDocument();
+    const other = createDocument({ width:300, height:200 });
+    const before = clone(origin);
+    let reads = 0;
+    const commits = [];
+    const runtime = { resets:0, fits:0 };
+    const controller = createDocumentResizeCommandController({
+      state: {
+        getDocument: () => {
+          reads += 1;
+          return reads === 1 ? origin : other;
+        },
+      },
+      transaction: { commit: label => commits.push(label) },
+      runtime: {
+        resetGeometryTransientState: () => { runtime.resets += 1; },
+        fitToView: () => { runtime.fits += 1; },
+      },
+    });
+
+    const outcome = command === 'image'
+      ? controller.resizeImage(origin, { width:200, height:160 })
+      : controller.resizeCanvas(origin, { width:200, height:180, anchor:'center' });
+
+    assert.equal(outcome.result, DOCUMENT_RESIZE_COMMAND_RESULT.REJECTED, command);
+    assert.deepEqual(origin, before, command);
+    assert.deepEqual(commits, [], command);
+    assert.deepEqual(runtime, { resets:0, fits:0 }, command);
+    assert.equal(reads, 2, command);
+  }
+});
+
 test('stale or replaced document owners cannot mutate or publish either resize command', () => {
   const origin = createDocument();
   const active = createDocument({ width:300, height:200 });
