@@ -15,6 +15,7 @@ const pathControlSurface=await readFile(new URL('../src/interaction/path-control
 const pathControlCommands=await readFile(new URL('../src/interaction/path-control-command-controller.js',import.meta.url),'utf8');
 const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
 const penDraftGestures=await readFile(new URL('../src/interaction/pen-draft-gesture-controller.js',import.meta.url),'utf8');
+const penPathCommands=await readFile(new URL('../src/interaction/pen-path-command-controller.js',import.meta.url),'utf8');
 
 test('requested advanced tools have dedicated vector icons and toolbar controls',()=>{
   for(const tool of ['heal','smudge','gradient','pen','magnetic','wand'])assert.match(html,new RegExp(`data-tool="${tool}"`));
@@ -64,7 +65,7 @@ test('smudge strength, healing source, gradient, edge snapping and wand selectio
   assert.match(main,/const selectedMask=new Uint8Array\(total\)/);
 });
 
-test('pen creates backward-compatible cubic Bezier paths through the canonical draft gesture owner',()=>{
+test('pen keeps transient drafting and persisted path publication behind separate canonical owners',()=>{
   assert.match(main,/createPenDraftGestureController/);
   assert.match(main,/penDraftGestures\.beginPoint\(p,\{finish:e\.detail>=2\}\)/);
   assert.match(penDraftGestures,/export function createPenDraftGestureController/);
@@ -74,7 +75,13 @@ test('pen creates backward-compatible cubic Bezier paths through the canonical d
   assert.doesNotMatch(main,/kind:'pen-handle'/);
   assert.match(main,/function tracePenDraftPath/);
   assert.match(main,/bezierCurveTo/);
-  assert.match(main,/shape:'path'/);
+  assert.match(main,/createPenPathCommandController/);
+  assert.match(main,/penPathCommands\.publish\(doc,points,/);
+  assert.match(penPathCommands,/export function createPenPathCommandController/);
+  assert.match(penPathCommands,/shape:'path'/);
+  assert.match(penPathCommands,/Добавить Bézier-контур/);
+  assert.doesNotMatch(main,/function penDraftBounds\(/);
+  assert.doesNotMatch(main,/function localizePenNode\(/);
   assert.match(render,/function traceLayerBezierPath/);
   assert.match(render,/ctx\.bezierCurveTo/);
   assert.match(state,/\['rect', 'ellipse', 'line', 'path'\]/);

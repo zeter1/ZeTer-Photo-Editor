@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -32,6 +32,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/interaction/path-control-command-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/path-control-gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pen-draft-gesture-controller.js', root), 'utf8'),
+  readFile(new URL('src/interaction/pen-path-command-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/raster-mutation-controller.js', root), 'utf8'),
@@ -217,6 +218,24 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /penDraft\.points\.splice/);
   assert.doesNotMatch(main, /function beginPenPoint\(/);
   assert.doesNotMatch(penDraftGestureController, /\b(?:commit|addLayer|createShapeLayer)\b/);
+  assert.match(main, /from '\.\/interaction\/pen-path-command-controller\.js'/);
+  assert.match(build, /'src\/interaction\/pen-path-command-controller\.js'/);
+  assert.match(penPathCommandController, /export function createPenPathCommandController/);
+  assert.match(penPathCommandController, /createShapeLayer/);
+  assert.match(penPathCommandController, /addLayer/);
+  assert.match(penPathCommandController, /Добавить Bézier-контур/);
+  assert.match(main, /createPenPathCommandController\(\{/);
+  assert.match(main, /penPathCommands\.publish\(doc,points,/);
+  assert.doesNotMatch(main, /function penDraftBounds\(/);
+  assert.doesNotMatch(main, /function localizePenNode\(/);
+  const finishPenPathSource = main.slice(
+    main.indexOf('function finishPenPath(){'),
+    main.indexOf('function magicWandSelect('),
+  );
+  assert.ok(finishPenPathSource.includes('function finishPenPath(){'));
+  assert.match(finishPenPathSource, /penDraftGestures\.consumePoints\(\)/);
+  assert.match(finishPenPathSource, /PEN_PATH_COMMAND_RESULT\.COMMITTED/);
+  assert.doesNotMatch(finishPenPathSource, /createShapeLayer|addLayer\(|commit\('Добавить Bézier-контур'\)/);
   assert.match(main, /layerTransformGestures\.beginRotate\(doc,l\.id,p,frame\.center\)/);
   assert.match(main, /layerTransformGestures\.update\(drag,p,/);
   assert.match(main, /layerTransformGestures\.finish\(d,canvasPoint\(e,\{clampToDocument:false\}\),/);
