@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical Layer Properties command controller
+
+- Refactor: generic Layer Properties / Color & Effects / persistent opacity+blend / HDR display-preview mutation and history policy moved from `src/main.js` into `src/layers/property-command-controller.js`; Properties markup remains in the composition root.
+- Stale-state fix: rendered property/HDR controls now publish through the originating document + stable layer ID and re-resolve the exact live target before mutation, so callbacks retained across a tab switch cannot mutate an old layer while committing into the new session.
+- History hygiene: filters, layer opacity, blend mode, generic properties and HDR preview suppress same-value commits; range `input` keeps an original baseline so the final `change` still produces exactly one Undo after live preview, while returning to the baseline produces no synthetic history.
+- Validation: recursive effective locks, numeric/text enum normalization, transform clamps, raster canvas-size safety, filter/HDR sanitization and custom-font publication now share one narrow transaction owner.
+- Regression/docs/build: direct controller tests cover exact-owner/lock/no-op/live-preview/HDR behavior; HDR and architecture source guards target the new owner; AI routing docs and the canonical browser build graph include the new module.
+
+
 ### 2026-09-27 — Canonical Layer/Group command controller
 
 - Refactor: primitive layer/group semantic commands shared by the Layers panel, menus, buttons and keyboard routes moved from duplicated `src/main.js` callbacks into `src/layers/command-controller.js`; `src/main.js` is now composition/wiring plus feature-heavy menu ownership.

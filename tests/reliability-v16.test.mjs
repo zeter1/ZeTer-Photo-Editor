@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { checkedCanvasSize, createDocument, sanitizeProject, MAX_CANVAS_PIXELS } from '../src/core/state.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const propertyCommands = await readFile(new URL('../src/layers/property-command-controller.js', import.meta.url), 'utf8');
 const painting = await readFile(new URL('../src/painting/controller.js', import.meta.url), 'utf8');
 const gesture = await readFile(new URL('../src/painting/gesture-controller.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
@@ -95,7 +96,8 @@ test('brush outline and painting stay bound to the selected visible raster layer
 });
 
 test('manual raster dimensions cannot bypass the canvas pixel budget', () => {
-  assert.match(main, /if \(l\.type === 'raster'\) \{[\s\S]*?checkedCanvasSize\(path === 'width' \? value : l\.width, path === 'height' \? value : l\.height/);
+  assert.match(main, /layerPropertyCommandController\.applyProperty\(owner, layerId/);
+  assert.match(propertyCommands, /checkedCanvasSize\([\s\S]*?path === 'width' \? value : layer\.width,[\s\S]*?path === 'height' \? value : layer\.height/);
   assert.match(painting, /const paintSize = checkedCanvasSize\(layer\.width, layer\.height, `Растровый слой/);
   assert.match(painting, /const canvasWidth = paintSize\.width/);
   assert.match(painting, /const canvasHeight = paintSize\.height/);

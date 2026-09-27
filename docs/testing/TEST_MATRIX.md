@@ -8,6 +8,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 | Workspace shell layout / sidebar collapse / canvas mode | `tests/workspace-layout-controller.test.mjs`, `tests/collapsible-panels.test.mjs`, architecture test | `npm run test:browser` for persistence + Tab hide/show integration |
 | Layers panel/tree DOM + keyboard focus + layer/group DnD | `tests/layers-panel-controller.test.mjs`, `tests/layer-groups.test.mjs`, architecture/source guard | `npm run test:browser` after panel/composition-root wiring changes |
 | Primitive layer/group command policy: recursive locks, stale modal owner, no-op history, create/delete/reorder/move publication | `tests/layer-group-command-controller.test.mjs`, `tests/layer-groups.test.mjs`, architecture/source guard | `npm run test:browser` after command/composition-root wiring changes |
+| Generic layer property command policy: exact owner, no-op history, filter/opacity live-preview baseline, HDR stale callback, text/geometry validation | `tests/layer-property-command-controller.test.mjs`, `tests/high-depth-preview-controls.test.mjs`, text/high-depth/layer regressions, architecture/source guard | `npm run test:browser` after Properties/persistent-control composition wiring changes |
 | Saved Paths panel / CRUD / selected-index bridge / vector-mask apply | `tests/paths-controller.test.mjs`, `tests/paths-panel.test.mjs`, `tests/workspace-session-controller.test.mjs`, `tests/vector-masks.test.mjs`, architecture test | `npm run test:browser` for full file:// startup after wiring changes |
 | Global overlay pointer lifecycle / capture / cancellation | `tests/pointer-lifecycle-router.test.mjs`, `tests/pointer-release-tools.test.mjs`, architecture test | `npm run test:browser` |
 | Menu/tool-specific interaction | relevant interaction/selection/retouch tests | `npm run test:browser` |
@@ -50,7 +51,7 @@ npm run test:browser
 CI performs:
 1. checkout + Node 24;
 2. `npm run check`;
-3. `git diff --exit-code -- src/app.bundle.js`;
+3. generated browser artifact parity: `git diff --exit-code -- src/app.bundle.js index.html version.json`;
 4. real Chromium `file://` smoke;
 5. `git diff --check`.
 

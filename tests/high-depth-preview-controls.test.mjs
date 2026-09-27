@@ -5,6 +5,7 @@ import { createDocument, createRasterLayer, addLayer, sanitizeProject, snapshotD
 import { createPixelBuffer, serializePixelBufferSource, pixelBufferToToneMappedRgba8Preview } from '../src/core/pixel-buffer.js';
 
 const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
+const propertyCommands=await readFile(new URL('../src/layers/property-command-controller.js',import.meta.url),'utf8');
 const painting=await readFile(new URL('../src/painting/controller.js',import.meta.url),'utf8');
 const selectionMutations=await readFile(new URL('../src/selection/raster-mutation-controller.js',import.meta.url),'utf8');
 const render=await readFile(new URL('../src/core/render.js',import.meta.url),'utf8');
@@ -46,8 +47,12 @@ test('Stage 12c UI and renderer wire tone-map mode and display exposure into cac
   assert.match(main,/data-high-depth-tone-map/);
   assert.match(main,/data-high-depth-display-exposure/);
   assert.match(main,/data-high-depth-preview-reset/);
-  assert.match(main,/function updateHighDepthPreviewSetting\(/);
   assert.match(main,/function bindHighDepthPreviewControls\(/);
+  assert.match(main,/layerPropertyCommandController\.updateHighDepthPreview\(/);
+  assert.match(main,/layerPropertyCommandController\.resetHighDepthPreview\(/);
+  assert.match(propertyCommands,/function commandUpdateHighDepthPreview\(/);
+  assert.match(propertyCommands,/function commandResetHighDepthPreview\(/);
+  assert.doesNotMatch(main,/function updateHighDepthPreviewSetting\(/);
   assert.match(render,/const toneMap = \['auto','clip','aces'\]\.includes\(preview\.toneMap\)/);
   assert.match(render,/displayExposure\.toFixed\(3\)/);
   assert.match(render,/pixelBufferToToneMappedRgba8Preview\(buffer, layer\.filters \|\| \{\}, \{ toneMap, displayExposure \}\)/);
