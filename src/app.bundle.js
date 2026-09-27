@@ -7268,6 +7268,333 @@ function sanitizeProject(input) {
   return sanitizeProjectInternal(input, { allowMissingVersion: true, embeddedDepth: 0 });
 }
 
+// ---- src/ui/color-correction-controller.js ----
+const COLOR_CORRECTION_CONTROL_BY_KEY = new Map(COLOR_CORRECTION_CONTROLS.map(control => [control.key, control]));
+const COLOR_CORRECTION_EPSILON = 1e-9;
+
+function colorCorrectionNumbersEqual(left, right) {
+  return Math.abs(Number(left) - Number(right)) < COLOR_CORRECTION_EPSILON;
+}
+
+function colorCorrectionFiltersEqual(left, right) {
+  return COLOR_CORRECTION_CONTROLS.every(control => colorCorrectionNumbersEqual(
+    left?.[control.key] ?? DEFAULT_LAYER_FILTERS[control.key],
+    right?.[control.key] ?? DEFAULT_LAYER_FILTERS[control.key],
+  ));
+}
+
+function normalizeColorCorrectionValue(control, raw) {
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric)) return null;
+  const [safeMin, safeMax] = FILTER_RANGES[control.key] ?? [control.min, control.max];
+  const minimum = Math.max(Number(control.min), safeMin);
+  const maximum = Math.min(Number(control.max), safeMax);
+  return Math.min(maximum, Math.max(minimum, numeric));
+}
+
+function colorCorrectionRejectionMessage(reason) {
+  if (reason === 'locked') return 'Слой или его группа заблокированы';
+  if (reason === 'missing-target') return 'Слой цветокоррекции больше недоступен';
+  if (reason === 'stale-document') return 'Цветокоррекция отменена после смены документа';
+  if (reason === 'invalid-value') return 'Некорректное значение цветокоррекции';
+  return 'Цветокоррекция не может быть применена';
+}
+function createColorCorrectionSession({
+  owner,
+  layerId,
+  getDocument = () => owner,
+  markTransientChange = () => {},
+  render = () => {},
+  refreshInspectorPanels = () => {},
+  commit = () => {},
+} = {}) {
+  if (!owner || !layerId) throw new TypeError('Color correction session requires an owner document and layer id');
+  const initialLayer = owner.layers?.find(layer => layer.id === layerId) ?? null;
+  if (!initialLayer || initialLayer.type !== 'raster') {
+    throw new TypeError('Color correction session requires an exact raster layer');
+  }
+
+  const identity = initialLayer;
+  const original = sanitizeFilters(initialLayer.filters);
+  const draft = { ...original };
+
+  function exactLayer() {
+    const current = owner.layers?.find(layer => layer.id === layerId) ?? null;
+    return current === identity ? current : null;
+  }
+
+  function publicationState() {
+    if (getDocument() !== owner) return { valid:false, reason:'stale-document', target:exactLayer() };
+    const target = exactLayer();
+    if (!target || target.type !== 'raster') return { valid:false, reason:'missing-target', target:null };
+    if (isLayerLocked(owner, target)) return { valid:false, reason:'locked', target };
+    return { valid:true, reason:null, target };
+  }
+
+  function publishTransient(target, nextFilters) {
+    const normalized = sanitizeFilters(nextFilters);
+    if (colorCorrectionFiltersEqual(target.filters, normalized)) return false;
+    target.filters = normalized;
+    markTransientChange();
+    render();
+    return true;
+  }
+
+  function restore({ publish = getDocument() === owner } = {}) {
+    const target = exactLayer();
+    if (!target) return false;
+    const changed = !colorCorrectionFiltersEqual(target.filters, original);
+    if (changed) target.filters = { ...original };
+    if (changed && publish) {
+      markTransientChange();
+      render();
+      refreshInspectorPanels();
+    }
+    return changed;
+  }
+
+  function preview(key, raw) {
+    const control = COLOR_CORRECTION_CONTROL_BY_KEY.get(key);
+    if (!control) return { valid:false, changed:false, reason:'invalid-value', value:null };
+    const value = normalizeColorCorrectionValue(control, raw);
+    if (value === null) return { valid:false, changed:false, reason:'invalid-value', value:draft[key] };
+    const state = publicationState();
+    if (!state.valid) return { valid:false, changed:false, reason:state.reason, value:draft[key] };
+    if (colorCorrectionNumbersEqual(draft[key], value) && colorCorrectionNumbersEqual(state.target.filters?.[key], value)) {
+      return { valid:true, changed:false, reason:null, value };
+    }
+    draft[key] = value;
+    const changed = publishTransient(state.target, draft);
+    return { valid:true, changed, reason:null, value };
+  }
+
+  function reset() {
+    const state = publicationState();
+    if (!state.valid) return { valid:false, changed:false, reason:state.reason };
+    for (const control of COLOR_CORRECTION_CONTROLS) {
+      draft[control.key] = normalizeColorCorrectionValue(control, DEFAULT_LAYER_FILTERS[control.key]);
+    }
+    const changed = publishTransient(state.target, draft);
+    return { valid:true, changed, reason:null };
+  }
+
+  function cancel() {
+    const state = publicationState();
+    const restored = restore({ publish:getDocument() === owner });
+    return { valid:state.valid, changed:false, committed:false, restored, reason:state.reason };
+  }
+
+  function apply() {
+    const state = publicationState();
+    if (!state.valid) {
+      const restored = restore({ publish:getDocument() === owner });
+      return { valid:false, changed:false, committed:false, restored, reason:state.reason };
+    }
+    const changed = !colorCorrectionFiltersEqual(draft, original);
+    if (!changed) {
+      const restored = restore();
+      return { valid:true, changed:false, committed:false, restored, reason:null };
+    }
+    state.target.filters = sanitizeFilters(draft);
+    commit('Цветокоррекция слоя');
+    return { valid:true, changed:true, committed:true, restored:false, reason:null };
+  }
+
+  return { draft, exactLayer, publicationState, preview, reset, cancel, apply };
+}
+function createColorCorrectionModalFinalizer({
+  session,
+  closeModal = () => {},
+  restoreFocus = () => {},
+  setStatus = () => {},
+  toast = () => {},
+} = {}) {
+  if (!session) throw new TypeError('Color correction modal finalizer requires a session');
+  let closed = false;
+
+  function closeOnce() {
+    if (closed) return false;
+    closed = true;
+    closeModal();
+    restoreFocus();
+    return true;
+  }
+
+  function cancel(reason = null) {
+    if (closed) return null;
+    const outcome = session.cancel();
+    closeOnce();
+    const rejection = reason || outcome.reason;
+    if (rejection && rejection !== 'stale-document') toast(colorCorrectionRejectionMessage(rejection), 'warn');
+    setStatus(rejection ? colorCorrectionRejectionMessage(rejection) : 'Цветокоррекция отменена');
+    return outcome;
+  }
+
+  function apply() {
+    if (closed) return null;
+    const outcome = session.apply();
+    closeOnce();
+    if (!outcome.valid) {
+      const message = colorCorrectionRejectionMessage(outcome.reason);
+      toast(message, 'warn');
+      setStatus(message);
+    } else if (outcome.changed) {
+      setStatus('Цветокоррекция применена');
+    } else {
+      setStatus('Цветокоррекция без изменений');
+    }
+    return outcome;
+  }
+
+  return { cancel, apply, isClosed:() => closed };
+}
+function createColorCorrectionController({ state = {}, transaction = {}, rendering = {}, ui = {} } = {}) {
+  const { getDocument = () => null } = state;
+  const { commit = () => {}, markTransientChange = () => {} } = transaction;
+  const { render = () => {}, refreshInspectorPanels = () => {} } = rendering;
+  const {
+    modalRoot = null,
+    documentRef = globalThis.document,
+    HTMLElementClass = globalThis.HTMLElement,
+    setStatus = () => {},
+    toast = () => {},
+    formatFilterValue = (_key, value) => String(value),
+  } = ui;
+
+  function rejectOpen(message, { status = message } = {}) {
+    toast(message, 'warn');
+    setStatus(status);
+    return false;
+  }
+
+  function open(layer) {
+    const owner = getDocument();
+    if (!owner || !layer || owner.layers?.find(item => item.id === layer.id) !== layer || layer.type !== 'raster') {
+      return rejectOpen('Цветокоррекция доступна для растрового слоя', { status:'Выберите растровый слой' });
+    }
+    if (isLayerLocked(owner, layer)) return rejectOpen('Слой или его группа заблокированы');
+    if (!modalRoot || !documentRef) throw new Error('Color correction controller requires modal DOM capabilities');
+
+    const session = createColorCorrectionSession({
+      owner,
+      layerId:layer.id,
+      getDocument,
+      markTransientChange,
+      render,
+      refreshInspectorPanels,
+      commit,
+    });
+    const previousFocus = documentRef.activeElement;
+    const back = documentRef.createElement('div');
+    back.className = 'modal-backdrop';
+    const modal = documentRef.createElement('form');
+    modal.className = 'modal color-correction-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-label', 'Цветокоррекция');
+    modal.innerHTML = '<header>Цветокоррекция</header><div class="modal-body color-correction-body"><p class="muted color-correction-hint">Настройки применяются неразрушающе к выбранному растровому слою. Изменения сразу видны на холсте.</p></div><footer><button type="button" class="secondary-button" data-reset>Сбросить</button><span class="modal-footer-spacer"></span><button type="button" class="secondary-button" data-cancel>Отмена</button><button type="submit" class="primary-button">Применить</button></footer>';
+    const body = modal.querySelector('.color-correction-body');
+    const controlNodes = new Map();
+    let currentGroup = '';
+
+    for (const control of COLOR_CORRECTION_CONTROLS) {
+      if (control.group !== currentGroup) {
+        currentGroup = control.group;
+        const heading = documentRef.createElement('div');
+        heading.className = 'color-correction-group';
+        heading.textContent = currentGroup;
+        body.append(heading);
+      }
+      const row = documentRef.createElement('label');
+      row.className = 'color-correction-row';
+      const label = documentRef.createElement('span');
+      label.textContent = control.label;
+      const input = documentRef.createElement('input');
+      input.type = 'range';
+      input.name = control.key;
+      input.min = String(control.min);
+      input.max = String(control.max);
+      input.step = String(control.step);
+      input.value = String(session.draft[control.key]);
+      const output = documentRef.createElement('output');
+      output.value = formatFilterValue(control.key, input.value);
+      output.textContent = output.value;
+      row.append(label, input, output);
+      body.append(row);
+      controlNodes.set(control.key, { input, output });
+    }
+
+    const restoreFocus = () => {
+      if (HTMLElementClass && previousFocus instanceof HTMLElementClass && previousFocus.isConnected) previousFocus.focus();
+    };
+    const finalizer = createColorCorrectionModalFinalizer({
+      session,
+      closeModal:() => modalRoot.replaceChildren(),
+      restoreFocus,
+      setStatus,
+      toast,
+    });
+
+    function cancelForInvalidState(reason) {
+      finalizer.cancel(reason);
+    }
+
+    for (const control of COLOR_CORRECTION_CONTROLS) {
+      const { input, output } = controlNodes.get(control.key);
+      input.addEventListener('input', () => {
+        const outcome = session.preview(control.key, input.value);
+        if (!outcome.valid) {
+          if (outcome.reason === 'invalid-value') {
+            input.value = String(outcome.value ?? session.draft[control.key]);
+            output.value = formatFilterValue(control.key, input.value);
+            output.textContent = output.value;
+            toast(colorCorrectionRejectionMessage(outcome.reason), 'warn');
+            return;
+          }
+          cancelForInvalidState(outcome.reason);
+          return;
+        }
+        input.value = String(outcome.value);
+        output.value = formatFilterValue(control.key, outcome.value);
+        output.textContent = output.value;
+      });
+    }
+
+    modal.querySelector('[data-reset]').addEventListener('click', () => {
+      const outcome = session.reset();
+      if (!outcome.valid) {
+        cancelForInvalidState(outcome.reason);
+        return;
+      }
+      for (const control of COLOR_CORRECTION_CONTROLS) {
+        const { input, output } = controlNodes.get(control.key);
+        input.value = String(session.draft[control.key]);
+        output.value = formatFilterValue(control.key, input.value);
+        output.textContent = output.value;
+      }
+    });
+    modal.querySelector('[data-cancel]').addEventListener('click', () => finalizer.cancel());
+    back.addEventListener('mousedown', event => { if (event.target === back) finalizer.cancel(); });
+    modal.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        finalizer.cancel();
+      }
+    });
+    modal.addEventListener('submit', event => {
+      event.preventDefault();
+      finalizer.apply();
+    });
+    back.append(modal);
+    modalRoot.replaceChildren(back);
+    modal.querySelector('input[type="range"]')?.focus();
+    return true;
+  }
+
+  return { open };
+}
+
 // ---- src/layers/command-controller.js ----
 function createLayerGroupCommandController({
   state,
@@ -19017,6 +19344,23 @@ const layerPropertyCommandController = createLayerPropertyCommandController({
   },
 });
 
+const colorCorrectionController = createColorCorrectionController({
+  state: { getDocument: () => doc },
+  transaction: {
+    commit,
+    markTransientChange: () => { documentChangeSerial += 1; },
+  },
+  rendering: { render, refreshInspectorPanels },
+  ui: {
+    modalRoot: els.modalRoot,
+    documentRef: document,
+    HTMLElementClass: HTMLElement,
+    setStatus,
+    toast,
+    formatFilterValue,
+  },
+});
+
 const modalController = createModalController({
   modalRoot: els.modalRoot,
   escapeHtml,
@@ -21350,7 +21694,7 @@ const menus={
     ['Опустить слой','',()=>layerGroupCommandController.moveSelectedLayer(-1),()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],
   image:[
-    ['Цветокоррекция…','',openColorCorrectionDialog,()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
+    ['Цветокоррекция…','',()=>colorCorrectionController.open(selected()),()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
     ['Сбросить цветокоррекцию','',()=>{const l=selected();if(l?.type==='raster'&&!isLayerLocked(doc,l)){const current=sanitizeFilters(l.filters);for(const key of COLOR_CORRECTION_KEYS)current[key]=DEFAULT_LAYER_FILTERS[key];l.filters=current;commit('Сбросить цветокоррекцию');}},()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Размер изображения…','',resizeImageDialog],
@@ -21385,53 +21729,6 @@ const menus={
     ['О программе','',showAbout],
   ],
 };
-function openColorCorrectionDialog(){
-  const layer=selected();
-  if(!layer||layer.type!=='raster'){toast('Цветокоррекция доступна для растрового слоя','warn');setStatus('Выберите растровый слой');return;}
-  if(isLayerLocked(doc,layer)){toast('Слой или его группа заблокированы','warn');return;}
-  const layerId=layer.id;
-  const original=sanitizeFilters(layer.filters);
-  layer.filters={...original};
-  const previousFocus=document.activeElement;
-  const back=document.createElement('div');back.className='modal-backdrop';
-  const modal=document.createElement('form');modal.className='modal color-correction-modal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Цветокоррекция');
-  modal.innerHTML='<header>Цветокоррекция</header><div class="modal-body color-correction-body"><p class="muted color-correction-hint">Настройки применяются неразрушающе к выбранному растровому слою. Изменения сразу видны на холсте.</p></div><footer><button type="button" class="secondary-button" data-reset>Сбросить</button><span class="modal-footer-spacer"></span><button type="button" class="secondary-button" data-cancel>Отмена</button><button type="submit" class="primary-button">Применить</button></footer>';
-  const body=modal.querySelector('.color-correction-body');
-  let currentGroup='';
-  for(const control of COLOR_CORRECTION_CONTROLS){
-    if(control.group!==currentGroup){currentGroup=control.group;const heading=document.createElement('div');heading.className='color-correction-group';heading.textContent=currentGroup;body.append(heading);}
-    const row=document.createElement('label');row.className='color-correction-row';
-    const label=document.createElement('span');label.textContent=control.label;
-    const input=document.createElement('input');input.type='range';input.name=control.key;input.min=String(control.min);input.max=String(control.max);input.step=String(control.step);input.value=String(layer.filters[control.key] ?? DEFAULT_LAYER_FILTERS[control.key]);
-    const output=document.createElement('output');output.value=formatFilterValue(control.key,input.value);output.textContent=output.value;
-    row.append(label,input,output);body.append(row);
-    input.addEventListener('input',()=>{
-      const target=doc.layers.find(item=>item.id===layerId);if(!target)return;
-      const [min,max]=FILTER_RANGES[control.key]||[control.min,control.max];
-      const value=clamp(Number(input.value),min,max);target.filters[control.key]=value;output.value=formatFilterValue(control.key,value);output.textContent=output.value;render();
-    });
-  }
-  const close=()=>{els.modalRoot.replaceChildren();if(previousFocus instanceof HTMLElement)previousFocus.focus();};
-  const restore=()=>{const target=doc.layers.find(item=>item.id===layerId);if(target){target.filters={...original};render();refreshInspectorPanels();}};
-  back.append(modal);els.modalRoot.replaceChildren(back);
-  modal.querySelector('[data-reset]').addEventListener('click',()=>{
-    for(const control of COLOR_CORRECTION_CONTROLS){
-      const input=modal.elements.namedItem(control.key);if(!(input instanceof HTMLInputElement))continue;
-      input.value=String(DEFAULT_LAYER_FILTERS[control.key]);input.dispatchEvent(new Event('input',{bubbles:true}));
-    }
-  });
-  modal.querySelector('[data-cancel]').addEventListener('click',()=>{restore();close();setStatus('Цветокоррекция отменена');});
-  modal.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();restore();close();setStatus('Цветокоррекция отменена');}});
-  modal.addEventListener('submit',e=>{
-    e.preventDefault();const target=doc.layers.find(item=>item.id===layerId);if(!target){close();return;}
-    const changed=COLOR_CORRECTION_CONTROLS.some(control=>Math.abs((target.filters[control.key]??DEFAULT_LAYER_FILTERS[control.key])-(original[control.key]??DEFAULT_LAYER_FILTERS[control.key]))>1e-9);
-    close();
-    if(changed){commit('Цветокоррекция слоя');setStatus('Цветокоррекция применена');}
-    else {target.filters={...original};render();setStatus('Цветокоррекция без изменений');}
-  });
-  modal.querySelector('input[type="range"]')?.focus();
-}
-
 function resizeCanvasDialog(){if(blockPendingDocumentEdit())return;showModal({title:'Размер холста',fields:[
   {name:'width',label:'Ширина',type:'number',value:doc.width,min:'1',max:'12000',required:true},
   {name:'height',label:'Высота',type:'number',value:doc.height,min:'1',max:'12000',required:true},

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical Color Correction dialog controller
+
+- Refactor: Color Correction modal construction, draft/live-preview transaction and finalization moved from `src/main.js` into `src/ui/color-correction-controller.js`; the composition root now only wires the owner and routes the Image-menu action.
+- Stale-state fix: every preview/Apply revalidates the originating document plus stable layer ID and object identity, so tab switches or a removed/replaced target cannot mutate a coincidental layer or publish history into another session.
+- Transaction safety: effective lock changes block Apply, stale/locked close paths restore the exact originating transient preview when the target survives, Reset is one history-free preview publication, repeated identical input is a no-op and real Apply commits at most once.
+- Lifecycle/tests/docs/build: Cancel/Escape/backdrop share one idempotent finalizer with focus restoration; direct controller regressions cover clamps, no-op/history, stale target/document/lock and cleanup; architecture/AI-routing docs and the canonical file:// bundle graph point to the new owner.
+
 ### 2026-09-27 — Canonical Layer Properties command controller
 
 - Refactor: generic Layer Properties / Color & Effects / persistent opacity+blend / HDR display-preview mutation and history policy moved from `src/main.js` into `src/layers/property-command-controller.js`; Properties markup remains in the composition root.

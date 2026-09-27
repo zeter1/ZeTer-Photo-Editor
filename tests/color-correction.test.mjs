@@ -7,6 +7,7 @@ import { createRasterLayer, sanitizeFilters, sanitizeProject, DEFAULT_LAYER_FILT
 import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+const colorCorrectionController = await readFile(new URL('../src/ui/color-correction-controller.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
 
 test('neutral advanced color correction preserves RGB values', () => {
@@ -57,11 +58,13 @@ test('filter sanitizer accepts signed color controls and clamps unsafe project v
   assert.equal(legacy.layers[0].filters.temperature, 0);
 });
 
-test('editor exposes non-destructive color correction UI and render wiring', () => {
-  assert.match(main, /function openColorCorrectionDialog\(\)/);
-  assert.match(main, /Цветокоррекция…/);
-  assert.match(main, /commit\('Цветокоррекция слоя'\)/);
-  assert.match(main, /COLOR_CORRECTION_CONTROLS/);
+test('editor exposes non-destructive color correction through the canonical transaction owner', () => {
+  assert.match(main, /createColorCorrectionController/);
+  assert.match(main, /colorCorrectionController\.open\(selected\(\)\)/);
+  assert.doesNotMatch(main, /function openColorCorrectionDialog\(\)/);
+  assert.match(colorCorrectionController, /createColorCorrectionSession/);
+  assert.match(colorCorrectionController, /commit\('Цветокоррекция слоя'\)/);
+  assert.match(colorCorrectionController, /COLOR_CORRECTION_CONTROLS/);
   assert.match(render, /applyAdvancedColorAdjustments/);
   assert.match(render, /hue-rotate\(\$\{f\.hue\}deg\)/);
   assert.match(render, /adjustedRasterCache/);
