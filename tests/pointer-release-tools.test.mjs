@@ -13,7 +13,7 @@ const pointerMoveStart = main.indexOf('function onOverlayPointerMove(e) {');
 assert.ok(pointerMoveStart >= 0 && pointerMoveStart < start);
 const pointerMoveSource = main.slice(pointerMoveStart, start);
 
-function release(drag, point, pointerId = 1, shiftKey = false) {
+function release(drag, point, pointerId = 1, shiftKey = false, altKey = false) {
   const calls = [];
   const context = {
     drag,
@@ -67,7 +67,7 @@ function release(drag, point, pointerId = 1, shiftKey = false) {
   context.els.primaryColor = { value:'#123456' };
   context.els.toolOpacity = { value:'100' };
   runInNewContext(`${pointerUpSource}\nglobalThis.__pointerUp = onOverlayPointerUp;`, context);
-  return context.__pointerUp({ pointerId, point, shiftKey }).then(() => calls);
+  return context.__pointerUp({ pointerId, point, shiftKey, altKey }).then(() => calls);
 }
 
 test('drawing tools use the release position even without a final pointermove', async () => {
@@ -106,10 +106,9 @@ test('new Pen draft gesture delegates the final release point and Alt state to i
   assert.deepEqual(await release({kind:'pen-draft-handle'}, {x:40,y:50}), [
     ['pen-draft-finish',40,50,false],
   ]);
-  const withAlt = [];
-  const calls = await release({kind:'pen-draft-handle'}, {x:42,y:52});
-  withAlt.push(...calls);
-  assert.deepEqual(withAlt, [['pen-draft-finish',42,52,false]]);
+  assert.deepEqual(await release({kind:'pen-draft-handle'}, {x:42,y:52}, 1, false, true), [
+    ['pen-draft-finish',42,52,true],
+  ]);
 });
 
 test('hand tool uses the release position for the final pan', async () => {
