@@ -23,6 +23,7 @@ const sources = [
   'src/core/layer-styles.js',
   'src/core/adjustments.js',
   'src/core/state.js',
+  'src/interaction/layer-transform-surface-controller.js',
   'src/interaction/layer-transform-gesture-controller.js',
   'src/interaction/path-control-surface-controller.js',
   'src/interaction/path-control-command-controller.js',
