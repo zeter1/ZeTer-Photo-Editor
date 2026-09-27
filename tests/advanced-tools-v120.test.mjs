@@ -14,6 +14,7 @@ const toolbar=await readFile(new URL('../src/ui/toolbar-controller.js',import.me
 const pathControlSurface=await readFile(new URL('../src/interaction/path-control-surface-controller.js',import.meta.url),'utf8');
 const pathControlCommands=await readFile(new URL('../src/interaction/path-control-command-controller.js',import.meta.url),'utf8');
 const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
+const penDraftGestures=await readFile(new URL('../src/interaction/pen-draft-gesture-controller.js',import.meta.url),'utf8');
 
 test('requested advanced tools have dedicated vector icons and toolbar controls',()=>{
   for(const tool of ['heal','smudge','gradient','pen','magnetic','wand'])assert.match(html,new RegExp(`data-tool="${tool}"`));
@@ -63,11 +64,14 @@ test('smudge strength, healing source, gradient, edge snapping and wand selectio
   assert.match(main,/const selectedMask=new Uint8Array\(total\)/);
 });
 
-test('pen creates backward-compatible cubic Bezier paths with draggable handles',()=>{
-  assert.match(main,/function beginPenPoint\(point,finish=false\)/);
-  assert.match(main,/kind:'pen-handle'/);
-  assert.match(main,/handleIn/);
-  assert.match(main,/handleOut/);
+test('pen creates backward-compatible cubic Bezier paths through the canonical draft gesture owner',()=>{
+  assert.match(main,/createPenDraftGestureController/);
+  assert.match(main,/penDraftGestures\.beginPoint\(p,\{finish:e\.detail>=2\}\)/);
+  assert.match(penDraftGestures,/export function createPenDraftGestureController/);
+  assert.match(penDraftGestures,/handleIn/);
+  assert.match(penDraftGestures,/handleOut/);
+  assert.doesNotMatch(main,/function beginPenPoint\(/);
+  assert.doesNotMatch(main,/kind:'pen-handle'/);
   assert.match(main,/function tracePenDraftPath/);
   assert.match(main,/bezierCurveTo/);
   assert.match(main,/shape:'path'/);

@@ -13,7 +13,7 @@ const pointerMoveStart = main.indexOf('function onOverlayPointerMove(e) {');
 assert.ok(pointerMoveStart >= 0 && pointerMoveStart < start);
 const pointerMoveSource = main.slice(pointerMoveStart, start);
 
-function release(drag, point, pointerId = 1, shiftKey = false) {
+function release(drag, point, pointerId = 1, shiftKey = false, altKey = false) {
   const calls = [];
   const context = {
     drag,
@@ -34,6 +34,13 @@ function release(drag, point, pointerId = 1, shiftKey = false) {
     pathControlGestures: {
       isGesture: value => value?.kind === 'path-control',
       finish: (value, releasePoint, modifiers) => calls.push(['path-finish', releasePoint.x, releasePoint.y, Boolean(modifiers.altKey)]),
+    },
+    penDraftGestures: {
+      isGesture: value => value?.kind === 'pen-draft-handle',
+      finish: (value, releasePoint, modifiers) => {
+        calls.push(['pen-draft-finish', releasePoint.x, releasePoint.y, Boolean(modifiers.altKey)]);
+        return { status:'pen release status' };
+      },
     },
     onOverlayPointerMove: event => {
       calls.push(['transform', event.point.x, event.point.y]);
@@ -60,7 +67,7 @@ function release(drag, point, pointerId = 1, shiftKey = false) {
   context.els.primaryColor = { value:'#123456' };
   context.els.toolOpacity = { value:'100' };
   runInNewContext(`${pointerUpSource}\nglobalThis.__pointerUp = onOverlayPointerUp;`, context);
-  return context.__pointerUp({ pointerId, point, shiftKey }).then(() => calls);
+  return context.__pointerUp({ pointerId, point, shiftKey, altKey }).then(() => calls);
 }
 
 test('drawing tools use the release position even without a final pointermove', async () => {
@@ -92,6 +99,15 @@ test('transform tools delegate final release geometry to the canonical gesture o
 test('path-control gesture delegates final release point and Alt state to the canonical owner', async () => {
   assert.deepEqual(await release({kind:'path-control'}, {x:40,y:50}), [
     ['path-finish',40,50,false],
+  ]);
+});
+
+test('new Pen draft gesture delegates the final release point and Alt state to its canonical owner', async () => {
+  assert.deepEqual(await release({kind:'pen-draft-handle'}, {x:40,y:50}), [
+    ['pen-draft-finish',40,50,false],
+  ]);
+  assert.deepEqual(await release({kind:'pen-draft-handle'}, {x:42,y:52}, 1, false, true), [
+    ['pen-draft-finish',42,52,true],
   ]);
 });
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical new Pen draft gesture controller
+
+- Refactor: transient creation of a brand-new Pen path moves out of the large `src/main.js` composition root into `src/interaction/pen-draft-gesture-controller.js`: draft points/hover, double-click finish intent, per-point handle gesture, release status classification and cancel/reset/consume state now have one explicit owner.
+- Behavior preservation: the close threshold remains `4 / zoom`; handle movement remains `1 / zoom`; new nodes start cornered with null handles; normal drag mirrors `handleIn` and marks smooth, Alt-drag keeps an independent `handleOut` with corner semantics; the three existing Russian release statuses and minimum-two-points warning are preserved.
+- Correctness/safety: `pointerup` now applies its final coordinate before classifying the new handle, closing the gap where a release without a final `pointermove` could leave geometry at the previous point; draft gestures bind exact draft+node identity so reset/replacement cannot redirect a stale cancel or update into a replacement draft.
+- Boundary/history hygiene: drafting owns no persisted layer mutation or history; `src/main.js` still owns bounds/localization and final Shape + `Добавить Bézier-контур` publication, while pointercancel/Escape delegate exact transient-node rollback and tool/document/session resets delegate the controller reset seam.
+- Regression/docs/build: direct controller tests cover finish intent, thresholds, smooth/Alt modes, immutable snapshots, final release, cancellation, stale identity and invalid input; architecture/source guards prevent `penDraft`/`pen-handle` state from returning to `main.js`; AGENTS/CODEMAP/BOUNDARIES/AI workflow/test matrix route future agents directly to the canonical owner.
+
 ### 2026-09-27 — Canonical existing Bézier corner command controller
 
 - Refactor: the one-shot Alt-click existing-anchor → corner mutation/history policy moves out of `src/main.js` into `src/interaction/path-control-command-controller.js`; the composition root now only distinguishes a handled command from drag fallback.

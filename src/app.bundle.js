@@ -8348,6 +8348,229 @@ function createPathControlGestureController({
   };
 }
 
+// ---- src/interaction/pen-draft-gesture-controller.js ----
+const PEN_DRAFT_BEGIN_RESULT = Object.freeze({
+  STARTED: 'started',
+  FINISH_REQUESTED: 'finish-requested',
+  TOO_SHORT: 'too-short',
+  INVALID: 'invalid',
+});
+const PEN_DRAFT_GESTURE_RESULT = Object.freeze({
+  UPDATED: 'updated',
+  NOOP: 'noop',
+  FINISHED: 'finished',
+  CANCELED: 'canceled',
+  REJECTED: 'rejected',
+  INVALID: 'invalid',
+});
+
+const PEN_DRAFT_STATUS = Object.freeze({
+  BEGIN: 'Перо: клик — угловая точка, тяните — гладкая, Alt+drag — независимая ручка',
+  TOO_SHORT: 'Перо: для контура нужно минимум 2 точки',
+  CORNER: 'Перо: угловая точка',
+  SMOOTH: 'Перо: гладкая точка с симметричными ручками',
+  INDEPENDENT: 'Перо: угловая точка с независимой ручкой',
+});
+
+const PEN_DRAFT_EPSILON = 1e-9;
+function createPenDraftGestureController({ runtime } = {}) {
+  if (typeof runtime?.getZoom !== 'function') {
+    throw new TypeError('pen draft gesture runtime.getZoom bridge is required');
+  }
+
+  const gestureToken = Symbol('pen-draft-handle-gesture');
+  let draft = null;
+
+  function finiteNumber(value) {
+    try {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function finitePoint(value) {
+    const x = finiteNumber(value?.x);
+    const y = finiteNumber(value?.y);
+    return x === null || y === null ? null : { x, y };
+  }
+
+  function currentZoom() {
+    const value = finiteNumber(runtime.getZoom());
+    return value !== null && value > PEN_DRAFT_EPSILON ? value : 1;
+  }
+
+  function hasDraft() {
+    return Boolean(draft);
+  }
+
+  function snapshot() {
+    return draft ? structuredClone(draft) : null;
+  }
+
+  function reset() {
+    draft = null;
+  }
+
+  function updateIdleHover(point) {
+    if (!draft) return false;
+    const hover = finitePoint(point);
+    if (!hover) return false;
+    draft.hover = hover;
+    return true;
+  }
+
+  function isGesture(value) {
+    return Boolean(value && value.token === gestureToken && value.kind === 'pen-draft-handle');
+  }
+
+  function resolveGesture(gesture) {
+    if (!isGesture(gesture) || !gesture.active || draft !== gesture.draftTarget) return null;
+    const node = draft?.points?.[gesture.nodeIndex] ?? null;
+    if (!node || node !== gesture.nodeTarget) return null;
+    return { draft, node };
+  }
+
+  function beginPoint(point, { finish = false } = {}) {
+    const anchor = finitePoint(point);
+    if (!anchor) {
+      return { result: PEN_DRAFT_BEGIN_RESULT.INVALID, gesture: null, status: null };
+    }
+    if (!draft) draft = { points: [], hover: anchor };
+
+    const last = draft.points.at(-1) ?? null;
+    const nearLast = Boolean(
+      last && Math.hypot(anchor.x - last.x, anchor.y - last.y) <= 4 / currentZoom()
+    );
+    if (finish && nearLast) {
+      return draft.points.length >= 2
+        ? { result: PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED, gesture: null, status: null }
+        : { result: PEN_DRAFT_BEGIN_RESULT.TOO_SHORT, gesture: null, status: PEN_DRAFT_STATUS.TOO_SHORT };
+    }
+
+    const node = {
+      x: anchor.x,
+      y: anchor.y,
+      handleIn: null,
+      handleOut: null,
+      kind: 'corner',
+    };
+    draft.points.push(node);
+    draft.hover = anchor;
+    const gesture = {
+      token: gestureToken,
+      active: true,
+      kind: 'pen-draft-handle',
+      draftTarget: draft,
+      nodeTarget: node,
+      nodeIndex: draft.points.length - 1,
+      anchor: { ...anchor },
+      lastPointer: { ...anchor },
+      moved: false,
+    };
+    return {
+      result: PEN_DRAFT_BEGIN_RESULT.STARTED,
+      gesture,
+      status: PEN_DRAFT_STATUS.BEGIN,
+    };
+  }
+
+  function update(gesture, point, modifiers = {}) {
+    const resolved = resolveGesture(gesture);
+    if (!resolved) return PEN_DRAFT_GESTURE_RESULT.REJECTED;
+    const pointer = finitePoint(point);
+    if (!pointer) return PEN_DRAFT_GESTURE_RESULT.INVALID;
+
+    const dx = pointer.x - gesture.anchor.x;
+    const dy = pointer.y - gesture.anchor.y;
+    const moved = Math.hypot(dx, dy) > 1 / currentZoom();
+    gesture.lastPointer = pointer;
+    gesture.moved = moved;
+    resolved.draft.hover = pointer;
+
+    if (!moved) {
+      resolved.node.handleIn = null;
+      resolved.node.handleOut = null;
+      resolved.node.kind = 'corner';
+      return PEN_DRAFT_GESTURE_RESULT.NOOP;
+    }
+
+    resolved.node.handleOut = { ...pointer };
+    if (modifiers.altKey) {
+      resolved.node.handleIn = null;
+      resolved.node.kind = 'corner';
+    } else {
+      resolved.node.handleIn = {
+        x: gesture.anchor.x - dx,
+        y: gesture.anchor.y - dy,
+      };
+      resolved.node.kind = 'smooth';
+    }
+    return PEN_DRAFT_GESTURE_RESULT.UPDATED;
+  }
+
+  function finish(gesture, point, modifiers = {}) {
+    if (!isGesture(gesture) || !gesture.active) {
+      return { result: PEN_DRAFT_GESTURE_RESULT.REJECTED, status: null };
+    }
+    const updateResult = update(gesture, point, modifiers);
+    if (
+      updateResult === PEN_DRAFT_GESTURE_RESULT.REJECTED ||
+      updateResult === PEN_DRAFT_GESTURE_RESULT.INVALID
+    ) {
+      gesture.active = false;
+      return { result: updateResult, status: null };
+    }
+
+    const resolved = resolveGesture(gesture);
+    if (!resolved) {
+      gesture.active = false;
+      return { result: PEN_DRAFT_GESTURE_RESULT.REJECTED, status: null };
+    }
+    const status = gesture.moved
+      ? (resolved.node.kind === 'smooth' ? PEN_DRAFT_STATUS.SMOOTH : PEN_DRAFT_STATUS.INDEPENDENT)
+      : PEN_DRAFT_STATUS.CORNER;
+    gesture.active = false;
+    return { result: PEN_DRAFT_GESTURE_RESULT.FINISHED, status };
+  }
+
+  function cancelPoint(gesture) {
+    const resolved = resolveGesture(gesture);
+    if (!resolved) return PEN_DRAFT_GESTURE_RESULT.REJECTED;
+    gesture.active = false;
+    resolved.draft.points.splice(gesture.nodeIndex, 1);
+    if (!resolved.draft.points.length) draft = null;
+    return PEN_DRAFT_GESTURE_RESULT.CANCELED;
+  }
+
+  function cancelDraft() {
+    if (!draft) return false;
+    draft = null;
+    return true;
+  }
+
+  function consumePoints() {
+    const points = draft?.points ? structuredClone(draft.points) : [];
+    draft = null;
+    return points;
+  }
+
+  return {
+    hasDraft,
+    snapshot,
+    reset,
+    updateIdleHover,
+    isGesture,
+    beginPoint,
+    update,
+    finish,
+    cancelPoint,
+    cancelDraft,
+    consumePoints,
+  };
+}
+
 // ---- src/ui/color-correction-controller.js ----
 const COLOR_CORRECTION_CONTROL_BY_KEY = new Map(COLOR_CORRECTION_CONTROLS.map(control => [control.key, control]));
 const COLOR_CORRECTION_EPSILON = 1e-9;
@@ -20740,7 +20963,6 @@ const renderBuffer = document.createElement('canvas');
 let dirty = false;
 let documentChangeSerial = 0;
 let drag = null;
-let penDraft = null;
 let vectorMaskEditLayerId = null;
 let documentPathEditIndex = -1;
 let spaceHeld = false;
@@ -21430,6 +21652,9 @@ const layerTransformGestures = createLayerTransformGestureController({
     redrawOverlay: () => drawOverlay(),
   },
 });
+const penDraftGestures = createPenDraftGestureController({
+  runtime: { getZoom: () => zoom },
+});
 const pathControlSurface = createPathControlSurfaceController({
   state: {
     getDocument: () => doc,
@@ -21440,7 +21665,7 @@ const pathControlSurface = createPathControlSurfaceController({
   runtime: {
     getCurrentTool: () => currentTool,
     getZoom: () => zoom,
-    hasPenDraft: () => Boolean(penDraft),
+    hasPenDraft: () => penDraftGestures.hasDraft(),
     hasActiveInteraction: () => Boolean(drag),
     setCursor: cursor => { els.overlay.style.cursor = cursor; },
   },
@@ -21567,7 +21792,7 @@ documentSessionController = createDocumentSessionController({
     pathsController.setSelectedIndex(state.selectedPathIndex);
     documentPathEditIndex = -1;
     vectorMaskEditLayerId = null;
-    penDraft = null;
+    penDraftGestures.reset();
     selectionGestures.resetDrafts();
     drag = null;
     rasterEdit.reset();
@@ -21694,7 +21919,7 @@ function setDoc(next, { resetHistory = false, label = 'Состояние' } = {
   pathsController.setSelectedIndex(-1);
   documentPathEditIndex = -1;
   vectorMaskEditLayerId = null;
-  penDraft = null;
+  penDraftGestures.reset();
   clearSelectionState();
   rasterEdit.reset();
   if (resetHistory) { clearImageCache(); history.reset(label, snapshotDocument(doc)); }
@@ -21913,10 +22138,11 @@ function drawOverlay() {
     ctx.restore();
   }
   selectionGestures.drawPolygonDraft(ctx);
+  const penDraft=penDraftGestures.snapshot();
   if(penDraft?.points?.length){
     const points=penDraft.points;
     ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#72a7ff';ctx.fillStyle='#fff';ctx.setLineDash([]);
-    ctx.beginPath();tracePenDraftPath(ctx,points,drag?.kind==='pen-handle'?null:penDraft.hover);ctx.stroke();
+    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover);ctx.stroke();
     ctx.lineWidth=1/zoom;ctx.strokeStyle='#8fc0ff';
     for(const point of points){
       for(const handle of [point.handleIn,point.handleOut]){
@@ -22264,7 +22490,7 @@ function updateToolLabel() {
 function setTool(tool) {
   if (tool !== currentTool && blockPendingDocumentEdit()) return;
   selectionGestures.prepareToolChange(tool);
-  if(tool!=='pen'){penDraft=null;vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
+  if(tool!=='pen'){penDraftGestures.reset();vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
   currentTool = tool;
   $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   updateToolLabel();
@@ -22407,7 +22633,7 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'gradient') { drag={kind:'gradient',start:p,current:p};drawOverlay();return; }
   if (currentTool === 'wand') { magicWandSelect(p);return; }
   if (currentTool === 'pen') {
-    const hit=!penDraft?pathControlSurface.hit(p):null;
+    const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
     if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
     if(documentPathEditIndex>=0){
       setStatus('Сохранённый контур: перетаскивайте существующие anchors/handles; новые subpaths добавляются через маску/выделение и сохранение');
@@ -22417,7 +22643,13 @@ async function onOverlayPointerDown(e) {
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
       return;
     }
-    beginPenPoint(p,e.detail>=2);return;
+    const penResult=penDraftGestures.beginPoint(p,{finish:e.detail>=2});
+    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
+    else{
+      if(penResult.status)setStatus(penResult.status);
+      if(penResult.result===PEN_DRAFT_BEGIN_RESULT.STARTED){drag=penResult.gesture;drawOverlay();}
+    }
+    return;
   }
   if (currentTool === 'magnetic') { selectionGestures.addMagneticPoint(p,{finish:e.detail>=2});return; }
   if (currentTool === 'marquee') {
@@ -22441,7 +22673,7 @@ function onOverlayPointerMove(e) {
   hoverPoint = p;
   if (!drag) {
     selectionGestures.updateIdleHover(p);
-    if(penDraft&&currentTool==='pen')penDraft.hover=p;
+    if(currentTool==='pen')penDraftGestures.updateIdleHover(p);
     if (currentTool === 'zoom') els.overlay.style.cursor=e.altKey?'zoom-out':'zoom-in';
     else if(currentTool==='pen')pathControlSurface.updateCursor(p);
     else updateMoveCursor(p);
@@ -22473,20 +22705,9 @@ function onOverlayPointerMove(e) {
   if (drag.kind === 'shape') { drag.current=p; drag.lockAspect=e.shiftKey; const r=constrainedRect(drag.start,p,e.shiftKey); previewRect(r, els.primaryColor.value); return; }
   if (drag.kind === 'crop') { drag.current=p; cropRect=normalizeRect(drag.start,p); drawOverlay(); return; }
   if (drag.kind === 'gradient') { drag.current=p;previewGradient(drag.start,p);return; }
-  if (drag.kind === 'pen-handle') {
-    const node=penDraft?.points?.[drag.nodeIndex];
-    if(!node)return;
-    const dx=p.x-drag.anchor.x,dy=p.y-drag.anchor.y;
-    const moved=Math.hypot(dx,dy)>1/zoom;
-    drag.moved=moved;
-    if(moved){
-      node.handleOut={x:p.x,y:p.y};
-      if(e.altKey){node.handleIn=null;node.kind='corner';}
-      else{node.handleIn={x:drag.anchor.x-dx,y:drag.anchor.y-dy};node.kind='smooth';}
-    }else{
-      node.handleIn=null;node.handleOut=null;node.kind='corner';
-    }
-    penDraft.hover=p;drawOverlay();return;
+  if (penDraftGestures.isGesture(drag)) {
+    penDraftGestures.update(drag,p,{altKey:e.altKey});
+    drawOverlay();return;
   }
 }
 async function onOverlayPointerUp(e) {
@@ -22531,11 +22752,9 @@ async function onOverlayPointerUp(e) {
     if (r.width >= 10 && r.height >= 10) applyCrop(d.owner,r); else { cropRect=null; drawOverlay(); }
   }
   if (d.kind === 'gradient') await applyGradient(d.start,d.current);
-  if (d.kind === 'pen-handle') {
-    if(penDraft)penDraft.hover=canvasPoint(e);
-    setStatus(d.moved
-      ? (penDraft?.points?.[d.nodeIndex]?.kind==='smooth'?'Перо: гладкая точка с симметричными ручками':'Перо: угловая точка с независимой ручкой')
-      : 'Перо: угловая точка');
+  if (penDraftGestures.isGesture(d)) {
+    const penResult=penDraftGestures.finish(d,canvasPoint(e),{altKey:e.altKey});
+    if(penResult.status)setStatus(penResult.status);
     drawOverlay();
   }
   updateMoveCursor(canvasPoint(e));
@@ -22550,10 +22769,7 @@ async function onOverlayPointerCancel(e) {
     if (layerTransformGestures.isGesture(d)) layerTransformGestures.cancel(d);
     if (d.kind==='crop') cropRect=null;
     if (d.kind==='marquee') selectionGestures.cancelMarquee(d);
-    if (d.kind==='pen-handle'&&penDraft){
-      penDraft.points.splice(d.nodeIndex,1);
-      if(!penDraft.points.length)penDraft=null;
-    }
+    if(penDraftGestures.isGesture(d))penDraftGestures.cancelPoint(d);
     if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
     if (d.kind==='pan') els.overlay.style.cursor=defaultToolCursor();
     rasterEdit.cancelPaintPreview(); drawOverlay(); setStatus('Действие отменено');
@@ -22639,21 +22855,6 @@ function tracePenDraftPath(ctx,points,hover=null){
   }
   return true;
 }
-function beginPenPoint(point,finish=false){
-  if(!penDraft)penDraft={points:[],hover:point};
-  const last=penDraft.points.at(-1);
-  const nearLast=last&&Math.hypot(point.x-last.x,point.y-last.y)<=4/zoom;
-  if(finish&&nearLast){
-    if(penDraft.points.length>=2)finishPenPath();
-    else setStatus('Перо: для контура нужно минимум 2 точки');
-    return false;
-  }
-  const node={x:point.x,y:point.y,handleIn:null,handleOut:null,kind:'corner'};
-  penDraft.points.push(node);penDraft.hover=point;
-  drag={kind:'pen-handle',nodeIndex:penDraft.points.length-1,anchor:{...point},moved:false};
-  setStatus('Перо: клик — угловая точка, тяните — гладкая, Alt+drag — независимая ручка');
-  drawOverlay();return true;
-}
 function penDraftBounds(points){
   const coords=[];
   for(const point of points||[]){
@@ -22675,9 +22876,9 @@ function localizePenNode(point,bounds){
   };
 }
 function finishPenPath(){
-  if(!penDraft||penDraft.points.length<2){penDraft=null;drag=null;drawOverlay();return false;}
-  const points=penDraft.points;penDraft=null;
-  if(drag?.kind==='pen-handle')drag=null;
+  const points=penDraftGestures.consumePoints();
+  if(points.length<2){if(penDraftGestures.isGesture(drag))drag=null;drawOverlay();return false;}
+  if(penDraftGestures.isGesture(drag))drag=null;
   const bounds=penDraftBounds(points);
   if(!bounds||Math.max(bounds.width,bounds.height)<1)return false;
   const localPoints=points.map(point=>localizePenNode(point,bounds));
@@ -23493,14 +23694,14 @@ window.addEventListener('keydown',e=>{
       e.preventDefault();
       const d=drag;drag=null;pointerLifecycle?.releaseActivePointer();clearSmartGuides();
       if(layerTransformGestures.isGesture(d))layerTransformGestures.cancel(d);
-      if(d.kind==='pen-handle'&&penDraft){penDraft.points.splice(d.nodeIndex,1);if(!penDraft.points.length)penDraft=null;}
+      if(penDraftGestures.isGesture(d))penDraftGestures.cancelPoint(d);
       if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
       if(d.kind==='crop')cropRect=null;
       if(d.kind==='marquee')selectionGestures.cancelMarquee(d);
       els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;
     }
     if(selectionGestures.hasPolygonDraft()){e.preventDefault();selectionGestures.cancelPolygonDraft({restorePrevious:true,announce:true});return;}
-    if(penDraft){e.preventDefault();penDraft=null;drawOverlay();setStatus('Контур отменён');return;}
+    if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropRect){cropRect=null;drawOverlay();setStatus('Кадрирование отменено');return;}
     if(selectionRect){deselectPixels();return;}
@@ -23508,7 +23709,7 @@ window.addEventListener('keydown',e=>{
   if(e.target instanceof Node && els.modalRoot.contains(e.target))return;
   if(menuController.isOpen() && (els.menu.contains(e.target)||e.target.closest?.('.menu-button')))return;
   if(e.key==='Enter'&&selectionGestures.hasPolygonDraft()&&currentTool==='marquee'){e.preventDefault();selectionGestures.finishPolygonSelection();return;}
-  if(e.key==='Enter'&&penDraft&&currentTool==='pen'){e.preventDefault();finishPenPath();return;}
+  if(e.key==='Enter'&&penDraftGestures.hasDraft()&&currentTool==='pen'){e.preventDefault();finishPenPath();return;}
   if(e.key==='Enter'&&selectionGestures.hasMagneticDraft()&&currentTool==='magnetic'){e.preventDefault();selectionGestures.finishMagneticSelection();return;}
   if(ctrl&&e.code==='Digit0'){e.preventDefault();fitToView();return;}
   if(ctrl&&e.code==='Digit1'){e.preventDefault();setZoom(1);return;}
