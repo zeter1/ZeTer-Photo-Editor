@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical existing Bézier path-control surface controller
+
+- Refactor: read-only discovery/projection/hit-testing/path tracing/control drawing/cursor feedback for existing Shape paths, Vector Masks and Saved Paths moves from the large `src/main.js` composition root into `src/interaction/path-control-surface-controller.js`; pointer/tool dispatch, Alt-click corner conversion and new `penDraft` / `pen-handle` creation remain outside.
+- Behavior preservation: Saved Path edit mode keeps precedence and invalid-index cleanup; matching selected Vector Masks and Shape paths retain visibility rules; recursively locked controls remain visible with the locked style but are excluded from hit/edit targeting; handles still beat anchors and the hit radius remains `8 / zoom`.
+- Overlay/cursor hygiene: layer-backed controls still use canonical layer→document projection, Saved Paths stay in document coordinates, vector/saved outlines retain dashed source styling, control metrics remain zoom-stable, and Canvas state is paired with `save()` / `restore()` while cursor feedback runs only for idle Pen interaction.
+- Regression/docs/build: direct surface tests cover target precedence, invalid edit cleanup, visibility/lock policy, projection/hit priority/radius, open/closed cubic tracing, source styles/metrics and cursor guards; legacy source tests and architecture/AI maps are retargeted, and the canonical file:// build graph includes the new owner.
+
 ### 2026-09-27 — Canonical existing Bézier path-control gesture controller
 
 - Refactor: dragging existing Shape-path, Vector Mask and Saved Path anchors/handles moves from direct mutation/history logic in `src/main.js` into `src/interaction/path-control-gesture-controller.js`; hit-testing, control drawing/status, Alt-click corner conversion and new `penDraft` / `pen-handle` creation remain in the composition root.
