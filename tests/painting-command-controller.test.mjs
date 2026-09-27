@@ -36,6 +36,8 @@ function makeHarness({
   selectionPredicate = () => null,
   selectionIntersects = () => true,
   persistResult = true,
+  highDepthPersistResult = true,
+  highDepthBuffer = null,
   pixels,
 } = {}) {
   let persisting = false;
@@ -43,7 +45,8 @@ function makeHarness({
   const ensureCalls = [];
   const persistArgs = [];
   let resetPaintStateCalls = 0;
-  let highDepthMutation = null;
+  let highDepthPersistCalls = 0;
+  const highDepthPersistArgs = [];
   const commits = [];
   const statuses = [];
   const clips = [];
@@ -52,9 +55,14 @@ function makeHarness({
   const rasterEdit = {
     brushCanvas:null,
     brushContext:null,
-    editableHighDepthBuffer() { return null; },
-    async prepareHighDepthMutation(layer, buffer) { return { layerId:layer.id, buffer }; },
-    applyHighDepthMutation(layer, mutation) { highDepthMutation = { layer, mutation }; },
+    editableHighDepthBuffer() { return highDepthBuffer; },
+    async persistHighDepthMutation(owner, layer, buffer) {
+      highDepthPersistCalls += 1;
+      highDepthPersistArgs.push([owner, layer, buffer]);
+      return typeof highDepthPersistResult === 'function'
+        ? highDepthPersistResult(owner, layer, buffer)
+        : highDepthPersistResult;
+    },
     async ensureRasterBuffer(owner, layer) {
       ensureCalls.push([owner, layer]);
       this.brushCanvas = { ...canvas.canvas, width:layer.width, height:layer.height };
@@ -125,7 +133,8 @@ function makeHarness({
     getEnsureCalls:() => ensureCalls,
     getPersistArgs:() => persistArgs,
     getResetPaintStateCalls:() => resetPaintStateCalls,
-    getHighDepthMutation:() => highDepthMutation,
+    getHighDepthPersistCalls:() => highDepthPersistCalls,
+    getHighDepthPersistArgs:() => highDepthPersistArgs,
   };
 }
 
@@ -220,13 +229,16 @@ test('selection clear keeps native high-depth samples and uses the shared reset 
     selectionActive:true,
     selectionPredicate:() => x => x === 1,
     selectionIntersects:() => true,
+    highDepthBuffer:buffer,
   });
-  harness.rasterEdit.editableHighDepthBuffer = () => buffer;
 
   assert.equal(await harness.controller.clearSelection(), true);
   assert.equal(buffer.data[3], 1);
   assert.equal(buffer.data[7], 0);
-  assert.ok(harness.getHighDepthMutation());
+  assert.equal(harness.getHighDepthPersistCalls(), 1);
+  assert.equal(harness.getHighDepthPersistArgs()[0][0], doc);
+  assert.equal(harness.getHighDepthPersistArgs()[0][1], layer);
+  assert.equal(harness.getHighDepthPersistArgs()[0][2], buffer);
   assert.equal(harness.getResetPaintStateCalls(), 1);
   assert.equal(harness.getPersistCalls(), 0);
   assert.equal(harness.getPersisting(), false);
@@ -255,4 +267,60 @@ test('fill raises the shared pending-edit guard before asynchronous raster prepa
   releaseDecode();
   await pending;
   assert.equal(harness.getPersisting(), false);
+});
+
+
+test('native high-depth line, fill and selection clear suppress publication feedback when ownership becomes stale', async () => {
+  const makeNative = ({ selectionActive = false, selectionPredicate = () => null } = {}) => {
+    const doc = createDocument({ width:2, height:1 });
+    const layer = createRasterLayer({ name:'HDR', width:2, height:1, dataUrl:null });
+    layer.highDepthSource = { model:'rgb' };
+    addLayer(doc, layer);
+    const buffer = createPixelBuffer({
+      width:2,
+      height:1,
+      model:'rgb',
+      channels:4,
+      bitsPerChannel:32,
+      colorSpace:'linear-rgb-unmanaged',
+      data:new Float32Array([0,0,0,1, 0,0,0,1]),
+    });
+    return {
+      harness:makeHarness({
+        doc,
+        selectionActive,
+        selectionPredicate,
+        selectionIntersects:() => true,
+        highDepthBuffer:buffer,
+        highDepthPersistResult:false,
+      }),
+    };
+  };
+
+  {
+    const { harness } = makeNative();
+    assert.equal(await harness.controller.drawLine({ x:.5, y:.5 }, { x:1.5, y:.5 }), false);
+    assert.equal(harness.getHighDepthPersistCalls(), 1);
+    assert.deepEqual(harness.commits, []);
+    assert.equal(harness.statuses.some(value => value.startsWith('Линия добавлена')), false);
+    assert.equal(harness.getPersisting(), false);
+  }
+
+  {
+    const { harness } = makeNative();
+    assert.equal(await harness.controller.fillAt({ x:0, y:0 }), false);
+    assert.equal(harness.getHighDepthPersistCalls(), 1);
+    assert.deepEqual(harness.commits, []);
+    assert.equal(harness.statuses.some(value => value.startsWith('High-depth заливка:')), false);
+    assert.equal(harness.getPersisting(), false);
+  }
+
+  {
+    const { harness } = makeNative({ selectionActive:true, selectionPredicate:() => () => true });
+    assert.equal(await harness.controller.clearSelection(), false);
+    assert.equal(harness.getHighDepthPersistCalls(), 1);
+    assert.deepEqual(harness.commits, []);
+    assert.equal(harness.statuses.some(value => value.includes('high-depth:')), false);
+    assert.equal(harness.getPersisting(), false);
+  }
 });

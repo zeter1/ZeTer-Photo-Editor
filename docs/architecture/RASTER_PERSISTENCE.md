@@ -1,10 +1,10 @@
-# Canvas8 raster persistence ownership
+# Raster persistence ownership
 
-This document is the canonical contract for the reusable **Canvas8** paint buffer and its asynchronous publication in `src/painting/controller.js`.
+This document is the canonical contract for reusable **Canvas8** and native **16/32-bit RGB / CMYK** paint state plus their asynchronous publication in `src/painting/controller.js`.
 
-Read it when changing fill/line, brush/eraser/retouch Canvas8 strokes, clone-source preparation, paint preview overrides, or any code that calls `ensureRasterBuffer()` / `persistPaintLayer()`.
+Read it when changing fill/line, brush/eraser/retouch strokes, clone-source preparation, paint preview overrides, or code that calls `ensureRasterBuffer()`, `persistPaintLayer()`, `ensureNativeHighDepthPaintBuffer()`, `persistHighDepthMutation()` or `persistNativeHighDepthPaintLayer()`.
 
-> Scope: Canvas8 only. Native high-depth/CMYK paint persistence has a separate lifecycle and must not be assumed to have the guarantees described here unless its own code/tests prove them.
+> Scope: current-layer painting/commands and their shared raster-edit cache. Multi-layer Clipboard cut / selection clearing owns a separate batch transaction in `src/selection/raster-mutation-controller.js`; it may reuse low-level high-depth preparation/apply helpers but must prove its own owner/target publication safety.
 
 ## Ownership model
 
@@ -49,15 +49,32 @@ A document switch, same-ID document replacement, same-ID layer replacement, buff
 
 Encoding failures are real failures and remain observable to the caller; do not suppress them as stale no-ops.
 
+## Native high-depth / CMYK contract
+
+Native working state uses the same authority rule but has a different payload. The cache belongs to the exact originating document object, exact raster-layer object, exact typed `PixelBuffer` and its preview Canvas. A matching `document.id` or `layer.id` is never enough.
+
+`ensureNativeHighDepthPaintBuffer(owner, layer)` may reuse native state only when the exact owner and layer are still current and editable. Publishing a new native cache stores both object identities alongside the layer ID; preview overrides are exposed only while `isNativeHighDepthPaintTarget(owner, layer)` still proves that identity.
+
+There are two native publication seams:
+
+- `persistHighDepthMutation(owner, layer, buffer)` is used by one-shot line/fill/current-layer-clear commands. It validates the exact target, serializes the typed source and awaits PNG preview encoding, revalidates the exact owner/layer immediately after the await, then atomically applies `highDepthSource`, `highDepthPreview` and `dataUrl`.
+- `persistNativeHighDepthPaintLayer(owner, layer)` is used by paint gestures. In addition to owner/layer revalidation it captures the exact cached working buffer and proves that the cache was not replaced while preview encoding was pending.
+
+A stale native result returns `false`; callers must publish no history entry and no success status. Encoding errors remain errors and the gesture error path clears the native working state so an unsaved stroke cannot leak into a later gesture.
+
+`prepareHighDepthMutation()` and `applyHighDepthMutation()` are lower-level mechanisms, not an implicit async-safety contract. A batch owner that uses them directly must stage work locally and revalidate every publication target before mutation.
+
+This yields one reusable rule for both raster modes: **the authority proven after the last await must be at least as strict as the authority that created the working buffer**.
+
 ## Caller contract
 
-Canvas8 callers must capture the owner and exact layer before their asynchronous work and pass both explicitly:
+Raster callers must capture the owner and exact layer before asynchronous work and pass both explicitly:
 
-- `src/painting/command-controller.js`: fill, raster line and current-layer selection clear;
-- `src/painting/gesture-controller.js`: Canvas8 brush/eraser/retouch stroke lifecycle;
+- `src/painting/command-controller.js`: fill, raster line and current-layer selection clear; native branches publish through `persistHighDepthMutation(owner, layer, buffer)`;
+- `src/painting/gesture-controller.js`: Canvas8 and native brush/eraser/retouch stroke lifecycle; native end passes the drag's exact owner/layer to `persistNativeHighDepthPaintLayer()`;
 - `src/main.js::setCloneSource()`: Canvas8 clone/heal source preparation.
 
-For paint gestures, drag state carries the exact owner and layer. Movement must not re-resolve the layer from a mutable current document by ID.
+For paint gestures, drag state carries the exact owner and layer. Movement and end must not re-resolve a layer from a mutable current document by ID. Native paint callbacks receive the captured owner too, so typed edits cannot validate cache authority by layer ID alone.
 
 The application-wide raster persistence guard remains outside `src/painting/controller.js`. Command/gesture callers acquire it and release it in `finally`. A stale persistence result publishes no history entry and no success status.
 
@@ -89,6 +106,6 @@ Prefer deferred or deterministic Promise boundaries over timing-based sleeps for
 
 ## Non-goals
 
-This contract does not redesign retouch math, selection clipping, history storage, global pointer capture or native high-depth persistence.
+This contract does not redesign retouch math, selection clipping, history storage, global pointer capture, PSD/PSB import/export or the multi-layer selection batch transaction.
 
-If native high-depth persistence still selects its target from mutable current state across an `await`, fix that as a separate bounded task with its own exact-owner tests rather than silently broadening a Canvas8 pass.
+Do not broaden the shared raster controller into those owners. If another async raster publisher uses `prepareHighDepthMutation()` / `applyHighDepthMutation()` directly, review that caller's own exact-target revalidation and give it a bounded regression task instead of assuming this current-layer contract covers it.

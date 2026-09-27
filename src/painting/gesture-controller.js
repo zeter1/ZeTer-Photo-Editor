@@ -82,7 +82,7 @@ export function createPaintGestureController({
     }
 
     const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
-      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(layer, { requireAlpha:tool === 'eraser' })
+      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(owner, layer, { requireAlpha:tool === 'eraser' })
       : false;
     if (!nativeHighDepth && !await rasterEdit.ensureRasterBuffer(owner, layer)) return null;
     if (state.getDocument() !== owner || !owner.layers.includes(layer)) return null;
@@ -139,7 +139,7 @@ export function createPaintGestureController({
       layer,
       layerId:layer.id,
       last:localPoint,
-      nativeHighDepth:rasterEdit.highDepthPaintLayerId === layer.id && NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool),
+      nativeHighDepth:rasterEdit.isNativeHighDepthPaintTarget(owner, layer) && NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool),
     };
     state.setDrag(drag);
 
@@ -182,7 +182,7 @@ export function createPaintGestureController({
         retouch.applyNativeHighDepthBlurDab(layer, localPoint, pointerEvent);
         return true;
       }
-      nativePaint?.dab?.(layer, localPoint, pointerEvent, tool === 'eraser');
+      nativePaint?.dab?.(owner, layer, localPoint, pointerEvent, tool === 'eraser');
       return true;
     }
 
@@ -256,7 +256,7 @@ export function createPaintGestureController({
       else if (drag.tool === 'clone' || drag.tool === 'heal') retouch.nativeHighDepthCloneSegment(layer, last, next, drag.cloneOffset, pointerEvent, drag.tool === 'heal');
       else if (drag.tool === 'smudge') retouch.nativeHighDepthSmudgeSegment(layer, last, next, pointerEvent);
       else if (drag.tool === 'dodge' || drag.tool === 'burn') retouch.nativeHighDepthToneSegment(layer, last, next, pointerEvent, drag.tool === 'dodge');
-      else nativePaint?.segment?.(layer, last, next, pointerEvent, drag.tool === 'eraser');
+      else nativePaint?.segment?.(drag.owner, layer, last, next, pointerEvent, drag.tool === 'eraser');
       drag.last = next;
       return true;
     }
@@ -281,11 +281,13 @@ export function createPaintGestureController({
     rasterEdit.cancelPaintPreview();
     const paintTool = drag?.tool;
     const nativeHighDepth = Boolean(
-      rasterEdit.highDepthPaintBuffer &&
-      rasterEdit.highDepthPaintLayerId === rasterEdit.brushLayerId &&
-      NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool),
+      drag?.nativeHighDepth &&
+      NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool)
     );
-    if ((!rasterEdit.brushContext && !nativeHighDepth) || !state.beginPersist()) return false;
+    if (
+      (nativeHighDepth ? !rasterEdit.highDepthPaintBuffer : !rasterEdit.brushContext) ||
+      !state.beginPersist()
+    ) return false;
 
     const label = PAINT_HISTORY_LABELS[paintTool] || 'Кисть';
     if (!nativeHighDepth) rasterEdit.brushContext.restore();
@@ -294,7 +296,7 @@ export function createPaintGestureController({
 
     try {
       const persisted = nativeHighDepth
-        ? await rasterEdit.persistNativeHighDepthPaintLayer()
+        ? await rasterEdit.persistNativeHighDepthPaintLayer(drag?.owner, drag?.layer)
         : await rasterEdit.persistPaintLayer(drag?.owner, drag?.layer);
       if (persisted) {
         ui?.commit?.(label);
@@ -305,6 +307,7 @@ export function createPaintGestureController({
     } catch (error) {
       console.error(error);
       rasterEdit.clearBrushBuffer();
+      rasterEdit.clearHighDepthPaintState();
       ui?.render?.();
       status(`Ошибка сохранения штриха: ${error.message}`);
       ui?.toast?.('Не удалось сохранить штрих', 'error');

@@ -27,13 +27,17 @@ function makeHarness({
   atPoint = () => null,
   ensureRasterBuffer,
   persistResult = true,
+  nativeHighDepth = false,
+  nativePersistResult = true,
 } = {}) {
   let activeDocument = doc;
   let drag = null;
   let persisting = false;
   let persistCalls = 0;
+  let nativePersistCalls = 0;
   const ensureCalls = [];
   const persistArgs = [];
+  const nativePersistArgs = [];
   let previewSawPaintDrag = false;
   const commits = [];
   const statuses = [];
@@ -46,7 +50,15 @@ function makeHarness({
     brushLayerId:null,
     highDepthPaintBuffer:null,
     highDepthPaintLayerId:null,
-    async ensureNativeHighDepthPaintBuffer() { return false; },
+    async ensureNativeHighDepthPaintBuffer(owner, layer) {
+      if (!nativeHighDepth) return false;
+      this.highDepthPaintBuffer = { width:layer.width, height:layer.height };
+      this.highDepthPaintLayerId = layer.id;
+      return true;
+    },
+    isNativeHighDepthPaintTarget(owner, layer) {
+      return Boolean(nativeHighDepth && this.highDepthPaintBuffer && this.highDepthPaintLayerId === layer?.id);
+    },
     async ensureRasterBuffer(owner, layer) {
       ensureCalls.push([owner, layer]);
       if (ensureRasterBuffer) return ensureRasterBuffer.call(this, owner, layer, context);
@@ -62,7 +74,12 @@ function makeHarness({
       persistArgs.push([owner, layer]);
       return typeof persistResult === 'function' ? persistResult(owner, layer) : persistResult;
     },
-    async persistNativeHighDepthPaintLayer() { throw new Error('native path should not run'); },
+    async persistNativeHighDepthPaintLayer(owner, layer) {
+      nativePersistCalls += 1;
+      nativePersistArgs.push([owner, layer]);
+      if (!nativeHighDepth) throw new Error('native path should not run');
+      return typeof nativePersistResult === 'function' ? nativePersistResult(owner, layer) : nativePersistResult;
+    },
     clearBrushBuffer() {
       this.brushCanvas = null;
       this.brushContext = null;
@@ -128,6 +145,8 @@ function makeHarness({
     getPersistCalls:() => persistCalls,
     getEnsureCalls:() => ensureCalls,
     getPersistArgs:() => persistArgs,
+    getNativePersistCalls:() => nativePersistCalls,
+    getNativePersistArgs:() => nativePersistArgs,
     getPersisting:() => persisting,
     setDocument:value => { activeDocument = value; },
     previewSawPaintDrag:() => previewSawPaintDrag,
@@ -277,4 +296,37 @@ test('paint move rejects a same-ID replacement document instead of redirecting t
   assert.equal(harness.calls.stroke, strokesBefore);
   assert.equal(harness.getDrag().layer, originLayer);
   assert.notEqual(harness.getDrag().layer, replacementLayer);
+});
+
+
+test('native high-depth gesture hands exact owner/target to persistence and suppresses stale success', async () => {
+  const doc = createDocument({ width:8, height:8 });
+  const layer = createRasterLayer({ name:'HDR', width:8, height:8, dataUrl:null });
+  layer.highDepthSource = { model:'rgb' };
+  addLayer(doc, layer);
+  const harness = makeHarness({
+    doc,
+    atPoint:() => layer,
+    nativeHighDepth:true,
+    nativePersistResult:false,
+  });
+
+  assert.equal(await harness.controller.begin({
+    point:{ x:1, y:2 },
+    tool:'brush',
+    canContinue:() => true,
+  }), true);
+  const finishedDrag = harness.getDrag();
+  assert.equal(finishedDrag.owner, doc);
+  assert.equal(finishedDrag.layer, layer);
+  assert.equal(finishedDrag.nativeHighDepth, true);
+
+  harness.setDrag(null);
+  assert.equal(await harness.controller.end(finishedDrag), false);
+  assert.equal(harness.getNativePersistCalls(), 1);
+  assert.equal(harness.getNativePersistArgs()[0][0], doc);
+  assert.equal(harness.getNativePersistArgs()[0][1], layer);
+  assert.equal(harness.getPersisting(), false);
+  assert.deepEqual(harness.commits, []);
+  assert.notEqual(harness.statuses.at(-1), 'Готово');
 });

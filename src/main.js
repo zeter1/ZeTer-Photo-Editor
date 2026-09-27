@@ -1985,8 +1985,8 @@ function createLineLayerFromPoints(start,end) {
 
 
 
-function applyNativeHighDepthDab(layer,point,pointerEvent=null,erase=false){
-  if(rasterEdit.highDepthPaintLayerId!==layer?.id||!rasterEdit.highDepthPaintBuffer)return false;
+function applyNativeHighDepthDab(owner,layer,point,pointerEvent=null,erase=false){
+  if(!rasterEdit.isNativeHighDepthPaintTarget(owner,layer))return false;
   const rgb=hexToRgb(els.primaryColor.value);
   const changed=rasterEdit.highDepthPaintBuffer.model==='cmyk'
     ? applyCmykPixelBufferBrushDab(rasterEdit.highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb8ToDocumentCmyk(rgb),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)})
@@ -1995,8 +1995,8 @@ function applyNativeHighDepthDab(layer,point,pointerEvent=null,erase=false){
   return changed>0;
 }
 
-function nativeHighDepthStrokeSegment(layer,from,to,pointerEvent=null,erase=false){
-  if(rasterEdit.highDepthPaintLayerId!==layer?.id||!rasterEdit.highDepthPaintBuffer)return false;
+function nativeHighDepthStrokeSegment(owner,layer,from,to,pointerEvent=null,erase=false){
+  if(!rasterEdit.isNativeHighDepthPaintTarget(owner,layer))return false;
   const rgb=hexToRgb(els.primaryColor.value);
   const changed=rasterEdit.highDepthPaintBuffer.model==='cmyk'
     ? applyCmykPixelBufferStrokeSegment(rasterEdit.highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb8ToDocumentCmyk(rgb),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)})

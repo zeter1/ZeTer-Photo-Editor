@@ -13480,6 +13480,8 @@ function createRasterEditController({
   let brushLayer = null;
   let highDepthPaintBuffer = null;
   let highDepthPaintLayerId = null;
+  let highDepthPaintOwner = null;
+  let highDepthPaintLayer = null;
   let highDepthPaintPreviewDirty = false;
   let paintPreviewFrame = 0;
   let paintPreviewQueued = false;
@@ -13498,7 +13500,7 @@ function createRasterEditController({
     brushLayer = null;
   }
 
-  function isCurrentCanvasTarget(owner, layer) {
+  function isCurrentRasterTarget(owner, layer) {
     return Boolean(
       owner &&
       layer &&
@@ -13513,7 +13515,33 @@ function createRasterEditController({
   function clearHighDepthPaintState() {
     highDepthPaintBuffer = null;
     highDepthPaintLayerId = null;
+    highDepthPaintOwner = null;
+    highDepthPaintLayer = null;
     highDepthPaintPreviewDirty = false;
+  }
+
+  function isNativeHighDepthPaintTarget(owner, layer) {
+    return Boolean(
+      highDepthPaintBuffer &&
+      highDepthPaintOwner === owner &&
+      highDepthPaintLayer === layer &&
+      highDepthPaintLayerId === layer?.id &&
+      brushOwner === owner &&
+      brushLayer === layer &&
+      brushLayerId === layer?.id &&
+      isCurrentRasterTarget(owner, layer)
+    );
+  }
+
+  function clearNativeHighDepthPaintTarget(owner, layer, buffer = highDepthPaintBuffer) {
+    if (
+      highDepthPaintBuffer !== buffer ||
+      highDepthPaintOwner !== owner ||
+      highDepthPaintLayer !== layer
+    ) return false;
+    clearBrushBuffer();
+    clearHighDepthPaintState();
+    return true;
   }
 
   function markHighDepthPreviewDirty() {
@@ -13549,8 +13577,8 @@ function createRasterEditController({
     return working;
   }
 
-  function refreshHighDepthPaintCanvas(layer, withFilters = true) {
-    if (!layer || highDepthPaintLayerId !== layer.id || !highDepthPaintBuffer || !brushCanvas || !brushContext) return false;
+  function refreshHighDepthPaintCanvas(owner, layer, withFilters = true) {
+    if (!isNativeHighDepthPaintTarget(owner, layer) || !brushCanvas || !brushContext) return false;
     const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
     const rgba = highDepthPaintBuffer.model === 'cmyk'
       ? cmykPixelBufferToRgba8Preview(highDepthPaintBuffer, getCmykPreviewTransform())
@@ -13571,25 +13599,36 @@ function createRasterEditController({
     return true;
   }
 
-  async function ensureNativeHighDepthPaintBuffer(layer, { requireAlpha = false } = {}) {
-    if (!layer?.highDepthSource) return false;
+  async function ensureNativeHighDepthPaintBuffer(owner, layer, { requireAlpha = false } = {}) {
+    if (!layer?.highDepthSource || !isCurrentRasterTarget(owner, layer)) return false;
     const alphaChannels = highDepthPaintBuffer?.model === 'cmyk' ? 5 : 4;
-    if (highDepthPaintLayerId === layer.id && highDepthPaintBuffer && (!requireAlpha || highDepthPaintBuffer.channels === alphaChannels)) return true;
+    if (
+      isNativeHighDepthPaintTarget(owner, layer) &&
+      (!requireAlpha || highDepthPaintBuffer.channels === alphaChannels)
+    ) return true;
+
     const working = editableHighDepthBuffer(layer, { requireAlpha });
     if (!working) return false;
     const size = checkedCanvasSize(layer.width, layer.height, `High-depth слой «${layer.name || 'Без имени'}»`);
     if (working.width !== size.width || working.height !== size.height) return false;
-    brushCanvas = documentRef.createElement('canvas');
-    brushCanvas.width = size.width;
-    brushCanvas.height = size.height;
-    brushContext = brushCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
+
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+    if (!isCurrentRasterTarget(owner, layer)) return false;
+
+    brushCanvas = canvas;
+    brushContext = context;
     brushLayerId = layer.id;
-    brushOwner = null;
-    brushLayer = null;
+    brushOwner = owner;
+    brushLayer = layer;
     highDepthPaintBuffer = working;
     highDepthPaintLayerId = layer.id;
+    highDepthPaintOwner = owner;
+    highDepthPaintLayer = layer;
     highDepthPaintPreviewDirty = true;
-    refreshHighDepthPaintCanvas(layer, true);
+    refreshHighDepthPaintCanvas(owner, layer, true);
     return true;
   }
 
@@ -13630,13 +13669,38 @@ function createRasterEditController({
     invalidateImageCache(old);
   }
 
-  async function persistNativeHighDepthPaintLayer() {
-    const layer = currentDocument().layers.find(item => item.id === highDepthPaintLayerId);
-    if (!layer || !highDepthPaintBuffer) return false;
-    const mutation = await prepareHighDepthMutation(layer, highDepthPaintBuffer);
+  async function persistHighDepthMutation(owner, layer, buffer) {
+    if (!buffer || !isCurrentRasterTarget(owner, layer)) return false;
+    const mutation = await prepareHighDepthMutation(layer, buffer);
+    if (!isCurrentRasterTarget(owner, layer)) return false;
     applyHighDepthMutation(layer, mutation);
-    clearBrushBuffer();
-    clearHighDepthPaintState();
+    return true;
+  }
+
+  async function persistNativeHighDepthPaintLayer(owner, layer) {
+    const buffer = highDepthPaintBuffer;
+    if (!buffer) return false;
+    if (!isNativeHighDepthPaintTarget(owner, layer)) {
+      clearNativeHighDepthPaintTarget(owner, layer, buffer);
+      return false;
+    }
+
+    let mutation;
+    try {
+      mutation = await prepareHighDepthMutation(layer, buffer);
+    } catch (error) {
+      clearNativeHighDepthPaintTarget(owner, layer, buffer);
+      throw error;
+    }
+
+    if (highDepthPaintBuffer !== buffer) return false;
+    if (!isNativeHighDepthPaintTarget(owner, layer)) {
+      clearNativeHighDepthPaintTarget(owner, layer, buffer);
+      return false;
+    }
+
+    applyHighDepthMutation(layer, mutation);
+    clearNativeHighDepthPaintTarget(owner, layer, buffer);
     return true;
   }
 
@@ -13663,7 +13727,7 @@ function createRasterEditController({
   }
 
   async function ensureRasterBuffer(owner, layer) {
-    if (!isCurrentCanvasTarget(owner, layer)) return null;
+    if (!isCurrentRasterTarget(owner, layer)) return null;
     const paintSize = checkedCanvasSize(layer.width, layer.height, `Растровый слой «${layer.name || 'Без имени'}»`);
     const canvasWidth = paintSize.width;
     const canvasHeight = paintSize.height;
@@ -13683,11 +13747,12 @@ function createRasterEditController({
     const context = canvas.getContext('2d', { alpha: true });
     if (!drawHighDepthRasterBase(layer, canvas, context) && layer.dataUrl) {
       const image = await getImage(layer.dataUrl);
-      if (!isCurrentCanvasTarget(owner, layer)) return null;
+      if (!isCurrentRasterTarget(owner, layer)) return null;
       if (image) context.drawImage(image, 0, 0, canvasWidth, canvasHeight);
     }
-    if (!isCurrentCanvasTarget(owner, layer)) return null;
+    if (!isCurrentRasterTarget(owner, layer)) return null;
 
+    clearHighDepthPaintState();
     brushCanvas = canvas;
     brushContext = context;
     brushLayerId = layer.id;
@@ -13703,7 +13768,7 @@ function createRasterEditController({
       brushOwner !== owner ||
       brushLayer !== layer ||
       brushLayerId !== layer?.id ||
-      !isCurrentCanvasTarget(owner, layer)
+      !isCurrentRasterTarget(owner, layer)
     ) return false;
 
     const dataUrl = await canvasToDataURL(canvas, 'image/png');
@@ -13712,7 +13777,7 @@ function createRasterEditController({
       brushOwner !== owner ||
       brushLayer !== layer ||
       brushLayerId !== layer.id ||
-      !isCurrentCanvasTarget(owner, layer)
+      !isCurrentRasterTarget(owner, layer)
     ) return false;
 
     const old = layer.dataUrl;
@@ -13725,7 +13790,8 @@ function createRasterEditController({
 
   function paintPreviewOverrides() {
     if (!brushCanvas || !brushLayerId) return null;
-    if (highDepthPaintLayerId === brushLayerId) {
+    if (highDepthPaintBuffer) {
+      if (!isNativeHighDepthPaintTarget(highDepthPaintOwner, highDepthPaintLayer)) return null;
       return new Map([[brushLayerId, { source: brushCanvas, skipAdjustments: true }]]);
     }
     if (
@@ -13745,9 +13811,8 @@ function createRasterEditController({
       paintPreviewFrame = 0;
       if (!paintPreviewQueued || getDrag()?.kind !== 'paint') return;
       paintPreviewQueued = false;
-      if (highDepthPaintPreviewDirty && highDepthPaintLayerId) {
-        const layer = currentDocument().layers.find(item => item.id === highDepthPaintLayerId);
-        if (layer) refreshHighDepthPaintCanvas(layer, true);
+      if (highDepthPaintPreviewDirty && highDepthPaintOwner && highDepthPaintLayer) {
+        refreshHighDepthPaintCanvas(highDepthPaintOwner, highDepthPaintLayer, true);
       }
       renderPaintPreview();
     });
@@ -13763,12 +13828,14 @@ function createRasterEditController({
     clearHighDepthPaintState,
     reset,
     markHighDepthPreviewDirty,
+    isNativeHighDepthPaintTarget,
     highDepthBudgetForLayer,
     editableHighDepthBuffer,
     refreshHighDepthPaintCanvas,
     ensureNativeHighDepthPaintBuffer,
     prepareHighDepthMutation,
     applyHighDepthMutation,
+    persistHighDepthMutation,
     persistNativeHighDepthPaintLayer,
     drawHighDepthRasterBase,
     ensureRasterBuffer,
@@ -13898,7 +13965,7 @@ function createRasterCommandController({
             status('Линия не изменила high-depth слой');
             return false;
           }
-          rasterEdit.applyHighDepthMutation(layer, await rasterEdit.prepareHighDepthMutation(layer, buffer));
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
           resetNativeState();
           doc.selectedLayerId = layer.id;
           ui?.commit?.('Нарисовать линию');
@@ -13988,7 +14055,7 @@ function createRasterCommandController({
             status('Заливка: подходящая область не найдена');
             return false;
           }
-          rasterEdit.applyHighDepthMutation(layer, await rasterEdit.prepareHighDepthMutation(layer, buffer));
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
           resetNativeState();
           doc.selectedLayerId = layer.id;
           ui?.commit?.('Заливка');
@@ -14076,7 +14143,7 @@ function createRasterCommandController({
             status('В выделении нет непрозрачных high-depth пикселей');
             return false;
           }
-          rasterEdit.applyHighDepthMutation(layer, await rasterEdit.prepareHighDepthMutation(layer, buffer));
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
           resetNativeState();
           ui?.commit?.(historyLabel);
           status(`${successStatus} · high-depth: ${cleared.toLocaleString('ru-RU')} px`);
@@ -14792,7 +14859,7 @@ function createPaintGestureController({
     }
 
     const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
-      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(layer, { requireAlpha:tool === 'eraser' })
+      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(owner, layer, { requireAlpha:tool === 'eraser' })
       : false;
     if (!nativeHighDepth && !await rasterEdit.ensureRasterBuffer(owner, layer)) return null;
     if (state.getDocument() !== owner || !owner.layers.includes(layer)) return null;
@@ -14849,7 +14916,7 @@ function createPaintGestureController({
       layer,
       layerId:layer.id,
       last:localPoint,
-      nativeHighDepth:rasterEdit.highDepthPaintLayerId === layer.id && NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool),
+      nativeHighDepth:rasterEdit.isNativeHighDepthPaintTarget(owner, layer) && NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool),
     };
     state.setDrag(drag);
 
@@ -14892,7 +14959,7 @@ function createPaintGestureController({
         retouch.applyNativeHighDepthBlurDab(layer, localPoint, pointerEvent);
         return true;
       }
-      nativePaint?.dab?.(layer, localPoint, pointerEvent, tool === 'eraser');
+      nativePaint?.dab?.(owner, layer, localPoint, pointerEvent, tool === 'eraser');
       return true;
     }
 
@@ -14966,7 +15033,7 @@ function createPaintGestureController({
       else if (drag.tool === 'clone' || drag.tool === 'heal') retouch.nativeHighDepthCloneSegment(layer, last, next, drag.cloneOffset, pointerEvent, drag.tool === 'heal');
       else if (drag.tool === 'smudge') retouch.nativeHighDepthSmudgeSegment(layer, last, next, pointerEvent);
       else if (drag.tool === 'dodge' || drag.tool === 'burn') retouch.nativeHighDepthToneSegment(layer, last, next, pointerEvent, drag.tool === 'dodge');
-      else nativePaint?.segment?.(layer, last, next, pointerEvent, drag.tool === 'eraser');
+      else nativePaint?.segment?.(drag.owner, layer, last, next, pointerEvent, drag.tool === 'eraser');
       drag.last = next;
       return true;
     }
@@ -14991,11 +15058,13 @@ function createPaintGestureController({
     rasterEdit.cancelPaintPreview();
     const paintTool = drag?.tool;
     const nativeHighDepth = Boolean(
-      rasterEdit.highDepthPaintBuffer &&
-      rasterEdit.highDepthPaintLayerId === rasterEdit.brushLayerId &&
-      NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool),
+      drag?.nativeHighDepth &&
+      NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool)
     );
-    if ((!rasterEdit.brushContext && !nativeHighDepth) || !state.beginPersist()) return false;
+    if (
+      (nativeHighDepth ? !rasterEdit.highDepthPaintBuffer : !rasterEdit.brushContext) ||
+      !state.beginPersist()
+    ) return false;
 
     const label = PAINT_HISTORY_LABELS[paintTool] || 'Кисть';
     if (!nativeHighDepth) rasterEdit.brushContext.restore();
@@ -15004,7 +15073,7 @@ function createPaintGestureController({
 
     try {
       const persisted = nativeHighDepth
-        ? await rasterEdit.persistNativeHighDepthPaintLayer()
+        ? await rasterEdit.persistNativeHighDepthPaintLayer(drag?.owner, drag?.layer)
         : await rasterEdit.persistPaintLayer(drag?.owner, drag?.layer);
       if (persisted) {
         ui?.commit?.(label);
@@ -15015,6 +15084,7 @@ function createPaintGestureController({
     } catch (error) {
       console.error(error);
       rasterEdit.clearBrushBuffer();
+      rasterEdit.clearHighDepthPaintState();
       ui?.render?.();
       status(`Ошибка сохранения штриха: ${error.message}`);
       ui?.toast?.('Не удалось сохранить штрих', 'error');
@@ -23687,8 +23757,8 @@ function createLineLayerFromPoints(start,end) {
 
 
 
-function applyNativeHighDepthDab(layer,point,pointerEvent=null,erase=false){
-  if(rasterEdit.highDepthPaintLayerId!==layer?.id||!rasterEdit.highDepthPaintBuffer)return false;
+function applyNativeHighDepthDab(owner,layer,point,pointerEvent=null,erase=false){
+  if(!rasterEdit.isNativeHighDepthPaintTarget(owner,layer))return false;
   const rgb=hexToRgb(els.primaryColor.value);
   const changed=rasterEdit.highDepthPaintBuffer.model==='cmyk'
     ? applyCmykPixelBufferBrushDab(rasterEdit.highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb8ToDocumentCmyk(rgb),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)})
@@ -23697,8 +23767,8 @@ function applyNativeHighDepthDab(layer,point,pointerEvent=null,erase=false){
   return changed>0;
 }
 
-function nativeHighDepthStrokeSegment(layer,from,to,pointerEvent=null,erase=false){
-  if(rasterEdit.highDepthPaintLayerId!==layer?.id||!rasterEdit.highDepthPaintBuffer)return false;
+function nativeHighDepthStrokeSegment(owner,layer,from,to,pointerEvent=null,erase=false){
+  if(!rasterEdit.isNativeHighDepthPaintTarget(owner,layer))return false;
   const rgb=hexToRgb(els.primaryColor.value);
   const changed=rasterEdit.highDepthPaintBuffer.model==='cmyk'
     ? applyCmykPixelBufferStrokeSegment(rasterEdit.highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb8ToDocumentCmyk(rgb),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)})
