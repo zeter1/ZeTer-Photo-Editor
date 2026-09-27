@@ -48,6 +48,7 @@ import { createSelectionMaskController } from './selection/mask-controller.js';
 import { createSelectionVectorMaskController } from './selection/vector-mask-controller.js';
 import { createDocumentImportController } from './document/import-controller.js';
 import { DOCUMENT_BACKGROUND_COMMAND_RESULT, createDocumentBackgroundCommandController } from './document/background-command-controller.js';
+import { DOCUMENT_CROP_COMMAND_RESULT, createDocumentCropCommandController } from './document/crop-command-controller.js';
 import { DOCUMENT_RESIZE_COMMAND_RESULT, createDocumentResizeCommandController } from './document/resize-command-controller.js';
 import { createSmartObjectController } from './document/smart-object-controller.js';
 import { createPsdSmartObjectResource } from './document/psd-smart-object-resource.js';
@@ -787,6 +788,18 @@ const selectionGestures = createSelectionGestureController({
 const documentBackgroundCommandController = createDocumentBackgroundCommandController({
   state: { getDocument: () => doc },
   transaction: { commit },
+});
+const documentCropCommandController = createDocumentCropCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+  runtime: {
+    completeCropTransientState: () => {
+      cropRect = null;
+      clearSelectionState();
+      rasterEdit.clearBrushBuffer();
+    },
+    fitToView,
+  },
 });
 const documentResizeCommandController = createDocumentResizeCommandController({
   state: { getDocument: () => doc },
@@ -1840,7 +1853,7 @@ async function onOverlayPointerDown(e) {
   }
   if (currentTool === 'line') { drag = { kind:'line', start:p, current:p }; previewLine(p,p); return; }
   if (currentTool === 'shape') { drag = { kind:'shape', start:p, current:p }; return; }
-  if (currentTool === 'crop') { drag = { kind:'crop', start:p, current:p }; cropRect = {x:p.x,y:p.y,width:0,height:0}; drawOverlay(); return; }
+  if (currentTool === 'crop') { drag = { kind:'crop', start:p, current:p, owner:doc }; cropRect = {x:p.x,y:p.y,width:0,height:0}; drawOverlay(); return; }
   if (currentTool === 'text') { textEditController.open(p); return; }
   if (currentTool === 'eyedropper') { pickColor(p); return; }
   if (currentTool === 'zoom') { setZoomAtClientPoint(zoom*(e.altKey ? 1/1.5 : 1.5),e.clientX,e.clientY); return; }
@@ -1993,7 +2006,7 @@ async function onOverlayPointerUp(e) {
   }
   if (d.kind === 'crop') {
     const r = normalizeRect(d.start,d.current);
-    if (r.width >= 10 && r.height >= 10) applyCrop(r); else { cropRect=null; drawOverlay(); }
+    if (r.width >= 10 && r.height >= 10) applyCrop(d.owner,r); else { cropRect=null; drawOverlay(); }
   }
   if (d.kind === 'gradient') await applyGradient(d.start,d.current);
   if (d.kind === 'path-control') {
@@ -2241,14 +2254,20 @@ function pickColor(p) {
   const alpha=pixel[3]===255?'':` • alpha ${Math.round(pixel[3]/255*100)}%`;
   setStatus(`Цвет: ${hex}${alpha}`);
 }
-function applyCrop(r) {
-  const x=Math.round(r.x), y=Math.round(r.y), w=Math.max(1,Math.round(r.width)), h=Math.max(1,Math.round(r.height));
-  doc.layers.forEach(l=>{l.x-=x;l.y-=y;}); doc.width=w; doc.height=h; cropRect=null; clearSelectionState(); rasterEdit.clearBrushBuffer(); commit('Кадрирование'); fitToView();
+function applyCrop(owner,r) {
+  const outcome=documentCropCommandController.crop(owner,r);
+  if(outcome.result===DOCUMENT_CROP_COMMAND_RESULT.INVALID){
+    const message=outcome.error?.message||'Не удалось кадрировать документ';
+    toast(message,'error');setStatus(message);
+  }else if(outcome.result===DOCUMENT_CROP_COMMAND_RESULT.REJECTED){
+    setStatus('Документ изменился — кадрирование не применено');
+  }
+  return outcome;
 }
 
 function selectAllPixels(){setSelectionShape({type:'rect',rect:{x:0,y:0,width:doc.width,height:doc.height}});drawOverlay();setStatus('Выделен весь холст');}
 function deselectPixels(){if(!selectionRect&&!selectionGestures.hasPolygonDraft())return;clearSelectionState();drawOverlay();setStatus('Выделение снято');}
-function cropToSelection(){if(!selectionRect){setStatus('Нет активного выделения');return;}if(selectionRect.width<1||selectionRect.height<1)return;applyCrop({...selectionRect});}
+function cropToSelection(){if(!selectionRect){setStatus('Нет активного выделения');return;}if(selectionRect.width<1||selectionRect.height<1)return;const owner=doc;applyCrop(owner,{...selectionRect});}
 
 function canReplaceDocument() {
   return !dirty || window.confirm('В документе есть несохранённые изменения. Продолжить без сохранения?');

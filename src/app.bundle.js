@@ -14436,6 +14436,123 @@ function createDocumentBackgroundCommandController({
   return { setBackground };
 }
 
+// ---- src/document/crop-command-controller.js ----
+const DOCUMENT_CROP_COMMAND_RESULT = Object.freeze({
+  COMMITTED: 'committed',
+  NOOP: 'noop',
+  INVALID: 'invalid',
+  REJECTED: 'rejected',
+});
+const DOCUMENT_CROP_GEOMETRY_ERROR = 'Некорректная область кадрирования';
+const DOCUMENT_CROP_POSITION_ERROR = 'Кадрирование выведет слой за допустимые пределы';
+
+function commandResult(result, error = null) {
+  return error ? { result, error } : { result };
+}
+
+function normalizedCropRect(rect) {
+  const xValue = Number(rect?.x);
+  const yValue = Number(rect?.y);
+  const widthValue = Number(rect?.width);
+  const heightValue = Number(rect?.height);
+  if (
+    !Number.isFinite(xValue) ||
+    !Number.isFinite(yValue) ||
+    !Number.isFinite(widthValue) ||
+    !Number.isFinite(heightValue) ||
+    widthValue <= 0 ||
+    heightValue <= 0
+  ) {
+    throw new Error(DOCUMENT_CROP_GEOMETRY_ERROR);
+  }
+
+  const x = Math.round(xValue);
+  const y = Math.round(yValue);
+  const width = Math.max(1, Math.round(widthValue));
+  const height = Math.max(1, Math.round(heightValue));
+  const size = checkedCanvasSize(width, height, 'Кадрирование');
+  if (size.width !== width || size.height !== height) {
+    throw new Error(DOCUMENT_CROP_GEOMETRY_ERROR);
+  }
+  return { x, y, width:size.width, height:size.height };
+}
+function createDocumentCropCommandController({
+  state,
+  transaction,
+  runtime,
+} = {}) {
+  if (typeof state?.getDocument !== 'function') {
+    throw new TypeError('document crop command state bridge is required');
+  }
+  if (typeof transaction?.commit !== 'function') {
+    throw new TypeError('document crop command transaction bridge is required');
+  }
+  if (typeof runtime?.completeCropTransientState !== 'function') {
+    throw new TypeError('document crop command transient completion bridge is required');
+  }
+  if (typeof runtime?.fitToView !== 'function') {
+    throw new TypeError('document crop command fit-to-view bridge is required');
+  }
+
+  function activeOwner(owner) {
+    return Boolean(owner) && state.getDocument() === owner;
+  }
+
+  function complete(result) {
+    runtime.completeCropTransientState();
+    if (result === DOCUMENT_CROP_COMMAND_RESULT.COMMITTED) {
+      transaction.commit('Кадрирование');
+    }
+    runtime.fitToView();
+    return commandResult(result);
+  }
+
+  function crop(owner, rect) {
+    if (!activeOwner(owner)) return commandResult(DOCUMENT_CROP_COMMAND_RESULT.REJECTED);
+
+    let cropRect;
+    let updates;
+    try {
+      cropRect = normalizedCropRect(rect);
+      if (
+        cropRect.x === 0 &&
+        cropRect.y === 0 &&
+        cropRect.width === owner.width &&
+        cropRect.height === owner.height
+      ) {
+        if (!activeOwner(owner)) return commandResult(DOCUMENT_CROP_COMMAND_RESULT.REJECTED);
+        return complete(DOCUMENT_CROP_COMMAND_RESULT.NOOP);
+      }
+
+      if (!Array.isArray(owner.layers)) throw new Error(DOCUMENT_CROP_GEOMETRY_ERROR);
+      updates = owner.layers.map(layer => {
+        const x = Number(layer?.x) - cropRect.x;
+        const y = Number(layer?.y) - cropRect.y;
+        if (
+          !Number.isFinite(x) ||
+          !Number.isFinite(y) ||
+          Math.abs(x) > MAX_LAYER_POSITION ||
+          Math.abs(y) > MAX_LAYER_POSITION
+        ) {
+          throw new Error(DOCUMENT_CROP_POSITION_ERROR);
+        }
+        return { x, y };
+      });
+    } catch (error) {
+      return commandResult(DOCUMENT_CROP_COMMAND_RESULT.INVALID, error);
+    }
+
+    if (!activeOwner(owner)) return commandResult(DOCUMENT_CROP_COMMAND_RESULT.REJECTED);
+
+    owner.layers.forEach((layer, index) => Object.assign(layer, updates[index]));
+    owner.width = cropRect.width;
+    owner.height = cropRect.height;
+    return complete(DOCUMENT_CROP_COMMAND_RESULT.COMMITTED);
+  }
+
+  return { crop };
+}
+
 // ---- src/document/resize-command-controller.js ----
 const DOCUMENT_RESIZE_COMMAND_RESULT = Object.freeze({
   COMMITTED: 'committed',
@@ -20242,6 +20359,18 @@ const documentBackgroundCommandController = createDocumentBackgroundCommandContr
   state: { getDocument: () => doc },
   transaction: { commit },
 });
+const documentCropCommandController = createDocumentCropCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+  runtime: {
+    completeCropTransientState: () => {
+      cropRect = null;
+      clearSelectionState();
+      rasterEdit.clearBrushBuffer();
+    },
+    fitToView,
+  },
+});
 const documentResizeCommandController = createDocumentResizeCommandController({
   state: { getDocument: () => doc },
   transaction: { commit },
@@ -21294,7 +21423,7 @@ async function onOverlayPointerDown(e) {
   }
   if (currentTool === 'line') { drag = { kind:'line', start:p, current:p }; previewLine(p,p); return; }
   if (currentTool === 'shape') { drag = { kind:'shape', start:p, current:p }; return; }
-  if (currentTool === 'crop') { drag = { kind:'crop', start:p, current:p }; cropRect = {x:p.x,y:p.y,width:0,height:0}; drawOverlay(); return; }
+  if (currentTool === 'crop') { drag = { kind:'crop', start:p, current:p, owner:doc }; cropRect = {x:p.x,y:p.y,width:0,height:0}; drawOverlay(); return; }
   if (currentTool === 'text') { textEditController.open(p); return; }
   if (currentTool === 'eyedropper') { pickColor(p); return; }
   if (currentTool === 'zoom') { setZoomAtClientPoint(zoom*(e.altKey ? 1/1.5 : 1.5),e.clientX,e.clientY); return; }
@@ -21447,7 +21576,7 @@ async function onOverlayPointerUp(e) {
   }
   if (d.kind === 'crop') {
     const r = normalizeRect(d.start,d.current);
-    if (r.width >= 10 && r.height >= 10) applyCrop(r); else { cropRect=null; drawOverlay(); }
+    if (r.width >= 10 && r.height >= 10) applyCrop(d.owner,r); else { cropRect=null; drawOverlay(); }
   }
   if (d.kind === 'gradient') await applyGradient(d.start,d.current);
   if (d.kind === 'path-control') {
@@ -21695,14 +21824,20 @@ function pickColor(p) {
   const alpha=pixel[3]===255?'':` • alpha ${Math.round(pixel[3]/255*100)}%`;
   setStatus(`Цвет: ${hex}${alpha}`);
 }
-function applyCrop(r) {
-  const x=Math.round(r.x), y=Math.round(r.y), w=Math.max(1,Math.round(r.width)), h=Math.max(1,Math.round(r.height));
-  doc.layers.forEach(l=>{l.x-=x;l.y-=y;}); doc.width=w; doc.height=h; cropRect=null; clearSelectionState(); rasterEdit.clearBrushBuffer(); commit('Кадрирование'); fitToView();
+function applyCrop(owner,r) {
+  const outcome=documentCropCommandController.crop(owner,r);
+  if(outcome.result===DOCUMENT_CROP_COMMAND_RESULT.INVALID){
+    const message=outcome.error?.message||'Не удалось кадрировать документ';
+    toast(message,'error');setStatus(message);
+  }else if(outcome.result===DOCUMENT_CROP_COMMAND_RESULT.REJECTED){
+    setStatus('Документ изменился — кадрирование не применено');
+  }
+  return outcome;
 }
 
 function selectAllPixels(){setSelectionShape({type:'rect',rect:{x:0,y:0,width:doc.width,height:doc.height}});drawOverlay();setStatus('Выделен весь холст');}
 function deselectPixels(){if(!selectionRect&&!selectionGestures.hasPolygonDraft())return;clearSelectionState();drawOverlay();setStatus('Выделение снято');}
-function cropToSelection(){if(!selectionRect){setStatus('Нет активного выделения');return;}if(selectionRect.width<1||selectionRect.height<1)return;applyCrop({...selectionRect});}
+function cropToSelection(){if(!selectionRect){setStatus('Нет активного выделения');return;}if(selectionRect.width<1||selectionRect.height<1)return;const owner=doc;applyCrop(owner,{...selectionRect});}
 
 function canReplaceDocument() {
   return !dirty || window.confirm('В документе есть несохранённые изменения. Продолжить без сохранения?');

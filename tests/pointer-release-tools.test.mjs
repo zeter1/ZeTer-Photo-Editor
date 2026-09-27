@@ -39,7 +39,7 @@ function release(drag, point, pointerId = 1, shiftKey = false) {
     commit: label => {
       if (['Перемещение слоя', 'Изменить размер слоя', 'Повернуть слой'].includes(label)) calls.push(['commit', label]);
     },
-    applyCrop: rect => calls.push(['crop', rect.width, rect.height]),
+    applyCrop: (owner, rect) => calls.push(['crop', owner?.id, rect.width, rect.height]),
     applyGradient: (from, to) => calls.push(['gradient', to.x, to.y]),
     setSelectionShape: () => {},
     drawOverlay: () => {},
@@ -62,7 +62,7 @@ test('drawing tools use the release position even without a final pointermove', 
   const end = { x:40, y:50 };
   assert.deepEqual(await release({ kind:'line', start, current }, end), [['line',10,10,40,50]]);
   assert.deepEqual(await release({ kind:'shape', start, current, lockAspect:false }, end), [['shape',30,40]]);
-  assert.deepEqual(await release({ kind:'crop', start, current }, end), [['crop',30,40]]);
+  assert.deepEqual(await release({ kind:'crop', start, current, owner:{id:'crop-owner'} }, end), [['crop','crop-owner',30,40]]);
   assert.deepEqual(await release({ kind:'gradient', start, current }, end), [['gradient',40,50]]);
 });
 

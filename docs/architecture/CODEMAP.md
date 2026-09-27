@@ -141,6 +141,11 @@ Owns synchronous persisted Image Size and Canvas Size commands. It binds each de
 
 It deliberately does **not** own resize modal DOM, Crop tool/pointer lifecycle, zoom/viewport state, document schema, or core size/scale/position limits. Those remain in `src/main.js`, interaction owners and `src/core/state.js` respectively.
 
+### `crop-command-controller.js`
+Owns the synchronous persisted Crop geometry transaction. It receives the exact document captured by the crop gesture or selection command, validates finite rounded geometry and canonical canvas safety, stages every shifted layer position against `MAX_LAYER_POSITION`, revalidates active owner identity immediately before the first write, and publishes at most one `Кадрирование` history entry.
+
+A full-document crop is a persisted semantic no-op: it completes the existing crop/selection/brush transient UI and viewport fit without fabricating Undo history. Invalid/stale requests leave both persisted and transient state untouched. Pointer begin/move/up/cancel, the 10×10 gesture gate, selection's 1×1 gate, crop overlay/grid and session snapshots remain in `src/main.js` / workspace interaction owners.
+
 ### `background-command-controller.js`
 Owns the persisted Document Background command transaction. The modal captures the originating document object, the controller revalidates that exact object immediately before mutation, same-value Apply is a semantic no-op, and a real change publishes exactly one `Фон документа` history entry.
 
