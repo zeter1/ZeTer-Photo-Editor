@@ -110,6 +110,8 @@ When a new subsystem is extracted:
 - add its direct test to `TEST_MATRIX.md`;
 - update source-graph architecture tests where useful.
 
+When a pass discovers a stable, reusable contract that is expensive to rediscover — for example an owner split, stale-state rule, lifecycle sequence, format invariant, failure/recovery pattern or exact UI behavior — capture it in a small targeted specification/pattern document close to the relevant architecture/development docs and link it from the routing maps. Prefer progressive disclosure: one focused source of truth over copying the same explanation into many files. Periodically repair or delete stale specs as code/tests evolve.
+
 ## Source checkpoints
 
 - OpenAI, “Harness engineering: leveraging Codex in an agent-first world” (2026-02-11): repository-local knowledge, short `AGENTS.md`, progressive disclosure, versioned active/completed execution plans, mechanically enforced architecture.

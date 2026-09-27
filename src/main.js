@@ -41,6 +41,7 @@ import { createTextSettingsController, TEXT_WEIGHT_OPTIONS, TEXT_STYLE_OPTIONS, 
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
+import { createCropGestureController } from './interaction/crop-gesture-controller.js';
 import { createLayerTransformSurfaceController } from './interaction/layer-transform-surface-controller.js';
 import { createLayerTransformGestureController } from './interaction/layer-transform-gesture-controller.js';
 import { createPathControlSurfaceController } from './interaction/path-control-surface-controller.js';
@@ -100,7 +101,6 @@ let drag = null;
 let vectorMaskEditLayerId = null;
 let documentPathEditIndex = -1;
 let spaceHeld = false;
-let cropRect = null;
 let selectionRect = null;
 let selectionShape = null;
 let selectionCopyMode = 'merged';
@@ -795,6 +795,9 @@ const layerTransformGestures = createLayerTransformGestureController({
     redrawOverlay: () => drawOverlay(),
   },
 });
+const cropGestures = createCropGestureController({
+  state: { getDocument: () => doc },
+});
 const penDraftGestures = createPenDraftGestureController({
   runtime: { getZoom: () => zoom },
 });
@@ -865,7 +868,7 @@ const documentCropCommandController = createDocumentCropCommandController({
   transaction: { commit },
   runtime: {
     completeCropTransientState: () => {
-      cropRect = null;
+      cropGestures.reset();
       clearSelectionState();
       rasterEdit.clearBrushBuffer();
     },
@@ -877,7 +880,7 @@ const documentResizeCommandController = createDocumentResizeCommandController({
   transaction: { commit },
   runtime: {
     resetGeometryTransientState: () => {
-      cropRect = null;
+      cropGestures.reset();
       clearSelectionState();
       rasterEdit.clearBrushBuffer();
     },
@@ -925,7 +928,7 @@ documentSessionController = createDocumentSessionController({
   getActiveSessionId: () => activeSessionId,
   setActiveSessionId: value => { activeSessionId = value; },
   getRuntimeState: () => ({
-    doc, history, zoom, dirty, cropRect, selectionRect, selectionShape,
+    doc, history, zoom, dirty, cropRect: cropGestures.snapshot(), selectionRect, selectionShape,
     selectedDocumentPathIndex: pathsController.getSelectedIndex(),
   }),
   applyRuntimeState: state => {
@@ -933,7 +936,7 @@ documentSessionController = createDocumentSessionController({
     history = state.history;
     zoom = state.zoom;
     dirty = state.dirty;
-    cropRect = state.cropRect;
+    cropGestures.restore(state.cropRect);
     selectionRect = state.selectionRect;
     selectionShape = state.selectionShape;
     pathsController.setSelectedIndex(state.selectedPathIndex);
@@ -1062,7 +1065,7 @@ function blockPendingDocumentEdit() {
 }
 function setDoc(next, { resetHistory = false, label = 'Состояние' } = {}) {
   doc = next;
-  cropRect = null;
+  cropGestures.reset();
   pathsController.setSelectedIndex(-1);
   documentPathEditIndex = -1;
   vectorMaskEditLayerId = null;
@@ -1255,23 +1258,7 @@ async function drainRenderQueue() {
 function drawOverlay() {
   const ctx = els.overlay.getContext('2d');
   ctx.clearRect(0, 0, doc.width, doc.height);
-  if (cropRect) {
-    ctx.save();
-    ctx.fillStyle = '#0008';
-    ctx.fillRect(0, 0, doc.width, doc.height);
-    ctx.clearRect(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1 / zoom; ctx.setLineDash([8 / zoom, 5 / zoom]);
-    ctx.strokeRect(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
-    ctx.globalAlpha = .72;
-    ctx.setLineDash([4 / zoom, 5 / zoom]);
-    for (const fraction of [1 / 3, 2 / 3]) {
-      const x = cropRect.x + cropRect.width * fraction;
-      const y = cropRect.y + cropRect.height * fraction;
-      ctx.beginPath(); ctx.moveTo(x, cropRect.y); ctx.lineTo(x, cropRect.y + cropRect.height); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(cropRect.x, y); ctx.lineTo(cropRect.x + cropRect.width, y); ctx.stroke();
-    }
-    ctx.restore();
-  }
+  cropGestures.draw(ctx, { zoom, width:doc.width, height:doc.height });
   if (selectionShape) {
     ctx.save();
     ctx.lineWidth = 1 / zoom;
@@ -1382,7 +1369,7 @@ function jumpToHistory(index) {
   const entry = history.jump(index);
   if (!entry) return;
   doc = restoreDocument(entry.snapshot);
-  rasterEdit.clearBrushBuffer(); cropRect=null; clearSelectionState();
+  rasterEdit.clearBrushBuffer(); cropGestures.reset(); clearSelectionState();
   updateAll(); markDirty(true); setStatus(`История → ${entry.label}`);
 }
 
@@ -1627,7 +1614,7 @@ function setTool(tool) {
   $$('.marquee-only').forEach(x => x.style.display = tool === 'marquee' ? '' : 'none');
   $$('.move-only').forEach(x => x.style.display = tool === 'move' ? '' : 'none');
   els.overlay.style.cursor = defaultToolCursor();
-  cropRect = null; hoverPoint = null; clearSmartGuides(); drawOverlay();
+  cropGestures.reset(); hoverPoint = null; clearSmartGuides(); drawOverlay();
   if ((tool === 'clone' || tool === 'heal') && !getRetouchCloneSource()) setStatus(`${TOOL_LABELS[tool]}: Alt+клик по растровому слою задаёт источник`);
 }
 
@@ -1750,7 +1737,7 @@ async function onOverlayPointerDown(e) {
   }
   if (currentTool === 'line') { drag = { kind:'line', start:p, current:p }; previewLine(p,p); return; }
   if (currentTool === 'shape') { drag = { kind:'shape', start:p, current:p }; return; }
-  if (currentTool === 'crop') { drag = { kind:'crop', start:p, current:p, owner:doc }; cropRect = {x:p.x,y:p.y,width:0,height:0}; drawOverlay(); return; }
+  if (currentTool === 'crop') { drag = cropGestures.begin(doc,p); drawOverlay(); return; }
   if (currentTool === 'text') { textEditController.open(p); return; }
   if (currentTool === 'eyedropper') { pickColor(p); return; }
   if (currentTool === 'zoom') { setZoomAtClientPoint(zoom*(e.altKey ? 1/1.5 : 1.5),e.clientX,e.clientY); return; }
@@ -1793,7 +1780,7 @@ function onOverlayPointerMove(e) {
   if (drag.kind === 'marquee') { selectionGestures.updateMarquee(drag,p,{shiftKey:e.shiftKey}); return; }
   if (drag.kind === 'line') { drag.current=e.shiftKey?snapLineEnd(drag.start,p,45):p; previewLine(drag.start,drag.current); return; }
   if (drag.kind === 'shape') { drag.current=p; drag.lockAspect=e.shiftKey; const r=constrainedRect(drag.start,p,e.shiftKey); previewRect(r, els.primaryColor.value); return; }
-  if (drag.kind === 'crop') { drag.current=p; cropRect=normalizeRect(drag.start,p); drawOverlay(); return; }
+  if (cropGestures.isGesture(drag)) { cropGestures.update(drag,p); drawOverlay(); return; }
   if (drag.kind === 'gradient') { drag.current=p;previewGradient(drag.start,p);return; }
   if (penDraftGestures.isGesture(drag)) {
     penDraftGestures.update(drag,p,{altKey:e.altKey});
@@ -1810,7 +1797,7 @@ async function onOverlayPointerUp(e) {
     if (localPoint && Math.hypot(localPoint.x-drag.last.x, localPoint.y-drag.last.y) > .01) paintGesture.move(releasePoint, e);
   }
   const d = drag; drag = null;
-  if (['marquee','line','shape','crop','gradient'].includes(d.kind)) d.current = canvasPoint(e);
+  if (['marquee','line','shape','gradient'].includes(d.kind)) d.current = canvasPoint(e);
   if (layerTransformGestures.isGesture(d)) {
     layerTransformGestures.finish(d,canvasPoint(e,{clampToDocument:false}),{
       shiftKey:e.shiftKey,
@@ -1837,9 +1824,10 @@ async function onOverlayPointerUp(e) {
     if (r.width > 2 && r.height > 2) { addLayer(doc, createShapeLayer({ x:r.x,y:r.y,width:r.width,height:r.height,shape:els.shapeKind.value,fill:els.primaryColor.value,opacity:Number(els.toolOpacity.value)/100 })); commit('Добавить фигуру'); }
     else render();
   }
-  if (d.kind === 'crop') {
-    const r = normalizeRect(d.start,d.current);
-    if (r.width >= 10 && r.height >= 10) applyCrop(d.owner,r); else { cropRect=null; drawOverlay(); }
+  if (cropGestures.isGesture(d)) {
+    const cropResult = cropGestures.finish(d,canvasPoint(e));
+    if (cropResult.accepted) applyCrop(cropResult.owner,cropResult.rect);
+    else drawOverlay();
   }
   if (d.kind === 'gradient') await applyGradient(d.start,d.current);
   if (penDraftGestures.isGesture(d)) {
@@ -1857,7 +1845,7 @@ async function onOverlayPointerCancel(e) {
   if (d.kind==='paint') { await paintGesture.end(d); }
   else {
     if (layerTransformGestures.isGesture(d)) layerTransformGestures.cancel(d);
-    if (d.kind==='crop') cropRect=null;
+    if (cropGestures.isGesture(d)) cropGestures.cancel(d);
     if (d.kind==='marquee') selectionGestures.cancelMarquee(d);
     if(penDraftGestures.isGesture(d))penDraftGestures.cancelPoint(d);
     if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
@@ -2763,14 +2751,14 @@ window.addEventListener('keydown',e=>{
       if(layerTransformGestures.isGesture(d))layerTransformGestures.cancel(d);
       if(penDraftGestures.isGesture(d))penDraftGestures.cancelPoint(d);
       if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
-      if(d.kind==='crop')cropRect=null;
+      if(cropGestures.isGesture(d))cropGestures.cancel(d);
       if(d.kind==='marquee')selectionGestures.cancelMarquee(d);
       els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;
     }
     if(selectionGestures.hasPolygonDraft()){e.preventDefault();selectionGestures.cancelPolygonDraft({restorePrevious:true,announce:true});return;}
     if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
-    if(cropRect){cropRect=null;drawOverlay();setStatus('Кадрирование отменено');return;}
+    if(cropGestures.hasDraft()){cropGestures.reset();drawOverlay();setStatus('Кадрирование отменено');return;}
     if(selectionRect){deselectPixels();return;}
   }
   if(e.target instanceof Node && els.modalRoot.contains(e.target))return;

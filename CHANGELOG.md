@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical transient Crop gesture / overlay controller
+
+- Refactor: transient Crop gesture ownership, normalized draft rectangle, final-release geometry, 10×10 pointer acceptance gate, per-document session-safe draft snapshot/restore and crop overlay/grid move out of the large `src/main.js` composition root into `src/interaction/crop-gesture-controller.js`.
+- Exact-owner/session safety: active Crop gestures capture the originating document object, stale/replaced owners cannot yield a persisted crop intent, and session restore revives only immutable rectangle presentation data — never active pointer ownership.
+- Ownership hygiene: persisted canvas/layer geometry and the single `Кадрирование` history publication remain in `src/document/crop-command-controller.js`; Crop-to-Selection keeps its separate 1×1 gate; generic pointer capture remains in `pointer-lifecycle-router.js`.
+- Regression/docs/build: direct controller tests cover reverse drags, immutability, stale/undersized releases, cancellation and exact overlay metrics; VM pointer harnesses and architecture guards are retargeted; `CROP_INTERACTION.md` records the reusable split and AI documentation rules now require targeted specs/patterns when a stable contract would otherwise need rediscovery.
+
 ### 2026-09-27 — Canonical selected-layer transform surface controller
 
 - Refactor: read-only selected-layer Move / Resize / Rotate discovery, control hit-testing, frame/handle/name-badge drawing, rotated resize cursors and topmost Move targeting move out of the large `src/main.js` composition root into `src/interaction/layer-transform-surface-controller.js`.
