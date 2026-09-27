@@ -1,5 +1,5 @@
 import { HistoryStack } from './core/history.js';
-import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, alignLayerToCanvas, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
+import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
   createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
   addLayer, selectedLayer,
@@ -30,6 +30,7 @@ import { createLayersPanelController } from './ui/layers-panel-controller.js';
 import { createLayerGroupCommandController } from './layers/command-controller.js';
 import { createLayerPropertyCommandController } from './layers/property-command-controller.js';
 import { ADJUSTMENT_COMMAND_RESULT, createAdjustmentLayerCommandController } from './layers/adjustment-command-controller.js';
+import { LAYER_ALIGNMENT_LABELS, LAYER_TRANSFORM_COMMAND_RESULT, createLayerTransformCommandController } from './layers/transform-command-controller.js';
 import { createColorCorrectionController } from './ui/color-correction-controller.js';
 import { createPathsController } from './ui/paths-controller.js';
 import { createColorManagementController } from './ui/color-management-controller.js';
@@ -413,6 +414,11 @@ const textSettingsController = createTextSettingsController({
 });
 
 const adjustmentLayerCommandController = createAdjustmentLayerCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+});
+
+const layerTransformCommandController = createLayerTransformCommandController({
   state: { getDocument: () => doc },
   transaction: { commit },
 });
@@ -2470,8 +2476,8 @@ async function exportDialog() { if(blockPendingDocumentEdit())return; showModal(
 function toggleSelectedVisibility() { return layerGroupCommandController.toggleSelectedLayerVisibility(); }
 function toggleSelectedLock() { return layerGroupCommandController.toggleSelectedLayerLock(); }
 function nudgeSelected(dx,dy) {
-  const l=selected(); if(!l || isLayerLocked(doc,l))return;
-  l.x+=dx; l.y+=dy; commit('Сдвинуть слой');
+  const l=selected();if(!l)return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+  return layerTransformCommandController.nudge(doc,l.id,dx,dy);
 }
 function selectAdjacentLayer(direction) {
   if (!doc.layers.length) return;
@@ -2481,35 +2487,26 @@ function selectAdjacentLayer(direction) {
 }
 
 function centerSelectedLayer() {
-  const l=selected();if(!isTransformableLayer(l)||isLayerLocked(doc,l))return;
-  const frame=layerFrame(l);
-  l.x += doc.width/2-frame.center.x;
-  l.y += doc.height/2-frame.center.y;
-  commit('Центрировать слой');
+  const l=selected();if(!l)return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+  return layerTransformCommandController.center(doc,l.id);
 }
 function alignSelectedLayer(mode) {
   const l=selected();
-  if(!l){setStatus('Сначала выберите слой');return;}
-  if(!isTransformableLayer(l)){setStatus('Корректирующий слой не имеет геометрической трансформации');return;}
-  if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}
-  const next=alignLayerToCanvas(l,mode,doc.width,doc.height);
-  if(!next.changed){setStatus('Слой уже выровнен');return;}
-  l.x=next.x;l.y=next.y;
-  const labels={left:'по левому краю',hcenter:'по центру горизонтально',right:'по правому краю',top:'по верхнему краю',vcenter:'по центру вертикально',bottom:'по нижнему краю'};
-  commit(`Выровнять слой ${labels[mode]||''}`.trim());
-  setStatus(`Слой выровнен ${labels[mode]||''}`.trim());
+  if(!l){setStatus('Сначала выберите слой');return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;}
+  const result=layerTransformCommandController.align(doc,l.id,mode);
+  if(result===LAYER_TRANSFORM_COMMAND_RESULT.NOOP){
+    setStatus('Слой уже выровнен');
+  }else if(result===LAYER_TRANSFORM_COMMAND_RESULT.COMMITTED){
+    setStatus(`Слой выровнен ${LAYER_ALIGNMENT_LABELS[mode]}`);
+  }else if(result===LAYER_TRANSFORM_COMMAND_RESULT.REJECTED){
+    if(!isTransformableLayer(l))setStatus('Корректирующий слой не имеет геометрической трансформации');
+    else if(isLayerLocked(doc,l))setStatus('Слой или его группа заблокированы');
+  }
+  return result;
 }
 function fitSelectedLayerToCanvas() {
-  const l=selected();if(!isTransformableLayer(l)||isLayerLocked(doc,l))return;
-  const bounds=frameBounds(l);
-  if(bounds.width<=0||bounds.height<=0)return;
-  const ratio=Math.min(doc.width/bounds.width,doc.height/bounds.height);
-  if(!Number.isFinite(ratio)||ratio<=0)return;
-  l.scaleX=(l.scaleX??1)*ratio;l.scaleY=(l.scaleY??1)*ratio;
-  const frame=layerFrame(l);
-  l.x += doc.width/2-frame.center.x;
-  l.y += doc.height/2-frame.center.y;
-  commit('Вписать слой в холст');
+  const l=selected();if(!l)return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+  return layerTransformCommandController.fitToCanvas(doc,l.id);
 }
 
 function setDocumentBackground() {

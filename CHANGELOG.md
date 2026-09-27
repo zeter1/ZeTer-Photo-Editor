@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical discrete layer transform command controller
+
+- Refactor: synchronous selected-layer nudge, center, canvas alignment and fit-to-canvas commands move from direct geometry mutation in `src/main.js` into `src/layers/transform-command-controller.js`; pointer Move/Resize/Rotate gestures and Properties live preview stay unchanged.
+- Correctness/history: every command re-resolves the exact active layer ID, honors recursive effective locks, rejects non-transformable Adjustment layers, validates finite deltas/modes, and suppresses zero/already-centered/aligned/fitted Undo entries while preserving existing history labels for real mutations.
+- Geometry: center/align/fit reuse canonical `layerFrame`, `frameBounds` and `alignLayerToCanvas` behavior, including rotated/scaled layers, instead of introducing parallel frame math.
+- Regression/docs/build: direct controller and architecture/source-contract coverage pin behavior and ownership; AI routing/test docs and the canonical file:// bundle graph include the new owner.
+
+
 ### 2026-09-27 — Canonical Adjustment Layer command controller
 
 - Refactor: persisted Adjustment Layer scalar/Levels, Curves and clipping commands move from `src/main.js` into `src/layers/adjustment-command-controller.js`; Properties markup and display formatting remain in the composition root.
