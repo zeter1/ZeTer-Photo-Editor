@@ -95,9 +95,11 @@ export function createGradientCommandController({
     try {
       if (!activeOwner(owner)) return stale();
 
+      const width = owner.width;
+      const height = owner.height;
       const canvas = runtime.createCanvas();
-      canvas.width = owner.width;
-      canvas.height = owner.height;
+      canvas.width = width;
+      canvas.height = height;
       const context = canvas.getContext?.('2d', { alpha:true });
       if (!context) throw new Error('Canvas 2D context is unavailable');
 
@@ -129,8 +131,8 @@ export function createGradientCommandController({
         name:'Градиент',
         x:0,
         y:0,
-        width:owner.width,
-        height:owner.height,
+        width,
+        height,
         dataUrl,
       }));
       rasterEdit.clearBrushBuffer();
