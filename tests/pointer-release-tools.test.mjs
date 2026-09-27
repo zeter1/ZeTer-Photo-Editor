@@ -27,9 +27,12 @@ function release(drag, point, pointerId = 1, shiftKey = false) {
     },
     clearSmartGuides: () => {},
     updateMoveCursor: () => {},
+    layerTransformGestures: {
+      isGesture: value => ['move','resize','rotate'].includes(value?.kind),
+      finish: (value, releasePoint, modifiers) => calls.push(['finish', value.kind, releasePoint.x, releasePoint.y, Boolean(modifiers.shiftKey)]),
+    },
     onOverlayPointerMove: event => {
       calls.push(['transform', event.point.x, event.point.y]);
-      drag.moved = true;
     },
     drawLineOnCurrentRaster: (from, to) => calls.push(['line', from.x, from.y, to.x, to.y]),
     constrainedRect,
@@ -71,17 +74,14 @@ test('paint draws the final segment once and ignores an unchanged release point'
   assert.deepEqual(await release({ kind:'paint', tool:'brush', layerId:'paint-layer', last:{ x:20, y:20 } }, { x:20, y:20 }), []);
 });
 
-test('transform tools apply the release position before committing', async () => {
-  for (const [kind, label] of [
-    ['move', 'Перемещение слоя'],
-    ['resize', 'Изменить размер слоя'],
-    ['rotate', 'Повернуть слой'],
-  ]) {
-    assert.deepEqual(await release({ kind, moved:false, lastPointer:{x:10,y:10} }, {x:40,y:50 }), [
-      ['transform',40,50],
-      ['commit',label],
+test('transform tools delegate final release geometry to the canonical gesture owner', async () => {
+  for (const kind of ['move', 'resize', 'rotate']) {
+    assert.deepEqual(await release({ kind }, {x:40,y:50}), [
+      ['finish',kind,40,50,false],
     ]);
-    assert.deepEqual(await release({ kind, moved:false, lastPointer:{x:40,y:50} }, {x:40,y:50 }), []);
+    assert.deepEqual(await release({ kind }, {x:40,y:50}, 1, true), [
+      ['finish',kind,40,50,true],
+    ]);
   }
 });
 
@@ -93,30 +93,25 @@ test('shape honors Shift pressed at the release point', async () => {
   assert.deepEqual(await release({kind:'shape', start:{x:10,y:10}, current:{x:20,y:20}, lockAspect:false}, {x:40,y:50}, 1, true), [['shape',40,40]]);
 });
 
-test('real move and hand handlers apply a release with no intermediate move event', async () => {
-  for (const kind of ['move', 'pan']) {
-    const layer = {id:'layer', x:10, y:20};
-    const drag = kind === 'move'
-      ? {kind, layerId:'layer', px:5, py:5, x:10, y:20, moved:false, lastPointer:{x:5,y:5}}
-      : {kind, x:100, y:100, left:30, top:40};
-    const commits = [];
-    const viewport = {scrollLeft:30, scrollTop:40};
-    const context = {
-      drag, doc:{layers:[layer]},
-      els:{overlay:{style:{}},pointer:{},viewport},
-      canvasPoint:event=>event.point, isLayerLocked:()=>false, smartSnapEnabled:false,
-      clearSmartGuides:()=>{}, render:()=>{}, updateTransformPropertyValues:()=>{},
-      drawOverlay:()=>{}, updateMoveCursor:()=>{}, defaultToolCursor:()=> 'default',
-      commit:label=>commits.push(label), currentTool:'move', spaceHeld:false,
-    };
-    runInNewContext(pointerMoveSource + pointerUpSource + '\nglobalThis.__pointerUp = onOverlayPointerUp;', context);
-    await context.__pointerUp({pointerId:1,point:{x:15,y:25},clientX:115,clientY:125});
-    if (kind === 'move') {
-      assert.deepEqual([layer.x,layer.y], [20,40]);
-      assert.deepEqual(commits, ['Перемещение слоя']);
-    } else {
-      assert.deepEqual([viewport.scrollLeft,viewport.scrollTop], [15,15]);
-      assert.deepEqual(commits, []);
-    }
-  }
+test('real transform pointermove delegates point and modifiers to the canonical gesture owner', () => {
+  const transformDrag = {kind:'move'};
+  const calls = [];
+  const context = {
+    drag: transformDrag,
+    els:{pointer:{}},
+    canvasPoint:event=>event.point,
+    hoverPoint:null,
+    layerTransformGestures:{
+      isGesture:value=>value===transformDrag,
+      update:(value,point,modifiers)=>calls.push([value.kind,point.x,point.y,modifiers]),
+    },
+  };
+  runInNewContext(pointerMoveSource + '\nglobalThis.__pointerMove = onOverlayPointerMove;', context);
+  context.__pointerMove({point:{x:15,y:25},shiftKey:true,altKey:true,ctrlKey:true,metaKey:false});
+  assert.deepEqual(calls, [[
+    'move',
+    15,
+    25,
+    {shiftKey:true,altKey:true,ctrlKey:true,metaKey:false},
+  ]]);
 });

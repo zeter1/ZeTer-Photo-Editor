@@ -1,5 +1,5 @@
 import { HistoryStack } from './core/history.js';
-import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, resizeLayerFromPoint, rotationHandlePoint, rotationFromDrag, snapLineEnd, snapLayerMove, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
+import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, rotationHandlePoint, snapLineEnd, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
   createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
   addLayer, selectedLayer,
@@ -41,6 +41,7 @@ import { createTextSettingsController, TEXT_WEIGHT_OPTIONS, TEXT_STYLE_OPTIONS, 
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
+import { createLayerTransformGestureController } from './interaction/layer-transform-gesture-controller.js';
 import { createSelectionGestureController, cloneSelectionShape } from './selection/gesture-controller.js';
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
 import { createSelectionRasterMutationController } from './selection/raster-mutation-controller.js';
@@ -763,6 +764,23 @@ function persistSmartSnapState() {
   catch (error) { console.warn('Could not persist smart snap setting', error); }
 }
 function clearSmartGuides() { smartGuides = { x:null, y:null }; }
+const layerTransformGestures = createLayerTransformGestureController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+  runtime: {
+    getZoom: () => zoom,
+    isSmartSnapEnabled: () => smartSnapEnabled,
+    visibleSnapTargetRects: (owner, layerId) => visibleSnapTargetRects(owner, layerId),
+    setSmartGuides: guides => { smartGuides = guides; },
+    clearSmartGuides,
+    refreshLayerPreview: layer => {
+      render();
+      updateTransformPropertyValues(layer);
+      drawOverlay();
+    },
+    redrawOverlay: () => drawOverlay(),
+  },
+});
 const selectionGestures = createSelectionGestureController({
   selectionTypes: SELECTION_TYPES,
   selectionTypeLabels: SELECTION_TYPE_LABELS,
@@ -1774,9 +1792,9 @@ function updateMoveCursor(point) {
   els.overlay.style.cursor = layer && isLayerVisible(doc, layer) && !isLayerLocked(doc, layer) && pointInLayer(point, layer) ? 'move' : 'default';
 }
 
-function visibleSnapTargetRects(layerId) {
-  return doc.layers
-    .filter(layer => layer.id !== layerId && isLayerVisible(doc, layer))
+function visibleSnapTargetRects(owner, layerId) {
+  return owner.layers
+    .filter(layer => layer.id !== layerId && isLayerVisible(owner, layer))
     .map(layer => frameBounds(layer));
 }
 
@@ -1807,13 +1825,13 @@ async function onOverlayPointerDown(e) {
       const rotatePoint = interactiveRotationHandlePoint(l);
       if (Math.hypot(p.x - rotatePoint.x, p.y - rotatePoint.y) <= 10 / zoom) {
         const frame = layerFrame(l);
-        drag = { kind:'rotate', layerId:l.id, moved:false, initialRotation:l.rotation ?? 0, center:frame.center, start:p, lastPointer:p };
+        drag = layerTransformGestures.beginRotate(doc,l.id,p,frame.center);
         els.overlay.style.cursor = 'grabbing';
         return;
       }
       const handle = hitLayerHandle(p, l, 10 / zoom);
       if (handle) {
-        drag = { kind:'resize', layerId:l.id, handle, moved:false, lastPointer:p, initial:{x:l.x,y:l.y,width:l.width,height:l.height,scaleX:l.scaleX,scaleY:l.scaleY,rotation:l.rotation} };
+        drag = layerTransformGestures.beginResize(doc,l.id,handle,p);
         els.overlay.style.cursor = cursorForHandle(handle, l);
         return;
       }
@@ -1821,7 +1839,7 @@ async function onOverlayPointerDown(e) {
     if (!isTransformableLayer(l) || isLayerLocked(doc,l) || !isLayerVisible(doc,l) || !pointInLayer(p,l)) l = topLayerAt(p);
     if (l) {
       doc.selectedLayerId = l.id;
-      drag = { kind:'move', layerId:l.id, px:p.x, py:p.y, x:l.x, y:l.y, moved:false, lastPointer:p };
+      drag = layerTransformGestures.beginMove(doc,l.id,p);
       els.overlay.style.cursor='move'; layersPanelController.render(); refreshInspectorPanels(); drawOverlay();
     }
     return;
@@ -1860,9 +1878,8 @@ async function onOverlayPointerDown(e) {
 }
 
 function onOverlayPointerMove(e) {
-  const allowOutside = drag && ['move','resize','rotate','paint','path-control'].includes(drag.kind);
+  const allowOutside = layerTransformGestures.isGesture(drag) || (drag && ['paint','path-control'].includes(drag.kind));
   const p = canvasPoint(e, { clampToDocument: !allowOutside });
-  if (drag && ['move','resize','rotate'].includes(drag.kind)) drag.lastPointer = p;
   els.pointer.textContent = `x: ${Math.round(p.x)} y: ${Math.round(p.y)}`;
   hoverPoint = p;
   if (!drag) {
@@ -1874,50 +1891,14 @@ function onOverlayPointerMove(e) {
     drawOverlay(); return;
   }
   if (drag.kind === 'pan') { els.viewport.scrollLeft = drag.left - (e.clientX-drag.x); els.viewport.scrollTop = drag.top - (e.clientY-drag.y); return; }
-  if (drag.kind === 'move') {
-    const l = doc.layers.find(x=>x.id===drag.layerId); if (!l || isLayerLocked(doc,l)) return;
-    let dx = p.x-drag.px;
-    let dy = p.y-drag.py;
-    let lockedAxis = null;
-    if (e.shiftKey) {
-      if (Math.abs(dx) >= Math.abs(dy)) { dy = 0; lockedAxis = 'y'; }
-      else { dx = 0; lockedAxis = 'x'; }
-    }
-    let nextX = drag.x + dx;
-    let nextY = drag.y + dy;
-    if (smartSnapEnabled && !e.ctrlKey && !e.metaKey) {
-      const snapped = snapLayerMove(l, nextX, nextY, {
-        docWidth: doc.width,
-        docHeight: doc.height,
-        targetRects: visibleSnapTargetRects(l.id),
-        threshold: 8 / zoom,
-      });
-      nextX = lockedAxis === 'x' ? drag.x : snapped.x;
-      nextY = lockedAxis === 'y' ? drag.y : snapped.y;
-      smartGuides = {
-        x: lockedAxis === 'x' ? null : snapped.guides.x,
-        y: lockedAxis === 'y' ? null : snapped.guides.y,
-      };
-    } else clearSmartGuides();
-    l.x = nextX; l.y = nextY;
-    drag.moved = Math.abs(l.x-drag.x) > 1e-9 || Math.abs(l.y-drag.y) > 1e-9;
-    render(); updateTransformPropertyValues(l); drawOverlay(); return;
-  }
-  if (drag.kind === 'resize') {
-    const l = doc.layers.find(x=>x.id===drag.layerId); if (!l || isLayerLocked(doc,l)) return;
-    const next = resizeLayerFromPoint({ ...l, ...drag.initial }, drag.handle, p, {
-      minSize: Math.max(2, 6 / zoom),
-      lockAspect: e.shiftKey,
-      fromCenter: e.altKey,
+  if (layerTransformGestures.isGesture(drag)) {
+    layerTransformGestures.update(drag,p,{
+      shiftKey:e.shiftKey,
+      altKey:e.altKey,
+      ctrlKey:e.ctrlKey,
+      metaKey:e.metaKey,
     });
-    l.x=next.x; l.y=next.y; l.scaleX=next.scaleX; l.scaleY=next.scaleY; drag.moved=true;
-    render(); updateTransformPropertyValues(l); drawOverlay(); return;
-  }
-  if (drag.kind === 'rotate') {
-    const l = doc.layers.find(x=>x.id===drag.layerId); if (!l || isLayerLocked(doc,l)) return;
-    l.rotation = rotationFromDrag(drag.initialRotation, drag.center, drag.start, p, e.shiftKey ? 15 : 0);
-    drag.moved = true;
-    render(); updateTransformPropertyValues(l); drawOverlay(); return;
+    return;
   }
   if (drag.kind === 'paint') {
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
@@ -1974,10 +1955,6 @@ function onOverlayPointerMove(e) {
 }
 async function onOverlayPointerUp(e) {
   if (drag?.kind === 'pan') onOverlayPointerMove(e);
-  else if (drag && ['move','resize','rotate'].includes(drag.kind)) {
-    const releasePoint = canvasPoint(e, { clampToDocument:false });
-    if (Math.hypot(releasePoint.x-drag.lastPointer.x, releasePoint.y-drag.lastPointer.y) > .01) onOverlayPointerMove(e);
-  }
   if (!drag) return;
   if (drag.kind === 'paint') {
     const layer = doc.layers.find(item => item.id === drag.layerId);
@@ -1987,11 +1964,15 @@ async function onOverlayPointerUp(e) {
   }
   const d = drag; drag = null;
   if (['marquee','line','shape','crop','gradient'].includes(d.kind)) d.current = canvasPoint(e);
-  clearSmartGuides();
+  if (layerTransformGestures.isGesture(d)) {
+    layerTransformGestures.finish(d,canvasPoint(e,{clampToDocument:false}),{
+      shiftKey:e.shiftKey,
+      altKey:e.altKey,
+      ctrlKey:e.ctrlKey,
+      metaKey:e.metaKey,
+    });
+  } else clearSmartGuides();
   if (d.kind === 'pan') els.overlay.style.cursor = (spaceHeld || currentTool === 'hand') ? 'grab' : defaultToolCursor();
-  if (d.kind === 'move' && d.moved) commit('Перемещение слоя');
-  if (d.kind === 'resize' && d.moved) commit('Изменить размер слоя');
-  if (d.kind === 'rotate' && d.moved) commit('Повернуть слой');
   if (d.kind === 'paint') await paintGesture.end(d);
   if (d.kind === 'marquee') selectionGestures.finishMarquee(d,d.current,{shiftKey:e.shiftKey});
   if (d.kind === 'line') {
@@ -2036,15 +2017,7 @@ async function onOverlayPointerCancel(e) {
   const d=drag; drag=null; clearSmartGuides();
   if (d.kind==='paint') { await paintGesture.end(d); }
   else {
-    if (d.kind==='move') {
-      const l=doc.layers.find(x=>x.id===d.layerId); if(l){l.x=d.x;l.y=d.y;render();updateTransformPropertyValues(l);}
-    }
-    if (d.kind==='resize') {
-      const l=doc.layers.find(x=>x.id===d.layerId); if(l){Object.assign(l,d.initial);render();updateTransformPropertyValues(l);}
-    }
-    if (d.kind==='rotate') {
-      const l=doc.layers.find(x=>x.id===d.layerId); if(l){l.rotation=d.initialRotation;render();updateTransformPropertyValues(l);}
-    }
+    if (layerTransformGestures.isGesture(d)) layerTransformGestures.cancel(d);
     if (d.kind==='crop') cropRect=null;
     if (d.kind==='marquee') selectionGestures.cancelMarquee(d);
     if (d.kind==='pen-handle'&&penDraft){
@@ -2989,9 +2962,7 @@ window.addEventListener('keydown',e=>{
     if(drag && drag.kind!=='paint'){
       e.preventDefault();
       const d=drag;drag=null;pointerLifecycle?.releaseActivePointer();clearSmartGuides();
-      if(d.kind==='move'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){l.x=d.x;l.y=d.y;render();updateTransformPropertyValues(l);}}
-      if(d.kind==='resize'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){Object.assign(l,d.initial);render();updateTransformPropertyValues(l);}}
-      if(d.kind==='rotate'){const l=doc.layers.find(x=>x.id===d.layerId);if(l){l.rotation=d.initialRotation;render();updateTransformPropertyValues(l);}}
+      if(layerTransformGestures.isGesture(d))layerTransformGestures.cancel(d);
       if(d.kind==='pen-handle'&&penDraft){penDraft.points.splice(d.nodeIndex,1);if(!penDraft.points.length)penDraft=null;}
       if(d.kind==='path-control')restorePathControlDrag(d);
       if(d.kind==='crop')cropRect=null;

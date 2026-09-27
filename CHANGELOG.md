@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical interactive layer transform gesture controller
+
+- Refactor: selected-layer Move / Resize / Rotate drag transactions move from direct geometry/history mutation in `src/main.js` into `src/interaction/layer-transform-gesture-controller.js`; generic Pointer Events capture remains in `pointer-lifecycle-router.js`, while hit-testing/cursor/tool dispatch stay in the composition root.
+- Exact-owner safety: each gesture captures originating document + stable layer ID + object identity, re-resolves that exact target on update/finalize/cancel, honors recursive effective locks, and rejects stale/missing/same-ID replacement targets without redirecting writes or history.
+- Gesture semantics: Shift axis lock, Smart Snap + Ctrl bypass, zoom-stable snap threshold, Resize Shift/Alt modifiers, minimum handle size and Rotate Shift 15° snapping keep their existing canonical geometry helpers; final release coordinates are applied even when no last `pointermove` arrives.
+- History/cancel hygiene: real transforms publish exactly one preserved history label; return-to-baseline and unchanged Resize/Rotate finishes publish zero Undo; pointercancel/lost-capture/Escape share controller rollback so baseline restoration cannot target another document/layer.
+- Regression/docs/build: direct transaction tests cover live preview, modifiers, snapping, final release, no-op, stale/replaced/missing/locked targets and cancel rollback; old source-slice tests now assert delegation, architecture/AI maps point to the canonical owner, and the generated file:// bundle includes the module.
+
 ### 2026-09-27 — Canonical document Crop command controller
 
 - Refactor: persisted Crop geometry mutation/history moves from `src/main.js` into `src/document/crop-command-controller.js`; pointer gesture/overlay/cancel state and Crop-to-Selection UI gates stay with their existing interaction owners.

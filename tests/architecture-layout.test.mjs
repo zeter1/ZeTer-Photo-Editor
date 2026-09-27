@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformGestureController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -27,6 +27,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/text-edit-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/text-settings-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pointer-lifecycle-router.js', root), 'utf8'),
+  readFile(new URL('src/interaction/layer-transform-gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/raster-mutation-controller.js', root), 'utf8'),
@@ -144,6 +145,22 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /layerTransformCommandController\.center\(doc,l\.id\)/);
   assert.match(main, /layerTransformCommandController\.align\(doc,l\.id,mode\)/);
   assert.match(main, /layerTransformCommandController\.fitToCanvas\(doc,l\.id\)/);
+  assert.match(main, /from '\.\/interaction\/layer-transform-gesture-controller\.js'/);
+  assert.match(build, /'src\/interaction\/layer-transform-gesture-controller\.js'/);
+  assert.match(layerTransformGestureController, /export function createLayerTransformGestureController/);
+  assert.match(layerTransformGestureController, /state\.getDocument\(\) !== owner/);
+  assert.match(layerTransformGestureController, /layer !== target/);
+  assert.match(layerTransformGestureController, /isLayerLocked\(owner, layer\)/);
+  assert.match(main, /createLayerTransformGestureController\(\{/);
+  assert.match(main, /layerTransformGestures\.beginMove\(doc,l\.id,p\)/);
+  assert.match(main, /layerTransformGestures\.beginResize\(doc,l\.id,handle,p\)/);
+  assert.match(main, /layerTransformGestures\.beginRotate\(doc,l\.id,p,frame\.center\)/);
+  assert.match(main, /layerTransformGestures\.update\(drag,p,/);
+  assert.match(main, /layerTransformGestures\.finish\(d,canvasPoint\(e,\{clampToDocument:false\}\),/);
+  assert.match(main, /layerTransformGestures\.cancel\(d\)/);
+  assert.doesNotMatch(main, /resizeLayerFromPoint\(/);
+  assert.doesNotMatch(main, /rotationFromDrag\(/);
+  assert.doesNotMatch(main, /snapLayerMove\(/);
   const imageMenuSource = main.match(/  image:\[[\s\S]*?\n  \],\n  select:\[/)?.[0] ?? '';
   assert.ok(imageMenuSource);
   assert.doesNotMatch(imageMenuSource, /\.filters\s*=/);
