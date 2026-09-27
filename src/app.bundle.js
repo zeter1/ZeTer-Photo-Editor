@@ -8571,6 +8571,131 @@ function createPenDraftGestureController({ runtime } = {}) {
   };
 }
 
+// ---- src/interaction/pen-path-command-controller.js ----
+const PEN_PATH_COMMAND_RESULT = Object.freeze({
+  COMMITTED: 'committed',
+  NOOP: 'noop',
+  REJECTED: 'rejected',
+});
+const PEN_PATH_NOOP_REASON = Object.freeze({
+  TOO_SHORT: 'too-short',
+  INVALID_POINT: 'invalid-point',
+  DEGENERATE: 'degenerate',
+});
+
+function commandResult(result, reason = null, layer = null) {
+  const outcome = { result };
+  if (reason) outcome.reason = reason;
+  if (layer) outcome.layer = layer;
+  return outcome;
+}
+
+function finiteNumber(value) {
+  try {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  } catch {
+    return null;
+  }
+}
+
+function finitePoint(value) {
+  const x = finiteNumber(value?.x);
+  const y = finiteNumber(value?.y);
+  return x === null || y === null ? null : { x, y };
+}
+
+function normalizeNode(value) {
+  const anchor = finitePoint(value);
+  if (!anchor) return null;
+  const handleIn = value?.handleIn == null ? null : finitePoint(value.handleIn);
+  const handleOut = value?.handleOut == null ? null : finitePoint(value.handleOut);
+  if ((value?.handleIn != null && !handleIn) || (value?.handleOut != null && !handleOut)) return null;
+  return {
+    ...anchor,
+    handleIn,
+    handleOut,
+    kind: value?.kind === 'smooth' ? 'smooth' : 'corner',
+  };
+}
+
+function penPathBounds(points) {
+  const coordinates = [];
+  for (const point of points) {
+    coordinates.push(point);
+    if (point.handleIn) coordinates.push(point.handleIn);
+    if (point.handleOut) coordinates.push(point.handleOut);
+  }
+  if (!coordinates.length) return null;
+  const xs = coordinates.map(point => point.x);
+  const ys = coordinates.map(point => point.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  const right = Math.max(...xs);
+  const bottom = Math.max(...ys);
+  return { x, y, width:right - x, height:bottom - y };
+}
+
+function localizeNode(point, bounds) {
+  const localize = position => position
+    ? { x:position.x - bounds.x, y:position.y - bounds.y }
+    : null;
+  return {
+    x: point.x - bounds.x,
+    y: point.y - bounds.y,
+    handleIn: localize(point.handleIn),
+    handleOut: localize(point.handleOut),
+    kind: point.kind,
+  };
+}
+function createPenPathCommandController({ state, transaction } = {}) {
+  if (typeof state?.getDocument !== 'function') {
+    throw new TypeError('pen path command state bridge is required');
+  }
+  if (typeof transaction?.commit !== 'function') {
+    throw new TypeError('pen path command transaction bridge is required');
+  }
+
+  function activeOwner(owner) {
+    return Boolean(owner) && state.getDocument() === owner;
+  }
+
+  function publish(owner, points, options = {}) {
+    if (!activeOwner(owner)) return commandResult(PEN_PATH_COMMAND_RESULT.REJECTED);
+    if (!Array.isArray(points) || points.length < 2) {
+      return commandResult(PEN_PATH_COMMAND_RESULT.NOOP, PEN_PATH_NOOP_REASON.TOO_SHORT);
+    }
+    const normalizedPoints = points.map(normalizeNode);
+    if (normalizedPoints.some(point => !point)) {
+      return commandResult(PEN_PATH_COMMAND_RESULT.NOOP, PEN_PATH_NOOP_REASON.INVALID_POINT);
+    }
+    const bounds = penPathBounds(normalizedPoints);
+    if (!bounds || Math.max(bounds.width, bounds.height) < 1) {
+      return commandResult(PEN_PATH_COMMAND_RESULT.NOOP, PEN_PATH_NOOP_REASON.DEGENERATE);
+    }
+    const layer = createShapeLayer({
+      name:'Контур',
+      shape:'path',
+      x:bounds.x,
+      y:bounds.y,
+      width:Math.max(1, bounds.width),
+      height:Math.max(1, bounds.height),
+      pathPoints:normalizedPoints.map(point => localizeNode(point, bounds)),
+      pathClosed:Boolean(options.pathClosed),
+      fill:'transparent',
+      stroke:options.stroke,
+      strokeWidth:Math.max(1, Number(options.strokeWidth) || 1),
+      opacity:Number(options.opacity),
+    });
+    if (!activeOwner(owner)) return commandResult(PEN_PATH_COMMAND_RESULT.REJECTED);
+    addLayer(owner, layer);
+    transaction.commit('Добавить Bézier-контур');
+    return commandResult(PEN_PATH_COMMAND_RESULT.COMMITTED, null, layer);
+  }
+
+  return { publish };
+}
+
 // ---- src/ui/color-correction-controller.js ----
 const COLOR_CORRECTION_CONTROL_BY_KEY = new Map(COLOR_CORRECTION_CONTROLS.map(control => [control.key, control]));
 const COLOR_CORRECTION_EPSILON = 1e-9;
@@ -21655,6 +21780,10 @@ const layerTransformGestures = createLayerTransformGestureController({
 const penDraftGestures = createPenDraftGestureController({
   runtime: { getZoom: () => zoom },
 });
+const penPathCommands = createPenPathCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+});
 const pathControlSurface = createPathControlSurfaceController({
   state: {
     getDocument: () => doc,
@@ -22855,44 +22984,21 @@ function tracePenDraftPath(ctx,points,hover=null){
   }
   return true;
 }
-function penDraftBounds(points){
-  const coords=[];
-  for(const point of points||[]){
-    coords.push({x:point.x,y:point.y});
-    if(point.handleIn)coords.push(point.handleIn);
-    if(point.handleOut)coords.push(point.handleOut);
-  }
-  if(!coords.length)return null;
-  const xs=coords.map(point=>point.x),ys=coords.map(point=>point.y);
-  const x=Math.min(...xs),y=Math.min(...ys),right=Math.max(...xs),bottom=Math.max(...ys);
-  return{x,y,width:right-x,height:bottom-y};
-}
-function localizePenNode(point,bounds){
-  const local=position=>position?{x:position.x-bounds.x,y:position.y-bounds.y}:null;
-  return{
-    x:point.x-bounds.x,y:point.y-bounds.y,
-    handleIn:local(point.handleIn),handleOut:local(point.handleOut),
-    kind:point.kind==='smooth'?'smooth':'corner',
-  };
-}
 function finishPenPath(){
   const points=penDraftGestures.consumePoints();
-  if(points.length<2){if(penDraftGestures.isGesture(drag))drag=null;drawOverlay();return false;}
   if(penDraftGestures.isGesture(drag))drag=null;
-  const bounds=penDraftBounds(points);
-  if(!bounds||Math.max(bounds.width,bounds.height)<1)return false;
-  const localPoints=points.map(point=>localizePenNode(point,bounds));
-  addLayer(doc,createShapeLayer({
-    name:'Контур',shape:'path',x:bounds.x,y:bounds.y,
-    width:Math.max(1,bounds.width),height:Math.max(1,bounds.height),
-    pathPoints:localPoints,pathClosed:Boolean(els.penClosed?.checked),
-    fill:'transparent',stroke:els.primaryColor.value,
-    strokeWidth:Math.max(1,Number(els.brushSize.value)||1),
-    opacity:Number(els.toolOpacity.value)/100
-  }));
-  commit('Добавить Bézier-контур');setStatus('Bézier-контур добавлен');drawOverlay();return true;
+  const outcome=penPathCommands.publish(doc,points,{
+    pathClosed:Boolean(els.penClosed?.checked),
+    stroke:els.primaryColor.value,
+    strokeWidth:els.brushSize.value,
+    opacity:Number(els.toolOpacity.value)/100,
+  });
+  if(outcome.result===PEN_PATH_COMMAND_RESULT.COMMITTED){
+    setStatus('Bézier-контур добавлен');drawOverlay();return true;
+  }
+  if(outcome.result===PEN_PATH_COMMAND_RESULT.NOOP&&outcome.reason===PEN_PATH_NOOP_REASON.TOO_SHORT)drawOverlay();
+  return false;
 }
-
 function magicWandSelect(point){
   const width=els.canvas.width,height=els.canvas.height,total=width*height;if(total>8_000_000){toast('Волшебная палочка: изображение слишком большое для безопасного выделения','warn');setStatus('Уменьшите изображение до 8 МП для волшебной палочки');return false;}
   const x0=clamp(Math.floor(point.x),0,width-1),y0=clamp(Math.floor(point.y),0,height-1);const data=els.canvas.getContext('2d',{alpha:true}).getImageData(0,0,width,height).data;const seed=(y0*width+x0)*4;const target=[data[seed],data[seed+1],data[seed+2],data[seed+3]];const tolerance=(Number(els.fillTolerance?.value)||0)*4.42;const selectedMask=new Uint8Array(total);const queue=new Int32Array(total);let head=0,tail=0;queue[tail++]=y0*width+x0;selectedMask[y0*width+x0]=1;

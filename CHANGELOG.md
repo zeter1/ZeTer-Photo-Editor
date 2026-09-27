@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical new Pen path publication command controller
+
+- Refactor: final persisted publication of a brand-new Pen draft moves out of the large `src/main.js` composition root into `src/interaction/pen-path-command-controller.js`; bounds/localization, Shape-path construction, exact-owner publication and the single `Добавить Bézier-контур` history entry now have one focused owner.
+- Behavior preservation: drafts are still consumed before publication; fewer than two points and geometry below the existing one-pixel extent remain zero-history no-ops, handle coordinates still participate in bounds, nodes localize to layer space with smooth/corner normalization, and name/path-closed/fill/stroke/stroke-width/opacity values retain the existing Pen mapping.
+- Exact-owner safety: publication verifies the originating document before planning and again immediately before the first persisted write, so stale/replaced owners cannot receive a new path or history entry.
+- Regression/docs/build: direct command tests cover bridge validation, too-short/degenerate/invalid no-ops, handle-inclusive localization/style mapping, open/closed paths and stale pre-write replacement; architecture/source guards keep publication logic out of `main.js`, AI routing docs point to the new owner, and the canonical file:// bundle graph includes it.
+
 ### 2026-09-27 — Canonical new Pen draft gesture controller
 
 - Refactor: transient creation of a brand-new Pen path moves out of the large `src/main.js` composition root into `src/interaction/pen-draft-gesture-controller.js`: draft points/hover, double-click finish intent, per-point handle gesture, release status classification and cancel/reset/consume state now have one explicit owner.

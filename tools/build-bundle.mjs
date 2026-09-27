@@ -28,6 +28,7 @@ const sources = [
   'src/interaction/path-control-command-controller.js',
   'src/interaction/path-control-gesture-controller.js',
   'src/interaction/pen-draft-gesture-controller.js',
+  'src/interaction/pen-path-command-controller.js',
   'src/ui/color-correction-controller.js',
   'src/layers/command-controller.js',
   'src/layers/property-command-controller.js',
