@@ -104,7 +104,7 @@ test('effective ancestor lock blocks persisted layer property mutations', () => 
 
 test('numeric property validation preserves clamps and raster canvas safety', () => {
   const doc = createDocument();
-  const layer = addLayer(doc, createRasterLayer({ name: 'Raster', width: 1000, height: 1000 }));
+  const layer = addLayer(doc, createRasterLayer({ name: 'Raster', width: 1000, height: 5000 }));
   const h = createHarness(doc);
 
   assert.equal(h.controller.applyProperty(doc, layer.id, 'x', 'not-a-number'), false);
