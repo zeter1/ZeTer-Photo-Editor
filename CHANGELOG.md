@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical Adjustment Layer command controller
+
+- Refactor: persisted Adjustment Layer scalar/Levels, Curves and clipping commands move from `src/main.js` into `src/layers/adjustment-command-controller.js`; Properties markup and display formatting remain in the composition root.
+- Stale-state/lock safety: callbacks now carry the originating document + stable layer ID, re-resolve the exact target, honor recursive effective locks, and stale/missing/locked paths publish neither mutation nor history.
+- History/validation hygiene: canonical same-value updates and unchanged clipping create zero Undo entries; real commands publish exactly once without the former pre-`commit()` `markDirty(true)` duplication; invalid numeric/Levels/Curves input leaves persisted state unchanged.
+- Regression/docs/build: direct controller tests cover scalar/Levels/Curves/clipping, lock/stale/missing/no-op and PSD metadata preservation; architecture/AI-routing docs and the canonical file:// build graph point to the new owner.
+
+
 ### 2026-09-27 — Canonical Layer Filter reset commands
 
 - Refactor: Image-menu commands «Сбросить цветокоррекцию» and «Сбросить все фильтры слоя» now delegate to `src/layers/property-command-controller.js` instead of mutating `layer.filters` directly in the composition root.
