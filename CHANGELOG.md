@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical document background command controller
+
+- Refactor: persisted Image → «Фон документа…» mutation/history policy moves from the delayed modal callback in `src/main.js` into `src/document/background-command-controller.js`; modal markup/options/status and persisted schema/rendering remain with their existing owners.
+- Stale-document fix: the dialog captures its originating document and Apply revalidates exact object identity immediately before mutation, so switching tabs or replacing the active document cannot redirect a stale background change.
+- History hygiene: applying the already-selected background is now a semantic no-op with zero Undo/dirty/recovery publication; a real change publishes exactly one preserved `Фон документа` history entry.
+- Regression/docs/build: direct controller tests cover bridge requirements, supported values, no-op, stale/replacement ownership and pre-write revalidation; architecture/AI-routing docs and the canonical file:// build graph point to the new owner.
+
+
 ### 2026-09-27 — Canonical document resize command controller
 
 - Refactor: persisted Image Size and Canvas Size mutation/validation/history policy moves from delayed modal callbacks in `src/main.js` into `src/document/resize-command-controller.js`; modal markup, pending-edit UI guard and status presentation remain in the composition root.
