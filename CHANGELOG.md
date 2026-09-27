@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Exact-owner native high-depth raster persistence
+
+- Correctness: native 16/32-bit RGB and CMYK paint caches now bind to the exact originating document and exact raster-layer objects; same-ID replacement documents/layers cannot inherit a stale typed working buffer or preview override.
+- Async safety: current-layer high-depth publication now follows capture → prepare/serialize → await PNG preview → exact owner/target revalidation → atomic metadata publication; paint gestures additionally revalidate the exact captured working buffer before commit.
+- Caller/history hygiene: native brush/eraser/retouch gestures plus high-depth line/fill/current-layer clear carry captured owner/target authority into persistence; stale results publish no layer write, Undo entry or success status, while encoding failures remain observable and clear unsaved native gesture state.
+- Regression/docs: direct tests cover cache identity, normal native publication, active/same-ID document replacement, same-ID layer replacement, generic command stale publication and serialization failure; architecture/source guards and `RASTER_PERSISTENCE.md` now document the shared Canvas8/native ownership pattern.
+
 ### 2026-09-27 — Owner-bound Canvas8 raster persistence
 
 - Correctness: reusable Canvas8 paint buffers now bind to the exact originating document and exact raster-layer objects instead of only a reusable layer ID; same-ID document/layer replacements cannot inherit a stale buffer or late PNG publication.

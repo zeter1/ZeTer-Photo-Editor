@@ -29,7 +29,7 @@ Useful routing:
 - document/layer invariant → state
 - clone/heal/smudge/blur/dodge/burn mechanics → retouch/controller + painting/controller state; include painting/gesture-controller when the bug is in stroke begin/move/end routing
 - Gradient persisted publication / late async result / wrong-tab layer → `painting/gradient-command-controller.js` + `architecture/GRADIENT_COMMAND.md`; inspect `main.js` only for preview/pointer owner handoff
-- Canvas8 raster buffer / async PNG persistence / wrong-tab or same-ID target → `painting/controller.js` + `architecture/RASTER_PERSISTENCE.md`; high-depth working state / generic paint preview still start at `painting/controller.js`
+- Canvas8 **or native high-depth/CMYK** raster buffer / async PNG-preview persistence / wrong-tab or same-ID target → `painting/controller.js` + `architecture/RASTER_PERSISTENCE.md`; inspect the command/gesture owner next, and do not treat `layer.id` as mutation authority
 - brush/eraser/retouch stroke begin/move/end → painting/gesture-controller + painting/controller + retouch/controller
 - fill / raster line / current-layer selection clear → painting/command-controller + painting/controller + pixel-buffer/pixels; main only supplies selection/tool/transaction ports
 - marquee / ellipse / free-lasso / polygon / magnetic selection gesture → selection/gesture-controller; inspect main only for global pointer/keyboard routing

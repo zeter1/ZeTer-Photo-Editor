@@ -425,9 +425,13 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(paintingController, /export function createRasterEditController/);
   assert.match(paintingController, /async function ensureRasterBuffer\(owner, layer\)/);
   assert.match(paintingController, /async function persistPaintLayer\(owner, layer\)/);
-  assert.match(paintingController, /brushOwner === owner/);
-  assert.match(paintingController, /brushLayer === layer/);
-  assert.match(paintingController, /isCurrentCanvasTarget\(owner, layer\)/);
+  assert.match(paintingController, /async function ensureNativeHighDepthPaintBuffer\(owner, layer/);
+  assert.match(paintingController, /async function persistHighDepthMutation\(owner, layer, buffer\)/);
+  assert.match(paintingController, /async function persistNativeHighDepthPaintLayer\(owner, layer\)/);
+  assert.match(paintingController, /highDepthPaintOwner === owner/);
+  assert.match(paintingController, /highDepthPaintLayer === layer/);
+  assert.match(paintingController, /isCurrentRasterTarget\(owner, layer\)/);
+  assert.doesNotMatch(paintingController, /currentDocument\(\)\.layers\.find\(item => item\.id === highDepthPaintLayerId\)/);
   assert.doesNotMatch(paintingController, /async function persistPaintLayer\(\)/);
   for (const name of [
     'ensureRasterBuffer','ensureNativeHighDepthPaintBuffer','prepareHighDepthMutation',
@@ -444,6 +448,7 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(paintCommandController, /async function fillAt\(/);
   assert.match(paintCommandController, /async function clearSelection\(/);
   assert.match(paintCommandController, /persistPaintLayer\(doc, layer\)/);
+  assert.match(paintCommandController, /persistHighDepthMutation\(doc, layer, buffer\)/);
   assert.match(main, /drawLine: drawLineOnCurrentRaster/);
   assert.match(main, /fillAt: fillAtPoint/);
   assert.match(main, /clearSelection: clearSelectedPixels/);
@@ -478,6 +483,7 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(paintGestureController, /owner,/);
   assert.match(paintGestureController, /layer,/);
   assert.match(paintGestureController, /persistPaintLayer\(drag\?\.owner, drag\?\.layer\)/);
+  assert.match(paintGestureController, /persistNativeHighDepthPaintLayer\(drag\?\.owner, drag\?\.layer\)/);
   assert.match(paintGestureController, /async function ensurePaintLayer\(/);
   assert.match(paintGestureController, /async function begin\(/);
   assert.match(paintGestureController, /function move\(/);

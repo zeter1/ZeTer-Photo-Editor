@@ -65,13 +65,13 @@ test('Stage 12d clear respects a selection predicate at high depth',()=>{
 });
 
 test('Stage 12d routes brush/eraser gestures and one-shot raster commands through native high-depth mutations',()=>{
-  assert.match(painting,/function ensureNativeHighDepthPaintBuffer\(/);
+  assert.match(painting,/function ensureNativeHighDepthPaintBuffer\(owner, layer/);
   assert.match(main,/applyPixelBufferBrushDab\(rasterEdit\.highDepthPaintBuffer/);
   assert.match(main,/applyPixelBufferStrokeSegment\(rasterEdit\.highDepthPaintBuffer/);
   assert.match(commands,/floodFillPixelBuffer\(/);
   assert.match(commands,/clearPixelBufferPixels\(buffer, \{ isAllowed:selectionPredicate\(layer\) \}\)/);
   assert.match(commands,/applyPixelBufferStrokeSegment\(/);
-  assert.match(commands,/rasterEdit\.applyHighDepthMutation\(layer, await rasterEdit\.prepareHighDepthMutation\(layer, buffer\)\)/);
+  assert.match(commands,/await rasterEdit\.persistHighDepthMutation\(doc, layer, buffer\)/);
   assert.match(selectionMutations,/async function prepareClearedHighDepthMutation\(/);
 });
 

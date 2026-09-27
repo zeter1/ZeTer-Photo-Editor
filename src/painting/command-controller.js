@@ -126,7 +126,7 @@ export function createRasterCommandController({
             status('Линия не изменила high-depth слой');
             return false;
           }
-          rasterEdit.applyHighDepthMutation(layer, await rasterEdit.prepareHighDepthMutation(layer, buffer));
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
           resetNativeState();
           doc.selectedLayerId = layer.id;
           ui?.commit?.('Нарисовать линию');
@@ -216,7 +216,7 @@ export function createRasterCommandController({
             status('Заливка: подходящая область не найдена');
             return false;
           }
-          rasterEdit.applyHighDepthMutation(layer, await rasterEdit.prepareHighDepthMutation(layer, buffer));
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
           resetNativeState();
           doc.selectedLayerId = layer.id;
           ui?.commit?.('Заливка');
@@ -304,7 +304,7 @@ export function createRasterCommandController({
             status('В выделении нет непрозрачных high-depth пикселей');
             return false;
           }
-          rasterEdit.applyHighDepthMutation(layer, await rasterEdit.prepareHighDepthMutation(layer, buffer));
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
           resetNativeState();
           ui?.commit?.(historyLabel);
           status(`${successStatus} · high-depth: ${cleared.toLocaleString('ru-RU')} px`);
