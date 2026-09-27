@@ -12,6 +12,7 @@ const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8
 const css=await readFile(new URL('../src/styles.css',import.meta.url),'utf8');
 const toolbar=await readFile(new URL('../src/ui/toolbar-controller.js',import.meta.url),'utf8');
 const pathControlSurface=await readFile(new URL('../src/interaction/path-control-surface-controller.js',import.meta.url),'utf8');
+const pathControlCommands=await readFile(new URL('../src/interaction/path-control-command-controller.js',import.meta.url),'utf8');
 const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
 
 test('requested advanced tools have dedicated vector icons and toolbar controls',()=>{
@@ -83,7 +84,7 @@ test('gradient and crop provide useful live previews before committing',()=>{
   assert.match(main,/for \(const fraction of \[1 \/ 3, 2 \/ 3\]\)/);
 });
 
-test('existing Bezier paths delegate read-only controls and mutations to separate canonical owners',()=>{
+test('existing Bezier paths delegate surface, one-shot command and drag transaction to separate canonical owners',()=>{
   assert.match(main,/createPathControlSurfaceController/);
   assert.match(main,/pathControlSurface\.hit\(p\)/);
   assert.match(main,/pathControlSurface\.draw\(ctx\)/);
@@ -95,6 +96,17 @@ test('existing Bezier paths delegate read-only controls and mutations to separat
   assert.doesNotMatch(main,/function hitSelectedPathControl\(/);
   assert.doesNotMatch(main,/function drawSelectedPathControls\(/);
   assert.doesNotMatch(main,/function updatePenCursor\(/);
+  assert.match(main,/createPathControlCommandController/);
+  assert.match(main,/pathControlCommands\.convertAnchorToCorner\(doc,hit,\{altKey:event\.altKey\}\)/);
+  assert.match(pathControlCommands,/export function createPathControlCommandController/);
+  assert.match(pathControlCommands,/targets\.resolve\(target\)/);
+  assert.match(pathControlCommands,/isLayerLocked\(owner, resolved\.layer\)/);
+  assert.match(pathControlCommands,/Преобразовать Bézier-узел в угловой/);
+  assert.match(pathControlCommands,/Преобразовать узел векторной маски/);
+  assert.match(pathControlCommands,/Преобразовать узел сохранённого контура/);
+  assert.doesNotMatch(main,/Преобразовать Bézier-узел в угловой/);
+  assert.doesNotMatch(main,/Преобразовать узел векторной маски/);
+  assert.doesNotMatch(main,/Преобразовать узел сохранённого контура/);
   assert.match(main,/createPathControlGestureController/);
   assert.match(main,/pathControlGestures\.begin\(doc,hit,point,\{shiftKey:event\.shiftKey\}\)/);
   assert.match(main,/Shift\+drag создаёт smooth handles/);
