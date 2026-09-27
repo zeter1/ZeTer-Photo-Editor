@@ -144,9 +144,10 @@ test('modal fields read live toolbar defaults instead of copying them into contr
 });
 
 test('text settings policy has one canonical owner and Properties keeps async stale guards', async () => {
-  const [main,source,build,modal]=await Promise.all([
+  const [main,source,propertyCommands,build,modal]=await Promise.all([
     readFile(new URL('../src/main.js',import.meta.url),'utf8'),
     readFile(new URL('../src/ui/text-settings-controller.js',import.meta.url),'utf8'),
+    readFile(new URL('../src/layers/property-command-controller.js',import.meta.url),'utf8'),
     readFile(new URL('../tools/build-bundle.mjs',import.meta.url),'utf8'),
     readFile(new URL('../src/ui/modal-controller.js',import.meta.url),'utf8'),
   ]);
@@ -163,5 +164,6 @@ test('text settings policy has one canonical owner and Properties keeps async st
   for(const name of ['textFontOptions','loadComputerFonts','readCustomTextFont','loadCustomTextFont','textModalFields','textSettingsFromForm']){
     assert.doesNotMatch(main,new RegExp('(?:async\\s+)?function '+name+'\\('));
   }
-  assert.match(main,/const targetDoc = doc, targetLayer = l;[\s\S]*?await textSettingsController\.readCustomFont\(fontInput\.files\?\.\[0\]\);[\s\S]*?doc !== targetDoc \|\| selected\(\) !== targetLayer \|\| isLayerLocked\(doc,targetLayer\)/);
+  assert.match(main,/const targetDoc = propertyOwner, targetLayerId = propertyLayerId;[\s\S]*?await textSettingsController\.readCustomFont\(fontInput\.files\?\.\[0\]\);[\s\S]*?doc !== targetDoc \|\| selected\(\)\?\.id !== targetLayerId[\s\S]*?layerPropertyCommandController\.applyCustomFont\(targetDoc,targetLayerId,custom\)/);
+  assert.match(propertyCommands,/function commandApplyCustomFont\(owner, layerId, custom\)[\s\S]*?const layer = exactLayer\(owner, layerId\)[\s\S]*?layer\.type !== 'text' \|\| isLayerLocked\(owner, layer\)/);
 });
