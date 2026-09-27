@@ -119,6 +119,13 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /layerPropertyCommandController\.applyProperty\(/);
   assert.match(main, /layerPropertyCommandController\.setSelectedOpacity/);
   assert.match(main, /layerPropertyCommandController\.updateHighDepthPreview/);
+  assert.match(main, /colorCorrectionKeys: COLOR_CORRECTION_KEYS/);
+  assert.match(main, /layerPropertyCommandController\.resetSelectedColorCorrection\(\)/);
+  assert.match(main, /layerPropertyCommandController\.resetSelectedFilters\(\)/);
+  const imageMenuSource = main.match(/  image:\[[\s\S]*?\n  \],\n  select:\[/)?.[0] ?? '';
+  assert.ok(imageMenuSource);
+  assert.doesNotMatch(imageMenuSource, /\.filters\s*=/);
+  assert.doesNotMatch(main, /\bsanitizeFilters\b/);
   assert.doesNotMatch(main, /function applyProperty\(/);
   assert.doesNotMatch(main, /function updateHighDepthPreviewSetting\(/);
   assert.doesNotMatch(main, /function resetSelectedLayerEffects\(/);

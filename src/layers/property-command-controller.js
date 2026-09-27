@@ -209,26 +209,72 @@ export function createLayerPropertyCommandController({
     return publishCommit(owner, `Изменить ${path}`);
   }
 
-  function commandResetEffects(owner, layerId) {
+  function resetFilterKeys(owner, layerId, {
+    keysForLayer,
+    label,
+    noOpStatus = '',
+    requireRaster = false,
+    dropUnknown = false,
+  } = {}) {
     const layer = exactLayer(owner, layerId);
-    if (!layer || isLayerLocked(owner, layer)) return false;
-    const current = sanitizeFilters(layer.filters);
-    const keys = effects?.filterKeysForLayer?.(layer) ?? Object.keys(DEFAULT_LAYER_FILTERS);
-    let changed = false;
+    if (!layer || (requireRaster && layer.type !== 'raster') || isLayerLocked(owner, layer)) return false;
+
+    const source = layer.filters;
+    const current = sanitizeFilters(source);
+    const keys = [...new Set(keysForLayer?.(layer) ?? [])]
+      .filter(key => key in DEFAULT_LAYER_FILTERS);
+    if (!keys.length) return false;
+
+    let changed = dropUnknown && (
+      !source ||
+      typeof source !== 'object' ||
+      Array.isArray(source) ||
+      Object.keys(source).some(key => !(key in DEFAULT_LAYER_FILTERS))
+    );
     const next = { ...current };
     for (const key of keys) {
-      if (!(key in DEFAULT_LAYER_FILTERS)) continue;
-      if (!sameValue(next[key], DEFAULT_LAYER_FILTERS[key])) {
-        next[key] = DEFAULT_LAYER_FILTERS[key];
-        changed = true;
-      }
+      clearBaseline(owner, `property:${layerId}:filters.${key}`);
+      const sourceIsCanonical = Boolean(source) &&
+        typeof source === 'object' &&
+        !Array.isArray(source) &&
+        Object.prototype.hasOwnProperty.call(source, key) &&
+        typeof source[key] === 'number' &&
+        Number.isFinite(source[key]) &&
+        sameValue(source[key], current[key]);
+      if (!sourceIsCanonical || !sameValue(current[key], DEFAULT_LAYER_FILTERS[key])) changed = true;
+      next[key] = DEFAULT_LAYER_FILTERS[key];
     }
+
     if (!changed) {
-      status('Цвет и эффекты уже сброшены');
+      if (noOpStatus) status(noOpStatus);
       return false;
     }
     layer.filters = next;
-    return publishCommit(owner, 'Сбросить цвет и эффекты');
+    return publishCommit(owner, label);
+  }
+
+  function commandResetEffects(owner, layerId) {
+    return resetFilterKeys(owner, layerId, {
+      keysForLayer: layer => effects?.filterKeysForLayer?.(layer) ?? Object.keys(DEFAULT_LAYER_FILTERS),
+      label: 'Сбросить цвет и эффекты',
+      noOpStatus: 'Цвет и эффекты уже сброшены',
+    });
+  }
+
+  function commandResetColorCorrection(owner, layerId) {
+    return resetFilterKeys(owner, layerId, {
+      keysForLayer: () => effects?.colorCorrectionKeys ?? [],
+      label: 'Сбросить цветокоррекцию',
+      requireRaster: true,
+    });
+  }
+
+  function commandResetFilters(owner, layerId) {
+    return resetFilterKeys(owner, layerId, {
+      keysForLayer: () => Object.keys(DEFAULT_LAYER_FILTERS),
+      label: 'Сбросить фильтры',
+      dropUnknown: true,
+    });
   }
 
   function commandSetBlendMode(owner, layerId, raw) {
@@ -359,6 +405,8 @@ export function createLayerPropertyCommandController({
   return {
     applyProperty: commandApplyProperty,
     resetEffects: commandResetEffects,
+    resetColorCorrection: commandResetColorCorrection,
+    resetFilters: commandResetFilters,
     setBlendMode: commandSetBlendMode,
     setOpacity: commandSetOpacity,
     updateHighDepthPreview: commandUpdateHighDepthPreview,
@@ -367,6 +415,14 @@ export function createLayerPropertyCommandController({
     resetSelectedEffects: () => {
       const { owner, layerId } = selectedTarget();
       return owner && layerId ? commandResetEffects(owner, layerId) : false;
+    },
+    resetSelectedColorCorrection: () => {
+      const { owner, layerId } = selectedTarget();
+      return owner && layerId ? commandResetColorCorrection(owner, layerId) : false;
+    },
+    resetSelectedFilters: () => {
+      const { owner, layerId } = selectedTarget();
+      return owner && layerId ? commandResetFilters(owner, layerId) : false;
     },
     setSelectedBlendMode: value => {
       const { owner, layerId } = selectedTarget();

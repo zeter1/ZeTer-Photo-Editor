@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical Layer Filter reset commands
+
+- Refactor: Image-menu commands «Сбросить цветокоррекцию» and «Сбросить все фильтры слоя» now delegate to `src/layers/property-command-controller.js` instead of mutating `layer.filters` directly in the composition root.
+- History/state hygiene: discrete resets re-resolve the exact active layer, honor recursive effective locks, suppress already-default Undo entries and clear matching live-preview baselines so a later range `change` cannot publish stale history.
+- Canonicalization: reset publication runs through `sanitizeFilters`; Color Correction resets only configured color keys while preserving valid non-color effects, and full reset restores the complete canonical default shape including removal of unknown persisted filter keys.
+- Regression/docs/build: direct controller tests cover no-op, lock/stale/missing targets, malformed persisted filters, non-color preservation and preview-baseline cleanup; architecture/AI-routing docs pin the controller as the single reset owner and the generated browser artifacts are refreshed through the canonical build.
+
 ### 2026-09-27 — Canonical Color Correction dialog controller
 
 - Refactor: Color Correction modal construction, draft/live-preview transaction and finalization moved from `src/main.js` into `src/ui/color-correction-controller.js`; the composition root now only wires the owner and routes the Image-menu action.

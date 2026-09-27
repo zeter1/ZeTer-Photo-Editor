@@ -45,6 +45,7 @@ function createHarness(initialDocument) {
       fontOptions: value => [[value, value], ['"Segoe UI"', 'Segoe UI']],
     },
     effects: {
+      colorCorrectionKeys: new Set(['exposure', 'brightness', 'contrast', 'saturate', 'hue']),
       filterKeysForLayer: layer => layer.type === 'raster'
         ? ['brightness', 'contrast', 'saturate', 'exposure', 'blur']
         : ['brightness', 'contrast', 'saturate'],
@@ -191,6 +192,88 @@ test('effect reset commits only when a controlled filter differs from defaults',
   assert.equal(h.controller.resetEffects(doc, layer.id), false);
   assert.deepEqual(h.commits, ['Сбросить цвет и эффекты']);
   assert.ok(h.statuses.includes('Цвет и эффекты уже сброшены'));
+});
+
+test('color correction reset preserves non-color effects and suppresses no-op history', () => {
+  const doc = createDocument();
+  const layer = addLayer(doc, createRasterLayer({
+    filters: { ...DEFAULT_LAYER_FILTERS, brightness: 145, hue: 20, blur: 7 },
+  }));
+  const h = createHarness(doc);
+
+  assert.equal(h.controller.resetSelectedColorCorrection(), true);
+  assert.equal(layer.filters.brightness, DEFAULT_LAYER_FILTERS.brightness);
+  assert.equal(layer.filters.hue, DEFAULT_LAYER_FILTERS.hue);
+  assert.equal(layer.filters.blur, 7);
+  assert.deepEqual(h.commits, ['Сбросить цветокоррекцию']);
+
+  assert.equal(h.controller.resetSelectedColorCorrection(), false);
+  assert.deepEqual(h.commits, ['Сбросить цветокоррекцию']);
+});
+
+test('full filter reset restores canonical defaults and drops unknown persisted keys once', () => {
+  const doc = createDocument();
+  const layer = addLayer(doc, createRasterLayer({
+    filters: { ...DEFAULT_LAYER_FILTERS, brightness: 145, blur: 9, legacyEffect: 1 },
+  }));
+  const h = createHarness(doc);
+
+  assert.equal(h.controller.resetSelectedFilters(), true);
+  assert.deepEqual(layer.filters, DEFAULT_LAYER_FILTERS);
+  assert.deepEqual(h.commits, ['Сбросить фильтры']);
+
+  assert.equal(h.controller.resetSelectedFilters(), false);
+  assert.deepEqual(h.commits, ['Сбросить фильтры']);
+});
+
+test('filter resets reject stale, missing and recursively locked targets and sanitize publication', () => {
+  const doc = createDocument();
+  const group = addLayerGroup(doc, createLayerGroup({ name: 'Locked', locked: true }));
+  const layer = addLayer(doc, createRasterLayer({ groupId: group.id }));
+  const h = createHarness(doc);
+
+  assert.equal(h.controller.resetColorCorrection(doc, layer.id), false);
+  assert.equal(h.controller.resetFilters(doc, layer.id), false);
+  assert.deepEqual(h.commits, []);
+
+  group.locked = false;
+  layer.filters = {
+    ...DEFAULT_LAYER_FILTERS,
+    brightness: 'bad',
+    exposure: 99,
+    blur: '7',
+  };
+  assert.equal(h.controller.resetColorCorrection(doc, layer.id), true);
+  assert.equal(layer.filters.brightness, DEFAULT_LAYER_FILTERS.brightness);
+  assert.equal(layer.filters.exposure, DEFAULT_LAYER_FILTERS.exposure);
+  assert.equal(layer.filters.blur, 7);
+  assert.equal(typeof layer.filters.blur, 'number');
+  assert.deepEqual(h.commits, ['Сбросить цветокоррекцию']);
+
+  const other = createDocument();
+  h.setDocument(other);
+  assert.equal(h.controller.resetFilters(doc, layer.id), false);
+  h.setDocument(doc);
+  doc.layers = [];
+  assert.equal(h.controller.resetColorCorrection(doc, layer.id), false);
+  assert.deepEqual(h.commits, ['Сбросить цветокоррекцию']);
+});
+
+test('discrete filter reset clears stale range-preview baseline before later change', () => {
+  const doc = createDocument();
+  const layer = addLayer(doc, createRasterLayer());
+  const h = createHarness(doc);
+
+  assert.equal(h.controller.applyProperty(doc, layer.id, 'filters.brightness', '130', { commit: false }), true);
+  assert.equal(layer.filters.brightness, 130);
+  assert.deepEqual(h.commits, []);
+
+  assert.equal(h.controller.resetColorCorrection(doc, layer.id), true);
+  assert.equal(layer.filters.brightness, DEFAULT_LAYER_FILTERS.brightness);
+  assert.deepEqual(h.commits, ['Сбросить цветокоррекцию']);
+
+  assert.equal(h.controller.applyProperty(doc, layer.id, 'filters.brightness', '100', { commit: true }), false);
+  assert.deepEqual(h.commits, ['Сбросить цветокоррекцию']);
 });
 
 test('blend and opacity controls share no-op-aware publication with live-preview baseline', () => {
