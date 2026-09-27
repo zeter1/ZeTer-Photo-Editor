@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical existing Bézier corner command controller
+
+- Refactor: the one-shot Alt-click existing-anchor → corner mutation/history policy moves out of `src/main.js` into `src/interaction/path-control-command-controller.js`; the composition root now only distinguishes a handled command from drag fallback.
+- Exact-owner safety: the command revalidates the active document, resolves the exact live Shape / Vector Mask / Saved Path target through the read-only surface owner, rechecks recursive layer locks immediately before mutation, and rejects stale/replaced/missing targets without redirected writes or history.
+- Behavior preservation: real conversions still clear both handles, set `kind='corner'` and publish the three established source-specific history labels; already-corner/no-handles anchors remain a semantic no-op with exact status `Bézier-узел уже угловой` and no history entry.
+- Regression/docs/build: direct command tests cover all three sources, ignored handle/non-Alt intent, no-op, stale/owner/recursive-lock rejection; surface identity coverage and architecture/source guards prevent mutation policy drifting back into `src/main.js`, AI routing docs now distinguish surface → one-shot command → gesture → new Pen draft, and the canonical bundle graph includes the new owner.
+
 ### 2026-09-27 — Canonical existing Bézier path-control surface controller
 
 - Refactor: read-only discovery/projection/hit-testing/path tracing/control drawing/cursor feedback for existing Shape paths, Vector Masks and Saved Paths moves from the large `src/main.js` composition root into `src/interaction/path-control-surface-controller.js`; pointer/tool dispatch, Alt-click corner conversion and new `penDraft` / `pen-handle` creation remain outside.

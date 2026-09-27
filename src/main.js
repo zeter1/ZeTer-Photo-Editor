@@ -43,6 +43,7 @@ import { createModalController } from './ui/modal-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
 import { createLayerTransformGestureController } from './interaction/layer-transform-gesture-controller.js';
 import { createPathControlSurfaceController } from './interaction/path-control-surface-controller.js';
+import { PATH_CONTROL_COMMAND_RESULT, createPathControlCommandController } from './interaction/path-control-command-controller.js';
 import { createPathControlGestureController } from './interaction/path-control-gesture-controller.js';
 import { createSelectionGestureController, cloneSelectionShape } from './selection/gesture-controller.js';
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
@@ -799,6 +800,12 @@ const pathControlSurface = createPathControlSurfaceController({
   },
   geometry: { layerToDocument: layerPixelToDocumentPoint },
 });
+const pathControlCommands = createPathControlCommandController({
+  state: { getDocument: () => doc },
+  targets: { resolve: target => pathControlSurface.resolveTarget(target) },
+  transaction: { commit },
+  ui: { setStatus },
+});
 const pathControlGestures = createPathControlGestureController({
   state: { getDocument: () => doc },
   transaction: { commit },
@@ -1086,16 +1093,8 @@ function documentPointToLayerPixel(point, layer) {
 }
 
 function beginPathControlDrag(hit,point,event){
-  const points=pathControlSurface.targetPoints(hit);
-  const node=points?.[hit.nodeIndex];
-  if(!node)return false;
-  if(hit.control==='anchor'&&event.altKey){
-    const changed=Boolean(node.handleIn||node.handleOut||node.kind==='smooth');
-    node.handleIn=null;node.handleOut=null;node.kind='corner';
-    if(changed)commit(hit.source==='document-path'?'Преобразовать узел сохранённого контура':hit.source==='vector-mask'?'Преобразовать узел векторной маски':'Преобразовать Bézier-узел в угловой');
-    else setStatus('Bézier-узел уже угловой');
-    return true;
-  }
+  const commandResult=pathControlCommands.convertAnchorToCorner(doc,hit,{altKey:event.altKey});
+  if(commandResult!==PATH_CONTROL_COMMAND_RESULT.IGNORED)return true;
   const gesture=pathControlGestures.begin(doc,hit,point,{shiftKey:event.shiftKey});
   if(!gesture)return false;
   drag=gesture;
