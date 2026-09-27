@@ -25,6 +25,7 @@ const sources = [
   'src/core/state.js',
   'src/interaction/layer-transform-gesture-controller.js',
   'src/interaction/path-control-surface-controller.js',
+  'src/interaction/path-control-command-controller.js',
   'src/interaction/path-control-gesture-controller.js',
   'src/ui/color-correction-controller.js',
   'src/layers/command-controller.js',
