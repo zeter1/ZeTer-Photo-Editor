@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -44,6 +44,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/document/resize-command-controller.js', root), 'utf8'),
   readFile(new URL('src/painting/controller.js', root), 'utf8'),
   readFile(new URL('src/painting/command-controller.js', root), 'utf8'),
+  readFile(new URL('src/painting/gradient-command-controller.js', root), 'utf8'),
   readFile(new URL('src/painting/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/retouch/controller.js', root), 'utf8'),
   readFile(new URL('src/document/psd-export-controller.js', root), 'utf8'),
@@ -443,6 +444,17 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /async function fillAtPoint\(/);
   assert.doesNotMatch(main, /async function clearSelectedPixels\(/);
   assert.doesNotMatch(main, /function clearHighDepthPaintState\(/);
+  assert.match(main, /from '\.\/painting\/gradient-command-controller\.js'/);
+  assert.match(build, /'src\/painting\/gradient-command-controller\.js'/);
+  assert.match(gradientCommandController, /export function createGradientCommandController/);
+  assert.match(gradientCommandController, /await io\.canvasToDataURL\(canvas, 'image\/png'\)/);
+  assert.match(gradientCommandController, /state\.getDocument\(\) === owner/);
+  assert.match(main, /createGradientCommandController\(\{/);
+  assert.match(main, /drag=\{kind:'gradient',owner:doc,start:p,current:p\}/);
+  assert.match(main, /gradientCommands\.apply\(d\.owner,d\.start,d\.current\)/);
+  assert.match(main, /function previewGradient\(start,end\)/);
+  assert.doesNotMatch(main, /async function applyGradient\(/);
+  assert.doesNotMatch(main, /commit\('Добавить градиент'\)/);
   assert.match(main, /from '\.\/selection\/raster-mutation-controller\.js'/);
   assert.match(build, /'src\/selection\/raster-mutation-controller\.js'/);
   assert.match(selectionRasterMutationController, /export function createSelectionRasterMutationController/);
