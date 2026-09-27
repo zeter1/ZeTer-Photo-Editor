@@ -14392,6 +14392,50 @@ function createDocumentImportController({
   return { isImageFile, isProjectFile, importImages, handleIncomingFiles };
 }
 
+// ---- src/document/background-command-controller.js ----
+const DOCUMENT_BACKGROUND_COMMAND_RESULT = Object.freeze({
+  COMMITTED: 'committed',
+  NOOP: 'noop',
+  REJECTED: 'rejected',
+});
+
+function commandResult(result) {
+  return { result };
+}
+function createDocumentBackgroundCommandController({
+  state,
+  transaction,
+} = {}) {
+  if (typeof state?.getDocument !== 'function') {
+    throw new TypeError('document background command state bridge is required');
+  }
+  if (typeof transaction?.commit !== 'function') {
+    throw new TypeError('document background command transaction bridge is required');
+  }
+
+  function activeOwner(owner) {
+    return Boolean(owner) && state.getDocument() === owner;
+  }
+
+  function setBackground(owner, value) {
+    if (!activeOwner(owner)) {
+      return commandResult(DOCUMENT_BACKGROUND_COMMAND_RESULT.REJECTED);
+    }
+    if (owner.background === value) {
+      return commandResult(DOCUMENT_BACKGROUND_COMMAND_RESULT.NOOP);
+    }
+    if (!activeOwner(owner)) {
+      return commandResult(DOCUMENT_BACKGROUND_COMMAND_RESULT.REJECTED);
+    }
+
+    owner.background = value;
+    transaction.commit('Фон документа');
+    return commandResult(DOCUMENT_BACKGROUND_COMMAND_RESULT.COMMITTED);
+  }
+
+  return { setBackground };
+}
+
 // ---- src/document/resize-command-controller.js ----
 const DOCUMENT_RESIZE_COMMAND_RESULT = Object.freeze({
   COMMITTED: 'committed',
@@ -20194,6 +20238,10 @@ const selectionGestures = createSelectionGestureController({
     drawOverlay: () => drawOverlay(),
   },
 });
+const documentBackgroundCommandController = createDocumentBackgroundCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+});
 const documentResizeCommandController = createDocumentResizeCommandController({
   state: { getDocument: () => doc },
   transaction: { commit },
@@ -21934,7 +21982,25 @@ function fitSelectedLayerToCanvas() {
 }
 
 function setDocumentBackground() {
-  showModal({title:'Фон документа',fields:[{name:'background',label:'Фон',type:'select',value:doc.background,options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный'],[els.primaryColor.value,'Основной цвет']]}],submitLabel:'Применить',onSubmit:v=>{doc.background=v.background;commit('Фон документа');}});
+  const owner=doc;
+  showModal({
+    title:'Фон документа',
+    fields:[{
+      name:'background',
+      label:'Фон',
+      type:'select',
+      value:owner.background,
+      options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный'],[els.primaryColor.value,'Основной цвет']]
+    }],
+    submitLabel:'Применить',
+    onSubmit:v=>{
+      const outcome=documentBackgroundCommandController.setBackground(owner,v.background);
+      if(outcome.result===DOCUMENT_BACKGROUND_COMMAND_RESULT.REJECTED){
+        setStatus('Документ изменился — фон не применён');
+        return false;
+      }
+    }
+  });
 }
 async function toggleFullscreen() {
   try {
