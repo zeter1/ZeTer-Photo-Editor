@@ -196,7 +196,7 @@ test('real Crop pointermove delegates transient geometry to the canonical owner'
       isGesture:value=>value===cropDrag,
       update:(value,point)=>calls.push([value.kind,point.x,point.y]),
     },
-    drawOverlay:()=>calls.push(['overlay']),
+    drawOverlay:()=>{},
   };
   runInNewContext(pointerMoveSource + '\nglobalThis.__pointerMove = onOverlayPointerMove;', context);
   context.__pointerMove({point:{x:31,y:47}});
