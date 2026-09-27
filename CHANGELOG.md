@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Owner-bound Canvas8 raster persistence
+
+- Correctness: reusable Canvas8 paint buffers now bind to the exact originating document and exact raster-layer objects instead of only a reusable layer ID; same-ID document/layer replacements cannot inherit a stale buffer or late PNG publication.
+- Async safety: `ensureRasterBuffer(owner, layer)` prepares async raster materialization in a local candidate and publishes shared buffer state only after revalidation; `persistPaintLayer(owner, layer)` revalidates exact owner, target and captured Canvas immediately after PNG encoding and before the first persisted write.
+- Caller ownership: fill/line/selection-clear commands and Canvas8 paint gestures hand exact document/layer authority to the raster owner; paint drag movement no longer re-resolves a same-ID layer from mutable current-document state, and clone-source preparation aborts if its owner changes while preparing the raster buffer.
+- Regression/docs: controller tests cover exact cache identity, normal publication, same-ID document/layer replacement and serialization failure; command/gesture tests prove owner handoff and stale history/success suppression; `RASTER_PERSISTENCE.md` records the reusable Canvas8 contract for future AI/Codex passes.
+
+
 ### 2026-09-27 — Canonical persisted Gradient command controller
 
 - Refactor: persisted Gradient Canvas preparation, PNG serialization, Raster-layer creation and history publication move out of the large `src/main.js` composition root into `src/painting/gradient-command-controller.js`; visual Gradient preview stays in `src/main.js`.
