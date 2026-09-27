@@ -47,6 +47,7 @@ import { createSelectionRasterMutationController } from './selection/raster-muta
 import { createSelectionMaskController } from './selection/mask-controller.js';
 import { createSelectionVectorMaskController } from './selection/vector-mask-controller.js';
 import { createDocumentImportController } from './document/import-controller.js';
+import { DOCUMENT_BACKGROUND_COMMAND_RESULT, createDocumentBackgroundCommandController } from './document/background-command-controller.js';
 import { DOCUMENT_RESIZE_COMMAND_RESULT, createDocumentResizeCommandController } from './document/resize-command-controller.js';
 import { createSmartObjectController } from './document/smart-object-controller.js';
 import { createPsdSmartObjectResource } from './document/psd-smart-object-resource.js';
@@ -782,6 +783,10 @@ const selectionGestures = createSelectionGestureController({
     setStatus,
     drawOverlay: () => drawOverlay(),
   },
+});
+const documentBackgroundCommandController = createDocumentBackgroundCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
 });
 const documentResizeCommandController = createDocumentResizeCommandController({
   state: { getDocument: () => doc },
@@ -2523,7 +2528,25 @@ function fitSelectedLayerToCanvas() {
 }
 
 function setDocumentBackground() {
-  showModal({title:'Фон документа',fields:[{name:'background',label:'Фон',type:'select',value:doc.background,options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный'],[els.primaryColor.value,'Основной цвет']]}],submitLabel:'Применить',onSubmit:v=>{doc.background=v.background;commit('Фон документа');}});
+  const owner=doc;
+  showModal({
+    title:'Фон документа',
+    fields:[{
+      name:'background',
+      label:'Фон',
+      type:'select',
+      value:owner.background,
+      options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный'],[els.primaryColor.value,'Основной цвет']]
+    }],
+    submitLabel:'Применить',
+    onSubmit:v=>{
+      const outcome=documentBackgroundCommandController.setBackground(owner,v.background);
+      if(outcome.result===DOCUMENT_BACKGROUND_COMMAND_RESULT.REJECTED){
+        setStatus('Документ изменился — фон не применён');
+        return false;
+      }
+    }
+  });
 }
 async function toggleFullscreen() {
   try {
