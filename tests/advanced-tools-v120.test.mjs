@@ -11,6 +11,7 @@ const render=await readFile(new URL('../src/core/render.js',import.meta.url),'ut
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
 const css=await readFile(new URL('../src/styles.css',import.meta.url),'utf8');
 const toolbar=await readFile(new URL('../src/ui/toolbar-controller.js',import.meta.url),'utf8');
+const pathControlSurface=await readFile(new URL('../src/interaction/path-control-surface-controller.js',import.meta.url),'utf8');
 const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
 
 test('requested advanced tools have dedicated vector icons and toolbar controls',()=>{
@@ -82,9 +83,18 @@ test('gradient and crop provide useful live previews before committing',()=>{
   assert.match(main,/for \(const fraction of \[1 \/ 3, 2 \/ 3\]\)/);
 });
 
-test('existing Bezier paths delegate direct anchor and handle transactions to the canonical gesture owner',()=>{
-  assert.match(main,/function hitSelectedPathControl\(/);
-  assert.match(main,/function drawSelectedPathControls\(/);
+test('existing Bezier paths delegate read-only controls and mutations to separate canonical owners',()=>{
+  assert.match(main,/createPathControlSurfaceController/);
+  assert.match(main,/pathControlSurface\.hit\(p\)/);
+  assert.match(main,/pathControlSurface\.draw\(ctx\)/);
+  assert.match(main,/pathControlSurface\.updateCursor\(p\)/);
+  assert.match(pathControlSurface,/export function createPathControlSurfaceController/);
+  assert.match(pathControlSurface,/function selectedTargets\(\)/);
+  assert.match(pathControlSurface,/PATH_CONTROL_HANDLE_NAMES/);
+  assert.doesNotMatch(main,/function selectedEditablePathTargets\(/);
+  assert.doesNotMatch(main,/function hitSelectedPathControl\(/);
+  assert.doesNotMatch(main,/function drawSelectedPathControls\(/);
+  assert.doesNotMatch(main,/function updatePenCursor\(/);
   assert.match(main,/createPathControlGestureController/);
   assert.match(main,/pathControlGestures\.begin\(doc,hit,point,\{shiftKey:event\.shiftKey\}\)/);
   assert.match(main,/Shift\+drag создаёт smooth handles/);
