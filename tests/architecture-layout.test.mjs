@@ -179,7 +179,12 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(pathControlCommandController, /isLayerLocked\(owner, resolved\.layer\)/);
   assert.match(main, /createPathControlCommandController\(\{/);
   assert.match(main, /pathControlCommands\.convertAnchorToCorner\(doc,hit,\{altKey:event\.altKey\}\)/);
-  assert.doesNotMatch(main, /node\.handleIn=null;node\.handleOut=null;node\.kind='corner'/);
+  const pathControlBeginSource = main.slice(
+    main.indexOf('function beginPathControlDrag('),
+    main.indexOf('function setSelectionPreviewShape('),
+  );
+  assert.ok(pathControlBeginSource.includes('function beginPathControlDrag('));
+  assert.doesNotMatch(pathControlBeginSource, /node\.handleIn=null;node\.handleOut=null;node\.kind='corner'/);
   assert.doesNotMatch(main, /Преобразовать Bézier-узел в угловой/);
   assert.doesNotMatch(main, /Преобразовать узел векторной маски/);
   assert.doesNotMatch(main, /Преобразовать узел сохранённого контура/);

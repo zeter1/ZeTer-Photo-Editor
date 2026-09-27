@@ -7,6 +7,7 @@ const main=await readFile(new URL('../src/main.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
 const selectionVectorMaskController=await readFile(new URL('../src/selection/vector-mask-controller.js',import.meta.url),'utf8');
 const pathControlSurface=await readFile(new URL('../src/interaction/path-control-surface-controller.js',import.meta.url),'utf8');
+const pathControlCommands=await readFile(new URL('../src/interaction/path-control-command-controller.js',import.meta.url),'utf8');
 const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
 const build=await readFile(new URL('../tools/build-bundle.mjs',import.meta.url),'utf8');
 
@@ -56,10 +57,12 @@ test('Stage 10 UI exposes vector masks through the canonical selection owner',()
 });
 
 
-test('Stage 10c vector-mask controls route through canonical surface and gesture owners',()=>{
+test('Stage 10c vector-mask controls route through canonical surface, command and gesture owners',()=>{
   assert.match(main,/let vectorMaskEditLayerId = null/);
   assert.match(main,/pathControlSurface\.hit\(p\)/);
-  assert.match(main,/pathControlSurface\.targetPoints\(hit\)/);
+  assert.match(pathControlSurface,/function resolveTarget\(target\)/);
+  assert.match(main,/pathControlCommands\.convertAnchorToCorner\(doc,hit,\{altKey:event\.altKey\}\)/);
+  assert.match(pathControlCommands,/Преобразовать узел векторной маски/);
   assert.match(pathControlSurface,/state\.getVectorMaskEditLayerId\(\) === layer\.id/);
   assert.match(pathControlSurface,/source: 'vector-mask'/);
   assert.match(pathControlSurface,/isLayerLocked\(owner, target\.layer\)/);
@@ -73,6 +76,7 @@ test('Stage 10c vector-mask controls route through canonical surface and gesture
   assert.match(main,/Редактировать векторную маску пером/);
   assert.match(main,/vectorMaskEditLayerId===selected\(\)\?\.id/);
   assert.match(build,/src\/interaction\/path-control-surface-controller\.js/);
+  assert.match(build,/src\/interaction\/path-control-command-controller\.js/);
   assert.match(build,/src\/interaction\/path-control-gesture-controller\.js/);
 });
 
