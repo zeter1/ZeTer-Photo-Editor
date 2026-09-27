@@ -34,6 +34,7 @@ function createHarness({ documentValue, operations = {}, rasterEdit = {}, select
     },
     selection:{
       hasActive:() => true,
+      captureSnapshot:() => ({ type:'rect', rect:{ x:0, y:0, width:10, height:10 } }),
       intersectsLayer:() => true,
       predicate:() => null,
       clipContext:() => {},
@@ -328,4 +329,136 @@ test('merged selection clear keeps every persisted target unchanged when prepara
   assert.equal(harness.getPersisting(), false);
   assert.equal(harness.getClearCount(), 1);
   assert.match(harness.statuses.at(-1), /prepare failed/);
+});
+
+test('merged selection clear freezes one selection snapshot across async Canvas target preparation', async () => {
+  let releaseFirst;
+  const firstPending = new Promise(resolve => { releaseFirst = resolve; });
+  const first = { id:'first', type:'raster', name:'First', visible:true, locked:false, dataUrl:'first-original' };
+  const second = { id:'second', type:'raster', name:'Second', visible:true, locked:false, dataUrl:'second-original' };
+  const documentValue = { layers:[first, second], groups:[], selectedLayerId:'first' };
+  let liveSelection = { type:'ellipse', rect:{ x:0, y:0, width:4, height:4 } };
+  const intersections = [];
+  const preparations = [];
+  let captures = 0;
+  const harness = createHarness({
+    documentValue,
+    selection:{
+      captureSnapshot:() => {
+        captures += 1;
+        return liveSelection?.rect
+          ? { ...liveSelection, rect:{ ...liveSelection.rect } }
+          : { ...liveSelection, points:liveSelection.points.map(point => ({ ...point })) };
+      },
+      intersectsLayer:(layer, snapshot) => {
+        intersections.push({ layer, snapshot });
+        return true;
+      },
+    },
+    operations:{
+      prepareClearedRasterDataUrl:async(layer, snapshot) => {
+        preparations.push({ layer, snapshot });
+        if (layer === first) await firstPending;
+        return `cleared-${layer.id}-${snapshot.type}`;
+      },
+    },
+  });
+
+  const clearing = harness.controller.clearAcrossVisibleLayers();
+  assert.equal(harness.getPersisting(), true);
+  liveSelection = {
+    type:'polygon',
+    points:[{ x:0, y:0 }, { x:4, y:0 }, { x:0, y:4 }],
+  };
+  releaseFirst();
+  const result = await clearing;
+
+  assert.deepEqual(result, { cleared:2, locked:0, rasterized:0 });
+  assert.equal(captures, 1);
+  assert.equal(intersections.length, 2);
+  assert.equal(preparations.length, 2);
+  assert.equal(intersections[0].snapshot, intersections[1].snapshot);
+  assert.equal(preparations[0].snapshot, preparations[1].snapshot);
+  assert.equal(intersections[0].snapshot, preparations[0].snapshot);
+  assert.deepEqual(preparations[0].snapshot, { type:'ellipse', rect:{ x:0, y:0, width:4, height:4 } });
+  assert.equal(first.dataUrl, 'cleared-first-ellipse');
+  assert.equal(second.dataUrl, 'cleared-second-ellipse');
+  assert.deepEqual(liveSelection, {
+    type:'polygon',
+    points:[{ x:0, y:0 }, { x:4, y:0 }, { x:0, y:4 }],
+  });
+});
+
+test('merged mixed high-depth and Canvas clear keeps the captured selection after live selection is cleared', async () => {
+  let releaseHighDepth;
+  const highDepthPending = new Promise(resolve => { releaseHighDepth = resolve; });
+  const hdr = {
+    id:'hdr',
+    type:'raster',
+    name:'HDR',
+    visible:true,
+    locked:false,
+    dataUrl:'hdr-original',
+    highDepthSource:{ model:'rgb' },
+  };
+  const canvas = { id:'canvas', type:'raster', name:'Canvas', visible:true, locked:false, dataUrl:'canvas-original' };
+  const documentValue = { layers:[hdr, canvas], groups:[], selectedLayerId:'hdr' };
+  const buffer = createPixelBuffer({
+    width:1,
+    height:1,
+    model:'rgb',
+    channels:4,
+    bitsPerChannel:32,
+    colorSpace:'linear-rgb-unmanaged',
+    data:new Float32Array([1,0,0,1]),
+  });
+  let liveSelection = { type:'polygon', points:[{ x:0, y:0 }, { x:2, y:0 }, { x:0, y:2 }] };
+  const predicateSnapshots = [];
+  const canvasSnapshots = [];
+  let applied = 0;
+  const harness = createHarness({
+    documentValue,
+    selection:{
+      captureSnapshot:() => ({
+        ...liveSelection,
+        points:liveSelection.points.map(point => ({ ...point })),
+      }),
+      predicate:(layer, snapshot) => {
+        predicateSnapshots.push({ layer, snapshot });
+        return () => true;
+      },
+    },
+    rasterEdit:{
+      editableHighDepthBuffer:layer => layer === hdr ? buffer : null,
+      prepareHighDepthMutation:async() => {
+        await highDepthPending;
+        return { dataUrl:'hdr-cleared', highDepthSource:{ model:'rgb' } };
+      },
+      applyHighDepthMutation:() => { applied += 1; },
+    },
+    operations:{
+      prepareClearedRasterDataUrl:async(layer, snapshot) => {
+        canvasSnapshots.push({ layer, snapshot });
+        return 'canvas-cleared';
+      },
+    },
+  });
+
+  const clearing = harness.controller.clearAcrossVisibleLayers();
+  liveSelection = null;
+  releaseHighDepth();
+  const result = await clearing;
+
+  assert.deepEqual(result, { cleared:2, locked:0, rasterized:0 });
+  assert.equal(applied, 1);
+  assert.equal(predicateSnapshots.length, 1);
+  assert.equal(canvasSnapshots.length, 1);
+  assert.equal(predicateSnapshots[0].snapshot, canvasSnapshots[0].snapshot);
+  assert.deepEqual(canvasSnapshots[0].snapshot, {
+    type:'polygon',
+    points:[{ x:0, y:0 }, { x:2, y:0 }, { x:0, y:2 }],
+  });
+  assert.equal(canvas.dataUrl, 'canvas-cleared');
+  assert.equal(liveSelection, null);
+  assert.deepEqual(harness.commits, ['Вырезать выделение']);
 });

@@ -27,6 +27,7 @@ export function createSelectionRasterMutationController({
   }
   if (
     typeof selection?.hasActive !== 'function' ||
+    typeof selection?.captureSnapshot !== 'function' ||
     typeof selection?.intersectsLayer !== 'function' ||
     typeof selection?.predicate !== 'function' ||
     typeof selection?.clipContext !== 'function'
@@ -50,11 +51,11 @@ export function createSelectionRasterMutationController({
     return false;
   }
 
-  async function prepareClearedHighDepthMutation(layer) {
+  async function prepareClearedHighDepthMutation(layer, selectionSnapshot) {
     if (!layer?.highDepthSource) return null;
     const buffer = rasterEdit.editableHighDepthBuffer(layer, { requireAlpha:true });
     if (!buffer) return null;
-    const cleared = clearPixelBufferPixels(buffer, { isAllowed:selection.predicate(layer) });
+    const cleared = clearPixelBufferPixels(buffer, { isAllowed:selection.predicate(layer, selectionSnapshot) });
     if (!cleared) return { cleared:0, mutation:null };
     return {
       cleared,
@@ -62,7 +63,7 @@ export function createSelectionRasterMutationController({
     };
   }
 
-  async function prepareClearedRasterDataUrl(layer) {
+  async function prepareClearedRasterDataUrl(layer, selectionSnapshot) {
     if (!documentRef?.createElement) throw new Error('Canvas document is unavailable');
     const size = checkedCanvasSize(layer.width, layer.height, 'Растровый слой «' + (layer.name || 'Без имени') + '»');
     const canvas = documentRef.createElement('canvas');
@@ -74,7 +75,7 @@ export function createSelectionRasterMutationController({
       if (image) context.drawImage(image, 0, 0, size.width, size.height);
     }
     context.save();
-    selection.clipContext(context, layer);
+    selection.clipContext(context, layer, selectionSnapshot);
     context.clearRect(0, 0, size.width, size.height);
     context.restore();
     return canvasToDataURL(canvas, 'image/png');
@@ -135,10 +136,13 @@ export function createSelectionRasterMutationController({
       return null;
     }
 
+    const selectionSnapshot = selection.captureSnapshot();
+    if (!selectionSnapshot) return { cleared:0, locked:0, rasterized:0 };
+
     const documentValue = currentDocument();
     const targetSessionId = state.getActiveSessionId();
     const intersecting = documentValue.layers.filter(
-      layer => isLayerVisible(documentValue, layer) && selection.intersectsLayer(layer),
+      layer => isLayerVisible(documentValue, layer) && selection.intersectsLayer(layer, selectionSnapshot),
     );
     const pixelTargets = intersecting.filter(layer => layer.type !== 'adjustment');
     const targets = pixelTargets.filter(layer => !isLayerLocked(documentValue, layer));
@@ -154,13 +158,13 @@ export function createSelectionRasterMutationController({
         if (!working) throw new Error('Не удалось подготовить слой к очистке');
         if (layer.type !== 'raster') rasterized += 1;
         if (layer.type === 'raster' && working.highDepthSource) {
-          const highDepth = await prepareHighDepthMutation(working);
+          const highDepth = await prepareHighDepthMutation(working, selectionSnapshot);
           if (highDepth?.mutation) {
             prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
             continue;
           }
         }
-        prepared.push({ layer, working, dataUrl:await prepareRasterDataUrl(working), highDepthMutation:null });
+        prepared.push({ layer, working, dataUrl:await prepareRasterDataUrl(working, selectionSnapshot), highDepthMutation:null });
       }
 
       if (state.getDocument() !== documentValue || state.getActiveSessionId() !== targetSessionId) {

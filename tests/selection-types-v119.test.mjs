@@ -42,7 +42,7 @@ test('non-rectangular selections clip copy, raster editing and fill through the 
   assert.match(clipboard, /renderSelectionLayerToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
   assert.match(clipboard, /renderSelectionMergedToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
   assert.match(main, /function selectionPolygonForLayer\(layer, shape = selectionShape\)[\s\S]*selectionPathPoints\(shape, 72\)/);
-  assert.match(main, /function rasterSelectionPredicate\(layer\)[\s\S]*pointInsideSelection/);
+  assert.match(main, /function rasterSelectionPredicate\(layer, shape = selectionShape\)[\s\S]*pointInsideSelection\([^;]+, shape\)/);
 });
 
 test('polygonal lasso lifecycle lives in the selection gesture controller while keyboard routing stays global', () => {

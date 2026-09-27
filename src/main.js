@@ -338,6 +338,7 @@ const selectionRasterMutations = createSelectionRasterMutationController({
   },
   selection: {
     hasActive: () => Boolean(selectionRect),
+    captureSnapshot: () => selectionShape ? cloneSelectionShape(selectionShape) : null,
     intersectsLayer: selectionIntersectsLayer,
     predicate: rasterSelectionPredicate,
     clipContext: clipContextToSelection,
@@ -1177,9 +1178,9 @@ function clearSelectionState() {
   selectionGestures.resetDrafts();
 }
 
-function pointInsideSelection(point) {
-  if (!selectionShape) return true;
-  return pointInSelection(point, selectionShape);
+function pointInsideSelection(point, shape = selectionShape) {
+  if (!shape) return true;
+  return pointInSelection(point, shape);
 }
 
 function selectionPolygonForLayer(layer, shape = selectionShape) {
@@ -1214,8 +1215,8 @@ function clipContextToDocumentSelection(ctx) {
   if (traceDocumentSelectionPath(ctx)) ctx.clip();
 }
 
-function clipContextToSelection(ctx, layer) {
-  const polygon = selectionPolygonForLayer(layer);
+function clipContextToSelection(ctx, layer, shape = selectionShape) {
+  const polygon = selectionPolygonForLayer(layer, shape);
   if (!polygon) return;
   ctx.beginPath();
   ctx.moveTo(polygon[0].x, polygon[0].y);
@@ -1224,15 +1225,16 @@ function clipContextToSelection(ctx, layer) {
   ctx.clip();
 }
 
-function rasterSelectionPredicate(layer) {
-  if (!selectionShape) return null;
-  return (x,y) => pointInsideSelection(layerPixelToDocumentPoint({x:x+.5,y:y+.5},layer));
+function rasterSelectionPredicate(layer, shape = selectionShape) {
+  if (!shape) return null;
+  return (x,y) => pointInsideSelection(layerPixelToDocumentPoint({x:x+.5,y:y+.5},layer), shape);
 }
 
-function selectionIntersectsLayer(layer) {
-  if (!selectionRect) return false;
+function selectionIntersectsLayer(layer, shape = selectionShape) {
+  const selectionBoundsSnapshot = shape === selectionShape ? selectionRect : selectionBounds(shape);
+  if (!selectionBoundsSnapshot) return false;
   const bounds=frameBounds(layer);
-  return selectionRect.x < bounds.x+bounds.width && selectionRect.x+selectionRect.width > bounds.x && selectionRect.y < bounds.y+bounds.height && selectionRect.y+selectionRect.height > bounds.y;
+  return selectionBoundsSnapshot.x < bounds.x+bounds.width && selectionBoundsSnapshot.x+selectionBoundsSnapshot.width > bounds.x && selectionBoundsSnapshot.y < bounds.y+bounds.height && selectionBoundsSnapshot.y+selectionBoundsSnapshot.height > bounds.y;
 }
 
 function render({ paintPreview = false } = {}) {

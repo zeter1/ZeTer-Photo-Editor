@@ -476,6 +476,14 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(selectionRasterMutationController, /documentValue\.layers\.indexOf\(entry\.layer\)/);
   assert.match(selectionRasterMutationController, /isLayerLocked\(documentValue, layer\)/);
   assert.doesNotMatch(selectionRasterMutationController, /findIndex\(item => item\.id === layer\.id\)/);
+  assert.match(selectionRasterMutationController, /const selectionSnapshot = selection\.captureSnapshot\(\)/);
+  assert.match(selectionRasterMutationController, /selection\.intersectsLayer\(layer, selectionSnapshot\)/);
+  assert.match(selectionRasterMutationController, /prepareHighDepthMutation\(working, selectionSnapshot\)/);
+  assert.match(selectionRasterMutationController, /prepareRasterDataUrl\(working, selectionSnapshot\)/);
+  assert.match(main, /captureSnapshot: \(\) => selectionShape \? cloneSelectionShape\(selectionShape\) : null/);
+  assert.match(main, /function clipContextToSelection\(ctx, layer, shape = selectionShape\)/);
+  assert.match(main, /function rasterSelectionPredicate\(layer, shape = selectionShape\)/);
+  assert.match(main, /function selectionIntersectsLayer\(layer, shape = selectionShape\)/);
   assert.match(main, /clearAcrossVisibleLayers: clearSelectionAcrossVisibleLayers/);
   assert.doesNotMatch(main, /async function clearSelectionAcrossVisibleLayers\(/);
   assert.doesNotMatch(main, /async function rasterizeLayerForPixelEditing\(/);

@@ -100,7 +100,7 @@ function rasterMutationHarness({ state, rasterizeLayerForPixelEditing, commits }
       endPersist:() => { persisting = false; },
       blockPendingDocumentEdit:() => false,
     },
-    selection:{ hasActive:() => false, intersectsLayer:() => false, predicate:() => null, clipContext:() => {} },
+    selection:{ hasActive:() => false, captureSnapshot:() => null, intersectsLayer:() => false, predicate:() => null, clipContext:() => {} },
     ui:{ setStatus:() => {}, toast:() => {}, render:() => {}, commit:label => commits.push(label) },
     operations:{ rasterizeLayerForPixelEditing },
   });
