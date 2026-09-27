@@ -157,6 +157,36 @@ test('Shift+anchor begin promotes the existing gesture to handleOut semantics', 
   assert.deepEqual(h.commits, ['Изменить Bézier-ручку']);
 });
 
+test('layer-backed gestures use the injected document-to-layer coordinate transform for start and update', () => {
+  const h = createHarness({
+    documentPointToLayer:value=>({x:value.x-100,y:value.y-50}),
+    pointValue:point({x:10,y:20,handleIn:null,handleOut:null,kind:'corner'}),
+  });
+  const gesture = h.controller.begin(h.documentValue, h.target, {x:110,y:70});
+  assert.ok(gesture);
+  assert.deepEqual(gesture.startLocal, {x:10,y:20});
+
+  assert.equal(
+    h.controller.update(gesture, {x:116,y:78}),
+    PATH_CONTROL_GESTURE_RESULT.UPDATED,
+  );
+  assert.deepEqual([h.node.x,h.node.y], [16,28]);
+});
+
+test('replacing a vector-mask object during a gesture is rejected without redirected writes', () => {
+  const h = createHarness({source:'vector-mask'});
+  const gesture = h.controller.begin(h.documentValue, h.target, {x:10,y:20});
+  const replacementNode = point({x:70,y:80});
+  h.layer.vectorMask = {subpaths:[{closed:true,operation:'add',points:[replacementNode]}]};
+
+  assert.equal(
+    h.controller.update(gesture, {x:20,y:30}),
+    PATH_CONTROL_GESTURE_RESULT.REJECTED,
+  );
+  assert.deepEqual([replacementNode.x,replacementNode.y], [70,80]);
+  assert.deepEqual(h.commits, []);
+});
+
 test('vector-mask gesture resolves the exact layer/subpath/node and preserves both history labels', () => {
   const anchor = createHarness({source:'vector-mask'});
   let gesture = anchor.controller.begin(anchor.documentValue, anchor.target, {x:10,y:20});
