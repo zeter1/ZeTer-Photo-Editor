@@ -47,6 +47,7 @@ const sources = [
   'src/core/render.js',
   'src/painting/controller.js',
   'src/painting/command-controller.js',
+  'src/painting/gradient-command-controller.js',
   'src/retouch/controller.js',
   'src/painting/gesture-controller.js',
   'src/selection/gesture-controller.js',
