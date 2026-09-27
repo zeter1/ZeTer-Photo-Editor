@@ -58,8 +58,8 @@ export function createPaintGestureController({
       : NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool);
   }
 
-  async function ensurePaintLayer(point, tool, canContinue = () => true) {
-    const doc = currentDocument();
+  async function ensurePaintLayer(owner, point, tool, canContinue = () => true) {
+    const doc = owner;
     let layer = target.selected?.() ?? null;
     const rasterAtPoint = target.atPoint(point);
 
@@ -84,7 +84,8 @@ export function createPaintGestureController({
     const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
       ? await rasterEdit.ensureNativeHighDepthPaintBuffer(layer, { requireAlpha:tool === 'eraser' })
       : false;
-    if (!nativeHighDepth) await rasterEdit.ensureRasterBuffer(layer);
+    if (!nativeHighDepth && !await rasterEdit.ensureRasterBuffer(owner, layer)) return null;
+    if (state.getDocument() !== owner || !owner.layers.includes(layer)) return null;
     doc.selectedLayerId = layer.id;
     return layer;
   }
@@ -119,19 +120,23 @@ export function createPaintGestureController({
       return false;
     }
 
-    const layer = await ensurePaintLayer(point, tool, canContinue);
-    if (!canContinue()) return false;
+    const owner = currentDocument();
+    const layer = await ensurePaintLayer(owner, point, tool, canContinue);
+    if (!canContinue() || state.getDocument() !== owner) return false;
 
     const cloneSource = retouch.getCloneSource();
     if (!layer) {
       warn(unavailableMessage(tool, cloneSource));
       return false;
     }
+    if (!owner.layers.includes(layer)) return false;
 
     const localPoint = target.toLocal(point, layer);
     const drag = {
       kind:'paint',
       tool,
+      owner,
+      layer,
       layerId:layer.id,
       last:localPoint,
       nativeHighDepth:rasterEdit.highDepthPaintLayerId === layer.id && NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool),
@@ -234,9 +239,14 @@ export function createPaintGestureController({
 
   function move(point, pointerEvent = null) {
     const drag = state.getDrag();
-    if (!drag || drag.kind !== 'paint') return false;
-    const layer = currentDocument().layers.find(item => item.id === drag.layerId);
-    if (!layer) return false;
+    if (
+      !drag ||
+      drag.kind !== 'paint' ||
+      state.getDocument() !== drag.owner ||
+      !drag.owner?.layers?.includes(drag.layer) ||
+      drag.layer?.id !== drag.layerId
+    ) return false;
+    const layer = drag.layer;
 
     const next = target.toLocal(point, layer);
     const last = drag.last;
@@ -285,7 +295,7 @@ export function createPaintGestureController({
     try {
       const persisted = nativeHighDepth
         ? await rasterEdit.persistNativeHighDepthPaintLayer()
-        : await rasterEdit.persistPaintLayer();
+        : await rasterEdit.persistPaintLayer(drag?.owner, drag?.layer);
       if (persisted) {
         ui?.commit?.(label);
         status('Готово');

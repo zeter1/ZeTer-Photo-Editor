@@ -32,7 +32,7 @@ test('paint gesture move draws only the latest segment instead of restroking an 
 });
 
 test('finished strokes use asynchronous canvas encoding instead of synchronous toDataURL', () => {
-  const persist = painting.match(/async function persistPaintLayer\(\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const persist = painting.match(/async function persistPaintLayer\(owner, layer\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.ok(persist, 'persistPaintLayer function not found');
   assert.match(persist, /await canvasToDataURL\(canvas,\s*'image\/png'\)/);
   assert.doesNotMatch(persist, /\.toDataURL\(/);
@@ -41,5 +41,5 @@ test('finished strokes use asynchronous canvas encoding instead of synchronous t
 
 test('paint start is cancelled when the primary pointer was released during async layer preparation', () => {
   assert.match(main, /canContinue:\(\)=>pointerLifecycle\.isActivePointer\(e\.pointerId\)/);
-  assert.match(gesture, /const layer = await ensurePaintLayer\(point, tool, canContinue\);[\s\S]*?if \(!canContinue\(\)\) return false/);
+  assert.match(gesture, /const owner = currentDocument\(\);[\s\S]*?const layer = await ensurePaintLayer\(owner, point, tool, canContinue\);[\s\S]*?!canContinue\(\)[\s\S]*?state\.getDocument\(\) !== owner/);
 });

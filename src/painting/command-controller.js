@@ -135,8 +135,9 @@ export function createRasterCommandController({
         }
       }
 
-      await rasterEdit.ensureRasterBuffer(layer);
-      const context = rasterEdit.brushContext;
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      const context = prepared.ctx;
       context.save();
       selection?.clipContext?.(context, layer);
       context.lineCap = 'round';
@@ -151,7 +152,7 @@ export function createRasterCommandController({
       context.stroke();
       context.restore();
       doc.selectedLayerId = layer.id;
-      if (!await rasterEdit.persistPaintLayer()) throw new Error('Не удалось сохранить слой с линиями');
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
       ui?.commit?.('Нарисовать линию');
       status(`Линия добавлена в слой «${layer.name}»`);
       return true;
@@ -174,6 +175,7 @@ export function createRasterCommandController({
       return false;
     }
 
+    const doc = currentDocument();
     const layer = target.atPoint(point);
     if (!layer) {
       status('Заливка работает по растровому слою');
@@ -183,7 +185,6 @@ export function createRasterCommandController({
     if (!beginPersist()) return false;
 
     try {
-      const doc = currentDocument();
       const local = target.toLocal(point, layer);
       if (layer.highDepthSource) {
         const buffer = rasterEdit.editableHighDepthBuffer(layer);
@@ -224,24 +225,25 @@ export function createRasterCommandController({
         }
       }
 
-      await rasterEdit.ensureRasterBuffer(layer);
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
       const x = Math.floor(local.x);
       const y = Math.floor(local.y);
-      if (x < 0 || y < 0 || x >= rasterEdit.brushCanvas.width || y >= rasterEdit.brushCanvas.height) {
+      if (x < 0 || y < 0 || x >= prepared.canvas.width || y >= prepared.canvas.height) {
         status('Точка заливки вне растрового слоя');
         return false;
       }
       status('Заливка области…');
-      const imageData = rasterEdit.brushContext.getImageData(
+      const imageData = prepared.ctx.getImageData(
         0,
         0,
-        rasterEdit.brushCanvas.width,
-        rasterEdit.brushCanvas.height,
+        prepared.canvas.width,
+        prepared.canvas.height,
       );
       const filled = floodFillPixels(
         imageData.data,
-        rasterEdit.brushCanvas.width,
-        rasterEdit.brushCanvas.height,
+        prepared.canvas.width,
+        prepared.canvas.height,
         x,
         y,
         hexToRgb(tools.primaryColor()),
@@ -255,9 +257,9 @@ export function createRasterCommandController({
         status('Заливка: подходящая область не найдена');
         return false;
       }
-      rasterEdit.brushContext.putImageData(imageData, 0, 0);
+      prepared.ctx.putImageData(imageData, 0, 0);
       doc.selectedLayerId = layer.id;
-      if (!await rasterEdit.persistPaintLayer()) throw new Error('Не удалось сохранить растровый слой');
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
       ui?.commit?.('Заливка');
       status(`Заливка: ${filled.toLocaleString('ru-RU')} px`);
       return true;
@@ -280,6 +282,7 @@ export function createRasterCommandController({
     if (!selection?.hasActive?.()) return false;
     if (busy()) return false;
 
+    const doc = currentDocument();
     const layer = target.selected?.() ?? null;
     if (!target.isEditableRasterLayer(layer)) {
       status('Для очистки выделения выберите незаблокированный растровый слой');
@@ -309,13 +312,14 @@ export function createRasterCommandController({
         }
       }
 
-      await rasterEdit.ensureRasterBuffer(layer);
-      const context = rasterEdit.brushContext;
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      const context = prepared.ctx;
       context.save();
       selection?.clipContext?.(context, layer);
-      context.clearRect(0, 0, rasterEdit.brushCanvas.width, rasterEdit.brushCanvas.height);
+      context.clearRect(0, 0, prepared.canvas.width, prepared.canvas.height);
       context.restore();
-      if (!await rasterEdit.persistPaintLayer()) throw new Error('Не удалось сохранить растровый слой');
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
       ui?.commit?.(historyLabel);
       status(successStatus);
       return true;

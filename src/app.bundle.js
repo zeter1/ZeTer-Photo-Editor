@@ -13476,6 +13476,8 @@ function createRasterEditController({
   let brushCanvas = null;
   let brushContext = null;
   let brushLayerId = null;
+  let brushOwner = null;
+  let brushLayer = null;
   let highDepthPaintBuffer = null;
   let highDepthPaintLayerId = null;
   let highDepthPaintPreviewDirty = false;
@@ -13492,6 +13494,20 @@ function createRasterEditController({
     brushCanvas = null;
     brushContext = null;
     brushLayerId = null;
+    brushOwner = null;
+    brushLayer = null;
+  }
+
+  function isCurrentCanvasTarget(owner, layer) {
+    return Boolean(
+      owner &&
+      layer &&
+      getDocument() === owner &&
+      Array.isArray(owner.layers) &&
+      owner.layers.includes(layer) &&
+      layer.type === 'raster' &&
+      !isLayerLocked(owner, layer)
+    );
   }
 
   function clearHighDepthPaintState() {
@@ -13514,10 +13530,6 @@ function createRasterEditController({
     cancelPaintPreview();
     clearBrushBuffer();
     clearHighDepthPaintState();
-  }
-
-  function isEditableRasterLayer(layer) {
-    return Boolean(layer) && layer.type === 'raster' && !isLayerLocked(currentDocument(), layer);
   }
 
   function highDepthBudgetForLayer(layer) {
@@ -13572,6 +13584,8 @@ function createRasterEditController({
     brushCanvas.height = size.height;
     brushContext = brushCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
     brushLayerId = layer.id;
+    brushOwner = null;
+    brushLayer = null;
     highDepthPaintBuffer = working;
     highDepthPaintLayerId = layer.id;
     highDepthPaintPreviewDirty = true;
@@ -13648,32 +13662,59 @@ function createRasterEditController({
     return true;
   }
 
-  async function ensureRasterBuffer(layer) {
-    if (!isEditableRasterLayer(layer)) return null;
+  async function ensureRasterBuffer(owner, layer) {
+    if (!isCurrentCanvasTarget(owner, layer)) return null;
     const paintSize = checkedCanvasSize(layer.width, layer.height, `Растровый слой «${layer.name || 'Без имени'}»`);
     const canvasWidth = paintSize.width;
     const canvasHeight = paintSize.height;
-    if (brushLayerId !== layer.id || !brushCanvas || brushCanvas.width !== canvasWidth || brushCanvas.height !== canvasHeight) {
-      brushCanvas = documentRef.createElement('canvas');
-      brushCanvas.width = canvasWidth;
-      brushCanvas.height = canvasHeight;
-      brushContext = brushCanvas.getContext('2d', { alpha: true });
-      if (!drawHighDepthRasterBase(layer, brushCanvas, brushContext) && layer.dataUrl) {
-        const image = await getImage(layer.dataUrl);
-        if (image) brushContext.drawImage(image, 0, 0, canvasWidth, canvasHeight);
-      }
-      brushLayerId = layer.id;
+    const canReuse = (
+      brushOwner === owner &&
+      brushLayer === layer &&
+      brushLayerId === layer.id &&
+      brushCanvas &&
+      brushCanvas.width === canvasWidth &&
+      brushCanvas.height === canvasHeight
+    );
+    if (canReuse) return { canvas: brushCanvas, ctx: brushContext };
+
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    const context = canvas.getContext('2d', { alpha: true });
+    if (!drawHighDepthRasterBase(layer, canvas, context) && layer.dataUrl) {
+      const image = await getImage(layer.dataUrl);
+      if (!isCurrentCanvasTarget(owner, layer)) return null;
+      if (image) context.drawImage(image, 0, 0, canvasWidth, canvasHeight);
     }
-    return { canvas: brushCanvas, ctx: brushContext };
+    if (!isCurrentCanvasTarget(owner, layer)) return null;
+
+    brushCanvas = canvas;
+    brushContext = context;
+    brushLayerId = layer.id;
+    brushOwner = owner;
+    brushLayer = layer;
+    return { canvas, ctx: context };
   }
 
-  async function persistPaintLayer() {
-    const layerId = brushLayerId;
+  async function persistPaintLayer(owner, layer) {
     const canvas = brushCanvas;
-    if (!layerId || !canvas) return false;
+    if (
+      !canvas ||
+      brushOwner !== owner ||
+      brushLayer !== layer ||
+      brushLayerId !== layer?.id ||
+      !isCurrentCanvasTarget(owner, layer)
+    ) return false;
+
     const dataUrl = await canvasToDataURL(canvas, 'image/png');
-    const layer = currentDocument().layers.find(item => item.id === layerId);
-    if (!layer) return false;
+    if (
+      brushCanvas !== canvas ||
+      brushOwner !== owner ||
+      brushLayer !== layer ||
+      brushLayerId !== layer.id ||
+      !isCurrentCanvasTarget(owner, layer)
+    ) return false;
+
     const old = layer.dataUrl;
     layer.dataUrl = dataUrl;
     layer.highDepthSource = null;
@@ -13684,10 +13725,17 @@ function createRasterEditController({
 
   function paintPreviewOverrides() {
     if (!brushCanvas || !brushLayerId) return null;
-    const source = highDepthPaintLayerId === brushLayerId
-      ? { source: brushCanvas, skipAdjustments: true }
-      : brushCanvas;
-    return new Map([[brushLayerId, source]]);
+    if (highDepthPaintLayerId === brushLayerId) {
+      return new Map([[brushLayerId, { source: brushCanvas, skipAdjustments: true }]]);
+    }
+    if (
+      !brushOwner ||
+      !brushLayer ||
+      getDocument() !== brushOwner ||
+      !Array.isArray(brushOwner.layers) ||
+      !brushOwner.layers.includes(brushLayer)
+    ) return null;
+    return new Map([[brushLayerId, brushCanvas]]);
   }
 
   function schedulePaintPreview() {
@@ -13859,8 +13907,9 @@ function createRasterCommandController({
         }
       }
 
-      await rasterEdit.ensureRasterBuffer(layer);
-      const context = rasterEdit.brushContext;
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      const context = prepared.ctx;
       context.save();
       selection?.clipContext?.(context, layer);
       context.lineCap = 'round';
@@ -13875,7 +13924,7 @@ function createRasterCommandController({
       context.stroke();
       context.restore();
       doc.selectedLayerId = layer.id;
-      if (!await rasterEdit.persistPaintLayer()) throw new Error('Не удалось сохранить слой с линиями');
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
       ui?.commit?.('Нарисовать линию');
       status(`Линия добавлена в слой «${layer.name}»`);
       return true;
@@ -13898,6 +13947,7 @@ function createRasterCommandController({
       return false;
     }
 
+    const doc = currentDocument();
     const layer = target.atPoint(point);
     if (!layer) {
       status('Заливка работает по растровому слою');
@@ -13907,7 +13957,6 @@ function createRasterCommandController({
     if (!beginPersist()) return false;
 
     try {
-      const doc = currentDocument();
       const local = target.toLocal(point, layer);
       if (layer.highDepthSource) {
         const buffer = rasterEdit.editableHighDepthBuffer(layer);
@@ -13948,24 +13997,25 @@ function createRasterCommandController({
         }
       }
 
-      await rasterEdit.ensureRasterBuffer(layer);
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
       const x = Math.floor(local.x);
       const y = Math.floor(local.y);
-      if (x < 0 || y < 0 || x >= rasterEdit.brushCanvas.width || y >= rasterEdit.brushCanvas.height) {
+      if (x < 0 || y < 0 || x >= prepared.canvas.width || y >= prepared.canvas.height) {
         status('Точка заливки вне растрового слоя');
         return false;
       }
       status('Заливка области…');
-      const imageData = rasterEdit.brushContext.getImageData(
+      const imageData = prepared.ctx.getImageData(
         0,
         0,
-        rasterEdit.brushCanvas.width,
-        rasterEdit.brushCanvas.height,
+        prepared.canvas.width,
+        prepared.canvas.height,
       );
       const filled = floodFillPixels(
         imageData.data,
-        rasterEdit.brushCanvas.width,
-        rasterEdit.brushCanvas.height,
+        prepared.canvas.width,
+        prepared.canvas.height,
         x,
         y,
         hexToRgb(tools.primaryColor()),
@@ -13979,9 +14029,9 @@ function createRasterCommandController({
         status('Заливка: подходящая область не найдена');
         return false;
       }
-      rasterEdit.brushContext.putImageData(imageData, 0, 0);
+      prepared.ctx.putImageData(imageData, 0, 0);
       doc.selectedLayerId = layer.id;
-      if (!await rasterEdit.persistPaintLayer()) throw new Error('Не удалось сохранить растровый слой');
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
       ui?.commit?.('Заливка');
       status(`Заливка: ${filled.toLocaleString('ru-RU')} px`);
       return true;
@@ -14004,6 +14054,7 @@ function createRasterCommandController({
     if (!selection?.hasActive?.()) return false;
     if (busy()) return false;
 
+    const doc = currentDocument();
     const layer = target.selected?.() ?? null;
     if (!target.isEditableRasterLayer(layer)) {
       status('Для очистки выделения выберите незаблокированный растровый слой');
@@ -14033,13 +14084,14 @@ function createRasterCommandController({
         }
       }
 
-      await rasterEdit.ensureRasterBuffer(layer);
-      const context = rasterEdit.brushContext;
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      const context = prepared.ctx;
       context.save();
       selection?.clipContext?.(context, layer);
-      context.clearRect(0, 0, rasterEdit.brushCanvas.width, rasterEdit.brushCanvas.height);
+      context.clearRect(0, 0, prepared.canvas.width, prepared.canvas.height);
       context.restore();
-      if (!await rasterEdit.persistPaintLayer()) throw new Error('Не удалось сохранить растровый слой');
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
       ui?.commit?.(historyLabel);
       status(successStatus);
       return true;
@@ -14716,8 +14768,8 @@ function createPaintGestureController({
       : NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool);
   }
 
-  async function ensurePaintLayer(point, tool, canContinue = () => true) {
-    const doc = currentDocument();
+  async function ensurePaintLayer(owner, point, tool, canContinue = () => true) {
+    const doc = owner;
     let layer = target.selected?.() ?? null;
     const rasterAtPoint = target.atPoint(point);
 
@@ -14742,7 +14794,8 @@ function createPaintGestureController({
     const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
       ? await rasterEdit.ensureNativeHighDepthPaintBuffer(layer, { requireAlpha:tool === 'eraser' })
       : false;
-    if (!nativeHighDepth) await rasterEdit.ensureRasterBuffer(layer);
+    if (!nativeHighDepth && !await rasterEdit.ensureRasterBuffer(owner, layer)) return null;
+    if (state.getDocument() !== owner || !owner.layers.includes(layer)) return null;
     doc.selectedLayerId = layer.id;
     return layer;
   }
@@ -14777,19 +14830,23 @@ function createPaintGestureController({
       return false;
     }
 
-    const layer = await ensurePaintLayer(point, tool, canContinue);
-    if (!canContinue()) return false;
+    const owner = currentDocument();
+    const layer = await ensurePaintLayer(owner, point, tool, canContinue);
+    if (!canContinue() || state.getDocument() !== owner) return false;
 
     const cloneSource = retouch.getCloneSource();
     if (!layer) {
       warn(unavailableMessage(tool, cloneSource));
       return false;
     }
+    if (!owner.layers.includes(layer)) return false;
 
     const localPoint = target.toLocal(point, layer);
     const drag = {
       kind:'paint',
       tool,
+      owner,
+      layer,
       layerId:layer.id,
       last:localPoint,
       nativeHighDepth:rasterEdit.highDepthPaintLayerId === layer.id && NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool),
@@ -14892,9 +14949,14 @@ function createPaintGestureController({
 
   function move(point, pointerEvent = null) {
     const drag = state.getDrag();
-    if (!drag || drag.kind !== 'paint') return false;
-    const layer = currentDocument().layers.find(item => item.id === drag.layerId);
-    if (!layer) return false;
+    if (
+      !drag ||
+      drag.kind !== 'paint' ||
+      state.getDocument() !== drag.owner ||
+      !drag.owner?.layers?.includes(drag.layer) ||
+      drag.layer?.id !== drag.layerId
+    ) return false;
+    const layer = drag.layer;
 
     const next = target.toLocal(point, layer);
     const last = drag.last;
@@ -14943,7 +15005,7 @@ function createPaintGestureController({
     try {
       const persisted = nativeHighDepth
         ? await rasterEdit.persistNativeHighDepthPaintLayer()
-        : await rasterEdit.persistPaintLayer();
+        : await rasterEdit.persistPaintLayer(drag?.owner, drag?.layer);
       if (persisted) {
         ui?.commit?.(label);
         status('Готово');
@@ -23648,11 +23710,13 @@ function nativeHighDepthStrokeSegment(layer,from,to,pointerEvent=null,erase=fals
 
 
 async function setCloneSource(point) {
+  const owner=doc;
   const layer=findTopEditableRasterLayerAt(point);
   if(!layer){setStatus(`${TOOL_LABELS[currentTool]}: источник должен находиться на растровом слое`);toast('Alt+кликните по растровому слою','warn');return false;}
-  if(!layer.highDepthSource)await rasterEdit.ensureRasterBuffer(layer);
+  if(!layer.highDepthSource&&!await rasterEdit.ensureRasterBuffer(owner,layer))return false;
+  if(doc!==owner||!owner.layers.includes(layer))return false;
   setRetouchCloneSource({layerId:layer.id,documentPoint:{...point},localPoint:documentPointToLayerPixel(point,layer)});
-  doc.selectedLayerId=layer.id;
+  owner.selectedLayerId=layer.id;
   setStatus(`Источник для «${TOOL_LABELS[currentTool]}» задан. Рисуйте по этому же слою.`);
   drawOverlay();
   return true;}

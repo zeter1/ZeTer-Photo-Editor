@@ -35,10 +35,13 @@ function makeHarness({
   selectionContains = () => true,
   selectionPredicate = () => null,
   selectionIntersects = () => true,
+  persistResult = true,
   pixels,
 } = {}) {
   let persisting = false;
   let persistCalls = 0;
+  const ensureCalls = [];
+  const persistArgs = [];
   let resetPaintStateCalls = 0;
   let highDepthMutation = null;
   const commits = [];
@@ -52,12 +55,17 @@ function makeHarness({
     editableHighDepthBuffer() { return null; },
     async prepareHighDepthMutation(layer, buffer) { return { layerId:layer.id, buffer }; },
     applyHighDepthMutation(layer, mutation) { highDepthMutation = { layer, mutation }; },
-    async ensureRasterBuffer(layer) {
+    async ensureRasterBuffer(owner, layer) {
+      ensureCalls.push([owner, layer]);
       this.brushCanvas = { ...canvas.canvas, width:layer.width, height:layer.height };
       this.brushContext = canvas.context;
       return { canvas:this.brushCanvas, ctx:this.brushContext };
     },
-    async persistPaintLayer() { persistCalls += 1; return true; },
+    async persistPaintLayer(owner, layer) {
+      persistCalls += 1;
+      persistArgs.push([owner, layer]);
+      return typeof persistResult === 'function' ? persistResult(owner, layer) : persistResult;
+    },
     clearBrushBuffer() {
       this.brushCanvas = null;
       this.brushContext = null;
@@ -114,6 +122,8 @@ function makeHarness({
     clips,
     getPersisting:() => persisting,
     getPersistCalls:() => persistCalls,
+    getEnsureCalls:() => ensureCalls,
+    getPersistArgs:() => persistArgs,
     getResetPaintStateCalls:() => resetPaintStateCalls,
     getHighDepthMutation:() => highDepthMutation,
   };
@@ -138,7 +148,28 @@ test('line command creates one sparse raster target and keeps persistence/histor
   assert.equal(harness.clips.length, 1);
   assert.equal(harness.getPersistCalls(), 1);
   assert.equal(harness.getPersisting(), false);
+  assert.equal(harness.getEnsureCalls()[0][0], doc);
+  assert.equal(harness.getEnsureCalls()[0][1], doc.layers[0]);
+  assert.equal(harness.getPersistArgs()[0][0], doc);
+  assert.equal(harness.getPersistArgs()[0][1], doc.layers[0]);
   assert.deepEqual(harness.commits, ['Нарисовать линию']);
+});
+
+test('Canvas8 command suppresses history and success feedback when persistence becomes stale', async () => {
+  const doc = createDocument({ width:8, height:6 });
+  const harness = makeHarness({
+    doc,
+    selected:() => null,
+    atPoint:() => null,
+    isEditableRasterLayer:layer => Boolean(layer) && layer.type === 'raster',
+    persistResult:false,
+  });
+
+  assert.equal(await harness.controller.drawLine({ x:1, y:2 }, { x:6, y:4 }), false);
+  assert.equal(harness.getPersistCalls(), 1);
+  assert.equal(harness.getPersisting(), false);
+  assert.deepEqual(harness.commits, []);
+  assert.equal(harness.statuses.some(value => value.startsWith('Линия добавлена')), false);
 });
 
 test('fill command owns Canvas8 flood fill while honoring the injected selection predicate', async () => {

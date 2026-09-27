@@ -28,7 +28,7 @@ test('clone stamp requires Alt-click source and paints from an immutable stroke 
 });
 
 test('retouch tools edit only an existing raster layer and keep dedicated history labels', () => {
-  const ensurePaintLayer = gesture.match(/async function ensurePaintLayer\(point, tool, canContinue = \(\) => true\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  const ensurePaintLayer = gesture.match(/async function ensurePaintLayer\(owner, point, tool, canContinue = \(\) => true\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
   assert.match(ensurePaintLayer, /EXISTING_RASTER_ONLY_TOOLS\.has\(tool\)/);
   assert.match(gesture, /clone:'Штамп',[\s\S]*?heal:'Лечебная кисть',[\s\S]*?smudge:'Палец \/ смазывание',[\s\S]*?dodge:'Осветлитель',[\s\S]*?burn:'Затемнитель'/);
   assert.match(retouch, /function applyToneDab\(layer, point, pointerEvent = null, brighten = true\)/);

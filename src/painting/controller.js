@@ -26,6 +26,8 @@ export function createRasterEditController({
   let brushCanvas = null;
   let brushContext = null;
   let brushLayerId = null;
+  let brushOwner = null;
+  let brushLayer = null;
   let highDepthPaintBuffer = null;
   let highDepthPaintLayerId = null;
   let highDepthPaintPreviewDirty = false;
@@ -42,6 +44,20 @@ export function createRasterEditController({
     brushCanvas = null;
     brushContext = null;
     brushLayerId = null;
+    brushOwner = null;
+    brushLayer = null;
+  }
+
+  function isCurrentCanvasTarget(owner, layer) {
+    return Boolean(
+      owner &&
+      layer &&
+      getDocument() === owner &&
+      Array.isArray(owner.layers) &&
+      owner.layers.includes(layer) &&
+      layer.type === 'raster' &&
+      !isLayerLocked(owner, layer)
+    );
   }
 
   function clearHighDepthPaintState() {
@@ -64,10 +80,6 @@ export function createRasterEditController({
     cancelPaintPreview();
     clearBrushBuffer();
     clearHighDepthPaintState();
-  }
-
-  function isEditableRasterLayer(layer) {
-    return Boolean(layer) && layer.type === 'raster' && !isLayerLocked(currentDocument(), layer);
   }
 
   function highDepthBudgetForLayer(layer) {
@@ -122,6 +134,8 @@ export function createRasterEditController({
     brushCanvas.height = size.height;
     brushContext = brushCanvas.getContext('2d', { alpha: true, willReadFrequently: true });
     brushLayerId = layer.id;
+    brushOwner = null;
+    brushLayer = null;
     highDepthPaintBuffer = working;
     highDepthPaintLayerId = layer.id;
     highDepthPaintPreviewDirty = true;
@@ -198,32 +212,59 @@ export function createRasterEditController({
     return true;
   }
 
-  async function ensureRasterBuffer(layer) {
-    if (!isEditableRasterLayer(layer)) return null;
+  async function ensureRasterBuffer(owner, layer) {
+    if (!isCurrentCanvasTarget(owner, layer)) return null;
     const paintSize = checkedCanvasSize(layer.width, layer.height, `Растровый слой «${layer.name || 'Без имени'}»`);
     const canvasWidth = paintSize.width;
     const canvasHeight = paintSize.height;
-    if (brushLayerId !== layer.id || !brushCanvas || brushCanvas.width !== canvasWidth || brushCanvas.height !== canvasHeight) {
-      brushCanvas = documentRef.createElement('canvas');
-      brushCanvas.width = canvasWidth;
-      brushCanvas.height = canvasHeight;
-      brushContext = brushCanvas.getContext('2d', { alpha: true });
-      if (!drawHighDepthRasterBase(layer, brushCanvas, brushContext) && layer.dataUrl) {
-        const image = await getImage(layer.dataUrl);
-        if (image) brushContext.drawImage(image, 0, 0, canvasWidth, canvasHeight);
-      }
-      brushLayerId = layer.id;
+    const canReuse = (
+      brushOwner === owner &&
+      brushLayer === layer &&
+      brushLayerId === layer.id &&
+      brushCanvas &&
+      brushCanvas.width === canvasWidth &&
+      brushCanvas.height === canvasHeight
+    );
+    if (canReuse) return { canvas: brushCanvas, ctx: brushContext };
+
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    const context = canvas.getContext('2d', { alpha: true });
+    if (!drawHighDepthRasterBase(layer, canvas, context) && layer.dataUrl) {
+      const image = await getImage(layer.dataUrl);
+      if (!isCurrentCanvasTarget(owner, layer)) return null;
+      if (image) context.drawImage(image, 0, 0, canvasWidth, canvasHeight);
     }
-    return { canvas: brushCanvas, ctx: brushContext };
+    if (!isCurrentCanvasTarget(owner, layer)) return null;
+
+    brushCanvas = canvas;
+    brushContext = context;
+    brushLayerId = layer.id;
+    brushOwner = owner;
+    brushLayer = layer;
+    return { canvas, ctx: context };
   }
 
-  async function persistPaintLayer() {
-    const layerId = brushLayerId;
+  async function persistPaintLayer(owner, layer) {
     const canvas = brushCanvas;
-    if (!layerId || !canvas) return false;
+    if (
+      !canvas ||
+      brushOwner !== owner ||
+      brushLayer !== layer ||
+      brushLayerId !== layer?.id ||
+      !isCurrentCanvasTarget(owner, layer)
+    ) return false;
+
     const dataUrl = await canvasToDataURL(canvas, 'image/png');
-    const layer = currentDocument().layers.find(item => item.id === layerId);
-    if (!layer) return false;
+    if (
+      brushCanvas !== canvas ||
+      brushOwner !== owner ||
+      brushLayer !== layer ||
+      brushLayerId !== layer.id ||
+      !isCurrentCanvasTarget(owner, layer)
+    ) return false;
+
     const old = layer.dataUrl;
     layer.dataUrl = dataUrl;
     layer.highDepthSource = null;
@@ -234,10 +275,17 @@ export function createRasterEditController({
 
   function paintPreviewOverrides() {
     if (!brushCanvas || !brushLayerId) return null;
-    const source = highDepthPaintLayerId === brushLayerId
-      ? { source: brushCanvas, skipAdjustments: true }
-      : brushCanvas;
-    return new Map([[brushLayerId, source]]);
+    if (highDepthPaintLayerId === brushLayerId) {
+      return new Map([[brushLayerId, { source: brushCanvas, skipAdjustments: true }]]);
+    }
+    if (
+      !brushOwner ||
+      !brushLayer ||
+      getDocument() !== brushOwner ||
+      !Array.isArray(brushOwner.layers) ||
+      !brushOwner.layers.includes(brushLayer)
+    ) return null;
+    return new Map([[brushLayerId, brushCanvas]]);
   }
 
   function schedulePaintPreview() {

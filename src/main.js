@@ -2008,11 +2008,13 @@ function nativeHighDepthStrokeSegment(layer,from,to,pointerEvent=null,erase=fals
 
 
 async function setCloneSource(point) {
+  const owner=doc;
   const layer=findTopEditableRasterLayerAt(point);
   if(!layer){setStatus(`${TOOL_LABELS[currentTool]}: источник должен находиться на растровом слое`);toast('Alt+кликните по растровому слою','warn');return false;}
-  if(!layer.highDepthSource)await rasterEdit.ensureRasterBuffer(layer);
+  if(!layer.highDepthSource&&!await rasterEdit.ensureRasterBuffer(owner,layer))return false;
+  if(doc!==owner||!owner.layers.includes(layer))return false;
   setRetouchCloneSource({layerId:layer.id,documentPoint:{...point},localPoint:documentPointToLayerPixel(point,layer)});
-  doc.selectedLayerId=layer.id;
+  owner.selectedLayerId=layer.id;
   setStatus(`Источник для «${TOOL_LABELS[currentTool]}» задан. Рисуйте по этому же слою.`);
   drawOverlay();
   return true;}
