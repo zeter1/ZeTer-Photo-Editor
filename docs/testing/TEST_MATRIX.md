@@ -51,7 +51,7 @@ npm run test:browser
 CI performs:
 1. checkout + Node 24;
 2. `npm run check`;
-3. `git diff --exit-code -- src/app.bundle.js`;
+3. generated browser artifact parity: `git diff --exit-code -- src/app.bundle.js index.html version.json`;
 4. real Chromium `file://` smoke;
 5. `git diff --check`.
 
