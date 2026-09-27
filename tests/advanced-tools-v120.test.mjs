@@ -11,6 +11,7 @@ const render=await readFile(new URL('../src/core/render.js',import.meta.url),'ut
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
 const css=await readFile(new URL('../src/styles.css',import.meta.url),'utf8');
 const toolbar=await readFile(new URL('../src/ui/toolbar-controller.js',import.meta.url),'utf8');
+const layerTransformSurface=await readFile(new URL('../src/interaction/layer-transform-surface-controller.js',import.meta.url),'utf8');
 const pathControlSurface=await readFile(new URL('../src/interaction/path-control-surface-controller.js',import.meta.url),'utf8');
 const pathControlCommands=await readFile(new URL('../src/interaction/path-control-command-controller.js',import.meta.url),'utf8');
 const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
@@ -46,13 +47,14 @@ test('about dialog identifies the developer and exposes safe contact links',()=>
 });
 
 test('selected layer is highlighted on canvas outside move mode with corners and a name badge',()=>{
-  assert.match(main,/if \(!layer \|\| !isLayerVisible\(doc, layer\) \|\| !isTransformableLayer\(layer\)\) return/);
-  assert.match(main,/function isTransformableLayer\(layer\) \{ return Boolean\(layer\) && layer\.type !== 'adjustment'; \}/);
-  assert.doesNotMatch(main,/!layer \|\| currentTool !== 'move' \|\| !isLayerVisible/);
-  assert.match(main,/const moveMode=currentTool==='move'/);
-  assert.match(main,/for\(const point of frame\.corners\)/);
-  assert.match(main,/const label=String\(layer\.name\|\|'Слой'\)/);
-  assert.match(main,/ctx\.roundRect\(labelX,labelY,labelWidth,labelHeight/);
+  assert.match(layerTransformSurface,/if \(!layer \|\| !isLayerVisible\(owner, layer\) \|\| !isTransformableLayer\(layer\)\) return false/);
+  assert.match(layerTransformSurface,/function isTransformableLayer\(layer\)/);
+  assert.match(layerTransformSurface,/const moveMode = runtime\.getCurrentTool\(\) === 'move'/);
+  assert.match(layerTransformSurface,/for \(const corner of frame\.corners\)/);
+  assert.match(layerTransformSurface,/const label = String\(layer\.name \|\| 'Слой'\)/);
+  assert.match(layerTransformSurface,/context\.roundRect\(labelX, labelY, labelWidth, labelHeight/);
+  assert.match(main,/layerTransformSurface\.draw\(ctx\)/);
+  assert.doesNotMatch(main,/function isTransformableLayer\(/);
 });
 
 test('smudge strength, healing source, gradient, edge snapping and wand selection are wired',()=>{
