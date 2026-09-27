@@ -163,6 +163,7 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /layerTransformSurface\.draw\(ctx\)/);
   assert.match(main, /layerTransformSurface\.movePointerIntent\(p\)/);
   assert.match(main, /layerTransformSurface\.idleCursor\(point\)/);
+  assert.match(main, /layerTransformSurface\.isTransformableLayer\(selected\(\)\)/);
   for (const name of ['isTransformableLayer','topLayerAt','interactiveRotationHandlePoint','cursorForHandle']) {
     assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
   }
