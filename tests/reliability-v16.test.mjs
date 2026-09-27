@@ -5,6 +5,7 @@ import { checkedCanvasSize, createDocument, sanitizeProject, MAX_CANVAS_PIXELS }
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const propertyCommands = await readFile(new URL('../src/layers/property-command-controller.js', import.meta.url), 'utf8');
+const layerTransformSurface = await readFile(new URL('../src/interaction/layer-transform-surface-controller.js', import.meta.url), 'utf8');
 const painting = await readFile(new URL('../src/painting/controller.js', import.meta.url), 'utf8');
 const gesture = await readFile(new URL('../src/painting/gesture-controller.js', import.meta.url), 'utf8');
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
@@ -104,9 +105,10 @@ test('manual raster dimensions cannot bypass the canvas pixel budget', () => {
 });
 
 test('rotation handle is clamped into the interactive canvas area at document edges', () => {
-  const helper = main.match(/function interactiveRotationHandlePoint\(layer\) \{[\s\S]*?\n\}/)?.[0] ?? '';
-  assert.match(helper, /rotationHandlePoint\(layer, 30 \/ zoom\)/);
-  assert.match(helper, /x: clamp\(preferred\.x/);
-  assert.match(helper, /y: clamp\(preferred\.y/);
-  assert.ok((main.match(/interactiveRotationHandlePoint\(/g) ?? []).length >= 4, 'draw + hover + pointerdown should share the interactive handle point');
+  const helper = layerTransformSurface.match(/function interactiveRotationHandlePoint\(layer\) \{[\s\S]*?\n  \}/)?.[0] ?? '';
+  assert.match(helper, /geometry\.rotationHandlePoint\(layer, 30 \/ zoom\)/);
+  assert.match(helper, /x: geometry\.clamp\(preferred\.x/);
+  assert.match(helper, /y: geometry\.clamp\(preferred\.y/);
+  assert.ok((layerTransformSurface.match(/interactiveRotationHandlePoint\(/g) ?? []).length >= 3, 'draw + selected-control hit should share the interactive handle point');
+  assert.doesNotMatch(main, /function interactiveRotationHandlePoint\(/);
 });

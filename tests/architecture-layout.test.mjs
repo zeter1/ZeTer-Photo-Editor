@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -27,6 +27,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/text-edit-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/text-settings-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pointer-lifecycle-router.js', root), 'utf8'),
+  readFile(new URL('src/interaction/layer-transform-surface-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/layer-transform-gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/path-control-surface-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/path-control-command-controller.js', root), 'utf8'),
@@ -150,6 +151,22 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /layerTransformCommandController\.center\(doc,l\.id\)/);
   assert.match(main, /layerTransformCommandController\.align\(doc,l\.id,mode\)/);
   assert.match(main, /layerTransformCommandController\.fitToCanvas\(doc,l\.id\)/);
+  assert.match(main, /from '\.\/interaction\/layer-transform-surface-controller\.js'/);
+  assert.match(build, /'src\/interaction\/layer-transform-surface-controller\.js'/);
+  assert.match(layerTransformSurfaceController, /export function createLayerTransformSurfaceController/);
+  assert.match(layerTransformSurfaceController, /isLayerVisible\(owner, layer\)/);
+  assert.match(layerTransformSurfaceController, /isLayerLocked\(owner, layer\)/);
+  assert.match(layerTransformSurfaceController, /geometry\.hitLayerHandle\(hitPoint, layer, 10 \/ zoom\)/);
+  assert.match(layerTransformSurfaceController, /geometry\.rotationHandlePoint\(layer, 30 \/ zoom\)/);
+  assert.doesNotMatch(layerTransformSurfaceController, /\b(?:commit|addLayer|touch)\b/);
+  assert.match(main, /createLayerTransformSurfaceController\(\{/);
+  assert.match(main, /layerTransformSurface\.draw\(ctx\)/);
+  assert.match(main, /layerTransformSurface\.movePointerIntent\(p\)/);
+  assert.match(main, /layerTransformSurface\.idleCursor\(point\)/);
+  assert.match(main, /layerTransformSurface\.isTransformableLayer\(selected\(\)\)/);
+  for (const name of ['isTransformableLayer','topLayerAt','interactiveRotationHandlePoint','cursorForHandle']) {
+    assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  }
   assert.match(main, /from '\.\/interaction\/layer-transform-gesture-controller\.js'/);
   assert.match(build, /'src\/interaction\/layer-transform-gesture-controller\.js'/);
   assert.match(layerTransformGestureController, /export function createLayerTransformGestureController/);
@@ -157,8 +174,8 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(layerTransformGestureController, /layer !== target/);
   assert.match(layerTransformGestureController, /isLayerLocked\(owner, layer\)/);
   assert.match(main, /createLayerTransformGestureController\(\{/);
-  assert.match(main, /layerTransformGestures\.beginMove\(doc,l\.id,p\)/);
-  assert.match(main, /layerTransformGestures\.beginResize\(doc,l\.id,handle,p\)/);
+  assert.match(main, /layerTransformGestures\.beginMove\(doc,intent\.layer\.id,p\)/);
+  assert.match(main, /layerTransformGestures\.beginResize\(doc,intent\.layer\.id,intent\.handle,p\)/);
   assert.match(main, /from '\.\/interaction\/path-control-surface-controller\.js'/);
   assert.match(build, /'src\/interaction\/path-control-surface-controller\.js'/);
   assert.match(pathControlSurfaceController, /export function createPathControlSurfaceController/);
@@ -236,7 +253,7 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(finishPenPathSource, /penDraftGestures\.consumePoints\(\)/);
   assert.match(finishPenPathSource, /PEN_PATH_COMMAND_RESULT\.COMMITTED/);
   assert.doesNotMatch(finishPenPathSource, /createShapeLayer|addLayer\(|commit\('Добавить Bézier-контур'\)/);
-  assert.match(main, /layerTransformGestures\.beginRotate\(doc,l\.id,p,frame\.center\)/);
+  assert.match(main, /layerTransformGestures\.beginRotate\(doc,intent\.layer\.id,p,intent\.center\)/);
   assert.match(main, /layerTransformGestures\.update\(drag,p,/);
   assert.match(main, /layerTransformGestures\.finish\(d,canvasPoint\(e,\{clampToDocument:false\}\),/);
   assert.match(main, /layerTransformGestures\.cancel\(d\)/);
@@ -298,7 +315,7 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
     assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
   }
   assert.match(main, /textEditController\.documentWithPreview\(doc\)/);
-  assert.match(main, /textEditController\.previewLayer\(doc\)/);
+  assert.match(main, /getDisplayLayer: owner => textEditController\.previewLayer\(owner\) \|\| selectedLayer\(owner\)/);
   assert.match(main, /textEditController\.syncPreviewCanvas\(\)/);
   assert.doesNotMatch(modalController, /attachTextPreview/);
   assert.doesNotMatch(modalController, /onModalClose/);

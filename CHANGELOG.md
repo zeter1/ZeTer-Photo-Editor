@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical selected-layer transform surface controller
+
+- Refactor: read-only selected-layer Move / Resize / Rotate discovery, control hit-testing, frame/handle/name-badge drawing, rotated resize cursors and topmost Move targeting move out of the large `src/main.js` composition root into `src/interaction/layer-transform-surface-controller.js`.
+- Behavior preservation: frame visibility/lock accents, non-Move corner dots, Move resize/rotate controls, zoom-aware `10 / zoom` hit tolerances, canvas-clamped rotation handle, reverse z-order target discovery, recursive group locks and the exact `Слой` fallback remain unchanged.
+- Ownership hygiene: pointer-down now consumes semantic rotate/resize/move intents from the read-only surface while actual transform mutation, Smart Snap, history/no-op/finalization and rollback remain in `layer-transform-gesture-controller.js`; discrete nudge/center/align/fit remains in `layers/transform-command-controller.js`.
+- Regression/docs/build: direct surface tests cover drawing, lock/visibility, geometry, cursor precedence, topmost targeting, text-preview display routing and read-only state preservation; source/architecture guards route future agents to the canonical owner and the file:// build graph includes the new module.
+
+
 ### 2026-09-27 — Canonical new Pen path publication command controller
 
 - Refactor: final persisted publication of a brand-new Pen draft moves out of the large `src/main.js` composition root into `src/interaction/pen-path-command-controller.js`; bounds/localization, Shape-path construction, exact-owner publication and the single `Добавить Bézier-контур` history entry now have one focused owner.
