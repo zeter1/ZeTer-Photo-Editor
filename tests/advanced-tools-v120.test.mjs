@@ -11,6 +11,7 @@ const render=await readFile(new URL('../src/core/render.js',import.meta.url),'ut
 const state=await readFile(new URL('../src/core/state.js',import.meta.url),'utf8');
 const css=await readFile(new URL('../src/styles.css',import.meta.url),'utf8');
 const toolbar=await readFile(new URL('../src/ui/toolbar-controller.js',import.meta.url),'utf8');
+const pathControlGestures=await readFile(new URL('../src/interaction/path-control-gesture-controller.js',import.meta.url),'utf8');
 
 test('requested advanced tools have dedicated vector icons and toolbar controls',()=>{
   for(const tool of ['heal','smudge','gradient','pen','magnetic','wand'])assert.match(html,new RegExp(`data-tool="${tool}"`));
@@ -81,14 +82,17 @@ test('gradient and crop provide useful live previews before committing',()=>{
   assert.match(main,/for \(const fraction of \[1 \/ 3, 2 \/ 3\]\)/);
 });
 
-test('existing Bezier paths expose direct anchor and handle editing with cancel-safe history',()=>{
+test('existing Bezier paths delegate direct anchor and handle transactions to the canonical gesture owner',()=>{
   assert.match(main,/function hitSelectedPathControl\(/);
   assert.match(main,/function drawSelectedPathControls\(/);
-  assert.match(main,/kind:'path-control'/);
+  assert.match(main,/createPathControlGestureController/);
+  assert.match(main,/pathControlGestures\.begin\(doc,hit,point,\{shiftKey:event\.shiftKey\}\)/);
   assert.match(main,/Shift\+drag создаёт smooth handles/);
-  assert.match(main,/event\.altKey/);
-  assert.match(main,/node\[opposite\]=\{x:node\.x-\(local\.x-node\.x\),y:node\.y-\(local\.y-node\.y\)\}/);
-  assert.match(main,/restorePathControlDrag\(d\)/);
-  assert.match(main,/Переместить Bézier-узел/);
-  assert.match(main,/Изменить Bézier-ручку/);
+  assert.match(pathControlGestures,/kind: 'path-control'/);
+  assert.match(pathControlGestures,/target\.control === 'anchor' && modifiers\.shiftKey \? 'handleOut'/);
+  assert.match(pathControlGestures,/node\[opposite\] = \{/);
+  assert.match(pathControlGestures,/if \(modifiers\.altKey\)/);
+  assert.match(pathControlGestures,/Переместить Bézier-узел/);
+  assert.match(pathControlGestures,/Изменить Bézier-ручку/);
+  assert.doesNotMatch(main,/restorePathControlDrag/);
 });
