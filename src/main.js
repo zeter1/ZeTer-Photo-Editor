@@ -42,6 +42,7 @@ import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
 import { createLayerTransformGestureController } from './interaction/layer-transform-gesture-controller.js';
+import { createPathControlGestureController } from './interaction/path-control-gesture-controller.js';
 import { createSelectionGestureController, cloneSelectionShape } from './selection/gesture-controller.js';
 import { createSelectionClipboardController } from './selection/clipboard-controller.js';
 import { createSelectionRasterMutationController } from './selection/raster-mutation-controller.js';
@@ -781,6 +782,16 @@ const layerTransformGestures = createLayerTransformGestureController({
     redrawOverlay: () => drawOverlay(),
   },
 });
+const pathControlGestures = createPathControlGestureController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+  runtime: {
+    getZoom: () => zoom,
+    refreshPreview: () => { render(); drawOverlay(); },
+    redrawOverlay: () => drawOverlay(),
+  },
+  geometry: { documentPointToLayer: documentPointToLayerPixel },
+});
 const selectionGestures = createSelectionGestureController({
   selectionTypes: SELECTION_TYPES,
   selectionTypeLabels: SELECTION_TYPE_LABELS,
@@ -1163,13 +1174,6 @@ function updatePenCursor(point){
   if(currentTool!=='pen'||drag||penDraft)return;
   els.overlay.style.cursor=hitSelectedPathControl(point)?'pointer':'crosshair';
 }
-function restorePathControlDrag(d){
-  const layer=d.pathSource==='document-path'?null:doc.layers.find(item=>item.id===d.layerId);
-  const points=pathTargetPoints(layer,d.pathSource,d.subpathIndex,d.documentPathIndex);
-  if(!points?.[d.nodeIndex])return false;
-  points[d.nodeIndex]=structuredClone(d.initial);
-  render();drawOverlay();return true;
-}
 function beginPathControlDrag(hit,point,event){
   const points=pathTargetPoints(hit.layer,hit.source,hit.subpathIndex,hit.documentPathIndex);
   const node=points?.[hit.nodeIndex];
@@ -1181,13 +1185,10 @@ function beginPathControlDrag(hit,point,event){
     else setStatus('Bézier-узел уже угловой');
     return true;
   }
-  const control=hit.control==='anchor'&&event.shiftKey?'handleOut':hit.control;
-  drag={
-    kind:'path-control',layerId:hit.layer?.id??null,nodeIndex:hit.nodeIndex,control,
-    pathSource:hit.source,documentPathIndex:hit.documentPathIndex??null,subpathIndex:hit.subpathIndex,
-    startLocal:hit.layer?documentPointToLayerPixel(point,hit.layer):{...point},
-    initial:structuredClone(node),moved:false,
-  };
+  const gesture=pathControlGestures.begin(doc,hit,point,{shiftKey:event.shiftKey});
+  if(!gesture)return false;
+  drag=gesture;
+  const control=gesture.control;
   setStatus(hit.source==='document-path'
     ? 'Сохранённый контур: перетаскивайте anchors/handles; Alt разрывает симметрию'
     : hit.source==='vector-mask'
@@ -1878,7 +1879,7 @@ async function onOverlayPointerDown(e) {
 }
 
 function onOverlayPointerMove(e) {
-  const allowOutside = layerTransformGestures.isGesture(drag) || (drag && ['paint','path-control'].includes(drag.kind));
+  const allowOutside = layerTransformGestures.isGesture(drag) || pathControlGestures.isGesture(drag) || drag?.kind === 'paint';
   const p = canvasPoint(e, { clampToDocument: !allowOutside });
   els.pointer.textContent = `x: ${Math.round(p.x)} y: ${Math.round(p.y)}`;
   hoverPoint = p;
@@ -1900,6 +1901,10 @@ function onOverlayPointerMove(e) {
     });
     return;
   }
+  if (pathControlGestures.isGesture(drag)) {
+    pathControlGestures.update(drag,p,{altKey:e.altKey});
+    return;
+  }
   if (drag.kind === 'paint') {
     const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
     for (const event of events.length ? events : [e]) paintGesture.move(canvasPoint(event, { clampToDocument:false }), event);
@@ -1912,31 +1917,6 @@ function onOverlayPointerMove(e) {
   if (drag.kind === 'shape') { drag.current=p; drag.lockAspect=e.shiftKey; const r=constrainedRect(drag.start,p,e.shiftKey); previewRect(r, els.primaryColor.value); return; }
   if (drag.kind === 'crop') { drag.current=p; cropRect=normalizeRect(drag.start,p); drawOverlay(); return; }
   if (drag.kind === 'gradient') { drag.current=p;previewGradient(drag.start,p);return; }
-  if (drag.kind === 'path-control') {
-    const layer=drag.pathSource==='document-path'?null:doc.layers.find(item=>item.id===drag.layerId);
-    const points=pathTargetPoints(layer,drag.pathSource,drag.subpathIndex,drag.documentPathIndex);
-    const node=points?.[drag.nodeIndex];
-    if(!node||(layer&&isLayerLocked(doc,layer)))return;
-    const local=layer?documentPointToLayerPixel(p,layer):p;
-    const distance=Math.hypot(local.x-drag.startLocal.x,local.y-drag.startLocal.y);
-    drag.moved=distance>1/zoom;
-    if(drag.control==='anchor'){
-      const dx=local.x-drag.startLocal.x,dy=local.y-drag.startLocal.y;
-      node.x=drag.initial.x+dx;node.y=drag.initial.y+dy;
-      node.handleIn=drag.initial.handleIn?{x:drag.initial.handleIn.x+dx,y:drag.initial.handleIn.y+dy}:null;
-      node.handleOut=drag.initial.handleOut?{x:drag.initial.handleOut.x+dx,y:drag.initial.handleOut.y+dy}:null;
-      node.kind=drag.initial.kind==='smooth'?'smooth':'corner';
-    }else{
-      node[drag.control]={x:local.x,y:local.y};
-      const opposite=drag.control==='handleIn'?'handleOut':'handleIn';
-      if(e.altKey)node.kind='corner';
-      else{
-        node.kind='smooth';
-        node[opposite]={x:node.x-(local.x-node.x),y:node.y-(local.y-node.y)};
-      }
-    }
-    render();drawOverlay();return;
-  }
   if (drag.kind === 'pen-handle') {
     const node=penDraft?.points?.[drag.nodeIndex];
     if(!node)return;
@@ -1971,7 +1951,12 @@ async function onOverlayPointerUp(e) {
       ctrlKey:e.ctrlKey,
       metaKey:e.metaKey,
     });
-  } else clearSmartGuides();
+  } else {
+    clearSmartGuides();
+    if (pathControlGestures.isGesture(d)) {
+      pathControlGestures.finish(d,canvasPoint(e,{clampToDocument:false}),{altKey:e.altKey});
+    }
+  }
   if (d.kind === 'pan') els.overlay.style.cursor = (spaceHeld || currentTool === 'hand') ? 'grab' : defaultToolCursor();
   if (d.kind === 'paint') await paintGesture.end(d);
   if (d.kind === 'marquee') selectionGestures.finishMarquee(d,d.current,{shiftKey:e.shiftKey});
@@ -1990,17 +1975,6 @@ async function onOverlayPointerUp(e) {
     if (r.width >= 10 && r.height >= 10) applyCrop(d.owner,r); else { cropRect=null; drawOverlay(); }
   }
   if (d.kind === 'gradient') await applyGradient(d.start,d.current);
-  if (d.kind === 'path-control') {
-    if(d.moved){
-      const vector=d.pathSource==='vector-mask';
-      const saved=d.pathSource==='document-path';
-      commit(saved
-        ? (d.control==='anchor'?'Переместить узел сохранённого контура':'Изменить ручку сохранённого контура')
-        : vector
-          ? (d.control==='anchor'?'Переместить узел векторной маски':'Изменить ручку векторной маски')
-          : (d.control==='anchor'?'Переместить Bézier-узел':'Изменить Bézier-ручку'));
-    }else drawOverlay();
-  }
   if (d.kind === 'pen-handle') {
     if(penDraft)penDraft.hover=canvasPoint(e);
     setStatus(d.moved
@@ -2024,7 +1998,7 @@ async function onOverlayPointerCancel(e) {
       penDraft.points.splice(d.nodeIndex,1);
       if(!penDraft.points.length)penDraft=null;
     }
-    if(d.kind==='path-control')restorePathControlDrag(d);
+    if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
     if (d.kind==='pan') els.overlay.style.cursor=defaultToolCursor();
     rasterEdit.cancelPaintPreview(); drawOverlay(); setStatus('Действие отменено');
   }
@@ -2964,7 +2938,7 @@ window.addEventListener('keydown',e=>{
       const d=drag;drag=null;pointerLifecycle?.releaseActivePointer();clearSmartGuides();
       if(layerTransformGestures.isGesture(d))layerTransformGestures.cancel(d);
       if(d.kind==='pen-handle'&&penDraft){penDraft.points.splice(d.nodeIndex,1);if(!penDraft.points.length)penDraft=null;}
-      if(d.kind==='path-control')restorePathControlDrag(d);
+      if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
       if(d.kind==='crop')cropRect=null;
       if(d.kind==='marquee')selectionGestures.cancelMarquee(d);
       els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;
