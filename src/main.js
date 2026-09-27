@@ -1,5 +1,5 @@
 import { HistoryStack } from './core/history.js';
-import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, rotationHandlePoint, snapLineEnd, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
+import { fitZoom, frameBounds, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, snapLineEnd, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
   createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
   addLayer, selectedLayer,
@@ -41,6 +41,7 @@ import { createTextSettingsController, TEXT_WEIGHT_OPTIONS, TEXT_STYLE_OPTIONS, 
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
+import { createLayerTransformSurfaceController } from './interaction/layer-transform-surface-controller.js';
 import { createLayerTransformGestureController } from './interaction/layer-transform-gesture-controller.js';
 import { createPathControlSurfaceController } from './interaction/path-control-surface-controller.js';
 import { PATH_CONTROL_COMMAND_RESULT, createPathControlCommandController } from './interaction/path-control-command-controller.js';
@@ -768,6 +769,15 @@ function persistSmartSnapState() {
   catch (error) { console.warn('Could not persist smart snap setting', error); }
 }
 function clearSmartGuides() { smartGuides = { x:null, y:null }; }
+const layerTransformSurface = createLayerTransformSurfaceController({
+  state: { getDocument: () => doc },
+  runtime: {
+    getCurrentTool: () => currentTool,
+    getZoom: () => zoom,
+    hasActiveInteraction: () => Boolean(drag),
+    getDisplayLayer: owner => textEditController.previewLayer(owner) || selectedLayer(owner),
+  },
+});
 const layerTransformGestures = createLayerTransformGestureController({
   state: { getDocument: () => doc },
   transaction: { commit },
@@ -1331,34 +1341,7 @@ function drawOverlay() {
     }
     ctx.restore();
   }
-  const layer = textEditController.previewLayer(doc) || selected();
-  if (!layer || !isLayerVisible(doc, layer) || !isTransformableLayer(layer)) return;
-  const frame = layerFrame(layer);
-  const moveMode=currentTool==='move';
-  const accent=isLayerLocked(doc,layer)?'#aeb6c4':moveMode?'#69a0ff':'#5ee7ff';
-  ctx.save();
-  ctx.strokeStyle='#000c';ctx.lineWidth=4/zoom;ctx.setLineDash([]);
-  ctx.beginPath();
-  ctx.moveTo(frame.corners[0].x, frame.corners[0].y);
-  for (let i = 1; i < frame.corners.length; i += 1) ctx.lineTo(frame.corners[i].x, frame.corners[i].y);
-  ctx.closePath(); ctx.stroke();
-  ctx.strokeStyle=accent;ctx.lineWidth=1.5/zoom;ctx.setLineDash(moveMode?[6/zoom,4/zoom]:[]);ctx.stroke();
-  if(moveMode&&!isLayerLocked(doc, layer)) {
-    ctx.fillStyle = '#f8fbff'; ctx.strokeStyle = '#3976ea'; ctx.setLineDash([]);
-    const size = 8 / zoom;
-    for (const point of Object.values(frame.handles)) {
-      ctx.fillRect(point.x-size/2, point.y-size/2, size, size);
-      ctx.strokeRect(point.x-size/2, point.y-size/2, size, size);
-    }
-    const rotatePoint = interactiveRotationHandlePoint(layer);
-    ctx.beginPath(); ctx.moveTo(frame.handles.n.x, frame.handles.n.y); ctx.lineTo(rotatePoint.x, rotatePoint.y); ctx.stroke();
-    ctx.beginPath(); ctx.arc(rotatePoint.x, rotatePoint.y, 5 / zoom, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  }else{
-    ctx.fillStyle=accent;ctx.strokeStyle='#071018';ctx.lineWidth=1/zoom;ctx.setLineDash([]);const radius=3.5/zoom;
-    for(const point of frame.corners){ctx.beginPath();ctx.arc(point.x,point.y,radius,0,Math.PI*2);ctx.fill();ctx.stroke();}
-  }
-  const label=String(layer.name||'Слой');ctx.font=`600 ${12/zoom}px Inter, Arial, sans-serif`;const paddingX=7/zoom,paddingY=5/zoom,labelWidth=ctx.measureText(label).width+paddingX*2,labelHeight=22/zoom;const bounds=frameBounds(layer);const labelX=clamp(bounds.x,2/zoom,Math.max(2/zoom,doc.width-labelWidth-2/zoom));const labelY=clamp(bounds.y-labelHeight-5/zoom,2/zoom,Math.max(2/zoom,doc.height-labelHeight-2/zoom));ctx.fillStyle='#101722ee';ctx.strokeStyle=accent;ctx.lineWidth=1/zoom;ctx.beginPath();ctx.roundRect(labelX,labelY,labelWidth,labelHeight,5/zoom);ctx.fill();ctx.stroke();ctx.fillStyle='#f6fbff';ctx.textBaseline='middle';ctx.fillText(label,labelX+paddingX,labelY+labelHeight/2);
-  ctx.restore();
+  layerTransformSurface.draw(ctx);
 }
 
 function updateCanvasSize() {
@@ -1654,8 +1637,6 @@ function canvasPoint(event, { clampToDocument = true } = {}) {
   const y = (event.clientY - r.top) / zoom;
   return clampToDocument ? { x: clamp(x, 0, doc.width), y: clamp(y, 0, doc.height) } : { x, y };
 }
-function isTransformableLayer(layer) { return Boolean(layer) && layer.type !== 'adjustment'; }
-function topLayerAt(point) { return [...doc.layers].reverse().find(l => isTransformableLayer(l) && isLayerVisible(doc,l) && !isLayerLocked(doc,l) && pointInLayer(point,l)) ?? null; }
 function updateTransformPropertyValues(layer) {
   const values = {
     x: Math.round(layer.x), y: Math.round(layer.y),
@@ -1666,21 +1647,6 @@ function updateTransformPropertyValues(layer) {
     const input = els.props.querySelector(`[data-prop="${key}"]`);
     if (input) input.value = String(value);
   }
-}
-function interactiveRotationHandlePoint(layer) {
-  const preferred = rotationHandlePoint(layer, 30 / zoom);
-  const insetX = Math.min(Math.max(8 / zoom, 2), doc.width / 2);
-  const insetY = Math.min(Math.max(8 / zoom, 2), doc.height / 2);
-  return {
-    x: clamp(preferred.x, insetX, Math.max(insetX, doc.width - insetX)),
-    y: clamp(preferred.y, insetY, Math.max(insetY, doc.height - insetY)),
-  };
-}
-function cursorForHandle(handle, layer) {
-  const baseAngles = { e:0, se:45, s:90, sw:135, w:180, nw:225, n:270, ne:315 };
-  const angle = ((baseAngles[handle] ?? 0) + (Number(layer.rotation) || 0) + 360) % 180;
-  const bucket = Math.round(angle / 45) % 4;
-  return ['ew-resize','nwse-resize','ns-resize','nesw-resize'][bucket];
 }
 function defaultToolCursor() {
   return currentTool === 'move' ? 'default' : currentTool === 'text' ? 'text' : currentTool === 'hand' ? 'grab' : currentTool === 'zoom' ? 'zoom-in' : RASTER_BRUSH_TOOLS.has(currentTool) ? 'none' : 'crosshair';
@@ -1701,15 +1667,8 @@ function adjustBrushSize(direction, coarse = false) {
 }
 
 function updateMoveCursor(point) {
-  if (currentTool !== 'move' || drag) return;
-  const layer = selected();
-  if (isTransformableLayer(layer) && isLayerVisible(doc, layer) && !isLayerLocked(doc, layer)) {
-    const rotatePoint = interactiveRotationHandlePoint(layer);
-    if (Math.hypot(point.x - rotatePoint.x, point.y - rotatePoint.y) <= 10 / zoom) { els.overlay.style.cursor = 'grab'; return; }
-    const handle = hitLayerHandle(point, layer, 10 / zoom);
-    if (handle) { els.overlay.style.cursor = cursorForHandle(handle, layer); return; }
-  }
-  els.overlay.style.cursor = layer && isLayerVisible(doc, layer) && !isLayerLocked(doc, layer) && pointInLayer(point, layer) ? 'move' : 'default';
+  const cursor = layerTransformSurface.idleCursor(point);
+  if (cursor) els.overlay.style.cursor = cursor;
 }
 
 function visibleSnapTargetRects(owner, layerId) {
@@ -1740,26 +1699,20 @@ async function onOverlayPointerDown(e) {
   }
   if (e.button !== 0) return;
   if (currentTool === 'move') {
-    let l = selected();
-    if (isTransformableLayer(l) && isLayerVisible(doc,l) && !isLayerLocked(doc,l)) {
-      const rotatePoint = interactiveRotationHandlePoint(l);
-      if (Math.hypot(p.x - rotatePoint.x, p.y - rotatePoint.y) <= 10 / zoom) {
-        const frame = layerFrame(l);
-        drag = layerTransformGestures.beginRotate(doc,l.id,p,frame.center);
-        els.overlay.style.cursor = 'grabbing';
-        return;
-      }
-      const handle = hitLayerHandle(p, l, 10 / zoom);
-      if (handle) {
-        drag = layerTransformGestures.beginResize(doc,l.id,handle,p);
-        els.overlay.style.cursor = cursorForHandle(handle, l);
-        return;
-      }
+    const intent = layerTransformSurface.movePointerIntent(p);
+    if (intent?.kind === 'rotate') {
+      drag = layerTransformGestures.beginRotate(doc,intent.layer.id,p,intent.center);
+      els.overlay.style.cursor = 'grabbing';
+      return;
     }
-    if (!isTransformableLayer(l) || isLayerLocked(doc,l) || !isLayerVisible(doc,l) || !pointInLayer(p,l)) l = topLayerAt(p);
-    if (l) {
-      doc.selectedLayerId = l.id;
-      drag = layerTransformGestures.beginMove(doc,l.id,p);
+    if (intent?.kind === 'resize') {
+      drag = layerTransformGestures.beginResize(doc,intent.layer.id,intent.handle,p);
+      els.overlay.style.cursor = intent.cursor;
+      return;
+    }
+    if (intent?.kind === 'move') {
+      doc.selectedLayerId = intent.layer.id;
+      drag = layerTransformGestures.beginMove(doc,intent.layer.id,p);
       els.overlay.style.cursor='move'; layersPanelController.render(); refreshInspectorPanels(); drawOverlay();
     }
     return;
