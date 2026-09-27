@@ -45,6 +45,11 @@ Owns primitive layer/group command policy shared by the Layers panel, menus, but
 
 It deliberately does **not** render the Layers tree, own drag identity, define persisted layer/group schema, store history, or absorb Smart Object/mask/blending feature menus. Stable model mutations remain in `src/core/state.js`; `src/main.js` is the composition root for transaction/modal/status ports and feature-heavy menu lists.
 
+### `src/layers/transform-command-controller.js`
+Owns synchronous one-shot selected-layer layout transforms shared by keyboard/menu routes: nudge, center, six canvas alignments and fit-to-canvas. It re-resolves the exact active layer by stable ID, applies recursive effective-lock and transformability guards, delegates rotated/scaled frame math to `src/core/geometry.js`, suppresses semantic no-ops and publishes one history entry only after a real transform.
+
+It deliberately does **not** own pointer Move/Resize/Rotate gesture state or generic Properties live-preview transactions; those remain in `src/main.js` and `src/layers/property-command-controller.js` respectively. `src/main.js` keeps only selected-layer/status wrappers.
+
 ### `src/layers/property-command-controller.js`
 Owns generic Layer Properties mutation/transaction policy shared by the Properties/Color & Effects panels, discrete Image-menu filter resets and persistent layer controls: exact active-document + layer-ID re-resolution, effective-lock checks, numeric/text/shape/filter normalization, raster canvas-size safety, custom-font publication, layer blend/opacity commands and HDR display-preview update/reset.
 

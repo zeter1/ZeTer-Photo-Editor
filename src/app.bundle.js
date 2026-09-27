@@ -8560,6 +8560,170 @@ function createAdjustmentLayerCommandController({ state, transaction } = {}) {
   return { updateProperty, updateCurveChannel, setClipping };
 }
 
+// ---- src/layers/transform-command-controller.js ----
+const LAYER_TRANSFORM_COMMAND_RESULT = Object.freeze({
+  COMMITTED: 'committed',
+  NOOP: 'noop',
+  INVALID: 'invalid',
+  REJECTED: 'rejected',
+});
+const LAYER_ALIGNMENT_LABELS = Object.freeze({
+  left: 'по левому краю',
+  hcenter: 'по центру горизонтально',
+  right: 'по правому краю',
+  top: 'по верхнему краю',
+  vcenter: 'по центру вертикально',
+  bottom: 'по нижнему краю',
+});
+
+const LAYER_ALIGNMENT_MODES = new Set(Object.keys(LAYER_ALIGNMENT_LABELS));
+const LAYER_TRANSFORM_EPSILON = 1e-9;
+function createLayerTransformCommandController({ state, transaction } = {}) {
+  if (typeof state?.getDocument !== 'function') {
+    throw new TypeError('layer transform command state bridge is required');
+  }
+  if (typeof transaction?.commit !== 'function') {
+    throw new TypeError('layer transform command transaction bridge is required');
+  }
+
+  function activeDocument(owner) {
+    return Boolean(owner) && state.getDocument() === owner;
+  }
+
+  function exactEditableLayer(owner, layerId) {
+    if (!activeDocument(owner) || !layerId) return null;
+    const layer = owner.layers?.find(item => item.id === layerId) ?? null;
+    if (!layer || layer.type === 'adjustment' || isLayerLocked(owner, layer)) return null;
+    return layer;
+  }
+
+  function finiteNumber(value) {
+    try {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function documentSize(owner) {
+    const width = finiteNumber(owner?.width);
+    const height = finiteNumber(owner?.height);
+    return width !== null && height !== null && width > 0 && height > 0
+      ? { width, height }
+      : null;
+  }
+
+  function sameNumber(left, right) {
+    return Math.abs(left - right) <= LAYER_TRANSFORM_EPSILON;
+  }
+
+  function publish(label) {
+    transaction.commit(label);
+    return LAYER_TRANSFORM_COMMAND_RESULT.COMMITTED;
+  }
+
+  function nudge(owner, layerId, dx, dy) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const deltaX = finiteNumber(dx);
+    const deltaY = finiteNumber(dy);
+    if (deltaX === null || deltaY === null) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
+    if (sameNumber(deltaX, 0) && sameNumber(deltaY, 0)) return LAYER_TRANSFORM_COMMAND_RESULT.NOOP;
+
+    const currentX = finiteNumber(layer.x) ?? 0;
+    const currentY = finiteNumber(layer.y) ?? 0;
+    layer.x = currentX + deltaX;
+    layer.y = currentY + deltaY;
+    return publish('Сдвинуть слой');
+  }
+
+  function center(owner, layerId) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const size = documentSize(owner);
+    if (!size) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
+
+    const frame = layerFrame(layer);
+    const currentX = finiteNumber(layer.x) ?? 0;
+    const currentY = finiteNumber(layer.y) ?? 0;
+    const nextX = currentX + size.width / 2 - frame.center.x;
+    const nextY = currentY + size.height / 2 - frame.center.y;
+    if (sameNumber(currentX, nextX) && sameNumber(currentY, nextY)) {
+      return LAYER_TRANSFORM_COMMAND_RESULT.NOOP;
+    }
+
+    layer.x = nextX;
+    layer.y = nextY;
+    return publish('Центрировать слой');
+  }
+
+  function align(owner, layerId, mode) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    if (!LAYER_ALIGNMENT_MODES.has(mode)) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
+    const size = documentSize(owner);
+    if (!size) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
+
+    const next = alignLayerToCanvas(layer, mode, size.width, size.height);
+    if (!next.changed) return LAYER_TRANSFORM_COMMAND_RESULT.NOOP;
+    layer.x = next.x;
+    layer.y = next.y;
+    return publish(`Выровнять слой ${LAYER_ALIGNMENT_LABELS[mode]}`);
+  }
+
+  function fitToCanvas(owner, layerId) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const size = documentSize(owner);
+    if (!size) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
+
+    const bounds = frameBounds(layer);
+    if (
+      !Number.isFinite(bounds.width) ||
+      !Number.isFinite(bounds.height) ||
+      bounds.width <= 0 ||
+      bounds.height <= 0
+    ) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
+
+    const ratio = Math.min(size.width / bounds.width, size.height / bounds.height);
+    const currentScaleX = finiteNumber(layer.scaleX ?? 1);
+    const currentScaleY = finiteNumber(layer.scaleY ?? 1);
+    if (
+      !Number.isFinite(ratio) ||
+      ratio <= 0 ||
+      currentScaleX === null ||
+      currentScaleY === null ||
+      currentScaleX <= 0 ||
+      currentScaleY <= 0
+    ) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
+
+    const nextScaleX = currentScaleX * ratio;
+    const nextScaleY = currentScaleY * ratio;
+    const candidate = { ...layer, scaleX: nextScaleX, scaleY: nextScaleY };
+    const frame = layerFrame(candidate);
+    const currentX = finiteNumber(layer.x) ?? 0;
+    const currentY = finiteNumber(layer.y) ?? 0;
+    const nextX = currentX + size.width / 2 - frame.center.x;
+    const nextY = currentY + size.height / 2 - frame.center.y;
+
+    if (
+      sameNumber(currentScaleX, nextScaleX) &&
+      sameNumber(currentScaleY, nextScaleY) &&
+      sameNumber(currentX, nextX) &&
+      sameNumber(currentY, nextY)
+    ) return LAYER_TRANSFORM_COMMAND_RESULT.NOOP;
+
+    layer.scaleX = nextScaleX;
+    layer.scaleY = nextScaleY;
+    layer.x = nextX;
+    layer.y = nextY;
+    return publish('Вписать слой в холст');
+  }
+
+  return { nudge, center, align, fitToCanvas };
+}
+
 // ---- src/ui/layer-blending-controller.js ----
 function blendingPreviewCrop(documentValue, layer) {
   const scale = Math.max(Math.abs(layer.scaleX || 1), Math.abs(layer.scaleY || 1));
@@ -19523,6 +19687,11 @@ const adjustmentLayerCommandController = createAdjustmentLayerCommandController(
   transaction: { commit },
 });
 
+const layerTransformCommandController = createLayerTransformCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+});
+
 const layerPropertyCommandController = createLayerPropertyCommandController({
   state: { getDocument: () => doc },
   transaction: {
@@ -21576,8 +21745,8 @@ async function exportDialog() { if(blockPendingDocumentEdit())return; showModal(
 function toggleSelectedVisibility() { return layerGroupCommandController.toggleSelectedLayerVisibility(); }
 function toggleSelectedLock() { return layerGroupCommandController.toggleSelectedLayerLock(); }
 function nudgeSelected(dx,dy) {
-  const l=selected(); if(!l || isLayerLocked(doc,l))return;
-  l.x+=dx; l.y+=dy; commit('Сдвинуть слой');
+  const l=selected();if(!l)return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+  return layerTransformCommandController.nudge(doc,l.id,dx,dy);
 }
 function selectAdjacentLayer(direction) {
   if (!doc.layers.length) return;
@@ -21587,35 +21756,26 @@ function selectAdjacentLayer(direction) {
 }
 
 function centerSelectedLayer() {
-  const l=selected();if(!isTransformableLayer(l)||isLayerLocked(doc,l))return;
-  const frame=layerFrame(l);
-  l.x += doc.width/2-frame.center.x;
-  l.y += doc.height/2-frame.center.y;
-  commit('Центрировать слой');
+  const l=selected();if(!l)return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+  return layerTransformCommandController.center(doc,l.id);
 }
 function alignSelectedLayer(mode) {
   const l=selected();
-  if(!l){setStatus('Сначала выберите слой');return;}
-  if(!isTransformableLayer(l)){setStatus('Корректирующий слой не имеет геометрической трансформации');return;}
-  if(isLayerLocked(doc,l)){setStatus('Слой или его группа заблокированы');return;}
-  const next=alignLayerToCanvas(l,mode,doc.width,doc.height);
-  if(!next.changed){setStatus('Слой уже выровнен');return;}
-  l.x=next.x;l.y=next.y;
-  const labels={left:'по левому краю',hcenter:'по центру горизонтально',right:'по правому краю',top:'по верхнему краю',vcenter:'по центру вертикально',bottom:'по нижнему краю'};
-  commit(`Выровнять слой ${labels[mode]||''}`.trim());
-  setStatus(`Слой выровнен ${labels[mode]||''}`.trim());
+  if(!l){setStatus('Сначала выберите слой');return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;}
+  const result=layerTransformCommandController.align(doc,l.id,mode);
+  if(result===LAYER_TRANSFORM_COMMAND_RESULT.NOOP){
+    setStatus('Слой уже выровнен');
+  }else if(result===LAYER_TRANSFORM_COMMAND_RESULT.COMMITTED){
+    setStatus(`Слой выровнен ${LAYER_ALIGNMENT_LABELS[mode]}`);
+  }else if(result===LAYER_TRANSFORM_COMMAND_RESULT.REJECTED){
+    if(!isTransformableLayer(l))setStatus('Корректирующий слой не имеет геометрической трансформации');
+    else if(isLayerLocked(doc,l))setStatus('Слой или его группа заблокированы');
+  }
+  return result;
 }
 function fitSelectedLayerToCanvas() {
-  const l=selected();if(!isTransformableLayer(l)||isLayerLocked(doc,l))return;
-  const bounds=frameBounds(l);
-  if(bounds.width<=0||bounds.height<=0)return;
-  const ratio=Math.min(doc.width/bounds.width,doc.height/bounds.height);
-  if(!Number.isFinite(ratio)||ratio<=0)return;
-  l.scaleX=(l.scaleX??1)*ratio;l.scaleY=(l.scaleY??1)*ratio;
-  const frame=layerFrame(l);
-  l.x += doc.width/2-frame.center.x;
-  l.y += doc.height/2-frame.center.y;
-  commit('Вписать слой в холст');
+  const l=selected();if(!l)return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+  return layerTransformCommandController.fitToCanvas(doc,l.id);
 }
 
 function setDocumentBackground() {
