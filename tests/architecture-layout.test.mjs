@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformGestureController, pathControlGestureController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, layerTransformGestureController, pathControlSurfaceController, pathControlGestureController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -28,6 +28,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/text-settings-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pointer-lifecycle-router.js', root), 'utf8'),
   readFile(new URL('src/interaction/layer-transform-gesture-controller.js', root), 'utf8'),
+  readFile(new URL('src/interaction/path-control-surface-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/path-control-gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
@@ -155,6 +156,20 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /createLayerTransformGestureController\(\{/);
   assert.match(main, /layerTransformGestures\.beginMove\(doc,l\.id,p\)/);
   assert.match(main, /layerTransformGestures\.beginResize\(doc,l\.id,handle,p\)/);
+  assert.match(main, /from '\.\/interaction\/path-control-surface-controller\.js'/);
+  assert.match(build, /'src\/interaction\/path-control-surface-controller\.js'/);
+  assert.match(pathControlSurfaceController, /export function createPathControlSurfaceController/);
+  assert.match(pathControlSurfaceController, /selectedLayer\(owner\)/);
+  assert.match(pathControlSurfaceController, /isLayerVisible\(owner, layer\)/);
+  assert.match(pathControlSurfaceController, /isLayerLocked\(owner, target\.layer\)/);
+  assert.match(main, /createPathControlSurfaceController\(\{/);
+  assert.match(main, /pathControlSurface\.hit\(p\)/);
+  assert.match(main, /pathControlSurface\.draw\(ctx\)/);
+  assert.match(main, /pathControlSurface\.updateCursor\(p\)/);
+  assert.match(main, /pathControlSurface\.targetPoints\(hit\)/);
+  for (const name of ['selectedEditablePathTargets','pathTargetPoints','pathControlDocumentPoint','hitSelectedPathControl','traceEditablePathTarget','drawSelectedPathControls','updatePenCursor']) {
+    assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  }
   assert.match(main, /from '\.\/interaction\/path-control-gesture-controller\.js'/);
   assert.match(build, /'src\/interaction\/path-control-gesture-controller\.js'/);
   assert.match(pathControlGestureController, /export function createPathControlGestureController/);
