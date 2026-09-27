@@ -23,6 +23,11 @@ Owns one interactive selected-layer Move / Resize / Rotate transaction from capt
 
 It deliberately does **not** install DOM listeners, choose the selected layer, hit-test handles, own pointer capture, render the Layers tree or absorb one-shot nudge/align/fit commands. Generic capture stays in `pointer-lifecycle-router.js`; hit-testing/cursor/tool dispatch stay in `src/main.js`; discrete transform commands stay in `src/layers/transform-command-controller.js`.
 
+### `path-control-gesture-controller.js`
+Owns one drag transaction for an existing Bézier anchor or handle across Shape paths, Vector Masks and Saved Paths. It captures the originating document plus exact target identities, uses stable Saved Path IDs when available, localizes layer-backed points, applies Shift/Alt semantics, restores sub-threshold/no-op previews, applies the final release point, publishes one exact history label and shares one cancel primitive for pointer-cancel/Escape.
+
+It deliberately does **not** own hit-testing, control drawing, status strings, Alt-click corner conversion or new `penDraft` / `pen-handle` creation; those stay in `src/main.js`. Saved Paths CRUD stays in `src/ui/paths-controller.js`; Vector Mask lifecycle stays in `src/selection/vector-mask-controller.js`.
+
 ## UI boundary — `src/ui/`
 
 ### `tool-config.js`
@@ -39,11 +44,6 @@ Owns generic top-menu/context-menu mechanics: rendering menu items, enabled stat
 
 ### `modal-controller.js`
 Owns generic modal/dialog mechanics: field rendering, numeric normalization, async submit lifecycle, focus restoration, backdrop/Escape close, draggable text-modal shell, info dialogs and the saved-project recovery manager (list/select/load/new/rename/delete/restore actions, including rapid right-button double-click restore). Feature state remains outside the shell; Text draft/preview belongs to `text-edit-controller.js` and Text font/settings policy belongs to `text-settings-controller.js`.
-
-### `path-control-gesture-controller.js`
-Owns one drag transaction for an existing Bézier anchor or handle across Shape paths, Vector Masks and Saved Paths. It captures the originating document plus exact target identities, uses stable Saved Path IDs when available, localizes layer-backed points, applies Shift/Alt semantics, restores sub-threshold/no-op previews, applies the final release point, publishes one exact history label and shares one cancel primitive for pointer-cancel/Escape.
-
-It deliberately does **not** own hit-testing, control drawing, status strings, Alt-click corner conversion or new `penDraft` / `pen-handle` creation; those stay in `src/main.js`. Saved Paths CRUD stays in `src/ui/paths-controller.js`; Vector Mask lifecycle stays in `src/selection/vector-mask-controller.js`.
 
 ### `workspace-layout-controller.js`
 Owns editor-shell layout state that is independent of document contents: persisted sidebar collapse IDs, legacy collapse-state migration, accessible panel toggle state and canvas-mode visibility with viewport-center preservation. It receives DOM/runtime geometry through narrow ports and does not own document/layer/history/tool state.
