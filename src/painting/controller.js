@@ -82,10 +82,6 @@ export function createRasterEditController({
     clearHighDepthPaintState();
   }
 
-  function isEditableRasterLayer(layer) {
-    return Boolean(layer) && layer.type === 'raster' && !isLayerLocked(currentDocument(), layer);
-  }
-
   function highDepthBudgetForLayer(layer) {
     const used = currentDocument().layers.reduce(
       (sum, item) => item.id === layer?.id ? sum : sum + Math.max(0, Number(item?.highDepthSource?.rawBytes) || 0),
