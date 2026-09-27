@@ -32,7 +32,7 @@ test('begin captures the exact owner and update normalizes reverse drags', () =>
   assert.deepEqual(updated, { x:10, y:15, width:30, height:35 });
   assert.ok(Object.isFrozen(updated));
 
-  updated.x = 999;
+  assert.throws(() => { updated.x = 999; }, TypeError);
   assert.deepEqual(controller.snapshot(), { x:10, y:15, width:30, height:35 });
 });
 
