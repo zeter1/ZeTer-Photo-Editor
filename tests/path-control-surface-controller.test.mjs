@@ -236,3 +236,16 @@ test('cursor feedback is owned by the surface and only changes for idle Pen inte
   assert.equal(h.controller.updateCursor({ x: 110, y: 70 }), null);
   assert.deepEqual(h.cursors, ['pointer', 'crosshair']);
 });
+
+
+test('live target resolution rejects stale point-array identity instead of mutating a replacement path', () => {
+  const h = createHarness();
+  h.node.handleIn = null;
+  h.node.handleOut = null;
+  const hit = h.controller.hit({ x: 110, y: 70 });
+  assert.equal(hit?.control, 'anchor');
+  assert.equal(h.controller.resolveTarget(hit)?.node, h.node);
+
+  h.layer.pathPoints = [pathNode({ x: 10, y: 20, handleIn: null, handleOut: null })];
+  assert.equal(h.controller.resolveTarget(hit), null);
+});
