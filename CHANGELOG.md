@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-27 — Canonical Layer/Group command controller
+
+- Refactor: primitive layer/group semantic commands shared by the Layers panel, menus, buttons and keyboard routes moved from duplicated `src/main.js` callbacks into `src/layers/command-controller.js`; `src/main.js` is now composition/wiring plus feature-heavy menu ownership.
+- Correctness: layer/group lock policy now consistently uses recursive effective ancestor locks, fixing the selected-layer path that previously checked only the immediate group.
+- Stale-state safety: rename/group-properties modal Apply re-resolves the exact originating document/entity before mutation, so tab switches or removed targets publish neither stale writes nor history.
+- History hygiene: failed and no-op reorder/move/property commands do not commit; group deletion keeps existing core behavior that reparents contents one level upward.
+- Regression/docs/build: direct command-controller tests cover nested locks, pending delete, stale modals, no-op history, group preservation and layer/group moves; architecture/source contracts and AI maps point to the new canonical owner, and the generated browser bundle includes the new source.
+
 ### 2026-09-27 — Открытие recovery-проекта двойным левым кликом
 
 - Bug fix: быстрый двойной клик по карточке автосохранённого проекта теперь обрабатывается только основной (левой) кнопкой мыши; двойной правый клик больше не запускает восстановление.
