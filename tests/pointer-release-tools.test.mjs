@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-import { constrainedRect, normalizeRect } from '../src/core/geometry.js';
+import { constrainedRect } from '../src/core/geometry.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const start = main.indexOf('async function onOverlayPointerUp(e) {');
@@ -47,7 +47,20 @@ function release(drag, point, pointerId = 1, shiftKey = false, altKey = false) {
     },
     drawLineOnCurrentRaster: (from, to) => calls.push(['line', from.x, from.y, to.x, to.y]),
     constrainedRect,
-    normalizeRect,
+    cropGestures: {
+      isGesture: value => value?.kind === 'crop',
+      finish: (value, releasePoint) => {
+        const rect = {
+          x:Math.min(value.start.x, releasePoint.x),
+          y:Math.min(value.start.y, releasePoint.y),
+          width:Math.abs(releasePoint.x - value.start.x),
+          height:Math.abs(releasePoint.y - value.start.y),
+        };
+        return rect.width >= 10 && rect.height >= 10
+          ? { accepted:true, owner:value.owner, rect }
+          : { accepted:false, reason:'too-small' };
+      },
+    },
     createShapeLayer: props => props,
     addLayer: (_, layer) => calls.push(['shape', layer.width, layer.height]),
     commit: label => {
@@ -132,6 +145,7 @@ test('real transform pointermove delegates point and modifiers to the canonical 
       update:(value,point,modifiers)=>calls.push([value.kind,point.x,point.y,Boolean(modifiers.shiftKey),Boolean(modifiers.altKey),Boolean(modifiers.ctrlKey),Boolean(modifiers.metaKey)]),
     },
     pathControlGestures:{isGesture:()=>false},
+    cropGestures:{isGesture:()=>false},
   };
   runInNewContext(pointerMoveSource + '\nglobalThis.__pointerMove = onOverlayPointerMove;', context);
   context.__pointerMove({point:{x:15,y:25},shiftKey:true,altKey:true,ctrlKey:true,metaKey:false});
@@ -160,8 +174,30 @@ test('real path-control pointermove delegates the point and Alt modifier to the 
       isGesture:value=>value===pathDrag,
       update:(value,point,modifiers)=>calls.push([value.kind,point.x,point.y,Boolean(modifiers.altKey)]),
     },
+    cropGestures:{isGesture:()=>false},
   };
   runInNewContext(pointerMoveSource + '\nglobalThis.__pointerMove = onOverlayPointerMove;', context);
   context.__pointerMove({point:{x:15,y:25},altKey:true});
   assert.deepEqual(calls, [['path-control',15,25,true]]);
+});
+
+
+test('real Crop pointermove delegates transient geometry to the canonical owner', () => {
+  const cropDrag = {kind:'crop'};
+  const calls = [];
+  const context = {
+    drag:cropDrag,
+    els:{pointer:{}},
+    canvasPoint:event=>event.point,
+    hoverPoint:null,
+    layerTransformGestures:{isGesture:()=>false},
+    pathControlGestures:{isGesture:()=>false},
+    cropGestures:{
+      isGesture:value=>value===cropDrag,
+      update:(value,point)=>calls.push([value.kind,point.x,point.y]),
+    },
+  };
+  runInNewContext(pointerMoveSource + '\nglobalThis.__pointerMove = onOverlayPointerMove;', context);
+  context.__pointerMove({point:{x:31,y:47}});
+  assert.deepEqual(calls, [['crop',31,47]]);
 });
