@@ -3,7 +3,7 @@ import { fitZoom, layerFrame, frameBounds, hitLayerHandle, normalizeRect, constr
 import {
   createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
   addLayer, selectedLayer,
-  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, imageResizeTransforms, MAX_LAYER_POSITION, DEFAULT_LAYER_FILTERS, sanitizeHighDepthPreview, sanitizeColorManagement,
+  snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, DEFAULT_LAYER_FILTERS, sanitizeHighDepthPreview, sanitizeColorManagement,
   isLayerVisible, isLayerLocked, isGroupLocked, groupDepth,
 } from './core/state.js';
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache } from './core/render.js';
@@ -47,6 +47,7 @@ import { createSelectionRasterMutationController } from './selection/raster-muta
 import { createSelectionMaskController } from './selection/mask-controller.js';
 import { createSelectionVectorMaskController } from './selection/vector-mask-controller.js';
 import { createDocumentImportController } from './document/import-controller.js';
+import { DOCUMENT_RESIZE_COMMAND_RESULT, createDocumentResizeCommandController } from './document/resize-command-controller.js';
 import { createSmartObjectController } from './document/smart-object-controller.js';
 import { createPsdSmartObjectResource } from './document/psd-smart-object-resource.js';
 import { createPsdImportController } from './document/psd-import-controller.js';
@@ -780,6 +781,18 @@ const selectionGestures = createSelectionGestureController({
     updateToolLabel: () => updateToolLabel(),
     setStatus,
     drawOverlay: () => drawOverlay(),
+  },
+});
+const documentResizeCommandController = createDocumentResizeCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+  runtime: {
+    resetGeometryTransientState: () => {
+      cropRect = null;
+      clearSelectionState();
+      rasterEdit.clearBrushBuffer();
+    },
+    fitToView,
   },
 });
 let documentSessionController = null;
@@ -2634,22 +2647,25 @@ function layerMaskSummary(layer){
   return parts.join(' + ')||'нет';
 }
 
+function handleDocumentResizeCommandResult(outcome) {
+  if(outcome.result===DOCUMENT_RESIZE_COMMAND_RESULT.INVALID){
+    const message=outcome.error?.message||'Не удалось изменить размер документа';
+    toast(message,'error');setStatus(message);return false;
+  }
+  if(outcome.result===DOCUMENT_RESIZE_COMMAND_RESULT.REJECTED){
+    setStatus('Документ изменился — размер не применён');return false;
+  }
+}
+
 function resizeImageDialog(){
   if(blockPendingDocumentEdit())return;
+  const owner=doc;
   showModal({title:'Размер изображения',fields:[
-    {name:'width',label:'Ширина',type:'number',value:doc.width,min:'1',max:'12000',required:true},
-    {name:'height',label:'Высота',type:'number',value:doc.height,min:'1',max:'12000',required:true}
+    {name:'width',label:'Ширина',type:'number',value:owner.width,min:'1',max:'12000',required:true},
+    {name:'height',label:'Высота',type:'number',value:owner.height,min:'1',max:'12000',required:true}
   ],submitLabel:'Изменить',onSubmit:v=>{
     if(blockPendingDocumentEdit())return false;
-    let size;try{size=checkedCanvasSize(Number(v.width)||doc.width,Number(v.height)||doc.height,'Размер изображения');}catch(error){toast(error.message,'error');setStatus(error.message);return false;}
-    const {width,height}=size;
-    if(width===doc.width&&height===doc.height)return;
-    const sx=width/doc.width,sy=height/doc.height;
-    let transforms;
-    try{transforms=imageResizeTransforms(doc.layers,sx,sy);}catch(error){toast(error.message,'error');setStatus(error.message);return false;}
-    doc.layers.forEach((layer,index)=>Object.assign(layer,transforms[index]));
-    doc.width=width;doc.height=height;cropRect=null;clearSelectionState();rasterEdit.clearBrushBuffer();
-    commit('Размер изображения');fitToView();
+    return handleDocumentResizeCommandResult(documentResizeCommandController.resizeImage(owner,v));
   }});
 }
 
@@ -2780,31 +2796,22 @@ const menus={
     ['О программе','',showAbout],
   ],
 };
-function resizeCanvasDialog(){if(blockPendingDocumentEdit())return;showModal({title:'Размер холста',fields:[
-  {name:'width',label:'Ширина',type:'number',value:doc.width,min:'1',max:'12000',required:true},
-  {name:'height',label:'Высота',type:'number',value:doc.height,min:'1',max:'12000',required:true},
-  {name:'anchor',label:'Якорь',type:'select',value:'center',options:[
-    ['top-left','↖ Слева сверху'],['top','↑ Сверху'],['top-right','↗ Справа сверху'],
-    ['left','← Слева'],['center','● По центру'],['right','→ Справа'],
-    ['bottom-left','↙ Слева снизу'],['bottom','↓ Снизу'],['bottom-right','↘ Справа снизу']
-  ]}
-],submitLabel:'Изменить',onSubmit:v=>{
-  if(blockPendingDocumentEdit())return false;
-  let size;try{size=checkedCanvasSize(Number(v.width)||doc.width,Number(v.height)||doc.height,'Размер холста');}catch(error){toast(error.message,'error');setStatus(error.message);return false;}
-  const {width,height}=size;
-  if(width===doc.width&&height===doc.height)return;
-  const anchors={
-    'top-left':[0,0],top:[.5,0],'top-right':[1,0],left:[0,.5],center:[.5,.5],right:[1,.5],
-    'bottom-left':[0,1],bottom:[.5,1],'bottom-right':[1,1]
-  };
-  const [ax,ay]=anchors[v.anchor]||anchors.center;
-  const shiftX=(width-doc.width)*ax, shiftY=(height-doc.height)*ay;
-  if(doc.layers.some(layer=>Math.abs(layer.x+shiftX)>MAX_LAYER_POSITION||Math.abs(layer.y+shiftY)>MAX_LAYER_POSITION)){
-    const message='Размер холста выведет слой за допустимые пределы';toast(message,'error');setStatus(message);return false;
-  }
-  for(const layer of doc.layers){layer.x+=shiftX;layer.y+=shiftY;}
-  doc.width=width;doc.height=height;cropRect=null;clearSelectionState();rasterEdit.clearBrushBuffer();commit('Размер холста');fitToView();
-}});}
+function resizeCanvasDialog(){
+  if(blockPendingDocumentEdit())return;
+  const owner=doc;
+  showModal({title:'Размер холста',fields:[
+    {name:'width',label:'Ширина',type:'number',value:owner.width,min:'1',max:'12000',required:true},
+    {name:'height',label:'Высота',type:'number',value:owner.height,min:'1',max:'12000',required:true},
+    {name:'anchor',label:'Якорь',type:'select',value:'center',options:[
+      ['top-left','↖ Слева сверху'],['top','↑ Сверху'],['top-right','↗ Справа сверху'],
+      ['left','← Слева'],['center','● По центру'],['right','→ Справа'],
+      ['bottom-left','↙ Слева снизу'],['bottom','↓ Снизу'],['bottom-right','↘ Справа снизу']
+    ]}
+  ],submitLabel:'Изменить',onSubmit:v=>{
+    if(blockPendingDocumentEdit())return false;
+    return handleDocumentResizeCommandResult(documentResizeCommandController.resizeCanvas(owner,v));
+  }});
+}
 els.tabs.addEventListener('contextmenu',e=>{
   if(e.target!==els.tabs)return;
   e.preventDefault();

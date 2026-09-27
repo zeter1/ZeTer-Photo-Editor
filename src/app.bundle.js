@@ -14392,6 +14392,149 @@ function createDocumentImportController({
   return { isImageFile, isProjectFile, importImages, handleIncomingFiles };
 }
 
+// ---- src/document/resize-command-controller.js ----
+const DOCUMENT_RESIZE_COMMAND_RESULT = Object.freeze({
+  COMMITTED: 'committed',
+  NOOP: 'noop',
+  INVALID: 'invalid',
+  REJECTED: 'rejected',
+});
+const DOCUMENT_RESIZE_ANCHORS = Object.freeze([
+  'top-left',
+  'top',
+  'top-right',
+  'left',
+  'center',
+  'right',
+  'bottom-left',
+  'bottom',
+  'bottom-right',
+]);
+
+const DOCUMENT_RESIZE_ANCHOR_POINTS = Object.freeze({
+  'top-left': [0, 0],
+  top: [0.5, 0],
+  'top-right': [1, 0],
+  left: [0, 0.5],
+  center: [0.5, 0.5],
+  right: [1, 0.5],
+  'bottom-left': [0, 1],
+  bottom: [0.5, 1],
+  'bottom-right': [1, 1],
+});
+const DOCUMENT_RESIZE_POSITION_ERROR = 'Размер холста выведет слой за допустимые пределы';
+
+function commandResult(result, error = null) {
+  return error ? { result, error } : { result };
+}
+function createDocumentResizeCommandController({
+  state,
+  transaction,
+  runtime,
+} = {}) {
+  if (typeof state?.getDocument !== 'function') {
+    throw new TypeError('document resize command state bridge is required');
+  }
+  if (typeof transaction?.commit !== 'function') {
+    throw new TypeError('document resize command transaction bridge is required');
+  }
+  if (typeof runtime?.resetGeometryTransientState !== 'function') {
+    throw new TypeError('document resize command transient reset bridge is required');
+  }
+  if (typeof runtime?.fitToView !== 'function') {
+    throw new TypeError('document resize command fit-to-view bridge is required');
+  }
+
+  function activeOwner(owner) {
+    return Boolean(owner) && state.getDocument() === owner;
+  }
+
+  function requestedSize(owner, request, label) {
+    return checkedCanvasSize(
+      Number(request?.width) || owner.width,
+      Number(request?.height) || owner.height,
+      label,
+    );
+  }
+
+  function publish(label) {
+    runtime.resetGeometryTransientState();
+    transaction.commit(label);
+    runtime.fitToView();
+    return commandResult(DOCUMENT_RESIZE_COMMAND_RESULT.COMMITTED);
+  }
+
+  function resizeImage(owner, request = {}) {
+    if (!activeOwner(owner)) return commandResult(DOCUMENT_RESIZE_COMMAND_RESULT.REJECTED);
+
+    let size;
+    let transforms;
+    try {
+      size = requestedSize(owner, request, 'Размер изображения');
+      if (size.width === owner.width && size.height === owner.height) {
+        return commandResult(DOCUMENT_RESIZE_COMMAND_RESULT.NOOP);
+      }
+      const scaleX = size.width / owner.width;
+      const scaleY = size.height / owner.height;
+      transforms = imageResizeTransforms(owner.layers, scaleX, scaleY);
+    } catch (error) {
+      return commandResult(DOCUMENT_RESIZE_COMMAND_RESULT.INVALID, error);
+    }
+
+    if (!activeOwner(owner)) return commandResult(DOCUMENT_RESIZE_COMMAND_RESULT.REJECTED);
+
+    owner.layers.forEach((layer, index) => Object.assign(layer, transforms[index]));
+    owner.width = size.width;
+    owner.height = size.height;
+    return publish('Размер изображения');
+  }
+
+  function resizeCanvas(owner, request = {}) {
+    if (!activeOwner(owner)) return commandResult(DOCUMENT_RESIZE_COMMAND_RESULT.REJECTED);
+
+    let size;
+    let updates;
+    try {
+      size = requestedSize(owner, request, 'Размер холста');
+      if (size.width === owner.width && size.height === owner.height) {
+        return commandResult(DOCUMENT_RESIZE_COMMAND_RESULT.NOOP);
+      }
+
+      const anchor = Object.hasOwn(DOCUMENT_RESIZE_ANCHOR_POINTS, request?.anchor)
+        ? request.anchor
+        : 'center';
+      const [anchorX, anchorY] = DOCUMENT_RESIZE_ANCHOR_POINTS[anchor];
+      const shiftX = (size.width - owner.width) * anchorX;
+      const shiftY = (size.height - owner.height) * anchorY;
+
+      updates = owner.layers.map(layer => {
+        const x = layer.x + shiftX;
+        const y = layer.y + shiftY;
+        if (
+          !Number.isFinite(x) ||
+          !Number.isFinite(y) ||
+          Math.abs(x) > MAX_LAYER_POSITION ||
+          Math.abs(y) > MAX_LAYER_POSITION
+        ) {
+          throw new Error(DOCUMENT_RESIZE_POSITION_ERROR);
+        }
+        return { x, y };
+      });
+    } catch (error) {
+      return commandResult(DOCUMENT_RESIZE_COMMAND_RESULT.INVALID, error);
+    }
+
+    if (!activeOwner(owner)) return commandResult(DOCUMENT_RESIZE_COMMAND_RESULT.REJECTED);
+
+    owner.layers.forEach((layer, index) => Object.assign(layer, updates[index]));
+    owner.width = size.width;
+    owner.height = size.height;
+    return publish('Размер холста');
+  }
+
+  return { resizeImage, resizeCanvas };
+}
+
 // ---- src/document/smart-object-controller.js ----
 function createSmartObjectController({
   runtime = {},
@@ -20051,6 +20194,18 @@ const selectionGestures = createSelectionGestureController({
     drawOverlay: () => drawOverlay(),
   },
 });
+const documentResizeCommandController = createDocumentResizeCommandController({
+  state: { getDocument: () => doc },
+  transaction: { commit },
+  runtime: {
+    resetGeometryTransientState: () => {
+      cropRect = null;
+      clearSelectionState();
+      rasterEdit.clearBrushBuffer();
+    },
+    fitToView,
+  },
+});
 let documentSessionController = null;
 const recoveryController = createRecoveryController({
   storage: {
@@ -21903,22 +22058,25 @@ function layerMaskSummary(layer){
   return parts.join(' + ')||'нет';
 }
 
+function handleDocumentResizeCommandResult(outcome) {
+  if(outcome.result===DOCUMENT_RESIZE_COMMAND_RESULT.INVALID){
+    const message=outcome.error?.message||'Не удалось изменить размер документа';
+    toast(message,'error');setStatus(message);return false;
+  }
+  if(outcome.result===DOCUMENT_RESIZE_COMMAND_RESULT.REJECTED){
+    setStatus('Документ изменился — размер не применён');return false;
+  }
+}
+
 function resizeImageDialog(){
   if(blockPendingDocumentEdit())return;
+  const owner=doc;
   showModal({title:'Размер изображения',fields:[
-    {name:'width',label:'Ширина',type:'number',value:doc.width,min:'1',max:'12000',required:true},
-    {name:'height',label:'Высота',type:'number',value:doc.height,min:'1',max:'12000',required:true}
+    {name:'width',label:'Ширина',type:'number',value:owner.width,min:'1',max:'12000',required:true},
+    {name:'height',label:'Высота',type:'number',value:owner.height,min:'1',max:'12000',required:true}
   ],submitLabel:'Изменить',onSubmit:v=>{
     if(blockPendingDocumentEdit())return false;
-    let size;try{size=checkedCanvasSize(Number(v.width)||doc.width,Number(v.height)||doc.height,'Размер изображения');}catch(error){toast(error.message,'error');setStatus(error.message);return false;}
-    const {width,height}=size;
-    if(width===doc.width&&height===doc.height)return;
-    const sx=width/doc.width,sy=height/doc.height;
-    let transforms;
-    try{transforms=imageResizeTransforms(doc.layers,sx,sy);}catch(error){toast(error.message,'error');setStatus(error.message);return false;}
-    doc.layers.forEach((layer,index)=>Object.assign(layer,transforms[index]));
-    doc.width=width;doc.height=height;cropRect=null;clearSelectionState();rasterEdit.clearBrushBuffer();
-    commit('Размер изображения');fitToView();
+    return handleDocumentResizeCommandResult(documentResizeCommandController.resizeImage(owner,v));
   }});
 }
 
@@ -22049,31 +22207,22 @@ const menus={
     ['О программе','',showAbout],
   ],
 };
-function resizeCanvasDialog(){if(blockPendingDocumentEdit())return;showModal({title:'Размер холста',fields:[
-  {name:'width',label:'Ширина',type:'number',value:doc.width,min:'1',max:'12000',required:true},
-  {name:'height',label:'Высота',type:'number',value:doc.height,min:'1',max:'12000',required:true},
-  {name:'anchor',label:'Якорь',type:'select',value:'center',options:[
-    ['top-left','↖ Слева сверху'],['top','↑ Сверху'],['top-right','↗ Справа сверху'],
-    ['left','← Слева'],['center','● По центру'],['right','→ Справа'],
-    ['bottom-left','↙ Слева снизу'],['bottom','↓ Снизу'],['bottom-right','↘ Справа снизу']
-  ]}
-],submitLabel:'Изменить',onSubmit:v=>{
-  if(blockPendingDocumentEdit())return false;
-  let size;try{size=checkedCanvasSize(Number(v.width)||doc.width,Number(v.height)||doc.height,'Размер холста');}catch(error){toast(error.message,'error');setStatus(error.message);return false;}
-  const {width,height}=size;
-  if(width===doc.width&&height===doc.height)return;
-  const anchors={
-    'top-left':[0,0],top:[.5,0],'top-right':[1,0],left:[0,.5],center:[.5,.5],right:[1,.5],
-    'bottom-left':[0,1],bottom:[.5,1],'bottom-right':[1,1]
-  };
-  const [ax,ay]=anchors[v.anchor]||anchors.center;
-  const shiftX=(width-doc.width)*ax, shiftY=(height-doc.height)*ay;
-  if(doc.layers.some(layer=>Math.abs(layer.x+shiftX)>MAX_LAYER_POSITION||Math.abs(layer.y+shiftY)>MAX_LAYER_POSITION)){
-    const message='Размер холста выведет слой за допустимые пределы';toast(message,'error');setStatus(message);return false;
-  }
-  for(const layer of doc.layers){layer.x+=shiftX;layer.y+=shiftY;}
-  doc.width=width;doc.height=height;cropRect=null;clearSelectionState();rasterEdit.clearBrushBuffer();commit('Размер холста');fitToView();
-}});}
+function resizeCanvasDialog(){
+  if(blockPendingDocumentEdit())return;
+  const owner=doc;
+  showModal({title:'Размер холста',fields:[
+    {name:'width',label:'Ширина',type:'number',value:owner.width,min:'1',max:'12000',required:true},
+    {name:'height',label:'Высота',type:'number',value:owner.height,min:'1',max:'12000',required:true},
+    {name:'anchor',label:'Якорь',type:'select',value:'center',options:[
+      ['top-left','↖ Слева сверху'],['top','↑ Сверху'],['top-right','↗ Справа сверху'],
+      ['left','← Слева'],['center','● По центру'],['right','→ Справа'],
+      ['bottom-left','↙ Слева снизу'],['bottom','↓ Снизу'],['bottom-right','↘ Справа снизу']
+    ]}
+  ],submitLabel:'Изменить',onSubmit:v=>{
+    if(blockPendingDocumentEdit())return false;
+    return handleDocumentResizeCommandResult(documentResizeCommandController.resizeCanvas(owner,v));
+  }});
+}
 els.tabs.addEventListener('contextmenu',e=>{
   if(e.target!==els.tabs)return;
   e.preventDefault();

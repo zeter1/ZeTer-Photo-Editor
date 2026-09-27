@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentResizeCommandController, paintingController, paintCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -31,6 +31,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/raster-mutation-controller.js', root), 'utf8'),
   readFile(new URL('src/document/import-controller.js', root), 'utf8'),
+  readFile(new URL('src/document/resize-command-controller.js', root), 'utf8'),
   readFile(new URL('src/painting/controller.js', root), 'utf8'),
   readFile(new URL('src/painting/command-controller.js', root), 'utf8'),
   readFile(new URL('src/painting/gesture-controller.js', root), 'utf8'),
@@ -247,6 +248,16 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /\bopenMenuKey\b/);
   assert.match(main, /menuController\.isOpen\(\)/);
   assert.match(main, /from '\.\/document\/import-controller\.js'/);
+  assert.match(main, /from '\.\/document\/resize-command-controller\.js'/);
+  assert.match(build, /'src\/document\/resize-command-controller\.js'/);
+  assert.match(documentResizeCommandController, /export function createDocumentResizeCommandController/);
+  assert.match(documentResizeCommandController, /imageResizeTransforms/);
+  assert.match(documentResizeCommandController, /MAX_LAYER_POSITION/);
+  assert.match(main, /createDocumentResizeCommandController\(\{/);
+  assert.match(main, /documentResizeCommandController\.resizeImage\(owner,v\)/);
+  assert.match(main, /documentResizeCommandController\.resizeCanvas\(owner,v\)/);
+  assert.doesNotMatch(main, /imageResizeTransforms\(/);
+  assert.doesNotMatch(main, /MAX_LAYER_POSITION/);
   assert.match(build, /'src\/document\/import-controller\.js'/);
   assert.match(documentImportController, /export function createDocumentImportController/);
   assert.doesNotMatch(main, /function isImageFile\(/);
