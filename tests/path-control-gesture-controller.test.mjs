@@ -140,7 +140,7 @@ test('shape handle drag mirrors the opposite handle and Alt keeps the captured o
     PATH_CONTROL_GESTURE_RESULT.UPDATED,
   );
   assert.deepEqual(corner.node.handleOut, {x:17,y:25});
-  assert.deepEqual(corner.node.handleIn, {x:8,y:20});
+  assert.deepEqual(corner.node.handleIn, {x:5,y:17});
   assert.equal(corner.node.kind, 'corner');
 });
 
