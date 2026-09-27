@@ -141,9 +141,9 @@ Future UI extractions should land here when they can be expressed as pure config
 ## Painting boundary — `src/painting/`
 
 ### `controller.js`
-Owns reusable raster-edit state shared by brush/eraser/fill/line and retouch routing: Canvas8 buffer/context/layer identity, native high-depth/CMYK working buffer, preview invalidation/frame throttling, render overrides, raster materialization and publication back to the layer.
+Owns reusable raster-edit state shared by brush/eraser/fill/line and retouch routing. For Canvas8 it owns the exact document + exact layer + exact Canvas cache identity, local prepare-before-cache-publication, paint-preview validity and PNG publish revalidation; see `RASTER_PERSISTENCE.md`. It also owns the existing native high-depth/CMYK working buffer, preview invalidation/frame throttling and raster materialization.
 
-It deliberately does **not** own tool choice, stroke routing, selection semantics, history commits or the application-wide pending-edit guard.
+It deliberately does **not** own tool choice, stroke routing, selection semantics, history commits or the application-wide pending-edit guard. The Canvas8 exact-owner contract does not imply equivalent async guarantees for native high-depth persistence.
 
 ### `command-controller.js`
 Owns bounded one-shot raster commands: flood fill, raster line and clearing pixels on the current raster layer inside the active selection. Canvas8 and native RGB/CMYK high-depth paths share the same injected target, selection, tool, transaction and UI ports.
@@ -156,9 +156,9 @@ Owns the persisted Gradient raster-layer transaction. `src/main.js` captures the
 A switched/replaced document — including a same-ID replacement — is stale and receives no redirected publication. See `GRADIENT_COMMAND.md` before changing this path.
 
 ### `gesture-controller.js`
-Owns the bounded lifecycle of one brush/eraser/retouch stroke: choose existing/new raster target, choose native high-depth/CMYK vs Canvas8 path, initialize per-stroke retouch state, route movement segments and persist on end. Dependencies are grouped ports (`state`, `target`, `selection`, `tools`, `nativePaint`, `ui`) instead of a long flat callback list.
+Owns the bounded lifecycle of one brush/eraser/retouch stroke: choose existing/new raster target, choose native high-depth/CMYK vs Canvas8 path, initialize per-stroke retouch state, route movement segments and persist on end. A Canvas8 drag carries the exact originating document and layer object so move/end cannot redirect to a same-ID replacement. Dependencies are grouped ports (`state`, `target`, `selection`, `tools`, `nativePaint`, `ui`) instead of a long flat callback list.
 
-It deliberately does **not** own global pointer events/capture, `currentTool`, document/session identity, selection/history state or the global pending-edit flag. Generic capture/active-pointer ownership lives in `src/interaction/pointer-lifecycle-router.js`; tool-specific routing and the other application state remain in `src/main.js`; storage/persistence stays in `src/painting/controller.js`; pixel math stays in core.
+It deliberately does **not** own global pointer events/capture, `currentTool`, active document/session selection, selection/history state or the global pending-edit flag. Generic capture/active-pointer ownership lives in `src/interaction/pointer-lifecycle-router.js`; tool-specific routing and the other application state remain in `src/main.js`; Canvas8 buffer/persistence authority stays in `src/painting/controller.js`; pixel math stays in core.
 
 ## Retouch boundary — `src/retouch/`
 
