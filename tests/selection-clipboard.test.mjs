@@ -83,7 +83,7 @@ function createClipboardHarness({copyMode='merged',selectionShape:initialSelecti
   const fallback=initialLayer||{id:'layer-1',type:'raster',name:'Layer',locked:false,visible:true};
   let documentValue=initialDocument||{id:'doc-1',width:16,height:12,layers:[fallback],selectedLayerId:fallback.id};
   let selectedLayer=initialLayer||fallback,sessionId='session-1',selectionShape=initialSelection,tool='marquee',selectionClearCount=0;
-  const statuses=[],clips=[],mergedCuts=[],selectedCuts=[],renderDocuments=[];
+  const statuses=[],toasts=[],clips=[],mergedCuts=[],selectedCuts=[],renderDocuments=[];
   const documentTarget={createElement(){const ctx={clearRect(){},save(){},restore(){},translate(){},drawImage(){}};return{width:0,height:0,getContext:()=>ctx};}};
   class ClipboardItemStub{constructor(data){this.data=data;}}
   const controller=createSelectionClipboardController({
@@ -91,11 +91,11 @@ function createClipboardHarness({copyMode='merged',selectionShape:initialSelecti
     getCopyMode:()=>copyMode,getSelectedLayer:()=>selectedLayer,getCurrentTool:()=>tool,isEditableRasterLayer:layer=>Boolean(layer)&&layer.type==='raster'&&!layer.locked&&documentValue.layers.includes(layer),
     clipContextToDocumentSelection:(ctx,shape)=>clips.push(shape),clearSelectionAcrossVisibleLayers:async options=>{mergedCuts.push(options);return clearMergedImpl(options);},
     clearSelectedPixels:async options=>{selectedCuts.push(options);return clearSelectedImpl(options);},clearSelectionState:()=>{selectionClearCount+=1;selectionShape=null;},setTool:v=>{tool=v;},
-    setStatus:v=>statuses.push(v),toast:()=>{},importImages:async()=>{},visibleCanvasCenter:()=>({x:0,y:0}),isImageFile:()=>false,documentTarget,
+    setStatus:v=>statuses.push(v),toast:(message,type)=>toasts.push({message,type}),importImages:async()=>{},visibleCanvasCenter:()=>({x:0,y:0}),isImageFile:()=>false,documentTarget,
     navigatorTarget:{clipboard:{write:items=>writeImpl(items),read:async()=>[]}},ClipboardItemClass:ClipboardItemStub,FileClass:class{},
     renderDocumentFn:async(canvas,owner,options)=>{renderDocuments.push(owner);return renderDocumentImpl(canvas,owner,options);},renderLayerFn:async()=>{},canvasToPngBlobFn:async()=>({type:'image/png'}),setTimeoutFn:()=>1,clearTimeoutFn:()=>{},
   });
-  return{controller,statuses,clips,mergedCuts,selectedCuts,renderDocuments,getDocument:()=>documentValue,setDocument:v=>{documentValue=v;},setSessionId:v=>{sessionId=v;},getSelectionShape:()=>selectionShape,setSelectionShape:v=>{selectionShape=v;},setSelectedLayer:v=>{selectedLayer=v;},getTool:()=>tool,setTool:v=>{tool=v;},getSelectionClearCount:()=>selectionClearCount};
+  return{controller,statuses,toasts,clips,mergedCuts,selectedCuts,renderDocuments,getDocument:()=>documentValue,setDocument:v=>{documentValue=v;},setSessionId:v=>{sessionId=v;},getSelectionShape:()=>selectionShape,setSelectionShape:v=>{selectionShape=v;},setSelectedLayer:v=>{selectedLayer=v;},getTool:()=>tool,setTool:v=>{tool=v;},getSelectionClearCount:()=>selectionClearCount};
 }
 test('merged copy keeps originating document and full selection across async render',async()=>{
   const started=deferred(),release=deferred();const h=createClipboardHarness({renderDocumentImpl:async(c,o)=>{started.resolve(o);await release.promise;}});
@@ -130,4 +130,67 @@ test('non-stale cut keeps Clipboard-before-mutation ordering and normal cleanup'
 test('Clipboard write failure performs no cut or transient cleanup',async()=>{
   const h=createClipboardHarness({writeImpl:async()=>{throw new Error('denied');}}),warn=console.warn;console.warn=()=>{};let result;try{result=await h.controller.cutSelection();}finally{console.warn=warn;}
   assert.equal(result,false);assert.equal(h.mergedCuts.length,0);assert.equal(h.getSelectionClearCount(),0);assert.equal(h.getTool(),'marquee');assert.match(h.statuses.at(-1),/denied/);
+});
+
+
+test('clipboard async continuation is guarded by controller-local command generation ownership', () => {
+  assert.match(clipboard, /let clipboardCommandGeneration=0;/);
+  assert.match(clipboard, /const commandGeneration=\+\+clipboardCommandGeneration;/);
+  assert.match(clipboard, /context\.commandGeneration===clipboardCommandGeneration/);
+  assert.match(clipboard, /if\(!isClipboardCommandCurrent\(context\)\)return false;/);
+  assert.doesNotMatch(main, /\bclipboardCommandGeneration\b/);
+});
+
+test('overlapping merged cuts let only the latest command continue when it completes first',async()=>{
+  const firstStarted=deferred(),secondStarted=deferred(),writes=[];
+  const h=createClipboardHarness({writeImpl:()=>{const gate=deferred();writes.push(gate);(writes.length===1?firstStarted:secondStarted).resolve();return gate.promise;}});
+  const older=h.controller.cutSelection();await firstStarted.promise;
+  const newer=h.controller.cutSelection();await secondStarted.promise;
+  writes[1].resolve();assert.equal(await newer,true);
+  writes[0].resolve();assert.equal(await older,false);
+  assert.equal(h.mergedCuts.length,1);assert.equal(h.getSelectionClearCount(),1);assert.equal(h.getTool(),'move');
+  assert.match(h.statuses.at(-1),/Вырезано/);
+});
+
+test('older Clipboard write resolving after a newer command starts cannot reach destructive continuation',async()=>{
+  const firstStarted=deferred(),secondStarted=deferred(),writes=[];
+  const h=createClipboardHarness({writeImpl:()=>{const gate=deferred();writes.push(gate);(writes.length===1?firstStarted:secondStarted).resolve();return gate.promise;}});
+  const older=h.controller.cutSelection();await firstStarted.promise;
+  const newer=h.controller.cutSelection();await secondStarted.promise;
+  writes[0].resolve();assert.equal(await older,false);assert.equal(h.mergedCuts.length,0);
+  writes[1].resolve();assert.equal(await newer,true);assert.equal(h.mergedCuts.length,1);
+});
+
+test('overlapping selected-layer cuts cannot both mutate the same exact layer',async()=>{
+  const firstStarted=deferred(),secondStarted=deferred(),writes=[];
+  const layer={id:'layer-1',type:'raster',locked:false,visible:true},doc={id:'doc-1',width:16,height:12,layers:[layer],selectedLayerId:'layer-1'};
+  const h=createClipboardHarness({copyMode:'selected',documentValue:doc,selectedLayer:layer,writeImpl:()=>{const gate=deferred();writes.push(gate);(writes.length===1?firstStarted:secondStarted).resolve();return gate.promise;}});
+  const older=h.controller.cutSelection();await firstStarted.promise;
+  const newer=h.controller.cutSelection();await secondStarted.promise;
+  writes[1].resolve();assert.equal(await newer,true);
+  writes[0].resolve();assert.equal(await older,false);
+  assert.equal(h.selectedCuts.length,1);assert.equal(h.selectedCuts[0].ownerDocument,doc);assert.equal(h.selectedCuts[0].targetLayer,layer);
+});
+
+test('latest command ownership makes Copy then Cut and Cut then Copy deterministic',async()=>{
+  for(const [olderKind,newerKind,expectedCuts] of [['copy','cut',1],['cut','copy',0]]){
+    const firstStarted=deferred(),secondStarted=deferred(),writes=[];
+    const h=createClipboardHarness({writeImpl:()=>{const gate=deferred();writes.push(gate);(writes.length===1?firstStarted:secondStarted).resolve();return gate.promise;}});
+    const older=h.controller[olderKind==='cut'?'cutSelection':'copySelection']();await firstStarted.promise;
+    const newer=h.controller[newerKind==='cut'?'cutSelection':'copySelection']();await secondStarted.promise;
+    writes[1].resolve();assert.equal(await newer,true);
+    writes[0].resolve();assert.equal(await older,false);
+    assert.equal(h.mergedCuts.length,expectedCuts,`${olderKind} -> ${newerKind}`);
+  }
+});
+
+test('superseded Clipboard rejection cannot overwrite newer success status or toast',async()=>{
+  const firstStarted=deferred(),oldWrite=deferred();let callCount=0;
+  const h=createClipboardHarness({writeImpl:()=>{callCount+=1;if(callCount===1){firstStarted.resolve();return oldWrite.promise;}return Promise.resolve();}});
+  const older=h.controller.copySelection();await firstStarted.promise;
+  assert.equal(await h.controller.copySelection(),true);
+  const latestStatus=h.statuses.at(-1),latestToast=h.toasts.at(-1);
+  const warn=console.warn;console.warn=()=>{};try{oldWrite.reject(new Error('old denied'));assert.equal(await older,false);}finally{console.warn=warn;}
+  assert.equal(h.statuses.at(-1),latestStatus);assert.deepEqual(h.toasts.at(-1),latestToast);
+  assert.doesNotMatch(h.statuses.join('\n'),/old denied/);
 });
