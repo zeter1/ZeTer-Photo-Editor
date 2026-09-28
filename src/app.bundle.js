@@ -24393,6 +24393,22 @@ async function toggleFullscreen() {
     else await document.documentElement.requestFullscreen();
   } catch (error) { console.warn(error); toast('Полноэкранный режим недоступен','error'); }
 }
+function showLearningCenter() {
+  showInfoModal('Центр обучения',`<div class="about-copy">
+    <strong>Быстрый старт — 5 минут</strong>
+    <div class="shortcut-list">
+      <b>1. Откройте</b><span><b>Ctrl+O</b> или перетащите изображение на холст.</span>
+      <b>2. Осмотритесь</b><span><b>V</b> — перемещение слоя, <b>Space</b> — рука, <b>Z</b> — лупа.</span>
+      <b>3. Редактируйте</b><span><b>B</b> — кисть, <b>E</b> — ластик, <b>M</b> — выделение, <b>G</b> — заливка, <b>T</b> — текст.</span>
+      <b>4. Работайте слоями</b><span>Создавайте отдельные слои, меняйте порядок, группируйте и переименовывайте через <b>F2</b>.</span>
+      <b>5. Сохраните</b><span><b>Ctrl+S</b> сохраняет проект <code>.zpe</code>, <b>Ctrl+Shift+S</b> открывает экспорт результата.</span>
+    </div>
+    <p><strong>Маршрут обучения:</strong> сначала освойте навигацию и слои, затем выделения и маски, после этого ретушь, цветокоррекцию и экспорт. Для безопасной работы сохраняйте редактируемый <code>.zpe</code> перед финальным экспортом.</p>
+    <p><strong>Полезная практика:</strong> импортируйте фотографию, создайте новый растровый слой, сделайте небольшую правку кистью, выделите область, переместите слой, выполните Undo/Redo и экспортируйте копию. Так вы за один проход потренируете основной рабочий цикл редактора.</p>
+    <p>Полный список команд доступен в <strong>Помощь → Горячие клавиши</strong>.</p>
+  </div>`);
+}
+
 function showShortcuts() {
   showInfoModal('Горячие клавиши',`<div class="shortcut-list">
     <b>Ctrl+N</b><span>Новый документ</span><b>Ctrl+O</b><span>Открыть изображение</span>
@@ -24634,7 +24650,9 @@ const menus={
     ['Полноэкранный режим','F11',toggleFullscreen],
   ],
   help:[
+    ['Центр обучения','',showLearningCenter],
     ['Горячие клавиши','?',showShortcuts],
+    ['sep'],
     ['О программе','',showAbout],
   ],
 };

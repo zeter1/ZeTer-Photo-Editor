@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-28 — In-app Learning Center
+
+- UX: в меню «Помощь» добавлен «Центр обучения» перед справкой по горячим клавишам; «О программе» отделено визуальным разделителем.
+- Onboarding: новый встроенный экран даёт пятиминутный маршрут от открытия изображения и навигации до слоёв, базовых инструментов, сохранения проекта и экспорта.
+- Safety/learning: центр отдельно напоминает сохранять редактируемый `.zpe`, предлагает короткое практическое упражнение и направляет к полной справке по горячим клавишам.
+- Regression/build: тест закрепляет wiring меню и ключевой учебный контент; file:// bundle и cache manifest должны быть перегенерированы вместе с исходником.
+
 ### 2026-09-28 — Extract canvas viewport navigation owner
 
 - Refactor: zoom clamp/no-op policy, active-session zoom synchronization, canvas/overlay refresh, pointer-anchored correction and fit-to-view orchestration move from `src/main.js` into `src/workspace/viewport-controller.js`; keyboard/menu/wheel dispatch and pan gestures stay in the runtime composition root.

@@ -11,3 +11,12 @@ test('about dialog exposes developer contact links', () => {
   assert.match(mainSource, /href="https:\/\/www\.facebook\.com\/zeter1" target="_blank" rel="noopener noreferrer">Facebook: @zeter1<\/a>/);
   assert.match(mainSource, /href="https:\/\/www\.instagram\.com\/zeter1992\/" target="_blank" rel="noopener noreferrer">Instagram: @zeter1992<\/a>/);
 });
+
+
+test('help menu exposes learning center', () => {
+  assert.match(mainSource, /help:\[\s*\['Центр обучения','',showLearningCenter\]/);
+  assert.match(mainSource, /function showLearningCenter\(\)/);
+  assert.match(mainSource, /Быстрый старт — 5 минут/);
+  assert.match(mainSource, /Ctrl\+S<\/b> сохраняет проект <code>\.zpe<\/code>/);
+  assert.match(mainSource, /Помощь → Горячие клавиши/);
+});
