@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-28 — Origin-bound async Selection Clipboard copy/cut
+
+- Correctness: copy/cut freezes exact originating document/session, full cloned selection geometry, copy mode and selected-layer identity before rendering or Clipboard awaits; copied PNG and later Cut consume the same intent.
+- Async safety: context is revalidated before OS Clipboard write and before destructive continuation; same-ID document/layer replacements cannot receive a late clear or history publication.
+- UI ownership: stale completion cannot clear a newer selection or force a newer tool; normal non-stale completion still clears the marquee and switches to Move.
+- Regression/docs: deterministic deferred-Promise tests cover selection replacement, same-bounds geometry, stale targets, ordering and Clipboard failures; lower destructive ports accept caller-owned frozen context without weakening exact publication guards.
+
+
 ### 2026-09-27 — Frozen selection semantics for merged raster batches
 
 - Correctness: merged multi-layer selection clearing now captures one cloned full selection-shape snapshot before target discovery and async preparation, so later targets cannot silently switch to a newer marquee/lasso/polygon/magnetic selection while the batch is pending.

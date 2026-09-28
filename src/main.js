@@ -698,9 +698,11 @@ const { isImageFile, isProjectFile, importImages, handleIncomingFiles } = docume
 const selectionClipboardController = createSelectionClipboardController({
   getDocument: () => doc,
   getActiveSessionId: () => activeSessionId,
-  getSelectionRect: () => selectionRect,
+  getSelectionShape: () => selectionShape,
+  captureSelectionSnapshot: () => selectionShape ? cloneSelectionShape(selectionShape) : null,
   getCopyMode: () => selectionCopyMode,
   getSelectedLayer: selected,
+  getCurrentTool: () => currentTool,
   isEditableRasterLayer,
   clipContextToDocumentSelection,
   clearSelectionAcrossVisibleLayers,
@@ -1210,9 +1212,9 @@ function traceDocumentSelectionPath(ctx, shape = selectionShape) {
   return true;
 }
 
-function clipContextToDocumentSelection(ctx) {
-  if (!selectionShape) return;
-  if (traceDocumentSelectionPath(ctx)) ctx.clip();
+function clipContextToDocumentSelection(ctx, shape = selectionShape) {
+  if (!shape) return;
+  if (traceDocumentSelectionPath(ctx, shape)) ctx.clip();
 }
 
 function clipContextToSelection(ctx, layer, shape = selectionShape) {

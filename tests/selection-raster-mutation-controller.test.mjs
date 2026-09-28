@@ -462,3 +462,15 @@ test('merged mixed high-depth and Canvas clear keeps the captured selection afte
   assert.equal(liveSelection, null);
   assert.deepEqual(harness.commits, ['Вырезать выделение']);
 });
+
+test('merged selection clear accepts caller-owned context and frozen selection without live recapture',async()=>{
+  const layer={id:'r',type:'raster',name:'R',visible:true,locked:false,dataUrl:'old'},doc={layers:[layer],groups:[],selectedLayerId:'r'},snapshot={type:'ellipse',rect:{x:1,y:1,width:4,height:4}};let captures=0;const seen=[];
+  const h=createHarness({documentValue:doc,selection:{hasActive:()=>false,captureSnapshot:()=>{captures+=1;return null;},intersectsLayer:(l,s)=>{seen.push(s);return true;}},operations:{prepareClearedRasterDataUrl:async(l,s)=>{seen.push(s);return'new';}}});
+  assert.deepEqual(await h.controller.clearAcrossVisibleLayers({ownerDocument:doc,ownerSessionId:'first',selectionSnapshot:snapshot,historyLabel:'Caller cut'}),{cleared:1,locked:0,rasterized:0});
+  assert.equal(captures,0);assert.deepEqual(seen,[snapshot,snapshot]);assert.equal(layer.dataUrl,'new');assert.deepEqual(h.commits,['Caller cut']);
+});
+test('merged selection clear rejects stale caller-owned context before preparation',async()=>{
+  const layer={id:'r',type:'raster',name:'R',visible:true,locked:false,dataUrl:'old'},doc={layers:[layer],groups:[],selectedLayerId:'r'};let prepares=0;
+  const h=createHarness({documentValue:doc,operations:{prepareClearedRasterDataUrl:async()=>{prepares+=1;return'new';}}});h.stateValue.documentValue={layers:[{...layer}],groups:[],selectedLayerId:'r'};
+  assert.equal(await h.controller.clearAcrossVisibleLayers({ownerDocument:doc,ownerSessionId:'first',selectionSnapshot:{type:'rect',rect:{x:0,y:0,width:2,height:2}}}),null);assert.equal(prepares,0);assert.equal(layer.dataUrl,'old');assert.deepEqual(h.commits,[]);
+});

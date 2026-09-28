@@ -4,7 +4,7 @@ This document is the canonical contract for reusable **Canvas8** and native **16
 
 Read it when changing fill/line, brush/eraser/retouch strokes, clone-source preparation, paint preview overrides, or code that calls `ensureRasterBuffer()`, `persistPaintLayer()`, `ensureNativeHighDepthPaintBuffer()`, `persistHighDepthMutation()` or `persistNativeHighDepthPaintLayer()`.
 
-> Scope: current-layer painting/commands and their shared raster-edit cache. Multi-layer Clipboard cut / selection clearing owns a separate batch transaction in `src/selection/raster-mutation-controller.js`; it may reuse low-level high-depth preparation/apply helpers but must prove its own owner/target publication safety.
+> Scope: current-layer painting/commands and their shared raster-edit cache. Multi-layer Clipboard cut / selection clearing owns a separate batch transaction in `src/selection/raster-mutation-controller.js`; it may reuse low-level high-depth preparation/apply helpers but must prove its own owner/target publication safety. The higher `src/selection/clipboard-controller.js` boundary may supply an earlier frozen document/session/selection intent across Clipboard awaits.
 
 ## Ownership model
 
@@ -71,11 +71,11 @@ This yields one reusable rule for both raster modes: **the authority proven afte
 
 `src/selection/raster-mutation-controller.js::clearAcrossVisibleLayers()` owns a separate destructive batch transaction for merged Clipboard cut / multi-layer selection clearing. It may reuse low-level Canvas/high-depth preparation helpers, but it must establish publication authority for the **whole target set** itself.
 
-The batch has **two frozen inputs**: publication authority and selection semantics. Before target discovery it captures one cloned full selection shape — rectangle, ellipse or complete polygon/lasso/magnetic point geometry, not only its bounds. Target intersection, native high-depth predicate generation and Canvas clipping must all consume that same snapshot. A newer live selection may be edited or cleared while preparation is pending; it must neither change the pixels prepared for later batch targets nor be restored/overwritten when the older batch completes.
+The batch has **two frozen inputs**: publication authority and selection semantics. Direct callers capture a cloned full selection shape before target discovery; a higher async boundary such as Clipboard may instead supply an already frozen exact document/session + full selection snapshot. The batch must not re-read or re-snapshot a supplied shape. Rectangle, ellipse and complete polygon/lasso/magnetic geometry are preserved, not only bounds; target intersection, high-depth predicates and Canvas clipping all consume that same snapshot.
 
 The batch follows **capture selection + target set → prepare all → await → revalidate all → publish all**:
 
-1. capture one full selection-shape snapshot, the originating document object, active session and every exact source-layer object selected for the batch;
+1. receive or capture one full selection-shape snapshot plus the originating document object and active session, then capture every exact source-layer object selected for the batch;
 2. derive every target intersection / high-depth predicate / Canvas clip from that captured selection snapshot and finish rasterization, PNG encoding and native high-depth mutation preparation without persisted writes;
 3. after the final await and immediately before the first persisted write, revalidate the exact document/session plus every exact source-layer object with object identity and current effective lock state;
 4. derive publication slots from the exact source objects (for example `owner.layers.indexOf(sourceLayer)`), never from `layer.id`;
@@ -128,3 +128,9 @@ Prefer deferred or deterministic Promise boundaries over timing-based sleeps for
 This contract does not redesign retouch math, selection clipping, history storage, global pointer capture, PSD/PSB import/export or the multi-layer selection batch transaction.
 
 Do not broaden the shared raster controller into those owners. If another async raster publisher uses `prepareHighDepthMutation()` / `applyHighDepthMutation()` directly, review that caller's own exact-target revalidation and give it a bounded regression task instead of assuming this current-layer contract covers it.
+
+## Higher async intent boundary: Clipboard copy/cut
+
+`src/selection/clipboard-controller.js` crosses render and OS Clipboard awaits before destructive Cut begins, so a lower raster-batch snapshot alone is too late to represent the original user intent. Copy/cut freezes exact document/session, full cloned selection geometry, copy mode and exact selected-layer object (when applicable) before the first await. The same snapshot clips the PNG and is handed to destructive clearing.
+
+Revalidate before OS Clipboard write and again before destructive continuation. If Clipboard write already succeeded but authority became stale, copied OS data may remain, but no destructive write/history follows. Transient cleanup is separately identity-guarded: an older completion clears selection/switches to Move only while its original selection identity and tool are still current.
