@@ -22617,7 +22617,7 @@ function createPsdSmartObjectResource({
 
 // ---- src/main.js ----
 const $ = (selector) => document.querySelector(selector);
-const $ = (selector) => [...document.querySelectorAll(selector)];
+const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 const els = {
   canvas: $('#editorCanvas'), overlay: $('#overlayCanvas'), shell: $('#canvasShell'), viewport: $('#stageViewport'),
@@ -22778,7 +22778,7 @@ const layerBlendingController = createLayerBlendingController({
 const { openBlendingOptions } = layerBlendingController;
 
 const workspaceLayoutController = createWorkspaceLayoutController({
-  panelCards: $('.panel-card[data-panel-id]'),
+  panelCards: $$('.panel-card[data-panel-id]'),
   workspace: els.workspace,
   toolbar: els.toolbar,
   rightPanel: els.rightPanel,
@@ -22924,7 +22924,7 @@ const { initReorder:initToolbarReorder, initTooltips } = toolbarController;
 const menuController = createMenuController({
   menu: els.menu,
   viewport: els.viewport,
-  menuButtons: $('.menu-button'),
+  menuButtons: $$('.menu-button'),
   getItems: key => menus[key] || [],
   escapeHtml,
   toast,
@@ -24201,20 +24201,20 @@ function setTool(tool) {
   selectionGestures.prepareToolChange(tool);
   if(tool!=='pen'){penDraftGestures.reset();vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
   currentTool = tool;
-  $('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   updateToolLabel();
-  $('.text-only').forEach(x => x.style.display = tool === 'text' ? '' : 'none');
-  $('.shape-only').forEach(x => x.style.display = tool === 'shape' ? '' : 'none');
-  $('.fill-only').forEach(x => x.style.display = tool === 'fill' ? '' : 'none');
-  $('.blur-only').forEach(x => x.style.display = tool === 'blur' ? '' : 'none');
-  $('.smudge-only').forEach(x => x.style.display = tool === 'smudge' ? '' : 'none');
-  $('.dodge-only').forEach(x => x.style.display = tool === 'dodge' ? '' : 'none');
-  $('.burn-only').forEach(x => x.style.display = tool === 'burn' ? '' : 'none');
-  $('.color-option, .opacity-option').forEach(x => x.style.display = ['dodge','burn','blur'].includes(tool) ? 'none' : '');
-  $('.gradient-only').forEach(x => x.style.display = tool === 'gradient' ? '' : 'none');
-  $('.pen-only').forEach(x => x.style.display = tool === 'pen' ? '' : 'none');
-  $('.marquee-only').forEach(x => x.style.display = tool === 'marquee' ? '' : 'none');
-  $('.move-only').forEach(x => x.style.display = tool === 'move' ? '' : 'none');
+  $$('.text-only').forEach(x => x.style.display = tool === 'text' ? '' : 'none');
+  $$('.shape-only').forEach(x => x.style.display = tool === 'shape' ? '' : 'none');
+  $$('.fill-only').forEach(x => x.style.display = tool === 'fill' ? '' : 'none');
+  $$('.blur-only').forEach(x => x.style.display = tool === 'blur' ? '' : 'none');
+  $$('.smudge-only').forEach(x => x.style.display = tool === 'smudge' ? '' : 'none');
+  $$('.dodge-only').forEach(x => x.style.display = tool === 'dodge' ? '' : 'none');
+  $$('.burn-only').forEach(x => x.style.display = tool === 'burn' ? '' : 'none');
+  $$('.color-option, .opacity-option').forEach(x => x.style.display = ['dodge','burn','blur'].includes(tool) ? 'none' : '');
+  $$('.gradient-only').forEach(x => x.style.display = tool === 'gradient' ? '' : 'none');
+  $$('.pen-only').forEach(x => x.style.display = tool === 'pen' ? '' : 'none');
+  $$('.marquee-only').forEach(x => x.style.display = tool === 'marquee' ? '' : 'none');
+  $$('.move-only').forEach(x => x.style.display = tool === 'move' ? '' : 'none');
   els.overlay.style.cursor = defaultToolCursor();
   cropGestures.reset(); hoverPoint = null; clearSmartGuides(); drawOverlay();
   if ((tool === 'clone' || tool === 'heal') && !getRetouchCloneSource()) setStatus(`${TOOL_LABELS[tool]}: Alt+клик по растровому слою задаёт источник`);
@@ -25218,7 +25218,7 @@ els.viewport.addEventListener('contextmenu',e=>{
 });
 window.addEventListener('blur',()=>{closeMenu();spaceHeld=false;if(!drag)els.overlay.style.cursor=defaultToolCursor();});
 
-$('.tool').forEach(b=>b.onclick=()=>{if(toolbarController.isClickSuppressed())return;setTool(b.dataset.tool);});
+$$('.tool').forEach(b=>b.onclick=()=>{if(toolbarController.isClickSuppressed())return;setTool(b.dataset.tool);});
 els.primaryColor.oninput=()=>els.colorChip.style.background=els.primaryColor.value;
 els.brushSize.oninput=()=>els.brushSizeValue.textContent=els.brushSize.value;
 els.toolOpacity.oninput=()=>els.toolOpacityValue.textContent=`${els.toolOpacity.value}%`;
@@ -25230,7 +25230,7 @@ if(els.fillTolerance)els.fillTolerance.oninput=()=>els.fillToleranceValue.textCo
 if(els.selectionType)els.selectionType.onchange=()=>selectionGestures.setType(els.selectionType.value);
 if(els.selectionCopyMode)els.selectionCopyMode.onchange=()=>{selectionCopyMode=els.selectionCopyMode.value==='selected'?'selected':'merged';setStatus(selectionCopyMode==='merged'?'Выделение: копирование со всех видимых слоёв':'Выделение: копирование с выбранного слоя');};
 if(els.smartSnapToggle)els.smartSnapToggle.onchange=()=>{smartSnapEnabled=els.smartSnapToggle.checked;persistSmartSnapState();clearSmartGuides();drawOverlay();setStatus(smartSnapEnabled?'Умная привязка включена':'Умная привязка выключена');};
-$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSelectedLayer(button.dataset.align)));
+$$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSelectedLayer(button.dataset.align)));
 els.undo.onclick=undo;els.redo.onclick=redo;$('#exportQuickBtn').onclick=exportDialog;
 $('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=()=>addGroup();$('#renameLayerBtn').onclick=()=>{const layer=selected();if(layer)renameLayer(layer);};$('#duplicateLayerBtn').onclick=duplicateSelected;$('#deleteLayerBtn').onclick=deleteSelected;
 $('#layerUpBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(1);$('#layerDownBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(-1);
