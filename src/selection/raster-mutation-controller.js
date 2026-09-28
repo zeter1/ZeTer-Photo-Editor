@@ -129,20 +129,30 @@ export function createSelectionRasterMutationController({
   const prepareRasterDataUrl = operations.prepareClearedRasterDataUrl || prepareClearedRasterDataUrl;
   const prepareHighDepthMutation = operations.prepareClearedHighDepthMutation || prepareClearedHighDepthMutation;
 
-  async function clearAcrossVisibleLayers({ historyLabel = 'Вырезать выделение' } = {}) {
-    if (!selection.hasActive()) return { cleared:0, locked:0, rasterized:0 };
+  async function clearAcrossVisibleLayers({
+    historyLabel = 'Вырезать выделение',
+    ownerDocument,
+    ownerSessionId,
+    selectionSnapshot,
+  } = {}) {
+    const hasExplicitSelection = selectionSnapshot !== undefined;
+    if (!hasExplicitSelection && !selection.hasActive()) return { cleared:0, locked:0, rasterized:0 };
+    if (hasExplicitSelection && !selectionSnapshot) return { cleared:0, locked:0, rasterized:0 };
     if (state.isPersisting()) {
       status('Сохраняется предыдущая растровая операция…');
       return null;
     }
 
-    const selectionSnapshot = selection.captureSnapshot();
-    if (!selectionSnapshot) return { cleared:0, locked:0, rasterized:0 };
-
-    const documentValue = currentDocument();
-    const targetSessionId = state.getActiveSessionId();
+    const documentValue = ownerDocument === undefined ? currentDocument() : ownerDocument;
+    const targetSessionId = ownerSessionId === undefined ? state.getActiveSessionId() : ownerSessionId;
+    if (state.getDocument() !== documentValue || state.getActiveSessionId() !== targetSessionId) {
+      status('Очистка выделения отменена: активный документ изменился');
+      return null;
+    }
+    const frozenSelection = hasExplicitSelection ? selectionSnapshot : selection.captureSnapshot();
+    if (!frozenSelection) return { cleared:0, locked:0, rasterized:0 };
     const intersecting = documentValue.layers.filter(
-      layer => isLayerVisible(documentValue, layer) && selection.intersectsLayer(layer, selectionSnapshot),
+      layer => isLayerVisible(documentValue, layer) && selection.intersectsLayer(layer, frozenSelection),
     );
     const pixelTargets = intersecting.filter(layer => layer.type !== 'adjustment');
     const targets = pixelTargets.filter(layer => !isLayerLocked(documentValue, layer));
@@ -158,13 +168,13 @@ export function createSelectionRasterMutationController({
         if (!working) throw new Error('Не удалось подготовить слой к очистке');
         if (layer.type !== 'raster') rasterized += 1;
         if (layer.type === 'raster' && working.highDepthSource) {
-          const highDepth = await prepareHighDepthMutation(working, selectionSnapshot);
+          const highDepth = await prepareHighDepthMutation(working, frozenSelection);
           if (highDepth?.mutation) {
             prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
             continue;
           }
         }
-        prepared.push({ layer, working, dataUrl:await prepareRasterDataUrl(working, selectionSnapshot), highDepthMutation:null });
+        prepared.push({ layer, working, dataUrl:await prepareRasterDataUrl(working, frozenSelection), highDepthMutation:null });
       }
 
       if (state.getDocument() !== documentValue || state.getActiveSessionId() !== targetSessionId) {

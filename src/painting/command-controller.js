@@ -64,8 +64,8 @@ export function createRasterCommandController({
     return false;
   }
 
-  function selectionPredicate(layer) {
-    return selection?.predicate?.(layer) ?? null;
+  function selectionPredicate(layer, selectionSnapshot) {
+    return selection?.predicate?.(layer, selectionSnapshot) ?? null;
   }
 
   function resetNativeState() {
@@ -278,18 +278,27 @@ export function createRasterCommandController({
   async function clearSelection({
     historyLabel = 'Очистить выделение',
     successStatus = 'Пиксели внутри выделения очищены',
+    ownerDocument,
+    targetLayer,
+    selectionSnapshot,
   } = {}) {
-    if (!selection?.hasActive?.()) return false;
+    const hasExplicitSelection = selectionSnapshot !== undefined;
+    if (!hasExplicitSelection && !selection?.hasActive?.()) return false;
+    if (hasExplicitSelection && !selectionSnapshot) return false;
     if (busy()) return false;
 
-    const doc = currentDocument();
-    const layer = target.selected?.() ?? null;
-    if (!target.isEditableRasterLayer(layer)) {
+    const doc = ownerDocument === undefined ? currentDocument() : ownerDocument;
+    if (state.getDocument() !== doc) {
+      status('Очистка выделения отменена: активный документ изменился');
+      return false;
+    }
+    const layer = targetLayer === undefined ? (target.selected?.() ?? null) : targetLayer;
+    if (!Array.isArray(doc?.layers) || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
       status('Для очистки выделения выберите незаблокированный растровый слой');
       ui?.toast?.('Выделение очищает пиксели только на растровом слое', 'warn');
       return false;
     }
-    if (selection?.intersectsLayer && !selection.intersectsLayer(layer)) {
+    if (selection?.intersectsLayer && !selection.intersectsLayer(layer, selectionSnapshot)) {
       status('Выделение не пересекает выбранный слой');
       return false;
     }
@@ -299,7 +308,7 @@ export function createRasterCommandController({
       if (layer.highDepthSource) {
         const buffer = rasterEdit.editableHighDepthBuffer(layer, { requireAlpha:true });
         if (buffer) {
-          const cleared = clearPixelBufferPixels(buffer, { isAllowed:selectionPredicate(layer) });
+          const cleared = clearPixelBufferPixels(buffer, { isAllowed:selectionPredicate(layer, selectionSnapshot) });
           if (!cleared) {
             status('В выделении нет непрозрачных high-depth пикселей');
             return false;
@@ -316,7 +325,7 @@ export function createRasterCommandController({
       if (!prepared) return false;
       const context = prepared.ctx;
       context.save();
-      selection?.clipContext?.(context, layer);
+      selection?.clipContext?.(context, layer, selectionSnapshot);
       context.clearRect(0, 0, prepared.canvas.width, prepared.canvas.height);
       context.restore();
       if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;

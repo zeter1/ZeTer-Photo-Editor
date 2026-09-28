@@ -104,7 +104,7 @@ function makeHarness({
       containsPoint:selectionContains,
       intersectsLayer:selectionIntersects,
       predicate:selectionPredicate,
-      clipContext:(context, layer) => clips.push([context, layer]),
+      clipContext:(context, layer, snapshot) => clips.push([context, layer, snapshot]),
     },
     tools:{
       primaryColor:() => '#ff0000',
@@ -323,4 +323,14 @@ test('native high-depth line, fill and selection clear suppress publication feed
     assert.equal(harness.statuses.some(value => value.includes('high-depth:')), false);
     assert.equal(harness.getPersisting(), false);
   }
+});
+
+test('selection clear accepts caller-owned target and frozen geometry',async()=>{
+  const doc=createDocument({width:4,height:1}),layer=createRasterLayer({name:'P',width:4,height:1,dataUrl:null});addLayer(doc,layer);const snapshot={type:'ellipse',rect:{x:0,y:0,width:2,height:1}},seen=[];
+  const h=makeHarness({doc,selectionActive:false,selectionIntersects:(l,s)=>{seen.push(s);return true;}});
+  assert.equal(await h.controller.clearSelection({ownerDocument:doc,targetLayer:layer,selectionSnapshot:snapshot,historyLabel:'Clipboard cut'}),true);assert.deepEqual(seen,[snapshot]);assert.equal(h.clips[0][2],snapshot);assert.deepEqual(h.commits,['Clipboard cut']);
+});
+test('selection clear rejects caller target replaced by same id',async()=>{
+  const doc=createDocument({width:4,height:1}),original=createRasterLayer({name:'O',width:4,height:1,dataUrl:null});addLayer(doc,original);const replacement={...original,name:'R'};doc.layers.splice(doc.layers.indexOf(original),1,replacement);doc.selectedLayerId=replacement.id;
+  const h=makeHarness({doc,selected:()=>replacement});assert.equal(await h.controller.clearSelection({ownerDocument:doc,targetLayer:original,selectionSnapshot:{type:'rect',rect:{x:0,y:0,width:2,height:1}}}),false);assert.equal(h.getEnsureCalls().length,0);assert.deepEqual(h.commits,[]);
 });

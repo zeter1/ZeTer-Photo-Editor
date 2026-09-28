@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { selectionPixelBounds } from '../src/core/geometry.js';
+import { createSelectionClipboardController } from '../src/selection/clipboard-controller.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const clipboard = await readFile(new URL('../src/selection/clipboard-controller.js', import.meta.url), 'utf8');
@@ -39,21 +40,21 @@ test('Ctrl+C and Ctrl+X are wired to image clipboard commands', () => {
   assert.match(main, /window\.addEventListener\('cut'/);
 });
 
-test('merged clipboard mode renders the complete document pipeline and selected mode renders one layer', () => {
-  const start = clipboard.indexOf('async function renderSelectionMergedToPng(bounds) {');
-  const end = clipboard.indexOf('\n  function finishSelectionClipboardAction', start);
+test('merged clipboard mode renders the captured document and captured full selection shape', () => {
+  const start = clipboard.indexOf('async function renderSelectionMergedToPng(documentValue,bounds,selectionSnapshot) {');
+  const end = clipboard.indexOf('\n  function isClipboardContextCurrent', start);
   const fn = start >= 0 && end > start ? clipboard.slice(start, end) : '';
-  assert.match(fn, /await renderDocument\(full,getDocument\(\),\{checker:false\}\)/);
-  assert.match(fn, /clipContextToDocumentSelection\(ctx\)/);
+  assert.match(fn, /await renderDocumentFn\(full,documentValue,\{checker:false\}\)/);
+  assert.match(fn, /clipContextToDocumentSelection\(ctx,selectionSnapshot\)/);
   assert.match(fn, /ctx\.drawImage\(full,0,0\)/);
-  assert.match(clipboard, /copyMode==='merged'[\s\S]*renderSelectionMergedToPng\(bounds\)[\s\S]*renderSelectionLayerToPng\(layer,bounds\)/);
+  assert.doesNotMatch(fn, /getDocument\(\)/);
 });
 
 test('clipboard writes PNG before cut mutates raster pixels', () => {
   const start = clipboard.indexOf('async function copySelectionToClipboard({ cut = false } = {}) {');
   const end = clipboard.indexOf('\n  function copySelection()', start);
   const fn = start >= 0 && end > start ? clipboard.slice(start, end) : '';
-  assert.match(fn, /new ClipboardItemClass\(\{'image\/png':pngPromise\}\)/);
+  assert.match(fn, /new ClipboardItemClass\(\{'image\/png':pngBlob\}\)/);
   assert.match(fn, /await navigatorTarget\.clipboard\.write\(\[item\]\)/);
   assert.match(fn, /clearSelectionAcrossVisibleLayers/);
   assert.match(fn, /await clearSelectedPixels/);
@@ -69,8 +70,64 @@ test('merged cut delegates destructive multi-layer work to the selection raster 
   assert.match(mutations, /documentValue\.layers\.splice\(index, 1, working\)/);
 });
 
-test('successful copy or cut clears the marquee and switches to move for immediate paste positioning', () => {
-  assert.match(clipboard, /function finishSelectionClipboardAction\(message\) \{[\s\S]*clearSelectionState\(\);[\s\S]*setTool\('move'\)/);
-  assert.match(clipboard, /finishSelectionClipboardAction\(`Скопировано/);
-  assert.match(clipboard, /finishSelectionClipboardAction\(`Вырезано/);
+test('transient Clipboard completion is identity-guarded before clearing selection or switching tools', () => {
+  assert.match(clipboard, /getSelectionShape\(\)===context\.selectionIdentity/);
+  assert.match(clipboard, /getCurrentTool\(\)===context\.tool/);
+  assert.match(clipboard, /ownerDocument:documentValue/);
+  assert.match(clipboard, /ownerSessionId:sessionId/);
+  assert.match(clipboard, /targetLayer:layer/);
+});
+
+function deferred(){let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return{promise,resolve,reject};}
+function createClipboardHarness({copyMode='merged',selectionShape:initialSelection={type:'ellipse',rect:{x:1,y:1,width:4,height:4}},documentValue:initialDocument,selectedLayer:initialLayer,renderDocumentImpl=async()=>{},writeImpl=async()=>{},clearMergedImpl=async()=>({cleared:1,locked:0,rasterized:0}),clearSelectedImpl=async()=>true}={}){
+  const fallback=initialLayer||{id:'layer-1',type:'raster',name:'Layer',locked:false,visible:true};
+  let documentValue=initialDocument||{id:'doc-1',width:16,height:12,layers:[fallback],selectedLayerId:fallback.id};
+  let selectedLayer=initialLayer||fallback,sessionId='session-1',selectionShape=initialSelection,tool='marquee',selectionClearCount=0;
+  const statuses=[],clips=[],mergedCuts=[],selectedCuts=[],renderDocuments=[];
+  const documentTarget={createElement(){const ctx={clearRect(){},save(){},restore(){},translate(){},drawImage(){}};return{width:0,height:0,getContext:()=>ctx};}};
+  class ClipboardItemStub{constructor(data){this.data=data;}}
+  const controller=createSelectionClipboardController({
+    getDocument:()=>documentValue,getActiveSessionId:()=>sessionId,getSelectionShape:()=>selectionShape,captureSelectionSnapshot:()=>selectionShape?structuredClone(selectionShape):null,
+    getCopyMode:()=>copyMode,getSelectedLayer:()=>selectedLayer,getCurrentTool:()=>tool,isEditableRasterLayer:layer=>Boolean(layer)&&layer.type==='raster'&&!layer.locked&&documentValue.layers.includes(layer),
+    clipContextToDocumentSelection:(ctx,shape)=>clips.push(shape),clearSelectionAcrossVisibleLayers:async options=>{mergedCuts.push(options);return clearMergedImpl(options);},
+    clearSelectedPixels:async options=>{selectedCuts.push(options);return clearSelectedImpl(options);},clearSelectionState:()=>{selectionClearCount+=1;selectionShape=null;},setTool:v=>{tool=v;},
+    setStatus:v=>statuses.push(v),toast:()=>{},importImages:async()=>{},visibleCanvasCenter:()=>({x:0,y:0}),isImageFile:()=>false,documentTarget,
+    navigatorTarget:{clipboard:{write:items=>writeImpl(items),read:async()=>[]}},ClipboardItemClass:ClipboardItemStub,FileClass:class{},
+    renderDocumentFn:async(canvas,owner,options)=>{renderDocuments.push(owner);return renderDocumentImpl(canvas,owner,options);},renderLayerFn:async()=>{},canvasToPngBlobFn:async()=>({type:'image/png'}),setTimeoutFn:()=>1,clearTimeoutFn:()=>{},
+  });
+  return{controller,statuses,clips,mergedCuts,selectedCuts,renderDocuments,getDocument:()=>documentValue,setDocument:v=>{documentValue=v;},setSessionId:v=>{sessionId=v;},getSelectionShape:()=>selectionShape,setSelectionShape:v=>{selectionShape=v;},setSelectedLayer:v=>{selectedLayer=v;},getTool:()=>tool,setTool:v=>{tool=v;},getSelectionClearCount:()=>selectionClearCount};
+}
+test('merged copy keeps originating document and full selection across async render',async()=>{
+  const started=deferred(),release=deferred();const h=createClipboardHarness({renderDocumentImpl:async(c,o)=>{started.resolve(o);await release.promise;}});
+  const doc=h.getDocument(),original=h.getSelectionShape(),pending=h.controller.copySelection();assert.equal(await started.promise,doc);
+  const newer={type:'polygon',points:[{x:1,y:1},{x:5,y:1},{x:1,y:5}]};h.setSelectionShape(newer);release.resolve();assert.equal(await pending,true);
+  assert.equal(h.renderDocuments[0],doc);assert.deepEqual(h.clips[0],original);assert.notEqual(h.clips[0],original);assert.equal(h.getSelectionShape(),newer);assert.equal(h.getTool(),'marquee');assert.equal(h.getSelectionClearCount(),0);
+});
+test('merged cut hands frozen selection to clearing and preserves newer selection',async()=>{
+  const started=deferred(),release=deferred();const h=createClipboardHarness({writeImpl:async()=>{started.resolve();await release.promise;}}),doc=h.getDocument(),original=structuredClone(h.getSelectionShape());
+  const pending=h.controller.cutSelection();await started.promise;const newer={type:'polygon',points:[{x:1,y:1},{x:5,y:1},{x:1,y:5}]};h.setSelectionShape(newer);release.resolve();assert.equal(await pending,true);
+  assert.equal(h.mergedCuts.length,1);assert.equal(h.mergedCuts[0].ownerDocument,doc);assert.equal(h.mergedCuts[0].ownerSessionId,'session-1');assert.deepEqual(h.mergedCuts[0].selectionSnapshot,original);assert.equal(h.getSelectionShape(),newer);assert.equal(h.getTool(),'marquee');
+});
+test('merged cut rejects same-id replacement document after Clipboard write',async()=>{
+  const started=deferred(),release=deferred(),h=createClipboardHarness({writeImpl:async()=>{started.resolve();await release.promise;}}),original=h.getDocument(),pending=h.controller.cutSelection();await started.promise;
+  const newer={type:'rect',rect:{x:7,y:2,width:3,height:3}};h.setDocument({id:original.id,width:16,height:12,layers:[],selectedLayerId:null});h.setSelectedLayer(null);h.setSelectionShape(newer);h.setTool('pen');release.resolve();
+  assert.equal(await pending,false);assert.equal(h.mergedCuts.length,0);assert.equal(h.getSelectionShape(),newer);assert.equal(h.getTool(),'pen');assert.equal(h.getSelectionClearCount(),0);
+});
+test('selected cut rejects same-id replacement target after Clipboard write',async()=>{
+  const started=deferred(),release=deferred(),layer={id:'layer-1',type:'raster',locked:false,visible:true},doc={id:'doc-1',width:16,height:12,layers:[layer],selectedLayerId:'layer-1'};
+  const h=createClipboardHarness({copyMode:'selected',documentValue:doc,selectedLayer:layer,writeImpl:async()=>{started.resolve();await release.promise;}}),pending=h.controller.cutSelection();await started.promise;
+  const replacement={...layer};doc.layers=[replacement];h.setSelectedLayer(replacement);release.resolve();assert.equal(await pending,false);assert.equal(h.selectedCuts.length,0);assert.equal(h.getSelectionClearCount(),0);
+});
+test('selected cut keeps original same-bounds geometry and leaves newer selection intact',async()=>{
+  const started=deferred(),release=deferred(),layer={id:'layer-1',type:'raster',locked:false,visible:true},doc={id:'doc-1',width:16,height:12,layers:[layer],selectedLayerId:'layer-1'},original={type:'rect',rect:{x:1,y:1,width:4,height:4}};
+  const h=createClipboardHarness({copyMode:'selected',documentValue:doc,selectedLayer:layer,selectionShape:original,writeImpl:async()=>{started.resolve();await release.promise;}}),pending=h.controller.cutSelection();await started.promise;
+  const newer={type:'ellipse',rect:{x:1,y:1,width:4,height:4}};h.setSelectionShape(newer);release.resolve();assert.equal(await pending,true);assert.equal(h.selectedCuts[0].ownerDocument,doc);assert.equal(h.selectedCuts[0].targetLayer,layer);assert.deepEqual(h.selectedCuts[0].selectionSnapshot,original);assert.equal(h.getSelectionShape(),newer);assert.equal(h.getTool(),'marquee');
+});
+test('non-stale cut keeps Clipboard-before-mutation ordering and normal cleanup',async()=>{
+  const order=[],h=createClipboardHarness({writeImpl:async()=>order.push('clipboard'),clearMergedImpl:async()=>{order.push('cut');return{cleared:1,locked:0,rasterized:0};}});
+  assert.equal(await h.controller.cutSelection(),true);assert.deepEqual(order,['clipboard','cut']);assert.equal(h.getSelectionShape(),null);assert.equal(h.getTool(),'move');assert.equal(h.getSelectionClearCount(),1);
+});
+test('Clipboard write failure performs no cut or transient cleanup',async()=>{
+  const h=createClipboardHarness({writeImpl:async()=>{throw new Error('denied');}}),warn=console.warn;console.warn=()=>{};let result;try{result=await h.controller.cutSelection();}finally{console.warn=warn;}
+  assert.equal(result,false);assert.equal(h.mergedCuts.length,0);assert.equal(h.getSelectionClearCount(),0);assert.equal(h.getTool(),'marquee');assert.match(h.statuses.at(-1),/denied/);
 });

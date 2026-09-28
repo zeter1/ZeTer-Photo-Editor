@@ -86,7 +86,7 @@ test('v1.8 tools are wired to toolbar, menus, shortcuts, selection clipping and 
   assert.match(main, /clipContext: clipContextToSelection/);
   assert.match(main, /predicate: rasterSelectionPredicate/);
   assert.match(gesture, /selection\?\.clipContext\?\.\(context, layer\)/);
-  assert.match(commands, /selection\?\.predicate\?\.\(layer\)/);
+  assert.match(commands, /selection\?\.predicate\?\.\(layer, selectionSnapshot\)/);
 });
 
 test('line tool delegates raster mutation to the painting command controller',()=>{
