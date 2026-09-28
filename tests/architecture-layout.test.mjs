@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardCopyCutController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -36,6 +36,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/interaction/pen-draft-gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/interaction/pen-path-command-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/gesture-controller.js', root), 'utf8'),
+  readFile(new URL('src/selection/clipboard-copy-cut-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/clipboard-controller.js', root), 'utf8'),
   readFile(new URL('src/selection/raster-mutation-controller.js', root), 'utf8'),
   readFile(new URL('src/document/import-controller.js', root), 'utf8'),
@@ -358,8 +359,14 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
     assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
   }
   assert.match(main, /from '\.\/selection\/clipboard-controller\.js'/);
+  assert.match(build, /'src\/selection\/clipboard-copy-cut-controller\.js'/);
   assert.match(build, /'src\/selection\/clipboard-controller\.js'/);
+  assert.match(selectionClipboardCopyCutController, /export function createSelectionClipboardCopyCutController/);
   assert.match(selectionClipboardController, /export function createSelectionClipboardController/);
+  assert.match(selectionClipboardController, /from '\.\/clipboard-copy-cut-controller\.js'/);
+  assert.match(selectionClipboardController, /let pasteGeneration=0;/);
+  assert.doesNotMatch(selectionClipboardController, /\bclipboardCommandGeneration\b/);
+  assert.doesNotMatch(selectionClipboardCopyCutController, /\bpasteGeneration\b/);
   assert.doesNotMatch(main, /function copySelectionToClipboard\(/);
   assert.doesNotMatch(main, /function readClipboardImageFiles\(/);
   assert.doesNotMatch(main, /function armPasteShortcutFallback\(/);
@@ -485,18 +492,18 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /function rasterSelectionPredicate\(layer, shape = selectionShape\)/);
   assert.match(main, /function selectionIntersectsLayer\(layer, shape = selectionShape\)/);
   assert.match(main, /function clipContextToDocumentSelection\(ctx, shape = selectionShape\)/);
-  assert.match(selectionClipboardController, /captureSelectionSnapshot\(\)/);
-  assert.match(selectionClipboardController, /let clipboardCommandGeneration=0;/);
-  assert.match(selectionClipboardController, /const commandGeneration=\+\+clipboardCommandGeneration/);
-  assert.match(selectionClipboardController, /context\.commandGeneration===clipboardCommandGeneration/);
-  assert.match(selectionClipboardController, /isContinuationCurrent:\(\)=>isClipboardContinuationCurrent\(context\)/);
+  assert.match(selectionClipboardCopyCutController, /captureSelectionSnapshot\(\)/);
+  assert.match(selectionClipboardCopyCutController, /let clipboardCommandGeneration=0;/);
+  assert.match(selectionClipboardCopyCutController, /const commandGeneration=\+\+clipboardCommandGeneration/);
+  assert.match(selectionClipboardCopyCutController, /context\.commandGeneration===clipboardCommandGeneration/);
+  assert.match(selectionClipboardCopyCutController, /isContinuationCurrent:\(\)=>isClipboardContinuationCurrent\(context\)/);
   assert.match(selectionRasterMutationController, /const continuationCurrent = typeof isContinuationCurrent === 'function'/);
   assert.match(paintCommandController, /persistPaintLayer\(doc, layer, \{ isContinuationCurrent:continuationCurrent \}\)/);
   assert.match(paintingController, /persistPaintLayer\(owner, layer, \{ isContinuationCurrent \} = \{\}\)/);
   assert.match(paintingController, /persistHighDepthMutation\(owner, layer, buffer, \{ isContinuationCurrent \} = \{\}\)/);
-  assert.match(selectionClipboardController, /ownerDocument:documentValue/);
-  assert.match(selectionClipboardController, /ownerSessionId:sessionId/);
-  assert.match(selectionClipboardController, /targetLayer:layer/);
+  assert.match(selectionClipboardCopyCutController, /ownerDocument:documentValue/);
+  assert.match(selectionClipboardCopyCutController, /ownerSessionId:sessionId/);
+  assert.match(selectionClipboardCopyCutController, /targetLayer:layer/);
   assert.match(paintCommandController, /selection\?\.clipContext\?\.\(context, layer, selectionSnapshot\)/);
   assert.match(main, /clearAcrossVisibleLayers: clearSelectionAcrossVisibleLayers/);
   assert.doesNotMatch(main, /async function clearSelectionAcrossVisibleLayers\(/);
