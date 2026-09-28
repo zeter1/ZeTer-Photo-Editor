@@ -11,6 +11,7 @@ const gesture = await readFile(new URL('../src/painting/gesture-controller.js', 
 const render = await readFile(new URL('../src/core/render.js', import.meta.url), 'utf8');
 const modalController = await readFile(new URL('../src/ui/modal-controller.js', import.meta.url), 'utf8');
 const documentImportController = await readFile(new URL('../src/document/import-controller.js', import.meta.url), 'utf8');
+const viewportController = await readFile(new URL('../src/workspace/viewport-controller.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
 test('canvas allocation has a pixel budget in addition to per-axis bounds', () => {
@@ -64,7 +65,7 @@ test('multi-image import validates all inputs before changing document state', (
 
 
 test('high zoom supports pixel inspection and a visible brush outline', () => {
-  assert.match(main, /const value=clamp\(next,\.1,16\)/);
+  assert.match(viewportController, /clamp\(next, VIEWPORT_MIN_ZOOM, VIEWPORT_MAX_ZOOM\)/);
   assert.match(main, /zoom >= 4 \? 'pixelated' : 'auto'/);
   assert.match(main, /ctx\.ellipse\(hoverPoint\.x,hoverPoint\.y,radius\*scaleX,radius\*scaleY,rotation/);
   assert.match(main, /RASTER_BRUSH_TOOLS\.has\(currentTool\) \? 'none'/);
