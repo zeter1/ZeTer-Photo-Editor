@@ -489,6 +489,11 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(selectionClipboardController, /let clipboardCommandGeneration=0;/);
   assert.match(selectionClipboardController, /const commandGeneration=\+\+clipboardCommandGeneration/);
   assert.match(selectionClipboardController, /context\.commandGeneration===clipboardCommandGeneration/);
+  assert.match(selectionClipboardController, /isContinuationCurrent:\(\)=>isClipboardContinuationCurrent\(context\)/);
+  assert.match(selectionRasterMutationController, /const continuationCurrent = typeof isContinuationCurrent === 'function'/);
+  assert.match(paintCommandController, /persistPaintLayer\(doc, layer, \{ isContinuationCurrent:continuationCurrent \}\)/);
+  assert.match(paintingController, /persistPaintLayer\(owner, layer, \{ isContinuationCurrent \} = \{\}\)/);
+  assert.match(paintingController, /persistHighDepthMutation\(owner, layer, buffer, \{ isContinuationCurrent \} = \{\}\)/);
   assert.match(selectionClipboardController, /ownerDocument:documentValue/);
   assert.match(selectionClipboardController, /ownerSessionId:sessionId/);
   assert.match(selectionClipboardController, /targetLayer:layer/);
