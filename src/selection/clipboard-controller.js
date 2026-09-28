@@ -36,6 +36,7 @@ export function createSelectionClipboardController({
   setTimeoutFn=globalThis.setTimeout,
   clearTimeoutFn=globalThis.clearTimeout,
 } = {}) {
+  let clipboardCommandGeneration=0;
   let pasteGeneration=0;
   let pasteFallbackTimer=null;
 
@@ -78,7 +79,16 @@ export function createSelectionClipboardController({
     return true;
   }
 
+  function isClipboardCommandCurrent(context) {
+    return context.commandGeneration===clipboardCommandGeneration;
+  }
+
+  function isClipboardContinuationCurrent(context) {
+    return isClipboardCommandCurrent(context)&&isClipboardContextCurrent(context);
+  }
+
   function finishSelectionClipboardAction(context,message) {
+    if(!isClipboardCommandCurrent(context))return false;
     const stillOwnsTransientUi=
       isClipboardContextCurrent(context)&&
       getSelectionShape()===context.selectionIdentity&&
@@ -88,15 +98,18 @@ export function createSelectionClipboardController({
       setTool('move');
     }
     setStatus(message);
+    return true;
   }
 
-  function rejectStaleCut() {
+  function rejectStaleCut(context) {
+    if(!isClipboardCommandCurrent(context))return false;
     setStatus('Область скопирована, но вырезание отменено: активный документ или слой изменился');
     toast('Область скопирована; вырезание отменено из-за изменения документа или слоя','warn');
     return false;
   }
 
   async function copySelectionToClipboard({ cut = false } = {}) {
+    const commandGeneration=++clipboardCommandGeneration;
     const selectionIdentity=getSelectionShape();
     const selectionSnapshot=captureSelectionSnapshot();
     if(!selectionIdentity||!selectionSnapshot){setStatus('Сначала выделите область инструментом выделения');toast('Нет активного выделения','warn');return false;}
@@ -114,53 +127,64 @@ export function createSelectionClipboardController({
       toast('Браузер не поддерживает запись изображений в буфер обмена','error');
       return false;
     }
-    const context={documentValue,sessionId,selectionIdentity,selectionSnapshot,bounds,copyMode,layer,tool:getCurrentTool()};
+    const context={commandGeneration,documentValue,sessionId,selectionIdentity,selectionSnapshot,bounds,copyMode,layer,tool:getCurrentTool()};
     try {
       const pngBlob=await (copyMode==='merged'
         ? renderSelectionMergedToPng(documentValue,bounds,selectionSnapshot)
         : renderSelectionLayerToPng(layer,bounds,selectionSnapshot));
+      if(!isClipboardCommandCurrent(context))return false;
       if(!isClipboardContextCurrent(context)){setStatus('Копирование отменено: активный документ или слой изменился');return false;}
       const item=new ClipboardItemClass({'image/png':pngBlob});
       await navigatorTarget.clipboard.write([item]);
+      if(!isClipboardCommandCurrent(context))return false;
+      if(!isClipboardContextCurrent(context)){
+        if(cut)return rejectStaleCut(context);
+        setStatus('Область скопирована, но завершение команды отменено: активный документ или слой изменился');
+        return false;
+      }
       if(cut){
-        if(!isClipboardContextCurrent(context))return rejectStaleCut();
         if(copyMode==='merged'){
           const result=await clearSelectionAcrossVisibleLayers({
             historyLabel:'Вырезать выделение со всех слоёв',
             ownerDocument:documentValue,
             ownerSessionId:sessionId,
             selectionSnapshot,
+            isContinuationCurrent:()=>isClipboardContinuationCurrent(context),
           });
           if(!result)return false;
+          if(!isClipboardContinuationCurrent(context))return false;
           const details=[];
           if(result.rasterized)details.push(`растрировано слоёв: ${result.rasterized}`);
           if(result.locked)details.push(`заблокировано и не изменено: ${result.locked}`);
           const message=result.cleared
             ? `Вырезано со всех видимых слоёв: ${bounds.width} × ${bounds.height} px${details.length?` • ${details.join(' • ')}`:''}`
             : `Скопировано объединённое выделение: ${bounds.width} × ${bounds.height} px • очищать нечего`;
-          finishSelectionClipboardAction(context,message);
+          if(!finishSelectionClipboardAction(context,message))return false;
           toast(result.cleared?'Выделение вырезано со всех доступных видимых слоёв':'Объединённое выделение скопировано; доступных слоёв для очистки нет',result.cleared?'success':'warn');
           return true;
         }
-        if(!isEditableRasterLayer(layer))return rejectStaleCut();
+        if(!isEditableRasterLayer(layer))return rejectStaleCut(context);
         const cleared=await clearSelectedPixels({
           historyLabel:'Вырезать выделение',
           successStatus:`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`,
           ownerDocument:documentValue,
           targetLayer:layer,
           selectionSnapshot,
+          isContinuationCurrent:()=>isClipboardContinuationCurrent(context),
         });
-        if(!cleared){toast('Область скопирована, но удалить пиксели со слоя не удалось','warn');return false;}
-        finishSelectionClipboardAction(context,`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`);
+        if(!cleared){if(isClipboardCommandCurrent(context))toast('Область скопирована, но удалить пиксели со слоя не удалось','warn');return false;}
+        if(!isClipboardContinuationCurrent(context))return false;
+        if(!finishSelectionClipboardAction(context,`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`))return false;
         toast('Выделенная область вырезана в буфер обмена','success');
         return true;
       }
       const sourceLabel=copyMode==='merged'?'со всех видимых слоёв':'с выбранного слоя';
-      finishSelectionClipboardAction(context,`Скопировано ${sourceLabel}: ${bounds.width} × ${bounds.height} px`);
+      if(!finishSelectionClipboardAction(context,`Скопировано ${sourceLabel}: ${bounds.width} × ${bounds.height} px`))return false;
       toast(`Выделенная область скопирована ${sourceLabel}`,'success');
       return true;
     } catch(error) {
       console.warn('Clipboard image write failed',error);
+      if(!isClipboardCommandCurrent(context))return false;
       setStatus(`Не удалось записать выделение в буфер: ${error.message||'доступ запрещён'}`);
       toast('Не удалось скопировать изображение в системный буфер','error');
       return false;

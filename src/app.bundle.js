@@ -13669,10 +13669,11 @@ function createRasterEditController({
     invalidateImageCache(old);
   }
 
-  async function persistHighDepthMutation(owner, layer, buffer) {
-    if (!buffer || !isCurrentRasterTarget(owner, layer)) return false;
+  async function persistHighDepthMutation(owner, layer, buffer, { isContinuationCurrent } = {}) {
+    const continuationCurrent = () => typeof isContinuationCurrent !== 'function' || isContinuationCurrent();
+    if (!buffer || !continuationCurrent() || !isCurrentRasterTarget(owner, layer)) return false;
     const mutation = await prepareHighDepthMutation(layer, buffer);
-    if (!isCurrentRasterTarget(owner, layer)) return false;
+    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) return false;
     applyHighDepthMutation(layer, mutation);
     return true;
   }
@@ -13761,9 +13762,11 @@ function createRasterEditController({
     return { canvas, ctx: context };
   }
 
-  async function persistPaintLayer(owner, layer) {
+  async function persistPaintLayer(owner, layer, { isContinuationCurrent } = {}) {
     const canvas = brushCanvas;
+    const continuationCurrent = () => typeof isContinuationCurrent !== 'function' || isContinuationCurrent();
     if (
+      !continuationCurrent() ||
       !canvas ||
       brushOwner !== owner ||
       brushLayer !== layer ||
@@ -13773,6 +13776,7 @@ function createRasterEditController({
 
     const dataUrl = await canvasToDataURL(canvas, 'image/png');
     if (
+      !continuationCurrent() ||
       brushCanvas !== canvas ||
       brushOwner !== owner ||
       brushLayer !== layer ||
@@ -14120,7 +14124,10 @@ function createRasterCommandController({
     ownerDocument,
     targetLayer,
     selectionSnapshot,
+    isContinuationCurrent,
   } = {}) {
+    const continuationCurrent = typeof isContinuationCurrent === 'function' ? isContinuationCurrent : () => true;
+    if (!continuationCurrent()) return false;
     const hasExplicitSelection = selectionSnapshot !== undefined;
     if (!hasExplicitSelection && !selection?.hasActive?.()) return false;
     if (hasExplicitSelection && !selectionSnapshot) return false;
@@ -14152,7 +14159,10 @@ function createRasterCommandController({
             status('В выделении нет непрозрачных high-depth пикселей');
             return false;
           }
-          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer, { isContinuationCurrent:continuationCurrent })) {
+            if (!continuationCurrent()) resetNativeState();
+            return false;
+          }
           resetNativeState();
           ui?.commit?.(historyLabel);
           status(`${successStatus} · high-depth: ${cleared.toLocaleString('ru-RU')} px`);
@@ -14162,16 +14172,27 @@ function createRasterCommandController({
 
       const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
       if (!prepared) return false;
+      if (!continuationCurrent()) {
+        rasterEdit.clearBrushBuffer();
+        return false;
+      }
       const context = prepared.ctx;
       context.save();
       selection?.clipContext?.(context, layer, selectionSnapshot);
       context.clearRect(0, 0, prepared.canvas.width, prepared.canvas.height);
       context.restore();
-      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
+      if (!await rasterEdit.persistPaintLayer(doc, layer, { isContinuationCurrent:continuationCurrent })) {
+        if (!continuationCurrent()) rasterEdit.clearBrushBuffer();
+        return false;
+      }
       ui?.commit?.(historyLabel);
       status(successStatus);
       return true;
     } catch (error) {
+      if (!continuationCurrent()) {
+        rasterEdit.clearBrushBuffer();
+        return false;
+      }
       console.error(error);
       rasterEdit.clearBrushBuffer();
       ui?.render?.();
@@ -15570,7 +15591,10 @@ function createSelectionRasterMutationController({
     ownerDocument,
     ownerSessionId,
     selectionSnapshot,
+    isContinuationCurrent,
   } = {}) {
+    const continuationCurrent = typeof isContinuationCurrent === 'function' ? isContinuationCurrent : () => true;
+    if (!continuationCurrent()) return null;
     const hasExplicitSelection = selectionSnapshot !== undefined;
     if (!hasExplicitSelection && !selection.hasActive()) return { cleared:0, locked:0, rasterized:0 };
     if (hasExplicitSelection && !selectionSnapshot) return { cleared:0, locked:0, rasterized:0 };
@@ -15601,18 +15625,23 @@ function createSelectionRasterMutationController({
       let rasterized = 0;
       for (const layer of targets) {
         const working = layer.type === 'raster' ? layer : await rasterizeLayer(layer);
+        if (!continuationCurrent()) return null;
         if (!working) throw new Error('Не удалось подготовить слой к очистке');
         if (layer.type !== 'raster') rasterized += 1;
         if (layer.type === 'raster' && working.highDepthSource) {
           const highDepth = await prepareHighDepthMutation(working, frozenSelection);
+          if (!continuationCurrent()) return null;
           if (highDepth?.mutation) {
             prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
             continue;
           }
         }
-        prepared.push({ layer, working, dataUrl:await prepareRasterDataUrl(working, frozenSelection), highDepthMutation:null });
+        const dataUrl = await prepareRasterDataUrl(working, frozenSelection);
+        if (!continuationCurrent()) return null;
+        prepared.push({ layer, working, dataUrl, highDepthMutation:null });
       }
 
+      if (!continuationCurrent()) return null;
       if (state.getDocument() !== documentValue || state.getActiveSessionId() !== targetSessionId) {
         status('Очистка выделения отменена: активный документ изменился');
         return null;
@@ -15648,6 +15677,7 @@ function createSelectionRasterMutationController({
       ui?.commit?.(historyLabel);
       return { cleared:prepared.length, locked, rasterized };
     } catch (error) {
+      if (!continuationCurrent()) return null;
       console.error(error);
       rasterEdit.clearBrushBuffer();
       ui?.render?.();
@@ -16334,6 +16364,7 @@ function createSelectionClipboardController({
   setTimeoutFn=globalThis.setTimeout,
   clearTimeoutFn=globalThis.clearTimeout,
 } = {}) {
+  let clipboardCommandGeneration=0;
   let pasteGeneration=0;
   let pasteFallbackTimer=null;
 
@@ -16376,7 +16407,16 @@ function createSelectionClipboardController({
     return true;
   }
 
+  function isClipboardCommandCurrent(context) {
+    return context.commandGeneration===clipboardCommandGeneration;
+  }
+
+  function isClipboardContinuationCurrent(context) {
+    return isClipboardCommandCurrent(context)&&isClipboardContextCurrent(context);
+  }
+
   function finishSelectionClipboardAction(context,message) {
+    if(!isClipboardCommandCurrent(context))return false;
     const stillOwnsTransientUi=
       isClipboardContextCurrent(context)&&
       getSelectionShape()===context.selectionIdentity&&
@@ -16386,15 +16426,18 @@ function createSelectionClipboardController({
       setTool('move');
     }
     setStatus(message);
+    return true;
   }
 
-  function rejectStaleCut() {
+  function rejectStaleCut(context) {
+    if(!isClipboardCommandCurrent(context))return false;
     setStatus('Область скопирована, но вырезание отменено: активный документ или слой изменился');
     toast('Область скопирована; вырезание отменено из-за изменения документа или слоя','warn');
     return false;
   }
 
   async function copySelectionToClipboard({ cut = false } = {}) {
+    const commandGeneration=++clipboardCommandGeneration;
     const selectionIdentity=getSelectionShape();
     const selectionSnapshot=captureSelectionSnapshot();
     if(!selectionIdentity||!selectionSnapshot){setStatus('Сначала выделите область инструментом выделения');toast('Нет активного выделения','warn');return false;}
@@ -16412,53 +16455,64 @@ function createSelectionClipboardController({
       toast('Браузер не поддерживает запись изображений в буфер обмена','error');
       return false;
     }
-    const context={documentValue,sessionId,selectionIdentity,selectionSnapshot,bounds,copyMode,layer,tool:getCurrentTool()};
+    const context={commandGeneration,documentValue,sessionId,selectionIdentity,selectionSnapshot,bounds,copyMode,layer,tool:getCurrentTool()};
     try {
       const pngBlob=await (copyMode==='merged'
         ? renderSelectionMergedToPng(documentValue,bounds,selectionSnapshot)
         : renderSelectionLayerToPng(layer,bounds,selectionSnapshot));
+      if(!isClipboardCommandCurrent(context))return false;
       if(!isClipboardContextCurrent(context)){setStatus('Копирование отменено: активный документ или слой изменился');return false;}
       const item=new ClipboardItemClass({'image/png':pngBlob});
       await navigatorTarget.clipboard.write([item]);
+      if(!isClipboardCommandCurrent(context))return false;
+      if(!isClipboardContextCurrent(context)){
+        if(cut)return rejectStaleCut(context);
+        setStatus('Область скопирована, но завершение команды отменено: активный документ или слой изменился');
+        return false;
+      }
       if(cut){
-        if(!isClipboardContextCurrent(context))return rejectStaleCut();
         if(copyMode==='merged'){
           const result=await clearSelectionAcrossVisibleLayers({
             historyLabel:'Вырезать выделение со всех слоёв',
             ownerDocument:documentValue,
             ownerSessionId:sessionId,
             selectionSnapshot,
+            isContinuationCurrent:()=>isClipboardContinuationCurrent(context),
           });
           if(!result)return false;
+          if(!isClipboardContinuationCurrent(context))return false;
           const details=[];
           if(result.rasterized)details.push(`растрировано слоёв: ${result.rasterized}`);
           if(result.locked)details.push(`заблокировано и не изменено: ${result.locked}`);
           const message=result.cleared
             ? `Вырезано со всех видимых слоёв: ${bounds.width} × ${bounds.height} px${details.length?` • ${details.join(' • ')}`:''}`
             : `Скопировано объединённое выделение: ${bounds.width} × ${bounds.height} px • очищать нечего`;
-          finishSelectionClipboardAction(context,message);
+          if(!finishSelectionClipboardAction(context,message))return false;
           toast(result.cleared?'Выделение вырезано со всех доступных видимых слоёв':'Объединённое выделение скопировано; доступных слоёв для очистки нет',result.cleared?'success':'warn');
           return true;
         }
-        if(!isEditableRasterLayer(layer))return rejectStaleCut();
+        if(!isEditableRasterLayer(layer))return rejectStaleCut(context);
         const cleared=await clearSelectedPixels({
           historyLabel:'Вырезать выделение',
           successStatus:`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`,
           ownerDocument:documentValue,
           targetLayer:layer,
           selectionSnapshot,
+          isContinuationCurrent:()=>isClipboardContinuationCurrent(context),
         });
-        if(!cleared){toast('Область скопирована, но удалить пиксели со слоя не удалось','warn');return false;}
-        finishSelectionClipboardAction(context,`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`);
+        if(!cleared){if(isClipboardCommandCurrent(context))toast('Область скопирована, но удалить пиксели со слоя не удалось','warn');return false;}
+        if(!isClipboardContinuationCurrent(context))return false;
+        if(!finishSelectionClipboardAction(context,`Вырезано в буфер: ${bounds.width} × ${bounds.height} px`))return false;
         toast('Выделенная область вырезана в буфер обмена','success');
         return true;
       }
       const sourceLabel=copyMode==='merged'?'со всех видимых слоёв':'с выбранного слоя';
-      finishSelectionClipboardAction(context,`Скопировано ${sourceLabel}: ${bounds.width} × ${bounds.height} px`);
+      if(!finishSelectionClipboardAction(context,`Скопировано ${sourceLabel}: ${bounds.width} × ${bounds.height} px`))return false;
       toast(`Выделенная область скопирована ${sourceLabel}`,'success');
       return true;
     } catch(error) {
       console.warn('Clipboard image write failed',error);
+      if(!isClipboardCommandCurrent(context))return false;
       setStatus(`Не удалось записать выделение в буфер: ${error.message||'доступ запрещён'}`);
       toast('Не удалось скопировать изображение в системный буфер','error');
       return false;

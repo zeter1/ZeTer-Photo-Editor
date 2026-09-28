@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-28 — Latest-owner overlapping Selection Clipboard commands
+
+- Concurrency safety: each copy/cut invocation gets a controller-local monotonically increasing generation; a newer command supersedes older same-document/same-layer work after async render or OS Clipboard boundaries.
+- Mutation/history safety: superseded Cuts cannot enter a later destructive merged/current-layer clear; an optional continuation predicate is propagated through merged preparation and Canvas8/native high-depth persistence, so ownership lost during an internal await aborts before pixel/history publication; post-clear completion then revalidates generation + exact context before transient UI or success publication.
+- UI/error ownership: stale generations cannot clear a newer selection, force Move, or overwrite newer success/error status/toast; rejected stale Clipboard promises are observable in diagnostics without taking UI ownership back.
+- Regression/docs: deterministic deferred-Promise coverage pins newer-first/older-first overlap ordering, selected-layer overlap, Copy→Cut/Cut→Copy semantics and stale rejection suppression; AI-facing boundary/test docs now record the separate copy/cut generation contract.
+
 ### 2026-09-28 — Origin-bound async Selection Clipboard copy/cut
 
 - Correctness: copy/cut freezes exact originating document/session, full cloned selection geometry, copy mode and selected-layer identity before rendering or Clipboard awaits; copied PNG and later Cut consume the same intent.

@@ -134,7 +134,10 @@ export function createSelectionRasterMutationController({
     ownerDocument,
     ownerSessionId,
     selectionSnapshot,
+    isContinuationCurrent,
   } = {}) {
+    const continuationCurrent = typeof isContinuationCurrent === 'function' ? isContinuationCurrent : () => true;
+    if (!continuationCurrent()) return null;
     const hasExplicitSelection = selectionSnapshot !== undefined;
     if (!hasExplicitSelection && !selection.hasActive()) return { cleared:0, locked:0, rasterized:0 };
     if (hasExplicitSelection && !selectionSnapshot) return { cleared:0, locked:0, rasterized:0 };
@@ -165,18 +168,23 @@ export function createSelectionRasterMutationController({
       let rasterized = 0;
       for (const layer of targets) {
         const working = layer.type === 'raster' ? layer : await rasterizeLayer(layer);
+        if (!continuationCurrent()) return null;
         if (!working) throw new Error('Не удалось подготовить слой к очистке');
         if (layer.type !== 'raster') rasterized += 1;
         if (layer.type === 'raster' && working.highDepthSource) {
           const highDepth = await prepareHighDepthMutation(working, frozenSelection);
+          if (!continuationCurrent()) return null;
           if (highDepth?.mutation) {
             prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
             continue;
           }
         }
-        prepared.push({ layer, working, dataUrl:await prepareRasterDataUrl(working, frozenSelection), highDepthMutation:null });
+        const dataUrl = await prepareRasterDataUrl(working, frozenSelection);
+        if (!continuationCurrent()) return null;
+        prepared.push({ layer, working, dataUrl, highDepthMutation:null });
       }
 
+      if (!continuationCurrent()) return null;
       if (state.getDocument() !== documentValue || state.getActiveSessionId() !== targetSessionId) {
         status('Очистка выделения отменена: активный документ изменился');
         return null;
@@ -212,6 +220,7 @@ export function createSelectionRasterMutationController({
       ui?.commit?.(historyLabel);
       return { cleared:prepared.length, locked, rasterized };
     } catch (error) {
+      if (!continuationCurrent()) return null;
       console.error(error);
       rasterEdit.clearBrushBuffer();
       ui?.render?.();
