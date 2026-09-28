@@ -14,6 +14,7 @@ const sources = [
   'src/ui/toolbar-controller.js',
   'src/ui/menu-controller.js',
   'src/ui/modal-controller.js',
+  'src/ui/learning-center-controller.js',
   'src/interaction/pointer-lifecycle-router.js',
   'src/interaction/crop-gesture-controller.js',
   'src/core/history.js',

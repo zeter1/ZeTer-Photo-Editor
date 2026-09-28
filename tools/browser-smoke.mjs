@@ -324,6 +324,52 @@ async function runSmoke() {
     assert(initial.rows === 0, 'Fresh profile should start without layer rows', JSON.stringify(initial));
     assert(Object.values(initial.controls).every(value => value === true), 'Layer edit controls must be disabled when no layer is selected', JSON.stringify(initial.controls));
 
+    const learningInitial = await evaluate(client, `(() => {
+      const help=document.querySelector('.menu-button[data-menu="help"]');
+      help?.click();
+      const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(button=>button.querySelector('span')?.textContent==='Центр обучения');
+      item?.click();
+      const modal=document.querySelector('.learning-center-modal');
+      return {
+        title:modal?.getAttribute('aria-label')||'',
+        lessons:modal?.querySelectorAll('[data-learning-lesson-id]').length||0,
+        progress:modal?.querySelector('[data-learning-progress-text]')?.textContent||'',
+        focused:document.activeElement?.dataset?.learningAction||'',
+      };
+    })()`);
+    assert(learningInitial.title === 'Центр обучения', 'Learning Center must open from Help', JSON.stringify(learningInitial));
+    assert(learningInitial.lessons === 10, 'Learning Center must expose the full 10-lesson curriculum', JSON.stringify(learningInitial));
+    assert(learningInitial.progress.includes('0 / 10'), 'Fresh Learning Center progress must start at zero', JSON.stringify(learningInitial));
+    assert(learningInitial.focused === 'continue', 'Learning Center should focus its primary continue action', JSON.stringify(learningInitial));
+
+    const learningCompleted = await evaluate(client, `(() => {
+      document.querySelector('.learning-center-modal [data-learning-action="toggle-complete"]')?.click();
+      const modal=document.querySelector('.learning-center-modal');
+      return {
+        progress:modal?.querySelector('[data-learning-progress-text]')?.textContent||'',
+        stored:JSON.parse(localStorage.getItem('zeter-photo-editor.learning-center.v1')||'null'),
+      };
+    })()`);
+    assert(learningCompleted.progress.includes('1 / 10'), 'Completing a lesson must update Learning Center progress', JSON.stringify(learningCompleted));
+    assert(learningCompleted.stored?.completed?.includes('start'), 'Learning Center completion must persist locally', JSON.stringify(learningCompleted));
+
+    const learningRestored = await evaluate(client, `(() => {
+      document.querySelector('.learning-center-modal [data-close]')?.click();
+      const help=document.querySelector('.menu-button[data-menu="help"]');
+      help?.click();
+      const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(button=>button.querySelector('span')?.textContent==='Центр обучения');
+      item?.click();
+      const modal=document.querySelector('.learning-center-modal');
+      const progress=modal?.querySelector('[data-learning-progress-text]')?.textContent||'';
+      modal?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+      const focusReturned=document.activeElement===help;
+      localStorage.removeItem('zeter-photo-editor.learning-center.v1');
+      return {progress,closed:!document.querySelector('.learning-center-modal'),focusReturned};
+    })()`);
+    assert(learningRestored.progress.includes('1 / 10'), 'Learning Center progress must survive close/reopen', JSON.stringify(learningRestored));
+    assert(learningRestored.closed, 'Escape must close the Learning Center', JSON.stringify(learningRestored));
+    assert(learningRestored.focusReturned, 'Closing Learning Center must restore focus to Help', JSON.stringify(learningRestored));
+    assertNoBrowserErrors(errors, stderrState);
     await client.send('Emulation.setDeviceMetricsOverride', { width:1280, height:900, deviceScaleFactor:1, mobile:false });
     await waitFor('desktop two-column toolbar', async () => evaluate(client, `getComputedStyle(document.querySelector('.toolbar')).gridTemplateColumns.trim().split(/\\s+/).length === 2`));
     const toolbarBefore = await evaluate(client, `[...document.querySelectorAll('.toolbar .tool')].map(button => button.dataset.tool)`);

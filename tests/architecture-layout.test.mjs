@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, viewportController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardCopyCutController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, learningCenterController, workspaceLayoutController, viewportController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardCopyCutController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -14,6 +14,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/toolbar-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/menu-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
+  readFile(new URL('src/ui/learning-center-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/workspace-layout-controller.js', root), 'utf8'),
   readFile(new URL('src/workspace/viewport-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/layers-panel-controller.js', root), 'utf8'),
@@ -107,6 +108,10 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.doesNotMatch(main, /function makeModalDraggable\(/);
   assert.doesNotMatch(main, /function showInfoModal\(/);
   assert.doesNotMatch(main, /function showRecoveryModal\(/);
+  assert.match(main, /from '\.\/ui\/learning-center-controller\.js'/);
+  assert.match(build, /'src\/ui\/learning-center-controller\.js'/);
+  assert.match(learningCenterController, /export function createLearningCenterController/);
+  assert.doesNotMatch(main, /function showLearningCenter\(\)/);
   assert.match(main, /from '\.\/ui\/workspace-layout-controller\.js'/);
   assert.match(build, /'src\/ui\/workspace-layout-controller\.js'/);
   assert.match(workspaceLayoutController, /export function createWorkspaceLayoutController/);

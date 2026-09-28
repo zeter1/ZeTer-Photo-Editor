@@ -13,10 +13,9 @@ test('about dialog exposes developer contact links', () => {
 });
 
 
-test('help menu exposes learning center', () => {
+test('help menu delegates Learning Center to its UI controller', () => {
+  assert.match(mainSource, /from '\.\/ui\/learning-center-controller\.js'/);
+  assert.match(mainSource, /createLearningCenterController\(\{/);
   assert.match(mainSource, /help:\[\s*\['Центр обучения','',showLearningCenter\]/);
-  assert.match(mainSource, /function showLearningCenter\(\)/);
-  assert.match(mainSource, /Быстрый старт — 5 минут/);
-  assert.match(mainSource, /Ctrl\+S<\/b> сохраняет проект <code>\.zpe<\/code>/);
-  assert.match(mainSource, /Помощь → Горячие клавиши/);
+  assert.doesNotMatch(mainSource, /function showLearningCenter\(\)/);
 });
