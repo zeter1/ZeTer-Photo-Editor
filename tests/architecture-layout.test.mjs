@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardCopyCutController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, workspaceLayoutController, viewportController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardCopyCutController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -15,6 +15,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/ui/menu-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/modal-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/workspace-layout-controller.js', root), 'utf8'),
+  readFile(new URL('src/workspace/viewport-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/layers-panel-controller.js', root), 'utf8'),
   readFile(new URL('src/layers/command-controller.js', root), 'utf8'),
   readFile(new URL('src/layers/property-command-controller.js', root), 'utf8'),
@@ -115,6 +116,18 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   }
   assert.doesNotMatch(main, /const collapsedPanelIds = new Set/);
   assert.doesNotMatch(main, /let panelsVisible = true/);
+  assert.match(main, /from '\.\/workspace\/viewport-controller\.js'/);
+  assert.match(build, /'src\/workspace\/viewport-controller\.js'/);
+  assert.match(viewportController, /export function createViewportController/);
+  assert.match(viewportController, /const VIEWPORT_MIN_ZOOM = 0\.1/);
+  assert.match(viewportController, /const VIEWPORT_MAX_ZOOM = 16/);
+  assert.match(viewportController, /const VIEWPORT_FIT_PADDING = 90/);
+  assert.match(viewportController, /requestFrame\(\(\) =>/);
+  assert.match(viewportController, /viewport\.scrollTo\(\{ left: 0, top: 0 \}\)/);
+  assert.match(main, /const viewportController = createViewportController\(\{/);
+  assert.match(main, /const \{ setZoom, setZoomAtClientPoint, fitToView \} = viewportController/);
+  for (const name of ['setZoom','setZoomAtClientPoint','fitToView']) assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
+  assert.doesNotMatch(viewportController, /pointerWantsPan|spaceHeld|kind:'pan'/);
   assert.match(main, /from '\.\/ui\/layers-panel-controller\.js'/);
   assert.match(build, /'src\/ui\/layers-panel-controller\.js'/);
   assert.match(layersPanelController, /export function createLayersPanelController/);

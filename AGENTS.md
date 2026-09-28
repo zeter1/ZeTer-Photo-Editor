@@ -7,6 +7,7 @@
 - UI/runtime orchestration and tool-specific pointer dispatch: `src/main.js`
 - Global overlay pointer lifecycle, capture/release and active-pointer routing: `src/interaction/pointer-lifecycle-router.js`
 - Workspace/session/tab lifecycle: `src/workspace/session-controller.js`
+- Canvas viewport zoom / pointer-anchored zoom / fit-to-view policy: `src/workspace/viewport-controller.js`; keyboard/menu/wheel dispatch stays in `src/main.js`, while canvas-mode shell visibility/center preservation stays in `src/ui/workspace-layout-controller.js`.
 - Recovery/autosave orchestration, saved-project manager actions, window ownership, debounce/restore/delete policy: `src/workspace/recovery-controller.js`; recovery dialog DOM/actions: `src/ui/modal-controller.js`; IndexedDB persistence only: `src/core/recovery.js`
 - Document import / file routing: `src/document/import-controller.js`
 - Document Image Size / Canvas Size persisted command policy, stale-modal owner guard, atomic resize plan + history publication: `src/document/resize-command-controller.js`; modal fields/status remain in `src/main.js`, reusable limits/math in `src/core/state.js`.
@@ -50,6 +51,7 @@
 ## Быстрый выбор документа
 
 - где находится код → `docs/architecture/CODEMAP.md`
+- zoom / fit / pointer anchoring contract → `docs/architecture/VIEWPORT_NAVIGATION.md`
 - какие зависимости допустимы → `docs/architecture/BOUNDARIES.md`
 - как работать AI/Codex → `docs/development/AI_WORKFLOW.md`
 - как делать refactor/debug/review/tests с доказательствами → `docs/development/QUALITY_PLAYBOOK.md`

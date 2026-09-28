@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const sources = [
   'src/core/geometry.js',
+  'src/workspace/viewport-controller.js',
   'src/ui/tool-layout.js',
   'src/ui/tool-config.js',
   'src/ui/workspace-layout-controller.js',
