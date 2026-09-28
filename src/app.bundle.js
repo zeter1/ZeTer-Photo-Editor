@@ -13978,7 +13978,7 @@ function createRasterCommandController({
       if (!prepared) return false;
       const context = prepared.ctx;
       context.save();
-      selection?.clipContext?.(context, layer, selectionSnapshot);
+      selection?.clipContext?.(context, layer);
       context.lineCap = 'round';
       context.lineJoin = 'round';
       context.lineWidth = Math.max(1, tools.brushSize());
@@ -14164,7 +14164,7 @@ function createRasterCommandController({
       if (!prepared) return false;
       const context = prepared.ctx;
       context.save();
-      selection?.clipContext?.(context, layer);
+      selection?.clipContext?.(context, layer, selectionSnapshot);
       context.clearRect(0, 0, prepared.canvas.width, prepared.canvas.height);
       context.restore();
       if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
