@@ -325,6 +325,7 @@ async function runSmoke() {
     assert(Object.values(initial.controls).every(value => value === true), 'Layer edit controls must be disabled when no layer is selected', JSON.stringify(initial.controls));
 
     const learningInitial = await evaluate(client, `(() => {
+      localStorage.removeItem('zeter-photo-editor.learning-center.v1');
       const help=document.querySelector('.menu-button[data-menu="help"]');
       help?.click();
       const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(button=>button.querySelector('span')?.textContent==='Центр обучения');
@@ -334,24 +335,64 @@ async function runSmoke() {
         title:modal?.getAttribute('aria-label')||'',
         lessons:modal?.querySelectorAll('[data-learning-lesson-id]').length||0,
         progress:modal?.querySelector('[data-learning-progress-text]')?.textContent||'',
+        practice:modal?.querySelector('[data-learning-practice-progress]')?.textContent||'',
+        quizzes:modal?.querySelector('[data-learning-quiz-progress]')?.textContent||'',
+        practiceSteps:modal?.querySelectorAll('[data-learning-checklist="practice"]').length||0,
+        quizQuestions:modal?.querySelectorAll('[data-learning-quiz-question]').length||0,
+        completeDisabled:Boolean(modal?.querySelector('[data-learning-action="toggle-complete"]')?.disabled),
         focused:document.activeElement?.dataset?.learningAction||'',
       };
     })()`);
     assert(learningInitial.title === 'Центр обучения', 'Learning Center must open from Help', JSON.stringify(learningInitial));
     assert(learningInitial.lessons === 10, 'Learning Center must expose the full 10-lesson curriculum', JSON.stringify(learningInitial));
     assert(learningInitial.progress.includes('0 / 10'), 'Fresh Learning Center progress must start at zero', JSON.stringify(learningInitial));
+    assert(learningInitial.practice.startsWith('0/'), 'Fresh Learning Center practice evidence must start at zero', JSON.stringify(learningInitial));
+    assert(learningInitial.quizzes === '0/10', 'Fresh Learning Center quiz evidence must start at zero', JSON.stringify(learningInitial));
+    assert(learningInitial.practiceSteps === 4 && learningInitial.quizQuestions === 2, 'First lesson must expose real practice and a knowledge check', JSON.stringify(learningInitial));
+    assert(learningInitial.completeDisabled, 'Lesson credit must be gated until practice, mastery and quiz are complete', JSON.stringify(learningInitial));
     assert(learningInitial.focused === 'continue', 'Learning Center should focus its primary continue action', JSON.stringify(learningInitial));
 
-    const learningCompleted = await evaluate(client, `(() => {
-      document.querySelector('.learning-center-modal [data-learning-action="toggle-complete"]')?.click();
+    const learningMastered = await evaluate(client, `(() => {
+      for(let index=0;index<4;index+=1){
+        const input=document.querySelector('[data-learning-checklist="practice"][data-learning-index="'+index+'"]');
+        if(!input)return {error:'practice-'+index};
+        input.click();
+      }
+      for(let index=0;index<3;index+=1){
+        const input=document.querySelector('[data-learning-checklist="mastery"][data-learning-index="'+index+'"]');
+        if(!input)return {error:'mastery-'+index};
+        input.click();
+      }
+      const q0=document.querySelector('[data-learning-quiz-question="0"] input[data-learning-answer-index="1"]');
+      const q1=document.querySelector('[data-learning-quiz-question="1"] input[data-learning-answer-index="0"]');
+      if(!q0||!q1)return {error:'quiz-options'};
+      q0.click();
+      q1.click();
+      document.querySelector('[data-learning-action="check-quiz"]')?.click();
+      const completion=document.querySelector('[data-learning-action="toggle-complete"]');
+      const readyDisabled=Boolean(completion?.disabled);
+      const quizPassed=Boolean(document.querySelector('.learning-quiz-passed'));
+      completion?.click();
       const modal=document.querySelector('.learning-center-modal');
       return {
+        readyDisabled,
+        quizPassed,
         progress:modal?.querySelector('[data-learning-progress-text]')?.textContent||'',
+        practice:modal?.querySelector('[data-learning-practice-progress]')?.textContent||'',
+        quizzes:modal?.querySelector('[data-learning-quiz-progress]')?.textContent||'',
         stored:JSON.parse(localStorage.getItem('zeter-photo-editor.learning-center.v1')||'null'),
       };
     })()`);
-    assert(learningCompleted.progress.includes('1 / 10'), 'Completing a lesson must update Learning Center progress', JSON.stringify(learningCompleted));
-    assert(learningCompleted.stored?.completed?.includes('start'), 'Learning Center completion must persist locally', JSON.stringify(learningCompleted));
+    assert(!learningMastered.error, 'Learning Center mastery scenario must reach every checkpoint', JSON.stringify(learningMastered));
+    assert(!learningMastered.readyDisabled && learningMastered.quizPassed, 'Practice + mastery + correct knowledge check must unlock lesson credit', JSON.stringify(learningMastered));
+    assert(learningMastered.progress.includes('1 / 10'), 'Mastering a lesson must update Learning Center progress', JSON.stringify(learningMastered));
+    assert(learningMastered.practice.startsWith('4/'), 'Hands-on practice evidence must be persisted', JSON.stringify(learningMastered));
+    assert(learningMastered.quizzes === '1/10', 'Knowledge-check pass must be persisted', JSON.stringify(learningMastered));
+    assert(learningMastered.stored?.version === 2, 'Learning Center must persist the v2 evidence schema', JSON.stringify(learningMastered));
+    assert(learningMastered.stored?.completed?.includes('start'), 'Learning Center completion must persist locally', JSON.stringify(learningMastered));
+    assert(learningMastered.stored?.practice?.start?.length === 4, 'Learning Center practice checklist must persist locally', JSON.stringify(learningMastered));
+    assert(learningMastered.stored?.mastery?.start?.length === 3, 'Learning Center mastery checklist must persist locally', JSON.stringify(learningMastered));
+    assert(learningMastered.stored?.quizPassed?.includes('start'), 'Learning Center quiz pass must persist locally', JSON.stringify(learningMastered));
 
     const learningRestored = await evaluate(client, `(() => {
       document.querySelector('.learning-center-modal [data-close]')?.click();
@@ -361,12 +402,15 @@ async function runSmoke() {
       item?.click();
       const modal=document.querySelector('.learning-center-modal');
       const progress=modal?.querySelector('[data-learning-progress-text]')?.textContent||'';
+      const quizzes=modal?.querySelector('[data-learning-quiz-progress]')?.textContent||'';
+      const firstLessonComplete=Boolean(modal?.querySelector('[data-learning-lesson-id="start"]')?.classList.contains('is-complete'));
       modal?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
       const focusReturned=document.activeElement===help;
       localStorage.removeItem('zeter-photo-editor.learning-center.v1');
-      return {progress,closed:!document.querySelector('.learning-center-modal'),focusReturned};
+      return {progress,quizzes,firstLessonComplete,closed:!document.querySelector('.learning-center-modal'),focusReturned};
     })()`);
     assert(learningRestored.progress.includes('1 / 10'), 'Learning Center progress must survive close/reopen', JSON.stringify(learningRestored));
+    assert(learningRestored.quizzes === '1/10' && learningRestored.firstLessonComplete, 'Learning evidence must survive close/reopen', JSON.stringify(learningRestored));
     assert(learningRestored.closed, 'Escape must close the Learning Center', JSON.stringify(learningRestored));
     assert(learningRestored.focusReturned, 'Closing Learning Center must restore focus to Help', JSON.stringify(learningRestored));
     assertNoBrowserErrors(errors, stderrState);

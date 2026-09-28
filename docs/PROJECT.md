@@ -9,6 +9,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 | Задача | Главные файлы | Сначала тесты |
 |---|---|---|
 | UI, события, меню, dialogs, pointer/keyboard | `src/interaction/pointer-lifecycle-router.js` для capture/active-pointer lifecycle; `src/main.js` для tool-specific dispatch; `src/ui/menu-controller.js`, `src/ui/modal-controller.js`, `src/ui/`, `src/styles.css`, `index.html` | `tests/pointer-lifecycle-router.test.mjs`, `tests/pointer-release-tools.test.mjs`, interaction/browser tests |
+| Центр обучения: curriculum / практика / quiz / локальный прогресс | `src/ui/learning-center-controller.js`; generic shell — `src/ui/modal-controller.js`; стили — `src/styles.css`; Help routing — `src/main.js` | `tests/learning-center.test.mjs`, browser smoke |
 | Text add/edit transaction и live preview | `src/ui/text-edit-controller.js`; shared typography/font UI policy — `src/ui/text-settings-controller.js`; persisted text schema/preview projection — `src/core/state.js`; rendering/font loading — `src/core/render.js` | `tests/text-edit-controller.test.mjs`, `tests/text-settings-controller.test.mjs`, `tests/text-font.test.mjs`, `tests/render-pipeline.test.mjs`, browser smoke |
 | Вкладки, document sessions, session history | `src/workspace/session-controller.js`, wiring в `src/main.js` | `tests/workspace-session-controller.test.mjs`, `tests/document-tabs.test.mjs` |
 | Порядок инструментов, drag/drop, tooltips | `src/ui/toolbar-controller.js`, `src/ui/tool-layout.js`, `src/ui/tool-config.js` | `tests/tool-layout.test.mjs`, browser smoke |
