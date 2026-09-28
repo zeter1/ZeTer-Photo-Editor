@@ -195,17 +195,43 @@ export function createModalController({
     modal.querySelector('input,textarea,select')?.focus();
   }
 
-  function showInfoModal(title, html) {
+  function showInfoModal(title, html, {
+    className='',
+    initialFocusSelector='',
+    onMount=null,
+    onClose=null,
+  }={}) {
     const previousFocus=documentTarget.activeElement;
     const back=documentTarget.createElement('div');back.className='modal-backdrop';
-    const modal=documentTarget.createElement('div');modal.className='modal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label',title);
+    const modal=documentTarget.createElement('div');modal.className=['modal',className].filter(Boolean).join(' ');modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label',title);
     modal.innerHTML=`<header>${escapeHtml(title)}</header><div class="modal-body info-modal">${html}</div><footer><button type="button" class="primary-button" data-close>Закрыть</button></footer>`;
+    const body=modal.querySelector('.modal-body');
+    let cleanup=null;
+    let closed=false;
+    const close=()=>{
+      if(closed)return;
+      closed=true;
+      try{cleanup?.();onClose?.({modal,body,back});}
+      finally{modalRoot.replaceChildren();restoreFocus(previousFocus);}
+    };
     back.append(modal);modalRoot.replaceChildren(back);
-    const close=()=>{modalRoot.replaceChildren();restoreFocus(previousFocus);};
+    try{cleanup=onMount?.({modal,body,back,close})||null;}
+    catch(error){console.error(error);toast(error?.message||'Ошибка окна','error');}
     modal.querySelector('[data-close]').onclick=close;
     back.addEventListener('mousedown',event=>{if(event.target===back)close();});
-    modal.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}});
-    modal.querySelector('[data-close]').focus();
+    modal.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();return;}
+      if(event.key!=='Tab')return;
+      const focusable=[...modal.querySelectorAll('a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])')]
+        .filter(element=>!element.closest('[hidden]'));
+      if(!focusable.length)return;
+      const first=focusable[0],last=focusable.at(-1);
+      if(event.shiftKey&&documentTarget.activeElement===first){event.preventDefault();last.focus();}
+      else if(!event.shiftKey&&documentTarget.activeElement===last){event.preventDefault();first.focus();}
+    });
+    const initial=initialFocusSelector?modal.querySelector(initialFocusSelector):null;
+    (initial||modal.querySelector('[data-close]'))?.focus();
+    return close;
   }
 
   function showRecoveryModal(entriesOrRecord, {

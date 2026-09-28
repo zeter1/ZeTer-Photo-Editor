@@ -75,6 +75,10 @@ Owns generic top-menu/context-menu mechanics: rendering menu items, enabled stat
 ### `modal-controller.js`
 Owns generic modal/dialog mechanics: field rendering, numeric normalization, async submit lifecycle, focus restoration, backdrop/Escape close, draggable text-modal shell, info dialogs and the saved-project recovery manager (list/select/load/new/rename/delete/restore actions, including rapid right-button double-click restore). Feature state remains outside the shell; Text draft/preview belongs to `text-edit-controller.js` and Text font/settings policy belongs to `text-settings-controller.js`.
 
+### `learning-center-controller.js`
+Owns the in-app Learning Center curriculum and its lightweight local learning state: lesson ordering/levels, mastery criteria, practice assignments, resume point, completion progress and Help-dialog interaction. Progress is stored only in browser `localStorage` and contains lesson IDs/last position, never document pixels or project content.
+
+The controller uses the generic `showInfoModal` shell from `modal-controller.js`; it does not own editor document/layer/history state and intentionally does not auto-mark lessons from user actions. The user practices on the real canvas, then explicitly marks mastery. Menu wiring remains in `src/main.js`.
 ### `workspace-layout-controller.js`
 Owns editor-shell layout state that is independent of document contents: persisted sidebar collapse IDs, legacy collapse-state migration, accessible panel toggle state and canvas-mode visibility with viewport-center preservation. It receives DOM/runtime geometry through narrow ports and does not own document/layer/history/tool state.
 
