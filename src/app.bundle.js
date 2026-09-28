@@ -22093,7 +22093,7 @@ function createPsdSmartObjectResource({
 
 // ---- src/main.js ----
 const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => [...document.querySelectorAll(selector)];
+const $ = (selector) => [...document.querySelectorAll(selector)];
 
 const els = {
   canvas: $('#editorCanvas'), overlay: $('#overlayCanvas'), shell: $('#canvasShell'), viewport: $('#stageViewport'),
@@ -22254,7 +22254,7 @@ const layerBlendingController = createLayerBlendingController({
 const { openBlendingOptions } = layerBlendingController;
 
 const workspaceLayoutController = createWorkspaceLayoutController({
-  panelCards: $$('.panel-card[data-panel-id]'),
+  panelCards: $('.panel-card[data-panel-id]'),
   workspace: els.workspace,
   toolbar: els.toolbar,
   rightPanel: els.rightPanel,
@@ -22400,7 +22400,7 @@ const { initReorder:initToolbarReorder, initTooltips } = toolbarController;
 const menuController = createMenuController({
   menu: els.menu,
   viewport: els.viewport,
-  menuButtons: $$('.menu-button'),
+  menuButtons: $('.menu-button'),
   getItems: key => menus[key] || [],
   escapeHtml,
   toast,
@@ -23670,20 +23670,20 @@ function setTool(tool) {
   selectionGestures.prepareToolChange(tool);
   if(tool!=='pen'){penDraftGestures.reset();vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
   currentTool = tool;
-  $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  $('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   updateToolLabel();
-  $$('.text-only').forEach(x => x.style.display = tool === 'text' ? '' : 'none');
-  $$('.shape-only').forEach(x => x.style.display = tool === 'shape' ? '' : 'none');
-  $$('.fill-only').forEach(x => x.style.display = tool === 'fill' ? '' : 'none');
-  $$('.blur-only').forEach(x => x.style.display = tool === 'blur' ? '' : 'none');
-  $$('.smudge-only').forEach(x => x.style.display = tool === 'smudge' ? '' : 'none');
-  $$('.dodge-only').forEach(x => x.style.display = tool === 'dodge' ? '' : 'none');
-  $$('.burn-only').forEach(x => x.style.display = tool === 'burn' ? '' : 'none');
-  $$('.color-option, .opacity-option').forEach(x => x.style.display = ['dodge','burn','blur'].includes(tool) ? 'none' : '');
-  $$('.gradient-only').forEach(x => x.style.display = tool === 'gradient' ? '' : 'none');
-  $$('.pen-only').forEach(x => x.style.display = tool === 'pen' ? '' : 'none');
-  $$('.marquee-only').forEach(x => x.style.display = tool === 'marquee' ? '' : 'none');
-  $$('.move-only').forEach(x => x.style.display = tool === 'move' ? '' : 'none');
+  $('.text-only').forEach(x => x.style.display = tool === 'text' ? '' : 'none');
+  $('.shape-only').forEach(x => x.style.display = tool === 'shape' ? '' : 'none');
+  $('.fill-only').forEach(x => x.style.display = tool === 'fill' ? '' : 'none');
+  $('.blur-only').forEach(x => x.style.display = tool === 'blur' ? '' : 'none');
+  $('.smudge-only').forEach(x => x.style.display = tool === 'smudge' ? '' : 'none');
+  $('.dodge-only').forEach(x => x.style.display = tool === 'dodge' ? '' : 'none');
+  $('.burn-only').forEach(x => x.style.display = tool === 'burn' ? '' : 'none');
+  $('.color-option, .opacity-option').forEach(x => x.style.display = ['dodge','burn','blur'].includes(tool) ? 'none' : '');
+  $('.gradient-only').forEach(x => x.style.display = tool === 'gradient' ? '' : 'none');
+  $('.pen-only').forEach(x => x.style.display = tool === 'pen' ? '' : 'none');
+  $('.marquee-only').forEach(x => x.style.display = tool === 'marquee' ? '' : 'none');
+  $('.move-only').forEach(x => x.style.display = tool === 'move' ? '' : 'none');
   els.overlay.style.cursor = defaultToolCursor();
   cropGestures.reset(); hoverPoint = null; clearSmartGuides(); drawOverlay();
   if ((tool === 'clone' || tool === 'heal') && !getRetouchCloneSource()) setStatus(`${TOOL_LABELS[tool]}: Alt+клик по растровому слою задаёт источник`);
@@ -24393,6 +24393,22 @@ async function toggleFullscreen() {
     else await document.documentElement.requestFullscreen();
   } catch (error) { console.warn(error); toast('Полноэкранный режим недоступен','error'); }
 }
+function showLearningCenter() {
+  showInfoModal('Центр обучения',`<div class="about-copy">
+    <strong>Быстрый старт — 5 минут</strong>
+    <div class="shortcut-list">
+      <b>1. Откройте</b><span><b>Ctrl+O</b> или перетащите изображение на холст.</span>
+      <b>2. Осмотритесь</b><span><b>V</b> — перемещение слоя, <b>Space</b> — рука, <b>Z</b> — лупа.</span>
+      <b>3. Редактируйте</b><span><b>B</b> — кисть, <b>E</b> — ластик, <b>M</b> — выделение, <b>G</b> — заливка, <b>T</b> — текст.</span>
+      <b>4. Работайте слоями</b><span>Создавайте отдельные слои, меняйте порядок, группируйте и переименовывайте через <b>F2</b>.</span>
+      <b>5. Сохраните</b><span><b>Ctrl+S</b> сохраняет проект <code>.zpe</code>, <b>Ctrl+Shift+S</b> открывает экспорт результата.</span>
+    </div>
+    <p><strong>Маршрут обучения:</strong> сначала освойте навигацию и слои, затем выделения и маски, после этого ретушь, цветокоррекцию и экспорт. Для безопасной работы сохраняйте редактируемый <code>.zpe</code> перед финальным экспортом.</p>
+    <p><strong>Полезная практика:</strong> импортируйте фотографию, создайте новый растровый слой, сделайте небольшую правку кистью, выделите область, переместите слой, выполните Undo/Redo и экспортируйте копию. Так вы за один проход потренируете основной рабочий цикл редактора.</p>
+    <p>Полный список команд доступен в <strong>Помощь → Горячие клавиши</strong>.</p>
+  </div>`);
+}
+
 function showShortcuts() {
   showInfoModal('Горячие клавиши',`<div class="shortcut-list">
     <b>Ctrl+N</b><span>Новый документ</span><b>Ctrl+O</b><span>Открыть изображение</span>
@@ -24634,7 +24650,9 @@ const menus={
     ['Полноэкранный режим','F11',toggleFullscreen],
   ],
   help:[
+    ['Центр обучения','',showLearningCenter],
     ['Горячие клавиши','?',showShortcuts],
+    ['sep'],
     ['О программе','',showAbout],
   ],
 };
@@ -24685,7 +24703,7 @@ els.viewport.addEventListener('contextmenu',e=>{
 });
 window.addEventListener('blur',()=>{closeMenu();spaceHeld=false;if(!drag)els.overlay.style.cursor=defaultToolCursor();});
 
-$$('.tool').forEach(b=>b.onclick=()=>{if(toolbarController.isClickSuppressed())return;setTool(b.dataset.tool);});
+$('.tool').forEach(b=>b.onclick=()=>{if(toolbarController.isClickSuppressed())return;setTool(b.dataset.tool);});
 els.primaryColor.oninput=()=>els.colorChip.style.background=els.primaryColor.value;
 els.brushSize.oninput=()=>els.brushSizeValue.textContent=els.brushSize.value;
 els.toolOpacity.oninput=()=>els.toolOpacityValue.textContent=`${els.toolOpacity.value}%`;
@@ -24697,7 +24715,7 @@ if(els.fillTolerance)els.fillTolerance.oninput=()=>els.fillToleranceValue.textCo
 if(els.selectionType)els.selectionType.onchange=()=>selectionGestures.setType(els.selectionType.value);
 if(els.selectionCopyMode)els.selectionCopyMode.onchange=()=>{selectionCopyMode=els.selectionCopyMode.value==='selected'?'selected':'merged';setStatus(selectionCopyMode==='merged'?'Выделение: копирование со всех видимых слоёв':'Выделение: копирование с выбранного слоя');};
 if(els.smartSnapToggle)els.smartSnapToggle.onchange=()=>{smartSnapEnabled=els.smartSnapToggle.checked;persistSmartSnapState();clearSmartGuides();drawOverlay();setStatus(smartSnapEnabled?'Умная привязка включена':'Умная привязка выключена');};
-$$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSelectedLayer(button.dataset.align)));
+$('[data-align]').forEach(button=>button.addEventListener('click',()=>alignSelectedLayer(button.dataset.align)));
 els.undo.onclick=undo;els.redo.onclick=redo;$('#exportQuickBtn').onclick=exportDialog;
 $('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=()=>addGroup();$('#renameLayerBtn').onclick=()=>{const layer=selected();if(layer)renameLayer(layer);};$('#duplicateLayerBtn').onclick=duplicateSelected;$('#deleteLayerBtn').onclick=deleteSelected;
 $('#layerUpBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(1);$('#layerDownBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(-1);
