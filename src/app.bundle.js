@@ -16330,11 +16330,11 @@ function createSelectionVectorMaskController({
   };
 }
 
-// ---- src/selection/clipboard-controller.js ----
+// ---- src/selection/clipboard-copy-cut-controller.js ----
 function canvasToPngBlob(canvas) {
   return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Не удалось подготовить PNG для буфера обмена')),'image/png'));
 }
-function createSelectionClipboardController({
+function createSelectionClipboardCopyCutController({
   getDocument,
   getActiveSessionId,
   getSelectionShape,
@@ -16350,23 +16350,14 @@ function createSelectionClipboardController({
   setTool,
   setStatus,
   toast,
-  importImages,
-  visibleCanvasCenter,
-  isImageFile,
   documentTarget=globalThis.document,
   navigatorTarget=globalThis.navigator,
   ClipboardItemClass=globalThis.ClipboardItem,
-  FileClass=globalThis.File,
-  DateClass=globalThis.Date,
   renderDocumentFn=renderDocument,
   renderLayerFn=renderLayer,
   canvasToPngBlobFn=canvasToPngBlob,
-  setTimeoutFn=globalThis.setTimeout,
-  clearTimeoutFn=globalThis.clearTimeout,
 } = {}) {
   let clipboardCommandGeneration=0;
-  let pasteGeneration=0;
-  let pasteFallbackTimer=null;
 
   async function renderSelectionLayerToPng(layer,bounds,selectionSnapshot) {
     const canvas=documentTarget.createElement('canvas');
@@ -16521,6 +16512,67 @@ function createSelectionClipboardController({
 
   function copySelection() { return copySelectionToClipboard(); }
   function cutSelection() { return copySelectionToClipboard({cut:true}); }
+
+  return { copySelection, cutSelection };
+}
+
+// ---- src/selection/clipboard-controller.js ----
+function createSelectionClipboardController({
+  getDocument,
+  getActiveSessionId,
+  getSelectionShape,
+  captureSelectionSnapshot,
+  getCopyMode,
+  getSelectedLayer,
+  getCurrentTool,
+  isEditableRasterLayer,
+  clipContextToDocumentSelection,
+  clearSelectionAcrossVisibleLayers,
+  clearSelectedPixels,
+  clearSelectionState,
+  setTool,
+  setStatus,
+  toast,
+  importImages,
+  visibleCanvasCenter,
+  isImageFile,
+  documentTarget=globalThis.document,
+  navigatorTarget=globalThis.navigator,
+  ClipboardItemClass=globalThis.ClipboardItem,
+  FileClass=globalThis.File,
+  DateClass=globalThis.Date,
+  renderDocumentFn,
+  renderLayerFn,
+  canvasToPngBlobFn,
+  setTimeoutFn=globalThis.setTimeout,
+  clearTimeoutFn=globalThis.clearTimeout,
+} = {}) {
+  const { copySelection, cutSelection }=createSelectionClipboardCopyCutController({
+    getDocument,
+    getActiveSessionId,
+    getSelectionShape,
+    captureSelectionSnapshot,
+    getCopyMode,
+    getSelectedLayer,
+    getCurrentTool,
+    isEditableRasterLayer,
+    clipContextToDocumentSelection,
+    clearSelectionAcrossVisibleLayers,
+    clearSelectedPixels,
+    clearSelectionState,
+    setTool,
+    setStatus,
+    toast,
+    documentTarget,
+    navigatorTarget,
+    ClipboardItemClass,
+    renderDocumentFn,
+    renderLayerFn,
+    canvasToPngBlobFn,
+  });
+
+  let pasteGeneration=0;
+  let pasteFallbackTimer=null;
 
   async function readClipboardImageFiles() {
     if (!navigatorTarget?.clipboard?.read) return [];
