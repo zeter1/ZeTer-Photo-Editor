@@ -56,11 +56,11 @@ function makeHarness({
     brushCanvas:null,
     brushContext:null,
     editableHighDepthBuffer() { return highDepthBuffer; },
-    async persistHighDepthMutation(owner, layer, buffer) {
+    async persistHighDepthMutation(owner, layer, buffer, options) {
       highDepthPersistCalls += 1;
-      highDepthPersistArgs.push([owner, layer, buffer]);
+      highDepthPersistArgs.push([owner, layer, buffer, options]);
       return typeof highDepthPersistResult === 'function'
-        ? highDepthPersistResult(owner, layer, buffer)
+        ? highDepthPersistResult(owner, layer, buffer, options)
         : highDepthPersistResult;
     },
     async ensureRasterBuffer(owner, layer) {
@@ -69,10 +69,10 @@ function makeHarness({
       this.brushContext = canvas.context;
       return { canvas:this.brushCanvas, ctx:this.brushContext };
     },
-    async persistPaintLayer(owner, layer) {
+    async persistPaintLayer(owner, layer, options) {
       persistCalls += 1;
-      persistArgs.push([owner, layer]);
-      return typeof persistResult === 'function' ? persistResult(owner, layer) : persistResult;
+      persistArgs.push([owner, layer, options]);
+      return typeof persistResult === 'function' ? persistResult(owner, layer, options) : persistResult;
     },
     clearBrushBuffer() {
       this.brushCanvas = null;
@@ -333,4 +333,34 @@ test('selection clear accepts caller-owned target and frozen geometry',async()=>
 test('selection clear rejects caller target replaced by same id',async()=>{
   const doc=createDocument({width:4,height:1}),original=createRasterLayer({name:'O',width:4,height:1,dataUrl:null});addLayer(doc,original);const replacement={...original,name:'R'};doc.layers.splice(doc.layers.indexOf(original),1,replacement);doc.selectedLayerId=replacement.id;
   const h=makeHarness({doc,selected:()=>replacement});assert.equal(await h.controller.clearSelection({ownerDocument:doc,targetLayer:original,selectionSnapshot:{type:'rect',rect:{x:0,y:0,width:2,height:1}}}),false);assert.equal(h.getEnsureCalls().length,0);assert.deepEqual(h.commits,[]);
+});
+
+
+test('caller continuation ownership is forwarded into selected-layer Canvas persistence',async()=>{
+  const doc=createDocument({width:4,height:1});
+  const layer=createRasterLayer({name:'P',width:4,height:1,dataUrl:null});
+  addLayer(doc,layer);
+  let current=true,seenGuard=null;
+  const h=makeHarness({
+    doc,
+    selectionActive:true,
+    persistResult:(owner,target,options)=>{
+      assert.equal(owner,doc);
+      assert.equal(target,layer);
+      seenGuard=options?.isContinuationCurrent;
+      current=false;
+      return false;
+    },
+  });
+  assert.equal(await h.controller.clearSelection({
+    ownerDocument:doc,
+    targetLayer:layer,
+    selectionSnapshot:{type:'rect',rect:{x:0,y:0,width:2,height:1}},
+    isContinuationCurrent:()=>current,
+  }),false);
+  assert.equal(typeof seenGuard,'function');
+  assert.equal(seenGuard(),false);
+  assert.equal(h.rasterEdit.brushCanvas,null);
+  assert.deepEqual(h.commits,[]);
+  assert.equal(h.getPersisting(),false);
 });
