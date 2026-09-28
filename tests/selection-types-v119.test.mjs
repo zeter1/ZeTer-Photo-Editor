@@ -38,9 +38,9 @@ test('selection toolbar exposes all four selection types and Shift+M cycling', (
 });
 
 test('non-rectangular selections clip copy, raster editing and fill through the same selection shape', () => {
-  assert.match(main, /function clipContextToDocumentSelection\(ctx\)/);
-  assert.match(clipboard, /renderSelectionLayerToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
-  assert.match(clipboard, /renderSelectionMergedToPng[\s\S]*clipContextToDocumentSelection\(ctx\)/);
+  assert.match(main, /function clipContextToDocumentSelection\(ctx, shape = selectionShape\)/);
+  assert.match(clipboard, /renderSelectionLayerToPng\(layer,bounds,selectionSnapshot\)[\s\S]*clipContextToDocumentSelection\(ctx,selectionSnapshot\)/);
+  assert.match(clipboard, /renderSelectionMergedToPng\(documentValue,bounds,selectionSnapshot\)[\s\S]*clipContextToDocumentSelection\(ctx,selectionSnapshot\)/);
   assert.match(main, /function selectionPolygonForLayer\(layer, shape = selectionShape\)[\s\S]*selectionPathPoints\(shape, 72\)/);
   assert.match(main, /function rasterSelectionPredicate\(layer, shape = selectionShape\)[\s\S]*pointInsideSelection\([^;]+, shape\)/);
 });
