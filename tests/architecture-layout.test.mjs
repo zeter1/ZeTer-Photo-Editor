@@ -486,6 +486,9 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /function selectionIntersectsLayer\(layer, shape = selectionShape\)/);
   assert.match(main, /function clipContextToDocumentSelection\(ctx, shape = selectionShape\)/);
   assert.match(selectionClipboardController, /captureSelectionSnapshot\(\)/);
+  assert.match(selectionClipboardController, /let clipboardCommandGeneration=0;/);
+  assert.match(selectionClipboardController, /const commandGeneration=\+\+clipboardCommandGeneration/);
+  assert.match(selectionClipboardController, /context\.commandGeneration===clipboardCommandGeneration/);
   assert.match(selectionClipboardController, /ownerDocument:documentValue/);
   assert.match(selectionClipboardController, /ownerSessionId:sessionId/);
   assert.match(selectionClipboardController, /targetLayer:layer/);
