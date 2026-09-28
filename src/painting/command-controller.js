@@ -281,7 +281,10 @@ export function createRasterCommandController({
     ownerDocument,
     targetLayer,
     selectionSnapshot,
+    isContinuationCurrent,
   } = {}) {
+    const continuationCurrent = typeof isContinuationCurrent === 'function' ? isContinuationCurrent : () => true;
+    if (!continuationCurrent()) return false;
     const hasExplicitSelection = selectionSnapshot !== undefined;
     if (!hasExplicitSelection && !selection?.hasActive?.()) return false;
     if (hasExplicitSelection && !selectionSnapshot) return false;
@@ -313,7 +316,10 @@ export function createRasterCommandController({
             status('В выделении нет непрозрачных high-depth пикселей');
             return false;
           }
-          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer, { isContinuationCurrent:continuationCurrent })) {
+            if (!continuationCurrent()) resetNativeState();
+            return false;
+          }
           resetNativeState();
           ui?.commit?.(historyLabel);
           status(`${successStatus} · high-depth: ${cleared.toLocaleString('ru-RU')} px`);
@@ -323,16 +329,27 @@ export function createRasterCommandController({
 
       const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
       if (!prepared) return false;
+      if (!continuationCurrent()) {
+        rasterEdit.clearBrushBuffer();
+        return false;
+      }
       const context = prepared.ctx;
       context.save();
       selection?.clipContext?.(context, layer, selectionSnapshot);
       context.clearRect(0, 0, prepared.canvas.width, prepared.canvas.height);
       context.restore();
-      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
+      if (!await rasterEdit.persistPaintLayer(doc, layer, { isContinuationCurrent:continuationCurrent })) {
+        if (!continuationCurrent()) rasterEdit.clearBrushBuffer();
+        return false;
+      }
       ui?.commit?.(historyLabel);
       status(successStatus);
       return true;
     } catch (error) {
+      if (!continuationCurrent()) {
+        rasterEdit.clearBrushBuffer();
+        return false;
+      }
       console.error(error);
       rasterEdit.clearBrushBuffer();
       ui?.render?.();
