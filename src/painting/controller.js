@@ -219,10 +219,11 @@ export function createRasterEditController({
     invalidateImageCache(old);
   }
 
-  async function persistHighDepthMutation(owner, layer, buffer) {
-    if (!buffer || !isCurrentRasterTarget(owner, layer)) return false;
+  async function persistHighDepthMutation(owner, layer, buffer, { isContinuationCurrent } = {}) {
+    const continuationCurrent = () => typeof isContinuationCurrent !== 'function' || isContinuationCurrent();
+    if (!buffer || !continuationCurrent() || !isCurrentRasterTarget(owner, layer)) return false;
     const mutation = await prepareHighDepthMutation(layer, buffer);
-    if (!isCurrentRasterTarget(owner, layer)) return false;
+    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) return false;
     applyHighDepthMutation(layer, mutation);
     return true;
   }
@@ -311,9 +312,11 @@ export function createRasterEditController({
     return { canvas, ctx: context };
   }
 
-  async function persistPaintLayer(owner, layer) {
+  async function persistPaintLayer(owner, layer, { isContinuationCurrent } = {}) {
     const canvas = brushCanvas;
+    const continuationCurrent = () => typeof isContinuationCurrent !== 'function' || isContinuationCurrent();
     if (
+      !continuationCurrent() ||
       !canvas ||
       brushOwner !== owner ||
       brushLayer !== layer ||
@@ -323,6 +326,7 @@ export function createRasterEditController({
 
     const dataUrl = await canvasToDataURL(canvas, 'image/png');
     if (
+      !continuationCurrent() ||
       brushCanvas !== canvas ||
       brushOwner !== owner ||
       brushLayer !== layer ||
