@@ -54,6 +54,7 @@ const sources = [
   'src/selection/raster-mutation-controller.js',
   'src/selection/mask-controller.js',
   'src/selection/vector-mask-controller.js',
+  'src/selection/clipboard-copy-cut-controller.js',
   'src/selection/clipboard-controller.js',
   'src/document/import-controller.js',
   'src/document/background-command-controller.js',
