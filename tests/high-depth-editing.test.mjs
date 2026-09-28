@@ -69,7 +69,7 @@ test('Stage 12d routes brush/eraser gestures and one-shot raster commands throug
   assert.match(main,/applyPixelBufferBrushDab\(rasterEdit\.highDepthPaintBuffer/);
   assert.match(main,/applyPixelBufferStrokeSegment\(rasterEdit\.highDepthPaintBuffer/);
   assert.match(commands,/floodFillPixelBuffer\(/);
-  assert.match(commands,/clearPixelBufferPixels\(buffer, \{ isAllowed:selectionPredicate\(layer\) \}\)/);
+  assert.match(commands,/clearPixelBufferPixels\(buffer, \{ isAllowed:selectionPredicate\(layer, selectionSnapshot\) \}\)/);
   assert.match(commands,/applyPixelBufferStrokeSegment\(/);
   assert.match(commands,/await rasterEdit\.persistHighDepthMutation\(doc, layer, buffer\)/);
   assert.match(selectionMutations,/async function prepareClearedHighDepthMutation\(/);
