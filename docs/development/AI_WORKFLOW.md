@@ -33,7 +33,7 @@ Useful routing:
 - brush/eraser/retouch stroke begin/move/end → painting/gesture-controller + painting/controller + retouch/controller
 - fill / raster line / current-layer selection clear → painting/command-controller + painting/controller + pixel-buffer/pixels; main only supplies selection/tool/transaction ports
 - marquee / ellipse / free-lasso / polygon / magnetic selection gesture → selection/gesture-controller; inspect main only for global pointer/keyboard routing
-- merged Clipboard cut / multi-layer selection clear / rasterize selected layer → selection/clipboard-controller + selection/raster-mutation-controller
+- Selection Copy/Cut async ownership/render/write → selection/clipboard-copy-cut-controller + architecture/SELECTION_CLIPBOARD.md; Paste/native fallback → selection/clipboard-controller; destructive merged cut / rasterize selected layer → selection/raster-mutation-controller
 - pixels/precision → pixel-buffer/pixels
 - rendering → render
 - ICC/CMYK → color-management

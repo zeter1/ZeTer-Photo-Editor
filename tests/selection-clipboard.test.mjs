@@ -6,6 +6,7 @@ import { createSelectionClipboardController } from '../src/selection/clipboard-c
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const clipboard = await readFile(new URL('../src/selection/clipboard-controller.js', import.meta.url), 'utf8');
+const clipboardCopyCut = await readFile(new URL('../src/selection/clipboard-copy-cut-controller.js', import.meta.url), 'utf8');
 const mutations = await readFile(new URL('../src/selection/raster-mutation-controller.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
@@ -30,8 +31,8 @@ test('selection tool exposes merged and selected-layer clipboard modes', () => {
 });
 
 test('Ctrl+C and Ctrl+X are wired to image clipboard commands', () => {
-  assert.match(clipboard, /function copySelection\(\) \{ return copySelectionToClipboard\(\); \}/);
-  assert.match(clipboard, /function cutSelection\(\) \{ return copySelectionToClipboard\(\{cut:true\}\); \}/);
+  assert.match(clipboardCopyCut, /function copySelection\(\) \{ return copySelectionToClipboard\(\); \}/);
+  assert.match(clipboardCopyCut, /function cutSelection\(\) \{ return copySelectionToClipboard\(\{cut:true\}\); \}/);
   assert.match(main, /if\(ctrl&&e\.code==='KeyC'\)/);
   assert.match(main, /if\(ctrl&&e\.code==='KeyX'\)/);
   assert.match(main, /\['Копировать выделение','Ctrl\+C',copySelection/);
@@ -41,9 +42,9 @@ test('Ctrl+C and Ctrl+X are wired to image clipboard commands', () => {
 });
 
 test('merged clipboard mode renders the captured document and captured full selection shape', () => {
-  const start = clipboard.indexOf('async function renderSelectionMergedToPng(documentValue,bounds,selectionSnapshot) {');
-  const end = clipboard.indexOf('\n  function isClipboardContextCurrent', start);
-  const fn = start >= 0 && end > start ? clipboard.slice(start, end) : '';
+  const start = clipboardCopyCut.indexOf('async function renderSelectionMergedToPng(documentValue,bounds,selectionSnapshot) {');
+  const end = clipboardCopyCut.indexOf('\n  function isClipboardContextCurrent', start);
+  const fn = start >= 0 && end > start ? clipboardCopyCut.slice(start, end) : '';
   assert.match(fn, /await renderDocumentFn\(full,documentValue,\{checker:false\}\)/);
   assert.match(fn, /clipContextToDocumentSelection\(ctx,selectionSnapshot\)/);
   assert.match(fn, /ctx\.drawImage\(full,0,0\)/);
@@ -51,9 +52,9 @@ test('merged clipboard mode renders the captured document and captured full sele
 });
 
 test('clipboard writes PNG before cut mutates raster pixels', () => {
-  const start = clipboard.indexOf('async function copySelectionToClipboard({ cut = false } = {}) {');
-  const end = clipboard.indexOf('\n  function copySelection()', start);
-  const fn = start >= 0 && end > start ? clipboard.slice(start, end) : '';
+  const start = clipboardCopyCut.indexOf('async function copySelectionToClipboard({ cut = false } = {}) {');
+  const end = clipboardCopyCut.indexOf('\n  function copySelection()', start);
+  const fn = start >= 0 && end > start ? clipboardCopyCut.slice(start, end) : '';
   assert.match(fn, /new ClipboardItemClass\(\{'image\/png':pngBlob\}\)/);
   assert.match(fn, /await navigatorTarget\.clipboard\.write\(\[item\]\)/);
   assert.match(fn, /clearSelectionAcrossVisibleLayers/);
@@ -71,11 +72,11 @@ test('merged cut delegates destructive multi-layer work to the selection raster 
 });
 
 test('transient Clipboard completion is identity-guarded before clearing selection or switching tools', () => {
-  assert.match(clipboard, /getSelectionShape\(\)===context\.selectionIdentity/);
-  assert.match(clipboard, /getCurrentTool\(\)===context\.tool/);
-  assert.match(clipboard, /ownerDocument:documentValue/);
-  assert.match(clipboard, /ownerSessionId:sessionId/);
-  assert.match(clipboard, /targetLayer:layer/);
+  assert.match(clipboardCopyCut, /getSelectionShape\(\)===context\.selectionIdentity/);
+  assert.match(clipboardCopyCut, /getCurrentTool\(\)===context\.tool/);
+  assert.match(clipboardCopyCut, /ownerDocument:documentValue/);
+  assert.match(clipboardCopyCut, /ownerSessionId:sessionId/);
+  assert.match(clipboardCopyCut, /targetLayer:layer/);
 });
 
 function deferred(){let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return{promise,resolve,reject};}
@@ -133,12 +134,22 @@ test('Clipboard write failure performs no cut or transient cleanup',async()=>{
 });
 
 
-test('clipboard async continuation is guarded by controller-local command generation ownership', () => {
-  assert.match(clipboard, /let clipboardCommandGeneration=0;/);
-  assert.match(clipboard, /const commandGeneration=\+\+clipboardCommandGeneration;/);
-  assert.match(clipboard, /context\.commandGeneration===clipboardCommandGeneration/);
-  assert.match(clipboard, /if\(!isClipboardCommandCurrent\(context\)\)return false;/);
+test('clipboard async continuation is guarded by copy-cut-owner command generation', () => {
+  assert.match(clipboardCopyCut, /let clipboardCommandGeneration=0;/);
+  assert.match(clipboardCopyCut, /const commandGeneration=\+\+clipboardCommandGeneration;/);
+  assert.match(clipboardCopyCut, /context\.commandGeneration===clipboardCommandGeneration/);
+  assert.match(clipboardCopyCut, /if\(!isClipboardCommandCurrent\(context\)\)return false;/);
+  assert.doesNotMatch(clipboard, /\bclipboardCommandGeneration\b/);
   assert.doesNotMatch(main, /\bclipboardCommandGeneration\b/);
+});
+
+test('clipboard facade keeps paste generation separate from copy-cut transaction ownership', () => {
+  assert.match(clipboard, /createSelectionClipboardCopyCutController\(/);
+  assert.match(clipboard, /let pasteGeneration=0;/);
+  assert.doesNotMatch(clipboard, /async function copySelectionToClipboard\(/);
+  assert.doesNotMatch(clipboardCopyCut, /\bpasteGeneration\b/);
+  assert.doesNotMatch(clipboardCopyCut, /function readClipboardImageFiles\(/);
+  assert.doesNotMatch(clipboardCopyCut, /function armPasteShortcutFallback\(/);
 });
 
 test('overlapping merged cuts let only the latest command continue when it completes first',async()=>{

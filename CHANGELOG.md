@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-09-28 — Split Selection Clipboard async owners
+
+- Refactor: Selection Copy/Cut rendering, frozen intent capture, OS Clipboard write and latest-command continuation move into `src/selection/clipboard-copy-cut-controller.js`; `src/selection/clipboard-controller.js` becomes the stable facade and keeps Paste/native-paste/fallback lifecycle.
+- Ownership hygiene: `clipboardCommandGeneration` and `pasteGeneration` now live in separate canonical owners while the public API consumed by `src/main.js` remains unchanged; destructive raster/history policy stays behind existing mutation ports.
+- Regression/build/docs: source-contract tests are retargeted to the canonical owner, structural guards prevent generation domains from recombining, the file:// build graph loads the new owner before the facade, and `SELECTION_CLIPBOARD.md` records the reusable async contract.
+
 ### 2026-09-28 — Latest-owner overlapping Selection Clipboard commands
 
 - Concurrency safety: each copy/cut invocation gets a controller-local monotonically increasing generation; a newer command supersedes older same-document/same-layer work after async render or OS Clipboard boundaries.

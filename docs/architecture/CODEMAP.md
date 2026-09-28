@@ -218,8 +218,11 @@ Owns transient selection gesture mechanics: active marquee type, rectangle/ellip
 
 Generic pointer capture/active-pointer routing lives in `src/interaction/pointer-lifecycle-router.js`; tool/keyboard dispatch and canonical selection shape/session state remain in `src/main.js`; geometry math remains in `src/core/geometry.js`.
 
+### `clipboard-copy-cut-controller.js`
+Owns Selection Copy/Cut transaction orchestration: frozen exact document/session/selection/layer intent, selected-vs-merged PNG preparation, OS Clipboard image write, copy/cut command generation, post-await continuation ownership and destructive-port guard handoff. It does not own Paste or destructive pixel/history internals.
+
 ### `clipboard-controller.js`
-Owns selection copy/cut/paste orchestration: selected-vs-merged PNG preparation, browser Clipboard API, native paste payload handling, shortcut fallback timers/generation and tab-switch guards. It does not own document mutation internals: destructive clearing is delegated to the raster-mutation controller.
+Owns Paste/native-paste/fallback lifecycle and its independent `pasteGeneration`, while composing the copy/cut owner behind the stable public facade imported by `src/main.js`. Destructive clearing remains delegated to raster owners. See `SELECTION_CLIPBOARD.md`.
 
 ### `raster-mutation-controller.js`
 Owns destructive selection-to-layer orchestration: merged cut across visible unlocked pixel layers, prepare-all-before-mutate staging, native high-depth clear publication, non-raster pixel-edit rasterization and the selected-layer rasterize command.
