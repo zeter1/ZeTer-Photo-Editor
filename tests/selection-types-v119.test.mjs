@@ -5,7 +5,7 @@ import { pointInSelection, selectionBounds, selectionPathPoints } from '../src/c
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const selectionGestures = await readFile(new URL('../src/selection/gesture-controller.js', import.meta.url), 'utf8');
-const clipboard = await readFile(new URL('../src/selection/clipboard-controller.js', import.meta.url), 'utf8');
+const clipboardCopyCut = await readFile(new URL('../src/selection/clipboard-copy-cut-controller.js', import.meta.url), 'utf8');
 const toolConfig = await readFile(new URL('../src/ui/tool-config.js', import.meta.url), 'utf8');
 const index = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 
@@ -39,8 +39,8 @@ test('selection toolbar exposes all four selection types and Shift+M cycling', (
 
 test('non-rectangular selections clip copy, raster editing and fill through the same selection shape', () => {
   assert.match(main, /function clipContextToDocumentSelection\(ctx, shape = selectionShape\)/);
-  assert.match(clipboard, /renderSelectionLayerToPng\(layer,bounds,selectionSnapshot\)[\s\S]*clipContextToDocumentSelection\(ctx,selectionSnapshot\)/);
-  assert.match(clipboard, /renderSelectionMergedToPng\(documentValue,bounds,selectionSnapshot\)[\s\S]*clipContextToDocumentSelection\(ctx,selectionSnapshot\)/);
+  assert.match(clipboardCopyCut, /renderSelectionLayerToPng\(layer,bounds,selectionSnapshot\)[\s\S]*clipContextToDocumentSelection\(ctx,selectionSnapshot\)/);
+  assert.match(clipboardCopyCut, /renderSelectionMergedToPng\(documentValue,bounds,selectionSnapshot\)[\s\S]*clipContextToDocumentSelection\(ctx,selectionSnapshot\)/);
   assert.match(main, /function selectionPolygonForLayer\(layer, shape = selectionShape\)[\s\S]*selectionPathPoints\(shape, 72\)/);
   assert.match(main, /function rasterSelectionPredicate\(layer, shape = selectionShape\)[\s\S]*pointInsideSelection\([^;]+, shape\)/);
 });
