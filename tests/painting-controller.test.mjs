@@ -382,3 +382,32 @@ test('Canvas8 preparation clears stale native working state before publishing it
   assert.equal(controller.highDepthPaintBuffer, null);
   assert.equal(controller.paintPreviewOverrides().has(canvasLayer.id), true);
 });
+
+
+test('Canvas8 persistence honors a caller continuation guard after async encoding',async()=>{
+  const layer=rasterLayer({dataUrl:'data:image/png;base64,origin'});
+  const doc={width:2,height:1,layers:[layer],groups:[]};
+  const {documentRef}=canvasHarness({toDataURL:()=> 'data:image/png;base64,late'});
+  const controller=createRasterEditController({getDocument:()=>doc,documentRef});
+  await controller.ensureRasterBuffer(doc,layer);
+  let current=true;
+  const pending=controller.persistPaintLayer(doc,layer,{isContinuationCurrent:()=>current});
+  current=false;
+  assert.equal(await pending,false);
+  assert.equal(layer.dataUrl,'data:image/png;base64,origin');
+});
+
+test('generic high-depth persistence honors a caller continuation guard after preview encoding',async()=>{
+  const layer=rasterLayer({highDepthSource:highDepthSource(),dataUrl:'data:image/png;base64,origin'});
+  const doc={width:2,height:1,layers:[layer],groups:[]};
+  const {documentRef}=canvasHarness({toDataURL:()=> 'data:image/png;base64,late'});
+  const controller=createRasterEditController({getDocument:()=>doc,documentRef});
+  const buffer=controller.editableHighDepthBuffer(layer);
+  const originalSource=layer.highDepthSource;
+  let current=true;
+  const pending=controller.persistHighDepthMutation(doc,layer,buffer,{isContinuationCurrent:()=>current});
+  current=false;
+  assert.equal(await pending,false);
+  assert.equal(layer.dataUrl,'data:image/png;base64,origin');
+  assert.equal(layer.highDepthSource,originalSource);
+});
