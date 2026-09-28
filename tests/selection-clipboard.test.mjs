@@ -194,3 +194,26 @@ test('superseded Clipboard rejection cannot overwrite newer success status or to
   assert.equal(h.statuses.at(-1),latestStatus);assert.deepEqual(h.toasts.at(-1),latestToast);
   assert.doesNotMatch(h.statuses.join('\n'),/old denied/);
 });
+
+
+test('newer Clipboard command cancels an older merged Cut still awaiting destructive preparation',async()=>{
+  const destructiveStarted=deferred(),releaseDestructive=deferred();
+  const h=createClipboardHarness({
+    clearMergedImpl:async options=>{
+      destructiveStarted.resolve(options);
+      await releaseDestructive.promise;
+      return options.isContinuationCurrent()?{cleared:1,locked:0,rasterized:0}:null;
+    },
+  });
+  const older=h.controller.cutSelection();
+  const destructiveOptions=await destructiveStarted.promise;
+  assert.equal(destructiveOptions.isContinuationCurrent(),true);
+  assert.equal(await h.controller.copySelection(),true);
+  const latestStatus=h.statuses.at(-1),latestToast=h.toasts.at(-1);
+  assert.equal(destructiveOptions.isContinuationCurrent(),false);
+  releaseDestructive.resolve();
+  assert.equal(await older,false);
+  assert.equal(h.mergedCuts.length,1);
+  assert.equal(h.statuses.at(-1),latestStatus);
+  assert.deepEqual(h.toasts.at(-1),latestToast);
+});
