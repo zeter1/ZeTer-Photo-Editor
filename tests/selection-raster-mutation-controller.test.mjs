@@ -474,3 +474,27 @@ test('merged selection clear rejects stale caller-owned context before preparati
   const h=createHarness({documentValue:doc,operations:{prepareClearedRasterDataUrl:async()=>{prepares+=1;return'new';}}});h.stateValue.documentValue={layers:[{...layer}],groups:[],selectedLayerId:'r'};
   assert.equal(await h.controller.clearAcrossVisibleLayers({ownerDocument:doc,ownerSessionId:'first',selectionSnapshot:{type:'rect',rect:{x:0,y:0,width:2,height:2}}}),null);assert.equal(prepares,0);assert.equal(layer.dataUrl,'old');assert.deepEqual(h.commits,[]);
 });
+
+
+test('merged selection clear rejects caller continuation ownership lost during async preparation',async()=>{
+  let release;
+  const pending=new Promise(resolve=>{release=resolve;});
+  let current=true;
+  const layer={id:'r',type:'raster',name:'R',visible:true,locked:false,dataUrl:'old'};
+  const doc={layers:[layer],groups:[],selectedLayerId:'r'};
+  const h=createHarness({documentValue:doc,operations:{prepareClearedRasterDataUrl:async()=>pending}});
+  const clearing=h.controller.clearAcrossVisibleLayers({
+    ownerDocument:doc,
+    ownerSessionId:'first',
+    selectionSnapshot:{type:'rect',rect:{x:0,y:0,width:2,height:2}},
+    isContinuationCurrent:()=>current,
+  });
+  assert.equal(h.getPersisting(),true);
+  current=false;
+  release('new');
+  assert.equal(await clearing,null);
+  assert.equal(layer.dataUrl,'old');
+  assert.deepEqual(h.commits,[]);
+  assert.equal(h.getPersisting(),false);
+  assert.deepEqual(h.statuses,[]);
+});
