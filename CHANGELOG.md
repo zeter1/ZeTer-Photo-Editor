@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-09-28 — Extract canvas viewport navigation owner
+
+- Refactor: zoom clamp/no-op policy, active-session zoom synchronization, canvas/overlay refresh, pointer-anchored correction and fit-to-view orchestration move from `src/main.js` into `src/workspace/viewport-controller.js`; keyboard/menu/wheel dispatch and pan gestures stay in the runtime composition root.
+- Behavior preservation: the canonical 10%–1600% range, `1e-6` no-op threshold, one-shot `requestAnimationFrame` anchoring seam, 90 px fit padding, fit scroll reset and per-tab zoom persistence are covered by direct deterministic tests.
+- AI/build hygiene: architecture/source guards point to the new owner, a narrow viewport specification documents ownership and temporal behavior, and the generated `file://` bundle loads the owner before `src/main.js`.
+
 ### 2026-09-28 — Split Selection Clipboard async owners
 
 - Refactor: Selection Copy/Cut rendering, frozen intent capture, OS Clipboard write and latest-command continuation move into `src/selection/clipboard-copy-cut-controller.js`; `src/selection/clipboard-controller.js` becomes the stable facade and keeps Paste/native-paste/fallback lifecycle.

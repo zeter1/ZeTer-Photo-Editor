@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const workspaceLayout = await readFile(new URL('../src/ui/workspace-layout-controller.js', import.meta.url), 'utf8');
+const viewportController = await readFile(new URL('../src/workspace/viewport-controller.js', import.meta.url), 'utf8');
 const layersPanel = await readFile(new URL('../src/ui/layers-panel-controller.js', import.meta.url), 'utf8');
 const layerTransformGestureController = await readFile(new URL('../src/interaction/layer-transform-gesture-controller.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
@@ -16,12 +17,20 @@ test('middle mouse and Space provide temporary canvas panning without changing t
   assert.match(main, /auxclick[\s\S]*?e\.button === 1/);
 });
 
-test('canvas zoom supports professional keyboard and wheel navigation', () => {
+test('canvas zoom dispatch remains in main while viewport policy has one canonical owner', () => {
+  assert.match(main, /from '\.\/workspace\/viewport-controller\.js'/);
   assert.match(main, /if\(!e\.ctrlKey&&!e\.altKey\)return/);
+  assert.match(main, /setZoomAtClientPoint\(zoom\*factor,e\.clientX,e\.clientY\)/);
   assert.match(main, /ctrl&&e\.code==='Digit0'[\s\S]*?fitToView/);
   assert.match(main, /ctrl&&e\.code==='Digit1'[\s\S]*?setZoom\(1\)/);
   assert.match(main, /ctrl&&\(e\.code==='Equal'\|\|e\.code==='NumpadAdd'\)/);
   assert.match(main, /ctrl&&\(e\.code==='Minus'\|\|e\.code==='NumpadSubtract'\)/);
+  assert.doesNotMatch(main, /function setZoom\(/);
+  assert.doesNotMatch(main, /function setZoomAtClientPoint\(/);
+  assert.doesNotMatch(main, /function fitToView\(/);
+  assert.match(viewportController, /export function createViewportController/);
+  assert.match(viewportController, /requestFrame\(\(\) =>/);
+  assert.match(viewportController, /fitZoom\([\s\S]*?VIEWPORT_FIT_PADDING/);
 });
 
 test('Tab canvas mode delegates shell layout while CSS keeps both side panels hidden', () => {

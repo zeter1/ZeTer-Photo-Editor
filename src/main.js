@@ -1,5 +1,5 @@
 import { HistoryStack } from './core/history.js';
-import { fitZoom, frameBounds, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, snapLineEnd, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
+import { frameBounds, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, snapLineEnd, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
   createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
   addLayer, selectedLayer,
@@ -23,6 +23,7 @@ import {
 import { sanitizeAdjustmentModel } from './core/adjustments.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './formats/psd.js';
 import { createDocumentSessionController } from './workspace/session-controller.js';
+import { createViewportController } from './workspace/viewport-controller.js';
 import { createRecoveryController } from './workspace/recovery-controller.js';
 import { createToolbarController } from './ui/toolbar-controller.js';
 import { createWorkspaceLayoutController } from './ui/workspace-layout-controller.js';
@@ -243,6 +244,25 @@ const workspaceLayoutController = createWorkspaceLayoutController({
   setStatus,
 });
 const { initCollapsiblePanels, togglePanels } = workspaceLayoutController;
+
+const viewportController = createViewportController({
+  state: {
+    getZoom: () => zoom,
+    setZoom: value => { zoom = value; },
+    getCurrentSession: () => documentSessionController?.currentSession?.() || null,
+    getDocument: () => doc,
+  },
+  geometry: { clientPointToCanvas },
+  view: {
+    viewport: els.viewport,
+    overlay: els.overlay,
+    updateCanvasSize,
+    drawOverlay,
+    requestFrame: callback => requestAnimationFrame(callback),
+  },
+  ui: { setStatus },
+});
+const { setZoom, setZoomAtClientPoint, fitToView } = viewportController;
 
 const rasterEdit = createRasterEditController({
   getDocument: () => doc,
@@ -2489,26 +2509,6 @@ function resizeImageDialog(){
     return handleDocumentResizeCommandResult(documentResizeCommandController.resizeImage(owner,v));
   }});
 }
-
-function setZoom(next, announce=true){
-  const value=clamp(next,.1,16);
-  if(Math.abs(value-zoom)<1e-6)return;
-  zoom=value;const session=currentSession();if(session)session.zoom=zoom;updateCanvasSize();drawOverlay();
-  if(announce)setStatus(`Масштаб ${Math.round(zoom*100)}%`);
-}
-function setZoomAtClientPoint(next, clientX, clientY){
-  const point=clientPointToCanvas(clientX,clientY);
-  const value=clamp(next,.1,16);
-  if(Math.abs(value-zoom)<1e-6)return;
-  zoom=value;const session=currentSession();if(session)session.zoom=zoom;updateCanvasSize();drawOverlay();
-  requestAnimationFrame(()=>{
-    const r=els.overlay.getBoundingClientRect();
-    els.viewport.scrollLeft += r.left + point.x*zoom - clientX;
-    els.viewport.scrollTop += r.top + point.y*zoom - clientY;
-  });
-  setStatus(`Масштаб ${Math.round(zoom*100)}%`);
-}
-function fitToView(){const r=els.viewport.getBoundingClientRect();setZoom(fitZoom(r.width,r.height,doc.width,doc.height,90));els.viewport.scrollTo({left:0,top:0});}
 
 const menus={
   file:[

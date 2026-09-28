@@ -76,6 +76,8 @@ browser primitives (Canvas, Worker, storage, File APIs)
 
 ### Workspace
 - `src/workspace/session-controller.js` owns document-tab/session lifecycle and per-session UI/runtime snapshots.
+- `src/workspace/viewport-controller.js` is the single owner of canvas zoom/fit command policy: 0.1…16 clamp, near-equal no-op, active-session zoom sync, canvas/overlay refresh, pointer-anchored deferred scroll correction and the 90 px fit-to-view policy. See `VIEWPORT_NAVIGATION.md`.
+- Keyboard/menu/wheel dispatch and pan gesture state stay in `src/main.js`; canvas-mode panel visibility/center preservation stays in `src/ui/workspace-layout-controller.js`. Do not merge these three ownership domains into a generic workspace state bag.
 - `src/workspace/recovery-controller.js` owns recovery orchestration state: window identity, debounce/generation, serialized persistence queue, unreadable-sibling carry-forward and restore/discard policy.
 - `src/core/recovery.js` stays a low-level IndexedDB/record adapter; it must not gain session/tab/UI ownership.
 - Recovery controller receives storage/project/session/runtime/UI dependencies through explicit ports. Do not recreate recovery timers, write promises or window keys in `src/main.js`.
