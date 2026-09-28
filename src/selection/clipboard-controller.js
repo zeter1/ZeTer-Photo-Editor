@@ -149,6 +149,7 @@ export function createSelectionClipboardController({
             ownerDocument:documentValue,
             ownerSessionId:sessionId,
             selectionSnapshot,
+            isContinuationCurrent:()=>isClipboardContinuationCurrent(context),
           });
           if(!result)return false;
           if(!isClipboardContinuationCurrent(context))return false;
@@ -169,6 +170,7 @@ export function createSelectionClipboardController({
           ownerDocument:documentValue,
           targetLayer:layer,
           selectionSnapshot,
+          isContinuationCurrent:()=>isClipboardContinuationCurrent(context),
         });
         if(!cleared){if(isClipboardCommandCurrent(context))toast('Область скопирована, но удалить пиксели со слоя не удалось','warn');return false;}
         if(!isClipboardContinuationCurrent(context))return false;
