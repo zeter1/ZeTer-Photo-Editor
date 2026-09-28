@@ -385,11 +385,12 @@ test('Canvas8 preparation clears stale native working state before publishing it
 
 
 test('Canvas8 persistence honors a caller continuation guard after async encoding',async()=>{
-  const layer=rasterLayer({dataUrl:'data:image/png;base64,origin'});
+  const layer=rasterLayer();
   const doc={width:2,height:1,layers:[layer],groups:[]};
   const {documentRef}=canvasHarness({toDataURL:()=> 'data:image/png;base64,late'});
   const controller=createRasterEditController({getDocument:()=>doc,documentRef});
   await controller.ensureRasterBuffer(doc,layer);
+  layer.dataUrl='data:image/png;base64,origin';
   let current=true;
   const pending=controller.persistPaintLayer(doc,layer,{isContinuationCurrent:()=>current});
   current=false;
