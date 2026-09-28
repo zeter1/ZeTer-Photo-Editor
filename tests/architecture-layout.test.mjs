@@ -424,9 +424,9 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(build, /'src\/painting\/controller\.js'/);
   assert.match(paintingController, /export function createRasterEditController/);
   assert.match(paintingController, /async function ensureRasterBuffer\(owner, layer\)/);
-  assert.match(paintingController, /async function persistPaintLayer\(owner, layer\)/);
+  assert.match(paintingController, /async function persistPaintLayer\(owner, layer, \{ isContinuationCurrent \} = \{\}\)/);
   assert.match(paintingController, /async function ensureNativeHighDepthPaintBuffer\(owner, layer/);
-  assert.match(paintingController, /async function persistHighDepthMutation\(owner, layer, buffer\)/);
+  assert.match(paintingController, /async function persistHighDepthMutation\(owner, layer, buffer, \{ isContinuationCurrent \} = \{\}\)/);
   assert.match(paintingController, /async function persistNativeHighDepthPaintLayer\(owner, layer\)/);
   assert.match(paintingController, /highDepthPaintOwner === owner/);
   assert.match(paintingController, /highDepthPaintLayer === layer/);
