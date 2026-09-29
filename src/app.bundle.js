@@ -4339,6 +4339,39 @@ function refineMaskAlpha(alpha, width, height, {
   }
   return output;
 }
+function applyMaskControlsAlpha(alpha, width, height, {
+  invert = false,
+  density = 1,
+  feather = 0,
+} = {}) {
+  if (!(alpha instanceof Uint8Array || alpha instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидалась 8-bit маска слоя');
+  }
+  const w = Math.max(0, Math.trunc(width));
+  const h = Math.max(0, Math.trunc(height));
+  const count = w * h;
+  if (!w || !h || alpha.length < count) return new Uint8ClampedArray();
+
+  let output = new Uint8ClampedArray(alpha.slice(0, count));
+  const featherRadius = clamp(Number(feather) || 0, 0, 250);
+  if (featherRadius > 0) {
+    const radius = Math.max(1, Math.round(featherRadius / 2));
+    output = maskBoxBlur(output, w, h, radius);
+    output = maskBoxBlur(output, w, h, radius);
+  }
+
+  if (invert) {
+    for (let index = 0; index < count; index += 1) output[index] = 255 - output[index];
+  }
+
+  const amount = clamp(Number(density ?? 1), 0, 1);
+  if (amount < 1) {
+    for (let index = 0; index < count; index += 1) {
+      output[index] = clamp(Math.round(255 - (255 - output[index]) * amount), 0, 255);
+    }
+  }
+  return output;
+}
 function composeMaskPreviewRgba(sourceRgba, maskAlpha, width, height, {
   mode = 'mask',
   overlay = [255, 72, 72],
@@ -7648,6 +7681,9 @@ function createLayerMask(overrides = {}) {
   return {
     enabled: true,
     dataUrl: null,
+    invert: false,
+    density: 1,
+    feather: 0,
     ...overrides,
   };
 }
@@ -8053,6 +8089,9 @@ function sanitizeLayerMask(mask) {
   return createLayerMask({
     enabled: mask.enabled !== false,
     dataUrl,
+    invert: Boolean(mask.invert),
+    density: bounded(mask.density, 1, 0, 1),
+    feather: bounded(mask.feather, 0, 0, 250),
   });
 }
 
@@ -14137,6 +14176,57 @@ async function getImage(dataUrl) {
   return promise;
 }
 
+async function layerMaskCoverageCanvas(mask, width, height) {
+  if (!mask || mask.enabled === false) return null;
+  const w = Math.max(1, Math.ceil(width || 1));
+  const h = Math.max(1, Math.ceil(height || 1));
+  const coverage = document.createElement('canvas');
+  coverage.width = w;
+  coverage.height = h;
+  const coverageCtx = coverage.getContext('2d', { alpha:true, willReadFrequently:true });
+  let hasBitmap = false;
+  if (mask.dataUrl) {
+    const image = await getImage(mask.dataUrl);
+    if (!image) return null;
+    coverageCtx.drawImage(image, 0, 0, w, h);
+    hasBitmap = true;
+  } else {
+    coverageCtx.fillStyle = '#fff';
+    coverageCtx.fillRect(0, 0, w, h);
+  }
+  const pixels = coverageCtx.getImageData(0, 0, w, h);
+  const alpha = new Uint8ClampedArray(w * h);
+  for (let index = 0; index < alpha.length; index += 1) alpha[index] = pixels.data[index * 4 + 3];
+  const controlled = applyMaskControlsAlpha(alpha, w, h, {
+    invert:Boolean(mask.invert),
+    density:mask.density ?? 1,
+    feather:hasBitmap ? mask.feather : 0,
+  });
+  for (let index = 0; index < controlled.length; index += 1) {
+    const offset = index * 4;
+    pixels.data[offset] = 255;
+    pixels.data[offset + 1] = 255;
+    pixels.data[offset + 2] = 255;
+    pixels.data[offset + 3] = controlled[index];
+  }
+  coverageCtx.putImageData(pixels, 0, 0);
+  return coverage;
+}
+
+async function applyLayerMaskToContext(ctx, mask, width, height) {
+  if (!mask || mask.enabled === false) return false;
+  if (!mask.dataUrl && !mask.invert) return false;
+  const coverage = await layerMaskCoverageCanvas(mask, width, height);
+  if (!coverage) return false;
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.globalAlpha = 1;
+  ctx.filter = 'none';
+  ctx.drawImage(coverage, 0, 0, width, height);
+  ctx.restore();
+  return true;
+}
+
 async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } = {}) {
   const width = Math.max(1, canvas.width || 1);
   const height = Math.max(1, canvas.height || 1);
@@ -14164,17 +14254,7 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
       console.warn('Adjustment layer could not process composite pixels', error);
     }
   }
-  if (layer.mask?.enabled && layer.mask.dataUrl) {
-    const mask = await getImage(layer.mask.dataUrl);
-    if (mask) {
-      sourceCtx.save();
-      sourceCtx.globalCompositeOperation = 'destination-in';
-      sourceCtx.globalAlpha = 1;
-      sourceCtx.filter = 'none';
-      sourceCtx.drawImage(mask, 0, 0, width, height);
-      sourceCtx.restore();
-    }
-  }
+  await applyLayerMaskToContext(sourceCtx, layer.mask, width, height);
   if(layer.vectorMask?.enabled!==false&&layer.vectorMask?.subpaths?.length){
     const vectorMask=renderVectorMaskBitmap(layer.vectorMask,width,height);
     sourceCtx.save();
@@ -14446,7 +14526,7 @@ async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       ctx.drawImage(styled.canvas,styled.x,styled.y,styled.width,styled.height);
       return;
     }
-    const hasRasterMask=Boolean(layer.mask?.enabled && layer.mask.dataUrl);
+    const hasRasterMask=Boolean(layer.mask && layer.mask.enabled !== false && (layer.mask.dataUrl || layer.mask.invert));
     const hasVectorMask=Boolean(layer.vectorMask?.enabled !== false && layer.vectorMask?.subpaths?.length);
     if (hasRasterMask || hasVectorMask) {
       const masked = document.createElement('canvas');
@@ -14469,13 +14549,7 @@ async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
         rotation: 0,
       };
       await renderLayer(maskedCtx, plain, { rasterOverride });
-      if(hasRasterMask){
-        const mask = await getImage(layer.mask.dataUrl);
-        if(mask){
-          maskedCtx.save();maskedCtx.globalCompositeOperation='destination-in';maskedCtx.globalAlpha=1;maskedCtx.filter='none';
-          maskedCtx.drawImage(mask,0,0,masked.width,masked.height);maskedCtx.restore();
-        }
-      }
+      if(hasRasterMask) await applyLayerMaskToContext(maskedCtx, layer.mask, masked.width, masked.height);
       if(hasVectorMask){
         const vectorMask=renderVectorMaskBitmap(layer.vectorMask,masked.width,masked.height);
         maskedCtx.save();maskedCtx.globalCompositeOperation='destination-in';maskedCtx.globalAlpha=1;maskedCtx.filter='none';
@@ -17045,10 +17119,12 @@ function createSelectionMaskController({
 
   const previewOwners = new WeakMap();
 
-  function currentTarget(ownerDocument, layer, { requireMaskAbsent = false } = {}) {
+  function currentTarget(ownerDocument, layer, options = {}) {
+    const { requireMaskAbsent = false } = options;
     if (!ownerDocument || getDocument() !== ownerDocument || getSelectedLayer() !== layer) return false;
     if (isLayerLocked(ownerDocument, layer)) return false;
     if (requireMaskAbsent && layer?.mask) return false;
+    if (Object.prototype.hasOwnProperty.call(options, 'expectedMask') && layer?.mask !== options.expectedMask) return false;
     return true;
   }
 
@@ -17359,7 +17435,8 @@ function createSelectionMaskController({
     const scale = layer.type === 'adjustment'
       ? 1
       : Math.max(.01, (Math.abs(Number(layer.scaleX) || 1) + Math.abs(Number(layer.scaleY) || 1)) / 2);
-    const replacing = Boolean(layer.mask);
+    const existingMask = layer.mask;
+    const replacing = Boolean(existingMask);
 
     showModal({
       title:'Уточнить выделение → маска слоя',
@@ -17385,13 +17462,78 @@ function createSelectionMaskController({
         });
       },
       onSubmit:async values => {
-        if (!currentTarget(ownerDocument, layer)) return false;
+        if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
         const options = selectionRefineOptionsFromValues(values, scale);
         const dataUrl = await selectionMaskDataUrlForOwner(layer, options, ownerDocument, shape);
-        if (!currentTarget(ownerDocument, layer)) return false;
-        layer.mask = createLayerMask({ enabled:true, dataUrl });
+        if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
+        layer.mask = createLayerMask({
+          enabled:existingMask?.enabled !== false,
+          dataUrl,
+          invert:Boolean(existingMask?.invert),
+          density:clamp(Number(existingMask?.density ?? 1), 0, 1),
+          feather:clamp(Number(existingMask?.feather) || 0, 0, 250),
+        });
         commit(replacing ? 'Уточнить маску слоя' : 'Создать уточнённую маску слоя');
         setStatus(`Маска уточнена: сглаживание ${Number(values.smooth) || 0}px, край ${Number(values.shift) || 0}px, радиус ${Number(values.edgeRadius) || 0}px, растушёвка ${Number(values.feather) || 0}px`);
+        return true;
+      },
+    });
+    return true;
+  }
+
+  function toggleSelectedLayerMask() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.mask;
+    if (!mask || !currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+    mask.enabled = mask.enabled === false;
+    commit(mask.enabled ? 'Включить маску слоя' : 'Отключить маску слоя');
+    setStatus(mask.enabled ? 'Маска слоя включена' : 'Маска слоя отключена');
+    return true;
+  }
+
+  function invertSelectedLayerMask() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.mask;
+    if (!mask || !currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+    mask.invert = !Boolean(mask.invert);
+    commit('Инвертировать маску слоя');
+    setStatus(mask.invert ? 'Маска слоя инвертирована' : 'Инверсия маски слоя снята');
+    return true;
+  }
+
+  function editSelectedLayerMaskProperties() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.mask;
+    if (!mask || !currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+    showModal({
+      title:'Параметры растровой маски',
+      fields:[
+        { name:'density', label:'Плотность, %', type:'number', value:Math.round(clamp(Number(mask.density ?? 1), 0, 1) * 100), min:0, max:100, step:1 },
+        { name:'feather', label:'Растушёвка, px', type:'number', value:clamp(Number(mask.feather) || 0, 0, 250), min:0, max:250, step:.5 },
+        { name:'invert', label:'Инвертировать', type:'select', value:mask.invert ? 'yes' : 'no', options:[['no','Нет'],['yes','Да']] },
+      ],
+      submitLabel:'Применить',
+      onSubmit:values => {
+        if (!currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+        const density = clamp(Number(values?.density) || 0, 0, 100) / 100;
+        const feather = clamp(Number(values?.feather) || 0, 0, 250);
+        const invert = values?.invert === 'yes';
+        if (
+          Math.abs(Number(mask.density ?? 1) - density) < 1e-9 &&
+          Math.abs((Number(mask.feather) || 0) - feather) < 1e-9 &&
+          Boolean(mask.invert) === invert
+        ) {
+          setStatus('Параметры маски слоя не изменились');
+          return true;
+        }
+        mask.density = density;
+        mask.feather = feather;
+        mask.invert = invert;
+        commit('Параметры маски слоя');
+        setStatus(`Маска слоя: плотность ${Math.round(density * 100)}%, растушёвка ${feather}px${invert ? ', инвертирована' : ''}`);
         return true;
       },
     });
@@ -17415,6 +17557,9 @@ function createSelectionMaskController({
     buildSelectionRefinePreviewSource,
     attachSelectionRefinePreview,
     refineSelectionToLayerMask,
+    toggleSelectedLayerMask,
+    invertSelectedLayerMask,
+    editSelectedLayerMaskProperties,
     removeSelectedLayerMask,
   };
 }
@@ -19947,19 +20092,35 @@ function createPsdExportController({
   }
   
   async function renderPsdMaskPixels(layer,bounds){
-    if(!layer.mask?.dataUrl)return null;
+    if(!layer.mask)return null;
     const canvas=createCanvas();canvas.width=bounds.width;canvas.height=bounds.height;
     const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
-    ctx.translate(-bounds.x,-bounds.y);
-    const maskLayer=createRasterLayer({
-      name:`${layer.name||'Слой'} — mask`,
-      x:layer.x,y:layer.y,width:layer.width,height:layer.height,
-      scaleX:layer.scaleX,scaleY:layer.scaleY,rotation:layer.rotation,
-      opacity:1,blendMode:'source-over',dataUrl:layer.mask.dataUrl,
-      filters:{...DEFAULT_LAYER_FILTERS},styles:null,mask:null,
+    if(layer.mask.dataUrl){
+      ctx.translate(-bounds.x,-bounds.y);
+      const maskLayer=createRasterLayer({
+        name:`${layer.name||'Слой'} — mask`,
+        x:layer.x,y:layer.y,width:layer.width,height:layer.height,
+        scaleX:layer.scaleX,scaleY:layer.scaleY,rotation:layer.rotation,
+        opacity:1,blendMode:'source-over',dataUrl:layer.mask.dataUrl,
+        filters:{...DEFAULT_LAYER_FILTERS},styles:null,mask:null,
+      });
+      await renderLayer(ctx,maskLayer);
+      ctx.setTransform(1,0,0,1,0,0);
+    }else{
+      ctx.fillStyle='#fff';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+    const pixels=canvasRgbaPixels(canvas,`PSD mask «${layer.name||'Без имени'}»`);
+    const alpha=new Uint8ClampedArray(bounds.width*bounds.height);
+    for(let index=0;index<alpha.length;index+=1)alpha[index]=pixels[index*4+3];
+    const maskScale=layer.mask.dataUrl?Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1)):1;
+    const controlled=applyMaskControlsAlpha(alpha,bounds.width,bounds.height,{
+      invert:Boolean(layer.mask.invert),
+      density:layer.mask.density??1,
+      feather:layer.mask.dataUrl?(Number(layer.mask.feather)||0)*maskScale:0,
     });
-    await renderLayer(ctx,maskLayer);
-    return canvasRgbaPixels(canvas,`PSD mask «${layer.name||'Без имени'}»`);
+    for(let index=0;index<controlled.length;index+=1)pixels[index*4+3]=controlled[index];
+    return pixels;
   }
   
   function layerNeedsSemanticRasterWarning(layer){
@@ -20215,14 +20376,14 @@ function createPsdExportController({
     if(downgradedHighDepth.length)warnings.push(`${downgradedHighDepth.length} high-depth RGB слой(я) с transform/filter/style или несовместимой геометрией экспортированы через 8-bit raster preview`);
     if(bitsPerChannel>8&&writerNative.some(buffer=>!buffer))warnings.push(`Документ экспортируется как ${bitsPerChannel}-bit; raster-preview слои без native source расширены из 8-bit без восстановления утраченной точности`);
     if(sourceLayers.some(layer=>layer.vectorMask?.linked===false))warnings.push('Unlinked vector mask flag записывается в PSD/PSB, но ZPE при трансформациях пока перемещает такую маску вместе со слоем');
-    if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
+    if(exportDoc.layers.some(layer=>layer.mask&&(layer.mask.invert||Math.abs(Number(layer.mask.density??1)-1)>1e-9||Number(layer.mask.feather)>0)))warnings.push('Параметры растровых масок invert/density/feather запечены в PSD/PSB mask alpha для совместимости');
   
     const prepared=[];
     for(let planIndex=0;planIndex<planned.length;planIndex+=1){
       const {layer,bounds,nativeText,nativeShape,nativeAdjustment}=planned[planIndex];
       const nativePixelBuffer=writerNative[planIndex];
       if(nativeAdjustment?.eligible){
-        const adjustmentMask=layer.mask?.dataUrl?{
+        const adjustmentMask=layer.mask?{
           pixels:await renderPsdMaskPixels(layer,{x:0,y:0,width:exportDoc.width,height:exportDoc.height}),
           disabled:layer.mask.enabled===false,
           x:0,y:0,width:exportDoc.width,height:exportDoc.height,defaultColor:255,
@@ -20248,7 +20409,7 @@ function createPsdExportController({
         clipping:layer.clipping===true,
         groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
         visible:needsAdjustmentRasterFallback?false:(layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer)),
-        mask:layer.mask?.dataUrl?{
+        mask:layer.mask?{
           pixels:await renderPsdMaskPixels(layer,bounds),
           disabled:layer.mask.enabled===false,
         }:null,
@@ -23903,6 +24064,9 @@ const {
   selectionMaskDataUrl,
   addSelectedLayerMask,
   refineSelectionToLayerMask,
+  toggleSelectedLayerMask,
+  invertSelectedLayerMask,
+  editSelectedLayerMaskProperties,
   removeSelectedLayerMask,
 } = selectionMaskController;
 
@@ -26180,6 +26344,9 @@ function layerContextMenu(id) {
     ['sep'],
     ['Добавить маску (показать всё)','',()=>addSelectedLayerMask(false),()=>selectedTarget() && editable() && !target().mask],
     ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>selectedTarget() && editable() && !target().mask && Boolean(selectionShape)],
+    ['Параметры растровой маски…','',editSelectedLayerMaskProperties,()=>selectedTarget() && editable() && Boolean(target().mask)],
+    ['Инвертировать растровую маску','',invertSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
+    ['Включить / отключить растровую маску','',toggleSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
     ['Удалить маску','',removeSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
     ['sep'],
     ['Создать векторную маску из выделения','',()=>applySelectionToVectorMask('replace'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&!target().vectorMask],
@@ -26225,7 +26392,13 @@ function addAdjustmentLayer(){
 
 function layerMaskSummary(layer){
   const parts=[];
-  if(layer?.mask)parts.push(layer.mask.enabled===false?'растровая отключена':layer.mask.dataUrl?'растровая':'растровая: показать всё');
+  if(layer?.mask){
+    const mask=layer.mask;
+    const state=mask.enabled===false?'отключена':mask.invert?'инвертирована':'включена';
+    const density=Math.round((mask.density??1)*100);
+    const feather=Number(mask.feather)||0;
+    parts.push(`растровая: ${state}, плотность ${density}%, растушёвка ${feather}px${mask.dataUrl?'':' (показать всё)'}`);
+  }
   if(layer?.vectorMask){
     const count=layer.vectorMask.subpaths?.length||0,state=layer.vectorMask.enabled===false?'отключена':layer.vectorMask.invert?'инвертирована':'включена';
     parts.push(`векторная: ${count} контур(ов), ${state}`);
@@ -26287,6 +26460,9 @@ const menus={
     ['Добавить маску (показать всё)','',()=>addSelectedLayerMask(false),()=>Boolean(selected())&&!selected().mask&&!isLayerLocked(doc,selected())],
     ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>Boolean(selected())&&!selected().mask&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Уточнить выделение → маска…','',refineSelectionToLayerMask,()=>Boolean(selected())&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Параметры растровой маски…','',editSelectedLayerMaskProperties,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
+    ['Инвертировать растровую маску','',invertSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
+    ['Включить / отключить растровую маску','',toggleSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['Удалить маску','',removeSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Создать векторную маску из выделения','',()=>applySelectionToVectorMask('replace'),()=>Boolean(selected())&&Boolean(selectionShape)&&!selected().vectorMask&&!isLayerLocked(doc,selected())],
