@@ -1466,6 +1466,145 @@ export function mutateSerializedPixelBufferTiles(source, visitor, {
   };
 }
 
+export function createSerializedPixelBufferTileWorkingSet(source, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  requireAlpha = false,
+} = {}) {
+  const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
+  if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
+  if (safe.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+
+  const range = channelRange(safe.model);
+  const targetChannels = requireAlpha ? range.max : safe.channels;
+  const targetRawBytes = expectedSourceBytes({ ...safe, channels:targetChannels });
+  const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
+  if (!targetRawBytes || targetRawBytes > limit) {
+    throw new RangeError('Tiled PixelBuffer working set требует ' + targetRawBytes + ' байт; лимит ' + limit + ' байт');
+  }
+
+  const promoteAlpha = targetChannels !== safe.channels;
+  const loaded = new Map();
+  const dirty = new Set();
+  const previewDirty = new Set();
+
+  function load(index) {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= safe.tiles.length) {
+      throw new RangeError('Tiled PixelBuffer tile index вне диапазона');
+    }
+    if (loaded.has(index)) return loaded.get(index);
+    let buffer = decodeSerializedTile(safe, safe.tiles[index]);
+    if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+    loaded.set(index, buffer);
+    return buffer;
+  }
+
+  function intersects(tile, bounds) {
+    if (!bounds) return true;
+    const left = Number(bounds.left);
+    const top = Number(bounds.top);
+    const right = Number(bounds.right);
+    const bottom = Number(bounds.bottom);
+    if (![left, top, right, bottom].every(Number.isFinite)) {
+      throw new TypeError('Tiled PixelBuffer bounds должны быть конечными числами');
+    }
+    return right > tile.x && bottom > tile.y && left < tile.x + tile.width && top < tile.y + tile.height;
+  }
+
+  function visit(bounds, visitor) {
+    if (typeof visitor !== 'function') throw new TypeError('Tiled PixelBuffer working-set visitor должен быть функцией');
+    let changed = 0;
+    for (let index = 0; index < safe.tiles.length; index += 1) {
+      const tile = safe.tiles[index];
+      if (!intersects(tile, bounds)) continue;
+      const buffer = load(index);
+      const rawResult = visitor({
+        index,
+        count:safe.tiles.length,
+        x:tile.x,
+        y:tile.y,
+        width:tile.width,
+        height:tile.height,
+        buffer,
+      });
+      const delta = rawResult == null || rawResult === false ? 0 : rawResult === true ? 1 : Number(rawResult);
+      if (!Number.isSafeInteger(delta) || delta < 0) {
+        throw new TypeError('Tiled PixelBuffer working-set visitor должен вернуть неотрицательное целое число изменений');
+      }
+      if (!delta) continue;
+      changed += delta;
+      if (!Number.isSafeInteger(changed)) throw new RangeError('Tiled PixelBuffer working-set change count переполнен');
+      dirty.add(index);
+      previewDirty.add(index);
+    }
+    return changed;
+  }
+
+  function forEachPreviewDirty(visitor) {
+    if (typeof visitor !== 'function') throw new TypeError('Tiled PixelBuffer preview visitor должен быть функцией');
+    for (const index of [...previewDirty]) {
+      const tile = safe.tiles[index];
+      const buffer = load(index);
+      visitor({
+        index,
+        x:tile.x,
+        y:tile.y,
+        width:tile.width,
+        height:tile.height,
+        buffer,
+      });
+      previewDirty.delete(index);
+    }
+  }
+
+  function serialize() {
+    const tiles = [];
+    let total = 0;
+    for (let index = 0; index < safe.tiles.length; index += 1) {
+      const tile = safe.tiles[index];
+      if (!dirty.has(index) && !promoteAlpha) {
+        tiles.push(tile);
+        total += tile.rawBytes;
+        continue;
+      }
+      let buffer = loaded.get(index);
+      if (!buffer) {
+        buffer = decodeSerializedTile(safe, tile);
+        if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+      }
+      const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
+      total += bytes.byteLength;
+      tiles.push({
+        ...tile,
+        rawBytes:bytes.byteLength,
+        dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME),
+      });
+    }
+    if (total !== targetRawBytes) throw new RangeError('Tiled PixelBuffer working-set serialization имеет несогласованный byte budget');
+    return {
+      ...safe,
+      channels:targetChannels,
+      alphaMode:promoteAlpha ? 'straight' : safe.alphaMode,
+      rawBytes:targetRawBytes,
+      tiles,
+    };
+  }
+
+  return {
+    kind:PIXEL_BUFFER_TILED_SOURCE_KIND,
+    width:safe.width,
+    height:safe.height,
+    model:safe.model,
+    channels:targetChannels,
+    bitsPerChannel:safe.bitsPerChannel,
+    promotedAlpha:promoteAlpha,
+    visit,
+    forEachPreviewDirty,
+    serialize,
+    get loadedTileCount() { return loaded.size; },
+    get dirtyTileCount() { return dirty.size; },
+  };
+}
+
 export function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
   const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
   if(safe.kind===PIXEL_BUFFER_SOURCE_KIND){

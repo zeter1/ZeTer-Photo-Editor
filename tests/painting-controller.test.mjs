@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPixelBuffer, serializePixelBufferSource } from '../src/core/pixel-buffer.js';
+import { createPixelBuffer, deserializePixelBufferSource, serializePixelBufferSource, serializeTiledPixelBufferSource, PIXEL_BUFFER_TILED_SOURCE_KIND } from '../src/core/pixel-buffer.js';
 import { createRasterEditController } from '../src/painting/controller.js';
 
 function canvasHarness({ toDataURL = () => 'data:image/png;base64,paint' } = {}) {
@@ -411,4 +411,63 @@ test('generic high-depth persistence honors a caller continuation guard after pr
   assert.equal(await pending,false);
   assert.equal(layer.dataUrl,'data:image/png;base64,origin');
   assert.equal(layer.highDepthSource,originalSource);
+});
+
+
+test('Stage 17c Brush uses a stroke-scoped tiled working set and persists untouched tiles byte-identically',async()=>{
+  const source=createPixelBuffer({
+    width:4,height:2,model:'rgb',channels:4,bitsPerChannel:16,colorSpace:'srgb',
+    data:new Uint16Array([
+      0,0,0,65535, 0,0,0,65535, 0,0,0,65535, 0,0,0,65535,
+      0,0,0,65535, 0,0,0,65535, 0,0,0,65535, 0,0,0,65535,
+    ]),
+  });
+  const packed=serializeTiledPixelBufferSource(source,{tileSize:2});
+  const untouched=packed.tiles[1].dataUrl;
+  const layer=rasterLayer({width:4,height:2,highDepthSource:packed,dataUrl:'data:image/png;base64,old'});
+  const doc={width:4,height:2,layers:[layer],groups:[]};
+  const {documentRef}=canvasHarness({toDataURL:()=> 'data:image/png;base64,tiled-next'});
+  const controller=createRasterEditController({getDocument:()=>doc,documentRef});
+
+  assert.equal(await controller.ensureNativeHighDepthPaintBuffer(doc,layer,{preferTiled:true}),true);
+  assert.equal(controller.highDepthPaintBuffer,null);
+  const working=controller.highDepthPaintWorkingSet;
+  assert.ok(working);
+  assert.equal(working.loadedTileCount,0);
+  assert.equal(controller.applyNativeHighDepthBrushDab(doc,layer,{x:.5,y:.5},{
+    radius:.6,rgb:[255,0,0],opacity:1,erase:false,
+  })>0,true);
+  assert.equal(working.loadedTileCount,1);
+  assert.equal(working.dirtyTileCount,1);
+
+  assert.equal(await controller.persistNativeHighDepthPaintLayer(doc,layer),true);
+  assert.equal(layer.highDepthSource.kind,PIXEL_BUFFER_TILED_SOURCE_KIND);
+  assert.equal(layer.highDepthSource.tiles[1].dataUrl,untouched);
+  assert.equal(controller.highDepthPaintWorkingSet,null);
+  assert.equal(controller.highDepthPaintBuffer,null);
+});
+
+test('Stage 17c tiled Eraser promotes native alpha tile-by-tile and keeps exact paint ownership',async()=>{
+  const source=createPixelBuffer({
+    width:3,height:2,model:'rgb',channels:3,bitsPerChannel:16,colorSpace:'srgb',
+    data:new Uint16Array(18).fill(22222),
+  });
+  const packed=serializeTiledPixelBufferSource(source,{tileSize:2});
+  const layer=rasterLayer({width:3,height:2,highDepthSource:packed});
+  const doc={width:3,height:2,layers:[layer],groups:[]};
+  const {documentRef}=canvasHarness();
+  const controller=createRasterEditController({getDocument:()=>doc,documentRef});
+
+  assert.equal(await controller.ensureNativeHighDepthPaintBuffer(doc,layer,{requireAlpha:true,preferTiled:true}),true);
+  const working=controller.highDepthPaintWorkingSet;
+  assert.equal(working.channels,4);
+  assert.equal(controller.applyNativeHighDepthBrushDab(doc,layer,{x:.5,y:.5},{
+    radius:.6,rgb:[0,0,0],opacity:.5,erase:true,
+  })>0,true);
+  assert.equal(working.loadedTileCount,1);
+  assert.equal(await controller.persistNativeHighDepthPaintLayer(doc,layer),true);
+  const restored=deserializePixelBufferSource(layer.highDepthSource);
+  assert.equal(restored.channels,4);
+  assert.ok(restored.data[3]>0&&restored.data[3]<65535);
+  assert.equal(restored.data[7],65535);
 });

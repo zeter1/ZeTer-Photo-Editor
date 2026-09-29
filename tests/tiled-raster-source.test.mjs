@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createPixelBuffer, deserializePixelBufferSource, forEachSerializedPixelBufferTile, mutateSerializedPixelBufferTiles,
+  createPixelBuffer, createSerializedPixelBufferTileWorkingSet, deserializePixelBufferSource, forEachSerializedPixelBufferTile, mutateSerializedPixelBufferTiles,
   PIXEL_BUFFER_SOURCE_KIND, PIXEL_BUFFER_TILED_SOURCE_KIND, sanitizeSerializedPixelBufferSource,
   serializePixelBufferSourceAdaptive, serializeTiledPixelBufferSource,
 } from '../src/core/pixel-buffer.js';
@@ -99,4 +99,44 @@ test('Stage 17b tile mutation can promote RGB16 tiles to straight alpha without 
   assert.deepEqual([...restored.data.slice(0,3)],[100,200,300]);
   assert.equal(restored.data[3],0);
   for(let pixel=1;pixel<6;pixel+=1)assert.equal(restored.data[pixel*4+3],65535);
+});
+
+
+test('Stage 17c stroke working set lazily decodes touched tiles and preserves untouched payloads',()=>{
+  const packed=serializeTiledPixelBufferSource(rgb16(4,2),{tileSize:2});
+  const untouched=packed.tiles[1].dataUrl;
+  const working=createSerializedPixelBufferTileWorkingSet(packed);
+  assert.equal(working.loadedTileCount,0);
+  const changed=working.visit({left:0,top:0,right:2,bottom:2},({buffer})=>{
+    buffer.data[0]=4321;
+    return 1;
+  });
+  assert.equal(changed,1);
+  assert.equal(working.loadedTileCount,1);
+  assert.equal(working.dirtyTileCount,1);
+  const next=working.serialize();
+  assert.equal(next.kind,PIXEL_BUFFER_TILED_SOURCE_KIND);
+  assert.equal(next.tiles[1].dataUrl,untouched);
+  assert.equal(deserializePixelBufferSource(next).data[0],4321);
+});
+
+test('Stage 17c eraser working set defers alpha promotion until touched/serialized tiles without a full plane',()=>{
+  const source=createPixelBuffer({
+    width:3,height:2,model:'rgb',channels:3,bitsPerChannel:16,colorSpace:'srgb',
+    data:new Uint16Array(3*2*3).fill(12345),
+  });
+  const packed=serializeTiledPixelBufferSource(source,{tileSize:2});
+  const working=createSerializedPixelBufferTileWorkingSet(packed,{requireAlpha:true});
+  assert.equal(working.channels,4);
+  assert.equal(working.loadedTileCount,0);
+  working.visit({left:0,top:0,right:1,bottom:1},({buffer})=>{
+    assert.equal(buffer.channels,4);
+    buffer.data[3]=0;
+    return 1;
+  });
+  assert.equal(working.loadedTileCount,1);
+  const restored=deserializePixelBufferSource(working.serialize());
+  assert.equal(restored.channels,4);
+  assert.equal(restored.data[3],0);
+  assert.equal(restored.data[7],65535);
 });

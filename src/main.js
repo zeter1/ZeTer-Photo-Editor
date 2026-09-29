@@ -9,7 +9,7 @@ import {
 import { renderDocument, renderLayer, compositeToBlob, invalidateImageCache, clearImageCache } from './core/render.js';
 import { readFileAsDataURL, readFileAsText, dimensionsFromDataUrl, canvasToDataURL, downloadBlob, downloadText, safeFilename, bytesToDataUrl, dataUrlToBytes } from './core/io.js';
 import { hexToRgb } from './core/pixels.js';
-import { pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, applyPixelBufferBrushDab, applyPixelBufferStrokeSegment, applyCmykPixelBufferBrushDab, applyCmykPixelBufferStrokeSegment, MAX_PIXEL_BUFFER_SOURCE_BYTES } from './core/pixel-buffer.js';
+import { pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview, clonePixelBuffer, pixelBufferWithStraightAlpha, pixelBufferByteLength, MAX_PIXEL_BUFFER_SOURCE_BYTES } from './core/pixel-buffer.js';
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import {
@@ -2210,20 +2210,30 @@ function createLineLayerFromPoints(start,end) {
 function applyNativeHighDepthDab(owner,layer,point,pointerEvent=null,erase=false){
   if(!rasterEdit.isNativeHighDepthPaintTarget(owner,layer))return false;
   const rgb=hexToRgb(els.primaryColor.value);
-  const changed=rasterEdit.highDepthPaintBuffer.model==='cmyk'
-    ? applyCmykPixelBufferBrushDab(rasterEdit.highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb8ToDocumentCmyk(rgb),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)})
-    : applyPixelBufferBrushDab(rasterEdit.highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb,{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)});
-  if(changed){rasterEdit.markHighDepthPreviewDirty();rasterEdit.schedulePaintPreview();}
+  const changed=rasterEdit.applyNativeHighDepthBrushDab(owner,layer,point,{
+    radius:Math.max(.5,brushWidthForPointer(pointerEvent)/2),
+    rgb,
+    cmyk:layer.highDepthSource?.model==='cmyk'?rgb8ToDocumentCmyk(rgb):null,
+    opacity:Number(els.toolOpacity.value)/100,
+    erase,
+    isAllowed:rasterSelectionPredicate(layer),
+  });
+  if(changed)rasterEdit.schedulePaintPreview();
   return changed>0;
 }
 
 function nativeHighDepthStrokeSegment(owner,layer,from,to,pointerEvent=null,erase=false){
   if(!rasterEdit.isNativeHighDepthPaintTarget(owner,layer))return false;
   const rgb=hexToRgb(els.primaryColor.value);
-  const changed=rasterEdit.highDepthPaintBuffer.model==='cmyk'
-    ? applyCmykPixelBufferStrokeSegment(rasterEdit.highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb8ToDocumentCmyk(rgb),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)})
-    : applyPixelBufferStrokeSegment(rasterEdit.highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb,{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)});
-  if(changed){rasterEdit.markHighDepthPreviewDirty();rasterEdit.schedulePaintPreview();}
+  const changed=rasterEdit.applyNativeHighDepthStrokeSegment(owner,layer,from,to,{
+    radius:Math.max(.5,brushWidthForPointer(pointerEvent)/2),
+    rgb,
+    cmyk:layer.highDepthSource?.model==='cmyk'?rgb8ToDocumentCmyk(rgb):null,
+    opacity:Number(els.toolOpacity.value)/100,
+    erase,
+    isAllowed:rasterSelectionPredicate(layer),
+  });
+  if(changed)rasterEdit.schedulePaintPreview();
   return changed>0;
 }
 

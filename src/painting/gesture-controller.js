@@ -82,7 +82,10 @@ export function createPaintGestureController({
     }
 
     const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
-      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(owner, layer, { requireAlpha:tool === 'eraser' })
+      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(owner, layer, {
+          requireAlpha:tool === 'eraser',
+          preferTiled:tool === 'brush' || tool === 'eraser',
+        })
       : false;
     if (!nativeHighDepth && !await rasterEdit.ensureRasterBuffer(owner, layer)) return null;
     if (state.getDocument() !== owner || !owner.layers.includes(layer)) return null;
@@ -285,7 +288,9 @@ export function createPaintGestureController({
       NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool)
     );
     if (
-      (nativeHighDepth ? !rasterEdit.highDepthPaintBuffer : !rasterEdit.brushContext) ||
+      (nativeHighDepth
+        ? !rasterEdit.isNativeHighDepthPaintTarget(drag?.owner, drag?.layer)
+        : !rasterEdit.brushContext) ||
       !state.beginPersist()
     ) return false;
 
