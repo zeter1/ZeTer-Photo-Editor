@@ -16,6 +16,7 @@ const modalController = await readFile(new URL('../src/ui/modal-controller.js', 
 const textEditController = await readFile(new URL('../src/ui/text-edit-controller.js', import.meta.url), 'utf8');
 const sessions = await readFile(new URL('../src/workspace/session-controller.js', import.meta.url), 'utf8');
 const workspaceRecovery = await readFile(new URL('../src/workspace/recovery-controller.js', import.meta.url), 'utf8');
+const projectController = await readFile(new URL('../src/document/project-controller.js', import.meta.url), 'utf8');
 const build = await readFile(new URL('../tools/build-bundle.mjs', import.meta.url), 'utf8');
 const recovery = await readFile(new URL('../src/core/recovery.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
@@ -171,8 +172,8 @@ test('recovery UI restores sanitized project data but keeps it dirty until expli
   assert.match(workspaceRecovery, /label:'Автовосстановление'/);
   assert.match(workspaceRecovery, /markDirty\(true\)/);
   assert.match(workspaceRecovery, /Ignored recovery discard request for another editor window/);
-  assert.match(main, /function saveProject\(\)[^\n]*downloadText\([^\n]*queueRecovery\(\{immediate:true\}\)/);
-  assert.doesNotMatch(main, /function saveProject\(\)[^\n]*markDirty\(false\)/);
+  assert.match(projectController, /function saveProject\(\)[\s\S]*?downloadText\([\s\S]*?queueRecovery\(\{ immediate:true \}\)/);
+  assert.doesNotMatch(projectController, /function saveProject\(\)[\s\S]*?markDirty\(false\)/);
 });
 
 test('new text and shape layers inherit the tool opacity like brush, fill, and line tools', () => {
