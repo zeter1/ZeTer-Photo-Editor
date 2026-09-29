@@ -58,6 +58,7 @@ const sources = [
   'src/selection/vector-mask-controller.js',
   'src/selection/clipboard-copy-cut-controller.js',
   'src/selection/clipboard-controller.js',
+  'src/document/project-controller.js',
   'src/document/import-controller.js',
   'src/document/background-command-controller.js',
   'src/document/crop-command-controller.js',

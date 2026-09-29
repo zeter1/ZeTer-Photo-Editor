@@ -57,6 +57,7 @@ import { createSelectionRasterMutationController } from './selection/raster-muta
 import { createSelectionMaskController } from './selection/mask-controller.js';
 import { createSelectionVectorMaskController } from './selection/vector-mask-controller.js';
 import { createDocumentImportController } from './document/import-controller.js';
+import { createProjectController } from './document/project-controller.js';
 import { DOCUMENT_BACKGROUND_COMMAND_RESULT, createDocumentBackgroundCommandController } from './document/background-command-controller.js';
 import { DOCUMENT_CROP_COMMAND_RESULT, createDocumentCropCommandController } from './document/crop-command-controller.js';
 import { DOCUMENT_RESIZE_COMMAND_RESULT, createDocumentResizeCommandController } from './document/resize-command-controller.js';
@@ -702,6 +703,27 @@ const psdImportController = createPsdImportController({
   ui: { setStatus, toast, alert, consoleRef:console },
 });
 
+const projectController = createProjectController({
+  documentState: {
+    getDocument: () => doc,
+    getActiveSessionId: () => activeSessionId,
+    getHistoryEntry: () => history.current(),
+    getDocumentChangeSerial: () => documentChangeSerial,
+    canReplaceDocument,
+    blockPendingDocumentEdit,
+    sanitizeProject,
+    replaceHistory: () => { history = new HistoryStack(80); },
+    setDocument: setDoc,
+    markDirty,
+    getCurrentSession: () => currentSession(),
+  },
+  io: { readFileAsText, downloadText, safeFilename },
+  smartObjects: { saveContent: session => saveSmartObjectContent(session) },
+  recovery: { queueRecovery: options => queueRecovery(options) },
+  view: { fitToView: () => fitToView() },
+  ui: { setStatus, toast, alertUser: message => alert(message), consoleRef:console },
+});
+const { openProject, saveProject } = projectController;
 const documentImportController = createDocumentImportController({
   getDocument: () => doc,
   getActiveSessionId: () => activeSessionId,
@@ -2254,38 +2276,6 @@ function bindAdjustmentControls(root,owner,layerId) {
     handleAdjustmentCommandResult(adjustmentLayerCommandController.setClipping(owner,layerId,clippingInput.checked));
   });
 }
-async function openProject(file) {
-  if (blockPendingDocumentEdit()) return;
-  if (!canReplaceDocument()) return;
-  const targetDocument=doc;
-  const targetSessionId=activeSessionId;
-  const targetHistoryEntry=history.current();
-  const targetChangeSerial=documentChangeSerial;
-  try {
-    const raw=await readFileAsText(file);
-    const data=sanitizeProject(JSON.parse(raw));
-    if(doc!==targetDocument||activeSessionId!==targetSessionId||
-      history.current()!==targetHistoryEntry||documentChangeSerial!==targetChangeSerial){
-      setStatus('Открытие отменено: документ изменился во время чтения файла');
-      toast('Повторите открытие проекта в нужной вкладке','warn');
-      return;
-    }
-    if(blockPendingDocumentEdit())return;
-    history=new HistoryStack(80);
-    setDoc(data,{resetHistory:true,label:'Открыть проект'});
-    markDirty(false);
-    queueRecovery({immediate:true});
-    fitToView();
-    setStatus('Проект открыт');
-    toast('Открыт проект: '+file.name,'success');
-  }catch(e){
-    console.error(e);
-    alert('Не удалось открыть проект: '+e.message);
-    setStatus('Ошибка открытия проекта');
-  }
-}
-function saveProject() { if(blockPendingDocumentEdit())return; const session=currentSession(); if(session?.smartObjectLink){saveSmartObjectContent(session);return;} const name=`${safeFilename(doc.name)}.zpe`; downloadText(JSON.stringify(doc,null,2),name,'application/json'); queueRecovery({immediate:true}); setStatus(`Скачивание ${name} запущено. Проверьте файл перед закрытием вкладки`); }
-
 async function exportPsdDocument(exportDoc,{psb=false}={}){
   const format=psb?'PSB':'PSD';
   setStatus(`${format}: подготовка слоёв…`);

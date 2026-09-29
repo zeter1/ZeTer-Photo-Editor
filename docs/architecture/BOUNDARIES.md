@@ -85,10 +85,16 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - Async recovery writes/discard must remain serialized; unreadable sibling records must not be silently lost when valid siblings are restored. Leaving recovery for a disk/new project must rotate a reserved current-window key before new autosave publication can occur.
 
 
+### Native project persistence
+- `src/document/project-controller.js` owns native `.zpe` open/save orchestration. Open is preflight → exact document/session/history/change-serial snapshot → async read/parse/sanitize → exact revalidation → second pending-edit guard → one publication path. See `docs/architecture/NATIVE_PROJECT_IO.md`.
+- Read/parse/sanitize failure or stale ownership publishes no document/history/dirty/recovery/view mutation. Successful open installs sanitized state, resets history, marks clean, queues immediate recovery and fits once.
+- Save routes Smart Object child sessions to their existing owner; regular `.zpe` download refreshes recovery but does not mark the document clean.
+- Schema stays in `src/core/state.js`, browser IO in `src/core/io.js`, Smart Object persistence in `src/document/smart-object-controller.js`.
+
 ### Document import
-- `src/document/import-controller.js` may classify incoming files and mutate the active document only after every image is decoded/validated.
-- Async import must re-check originating document/session before the first mutation.
-- PSD parsing stays in `src/formats/psd.js`; project open/save stays outside the import controller until extracted behind its own boundary.
+- `src/document/import-controller.js` classifies incoming files and mutates the active document only after every image is decoded/validated.
+- Async image import re-checks originating document/session before the first mutation.
+- It only routes `.zpe` to the project controller and PSD/PSB to the PSD owner; it must not absorb either persistence/parser policy.
 
 ### Document resize
 - `src/document/resize-command-controller.js` is the single semantic owner for persisted Image Size / Canvas Size commands. Modal opening captures the originating document and Apply must pass that exact owner into the controller; a different current document is a rejected stale command with no mutation, cleanup or history.

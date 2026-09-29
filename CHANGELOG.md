@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-29 — Extract native project IO owner
+
+- Refactor: native `.zpe` open/save orchestration moves from `src/main.js` into `src/document/project-controller.js`; incoming-file classification, schema, recovery storage and Smart Object persistence stay with their existing owners.
+- Async safety: direct tests pin preflight → exact document/session/history/change-serial snapshot → read/parse/sanitize → revalidation → one publication; stale/pending/invalid outcomes publish no partial project state.
+- Save semantics: regular `.zpe` download keeps immediate recovery without falsely marking the document clean; Smart Object content tabs still delegate to their owner.
+- AI/build hygiene: source-eval project-open tests are replaced by direct owner tests, recovery assertions target the canonical owner, and a narrow project-IO spec documents the boundary.
+
 ### 2026-09-28 — Learning Center guided mastery loop
 
 - Learning method: каждый урок теперь идёт по циклу «понять → сделать → проверить → закрепить»: ментальная модель и правило выбора, практический чек-лист на реальном холсте, проверка знаний с объяснениями и самопроверка мастерства.

@@ -41,7 +41,8 @@ ZeTer Photo Editor — локальный браузерный многосло�
 | Brush/eraser/retouch stroke begin → move → end | `src/painting/gesture-controller.js`, `src/painting/controller.js`, `src/retouch/controller.js`; capture/active pointer в `src/interaction/pointer-lifecycle-router.js`; tool routing в `src/main.js` | `tests/painting-gesture-controller.test.mjs`, `tests/pointer-lifecycle-router.test.mjs`, brush-performance, retouch/high-depth tests |
 | ICC/CMYK/soft proof UI/policy/profile orchestration | `src/ui/color-management-controller.js`; transform/parser math in `src/core/color-management.js` | `tests/color-management-controller.test.mjs`, color-management/profile/corpus tests |
 | PSD/PSB import/export | import transaction: `src/document/psd-import-controller.js`; Photoshop import semantics: `src/document/psd-import-semantics.js`; native export metadata plans: `src/document/psd-native-metadata-plans.js`; export preparation: `src/document/psd-export-controller.js`; binary codec: `src/formats/psd.js` | `tests/psd-import-controller.test.mjs`, `tests/psd-import-semantics.test.mjs`, `tests/psd-native-metadata-plans.test.mjs`, `tests/psd-export-controller.test.mjs`, `tests/psd-*.test.mjs` |
-| Document import / drag-drop routing | `src/document/import-controller.js`, PSD/project callbacks in `src/main.js` | async document context / reliability tests |
+| Native `.zpe` project open/save transaction | `src/document/project-controller.js`; schema/sanitization — `src/core/state.js`; text/download IO — `src/core/io.js`; Smart Object child-save — `src/document/smart-object-controller.js`; contract — `docs/architecture/NATIVE_PROJECT_IO.md` | `tests/project-controller.test.mjs`, async-document-context/recovery regressions, browser smoke |
+| Document import / drag-drop routing | `src/document/import-controller.js`; PSD callback — PSD import owner, `.zpe` callback — project controller | async document context / reliability tests |
 | Recovery/autosave + saved-project manager orchestration | `src/workspace/recovery-controller.js`; recovery dialog shell `src/ui/modal-controller.js`; storage adapter `src/core/recovery.js` | `tests/workspace-recovery-controller.test.mjs`, `tests/recovery-v110.test.mjs`, reliability tests |
 | Low-level browser IO | `src/core/io.js` | reliability / direct-open tests |
 | Bundle/build | `tools/build-bundle.mjs` | `npm run check` |
@@ -52,6 +53,7 @@ ZeTer Photo Editor — локальный браузерный многосло�
 ## 2. Source of truth
 
 - `src/main.js` — runtime orchestrator и владелец tool-specific pointer/keyboard dispatch. Zoom/fit policy делегирована в `src/workspace/viewport-controller.js`; shell layout — в `src/ui/workspace-layout-controller.js`. Это всё ещё большой файл; не читай его целиком без необходимости. Ищи конкретный symbol/event handler.
+- `src/document/project-controller.js` — canonical owner native `.zpe` open/save orchestration: preflight → capture → async prepare → exact-owner revalidate → publish, плюс Smart Object child-save routing. Детальный contract: `architecture/NATIVE_PROJECT_IO.md`.
 - `src/interaction/pointer-lifecycle-router.js` — generic lifecycle overlay-pointer: один active pointer, capture/release, фильтрация чужих move/up/cancel и fail-safe отмена при `lostpointercapture`; не знает про move/paint/crop/path semantics.
 - `src/ui/tool-config.js` — чистые UI-константы, labels/help/effect-control metadata/storage keys.
 - `src/ui/toolbar-controller.js` — drag/drop/persistence/drop-slot и rich tooltip lifecycle панели инструментов; выбор текущего tool остаётся в `src/main.js`.

@@ -183,8 +183,13 @@ Owns Photoshop-specific embedded Smart Object resource policy: PNG preview paylo
 
 Stable binary primitives stay in `src/formats/psd.js`; fingerprint/opaque-block decoding primitives stay in `psd-native-metadata-plans.js`. The owner receives PSD export preparation and the shared opaque-block-to-state bridge as narrow ports. Rewrite preparation does not mutate the parent document; the generic Smart Object controller revalidates content/parent identity after every await and only then calls the publish/update ports.
 
+### `project-controller.js`
+Owns native `.zpe` persistence orchestration. Open captures exact document/session/history-entry/change-serial authority before file IO, prepares JSON + sanitized state without mutation, then revalidates and publishes once. Save delegates Smart Object child sessions or runs regular JSON download + immediate recovery. Detailed contract: `NATIVE_PROJECT_IO.md`.
+
+It does not classify incoming files, parse PSD/PSB, own recovery storage, or define the `.zpe` schema.
+
 ### `import-controller.js`
-Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or project persistence; those remain separate runtime/format concerns.
+Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or native project persistence; those remain separate canonical owners.
 
 ### `resize-command-controller.js`
 Owns synchronous persisted Image Size and Canvas Size commands. It binds each delayed modal Apply to the originating document object, stages the full layer transform/shift plan through canonical `src/core/state.js` helpers, revalidates active ownership immediately before mutation, suppresses semantic no-ops, and publishes one history entry plus geometry transient cleanup only after a real change.
