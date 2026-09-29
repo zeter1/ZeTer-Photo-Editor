@@ -1,13 +1,14 @@
-# Tiled high-depth raster source — Stage 17c
+# Tiled high-depth raster source — Stage 17d
 
-Stage 17c продолжает Stage 17a/17b: большие native RGB/CMYK 8/16/32-bit PixelBuffer sources остаются backward-compatible tiled persistence, а interactive Brush/Eraser больше не обязаны собирать весь v2 source в один contiguous typed array на старте штриха.
+Stage 17d продолжает Stage 17a–17c: большие native RGB/CMYK 8/16/32-bit PixelBuffer sources остаются backward-compatible tiled persistence, Brush/Eraser используют stroke-scoped working set, а native Clone/Heal/Blur/Smudge/Dodge/Burn больше не обязаны материализовывать полный high-depth plane на старте штриха.
 
 ## Владельцы
 
-- `src/core/pixel-buffer.js`: v1/v2 source format, strict grid validation, per-tile encode/decode, adaptive serialization, one-shot `mutateSerializedPixelBufferTiles()` и stroke-scoped `createSerializedPixelBufferTileWorkingSet()`.
+- `src/core/pixel-buffer.js`: v1/v2 source format, strict grid validation, per-tile encode/decode, adaptive serialization, one-shot `mutateSerializedPixelBufferTiles()`, stroke-scoped `createSerializedPixelBufferTileWorkingSet()` и bounded `readRegion()/writeRegion()`.
 - `src/core/render.js`: RGB v2 document preview декодирует по одному tile; `OffscreenCanvas` используется как staging surface, когда доступен.
 - `src/painting/controller.js`: exact-owner native paint cache, tile working set, dirty-tile live preview, persistence и Canvas8 compatibility boundary.
-- `src/painting/gesture-controller.js`: Brush/Eraser opt-in в tiled working set; retouch tools пока намеренно запрашивают contiguous native buffer.
+- `src/painting/gesture-controller.js`: все native paint/retouch tools opt-in в tiled v2 working set; v1 sources остаются на contiguous compatibility path.
+- `src/retouch/controller.js`: bounded retouch-region planning, halo reads, immutable lazy Clone/Heal snapshot и dispatch RGB/CMYK math.
 - `src/painting/command-controller.js`: Line/current-layer Clear используют one-shot tiled mutation bridge.
 - `src/selection/raster-mutation-controller.js`: merged visible-layer clear готовит tiled mutations до общей atomic publication.
 - `src/document/psd-import-controller.js`: после decode sources от 8 MiB сохраняются как v2 tiles.
@@ -16,39 +17,42 @@ Stage 17c продолжает Stage 17a/17b: большие native RGB/CMYK 8/1
 
 `kind = zpe-pixel-buffer-source-v2`; row-major grid; default tile 256×256; edge tiles имеют реальный меньший размер. Каждый tile хранит bounded base64 payload. Grid полон и упорядочен; сумма `tile.rawBytes` равна `source.rawBytes`. Действуют 48 MiB precision budget и лимит 8192 tiles. Legacy v1 остаётся читаемым.
 
-## Interactive Brush/Eraser working set
+## Stroke working set
 
-При начале native Brush/Eraser по v2 source controller:
-1. валидирует exact owner/layer и общий high-depth byte budget;
-2. создаёт пустой stroke working set без full-plane decode;
-3. строит display canvas последовательным decode→tone-map→putImageData по одному source tile;
-4. при dab/segment вычисляет bounding box кисти и загружает только пересекающиеся tiles;
-5. держит touched tiles в памяти до конца текущего stroke и отмечает отдельно dirty + preview-dirty tiles;
-6. live preview обновляет только preview-dirty tiles;
-7. при commit сериализует dirty tiles, сохраняя untouched payloads byte-for-byte, затем повторно проверяет exact owner/target перед publication.
+При начале native stroke по v2 source controller валидирует exact owner/layer и byte budget, создаёт пустой mutable working set, строит display canvas последовательным tile decode и затем загружает только tiles, пересекающиеся с текущей операцией. Dirty и preview-dirty sets независимы. На commit dirty tiles сериализуются, untouched payloads остаются byte-for-byte, после чего exact owner/target проверяется повторно.
 
-Это stroke-scoped cache, а не disk-backed virtual memory. Очень длинный штрих, который касается всего изображения, всё ещё может постепенно загрузить все tiles; важное отличие — full high-depth plane больше не создаётся заранее и локальные штрихи масштабируются по touched area.
+Это stroke-scoped cache, а не disk-backed virtual memory. Очень длинный штрих всё ещё может постепенно загрузить весь source; локальный штрих больше не создаёт полный 16/32-bit plane заранее.
 
-Eraser с source без alpha логически повышает RGB→RGBA / CMYK→CMYKA. Touched tiles получают alpha при загрузке; на commit остальные tiles последовательно decode→alpha→encode без одновременного full-plane buffer. Если общий byte budget после добавления alpha превышен, stroke не стартует.
+Eraser без alpha логически повышает RGB→RGBA / CMYK→CMYKA. Touched tiles получают alpha при загрузке; на commit остальные tiles последовательно decode→alpha→encode без одновременного full-plane buffer. Новый byte budget проверяется до начала stroke.
+
+## Region / halo retouch contract
+
+`readRegion(bounds)` собирает только запрошенный прямоугольник из пересекающихся tiles и не помечает их dirty. `writeRegion(region)` сравнивает samples, пишет обратно только реально изменившиеся pixels и отмечает только соответствующие tiles.
+
+- Dodge/Burn читают brush footprint; stroke coverage адресуется глобальными pixel coordinates, поэтому overlap semantics не зависят от границ tiles.
+- Blur читает brush footprint + kernel halo, поэтому neighborhood math видит соседние samples по обе стороны tile boundary.
+- Smudge читает union destination footprint и смещённого source footprint + bilinear halo.
+- Clone/Heal используют mutable destination working set и отдельный lazy snapshot working set, созданный из исходного serialized source в начале stroke. Heal дополнительно включает source/target neighborhood halo.
+
+Clone/Heal snapshot не переиспользует уже изменённые mutable tiles: последующие dab-ы читают исходное содержимое stroke, как и прежний full-buffer snapshot, но без обязательного полного копирования source.
 
 ## Preview contract
 
-Full RGBA8 display canvas пока остаётся нужен браузерному compositor. Он не является canonical precision source. During stroke layer filters применяются в tile preview и renderer получает `skipAdjustments`, чтобы не применять их дважды. Persisted `layer.dataUrl` перестраивается из canonical tiled source без layer filters, как и на старом contiguous high-depth path.
+Full RGBA8 display canvas пока остаётся нужен browser compositor и не является canonical precision source. During stroke layer filters применяются в tile preview, а renderer получает `skipAdjustments`, чтобы не применять их дважды. Persisted `layer.dataUrl` перестраивается из canonical tiled source без layer filters.
 
-## Оставшиеся contiguous boundaries
+## Оставшиеся contiguous/global boundaries
 
 - PSD/PSB binary decoder materializes bounded channel planes до tiled handoff.
-- Flood Fill и Content-Aware Fill требуют cross-tile/global neighborhood semantics.
-- Clone/Heal/Blur/Smudge/Dodge/Burn пока используют contiguous stroke buffer; clone additionally требует immutable full-source snapshot.
+- Flood Fill и Content-Aware Fill требуют cross-tile/global connectivity/neighborhood semantics и пока используют contiguous PixelBuffer.
 - Часть export/color-management paths материализует contiguous PixelBuffer.
 - Canvas compositor требует full RGBA8 display surface.
 - Нет IndexedDB/file-backed eviction store, worker-owned editing tiles, GPU renderer или RAW/DNG decode.
 
-Следующая безопасная проходка: перенести neighborhood retouch на halo tiles + immutable tile snapshots, затем workerize дорогие tile jobs. После этого — cross-tile flood/inpaint и lazy backing store; только затем имеет смысл пересматривать 512 MiB PSD/PSB input gate.
+Следующая безопасная проходка: workerize дорогие bounded tile/halo jobs с exact-owner cancellation, затем перенести cross-tile Flood Fill / Content-Aware Fill на streaming/tiled algorithms. После этого — lazy backing store/eviction; только затем имеет смысл пересматривать 512 MiB PSD/PSB input gate.
 
 ## Проверка
 
-- `tests/tiled-raster-source.test.mjs`: storage/mutation/working-set lazy-load и alpha promotion.
-- `tests/painting-controller.test.mjs`: exact-owner native paint, tiled Brush persistence и untouched tile identity.
-- `tests/high-depth-editing.test.mjs`: architectural routing guards.
-- полный gate: `npm run check`, generated bundle diff и `npm run test:browser` через CI.
+- `tests/tiled-raster-source.test.mjs`: region read/write без ложного dirty.
+- `tests/retouch-controller.test.mjs`: tiled Dodge, cross-tile Blur halo и immutable lazy Clone snapshot.
+- `tests/painting-gesture-controller.test.mjs`: native retouch opt-in в tiled v2 path.
+- полный gate: `npm run check`, generated bundle parity и `npm run test:browser` через CI.

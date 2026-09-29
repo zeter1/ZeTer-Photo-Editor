@@ -152,7 +152,7 @@ Future UI extractions should land here when they can be expressed as pure config
 ## Painting boundary — `src/painting/`
 
 ### `controller.js`
-Owns reusable raster-edit state shared by brush/eraser/fill/line and retouch routing. Canvas8 and native high-depth/CMYK caches both bind exact document + exact layer identity; Canvas8 additionally captures the exact Canvas and native paint captures the exact typed working buffer. Both paths revalidate publication authority after async PNG preview encoding; see `RASTER_PERSISTENCE.md`.
+Owns reusable raster-edit state shared by brush/eraser/fill/line and retouch routing. Canvas8 and native high-depth/CMYK caches both bind exact document + exact layer identity; Canvas8 captures the exact Canvas, while native paint captures either the exact contiguous typed buffer or v2 tile working set. Both paths revalidate publication authority after async PNG preview encoding; tiled persistence/preview details are in `TILED_RASTER.md`, transaction guards in `RASTER_PERSISTENCE.md`.
 
 It deliberately does **not** own tool choice, stroke routing, selection semantics, history commits, the application-wide pending-edit guard or the multi-layer selection batch transaction. `prepareHighDepthMutation()` / `applyHighDepthMutation()` are low-level mechanisms; callers that bypass the guarded current-layer persistence seam must prove their own publication boundary.
 
@@ -174,9 +174,9 @@ It deliberately does **not** own global pointer events/capture, `currentTool`, a
 ## Retouch boundary — `src/retouch/`
 
 ### `controller.js`
-Owns destructive retouch mechanics for Canvas8 and native typed RGB/CMYK paths: clone/heal source + immutable per-stroke snapshots, smudge, blur, dodge/burn, private scratch canvases and high-depth retouch dispatch.
+Owns destructive retouch mechanics for Canvas8 and native typed RGB/CMYK paths: clone/heal source, smudge, blur, dodge/burn, private Canvas8 scratch and high-depth dispatch. For v2 native sources Stage 17d reads bounded mutable regions plus tool-specific halo from the shared tile working set; Clone/Heal create a second read-only lazy working set from the serialized stroke-start source so later dab samples remain immutable without a full-plane clone.
 
-It does **not** own document/history/global pointer state or the shared raster edit buffer. Per-stroke routing lives in `src/painting/gesture-controller.js`; global event/transaction orchestration remains in `src/main.js`; shared paint state/persistence lives in `src/painting/controller.js`; pixel math remains in core.
+It does **not** own document/history/global pointer state or shared persistence. Per-stroke routing lives in `src/painting/gesture-controller.js`; global event/transaction orchestration remains in `src/main.js`; exact-owner paint state/persistence lives in `src/painting/controller.js`; region codec and pixel math remain in core. See `TILED_RASTER.md`.
 
 ## Document boundary — `src/document/`
 
