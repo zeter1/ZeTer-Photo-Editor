@@ -115,14 +115,14 @@ async function makeHighDepthRasterSource(layer) {
       const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
       if(!ctx)throw new Error('Tiled high-depth preview: 2D context unavailable');
       forEachSerializedPixelBufferTile(metadata,({x,y,buffer})=>{
-        const rgba=pixelBufferToToneMappedRgba8Preview(buffer,layer.filters||{},{toneMap,displayExposure});
+        const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap, displayExposure });
         const image=ctx.createImageData(buffer.width,buffer.height); image.data.set(rgba); ctx.putImageData(image,x,y);
       });
       highDepthRasterCache.delete(layer.id); highDepthRasterCache.set(layer.id,{sourceToken,signature,buffer:null,canvas});
       trimHighDepthRasterCache(); return canvas;
     }
     const buffer=cached&&cached.sourceToken===sourceToken&&cached.buffer?cached.buffer:deserializePixelBufferSource(metadata);
-    const rgba=pixelBufferToToneMappedRgba8Preview(buffer,layer.filters||{},{toneMap,displayExposure});
+    const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap, displayExposure });
     const canvas=createHighDepthPreviewCanvas(buffer.width,buffer.height),ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
     if(!ctx)throw new Error('High-depth preview: 2D context unavailable');
     const image=ctx.createImageData(buffer.width,buffer.height); image.data.set(rgba); ctx.putImageData(image,0,0);

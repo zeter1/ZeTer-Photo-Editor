@@ -30,7 +30,7 @@ test('Stage 12a does not trust malformed persisted high-depth raster metadata',(
 test('destructive Canvas raster publication invalidates preserved high-depth source',()=>{
   assert.match(painting,/layer\.dataUrl = dataUrl;[\s\S]*?layer\.highDepthSource = null;/);
   assert.match(selectionMutations,/layer\.dataUrl = dataUrl;[\s\S]*?layer\.highDepthSource = null;/);
-  assert.ok(psdImportController.includes('highDepthSource=serializePixelBufferSource(sourceLayer.pixelBuffer'));
+  assert.ok(psdImportController.includes('highDepthSource=serializePixelBufferSourceAdaptive(sourceLayer.pixelBuffer'));
   assert.ok(psdImportController.includes('MAX_PIXEL_BUFFER_SOURCE_BYTES-highDepthBytesUsed'));
   assert.match(painting,/layer\.highDepthSource = null;[\s\S]*?layer\.highDepthPreview = null;/);
   assert.match(selectionMutations,/layer\.highDepthSource = null;[\s\S]*?layer\.highDepthPreview = null;/);
