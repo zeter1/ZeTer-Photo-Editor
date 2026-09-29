@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-29 — Extract document resize dialog orchestration owner
+
+- Refactor: Image Size / Canvas Size modal schema, all nine anchor labels, repeated pending-edit guard and command-result presentation move from `src/main.js` into `src/ui/document-resize-controller.js`; the composition root now only wires the UI owner to the persisted command owner and routes menu actions.
+- Owner safety: each dialog still captures the exact originating document at open and submits that owner to `src/document/resize-command-controller.js`, so tab replacement cannot redirect a delayed resize into another document.
+- Behavior preservation: INVALID and REJECTED keep the modal open with the existing status/toast messages, while COMMITTED and semantic NOOP keep the generic modal controller's normal close behavior without duplicate history or UI publication.
+- Tests/docs/build: direct UI-controller regressions cover schema/guards/owner capture/outcome routing; architecture guards enforce the split and classic file:// bundle dependency order; AI maps and the test matrix point to the new canonical owner.
+
 ### 2026-09-29 — Extract document export orchestration owner
 
 - Refactor: Export modal/command orchestration moves from `src/main.js` into `src/document/export-controller.js`; `main.js` now only composes the owner and routes menu/quick-export actions.
