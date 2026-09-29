@@ -4424,6 +4424,67 @@ function refineMaskAlpha(alpha, width, height, {
   }
   return output;
 }
+function decontaminateMaskEdgeColors(sourceRgba, maskAlpha, width, height, {
+  radius = 2,
+  strength = 0,
+} = {}) {
+  if (!(sourceRgba instanceof Uint8Array || sourceRgba instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидался RGBA source');
+  }
+  if (!(maskAlpha instanceof Uint8Array || maskAlpha instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидалась 8-bit mask');
+  }
+  const w = Math.max(0, Math.trunc(width));
+  const h = Math.max(0, Math.trunc(height));
+  const count = w * h;
+  if (!w || !h || sourceRgba.length < count * 4 || maskAlpha.length < count) return new Uint8ClampedArray();
+
+  const output = new Uint8ClampedArray(sourceRgba.slice(0, count * 4));
+  const searchRadius = clamp(Math.round(Number(radius) || 0), 0, 8);
+  const amount = clamp(Number(strength) || 0, 0, 100) / 100;
+  if (!searchRadius || !amount) return output;
+
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const index = y * w + x;
+      const coverage = maskAlpha[index];
+      if (coverage < 8 || coverage >= 250) continue;
+
+      let weightSum = 0;
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      const minY = Math.max(0, y - searchRadius);
+      const maxY = Math.min(h - 1, y + searchRadius);
+      const minX = Math.max(0, x - searchRadius);
+      const maxX = Math.min(w - 1, x + searchRadius);
+      for (let sy = minY; sy <= maxY; sy += 1) {
+        for (let sx = minX; sx <= maxX; sx += 1) {
+          const donorIndex = sy * w + sx;
+          const donorCoverage = maskAlpha[donorIndex];
+          if (donorCoverage < 224) continue;
+          const dx = sx - x;
+          const dy = sy - y;
+          const weight = (donorCoverage / 255) / (1 + dx * dx + dy * dy);
+          const donorOffset = donorIndex * 4;
+          weightSum += weight;
+          red += sourceRgba[donorOffset] * weight;
+          green += sourceRgba[donorOffset + 1] * weight;
+          blue += sourceRgba[donorOffset + 2] * weight;
+        }
+      }
+      if (weightSum <= 0) continue;
+
+      const edgeWeight = clamp((255 - coverage) / 127, .2, 1);
+      const localAmount = amount * edgeWeight;
+      const offset = index * 4;
+      output[offset] = clamp(Math.round(sourceRgba[offset] * (1 - localAmount) + (red / weightSum) * localAmount), 0, 255);
+      output[offset + 1] = clamp(Math.round(sourceRgba[offset + 1] * (1 - localAmount) + (green / weightSum) * localAmount), 0, 255);
+      output[offset + 2] = clamp(Math.round(sourceRgba[offset + 2] * (1 - localAmount) + (blue / weightSum) * localAmount), 0, 255);
+    }
+  }
+  return output;
+}
 function applyMaskControlsAlpha(alpha, width, height, {
   invert = false,
   density = 1,
@@ -17458,6 +17519,7 @@ function createSelectionMaskController({
     getDocument = () => null,
     getSelectedLayer = () => null,
     commit = () => {},
+    publishRefinedRasterOutput = () => null,
   } = state;
   const {
     getSelectionShape = () => null,
@@ -17643,16 +17705,64 @@ function createSelectionMaskController({
     };
   }
 
+  function selectionDecontaminateOptionsFromValues(values, scale = 1) {
+    const factor = Math.max(.0001, Number(scale) || 1);
+    return {
+      strength:clamp(Number(values?.decontaminate) || 0, 0, 100),
+      radius:clamp(Number(values?.decontaminateRadius) || 0, 0, 8) / factor,
+    };
+  }
+
+  function alphaMaskDataUrl(alpha, width, height) {
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { alpha:true });
+    const image = ctx.createImageData(width, height);
+    for (let index = 0; index < alpha.length; index += 1) {
+      const offset = index * 4;
+      image.data[offset] = 255;
+      image.data[offset + 1] = 255;
+      image.data[offset + 2] = 255;
+      image.data[offset + 3] = alpha[index];
+    }
+    ctx.putImageData(image, 0, 0);
+    return canvasToDataURL(canvas, 'image/png');
+  }
+
+  function rgbaDataUrl(rgba, width, height) {
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { alpha:true });
+    const image = ctx.createImageData(width, height);
+    image.data.set(rgba);
+    ctx.putImageData(image, 0, 0);
+    return canvasToDataURL(canvas, 'image/png');
+  }
+
+  function refinedMaskFromDataUrl(existingMask, dataUrl) {
+    return createLayerMask({
+      enabled:existingMask?.enabled !== false,
+      dataUrl,
+      invert:Boolean(existingMask?.invert),
+      density:clamp(Number(existingMask?.density ?? 1), 0, 1),
+      feather:clamp(Number(existingMask?.feather) || 0, 0, 250),
+      linked:existingMask?.linked !== false,
+      transform:existingMask?.transform ? { ...existingMask.transform } : null,
+    });
+  }
+
   async function buildSelectionRefinePreviewSource(
     layer,
-    { maxWidth=420, maxHeight=240 } = {},
+    { maxWidth=420, maxHeight=240, fullResolution=false } = {},
     ownerDocument = getDocument(),
     shape = getSelectionShape(),
   ) {
     if (!shape || !layer || !ownerDocument) return null;
     const sourceWidth = layer.type === 'adjustment' ? ownerDocument.width : Math.max(1, Math.round(layer.width || 1));
     const sourceHeight = layer.type === 'adjustment' ? ownerDocument.height : Math.max(1, Math.round(layer.height || 1));
-    const previewScale = Math.max(.0001, Math.min(2, maxWidth / sourceWidth, maxHeight / sourceHeight));
+    const previewScale = fullResolution ? 1 : Math.max(.0001, Math.min(2, maxWidth / sourceWidth, maxHeight / sourceHeight));
     const width = Math.max(1, Math.round(sourceWidth * previewScale));
     const height = Math.max(1, Math.round(sourceHeight * previewScale));
     const canvas = documentRef.createElement('canvas');
@@ -17747,8 +17857,16 @@ function createSelectionMaskController({
         ...previewOptions,
         sourceRgba:source.sourceRgba,
       });
-      const previewPixels = composeMaskPreviewRgba(
+      const decontaminateOptions = selectionDecontaminateOptionsFromValues(values, layerScale / source.scale);
+      const previewSource = decontaminateMaskEdgeColors(
         source.sourceRgba,
+        alpha,
+        source.width,
+        source.height,
+        decontaminateOptions,
+      );
+      const previewPixels = composeMaskPreviewRgba(
+        previewSource,
         alpha,
         source.width,
         source.height,
@@ -17813,6 +17931,9 @@ function createSelectionMaskController({
         { name:'feather', label:'Растушёвка, px', type:'number', value:1, min:0, max:64, step:.5 },
         { name:'contrast', label:'Контраст края, %', type:'number', value:0, min:0, max:100, step:1 },
         { name:'invert', label:'Инвертировать маску', type:'select', value:'no', options:[['no','Нет'],['yes','Да']] },
+        { name:'decontaminate', label:'Очистить цвета края, %', type:'number', value:0, min:0, max:100, step:1 },
+        { name:'decontaminateRadius', label:'Радиус очистки цвета, px', type:'number', value:2, min:1, max:8, step:1 },
+        { name:'outputMode', label:'Вывод', type:'select', value:'mask', options:[['mask','Маска слоя'],['new-raster-mask','Новый растровый слой + маска']] },
       ],
       submitLabel:replacing ? 'Заменить маску' : 'Создать маску',
       onMount:({ modal, body }) => {
@@ -17826,19 +17947,79 @@ function createSelectionMaskController({
       onSubmit:async values => {
         if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
         const options = selectionRefineOptionsFromValues(values, scale);
-        const dataUrl = await selectionMaskDataUrlForOwner(layer, options, ownerDocument, shape);
-        if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
-        layer.mask = createLayerMask({
-          enabled:existingMask?.enabled !== false,
-          dataUrl,
-          invert:Boolean(existingMask?.invert),
-          density:clamp(Number(existingMask?.density ?? 1), 0, 1),
-          feather:clamp(Number(existingMask?.feather) || 0, 0, 250),
-          linked:existingMask?.linked !== false,
-          transform:existingMask?.transform ? { ...existingMask.transform } : null,
+        const decontaminateOptions = selectionDecontaminateOptionsFromValues(values, scale);
+        const outputMode = values?.outputMode === 'new-raster-mask' ? 'new-raster-mask' : 'mask';
+
+        if (decontaminateOptions.strength > 0 && outputMode === 'mask') {
+          toast('Очистка цвета края изменяет пиксели. Выберите «Новый растровый слой + маска» или установите очистку в 0%.', 'warn');
+          return false;
+        }
+
+        if (outputMode === 'mask') {
+          const dataUrl = await selectionMaskDataUrlForOwner(layer, options, ownerDocument, shape);
+          if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
+          layer.mask = refinedMaskFromDataUrl(existingMask, dataUrl);
+          commit(replacing ? 'Уточнить маску слоя' : 'Создать уточнённую маску слоя');
+          setStatus(`Маска уточнена: сглаживание ${Number(values.smooth) || 0}px, край ${Number(values.shift) || 0}px, радиус ${Number(values.edgeRadius) || 0}px, растушёвка ${Number(values.feather) || 0}px`);
+          return true;
+        }
+
+        if (layer.type === 'adjustment') {
+          toast('Новый растровый слой из Select & Mask недоступен для корректирующего слоя. Используйте вывод «Маска слоя».', 'warn');
+          return false;
+        }
+        if (layer.highDepthSource) {
+          toast('Новый растровый слой из Select & Mask пока недоступен для native RGB/CMYK PixelBuffer. Используйте «Маска слоя», чтобы не понижать точность.', 'warn');
+          return false;
+        }
+
+        const width = Math.max(1, Math.round(layer.width || 1));
+        const height = Math.max(1, Math.round(layer.height || 1));
+        checkedCanvasSize(width, height, 'Select & Mask');
+        const pixels = width * height;
+        if (pixels > 12_000_000) {
+          toast('Вывод Select & Mask в новый растровый слой ограничен 12 МП. Используйте вывод «Маска слоя».', 'warn');
+          return false;
+        }
+        const detectionRadius = clamp(Math.round(Number(options.edgeRadius) || 0), 0, 12);
+        if (detectionRadius > 0 && pixels * Math.max(1, detectionRadius) > 48_000_000) {
+          toast('Умный радиус слишком тяжёлый для полноразмерного Select & Mask. Уменьшите радиус.', 'warn');
+          return false;
+        }
+        const colorRadius = clamp(Math.round(Number(decontaminateOptions.radius) || 0), 0, 8);
+        const colorKernel = (colorRadius * 2 + 1) ** 2;
+        if (decontaminateOptions.strength > 0 && pixels * colorKernel > 48_000_000) {
+          toast('Очистка цвета края слишком тяжёлая для этого слоя. Уменьшите радиус/размер или отключите очистку.', 'warn');
+          return false;
+        }
+
+        const source = await buildSelectionRefinePreviewSource(layer, { fullResolution:true }, ownerDocument, shape);
+        if (!source || !currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
+        const alpha = refineMaskAlpha(source.alpha, source.width, source.height, {
+          ...options,
+          sourceRgba:source.sourceRgba,
         });
-        commit(replacing ? 'Уточнить маску слоя' : 'Создать уточнённую маску слоя');
-        setStatus(`Маска уточнена: сглаживание ${Number(values.smooth) || 0}px, край ${Number(values.shift) || 0}px, радиус ${Number(values.edgeRadius) || 0}px, растушёвка ${Number(values.feather) || 0}px`);
+        const outputPixels = decontaminateMaskEdgeColors(
+          source.sourceRgba,
+          alpha,
+          source.width,
+          source.height,
+          decontaminateOptions,
+        );
+        const mask = refinedMaskFromDataUrl(existingMask, alphaMaskDataUrl(alpha, source.width, source.height));
+        const dataUrl = rgbaDataUrl(outputPixels, source.width, source.height);
+        if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
+        const outputLayer = publishRefinedRasterOutput({
+          ownerDocument,
+          sourceLayer:layer,
+          width:source.width,
+          height:source.height,
+          dataUrl,
+          mask,
+        });
+        if (!outputLayer) return false;
+        commit('Select & Mask: новый растровый слой');
+        setStatus(`Select & Mask: создан новый растровый слой с маской${decontaminateOptions.strength > 0 ? `, очистка цвета края ${decontaminateOptions.strength}%` : ''}`);
         return true;
       },
     });
@@ -17935,6 +18116,7 @@ function createSelectionMaskController({
     selectionMaskDataUrl,
     addSelectedLayerMask,
     selectionRefineOptionsFromValues,
+    selectionDecontaminateOptionsFromValues,
     buildSelectionRefinePreviewSource,
     attachSelectionRefinePreview,
     refineSelectionToLayerMask,
@@ -24432,6 +24614,32 @@ const selectionMaskController = createSelectionMaskController({
     getDocument: () => doc,
     getSelectedLayer: selected,
     commit,
+    publishRefinedRasterOutput: ({ ownerDocument, sourceLayer, width, height, dataUrl, mask }) => {
+      if (doc !== ownerDocument || selected() !== sourceLayer || isLayerLocked(ownerDocument, sourceLayer)) return null;
+      const sourceIndex = ownerDocument.layers.indexOf(sourceLayer);
+      if (sourceIndex < 0) return null;
+      const outputLayer = createRasterLayer({
+        name:`${sourceLayer.name || 'Слой'} — Select & Mask`,
+        x:sourceLayer.x,
+        y:sourceLayer.y,
+        width,
+        height,
+        scaleX:sourceLayer.scaleX,
+        scaleY:sourceLayer.scaleY,
+        rotation:sourceLayer.rotation,
+        opacity:sourceLayer.opacity,
+        blendMode:sourceLayer.blendMode,
+        clipping:Boolean(sourceLayer.clipping),
+        groupId:sourceLayer.groupId ?? null,
+        dataUrl,
+        mask,
+      });
+      sourceLayer.visible = false;
+      ownerDocument.layers.splice(sourceIndex + 1, 0, outputLayer);
+      ownerDocument.selectedLayerId = outputLayer.id;
+      rasterEdit.clearBrushBuffer();
+      return outputLayer;
+    },
   },
   selection: {
     getSelectionShape: () => selectionShape ? cloneSelectionShape(selectionShape) : null,

@@ -50,6 +50,14 @@ Mask commands capture the exact active document, selected layer and, for propert
 
 Select & Mask may perform async rendering/encoding. It must prepare first and revalidate the exact owner/target immediately before assigning `layer.mask`. Replacing an existing refined mask preserves its enabled/invert/density/feather controls.
 
+## Select & Mask edge-color cleanup and output
+
+Edge-color decontamination is a **pixel mutation**, not a mask property. The default output remains `Маска слоя`; non-zero color cleanup is rejected in that mode so a preview cannot silently rewrite source pixels.
+
+The explicit `Новый растровый слой + маска` output renders the selected source at full layer resolution, applies the same refined alpha used by the mask, optionally replaces contaminated partial-edge RGB from nearby confident foreground samples, creates a new raster layer with that mask, and keeps the original source layer hidden rather than destructively replacing it. Publication is still one exact-owner transaction and one history entry.
+
+The full-resolution raster output is bounded to 12 MP. Edge detection keeps its existing 48M pixel-radius work budget, and color decontamination uses a separate bounded radius/kernel budget. Sources carrying `highDepthSource` are deliberately refused for this raster output until a native PixelBuffer decontamination path exists; mask-only output remains available and preserves 16/32-bit RGB/CMYK precision. Preview may show decontamination on its bounded proxy, but it never mutates the document.
+
 ## Link / unlink transform contract
 
 `linked: true` means future layer transforms leave the mask's relative transform unchanged, so content and mask move together. `linked: false` means layer-transform owners compensate the mask after every transform so its document-space coverage stays fixed.

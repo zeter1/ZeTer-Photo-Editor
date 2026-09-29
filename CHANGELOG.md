@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-29 — Select & Mask edge-color decontamination
+
+- Refinement: Select & Mask can now decontaminate partially selected edge colors from nearby confident foreground samples, while keeping mask alpha and source alpha semantics separate and deterministic.
+- Output safety: mask-only remains the default non-destructive path; pixel decontamination requires explicit `Новый растровый слой + маска`, which keeps the original source hidden instead of overwriting it and publishes one guarded history transaction.
+- Precision/performance: full-resolution raster output is capped at 12 MP with bounded edge/color work budgets, and native PixelBuffer RGB/CMYK sources are refused rather than silently downgraded to RGBA8.
+- Tests/docs: pure color-cleanup regressions, controller publication/precision guards, Stage 9e source contracts and the raster-mask architecture guide cover the new path.
+
+
 ### 2026-09-29 — Texture-aware Content-Aware Fill
 
 - Quality: Content-Aware Fill now refines smaller completed holes with deterministic PatchMatch-style neighbour propagation and bounded pseudo-random donor search, so repeated textures can be reconstructed from real source samples instead of ending at a boundary-weighted blur.

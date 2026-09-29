@@ -108,6 +108,9 @@ function FakeFormData() {
     ['feather', '0'],
     ['contrast', '0'],
     ['invert', 'no'],
+    ['decontaminate', '0'],
+    ['decontaminateRadius', '2'],
+    ['outputMode', 'mask'],
   ]);
 }
 
@@ -122,6 +125,9 @@ function refineValues(overrides = {}) {
     feather:'0',
     contrast:'0',
     invert:'no',
+    decontaminate:'0',
+    decontaminateRadius:'2',
+    outputMode:'mask',
     ...overrides,
   };
 }
@@ -142,6 +148,7 @@ function harness({
   const commits = [];
   const statuses = [];
   const toasts = [];
+  const publishedOutputs = [];
   const fakeDocument = createFakeDocument();
   const scheduledFrames = new Map();
   const cancelledFrames = [];
@@ -152,6 +159,24 @@ function harness({
       getDocument:() => activeDocument,
       getSelectedLayer:() => selectedLayer,
       commit:label => commits.push(label),
+      publishRefinedRasterOutput:payload => {
+        publishedOutputs.push(payload);
+        if (activeDocument !== payload.ownerDocument || selectedLayer !== payload.sourceLayer) return null;
+        const index = activeDocument.layers.indexOf(payload.sourceLayer);
+        if (index < 0) return null;
+        const output = createRasterLayer({
+          name:'Select & Mask output',
+          width:payload.width,
+          height:payload.height,
+          dataUrl:payload.dataUrl,
+          mask:payload.mask,
+        });
+        payload.sourceLayer.visible = false;
+        activeDocument.layers.splice(index + 1, 0, output);
+        activeDocument.selectedLayerId = output.id;
+        selectedLayer = output;
+        return output;
+      },
     },
     selection:{
       getSelectionShape:() => selectionShape ? structuredClone(selectionShape) : null,
@@ -196,6 +221,7 @@ function harness({
     commits,
     statuses,
     toasts,
+    publishedOutputs,
     fakeDocument,
     scheduledFrames,
     cancelledFrames,
@@ -217,6 +243,14 @@ test('refine option normalization preserves bounds and preview scale conversion'
       smooth:16, shift:-32, edgeRadius:6, edgeStrength:100, smartRadius:false,
       feather:32, contrast:0, invert:true,
     },
+  );
+});
+
+test('decontamination option normalization preserves bounds and layer scale conversion', () => {
+  const h = harness();
+  assert.deepEqual(
+    h.controller.selectionDecontaminateOptionsFromValues({ decontaminate:150, decontaminateRadius:20 }, 2),
+    { strength:100, radius:4 },
   );
 });
 
@@ -372,6 +406,37 @@ test('valid refined Apply publishes exactly one mask and one history entry', asy
   assert.match(h.statuses.at(-1), /^Маска уточнена:/);
 });
 
+test('decontamination cannot silently mutate pixels when output remains mask-only', async () => {
+  const h = harness();
+  const config = await openRefineModal(h);
+  assert.equal(await config.onSubmit(refineValues({ decontaminate:'70', outputMode:'mask' })), false);
+  assert.equal(h.layer.mask, null);
+  assert.deepEqual(h.commits, []);
+  assert.match(h.toasts.at(-1)?.[0] || '', /изменяет пиксели/);
+});
+
+test('explicit raster output creates one guarded output layer and one history entry', async () => {
+  const h = harness();
+  const config = await openRefineModal(h);
+  assert.equal(await config.onSubmit(refineValues({ decontaminate:'0', outputMode:'new-raster-mask' })), true);
+  assert.equal(h.publishedOutputs.length, 1);
+  assert.equal(h.layer.visible, false);
+  assert.equal(h.documentValue.layers.length, 2);
+  assert.ok(h.documentValue.layers[1].mask);
+  assert.deepEqual(h.commits, ['Select & Mask: новый растровый слой']);
+});
+
+test('explicit raster output refuses native PixelBuffer sources instead of downgrading precision', async () => {
+  const layer = createRasterLayer({ name:'16-bit', width:16, height:12, dataUrl:null });
+  layer.highDepthSource = { model:'rgb', bitsPerChannel:16 };
+  const h = harness({ layer });
+  const config = await openRefineModal(h);
+  assert.equal(await config.onSubmit(refineValues({ outputMode:'new-raster-mask' })), false);
+  assert.equal(h.publishedOutputs.length, 0);
+  assert.deepEqual(h.commits, []);
+  assert.match(h.toasts.at(-1)?.[0] || '', /не понижать точность/);
+});
+
 test('stale preview preparation cannot bind listeners or publish into a switched document', async () => {
   const gate = deferred();
   const h = harness({ renderLayer:async () => gate.promise });
@@ -416,6 +481,7 @@ test('selection raster-mask policy has one owner and Smart Filter consumes its b
     'function selectionMaskDataUrl(',
     'function addSelectedLayerMask(',
     'function selectionRefineOptionsFromValues(',
+    'function selectionDecontaminateOptionsFromValues(',
     'function buildSelectionRefinePreviewSource(',
     'function attachSelectionRefinePreview(',
     'function refineSelectionToLayerMask(',

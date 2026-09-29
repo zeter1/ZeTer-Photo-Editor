@@ -236,7 +236,67 @@ export function refineMaskAlpha(alpha, width, height, {
   return output;
 }
 
+export function decontaminateMaskEdgeColors(sourceRgba, maskAlpha, width, height, {
+  radius = 2,
+  strength = 0,
+} = {}) {
+  if (!(sourceRgba instanceof Uint8Array || sourceRgba instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидался RGBA source');
+  }
+  if (!(maskAlpha instanceof Uint8Array || maskAlpha instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидалась 8-bit mask');
+  }
+  const w = Math.max(0, Math.trunc(width));
+  const h = Math.max(0, Math.trunc(height));
+  const count = w * h;
+  if (!w || !h || sourceRgba.length < count * 4 || maskAlpha.length < count) return new Uint8ClampedArray();
 
+  const output = new Uint8ClampedArray(sourceRgba.slice(0, count * 4));
+  const searchRadius = clamp(Math.round(Number(radius) || 0), 0, 8);
+  const amount = clamp(Number(strength) || 0, 0, 100) / 100;
+  if (!searchRadius || !amount) return output;
+
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const index = y * w + x;
+      const coverage = maskAlpha[index];
+      if (coverage < 8 || coverage >= 250) continue;
+
+      let weightSum = 0;
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      const minY = Math.max(0, y - searchRadius);
+      const maxY = Math.min(h - 1, y + searchRadius);
+      const minX = Math.max(0, x - searchRadius);
+      const maxX = Math.min(w - 1, x + searchRadius);
+      for (let sy = minY; sy <= maxY; sy += 1) {
+        for (let sx = minX; sx <= maxX; sx += 1) {
+          const donorIndex = sy * w + sx;
+          const donorCoverage = maskAlpha[donorIndex];
+          if (donorCoverage < 224) continue;
+          const dx = sx - x;
+          const dy = sy - y;
+          const weight = (donorCoverage / 255) / (1 + dx * dx + dy * dy);
+          const donorOffset = donorIndex * 4;
+          weightSum += weight;
+          red += sourceRgba[donorOffset] * weight;
+          green += sourceRgba[donorOffset + 1] * weight;
+          blue += sourceRgba[donorOffset + 2] * weight;
+        }
+      }
+      if (weightSum <= 0) continue;
+
+      const edgeWeight = clamp((255 - coverage) / 127, .2, 1);
+      const localAmount = amount * edgeWeight;
+      const offset = index * 4;
+      output[offset] = clamp(Math.round(sourceRgba[offset] * (1 - localAmount) + (red / weightSum) * localAmount), 0, 255);
+      output[offset + 1] = clamp(Math.round(sourceRgba[offset + 1] * (1 - localAmount) + (green / weightSum) * localAmount), 0, 255);
+      output[offset + 2] = clamp(Math.round(sourceRgba[offset + 2] * (1 - localAmount) + (blue / weightSum) * localAmount), 0, 255);
+    }
+  }
+  return output;
+}
 
 export function applyMaskControlsAlpha(alpha, width, height, {
   invert = false,

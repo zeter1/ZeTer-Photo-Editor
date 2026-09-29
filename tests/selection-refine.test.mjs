@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { refineMaskAlpha, refineMaskEdgeAware, composeMaskPreviewRgba } from '../src/core/pixels.js';
+import { refineMaskAlpha, refineMaskEdgeAware, composeMaskPreviewRgba, decontaminateMaskEdgeColors } from '../src/core/pixels.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const maskController = await readFile(new URL('../src/selection/mask-controller.js', import.meta.url), 'utf8');
@@ -158,6 +158,21 @@ test('Select & Mask Stage 9c keeps bounded edge-aware refinement in the canonica
   assert.match(maskController,/pixels \* Math\.max\(1, detectionRadius\) > 48_000_000/);
 });
 
+test('edge color decontamination replaces contaminated fringe RGB from confident foreground without changing alpha',()=>{
+  const source=Uint8ClampedArray.from([
+    230,30,20,255,
+    110,30,150,190,
+    20,40,230,255,
+  ]);
+  const alpha=Uint8ClampedArray.from([255,128,0]);
+  const output=decontaminateMaskEdgeColors(source,alpha,3,1,{radius:1,strength:100});
+  assert.deepEqual([...output.slice(0,4)],[...source.slice(0,4)]);
+  assert.deepEqual([...output.slice(8,12)],[...source.slice(8,12)]);
+  assert.ok(output[4]>source[4],'fringe should move toward foreground red');
+  assert.ok(output[6]<source[6],'fringe should lose background-blue contamination');
+  assert.equal(output[7],source[7],'source alpha must stay unchanged');
+});
+
 test('Select & Mask Stage 9d exposes professional preview modes without mutating output settings',()=>{
   assert.match(maskController,/name:'viewMode'/);
   assert.match(maskController,/Чёрно-белая маска/);
@@ -166,4 +181,16 @@ test('Select & Mask Stage 9d exposes professional preview modes without mutating
   assert.match(maskController,/На белом/);
   assert.match(maskController,/composeMaskPreviewRgba\(/);
   assert.match(maskController,/mode:values\.viewMode \|\| 'mask'/);
+});
+
+
+test('Select & Mask Stage 9e exposes bounded edge-color decontamination and explicit raster output',()=>{
+  assert.match(maskController,/decontaminateMaskEdgeColors/);
+  assert.match(maskController,/name:'decontaminate'/);
+  assert.match(maskController,/name:'decontaminateRadius'/);
+  assert.match(maskController,/name:'outputMode'/);
+  assert.match(maskController,/new-raster-mask/);
+  assert.match(maskController,/fullResolution:true/);
+  assert.match(maskController,/layer\.highDepthSource/);
+  assert.match(maskController,/colorKernel/);
 });

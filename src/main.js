@@ -150,6 +150,32 @@ const selectionMaskController = createSelectionMaskController({
     getDocument: () => doc,
     getSelectedLayer: selected,
     commit,
+    publishRefinedRasterOutput: ({ ownerDocument, sourceLayer, width, height, dataUrl, mask }) => {
+      if (doc !== ownerDocument || selected() !== sourceLayer || isLayerLocked(ownerDocument, sourceLayer)) return null;
+      const sourceIndex = ownerDocument.layers.indexOf(sourceLayer);
+      if (sourceIndex < 0) return null;
+      const outputLayer = createRasterLayer({
+        name:`${sourceLayer.name || 'Слой'} — Select & Mask`,
+        x:sourceLayer.x,
+        y:sourceLayer.y,
+        width,
+        height,
+        scaleX:sourceLayer.scaleX,
+        scaleY:sourceLayer.scaleY,
+        rotation:sourceLayer.rotation,
+        opacity:sourceLayer.opacity,
+        blendMode:sourceLayer.blendMode,
+        clipping:Boolean(sourceLayer.clipping),
+        groupId:sourceLayer.groupId ?? null,
+        dataUrl,
+        mask,
+      });
+      sourceLayer.visible = false;
+      ownerDocument.layers.splice(sourceIndex + 1, 0, outputLayer);
+      ownerDocument.selectedLayerId = outputLayer.id;
+      rasterEdit.clearBrushBuffer();
+      return outputLayer;
+    },
   },
   selection: {
     getSelectionShape: () => selectionShape ? cloneSelectionShape(selectionShape) : null,
