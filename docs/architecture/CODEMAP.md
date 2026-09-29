@@ -206,10 +206,15 @@ Owns the synchronous persisted Crop geometry transaction. It receives the exact 
 
 A full-document crop is a persisted semantic no-op: it completes the existing crop/selection/brush transient UI and viewport fit without fabricating Undo history. Invalid/stale requests leave both persisted and transient state untouched. Pointer begin/move/up/cancel semantics, the 10×10 gesture gate, crop overlay/grid and session-safe draft snapshot belong to `src/interaction/crop-gesture-controller.js`; tool routing and the separate selection 1×1 gate remain in `src/main.js`.
 
-### `background-command-controller.js`
-Owns the persisted Document Background command transaction. The modal captures the originating document object, the controller revalidates that exact object immediately before mutation, same-value Apply is a semantic no-op, and a real change publishes exactly one `Фон документа` history entry.
+### `document-background-controller.js`
+Owns the user-facing Document Background modal transaction. It captures the exact document at open time, samples the current primary color through an explicit port on every open, preserves the select schema/options, and hands delayed Apply to the persisted command with that exact owner. Only REJECTED is presented locally so COMMITTED/NOOP retain the generic modal-close behavior.
 
-It deliberately does **not** own modal DOM/options, background schema/defaults, renderer behavior, Crop or resize. Those stay in `src/main.js`, `src/core/state.js`, render owners and `resize-command-controller.js`.
+It deliberately does **not** own persisted mutation/history, generic modal DOM, background schema/defaults or rendering. Those remain in `background-command-controller.js`, `modal-controller.js` and core owners.
+
+### `background-command-controller.js`
+Owns the persisted Document Background command transaction. The UI owner passes the originating document object, the controller revalidates that exact object immediately before mutation, same-value Apply is a semantic no-op, and a real change publishes exactly one `Фон документа` history entry.
+
+It deliberately does **not** own modal schema/options, background schema/defaults, renderer behavior, Crop or resize. Those stay in `document-background-controller.js`, `src/core/state.js`, render owners and `resize-command-controller.js`.
 
 ### `psd-import-controller.js`
 Owns the import transaction from a PSD/PSB file to a canonical ZPE document after codec decode: size guard, decoded layer/group/path mapping, native high-depth/CMYK preservation, ICC preview policy, temporary-buffer budgeting, stale document/session checks and publish coordination. Stable core transforms are direct dependencies; binary decode, browser raster encoding, runtime publication and Photoshop semantics are explicit narrow ports.

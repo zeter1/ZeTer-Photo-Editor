@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-29 — Extract Document Background dialog orchestration owner
+
+- Refactor: Image → Document Background modal schema/options, exact open-time owner capture and stale-result presentation move from `src/main.js` into directly tested `src/ui/document-background-controller.js`; the composition root now only wires explicit ports and routes the Image menu action.
+- Owner safety: delayed Apply keeps the exact originating document while the dynamic “Основной цвет” option is sampled once per dialog open through an explicit primary-color port, so tab switches cannot redirect a late command.
+- Behavior preservation: transparent/white/black/current-primary options, `Применить`, existing no-pending-guard policy, REJECTED status and normal COMMITTED/NOOP modal-close semantics remain unchanged; persisted no-op/history policy stays in `src/document/background-command-controller.js`.
+- Tests/docs/build: direct UI-owner regressions cover bridge validation, schema, dynamic sampling, captured-owner routing and all command outcomes; architecture guards enforce the split and classic bundle dependency order, with AI maps/test matrix updated to the canonical owners.
+
 ### 2026-09-29 — Extract document resize dialog orchestration owner
 
 - Refactor: Image Size / Canvas Size modal schema, all nine anchor labels, repeated pending-edit guard and command-result presentation move from `src/main.js` into `src/ui/document-resize-controller.js`; the composition root now only wires the UI owner to the persisted command owner and routes menu actions.

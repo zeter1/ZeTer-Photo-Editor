@@ -61,6 +61,7 @@ const sources = [
   'src/document/project-controller.js',
   'src/document/import-controller.js',
   'src/document/background-command-controller.js',
+  'src/ui/document-background-controller.js',
   'src/document/crop-command-controller.js',
   'src/document/resize-command-controller.js',
   'src/ui/document-resize-controller.js',
