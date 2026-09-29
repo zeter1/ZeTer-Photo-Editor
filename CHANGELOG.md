@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-29 — Professional raster layer-mask controls
+
+- Masks: raster layer masks now persist explicit invert, density and feather controls; Layer/context menus expose properties, invert and enable/disable commands without rewriting the source bitmap.
+- Rendering: one bounded alpha transform owns feather → invert → density semantics for Canvas8 and high-depth display paths, while show-all masks remain compact and exact.
+- PSD/PSB: mask controls are baked into exported mask alpha for visual compatibility, including explicit show-all masks when runtime controls require a real mask channel.
+- Safety/tests/docs: property dialogs bind to the exact mask object, Select & Mask revalidates the exact prior mask before async replacement, stale/replaced/locked targets publish no history, and new schema/math/controller/export regressions plus a dedicated AI-facing mask contract document the boundary.
+
 ### 2026-09-29 — Content-Aware Fill foundation
 
 - Feature: в меню «Правка» добавлена контент-заливка активного выделения на текущем растровом слое; алгоритм идёт от границы выделения внутрь и использует только неизменяемые donor-пиксели вне hole, поэтому synthesized samples не размазываются рекурсивно.
