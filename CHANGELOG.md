@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-29 — Extract New Document lifecycle owner
+
+- Refactor: File → New / Ctrl+N dirty-confirm, exact modal schema and replacement transaction move from `src/main.js` into `src/document/new-document-controller.js`; the composition root now only wires explicit ports and routes menu/keyboard/recovery actions.
+- Shared policy: PSD/PSB and native `.zpe` open flows reuse the same extracted document-replacement confirmation policy instead of depending on a composition-root helper.
+- Atomicity: canonical `createDocument` validation runs before any publication; success preserves fresh `HistoryStack(80)` → document/session replacement → clean state → immediate recovery → fit-to-view order, while validation failures keep the modal open with zero partial replacement.
+- Tests/docs/build: direct owner tests cover preflight, exact confirmation/schema, submit recheck, ordered publication and failure rollback; a source/bundle guard locks composition routing and classic-script evaluation order; AI maps/test matrix now point to the canonical lifecycle owner.
+
 ### 2026-09-29 — Extract Document Background dialog orchestration owner
 
 - Refactor: Image → Document Background modal schema/options, exact open-time owner capture and stale-result presentation move from `src/main.js` into directly tested `src/ui/document-background-controller.js`; the composition root now only wires explicit ports and routes the Image menu action.

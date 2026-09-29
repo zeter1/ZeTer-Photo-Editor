@@ -22,6 +22,12 @@ browser primitives (Canvas, Worker, storage, File APIs)
 
 ## Rules
 
+### Document replacement lifecycle
+- `src/document/new-document-controller.js` is the canonical owner for File → New / Ctrl+N replacement orchestration and the shared dirty-confirm predicate consumed by other document-open owners.
+- New Document must run pending-edit guard before confirmation, repeat it on submit, call canonical `createDocument` before any publication, then publish in this order: replace the history binding with fresh `HistoryStack(80)` → `setDocument(..., { resetHistory:true, label:'Новый документ' })` → mark clean → queue immediate recovery → fit viewport.
+- Factory/validation failure must keep the modal open and publish only the existing error toast/status; it must not replace history/document/session, alter dirty state, queue recovery or fit the viewport.
+- The controller receives narrow ports. It must not read global `els`, duplicate canvas validation/limits, absorb generic modal DOM, or become a generic document-dialog framework. `src/main.js` owns only composition and dispatch.
+
 ### Interaction
 - `src/interaction/pointer-lifecycle-router.js` owns only generic overlay Pointer Events lifecycle: one active pointer, capture/release, active-pointer filtering and `pointerup` / `pointercancel` / `lostpointercapture` termination.
 - It must not branch on editor tool names or own drag/domain state. Selected-layer transform read-only discovery/hit/draw/cursor semantics live in `src/interaction/layer-transform-surface-controller.js`; Move/Resize/Rotate transaction semantics live in `src/interaction/layer-transform-gesture-controller.js`; existing Bézier read-only surface semantics live in `src/interaction/path-control-surface-controller.js`; one-shot existing-anchor corner conversion semantics live in `src/interaction/path-control-command-controller.js`; existing Bézier anchor/handle drag semantics live in `src/interaction/path-control-gesture-controller.js`; transient new-path draft/handle semantics live in `src/interaction/pen-draft-gesture-controller.js`; final new-path persisted publication lives in `src/interaction/pen-path-command-controller.js`; pointer/tool routing stays in `src/main.js`, while paint/selection/crop semantics stay with their domain owners.

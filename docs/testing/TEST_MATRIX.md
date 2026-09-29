@@ -4,6 +4,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 
 | Change area | Targeted tests / checks | Extra runtime gate |
 |---|---|---|
+| New Document replacement lifecycle: pending guard, exact dirty-confirm/modal schema, canonical factory values, fresh-history/document/clean/recovery/fit order, zero-partial failure and shared open-policy composition | `tests/new-document-controller.test.mjs`, `tests/new-document-composition.test.mjs`, workspace session/recovery regressions | `npm run test:browser` after composition/bundle wiring changes |
 | UI constants / toolbar math | `tests/tool-layout.test.mjs`, architecture test | browser smoke for drag/persistence |
 | Workspace shell layout / sidebar collapse / canvas mode | `tests/workspace-layout-controller.test.mjs`, `tests/collapsible-panels.test.mjs`, architecture test | `npm run test:browser` for persistence + Tab hide/show integration |
 | Layers panel/tree DOM + keyboard focus + layer/group DnD | `tests/layers-panel-controller.test.mjs`, `tests/layer-groups.test.mjs`, architecture/source guard | `npm run test:browser` after panel/composition-root wiring changes |
