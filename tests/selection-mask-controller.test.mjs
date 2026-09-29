@@ -257,6 +257,43 @@ test('add mask from selection publishes one mask and one history commit', async 
   assert.equal(h.statuses.at(-1), 'Маска слоя создана из текущего выделения');
 });
 
+test('layer mask runtime controls publish exact one-step history and properties', async () => {
+  const h = harness();
+  await h.controller.addSelectedLayerMask(false);
+  h.commits.length = 0;
+  h.statuses.length = 0;
+
+  assert.equal(h.controller.invertSelectedLayerMask(), true);
+  assert.equal(h.layer.mask.invert, true);
+  assert.deepEqual(h.commits, ['Инвертировать маску слоя']);
+
+  assert.equal(h.controller.toggleSelectedLayerMask(), true);
+  assert.equal(h.layer.mask.enabled, false);
+  assert.deepEqual(h.commits, ['Инвертировать маску слоя', 'Отключить маску слоя']);
+
+  assert.equal(h.controller.editSelectedLayerMaskProperties(), true);
+  const config = h.getModalConfig();
+  assert.equal(config.title, 'Параметры растровой маски');
+  assert.equal(config.onSubmit({ density:'42', feather:'6.5', invert:'no' }), true);
+  assert.equal(h.layer.mask.density, .42);
+  assert.equal(h.layer.mask.feather, 6.5);
+  assert.equal(h.layer.mask.invert, false);
+  assert.equal(h.commits.at(-1), 'Параметры маски слоя');
+});
+
+test('stale layer-mask properties modal cannot mutate a replacement mask', async () => {
+  const h = harness();
+  await h.controller.addSelectedLayerMask(false);
+  h.commits.length = 0;
+  assert.equal(h.controller.editSelectedLayerMaskProperties(), true);
+  const config = h.getModalConfig();
+  const replacement = { enabled:true, dataUrl:null, invert:false, density:1, feather:0 };
+  h.layer.mask = replacement;
+  assert.equal(config.onSubmit({ density:'25', feather:'9', invert:'yes' }), false);
+  assert.deepEqual(h.layer.mask, replacement);
+  assert.deepEqual(h.commits, []);
+});
+
 test('document switch during async add-mask encoding publishes nothing', async () => {
   const h = harness();
   const pending = h.controller.addSelectedLayerMask(true);
@@ -365,6 +402,9 @@ test('selection raster-mask policy has one owner and Smart Filter consumes its b
     'function buildSelectionRefinePreviewSource(',
     'function attachSelectionRefinePreview(',
     'function refineSelectionToLayerMask(',
+    'function toggleSelectedLayerMask(',
+    'function invertSelectedLayerMask(',
+    'function editSelectedLayerMaskProperties(',
     'function removeSelectedLayerMask(',
   ]) {
     assert.equal(main.includes(definition), false, definition + ' must not drift back into main.js');
