@@ -5430,6 +5430,64 @@ function clonePixelBuffer(buffer) {
     colorSpace:buffer.colorSpace,alphaMode:buffer.alphaMode,profileName:buffer.profileName,data:clonePixelData(buffer.data),
   });
 }
+function decontaminatePixelBufferEdgeColors(buffer, maskAlpha, {
+  radius = 2,
+  strength = 0,
+} = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  if (!(maskAlpha instanceof Uint8Array || maskAlpha instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидалась 8-bit mask');
+  }
+  const pixels = buffer.width * buffer.height;
+  if (maskAlpha.length < pixels) throw new RangeError('Mask alpha меньше PixelBuffer');
+  const output = clonePixelBuffer(buffer);
+  const searchRadius = Math.max(0, Math.min(8, Math.round(Number(radius) || 0)));
+  const amount = Math.max(0, Math.min(100, Number(strength) || 0)) / 100;
+  if (!searchRadius || !amount) return output;
+
+  const colorChannels = buffer.model === 'cmyk' ? 4 : 3;
+  const sums = new Float64Array(colorChannels);
+  for (let y = 0; y < buffer.height; y += 1) {
+    for (let x = 0; x < buffer.width; x += 1) {
+      const pixel = y * buffer.width + x;
+      const coverage = maskAlpha[pixel];
+      if (coverage < 8 || coverage >= 250) continue;
+
+      sums.fill(0);
+      let weightSum = 0;
+      const minY = Math.max(0, y - searchRadius);
+      const maxY = Math.min(buffer.height - 1, y + searchRadius);
+      const minX = Math.max(0, x - searchRadius);
+      const maxX = Math.min(buffer.width - 1, x + searchRadius);
+      for (let sy = minY; sy <= maxY; sy += 1) {
+        for (let sx = minX; sx <= maxX; sx += 1) {
+          const donorPixel = sy * buffer.width + sx;
+          const donorCoverage = maskAlpha[donorPixel];
+          if (donorCoverage < 224) continue;
+          const dx = sx - x;
+          const dy = sy - y;
+          const weight = (donorCoverage / 255) / (1 + dx * dx + dy * dy);
+          const donorOffset = donorPixel * buffer.channels;
+          weightSum += weight;
+          for (let channel = 0; channel < colorChannels; channel += 1) {
+            sums[channel] += sourceSampleValue(buffer, donorOffset + channel) * weight;
+          }
+        }
+      }
+      if (weightSum <= 0) continue;
+
+      const edgeWeight = Math.max(.2, Math.min(1, (255 - coverage) / 127));
+      const localAmount = amount * edgeWeight;
+      const sourceOffset = pixel * buffer.channels;
+      for (let channel = 0; channel < colorChannels; channel += 1) {
+        const current = sourceSampleValue(buffer, sourceOffset + channel);
+        const donor = sums[channel] / weightSum;
+        writeNormalizedSample(output, sourceOffset + channel, current * (1 - localAmount) + donor * localAmount);
+      }
+    }
+  }
+  return output;
+}
 function pixelBufferWithStraightAlpha(buffer) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const colorChannels=buffer.model==='cmyk'?4:3;
@@ -15317,8 +15375,11 @@ function createRasterEditController({
     return canvasToDataURL(canvas, 'image/png');
   }
 
-  async function prepareHighDepthMutation(layer, buffer) {
-    const highDepthSource = serializePixelBufferSource(buffer, { maxBytes: highDepthBudgetForLayer(layer) });
+  async function prepareHighDepthMutation(layer, buffer, { maxBytes = null } = {}) {
+    const byteBudget = maxBytes == null
+      ? highDepthBudgetForLayer(layer)
+      : Math.max(0, Math.trunc(Number(maxBytes) || 0));
+    const highDepthSource = serializePixelBufferSource(buffer, { maxBytes: byteBudget });
     const dataUrl = await highDepthPreviewDataUrl(layer, buffer);
     return {
       highDepthSource,
@@ -17968,11 +18029,6 @@ function createSelectionMaskController({
           toast('Новый растровый слой из Select & Mask недоступен для корректирующего слоя. Используйте вывод «Маска слоя».', 'warn');
           return false;
         }
-        if (layer.highDepthSource) {
-          toast('Новый растровый слой из Select & Mask пока недоступен для native RGB/CMYK PixelBuffer. Используйте «Маска слоя», чтобы не понижать точность.', 'warn');
-          return false;
-        }
-
         const width = Math.max(1, Math.round(layer.width || 1));
         const height = Math.max(1, Math.round(layer.height || 1));
         checkedCanvasSize(width, height, 'Select & Mask');
@@ -17993,33 +18049,56 @@ function createSelectionMaskController({
           return false;
         }
 
+        const sourceHighDepth = layer.highDepthSource || null;
         const source = await buildSelectionRefinePreviewSource(layer, { fullResolution:true }, ownerDocument, shape);
         if (!source || !currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
+        if (layer.highDepthSource !== sourceHighDepth) return false;
         const alpha = refineMaskAlpha(source.alpha, source.width, source.height, {
           ...options,
           sourceRgba:source.sourceRgba,
         });
-        const outputPixels = decontaminateMaskEdgeColors(
-          source.sourceRgba,
-          alpha,
-          source.width,
-          source.height,
-          decontaminateOptions,
-        );
+
+        let dataUrl = null;
+        let highDepthBuffer = null;
+        if (sourceHighDepth) {
+          try {
+            const nativeSource = deserializePixelBufferSource(sourceHighDepth);
+            if (nativeSource.width !== source.width || nativeSource.height !== source.height) {
+              toast('Native PixelBuffer Select & Mask не совпадает с размером растрового слоя.', 'warn');
+              return false;
+            }
+            highDepthBuffer = decontaminatePixelBufferEdgeColors(nativeSource, alpha, decontaminateOptions);
+          } catch (error) {
+            toast(error?.message || 'Не удалось подготовить native PixelBuffer для Select & Mask', 'warn');
+            return false;
+          }
+        } else {
+          const outputPixels = decontaminateMaskEdgeColors(
+            source.sourceRgba,
+            alpha,
+            source.width,
+            source.height,
+            decontaminateOptions,
+          );
+          dataUrl = rgbaDataUrl(outputPixels, source.width, source.height);
+        }
+
         const mask = refinedMaskFromDataUrl(existingMask, alphaMaskDataUrl(alpha, source.width, source.height));
-        const dataUrl = rgbaDataUrl(outputPixels, source.width, source.height);
         if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
-        const outputLayer = publishRefinedRasterOutput({
+        if (layer.highDepthSource !== sourceHighDepth) return false;
+        const outputLayer = await publishRefinedRasterOutput({
           ownerDocument,
           sourceLayer:layer,
           width:source.width,
           height:source.height,
           dataUrl,
+          highDepthBuffer,
+          expectedHighDepthSource:sourceHighDepth,
           mask,
         });
         if (!outputLayer) return false;
         commit('Select & Mask: новый растровый слой');
-        setStatus(`Select & Mask: создан новый растровый слой с маской${decontaminateOptions.strength > 0 ? `, очистка цвета края ${decontaminateOptions.strength}%` : ''}`);
+        setStatus(`Select & Mask: создан новый растровый слой с маской${highDepthBuffer ? `, native ${highDepthBuffer.model.toUpperCase()} ${highDepthBuffer.bitsPerChannel}-bit` : ''}${decontaminateOptions.strength > 0 ? `, очистка цвета края ${decontaminateOptions.strength}%` : ''}`);
         return true;
       },
     });
@@ -24614,8 +24693,57 @@ const selectionMaskController = createSelectionMaskController({
     getDocument: () => doc,
     getSelectedLayer: selected,
     commit,
-    publishRefinedRasterOutput: ({ ownerDocument, sourceLayer, width, height, dataUrl, mask }) => {
-      if (doc !== ownerDocument || selected() !== sourceLayer || isLayerLocked(ownerDocument, sourceLayer)) return null;
+    publishRefinedRasterOutput: async ({
+      ownerDocument,
+      sourceLayer,
+      width,
+      height,
+      dataUrl,
+      highDepthBuffer = null,
+      expectedHighDepthSource = null,
+      mask,
+    }) => {
+      const targetCurrent = () => (
+        doc === ownerDocument &&
+        selected() === sourceLayer &&
+        !isLayerLocked(ownerDocument, sourceLayer) &&
+        sourceLayer.highDepthSource === expectedHighDepthSource
+      );
+      if (!targetCurrent()) return null;
+      if (ownerDocument.layers.indexOf(sourceLayer) < 0) return null;
+
+      let outputDataUrl = dataUrl;
+      let highDepthSource = null;
+      let highDepthPreview = null;
+      if (highDepthBuffer) {
+        const usedBytes = ownerDocument.layers.reduce(
+          (sum, item) => sum + Math.max(0, Number(item?.highDepthSource?.rawBytes) || 0),
+          0,
+        );
+        const remainingBytes = Math.max(0, MAX_PIXEL_BUFFER_SOURCE_BYTES - usedBytes);
+        if (pixelBufferByteLength(highDepthBuffer) > remainingBytes) {
+          toast('Native Select & Mask не помещается в общий лимит PixelBuffer 48 MiB. Уменьшите слой или используйте вывод «Маска слоя».', 'warn');
+          return null;
+        }
+
+        let mutation;
+        try {
+          mutation = await rasterEdit.prepareHighDepthMutation(
+            sourceLayer,
+            highDepthBuffer,
+            { maxBytes:remainingBytes },
+          );
+        } catch (error) {
+          toast(error?.message || 'Не удалось сериализовать native Select & Mask', 'warn');
+          return null;
+        }
+        if (!targetCurrent()) return null;
+        outputDataUrl = mutation.dataUrl;
+        highDepthSource = mutation.highDepthSource;
+        highDepthPreview = mutation.highDepthPreview;
+      }
+
+      if (!targetCurrent()) return null;
       const sourceIndex = ownerDocument.layers.indexOf(sourceLayer);
       if (sourceIndex < 0) return null;
       const outputLayer = createRasterLayer({
@@ -24631,7 +24759,9 @@ const selectionMaskController = createSelectionMaskController({
         blendMode:sourceLayer.blendMode,
         clipping:Boolean(sourceLayer.clipping),
         groupId:sourceLayer.groupId ?? null,
-        dataUrl,
+        dataUrl:outputDataUrl,
+        highDepthSource,
+        highDepthPreview,
         mask,
       });
       sourceLayer.visible = false;

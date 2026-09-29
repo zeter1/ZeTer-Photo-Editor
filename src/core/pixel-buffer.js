@@ -300,6 +300,65 @@ export function clonePixelBuffer(buffer) {
   });
 }
 
+export function decontaminatePixelBufferEdgeColors(buffer, maskAlpha, {
+  radius = 2,
+  strength = 0,
+} = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  if (!(maskAlpha instanceof Uint8Array || maskAlpha instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидалась 8-bit mask');
+  }
+  const pixels = buffer.width * buffer.height;
+  if (maskAlpha.length < pixels) throw new RangeError('Mask alpha меньше PixelBuffer');
+  const output = clonePixelBuffer(buffer);
+  const searchRadius = Math.max(0, Math.min(8, Math.round(Number(radius) || 0)));
+  const amount = Math.max(0, Math.min(100, Number(strength) || 0)) / 100;
+  if (!searchRadius || !amount) return output;
+
+  const colorChannels = buffer.model === 'cmyk' ? 4 : 3;
+  const sums = new Float64Array(colorChannels);
+  for (let y = 0; y < buffer.height; y += 1) {
+    for (let x = 0; x < buffer.width; x += 1) {
+      const pixel = y * buffer.width + x;
+      const coverage = maskAlpha[pixel];
+      if (coverage < 8 || coverage >= 250) continue;
+
+      sums.fill(0);
+      let weightSum = 0;
+      const minY = Math.max(0, y - searchRadius);
+      const maxY = Math.min(buffer.height - 1, y + searchRadius);
+      const minX = Math.max(0, x - searchRadius);
+      const maxX = Math.min(buffer.width - 1, x + searchRadius);
+      for (let sy = minY; sy <= maxY; sy += 1) {
+        for (let sx = minX; sx <= maxX; sx += 1) {
+          const donorPixel = sy * buffer.width + sx;
+          const donorCoverage = maskAlpha[donorPixel];
+          if (donorCoverage < 224) continue;
+          const dx = sx - x;
+          const dy = sy - y;
+          const weight = (donorCoverage / 255) / (1 + dx * dx + dy * dy);
+          const donorOffset = donorPixel * buffer.channels;
+          weightSum += weight;
+          for (let channel = 0; channel < colorChannels; channel += 1) {
+            sums[channel] += sourceSampleValue(buffer, donorOffset + channel) * weight;
+          }
+        }
+      }
+      if (weightSum <= 0) continue;
+
+      const edgeWeight = Math.max(.2, Math.min(1, (255 - coverage) / 127));
+      const localAmount = amount * edgeWeight;
+      const sourceOffset = pixel * buffer.channels;
+      for (let channel = 0; channel < colorChannels; channel += 1) {
+        const current = sourceSampleValue(buffer, sourceOffset + channel);
+        const donor = sums[channel] / weightSum;
+        writeNormalizedSample(output, sourceOffset + channel, current * (1 - localAmount) + donor * localAmount);
+      }
+    }
+  }
+  return output;
+}
+
 export function pixelBufferWithStraightAlpha(buffer) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const colorChannels=buffer.model==='cmyk'?4:3;

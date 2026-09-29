@@ -6,6 +6,7 @@ import { refineMaskAlpha, refineMaskEdgeAware, composeMaskPreviewRgba, decontami
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const maskController = await readFile(new URL('../src/selection/mask-controller.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
+const pixelBuffer = await readFile(new URL('../src/core/pixel-buffer.js', import.meta.url), 'utf8');
 
 const mask = (width,height,points) => {
   const alpha=new Uint8ClampedArray(width*height);
@@ -193,4 +194,14 @@ test('Select & Mask Stage 9e exposes bounded edge-color decontamination and expl
   assert.match(maskController,/fullResolution:true/);
   assert.match(maskController,/layer\.highDepthSource/);
   assert.match(maskController,/colorKernel/);
+});
+
+
+test('Select & Mask Stage 9f keeps native RGB/CMYK edge cleanup in PixelBuffer space',()=> {
+  assert.match(maskController,/decontaminatePixelBufferEdgeColors/);
+  assert.match(maskController,/deserializePixelBufferSource/);
+  assert.match(maskController,/highDepthBuffer/);
+  assert.match(maskController,/expectedHighDepthSource/);
+  assert.match(pixelBuffer,/export function decontaminatePixelBufferEdgeColors\(/);
+  assert.doesNotMatch(maskController,/пока недоступен для native RGB\/CMYK PixelBuffer/);
 });

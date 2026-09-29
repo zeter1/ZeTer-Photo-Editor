@@ -150,8 +150,57 @@ const selectionMaskController = createSelectionMaskController({
     getDocument: () => doc,
     getSelectedLayer: selected,
     commit,
-    publishRefinedRasterOutput: ({ ownerDocument, sourceLayer, width, height, dataUrl, mask }) => {
-      if (doc !== ownerDocument || selected() !== sourceLayer || isLayerLocked(ownerDocument, sourceLayer)) return null;
+    publishRefinedRasterOutput: async ({
+      ownerDocument,
+      sourceLayer,
+      width,
+      height,
+      dataUrl,
+      highDepthBuffer = null,
+      expectedHighDepthSource = null,
+      mask,
+    }) => {
+      const targetCurrent = () => (
+        doc === ownerDocument &&
+        selected() === sourceLayer &&
+        !isLayerLocked(ownerDocument, sourceLayer) &&
+        sourceLayer.highDepthSource === expectedHighDepthSource
+      );
+      if (!targetCurrent()) return null;
+      if (ownerDocument.layers.indexOf(sourceLayer) < 0) return null;
+
+      let outputDataUrl = dataUrl;
+      let highDepthSource = null;
+      let highDepthPreview = null;
+      if (highDepthBuffer) {
+        const usedBytes = ownerDocument.layers.reduce(
+          (sum, item) => sum + Math.max(0, Number(item?.highDepthSource?.rawBytes) || 0),
+          0,
+        );
+        const remainingBytes = Math.max(0, MAX_PIXEL_BUFFER_SOURCE_BYTES - usedBytes);
+        if (pixelBufferByteLength(highDepthBuffer) > remainingBytes) {
+          toast('Native Select & Mask не помещается в общий лимит PixelBuffer 48 MiB. Уменьшите слой или используйте вывод «Маска слоя».', 'warn');
+          return null;
+        }
+
+        let mutation;
+        try {
+          mutation = await rasterEdit.prepareHighDepthMutation(
+            sourceLayer,
+            highDepthBuffer,
+            { maxBytes:remainingBytes },
+          );
+        } catch (error) {
+          toast(error?.message || 'Не удалось сериализовать native Select & Mask', 'warn');
+          return null;
+        }
+        if (!targetCurrent()) return null;
+        outputDataUrl = mutation.dataUrl;
+        highDepthSource = mutation.highDepthSource;
+        highDepthPreview = mutation.highDepthPreview;
+      }
+
+      if (!targetCurrent()) return null;
       const sourceIndex = ownerDocument.layers.indexOf(sourceLayer);
       if (sourceIndex < 0) return null;
       const outputLayer = createRasterLayer({
@@ -167,7 +216,9 @@ const selectionMaskController = createSelectionMaskController({
         blendMode:sourceLayer.blendMode,
         clipping:Boolean(sourceLayer.clipping),
         groupId:sourceLayer.groupId ?? null,
-        dataUrl,
+        dataUrl:outputDataUrl,
+        highDepthSource,
+        highDepthPreview,
         mask,
       });
       sourceLayer.visible = false;

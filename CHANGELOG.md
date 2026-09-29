@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-29 — Native high-depth Select & Mask output
+
+- Precision: explicit `Новый растровый слой + маска` no longer downgrades or refuses native PixelBuffer sources; RGB/CMYK 16-bit and Float32 edge-color cleanup now runs directly on native color samples while source alpha remains exact.
+- Safety: async publication keeps the exact originating `highDepthSource` identity, serializes the duplicate only after revalidation, and refuses publication before mutation when the shared 48 MiB PixelBuffer budget cannot hold both source and non-destructive output.
+- Preview/runtime: the output layer receives a regenerated display preview through the canonical raster persistence bridge while the native serialized source remains authoritative.
+- Tests/docs: RGB16 and CMYK Float32 regressions cover native color cleanup/alpha preservation, controller tests cover native output routing, and the mask architecture/test matrix document the new precision contract.
+
+
 ### 2026-09-29 — Select & Mask edge-color decontamination
 
 - Refinement: Select & Mask can now decontaminate partially selected edge colors from nearby confident foreground samples, while keeping mask alpha and source alpha semantics separate and deterministic.

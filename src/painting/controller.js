@@ -201,8 +201,11 @@ export function createRasterEditController({
     return canvasToDataURL(canvas, 'image/png');
   }
 
-  async function prepareHighDepthMutation(layer, buffer) {
-    const highDepthSource = serializePixelBufferSource(buffer, { maxBytes: highDepthBudgetForLayer(layer) });
+  async function prepareHighDepthMutation(layer, buffer, { maxBytes = null } = {}) {
+    const byteBudget = maxBytes == null
+      ? highDepthBudgetForLayer(layer)
+      : Math.max(0, Math.trunc(Number(maxBytes) || 0));
+    const highDepthSource = serializePixelBufferSource(buffer, { maxBytes: byteBudget });
     const dataUrl = await highDepthPreviewDataUrl(layer, buffer);
     return {
       highDepthSource,

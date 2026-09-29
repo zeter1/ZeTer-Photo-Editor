@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createPixelBuffer,
   createRgba8PixelBuffer,
+  decontaminatePixelBufferEdgeColors,
   isPixelBuffer,
   pixelBufferByteLength,
   pixelBufferToRgba8Preview,
@@ -82,4 +83,36 @@ test('serialized PixelBuffer sources are bounded and malformed payloads are reje
   assert.equal(sanitizeSerializedPixelBufferSource({...packed,rawBytes:999}),null);
   assert.equal(sanitizeSerializedPixelBufferSource({...packed,dataUrl:packed.dataUrl+'AAAA'}),null);
   assert.equal(MAX_PIXEL_BUFFER_SOURCE_BYTES,48*1024*1024);
+});
+
+
+test('native edge-color decontamination preserves RGB16 precision and source alpha', () => {
+  const source=createPixelBuffer({
+    width:3,height:1,model:'rgb',channels:4,bitsPerChannel:16,colorSpace:'srgb',alphaMode:'straight',
+    data:new Uint16Array([60000,5000,4000,40000, 30000,5000,45000,12345, 5000,7000,60000,22222]),
+  });
+  const output=decontaminatePixelBufferEdgeColors(source,Uint8ClampedArray.from([255,128,0]),{radius:1,strength:100});
+  assert.equal(output.bitsPerChannel,16);
+  assert.equal(output.model,'rgb');
+  assert.notStrictEqual(output.data,source.data);
+  assert.deepEqual([...output.data.slice(0,4)],[...source.data.slice(0,4)]);
+  assert.deepEqual([...output.data.slice(8,12)],[...source.data.slice(8,12)]);
+  assert.ok(output.data[4]>source.data[4]);
+  assert.ok(output.data[6]<source.data[6]);
+  assert.equal(output.data[7],source.data[7]);
+  assert.equal(source.data[4],30000,'source buffer must stay immutable');
+});
+
+test('native edge-color decontamination works in CMYK Float32 without touching alpha', () => {
+  const source=createPixelBuffer({
+    width:3,height:1,model:'cmyk',channels:5,bitsPerChannel:32,colorSpace:'device-cmyk',alphaMode:'straight',
+    data:new Float32Array([.1,.2,.3,.4,.8, .8,.7,.6,.5,.25, 1.2,.9,.8,.7,.5]),
+  });
+  const output=decontaminatePixelBufferEdgeColors(source,Uint8ClampedArray.from([255,128,0]),{radius:1,strength:100});
+  assert.equal(output.bitsPerChannel,32);
+  assert.equal(output.model,'cmyk');
+  assert.ok(output.data[5]<source.data[5]);
+  assert.ok(output.data[8]<source.data[8]);
+  assert.equal(output.data[9],source.data[9]);
+  assert.equal(output.data[10],source.data[10],'unselected CMYK sample must stay exact');
 });

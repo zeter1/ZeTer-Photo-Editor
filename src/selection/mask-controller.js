@@ -2,6 +2,7 @@ import { clamp } from '../core/geometry.js';
 import { checkedCanvasSize, createLayerMask, isLayerLocked } from '../core/state.js';
 import { canvasToDataURL } from '../core/io.js';
 import { composeMaskPreviewRgba, decontaminateMaskEdgeColors, refineMaskAlpha } from '../core/pixels.js';
+import { decontaminatePixelBufferEdgeColors, deserializePixelBufferSource } from '../core/pixel-buffer.js';
 
 export function createSelectionMaskController({
   state = {},
@@ -462,11 +463,6 @@ export function createSelectionMaskController({
           toast('Новый растровый слой из Select & Mask недоступен для корректирующего слоя. Используйте вывод «Маска слоя».', 'warn');
           return false;
         }
-        if (layer.highDepthSource) {
-          toast('Новый растровый слой из Select & Mask пока недоступен для native RGB/CMYK PixelBuffer. Используйте «Маска слоя», чтобы не понижать точность.', 'warn');
-          return false;
-        }
-
         const width = Math.max(1, Math.round(layer.width || 1));
         const height = Math.max(1, Math.round(layer.height || 1));
         checkedCanvasSize(width, height, 'Select & Mask');
@@ -487,33 +483,56 @@ export function createSelectionMaskController({
           return false;
         }
 
+        const sourceHighDepth = layer.highDepthSource || null;
         const source = await buildSelectionRefinePreviewSource(layer, { fullResolution:true }, ownerDocument, shape);
         if (!source || !currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
+        if (layer.highDepthSource !== sourceHighDepth) return false;
         const alpha = refineMaskAlpha(source.alpha, source.width, source.height, {
           ...options,
           sourceRgba:source.sourceRgba,
         });
-        const outputPixels = decontaminateMaskEdgeColors(
-          source.sourceRgba,
-          alpha,
-          source.width,
-          source.height,
-          decontaminateOptions,
-        );
+
+        let dataUrl = null;
+        let highDepthBuffer = null;
+        if (sourceHighDepth) {
+          try {
+            const nativeSource = deserializePixelBufferSource(sourceHighDepth);
+            if (nativeSource.width !== source.width || nativeSource.height !== source.height) {
+              toast('Native PixelBuffer Select & Mask не совпадает с размером растрового слоя.', 'warn');
+              return false;
+            }
+            highDepthBuffer = decontaminatePixelBufferEdgeColors(nativeSource, alpha, decontaminateOptions);
+          } catch (error) {
+            toast(error?.message || 'Не удалось подготовить native PixelBuffer для Select & Mask', 'warn');
+            return false;
+          }
+        } else {
+          const outputPixels = decontaminateMaskEdgeColors(
+            source.sourceRgba,
+            alpha,
+            source.width,
+            source.height,
+            decontaminateOptions,
+          );
+          dataUrl = rgbaDataUrl(outputPixels, source.width, source.height);
+        }
+
         const mask = refinedMaskFromDataUrl(existingMask, alphaMaskDataUrl(alpha, source.width, source.height));
-        const dataUrl = rgbaDataUrl(outputPixels, source.width, source.height);
         if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
-        const outputLayer = publishRefinedRasterOutput({
+        if (layer.highDepthSource !== sourceHighDepth) return false;
+        const outputLayer = await publishRefinedRasterOutput({
           ownerDocument,
           sourceLayer:layer,
           width:source.width,
           height:source.height,
           dataUrl,
+          highDepthBuffer,
+          expectedHighDepthSource:sourceHighDepth,
           mask,
         });
         if (!outputLayer) return false;
         commit('Select & Mask: новый растровый слой');
-        setStatus(`Select & Mask: создан новый растровый слой с маской${decontaminateOptions.strength > 0 ? `, очистка цвета края ${decontaminateOptions.strength}%` : ''}`);
+        setStatus(`Select & Mask: создан новый растровый слой с маской${highDepthBuffer ? `, native ${highDepthBuffer.model.toUpperCase()} ${highDepthBuffer.bitsPerChannel}-bit` : ''}${decontaminateOptions.strength > 0 ? `, очистка цвета края ${decontaminateOptions.strength}%` : ''}`);
         return true;
       },
     });

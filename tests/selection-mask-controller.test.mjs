@@ -8,6 +8,7 @@ import {
   createRasterLayer,
 } from '../src/core/state.js';
 import { createSelectionMaskController } from '../src/selection/mask-controller.js';
+import { createPixelBuffer, serializePixelBufferSource } from '../src/core/pixel-buffer.js';
 
 function deferred() {
   let resolve;
@@ -426,15 +427,24 @@ test('explicit raster output creates one guarded output layer and one history en
   assert.deepEqual(h.commits, ['Select & Mask: новый растровый слой']);
 });
 
-test('explicit raster output refuses native PixelBuffer sources instead of downgrading precision', async () => {
+test('explicit raster output keeps native RGB16 PixelBuffer precision instead of downgrading to RGBA8', async () => {
   const layer = createRasterLayer({ name:'16-bit', width:16, height:12, dataUrl:null });
-  layer.highDepthSource = { model:'rgb', bitsPerChannel:16 };
+  const source = createPixelBuffer({
+    width:16,height:12,model:'rgb',channels:4,bitsPerChannel:16,colorSpace:'srgb',alphaMode:'straight',
+    data:new Uint16Array(16 * 12 * 4).fill(12000),
+  });
+  layer.highDepthSource = serializePixelBufferSource(source);
   const h = harness({ layer });
   const config = await openRefineModal(h);
-  assert.equal(await config.onSubmit(refineValues({ outputMode:'new-raster-mask' })), false);
-  assert.equal(h.publishedOutputs.length, 0);
-  assert.deepEqual(h.commits, []);
-  assert.match(h.toasts.at(-1)?.[0] || '', /не понижать точность/);
+  assert.equal(await config.onSubmit(refineValues({ outputMode:'new-raster-mask' })), true);
+  assert.equal(h.publishedOutputs.length, 1);
+  const payload = h.publishedOutputs[0];
+  assert.equal(payload.dataUrl, null);
+  assert.equal(payload.highDepthBuffer?.model, 'rgb');
+  assert.equal(payload.highDepthBuffer?.bitsPerChannel, 16);
+  assert.ok(payload.highDepthBuffer?.data instanceof Uint16Array);
+  assert.deepEqual([...payload.highDepthBuffer.data.slice(0,8)],[...source.data.slice(0,8)]);
+  assert.deepEqual(h.commits, ['Select & Mask: новый растровый слой']);
 });
 
 test('stale preview preparation cannot bind listeners or publish into a switched document', async () => {
