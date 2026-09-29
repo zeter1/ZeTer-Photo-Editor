@@ -139,8 +139,10 @@ test('Stage 13c flood fill stays in CMYK source space and respects selection pre
 
 test('Stage 13c routes CMYK brush gestures and raster commands through canonical PixelBuffer mutations',()=>{
   assert.match(toolConfig,/export const NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
-  assert.match(main,/applyCmykPixelBufferBrushDab\(rasterEdit\.highDepthPaintBuffer/);
-  assert.match(main,/applyCmykPixelBufferStrokeSegment\(rasterEdit\.highDepthPaintBuffer/);
+  assert.match(painting,/applyCmykPixelBufferBrushDab\(/);
+  assert.match(painting,/applyCmykPixelBufferStrokeSegment\(/);
+  assert.match(main,/rasterEdit\.applyNativeHighDepthBrushDab\(owner,layer,point/);
+  assert.match(main,/rasterEdit\.applyNativeHighDepthStrokeSegment\(owner,layer,from,to/);
   assert.match(commands,/floodFillCmykPixelBuffer\(/);
   assert.match(commands,/applyCmykPixelBufferStrokeSegment\(/);
   assert.match(commands,/buffer\.model === 'cmyk'/);
