@@ -905,6 +905,7 @@ const retouchController = createRetouchController({
   getBrushContext: () => rasterEdit.brushContext,
   getDrag: () => drag,
   getHighDepthPaintBuffer: () => rasterEdit.highDepthPaintBuffer,
+  getHighDepthPaintWorkingSet: () => rasterEdit.highDepthPaintWorkingSet,
   getHighDepthPaintLayerId: () => rasterEdit.highDepthPaintLayerId,
   markHighDepthPreviewDirty: rasterEdit.markHighDepthPreviewDirty,
   brushWidthForPointer,

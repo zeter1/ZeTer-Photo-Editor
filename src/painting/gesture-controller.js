@@ -84,7 +84,7 @@ export function createPaintGestureController({
     const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
       ? await rasterEdit.ensureNativeHighDepthPaintBuffer(owner, layer, {
           requireAlpha:tool === 'eraser',
-          preferTiled:tool === 'brush' || tool === 'eraser',
+          preferTiled:true,
         })
       : false;
     if (!nativeHighDepth && !await rasterEdit.ensureRasterBuffer(owner, layer)) return null;
@@ -148,13 +148,13 @@ export function createPaintGestureController({
 
     if (tool === 'dodge' || tool === 'burn') {
       drag.toneCoverage = {
-        width:drag.nativeHighDepth ? rasterEdit.highDepthPaintBuffer.width : rasterEdit.brushCanvas.width,
+        width:drag.nativeHighDepth ? (rasterEdit.highDepthPaintWorkingSet?.width ?? rasterEdit.highDepthPaintBuffer?.width ?? layer.width) : rasterEdit.brushCanvas.width,
         tiles:new Map(),
       };
     }
     if (tool === 'blur') {
       drag.blurCoverage = {
-        width:drag.nativeHighDepth ? rasterEdit.highDepthPaintBuffer.width : rasterEdit.brushCanvas.width,
+        width:drag.nativeHighDepth ? (rasterEdit.highDepthPaintWorkingSet?.width ?? rasterEdit.highDepthPaintBuffer?.width ?? layer.width) : rasterEdit.brushCanvas.width,
         tiles:new Map(),
       };
     }

@@ -745,7 +745,7 @@ function cmykNeighborhoodMean(buffer,centerX,centerY,radius=3) {
   return weight>1e-9?sum.map(value=>value/weight):[0,0,0,0];
 }
 
-export function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount,{brighten=true,isAllowed=null,strokeCoverage=null}={}) {
+export function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount,{brighten=true,isAllowed=null,strokeCoverage=null,originX=0,originY=0}={}) {
   validateCmykEditBuffer(buffer,'CMYK tone brush');
   const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
   if(strength<=0)return 0;
@@ -758,7 +758,7 @@ export function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount
     if(distance>brushRadius)continue;
     const offset=(y*buffer.width+x)*buffer.channels;
     if(cmykPixelAlpha01(buffer,offset)<=0)continue;
-    const increment=retouchStrokeIncrement(strokeCoverage,x,y,strength*highDepthBrushFalloff(distance,brushRadius));
+    const increment=retouchStrokeIncrement(strokeCoverage,x+originX,y+originY,strength*highDepthBrushFalloff(distance,brushRadius));
     if(increment<=0)continue;
     const factor=2**(-increment);
     let pixelChanged=false;
@@ -778,7 +778,7 @@ export function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount
   return changed;
 }
 
-export function applyCmykPixelBufferBlurDab(buffer,centerX,centerY,radius,amount,{sampleRadius=3,isAllowed=null,strokeCoverage=null}={}) {
+export function applyCmykPixelBufferBlurDab(buffer,centerX,centerY,radius,amount,{sampleRadius=3,isAllowed=null,strokeCoverage=null,originX=0,originY=0}={}) {
   validateCmykEditBuffer(buffer,'CMYK blur');
   const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
   const kernel=Math.max(1,Math.min(8,Math.trunc(sampleRadius)||3));
@@ -792,7 +792,7 @@ export function applyCmykPixelBufferBlurDab(buffer,centerX,centerY,radius,amount
     if(distance>brushRadius)continue;
     const offset=(y*buffer.width+x)*buffer.channels;
     if(cmykPixelAlpha01(buffer,offset)<=0)continue;
-    const increment=retouchStrokeIncrement(strokeCoverage,x,y,strength*highDepthBrushFalloff(distance,brushRadius));
+    const increment=retouchStrokeIncrement(strokeCoverage,x+originX,y+originY,strength*highDepthBrushFalloff(distance,brushRadius));
     if(increment<=0)continue;
     const sum=[0,0,0,0];let weight=0;
     for(let sy=Math.max(0,y-kernel);sy<=Math.min(buffer.height-1,y+kernel);sy+=1)for(let sx=Math.max(0,x-kernel);sx<=Math.min(buffer.width-1,x+kernel);sx+=1){
@@ -1000,7 +1000,7 @@ function retouchNeighborhoodMean(buffer,centerX,centerY,radius=3) {
   return weight>1e-9?sum.map(value=>value/weight):[0,0,0];
 }
 
-export function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount, { brighten=true, isAllowed=null, strokeCoverage=null } = {}) {
+export function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount, { brighten=true, isAllowed=null, strokeCoverage=null, originX=0, originY=0 } = {}) {
   validateRgbRetouchBuffer(buffer,'High-depth tone brush');
   const brushRadius=Math.max(.5,Number(radius)||.5);
   const strength=clampPreview01(amount);
@@ -1015,7 +1015,7 @@ export function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount
     const offset=(y*buffer.width+x)*buffer.channels;
     if(pixelAlpha01(buffer,offset)<=0)continue;
     const local=strength*highDepthBrushFalloff(distance,brushRadius);
-    const increment=retouchStrokeIncrement(strokeCoverage,x,y,local);
+    const increment=retouchStrokeIncrement(strokeCoverage,x+originX,y+originY,local);
     if(increment<=0)continue;
     const factor=2**(brighten?increment:-increment);
     const rgb=retouchReadRgb(buffer,offset).map(value=>value*factor);
@@ -1025,7 +1025,7 @@ export function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount
   return changed;
 }
 
-export function applyPixelBufferBlurDab(buffer, centerX, centerY, radius, amount, { sampleRadius=3, isAllowed=null, strokeCoverage=null } = {}) {
+export function applyPixelBufferBlurDab(buffer, centerX, centerY, radius, amount, { sampleRadius=3, isAllowed=null, strokeCoverage=null, originX=0, originY=0 } = {}) {
   validateRgbRetouchBuffer(buffer,'High-depth blur brush');
   const brushRadius=Math.max(.5,Number(radius)||.5);
   const strength=clampPreview01(amount);
@@ -1041,7 +1041,7 @@ export function applyPixelBufferBlurDab(buffer, centerX, centerY, radius, amount
     const offset=(y*buffer.width+x)*buffer.channels;
     if(pixelAlpha01(buffer,offset)<=0)continue;
     const local=strength*highDepthBrushFalloff(distance,brushRadius);
-    const increment=retouchStrokeIncrement(strokeCoverage,x,y,local);
+    const increment=retouchStrokeIncrement(strokeCoverage,x+originX,y+originY,local);
     if(increment<=0)continue;
     const sum=[0,0,0];let weight=0;
     for(let sy=Math.max(0,y-kernel);sy<=Math.min(buffer.height-1,y+kernel);sy+=1){
@@ -1556,6 +1556,108 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     }
   }
 
+
+  function normalizeRegionBounds(bounds) {
+    if (!bounds || typeof bounds !== 'object') throw new TypeError('Tiled PixelBuffer region bounds обязательны');
+    const values = [bounds.left, bounds.top, bounds.right, bounds.bottom].map(Number);
+    if (!values.every(Number.isFinite)) throw new TypeError('Tiled PixelBuffer region bounds должны быть конечными числами');
+    const left = Math.max(0, Math.min(safe.width, Math.floor(values[0])));
+    const top = Math.max(0, Math.min(safe.height, Math.floor(values[1])));
+    const right = Math.max(0, Math.min(safe.width, Math.ceil(values[2])));
+    const bottom = Math.max(0, Math.min(safe.height, Math.ceil(values[3])));
+    if (right <= left || bottom <= top) return null;
+    return { left, top, right, bottom, width:right-left, height:bottom-top };
+  }
+
+  function readRegion(bounds) {
+    const area = normalizeRegionBounds(bounds);
+    if (!area) return null;
+    const Expected = expectedArrayConstructor(safe.bitsPerChannel);
+    const data = new Expected(area.width * area.height * targetChannels);
+    for (let index = 0; index < safe.tiles.length; index += 1) {
+      const tile = safe.tiles[index];
+      if (!intersects(tile, area)) continue;
+      const buffer = load(index);
+      const left = Math.max(area.left, tile.x);
+      const top = Math.max(area.top, tile.y);
+      const right = Math.min(area.right, tile.x + tile.width);
+      const bottom = Math.min(area.bottom, tile.y + tile.height);
+      for (let y = top; y < bottom; y += 1) {
+        const sourceOffset = ((y - tile.y) * tile.width + (left - tile.x)) * targetChannels;
+        const targetOffset = ((y - area.top) * area.width + (left - area.left)) * targetChannels;
+        data.set(buffer.data.subarray(sourceOffset, sourceOffset + (right - left) * targetChannels), targetOffset);
+      }
+    }
+    return {
+      x:area.left,
+      y:area.top,
+      buffer:createPixelBuffer({
+        width:area.width,
+        height:area.height,
+        model:safe.model,
+        channels:targetChannels,
+        bitsPerChannel:safe.bitsPerChannel,
+        colorSpace:safe.colorSpace,
+        alphaMode:promoteAlpha ? 'straight' : safe.alphaMode,
+        profileName:safe.profileName,
+        data,
+      }),
+    };
+  }
+
+  function writeRegion(region) {
+    const x = Math.trunc(Number(region?.x));
+    const y = Math.trunc(Number(region?.y));
+    const buffer = region?.buffer;
+    if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || !isPixelBuffer(buffer)) {
+      throw new TypeError('Tiled PixelBuffer writeRegion требует region из readRegion()');
+    }
+    if (
+      x < 0 || y < 0 ||
+      x + buffer.width > safe.width || y + buffer.height > safe.height ||
+      buffer.model !== safe.model ||
+      buffer.channels !== targetChannels ||
+      buffer.bitsPerChannel !== safe.bitsPerChannel
+    ) throw new TypeError('Tiled PixelBuffer writeRegion несовместим с working set');
+
+    const bounds = { left:x, top:y, right:x+buffer.width, bottom:y+buffer.height };
+    let changedPixels = 0;
+    for (let index = 0; index < safe.tiles.length; index += 1) {
+      const tile = safe.tiles[index];
+      if (!intersects(tile, bounds)) continue;
+      const target = load(index);
+      const left = Math.max(bounds.left, tile.x);
+      const top = Math.max(bounds.top, tile.y);
+      const right = Math.min(bounds.right, tile.x + tile.width);
+      const bottom = Math.min(bounds.bottom, tile.y + tile.height);
+      let tileChanged = false;
+      for (let globalY = top; globalY < bottom; globalY += 1) {
+        for (let globalX = left; globalX < right; globalX += 1) {
+          const sourceOffset = ((globalY - y) * buffer.width + (globalX - x)) * targetChannels;
+          const targetOffset = ((globalY - tile.y) * tile.width + (globalX - tile.x)) * targetChannels;
+          let pixelChanged = false;
+          for (let channel = 0; channel < targetChannels; channel += 1) {
+            if (!Object.is(target.data[targetOffset + channel], buffer.data[sourceOffset + channel])) {
+              pixelChanged = true;
+              break;
+            }
+          }
+          if (!pixelChanged) continue;
+          for (let channel = 0; channel < targetChannels; channel += 1) {
+            target.data[targetOffset + channel] = buffer.data[sourceOffset + channel];
+          }
+          changedPixels += 1;
+          tileChanged = true;
+        }
+      }
+      if (tileChanged) {
+        dirty.add(index);
+        previewDirty.add(index);
+      }
+    }
+    return changedPixels;
+  }
+
   function serialize() {
     const tiles = [];
     let total = 0;
@@ -1599,6 +1701,8 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     promotedAlpha:promoteAlpha,
     visit,
     forEachPreviewDirty,
+    readRegion,
+    writeRegion,
     serialize,
     get loadedTileCount() { return loaded.size; },
     get dirtyTileCount() { return dirty.size; },

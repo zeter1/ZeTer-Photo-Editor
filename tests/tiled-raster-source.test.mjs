@@ -140,3 +140,23 @@ test('Stage 17c eraser working set defers alpha promotion until touched/serializ
   assert.equal(restored.data[3],0);
   assert.equal(restored.data[7],65535);
 });
+
+
+test('Stage 17d working-set regions read halo pixels across tiles without dirtying them',()=>{
+  const packed=serializeTiledPixelBufferSource(rgb16(4,1),{tileSize:2});
+  const untouchedSecond=packed.tiles[1].dataUrl;
+  const working=createSerializedPixelBufferTileWorkingSet(packed);
+  const region=working.readRegion({left:1,top:0,right:3,bottom:1});
+  assert.equal(region.x,1);
+  assert.equal(region.y,0);
+  assert.equal(region.buffer.width,2);
+  assert.equal(region.buffer.height,1);
+  assert.equal(working.loadedTileCount,2);
+  assert.equal(working.dirtyTileCount,0);
+  region.buffer.data[0]=4321;
+  assert.equal(working.writeRegion(region),1);
+  assert.equal(working.dirtyTileCount,1);
+  const serialized=working.serialize();
+  assert.equal(serialized.tiles[1].dataUrl,untouchedSecond);
+  assert.equal(deserializePixelBufferSource(serialized).data[3],4321);
+});

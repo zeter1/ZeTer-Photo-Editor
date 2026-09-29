@@ -2,6 +2,7 @@ import { clamp } from '../core/geometry.js';
 import { applyBlurBrushPixels, applyToneBrushPixels } from '../core/pixels.js';
 import {
   clonePixelBuffer,
+  createSerializedPixelBufferTileWorkingSet,
   applyPixelBufferToneDab,
   applyPixelBufferBlurDab,
   applyPixelBufferCloneDab,
@@ -23,6 +24,7 @@ export function createRetouchController({
   getBrushContext,
   getDrag,
   getHighDepthPaintBuffer,
+  getHighDepthPaintWorkingSet = () => null,
   getHighDepthPaintLayerId,
   markHighDepthPreviewDirty,
   brushWidthForPointer,
@@ -38,6 +40,7 @@ export function createRetouchController({
   let cloneSource = null;
   let cloneSnapshotCanvas = null;
   let highDepthCloneSnapshotBuffer = null;
+  let highDepthCloneSnapshotWorkingSet = null;
   let blurScratchCanvas = null;
   let blurScratchCtx = null;
   let retouchScratchCanvas = null;
@@ -62,6 +65,7 @@ export function createRetouchController({
   function resetStroke() {
     cloneSnapshotCanvas = null;
     highDepthCloneSnapshotBuffer = null;
+    highDepthCloneSnapshotWorkingSet = null;
   }
 
   function ensureRetouchScratch(width, height) {
@@ -303,6 +307,40 @@ export function createRetouchController({
     return getHighDepthPaintLayerId()===layer?.id && buffer ? buffer : null;
   }
 
+  function activeHighDepthWorkingSet(layer) {
+    const workingSet=getHighDepthPaintWorkingSet();
+    return getHighDepthPaintLayerId()===layer?.id && workingSet ? workingSet : null;
+  }
+
+  function offsetSelectionPredicate(predicate, offsetX, offsetY) {
+    return typeof predicate === 'function' ? (x,y)=>predicate(x+offsetX,y+offsetY) : null;
+  }
+
+  function brushBounds(point, radius, padding = 0) {
+    const extent=Math.max(.5,Number(radius)||.5)+Math.max(0,Number(padding)||0);
+    return {left:point.x-extent,top:point.y-extent,right:point.x+extent,bottom:point.y+extent};
+  }
+
+  function shiftedBounds(bounds, dx, dy) {
+    return {left:bounds.left+dx,top:bounds.top+dy,right:bounds.right+dx,bottom:bounds.bottom+dy};
+  }
+
+  function expandedBounds(bounds, padding) {
+    const amount=Math.max(0,Number(padding)||0);
+    return {left:bounds.left-amount,top:bounds.top-amount,right:bounds.right+amount,bottom:bounds.bottom+amount};
+  }
+
+  function unionBounds(...values) {
+    const bounds=values.filter(Boolean);
+    if(!bounds.length)return null;
+    return {
+      left:Math.min(...bounds.map(value=>value.left)),
+      top:Math.min(...bounds.map(value=>value.top)),
+      right:Math.max(...bounds.map(value=>value.right)),
+      bottom:Math.max(...bounds.map(value=>value.bottom)),
+    };
+  }
+
   function markNativeHighDepthRetouchChanged(changed) {
     if (changed>0) {
       markHighDepthPreviewDirty();
@@ -313,18 +351,28 @@ export function createRetouchController({
   }
 
   function applyNativeHighDepthToneDab(layer, point, pointerEvent = null, brighten = true) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const strength=brighten ? getDodgeStrength() : getBurnStrength();
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      const region=workingSet.readRegion(brushBounds(point,radius));
+      if(!region)return false;
+      const fn=region.buffer.model === 'cmyk' ? applyCmykPixelBufferToneDab : applyPixelBufferToneDab;
+      const changed=fn(region.buffer,point.x-region.x,point.y-region.y,radius,strength,{
+        brighten,
+        isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),region.x,region.y),
+        strokeCoverage:getDrag()?.toneCoverage,
+        originX:region.x,originY:region.y,
+      });
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(region));
+    }
     const buffer=activeHighDepthBuffer(layer);
     if (!buffer) return false;
-    const strength=brighten ? getDodgeStrength() : getBurnStrength();
     const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferToneDab : applyPixelBufferToneDab;
-    const changed=fn(
-      buffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),strength,
-      {
-        brighten,
-        isAllowed:rasterSelectionPredicate(layer),
-        strokeCoverage:getDrag()?.toneCoverage,
-      },
-    );
+    const changed=fn(buffer,point.x,point.y,radius,strength,{
+      brighten,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:getDrag()?.toneCoverage,
+    });
     return markNativeHighDepthRetouchChanged(changed);
   }
 
@@ -334,25 +382,33 @@ export function createRetouchController({
     const steps=Math.max(1,Math.ceil(distance/spacing));
     for (let index=1; index<=steps; index+=1) {
       const t=index/steps;
-      applyNativeHighDepthToneDab(
-        layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},
-        pointerEvent,brighten,
-      );
+      applyNativeHighDepthToneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent,brighten);
     }
   }
 
   function applyNativeHighDepthBlurDab(layer, point, pointerEvent = null) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const sampleRadius=3;
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      const region=workingSet.readRegion(brushBounds(point,radius,sampleRadius));
+      if(!region)return false;
+      const fn=region.buffer.model === 'cmyk' ? applyCmykPixelBufferBlurDab : applyPixelBufferBlurDab;
+      const changed=fn(region.buffer,point.x-region.x,point.y-region.y,radius,getBlurStrength(),{
+        sampleRadius,
+        isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),region.x,region.y),
+        strokeCoverage:getDrag()?.blurCoverage,
+        originX:region.x,originY:region.y,
+      });
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(region));
+    }
     const buffer=activeHighDepthBuffer(layer);
     if (!buffer) return false;
     const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferBlurDab : applyPixelBufferBlurDab;
-    const changed=fn(
-      buffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),getBlurStrength(),
-      {
-        sampleRadius:3,
-        isAllowed:rasterSelectionPredicate(layer),
-        strokeCoverage:getDrag()?.blurCoverage,
-      },
-    );
+    const changed=fn(buffer,point.x,point.y,radius,getBlurStrength(),{
+      sampleRadius,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:getDrag()?.blurCoverage,
+    });
     return markNativeHighDepthRetouchChanged(changed);
   }
 
@@ -362,65 +418,89 @@ export function createRetouchController({
     const steps=Math.max(1,Math.ceil(distance/spacing));
     for (let index=1; index<=steps; index+=1) {
       const t=index/steps;
-      applyNativeHighDepthBlurDab(
-        layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},
-        pointerEvent,
-      );
+      applyNativeHighDepthBlurDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent);
     }
   }
 
   function prepareNativeHighDepthCloneStroke(layer, destinationPoint) {
+    if (!cloneSource || cloneSource.layerId!==layer?.id) return false;
+    const offset={x:cloneSource.localPoint.x-destinationPoint.x,y:cloneSource.localPoint.y-destinationPoint.y};
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      highDepthCloneSnapshotBuffer=null;
+      highDepthCloneSnapshotWorkingSet=createSerializedPixelBufferTileWorkingSet(layer.highDepthSource);
+      return highDepthCloneSnapshotWorkingSet ? offset : false;
+    }
     const buffer=activeHighDepthBuffer(layer);
-    if (!cloneSource || cloneSource.layerId!==layer?.id || !buffer) return false;
+    if (!buffer) return false;
+    highDepthCloneSnapshotWorkingSet=null;
     highDepthCloneSnapshotBuffer=clonePixelBuffer(buffer);
-    return {
-      x:cloneSource.localPoint.x-destinationPoint.x,
-      y:cloneSource.localPoint.y-destinationPoint.y,
-    };
+    return offset;
   }
 
-  function applyNativeHighDepthCloneDab(
-    layer, point, offset, pointerEvent = null, healing = false,
-  ) {
+  function applyNativeHighDepthCloneDab(layer, point, offset, pointerEvent = null, healing = false) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      if(!highDepthCloneSnapshotWorkingSet || !offset)return false;
+      const targetBounds=brushBounds(point,radius);
+      const sourceBounds=expandedBounds(shiftedBounds(targetBounds,offset.x,offset.y),1);
+      const healingRadius=healing ? Math.max(2,Math.min(8,radius*.25)) : 0;
+      const bounds=unionBounds(
+        targetBounds,sourceBounds,
+        healing ? brushBounds(point,healingRadius) : null,
+        healing ? brushBounds({x:point.x+offset.x,y:point.y+offset.y},healingRadius) : null,
+      );
+      const targetRegion=workingSet.readRegion(bounds);
+      const snapshotRegion=highDepthCloneSnapshotWorkingSet.readRegion(bounds);
+      if(!targetRegion||!snapshotRegion||targetRegion.x!==snapshotRegion.x||targetRegion.y!==snapshotRegion.y||
+        targetRegion.buffer.width!==snapshotRegion.buffer.width||targetRegion.buffer.height!==snapshotRegion.buffer.height)return false;
+      const fn=targetRegion.buffer.model === 'cmyk' ? applyCmykPixelBufferCloneDab : applyPixelBufferCloneDab;
+      const changed=fn(targetRegion.buffer,snapshotRegion.buffer,
+        point.x-targetRegion.x,point.y-targetRegion.y,radius,offset,{
+          opacity:getToolOpacity(),healing,
+          isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),targetRegion.x,targetRegion.y),
+        });
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(targetRegion));
+    }
     const buffer=activeHighDepthBuffer(layer);
     if (!buffer || !highDepthCloneSnapshotBuffer || !offset) return false;
     const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferCloneDab : applyPixelBufferCloneDab;
-    const changed=fn(
-      buffer,highDepthCloneSnapshotBuffer,
-      point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),offset,
-      {
-        opacity:getToolOpacity(),
-        healing,
-        isAllowed:rasterSelectionPredicate(layer),
-      },
-    );
+    const changed=fn(buffer,highDepthCloneSnapshotBuffer,point.x,point.y,radius,offset,{
+      opacity:getToolOpacity(),healing,isAllowed:rasterSelectionPredicate(layer),
+    });
     return markNativeHighDepthRetouchChanged(changed);
   }
 
-  function nativeHighDepthCloneSegment(
-    layer, from, to, offset, pointerEvent = null, healing = false,
-  ) {
+  function nativeHighDepthCloneSegment(layer, from, to, offset, pointerEvent = null, healing = false) {
     const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);
     const distance=Math.hypot(to.x-from.x,to.y-from.y);
     const steps=Math.max(1,Math.ceil(distance/spacing));
     for (let index=1; index<=steps; index+=1) {
       const t=index/steps;
-      applyNativeHighDepthCloneDab(
-        layer,
-        {x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},
-        offset,pointerEvent,healing,
-      );
+      applyNativeHighDepthCloneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},offset,pointerEvent,healing);
     }
   }
 
   function applyNativeHighDepthSmudgeDab(layer, from, to, pointerEvent = null) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      const targetBounds=brushBounds(to,radius);
+      const sourceBounds=expandedBounds(shiftedBounds(targetBounds,from.x-to.x,from.y-to.y),1);
+      const region=workingSet.readRegion(unionBounds(targetBounds,sourceBounds));
+      if(!region)return false;
+      const fn=region.buffer.model === 'cmyk' ? applyCmykPixelBufferSmudgeDab : applyPixelBufferSmudgeDab;
+      const changed=fn(region.buffer,{x:from.x-region.x,y:from.y-region.y},{x:to.x-region.x,y:to.y-region.y},
+        radius,getSmudgeStrength(),{isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),region.x,region.y)});
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(region));
+    }
     const buffer=activeHighDepthBuffer(layer);
     if (!buffer) return false;
     const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferSmudgeDab : applyPixelBufferSmudgeDab;
-    const changed=fn(
-      buffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),getSmudgeStrength(),
-      {isAllowed:rasterSelectionPredicate(layer)},
-    );
+    const changed=fn(buffer,from,to,radius,getSmudgeStrength(),{isAllowed:rasterSelectionPredicate(layer)});
     return markNativeHighDepthRetouchChanged(changed);
   }
 

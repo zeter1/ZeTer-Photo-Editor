@@ -5867,7 +5867,7 @@ function cmykNeighborhoodMean(buffer,centerX,centerY,radius=3) {
   }
   return weight>1e-9?sum.map(value=>value/weight):[0,0,0,0];
 }
-function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount,{brighten=true,isAllowed=null,strokeCoverage=null}={}) {
+function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount,{brighten=true,isAllowed=null,strokeCoverage=null,originX=0,originY=0}={}) {
   validateCmykEditBuffer(buffer,'CMYK tone brush');
   const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
   if(strength<=0)return 0;
@@ -5880,7 +5880,7 @@ function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount,{brigh
     if(distance>brushRadius)continue;
     const offset=(y*buffer.width+x)*buffer.channels;
     if(cmykPixelAlpha01(buffer,offset)<=0)continue;
-    const increment=retouchStrokeIncrement(strokeCoverage,x,y,strength*highDepthBrushFalloff(distance,brushRadius));
+    const increment=retouchStrokeIncrement(strokeCoverage,x+originX,y+originY,strength*highDepthBrushFalloff(distance,brushRadius));
     if(increment<=0)continue;
     const factor=2**(-increment);
     let pixelChanged=false;
@@ -5899,7 +5899,7 @@ function applyCmykPixelBufferToneDab(buffer,centerX,centerY,radius,amount,{brigh
   }
   return changed;
 }
-function applyCmykPixelBufferBlurDab(buffer,centerX,centerY,radius,amount,{sampleRadius=3,isAllowed=null,strokeCoverage=null}={}) {
+function applyCmykPixelBufferBlurDab(buffer,centerX,centerY,radius,amount,{sampleRadius=3,isAllowed=null,strokeCoverage=null,originX=0,originY=0}={}) {
   validateCmykEditBuffer(buffer,'CMYK blur');
   const brushRadius=Math.max(.5,Number(radius)||.5),strength=clampPreview01(amount);
   const kernel=Math.max(1,Math.min(8,Math.trunc(sampleRadius)||3));
@@ -5913,7 +5913,7 @@ function applyCmykPixelBufferBlurDab(buffer,centerX,centerY,radius,amount,{sampl
     if(distance>brushRadius)continue;
     const offset=(y*buffer.width+x)*buffer.channels;
     if(cmykPixelAlpha01(buffer,offset)<=0)continue;
-    const increment=retouchStrokeIncrement(strokeCoverage,x,y,strength*highDepthBrushFalloff(distance,brushRadius));
+    const increment=retouchStrokeIncrement(strokeCoverage,x+originX,y+originY,strength*highDepthBrushFalloff(distance,brushRadius));
     if(increment<=0)continue;
     const sum=[0,0,0,0];let weight=0;
     for(let sy=Math.max(0,y-kernel);sy<=Math.min(buffer.height-1,y+kernel);sy+=1)for(let sx=Math.max(0,x-kernel);sx<=Math.min(buffer.width-1,x+kernel);sx+=1){
@@ -6116,7 +6116,7 @@ function retouchNeighborhoodMean(buffer,centerX,centerY,radius=3) {
   }
   return weight>1e-9?sum.map(value=>value/weight):[0,0,0];
 }
-function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount, { brighten=true, isAllowed=null, strokeCoverage=null } = {}) {
+function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount, { brighten=true, isAllowed=null, strokeCoverage=null, originX=0, originY=0 } = {}) {
   validateRgbRetouchBuffer(buffer,'High-depth tone brush');
   const brushRadius=Math.max(.5,Number(radius)||.5);
   const strength=clampPreview01(amount);
@@ -6131,7 +6131,7 @@ function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount, { bri
     const offset=(y*buffer.width+x)*buffer.channels;
     if(pixelAlpha01(buffer,offset)<=0)continue;
     const local=strength*highDepthBrushFalloff(distance,brushRadius);
-    const increment=retouchStrokeIncrement(strokeCoverage,x,y,local);
+    const increment=retouchStrokeIncrement(strokeCoverage,x+originX,y+originY,local);
     if(increment<=0)continue;
     const factor=2**(brighten?increment:-increment);
     const rgb=retouchReadRgb(buffer,offset).map(value=>value*factor);
@@ -6140,7 +6140,7 @@ function applyPixelBufferToneDab(buffer, centerX, centerY, radius, amount, { bri
   }
   return changed;
 }
-function applyPixelBufferBlurDab(buffer, centerX, centerY, radius, amount, { sampleRadius=3, isAllowed=null, strokeCoverage=null } = {}) {
+function applyPixelBufferBlurDab(buffer, centerX, centerY, radius, amount, { sampleRadius=3, isAllowed=null, strokeCoverage=null, originX=0, originY=0 } = {}) {
   validateRgbRetouchBuffer(buffer,'High-depth blur brush');
   const brushRadius=Math.max(.5,Number(radius)||.5);
   const strength=clampPreview01(amount);
@@ -6156,7 +6156,7 @@ function applyPixelBufferBlurDab(buffer, centerX, centerY, radius, amount, { sam
     const offset=(y*buffer.width+x)*buffer.channels;
     if(pixelAlpha01(buffer,offset)<=0)continue;
     const local=strength*highDepthBrushFalloff(distance,brushRadius);
-    const increment=retouchStrokeIncrement(strokeCoverage,x,y,local);
+    const increment=retouchStrokeIncrement(strokeCoverage,x+originX,y+originY,local);
     if(increment<=0)continue;
     const sum=[0,0,0];let weight=0;
     for(let sy=Math.max(0,y-kernel);sy<=Math.min(buffer.height-1,y+kernel);sy+=1){
@@ -6656,6 +6656,108 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     }
   }
 
+
+  function normalizeRegionBounds(bounds) {
+    if (!bounds || typeof bounds !== 'object') throw new TypeError('Tiled PixelBuffer region bounds обязательны');
+    const values = [bounds.left, bounds.top, bounds.right, bounds.bottom].map(Number);
+    if (!values.every(Number.isFinite)) throw new TypeError('Tiled PixelBuffer region bounds должны быть конечными числами');
+    const left = Math.max(0, Math.min(safe.width, Math.floor(values[0])));
+    const top = Math.max(0, Math.min(safe.height, Math.floor(values[1])));
+    const right = Math.max(0, Math.min(safe.width, Math.ceil(values[2])));
+    const bottom = Math.max(0, Math.min(safe.height, Math.ceil(values[3])));
+    if (right <= left || bottom <= top) return null;
+    return { left, top, right, bottom, width:right-left, height:bottom-top };
+  }
+
+  function readRegion(bounds) {
+    const area = normalizeRegionBounds(bounds);
+    if (!area) return null;
+    const Expected = expectedArrayConstructor(safe.bitsPerChannel);
+    const data = new Expected(area.width * area.height * targetChannels);
+    for (let index = 0; index < safe.tiles.length; index += 1) {
+      const tile = safe.tiles[index];
+      if (!intersects(tile, area)) continue;
+      const buffer = load(index);
+      const left = Math.max(area.left, tile.x);
+      const top = Math.max(area.top, tile.y);
+      const right = Math.min(area.right, tile.x + tile.width);
+      const bottom = Math.min(area.bottom, tile.y + tile.height);
+      for (let y = top; y < bottom; y += 1) {
+        const sourceOffset = ((y - tile.y) * tile.width + (left - tile.x)) * targetChannels;
+        const targetOffset = ((y - area.top) * area.width + (left - area.left)) * targetChannels;
+        data.set(buffer.data.subarray(sourceOffset, sourceOffset + (right - left) * targetChannels), targetOffset);
+      }
+    }
+    return {
+      x:area.left,
+      y:area.top,
+      buffer:createPixelBuffer({
+        width:area.width,
+        height:area.height,
+        model:safe.model,
+        channels:targetChannels,
+        bitsPerChannel:safe.bitsPerChannel,
+        colorSpace:safe.colorSpace,
+        alphaMode:promoteAlpha ? 'straight' : safe.alphaMode,
+        profileName:safe.profileName,
+        data,
+      }),
+    };
+  }
+
+  function writeRegion(region) {
+    const x = Math.trunc(Number(region?.x));
+    const y = Math.trunc(Number(region?.y));
+    const buffer = region?.buffer;
+    if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || !isPixelBuffer(buffer)) {
+      throw new TypeError('Tiled PixelBuffer writeRegion требует region из readRegion()');
+    }
+    if (
+      x < 0 || y < 0 ||
+      x + buffer.width > safe.width || y + buffer.height > safe.height ||
+      buffer.model !== safe.model ||
+      buffer.channels !== targetChannels ||
+      buffer.bitsPerChannel !== safe.bitsPerChannel
+    ) throw new TypeError('Tiled PixelBuffer writeRegion несовместим с working set');
+
+    const bounds = { left:x, top:y, right:x+buffer.width, bottom:y+buffer.height };
+    let changedPixels = 0;
+    for (let index = 0; index < safe.tiles.length; index += 1) {
+      const tile = safe.tiles[index];
+      if (!intersects(tile, bounds)) continue;
+      const target = load(index);
+      const left = Math.max(bounds.left, tile.x);
+      const top = Math.max(bounds.top, tile.y);
+      const right = Math.min(bounds.right, tile.x + tile.width);
+      const bottom = Math.min(bounds.bottom, tile.y + tile.height);
+      let tileChanged = false;
+      for (let globalY = top; globalY < bottom; globalY += 1) {
+        for (let globalX = left; globalX < right; globalX += 1) {
+          const sourceOffset = ((globalY - y) * buffer.width + (globalX - x)) * targetChannels;
+          const targetOffset = ((globalY - tile.y) * tile.width + (globalX - tile.x)) * targetChannels;
+          let pixelChanged = false;
+          for (let channel = 0; channel < targetChannels; channel += 1) {
+            if (!Object.is(target.data[targetOffset + channel], buffer.data[sourceOffset + channel])) {
+              pixelChanged = true;
+              break;
+            }
+          }
+          if (!pixelChanged) continue;
+          for (let channel = 0; channel < targetChannels; channel += 1) {
+            target.data[targetOffset + channel] = buffer.data[sourceOffset + channel];
+          }
+          changedPixels += 1;
+          tileChanged = true;
+        }
+      }
+      if (tileChanged) {
+        dirty.add(index);
+        previewDirty.add(index);
+      }
+    }
+    return changedPixels;
+  }
+
   function serialize() {
     const tiles = [];
     let total = 0;
@@ -6699,6 +6801,8 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     promotedAlpha:promoteAlpha,
     visit,
     forEachPreviewDirty,
+    readRegion,
+    writeRegion,
     serialize,
     get loadedTileCount() { return loaded.size; },
     get dirtyTileCount() { return dirty.size; },
@@ -16801,6 +16905,7 @@ function createRetouchController({
   getBrushContext,
   getDrag,
   getHighDepthPaintBuffer,
+  getHighDepthPaintWorkingSet = () => null,
   getHighDepthPaintLayerId,
   markHighDepthPreviewDirty,
   brushWidthForPointer,
@@ -16816,6 +16921,7 @@ function createRetouchController({
   let cloneSource = null;
   let cloneSnapshotCanvas = null;
   let highDepthCloneSnapshotBuffer = null;
+  let highDepthCloneSnapshotWorkingSet = null;
   let blurScratchCanvas = null;
   let blurScratchCtx = null;
   let retouchScratchCanvas = null;
@@ -16840,6 +16946,7 @@ function createRetouchController({
   function resetStroke() {
     cloneSnapshotCanvas = null;
     highDepthCloneSnapshotBuffer = null;
+    highDepthCloneSnapshotWorkingSet = null;
   }
 
   function ensureRetouchScratch(width, height) {
@@ -17081,6 +17188,40 @@ function createRetouchController({
     return getHighDepthPaintLayerId()===layer?.id && buffer ? buffer : null;
   }
 
+  function activeHighDepthWorkingSet(layer) {
+    const workingSet=getHighDepthPaintWorkingSet();
+    return getHighDepthPaintLayerId()===layer?.id && workingSet ? workingSet : null;
+  }
+
+  function offsetSelectionPredicate(predicate, offsetX, offsetY) {
+    return typeof predicate === 'function' ? (x,y)=>predicate(x+offsetX,y+offsetY) : null;
+  }
+
+  function brushBounds(point, radius, padding = 0) {
+    const extent=Math.max(.5,Number(radius)||.5)+Math.max(0,Number(padding)||0);
+    return {left:point.x-extent,top:point.y-extent,right:point.x+extent,bottom:point.y+extent};
+  }
+
+  function shiftedBounds(bounds, dx, dy) {
+    return {left:bounds.left+dx,top:bounds.top+dy,right:bounds.right+dx,bottom:bounds.bottom+dy};
+  }
+
+  function expandedBounds(bounds, padding) {
+    const amount=Math.max(0,Number(padding)||0);
+    return {left:bounds.left-amount,top:bounds.top-amount,right:bounds.right+amount,bottom:bounds.bottom+amount};
+  }
+
+  function unionBounds(...values) {
+    const bounds=values.filter(Boolean);
+    if(!bounds.length)return null;
+    return {
+      left:Math.min(...bounds.map(value=>value.left)),
+      top:Math.min(...bounds.map(value=>value.top)),
+      right:Math.max(...bounds.map(value=>value.right)),
+      bottom:Math.max(...bounds.map(value=>value.bottom)),
+    };
+  }
+
   function markNativeHighDepthRetouchChanged(changed) {
     if (changed>0) {
       markHighDepthPreviewDirty();
@@ -17091,18 +17232,28 @@ function createRetouchController({
   }
 
   function applyNativeHighDepthToneDab(layer, point, pointerEvent = null, brighten = true) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const strength=brighten ? getDodgeStrength() : getBurnStrength();
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      const region=workingSet.readRegion(brushBounds(point,radius));
+      if(!region)return false;
+      const fn=region.buffer.model === 'cmyk' ? applyCmykPixelBufferToneDab : applyPixelBufferToneDab;
+      const changed=fn(region.buffer,point.x-region.x,point.y-region.y,radius,strength,{
+        brighten,
+        isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),region.x,region.y),
+        strokeCoverage:getDrag()?.toneCoverage,
+        originX:region.x,originY:region.y,
+      });
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(region));
+    }
     const buffer=activeHighDepthBuffer(layer);
     if (!buffer) return false;
-    const strength=brighten ? getDodgeStrength() : getBurnStrength();
     const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferToneDab : applyPixelBufferToneDab;
-    const changed=fn(
-      buffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),strength,
-      {
-        brighten,
-        isAllowed:rasterSelectionPredicate(layer),
-        strokeCoverage:getDrag()?.toneCoverage,
-      },
-    );
+    const changed=fn(buffer,point.x,point.y,radius,strength,{
+      brighten,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:getDrag()?.toneCoverage,
+    });
     return markNativeHighDepthRetouchChanged(changed);
   }
 
@@ -17112,25 +17263,33 @@ function createRetouchController({
     const steps=Math.max(1,Math.ceil(distance/spacing));
     for (let index=1; index<=steps; index+=1) {
       const t=index/steps;
-      applyNativeHighDepthToneDab(
-        layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},
-        pointerEvent,brighten,
-      );
+      applyNativeHighDepthToneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent,brighten);
     }
   }
 
   function applyNativeHighDepthBlurDab(layer, point, pointerEvent = null) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const sampleRadius=3;
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      const region=workingSet.readRegion(brushBounds(point,radius,sampleRadius));
+      if(!region)return false;
+      const fn=region.buffer.model === 'cmyk' ? applyCmykPixelBufferBlurDab : applyPixelBufferBlurDab;
+      const changed=fn(region.buffer,point.x-region.x,point.y-region.y,radius,getBlurStrength(),{
+        sampleRadius,
+        isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),region.x,region.y),
+        strokeCoverage:getDrag()?.blurCoverage,
+        originX:region.x,originY:region.y,
+      });
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(region));
+    }
     const buffer=activeHighDepthBuffer(layer);
     if (!buffer) return false;
     const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferBlurDab : applyPixelBufferBlurDab;
-    const changed=fn(
-      buffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),getBlurStrength(),
-      {
-        sampleRadius:3,
-        isAllowed:rasterSelectionPredicate(layer),
-        strokeCoverage:getDrag()?.blurCoverage,
-      },
-    );
+    const changed=fn(buffer,point.x,point.y,radius,getBlurStrength(),{
+      sampleRadius,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:getDrag()?.blurCoverage,
+    });
     return markNativeHighDepthRetouchChanged(changed);
   }
 
@@ -17140,65 +17299,89 @@ function createRetouchController({
     const steps=Math.max(1,Math.ceil(distance/spacing));
     for (let index=1; index<=steps; index+=1) {
       const t=index/steps;
-      applyNativeHighDepthBlurDab(
-        layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},
-        pointerEvent,
-      );
+      applyNativeHighDepthBlurDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent);
     }
   }
 
   function prepareNativeHighDepthCloneStroke(layer, destinationPoint) {
+    if (!cloneSource || cloneSource.layerId!==layer?.id) return false;
+    const offset={x:cloneSource.localPoint.x-destinationPoint.x,y:cloneSource.localPoint.y-destinationPoint.y};
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      highDepthCloneSnapshotBuffer=null;
+      highDepthCloneSnapshotWorkingSet=createSerializedPixelBufferTileWorkingSet(layer.highDepthSource);
+      return highDepthCloneSnapshotWorkingSet ? offset : false;
+    }
     const buffer=activeHighDepthBuffer(layer);
-    if (!cloneSource || cloneSource.layerId!==layer?.id || !buffer) return false;
+    if (!buffer) return false;
+    highDepthCloneSnapshotWorkingSet=null;
     highDepthCloneSnapshotBuffer=clonePixelBuffer(buffer);
-    return {
-      x:cloneSource.localPoint.x-destinationPoint.x,
-      y:cloneSource.localPoint.y-destinationPoint.y,
-    };
+    return offset;
   }
 
-  function applyNativeHighDepthCloneDab(
-    layer, point, offset, pointerEvent = null, healing = false,
-  ) {
+  function applyNativeHighDepthCloneDab(layer, point, offset, pointerEvent = null, healing = false) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      if(!highDepthCloneSnapshotWorkingSet || !offset)return false;
+      const targetBounds=brushBounds(point,radius);
+      const sourceBounds=expandedBounds(shiftedBounds(targetBounds,offset.x,offset.y),1);
+      const healingRadius=healing ? Math.max(2,Math.min(8,radius*.25)) : 0;
+      const bounds=unionBounds(
+        targetBounds,sourceBounds,
+        healing ? brushBounds(point,healingRadius) : null,
+        healing ? brushBounds({x:point.x+offset.x,y:point.y+offset.y},healingRadius) : null,
+      );
+      const targetRegion=workingSet.readRegion(bounds);
+      const snapshotRegion=highDepthCloneSnapshotWorkingSet.readRegion(bounds);
+      if(!targetRegion||!snapshotRegion||targetRegion.x!==snapshotRegion.x||targetRegion.y!==snapshotRegion.y||
+        targetRegion.buffer.width!==snapshotRegion.buffer.width||targetRegion.buffer.height!==snapshotRegion.buffer.height)return false;
+      const fn=targetRegion.buffer.model === 'cmyk' ? applyCmykPixelBufferCloneDab : applyPixelBufferCloneDab;
+      const changed=fn(targetRegion.buffer,snapshotRegion.buffer,
+        point.x-targetRegion.x,point.y-targetRegion.y,radius,offset,{
+          opacity:getToolOpacity(),healing,
+          isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),targetRegion.x,targetRegion.y),
+        });
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(targetRegion));
+    }
     const buffer=activeHighDepthBuffer(layer);
     if (!buffer || !highDepthCloneSnapshotBuffer || !offset) return false;
     const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferCloneDab : applyPixelBufferCloneDab;
-    const changed=fn(
-      buffer,highDepthCloneSnapshotBuffer,
-      point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),offset,
-      {
-        opacity:getToolOpacity(),
-        healing,
-        isAllowed:rasterSelectionPredicate(layer),
-      },
-    );
+    const changed=fn(buffer,highDepthCloneSnapshotBuffer,point.x,point.y,radius,offset,{
+      opacity:getToolOpacity(),healing,isAllowed:rasterSelectionPredicate(layer),
+    });
     return markNativeHighDepthRetouchChanged(changed);
   }
 
-  function nativeHighDepthCloneSegment(
-    layer, from, to, offset, pointerEvent = null, healing = false,
-  ) {
+  function nativeHighDepthCloneSegment(layer, from, to, offset, pointerEvent = null, healing = false) {
     const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);
     const distance=Math.hypot(to.x-from.x,to.y-from.y);
     const steps=Math.max(1,Math.ceil(distance/spacing));
     for (let index=1; index<=steps; index+=1) {
       const t=index/steps;
-      applyNativeHighDepthCloneDab(
-        layer,
-        {x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},
-        offset,pointerEvent,healing,
-      );
+      applyNativeHighDepthCloneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},offset,pointerEvent,healing);
     }
   }
 
   function applyNativeHighDepthSmudgeDab(layer, from, to, pointerEvent = null) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      const targetBounds=brushBounds(to,radius);
+      const sourceBounds=expandedBounds(shiftedBounds(targetBounds,from.x-to.x,from.y-to.y),1);
+      const region=workingSet.readRegion(unionBounds(targetBounds,sourceBounds));
+      if(!region)return false;
+      const fn=region.buffer.model === 'cmyk' ? applyCmykPixelBufferSmudgeDab : applyPixelBufferSmudgeDab;
+      const changed=fn(region.buffer,{x:from.x-region.x,y:from.y-region.y},{x:to.x-region.x,y:to.y-region.y},
+        radius,getSmudgeStrength(),{isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),region.x,region.y)});
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(region));
+    }
     const buffer=activeHighDepthBuffer(layer);
     if (!buffer) return false;
     const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferSmudgeDab : applyPixelBufferSmudgeDab;
-    const changed=fn(
-      buffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),getSmudgeStrength(),
-      {isAllowed:rasterSelectionPredicate(layer)},
-    );
+    const changed=fn(buffer,from,to,radius,getSmudgeStrength(),{isAllowed:rasterSelectionPredicate(layer)});
     return markNativeHighDepthRetouchChanged(changed);
   }
 
@@ -17323,7 +17506,7 @@ function createPaintGestureController({
     const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
       ? await rasterEdit.ensureNativeHighDepthPaintBuffer(owner, layer, {
           requireAlpha:tool === 'eraser',
-          preferTiled:tool === 'brush' || tool === 'eraser',
+          preferTiled:true,
         })
       : false;
     if (!nativeHighDepth && !await rasterEdit.ensureRasterBuffer(owner, layer)) return null;
@@ -17387,13 +17570,13 @@ function createPaintGestureController({
 
     if (tool === 'dodge' || tool === 'burn') {
       drag.toneCoverage = {
-        width:drag.nativeHighDepth ? rasterEdit.highDepthPaintBuffer.width : rasterEdit.brushCanvas.width,
+        width:drag.nativeHighDepth ? (rasterEdit.highDepthPaintWorkingSet?.width ?? rasterEdit.highDepthPaintBuffer?.width ?? layer.width) : rasterEdit.brushCanvas.width,
         tiles:new Map(),
       };
     }
     if (tool === 'blur') {
       drag.blurCoverage = {
-        width:drag.nativeHighDepth ? rasterEdit.highDepthPaintBuffer.width : rasterEdit.brushCanvas.width,
+        width:drag.nativeHighDepth ? (rasterEdit.highDepthPaintWorkingSet?.width ?? rasterEdit.highDepthPaintBuffer?.width ?? layer.width) : rasterEdit.brushCanvas.width,
         tiles:new Map(),
       };
     }
@@ -26077,6 +26260,7 @@ const retouchController = createRetouchController({
   getBrushContext: () => rasterEdit.brushContext,
   getDrag: () => drag,
   getHighDepthPaintBuffer: () => rasterEdit.highDepthPaintBuffer,
+  getHighDepthPaintWorkingSet: () => rasterEdit.highDepthPaintWorkingSet,
   getHighDepthPaintLayerId: () => rasterEdit.highDepthPaintLayerId,
   markHighDepthPreviewDirty: rasterEdit.markHighDepthPreviewDirty,
   brushWidthForPointer,

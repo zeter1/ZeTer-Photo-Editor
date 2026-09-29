@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-29 — Tiled native retouch regions and lazy Clone/Heal snapshots
+
+- Memory/runtime: native v2 Clone/Heal/Blur/Smudge/Dodge/Burn now reuse the stroke-scoped tile working set instead of materializing the full 16/32-bit RGB/CMYK plane before editing.
+- Neighborhood correctness: the working set exposes bounded region reads/writes; Blur reads kernel halo across tile boundaries, Smudge reads the union of destination/source footprints, and only pixels that actually change mark tiles dirty.
+- Clone/Heal semantics: stroke start creates a separate lazy read-only tile working set from the original serialized source. Source tiles are decoded on demand, so later dab samples remain immutable without a mandatory full-plane clone.
+- Dodge/Burn/Blur coverage keeps global pixel coordinates across moving regions, preserving overlap behavior independently of tile boundaries.
+- Tests/docs: regressions cover region dirty identity, lazy tiled Dodge, cross-tile Blur, Clone snapshot routing and retouch gesture opt-in; TILED_RASTER/AGENTS/PROJECT/CODEMAP/README were updated for Stage 17d.
+
 ### 2026-09-29 — Tiled interactive Brush/Eraser working set
 
 - Memory/runtime: interactive native Brush/Eraser on `zpe-pixel-buffer-source-v2` no longer materialize the full 16/32-bit RGB/CMYK plane at stroke start; a stroke-scoped working set lazily decodes only intersecting tiles and keeps dirty/preview-dirty tile sets.

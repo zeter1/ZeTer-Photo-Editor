@@ -38,6 +38,7 @@ function makeHarness({
   const ensureCalls = [];
   const persistArgs = [];
   const nativePersistArgs = [];
+  const nativeEnsureOptions = [];
   let previewSawPaintDrag = false;
   const commits = [];
   const statuses = [];
@@ -50,7 +51,8 @@ function makeHarness({
     brushLayerId:null,
     highDepthPaintBuffer:null,
     highDepthPaintLayerId:null,
-    async ensureNativeHighDepthPaintBuffer(owner, layer) {
+    async ensureNativeHighDepthPaintBuffer(owner, layer, options = {}) {
+      nativeEnsureOptions.push(options);
       if (!nativeHighDepth) return false;
       this.highDepthPaintBuffer = { width:layer.width, height:layer.height };
       this.highDepthPaintLayerId = layer.id;
@@ -93,6 +95,14 @@ function makeHarness({
   const retouch = {
     getCloneSource:() => null,
     resetStroke() {},
+    applyNativeHighDepthToneDab:() => true,
+    nativeHighDepthToneSegment:() => true,
+    applyNativeHighDepthBlurDab:() => true,
+    nativeHighDepthBlurSegment:() => true,
+    prepareNativeHighDepthCloneStroke:() => ({x:0,y:0}),
+    applyNativeHighDepthCloneDab:() => true,
+    nativeHighDepthCloneSegment:() => true,
+    nativeHighDepthSmudgeSegment:() => true,
   };
 
   const controller = createPaintGestureController({
@@ -147,6 +157,7 @@ function makeHarness({
     getPersistArgs:() => persistArgs,
     getNativePersistCalls:() => nativePersistCalls,
     getNativePersistArgs:() => nativePersistArgs,
+    getNativeEnsureOptions:() => nativeEnsureOptions,
     getPersisting:() => persisting,
     setDocument:value => { activeDocument = value; },
     previewSawPaintDrag:() => previewSawPaintDrag,
@@ -329,4 +340,18 @@ test('native high-depth gesture hands exact owner/target to persistence and supp
   assert.equal(harness.getPersisting(), false);
   assert.deepEqual(harness.commits, []);
   assert.notEqual(harness.statuses.at(-1), 'Готово');
+});
+
+
+test('Stage 17d native retouch opts into the tiled v2 working set', async () => {
+  const doc = createDocument({ width:8, height:8 });
+  const layer = createRasterLayer({ name:'HDR retouch', width:8, height:8, dataUrl:null });
+  layer.highDepthSource = { model:'rgb', kind:'zpe-pixel-buffer-source-v2' };
+  addLayer(doc, layer);
+  const harness = makeHarness({doc,atPoint:() => layer,nativeHighDepth:true});
+  assert.equal(await harness.controller.begin({point:{x:2,y:2},tool:'dodge',canContinue:() => true}),true);
+  assert.equal(harness.getNativeEnsureOptions().at(-1)?.preferTiled,true);
+  assert.equal(harness.getNativeEnsureOptions().at(-1)?.requireAlpha,false);
+  assert.equal(harness.getDrag()?.nativeHighDepth,true);
+  assert.equal(harness.getDrag()?.toneCoverage?.width,8);
 });
