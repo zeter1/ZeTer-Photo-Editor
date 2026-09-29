@@ -204,6 +204,8 @@ test('native project ownership and build routing stay separated from import poli
   ]);
   assert.match(main, /from '\.\/document\/project-controller\.js'/);
   assert.match(main, /createProjectController\(\{/);
+  assert.match(main, /getCurrentSession:\s*\(\) => currentSession\(\)/);
+  assert.match(main, /saveContent:\s*session => saveSmartObjectContent\(session\)/);
   assert.doesNotMatch(main, /async function openProject\(/);
   assert.doesNotMatch(main, /function saveProject\(/);
   assert.match(importController, /openProject/);
