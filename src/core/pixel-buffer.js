@@ -1415,6 +1415,57 @@ export function forEachSerializedPixelBufferTile(source,visitor,{maxBytes=MAX_PI
   return count;
 }
 
+export function mutateSerializedPixelBufferTiles(source, visitor, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  requireAlpha = false,
+} = {}) {
+  if (typeof visitor !== 'function') throw new TypeError('Tiled PixelBuffer mutation visitor должен быть функцией');
+  const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
+  if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
+  if (safe.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+  const range = channelRange(safe.model);
+  const targetChannels = requireAlpha ? range.max : safe.channels;
+  const targetRawBytes = expectedSourceBytes({ ...safe, channels:targetChannels });
+  const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
+  if (!targetRawBytes || targetRawBytes > limit) {
+    throw new RangeError('Tiled PixelBuffer mutation требует ' + targetRawBytes + ' байт; лимит ' + limit + ' байт');
+  }
+  const promoteAlpha = targetChannels !== safe.channels;
+  const tiles = [];
+  let changed = 0;
+  let changedTiles = 0;
+  let total = 0;
+  for (let index = 0; index < safe.tiles.length; index += 1) {
+    const tile = safe.tiles[index];
+    let buffer = decodeSerializedTile(safe, tile);
+    if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+    const rawResult = visitor({
+      index, count:safe.tiles.length, x:tile.x, y:tile.y,
+      width:tile.width, height:tile.height, buffer,
+    });
+    const delta = rawResult == null || rawResult === false ? 0 : rawResult === true ? 1 : Number(rawResult);
+    if (!Number.isSafeInteger(delta) || delta < 0) {
+      throw new TypeError('Tiled PixelBuffer mutation visitor должен вернуть неотрицательное целое число изменений');
+    }
+    changed += delta;
+    if (!Number.isSafeInteger(changed)) throw new RangeError('Tiled PixelBuffer mutation change count переполнен');
+    if (!promoteAlpha && delta === 0) {
+      tiles.push(tile);
+      total += tile.rawBytes;
+      continue;
+    }
+    const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
+    total += bytes.byteLength;
+    tiles.push({ ...tile, rawBytes:bytes.byteLength, dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME) });
+    changedTiles += 1;
+  }
+  if (total !== targetRawBytes) throw new RangeError('Tiled PixelBuffer mutation имеет несогласованный byte budget');
+  return {
+    source:{ ...safe, channels:targetChannels, alphaMode:targetChannels === range.max ? 'straight' : 'none', rawBytes:targetRawBytes, tiles },
+    changed, changedTiles, promotedAlpha:promoteAlpha,
+  };
+}
+
 export function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
   const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
   if(safe.kind===PIXEL_BUFFER_SOURCE_KIND){

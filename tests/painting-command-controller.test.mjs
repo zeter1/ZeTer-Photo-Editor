@@ -38,6 +38,7 @@ function makeHarness({
   selectionIntersects = () => true,
   persistResult = true,
   highDepthPersistResult = true,
+  tiledPersistResult = null,
   highDepthBuffer = null,
   pixels,
 } = {}) {
@@ -48,6 +49,8 @@ function makeHarness({
   let resetPaintStateCalls = 0;
   let highDepthPersistCalls = 0;
   const highDepthPersistArgs = [];
+  let tiledPersistCalls = 0;
+  const tiledPersistArgs = [];
   const commits = [];
   const statuses = [];
   const clips = [];
@@ -57,6 +60,13 @@ function makeHarness({
     brushCanvas:null,
     brushContext:null,
     editableHighDepthBuffer() { return highDepthBuffer; },
+    async persistTiledHighDepthMutation(owner, layer, visitor, options) {
+      tiledPersistCalls += 1;
+      tiledPersistArgs.push([owner, layer, visitor, options]);
+      return typeof tiledPersistResult === 'function'
+        ? tiledPersistResult(owner, layer, visitor, options)
+        : tiledPersistResult;
+    },
     async persistHighDepthMutation(owner, layer, buffer, options) {
       highDepthPersistCalls += 1;
       highDepthPersistArgs.push([owner, layer, buffer, options]);
@@ -137,6 +147,8 @@ function makeHarness({
     getResetPaintStateCalls:() => resetPaintStateCalls,
     getHighDepthPersistCalls:() => highDepthPersistCalls,
     getHighDepthPersistArgs:() => highDepthPersistArgs,
+    getTiledPersistCalls:() => tiledPersistCalls,
+    getTiledPersistArgs:() => tiledPersistArgs,
   };
 }
 
@@ -394,5 +406,26 @@ test('content-aware fill keeps native high-depth CMYK samples and exact high-dep
   assert.equal(h.getResetPaintStateCalls(),1);
   assert.deepEqual(h.commits,['Контент-заливка']);
   for(let channel=5;channel<9;channel+=1) assert.ok(Math.abs(buffer.data[channel]-.5)<1e-6);
+  assert.equal(h.getPersisting(),false);
+});
+
+
+test('Stage 17b line and selection clear prefer the tiled mutation bridge over contiguous materialization',async()=>{
+  const doc=createDocument({width:2,height:1});
+  const layer=createRasterLayer({name:'Tiled HDR',width:2,height:1,dataUrl:null});
+  layer.highDepthSource={kind:'zpe-pixel-buffer-source-v2',model:'rgb'};
+  addLayer(doc,layer);
+  const h=makeHarness({
+    doc,selectionActive:true,selectionPredicate:()=>()=>true,selectionIntersects:()=>true,
+    tiledPersistResult:{changed:2,changedTiles:1,applied:true,stale:false},
+  });
+  h.rasterEdit.editableHighDepthBuffer=()=>{throw new Error('contiguous high-depth fallback must not run');};
+  assert.equal(await h.controller.drawLine({x:.5,y:.5},{x:1.5,y:.5}),true);
+  assert.equal(await h.controller.clearSelection(),true);
+  assert.equal(h.getTiledPersistCalls(),2);
+  assert.equal(h.getHighDepthPersistCalls(),0);
+  assert.equal(typeof h.getTiledPersistArgs()[0][2],'function');
+  assert.equal(h.getTiledPersistArgs()[1][3].requireAlpha,true);
+  assert.deepEqual(h.commits,['Нарисовать линию','Очистить выделение']);
   assert.equal(h.getPersisting(),false);
 });

@@ -70,6 +70,11 @@ export function createRasterCommandController({
     return selection?.predicate?.(layer, selectionSnapshot) ?? null;
   }
 
+  function offsetPredicate(predicate, offsetX, offsetY) {
+    if (typeof predicate !== 'function') return null;
+    return (x, y) => predicate(x + offsetX, y + offsetY);
+  }
+
   function resetNativeState() {
     rasterEdit.clearBrushBuffer();
     state.resetPaintState?.();
@@ -104,25 +109,47 @@ export function createRasterCommandController({
       const from = target.toLocal(start, layer);
       const to = target.toLocal(end, layer);
       if (layer.highDepthSource) {
+        const rgb = hexToRgb(tools.primaryColor());
+        const basePredicate = selectionPredicate(layer);
+        const tiled = typeof rasterEdit.persistTiledHighDepthMutation === 'function'
+          ? await rasterEdit.persistTiledHighDepthMutation(doc, layer, ({ x, y, buffer }) => {
+              const localFrom = { x:from.x - x, y:from.y - y };
+              const localTo = { x:to.x - x, y:to.y - y };
+              const isAllowed = offsetPredicate(basePredicate, x, y);
+              return buffer.model === 'cmyk'
+                ? applyCmykPixelBufferStrokeSegment(
+                    buffer, localFrom, localTo, editRadius(), tools.rgbToCmyk(rgb),
+                    { opacity:editOpacity(), isAllowed },
+                  )
+                : applyPixelBufferStrokeSegment(
+                    buffer, localFrom, localTo, editRadius(), rgb,
+                    { opacity:editOpacity(), isAllowed },
+                  );
+            })
+          : null;
+        if (tiled != null) {
+          if (tiled.stale) return false;
+          if (!tiled.changed) {
+            status('Линия не изменила high-depth слой');
+            return false;
+          }
+          if (!tiled.applied) return false;
+          resetNativeState();
+          doc.selectedLayerId = layer.id;
+          ui?.commit?.('Нарисовать линию');
+          status(`Линия добавлена в tiled high-depth слой «${layer.name}» · ${tiled.changedTiles} tiles`);
+          return true;
+        }
         const buffer = rasterEdit.editableHighDepthBuffer(layer);
         if (buffer) {
-          const rgb = hexToRgb(tools.primaryColor());
           const changed = buffer.model === 'cmyk'
             ? applyCmykPixelBufferStrokeSegment(
-                buffer,
-                from,
-                to,
-                editRadius(),
-                tools.rgbToCmyk(rgb),
-                { opacity:editOpacity(), isAllowed:selectionPredicate(layer) },
+                buffer, from, to, editRadius(), tools.rgbToCmyk(rgb),
+                { opacity:editOpacity(), isAllowed:basePredicate },
               )
             : applyPixelBufferStrokeSegment(
-                buffer,
-                from,
-                to,
-                editRadius(),
-                rgb,
-                { opacity:editOpacity(), isAllowed:selectionPredicate(layer) },
+                buffer, from, to, editRadius(), rgb,
+                { opacity:editOpacity(), isAllowed:basePredicate },
               );
           if (!changed) {
             status('Линия не изменила high-depth слой');
@@ -405,9 +432,34 @@ export function createRasterCommandController({
 
     try {
       if (layer.highDepthSource) {
+        const basePredicate = selectionPredicate(layer, selectionSnapshot);
+        const tiled = typeof rasterEdit.persistTiledHighDepthMutation === 'function'
+          ? await rasterEdit.persistTiledHighDepthMutation(
+              doc, layer,
+              ({ x, y, buffer }) => clearPixelBufferPixels(
+                buffer, { isAllowed:offsetPredicate(basePredicate, x, y) },
+              ),
+              { requireAlpha:true, isContinuationCurrent:continuationCurrent },
+            )
+          : null;
+        if (tiled != null) {
+          if (tiled.stale) {
+            resetNativeState();
+            return false;
+          }
+          if (!tiled.changed) {
+            status('В выделении нет непрозрачных high-depth пикселей');
+            return false;
+          }
+          if (!tiled.applied) return false;
+          resetNativeState();
+          ui?.commit?.(historyLabel);
+          status(`${successStatus} · tiled high-depth: ${tiled.changed.toLocaleString('ru-RU')} px`);
+          return true;
+        }
         const buffer = rasterEdit.editableHighDepthBuffer(layer, { requireAlpha:true });
         if (buffer) {
-          const cleared = clearPixelBufferPixels(buffer, { isAllowed:selectionPredicate(layer, selectionSnapshot) });
+          const cleared = clearPixelBufferPixels(buffer, { isAllowed:basePredicate });
           if (!cleared) {
             status('В выделении нет непрозрачных high-depth пикселей');
             return false;

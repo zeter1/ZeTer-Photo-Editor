@@ -53,14 +53,24 @@ export function createSelectionRasterMutationController({
 
   async function prepareClearedHighDepthMutation(layer, selectionSnapshot) {
     if (!layer?.highDepthSource) return null;
+    const basePredicate = selection.predicate(layer, selectionSnapshot);
+    if (typeof rasterEdit.prepareTiledHighDepthMutation === 'function') {
+      const tiled = await rasterEdit.prepareTiledHighDepthMutation(
+        layer,
+        ({ x, y, buffer }) => clearPixelBufferPixels(buffer, {
+          isAllowed:typeof basePredicate === 'function'
+            ? (localX, localY) => basePredicate(localX + x, localY + y)
+            : null,
+        }),
+        { requireAlpha:true },
+      );
+      if (tiled) return { cleared:tiled.changed, mutation:tiled.mutation };
+    }
     const buffer = rasterEdit.editableHighDepthBuffer(layer, { requireAlpha:true });
     if (!buffer) return null;
-    const cleared = clearPixelBufferPixels(buffer, { isAllowed:selection.predicate(layer, selectionSnapshot) });
+    const cleared = clearPixelBufferPixels(buffer, { isAllowed:basePredicate });
     if (!cleared) return { cleared:0, mutation:null };
-    return {
-      cleared,
-      mutation:await rasterEdit.prepareHighDepthMutation(layer, buffer),
-    };
+    return { cleared, mutation:await rasterEdit.prepareHighDepthMutation(layer, buffer) };
   }
 
   async function prepareClearedRasterDataUrl(layer, selectionSnapshot) {
@@ -174,8 +184,10 @@ export function createSelectionRasterMutationController({
         if (layer.type === 'raster' && working.highDepthSource) {
           const highDepth = await prepareHighDepthMutation(working, frozenSelection);
           if (!continuationCurrent()) return null;
-          if (highDepth?.mutation) {
-            prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
+          if (highDepth) {
+            if (highDepth.mutation) {
+              prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
+            }
             continue;
           }
         }
@@ -189,6 +201,7 @@ export function createSelectionRasterMutationController({
         status('Очистка выделения отменена: активный документ изменился');
         return null;
       }
+      if (!prepared.length) return { cleared:0, locked, rasterized };
 
       const publication = prepared.map(entry => ({
         ...entry,

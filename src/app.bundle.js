@@ -6516,6 +6516,56 @@ function forEachSerializedPixelBufferTile(source,visitor,{maxBytes=MAX_PIXEL_BUF
   }
   return count;
 }
+function mutateSerializedPixelBufferTiles(source, visitor, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  requireAlpha = false,
+} = {}) {
+  if (typeof visitor !== 'function') throw new TypeError('Tiled PixelBuffer mutation visitor должен быть функцией');
+  const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
+  if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
+  if (safe.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+  const range = channelRange(safe.model);
+  const targetChannels = requireAlpha ? range.max : safe.channels;
+  const targetRawBytes = expectedSourceBytes({ ...safe, channels:targetChannels });
+  const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
+  if (!targetRawBytes || targetRawBytes > limit) {
+    throw new RangeError('Tiled PixelBuffer mutation требует ' + targetRawBytes + ' байт; лимит ' + limit + ' байт');
+  }
+  const promoteAlpha = targetChannels !== safe.channels;
+  const tiles = [];
+  let changed = 0;
+  let changedTiles = 0;
+  let total = 0;
+  for (let index = 0; index < safe.tiles.length; index += 1) {
+    const tile = safe.tiles[index];
+    let buffer = decodeSerializedTile(safe, tile);
+    if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+    const rawResult = visitor({
+      index, count:safe.tiles.length, x:tile.x, y:tile.y,
+      width:tile.width, height:tile.height, buffer,
+    });
+    const delta = rawResult == null || rawResult === false ? 0 : rawResult === true ? 1 : Number(rawResult);
+    if (!Number.isSafeInteger(delta) || delta < 0) {
+      throw new TypeError('Tiled PixelBuffer mutation visitor должен вернуть неотрицательное целое число изменений');
+    }
+    changed += delta;
+    if (!Number.isSafeInteger(changed)) throw new RangeError('Tiled PixelBuffer mutation change count переполнен');
+    if (!promoteAlpha && delta === 0) {
+      tiles.push(tile);
+      total += tile.rawBytes;
+      continue;
+    }
+    const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
+    total += bytes.byteLength;
+    tiles.push({ ...tile, rawBytes:bytes.byteLength, dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME) });
+    changedTiles += 1;
+  }
+  if (total !== targetRawBytes) throw new RangeError('Tiled PixelBuffer mutation имеет несогласованный byte budget');
+  return {
+    source:{ ...safe, channels:targetChannels, alphaMode:targetChannels === range.max ? 'straight' : 'none', rawBytes:targetRawBytes, tiles },
+    changed, changedTiles, promotedAlpha:promoteAlpha,
+  };
+}
 function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
   const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
   if(safe.kind===PIXEL_BUFFER_SOURCE_KIND){
@@ -15504,11 +15554,92 @@ function createRasterEditController({
     return canvasToDataURL(canvas, 'image/png');
   }
 
+
+  async function highDepthPreviewDataUrlFromSource(layer, source) {
+    const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const context = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
+    forEachSerializedPixelBufferTile(source, ({ x, y, buffer }) => {
+      const rgba = buffer.model === 'cmyk'
+        ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
+        : pixelBufferToToneMappedRgba8Preview(buffer, {}, {
+            toneMap:preview.toneMap,
+            displayExposure:preview.displayExposure,
+          });
+      const image = context.createImageData(buffer.width, buffer.height);
+      image.data.set(rgba);
+      context.putImageData(image, x, y);
+    });
+    return canvasToDataURL(canvas, 'image/png');
+  }
+
+  async function prepareTiledHighDepthMutation(layer, visitor, {
+    requireAlpha = false,
+    maxBytes = null,
+  } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const byteBudget = maxBytes == null
+      ? highDepthBudgetForLayer(layer)
+      : Math.max(0, Math.trunc(Number(maxBytes) || 0));
+    const prepared = mutateSerializedPixelBufferTiles(
+      layer.highDepthSource,
+      visitor,
+      { maxBytes:byteBudget, requireAlpha },
+    );
+    if (!prepared) return null;
+    if (!prepared.changed) {
+      return {
+        changed:0,
+        changedTiles:prepared.changedTiles,
+        promotedAlpha:prepared.promotedAlpha,
+        mutation:null,
+      };
+    }
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
+    return {
+      changed:prepared.changed,
+      changedTiles:prepared.changedTiles,
+      promotedAlpha:prepared.promotedAlpha,
+      mutation:{
+        highDepthSource:prepared.source,
+        dataUrl,
+        highDepthPreview:prepared.source.model === 'cmyk'
+          ? null
+          : sanitizeHighDepthPreview(layer.highDepthPreview),
+      },
+    };
+  }
+
+  async function persistTiledHighDepthMutation(owner, layer, visitor, {
+    requireAlpha = false,
+    isContinuationCurrent,
+  } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const continuationCurrent = () => (
+      typeof isContinuationCurrent !== 'function' || isContinuationCurrent()
+    );
+    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
+      return { changed:0, changedTiles:0, applied:false, stale:true };
+    }
+    const prepared = await prepareTiledHighDepthMutation(layer, visitor, { requireAlpha });
+    if (!prepared) return null;
+    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
+      return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:false, stale:true };
+    }
+    if (!prepared.mutation) {
+      return { changed:0, changedTiles:prepared.changedTiles, applied:false, stale:false };
+    }
+    applyHighDepthMutation(layer, prepared.mutation);
+    return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:true, stale:false };
+  }
+
   async function prepareHighDepthMutation(layer, buffer, { maxBytes = null } = {}) {
     const byteBudget = maxBytes == null
       ? highDepthBudgetForLayer(layer)
       : Math.max(0, Math.trunc(Number(maxBytes) || 0));
-    const highDepthSource = serializePixelBufferSource(buffer, { maxBytes: byteBudget });
+    const highDepthSource = serializePixelBufferSourceAdaptive(buffer, { maxBytes: byteBudget });
     const dataUrl = await highDepthPreviewDataUrl(layer, buffer);
     return {
       highDepthSource,
@@ -15693,6 +15824,8 @@ function createRasterEditController({
     editableHighDepthBuffer,
     refreshHighDepthPaintCanvas,
     ensureNativeHighDepthPaintBuffer,
+    prepareTiledHighDepthMutation,
+    persistTiledHighDepthMutation,
     prepareHighDepthMutation,
     applyHighDepthMutation,
     persistHighDepthMutation,
@@ -15767,6 +15900,11 @@ function createRasterCommandController({
     return selection?.predicate?.(layer, selectionSnapshot) ?? null;
   }
 
+  function offsetPredicate(predicate, offsetX, offsetY) {
+    if (typeof predicate !== 'function') return null;
+    return (x, y) => predicate(x + offsetX, y + offsetY);
+  }
+
   function resetNativeState() {
     rasterEdit.clearBrushBuffer();
     state.resetPaintState?.();
@@ -15801,25 +15939,47 @@ function createRasterCommandController({
       const from = target.toLocal(start, layer);
       const to = target.toLocal(end, layer);
       if (layer.highDepthSource) {
+        const rgb = hexToRgb(tools.primaryColor());
+        const basePredicate = selectionPredicate(layer);
+        const tiled = typeof rasterEdit.persistTiledHighDepthMutation === 'function'
+          ? await rasterEdit.persistTiledHighDepthMutation(doc, layer, ({ x, y, buffer }) => {
+              const localFrom = { x:from.x - x, y:from.y - y };
+              const localTo = { x:to.x - x, y:to.y - y };
+              const isAllowed = offsetPredicate(basePredicate, x, y);
+              return buffer.model === 'cmyk'
+                ? applyCmykPixelBufferStrokeSegment(
+                    buffer, localFrom, localTo, editRadius(), tools.rgbToCmyk(rgb),
+                    { opacity:editOpacity(), isAllowed },
+                  )
+                : applyPixelBufferStrokeSegment(
+                    buffer, localFrom, localTo, editRadius(), rgb,
+                    { opacity:editOpacity(), isAllowed },
+                  );
+            })
+          : null;
+        if (tiled != null) {
+          if (tiled.stale) return false;
+          if (!tiled.changed) {
+            status('Линия не изменила high-depth слой');
+            return false;
+          }
+          if (!tiled.applied) return false;
+          resetNativeState();
+          doc.selectedLayerId = layer.id;
+          ui?.commit?.('Нарисовать линию');
+          status(`Линия добавлена в tiled high-depth слой «${layer.name}» · ${tiled.changedTiles} tiles`);
+          return true;
+        }
         const buffer = rasterEdit.editableHighDepthBuffer(layer);
         if (buffer) {
-          const rgb = hexToRgb(tools.primaryColor());
           const changed = buffer.model === 'cmyk'
             ? applyCmykPixelBufferStrokeSegment(
-                buffer,
-                from,
-                to,
-                editRadius(),
-                tools.rgbToCmyk(rgb),
-                { opacity:editOpacity(), isAllowed:selectionPredicate(layer) },
+                buffer, from, to, editRadius(), tools.rgbToCmyk(rgb),
+                { opacity:editOpacity(), isAllowed:basePredicate },
               )
             : applyPixelBufferStrokeSegment(
-                buffer,
-                from,
-                to,
-                editRadius(),
-                rgb,
-                { opacity:editOpacity(), isAllowed:selectionPredicate(layer) },
+                buffer, from, to, editRadius(), rgb,
+                { opacity:editOpacity(), isAllowed:basePredicate },
               );
           if (!changed) {
             status('Линия не изменила high-depth слой');
@@ -16102,9 +16262,34 @@ function createRasterCommandController({
 
     try {
       if (layer.highDepthSource) {
+        const basePredicate = selectionPredicate(layer, selectionSnapshot);
+        const tiled = typeof rasterEdit.persistTiledHighDepthMutation === 'function'
+          ? await rasterEdit.persistTiledHighDepthMutation(
+              doc, layer,
+              ({ x, y, buffer }) => clearPixelBufferPixels(
+                buffer, { isAllowed:offsetPredicate(basePredicate, x, y) },
+              ),
+              { requireAlpha:true, isContinuationCurrent:continuationCurrent },
+            )
+          : null;
+        if (tiled != null) {
+          if (tiled.stale) {
+            resetNativeState();
+            return false;
+          }
+          if (!tiled.changed) {
+            status('В выделении нет непрозрачных high-depth пикселей');
+            return false;
+          }
+          if (!tiled.applied) return false;
+          resetNativeState();
+          ui?.commit?.(historyLabel);
+          status(`${successStatus} · tiled high-depth: ${tiled.changed.toLocaleString('ru-RU')} px`);
+          return true;
+        }
         const buffer = rasterEdit.editableHighDepthBuffer(layer, { requireAlpha:true });
         if (buffer) {
-          const cleared = clearPixelBufferPixels(buffer, { isAllowed:selectionPredicate(layer, selectionSnapshot) });
+          const cleared = clearPixelBufferPixels(buffer, { isAllowed:basePredicate });
           if (!cleared) {
             status('В выделении нет непрозрачных high-depth пикселей');
             return false;
@@ -17460,14 +17645,24 @@ function createSelectionRasterMutationController({
 
   async function prepareClearedHighDepthMutation(layer, selectionSnapshot) {
     if (!layer?.highDepthSource) return null;
+    const basePredicate = selection.predicate(layer, selectionSnapshot);
+    if (typeof rasterEdit.prepareTiledHighDepthMutation === 'function') {
+      const tiled = await rasterEdit.prepareTiledHighDepthMutation(
+        layer,
+        ({ x, y, buffer }) => clearPixelBufferPixels(buffer, {
+          isAllowed:typeof basePredicate === 'function'
+            ? (localX, localY) => basePredicate(localX + x, localY + y)
+            : null,
+        }),
+        { requireAlpha:true },
+      );
+      if (tiled) return { cleared:tiled.changed, mutation:tiled.mutation };
+    }
     const buffer = rasterEdit.editableHighDepthBuffer(layer, { requireAlpha:true });
     if (!buffer) return null;
-    const cleared = clearPixelBufferPixels(buffer, { isAllowed:selection.predicate(layer, selectionSnapshot) });
+    const cleared = clearPixelBufferPixels(buffer, { isAllowed:basePredicate });
     if (!cleared) return { cleared:0, mutation:null };
-    return {
-      cleared,
-      mutation:await rasterEdit.prepareHighDepthMutation(layer, buffer),
-    };
+    return { cleared, mutation:await rasterEdit.prepareHighDepthMutation(layer, buffer) };
   }
 
   async function prepareClearedRasterDataUrl(layer, selectionSnapshot) {
@@ -17581,8 +17776,10 @@ function createSelectionRasterMutationController({
         if (layer.type === 'raster' && working.highDepthSource) {
           const highDepth = await prepareHighDepthMutation(working, frozenSelection);
           if (!continuationCurrent()) return null;
-          if (highDepth?.mutation) {
-            prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
+          if (highDepth) {
+            if (highDepth.mutation) {
+              prepared.push({ layer, working, dataUrl:highDepth.mutation.dataUrl, highDepthMutation:highDepth.mutation });
+            }
             continue;
           }
         }
@@ -17596,6 +17793,7 @@ function createSelectionRasterMutationController({
         status('Очистка выделения отменена: активный документ изменился');
         return null;
       }
+      if (!prepared.length) return { cleared:0, locked, rasterized };
 
       const publication = prepared.map(entry => ({
         ...entry,

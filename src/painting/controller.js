@@ -4,10 +4,13 @@ import { canvasToDataURL } from '../core/io.js';
 import {
   clonePixelBuffer,
   deserializePixelBufferSource,
+  forEachSerializedPixelBufferTile,
+  mutateSerializedPixelBufferTiles,
   pixelBufferByteLength,
   pixelBufferToToneMappedRgba8Preview,
   pixelBufferWithStraightAlpha,
-  serializePixelBufferSource,
+  serializePixelBufferSourceAdaptive,
+  PIXEL_BUFFER_TILED_SOURCE_KIND,
   MAX_PIXEL_BUFFER_SOURCE_BYTES,
 } from '../core/pixel-buffer.js';
 import { cmykPixelBufferToRgba8Preview } from '../core/color-management.js';
@@ -201,11 +204,92 @@ export function createRasterEditController({
     return canvasToDataURL(canvas, 'image/png');
   }
 
+
+  async function highDepthPreviewDataUrlFromSource(layer, source) {
+    const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const context = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
+    forEachSerializedPixelBufferTile(source, ({ x, y, buffer }) => {
+      const rgba = buffer.model === 'cmyk'
+        ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
+        : pixelBufferToToneMappedRgba8Preview(buffer, {}, {
+            toneMap:preview.toneMap,
+            displayExposure:preview.displayExposure,
+          });
+      const image = context.createImageData(buffer.width, buffer.height);
+      image.data.set(rgba);
+      context.putImageData(image, x, y);
+    });
+    return canvasToDataURL(canvas, 'image/png');
+  }
+
+  async function prepareTiledHighDepthMutation(layer, visitor, {
+    requireAlpha = false,
+    maxBytes = null,
+  } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const byteBudget = maxBytes == null
+      ? highDepthBudgetForLayer(layer)
+      : Math.max(0, Math.trunc(Number(maxBytes) || 0));
+    const prepared = mutateSerializedPixelBufferTiles(
+      layer.highDepthSource,
+      visitor,
+      { maxBytes:byteBudget, requireAlpha },
+    );
+    if (!prepared) return null;
+    if (!prepared.changed) {
+      return {
+        changed:0,
+        changedTiles:prepared.changedTiles,
+        promotedAlpha:prepared.promotedAlpha,
+        mutation:null,
+      };
+    }
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
+    return {
+      changed:prepared.changed,
+      changedTiles:prepared.changedTiles,
+      promotedAlpha:prepared.promotedAlpha,
+      mutation:{
+        highDepthSource:prepared.source,
+        dataUrl,
+        highDepthPreview:prepared.source.model === 'cmyk'
+          ? null
+          : sanitizeHighDepthPreview(layer.highDepthPreview),
+      },
+    };
+  }
+
+  async function persistTiledHighDepthMutation(owner, layer, visitor, {
+    requireAlpha = false,
+    isContinuationCurrent,
+  } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const continuationCurrent = () => (
+      typeof isContinuationCurrent !== 'function' || isContinuationCurrent()
+    );
+    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
+      return { changed:0, changedTiles:0, applied:false, stale:true };
+    }
+    const prepared = await prepareTiledHighDepthMutation(layer, visitor, { requireAlpha });
+    if (!prepared) return null;
+    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
+      return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:false, stale:true };
+    }
+    if (!prepared.mutation) {
+      return { changed:0, changedTiles:prepared.changedTiles, applied:false, stale:false };
+    }
+    applyHighDepthMutation(layer, prepared.mutation);
+    return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:true, stale:false };
+  }
+
   async function prepareHighDepthMutation(layer, buffer, { maxBytes = null } = {}) {
     const byteBudget = maxBytes == null
       ? highDepthBudgetForLayer(layer)
       : Math.max(0, Math.trunc(Number(maxBytes) || 0));
-    const highDepthSource = serializePixelBufferSource(buffer, { maxBytes: byteBudget });
+    const highDepthSource = serializePixelBufferSourceAdaptive(buffer, { maxBytes: byteBudget });
     const dataUrl = await highDepthPreviewDataUrl(layer, buffer);
     return {
       highDepthSource,
@@ -390,6 +474,8 @@ export function createRasterEditController({
     editableHighDepthBuffer,
     refreshHighDepthPaintCanvas,
     ensureNativeHighDepthPaintBuffer,
+    prepareTiledHighDepthMutation,
+    persistTiledHighDepthMutation,
     prepareHighDepthMutation,
     applyHighDepthMutation,
     persistHighDepthMutation,
