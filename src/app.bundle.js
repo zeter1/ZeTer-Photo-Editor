@@ -17562,6 +17562,94 @@ function createSelectionClipboardController({
   };
 }
 
+// ---- src/document/project-controller.js ----
+function createProjectController({
+  documentState = {},
+  io = {},
+  smartObjects = {},
+  recovery = {},
+  view = {},
+  ui = {},
+} = {}) {
+  const {
+    getDocument,
+    getActiveSessionId,
+    getHistoryEntry,
+    getDocumentChangeSerial,
+    canReplaceDocument,
+    blockPendingDocumentEdit,
+    sanitizeProject,
+    replaceHistory,
+    setDocument,
+    markDirty,
+    getCurrentSession,
+  } = documentState;
+  const { readFileAsText, downloadText, safeFilename } = io;
+  const { saveContent: saveSmartObjectContent } = smartObjects;
+  const { queueRecovery } = recovery;
+  const { fitToView } = view;
+  const { setStatus, toast, alertUser, consoleRef = console } = ui;
+
+  function captureOpenOwner() {
+    return {
+      document: getDocument(),
+      sessionId: getActiveSessionId(),
+      historyEntry: getHistoryEntry(),
+      changeSerial: getDocumentChangeSerial(),
+    };
+  }
+
+  function openOwnerIsCurrent(owner) {
+    return getDocument() === owner.document &&
+      getActiveSessionId() === owner.sessionId &&
+      getHistoryEntry() === owner.historyEntry &&
+      getDocumentChangeSerial() === owner.changeSerial;
+  }
+
+  async function openProject(file) {
+    if (blockPendingDocumentEdit()) return;
+    if (!canReplaceDocument()) return;
+    const owner = captureOpenOwner();
+    try {
+      const raw = await readFileAsText(file);
+      const data = sanitizeProject(JSON.parse(raw));
+      if (!openOwnerIsCurrent(owner)) {
+        setStatus('Открытие отменено: документ изменился во время чтения файла');
+        toast('Повторите открытие проекта в нужной вкладке', 'warn');
+        return;
+      }
+      if (blockPendingDocumentEdit()) return;
+      replaceHistory();
+      setDocument(data, { resetHistory:true, label:'Открыть проект' });
+      markDirty(false);
+      queueRecovery({ immediate:true });
+      fitToView();
+      setStatus('Проект открыт');
+      toast('Открыт проект: ' + file.name, 'success');
+    } catch (error) {
+      consoleRef.error(error);
+      alertUser('Не удалось открыть проект: ' + error.message);
+      setStatus('Ошибка открытия проекта');
+    }
+  }
+
+  function saveProject() {
+    if (blockPendingDocumentEdit()) return;
+    const session = getCurrentSession();
+    if (session?.smartObjectLink) {
+      saveSmartObjectContent(session);
+      return;
+    }
+    const documentValue = getDocument();
+    const name = `${safeFilename(documentValue.name)}.zpe`;
+    downloadText(JSON.stringify(documentValue, null, 2), name, 'application/json');
+    queueRecovery({ immediate:true });
+    setStatus(`Скачивание ${name} запущено. Проверьте файл перед закрытием вкладки`);
+  }
+
+  return { openProject, saveProject };
+}
+
 // ---- src/document/import-controller.js ----
 function createDocumentImportController({
   getDocument,
@@ -23541,6 +23629,27 @@ const psdImportController = createPsdImportController({
   ui: { setStatus, toast, alert, consoleRef:console },
 });
 
+const projectController = createProjectController({
+  documentState: {
+    getDocument: () => doc,
+    getActiveSessionId: () => activeSessionId,
+    getHistoryEntry: () => history.current(),
+    getDocumentChangeSerial: () => documentChangeSerial,
+    canReplaceDocument,
+    blockPendingDocumentEdit,
+    sanitizeProject,
+    replaceHistory: () => { history = new HistoryStack(80); },
+    setDocument: setDoc,
+    markDirty,
+    getCurrentSession: currentSession,
+  },
+  io: { readFileAsText, downloadText, safeFilename },
+  smartObjects: { saveContent: saveSmartObjectContent },
+  recovery: { queueRecovery },
+  view: { fitToView },
+  ui: { setStatus, toast, alertUser: message => alert(message), consoleRef:console },
+});
+const { openProject, saveProject } = projectController;
 const documentImportController = createDocumentImportController({
   getDocument: () => doc,
   getActiveSessionId: () => activeSessionId,
@@ -25093,38 +25202,6 @@ function bindAdjustmentControls(root,owner,layerId) {
     handleAdjustmentCommandResult(adjustmentLayerCommandController.setClipping(owner,layerId,clippingInput.checked));
   });
 }
-async function openProject(file) {
-  if (blockPendingDocumentEdit()) return;
-  if (!canReplaceDocument()) return;
-  const targetDocument=doc;
-  const targetSessionId=activeSessionId;
-  const targetHistoryEntry=history.current();
-  const targetChangeSerial=documentChangeSerial;
-  try {
-    const raw=await readFileAsText(file);
-    const data=sanitizeProject(JSON.parse(raw));
-    if(doc!==targetDocument||activeSessionId!==targetSessionId||
-      history.current()!==targetHistoryEntry||documentChangeSerial!==targetChangeSerial){
-      setStatus('Открытие отменено: документ изменился во время чтения файла');
-      toast('Повторите открытие проекта в нужной вкладке','warn');
-      return;
-    }
-    if(blockPendingDocumentEdit())return;
-    history=new HistoryStack(80);
-    setDoc(data,{resetHistory:true,label:'Открыть проект'});
-    markDirty(false);
-    queueRecovery({immediate:true});
-    fitToView();
-    setStatus('Проект открыт');
-    toast('Открыт проект: '+file.name,'success');
-  }catch(e){
-    console.error(e);
-    alert('Не удалось открыть проект: '+e.message);
-    setStatus('Ошибка открытия проекта');
-  }
-}
-function saveProject() { if(blockPendingDocumentEdit())return; const session=currentSession(); if(session?.smartObjectLink){saveSmartObjectContent(session);return;} const name=`${safeFilename(doc.name)}.zpe`; downloadText(JSON.stringify(doc,null,2),name,'application/json'); queueRecovery({immediate:true}); setStatus(`Скачивание ${name} запущено. Проверьте файл перед закрытием вкладки`); }
-
 async function exportPsdDocument(exportDoc,{psb=false}={}){
   const format=psb?'PSB':'PSD';
   setStatus(`${format}: подготовка слоёв…`);
