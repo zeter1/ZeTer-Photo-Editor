@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-29 — Extract history navigation owner
+
+- Refactor: Undo / Redo / jump-to-history runtime transactions move from `src/main.js` into `src/workspace/history-navigation-controller.js`; History panel DOM and menu/keyboard/button routing remain composition concerns.
+- Session safety: every command resolves the current mutable per-session HistoryStack at invocation time instead of capturing a stack during controller composition, while pending edits still block before any stack mutation.
+- Behavior preservation: Undo/Redo keep selection → raster cleanup, Jump keeps raster → crop → selection cleanup, and all successful navigation preserves restore → `updateAll()` → dirty → exact status ordering; semantic no-ops publish nothing.
+- Tests/docs/build: direct owner regressions cover fail-fast bridges, blocked/no-op paths, exact publication ordering and live history rebinding; composition guards lock routing and file:// bundle order, with AI maps/test matrix updated to the canonical owner.
+
 ### 2026-09-29 — Extract New Document lifecycle owner
 
 - Refactor: File → New / Ctrl+N dirty-confirm, exact modal schema and replacement transaction move from `src/main.js` into `src/document/new-document-controller.js`; the composition root now only wires explicit ports and routes menu/keyboard/recovery actions.
