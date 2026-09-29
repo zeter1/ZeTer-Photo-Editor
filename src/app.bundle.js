@@ -17562,6 +17562,103 @@ function createSelectionClipboardController({
   };
 }
 
+// ---- src/document/new-document-controller.js ----
+const DISCARD_CONFIRM_MESSAGE = 'В документе есть несохранённые изменения. Продолжить без сохранения?';
+
+function requirePort(value, label) {
+  if (typeof value !== 'function') throw new TypeError(`new document ${label} bridge is required`);
+  return value;
+}
+
+/**
+ * Owns the File → New / Ctrl+N document replacement transaction.
+ *
+ * Canonical document validation stays in the injected createDocument factory;
+ * generic modal DOM, session internals and recovery storage stay in their owners.
+ */
+function createNewDocumentController({
+  documentState: {
+    isDirty,
+    blockPendingDocumentEdit,
+    replaceHistory,
+    setDocument,
+    markDirty,
+  } = {},
+  documentFactory: { createDocument } = {},
+  recovery: { queueRecovery } = {},
+  view: { fitToView } = {},
+  ui: {
+    showModal,
+    confirmDiscard,
+    setStatus = () => {},
+    toast = () => {},
+  } = {},
+} = {}) {
+  requirePort(isDirty, 'dirty-state');
+  requirePort(blockPendingDocumentEdit, 'pending-edit');
+  requirePort(replaceHistory, 'history-replacement');
+  requirePort(setDocument, 'document-publication');
+  requirePort(markDirty, 'dirty-publication');
+  requirePort(createDocument, 'factory');
+  requirePort(queueRecovery, 'recovery');
+  requirePort(fitToView, 'viewport');
+  requirePort(showModal, 'modal');
+  requirePort(confirmDiscard, 'discard-confirmation');
+  requirePort(setStatus, 'status');
+  requirePort(toast, 'toast');
+
+  function canReplaceDocument() {
+    return !isDirty() || confirmDiscard(DISCARD_CONFIRM_MESSAGE);
+  }
+
+  async function open() {
+    if (blockPendingDocumentEdit()) return;
+    if (!canReplaceDocument()) return;
+    showModal({
+      title: 'Новый документ',
+      fields: [
+        { name: 'name', label: 'Название', value: 'Без имени' },
+        { name: 'width', label: 'Ширина', type: 'number', value: '1200', min: '1', max: '12000', required: true },
+        { name: 'height', label: 'Высота', type: 'number', value: '800', min: '1', max: '12000', required: true },
+        {
+          name: 'background',
+          label: 'Фон',
+          type: 'select',
+          value: 'transparent',
+          options: [
+            ['transparent', 'Прозрачный'],
+            ['#ffffff', 'Белый'],
+            ['#000000', 'Чёрный'],
+          ],
+        },
+      ],
+      submitLabel: 'Создать',
+      onSubmit: async values => {
+        if (blockPendingDocumentEdit()) return false;
+        try {
+          const next = createDocument({
+            name: values.name || 'Без имени',
+            width: Number(values.width),
+            height: Number(values.height),
+            background: values.background,
+          });
+          replaceHistory();
+          setDocument(next, { resetHistory: true, label: 'Новый документ' });
+          markDirty(false);
+          queueRecovery({ immediate: true });
+          fitToView();
+        } catch (error) {
+          toast(error.message, 'error');
+          setStatus(error.message);
+          return false;
+        }
+      },
+    });
+  }
+
+  return { open, canReplaceDocument };
+}
+
 // ---- src/document/project-controller.js ----
 function createProjectController({
   documentState = {},
@@ -23971,6 +24068,25 @@ const psdImportSemantics = createPsdImportSemantics({
   embeddedDocumentFingerprint: psdEmbeddedDocumentFingerprint,
 });
 
+const newDocumentController = createNewDocumentController({
+  documentState: {
+    isDirty: () => dirty,
+    blockPendingDocumentEdit,
+    replaceHistory: () => { history = new HistoryStack(80); },
+    setDocument: setDoc,
+    markDirty,
+  },
+  documentFactory: { createDocument },
+  recovery: { queueRecovery: options => queueRecovery(options) },
+  view: { fitToView },
+  ui: {
+    showModal,
+    confirmDiscard: message => window.confirm(message),
+    setStatus,
+    toast,
+  },
+});
+
 const psdImportController = createPsdImportController({
   codec: { decodePsd },
   runtime: {
@@ -23978,7 +24094,7 @@ const psdImportController = createPsdImportController({
     getActiveSessionId: () => activeSessionId,
     getHistoryEntry: () => history.current(),
     getChangeSerial: () => documentChangeSerial,
-    canReplaceDocument,
+    canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
     publishDocument: (next,{label}) => {
       history=new HistoryStack(80);
@@ -24000,7 +24116,7 @@ const projectController = createProjectController({
     getActiveSessionId: () => activeSessionId,
     getHistoryEntry: () => history.current(),
     getDocumentChangeSerial: () => documentChangeSerial,
-    canReplaceDocument,
+    canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
     sanitizeProject,
     replaceHistory: () => { history = new HistoryStack(80); },
@@ -24308,7 +24424,7 @@ const recoveryController = createRecoveryController({
   runtime: {
     updateAll,
     markDirty,
-    startNewProject: () => createNewDialog(),
+    startNewProject: () => newDocumentController.open(),
   },
   ui: {
     showRecoveryModal: (entries, options) => showRecoveryModal(entries, {
@@ -25417,16 +25533,6 @@ function selectAllPixels(){setSelectionShape({type:'rect',rect:{x:0,y:0,width:do
 function deselectPixels(){if(!selectionRect&&!selectionGestures.hasPolygonDraft())return;clearSelectionState();drawOverlay();setStatus('Выделение снято');}
 function cropToSelection(){if(!selectionRect){setStatus('Нет активного выделения');return;}if(selectionRect.width<1||selectionRect.height<1)return;const owner=doc;applyCrop(owner,{...selectionRect});}
 
-function canReplaceDocument() {
-  return !dirty || window.confirm('В документе есть несохранённые изменения. Продолжить без сохранения?');
-}
-
-async function createNewDialog() {
-  if (blockPendingDocumentEdit()) return;
-  if (!canReplaceDocument()) return;
-  showModal({title:'Новый документ',fields:[{name:'name',label:'Название',value:'Без имени'},{name:'width',label:'Ширина',type:'number',value:'1200',min:'1',max:'12000',required:true},{name:'height',label:'Высота',type:'number',value:'800',min:'1',max:'12000',required:true},{name:'background',label:'Фон',type:'select',value:'transparent',options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный']] }],submitLabel:'Создать',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{const next=createDocument({name:v.name||'Без имени',width:Number(v.width),height:Number(v.height),background:v.background});history=new HistoryStack(80);setDoc(next,{resetHistory:true,label:'Новый документ'});markDirty(false);queueRecovery({immediate:true});fitToView();}catch(error){toast(error.message,'error');setStatus(error.message);return false;}}});
-}
-
 function visibleCanvasCenter() {
   const vr=els.viewport.getBoundingClientRect();
   const cr=els.overlay.getBoundingClientRect();
@@ -25755,7 +25861,7 @@ function layerMaskSummary(layer){
 
 const menus={
   file:[
-    ['Новый…','Ctrl+N',createNewDialog],
+    ['Новый…','Ctrl+N',newDocumentController.open],
     ['Открыть изображение / PSD / PSB…','Ctrl+O',()=>els.fileInput.click()],
     ['Открыть проект…','',()=>els.projectInput.click()],
     ['Вставить изображение из буфера','Ctrl+V',pasteFromClipboard],
@@ -26026,7 +26132,7 @@ window.addEventListener('keydown',e=>{
   if(ctrl&&e.code==='KeyY'){e.preventDefault();redo();return;}
   if(ctrl&&e.code==='KeyS'){e.preventDefault();(e.shiftKey||e.altKey)?exportDialog():saveProject();return;}
   if(ctrl&&e.code==='KeyO'){e.preventDefault();els.fileInput.click();return;}
-  if(ctrl&&e.code==='KeyN'){e.preventDefault();e.shiftKey?addBlankLayer():createNewDialog();return;}
+  if(ctrl&&e.code==='KeyN'){e.preventDefault();e.shiftKey?addBlankLayer():newDocumentController.open();return;}
   if(ctrl&&e.code==='KeyA'){e.preventDefault();selectAllPixels();return;}
   if(ctrl&&e.code==='KeyD'){e.preventDefault();deselectPixels();return;}
   if(ctrl&&e.code==='KeyJ'){e.preventDefault();duplicateSelected();return;}

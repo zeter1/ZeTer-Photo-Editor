@@ -1,19 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { runInNewContext } from 'node:vm';
 import { createSelectionClipboardController } from '../src/selection/clipboard-controller.js';
 import { createSelectionRasterMutationController } from '../src/selection/raster-mutation-controller.js';
 import { createDocumentImportController } from '../src/document/import-controller.js';
-
-const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
-
-function functionSource(start, end) {
-  const from = main.indexOf(start);
-  const to = main.indexOf(end, from);
-  assert.ok(from >= 0 && to > from, 'Cannot locate function source');
-  return main.slice(from, to);
-}
+import { createNewDocumentController } from '../src/document/new-document-controller.js';
 
 function deferred() {
   let resolve;
@@ -151,27 +142,32 @@ test('rasterization finishes on the selected layer and releases the edit guard',
 test('new-document submission replaces the document before scheduling recovery refresh', async () => {
   const other = { name: 'Вторая вкладка' };
   const replacement = { name: 'Новый документ' };
-  let modal;
-  let queuedDocument;
   const context = {
     doc: { name: 'Первая вкладка' },
     activeSessionId: 'first',
-    blockPendingDocumentEdit: () => false,
-    canReplaceDocument: () => true,
-    showModal: options => { modal = options; },
-    createDocument: () => replacement,
-    queueRecovery: () => { queuedDocument = context.doc; },
-    HistoryStack: class {},
-    setDoc: value => { context.doc = value; },
-    markDirty: () => {},
-    fitToView: () => {},
-    setStatus: () => {},
-    toast: () => {},
   };
-  runInNewContext(functionSource('async function createNewDialog()', 'function visibleCanvasCenter()')
-    + '\nglobalThis.createNewDialog = createNewDialog;', context);
+  let modal;
+  let queuedDocument;
+  const controller = createNewDocumentController({
+    documentState: {
+      isDirty: () => false,
+      blockPendingDocumentEdit: () => false,
+      replaceHistory: () => {},
+      setDocument: value => { context.doc = value; },
+      markDirty: () => {},
+    },
+    documentFactory: { createDocument: () => replacement },
+    recovery: { queueRecovery: () => { queuedDocument = context.doc; } },
+    view: { fitToView: () => {} },
+    ui: {
+      showModal: options => { modal = options; },
+      confirmDiscard: () => true,
+      setStatus: () => {},
+      toast: () => {},
+    },
+  });
 
-  await context.createNewDialog();
+  await controller.open();
   await modal.onSubmit({ name: 'Новый документ', width: '100', height: '100' });
   assert.equal(context.doc, replacement);
   assert.equal(queuedDocument, replacement);

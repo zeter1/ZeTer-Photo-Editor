@@ -10,6 +10,13 @@ Application orchestrator: tool-specific pointer/keyboard dispatch, tool selectio
 
 **AI rule:** do not read the whole file first. Search for the command/tool/function involved, then inspect a bounded window and its tests.
 
+## Document lifecycle boundary — `src/document/`
+
+### `new-document-controller.js`
+Owns File → New / Ctrl+N as one replacement transaction: pending-edit preflight, shared dirty confirmation, exact New Document modal schema, submit-time pending recheck, canonical document factory call, fresh-history replacement, clean-state publication, immediate recovery and fit-to-view. The factory must finish successfully before any runtime publication.
+
+Its `canReplaceDocument` policy is intentionally reused by PSD/PSB and native `.zpe` open owners through narrow ports. It does **not** own generic modal DOM, document schema/limits, session internals, recovery storage or viewport math; those stay in their existing owners. Menu/keyboard/recovery dispatch remains in `src/main.js`.
+
 ## Interaction boundary — `src/interaction/`
 
 ### `pointer-lifecycle-router.js`
