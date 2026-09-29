@@ -97,9 +97,10 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - It only routes `.zpe` to the project controller and PSD/PSB to the PSD owner; it must not absorb either persistence/parser policy.
 
 ### Document resize
-- `src/document/resize-command-controller.js` is the single semantic owner for persisted Image Size / Canvas Size commands. Modal opening captures the originating document and Apply must pass that exact owner into the controller; a different current document is a rejected stale command with no mutation, cleanup or history.
+- `src/ui/document-resize-controller.js` is the single owner of Image Size / Canvas Size dialog orchestration: exact field/anchor schema, originating-document capture at open, repeated pending-edit guard at submit, delegation to the command owner and INVALID/REJECTED presentation. It owns no persisted geometry.
+- `src/document/resize-command-controller.js` is the single semantic owner for persisted Image Size / Canvas Size commands. Apply must pass the exact owner captured by the UI controller; a different current document is a rejected stale command with no mutation, cleanup or history.
 - All resize math that can fail must be staged before the first persisted write: Image Size uses canonical `checkedCanvasSize()` + `imageResizeTransforms()`; Canvas Size builds every shifted layer position and validates `MAX_LAYER_POSITION` before mutation. Invalid or semantic no-op requests publish nothing.
-- Successful resize clears caller-owned geometry transient state and publishes exactly one history entry, then fits the same active document. Resize modal DOM/status stays in `src/main.js`; Crop, pointer gestures, zoom/viewport policy and reusable document limits remain separate owners.
+- Successful resize clears caller-owned geometry transient state and publishes exactly one history entry, then fits the same active document. Generic modal DOM lifecycle stays in `src/ui/modal-controller.js`; menu dispatch stays in `src/main.js`; Crop, pointer gestures, zoom/viewport policy and reusable document limits remain separate owners.
 
 ### Document crop
 - `src/interaction/crop-gesture-controller.js` is the single owner of transient Crop draft/gesture state, exact originating-document gesture identity, the pointer 10×10 acceptance gate, session-safe immutable draft snapshot/restore and crop overlay/grid drawing. It must not mutate persisted document geometry or publish history. See `docs/architecture/CROP_INTERACTION.md`.
