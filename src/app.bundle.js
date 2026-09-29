@@ -4589,6 +4589,180 @@ function floodFillPixels(data, width, height, startX, startY, color, { tolerance
   return filled;
 }
 
+// ---- src/core/inpaint.js ----
+const CONTENT_AWARE_MAX_LAYER_PIXELS = 8_000_000;
+const CONTENT_AWARE_MAX_FILL_PIXELS = 2_000_000;
+
+function positiveInteger(value, label) {
+  const number = Math.trunc(Number(value));
+  if (!Number.isInteger(number) || number <= 0) throw new TypeError(`${label} должен быть положительным целым числом`);
+  return number;
+}
+
+function boundedInteger(value, fallback, min, max) {
+  const number = Math.trunc(Number(value));
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
+function isNumericTypedArray(value) {
+  return ArrayBuffer.isView(value) && !(value instanceof DataView);
+}
+
+function megapixels(value) {
+  return (value / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits:1 });
+}
+
+/**
+ * Deterministic bounded inpainting for a selected pixel region.
+ *
+ * The fill grows from the selection boundary inward. Each synthesized target
+ * resolves back to an immutable donor outside the selection, so later pixels
+ * never recursively sample already synthesized values. The same math works on
+ * Uint8/Uint16/Float32 samples without changing RGB/CMYK sample domains.
+ */
+function inpaintSelectedSamples(data, width, height, channels, {
+  isAllowed,
+  sampleRadius = 2,
+  maxLayerPixels = CONTENT_AWARE_MAX_LAYER_PIXELS,
+  maxFillPixels = CONTENT_AWARE_MAX_FILL_PIXELS,
+} = {}) {
+  width = positiveInteger(width, 'width');
+  height = positiveInteger(height, 'height');
+  channels = positiveInteger(channels, 'channels');
+  if (!isNumericTypedArray(data)) throw new TypeError('Контент-заливка требует typed pixel buffer');
+  const total = width * height;
+  if (!Number.isSafeInteger(total)) throw new RangeError('Контент-заливка: размер слоя выходит за безопасный диапазон');
+  if (data.length !== total * channels) throw new RangeError('Контент-заливка: размер pixel buffer не совпадает с геометрией слоя');
+  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen selection predicate');
+
+  maxLayerPixels = positiveInteger(maxLayerPixels, 'maxLayerPixels');
+  maxFillPixels = positiveInteger(maxFillPixels, 'maxFillPixels');
+  if (total > maxLayerPixels) {
+    throw new RangeError(`Контент-заливка: слой ${megapixels(total)} МП превышает безопасный лимит ${megapixels(maxLayerPixels)} МП`);
+  }
+
+  const pending = new Uint8Array(total);
+  const donorIndex = new Int32Array(total);
+  donorIndex.fill(-1);
+  let selected = 0;
+
+  for (let y = 0, index = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1, index += 1) {
+      if (isAllowed(x, y)) {
+        pending[index] = 1;
+        selected += 1;
+      } else {
+        donorIndex[index] = index;
+      }
+    }
+  }
+
+  if (!selected) return 0;
+  if (selected === total) return 0;
+  if (selected > maxFillPixels) {
+    throw new RangeError(`Контент-заливка: выделено ${megapixels(selected)} МП, безопасный лимит — ${megapixels(maxFillPixels)} МП`);
+  }
+
+  const queue = new Int32Array(selected);
+  const queued = new Uint8Array(total);
+  let head = 0;
+  let tail = 0;
+
+  const hasKnownNeighbor = index => {
+    const x = index % width;
+    const y = Math.floor(index / width);
+    for (let dy = -1; dy <= 1; dy += 1) {
+      const yy = y + dy;
+      if (yy < 0 || yy >= height) continue;
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (!dx && !dy) continue;
+        const xx = x + dx;
+        if (xx < 0 || xx >= width) continue;
+        if (!pending[yy * width + xx]) return true;
+      }
+    }
+    return false;
+  };
+
+  for (let index = 0; index < total; index += 1) {
+    if (pending[index] && hasKnownNeighbor(index)) {
+      queue[tail++] = index;
+      queued[index] = 1;
+    }
+  }
+
+  const radius = boundedInteger(sampleRadius, 2, 1, 6);
+  const sums = new Float64Array(channels);
+  let filled = 0;
+
+  while (head < tail) {
+    const index = queue[head++];
+    if (!pending[index]) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    sums.fill(0);
+    let weightTotal = 0;
+    let bestDonor = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (let dy = -radius; dy <= radius; dy += 1) {
+      const yy = y + dy;
+      if (yy < 0 || yy >= height) continue;
+      for (let dx = -radius; dx <= radius; dx += 1) {
+        if (!dx && !dy) continue;
+        const xx = x + dx;
+        if (xx < 0 || xx >= width) continue;
+        const neighbor = yy * width + xx;
+        if (pending[neighbor]) continue;
+        const donor = donorIndex[neighbor];
+        if (donor < 0) continue;
+
+        const donorX = donor % width;
+        const donorY = Math.floor(donor / width);
+        const ddx = donorX - x;
+        const ddy = donorY - y;
+        const distanceSquared = ddx * ddx + ddy * ddy;
+        const weight = 1 / (1 + distanceSquared);
+        const donorOffset = donor * channels;
+        for (let channel = 0; channel < channels; channel += 1) {
+          sums[channel] += Number(data[donorOffset + channel]) * weight;
+        }
+        weightTotal += weight;
+        if (distanceSquared < bestDistance || (distanceSquared === bestDistance && (bestDonor < 0 || donor < bestDonor))) {
+          bestDistance = distanceSquared;
+          bestDonor = donor;
+        }
+      }
+    }
+
+    if (bestDonor < 0 || weightTotal <= 0) continue;
+    const targetOffset = index * channels;
+    for (let channel = 0; channel < channels; channel += 1) {
+      data[targetOffset + channel] = sums[channel] / weightTotal;
+    }
+    pending[index] = 0;
+    donorIndex[index] = bestDonor;
+    filled += 1;
+
+    for (let dy = -1; dy <= 1; dy += 1) {
+      const yy = y + dy;
+      if (yy < 0 || yy >= height) continue;
+      for (let dx = -1; dx <= 1; dx += 1) {
+        if (!dx && !dy) continue;
+        const xx = x + dx;
+        if (xx < 0 || xx >= width) continue;
+        const neighbor = yy * width + xx;
+        if (pending[neighbor] && !queued[neighbor]) {
+          queued[neighbor] = 1;
+          queue[tail++] = neighbor;
+        }
+      }
+    }
+  }
+
+  return filled;
+}
+
 // ---- src/core/pixel-buffer.js ----
 const PIXEL_BUFFER_KIND = 'zpe-pixel-buffer-v1';
 const PIXEL_MODELS = Object.freeze(['rgb','cmyk']);
@@ -5728,6 +5902,10 @@ function clearPixelBufferPixels(buffer, { isAllowed=null } = {}) {
     }
   }
   return changed;
+}
+function inpaintPixelBuffer(buffer, options = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
+  return inpaintSelectedSamples(buffer.data, buffer.width, buffer.height, buffer.channels, options);
 }
 
 function sourceSampleBytes(bitsPerChannel) {
@@ -15109,6 +15287,100 @@ function createRasterCommandController({
     }
   }
 
+
+  async function contentAwareFill() {
+    if (busy()) return false;
+    const selectionSnapshot = selection?.captureSnapshot?.() ?? null;
+    if (!selectionSnapshot) {
+      status('Контент-заливка: сначала создайте выделение');
+      return false;
+    }
+
+    const doc = currentDocument();
+    const layer = target.selected?.() ?? null;
+    if (!Array.isArray(doc?.layers) || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
+      status('Контент-заливка работает по выбранному незаблокированному растровому слою');
+      ui?.toast?.('Выберите растровый слой для контент-заливки', 'warn');
+      return false;
+    }
+    if (selection?.intersectsLayer && !selection.intersectsLayer(layer, selectionSnapshot)) {
+      status('Контент-заливка: выделение не пересекает выбранный слой');
+      return false;
+    }
+
+    const isAllowed = selectionPredicate(layer, selectionSnapshot);
+    if (typeof isAllowed !== 'function') {
+      status('Контент-заливка: не удалось зафиксировать геометрию выделения');
+      return false;
+    }
+    if (!beginPersist()) return false;
+
+    try {
+      status('Контент-заливка: анализ окружения…');
+
+      if (layer.highDepthSource) {
+        const buffer = rasterEdit.editableHighDepthBuffer(layer);
+        if (!buffer) {
+          resetNativeState();
+          status('Контент-заливка: native high-depth buffer недоступен; precision сохранён без raster fallback');
+          return false;
+        }
+        const filled = inpaintPixelBuffer(buffer, { isAllowed });
+        if (!filled) {
+          resetNativeState();
+          status('Контент-заливка: нужны исходные пиксели за пределами выделения');
+          return false;
+        }
+        if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) {
+          resetNativeState();
+          return false;
+        }
+        resetNativeState();
+        ui?.commit?.('Контент-заливка');
+        status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px · ${buffer.bitsPerChannel}-bit ${String(buffer.model).toUpperCase()}`);
+        return true;
+      }
+
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      if (state.getDocument() !== doc || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
+        rasterEdit.clearBrushBuffer();
+        status('Контент-заливка отменена: документ или слой изменился');
+        return false;
+      }
+
+      const imageData = prepared.ctx.getImageData(0, 0, prepared.canvas.width, prepared.canvas.height);
+      const filled = inpaintSelectedSamples(imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed });
+      if (!filled) {
+        rasterEdit.clearBrushBuffer();
+        status('Контент-заливка: нужны исходные пиксели за пределами выделения');
+        return false;
+      }
+      prepared.ctx.putImageData(imageData, 0, 0);
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) {
+        rasterEdit.clearBrushBuffer();
+        return false;
+      }
+      ui?.commit?.('Контент-заливка');
+      status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
+      return true;
+    } catch (error) {
+      resetNativeState();
+      ui?.render?.();
+      if (error instanceof RangeError && String(error.message).startsWith('Контент-заливка:')) {
+        status(error.message);
+        ui?.toast?.(error.message, 'warn');
+        return false;
+      }
+      console.error(error);
+      status(`Ошибка контент-заливки: ${error.message}`);
+      ui?.toast?.('Не удалось выполнить контент-заливку', 'error');
+      return false;
+    } finally {
+      state.endPersist();
+    }
+  }
+
   async function clearSelection({
     historyLabel = 'Очистить выделение',
     successStatus = 'Пиксели внутри выделения очищены',
@@ -15195,7 +15467,7 @@ function createRasterCommandController({
     }
   }
 
-  return { drawLine, fillAt, clearSelection };
+  return { drawLine, fillAt, contentAwareFill, clearSelection };
 }
 
 // ---- src/painting/gradient-command-controller.js ----
@@ -23759,6 +24031,7 @@ const rasterCommands = createRasterCommandController({
   },
   selection: {
     hasActive: () => Boolean(selectionRect),
+    captureSnapshot: () => selectionShape ? cloneSelectionShape(selectionShape) : null,
     containsPoint: pointInsideSelection,
     intersectsLayer: selectionIntersectsLayer,
     predicate: rasterSelectionPredicate,
@@ -23776,6 +24049,7 @@ const rasterCommands = createRasterCommandController({
 const {
   drawLine: drawLineOnCurrentRaster,
   fillAt: fillAtPoint,
+  contentAwareFill: contentAwareFillSelection,
   clearSelection: clearSelectedPixels,
 } = rasterCommands;
 
@@ -25982,6 +26256,7 @@ const menus={
     ['Копировать выделение','Ctrl+C',copySelection,()=>Boolean(selectionRect)&&(selectionCopyMode==='merged'||Boolean(selected()))],
     ['Вырезать выделение','Ctrl+X',cutSelection,()=>Boolean(selectionRect)&&(selectionCopyMode==='merged'||isEditableRasterLayer(selected()))],
     ['Очистить выделенные пиксели','Delete',()=>clearSelectedPixels(),()=>Boolean(selectionRect)&&isEditableRasterLayer(selected())],
+    ['Контент-заливка выделения','',contentAwareFillSelection,()=>Boolean(selectionShape)&&isEditableRasterLayer(selected())],
     ['sep'],
     ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],

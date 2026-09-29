@@ -1,11 +1,13 @@
 import { addLayer, createRasterLayer } from '../core/state.js';
 import { floodFillPixels, hexToRgb } from '../core/pixels.js';
+import { inpaintSelectedSamples } from '../core/inpaint.js';
 import {
   applyPixelBufferStrokeSegment,
   applyCmykPixelBufferStrokeSegment,
   floodFillPixelBuffer,
   floodFillCmykPixelBuffer,
   clearPixelBufferPixels,
+  inpaintPixelBuffer,
 } from '../core/pixel-buffer.js';
 
 export function createRasterCommandController({
@@ -275,6 +277,100 @@ export function createRasterCommandController({
     }
   }
 
+
+  async function contentAwareFill() {
+    if (busy()) return false;
+    const selectionSnapshot = selection?.captureSnapshot?.() ?? null;
+    if (!selectionSnapshot) {
+      status('Контент-заливка: сначала создайте выделение');
+      return false;
+    }
+
+    const doc = currentDocument();
+    const layer = target.selected?.() ?? null;
+    if (!Array.isArray(doc?.layers) || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
+      status('Контент-заливка работает по выбранному незаблокированному растровому слою');
+      ui?.toast?.('Выберите растровый слой для контент-заливки', 'warn');
+      return false;
+    }
+    if (selection?.intersectsLayer && !selection.intersectsLayer(layer, selectionSnapshot)) {
+      status('Контент-заливка: выделение не пересекает выбранный слой');
+      return false;
+    }
+
+    const isAllowed = selectionPredicate(layer, selectionSnapshot);
+    if (typeof isAllowed !== 'function') {
+      status('Контент-заливка: не удалось зафиксировать геометрию выделения');
+      return false;
+    }
+    if (!beginPersist()) return false;
+
+    try {
+      status('Контент-заливка: анализ окружения…');
+
+      if (layer.highDepthSource) {
+        const buffer = rasterEdit.editableHighDepthBuffer(layer);
+        if (!buffer) {
+          resetNativeState();
+          status('Контент-заливка: native high-depth buffer недоступен; precision сохранён без raster fallback');
+          return false;
+        }
+        const filled = inpaintPixelBuffer(buffer, { isAllowed });
+        if (!filled) {
+          resetNativeState();
+          status('Контент-заливка: нужны исходные пиксели за пределами выделения');
+          return false;
+        }
+        if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) {
+          resetNativeState();
+          return false;
+        }
+        resetNativeState();
+        ui?.commit?.('Контент-заливка');
+        status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px · ${buffer.bitsPerChannel}-bit ${String(buffer.model).toUpperCase()}`);
+        return true;
+      }
+
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      if (state.getDocument() !== doc || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
+        rasterEdit.clearBrushBuffer();
+        status('Контент-заливка отменена: документ или слой изменился');
+        return false;
+      }
+
+      const imageData = prepared.ctx.getImageData(0, 0, prepared.canvas.width, prepared.canvas.height);
+      const filled = inpaintSelectedSamples(imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed });
+      if (!filled) {
+        rasterEdit.clearBrushBuffer();
+        status('Контент-заливка: нужны исходные пиксели за пределами выделения');
+        return false;
+      }
+      prepared.ctx.putImageData(imageData, 0, 0);
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) {
+        rasterEdit.clearBrushBuffer();
+        return false;
+      }
+      ui?.commit?.('Контент-заливка');
+      status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
+      return true;
+    } catch (error) {
+      resetNativeState();
+      ui?.render?.();
+      if (error instanceof RangeError && String(error.message).startsWith('Контент-заливка:')) {
+        status(error.message);
+        ui?.toast?.(error.message, 'warn');
+        return false;
+      }
+      console.error(error);
+      status(`Ошибка контент-заливки: ${error.message}`);
+      ui?.toast?.('Не удалось выполнить контент-заливку', 'error');
+      return false;
+    } finally {
+      state.endPersist();
+    }
+  }
+
   async function clearSelection({
     historyLabel = 'Очистить выделение',
     successStatus = 'Пиксели внутри выделения очищены',
@@ -361,5 +457,5 @@ export function createRasterCommandController({
     }
   }
 
-  return { drawLine, fillAt, clearSelection };
+  return { drawLine, fillAt, contentAwareFill, clearSelection };
 }

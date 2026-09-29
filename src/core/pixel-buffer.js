@@ -1,4 +1,5 @@
 import { bytesToDataUrl, dataUrlToBytes } from './io.js';
+import { inpaintSelectedSamples } from './inpaint.js';
 
 export const PIXEL_BUFFER_KIND = 'zpe-pixel-buffer-v1';
 export const PIXEL_MODELS = Object.freeze(['rgb','cmyk']);
@@ -1165,6 +1166,12 @@ export function clearPixelBufferPixels(buffer, { isAllowed=null } = {}) {
     }
   }
   return changed;
+}
+
+
+export function inpaintPixelBuffer(buffer, options = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
+  return inpaintSelectedSamples(buffer.data, buffer.width, buffer.height, buffer.channels, options);
 }
 
 function sourceSampleBytes(bitsPerChannel) {

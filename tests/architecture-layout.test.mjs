@@ -67,6 +67,9 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
 
   assert.match(build, /'src\/ui\/tool-config\.js'/);
   assert.match(build, /'src\/ui\/tool-layout\.js'/);
+  assert.match(build, /'src\/core\/inpaint\.js'/);
+  assert.ok(build.indexOf("'src/core/inpaint.js'") < build.indexOf("'src/core/pixel-buffer.js'"));
+  assert.match(paintCommandController, /from '\.\.\/core\/inpaint\.js'/);
   assert.match(build, /'src\/formats\/psd\.js'/);
   assert.doesNotMatch(build, /'src\/adapters\/psd\.js'/);
 

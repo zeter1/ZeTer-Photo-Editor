@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-29 — Content-Aware Fill foundation
+
+- Feature: в меню «Правка» добавлена контент-заливка активного выделения на текущем растровом слое; алгоритм идёт от границы выделения внутрь и использует только неизменяемые donor-пиксели вне hole, поэтому synthesized samples не размазываются рекурсивно.
+- Precision: один model-agnostic core работает с Uint8/Uint16/Float32 samples; native 16/32-bit RGB и CMYK редактируются через PixelBuffer и существующий exact-owner high-depth persistence без скрытого RGBA8 fallback.
+- Safety: команда фиксирует selection snapshot до async Canvas preparation, повторно проверяет exact document/layer перед публикацией, подавляет history/status при stale persistence и ограничивает рабочий слой 8 МП, а hole — 2 МП для предсказуемой памяти.
+- Tests/docs/build: добавлены pure inpaint regressions, Canvas8/high-depth command tests, bundle-order guard и AI-facing ownership maps; file:// bundle/cache manifest регенерированы.
+
 ### 2026-09-29 — Extract history navigation owner
 
 - Refactor: Undo / Redo / jump-to-history runtime transactions move from `src/main.js` into `src/workspace/history-navigation-controller.js`; History panel DOM and menu/keyboard/button routing remain composition concerns.
