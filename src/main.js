@@ -23,6 +23,7 @@ import {
 import { sanitizeAdjustmentModel } from './core/adjustments.js';
 import { decodePsd, encodePsdBlob, encodePsbBlob, isPsdFile } from './formats/psd.js';
 import { createDocumentSessionController } from './workspace/session-controller.js';
+import { createHistoryNavigationController } from './workspace/history-navigation-controller.js';
 import { createViewportController } from './workspace/viewport-controller.js';
 import { createRecoveryController } from './workspace/recovery-controller.js';
 import { createToolbarController } from './ui/toolbar-controller.js';
@@ -1134,6 +1135,22 @@ const {
   documentTabMenu,
 } = documentSessionController;
 
+const historyNavigationController = createHistoryNavigationController({
+  state: {
+    getHistory: () => history,
+    setDocument: value => { doc = value; },
+  },
+  guard: { blockPendingDocumentEdit },
+  restore: { restoreDocument },
+  transient: {
+    clearSelection: clearSelectionState,
+    clearRasterEdit: () => rasterEdit.clearBrushBuffer(),
+    resetCrop: () => cropGestures.reset(),
+  },
+  runtime: { updateAll, markDirty, setStatus },
+});
+const { undo, redo, jumpToHistory } = historyNavigationController;
+
 
 const smartObjectController = createSmartObjectController({
   runtime: {
@@ -1519,15 +1536,6 @@ function updateHistory() {
     els.history.append(row);
   });
   els.history.scrollTop = els.history.scrollHeight;
-}
-
-function jumpToHistory(index) {
-  if (blockPendingDocumentEdit()) return;
-  const entry = history.jump(index);
-  if (!entry) return;
-  doc = restoreDocument(entry.snapshot);
-  rasterEdit.clearBrushBuffer(); cropGestures.reset(); clearSelectionState();
-  updateAll(); markDirty(true); setStatus(`История → ${entry.label}`);
 }
 
 function updateLayerControls() {
@@ -2410,8 +2418,6 @@ function showAbout() {
   showInfoModal('О ZeTer Photo Editor',`<div class="about-copy"><strong>ZeTer Photo Editor ${escapeHtml(currentAppVersion())}</strong><p>Браузерный графический редактор со слоями, историей, умной привязкой, выделением, кистью, заливкой, линиями, текстом, фигурами и экспортом. Работает онлайн и локально; изображения обрабатываются в браузере.</p><p>Формат проекта: <code>.zpe</code>.</p><div class="developer-card"><span>Разработчик</span><strong>Дмитрий Колесниченко</strong><a href="mailto:zeter11@gmail.com">zeter11@gmail.com</a><a href="https://t.me/zeterchat" target="_blank" rel="noopener noreferrer">Telegram: @zeterchat</a><a href="https://github.com/zeter1" target="_blank" rel="noopener noreferrer">GitHub: @zeter1</a><a href="https://www.facebook.com/zeter1" target="_blank" rel="noopener noreferrer">Facebook: @zeter1</a><a href="https://www.instagram.com/zeter1992/" target="_blank" rel="noopener noreferrer">Instagram: @zeter1992</a></div></div>`);
 }
 
-function undo(){if(blockPendingDocumentEdit())return;const entry=history.undo();if(!entry)return;doc=restoreDocument(entry.snapshot);clearSelectionState();rasterEdit.clearBrushBuffer();updateAll();markDirty(true);setStatus(`Отменено → ${entry.label}`);}
-function redo(){if(blockPendingDocumentEdit())return;const entry=history.redo();if(!entry)return;doc=restoreDocument(entry.snapshot);clearSelectionState();rasterEdit.clearBrushBuffer();updateAll();markDirty(true);setStatus(`Повторено → ${entry.label}`);}
 function deleteSelected(){return layerGroupCommandController.deleteSelectedLayer();}
 function duplicateSelected(){return layerGroupCommandController.duplicateSelectedLayer();}
 function renameLayer(layer){return layer ? layerGroupCommandController.renameLayer(doc,layer.id) : false;}
