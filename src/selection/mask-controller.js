@@ -389,6 +389,8 @@ export function createSelectionMaskController({
           invert:Boolean(existingMask?.invert),
           density:clamp(Number(existingMask?.density ?? 1), 0, 1),
           feather:clamp(Number(existingMask?.feather) || 0, 0, 250),
+          linked:existingMask?.linked !== false,
+          transform:existingMask?.transform ? { ...existingMask.transform } : null,
         });
         commit(replacing ? 'Уточнить маску слоя' : 'Создать уточнённую маску слоя');
         setStatus(`Маска уточнена: сглаживание ${Number(values.smooth) || 0}px, край ${Number(values.shift) || 0}px, радиус ${Number(values.edgeRadius) || 0}px, растушёвка ${Number(values.feather) || 0}px`);
@@ -457,6 +459,23 @@ export function createSelectionMaskController({
     return true;
   }
 
+  function toggleSelectedLayerMaskLink() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.mask;
+    if (!mask || !currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+    if (layer.type === 'adjustment') {
+      setStatus('Маска корректирующего слоя уже работает в координатах документа');
+      return false;
+    }
+    mask.linked = mask.linked === false;
+    commit(mask.linked ? 'Связать маску со слоем' : 'Отвязать маску от слоя');
+    setStatus(mask.linked
+      ? 'Растровая маска связана со слоем и будет двигаться/масштабироваться вместе с ним'
+      : 'Растровая маска отвязана: трансформации слоя больше не сдвигают маску');
+    return true;
+  }
+
   function removeSelectedLayerMask() {
     const ownerDocument = getDocument();
     const layer = getSelectedLayer();
@@ -477,6 +496,7 @@ export function createSelectionMaskController({
     toggleSelectedLayerMask,
     invertSelectedLayerMask,
     editSelectedLayerMaskProperties,
+    toggleSelectedLayerMaskLink,
     removeSelectedLayerMask,
   };
 }

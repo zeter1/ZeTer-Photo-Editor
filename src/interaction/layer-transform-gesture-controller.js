@@ -1,4 +1,4 @@
-import { resizeLayerFromPoint, rotationFromDrag, snapLayerMove } from '../core/geometry.js';
+import { preserveRelativeLayerTransform, resizeLayerFromPoint, rotationFromDrag, snapLayerMove } from '../core/geometry.js';
 import { isLayerLocked } from '../core/state.js';
 
 export const LAYER_TRANSFORM_GESTURE_RESULT = Object.freeze({
@@ -107,6 +107,8 @@ export function createLayerTransformGestureController({
       start,
       lastPointer: start,
       baseline: numericBaseline(layer),
+      maskTarget:layer.mask?.linked === false ? layer.mask : null,
+      maskTransform:layer.mask?.linked === false && layer.mask.transform ? { ...layer.mask.transform } : null,
       moved: false,
     };
   }
@@ -164,6 +166,16 @@ export function createLayerTransformGestureController({
     return false;
   }
 
+  function preserveUnlinkedMask(gesture, layer) {
+    const mask = gesture.maskTarget;
+    if (!mask || layer?.mask !== mask || mask.linked !== false) return;
+    mask.transform = preserveRelativeLayerTransform(
+      { ...layer, ...gesture.baseline },
+      layer,
+      gesture.maskTransform,
+    );
+  }
+
   function applyMove(gesture, layer, point, modifiers) {
     let dx = point.x - gesture.start.x;
     let dy = point.y - gesture.start.y;
@@ -203,6 +215,7 @@ export function createLayerTransformGestureController({
 
     if (!sameNumber(layer.x, nextX)) layer.x = nextX;
     if (!sameNumber(layer.y, nextY)) layer.y = nextY;
+    preserveUnlinkedMask(gesture, layer);
     gesture.moved = moveChanged(gesture, layer);
     runtime.refreshLayerPreview(layer);
     return gesture.moved ? LAYER_TRANSFORM_GESTURE_RESULT.UPDATED : LAYER_TRANSFORM_GESTURE_RESULT.NOOP;
@@ -232,6 +245,7 @@ export function createLayerTransformGestureController({
     if (!sameNumber(layer.y, y)) layer.y = y;
     if (!sameNumber(layer.scaleX, scaleX)) layer.scaleX = scaleX;
     if (!sameNumber(layer.scaleY, scaleY)) layer.scaleY = scaleY;
+    preserveUnlinkedMask(gesture, layer);
     gesture.moved = resizeChanged(gesture, layer);
     runtime.refreshLayerPreview(layer);
     return gesture.moved ? LAYER_TRANSFORM_GESTURE_RESULT.UPDATED : LAYER_TRANSFORM_GESTURE_RESULT.NOOP;
@@ -247,6 +261,7 @@ export function createLayerTransformGestureController({
     ));
     if (rotation === null) return LAYER_TRANSFORM_GESTURE_RESULT.INVALID;
     if (!sameNumber(layer.rotation, rotation)) layer.rotation = rotation;
+    preserveUnlinkedMask(gesture, layer);
     gesture.moved = rotateChanged(gesture, layer);
     runtime.refreshLayerPreview(layer);
     return gesture.moved ? LAYER_TRANSFORM_GESTURE_RESULT.UPDATED : LAYER_TRANSFORM_GESTURE_RESULT.NOOP;
@@ -323,6 +338,9 @@ export function createLayerTransformGestureController({
     if (!layer) return LAYER_TRANSFORM_GESTURE_RESULT.REJECTED;
     const changed = hasSemanticChange(gesture, layer);
     if (changed) restoreBaseline(gesture, layer);
+    if (gesture.maskTarget && layer.mask === gesture.maskTarget && gesture.maskTarget.linked === false) {
+      gesture.maskTarget.transform = gesture.maskTransform ? { ...gesture.maskTransform } : null;
+    }
     gesture.moved = false;
     if (refresh) {
       if (changed) runtime.refreshLayerPreview(layer);

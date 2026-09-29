@@ -125,6 +125,99 @@ export function rotatePoint(point, center, radians) {
   };
 }
 
+export const IDENTITY_AFFINE_TRANSFORM = Object.freeze({ a:1, b:0, c:0, d:1, e:0, f:0 });
+
+function finiteAffineNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+export function normalizeAffineTransform(transform) {
+  return {
+    a:finiteAffineNumber(transform?.a, 1),
+    b:finiteAffineNumber(transform?.b, 0),
+    c:finiteAffineNumber(transform?.c, 0),
+    d:finiteAffineNumber(transform?.d, 1),
+    e:finiteAffineNumber(transform?.e, 0),
+    f:finiteAffineNumber(transform?.f, 0),
+  };
+}
+
+export function compactAffineTransform(transform, epsilon = 1e-10) {
+  const value = normalizeAffineTransform(transform);
+  if (
+    Math.abs(value.a - 1) <= epsilon &&
+    Math.abs(value.b) <= epsilon &&
+    Math.abs(value.c) <= epsilon &&
+    Math.abs(value.d - 1) <= epsilon &&
+    Math.abs(value.e) <= epsilon &&
+    Math.abs(value.f) <= epsilon
+  ) return null;
+  return value;
+}
+
+export function multiplyAffineTransforms(left, right) {
+  const a = normalizeAffineTransform(left);
+  const b = normalizeAffineTransform(right);
+  return {
+    a:a.a * b.a + a.c * b.b,
+    b:a.b * b.a + a.d * b.b,
+    c:a.a * b.c + a.c * b.d,
+    d:a.b * b.c + a.d * b.d,
+    e:a.a * b.e + a.c * b.f + a.e,
+    f:a.b * b.e + a.d * b.f + a.f,
+  };
+}
+
+export function invertAffineTransform(transform) {
+  const value = normalizeAffineTransform(transform);
+  const determinant = value.a * value.d - value.b * value.c;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) <= 1e-12) return null;
+  return {
+    a:value.d / determinant,
+    b:-value.b / determinant,
+    c:-value.c / determinant,
+    d:value.a / determinant,
+    e:(value.c * value.f - value.d * value.e) / determinant,
+    f:(value.b * value.e - value.a * value.f) / determinant,
+  };
+}
+
+export function layerLocalTransform(layer) {
+  const width = Math.max(1, finiteAffineNumber(layer?.width, 1));
+  const height = Math.max(1, finiteAffineNumber(layer?.height, 1));
+  const scaleX = Math.max(.01, finiteAffineNumber(layer?.scaleX, 1));
+  const scaleY = Math.max(.01, finiteAffineNumber(layer?.scaleY, 1));
+  const x = finiteAffineNumber(layer?.x, 0);
+  const y = finiteAffineNumber(layer?.y, 0);
+  const radians = finiteAffineNumber(layer?.rotation, 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const a = cos * scaleX;
+  const b = sin * scaleX;
+  const c = -sin * scaleY;
+  const d = cos * scaleY;
+  const centerX = x + width * scaleX / 2;
+  const centerY = y + height * scaleY / 2;
+  return {
+    a, b, c, d,
+    e:centerX - a * width / 2 - c * height / 2,
+    f:centerY - b * width / 2 - d * height / 2,
+  };
+}
+
+export function preserveRelativeLayerTransform(beforeLayer, afterLayer, relativeTransform = null) {
+  const inverseAfter = invertAffineTransform(layerLocalTransform(afterLayer));
+  if (!inverseAfter) return compactAffineTransform(relativeTransform);
+  const worldBefore = multiplyAffineTransforms(layerLocalTransform(beforeLayer), relativeTransform);
+  return compactAffineTransform(multiplyAffineTransforms(inverseAfter, worldBefore));
+}
+
+export function affineTransformMaxScale(transform) {
+  const value = normalizeAffineTransform(transform);
+  return Math.max(1e-9, Math.hypot(value.a, value.b), Math.hypot(value.c, value.d));
+}
+
 export function layerBounds(layer) {
   const width = Math.max(1, Number(layer.width) || 1);
   const height = Math.max(1, Number(layer.height) || 1);

@@ -11,6 +11,8 @@ test('layer mask defaults and sanitizer preserve bounded professional controls',
     invert:false,
     density:1,
     feather:0,
+    linked:true,
+    transform:null,
   });
   assert.deepEqual(sanitizeLayerMask({
     enabled:false,
@@ -18,12 +20,16 @@ test('layer mask defaults and sanitizer preserve bounded professional controls',
     invert:true,
     density:4,
     feather:999,
+    linked:false,
+    transform:{ a:1, b:0, c:0, d:1, e:12, f:-8 },
   }), {
     enabled:false,
     dataUrl:'data:image/png;base64,AA==',
     invert:true,
     density:1,
     feather:250,
+    linked:false,
+    transform:{ a:1, b:0, c:0, d:1, e:12, f:-8 },
   });
 });
 
@@ -58,4 +64,7 @@ test('render/export owners consume one canonical mask-control alpha transform', 
   assert.match(main, /Параметры растровой маски/);
   assert.match(main, /Инвертировать растровую маску/);
   assert.match(main, /Включить \/ отключить растровую маску/);
+  assert.match(main, /Связать \/ отвязать растровую маску/);
+  assert.match(render, /positionLayerMaskCoverage/);
+  assert.match(exportController, /multiplyAffineTransforms/);
 });

@@ -6,9 +6,11 @@ This document is the fast path for AI/Codex work on raster layer masks.
 
 - `src/core/state.js` owns persisted mask schema and sanitization.
 - `src/core/pixels.js#applyMaskControlsAlpha` owns deterministic alpha semantics for invert, density and feather.
-- `src/core/render.js` owns runtime composition of the controlled mask with rendered layer pixels.
-- `src/selection/mask-controller.js` owns selection → mask creation, Select & Mask refinement, mask properties/toggle/invert commands and exact-target publication guards.
-- `src/document/psd-export-controller.js` bakes runtime mask controls into PSD/PSB mask alpha so exported files retain the visible mask result.
+- `src/core/render.js` owns runtime composition of the controlled mask with rendered layer pixels, including the persisted relative affine mask transform.
+- `src/core/geometry.js` owns affine composition/inversion and the compensation equation used by layer transforms.
+- `src/selection/mask-controller.js` owns selection → mask creation, Select & Mask refinement, mask properties/toggle/invert/link commands and exact-target publication guards.
+- `src/layers/transform-command-controller.js` and `src/interaction/layer-transform-gesture-controller.js` preserve document-space mask placement while an unlinked layer moves/resizes/rotates.
+- `src/document/psd-export-controller.js` bakes runtime mask controls and placement into PSD/PSB mask alpha so exported files retain the visible mask result.
 - `src/main.js` only composes the controller and exposes menu/context-menu routes.
 
 ## Persisted schema
@@ -22,6 +24,8 @@ A raster layer mask is:
   invert: false,
   density: 1,   // 0..1
   feather: 0,   // 0..250 layer pixels
+  linked: true,
+  transform: null, // compact identity or {a,b,c,d,e,f}, mask-local → layer-local
 }
 ```
 
@@ -46,6 +50,20 @@ Mask commands capture the exact active document, selected layer and, for propert
 
 Select & Mask may perform async rendering/encoding. It must prepare first and revalidate the exact owner/target immediately before assigning `layer.mask`. Replacing an existing refined mask preserves its enabled/invert/density/feather controls.
 
+## Link / unlink transform contract
+
+`linked: true` means future layer transforms leave the mask's relative transform unchanged, so content and mask move together. `linked: false` means layer-transform owners compensate the mask after every transform so its document-space coverage stays fixed.
+
+The canonical equation is:
+
+`new relative = inverse(new layer transform) × old layer transform × old relative`
+
+Compensation is always computed from the captured command/gesture baseline, never incrementally from the previous pointer event. This avoids affine drift during long resize/rotate gestures. Cancel restores both the layer transform and the exact captured mask transform.
+
+`transform: null` is the compact identity. Re-linking does not erase a non-identity transform: it preserves the current relative placement and only changes how future layer transforms behave.
+
+Runtime and PSD/PSB export both compose the same relative transform. Do not implement link/unlink by modifying the mask bitmap or by adding one-off x/y offsets in `src/main.js`.
+
 ## PSD/PSB compatibility
 
 PSD/PSB writer preparation rasterizes `invert`, `density` and `feather` into the exported mask alpha. This intentionally preserves visual compatibility even when the target format path does not carry ZPE's runtime mask-control metadata as separate editable fields.
@@ -53,6 +71,7 @@ PSD/PSB writer preparation rasterizes `invert`, `density` and `feather` into the
 ## Tests
 
 - `tests/layer-mask-controls.test.mjs` — alpha math, schema bounds and render/export ownership.
+- `tests/layer-mask-linking.test.mjs` — affine invariance, linked/unlinked transform behavior, cancel rollback and runtime/export wiring.
 - `tests/selection-mask-controller.test.mjs` — exact-target command/modal transactions.
 - `tests/selection-refine.test.mjs` — Select & Mask refinement pipeline.
 - PSD/PSB export/integration suites — mask channel compatibility.

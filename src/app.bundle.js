@@ -120,6 +120,91 @@ function rotatePoint(point, center, radians) {
     y: center.y + dx * sin + dy * cos,
   };
 }
+const IDENTITY_AFFINE_TRANSFORM = Object.freeze({ a:1, b:0, c:0, d:1, e:0, f:0 });
+
+function finiteAffineNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+function normalizeAffineTransform(transform) {
+  return {
+    a:finiteAffineNumber(transform?.a, 1),
+    b:finiteAffineNumber(transform?.b, 0),
+    c:finiteAffineNumber(transform?.c, 0),
+    d:finiteAffineNumber(transform?.d, 1),
+    e:finiteAffineNumber(transform?.e, 0),
+    f:finiteAffineNumber(transform?.f, 0),
+  };
+}
+function compactAffineTransform(transform, epsilon = 1e-10) {
+  const value = normalizeAffineTransform(transform);
+  if (
+    Math.abs(value.a - 1) <= epsilon &&
+    Math.abs(value.b) <= epsilon &&
+    Math.abs(value.c) <= epsilon &&
+    Math.abs(value.d - 1) <= epsilon &&
+    Math.abs(value.e) <= epsilon &&
+    Math.abs(value.f) <= epsilon
+  ) return null;
+  return value;
+}
+function multiplyAffineTransforms(left, right) {
+  const a = normalizeAffineTransform(left);
+  const b = normalizeAffineTransform(right);
+  return {
+    a:a.a * b.a + a.c * b.b,
+    b:a.b * b.a + a.d * b.b,
+    c:a.a * b.c + a.c * b.d,
+    d:a.b * b.c + a.d * b.d,
+    e:a.a * b.e + a.c * b.f + a.e,
+    f:a.b * b.e + a.d * b.f + a.f,
+  };
+}
+function invertAffineTransform(transform) {
+  const value = normalizeAffineTransform(transform);
+  const determinant = value.a * value.d - value.b * value.c;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) <= 1e-12) return null;
+  return {
+    a:value.d / determinant,
+    b:-value.b / determinant,
+    c:-value.c / determinant,
+    d:value.a / determinant,
+    e:(value.c * value.f - value.d * value.e) / determinant,
+    f:(value.b * value.e - value.a * value.f) / determinant,
+  };
+}
+function layerLocalTransform(layer) {
+  const width = Math.max(1, finiteAffineNumber(layer?.width, 1));
+  const height = Math.max(1, finiteAffineNumber(layer?.height, 1));
+  const scaleX = Math.max(.01, finiteAffineNumber(layer?.scaleX, 1));
+  const scaleY = Math.max(.01, finiteAffineNumber(layer?.scaleY, 1));
+  const x = finiteAffineNumber(layer?.x, 0);
+  const y = finiteAffineNumber(layer?.y, 0);
+  const radians = finiteAffineNumber(layer?.rotation, 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const a = cos * scaleX;
+  const b = sin * scaleX;
+  const c = -sin * scaleY;
+  const d = cos * scaleY;
+  const centerX = x + width * scaleX / 2;
+  const centerY = y + height * scaleY / 2;
+  return {
+    a, b, c, d,
+    e:centerX - a * width / 2 - c * height / 2,
+    f:centerY - b * width / 2 - d * height / 2,
+  };
+}
+function preserveRelativeLayerTransform(beforeLayer, afterLayer, relativeTransform = null) {
+  const inverseAfter = invertAffineTransform(layerLocalTransform(afterLayer));
+  if (!inverseAfter) return compactAffineTransform(relativeTransform);
+  const worldBefore = multiplyAffineTransforms(layerLocalTransform(beforeLayer), relativeTransform);
+  return compactAffineTransform(multiplyAffineTransforms(inverseAfter, worldBefore));
+}
+function affineTransformMaxScale(transform) {
+  const value = normalizeAffineTransform(transform);
+  return Math.max(1e-9, Math.hypot(value.a, value.b), Math.hypot(value.c, value.d));
+}
 function layerBounds(layer) {
   const width = Math.max(1, Number(layer.width) || 1);
   const height = Math.max(1, Number(layer.height) || 1);
@@ -7684,6 +7769,8 @@ function createLayerMask(overrides = {}) {
     invert: false,
     density: 1,
     feather: 0,
+    linked: true,
+    transform: null,
     ...overrides,
   };
 }
@@ -8083,6 +8170,29 @@ function sanitizeSmartFilterMask(mask) {
     feather: bounded(mask.feather, 0, 0, 250),
   });
 }
+
+function sanitizeLayerMaskTransform(transform) {
+  if (!transform || typeof transform !== 'object' || Array.isArray(transform)) return null;
+  const value = {
+    a:bounded(transform.a, 1, -10_000, 10_000),
+    b:bounded(transform.b, 0, -10_000, 10_000),
+    c:bounded(transform.c, 0, -10_000, 10_000),
+    d:bounded(transform.d, 1, -10_000, 10_000),
+    e:bounded(transform.e, 0, -MAX_LAYER_POSITION * 200, MAX_LAYER_POSITION * 200),
+    f:bounded(transform.f, 0, -MAX_LAYER_POSITION * 200, MAX_LAYER_POSITION * 200),
+  };
+  const determinant = value.a * value.d - value.b * value.c;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) <= 1e-12) return null;
+  if (
+    Math.abs(value.a - 1) <= 1e-10 &&
+    Math.abs(value.b) <= 1e-10 &&
+    Math.abs(value.c) <= 1e-10 &&
+    Math.abs(value.d - 1) <= 1e-10 &&
+    Math.abs(value.e) <= 1e-10 &&
+    Math.abs(value.f) <= 1e-10
+  ) return null;
+  return value;
+}
 function sanitizeLayerMask(mask) {
   if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
   const dataUrl = typeof mask.dataUrl === 'string' && /^data:image\//i.test(mask.dataUrl) ? mask.dataUrl : null;
@@ -8092,6 +8202,8 @@ function sanitizeLayerMask(mask) {
     invert: Boolean(mask.invert),
     density: bounded(mask.density, 1, 0, 1),
     feather: bounded(mask.feather, 0, 0, 250),
+    linked: mask.linked !== false,
+    transform: sanitizeLayerMaskTransform(mask.transform),
   });
 }
 
@@ -8984,6 +9096,8 @@ function createLayerTransformGestureController({
       start,
       lastPointer: start,
       baseline: numericBaseline(layer),
+      maskTarget:layer.mask?.linked === false ? layer.mask : null,
+      maskTransform:layer.mask?.linked === false && layer.mask.transform ? { ...layer.mask.transform } : null,
       moved: false,
     };
   }
@@ -9041,6 +9155,16 @@ function createLayerTransformGestureController({
     return false;
   }
 
+  function preserveUnlinkedMask(gesture, layer) {
+    const mask = gesture.maskTarget;
+    if (!mask || layer?.mask !== mask || mask.linked !== false) return;
+    mask.transform = preserveRelativeLayerTransform(
+      { ...layer, ...gesture.baseline },
+      layer,
+      gesture.maskTransform,
+    );
+  }
+
   function applyMove(gesture, layer, point, modifiers) {
     let dx = point.x - gesture.start.x;
     let dy = point.y - gesture.start.y;
@@ -9080,6 +9204,7 @@ function createLayerTransformGestureController({
 
     if (!sameNumber(layer.x, nextX)) layer.x = nextX;
     if (!sameNumber(layer.y, nextY)) layer.y = nextY;
+    preserveUnlinkedMask(gesture, layer);
     gesture.moved = moveChanged(gesture, layer);
     runtime.refreshLayerPreview(layer);
     return gesture.moved ? LAYER_TRANSFORM_GESTURE_RESULT.UPDATED : LAYER_TRANSFORM_GESTURE_RESULT.NOOP;
@@ -9109,6 +9234,7 @@ function createLayerTransformGestureController({
     if (!sameNumber(layer.y, y)) layer.y = y;
     if (!sameNumber(layer.scaleX, scaleX)) layer.scaleX = scaleX;
     if (!sameNumber(layer.scaleY, scaleY)) layer.scaleY = scaleY;
+    preserveUnlinkedMask(gesture, layer);
     gesture.moved = resizeChanged(gesture, layer);
     runtime.refreshLayerPreview(layer);
     return gesture.moved ? LAYER_TRANSFORM_GESTURE_RESULT.UPDATED : LAYER_TRANSFORM_GESTURE_RESULT.NOOP;
@@ -9124,6 +9250,7 @@ function createLayerTransformGestureController({
     ));
     if (rotation === null) return LAYER_TRANSFORM_GESTURE_RESULT.INVALID;
     if (!sameNumber(layer.rotation, rotation)) layer.rotation = rotation;
+    preserveUnlinkedMask(gesture, layer);
     gesture.moved = rotateChanged(gesture, layer);
     runtime.refreshLayerPreview(layer);
     return gesture.moved ? LAYER_TRANSFORM_GESTURE_RESULT.UPDATED : LAYER_TRANSFORM_GESTURE_RESULT.NOOP;
@@ -9200,6 +9327,9 @@ function createLayerTransformGestureController({
     if (!layer) return LAYER_TRANSFORM_GESTURE_RESULT.REJECTED;
     const changed = hasSemanticChange(gesture, layer);
     if (changed) restoreBaseline(gesture, layer);
+    if (gesture.maskTarget && layer.mask === gesture.maskTarget && gesture.maskTarget.linked === false) {
+      gesture.maskTarget.transform = gesture.maskTransform ? { ...gesture.maskTransform } : null;
+    }
     gesture.moved = false;
     if (refresh) {
       if (changed) runtime.refreshLayerPreview(layer);
@@ -11661,9 +11791,25 @@ function createLayerTransformCommandController({ state, transaction } = {}) {
     return LAYER_TRANSFORM_COMMAND_RESULT.COMMITTED;
   }
 
+  function captureUnlinkedMask(layer) {
+    const mask = layer?.mask;
+    if (!mask || mask.linked !== false) return null;
+    return {
+      target:mask,
+      transform:mask.transform ? { ...mask.transform } : null,
+      layer:{ ...layer },
+    };
+  }
+
+  function preserveUnlinkedMask(layer, snapshot) {
+    if (!snapshot || layer?.mask !== snapshot.target || snapshot.target.linked !== false) return;
+    snapshot.target.transform = preserveRelativeLayerTransform(snapshot.layer, layer, snapshot.transform);
+  }
+
   function nudge(owner, layerId, dx, dy) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const maskSnapshot = captureUnlinkedMask(layer);
     const deltaX = finiteNumber(dx);
     const deltaY = finiteNumber(dy);
     if (deltaX === null || deltaY === null) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
@@ -11673,12 +11819,14 @@ function createLayerTransformCommandController({ state, transaction } = {}) {
     const currentY = finiteNumber(layer.y) ?? 0;
     layer.x = currentX + deltaX;
     layer.y = currentY + deltaY;
+    preserveUnlinkedMask(layer, maskSnapshot);
     return publish('Сдвинуть слой');
   }
 
   function center(owner, layerId) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const maskSnapshot = captureUnlinkedMask(layer);
     const size = documentSize(owner);
     if (!size) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
 
@@ -11693,12 +11841,14 @@ function createLayerTransformCommandController({ state, transaction } = {}) {
 
     layer.x = nextX;
     layer.y = nextY;
+    preserveUnlinkedMask(layer, maskSnapshot);
     return publish('Центрировать слой');
   }
 
   function align(owner, layerId, mode) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const maskSnapshot = captureUnlinkedMask(layer);
     if (!LAYER_ALIGNMENT_MODES.has(mode)) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
     const size = documentSize(owner);
     if (!size) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
@@ -11707,12 +11857,14 @@ function createLayerTransformCommandController({ state, transaction } = {}) {
     if (!next.changed) return LAYER_TRANSFORM_COMMAND_RESULT.NOOP;
     layer.x = next.x;
     layer.y = next.y;
+    preserveUnlinkedMask(layer, maskSnapshot);
     return publish(`Выровнять слой ${LAYER_ALIGNMENT_LABELS[mode]}`);
   }
 
   function fitToCanvas(owner, layerId) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const maskSnapshot = captureUnlinkedMask(layer);
     const size = documentSize(owner);
     if (!size) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
 
@@ -11756,6 +11908,7 @@ function createLayerTransformCommandController({ state, transaction } = {}) {
     layer.scaleY = nextScaleY;
     layer.x = nextX;
     layer.y = nextY;
+    preserveUnlinkedMask(layer, maskSnapshot);
     return publish('Вписать слой в холст');
   }
 
@@ -14213,16 +14366,30 @@ async function layerMaskCoverageCanvas(mask, width, height) {
   return coverage;
 }
 
+function positionLayerMaskCoverage(coverage, mask, width, height) {
+  if (!mask?.dataUrl || !mask?.transform) return coverage;
+  const transform = normalizeAffineTransform(mask.transform);
+  const positioned = document.createElement('canvas');
+  positioned.width = Math.max(1, Math.ceil(width || 1));
+  positioned.height = Math.max(1, Math.ceil(height || 1));
+  const positionedCtx = positioned.getContext('2d', { alpha:true });
+  positionedCtx.setTransform(transform.a, transform.b, transform.c, transform.d, transform.e, transform.f);
+  positionedCtx.drawImage(coverage, 0, 0, width, height);
+  positionedCtx.setTransform(1, 0, 0, 1, 0, 0);
+  return positioned;
+}
+
 async function applyLayerMaskToContext(ctx, mask, width, height) {
   if (!mask || mask.enabled === false) return false;
   if (!mask.dataUrl && !mask.invert) return false;
   const coverage = await layerMaskCoverageCanvas(mask, width, height);
   if (!coverage) return false;
+  const positioned = positionLayerMaskCoverage(coverage, mask, width, height);
   ctx.save();
   ctx.globalCompositeOperation = 'destination-in';
   ctx.globalAlpha = 1;
   ctx.filter = 'none';
-  ctx.drawImage(coverage, 0, 0, width, height);
+  ctx.drawImage(positioned, 0, 0, width, height);
   ctx.restore();
   return true;
 }
@@ -17472,6 +17639,8 @@ function createSelectionMaskController({
           invert:Boolean(existingMask?.invert),
           density:clamp(Number(existingMask?.density ?? 1), 0, 1),
           feather:clamp(Number(existingMask?.feather) || 0, 0, 250),
+          linked:existingMask?.linked !== false,
+          transform:existingMask?.transform ? { ...existingMask.transform } : null,
         });
         commit(replacing ? 'Уточнить маску слоя' : 'Создать уточнённую маску слоя');
         setStatus(`Маска уточнена: сглаживание ${Number(values.smooth) || 0}px, край ${Number(values.shift) || 0}px, радиус ${Number(values.edgeRadius) || 0}px, растушёвка ${Number(values.feather) || 0}px`);
@@ -17540,6 +17709,23 @@ function createSelectionMaskController({
     return true;
   }
 
+  function toggleSelectedLayerMaskLink() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.mask;
+    if (!mask || !currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+    if (layer.type === 'adjustment') {
+      setStatus('Маска корректирующего слоя уже работает в координатах документа');
+      return false;
+    }
+    mask.linked = mask.linked === false;
+    commit(mask.linked ? 'Связать маску со слоем' : 'Отвязать маску от слоя');
+    setStatus(mask.linked
+      ? 'Растровая маска связана со слоем и будет двигаться/масштабироваться вместе с ним'
+      : 'Растровая маска отвязана: трансформации слоя больше не сдвигают маску');
+    return true;
+  }
+
   function removeSelectedLayerMask() {
     const ownerDocument = getDocument();
     const layer = getSelectedLayer();
@@ -17560,6 +17746,7 @@ function createSelectionMaskController({
     toggleSelectedLayerMask,
     invertSelectedLayerMask,
     editSelectedLayerMaskProperties,
+    toggleSelectedLayerMaskLink,
     removeSelectedLayerMask,
   };
 }
@@ -20095,16 +20282,28 @@ function createPsdExportController({
     if(!layer.mask)return null;
     const canvas=createCanvas();canvas.width=bounds.width;canvas.height=bounds.height;
     const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
+    let maskScale=1;
     if(layer.mask.dataUrl){
-      ctx.translate(-bounds.x,-bounds.y);
+      const localWidth=Math.max(1,Number(layer.width)||1);
+      const localHeight=Math.max(1,Number(layer.height)||1);
+      const source=createCanvas();
+      source.width=Math.max(1,Math.ceil(localWidth));
+      source.height=Math.max(1,Math.ceil(localHeight));
+      checkedCanvasSize(source.width,source.height,`PSD mask source «${layer.name||'Без имени'}»`);
+      const sourceCtx=source.getContext('2d',{alpha:true,willReadFrequently:true});
       const maskLayer=createRasterLayer({
         name:`${layer.name||'Слой'} — mask`,
-        x:layer.x,y:layer.y,width:layer.width,height:layer.height,
-        scaleX:layer.scaleX,scaleY:layer.scaleY,rotation:layer.rotation,
+        x:0,y:0,width:localWidth,height:localHeight,
+        scaleX:1,scaleY:1,rotation:0,
         opacity:1,blendMode:'source-over',dataUrl:layer.mask.dataUrl,
         filters:{...DEFAULT_LAYER_FILTERS},styles:null,mask:null,
       });
-      await renderLayer(ctx,maskLayer);
+      await renderLayer(sourceCtx,maskLayer);
+      const relative=normalizeAffineTransform(layer.mask.transform);
+      const world=multiplyAffineTransforms(layerLocalTransform(layer),relative);
+      maskScale=affineTransformMaxScale(world);
+      ctx.setTransform(world.a,world.b,world.c,world.d,world.e-bounds.x,world.f-bounds.y);
+      ctx.drawImage(source,0,0,source.width,source.height,0,0,localWidth,localHeight);
       ctx.setTransform(1,0,0,1,0,0);
     }else{
       ctx.fillStyle='#fff';
@@ -20113,7 +20312,6 @@ function createPsdExportController({
     const pixels=canvasRgbaPixels(canvas,`PSD mask «${layer.name||'Без имени'}»`);
     const alpha=new Uint8ClampedArray(bounds.width*bounds.height);
     for(let index=0;index<alpha.length;index+=1)alpha[index]=pixels[index*4+3];
-    const maskScale=layer.mask.dataUrl?Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1)):1;
     const controlled=applyMaskControlsAlpha(alpha,bounds.width,bounds.height,{
       invert:Boolean(layer.mask.invert),
       density:layer.mask.density??1,
@@ -24067,6 +24265,7 @@ const {
   toggleSelectedLayerMask,
   invertSelectedLayerMask,
   editSelectedLayerMaskProperties,
+  toggleSelectedLayerMaskLink,
   removeSelectedLayerMask,
 } = selectionMaskController;
 
@@ -26347,6 +26546,7 @@ function layerContextMenu(id) {
     ['Параметры растровой маски…','',editSelectedLayerMaskProperties,()=>selectedTarget() && editable() && Boolean(target().mask)],
     ['Инвертировать растровую маску','',invertSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
     ['Включить / отключить растровую маску','',toggleSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
+    ['Связать / отвязать растровую маску','',toggleSelectedLayerMaskLink,()=>selectedTarget() && editable() && Boolean(target().mask) && target().type!=='adjustment'],
     ['Удалить маску','',removeSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
     ['sep'],
     ['Создать векторную маску из выделения','',()=>applySelectionToVectorMask('replace'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&!target().vectorMask],
@@ -26397,7 +26597,8 @@ function layerMaskSummary(layer){
     const state=mask.enabled===false?'отключена':mask.invert?'инвертирована':'включена';
     const density=Math.round((mask.density??1)*100);
     const feather=Number(mask.feather)||0;
-    parts.push(`растровая: ${state}, плотность ${density}%, растушёвка ${feather}px${mask.dataUrl?'':' (показать всё)'}`);
+    const linkage=mask.linked===false?'отвязана':'связана';
+    parts.push(`растровая: ${state}, ${linkage}, плотность ${density}%, растушёвка ${feather}px${mask.dataUrl?'':' (показать всё)'}`);
   }
   if(layer?.vectorMask){
     const count=layer.vectorMask.subpaths?.length||0,state=layer.vectorMask.enabled===false?'отключена':layer.vectorMask.invert?'инвертирована':'включена';
@@ -26463,6 +26664,7 @@ const menus={
     ['Параметры растровой маски…','',editSelectedLayerMaskProperties,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['Инвертировать растровую маску','',invertSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['Включить / отключить растровую маску','',toggleSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
+    ['Связать / отвязать растровую маску','',toggleSelectedLayerMaskLink,()=>Boolean(selected()?.mask)&&selected()?.type!=='adjustment'&&!isLayerLocked(doc,selected())],
     ['Удалить маску','',removeSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Создать векторную маску из выделения','',()=>applySelectionToVectorMask('replace'),()=>Boolean(selected())&&Boolean(selectionShape)&&!selected().vectorMask&&!isLayerLocked(doc,selected())],

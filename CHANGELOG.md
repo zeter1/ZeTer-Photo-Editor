@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-29 — Independent raster mask link/unlink transforms
+
+- Masks: raster masks now persist an explicit linked/unlinked relationship plus a compact relative affine transform; Layer and context menus can toggle linkage without rewriting mask pixels.
+- Transform safety: when a mask is unlinked, nudge/align/fit and interactive Move/Resize/Rotate compensate the mask from the command/gesture baseline, keeping mask coverage fixed in document space; cancel restores both layer and mask exactly.
+- Rendering/PSD: runtime composition and PSD/PSB export consume the same relative transform, while relinking preserves the current offset and only changes future transform behavior.
+- Compatibility/tests/docs: old projects default to linked identity masks; affine values are bounded/sanitized; new regressions cover transform invariance, cancellation, controller ownership, menu wiring and generated file:// artifacts.
+
 ### 2026-09-29 — Professional raster layer-mask controls
 
 - Masks: raster layer masks now persist explicit invert, density and feather controls; Layer/context menus expose properties, invert and enable/disable commands without rewriting the source bitmap.

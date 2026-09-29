@@ -1,4 +1,4 @@
-import { alignLayerToCanvas, frameBounds, layerFrame } from '../core/geometry.js';
+import { alignLayerToCanvas, frameBounds, layerFrame, preserveRelativeLayerTransform } from '../core/geometry.js';
 import { isLayerLocked } from '../core/state.js';
 
 export const LAYER_TRANSFORM_COMMAND_RESULT = Object.freeze({
@@ -65,9 +65,25 @@ export function createLayerTransformCommandController({ state, transaction } = {
     return LAYER_TRANSFORM_COMMAND_RESULT.COMMITTED;
   }
 
+  function captureUnlinkedMask(layer) {
+    const mask = layer?.mask;
+    if (!mask || mask.linked !== false) return null;
+    return {
+      target:mask,
+      transform:mask.transform ? { ...mask.transform } : null,
+      layer:{ ...layer },
+    };
+  }
+
+  function preserveUnlinkedMask(layer, snapshot) {
+    if (!snapshot || layer?.mask !== snapshot.target || snapshot.target.linked !== false) return;
+    snapshot.target.transform = preserveRelativeLayerTransform(snapshot.layer, layer, snapshot.transform);
+  }
+
   function nudge(owner, layerId, dx, dy) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const maskSnapshot = captureUnlinkedMask(layer);
     const deltaX = finiteNumber(dx);
     const deltaY = finiteNumber(dy);
     if (deltaX === null || deltaY === null) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
@@ -77,12 +93,14 @@ export function createLayerTransformCommandController({ state, transaction } = {
     const currentY = finiteNumber(layer.y) ?? 0;
     layer.x = currentX + deltaX;
     layer.y = currentY + deltaY;
+    preserveUnlinkedMask(layer, maskSnapshot);
     return publish('Сдвинуть слой');
   }
 
   function center(owner, layerId) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const maskSnapshot = captureUnlinkedMask(layer);
     const size = documentSize(owner);
     if (!size) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
 
@@ -97,12 +115,14 @@ export function createLayerTransformCommandController({ state, transaction } = {
 
     layer.x = nextX;
     layer.y = nextY;
+    preserveUnlinkedMask(layer, maskSnapshot);
     return publish('Центрировать слой');
   }
 
   function align(owner, layerId, mode) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const maskSnapshot = captureUnlinkedMask(layer);
     if (!LAYER_ALIGNMENT_MODES.has(mode)) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
     const size = documentSize(owner);
     if (!size) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
@@ -111,12 +131,14 @@ export function createLayerTransformCommandController({ state, transaction } = {
     if (!next.changed) return LAYER_TRANSFORM_COMMAND_RESULT.NOOP;
     layer.x = next.x;
     layer.y = next.y;
+    preserveUnlinkedMask(layer, maskSnapshot);
     return publish(`Выровнять слой ${LAYER_ALIGNMENT_LABELS[mode]}`);
   }
 
   function fitToCanvas(owner, layerId) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return LAYER_TRANSFORM_COMMAND_RESULT.REJECTED;
+    const maskSnapshot = captureUnlinkedMask(layer);
     const size = documentSize(owner);
     if (!size) return LAYER_TRANSFORM_COMMAND_RESULT.INVALID;
 
@@ -160,6 +182,7 @@ export function createLayerTransformCommandController({ state, transaction } = {
     layer.scaleY = nextScaleY;
     layer.x = nextX;
     layer.y = nextY;
+    preserveUnlinkedMask(layer, maskSnapshot);
     return publish('Вписать слой в холст');
   }
 

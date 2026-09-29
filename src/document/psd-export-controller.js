@@ -1,4 +1,7 @@
-import { frameBounds, clamp } from '../core/geometry.js';
+import {
+  affineTransformMaxScale, frameBounds, clamp, layerLocalTransform,
+  multiplyAffineTransforms, normalizeAffineTransform,
+} from '../core/geometry.js';
 import {
   createRasterLayer, checkedCanvasSize, DEFAULT_LAYER_FILTERS,
   sanitizeFilters, sanitizeColorManagement, isLayerVisible,
@@ -61,16 +64,28 @@ export function createPsdExportController({
     if(!layer.mask)return null;
     const canvas=createCanvas();canvas.width=bounds.width;canvas.height=bounds.height;
     const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
+    let maskScale=1;
     if(layer.mask.dataUrl){
-      ctx.translate(-bounds.x,-bounds.y);
+      const localWidth=Math.max(1,Number(layer.width)||1);
+      const localHeight=Math.max(1,Number(layer.height)||1);
+      const source=createCanvas();
+      source.width=Math.max(1,Math.ceil(localWidth));
+      source.height=Math.max(1,Math.ceil(localHeight));
+      checkedCanvasSize(source.width,source.height,`PSD mask source «${layer.name||'Без имени'}»`);
+      const sourceCtx=source.getContext('2d',{alpha:true,willReadFrequently:true});
       const maskLayer=createRasterLayer({
         name:`${layer.name||'Слой'} — mask`,
-        x:layer.x,y:layer.y,width:layer.width,height:layer.height,
-        scaleX:layer.scaleX,scaleY:layer.scaleY,rotation:layer.rotation,
+        x:0,y:0,width:localWidth,height:localHeight,
+        scaleX:1,scaleY:1,rotation:0,
         opacity:1,blendMode:'source-over',dataUrl:layer.mask.dataUrl,
         filters:{...DEFAULT_LAYER_FILTERS},styles:null,mask:null,
       });
-      await renderLayer(ctx,maskLayer);
+      await renderLayer(sourceCtx,maskLayer);
+      const relative=normalizeAffineTransform(layer.mask.transform);
+      const world=multiplyAffineTransforms(layerLocalTransform(layer),relative);
+      maskScale=affineTransformMaxScale(world);
+      ctx.setTransform(world.a,world.b,world.c,world.d,world.e-bounds.x,world.f-bounds.y);
+      ctx.drawImage(source,0,0,source.width,source.height,0,0,localWidth,localHeight);
       ctx.setTransform(1,0,0,1,0,0);
     }else{
       ctx.fillStyle='#fff';
@@ -79,7 +94,6 @@ export function createPsdExportController({
     const pixels=canvasRgbaPixels(canvas,`PSD mask «${layer.name||'Без имени'}»`);
     const alpha=new Uint8ClampedArray(bounds.width*bounds.height);
     for(let index=0;index<alpha.length;index+=1)alpha[index]=pixels[index*4+3];
-    const maskScale=layer.mask.dataUrl?Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1)):1;
     const controlled=applyMaskControlsAlpha(alpha,bounds.width,bounds.height,{
       invert:Boolean(layer.mask.invert),
       density:layer.mask.density??1,

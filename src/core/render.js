@@ -5,6 +5,7 @@ import { applyAdvancedColorAdjustmentsAsync } from './pixel-worker.js';
 import { deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview } from './pixel-buffer.js';
 import { applyAdjustmentPixels, compositeAdjustmentPixels } from './adjustments.js';
 import { applyMaskControlsAlpha } from './pixels.js';
+import { normalizeAffineTransform } from './geometry.js';
 
 const imageCache = new Map();
 const IMAGE_CACHE_LIMIT = 24;
@@ -349,16 +350,30 @@ async function layerMaskCoverageCanvas(mask, width, height) {
   return coverage;
 }
 
+function positionLayerMaskCoverage(coverage, mask, width, height) {
+  if (!mask?.dataUrl || !mask?.transform) return coverage;
+  const transform = normalizeAffineTransform(mask.transform);
+  const positioned = document.createElement('canvas');
+  positioned.width = Math.max(1, Math.ceil(width || 1));
+  positioned.height = Math.max(1, Math.ceil(height || 1));
+  const positionedCtx = positioned.getContext('2d', { alpha:true });
+  positionedCtx.setTransform(transform.a, transform.b, transform.c, transform.d, transform.e, transform.f);
+  positionedCtx.drawImage(coverage, 0, 0, width, height);
+  positionedCtx.setTransform(1, 0, 0, 1, 0, 0);
+  return positioned;
+}
+
 async function applyLayerMaskToContext(ctx, mask, width, height) {
   if (!mask || mask.enabled === false) return false;
   if (!mask.dataUrl && !mask.invert) return false;
   const coverage = await layerMaskCoverageCanvas(mask, width, height);
   if (!coverage) return false;
+  const positioned = positionLayerMaskCoverage(coverage, mask, width, height);
   ctx.save();
   ctx.globalCompositeOperation = 'destination-in';
   ctx.globalAlpha = 1;
   ctx.filter = 'none';
-  ctx.drawImage(coverage, 0, 0, width, height);
+  ctx.drawImage(positioned, 0, 0, width, height);
   ctx.restore();
   return true;
 }

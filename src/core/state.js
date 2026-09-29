@@ -182,6 +182,8 @@ export function createLayerMask(overrides = {}) {
     invert: false,
     density: 1,
     feather: 0,
+    linked: true,
+    transform: null,
     ...overrides,
   };
 }
@@ -616,6 +618,29 @@ export function sanitizeSmartFilterMask(mask) {
   });
 }
 
+function sanitizeLayerMaskTransform(transform) {
+  if (!transform || typeof transform !== 'object' || Array.isArray(transform)) return null;
+  const value = {
+    a:bounded(transform.a, 1, -10_000, 10_000),
+    b:bounded(transform.b, 0, -10_000, 10_000),
+    c:bounded(transform.c, 0, -10_000, 10_000),
+    d:bounded(transform.d, 1, -10_000, 10_000),
+    e:bounded(transform.e, 0, -MAX_LAYER_POSITION * 200, MAX_LAYER_POSITION * 200),
+    f:bounded(transform.f, 0, -MAX_LAYER_POSITION * 200, MAX_LAYER_POSITION * 200),
+  };
+  const determinant = value.a * value.d - value.b * value.c;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) <= 1e-12) return null;
+  if (
+    Math.abs(value.a - 1) <= 1e-10 &&
+    Math.abs(value.b) <= 1e-10 &&
+    Math.abs(value.c) <= 1e-10 &&
+    Math.abs(value.d - 1) <= 1e-10 &&
+    Math.abs(value.e) <= 1e-10 &&
+    Math.abs(value.f) <= 1e-10
+  ) return null;
+  return value;
+}
+
 export function sanitizeLayerMask(mask) {
   if (!mask || typeof mask !== 'object' || Array.isArray(mask)) return null;
   const dataUrl = typeof mask.dataUrl === 'string' && /^data:image\//i.test(mask.dataUrl) ? mask.dataUrl : null;
@@ -625,6 +650,8 @@ export function sanitizeLayerMask(mask) {
     invert: Boolean(mask.invert),
     density: bounded(mask.density, 1, 0, 1),
     feather: bounded(mask.feather, 0, 0, 250),
+    linked: mask.linked !== false,
+    transform: sanitizeLayerMaskTransform(mask.transform),
   });
 }
 

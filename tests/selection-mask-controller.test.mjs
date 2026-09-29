@@ -281,6 +281,23 @@ test('layer mask runtime controls publish exact one-step history and properties'
   assert.equal(h.commits.at(-1), 'Параметры маски слоя');
 });
 
+test('layer mask link toggle is guarded and publishes exactly one history step per change', async () => {
+  const h = harness();
+  await h.controller.addSelectedLayerMask(false);
+  h.commits.length = 0;
+  h.statuses.length = 0;
+
+  assert.equal(h.controller.toggleSelectedLayerMaskLink(), true);
+  assert.equal(h.layer.mask.linked, false);
+  assert.deepEqual(h.commits, ['Отвязать маску от слоя']);
+  assert.match(h.statuses.at(-1), /отвязана/);
+
+  assert.equal(h.controller.toggleSelectedLayerMaskLink(), true);
+  assert.equal(h.layer.mask.linked, true);
+  assert.deepEqual(h.commits, ['Отвязать маску от слоя', 'Связать маску со слоем']);
+  assert.match(h.statuses.at(-1), /связана/);
+});
+
 test('stale layer-mask properties modal cannot mutate a replacement mask', async () => {
   const h = harness();
   await h.controller.addSelectedLayerMask(false);
@@ -405,6 +422,7 @@ test('selection raster-mask policy has one owner and Smart Filter consumes its b
     'function toggleSelectedLayerMask(',
     'function invertSelectedLayerMask(',
     'function editSelectedLayerMaskProperties(',
+    'function toggleSelectedLayerMaskLink(',
     'function removeSelectedLayerMask(',
   ]) {
     assert.equal(main.includes(definition), false, definition + ' must not drift back into main.js');
