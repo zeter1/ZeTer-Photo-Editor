@@ -7,6 +7,7 @@ const textEditController=await readFile(new URL('../src/ui/text-edit-controller.
 const smartObjectController=await readFile(new URL('../src/document/smart-object-controller.js',import.meta.url),'utf8');
 const psdSmartObjectResource=await readFile(new URL('../src/document/psd-smart-object-resource.js',import.meta.url),'utf8');
 const psdExportController=await readFile(new URL('../src/document/psd-export-controller.js',import.meta.url),'utf8');
+const documentExportController=await readFile(new URL('../src/document/export-controller.js',import.meta.url),'utf8');
 const psdNativeMetadataPlans=await readFile(new URL('../src/document/psd-native-metadata-plans.js',import.meta.url),'utf8');
 const psdImportController=await readFile(new URL('../src/document/psd-import-controller.js',import.meta.url),'utf8');
 const psdImportSemantics=await readFile(new URL('../src/document/psd-import-semantics.js',import.meta.url),'utf8');
@@ -18,17 +19,20 @@ const colorManagement=await readFile(new URL('../src/ui/color-management-control
 const layersPanelController=await readFile(new URL('../src/ui/layers-panel-controller.js',import.meta.url),'utf8');
 const adjustmentCommandController=await readFile(new URL('../src/layers/adjustment-command-controller.js',import.meta.url),'utf8');
 
-test('PSD Stage 4 and PSB Stage 7a are wired into the export UI',()=>{
+test('PSD Stage 4 and PSB Stage 7a are wired through the document export owner',()=>{
   assert.match(main,/import \{[^}]*decodePsd[^}]*encodePsdBlob[^}]*encodePsbBlob[^}]*isPsdFile[^}]*\} from '\.\/formats\/psd\.js'/);
-  assert.match(main,/PSD — RGB\/CMYK слои 8\/16\/32-bit/);
-  assert.match(main,/PSB — RGB\/CMYK Large Document 8\/16\/32-bit/);
+  assert.match(main,/from '\.\/document\/export-controller\.js'/);
+  assert.match(main,/createDocumentExportController\(\{/);
+  assert.match(documentExportController,/PSD — RGB\/CMYK слои 8\/16\/32-bit/);
+  assert.match(documentExportController,/PSB — RGB\/CMYK Large Document 8\/16\/32-bit/);
   assert.match(psdExportController,/async function preparePsdExport\(exportDoc\)/);
-  assert.match(main,/async function exportPsdDocument\(exportDoc,\{psb=false\}=\{\}\)/);
-  assert.match(main,/const encodeBlob=psb\?encodePsbBlob:encodePsdBlob/);
-  assert.match(main,/if\(type==='psb'\)\{await exportPsdDocument\(exportDoc,\{psb:true\}\);return;\}/);
-  assert.match(main,/downloadBlob\(blob,filename\)/);
-  assert.match(main,/image\/vnd\.adobe\.photoshop/);
-  assert.match(psdExportController,/48_000_000/);
+  assert.match(documentExportController,/async function exportPsdDocument\(exportDoc, \{ psb = false \} = \{\}\)/);
+  assert.match(documentExportController,/const encodeBlob = psb \? encodePsbBlob : encodePsdBlob/);
+  assert.match(documentExportController,/if \(type === PSB_FORMAT\)/);
+  assert.match(documentExportController,/downloadBlob\(blob, filename\)/);
+  assert.match(documentExportController,/const PSD_MIME = 'image\/vnd\.adobe\.photoshop'/);
+  assert.match(documentExportController,/const PSD_MAX_PIXELS = 48_000_000/);
+  assert.match(documentExportController,/const PSD_MAX_LAYERS = 500/);
   assert.match(psdExportController,/ZPE Composite Preview \(adjustments baked\)/);
 });
 
@@ -85,7 +89,11 @@ test('PSD Group Export Stage 8b wires ZPE flat groups into the PSD/PSB writer',(
   assert.match(psdExportController,/const exportGroups=\(exportDoc\.groups\|\|\[\]\)/);
   assert.match(psdExportController,/groupKey:layer\.groupId/);
   assert.match(psdExportController,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),linkedLayerBlocks:/);
-  assert.match(main,/layers:prepared\.layers,groups:prepared\.groups,paths:prepared\.paths,linkedLayerBlocks:prepared\.linkedLayerBlocks,composite:prepared\.composite/);
+  assert.match(documentExportController,/layers:\s*prepared\.layers/);
+  assert.match(documentExportController,/groups:\s*prepared\.groups/);
+  assert.match(documentExportController,/paths:\s*prepared\.paths/);
+  assert.match(documentExportController,/linkedLayerBlocks:\s*prepared\.linkedLayerBlocks/);
+  assert.match(documentExportController,/composite:\s*prepared\.composite/);
 });
 
 
@@ -125,7 +133,8 @@ test('PSD Color Management Stage 7g persists ICC bytes in ZPE and passes them ba
   assert.match(adapter,/writeImageResourceBlock\(resources, 1039/);
   assert.match(psdImportController,/bytesToDataUrl\(parsed\.iccProfile\.bytes,'application\/vnd\.iccprofile'\)/);
   assert.match(main,/dataUrlToBytes\(profile\.dataUrl,\{maxBytes:4\*1024\*1024\}\)/);
-  assert.match(main,/iccProfile,iccUntagged:Boolean\(profile\?\.untagged\)/);
+  assert.match(documentExportController,/iccProfile/);
+  assert.match(documentExportController,/iccUntagged:\s*Boolean\(profile\?\.untagged\)/);
 });
 
 test('PSD Vector/Path Stage 10d-10e wires native masks and saved paths through UI and adapter',()=>{
@@ -137,7 +146,7 @@ test('PSD Vector/Path Stage 10d-10e wires native masks and saved paths through U
   assert.match(psdImportController,/importedLayer\.vectorMask=canMapShape\?null:semantics\.importPsdVectorMask\(sourceLayer\.vectorMask,importedLayer\)/);
   assert.match(psdImportController,/next\.paths=structuredClone\(parsed\.paths\|\|\[\]\)/);
   assert.match(psdExportController,/vectorMask:nativeShape\?\.eligible\?nativeShape\.vectorMask:exportPsdVectorMask\(layer\)/);
-  assert.match(main,/paths:prepared\.paths/);
+  assert.match(documentExportController,/paths:\s*prepared\.paths/);
 });
 
 
@@ -152,7 +161,9 @@ test('PSD/PSB Stage 12e routes native 16/32-bit PixelBuffers into Lr16/Lr32 writ
   assert.match(psdExportController,/nativePixelBuffer\?nativePsdBounds/);
   assert.match(psdExportController,/const bitsPerChannel=nativeDepths\.includes\(32\)\?32:nativeDepths\.includes\(16\)\?16:8/);
   assert.match(psdExportController,/if\(nativePixelBuffer\)item\.pixelBuffer=nativePixelBuffer/);
-  assert.match(main,/compositePixelBuffer:prepared\.compositePixelBuffer,bitsPerChannel:prepared\.bitsPerChannel,colorMode:prepared\.colorMode/);
+  assert.match(documentExportController,/compositePixelBuffer:\s*prepared\.compositePixelBuffer/);
+  assert.match(documentExportController,/bitsPerChannel:\s*prepared\.bitsPerChannel/);
+  assert.match(documentExportController,/colorMode:\s*prepared\.colorMode/);
 });
 
 test('Stage 12e keeps honest fallback semantics for transformed or effect-bearing high-depth layers',()=>{
@@ -192,7 +203,7 @@ test('Stage 13b wires advanced ICC policy and native CMYK PSD/PSB export',()=>{
   assert.match(psdExportController,/function buildNativeCmykComposite\(/);
   assert.match(psdExportController,/compositeCmykPixelBufferLayers\(/);
   assert.match(psdExportController,/const colorMode=cmykEligibility\.eligible\?'cmyk':'rgb'/);
-  assert.match(main,/colorMode:prepared\.colorMode/);
+  assert.match(documentExportController,/colorMode:\s*prepared\.colorMode/);
   assert.match(adapter,/colorMode = PSD_COLOR_MODE_RGB/);
   assert.match(adapter,/mode===PSD_COLOR_MODE_CMYK\?5:4/);
   assert.match(adapter,/expectedModel === 'cmyk' \? \[4,5\] : \[3,4\]/);
@@ -225,7 +236,7 @@ test('Stage 14a wires Photoshop Smart Object / Placed Layer opaque metadata thro
   assert.match(psdExportController,/psdSmartObject:psdSmartPlan\.eligible/);
   assert.match(psdImportController,/next\.psdLinkedLayerBlocks=/);
   assert.match(psdImportController,/next\.psdSmartObjectSourceCount=/);
-  assert.match(main,/linkedLayerBlocks:prepared\.linkedLayerBlocks/);
+  assert.match(documentExportController,/linkedLayerBlocks:\s*prepared\.linkedLayerBlocks/);
   assert.match(psdExportController,/Photoshop Smart Object native passthrough отключён/);
 });
 
