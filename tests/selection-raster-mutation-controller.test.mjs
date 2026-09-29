@@ -11,6 +11,7 @@ function createHarness({ documentValue, operations = {}, rasterEdit = {}, select
   let clears = 0;
   const edit = {
     editableHighDepthBuffer:() => null,
+    prepareTiledHighDepthMutation:async() => null,
     prepareHighDepthMutation:async() => null,
     applyHighDepthMutation:() => {},
     drawHighDepthRasterBase:() => false,
@@ -497,4 +498,45 @@ test('merged selection clear rejects caller continuation ownership lost during a
   assert.deepEqual(h.commits,[]);
   assert.equal(h.getPersisting(),false);
   assert.deepEqual(h.statuses,[]);
+});
+
+
+test('Stage 17b merged clear prepares a tiled high-depth mutation without contiguous or Canvas fallback',async()=>{
+  const layer={id:'hdr',type:'raster',name:'HDR',visible:true,locked:false,dataUrl:'preview',highDepthSource:{kind:'zpe-pixel-buffer-source-v2',model:'rgb'}};
+  const documentValue={layers:[layer],groups:[],selectedLayerId:'hdr'};
+  let applied=null,tiledCalls=0;
+  const h=createHarness({
+    documentValue,selection:{predicate:()=>()=>true},
+    rasterEdit:{
+      editableHighDepthBuffer:()=>{throw new Error('contiguous fallback must not run');},
+      prepareTiledHighDepthMutation:async(target,visitor,options)=>{
+        tiledCalls+=1;assert.equal(target,layer);assert.equal(typeof visitor,'function');assert.equal(options.requireAlpha,true);
+        return {changed:3,changedTiles:1,mutation:{dataUrl:'next',highDepthSource:{kind:'zpe-pixel-buffer-source-v2'}}};
+      },
+      applyHighDepthMutation:(target,mutation)=>{applied={target,mutation};},
+    },
+    operations:{prepareClearedRasterDataUrl:async()=>{throw new Error('Canvas fallback must not run');}},
+  });
+  assert.deepEqual(await h.controller.clearAcrossVisibleLayers(),{cleared:1,locked:0,rasterized:0});
+  assert.equal(tiledCalls,1);
+  assert.equal(applied.target,layer);
+  assert.equal(applied.mutation.dataUrl,'next');
+  assert.deepEqual(h.commits,['Вырезать выделение']);
+});
+
+test('Stage 17b merged clear keeps an unchanged tiled source native instead of falling through to Canvas8',async()=>{
+  const layer={id:'hdr',type:'raster',name:'HDR',visible:true,locked:false,dataUrl:'preview',highDepthSource:{kind:'zpe-pixel-buffer-source-v2',model:'rgb'}};
+  const documentValue={layers:[layer],groups:[],selectedLayerId:'hdr'};
+  const h=createHarness({
+    documentValue,
+    rasterEdit:{
+      editableHighDepthBuffer:()=>{throw new Error('contiguous fallback must not run');},
+      prepareTiledHighDepthMutation:async()=>({changed:0,changedTiles:0,mutation:null}),
+    },
+    operations:{prepareClearedRasterDataUrl:async()=>{throw new Error('Canvas fallback must not run');}},
+  });
+  assert.deepEqual(await h.controller.clearAcrossVisibleLayers(),{cleared:0,locked:0,rasterized:0});
+  assert.equal(layer.dataUrl,'preview');
+  assert.equal(layer.highDepthSource.kind,'zpe-pixel-buffer-source-v2');
+  assert.deepEqual(h.commits,[]);
 });

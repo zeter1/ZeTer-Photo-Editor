@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createPixelBuffer, deserializePixelBufferSource, forEachSerializedPixelBufferTile,
+  createPixelBuffer, deserializePixelBufferSource, forEachSerializedPixelBufferTile, mutateSerializedPixelBufferTiles,
   PIXEL_BUFFER_SOURCE_KIND, PIXEL_BUFFER_TILED_SOURCE_KIND, sanitizeSerializedPixelBufferSource,
   serializePixelBufferSourceAdaptive, serializeTiledPixelBufferSource,
 } from '../src/core/pixel-buffer.js';
@@ -56,4 +56,47 @@ test('Stage 17a tiled Float32 CMYK round-trip preserves values and metadata',()=
   assert.deepEqual([...restored.data],[...source.data]);
   assert.equal(restored.model,'cmyk');
   assert.equal(restored.profileName,'Fixture CMYK');
+});
+
+
+test('Stage 17b tile mutation rewrites only changed payloads and preserves untouched tiles byte-for-byte',()=>{
+  const source=rgb16(4,2),packed=serializeTiledPixelBufferSource(source,{tileSize:2});
+  const originalTiles=packed.tiles.map(tile=>tile.dataUrl);
+  const result=mutateSerializedPixelBufferTiles(packed,({x,buffer})=>{
+    if(x!==0)return 0;
+    buffer.data[0]=1234;
+    return 1;
+  });
+  assert.equal(result.changed,1);
+  assert.equal(result.changedTiles,1);
+  assert.notEqual(result.source.tiles[0].dataUrl,originalTiles[0]);
+  assert.equal(result.source.tiles[1].dataUrl,originalTiles[1]);
+  const restored=deserializePixelBufferSource(result.source);
+  assert.equal(restored.data[0],1234);
+  assert.deepEqual([...restored.data.slice(1)],[...source.data.slice(1)]);
+});
+
+test('Stage 17b tile mutation can promote RGB16 tiles to straight alpha without a full contiguous source',()=>{
+  const source=createPixelBuffer({
+    width:3,height:2,model:'rgb',channels:3,bitsPerChannel:16,colorSpace:'srgb',
+    data:new Uint16Array([
+      100,200,300, 400,500,600, 700,800,900,
+      1000,1100,1200, 1300,1400,1500, 1600,1700,1800,
+    ]),
+  });
+  const packed=serializeTiledPixelBufferSource(source,{tileSize:2});
+  const result=mutateSerializedPixelBufferTiles(packed,({x,buffer})=>{
+    if(x!==0)return 0;
+    buffer.data[3]=0;
+    return 1;
+  },{requireAlpha:true});
+  assert.equal(result.promotedAlpha,true);
+  assert.equal(result.source.channels,4);
+  assert.equal(result.source.rawBytes,3*2*4*2);
+  assert.equal(result.changed,1);
+  assert.equal(result.changedTiles,packed.tiles.length);
+  const restored=deserializePixelBufferSource(result.source);
+  assert.deepEqual([...restored.data.slice(0,3)],[100,200,300]);
+  assert.equal(restored.data[3],0);
+  for(let pixel=1;pixel<6;pixel+=1)assert.equal(restored.data[pixel*4+3],65535);
 });
