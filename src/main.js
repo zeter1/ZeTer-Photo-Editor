@@ -41,6 +41,7 @@ import { createTextEditController } from './ui/text-edit-controller.js';
 import { createTextSettingsController, TEXT_WEIGHT_OPTIONS, TEXT_STYLE_OPTIONS, TEXT_ALIGN_OPTIONS } from './ui/text-settings-controller.js';
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
+import { createDocumentResizeController } from './ui/document-resize-controller.js';
 import { createLearningCenterController } from './ui/learning-center-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
 import { createCropGestureController } from './interaction/crop-gesture-controller.js';
@@ -60,7 +61,7 @@ import { createDocumentImportController } from './document/import-controller.js'
 import { createProjectController } from './document/project-controller.js';
 import { DOCUMENT_BACKGROUND_COMMAND_RESULT, createDocumentBackgroundCommandController } from './document/background-command-controller.js';
 import { DOCUMENT_CROP_COMMAND_RESULT, createDocumentCropCommandController } from './document/crop-command-controller.js';
-import { DOCUMENT_RESIZE_COMMAND_RESULT, createDocumentResizeCommandController } from './document/resize-command-controller.js';
+import { createDocumentResizeCommandController } from './document/resize-command-controller.js';
 import { createSmartObjectController } from './document/smart-object-controller.js';
 import { createPsdSmartObjectResource } from './document/psd-smart-object-resource.js';
 import { createPsdImportController } from './document/psd-import-controller.js';
@@ -991,6 +992,21 @@ const documentResizeCommandController = createDocumentResizeCommandController({
       rasterEdit.clearBrushBuffer();
     },
     fitToView,
+  },
+});
+const documentResizeController = createDocumentResizeController({
+  documentState: {
+    getDocument: () => doc,
+    blockPendingDocumentEdit,
+  },
+  commands: {
+    resizeImage: (owner, values) => documentResizeCommandController.resizeImage(owner, values),
+    resizeCanvas: (owner, values) => documentResizeCommandController.resizeCanvas(owner, values),
+  },
+  ui: {
+    showModal,
+    setStatus,
+    toast,
   },
 });
 let documentSessionController = null;
@@ -2482,28 +2498,6 @@ function layerMaskSummary(layer){
   return parts.join(' + ')||'нет';
 }
 
-function handleDocumentResizeCommandResult(outcome) {
-  if(outcome.result===DOCUMENT_RESIZE_COMMAND_RESULT.INVALID){
-    const message=outcome.error?.message||'Не удалось изменить размер документа';
-    toast(message,'error');setStatus(message);return false;
-  }
-  if(outcome.result===DOCUMENT_RESIZE_COMMAND_RESULT.REJECTED){
-    setStatus('Документ изменился — размер не применён');return false;
-  }
-}
-
-function resizeImageDialog(){
-  if(blockPendingDocumentEdit())return;
-  const owner=doc;
-  showModal({title:'Размер изображения',fields:[
-    {name:'width',label:'Ширина',type:'number',value:owner.width,min:'1',max:'12000',required:true},
-    {name:'height',label:'Высота',type:'number',value:owner.height,min:'1',max:'12000',required:true}
-  ],submitLabel:'Изменить',onSubmit:v=>{
-    if(blockPendingDocumentEdit())return false;
-    return handleDocumentResizeCommandResult(documentResizeCommandController.resizeImage(owner,v));
-  }});
-}
-
 const menus={
   file:[
     ['Новый…','Ctrl+N',createNewDialog],
@@ -2579,8 +2573,8 @@ const menus={
     ['Цветокоррекция…','',()=>colorCorrectionController.open(selected()),()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
     ['Сбросить цветокоррекцию','',()=>layerPropertyCommandController.resetSelectedColorCorrection(),()=>selected()?.type==='raster'&&!isLayerLocked(doc,selected())],
     ['sep'],
-    ['Размер изображения…','',resizeImageDialog],
-    ['Размер холста…','',resizeCanvasDialog],
+    ['Размер изображения…','',documentResizeController.showImageSizeDialog],
+    ['Размер холста…','',documentResizeController.showCanvasSizeDialog],
     ['Фон документа…','',setDocumentBackground],
     ['sep'],
     ['Сбросить все фильтры слоя','',()=>layerPropertyCommandController.resetSelectedFilters(),()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
@@ -2613,22 +2607,6 @@ const menus={
     ['О программе','',showAbout],
   ],
 };
-function resizeCanvasDialog(){
-  if(blockPendingDocumentEdit())return;
-  const owner=doc;
-  showModal({title:'Размер холста',fields:[
-    {name:'width',label:'Ширина',type:'number',value:owner.width,min:'1',max:'12000',required:true},
-    {name:'height',label:'Высота',type:'number',value:owner.height,min:'1',max:'12000',required:true},
-    {name:'anchor',label:'Якорь',type:'select',value:'center',options:[
-      ['top-left','↖ Слева сверху'],['top','↑ Сверху'],['top-right','↗ Справа сверху'],
-      ['left','← Слева'],['center','● По центру'],['right','→ Справа'],
-      ['bottom-left','↙ Слева снизу'],['bottom','↓ Снизу'],['bottom-right','↘ Справа снизу']
-    ]}
-  ],submitLabel:'Изменить',onSubmit:v=>{
-    if(blockPendingDocumentEdit())return false;
-    return handleDocumentResizeCommandResult(documentResizeCommandController.resizeCanvas(owner,v));
-  }});
-}
 els.tabs.addEventListener('contextmenu',e=>{
   if(e.target!==els.tabs)return;
   e.preventDefault();
