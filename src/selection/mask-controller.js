@@ -36,10 +36,12 @@ export function createSelectionMaskController({
 
   const previewOwners = new WeakMap();
 
-  function currentTarget(ownerDocument, layer, { requireMaskAbsent = false } = {}) {
+  function currentTarget(ownerDocument, layer, options = {}) {
+    const { requireMaskAbsent = false } = options;
     if (!ownerDocument || getDocument() !== ownerDocument || getSelectedLayer() !== layer) return false;
     if (isLayerLocked(ownerDocument, layer)) return false;
     if (requireMaskAbsent && layer?.mask) return false;
+    if (Object.prototype.hasOwnProperty.call(options, 'expectedMask') && layer?.mask !== options.expectedMask) return false;
     return true;
   }
 
@@ -350,7 +352,8 @@ export function createSelectionMaskController({
     const scale = layer.type === 'adjustment'
       ? 1
       : Math.max(.01, (Math.abs(Number(layer.scaleX) || 1) + Math.abs(Number(layer.scaleY) || 1)) / 2);
-    const replacing = Boolean(layer.mask);
+    const existingMask = layer.mask;
+    const replacing = Boolean(existingMask);
 
     showModal({
       title:'Уточнить выделение → маска слоя',
@@ -376,13 +379,78 @@ export function createSelectionMaskController({
         });
       },
       onSubmit:async values => {
-        if (!currentTarget(ownerDocument, layer)) return false;
+        if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
         const options = selectionRefineOptionsFromValues(values, scale);
         const dataUrl = await selectionMaskDataUrlForOwner(layer, options, ownerDocument, shape);
-        if (!currentTarget(ownerDocument, layer)) return false;
-        layer.mask = createLayerMask({ enabled:true, dataUrl });
+        if (!currentTarget(ownerDocument, layer, { expectedMask:existingMask })) return false;
+        layer.mask = createLayerMask({
+          enabled:existingMask?.enabled !== false,
+          dataUrl,
+          invert:Boolean(existingMask?.invert),
+          density:clamp(Number(existingMask?.density ?? 1), 0, 1),
+          feather:clamp(Number(existingMask?.feather) || 0, 0, 250),
+        });
         commit(replacing ? 'Уточнить маску слоя' : 'Создать уточнённую маску слоя');
         setStatus(`Маска уточнена: сглаживание ${Number(values.smooth) || 0}px, край ${Number(values.shift) || 0}px, радиус ${Number(values.edgeRadius) || 0}px, растушёвка ${Number(values.feather) || 0}px`);
+        return true;
+      },
+    });
+    return true;
+  }
+
+  function toggleSelectedLayerMask() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.mask;
+    if (!mask || !currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+    mask.enabled = mask.enabled === false;
+    commit(mask.enabled ? 'Включить маску слоя' : 'Отключить маску слоя');
+    setStatus(mask.enabled ? 'Маска слоя включена' : 'Маска слоя отключена');
+    return true;
+  }
+
+  function invertSelectedLayerMask() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.mask;
+    if (!mask || !currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+    mask.invert = !Boolean(mask.invert);
+    commit('Инвертировать маску слоя');
+    setStatus(mask.invert ? 'Маска слоя инвертирована' : 'Инверсия маски слоя снята');
+    return true;
+  }
+
+  function editSelectedLayerMaskProperties() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.mask;
+    if (!mask || !currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+    showModal({
+      title:'Параметры растровой маски',
+      fields:[
+        { name:'density', label:'Плотность, %', type:'number', value:Math.round(clamp(Number(mask.density ?? 1), 0, 1) * 100), min:0, max:100, step:1 },
+        { name:'feather', label:'Растушёвка, px', type:'number', value:clamp(Number(mask.feather) || 0, 0, 250), min:0, max:250, step:.5 },
+        { name:'invert', label:'Инвертировать', type:'select', value:mask.invert ? 'yes' : 'no', options:[['no','Нет'],['yes','Да']] },
+      ],
+      submitLabel:'Применить',
+      onSubmit:values => {
+        if (!currentTarget(ownerDocument, layer, { expectedMask:mask })) return false;
+        const density = clamp(Number(values?.density) || 0, 0, 100) / 100;
+        const feather = clamp(Number(values?.feather) || 0, 0, 250);
+        const invert = values?.invert === 'yes';
+        if (
+          Math.abs(Number(mask.density ?? 1) - density) < 1e-9 &&
+          Math.abs((Number(mask.feather) || 0) - feather) < 1e-9 &&
+          Boolean(mask.invert) === invert
+        ) {
+          setStatus('Параметры маски слоя не изменились');
+          return true;
+        }
+        mask.density = density;
+        mask.feather = feather;
+        mask.invert = invert;
+        commit('Параметры маски слоя');
+        setStatus(`Маска слоя: плотность ${Math.round(density * 100)}%, растушёвка ${feather}px${invert ? ', инвертирована' : ''}`);
         return true;
       },
     });
@@ -406,6 +474,9 @@ export function createSelectionMaskController({
     buildSelectionRefinePreviewSource,
     attachSelectionRefinePreview,
     refineSelectionToLayerMask,
+    toggleSelectedLayerMask,
+    invertSelectedLayerMask,
+    editSelectedLayerMaskProperties,
     removeSelectedLayerMask,
   };
 }
