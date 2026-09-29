@@ -179,6 +179,9 @@ export function createLayerMask(overrides = {}) {
   return {
     enabled: true,
     dataUrl: null,
+    invert: false,
+    density: 1,
+    feather: 0,
     ...overrides,
   };
 }
@@ -619,6 +622,9 @@ export function sanitizeLayerMask(mask) {
   return createLayerMask({
     enabled: mask.enabled !== false,
     dataUrl,
+    invert: Boolean(mask.invert),
+    density: bounded(mask.density, 1, 0, 1),
+    feather: bounded(mask.feather, 0, 0, 250),
   });
 }
 
