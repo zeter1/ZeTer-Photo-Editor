@@ -7,10 +7,10 @@ import { createRasterCommandController } from '../src/painting/command-controlle
 import { createLayerGroupCommandController } from '../src/layers/command-controller.js';
 import { createDocument, createRasterLayer, addLayer } from '../src/core/state.js';
 import { createProjectController } from '../src/document/project-controller.js';
+import { createDocumentExportController } from '../src/document/export-controller.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const boundary = main.slice(main.indexOf('function documentEditPending()'), main.indexOf('function setDoc('));
-const fileCommands = main.slice(main.indexOf('async function exportPsdDocument'), main.indexOf('function toggleSelectedVisibility()'));
 const jumpHistory = main.slice(main.indexOf('function jumpToHistory('), main.indexOf('function updateLayerControls('));
 
 test('save and tab switch wait for a pending document edit', () => {
@@ -35,7 +35,7 @@ test('save and tab switch wait for a pending document edit', () => {
     updateAll: () => calls.push('update'),
     requestAnimationFrame: () => {}, els: { viewport: { focus: () => {} } },
   };
-  runInNewContext(`${boundary}\n${fileCommands}\n${jumpHistory}\nglobalThis.commands={jumpToHistory};`, context);
+  runInNewContext(`${boundary}\n${jumpHistory}\nglobalThis.commands={jumpToHistory};`, context);
   const projectController = createProjectController({
     documentState: {
       getDocument: () => context.doc,
@@ -101,11 +101,31 @@ test('export submits one document snapshot and blocks while raster data is pendi
     downloadBlob: (blob, name) => downloads.push({ blob, name }),
     safeFilename: value => value,
     MIME_EXT: { 'image/png': 'png' },
-    clamp: value => value,
     setStatus: () => {}, toast: () => {}, alert: () => {},
   };
-  runInNewContext(`${boundary}\n${fileCommands}\nglobalThis.commands={exportDialog};`, context);
-  await context.commands.exportDialog();
+  runInNewContext(`${boundary}\nglobalThis.blockPendingDocumentEdit=blockPendingDocumentEdit;`, context);
+  const exportController = createDocumentExportController({
+    documentState: {
+      getDocument: () => context.doc,
+      blockPendingDocumentEdit: () => context.blockPendingDocumentEdit(),
+      snapshotDocument: context.snapshotDocument,
+      restoreDocument: context.restoreDocument,
+    },
+    rendering: { compositeToBlob: context.compositeToBlob },
+    io: {
+      downloadBlob: context.downloadBlob,
+      safeFilename: context.safeFilename,
+      mimeExtensions: context.MIME_EXT,
+    },
+    ui: {
+      showModal: context.showModal,
+      setStatus: context.setStatus,
+      toast: context.toast,
+      alertUser: context.alert,
+      consoleRef: console,
+    },
+  });
+  exportController.showExportDialog();
   context.paintPersisting = true;
   assert.equal(await modal.onSubmit({ format: 'image/png', quality: '92' }), false);
   assert.equal(downloads.length, 0);
