@@ -132,7 +132,7 @@ test('PSD Color Management Stage 7g persists ICC bytes in ZPE and passes them ba
   assert.match(adapter,/function buildImageResources\(/);
   assert.match(adapter,/writeImageResourceBlock\(resources, 1039/);
   assert.match(psdImportController,/bytesToDataUrl\(parsed\.iccProfile\.bytes,'application\/vnd\.iccprofile'\)/);
-  assert.match(main,/dataUrlToBytes\(profile\.dataUrl,\{maxBytes:4\*1024\*1024\}\)/);
+  assert.match(documentExportController,/dataUrlToBytes\(profile\.dataUrl, \{ maxBytes: ICC_MAX_BYTES \}\)/);
   assert.match(documentExportController,/iccProfile/);
   assert.match(documentExportController,/iccUntagged:\s*Boolean\(profile\?\.untagged\)/);
 });
