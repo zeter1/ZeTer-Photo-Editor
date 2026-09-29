@@ -303,6 +303,7 @@ const rasterCommands = createRasterCommandController({
   },
   selection: {
     hasActive: () => Boolean(selectionRect),
+    captureSnapshot: () => selectionShape ? cloneSelectionShape(selectionShape) : null,
     containsPoint: pointInsideSelection,
     intersectsLayer: selectionIntersectsLayer,
     predicate: rasterSelectionPredicate,
@@ -320,6 +321,7 @@ const rasterCommands = createRasterCommandController({
 const {
   drawLine: drawLineOnCurrentRaster,
   fillAt: fillAtPoint,
+  contentAwareFill: contentAwareFillSelection,
   clearSelection: clearSelectedPixels,
 } = rasterCommands;
 
@@ -2526,6 +2528,7 @@ const menus={
     ['Копировать выделение','Ctrl+C',copySelection,()=>Boolean(selectionRect)&&(selectionCopyMode==='merged'||Boolean(selected()))],
     ['Вырезать выделение','Ctrl+X',cutSelection,()=>Boolean(selectionRect)&&(selectionCopyMode==='merged'||isEditableRasterLayer(selected()))],
     ['Очистить выделенные пиксели','Delete',()=>clearSelectedPixels(),()=>Boolean(selectionRect)&&isEditableRasterLayer(selected())],
+    ['Контент-заливка выделения','',contentAwareFillSelection,()=>Boolean(selectionShape)&&isEditableRasterLayer(selected())],
     ['sep'],
     ['Дублировать слой','Ctrl+J',duplicateSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
     ['Удалить слой','Delete',deleteSelected,()=>Boolean(selected())&&!isLayerLocked(doc,selected())],

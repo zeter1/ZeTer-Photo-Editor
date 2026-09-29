@@ -157,7 +157,7 @@ Owns reusable raster-edit state shared by brush/eraser/fill/line and retouch rou
 It deliberately does **not** own tool choice, stroke routing, selection semantics, history commits, the application-wide pending-edit guard or the multi-layer selection batch transaction. `prepareHighDepthMutation()` / `applyHighDepthMutation()` are low-level mechanisms; callers that bypass the guarded current-layer persistence seam must prove their own publication boundary.
 
 ### `command-controller.js`
-Owns bounded one-shot raster commands: flood fill, raster line and clearing pixels on the current raster layer inside the active selection. Canvas8 and native RGB/CMYK high-depth paths share the same injected target, selection, tool, transaction and UI ports.
+Owns bounded one-shot raster commands: flood fill, raster line, clearing pixels and Content-Aware Fill on the current raster layer. Content-Aware captures a frozen selection snapshot before async Canvas preparation, then publishes through the same exact-owner Canvas8 or native RGB/CMYK high-depth seams. Bounded donor-propagation math lives in `src/core/inpaint.js`; synthesized samples never become donor authority.
 
 It deliberately does **not** own global pointer events, selection-shape state, history storage or the application-wide pending-edit flag. Multi-layer selection clearing used by merged Clipboard cut belongs to `src/selection/raster-mutation-controller.js` rather than this current-layer command controller.
 

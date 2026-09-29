@@ -32,6 +32,7 @@ function makeHarness({
   atPoint = point => selected(point),
   isEditableRasterLayer = layer => Boolean(layer) && layer.type === 'raster',
   selectionActive = false,
+  selectionSnapshot = selectionActive ? { type:'rect', rect:{ x:0, y:0, width:1, height:1 } } : null,
   selectionContains = () => true,
   selectionPredicate = () => null,
   selectionIntersects = () => true,
@@ -101,6 +102,7 @@ function makeHarness({
     },
     selection:{
       hasActive:() => selectionActive,
+      captureSnapshot:() => selectionSnapshot,
       containsPoint:selectionContains,
       intersectsLayer:selectionIntersects,
       predicate:selectionPredicate,
@@ -362,5 +364,35 @@ test('caller continuation ownership is forwarded into selected-layer Canvas pers
   assert.equal(seenGuard(),false);
   assert.equal(h.rasterEdit.brushCanvas,null);
   assert.deepEqual(h.commits,[]);
+  assert.equal(h.getPersisting(),false);
+});
+
+
+test('content-aware fill freezes selection geometry and persists Canvas8 exactly once',async()=>{
+  const doc=createDocument({width:5,height:1});
+  const layer=createRasterLayer({name:'Repair',width:5,height:1,dataUrl:null});addLayer(doc,layer);
+  const pixels=new Uint8ClampedArray([10,20,30,255,20,30,40,255,250,0,0,255,220,230,240,255,230,240,250,255]);
+  const snapshot={type:'rect',rect:{x:2,y:0,width:1,height:1}},seen=[];
+  const h=makeHarness({doc,pixels,selectionActive:true,selectionSnapshot:snapshot,selectionPredicate:(target,captured)=>{assert.equal(target,layer);seen.push(captured);return x=>x===2;}});
+  assert.equal(await h.controller.contentAwareFill(),true);
+  assert.deepEqual(seen,[snapshot]);
+  assert.deepEqual([...pixels.slice(8,12)],[120,130,140,255]);
+  assert.equal(h.canvas.calls.putImageData,1);
+  assert.equal(h.getPersistCalls(),1);
+  assert.deepEqual(h.commits,['Контент-заливка']);
+  assert.equal(h.getPersisting(),false);
+});
+
+test('content-aware fill keeps native high-depth CMYK samples and exact high-depth persistence',async()=>{
+  const doc=createDocument({width:3,height:1});
+  const layer=createRasterLayer({name:'CMYK',width:3,height:1,dataUrl:null});layer.highDepthSource={model:'cmyk'};addLayer(doc,layer);
+  const buffer=createPixelBuffer({width:3,height:1,model:'cmyk',channels:5,bitsPerChannel:32,colorSpace:'cmyk-unmanaged',data:new Float32Array([.1,.2,.3,.4,1,9,9,9,9,1,.9,.8,.7,.6,1])});
+  const h=makeHarness({doc,selectionActive:true,selectionSnapshot:{type:'rect',rect:{x:1,y:0,width:1,height:1}},selectionPredicate:()=>x=>x===1,highDepthBuffer:buffer});
+  assert.equal(await h.controller.contentAwareFill(),true);
+  assert.equal(h.getHighDepthPersistCalls(),1);
+  assert.equal(h.getPersistCalls(),0);
+  assert.equal(h.getResetPaintStateCalls(),1);
+  assert.deepEqual(h.commits,['Контент-заливка']);
+  for(let channel=5;channel<9;channel+=1) assert.ok(Math.abs(buffer.data[channel]-.5)<1e-6);
   assert.equal(h.getPersisting(),false);
 });

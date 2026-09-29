@@ -27,7 +27,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **Продвинутые выделения:** прямоугольник, эллипс, свободное и многоугольное лассо, магнитное лассо и «Волшебная палочка».
 - **Select & Mask:** сглаживание, расширение/сжатие, растушёвка, контраст края, Smart Radius, edge-aware уточнение и несколько режимов предпросмотра.
 - **Растровые и векторные маски:** создание из выделения, инверсия, включение/отключение, прямое редактирование Bézier-узлов и операции Add / Subtract / Intersect / Exclude.
-- **Профессиональная ретушь:** кисть, ластик, размытие, штамп, лечебная кисть, палец, осветлитель, затемнитель, заливка, градиент и работа с давлением пера.
+- **Профессиональная ретушь:** кисть, ластик, размытие, штамп, лечебная кисть, палец, осветлитель, затемнитель, заливка, **Content-Aware Fill по активному выделению**, градиент и работа с давлением пера.
 - **Трансформации и Smart Guides:** перемещение, масштабирование, поворот, transform-handles, масштабирование от центра, сохранение пропорций, привязка к холсту и другим слоям.
 - **Стили слоя:** обводка, тиснение, внутренние тень и свечение, наложение цвета, градиента и узора, внешнее свечение и тень с живым предпросмотром.
 - **Контуры Photoshop:** импорт/экспорт vector masks и Saved Paths, отдельная панель «Контуры», редактирование anchors и Bézier handles непосредственно на холсте.
@@ -65,6 +65,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **Перо (`P`)**, Stage 2b: клик создаёт corner-узел, click+drag — smooth Bézier-узел; у выбранного path-слоя видны anchors/handles, anchor можно перетаскивать вместе с ручками, handle — менять отдельно, `Alt+drag` разрывает симметрию, `Shift+drag` по anchor создаёт smooth handles, `Alt+click` по anchor сбрасывает его в corner; cubic-контуры сохраняются в `.zpe`, старые прямолинейные pathPoints остаются совместимыми; **Магнитное лассо (`A`)** прослеживает границу промежуточными точками между кликами, а **Волшебная палочка (`W`)** выделяет связанную область похожего цвета;
 - панель инструментов на широком экране имеет две колонки; у каждого инструмента есть развёрнутая подсказка с назначением и горячей клавишей;
 - заливка (`G`) связной области с регулируемым допуском цвета и непрозрачностью;
+- **Правка → Контент-заливка выделения** восстанавливает выбранную область детерминированным boundary-inpainting по исходным пикселям вокруг выделения; Canvas8 и native 16/32-bit RGB/CMYK проходят через один sample-domain алгоритм без скрытой 8-bit rasterization. Для предсказуемой памяти один запуск ограничен слоем до 8 МП и выделением до 2 МП;
 - инструмент «Линия» (`L`) рисует в текущем растровом слое; при его отсутствии создаётся один переиспользуемый слой «Линии», а `Shift` привязывает направление к шагу 45°;
 - инструмент «Лупа» (`Z`) масштабирует относительно точки клика; `Alt+клик` уменьшает масштаб;
 - кисть и ластик;
@@ -249,6 +250,7 @@ npm test
 - `src/core/geometry.js` — геометрия и масштаб;
 - `src/core/io.js` — browser I/O helpers;
 - `src/core/pixels.js` — пиксельные операции, включая flood fill;
+- `src/core/inpaint.js` — bounded Content-Aware Fill math: deterministic boundary-to-interior donor propagation для Uint8/Uint16/Float32 RGB/CMYK samples;
 - `src/core/recovery.js` — неблокирующее аварийное автосохранение/восстановление через IndexedDB;
 - `src/core/pixel-buffer.js` — typed pixel contract для RGB/CMYK, 8/16/32-bit sample storage и явного RGB→RGBA8 preview bridge; CMYK не подменяется приблизительной конверсией без color management;
 - `src/adapters/psd.js` — изолированный PSD/PSB Adapter: binary parser/writer, version-aware 32/64-bit lengths, Raw/RLE/ZIP decode, RLE encode и нормализованный RGB/8-bit raster contract;
@@ -261,6 +263,6 @@ npm test
 
 ## Ограничения относительно Photopea
 
-PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip, Stage 12e–12g сохраняют native RGB 16/32-bit typed channels и compatible high-depth composite, Stage 13a–13e закрывают native CMYK/color-management и real-world ICC corpus, Stage 14a–14c закрывают основную embedded Smart Object цепочку, Stage 15a–15d дают editable Photoshop Text/solid Shape mapping, а Stage 16a–16c дают native basic Adjustment Layers с raster masks, clipping, channel-specific Levels и editable point Curves. Ограничения здесь теперь точечные: clipping base внутри сложных isolated/pass-through group chains и Photoshop blend-if ещё не моделируются полностью; Gradient/Pattern Fill renderer, multi-subpath boolean geometry, полная isolated-group/vector-mask parity и tiled/streaming pipeline ещё впереди.
+PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip, Stage 12e–12g сохраняют native RGB 16/32-bit typed channels и compatible high-depth composite, Stage 13a–13e закрывают native CMYK/color-management и real-world ICC corpus, Stage 14a–14c закрывают основную embedded Smart Object цепочку, Stage 15a–15d дают editable Photoshop Text/solid Shape mapping, а Stage 16a–16c дают native basic Adjustment Layers с raster masks, clipping, channel-specific Levels и editable point Curves. Ограничения здесь теперь точечные: clipping base внутри сложных isolated/pass-through group chains и Photoshop blend-if ещё не моделируются полностью; Gradient/Pattern Fill renderer, multi-subpath boolean geometry, полная isolated-group/vector-mask parity и tiled/streaming pipeline ещё впереди. Content-Aware Fill уже выполняет реальное bounded inpainting и сохраняет native sample precision, но это пока детерминированный donor-propagation v1, а не полноценный PatchMatch/ML synthesis для больших текстурных удалений.
 
 Следующий imaging-этап: **Stage 17a — Isolated Groups / Vector Mask Composite Parity**: приблизить Photoshop group compositing для pass-through/isolated stacks, clipping chains и mask interactions, добавить real PSD/PSB group fixtures и pixel-reference regressions; после этого — editable Gradient/Pattern Fill renderer и tiled/worker/GPU pipeline.

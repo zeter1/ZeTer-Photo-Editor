@@ -20,6 +20,7 @@ const sources = [
   'src/core/history.js',
   'src/core/io.js',
   'src/core/pixels.js',
+  'src/core/inpaint.js',
   'src/core/pixel-buffer.js',
   'src/core/color-management.js',
   'src/core/recovery.js',
