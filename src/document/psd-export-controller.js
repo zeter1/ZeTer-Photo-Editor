@@ -3,7 +3,7 @@ import {
   createRasterLayer, checkedCanvasSize, DEFAULT_LAYER_FILTERS,
   sanitizeFilters, sanitizeColorManagement, isLayerVisible,
 } from '../core/state.js';
-import { hexToRgb } from '../core/pixels.js';
+import { applyMaskControlsAlpha, hexToRgb } from '../core/pixels.js';
 import {
   createRgba8PixelBuffer, deserializePixelBufferSource,
   compositePixelBufferLayers, compositeCmykPixelBufferLayers,
@@ -58,19 +58,35 @@ export function createPsdExportController({
   }
   
   async function renderPsdMaskPixels(layer,bounds){
-    if(!layer.mask?.dataUrl)return null;
+    if(!layer.mask)return null;
     const canvas=createCanvas();canvas.width=bounds.width;canvas.height=bounds.height;
     const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
-    ctx.translate(-bounds.x,-bounds.y);
-    const maskLayer=createRasterLayer({
-      name:`${layer.name||'Слой'} — mask`,
-      x:layer.x,y:layer.y,width:layer.width,height:layer.height,
-      scaleX:layer.scaleX,scaleY:layer.scaleY,rotation:layer.rotation,
-      opacity:1,blendMode:'source-over',dataUrl:layer.mask.dataUrl,
-      filters:{...DEFAULT_LAYER_FILTERS},styles:null,mask:null,
+    if(layer.mask.dataUrl){
+      ctx.translate(-bounds.x,-bounds.y);
+      const maskLayer=createRasterLayer({
+        name:`${layer.name||'Слой'} — mask`,
+        x:layer.x,y:layer.y,width:layer.width,height:layer.height,
+        scaleX:layer.scaleX,scaleY:layer.scaleY,rotation:layer.rotation,
+        opacity:1,blendMode:'source-over',dataUrl:layer.mask.dataUrl,
+        filters:{...DEFAULT_LAYER_FILTERS},styles:null,mask:null,
+      });
+      await renderLayer(ctx,maskLayer);
+      ctx.setTransform(1,0,0,1,0,0);
+    }else{
+      ctx.fillStyle='#fff';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+    }
+    const pixels=canvasRgbaPixels(canvas,`PSD mask «${layer.name||'Без имени'}»`);
+    const alpha=new Uint8ClampedArray(bounds.width*bounds.height);
+    for(let index=0;index<alpha.length;index+=1)alpha[index]=pixels[index*4+3];
+    const maskScale=layer.mask.dataUrl?Math.max(Math.abs(Number(layer.scaleX)||1),Math.abs(Number(layer.scaleY)||1)):1;
+    const controlled=applyMaskControlsAlpha(alpha,bounds.width,bounds.height,{
+      invert:Boolean(layer.mask.invert),
+      density:layer.mask.density??1,
+      feather:layer.mask.dataUrl?(Number(layer.mask.feather)||0)*maskScale:0,
     });
-    await renderLayer(ctx,maskLayer);
-    return canvasRgbaPixels(canvas,`PSD mask «${layer.name||'Без имени'}»`);
+    for(let index=0;index<controlled.length;index+=1)pixels[index*4+3]=controlled[index];
+    return pixels;
   }
   
   function layerNeedsSemanticRasterWarning(layer){
@@ -326,14 +342,14 @@ export function createPsdExportController({
     if(downgradedHighDepth.length)warnings.push(`${downgradedHighDepth.length} high-depth RGB слой(я) с transform/filter/style или несовместимой геометрией экспортированы через 8-bit raster preview`);
     if(bitsPerChannel>8&&writerNative.some(buffer=>!buffer))warnings.push(`Документ экспортируется как ${bitsPerChannel}-bit; raster-preview слои без native source расширены из 8-bit без восстановления утраченной точности`);
     if(sourceLayers.some(layer=>layer.vectorMask?.linked===false))warnings.push('Unlinked vector mask flag записывается в PSD/PSB, но ZPE при трансформациях пока перемещает такую маску вместе со слоем');
-    if(exportDoc.layers.some(layer=>layer.mask&&!layer.mask.dataUrl))warnings.push('Пустые маски «показать всё» не создают отдельный PSD mask channel');
+    if(exportDoc.layers.some(layer=>layer.mask&&(layer.mask.invert||Math.abs(Number(layer.mask.density??1)-1)>1e-9||Number(layer.mask.feather)>0)))warnings.push('Параметры растровых масок invert/density/feather запечены в PSD/PSB mask alpha для совместимости');
   
     const prepared=[];
     for(let planIndex=0;planIndex<planned.length;planIndex+=1){
       const {layer,bounds,nativeText,nativeShape,nativeAdjustment}=planned[planIndex];
       const nativePixelBuffer=writerNative[planIndex];
       if(nativeAdjustment?.eligible){
-        const adjustmentMask=layer.mask?.dataUrl?{
+        const adjustmentMask=layer.mask?{
           pixels:await renderPsdMaskPixels(layer,{x:0,y:0,width:exportDoc.width,height:exportDoc.height}),
           disabled:layer.mask.enabled===false,
           x:0,y:0,width:exportDoc.width,height:exportDoc.height,defaultColor:255,
@@ -359,7 +375,7 @@ export function createPsdExportController({
         clipping:layer.clipping===true,
         groupKey:layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.groupId:null,
         visible:needsAdjustmentRasterFallback?false:(layer.groupId&&sourceGroupIds.has(layer.groupId)?layer.visible!==false:isLayerVisible(exportDoc,layer)),
-        mask:layer.mask?.dataUrl?{
+        mask:layer.mask?{
           pixels:await renderPsdMaskPixels(layer,bounds),
           disabled:layer.mask.enabled===false,
         }:null,
