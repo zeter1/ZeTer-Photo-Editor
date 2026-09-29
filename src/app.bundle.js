@@ -6566,6 +6566,144 @@ function mutateSerializedPixelBufferTiles(source, visitor, {
     changed, changedTiles, promotedAlpha:promoteAlpha,
   };
 }
+function createSerializedPixelBufferTileWorkingSet(source, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  requireAlpha = false,
+} = {}) {
+  const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
+  if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
+  if (safe.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+
+  const range = channelRange(safe.model);
+  const targetChannels = requireAlpha ? range.max : safe.channels;
+  const targetRawBytes = expectedSourceBytes({ ...safe, channels:targetChannels });
+  const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
+  if (!targetRawBytes || targetRawBytes > limit) {
+    throw new RangeError('Tiled PixelBuffer working set требует ' + targetRawBytes + ' байт; лимит ' + limit + ' байт');
+  }
+
+  const promoteAlpha = targetChannels !== safe.channels;
+  const loaded = new Map();
+  const dirty = new Set();
+  const previewDirty = new Set();
+
+  function load(index) {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= safe.tiles.length) {
+      throw new RangeError('Tiled PixelBuffer tile index вне диапазона');
+    }
+    if (loaded.has(index)) return loaded.get(index);
+    let buffer = decodeSerializedTile(safe, safe.tiles[index]);
+    if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+    loaded.set(index, buffer);
+    return buffer;
+  }
+
+  function intersects(tile, bounds) {
+    if (!bounds) return true;
+    const left = Number(bounds.left);
+    const top = Number(bounds.top);
+    const right = Number(bounds.right);
+    const bottom = Number(bounds.bottom);
+    if (![left, top, right, bottom].every(Number.isFinite)) {
+      throw new TypeError('Tiled PixelBuffer bounds должны быть конечными числами');
+    }
+    return right > tile.x && bottom > tile.y && left < tile.x + tile.width && top < tile.y + tile.height;
+  }
+
+  function visit(bounds, visitor) {
+    if (typeof visitor !== 'function') throw new TypeError('Tiled PixelBuffer working-set visitor должен быть функцией');
+    let changed = 0;
+    for (let index = 0; index < safe.tiles.length; index += 1) {
+      const tile = safe.tiles[index];
+      if (!intersects(tile, bounds)) continue;
+      const buffer = load(index);
+      const rawResult = visitor({
+        index,
+        count:safe.tiles.length,
+        x:tile.x,
+        y:tile.y,
+        width:tile.width,
+        height:tile.height,
+        buffer,
+      });
+      const delta = rawResult == null || rawResult === false ? 0 : rawResult === true ? 1 : Number(rawResult);
+      if (!Number.isSafeInteger(delta) || delta < 0) {
+        throw new TypeError('Tiled PixelBuffer working-set visitor должен вернуть неотрицательное целое число изменений');
+      }
+      if (!delta) continue;
+      changed += delta;
+      if (!Number.isSafeInteger(changed)) throw new RangeError('Tiled PixelBuffer working-set change count переполнен');
+      dirty.add(index);
+      previewDirty.add(index);
+    }
+    return changed;
+  }
+
+  function forEachPreviewDirty(visitor) {
+    if (typeof visitor !== 'function') throw new TypeError('Tiled PixelBuffer preview visitor должен быть функцией');
+    for (const index of [...previewDirty]) {
+      const tile = safe.tiles[index];
+      const buffer = load(index);
+      visitor({
+        index,
+        x:tile.x,
+        y:tile.y,
+        width:tile.width,
+        height:tile.height,
+        buffer,
+      });
+      previewDirty.delete(index);
+    }
+  }
+
+  function serialize() {
+    const tiles = [];
+    let total = 0;
+    for (let index = 0; index < safe.tiles.length; index += 1) {
+      const tile = safe.tiles[index];
+      if (!dirty.has(index) && !promoteAlpha) {
+        tiles.push(tile);
+        total += tile.rawBytes;
+        continue;
+      }
+      let buffer = loaded.get(index);
+      if (!buffer) {
+        buffer = decodeSerializedTile(safe, tile);
+        if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+      }
+      const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
+      total += bytes.byteLength;
+      tiles.push({
+        ...tile,
+        rawBytes:bytes.byteLength,
+        dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME),
+      });
+    }
+    if (total !== targetRawBytes) throw new RangeError('Tiled PixelBuffer working-set serialization имеет несогласованный byte budget');
+    return {
+      ...safe,
+      channels:targetChannels,
+      alphaMode:promoteAlpha ? 'straight' : safe.alphaMode,
+      rawBytes:targetRawBytes,
+      tiles,
+    };
+  }
+
+  return {
+    kind:PIXEL_BUFFER_TILED_SOURCE_KIND,
+    width:safe.width,
+    height:safe.height,
+    model:safe.model,
+    channels:targetChannels,
+    bitsPerChannel:safe.bitsPerChannel,
+    promotedAlpha:promoteAlpha,
+    visit,
+    forEachPreviewDirty,
+    serialize,
+    get loadedTileCount() { return loaded.size; },
+    get dirtyTileCount() { return dirty.size; },
+  };
+}
 function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
   const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
   if(safe.kind===PIXEL_BUFFER_SOURCE_KIND){
@@ -15382,6 +15520,7 @@ function createRasterEditController({
   let brushOwner = null;
   let brushLayer = null;
   let highDepthPaintBuffer = null;
+  let highDepthPaintWorkingSet = null;
   let highDepthPaintLayerId = null;
   let highDepthPaintOwner = null;
   let highDepthPaintLayer = null;
@@ -15417,6 +15556,7 @@ function createRasterEditController({
 
   function clearHighDepthPaintState() {
     highDepthPaintBuffer = null;
+    highDepthPaintWorkingSet = null;
     highDepthPaintLayerId = null;
     highDepthPaintOwner = null;
     highDepthPaintLayer = null;
@@ -15425,7 +15565,7 @@ function createRasterEditController({
 
   function isNativeHighDepthPaintTarget(owner, layer) {
     return Boolean(
-      highDepthPaintBuffer &&
+      (highDepthPaintBuffer || highDepthPaintWorkingSet) &&
       highDepthPaintOwner === owner &&
       highDepthPaintLayer === layer &&
       highDepthPaintLayerId === layer?.id &&
@@ -15436,9 +15576,9 @@ function createRasterEditController({
     );
   }
 
-  function clearNativeHighDepthPaintTarget(owner, layer, buffer = highDepthPaintBuffer) {
+  function clearNativeHighDepthPaintTarget(owner, layer, token = highDepthPaintBuffer || highDepthPaintWorkingSet) {
     if (
-      highDepthPaintBuffer !== buffer ||
+      (highDepthPaintBuffer || highDepthPaintWorkingSet) !== token ||
       highDepthPaintOwner !== owner ||
       highDepthPaintLayer !== layer
     ) return false;
@@ -15480,40 +15620,81 @@ function createRasterEditController({
     return working;
   }
 
-  function refreshHighDepthPaintCanvas(owner, layer, withFilters = true) {
+  function refreshHighDepthPaintCanvas(owner, layer, withFilters = true, { full = false } = {}) {
     if (!isNativeHighDepthPaintTarget(owner, layer) || !brushCanvas || !brushContext) return false;
     const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
+    const renderTile = (x, y, buffer) => {
+      const rgba = buffer.model === 'cmyk'
+        ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
+        : pixelBufferToToneMappedRgba8Preview(
+            buffer,
+            withFilters ? (layer.filters || {}) : {},
+            { toneMap:preview.toneMap, displayExposure:preview.displayExposure },
+          );
+      const image = brushContext.createImageData(buffer.width, buffer.height);
+      image.data.set(rgba);
+      brushContext.putImageData(image, x, y);
+    };
+
+    brushContext.setTransform(1, 0, 0, 1, 0, 0);
+    brushContext.globalAlpha = 1;
+    brushContext.globalCompositeOperation = 'source-over';
+    brushContext.filter = 'none';
+
+    if (highDepthPaintWorkingSet) {
+      if (full) {
+        brushContext.clearRect(0, 0, brushCanvas.width, brushCanvas.height);
+        forEachSerializedPixelBufferTile(layer.highDepthSource, ({ x, y, buffer }) => renderTile(x, y, buffer));
+      } else {
+        highDepthPaintWorkingSet.forEachPreviewDirty(({ x, y, buffer }) => renderTile(x, y, buffer));
+      }
+      highDepthPaintPreviewDirty = false;
+      return true;
+    }
+
     const rgba = highDepthPaintBuffer.model === 'cmyk'
       ? cmykPixelBufferToRgba8Preview(highDepthPaintBuffer, getCmykPreviewTransform())
       : pixelBufferToToneMappedRgba8Preview(
           highDepthPaintBuffer,
           withFilters ? (layer.filters || {}) : {},
-          { toneMap: preview.toneMap, displayExposure: preview.displayExposure },
+          { toneMap:preview.toneMap, displayExposure:preview.displayExposure },
         );
     const image = brushContext.createImageData(highDepthPaintBuffer.width, highDepthPaintBuffer.height);
     image.data.set(rgba);
-    brushContext.setTransform(1, 0, 0, 1, 0, 0);
-    brushContext.globalAlpha = 1;
-    brushContext.globalCompositeOperation = 'source-over';
-    brushContext.filter = 'none';
     brushContext.clearRect(0, 0, brushCanvas.width, brushCanvas.height);
     brushContext.putImageData(image, 0, 0);
     highDepthPaintPreviewDirty = false;
     return true;
   }
 
-  async function ensureNativeHighDepthPaintBuffer(owner, layer, { requireAlpha = false } = {}) {
+  async function ensureNativeHighDepthPaintBuffer(owner, layer, {
+    requireAlpha = false,
+    preferTiled = false,
+  } = {}) {
     if (!layer?.highDepthSource || !isCurrentRasterTarget(owner, layer)) return false;
-    const alphaChannels = highDepthPaintBuffer?.model === 'cmyk' ? 5 : 4;
+    const wantsTiled = preferTiled && layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND;
+    const activeChannels = highDepthPaintWorkingSet?.channels ?? highDepthPaintBuffer?.channels ?? 0;
+    const activeModel = highDepthPaintWorkingSet?.model ?? highDepthPaintBuffer?.model ?? layer.highDepthSource.model;
+    const alphaChannels = activeModel === 'cmyk' ? 5 : 4;
     if (
       isNativeHighDepthPaintTarget(owner, layer) &&
-      (!requireAlpha || highDepthPaintBuffer.channels === alphaChannels)
+      Boolean(highDepthPaintWorkingSet) === wantsTiled &&
+      (!requireAlpha || activeChannels === alphaChannels)
     ) return true;
 
-    const working = editableHighDepthBuffer(layer, { requireAlpha });
-    if (!working) return false;
     const size = checkedCanvasSize(layer.width, layer.height, `High-depth слой «${layer.name || 'Без имени'}»`);
-    if (working.width !== size.width || working.height !== size.height) return false;
+    let working = null;
+    let workingSet = null;
+    if (wantsTiled) {
+      workingSet = createSerializedPixelBufferTileWorkingSet(layer.highDepthSource, {
+        maxBytes:highDepthBudgetForLayer(layer),
+        requireAlpha,
+      });
+      if (!workingSet || workingSet.width !== size.width || workingSet.height !== size.height) return false;
+    } else {
+      working = editableHighDepthBuffer(layer, { requireAlpha });
+      if (!working || working.width !== size.width || working.height !== size.height) return false;
+    }
 
     const canvas = documentRef.createElement('canvas');
     canvas.width = size.width;
@@ -15527,12 +15708,114 @@ function createRasterEditController({
     brushOwner = owner;
     brushLayer = layer;
     highDepthPaintBuffer = working;
+    highDepthPaintWorkingSet = workingSet;
     highDepthPaintLayerId = layer.id;
     highDepthPaintOwner = owner;
     highDepthPaintLayer = layer;
     highDepthPaintPreviewDirty = true;
-    refreshHighDepthPaintCanvas(owner, layer, true);
+    refreshHighDepthPaintCanvas(owner, layer, true, { full:true });
     return true;
+  }
+
+  function offsetSelectionPredicate(predicate, offsetX, offsetY) {
+    if (typeof predicate !== 'function') return null;
+    return (x, y) => predicate(x + offsetX, y + offsetY);
+  }
+
+  function brushMutationBounds(from, to, radius) {
+    const padding = Math.max(.5, Number(radius) || .5);
+    return {
+      left:Math.min(from.x, to.x) - padding,
+      top:Math.min(from.y, to.y) - padding,
+      right:Math.max(from.x, to.x) + padding,
+      bottom:Math.max(from.y, to.y) + padding,
+    };
+  }
+
+  function applyNativeHighDepthBrushDab(owner, layer, point, {
+    radius,
+    rgb,
+    cmyk,
+    opacity = 1,
+    erase = false,
+    isAllowed = null,
+  } = {}) {
+    if (!isNativeHighDepthPaintTarget(owner, layer)) return 0;
+    const editRadius = Math.max(.5, Number(radius) || .5);
+    let changed = 0;
+    if (highDepthPaintWorkingSet) {
+      changed = highDepthPaintWorkingSet.visit(
+        brushMutationBounds(point, point, editRadius),
+        ({ x, y, buffer }) => buffer.model === 'cmyk'
+          ? applyCmykPixelBufferBrushDab(
+              buffer, point.x - x, point.y - y, editRadius, cmyk,
+              { opacity, erase, isAllowed:offsetSelectionPredicate(isAllowed, x, y) },
+            )
+          : applyPixelBufferBrushDab(
+              buffer, point.x - x, point.y - y, editRadius, rgb,
+              { opacity, erase, isAllowed:offsetSelectionPredicate(isAllowed, x, y) },
+            ),
+      );
+    } else if (highDepthPaintBuffer?.model === 'cmyk') {
+      changed = applyCmykPixelBufferBrushDab(
+        highDepthPaintBuffer, point.x, point.y, editRadius, cmyk,
+        { opacity, erase, isAllowed },
+      );
+    } else if (highDepthPaintBuffer) {
+      changed = applyPixelBufferBrushDab(
+        highDepthPaintBuffer, point.x, point.y, editRadius, rgb,
+        { opacity, erase, isAllowed },
+      );
+    }
+    if (changed > 0) markHighDepthPreviewDirty();
+    return changed;
+  }
+
+  function applyNativeHighDepthStrokeSegment(owner, layer, from, to, {
+    radius,
+    rgb,
+    cmyk,
+    opacity = 1,
+    erase = false,
+    isAllowed = null,
+  } = {}) {
+    if (!isNativeHighDepthPaintTarget(owner, layer)) return 0;
+    const editRadius = Math.max(.5, Number(radius) || .5);
+    let changed = 0;
+    if (highDepthPaintWorkingSet) {
+      changed = highDepthPaintWorkingSet.visit(
+        brushMutationBounds(from, to, editRadius),
+        ({ x, y, buffer }) => buffer.model === 'cmyk'
+          ? applyCmykPixelBufferStrokeSegment(
+              buffer,
+              { x:from.x - x, y:from.y - y },
+              { x:to.x - x, y:to.y - y },
+              editRadius,
+              cmyk,
+              { opacity, erase, isAllowed:offsetSelectionPredicate(isAllowed, x, y) },
+            )
+          : applyPixelBufferStrokeSegment(
+              buffer,
+              { x:from.x - x, y:from.y - y },
+              { x:to.x - x, y:to.y - y },
+              editRadius,
+              rgb,
+              { opacity, erase, isAllowed:offsetSelectionPredicate(isAllowed, x, y) },
+            ),
+      );
+    } else if (highDepthPaintBuffer?.model === 'cmyk') {
+      changed = applyCmykPixelBufferStrokeSegment(
+        highDepthPaintBuffer, from, to, editRadius, cmyk,
+        { opacity, erase, isAllowed },
+      );
+    } else if (highDepthPaintBuffer) {
+      changed = applyPixelBufferStrokeSegment(
+        highDepthPaintBuffer, from, to, editRadius, rgb,
+        { opacity, erase, isAllowed },
+      );
+    }
+    if (changed > 0) markHighDepthPreviewDirty();
+    return changed;
   }
 
   async function highDepthPreviewDataUrl(layer, buffer) {
@@ -15666,29 +15949,40 @@ function createRasterEditController({
   }
 
   async function persistNativeHighDepthPaintLayer(owner, layer) {
-    const buffer = highDepthPaintBuffer;
-    if (!buffer) return false;
+    const token = highDepthPaintBuffer || highDepthPaintWorkingSet;
+    if (!token) return false;
     if (!isNativeHighDepthPaintTarget(owner, layer)) {
-      clearNativeHighDepthPaintTarget(owner, layer, buffer);
+      clearNativeHighDepthPaintTarget(owner, layer, token);
       return false;
     }
 
     let mutation;
     try {
-      mutation = await prepareHighDepthMutation(layer, buffer);
+      if (highDepthPaintWorkingSet) {
+        const highDepthSource = highDepthPaintWorkingSet.serialize();
+        mutation = {
+          highDepthSource,
+          dataUrl:await highDepthPreviewDataUrlFromSource(layer, highDepthSource),
+          highDepthPreview:highDepthSource.model === 'cmyk'
+            ? null
+            : sanitizeHighDepthPreview(layer.highDepthPreview),
+        };
+      } else {
+        mutation = await prepareHighDepthMutation(layer, highDepthPaintBuffer);
+      }
     } catch (error) {
-      clearNativeHighDepthPaintTarget(owner, layer, buffer);
+      clearNativeHighDepthPaintTarget(owner, layer, token);
       throw error;
     }
 
-    if (highDepthPaintBuffer !== buffer) return false;
+    if ((highDepthPaintBuffer || highDepthPaintWorkingSet) !== token) return false;
     if (!isNativeHighDepthPaintTarget(owner, layer)) {
-      clearNativeHighDepthPaintTarget(owner, layer, buffer);
+      clearNativeHighDepthPaintTarget(owner, layer, token);
       return false;
     }
 
     applyHighDepthMutation(layer, mutation);
-    clearNativeHighDepthPaintTarget(owner, layer, buffer);
+    clearNativeHighDepthPaintTarget(owner, layer, token);
     return true;
   }
 
@@ -15781,7 +16075,7 @@ function createRasterEditController({
 
   function paintPreviewOverrides() {
     if (!brushCanvas || !brushLayerId) return null;
-    if (highDepthPaintBuffer) {
+    if (highDepthPaintBuffer || highDepthPaintWorkingSet) {
       if (!isNativeHighDepthPaintTarget(highDepthPaintOwner, highDepthPaintLayer)) return null;
       return new Map([[brushLayerId, { source: brushCanvas, skipAdjustments: true }]]);
     }
@@ -15814,6 +16108,7 @@ function createRasterEditController({
     get brushContext() { return brushContext; },
     get brushLayerId() { return brushLayerId; },
     get highDepthPaintBuffer() { return highDepthPaintBuffer; },
+    get highDepthPaintWorkingSet() { return highDepthPaintWorkingSet; },
     get highDepthPaintLayerId() { return highDepthPaintLayerId; },
     clearBrushBuffer,
     clearHighDepthPaintState,
@@ -15824,6 +16119,8 @@ function createRasterEditController({
     editableHighDepthBuffer,
     refreshHighDepthPaintCanvas,
     ensureNativeHighDepthPaintBuffer,
+    applyNativeHighDepthBrushDab,
+    applyNativeHighDepthStrokeSegment,
     prepareTiledHighDepthMutation,
     persistTiledHighDepthMutation,
     prepareHighDepthMutation,
@@ -17024,7 +17321,10 @@ function createPaintGestureController({
     }
 
     const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
-      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(owner, layer, { requireAlpha:tool === 'eraser' })
+      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(owner, layer, {
+          requireAlpha:tool === 'eraser',
+          preferTiled:tool === 'brush' || tool === 'eraser',
+        })
       : false;
     if (!nativeHighDepth && !await rasterEdit.ensureRasterBuffer(owner, layer)) return null;
     if (state.getDocument() !== owner || !owner.layers.includes(layer)) return null;
@@ -17227,7 +17527,9 @@ function createPaintGestureController({
       NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool)
     );
     if (
-      (nativeHighDepth ? !rasterEdit.highDepthPaintBuffer : !rasterEdit.brushContext) ||
+      (nativeHighDepth
+        ? !rasterEdit.isNativeHighDepthPaintTarget(drag?.owner, drag?.layer)
+        : !rasterEdit.brushContext) ||
       !state.beginPersist()
     ) return false;
 
@@ -27080,20 +27382,30 @@ function createLineLayerFromPoints(start,end) {
 function applyNativeHighDepthDab(owner,layer,point,pointerEvent=null,erase=false){
   if(!rasterEdit.isNativeHighDepthPaintTarget(owner,layer))return false;
   const rgb=hexToRgb(els.primaryColor.value);
-  const changed=rasterEdit.highDepthPaintBuffer.model==='cmyk'
-    ? applyCmykPixelBufferBrushDab(rasterEdit.highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb8ToDocumentCmyk(rgb),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)})
-    : applyPixelBufferBrushDab(rasterEdit.highDepthPaintBuffer,point.x,point.y,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb,{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)});
-  if(changed){rasterEdit.markHighDepthPreviewDirty();rasterEdit.schedulePaintPreview();}
+  const changed=rasterEdit.applyNativeHighDepthBrushDab(owner,layer,point,{
+    radius:Math.max(.5,brushWidthForPointer(pointerEvent)/2),
+    rgb,
+    cmyk:layer.highDepthSource?.model==='cmyk'?rgb8ToDocumentCmyk(rgb):null,
+    opacity:Number(els.toolOpacity.value)/100,
+    erase,
+    isAllowed:rasterSelectionPredicate(layer),
+  });
+  if(changed)rasterEdit.schedulePaintPreview();
   return changed>0;
 }
 
 function nativeHighDepthStrokeSegment(owner,layer,from,to,pointerEvent=null,erase=false){
   if(!rasterEdit.isNativeHighDepthPaintTarget(owner,layer))return false;
   const rgb=hexToRgb(els.primaryColor.value);
-  const changed=rasterEdit.highDepthPaintBuffer.model==='cmyk'
-    ? applyCmykPixelBufferStrokeSegment(rasterEdit.highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb8ToDocumentCmyk(rgb),{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)})
-    : applyPixelBufferStrokeSegment(rasterEdit.highDepthPaintBuffer,from,to,Math.max(.5,brushWidthForPointer(pointerEvent)/2),rgb,{opacity:Number(els.toolOpacity.value)/100,erase,isAllowed:rasterSelectionPredicate(layer)});
-  if(changed){rasterEdit.markHighDepthPreviewDirty();rasterEdit.schedulePaintPreview();}
+  const changed=rasterEdit.applyNativeHighDepthStrokeSegment(owner,layer,from,to,{
+    radius:Math.max(.5,brushWidthForPointer(pointerEvent)/2),
+    rgb,
+    cmyk:layer.highDepthSource?.model==='cmyk'?rgb8ToDocumentCmyk(rgb):null,
+    opacity:Number(els.toolOpacity.value)/100,
+    erase,
+    isAllowed:rasterSelectionPredicate(layer),
+  });
+  if(changed)rasterEdit.schedulePaintPreview();
   return changed>0;
 }
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-29 — Tiled interactive Brush/Eraser working set
+
+- Memory/runtime: interactive native Brush/Eraser on `zpe-pixel-buffer-source-v2` no longer materialize the full 16/32-bit RGB/CMYK plane at stroke start; a stroke-scoped working set lazily decodes only intersecting tiles and keeps dirty/preview-dirty tile sets.
+- Preview: the existing full RGBA8 display canvas is initialized tile-by-tile, then only dirty tiles are tone-mapped/repainted during the stroke; layer filters remain preview-only and are not baked into the persisted canonical preview.
+- Precision: untouched tile payloads stay byte-identical; Eraser promotes RGB→RGBA / CMYK→CMYKA tile-by-tile and serializes untouched alpha-promoted tiles sequentially instead of holding a second full source plane.
+- Ownership: exact document/layer paint guards and async publication remain unchanged; retouch/flood/inpaint still use the documented contiguous compatibility boundary.
+- Tests/docs: new regressions cover lazy tile loading, selective persistence, alpha promotion and native Brush routing; TILED_RASTER/AGENTS/README document the Stage 17c boundary.
+
+
 ### 2026-09-29 — Tile-local high-depth raster mutations
 
 - Precision/memory: `zpe-pixel-buffer-source-v2` получил bounded tile mutation visitor — Line и selection clear меняют native RGB/CMYK 16/32-bit samples по одному tile, не материализуя полный high-depth plane; untouched tile payloads сохраняются byte-for-byte.

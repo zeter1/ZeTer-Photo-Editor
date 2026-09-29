@@ -66,8 +66,11 @@ test('Stage 12d clear respects a selection predicate at high depth',()=>{
 
 test('Stage 12d routes brush/eraser gestures and one-shot raster commands through native high-depth mutations',()=>{
   assert.match(painting,/function ensureNativeHighDepthPaintBuffer\(owner, layer/);
-  assert.match(main,/applyPixelBufferBrushDab\(rasterEdit\.highDepthPaintBuffer/);
-  assert.match(main,/applyPixelBufferStrokeSegment\(rasterEdit\.highDepthPaintBuffer/);
+  assert.match(painting,/createSerializedPixelBufferTileWorkingSet/);
+  assert.match(painting,/function applyNativeHighDepthBrushDab\(owner, layer/);
+  assert.match(painting,/function applyNativeHighDepthStrokeSegment\(owner, layer/);
+  assert.match(main,/rasterEdit\.applyNativeHighDepthBrushDab\(owner,layer,point/);
+  assert.match(main,/rasterEdit\.applyNativeHighDepthStrokeSegment\(owner,layer,from,to/);
   assert.match(commands,/floodFillPixelBuffer\(/);
   assert.match(commands,/const basePredicate = selectionPredicate\(layer, selectionSnapshot\)/);
   assert.match(commands,/persistTiledHighDepthMutation/);
@@ -136,8 +139,10 @@ test('Stage 13c flood fill stays in CMYK source space and respects selection pre
 
 test('Stage 13c routes CMYK brush gestures and raster commands through canonical PixelBuffer mutations',()=>{
   assert.match(toolConfig,/export const NATIVE_CMYK_PAINT_TOOLS = new Set\(\['brush','eraser','blur','clone','heal','smudge','dodge','burn'\]\)/);
-  assert.match(main,/applyCmykPixelBufferBrushDab\(rasterEdit\.highDepthPaintBuffer/);
-  assert.match(main,/applyCmykPixelBufferStrokeSegment\(rasterEdit\.highDepthPaintBuffer/);
+  assert.match(painting,/applyCmykPixelBufferBrushDab\(/);
+  assert.match(painting,/applyCmykPixelBufferStrokeSegment\(/);
+  assert.match(main,/rasterEdit\.applyNativeHighDepthBrushDab\(owner,layer,point/);
+  assert.match(main,/rasterEdit\.applyNativeHighDepthStrokeSegment\(owner,layer,from,to/);
   assert.match(commands,/floodFillCmykPixelBuffer\(/);
   assert.match(commands,/applyCmykPixelBufferStrokeSegment\(/);
   assert.match(commands,/buffer\.model === 'cmyk'/);
