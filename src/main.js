@@ -175,6 +175,9 @@ const {
   selectionMaskDataUrl,
   addSelectedLayerMask,
   refineSelectionToLayerMask,
+  toggleSelectedLayerMask,
+  invertSelectedLayerMask,
+  editSelectedLayerMaskProperties,
   removeSelectedLayerMask,
 } = selectionMaskController;
 
@@ -2452,6 +2455,9 @@ function layerContextMenu(id) {
     ['sep'],
     ['Добавить маску (показать всё)','',()=>addSelectedLayerMask(false),()=>selectedTarget() && editable() && !target().mask],
     ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>selectedTarget() && editable() && !target().mask && Boolean(selectionShape)],
+    ['Параметры растровой маски…','',editSelectedLayerMaskProperties,()=>selectedTarget() && editable() && Boolean(target().mask)],
+    ['Инвертировать растровую маску','',invertSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
+    ['Включить / отключить растровую маску','',toggleSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
     ['Удалить маску','',removeSelectedLayerMask,()=>selectedTarget() && editable() && Boolean(target().mask)],
     ['sep'],
     ['Создать векторную маску из выделения','',()=>applySelectionToVectorMask('replace'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&!target().vectorMask],
@@ -2497,7 +2503,13 @@ function addAdjustmentLayer(){
 
 function layerMaskSummary(layer){
   const parts=[];
-  if(layer?.mask)parts.push(layer.mask.enabled===false?'растровая отключена':layer.mask.dataUrl?'растровая':'растровая: показать всё');
+  if(layer?.mask){
+    const mask=layer.mask;
+    const state=mask.enabled===false?'отключена':mask.invert?'инвертирована':'включена';
+    const density=Math.round((mask.density??1)*100);
+    const feather=Number(mask.feather)||0;
+    parts.push(`растровая: ${state}, плотность ${density}%, растушёвка ${feather}px${mask.dataUrl?'':' (показать всё)'}`);
+  }
   if(layer?.vectorMask){
     const count=layer.vectorMask.subpaths?.length||0,state=layer.vectorMask.enabled===false?'отключена':layer.vectorMask.invert?'инвертирована':'включена';
     parts.push(`векторная: ${count} контур(ов), ${state}`);
@@ -2559,6 +2571,9 @@ const menus={
     ['Добавить маску (показать всё)','',()=>addSelectedLayerMask(false),()=>Boolean(selected())&&!selected().mask&&!isLayerLocked(doc,selected())],
     ['Добавить маску из выделения','',()=>addSelectedLayerMask(true),()=>Boolean(selected())&&!selected().mask&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Уточнить выделение → маска…','',refineSelectionToLayerMask,()=>Boolean(selected())&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
+    ['Параметры растровой маски…','',editSelectedLayerMaskProperties,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
+    ['Инвертировать растровую маску','',invertSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
+    ['Включить / отключить растровую маску','',toggleSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['Удалить маску','',removeSelectedLayerMask,()=>Boolean(selected()?.mask)&&!isLayerLocked(doc,selected())],
     ['sep'],
     ['Создать векторную маску из выделения','',()=>applySelectionToVectorMask('replace'),()=>Boolean(selected())&&Boolean(selectionShape)&&!selected().vectorMask&&!isLayerLocked(doc,selected())],
