@@ -277,6 +277,11 @@ Owns document-tab/session lifecycle: session IDs and names, per-tab history/zoom
 
 It does **not** own raster/document internals. `src/main.js` supplies the live runtime state bridge and application callbacks; `src/core/state.js` remains the document model owner.
 
+### `history-navigation-controller.js`
+Owns synchronous Undo / Redo / jump-to-history runtime transactions. Each command resolves the current mutable HistoryStack binding at invocation time, runs the pending-edit guard before stack mutation, restores the selected snapshot, preserves command-specific transient cleanup, then publishes runtime refresh → dirty state → exact status.
+
+It does **not** render the History panel, create/clone HistoryStack instances or own snapshot serialization. Stack mechanics stay in `src/core/history.js`; per-tab history binding stays in `session-controller.js`; history-row DOM plus menu/keyboard/button dispatch stay in `src/main.js`.
+
 ### `viewport-controller.js`
 Owns canvas zoom command policy: canonical clamp/no-op semantics, active-session zoom synchronization, canvas/overlay refresh, one-frame pointer anchoring correction and fit-to-view with the established 90 px padding + scroll reset.
 
