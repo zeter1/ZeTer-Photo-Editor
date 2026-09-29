@@ -432,13 +432,30 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /applyCrop\(cropResult\.owner,cropResult\.rect\)/);
   assert.doesNotMatch(main, /commit\('Кадрирование'\)/);
   assert.match(main, /from '\.\/document\/resize-command-controller\.js'/);
+  assert.match(main, /from '\.\/ui\/document-resize-controller\.js'/);
   assert.match(build, /'src\/document\/resize-command-controller\.js'/);
+  assert.match(build, /'src\/ui\/document-resize-controller\.js'/);
+  assert.ok(
+    build.indexOf("'src/document/resize-command-controller.js'") <
+      build.indexOf("'src/ui/document-resize-controller.js'"),
+    'file bundle initializes resize command constants before the UI owner',
+  );
   assert.match(documentResizeCommandController, /export function createDocumentResizeCommandController/);
   assert.match(documentResizeCommandController, /imageResizeTransforms/);
   assert.match(documentResizeCommandController, /MAX_LAYER_POSITION/);
+  assert.match(documentResizeController, /export function createDocumentResizeController/);
+  assert.match(documentResizeController, /DOCUMENT_RESIZE_ANCHORS\.map/);
+  assert.match(documentResizeController, /resizeImage\(owner, values\)/);
+  assert.match(documentResizeController, /resizeCanvas\(owner, values\)/);
   assert.match(main, /createDocumentResizeCommandController\(\{/);
-  assert.match(main, /documentResizeCommandController\.resizeImage\(owner,v\)/);
-  assert.match(main, /documentResizeCommandController\.resizeCanvas\(owner,v\)/);
+  assert.match(main, /createDocumentResizeController\(\{/);
+  assert.match(main, /documentResizeController\.showImageSizeDialog/);
+  assert.match(main, /documentResizeController\.showCanvasSizeDialog/);
+  assert.doesNotMatch(main, /handleDocumentResizeCommandResult/);
+  assert.doesNotMatch(main, /resizeImageDialog/);
+  assert.doesNotMatch(main, /resizeCanvasDialog/);
+  assert.doesNotMatch(main, /documentResizeCommandController\.resizeImage\(owner,v\)/);
+  assert.doesNotMatch(main, /documentResizeCommandController\.resizeCanvas\(owner,v\)/);
   assert.doesNotMatch(main, /imageResizeTransforms\(/);
   assert.doesNotMatch(main, /MAX_LAYER_POSITION/);
   assert.match(build, /'src\/document\/import-controller\.js'/);
