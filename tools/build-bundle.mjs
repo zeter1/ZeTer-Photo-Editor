@@ -43,6 +43,7 @@ const sources = [
   'src/ui/text-settings-controller.js',
   'src/ui/smart-filter-controller.js',
   'src/workspace/session-controller.js',
+  'src/workspace/history-navigation-controller.js',
   'src/workspace/recovery-controller.js',
   'src/core/color.js',
   'src/core/pixel-worker.js',
