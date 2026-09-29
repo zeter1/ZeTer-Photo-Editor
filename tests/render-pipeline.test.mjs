@@ -49,9 +49,11 @@ test('render pipeline treats adjustment layers as cumulative stack operations an
   assert.match(render, /sourceCtx\.drawImage\(clippingMask,0,0,width,height\)/);
 });
 
-test('layer masks isolate layer content before destination-in compositing', () => {
-  assert.match(render, /const hasRasterMask=Boolean\(layer\.mask\?\.enabled && layer\.mask\.dataUrl\)/);
-  assert.match(render, /globalCompositeOperation='destination-in'/);
+test('layer masks isolate content and route professional controls through the canonical alpha pipeline', () => {
+  assert.match(render, /const hasRasterMask=Boolean\(layer\.mask && layer\.mask\.enabled !== false/);
+  assert.match(render, /applyLayerMaskToContext/);
+  assert.match(render, /applyMaskControlsAlpha/);
+  assert.match(render, /globalCompositeOperation = 'destination-in'/);
   assert.match(render, /mask: null/);
 });
 
