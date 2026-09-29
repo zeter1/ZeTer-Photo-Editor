@@ -197,11 +197,11 @@ export function createSelectionRasterMutationController({
       }
 
       if (!continuationCurrent()) return null;
-      if (!prepared.length) return { cleared:0, locked, rasterized };
       if (state.getDocument() !== documentValue || state.getActiveSessionId() !== targetSessionId) {
         status('Очистка выделения отменена: активный документ изменился');
         return null;
       }
+      if (!prepared.length) return { cleared:0, locked, rasterized };
 
       const publication = prepared.map(entry => ({
         ...entry,
