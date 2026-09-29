@@ -191,10 +191,15 @@ It does not classify incoming files, parse PSD/PSB, own recovery storage, or def
 ### `import-controller.js`
 Owns incoming-file classification and image import orchestration: image/project detection, decode-and-validate-before-mutate transaction, empty-document sizing, anchor placement and routing to PSD/project callbacks. It does not own PSD parsing or native project persistence; those remain separate canonical owners.
 
-### `resize-command-controller.js`
-Owns synchronous persisted Image Size and Canvas Size commands. It binds each delayed modal Apply to the originating document object, stages the full layer transform/shift plan through canonical `src/core/state.js` helpers, revalidates active ownership immediately before mutation, suppresses semantic no-ops, and publishes one history entry plus geometry transient cleanup only after a real change.
+### `ui/document-resize-controller.js`
+Owns the user-facing Image Size / Canvas Size dialog contract: exact field schema, all nine Canvas anchors, open-time originating-document capture, repeated pending-edit guard on submit, delegation to the persisted command owner, and INVALID/REJECTED status/toast presentation. COMMITTED and semantic NOOP deliberately return normal modal-close semantics without duplicate UI publication.
 
-It deliberately does **not** own resize modal DOM, Crop tool/pointer lifecycle, zoom/viewport state, document schema, or core size/scale/position limits. Those remain in `src/main.js`, interaction owners and `src/core/state.js` respectively.
+It deliberately does **not** own resize math, history, transient geometry cleanup or generic modal DOM lifecycle. Those remain in `src/document/resize-command-controller.js` and `src/ui/modal-controller.js`.
+
+### `resize-command-controller.js`
+Owns synchronous persisted Image Size and Canvas Size commands. It receives the exact originating document captured by the UI owner, stages the full layer transform/shift plan through canonical `src/core/state.js` helpers, revalidates active ownership immediately before mutation, suppresses semantic no-ops, and publishes one history entry plus geometry transient cleanup only after a real change.
+
+It deliberately does **not** own dialog schema/result presentation, Crop tool/pointer lifecycle, zoom/viewport state, document schema, or core size/scale/position limits. Those remain in `src/ui/document-resize-controller.js`, interaction owners and `src/core/state.js` respectively.
 
 ### `crop-command-controller.js`
 Owns the synchronous persisted Crop geometry transaction. It receives the exact document captured by the crop gesture or selection command, validates finite rounded geometry and canonical canvas safety, stages every shifted layer position against `MAX_LAYER_POSITION`, revalidates active owner identity immediately before the first write, and publishes at most one `Кадрирование` history entry.

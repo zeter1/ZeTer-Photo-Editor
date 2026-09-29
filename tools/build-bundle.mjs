@@ -63,6 +63,7 @@ const sources = [
   'src/document/background-command-controller.js',
   'src/document/crop-command-controller.js',
   'src/document/resize-command-controller.js',
+  'src/ui/document-resize-controller.js',
   'src/document/smart-object-controller.js',
   'src/document/psd-native-metadata-plans.js',
   'src/document/psd-import-semantics.js',
