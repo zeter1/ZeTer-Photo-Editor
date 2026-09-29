@@ -66,6 +66,7 @@ import { createPsdSmartObjectResource } from './document/psd-smart-object-resour
 import { createPsdImportController } from './document/psd-import-controller.js';
 import { createPsdImportSemantics } from './document/psd-import-semantics.js';
 import { createPsdExportController } from './document/psd-export-controller.js';
+import { createDocumentExportController } from './document/export-controller.js';
 import { psdAdjustmentNativePlan, psdEmbeddedDocumentFingerprint, psdPreviewFingerprint, psdShapeNativePlan, psdTextNativePlan } from './document/psd-native-metadata-plans.js';
 import { createRasterEditController } from './painting/controller.js';
 import { createRasterCommandController } from './painting/command-controller.js';
@@ -664,6 +665,32 @@ const psdExportController = createPsdExportController({
   },
 });
 const { prepareDocument: preparePsdExport } = psdExportController;
+
+const documentExportController = createDocumentExportController({
+  documentState: {
+    getDocument: () => doc,
+    blockPendingDocumentEdit,
+    snapshotDocument,
+    restoreDocument,
+  },
+  rendering: { compositeToBlob },
+  psd: { prepareDocument: preparePsdExport },
+  codec: { encodePsdBlob, encodePsbBlob },
+  io: {
+    downloadBlob,
+    safeFilename,
+    dataUrlToBytes,
+    mimeExtensions: MIME_EXT,
+  },
+  ui: {
+    showModal,
+    setStatus,
+    toast,
+    alertUser: message => alert(message),
+    consoleRef: console,
+  },
+});
+const { showExportDialog: exportDialog } = documentExportController;
 
 const psdSmartObjectResource = createPsdSmartObjectResource({
   prepareDocument: preparePsdExport,
@@ -2276,37 +2303,6 @@ function bindAdjustmentControls(root,owner,layerId) {
     handleAdjustmentCommandResult(adjustmentLayerCommandController.setClipping(owner,layerId,clippingInput.checked));
   });
 }
-async function exportPsdDocument(exportDoc,{psb=false}={}){
-  const format=psb?'PSB':'PSD';
-  setStatus(`${format}: подготовка слоёв…`);
-  const prepared=await preparePsdExport(exportDoc);
-  setStatus(`${format}: упаковка ${prepared.colorMode.toUpperCase()} ${prepared.bitsPerChannel}-bit каналов…`);
-  const encodeBlob=psb?encodePsbBlob:encodePsdBlob;
-  const profile=exportDoc.colorProfile;
-  const iccProfile=profile?.kind==='icc'&&profile.dataUrl
-    ? dataUrlToBytes(profile.dataUrl,{maxBytes:4*1024*1024})
-    : null;
-  const blob=encodeBlob({
-    width:exportDoc.width,height:exportDoc.height,
-    layers:prepared.layers,groups:prepared.groups,paths:prepared.paths,linkedLayerBlocks:prepared.linkedLayerBlocks,composite:prepared.composite,
-    compositePixelBuffer:prepared.compositePixelBuffer,bitsPerChannel:prepared.bitsPerChannel,colorMode:prepared.colorMode,
-    iccProfile,iccUntagged:Boolean(profile?.untagged),
-    maxPixels:48_000_000,maxLayers:500,
-  });
-  const filename=`${safeFilename(exportDoc.name)}.${psb?'psb':'psd'}`;
-  downloadBlob(blob,filename);
-  if(prepared.warnings.length){
-    console.warn(`${format} export warnings`,prepared.warnings);
-    setStatus(`Экспортирован ${filename} с ограничениями: ${prepared.warnings.length}`);
-    toast(`${format} экспортирован с ограничениями: ${prepared.warnings.length}. Подробности — в консоли`,'warn');
-  }else{
-    setStatus(`Экспортирован ${filename}`);
-    toast(`${format} экспортирован`,'success');
-  }
-}
-
-async function exportDialog() { if(blockPendingDocumentEdit())return; showModal({title:'Экспорт изображения',fields:[{name:'format',label:'Формат',type:'select',value:'image/png',options:[['image/png','PNG'],['image/jpeg','JPEG'],['image/webp','WebP'],['image/vnd.adobe.photoshop','PSD — RGB/CMYK слои 8/16/32-bit'],['psb','PSB — RGB/CMYK Large Document 8/16/32-bit']]},{name:'quality',label:'Качество',type:'number',value:'92',min:'1',max:'100'}],submitLabel:'Экспорт',onSubmit:async v=>{if(blockPendingDocumentEdit())return false;try{setStatus('Экспорт…');const type=v.format;const exportDoc=restoreDocument(snapshotDocument(doc));if(type==='image/vnd.adobe.photoshop'){await exportPsdDocument(exportDoc);return;}if(type==='psb'){await exportPsdDocument(exportDoc,{psb:true});return;}const blob=await compositeToBlob(exportDoc,type,clamp(Number(v.quality)/100,.01,1));const filename=`${safeFilename(exportDoc.name)}.${MIME_EXT[type]}`;downloadBlob(blob,filename);setStatus(`Экспортирован ${filename}`);}catch(e){console.error(e);alert(e.message);setStatus('Ошибка экспорта');}}}); }
-
 function toggleSelectedVisibility() { return layerGroupCommandController.toggleSelectedLayerVisibility(); }
 function toggleSelectedLock() { return layerGroupCommandController.toggleSelectedLayerLock(); }
 function nudgeSelected(dx,dy) {
