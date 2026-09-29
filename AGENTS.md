@@ -10,6 +10,7 @@
 - Canvas viewport zoom / pointer-anchored zoom / fit-to-view policy: `src/workspace/viewport-controller.js`; keyboard/menu/wheel dispatch stays in `src/main.js`, while canvas-mode shell visibility/center preservation stays in `src/ui/workspace-layout-controller.js`.
 - Recovery/autosave orchestration, saved-project manager actions, window ownership, debounce/restore/delete policy: `src/workspace/recovery-controller.js`; recovery dialog DOM/actions: `src/ui/modal-controller.js`; IndexedDB persistence only: `src/core/recovery.js`
 - Native `.zpe` project open/save transaction, async stale-owner guards and Smart Object save routing: `src/document/project-controller.js` (spec: `docs/architecture/NATIVE_PROJECT_IO.md`); schema sanitization stays in `src/core/state.js`, low-level text/download IO in `src/core/io.js`.
+- Document Export command/modal orchestration, repeated pending-edit guard, detached submit-time snapshot, raster/PSD/PSB routing and completion/error publication: `src/document/export-controller.js` (spec: `docs/architecture/DOCUMENT_EXPORT.md`); PSD/PSB preparation stays in `src/document/psd-export-controller.js`, binary codec in `src/formats/psd.js`, low-level IO in `src/core/io.js`.
 - Document import / file routing: `src/document/import-controller.js`; it delegates `.zpe` persistence to the project controller and PSD/PSB opening to the PSD import owner.
 - Document Image Size / Canvas Size persisted command policy, stale-modal owner guard, atomic resize plan + history publication: `src/document/resize-command-controller.js`; modal fields/status remain in `src/main.js`, reusable limits/math in `src/core/state.js`.
 - Crop transient gesture/draft/session snapshot + overlay/min-size policy: `src/interaction/crop-gesture-controller.js` (spec: `docs/architecture/CROP_INTERACTION.md`); persisted geometry command, exact owner guard, atomic layer-position plan and no-op/history completion: `src/document/crop-command-controller.js`; tool dispatch stays in `src/main.js`, reusable limits in `src/core/state.js`.
@@ -57,6 +58,7 @@
 - какие зависимости допустимы → `docs/architecture/BOUNDARIES.md`
 - как работать AI/Codex → `docs/development/AI_WORKFLOW.md`
 - как делать refactor/debug/review/tests с доказательствами → `docs/development/QUALITY_PLAYBOOK.md`
+- export modal / immutable submit snapshot / format routing contract → `docs/architecture/DOCUMENT_EXPORT.md`
 - какие проверки запускать → `docs/testing/TEST_MATRIX.md`
 - что делать в следующей небольшой проходке → `task/README.md`
 - подробная историческая инженерная летопись → `docs/reference/PROJECT_HISTORY.md`

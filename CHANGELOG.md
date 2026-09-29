@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-09-29 — Extract document export orchestration owner
+
+- Refactor: Export modal/command orchestration moves from `src/main.js` into `src/document/export-controller.js`; `main.js` now only composes the owner and routes menu/quick-export actions.
+- Async safety: the controller repeats the pending-edit guard on submit, freezes exactly one detached document snapshot before the first async export boundary, and never publishes a partial download on render/preparation/codec failure.
+- Format boundaries: PNG/JPEG/WebP quality + filename routing, PSD/PSB codec selection, ICC extraction cap and writer resource limits are covered directly while PSD document preparation remains in `src/document/psd-export-controller.js` and binary layout in `src/formats/psd.js`.
+- Test/docs hygiene: VM/source-oracle tests no longer depend on the removed Export block as a text delimiter; direct controller coverage, architecture guards, `DOCUMENT_EXPORT.md` and AI/test routing document the canonical boundary.
+
 ### 2026-09-29 — Extract native project IO owner
 
 - Refactor: native `.zpe` open/save orchestration moves from `src/main.js` into `src/document/project-controller.js`; incoming-file classification, schema, recovery storage and Smart Object persistence stay with their existing owners.

@@ -217,6 +217,11 @@ Owns Photoshop-native export compatibility decisions and bounded metadata rewrit
 
 The planner also owns persisted opaque-block decoding plus Smart Object preview/embedded fingerprints used to prove native passthrough is still safe. Unsupported or stale metadata returns an explicit ineligible plan; raster fallback remains the export controller's responsibility.
 
+### `export-controller.js`
+Owns the user-facing Export transaction: open/submit pending-edit guards, exact submit-time detached document snapshot, PNG/JPEG/WebP quality + filename routing, PSD/PSB preparation/codec selection, ICC/resource-limit handoff and success/warning/error publication.
+
+It receives mutable runtime state, raster rendering, PSD preparation, codecs and low-level IO only through narrow ports. After the detached snapshot is captured it must not consult the live document again, and no browser download is published before the selected render/encode path succeeds. See `DOCUMENT_EXPORT.md`.
+
 ### `psd-export-controller.js`
 Owns document-to-PSD/PSB writer preparation: export bounds, group ancestry, native high-depth/CMYK eligibility, raster/native layer payloads, merged composite selection and bounded export warnings. Photoshop semantic plans are direct dependencies from `psd-native-metadata-plans.js`; browser rendering and the generic vector-mask bridge remain explicit ports so native preparation stays directly Node-testable. Binary PSD/PSB parsing/writing stays in `src/formats/psd.js`.
 

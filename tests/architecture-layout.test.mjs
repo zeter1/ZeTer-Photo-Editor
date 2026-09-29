@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, learningCenterController, workspaceLayoutController, viewportController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardCopyCutController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, learningCenterController, workspaceLayoutController, viewportController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardCopyCutController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, documentExportController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -50,6 +50,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/painting/gradient-command-controller.js', root), 'utf8'),
   readFile(new URL('src/painting/gesture-controller.js', root), 'utf8'),
   readFile(new URL('src/retouch/controller.js', root), 'utf8'),
+  readFile(new URL('src/document/export-controller.js', root), 'utf8'),
   readFile(new URL('src/document/psd-export-controller.js', root), 'utf8'),
   readFile(new URL('src/document/psd-import-controller.js', root), 'utf8'),
   readFile(new URL('src/document/psd-import-semantics.js', root), 'utf8'),
@@ -559,6 +560,17 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
     'applyNativeHighDepthBlurDab','nativeHighDepthBlurSegment',
   ]) assert.doesNotMatch(main, new RegExp(`function ${name}\\(`));
   assert.doesNotMatch(main, /let (?:cloneSource|cloneSnapshotCanvas|highDepthCloneSnapshotBuffer|blurScratchCanvas|retouchScratchCanvas)\b/);
+  assert.match(main, /from '\.\/document\/export-controller\.js'/);
+  assert.match(build, /'src\/document\/export-controller\.js'/);
+  assert.match(documentExportController, /export function createDocumentExportController/);
+  assert.match(main, /createDocumentExportController\(\{/);
+  assert.match(main, /showExportDialog: exportDialog/);
+  assert.match(main, /codec: \{ encodePsdBlob, encodePsbBlob \}/);
+  assert.match(documentExportController, /restoreDocument\(snapshotDocument\(getDocument\(\)\)\)/);
+  assert.doesNotMatch(documentExportController, /from '\.\/formats\/psd\.js'/);
+  assert.doesNotMatch(main, /(?:async\s+)?function exportPsdDocument\(/);
+  assert.doesNotMatch(main, /(?:async\s+)?function exportDialog\(/);
+
   assert.match(main, /from '\.\/document\/psd-export-controller\.js'/);
   assert.match(main, /from '\.\/document\/psd-native-metadata-plans\.js'/);
   assert.match(build, /'src\/document\/psd-native-metadata-plans\.js'/);
