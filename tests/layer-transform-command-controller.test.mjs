@@ -197,7 +197,7 @@ test('composition root delegates discrete transforms and build/docs pin the cano
   assert.match(main, /layerTransformCommandController\.fitToCanvas\(doc,l\.id\)/);
 
   const start = main.indexOf('function nudgeSelected(dx,dy)');
-  const end = main.indexOf('function setDocumentBackground()', start);
+  const end = main.indexOf('async function toggleFullscreen()', start);
   assert.ok(start >= 0 && end > start);
   const wrappers = main.slice(start, end);
   assert.doesNotMatch(wrappers, /\.(?:x|y|scaleX|scaleY)\s*(?:\+=|-=|\*=|\/=|=)/);

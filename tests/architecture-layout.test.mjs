@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
-const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, learningCenterController, workspaceLayoutController, viewportController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardCopyCutController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentCropCommandController, documentResizeCommandController, documentResizeController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, documentExportController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
+const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, workspaceRecovery, toolbarController, menuController, modalController, learningCenterController, workspaceLayoutController, viewportController, layersPanelController, layerGroupCommandController, layerPropertyCommandController, adjustmentCommandController, layerTransformCommandController, colorCorrectionController, pathsController, colorManagementController, layerBlendingController, textEditController, textSettingsController, pointerLifecycleRouter, cropGestureController, layerTransformSurfaceController, layerTransformGestureController, pathControlSurfaceController, pathControlCommandController, pathControlGestureController, penDraftGestureController, penPathCommandController, selectionGestureController, selectionClipboardCopyCutController, selectionClipboardController, selectionRasterMutationController, documentImportController, documentBackgroundCommandController, documentBackgroundController, documentCropCommandController, documentResizeCommandController, documentResizeController, paintingController, paintCommandController, gradientCommandController, paintGestureController, retouchController, documentExportController, psdExportController, psdImportController, psdImportSemantics, psdNativeMetadataPlans] = await Promise.all([
   readFile(new URL('src/main.js', root), 'utf8'),
   readFile(new URL('tools/build-bundle.mjs', root), 'utf8'),
   readFile(new URL('src/adapters/psd.js', root), 'utf8'),
@@ -43,6 +43,7 @@ const [main, build, legacyPsd, legacyToolLayout, project, workspaceSessions, wor
   readFile(new URL('src/selection/raster-mutation-controller.js', root), 'utf8'),
   readFile(new URL('src/document/import-controller.js', root), 'utf8'),
   readFile(new URL('src/document/background-command-controller.js', root), 'utf8'),
+  readFile(new URL('src/ui/document-background-controller.js', root), 'utf8'),
   readFile(new URL('src/document/crop-command-controller.js', root), 'utf8'),
   readFile(new URL('src/document/resize-command-controller.js', root), 'utf8'),
   readFile(new URL('src/ui/document-resize-controller.js', root), 'utf8'),
@@ -396,13 +397,28 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /menuController\.isOpen\(\)/);
   assert.match(main, /from '\.\/document\/import-controller\.js'/);
   assert.match(main, /from '\.\/document\/background-command-controller\.js'/);
+  assert.match(main, /from '\.\/ui\/document-background-controller\.js'/);
   assert.match(build, /'src\/document\/background-command-controller\.js'/);
+  assert.match(build, /'src\/ui\/document-background-controller\.js'/);
+  assert.ok(
+    build.indexOf("'src/document/background-command-controller.js'") <
+      build.indexOf("'src/ui/document-background-controller.js'"),
+    'file bundle initializes background command constants before the UI owner',
+  );
   assert.match(documentBackgroundCommandController, /export function createDocumentBackgroundCommandController/);
   assert.match(documentBackgroundCommandController, /state\.getDocument\(\) === owner/);
   assert.match(documentBackgroundCommandController, /transaction\.commit\('Фон документа'\)/);
+  assert.match(documentBackgroundController, /export function createDocumentBackgroundController/);
+  assert.match(documentBackgroundController, /const owner = getDocument\(\)/);
+  assert.match(documentBackgroundController, /const primaryColor = getPrimaryColor\(\)/);
+  assert.match(documentBackgroundController, /setBackground\(owner, values\.background\)/);
   assert.match(main, /createDocumentBackgroundCommandController\(\{/);
-  assert.match(main, /const owner=doc;\s*showModal\(\{\s*title:'Фон документа'/);
-  assert.match(main, /documentBackgroundCommandController\.setBackground\(owner,v\.background\)/);
+  assert.match(main, /createDocumentBackgroundController\(\{/);
+  assert.match(main, /documentBackgroundController\.showDocumentBackgroundDialog/);
+  assert.doesNotMatch(main, /function setDocumentBackground\(/);
+  assert.doesNotMatch(main, /DOCUMENT_BACKGROUND_COMMAND_RESULT/);
+  assert.doesNotMatch(main, /title:'Фон документа'/);
+  assert.doesNotMatch(main, /documentBackgroundCommandController\.setBackground\(owner,v\.background\)/);
   assert.doesNotMatch(main, /doc\.background\s*=/);
   assert.match(main, /from '\.\/interaction\/crop-gesture-controller\.js'/);
   assert.match(build, /'src\/interaction\/crop-gesture-controller\.js'/);

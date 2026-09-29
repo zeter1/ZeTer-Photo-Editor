@@ -41,6 +41,7 @@ import { createTextEditController } from './ui/text-edit-controller.js';
 import { createTextSettingsController, TEXT_WEIGHT_OPTIONS, TEXT_STYLE_OPTIONS, TEXT_ALIGN_OPTIONS } from './ui/text-settings-controller.js';
 import { createMenuController } from './ui/menu-controller.js';
 import { createModalController } from './ui/modal-controller.js';
+import { createDocumentBackgroundController } from './ui/document-background-controller.js';
 import { createDocumentResizeController } from './ui/document-resize-controller.js';
 import { createLearningCenterController } from './ui/learning-center-controller.js';
 import { createPointerLifecycleRouter } from './interaction/pointer-lifecycle-router.js';
@@ -59,7 +60,7 @@ import { createSelectionMaskController } from './selection/mask-controller.js';
 import { createSelectionVectorMaskController } from './selection/vector-mask-controller.js';
 import { createDocumentImportController } from './document/import-controller.js';
 import { createProjectController } from './document/project-controller.js';
-import { DOCUMENT_BACKGROUND_COMMAND_RESULT, createDocumentBackgroundCommandController } from './document/background-command-controller.js';
+import { createDocumentBackgroundCommandController } from './document/background-command-controller.js';
 import { DOCUMENT_CROP_COMMAND_RESULT, createDocumentCropCommandController } from './document/crop-command-controller.js';
 import { createDocumentResizeCommandController } from './document/resize-command-controller.js';
 import { createSmartObjectController } from './document/smart-object-controller.js';
@@ -969,6 +970,19 @@ const selectionGestures = createSelectionGestureController({
 const documentBackgroundCommandController = createDocumentBackgroundCommandController({
   state: { getDocument: () => doc },
   transaction: { commit },
+});
+const documentBackgroundController = createDocumentBackgroundController({
+  documentState: {
+    getDocument: () => doc,
+    getPrimaryColor: () => els.primaryColor.value,
+  },
+  commands: {
+    setBackground: (owner, value) => documentBackgroundCommandController.setBackground(owner, value),
+  },
+  ui: {
+    showModal,
+    setStatus,
+  },
 });
 const documentCropCommandController = createDocumentCropCommandController({
   state: { getDocument: () => doc },
@@ -2355,27 +2369,6 @@ function fitSelectedLayerToCanvas() {
   return layerTransformCommandController.fitToCanvas(doc,l.id);
 }
 
-function setDocumentBackground() {
-  const owner=doc;
-  showModal({
-    title:'Фон документа',
-    fields:[{
-      name:'background',
-      label:'Фон',
-      type:'select',
-      value:owner.background,
-      options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный'],[els.primaryColor.value,'Основной цвет']]
-    }],
-    submitLabel:'Применить',
-    onSubmit:v=>{
-      const outcome=documentBackgroundCommandController.setBackground(owner,v.background);
-      if(outcome.result===DOCUMENT_BACKGROUND_COMMAND_RESULT.REJECTED){
-        setStatus('Документ изменился — фон не применён');
-        return false;
-      }
-    }
-  });
-}
 async function toggleFullscreen() {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -2575,7 +2568,7 @@ const menus={
     ['sep'],
     ['Размер изображения…','',documentResizeController.showImageSizeDialog],
     ['Размер холста…','',documentResizeController.showCanvasSizeDialog],
-    ['Фон документа…','',setDocumentBackground],
+    ['Фон документа…','',documentBackgroundController.showDocumentBackgroundDialog],
     ['sep'],
     ['Сбросить все фильтры слоя','',()=>layerPropertyCommandController.resetSelectedFilters(),()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],

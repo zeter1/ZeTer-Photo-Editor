@@ -17804,6 +17804,73 @@ function createDocumentBackgroundCommandController({
   return { setBackground };
 }
 
+// ---- src/ui/document-background-controller.js ----
+function requirePort(value, label) {
+  if (typeof value !== 'function') {
+    throw new TypeError(`document background UI ${label} bridge is required`);
+  }
+  return value;
+}
+
+/**
+ * Owns Image > Document Background modal orchestration only.
+ *
+ * Persisted mutation, exact-owner validation, semantic no-op suppression and
+ * history publication remain in document/background-command-controller.js.
+ * Volatile UI inputs such as the primary color are sampled at dialog-open time.
+ */
+function createDocumentBackgroundController({
+  documentState: {
+    getDocument,
+    getPrimaryColor,
+  } = {},
+  commands: {
+    setBackground,
+  } = {},
+  ui: {
+    showModal,
+    setStatus,
+  } = {},
+} = {}) {
+  requirePort(getDocument, 'document state');
+  requirePort(getPrimaryColor, 'primary-color');
+  requirePort(setBackground, 'set-background command');
+  requirePort(showModal, 'modal');
+  requirePort(setStatus, 'status');
+
+  function showDocumentBackgroundDialog() {
+    const owner = getDocument();
+    const primaryColor = getPrimaryColor();
+
+    showModal({
+      title: 'Фон документа',
+      fields: [{
+        name: 'background',
+        label: 'Фон',
+        type: 'select',
+        value: owner.background,
+        options: [
+          ['transparent', 'Прозрачный'],
+          ['#ffffff', 'Белый'],
+          ['#000000', 'Чёрный'],
+          [primaryColor, 'Основной цвет'],
+        ],
+      }],
+      submitLabel: 'Применить',
+      onSubmit: values => {
+        const outcome = setBackground(owner, values.background);
+        if (outcome?.result === DOCUMENT_BACKGROUND_COMMAND_RESULT.REJECTED) {
+          setStatus('Документ изменился — фон не применён');
+          return false;
+        }
+        return undefined;
+      },
+    });
+  }
+
+  return { showDocumentBackgroundDialog };
+}
+
 // ---- src/document/crop-command-controller.js ----
 const DOCUMENT_CROP_COMMAND_RESULT = Object.freeze({
   COMMITTED: 'committed',
@@ -24166,6 +24233,19 @@ const documentBackgroundCommandController = createDocumentBackgroundCommandContr
   state: { getDocument: () => doc },
   transaction: { commit },
 });
+const documentBackgroundController = createDocumentBackgroundController({
+  documentState: {
+    getDocument: () => doc,
+    getPrimaryColor: () => els.primaryColor.value,
+  },
+  commands: {
+    setBackground: (owner, value) => documentBackgroundCommandController.setBackground(owner, value),
+  },
+  ui: {
+    showModal,
+    setStatus,
+  },
+});
 const documentCropCommandController = createDocumentCropCommandController({
   state: { getDocument: () => doc },
   transaction: { commit },
@@ -25551,27 +25631,6 @@ function fitSelectedLayerToCanvas() {
   return layerTransformCommandController.fitToCanvas(doc,l.id);
 }
 
-function setDocumentBackground() {
-  const owner=doc;
-  showModal({
-    title:'Фон документа',
-    fields:[{
-      name:'background',
-      label:'Фон',
-      type:'select',
-      value:owner.background,
-      options:[['transparent','Прозрачный'],['#ffffff','Белый'],['#000000','Чёрный'],[els.primaryColor.value,'Основной цвет']]
-    }],
-    submitLabel:'Применить',
-    onSubmit:v=>{
-      const outcome=documentBackgroundCommandController.setBackground(owner,v.background);
-      if(outcome.result===DOCUMENT_BACKGROUND_COMMAND_RESULT.REJECTED){
-        setStatus('Документ изменился — фон не применён');
-        return false;
-      }
-    }
-  });
-}
 async function toggleFullscreen() {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -25771,7 +25830,7 @@ const menus={
     ['sep'],
     ['Размер изображения…','',documentResizeController.showImageSizeDialog],
     ['Размер холста…','',documentResizeController.showCanvasSizeDialog],
-    ['Фон документа…','',setDocumentBackground],
+    ['Фон документа…','',documentBackgroundController.showDocumentBackgroundDialog],
     ['sep'],
     ['Сбросить все фильтры слоя','',()=>layerPropertyCommandController.resetSelectedFilters(),()=>Boolean(selected())&&!isLayerLocked(doc,selected())],
   ],
