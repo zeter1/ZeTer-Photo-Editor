@@ -174,6 +174,12 @@ browser primitives (Canvas, Worker, storage, File APIs)
 - It may depend on stable core sanitizers/geometry and public rewrite primitives from `src/formats/psd.js`; it must not parse/write the PSD container, render Canvas pixels or mutate editor state.
 - Unsafe, changed or unsupported native metadata must return an explicit ineligible plan so the export controller can surface an honest raster/composite fallback.
 
+### Document export orchestration
+- `src/document/export-controller.js` owns the Export modal schema, repeated pending-edit preflight, one detached submit-time document snapshot, format routing and completion/error publication.
+- Rendering, PSD preparation, PSD/PSB codecs and low-level IO remain explicit ports. After snapshot capture the owner must not read mutable live document state again.
+- Browser download is the publication boundary: render/prepare/encode failure must produce no partial download. Keep PSD preparation in `psd-export-controller.js` and binary layout in `formats/psd.js`.
+- Detailed contract: `DOCUMENT_EXPORT.md`.
+
 ### Document / PSD export preparation
 - `src/document/psd-export-controller.js` owns document-to-writer preparation only: bounds, group mapping, native-vs-raster eligibility, prepared layer payloads, merged composite choice and export warnings.
 - Native Photoshop metadata plans are direct dependencies from `psd-native-metadata-plans.js`. Browser rendering and the shared generic vector-mask exporter remain explicit ports.
