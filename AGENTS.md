@@ -7,6 +7,7 @@
 - UI/runtime orchestration and tool-specific pointer dispatch: `src/main.js`
 - Global overlay pointer lifecycle, capture/release and active-pointer routing: `src/interaction/pointer-lifecycle-router.js`
 - Workspace/session/tab lifecycle: `src/workspace/session-controller.js`
+- Undo / Redo / jump-to-history runtime transaction policy: `src/workspace/history-navigation-controller.js`; `src/core/history.js` owns HistoryStack mechanics/snapshots, while history-panel DOM rows and menu/keyboard/button dispatch stay in `src/main.js`.
 - Canvas viewport zoom / pointer-anchored zoom / fit-to-view policy: `src/workspace/viewport-controller.js`; keyboard/menu/wheel dispatch stays in `src/main.js`, while canvas-mode shell visibility/center preservation stays in `src/ui/workspace-layout-controller.js`.
 - Recovery/autosave orchestration, saved-project manager actions, window ownership, debounce/restore/delete policy: `src/workspace/recovery-controller.js`; recovery dialog DOM/actions: `src/ui/modal-controller.js`; IndexedDB persistence only: `src/core/recovery.js`
 - File → New / Ctrl+N document replacement transaction, dirty-confirm policy, exact modal schema, fresh-history publication, clean-state recovery and fit-to-view ordering: `src/document/new-document-controller.js`; canonical document validation stays in `src/core/state.js`, generic modal DOM in `src/ui/modal-controller.js`. PSD/PSB and `.zpe` open flows reuse its `canReplaceDocument` policy through explicit ports.
