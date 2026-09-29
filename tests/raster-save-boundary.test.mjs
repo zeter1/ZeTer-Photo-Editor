@@ -6,10 +6,11 @@ import { createDocumentSessionController } from '../src/workspace/session-contro
 import { createRasterCommandController } from '../src/painting/command-controller.js';
 import { createLayerGroupCommandController } from '../src/layers/command-controller.js';
 import { createDocument, createRasterLayer, addLayer } from '../src/core/state.js';
+import { createProjectController } from '../src/document/project-controller.js';
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const boundary = main.slice(main.indexOf('function documentEditPending()'), main.indexOf('function setDoc('));
-const fileCommands = main.slice(main.indexOf('function saveProject()'), main.indexOf('function toggleSelectedVisibility()'));
+const fileCommands = main.slice(main.indexOf('async function exportPsdDocument'), main.indexOf('function toggleSelectedVisibility()'));
 const jumpHistory = main.slice(main.indexOf('function jumpToHistory('), main.indexOf('function updateLayerControls('));
 
 test('save and tab switch wait for a pending document edit', () => {
@@ -34,7 +35,19 @@ test('save and tab switch wait for a pending document edit', () => {
     updateAll: () => calls.push('update'),
     requestAnimationFrame: () => {}, els: { viewport: { focus: () => {} } },
   };
-  runInNewContext(`${boundary}\n${fileCommands}\n${jumpHistory}\nglobalThis.commands={saveProject,jumpToHistory};`, context);
+  runInNewContext(`${boundary}\n${fileCommands}\n${jumpHistory}\nglobalThis.commands={jumpToHistory};`, context);
+  const projectController = createProjectController({
+    documentState: {
+      getDocument: () => context.doc,
+      getCurrentSession: () => context.currentSession(),
+      blockPendingDocumentEdit: () => context.blockPendingDocumentEdit(),
+    },
+    io: { downloadText:context.downloadText, safeFilename:context.safeFilename },
+    smartObjects: { saveContent:context.saveSmartObjectContent },
+    recovery: { queueRecovery:context.queueRecovery },
+    ui: { setStatus:context.setStatus },
+  });
+  context.commands.saveProject = projectController.saveProject;
   const tabController = createDocumentSessionController({
     getSessions:()=>context.documentSessions,
     getActiveSessionId:()=>context.activeSessionId,
