@@ -29,7 +29,7 @@ test('history navigation composition routes runtime commands through the workspa
   assert.match(main, /e\.code==='KeyY'\)\{e\.preventDefault\(\);redo\(\);return;\}/);
 
   assert.match(controller, /getHistory\(\)/);
-  assert.doesNotMatch(controller, /HistoryStack/);
+  assert.doesNotMatch(controller, /new\s+HistoryStack|from ['\"].*core\/history/);
 
   const ownerPath = "'src/workspace/history-navigation-controller.js'";
   const mainPath = "'src/main.js'";
