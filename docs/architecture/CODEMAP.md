@@ -295,8 +295,8 @@ It deliberately does **not** implement IndexedDB or project schemas. `src/core/r
 ## Core — `src/core/`
 
 - `state.js` — document/layer/group/smart-object models, sanitization and invariants.
-- `render.js` — Canvas 2D render/composite/export bridge.
-- `pixel-buffer.js` — typed RGB/CMYK 8/16/32-bit model and native destructive/composite primitives.
+- `render.js` — Canvas 2D render/composite/export bridge; RGB v2 high-depth sources preview tile-by-tile with optional OffscreenCanvas staging.
+- `pixel-buffer.js` — typed RGB/CMYK 8/16/32-bit model, native primitives and backward-compatible v1/v2 tiled high-depth source persistence/materialization. See `TILED_RASTER.md`.
 - `pixels.js` — RGBA8 pixel operations and masks.
 - `color-management.js` — ICC parsing/transforms, CMYK preview/edit/proof policies.
 - `color.js` — color helpers.

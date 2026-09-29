@@ -2,7 +2,10 @@ import { isLayerVisible } from './state.js';
 import { hasLayerStyles, renderLayerStyles } from './layer-styles.js';
 import { colorAdjustmentSignature, hasAdvancedColorAdjustments } from './color.js';
 import { applyAdvancedColorAdjustmentsAsync } from './pixel-worker.js';
-import { deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview } from './pixel-buffer.js';
+import {
+  deserializePixelBufferSource, forEachSerializedPixelBufferTile,
+  pixelBufferToToneMappedRgba8Preview, PIXEL_BUFFER_TILED_SOURCE_KIND,
+} from './pixel-buffer.js';
 import { applyAdjustmentPixels, compositeAdjustmentPixels } from './adjustments.js';
 import { applyMaskControlsAlpha } from './pixels.js';
 import { normalizeAffineTransform } from './geometry.js';
@@ -85,38 +88,50 @@ function trimHighDepthRasterCache() {
   }
 }
 
+function createHighDepthPreviewCanvas(width, height) {
+  if (typeof OffscreenCanvas === 'function') {
+    try { return new OffscreenCanvas(width, height); } catch {}
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  return canvas;
+}
+
 async function makeHighDepthRasterSource(layer) {
   const metadata = layer?.highDepthSource;
   if (!metadata || layer?.type !== 'raster' || metadata.model !== 'rgb') return null;
   const preview = layer.highDepthPreview || {};
   const toneMap = ['auto','clip','aces'].includes(preview.toneMap) ? preview.toneMap : 'auto';
   const displayExposure = Math.max(-6, Math.min(6, Number(preview.displayExposure) || 0));
-  const signature = `${metadata.bitsPerChannel}|${metadata.colorSpace || ''}|${colorAdjustmentSignature(layer.filters || {})}|${toneMap}|${displayExposure.toFixed(3)}|tone-v2`;
-  const sourceToken = metadata.dataUrl || '';
+  const signature = `${metadata.kind || ''}|${metadata.bitsPerChannel}|${metadata.colorSpace || ''}|${colorAdjustmentSignature(layer.filters || {})}|${toneMap}|${displayExposure.toFixed(3)}|tone-v3`;
+  const sourceToken = metadata.kind === PIXEL_BUFFER_TILED_SOURCE_KIND ? metadata.tiles : (metadata.dataUrl || '');
   const cached = highDepthRasterCache.get(layer.id);
   if (cached && cached.sourceToken === sourceToken && cached.signature === signature) {
-    highDepthRasterCache.delete(layer.id);
-    highDepthRasterCache.set(layer.id, cached);
-    return cached.canvas;
+    highDepthRasterCache.delete(layer.id); highDepthRasterCache.set(layer.id, cached); return cached.canvas;
   }
   try {
+    if (metadata.kind === PIXEL_BUFFER_TILED_SOURCE_KIND) {
+      const canvas=createHighDepthPreviewCanvas(metadata.width,metadata.height);
+      const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
+      if(!ctx)throw new Error('Tiled high-depth preview: 2D context unavailable');
+      forEachSerializedPixelBufferTile(metadata,({x,y,buffer})=>{
+        const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap, displayExposure });
+        const image=ctx.createImageData(buffer.width,buffer.height); image.data.set(rgba); ctx.putImageData(image,x,y);
+      });
+      highDepthRasterCache.delete(layer.id); highDepthRasterCache.set(layer.id,{sourceToken,signature,buffer:null,canvas});
+      trimHighDepthRasterCache(); return canvas;
+    }
     const buffer = cached && cached.sourceToken === sourceToken && cached.buffer
       ? cached.buffer
       : deserializePixelBufferSource(metadata);
     const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap, displayExposure });
-    const canvas = document.createElement('canvas');
-    canvas.width = buffer.width; canvas.height = buffer.height;
-    const ctx = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
-    const image = ctx.createImageData(buffer.width, buffer.height);
-    image.data.set(rgba);
-    ctx.putImageData(image, 0, 0);
-    highDepthRasterCache.delete(layer.id);
-    highDepthRasterCache.set(layer.id, { sourceToken, signature, buffer, canvas });
-    trimHighDepthRasterCache();
-    return canvas;
+    const canvas=createHighDepthPreviewCanvas(buffer.width,buffer.height),ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
+    if(!ctx)throw new Error('High-depth preview: 2D context unavailable');
+    const image=ctx.createImageData(buffer.width,buffer.height); image.data.set(rgba); ctx.putImageData(image,0,0);
+    highDepthRasterCache.delete(layer.id); highDepthRasterCache.set(layer.id,{sourceToken,signature,buffer,canvas});
+    trimHighDepthRasterCache(); return canvas;
   } catch (error) {
-    console.warn('High-depth raster preview failed; falling back to RGBA8 layer preview', error);
-    return null;
+    console.warn('High-depth raster preview failed; falling back to RGBA8 layer preview', error); return null;
   }
 }
 

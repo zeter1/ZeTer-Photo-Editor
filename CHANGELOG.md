@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-29 — Tiled high-depth raster source foundation
+
+- Memory architecture: добавлен backward-compatible `zpe-pixel-buffer-source-v2` — strict row-major tiled container для native RGB/CMYK 8/16/32-bit samples; adaptive PSD/PSB import переводит sources от 8 MiB на 256×256 tiles, сохраняя существующий 48 MiB precision budget.
+- Render path: RGB v2 preview декодирует и tone-map-ит по одному tile без второго full high-depth plane; staging использует `OffscreenCanvas`, когда он доступен, с Canvas fallback.
+- Compatibility/safety: legacy v1 читается без миграции; mutable contiguous consumers материализуют v2 через прежний API. Sanitizer fail-closed проверяет grid order/geometry/byte budgets и ограничивает tile count.
+- Tests/docs: regressions фиксируют RGB16/CMYK Float32 exact round-trip, edge tiles, adaptive policy, visitor semantics и malformed-grid rejection; docs честно фиксируют оставшиеся non-tiled boundaries.
+
+
 ### 2026-09-29 — Native high-depth Select & Mask output
 
 - Precision: explicit `Новый растровый слой + маска` no longer downgrades or refuses native PixelBuffer sources; RGB/CMYK 16-bit and Float32 edge-color cleanup now runs directly on native color samples while source alpha remains exact.
