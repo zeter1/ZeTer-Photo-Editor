@@ -121,7 +121,9 @@ async function makeHighDepthRasterSource(layer) {
       highDepthRasterCache.delete(layer.id); highDepthRasterCache.set(layer.id,{sourceToken,signature,buffer:null,canvas});
       trimHighDepthRasterCache(); return canvas;
     }
-    const buffer=cached&&cached.sourceToken===sourceToken&&cached.buffer?cached.buffer:deserializePixelBufferSource(metadata);
+    const buffer = cached && cached.sourceToken === sourceToken && cached.buffer
+      ? cached.buffer
+      : deserializePixelBufferSource(metadata);
     const rgba = pixelBufferToToneMappedRgba8Preview(buffer, layer.filters || {}, { toneMap, displayExposure });
     const canvas=createHighDepthPreviewCanvas(buffer.width,buffer.height),ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
     if(!ctx)throw new Error('High-depth preview: 2D context unavailable');
