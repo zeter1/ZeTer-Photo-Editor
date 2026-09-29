@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### 2026-09-29 — Tile-local high-depth raster mutations
+
+- Precision/memory: `zpe-pixel-buffer-source-v2` получил bounded tile mutation visitor — Line и selection clear меняют native RGB/CMYK 16/32-bit samples по одному tile, не материализуя полный high-depth plane; untouched tile payloads сохраняются byte-for-byte.
+- Alpha/safety: clear может повысить RGB→RGBA / CMYK→CMYKA по tile с предварительной проверкой document byte budget; invalid grid/visitor result fail-closed до publication.
+- Transactions: current-layer и merged visible-layer clear сохраняют exact-owner/all-or-nothing guards; high-depth no-op больше не проваливается в Canvas8 и не теряет precision.
+- Compatibility: общий high-depth fallback reserialize теперь adaptive v1/v2, поэтому крупный source после поддержанной contiguous операции сохраняет tiled persistence.
+- Tests/docs: regressions покрывают selective tile rewrite, alpha promotion, command routing и merged no-op; `TILED_RASTER.md` фиксирует оставшиеся boundaries.
+
+
 ### 2026-09-29 — Tiled high-depth raster source foundation
 
 - Memory architecture: добавлен backward-compatible `zpe-pixel-buffer-source-v2` — strict row-major tiled container для native RGB/CMYK 8/16/32-bit samples; adaptive PSD/PSB import переводит sources от 8 MiB на 256×256 tiles, сохраняя существующий 48 MiB precision budget.
