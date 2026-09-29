@@ -171,7 +171,7 @@ test('main binds Adjustment controls to originating owner plus stable ID and con
   assert.doesNotMatch(main, /function updateAdjustmentCurveChannel\(/);
   assert.doesNotMatch(main, /function parseCurvePointsInput\(/);
   const start = main.indexOf('function bindAdjustmentControls(root,owner,layerId)');
-  const end = main.indexOf('async function exportPsdDocument', start);
+  const end = main.indexOf('function toggleSelectedVisibility', start);
   assert.ok(start >= 0 && end > start);
   assert.doesNotMatch(main.slice(start, end), /markDirty\(true\)/);
 });
