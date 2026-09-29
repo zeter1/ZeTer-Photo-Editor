@@ -237,6 +237,41 @@ export function refineMaskAlpha(alpha, width, height, {
 }
 
 
+
+export function applyMaskControlsAlpha(alpha, width, height, {
+  invert = false,
+  density = 1,
+  feather = 0,
+} = {}) {
+  if (!(alpha instanceof Uint8Array || alpha instanceof Uint8ClampedArray)) {
+    throw new TypeError('Ожидалась 8-bit маска слоя');
+  }
+  const w = Math.max(0, Math.trunc(width));
+  const h = Math.max(0, Math.trunc(height));
+  const count = w * h;
+  if (!w || !h || alpha.length < count) return new Uint8ClampedArray();
+
+  let output = new Uint8ClampedArray(alpha.slice(0, count));
+  const featherRadius = clamp(Number(feather) || 0, 0, 250);
+  if (featherRadius > 0) {
+    const radius = Math.max(1, Math.round(featherRadius / 2));
+    output = maskBoxBlur(output, w, h, radius);
+    output = maskBoxBlur(output, w, h, radius);
+  }
+
+  if (invert) {
+    for (let index = 0; index < count; index += 1) output[index] = 255 - output[index];
+  }
+
+  const amount = clamp(Number(density ?? 1), 0, 1);
+  if (amount < 1) {
+    for (let index = 0; index < count; index += 1) {
+      output[index] = clamp(Math.round(255 - (255 - output[index]) * amount), 0, 255);
+    }
+  }
+  return output;
+}
+
 export function composeMaskPreviewRgba(sourceRgba, maskAlpha, width, height, {
   mode = 'mask',
   overlay = [255, 72, 72],

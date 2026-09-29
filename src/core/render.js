@@ -4,6 +4,7 @@ import { colorAdjustmentSignature, hasAdvancedColorAdjustments } from './color.j
 import { applyAdvancedColorAdjustmentsAsync } from './pixel-worker.js';
 import { deserializePixelBufferSource, pixelBufferToToneMappedRgba8Preview } from './pixel-buffer.js';
 import { applyAdjustmentPixels, compositeAdjustmentPixels } from './adjustments.js';
+import { applyMaskControlsAlpha } from './pixels.js';
 
 const imageCache = new Map();
 const IMAGE_CACHE_LIMIT = 24;
@@ -311,6 +312,57 @@ export async function getImage(dataUrl) {
   return promise;
 }
 
+async function layerMaskCoverageCanvas(mask, width, height) {
+  if (!mask || mask.enabled === false) return null;
+  const w = Math.max(1, Math.ceil(width || 1));
+  const h = Math.max(1, Math.ceil(height || 1));
+  const coverage = document.createElement('canvas');
+  coverage.width = w;
+  coverage.height = h;
+  const coverageCtx = coverage.getContext('2d', { alpha:true, willReadFrequently:true });
+  let hasBitmap = false;
+  if (mask.dataUrl) {
+    const image = await getImage(mask.dataUrl);
+    if (!image) return null;
+    coverageCtx.drawImage(image, 0, 0, w, h);
+    hasBitmap = true;
+  } else {
+    coverageCtx.fillStyle = '#fff';
+    coverageCtx.fillRect(0, 0, w, h);
+  }
+  const pixels = coverageCtx.getImageData(0, 0, w, h);
+  const alpha = new Uint8ClampedArray(w * h);
+  for (let index = 0; index < alpha.length; index += 1) alpha[index] = pixels.data[index * 4 + 3];
+  const controlled = applyMaskControlsAlpha(alpha, w, h, {
+    invert:Boolean(mask.invert),
+    density:mask.density ?? 1,
+    feather:hasBitmap ? mask.feather : 0,
+  });
+  for (let index = 0; index < controlled.length; index += 1) {
+    const offset = index * 4;
+    pixels.data[offset] = 255;
+    pixels.data[offset + 1] = 255;
+    pixels.data[offset + 2] = 255;
+    pixels.data[offset + 3] = controlled[index];
+  }
+  coverageCtx.putImageData(pixels, 0, 0);
+  return coverage;
+}
+
+async function applyLayerMaskToContext(ctx, mask, width, height) {
+  if (!mask || mask.enabled === false) return false;
+  if (!mask.dataUrl && !mask.invert) return false;
+  const coverage = await layerMaskCoverageCanvas(mask, width, height);
+  if (!coverage) return false;
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.globalAlpha = 1;
+  ctx.filter = 'none';
+  ctx.drawImage(coverage, 0, 0, width, height);
+  ctx.restore();
+  return true;
+}
+
 async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } = {}) {
   const width = Math.max(1, canvas.width || 1);
   const height = Math.max(1, canvas.height || 1);
@@ -338,17 +390,7 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
       console.warn('Adjustment layer could not process composite pixels', error);
     }
   }
-  if (layer.mask?.enabled && layer.mask.dataUrl) {
-    const mask = await getImage(layer.mask.dataUrl);
-    if (mask) {
-      sourceCtx.save();
-      sourceCtx.globalCompositeOperation = 'destination-in';
-      sourceCtx.globalAlpha = 1;
-      sourceCtx.filter = 'none';
-      sourceCtx.drawImage(mask, 0, 0, width, height);
-      sourceCtx.restore();
-    }
-  }
+  await applyLayerMaskToContext(sourceCtx, layer.mask, width, height);
   if(layer.vectorMask?.enabled!==false&&layer.vectorMask?.subpaths?.length){
     const vectorMask=renderVectorMaskBitmap(layer.vectorMask,width,height);
     sourceCtx.save();
@@ -622,7 +664,7 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
       ctx.drawImage(styled.canvas,styled.x,styled.y,styled.width,styled.height);
       return;
     }
-    const hasRasterMask=Boolean(layer.mask?.enabled && layer.mask.dataUrl);
+    const hasRasterMask=Boolean(layer.mask && layer.mask.enabled !== false && (layer.mask.dataUrl || layer.mask.invert));
     const hasVectorMask=Boolean(layer.vectorMask?.enabled !== false && layer.vectorMask?.subpaths?.length);
     if (hasRasterMask || hasVectorMask) {
       const masked = document.createElement('canvas');
@@ -645,13 +687,7 @@ export async function renderLayer(ctx, layer, { rasterOverride = null } = {}) {
         rotation: 0,
       };
       await renderLayer(maskedCtx, plain, { rasterOverride });
-      if(hasRasterMask){
-        const mask = await getImage(layer.mask.dataUrl);
-        if(mask){
-          maskedCtx.save();maskedCtx.globalCompositeOperation='destination-in';maskedCtx.globalAlpha=1;maskedCtx.filter='none';
-          maskedCtx.drawImage(mask,0,0,masked.width,masked.height);maskedCtx.restore();
-        }
-      }
+      if(hasRasterMask) await applyLayerMaskToContext(maskedCtx, layer.mask, masked.width, masked.height);
       if(hasVectorMask){
         const vectorMask=renderVectorMaskBitmap(layer.vectorMask,masked.width,masked.height);
         maskedCtx.save();maskedCtx.globalCompositeOperation='destination-in';maskedCtx.globalAlpha=1;maskedCtx.filter='none';

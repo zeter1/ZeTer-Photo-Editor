@@ -141,7 +141,9 @@ test('Select & Mask Stage 9b keeps non-destructive preview lifecycle in the cano
   assert.match(maskController,/modal\.previewCleanup = \(\) =>/);
   assert.match(maskController,/requestFrame\(renderPreview\)/);
   assert.match(maskController,/документ изменится только после применения/i);
-  assert.match(maskController,/const replacing = Boolean\(layer\.mask\)/);
+  assert.match(maskController,/const existingMask = layer\.mask/);
+  assert.match(maskController,/const replacing = Boolean\(existingMask\)/);
+  assert.match(maskController,/expectedMask:existingMask/);
   assert.match(styles,/\.selection-refine-preview/);
   assert.match(styles,/\.selection-refine-modal/);
 });
