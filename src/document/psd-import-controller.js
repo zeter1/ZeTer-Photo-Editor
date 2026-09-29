@@ -6,7 +6,7 @@ import {
 } from '../core/state.js';
 import { sanitizeAdjustmentModel } from '../core/adjustments.js';
 import {
-  pixelBufferToRgba8Preview, serializePixelBufferSource,
+  pixelBufferToRgba8Preview, serializePixelBufferSourceAdaptive,
   MAX_PIXEL_BUFFER_SOURCE_BYTES,
 } from '../core/pixel-buffer.js';
 import {
@@ -35,7 +35,7 @@ export function createPsdImportController({
     if(runtime.blockPendingDocumentEdit())return;
     if(!runtime.canReplaceDocument())return;
     if(Number(file?.size)>512*1024*1024){
-      const message='PSD/PSB больше 512 МБ пока не импортируется: используйте уменьшенную копию или дождитесь tiled pipeline';
+      const message='PSD/PSB больше 512 МБ пока не импортируется: tiled high-depth source уже снижает retained preview memory, но текущий PSD/PSB decoder всё ещё materializes bounded channel planes';
       ui.toast(message,'error');ui.setStatus(message);return;
     }
     const targetDocument=runtime.getDocument();
@@ -154,7 +154,7 @@ export function createPsdImportController({
           const rawBytes=sourceLayer.pixelBuffer.data?.byteLength||0;
           const remaining=Math.max(0,MAX_PIXEL_BUFFER_SOURCE_BYTES-highDepthBytesUsed);
           if(rawBytes>0&&rawBytes<=remaining){
-            highDepthSource=serializePixelBufferSource(sourceLayer.pixelBuffer,{maxBytes:remaining});
+            highDepthSource=serializePixelBufferSourceAdaptive(sourceLayer.pixelBuffer,{maxBytes:remaining});
             highDepthBytesUsed+=highDepthSource.rawBytes;
           }else{
             warnings.push(`Слой «${sourceLayer.name}»: high-depth source ${Math.ceil(rawBytes/1024/1024)} МБ не помещается в bounded .zpe budget ${Math.round(MAX_PIXEL_BUFFER_SOURCE_BYTES/1024/1024)} МБ; сохранён только 8-bit preview`);
@@ -250,7 +250,7 @@ export function createPsdImportController({
           const rawBytes=parsed.compositePixelBuffer.data?.byteLength||0;
           const remaining=Math.max(0,MAX_PIXEL_BUFFER_SOURCE_BYTES-highDepthBytesUsed);
           if(rawBytes>0&&rawBytes<=remaining){
-            highDepthSource=serializePixelBufferSource(parsed.compositePixelBuffer,{maxBytes:remaining});
+            highDepthSource=serializePixelBufferSourceAdaptive(parsed.compositePixelBuffer,{maxBytes:remaining});
             highDepthBytesUsed+=highDepthSource.rawBytes;
           }else{
             warnings.push(`PSD/PSB composite: high-depth source ${Math.ceil(rawBytes/1024/1024)} МБ не помещается в bounded .zpe precision budget; сохранён только 8-bit preview`);

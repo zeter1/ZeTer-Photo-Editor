@@ -6,6 +6,11 @@ export const PIXEL_MODELS = Object.freeze(['rgb','cmyk']);
 export const PIXEL_DEPTHS = Object.freeze([8,16,32]);
 export const PIXEL_BUFFER_SOURCE_KIND = 'zpe-pixel-buffer-source-v1';
 export const PIXEL_BUFFER_SOURCE_MIME = 'application/x-zeter-pixel-buffer';
+export const PIXEL_BUFFER_TILED_SOURCE_KIND = 'zpe-pixel-buffer-source-v2';
+export const PIXEL_BUFFER_TILE_MIME = 'application/x-zeter-pixel-buffer-tile';
+export const PIXEL_BUFFER_TILE_SIZE = 256;
+export const PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES = 8 * 1024 * 1024;
+export const MAX_PIXEL_BUFFER_SOURCE_TILES = 8192;
 export const MAX_PIXEL_BUFFER_SOURCE_BYTES = 48 * 1024 * 1024;
 export const MAX_PIXEL_BUFFER_SOURCE_DATA_URL = 4 * Math.ceil(MAX_PIXEL_BUFFER_SOURCE_BYTES / 3) + 128;
 
@@ -1263,54 +1268,169 @@ function expectedSourceBytes({ width, height, channels, bitsPerChannel }) {
   return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : 0;
 }
 
+function sourceMetadata(buffer) {
+  return {
+    width: buffer.width, height: buffer.height, model: buffer.model, channels: buffer.channels,
+    bitsPerChannel: buffer.bitsPerChannel, sampleType: buffer.sampleType,
+    colorSpace: String(buffer.colorSpace || '').slice(0, 120), alphaMode: buffer.alphaMode,
+    profileName: String(buffer.profileName || '').slice(0, 240), byteOrder: 'little-endian',
+  };
+}
+
+function canonicalTileBytes(buffer, x, y, width, height) {
+  const sampleBytes = sourceSampleBytes(buffer.bitsPerChannel);
+  const bytes = new Uint8Array(width * height * buffer.channels * sampleBytes);
+  if (buffer.bitsPerChannel === 8) {
+    let target = 0;
+    for (let row = 0; row < height; row += 1) {
+      const source = ((y + row) * buffer.width + x) * buffer.channels;
+      const length = width * buffer.channels;
+      bytes.set(buffer.data.subarray(source, source + length), target);
+      target += length;
+    }
+    return bytes;
+  }
+  const view = new DataView(bytes.buffer);
+  let targetSample = 0;
+  for (let row = 0; row < height; row += 1) {
+    const source = ((y + row) * buffer.width + x) * buffer.channels;
+    const length = width * buffer.channels;
+    for (let offset = 0; offset < length; offset += 1) {
+      if (buffer.bitsPerChannel === 16) view.setUint16(targetSample * 2, buffer.data[source + offset], true);
+      else view.setFloat32(targetSample * 4, buffer.data[source + offset], true);
+      targetSample += 1;
+    }
+  }
+  return bytes;
+}
+
+function decodeCanonicalSamples(bytes, bitsPerChannel, samples) {
+  if (bitsPerChannel === 8) return new Uint8ClampedArray(bytes);
+  const data = bitsPerChannel === 16 ? new Uint16Array(samples) : new Float32Array(samples);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let index = 0; index < samples; index += 1) {
+    data[index] = bitsPerChannel === 16 ? view.getUint16(index * 2, true) : view.getFloat32(index * 4, true);
+  }
+  return data;
+}
+
+function sanitizeSourceHeader(source, maxBytes) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  const width=Math.trunc(Number(source.width)), height=Math.trunc(Number(source.height));
+  const model=String(source.model||'').toLowerCase(), channels=Math.trunc(Number(source.channels));
+  const bitsPerChannel=Math.trunc(Number(source.bitsPerChannel));
+  if(width<1||height<1||!PIXEL_MODELS.includes(model)||!PIXEL_DEPTHS.includes(bitsPerChannel))return null;
+  const range=channelRange(model); if(channels<range.min||channels>range.max)return null;
+  const expected=expectedSourceBytes({width,height,channels,bitsPerChannel});
+  const limit=Math.max(1,Math.trunc(Number(maxBytes)||0));
+  if(!expected||expected>limit||Number(source.rawBytes)!==expected)return null;
+  const hasAlpha=channels===range.max;
+  return {width,height,model,channels,bitsPerChannel,sampleType:bitsPerChannel===32?'float':'uint',
+    colorSpace:String(source.colorSpace||'').slice(0,120),alphaMode:hasAlpha?'straight':'none',
+    profileName:String(source.profileName||'').slice(0,240),byteOrder:'little-endian',rawBytes:expected};
+}
+
 export function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const bytes = pixelBufferCanonicalBytes(buffer);
   const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
-  if (bytes.byteLength > limit) throw new RangeError(`PixelBuffer source ${bytes.byteLength} байт превышает лимит ${limit} байт`);
-  return {
-    kind: PIXEL_BUFFER_SOURCE_KIND, width: buffer.width, height: buffer.height, model: buffer.model, channels: buffer.channels,
-    bitsPerChannel: buffer.bitsPerChannel, sampleType: buffer.sampleType, colorSpace: String(buffer.colorSpace || '').slice(0,120),
-    alphaMode: buffer.alphaMode, profileName: String(buffer.profileName || '').slice(0,240), byteOrder: 'little-endian',
-    rawBytes: bytes.byteLength, dataUrl: bytesToDataUrl(bytes, PIXEL_BUFFER_SOURCE_MIME),
-  };
+  if (bytes.byteLength > limit) throw new RangeError('PixelBuffer source ' + bytes.byteLength + ' байт превышает лимит ' + limit + ' байт');
+  return {kind:PIXEL_BUFFER_SOURCE_KIND,...sourceMetadata(buffer),rawBytes:bytes.byteLength,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_SOURCE_MIME)};
+}
+
+export function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE } = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  const rawBytes=expectedSourceBytes(buffer), limit=Math.max(1,Math.trunc(Number(maxBytes)||0));
+  if(!rawBytes||rawBytes>limit)throw new RangeError('PixelBuffer source '+rawBytes+' байт превышает лимит '+limit+' байт');
+  const size=Math.max(1,Math.min(2048,Math.trunc(Number(tileSize)||PIXEL_BUFFER_TILE_SIZE)));
+  const columns=Math.ceil(buffer.width/size),rows=Math.ceil(buffer.height/size),count=columns*rows;
+  if(!Number.isSafeInteger(count)||count<1||count>MAX_PIXEL_BUFFER_SOURCE_TILES)throw new RangeError('Tiled PixelBuffer требует '+count+' tiles; лимит '+MAX_PIXEL_BUFFER_SOURCE_TILES);
+  const tiles=[]; let total=0;
+  for(let row=0;row<rows;row+=1){
+    const y=row*size,height=Math.min(size,buffer.height-y);
+    for(let column=0;column<columns;column+=1){
+      const x=column*size,width=Math.min(size,buffer.width-x),bytes=canonicalTileBytes(buffer,x,y,width,height);
+      total+=bytes.byteLength;
+      tiles.push({x,y,width,height,rawBytes:bytes.byteLength,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_TILE_MIME)});
+    }
+  }
+  if(total!==rawBytes)throw new RangeError('Tiled PixelBuffer source имеет несогласованный byte budget');
+  return {kind:PIXEL_BUFFER_TILED_SOURCE_KIND,...sourceMetadata(buffer),tileSize:size,rawBytes,tiles};
+}
+
+export function serializePixelBufferSourceAdaptive(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, tiledThresholdBytes = PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES } = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  const threshold=Math.max(1,Math.trunc(Number(tiledThresholdBytes)||PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES));
+  return buffer.data.byteLength>=threshold?serializeTiledPixelBufferSource(buffer,{maxBytes,tileSize}):serializePixelBufferSource(buffer,{maxBytes});
 }
 
 export function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
-  if (!source || typeof source !== 'object' || Array.isArray(source) || source.kind !== PIXEL_BUFFER_SOURCE_KIND) return null;
-  const width=Math.trunc(Number(source.width)), height=Math.trunc(Number(source.height)), model=String(source.model||'').toLowerCase();
-  const channels=Math.trunc(Number(source.channels)), bitsPerChannel=Math.trunc(Number(source.bitsPerChannel));
-  if (width<1 || height<1 || !PIXEL_MODELS.includes(model) || !PIXEL_DEPTHS.includes(bitsPerChannel)) return null;
-  const range=channelRange(model); if(channels<range.min || channels>range.max) return null;
-  const expected=expectedSourceBytes({width,height,channels,bitsPerChannel});
-  const limit=Math.max(1,Math.trunc(Number(maxBytes)||0));
-  if(!expected || expected>limit || Number(source.rawBytes)!==expected) return null;
-  const dataUrl=typeof source.dataUrl==='string'?source.dataUrl:'';
-  if(dataUrl.length>MAX_PIXEL_BUFFER_SOURCE_DATA_URL) return null;
-  const prefix=`data:${PIXEL_BUFFER_SOURCE_MIME};base64,`;
-  if(!dataUrl.startsWith(prefix)) return null;
-  const base64=dataUrl.slice(prefix.length);
-  if(!/^[a-z\d+/=]+$/i.test(base64) || base64.length!==4*Math.ceil(expected/3)) return null;
-  const hasAlpha=channels===range.max;
-  return {kind:PIXEL_BUFFER_SOURCE_KIND,width,height,model,channels,bitsPerChannel,sampleType:bitsPerChannel===32?'float':'uint',
-    colorSpace:String(source.colorSpace||'').slice(0,120),alphaMode:hasAlpha?'straight':'none',profileName:String(source.profileName||'').slice(0,240),
-    byteOrder:'little-endian',rawBytes:expected,dataUrl};
+  const safe=sanitizeSourceHeader(source,maxBytes); if(!safe)return null;
+  if(source.kind===PIXEL_BUFFER_SOURCE_KIND){
+    const dataUrl=typeof source.dataUrl==='string'?source.dataUrl:'';
+    if(dataUrl.length>MAX_PIXEL_BUFFER_SOURCE_DATA_URL)return null;
+    const prefix='data:'+PIXEL_BUFFER_SOURCE_MIME+';base64,'; if(!dataUrl.startsWith(prefix))return null;
+    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(safe.rawBytes/3))return null;
+    return {kind:PIXEL_BUFFER_SOURCE_KIND,...safe,dataUrl};
+  }
+  if(source.kind!==PIXEL_BUFFER_TILED_SOURCE_KIND)return null;
+  const tileSize=Math.trunc(Number(source.tileSize)); if(tileSize<1||tileSize>2048||!Array.isArray(source.tiles))return null;
+  const columns=Math.ceil(safe.width/tileSize),rows=Math.ceil(safe.height/tileSize),count=columns*rows;
+  if(!Number.isSafeInteger(count)||count<1||count>MAX_PIXEL_BUFFER_SOURCE_TILES||source.tiles.length!==count)return null;
+  const prefix='data:'+PIXEL_BUFFER_TILE_MIME+';base64,',tiles=[]; let total=0;
+  for(let index=0;index<count;index+=1){
+    const tile=source.tiles[index]; if(!tile||typeof tile!=='object'||Array.isArray(tile))return null;
+    const column=index%columns,row=Math.floor(index/columns),x=column*tileSize,y=row*tileSize;
+    const width=Math.min(tileSize,safe.width-x),height=Math.min(tileSize,safe.height-y);
+    const rawBytes=expectedSourceBytes({width,height,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel});
+    if(Number(tile.x)!==x||Number(tile.y)!==y||Number(tile.width)!==width||Number(tile.height)!==height||Number(tile.rawBytes)!==rawBytes)return null;
+    const dataUrl=typeof tile.dataUrl==='string'?tile.dataUrl:''; if(!dataUrl.startsWith(prefix))return null;
+    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(rawBytes/3))return null;
+    total+=rawBytes; tiles.push({x,y,width,height,rawBytes,dataUrl});
+  }
+  if(total!==safe.rawBytes)return null;
+  return {kind:PIXEL_BUFFER_TILED_SOURCE_KIND,...safe,tileSize,tiles};
 }
 
-export function deserializePixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
-  const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes});
-  if(!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
-  const bytes=dataUrlToBytes(safe.dataUrl,{maxBytes:safe.rawBytes});
-  if(bytes.byteLength!==safe.rawBytes) throw new RangeError('Serialized PixelBuffer source имеет неверный размер');
-  const samples=safe.width*safe.height*safe.channels;
-  let data;
-  if(safe.bitsPerChannel===8){ data=new Uint8ClampedArray(bytes); }
-  else if(safe.bitsPerChannel===16){
-    data=new Uint16Array(samples); const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
-    for(let index=0;index<samples;index+=1)data[index]=view.getUint16(index*2,true);
-  } else {
-    data=new Float32Array(samples); const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
-    for(let index=0;index<samples;index+=1)data[index]=view.getFloat32(index*4,true);
+function decodeSerializedTile(safe,tile){
+  const bytes=dataUrlToBytes(tile.dataUrl,{maxBytes:tile.rawBytes});
+  if(bytes.byteLength!==tile.rawBytes)throw new RangeError('Serialized PixelBuffer tile имеет неверный размер');
+  const samples=tile.width*tile.height*safe.channels;
+  return createPixelBuffer({width:tile.width,height:tile.height,model:safe.model,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel,
+    colorSpace:safe.colorSpace,alphaMode:safe.alphaMode,profileName:safe.profileName,data:decodeCanonicalSamples(bytes,safe.bitsPerChannel,samples)});
+}
+
+export function forEachSerializedPixelBufferTile(source,visitor,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
+  if(typeof visitor!=='function')throw new TypeError('Tiled PixelBuffer visitor должен быть функцией');
+  const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
+  if(safe.kind===PIXEL_BUFFER_SOURCE_KIND){
+    const buffer=deserializePixelBufferSource(safe,{maxBytes});
+    visitor({index:0,count:1,x:0,y:0,width:safe.width,height:safe.height,buffer}); return 1;
+  }
+  const count=safe.tiles.length;
+  for(let index=0;index<count;index+=1){
+    const tile=safe.tiles[index];
+    visitor({index,count,x:tile.x,y:tile.y,width:tile.width,height:tile.height,buffer:decodeSerializedTile(safe,tile)});
+  }
+  return count;
+}
+
+export function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
+  const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
+  if(safe.kind===PIXEL_BUFFER_SOURCE_KIND){
+    const bytes=dataUrlToBytes(safe.dataUrl,{maxBytes:safe.rawBytes});
+    if(bytes.byteLength!==safe.rawBytes)throw new RangeError('Serialized PixelBuffer source имеет неверный размер');
+    const samples=safe.width*safe.height*safe.channels;
+    return createPixelBuffer({width:safe.width,height:safe.height,model:safe.model,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel,
+      colorSpace:safe.colorSpace,alphaMode:safe.alphaMode,profileName:safe.profileName,data:decodeCanonicalSamples(bytes,safe.bitsPerChannel,samples)});
+  }
+  const Expected=expectedArrayConstructor(safe.bitsPerChannel),data=new Expected(safe.width*safe.height*safe.channels);
+  for(const tile of safe.tiles){
+    const decoded=decodeSerializedTile(safe,tile);
+    for(let row=0;row<tile.height;row+=1){
+      const sourceOffset=row*tile.width*safe.channels,targetOffset=((tile.y+row)*safe.width+tile.x)*safe.channels;
+      data.set(decoded.data.subarray(sourceOffset,sourceOffset+tile.width*safe.channels),targetOffset);
+    }
   }
   return createPixelBuffer({width:safe.width,height:safe.height,model:safe.model,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel,
     colorSpace:safe.colorSpace,alphaMode:safe.alphaMode,profileName:safe.profileName,data});

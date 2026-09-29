@@ -48,6 +48,9 @@ test('Stage 12b keeps HDR exposure and gamma in the high-depth stage before tone
 
 test('renderer prefers the high-depth source, caches decoded typed data and skips the old 8-bit advanced pass',()=>{
   assert.match(render,/async function makeHighDepthRasterSource\(layer\)/);
+  assert.match(render,/PIXEL_BUFFER_TILED_SOURCE_KIND/);
+  assert.match(render,/forEachSerializedPixelBufferTile\(metadata/);
+  assert.match(render,/new OffscreenCanvas\(width, height\)/);
   assert.match(render,/deserializePixelBufferSource\(metadata\)/);
   assert.match(render,/pixelBufferToToneMappedRgba8Preview\(buffer, layer\.filters \|\| \{\}, \{ toneMap, displayExposure \}\)/);
   assert.match(render,/HIGH_DEPTH_RASTER_CACHE_LIMIT = 2/);
