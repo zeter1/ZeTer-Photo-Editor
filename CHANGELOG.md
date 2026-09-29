@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-09-29 — Texture-aware Content-Aware Fill
+
+- Quality: Content-Aware Fill now refines smaller completed holes with deterministic PatchMatch-style neighbour propagation and bounded pseudo-random donor search, so repeated textures can be reconstructed from real source samples instead of ending at a boundary-weighted blur.
+- Precision: the same refinement works directly on typed RGB/CMYK 8/16/32-bit samples; candidate donor centers and source-patch samples must stay outside the frozen original selection, and the winning donor copies the full native sample including alpha.
+- Safety/performance: the existing 8 MP layer and 2 MP fill gates remain; PatchMatch refinement is capped at 250k selected pixels and larger fills deliberately keep the deterministic boundary-synthesis fallback.
+- Tests/docs: regressions cover deterministic stripe-texture recovery and the explicit fallback path; a dedicated architecture contract documents ownership, precision, budgets and the fact that this is a bounded PatchMatch-style implementation rather than Adobe's proprietary or ML fill.
+
+
 ### 2026-09-29 — Independent raster mask link/unlink transforms
 
 - Masks: raster masks now persist an explicit linked/unlinked relationship plus a compact relative affine transform; Layer and context menus can toggle linkage without rewriting mask pixels.
