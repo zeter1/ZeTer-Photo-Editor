@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { createDocumentSessionController } from '../src/workspace/session-controller.js';
+import { createHistoryNavigationController } from '../src/workspace/history-navigation-controller.js';
 import { createRasterCommandController } from '../src/painting/command-controller.js';
 import { createLayerGroupCommandController } from '../src/layers/command-controller.js';
 import { createDocument, createRasterLayer, addLayer } from '../src/core/state.js';
@@ -11,7 +12,6 @@ import { createDocumentExportController } from '../src/document/export-controlle
 
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const boundary = main.slice(main.indexOf('function documentEditPending()'), main.indexOf('function setDoc('));
-const jumpHistory = main.slice(main.indexOf('function jumpToHistory('), main.indexOf('function updateLayerControls('));
 
 test('save and tab switch wait for a pending document edit', () => {
   const calls = [];
@@ -35,7 +35,7 @@ test('save and tab switch wait for a pending document edit', () => {
     updateAll: () => calls.push('update'),
     requestAnimationFrame: () => {}, els: { viewport: { focus: () => {} } },
   };
-  runInNewContext(`${boundary}\n${jumpHistory}\nglobalThis.commands={jumpToHistory};`, context);
+  runInNewContext(`${boundary}\nglobalThis.commands={};`, context);
   const projectController = createProjectController({
     documentState: {
       getDocument: () => context.doc,
@@ -59,6 +59,29 @@ test('save and tab switch wait for a pending document edit', () => {
     updateAll:()=>context.updateAll(),
   });
   context.commands.activateDocumentTab=id=>tabController.activateDocumentTab(id);
+  const historyNavigationController = createHistoryNavigationController({
+    state: {
+      getHistory: () => context.history,
+      setDocument: value => { context.doc = value; },
+    },
+    guard: {
+      blockPendingDocumentEdit: () => context.blockPendingDocumentEdit(),
+    },
+    restore: {
+      restoreDocument: snapshot => JSON.parse(snapshot),
+    },
+    transient: {
+      clearSelection: () => {},
+      clearRasterEdit: () => {},
+      resetCrop: () => {},
+    },
+    runtime: {
+      updateAll: () => context.updateAll(),
+      markDirty: value => { context.dirty = value; },
+      setStatus: context.setStatus,
+    },
+  });
+  context.commands.jumpToHistory = index => historyNavigationController.jumpToHistory(index);
   context.commands.saveProject();
   context.commands.activateDocumentTab('second');
   context.commands.jumpToHistory(0);
