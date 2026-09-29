@@ -23641,12 +23641,12 @@ const projectController = createProjectController({
     replaceHistory: () => { history = new HistoryStack(80); },
     setDocument: setDoc,
     markDirty,
-    getCurrentSession: currentSession,
+    getCurrentSession: () => currentSession(),
   },
   io: { readFileAsText, downloadText, safeFilename },
-  smartObjects: { saveContent: saveSmartObjectContent },
-  recovery: { queueRecovery },
-  view: { fitToView },
+  smartObjects: { saveContent: session => saveSmartObjectContent(session) },
+  recovery: { queueRecovery: options => queueRecovery(options) },
+  view: { fitToView: () => fitToView() },
   ui: { setStatus, toast, alertUser: message => alert(message), consoleRef:console },
 });
 const { openProject, saveProject } = projectController;
