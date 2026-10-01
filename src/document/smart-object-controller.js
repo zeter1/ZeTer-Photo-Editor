@@ -64,6 +64,7 @@ export function createSmartObjectController({
     toast = () => {},
     consoleRef = globalThis.console,
   } = ui;
+  let convertGeneration = 0;
   let saveContentGeneration = 0;
 
   function smartObjectLinkedCount(layer, owner = getDocument()) {
@@ -171,10 +172,13 @@ export function createSmartObjectController({
     inner.groupId = null;
     embedded.layers = [inner];
     embedded.selectedLayerId = inner.id;
+    const generation = ++convertGeneration;
+    const convertStillAuthorized = () => generation === convertGeneration;
     setStatus('Создание смарт-объекта…');
 
     try {
       const previewDataUrl = await renderPreview(embedded);
+      if (!convertStillAuthorized()) return;
       if (
         getDocument() !== documentValue ||
         getActiveSessionId() !== targetSessionId ||
@@ -204,6 +208,7 @@ export function createSmartObjectController({
       commit('Преобразовать в смарт-объект');
       setStatus('Слой преобразован в смарт-объект');
     } catch (error) {
+      if (!convertStillAuthorized()) return;
       consoleRef?.error?.(error);
       setStatus('Ошибка создания смарт-объекта: ' + error.message);
       toast('Не удалось создать смарт-объект', 'error');

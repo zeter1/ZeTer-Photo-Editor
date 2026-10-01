@@ -90,6 +90,23 @@ function makeController(state, {
   });
 }
 
+function makeConversionHarness(options = {}) {
+  const source = createRasterLayer({
+    name:'Pixels',
+    x:2,
+    y:3,
+    width:8,
+    height:6,
+    dataUrl:'data:image/png;base64,SOURCE',
+  });
+  const doc = createDocument({ name:'parent', width:80, height:60 });
+  doc.layers = [source];
+  doc.selectedLayerId = source.id;
+  const state = makeState(doc);
+  state.sessions = [{ id:'parent', doc, history:{ push() {} }, dirty:false, smartObjectLink:null }];
+  return { source, doc, state, controller:makeController(state, options) };
+}
+
 test('linked copy and unlink lifecycle is owned by the controller', () => {
   const embedded = createDocument({ name:'inside', width:20, height:20 });
   const source = createSmartObjectLayer({
@@ -160,6 +177,114 @@ test('conversion preserves layer identity and cancels after the originating tab 
   assert.equal(staleDoc.layers[0], staleSource);
   assert.deepEqual(staleState.commits, []);
   assert.match(staleState.statuses.at(-1), /отменено: слой изменился/);
+});
+
+
+test('overlapping Smart Object conversions silently discard an older preview before the latest conversion publishes', async () => {
+  const previews = [deferred(), deferred()];
+  let previewIndex = 0;
+  const { source, doc, state, controller } = makeConversionHarness({
+    renderPreview: () => previews[previewIndex++].promise,
+  });
+  const conversionA = controller.convertSelected();
+  const conversionB = controller.convertSelected();
+  const feedbackAfterBStarted = {
+    statuses:[...state.statuses],
+    toasts:[...state.toasts],
+    errors:[...state.errors],
+    warnings:[...state.warnings],
+  };
+  previews[0].resolve('data:image/png;base64,OLDER');
+  await conversionA;
+  assert.equal(doc.layers[0], source);
+  assert.deepEqual(state.commits, []);
+  assert.deepEqual(state.statuses, feedbackAfterBStarted.statuses);
+  assert.deepEqual(state.toasts, feedbackAfterBStarted.toasts);
+  assert.deepEqual(state.errors, feedbackAfterBStarted.errors);
+  assert.deepEqual(state.warnings, feedbackAfterBStarted.warnings);
+  previews[1].resolve('data:image/png;base64,LATEST');
+  await conversionB;
+  assert.equal(doc.layers[0].type, 'smart-object');
+  assert.equal(doc.layers[0].id, source.id);
+  assert.equal(doc.layers[0].previewDataUrl, 'data:image/png;base64,LATEST');
+  assert.deepEqual(state.commits, ['Преобразовать в смарт-объект']);
+  assert.equal(state.statuses.at(-1), 'Слой преобразован в смарт-объект');
+});
+
+test('older Smart Object conversion completion cannot overwrite newer success feedback', async () => {
+  const previews = [deferred(), deferred()];
+  let previewIndex = 0;
+  const { source, doc, state, controller } = makeConversionHarness({
+    renderPreview: () => previews[previewIndex++].promise,
+  });
+  const conversionA = controller.convertSelected();
+  const conversionB = controller.convertSelected();
+  previews[1].resolve('data:image/png;base64,LATEST');
+  await conversionB;
+  const publishedLayer = doc.layers[0];
+  const publishedFeedback = {
+    statuses:[...state.statuses],
+    toasts:[...state.toasts],
+    commits:[...state.commits],
+    errors:[...state.errors],
+    warnings:[...state.warnings],
+  };
+  previews[0].resolve('data:image/png;base64,OLDER');
+  await conversionA;
+  assert.notEqual(publishedLayer, source);
+  assert.equal(doc.layers[0], publishedLayer);
+  assert.equal(doc.layers[0].previewDataUrl, 'data:image/png;base64,LATEST');
+  assert.deepEqual(state.statuses, publishedFeedback.statuses);
+  assert.deepEqual(state.toasts, publishedFeedback.toasts);
+  assert.deepEqual(state.commits, publishedFeedback.commits);
+  assert.deepEqual(state.errors, publishedFeedback.errors);
+  assert.deepEqual(state.warnings, publishedFeedback.warnings);
+});
+
+test('superseded Smart Object conversion preview failure is silent', async () => {
+  const previews = [deferred(), deferred()];
+  let previewIndex = 0;
+  const { doc, state, controller } = makeConversionHarness({
+    renderPreview: () => previews[previewIndex++].promise,
+  });
+  const conversionA = controller.convertSelected();
+  const conversionB = controller.convertSelected();
+  const feedbackAfterBStarted = { statuses:[...state.statuses], toasts:[...state.toasts] };
+  previews[0].reject(new Error('stale preview failed'));
+  await conversionA;
+  assert.equal(doc.layers[0].type, 'raster');
+  assert.deepEqual(state.commits, []);
+  assert.deepEqual(state.statuses, feedbackAfterBStarted.statuses);
+  assert.deepEqual(state.toasts, feedbackAfterBStarted.toasts);
+  assert.deepEqual(state.errors, []);
+  assert.deepEqual(state.warnings, []);
+  previews[1].resolve('data:image/png;base64,LATEST');
+  await conversionB;
+  assert.equal(doc.layers[0].type, 'smart-object');
+  assert.equal(doc.layers[0].previewDataUrl, 'data:image/png;base64,LATEST');
+  assert.deepEqual(state.commits, ['Преобразовать в смарт-объект']);
+  assert.deepEqual(state.errors, []);
+});
+
+test('rejected newer Smart Object conversion preflight does not revoke older authority', async () => {
+  const preview = deferred();
+  let lockChecks = 0;
+  const { doc, state, controller } = makeConversionHarness({
+    renderPreview: () => preview.promise,
+    isLayerLocked: () => (++lockChecks) === 2,
+  });
+  const conversionA = controller.convertSelected();
+  const conversionB = controller.convertSelected();
+  await conversionB;
+  assert.equal(lockChecks, 2);
+  assert.equal(doc.layers[0].type, 'raster');
+  assert.deepEqual(state.commits, []);
+  preview.resolve('data:image/png;base64,AUTHORIZED');
+  await conversionA;
+  assert.equal(doc.layers[0].type, 'smart-object');
+  assert.equal(doc.layers[0].previewDataUrl, 'data:image/png;base64,AUTHORIZED');
+  assert.deepEqual(state.commits, ['Преобразовать в смарт-объект']);
+  assert.equal(state.statuses.at(-1), 'Слой преобразован в смарт-объект');
 });
 
 test('opening shared contents reports the parent linked-instance count after child load', () => {
