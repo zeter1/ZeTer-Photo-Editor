@@ -167,6 +167,9 @@ browser primitives (Canvas, Worker, storage, File APIs)
 
 ### Document / Smart Object content lifecycle
 - `src/document/smart-object-controller.js` owns generic Smart Object convert/open/save/link/unlink orchestration, nested-content depth/source-bounds rules, shared-source propagation and content-tab stale-context protection.
+- Content Save has **dual temporal authority**. After pending-edit, parent-exists and parent-lock preflight succeeds, it claims a controller-local monotonically increasing save generation; a newer authorized Save silently supersedes older continuations. A blocked/rejected newer attempt does not claim generation and therefore cannot revoke an older authorized Save.
+- Exact editor-state authority remains independent: exact content-session ID/object + immutable content snapshot, exact parent-session object, and parent Smart Object layer/shared-source identity must still match. Generation answers “which Save intent is newest”; state guards answer “does this result still belong to the same editor state”. Neither replaces the other.
+- Check save generation immediately after every reorderable await, including preview rendering and Photoshop embedded-resource rewrite. A superseded continuation publishes no parent/resource mutation, history, dirty state, cache invalidation, tabs/recovery, status/toast or stale-only log. Ordinary editor-state staleness keeps its explicit cancellation feedback. The final mutation/publication region is await-free; any future await requires re-proving both authorities before the first write.
 - It may import stable core state/geometry/style helpers directly. Browser preview rendering, workspace/session bridges, history/recovery publication hooks and Photoshop-native resource rewrite enter as explicit ports.
 - Photoshop embedded PSD/PSB/PNG serialization, linked-resource byte rewrite and native metadata fingerprint updates must not migrate into the generic lifecycle controller.
 - Async convert/save must revalidate the originating document/session/content before publishing, and shared-source counts must be computed against the parent owner rather than whichever content tab becomes active.
@@ -174,7 +177,7 @@ browser primitives (Canvas, Worker, storage, File APIs)
 ### Document / PSD Smart Object resource rewrite
 - `src/document/psd-smart-object-resource.js` owns Photoshop-specific embedded PNG/PSD/PSB payload serialization, bounded `liFD` linked-resource rewrite preparation, explicit publication of prepared linked blocks and per-target baseline/fingerprint metadata refresh.
 - Low-level PSD/PSB encoding and linked-record byte surgery remain in `src/formats/psd.js`; document-to-writer preparation remains in `src/document/psd-export-controller.js`; shared fingerprints/opaque-block decoding remain in `psd-native-metadata-plans.js`.
-- Resource preparation must not mutate `parentDoc` or target layers. Only `smart-object-controller.js`, after stale content/parent revalidation, may call the resource owner's publish/update ports.
+- Resource preparation must not mutate `parentDoc` or target layers. Only `smart-object-controller.js`, after latest-save generation **and** stale content/parent revalidation, may call the resource owner's publish/update ports.
 - Preserve the embedded asset/profile/linked-block bounds and writer safety limits. Unsupported formats, missing baselines, changed embedded dimensions and missing matching UUIDs must remain explicit safe fallback reasons.
 
 ### Document / PSD import mapping

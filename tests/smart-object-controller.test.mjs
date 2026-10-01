@@ -10,8 +10,12 @@ import { createSmartObjectController } from '../src/document/smart-object-contro
 
 function deferred() {
   let resolve;
-  const promise = new Promise(done => { resolve = done; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 function makeState(documentValue) {
@@ -25,6 +29,8 @@ function makeState(documentValue) {
     commits: [],
     invalidated: [],
     recoveries: [],
+    errors: [],
+    warnings: [],
     tabsRendered: 0,
     updates: 0,
     fits: 0,
@@ -33,6 +39,8 @@ function makeState(documentValue) {
 
 function makeController(state, {
   renderPreview = async () => 'data:image/png;base64,AA==',
+  blockPendingDocumentEdit = () => false,
+  isLayerLocked = () => false,
   photoshop = {},
 } = {}) {
   let sessionCounter = 0;
@@ -43,8 +51,8 @@ function makeController(state, {
       setActiveSessionId: value => { state.activeSessionId = value; },
       getSelectedLayer: () => state.doc.layers.find(layer => layer.id === state.doc.selectedLayerId) || null,
       getZoom: () => 0.75,
-      blockPendingDocumentEdit: () => false,
-      isLayerLocked: () => false,
+      blockPendingDocumentEdit,
+      isLayerLocked,
       commit: label => state.commits.push(label),
       updateAll: () => { state.updates += 1; },
       fitToView: () => { state.fits += 1; },
@@ -74,7 +82,10 @@ function makeController(state, {
     ui: {
       setStatus: message => state.statuses.push(message),
       toast: (message, tone) => state.toasts.push([message, tone]),
-      consoleRef: { error() {}, warn() {} },
+      consoleRef: {
+        error: (...args) => state.errors.push(args),
+        warn: (...args) => state.warnings.push(args),
+      },
     },
   });
 }
@@ -241,6 +252,227 @@ test('save propagates a linked source to every instance', async () => {
     'data:image/png;base64,OLD2',
   ]));
   assert.deepEqual(state.recoveries, [{ immediate:true }]);
+});
+
+
+test('overlapping Smart Object saves let only the latest authorized preview continuation publish', async () => {
+  const previews = [deferred(), deferred()];
+  let previewIndex = 0;
+  const embedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({ name:'Parent', width:10, height:10, previewDataUrl:'data:image/png;base64,OLD', embeddedDocument:embedded });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const childDoc = createDocument({ name:'inside', width:10, height:10 });
+  const historyCalls = [];
+  const parent = { id:'parent', doc:parentDoc, history:{ push(...args) { historyCalls.push(args); } }, dirty:false, smartObjectLink:null };
+  const child = { id:'child', doc:childDoc, history:{ push() {} }, dirty:true, smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:null } };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const controller = makeController(state, { renderPreview: () => previews[previewIndex++].promise });
+
+  const saveA = controller.saveContent(child);
+  const saveB = controller.saveContent(child);
+  const statusesAfterB = [...state.statuses];
+  const toastsAfterB = [...state.toasts];
+
+  previews[0].resolve('data:image/png;base64,A');
+  assert.equal(await saveA, false);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,OLD');
+  assert.equal(historyCalls.length, 0);
+  assert.deepEqual(state.recoveries, []);
+  assert.equal(state.tabsRendered, 0);
+  assert.deepEqual(state.statuses, statusesAfterB);
+  assert.deepEqual(state.toasts, toastsAfterB);
+
+  previews[1].resolve('data:image/png;base64,B');
+  assert.equal(await saveB, true);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,B');
+  assert.equal(historyCalls.length, 1);
+  assert.deepEqual(state.recoveries, [{ immediate:true }]);
+  assert.equal(state.tabsRendered, 1);
+  assert.equal(parent.dirty, true);
+  assert.equal(child.dirty, false);
+});
+
+test('an older Smart Object save cannot change state or feedback after the newer save publishes', async () => {
+  const previews = [deferred(), deferred()];
+  let previewIndex = 0;
+  const embedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({ name:'Parent', width:10, height:10, previewDataUrl:'data:image/png;base64,OLD', embeddedDocument:embedded });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const childDoc = createDocument({ name:'inside', width:10, height:10 });
+  const historyCalls = [];
+  const parent = { id:'parent', doc:parentDoc, history:{ push(...args) { historyCalls.push(args); } }, dirty:false, smartObjectLink:null };
+  const child = { id:'child', doc:childDoc, history:{ push() {} }, dirty:true, smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:null } };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const controller = makeController(state, { renderPreview: () => previews[previewIndex++].promise });
+
+  const saveA = controller.saveContent(child);
+  const saveB = controller.saveContent(child);
+  previews[1].resolve('data:image/png;base64,B');
+  assert.equal(await saveB, true);
+
+  const published = {
+    preview:parentLayer.previewDataUrl,
+    historyCount:historyCalls.length,
+    recoveries:JSON.stringify(state.recoveries),
+    statuses:JSON.stringify(state.statuses),
+    toasts:JSON.stringify(state.toasts),
+    invalidated:JSON.stringify(state.invalidated),
+    tabsRendered:state.tabsRendered,
+    errors:state.errors.length,
+    warnings:state.warnings.length,
+  };
+  previews[0].resolve('data:image/png;base64,A');
+  assert.equal(await saveA, false);
+
+  assert.equal(parentLayer.previewDataUrl, published.preview);
+  assert.equal(historyCalls.length, published.historyCount);
+  assert.equal(JSON.stringify(state.recoveries), published.recoveries);
+  assert.equal(JSON.stringify(state.statuses), published.statuses);
+  assert.equal(JSON.stringify(state.toasts), published.toasts);
+  assert.equal(JSON.stringify(state.invalidated), published.invalidated);
+  assert.equal(state.tabsRendered, published.tabsRendered);
+  assert.equal(state.errors.length, published.errors);
+  assert.equal(state.warnings.length, published.warnings);
+});
+
+test('a superseded Smart Object preview failure is silent', async () => {
+  const previews = [deferred(), deferred()];
+  let previewIndex = 0;
+  const embedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({ name:'Parent', width:10, height:10, previewDataUrl:'data:image/png;base64,OLD', embeddedDocument:embedded });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const childDoc = createDocument({ name:'inside', width:10, height:10 });
+  const parent = { id:'parent', doc:parentDoc, history:{ push() {} }, dirty:false, smartObjectLink:null };
+  const child = { id:'child', doc:childDoc, history:{ push() {} }, dirty:true, smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:null } };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.sessions = [parent, child];
+  const controller = makeController(state, { renderPreview: () => previews[previewIndex++].promise });
+
+  const saveA = controller.saveContent(child);
+  const saveB = controller.saveContent(child);
+  const feedbackAfterB = { statuses:JSON.stringify(state.statuses), toasts:JSON.stringify(state.toasts), errors:state.errors.length, warnings:state.warnings.length };
+
+  previews[0].reject(new Error('stale preview failure'));
+  assert.equal(await saveA, false);
+  assert.equal(JSON.stringify(state.statuses), feedbackAfterB.statuses);
+  assert.equal(JSON.stringify(state.toasts), feedbackAfterB.toasts);
+  assert.equal(state.errors.length, feedbackAfterB.errors);
+  assert.equal(state.warnings.length, feedbackAfterB.warnings);
+
+  previews[1].resolve('data:image/png;base64,B');
+  assert.equal(await saveB, true);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,B');
+});
+
+test('a newer Smart Object save rejected by preflight does not revoke the older authorized save', async () => {
+  const preview = deferred();
+  let pendingChecks = 0;
+  const embedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({ name:'Parent', width:10, height:10, previewDataUrl:'data:image/png;base64,OLD', embeddedDocument:embedded });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const childDoc = createDocument({ name:'inside', width:10, height:10 });
+  let historyCount = 0;
+  const parent = { id:'parent', doc:parentDoc, history:{ push() { historyCount += 1; } }, dirty:false, smartObjectLink:null };
+  const child = { id:'child', doc:childDoc, history:{ push() {} }, dirty:true, smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:null } };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.sessions = [parent, child];
+  const controller = makeController(state, { renderPreview: () => preview.promise, blockPendingDocumentEdit: () => ++pendingChecks === 2 });
+
+  const saveA = controller.saveContent(child);
+  assert.equal(await controller.saveContent(child), false);
+  preview.resolve('data:image/png;base64,A');
+
+  assert.equal(await saveA, true);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,A');
+  assert.equal(historyCount, 1);
+  assert.deepEqual(state.recoveries, [{ immediate:true }]);
+});
+
+test('a superseded Photoshop Smart Object rewrite cannot publish prepared native resources', async () => {
+  const rewriteA = deferred();
+  const enteredRewriteA = deferred();
+  let previewCalls = 0;
+  let rewriteCalls = 0;
+  const publishedSourceKeys = [];
+  const embedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({
+    name:'PS',
+    width:20,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD',
+    embeddedDocument:embedded,
+    psdSmartObject:{ uniqueId:'ps-overlap', asset:{ kind:'data' }, baseline:{} },
+  });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const childDoc = createDocument({ name:'inside', width:10, height:10 });
+  const historyCalls = [];
+  const parent = { id:'parent', doc:parentDoc, history:{ push(...args) { historyCalls.push(args); } }, dirty:false, smartObjectLink:null };
+  const child = { id:'child', doc:childDoc, history:{ push() {} }, dirty:true, smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:'ps-overlap' } };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.sessions = [parent, child];
+  const controller = makeController(state, {
+    renderPreview: async () => 'data:image/png;base64,' + (++previewCalls === 1 ? 'A' : 'B'),
+    photoshop: {
+      isLayer: layer => Boolean(layer?.psdSmartObject),
+      sourceId: layer => layer?.psdSmartObject?.uniqueId || null,
+      findLayers: (owner, uniqueId) => owner.layers.filter(layer => layer.psdSmartObject?.uniqueId === uniqueId),
+      rewriteEmbeddedSource: () => {
+        rewriteCalls += 1;
+        if (rewriteCalls === 1) {
+          enteredRewriteA.resolve();
+          return rewriteA.promise;
+        }
+        return Promise.resolve({ rewritten:true, linkedLayerBlocks:[{ key:'B' }], newSize:222, sourceKey:'B', type:'psd' });
+      },
+      publishEmbeddedSourceRewrite: (owner, rewrite) => {
+        publishedSourceKeys.push(rewrite.sourceKey);
+        owner.psdLinkedLayerBlocks = rewrite.linkedLayerBlocks;
+      },
+      updateTargetAfterRewrite: () => {},
+    },
+  });
+
+  const saveA = controller.saveContent(child);
+  await enteredRewriteA.promise;
+  const saveB = controller.saveContent(child);
+  assert.equal(await saveB, true);
+  assert.deepEqual(publishedSourceKeys, ['B']);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,B');
+  assert.equal(historyCalls.length, 1);
+  const finalFeedback = {
+    statuses:JSON.stringify(state.statuses),
+    toasts:JSON.stringify(state.toasts),
+    recoveries:JSON.stringify(state.recoveries),
+    errors:state.errors.length,
+    warnings:state.warnings.length,
+  };
+
+  rewriteA.resolve({ rewritten:true, linkedLayerBlocks:[{ key:'A' }], newSize:111, sourceKey:'A', type:'psd' });
+  assert.equal(await saveA, false);
+
+  assert.deepEqual(publishedSourceKeys, ['B']);
+  assert.deepEqual(parentDoc.psdLinkedLayerBlocks, [{ key:'B' }]);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,B');
+  assert.equal(historyCalls.length, 1);
+  assert.equal(JSON.stringify(state.statuses), finalFeedback.statuses);
+  assert.equal(JSON.stringify(state.toasts), finalFeedback.toasts);
+  assert.equal(JSON.stringify(state.recoveries), finalFeedback.recoveries);
+  assert.equal(state.errors.length, finalFeedback.errors);
+  assert.equal(state.warnings.length, finalFeedback.warnings);
 });
 
 test('save cancels when the originating content tab changes during preview preparation', async () => {
