@@ -29,6 +29,8 @@ test('history navigation and panel composition route through their narrow owners
   assert.match(main, /commands:\s*\{\s*jumpToHistory\s*\}/);
   assert.match(main, /historyPanelController\.render\(\)/);
   assert.doesNotMatch(main, /function updateHistory\s*\(/);
+  assert.match(main, /\$\('#clearHistoryBtn'\)\.onclick=\(\)=>\{history\.clearToCurrent\(\);updateAll\(\);\};/);
+  assert.doesNotMatch(main, /clearHistoryBtn[\s\S]{0,160}updateHistory\(/);
 
   assert.match(main, /\['Отменить','Ctrl\+Z',undo,/);
   assert.match(main, /\['Повторить','Ctrl\+Y',redo,/);
