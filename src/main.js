@@ -2770,7 +2770,7 @@ $('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=()=>addGroup(
 $('#layerUpBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(1);$('#layerDownBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(-1);
 pathsController.bindControls();
 layersPanelController.bind();
-$('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateHistory();updateAll();};
+$('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateAll();};
 $('#resetColorEffectsBtn').onclick=layerPropertyCommandController.resetSelectedEffects;
 els.addTab.onclick=()=>addDocumentTab();
 els.blend.onchange=()=>layerPropertyCommandController.setSelectedBlendMode(els.blend.value);
