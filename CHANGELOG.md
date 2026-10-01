@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-01 — Make overlapping PSD/PSB imports latest-authorized-wins
+
+- Bug fix: when two PSD/PSB opens overlap against the same document/session/history/change epoch, only the newest import that successfully passed replacement/file preflight may continue to publication.
+- Authority model: the PSD import controller now owns a monotonic command generation in addition to the existing exact document/session/history/change-serial ticket; the two guards protect independent command-intent and editor-state races.
+- UI/error safety: superseded work exits silently after file read, decode and later raster/embedded preparation awaits, so an older completion or failure cannot replace the newer document or overwrite its status/toast/alert/error reporting.
+- Tests/docs: deterministic deferred regressions cover both completion orders, a superseded decode failure and a rejected newer replacement decision that must not cancel the already-authorized import; AI-facing architecture and test routing now document the dual-authority contract.
+
 ### 2026-10-01 — Harden New Document replacement authority
 
 - Bug fix: the delayed **File → New / Ctrl+N** dialog now binds its discard authorization to the exact originating document/session instead of allowing a later submit to act on whichever tab is active.

@@ -21305,6 +21305,8 @@ function createPsdImportController({
   semantics = {},
   ui = {},
 } = {}) {
+  let openGeneration=0;
+
   async function open(file){
     if(runtime.blockPendingDocumentEdit())return;
     if(!runtime.canReplaceDocument())return;
@@ -21312,13 +21314,18 @@ function createPsdImportController({
       const message='PSD/PSB больше 512 МБ пока не импортируется: tiled high-depth source уже снижает retained preview memory, но текущий PSD/PSB decoder всё ещё materializes bounded channel planes';
       ui.toast(message,'error');ui.setStatus(message);return;
     }
+    const generation=++openGeneration;
+    const isCurrentImport=()=>generation===openGeneration;
     const targetDocument=runtime.getDocument();
     const targetSessionId=runtime.getActiveSessionId();
     const targetHistoryEntry=runtime.getHistoryEntry();
     const targetChangeSerial=runtime.getChangeSerial();
     ui.setStatus('PSD/PSB: чтение структуры и каналов…');
     try{
-      const parsed=await codec.decodePsd(await file.arrayBuffer(),{maxPixels:48_000_000,maxLayers:500});
+      const bytes=await file.arrayBuffer();
+      if(!isCurrentImport())return;
+      const parsed=await codec.decodePsd(bytes,{maxPixels:48_000_000,maxLayers:500});
+      if(!isCurrentImport())return;
       const warnings=[...parsed.warnings];
       if(parsed.fillLayers?.length)warnings.push(`Stage 15d: найдено ${parsed.fillLayers.length} Photoshop gradient/pattern fill layer(s); bounded GdFl/PtFl metadata разобраны, но canvas пока использует composite preview до editable fill renderer`);
       if(parsed.adjustmentLayers?.length)warnings.push(`Stage 16c: найдено ${parsed.adjustmentLayers.length} Photoshop adjustment layer(s): Brightness/Contrast, Exposure, Hue/Saturation, Levels, Curves, Invert, Posterize и Threshold мапятся semantic-first`);
@@ -21399,6 +21406,7 @@ function createPsdImportController({
           const adjustmentMaskDataUrl=sourceLayer.mask?.pixels
             ? await rendering.rgbaPixelsToDataUrl(parsed.width,parsed.height,sourceLayer.mask.pixels,`Маска adjustment «${sourceLayer.name}»`)
             : null;
+          if(!isCurrentImport())return;
           const imported=createAdjustmentLayer({
             name:sourceLayer.name||'PSD Adjustment',
             visible:sourceLayer.visible!==false,
@@ -21423,6 +21431,7 @@ function createPsdImportController({
           ? previewPixelsFor(sourceLayer.pixelBuffer)
           : sourceLayer.pixels;
         const dataUrl=await rendering.rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourcePixels,`PSD/PSB слой «${sourceLayer.name}»`);
+        if(!isCurrentImport())return;
         let highDepthSource=null;
         if(sourceLayer.pixelBuffer&&(sourceLayer.pixelBuffer.bitsPerChannel>8||sourceLayer.pixelBuffer.model==='cmyk')){
           const rawBytes=sourceLayer.pixelBuffer.data?.byteLength||0;
@@ -21437,6 +21446,7 @@ function createPsdImportController({
         const maskDataUrl=sourceLayer.mask
           ? await rendering.rgbaPixelsToDataUrl(sourceLayer.width,sourceLayer.height,sourceLayer.mask.pixels,`Маска PSD/PSB слоя «${sourceLayer.name}»`)
           : null;
+        if(!isCurrentImport())return;
         const commonLayer={
           name:sourceLayer.name||'PSD Layer',
           visible:sourceLayer.visible!==false,
@@ -21452,6 +21462,7 @@ function createPsdImportController({
         const embeddedDocument=!canMapShape&&!canMapText&&sourceLayer.psdSmartObject
           ? await semantics.importPsdEmbeddedAssetDocument(sourceLayer.psdSmartObject,sourceLayer.name||'Smart Object',warnings)
           : null;
+        if(!isCurrentImport())return;
         let importedLayer;
         if(canMapShape){
           importedLayer=createShapeLayer({
@@ -21530,14 +21541,17 @@ function createPsdImportController({
             warnings.push(`PSD/PSB composite: high-depth source ${Math.ceil(rawBytes/1024/1024)} МБ не помещается в bounded .zpe precision budget; сохранён только 8-bit preview`);
           }
         }
+        const compositeDataUrl=await rendering.rgbaPixelsToDataUrl(parsed.width,parsed.height,compositePixels,'PSD/PSB composite');
+        if(!isCurrentImport())return;
         prepared.push(createRasterLayer({
           name:'PSD/PSB Composite',x:0,y:0,width:parsed.width,height:parsed.height,
-          dataUrl:await rendering.rgbaPixelsToDataUrl(parsed.width,parsed.height,compositePixels,'PSD/PSB composite'),
+          dataUrl:compositeDataUrl,
           highDepthSource,
         }));
       }
       if(!prepared.length)throw new Error('PSD/PSB не содержит bitmap-данных, которые текущий RGB/8-bit pipeline может импортировать');
   
+      if(!isCurrentImport())return;
       if(runtime.getDocument()!==targetDocument||runtime.getActiveSessionId()!==targetSessionId||
         runtime.getHistoryEntry()!==targetHistoryEntry||runtime.getChangeSerial()!==targetChangeSerial){
         ui.setStatus('Импорт PSD/PSB отменён: документ изменился во время декодирования');
@@ -21578,6 +21592,7 @@ function createPsdImportController({
         ui.toast(`PSD/PSB импортирован с ограничениями: ${warnings.length}. Подробности — в консоли`,'warn');
       }
     }catch(error){
+      if(!isCurrentImport())return;
       ui.consoleRef.error('PSD/PSB import failed',{name:file?.name,size:file?.size,error});
       const message=`Не удалось импортировать PSD/PSB: ${error?.message||error}`;
       ui.alert(message);ui.setStatus('Ошибка импорта PSD/PSB');ui.toast(message,'error');

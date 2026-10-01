@@ -5,9 +5,9 @@ import { createPixelBuffer } from '../src/core/pixel-buffer.js';
 import { createPsdImportController } from '../src/document/psd-import-controller.js';
 
 function deferred() {
-  let resolve;
-  const promise = new Promise(done => { resolve = done; });
-  return { promise, resolve };
+  let resolve,reject;
+  const promise = new Promise((done,fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 function parsedRgb16() {
@@ -37,6 +37,8 @@ function harness({
   decodePsd=async()=>parsedRgb16(),
   rgbaPixelsToDataUrl=async()=> 'data:image/png;base64,AAAA',
   importPsdEmbeddedAssetDocument=async()=>null,
+  canReplaceDocument=()=>true,
+  blockPendingDocumentEdit=()=>false,
 }={}) {
   const original=createDocument({name:'Original',width:4,height:4});
   original.proofProfile={kind:'untagged',untagged:true};
@@ -48,6 +50,8 @@ function harness({
   const published=[];
   const statuses=[];
   const toasts=[];
+  const alerts=[];
+  const errors=[];
   const controller=createPsdImportController({
     codec:{decodePsd},
     runtime:{
@@ -55,8 +59,8 @@ function harness({
       getActiveSessionId:()=>sessionId,
       getHistoryEntry:()=>historyEntry,
       getChangeSerial:()=>changeSerial,
-      canReplaceDocument:()=>{replaceChecks+=1;return true;},
-      blockPendingDocumentEdit:()=>false,
+      canReplaceDocument:()=>{replaceChecks+=1;return canReplaceDocument();},
+      blockPendingDocumentEdit,
       publishDocument:(next,meta)=>published.push({next,meta}),
     },
     profiles:{profileBytes:()=>null},
@@ -74,12 +78,12 @@ function harness({
     ui:{
       setStatus:value=>statuses.push(value),
       toast:(message,type)=>toasts.push({message,type}),
-      alert:()=>{},
-      consoleRef:{warn:()=>{},error:()=>{}},
+      alert:message=>alerts.push(message),
+      consoleRef:{warn:()=>{},error:(...args)=>errors.push(args)},
     },
   });
   return {
-    controller,original,published,statuses,toasts,
+    controller,original,published,statuses,toasts,alerts,errors,
     setCurrent:value=>{current=value;},
     setSession:value=>{sessionId=value;},
     setHistoryEntry:value=>{historyEntry=value;},
@@ -188,6 +192,130 @@ test('late raster preparation rejects a change epoch that advances after decode'
   await opening;
 
   assertStaleImport(h);
+});
+
+
+test('newer authorized PSD import supersedes an older decode before publication', async () => {
+  const decodeA=deferred();
+  const decodeB=deferred();
+  const startedA=deferred();
+  const startedB=deferred();
+  let calls=0;
+  const h=harness({decodePsd:()=>{
+    calls+=1;
+    if(calls===1){startedA.resolve();return decodeA.promise;}
+    startedB.resolve();return decodeB.promise;
+  }});
+
+  const openingA=h.controller.open(file('a.psd'));
+  await startedA.promise;
+  const openingB=h.controller.open(file('b.psd'));
+  await startedB.promise;
+
+  decodeA.resolve(parsedRgb16());
+  await openingA;
+  assert.equal(h.published.length,0);
+
+  decodeB.resolve(parsedRgb16());
+  await openingB;
+  assert.equal(h.published.length,1);
+  assert.equal(h.published[0].next.name,'b');
+});
+
+test('late superseded PSD completion cannot overwrite newer success UI', async () => {
+  const decodeA=deferred();
+  const decodeB=deferred();
+  const startedA=deferred();
+  const startedB=deferred();
+  let calls=0;
+  const h=harness({decodePsd:()=>{
+    calls+=1;
+    if(calls===1){startedA.resolve();return decodeA.promise;}
+    startedB.resolve();return decodeB.promise;
+  }});
+
+  const openingA=h.controller.open(file('old.psd'));
+  await startedA.promise;
+  const openingB=h.controller.open(file('new.psd'));
+  await startedB.promise;
+
+  decodeB.resolve(parsedRgb16());
+  await openingB;
+  const finalStatus=h.statuses.at(-1);
+  const finalToasts=structuredClone(h.toasts);
+  const finalAlerts=structuredClone(h.alerts);
+  const finalErrors=structuredClone(h.errors);
+
+  decodeA.resolve(parsedRgb16());
+  await openingA;
+
+  assert.equal(h.published.length,1);
+  assert.equal(h.published[0].next.name,'new');
+  assert.equal(h.statuses.at(-1),finalStatus);
+  assert.deepEqual(h.toasts,finalToasts);
+  assert.deepEqual(h.alerts,finalAlerts);
+  assert.deepEqual(h.errors,finalErrors);
+});
+
+test('superseded PSD failure is silent while the newer import remains authoritative', async () => {
+  const decodeA=deferred();
+  const decodeB=deferred();
+  const startedA=deferred();
+  const startedB=deferred();
+  let calls=0;
+  const h=harness({decodePsd:()=>{
+    calls+=1;
+    if(calls===1){startedA.resolve();return decodeA.promise;}
+    startedB.resolve();return decodeB.promise;
+  }});
+
+  const openingA=h.controller.open(file('old-error.psd'));
+  await startedA.promise;
+  const openingB=h.controller.open(file('new-ok.psd'));
+  await startedB.promise;
+
+  decodeA.reject(new Error('superseded decode failure'));
+  await openingA;
+  assert.equal(h.published.length,0);
+  assert.equal(h.alerts.length,0);
+  assert.equal(h.errors.length,0);
+  assert.equal(h.toasts.some(item=>item.type==='error'),false);
+  assert.notEqual(h.statuses.at(-1),'Ошибка импорта PSD/PSB');
+
+  decodeB.resolve(parsedRgb16());
+  await openingB;
+  assert.equal(h.published.length,1);
+  assert.equal(h.published[0].next.name,'new-ok');
+});
+
+test('rejected newer replacement preflight does not supersede an authorized PSD import', async () => {
+  const decodeA=deferred();
+  const startedA=deferred();
+  let decodeCalls=0;
+  let replacementAttempt=0;
+  const h=harness({
+    decodePsd:()=>{
+      decodeCalls+=1;
+      startedA.resolve();
+      return decodeA.promise;
+    },
+    canReplaceDocument:()=>{
+      replacementAttempt+=1;
+      return replacementAttempt===1;
+    },
+  });
+
+  const openingA=h.controller.open(file('authorized.psd'));
+  await startedA.promise;
+  await h.controller.open(file('rejected.psd'));
+
+  assert.equal(h.getReplaceChecks(),2);
+  assert.equal(decodeCalls,1);
+
+  decodeA.resolve(parsedRgb16());
+  await openingA;
+  assert.equal(h.published.length,1);
+  assert.equal(h.published[0].next.name,'authorized');
 });
 
 test('oversized PSD/PSB is rejected before codec work starts', async () => {
