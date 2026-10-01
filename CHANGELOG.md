@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-01 — Make overlapping Smart Object conversions latest-authorized-wins
+
+- Bug fix: overlapping **Convert to Smart Object** commands now let only the newest conversion that passed target/type/lock/nesting/source-bounds preflight publish after asynchronous preview rendering.
+- Authority model: Convert owns a monotonic generation separate from Smart Object Save; exact document/session/source-slot/object-state checks remain independent, and a blocked/rejected newer Convert does not revoke an already-authorized older conversion.
+- UI/error safety: superseded preview successes and failures return silently before stale cancellation feedback, mutation, history, status/toast or error logging, so older work cannot overwrite a newer conversion result.
+- Tests/docs: deterministic deferred regressions cover both completion orders, superseded preview failure, rejected-newer preservation and ordinary exact-state cancellation; AI-facing routing now documents the separate Convert/Save generations.
+
 ### 2026-10-01 — Make overlapping Smart Object content saves latest-authorized-wins
 
 - Bug fix: two overlapping Smart Object content saves against the same unchanged child/parent state now let only the newest command that passed pending/parent/lock preflight publish.
