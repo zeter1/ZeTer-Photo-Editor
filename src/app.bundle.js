@@ -1379,6 +1379,50 @@ function createLayersPanelController({ container, state = {}, actions = {}, ui =
   return { bind, destroy, render, focusSelectedLayerRow, getLayerRow, getGroupRow, clearDrag: finishDrag };
 }
 
+// ---- src/ui/history-panel-controller.js ----
+function createHistoryPanelController({
+  container,
+  state,
+  commands,
+  documentRef = globalThis.document,
+} = {}) {
+  if (!container || typeof container.replaceChildren !== 'function' || typeof container.append !== 'function') {
+    throw new Error('history panel container is required');
+  }
+  if (typeof state?.getHistory !== 'function') {
+    throw new Error('history panel history bridge is required');
+  }
+  if (typeof commands?.jumpToHistory !== 'function') {
+    throw new Error('history panel jump command is required');
+  }
+  if (!documentRef || typeof documentRef.createElement !== 'function') {
+    throw new Error('history panel document bridge is required');
+  }
+
+  function render() {
+    const history = state.getHistory();
+    if (!history || !Array.isArray(history.entries)) {
+      throw new Error('history panel current history is required');
+    }
+
+    container.replaceChildren();
+    history.entries.forEach((entry, index) => {
+      const current = index === history.index;
+      const row = documentRef.createElement('button');
+      row.type = 'button';
+      row.className = `history-row${current ? ' current' : ''}`;
+      row.textContent = `${current ? '● ' : ''}${entry.label}`;
+      row.title = current ? 'Текущее состояние' : 'Перейти к этому состоянию';
+      row.disabled = current;
+      row.onclick = () => commands.jumpToHistory(index);
+      container.append(row);
+    });
+    container.scrollTop = container.scrollHeight;
+  }
+
+  return { render };
+}
+
 // ---- src/ui/paths-controller.js ----
 const SAVED_PATH_RESOURCE_MIN = 2000;
 const SAVED_PATH_RESOURCE_MAX = 2997;
@@ -26590,6 +26634,13 @@ const historyNavigationController = createHistoryNavigationController({
 });
 const { undo, redo, jumpToHistory } = historyNavigationController;
 
+const historyPanelController = createHistoryPanelController({
+  container: els.history,
+  state: { getHistory: () => history },
+  commands: { jumpToHistory },
+  documentRef: document,
+});
+
 
 const smartObjectController = createSmartObjectController({
   runtime: {
@@ -26960,21 +27011,8 @@ function updateAll() {
   els.dimensions.textContent = `${doc.width} × ${doc.height}`;
   els.undo.disabled = !history.canUndo(); els.redo.disabled = !history.canRedo();
   els.emptyDrop.hidden = doc.layers.length > 0;
-  updateCanvasSize(); layersPanelController.render(); updatePathsPanel(); updateHistory(); refreshInspectorPanels(); updateLayerControls(); render();
+  updateCanvasSize(); layersPanelController.render(); updatePathsPanel(); historyPanelController.render(); refreshInspectorPanels(); updateLayerControls(); render();
   renderDocumentTabs();
-}
-
-function updateHistory() {
-  els.history.replaceChildren();
-  history.entries.forEach((entry, index) => {
-    const row = document.createElement('button'); row.type='button'; row.className = `history-row${index === history.index ? ' current' : ''}`;
-    row.textContent = `${index === history.index ? '● ' : ''}${entry.label}`;
-    row.title = index === history.index ? 'Текущее состояние' : 'Перейти к этому состоянию';
-    row.disabled = index === history.index;
-    row.onclick = () => jumpToHistory(index);
-    els.history.append(row);
-  });
-  els.history.scrollTop = els.history.scrollHeight;
 }
 
 function updateLayerControls() {
@@ -28130,7 +28168,7 @@ $('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=()=>addGroup(
 $('#layerUpBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(1);$('#layerDownBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(-1);
 pathsController.bindControls();
 layersPanelController.bind();
-$('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateHistory();updateAll();};
+$('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateAll();};
 $('#resetColorEffectsBtn').onclick=layerPropertyCommandController.resetSelectedEffects;
 els.addTab.onclick=()=>addDocumentTab();
 els.blend.onchange=()=>layerPropertyCommandController.setSelectedBlendMode(els.blend.value);
