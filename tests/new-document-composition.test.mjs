@@ -13,6 +13,9 @@ test('New Document lifecycle stays in its canonical owner', () => {
   assert.match(main, /from '\.\/document\/new-document-controller\.js'/);
   assert.match(owner, /export function createNewDocumentController/);
   assert.match(main, /const newDocumentController = createNewDocumentController\(\{/);
+  assert.match(main, /getDocument: \(\) => doc,/);
+  assert.match(main, /getActiveSessionId: \(\) => activeSessionId,/);
+  assert.match(main, /getDocumentChangeSerial: \(\) => documentChangeSerial,/);
   assert.doesNotMatch(main, /function createNewDialog\(/);
   assert.doesNotMatch(main, /function canReplaceDocument\(/);
   assert.match(main, /\['Новый…','Ctrl\+N',newDocumentController\.open\]/);
