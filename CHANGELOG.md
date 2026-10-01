@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-01 — Harden New Document replacement authority
+
+- Bug fix: the delayed **File → New / Ctrl+N** dialog now binds its discard authorization to the exact originating document/session instead of allowing a later submit to act on whichever tab is active.
+- Dirty-state safety: clean→dirty transitions and additional edits in an already-dirty document advance the monotonic change epoch and require a fresh discard confirmation; an unchanged dirty epoch that was already confirmed is not prompted twice.
+- Transaction safety: stale-owner, rejected re-confirmation, pending-edit and factory-failure paths publish no replacement history/document/dirty/recovery/viewport state; successful creation keeps the existing factory-first publication order.
+- Tests/docs: focused regressions cover late dirty epochs, same-document/different-session staleness, owner replacement, no-double-confirm and exact success ordering; AI-facing boundaries and the test matrix now route future changes to the temporal-authority contract.
+
 ### 2026-10-01 — Harden Saved Path rename ownership
 
 - Bug fix: Rename Saved Path now binds the delayed modal intent to the exact originating document instead of re-reading the active tab by numeric index at submit time, preventing a stale dialog from renaming another document's path.
