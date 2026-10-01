@@ -287,6 +287,81 @@ test('rejected newer Smart Object conversion preflight does not revoke older aut
   assert.equal(state.statuses.at(-1), 'Слой преобразован в смарт-объект');
 });
 
+test('Smart Object conversion handles source-bounds safety failure without rejection or partial publication', async () => {
+  const source = createRasterLayer({
+    name:'Oversized bounds',
+    width:6000,
+    height:4000,
+    scaleX:2,
+    scaleY:2,
+  });
+  const doc = createDocument({ name:'parent', width:100, height:100 });
+  doc.layers = [source];
+  doc.selectedLayerId = source.id;
+  const state = makeState(doc);
+  state.sessions = [{ id:'parent', doc, history:{ push() {} }, dirty:false, smartObjectLink:null }];
+  const controller = makeController(state);
+
+  assert.equal(await controller.convertSelected(), undefined);
+  assert.equal(doc.layers[0], source);
+  assert.equal(doc.selectedLayerId, source.id);
+  assert.deepEqual(state.commits, []);
+  assert.equal(state.errors.length, 1);
+  assert.match(state.statuses.at(-1), /Ошибка создания смарт-объекта: .*48 МП/);
+  assert.deepEqual(state.toasts.at(-1), ['Не удалось создать смарт-объект', 'error']);
+});
+
+test('failed newer Smart Object preparation does not revoke an older authorized conversion', async () => {
+  const preview = deferred();
+  let previewCalls = 0;
+  const sourceA = createRasterLayer({
+    name:'Authorized',
+    x:2,
+    y:3,
+    width:8,
+    height:6,
+    dataUrl:'data:image/png;base64,SOURCE',
+  });
+  const sourceB = createRasterLayer({
+    name:'Oversized bounds',
+    width:6000,
+    height:4000,
+    scaleX:2,
+    scaleY:2,
+  });
+  const doc = createDocument({ name:'parent', width:100, height:100 });
+  doc.layers = [sourceA, sourceB];
+  doc.selectedLayerId = sourceA.id;
+  const state = makeState(doc);
+  state.sessions = [{ id:'parent', doc, history:{ push() {} }, dirty:false, smartObjectLink:null }];
+  const controller = makeController(state, {
+    renderPreview: () => {
+      previewCalls += 1;
+      return preview.promise;
+    },
+  });
+
+  const conversionA = controller.convertSelected();
+  assert.equal(previewCalls, 1);
+
+  doc.selectedLayerId = sourceB.id;
+  assert.equal(await controller.convertSelected(), undefined);
+  assert.equal(previewCalls, 1);
+  assert.equal(doc.layers[0], sourceA);
+  assert.equal(doc.layers[1], sourceB);
+  assert.deepEqual(state.commits, []);
+  assert.equal(state.errors.length, 1);
+
+  preview.resolve('data:image/png;base64,AUTHORIZED');
+  await conversionA;
+  assert.equal(doc.layers[0].type, 'smart-object');
+  assert.equal(doc.layers[0].id, sourceA.id);
+  assert.equal(doc.layers[0].previewDataUrl, 'data:image/png;base64,AUTHORIZED');
+  assert.equal(doc.layers[1], sourceB);
+  assert.deepEqual(state.commits, ['Преобразовать в смарт-объект']);
+  assert.equal(state.statuses.at(-1), 'Слой преобразован в смарт-объект');
+});
+
 test('opening shared contents reports the parent linked-instance count after child load', () => {
   const embedded = createDocument({ name:'inside', width:20, height:20 });
   const first = createSmartObjectLayer({

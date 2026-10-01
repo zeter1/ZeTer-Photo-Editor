@@ -20562,31 +20562,33 @@ function createSmartObjectController({
       return;
     }
 
-    const targetSessionId = getActiveSessionId();
-    const index = documentValue.layers.indexOf(source);
-    const original = JSON.stringify(source);
-    const bounds = sourceBounds(source);
-    const embedded = createDocument({
-      name:(source.name || 'Слой') + ' — содержимое',
-      width:bounds.width,
-      height:bounds.height,
-      background:'transparent',
-    });
-    const inner = structuredClone(source);
-    inner.x -= bounds.x;
-    inner.y -= bounds.y;
-    inner.opacity = 1;
-    inner.blendMode = 'source-over';
-    inner.visible = true;
-    inner.locked = false;
-    inner.groupId = null;
-    embedded.layers = [inner];
-    embedded.selectedLayerId = inner.id;
-    const generation = ++convertGeneration;
-    const convertStillAuthorized = () => generation === convertGeneration;
-    setStatus('Создание смарт-объекта…');
-
+    let convertStillAuthorized = null;
     try {
+      const targetSessionId = getActiveSessionId();
+      const index = documentValue.layers.indexOf(source);
+      const original = JSON.stringify(source);
+      const bounds = sourceBounds(source);
+      const embedded = createDocument({
+        name:(source.name || 'Слой') + ' — содержимое',
+        width:bounds.width,
+        height:bounds.height,
+        background:'transparent',
+      });
+      const inner = structuredClone(source);
+      inner.x -= bounds.x;
+      inner.y -= bounds.y;
+      inner.opacity = 1;
+      inner.blendMode = 'source-over';
+      inner.visible = true;
+      inner.locked = false;
+      inner.groupId = null;
+      embedded.layers = [inner];
+      embedded.selectedLayerId = inner.id;
+
+      const generation = ++convertGeneration;
+      convertStillAuthorized = () => generation === convertGeneration;
+      setStatus('Создание смарт-объекта…');
+
       const previewDataUrl = await renderPreview(embedded);
       if (!convertStillAuthorized()) return;
       if (
@@ -20618,7 +20620,7 @@ function createSmartObjectController({
       commit('Преобразовать в смарт-объект');
       setStatus('Слой преобразован в смарт-объект');
     } catch (error) {
-      if (!convertStillAuthorized()) return;
+      if (convertStillAuthorized && !convertStillAuthorized()) return;
       consoleRef?.error?.(error);
       setStatus('Ошибка создания смарт-объекта: ' + error.message);
       toast('Не удалось создать смарт-объект', 'error');
