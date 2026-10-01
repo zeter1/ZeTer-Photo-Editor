@@ -29,6 +29,7 @@ import { createRecoveryController } from './workspace/recovery-controller.js';
 import { createToolbarController } from './ui/toolbar-controller.js';
 import { createWorkspaceLayoutController } from './ui/workspace-layout-controller.js';
 import { createLayersPanelController } from './ui/layers-panel-controller.js';
+import { createHistoryPanelController } from './ui/history-panel-controller.js';
 import { createLayerGroupCommandController } from './layers/command-controller.js';
 import { createLayerPropertyCommandController } from './layers/property-command-controller.js';
 import { ADJUSTMENT_COMMAND_RESULT, createAdjustmentLayerCommandController } from './layers/adjustment-command-controller.js';
@@ -1235,6 +1236,13 @@ const historyNavigationController = createHistoryNavigationController({
 });
 const { undo, redo, jumpToHistory } = historyNavigationController;
 
+const historyPanelController = createHistoryPanelController({
+  container: els.history,
+  state: { getHistory: () => history },
+  commands: { jumpToHistory },
+  documentRef: document,
+});
+
 
 const smartObjectController = createSmartObjectController({
   runtime: {
@@ -1605,21 +1613,8 @@ function updateAll() {
   els.dimensions.textContent = `${doc.width} × ${doc.height}`;
   els.undo.disabled = !history.canUndo(); els.redo.disabled = !history.canRedo();
   els.emptyDrop.hidden = doc.layers.length > 0;
-  updateCanvasSize(); layersPanelController.render(); updatePathsPanel(); updateHistory(); refreshInspectorPanels(); updateLayerControls(); render();
+  updateCanvasSize(); layersPanelController.render(); updatePathsPanel(); historyPanelController.render(); refreshInspectorPanels(); updateLayerControls(); render();
   renderDocumentTabs();
-}
-
-function updateHistory() {
-  els.history.replaceChildren();
-  history.entries.forEach((entry, index) => {
-    const row = document.createElement('button'); row.type='button'; row.className = `history-row${index === history.index ? ' current' : ''}`;
-    row.textContent = `${index === history.index ? '● ' : ''}${entry.label}`;
-    row.title = index === history.index ? 'Текущее состояние' : 'Перейти к этому состоянию';
-    row.disabled = index === history.index;
-    row.onclick = () => jumpToHistory(index);
-    els.history.append(row);
-  });
-  els.history.scrollTop = els.history.scrollHeight;
 }
 
 function updateLayerControls() {
@@ -2775,7 +2770,7 @@ $('#addRasterBtn').onclick=addBlankLayer;$('#addGroupBtn').onclick=()=>addGroup(
 $('#layerUpBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(1);$('#layerDownBtn').onclick=()=>layerGroupCommandController.moveSelectedLayer(-1);
 pathsController.bindControls();
 layersPanelController.bind();
-$('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateHistory();updateAll();};
+$('#clearHistoryBtn').onclick=()=>{history.clearToCurrent();updateAll();};
 $('#resetColorEffectsBtn').onclick=layerPropertyCommandController.resetSelectedEffects;
 els.addTab.onclick=()=>addDocumentTab();
 els.blend.onchange=()=>layerPropertyCommandController.setSelectedBlendMode(els.blend.value);

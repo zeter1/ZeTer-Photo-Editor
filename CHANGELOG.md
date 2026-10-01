@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+
+### 2026-10-01 — Extract History panel renderer
+
+- Refactor: History-list DOM rendering moved from `src/main.js` into `src/ui/history-panel-controller.js`; the composition root now supplies only the live history getter and canonical jump command.
+- Session correctness: every panel render resolves the current mutable per-tab HistoryStack, so switching document sessions cannot leave rows bound to a stack captured when the controller was created.
+- Bug fix: the Clear History button no longer calls the removed `updateHistory()` helper; it clears the current stack and routes through the single `updateAll()` refresh path, avoiding a runtime `ReferenceError`.
+- Behavior/tests/build/docs: exact row order, marker/class/title/native disabled semantics, click delegation, bottom scroll, empty state, live rebinding, Clear History callback closure and classic `file://` bundle order are regression-guarded; AI ownership maps and the test matrix now point to the narrow renderer.
+
+
 ### 2026-09-29 — Tiled native retouch regions and lazy Clone/Heal snapshots
 
 - Memory/runtime: native v2 Clone/Heal/Blur/Smudge/Dodge/Burn now reuse the stroke-scoped tile working set instead of materializing the full 16/32-bit RGB/CMYK plane before editing.
