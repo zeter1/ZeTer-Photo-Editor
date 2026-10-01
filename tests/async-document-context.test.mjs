@@ -145,12 +145,16 @@ test('new-document submission replaces the document before scheduling recovery r
   const context = {
     doc: { name: 'Первая вкладка' },
     activeSessionId: 'first',
+    changeSerial: 0,
   };
   let modal;
   let queuedDocument;
   const controller = createNewDocumentController({
     documentState: {
       isDirty: () => false,
+      getDocument: () => context.doc,
+      getActiveSessionId: () => context.activeSessionId,
+      getDocumentChangeSerial: () => context.changeSerial,
       blockPendingDocumentEdit: () => false,
       replaceHistory: () => {},
       setDocument: value => { context.doc = value; },
