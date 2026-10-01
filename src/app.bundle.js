@@ -20474,6 +20474,7 @@ function createSmartObjectController({
     toast = () => {},
     consoleRef = globalThis.console,
   } = ui;
+  let saveContentGeneration = 0;
 
   function smartObjectLinkedCount(layer, owner = getDocument()) {
     const photoshopId = photoshopSourceId(layer);
@@ -20713,6 +20714,8 @@ function createSmartObjectController({
       return false;
     }
 
+    const generation = ++saveContentGeneration;
+    const saveStillAuthorized = () => generation === saveContentGeneration;
     const linkedSourceId = parentLayer.linkedSourceId || null;
     const photoshopId = photoshopSourceId(parentLayer) || link.photoshopSourceId || null;
     const targetsFor = (owner, layer) => linkedSourceId
@@ -20728,6 +20731,7 @@ function createSmartObjectController({
 
     try {
       const previewDataUrl = await renderPreview(embedded);
+      if (!saveStillAuthorized()) return false;
       if (!contentStillCurrent()) {
         setStatus('Обновление смарт-объекта отменено: содержимое или активная вкладка изменились');
         return false;
@@ -20754,11 +20758,13 @@ function createSmartObjectController({
         try {
           photoshopRewrite = await rewriteEmbeddedSource(liveParent.doc, liveLayer, embedded, previewDataUrl);
         } catch (error) {
+          if (!saveStillAuthorized()) return false;
           consoleRef?.warn?.('Photoshop Smart Object resource rewrite skipped', error);
           photoshopRewrite = { rewritten:false, reason:error?.message || String(error) };
         }
       }
 
+      if (!saveStillAuthorized()) return false;
       if (!contentStillCurrent()) {
         setStatus('Обновление смарт-объекта отменено: содержимое или активная вкладка изменились');
         return false;
@@ -20856,6 +20862,7 @@ function createSmartObjectController({
       }
       return true;
     } catch (error) {
+      if (!saveStillAuthorized()) return false;
       consoleRef?.error?.(error);
       setStatus('Ошибка обновления смарт-объекта: ' + error.message);
       toast('Не удалось обновить смарт-объект', 'error');

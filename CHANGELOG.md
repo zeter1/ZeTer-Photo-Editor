@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-01 — Make overlapping Smart Object content saves latest-authorized-wins
+
+- Bug fix: two overlapping Smart Object content saves against the same unchanged child/parent state now let only the newest command that passed pending/parent/lock preflight publish.
+- Authority model: `src/document/smart-object-controller.js` now combines a controller-local monotonic Save generation with the existing exact content-session/snapshot and parent/layer/shared-source guards; a blocked newer Save does not revoke an older authorized continuation.
+- Photoshop safety: generation is revalidated after preview preparation and native embedded-resource rewrite, so superseded prepared `liFD` work cannot publish resources, targets, history, dirty/recovery/cache/UI state; superseded failures are silent.
+- Tests/docs: deterministic deferred regressions cover both completion orders, superseded preview failure, rejected-newer preservation and Photoshop rewrite overlap; AI-facing boundaries and test routing now document the dual-authority contract.
+
 ### 2026-10-01 — Make overlapping native .zpe opens latest-authorized-wins
 
 - Bug fix: two overlapping native project opens against the same document/session/history/change epoch now publish only the newest command that actually passed pending-edit and replacement preflight.
