@@ -92,6 +92,11 @@ Owns editor-shell layout state that is independent of document contents: persist
 ### `layers-panel-controller.js`
 Owns the Layers panel DOM tree and panel-local interaction lifecycle: recursive group/layer presentation, selected/effective ancestor state, thumbnails/mask hints, row keyboard focus and layer/group drag identity/drop cleanup including root drop. Event callbacks are bound to the rendered document identity. Semantic layer/group actions are explicit ports into the canonical command owner rather than a second mutation/history policy.
 
+### `history-panel-controller.js`
+Owns only History-list DOM rendering: ordered buttons, current-row marker/class/title/disabled semantics, exact index delegation and scroll-to-bottom. Because the active tab can replace the mutable HistoryStack while this controller stays alive, every `render()` resolves `state.getHistory()` again instead of capturing a stack at composition time.
+
+It deliberately does **not** mutate HistoryStack, restore document snapshots, mark dirty state, publish status, or own session lifecycle. Undo / Redo / jump transactions stay in `src/workspace/history-navigation-controller.js`; stack mechanics stay in `src/core/history.js`; per-tab binding stays in `src/workspace/session-controller.js`; menu/keyboard/button dispatch stays in `src/main.js`. This getter-vs-capture rule is the default pattern for long-lived synchronous UI owners that display session-swappable state; async commands with origin-bound intent instead capture and later revalidate the exact owner.
+
 ### `src/layers/command-controller.js`
 Owns primitive layer/group command policy shared by the Layers panel, menus, buttons and keyboard routes: exact active-document/entity guards, recursive effective-lock checks, create/rename/delete/duplicate/visibility/lock/group-properties commands, step/relative/root moves and history publication only after a real mutation. Rename/property modals re-resolve the originating owner and target on Apply, so a tab switch or deleted target becomes a no-op.
 
@@ -280,7 +285,7 @@ It does **not** own raster/document internals. `src/main.js` supplies the live r
 ### `history-navigation-controller.js`
 Owns synchronous Undo / Redo / jump-to-history runtime transactions. Each command resolves the current mutable HistoryStack binding at invocation time, runs the pending-edit guard before stack mutation, restores the selected snapshot, preserves command-specific transient cleanup, then publishes runtime refresh → dirty state → exact status.
 
-It does **not** render the History panel, create/clone HistoryStack instances or own snapshot serialization. Stack mechanics stay in `src/core/history.js`; per-tab history binding stays in `session-controller.js`; history-row DOM plus menu/keyboard/button dispatch stay in `src/main.js`.
+It does **not** render the History panel, create/clone HistoryStack instances or own snapshot serialization. Stack mechanics stay in `src/core/history.js`; per-tab history binding stays in `session-controller.js`; history-row DOM rendering stays in `src/ui/history-panel-controller.js`; menu/keyboard/button dispatch stays in `src/main.js`.
 
 ### `viewport-controller.js`
 Owns canvas zoom command policy: canonical clamp/no-op semantics, active-session zoom synchronization, canvas/overlay refresh, one-frame pointer anchoring correction and fit-to-view with the established 90 px padding + scroll reset.
