@@ -196,7 +196,7 @@ Owns Photoshop-specific embedded Smart Object resource policy: PNG preview paylo
 Stable binary primitives stay in `src/formats/psd.js`; fingerprint/opaque-block decoding primitives stay in `psd-native-metadata-plans.js`. The owner receives PSD export preparation and the shared opaque-block-to-state bridge as narrow ports. Rewrite preparation does not mutate the parent document; the generic Smart Object controller revalidates content/parent identity after every await and only then calls the publish/update ports.
 
 ### `project-controller.js`
-Owns native `.zpe` persistence orchestration. Open captures exact document/session/history-entry/change-serial authority before file IO, prepares JSON + sanitized state without mutation, then revalidates and publishes once. Save delegates Smart Object child sessions or runs regular JSON download + immediate recovery. Detailed contract: `NATIVE_PROJECT_IO.md`.
+Owns native `.zpe` persistence orchestration. Open claims a controller-local monotonic generation only after replacement preflight, captures independent exact document/session/history-entry/change-serial authority, discards superseded reads/errors silently, then parses/sanitizes and publishes once only while both authorities remain valid. Save delegates Smart Object child sessions or runs regular JSON download + immediate recovery. Detailed contract: `NATIVE_PROJECT_IO.md`.
 
 It does not classify incoming files, parse PSD/PSB, own recovery storage, or define the `.zpe` schema.
 

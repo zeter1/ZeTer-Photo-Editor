@@ -19744,6 +19744,7 @@ function createProjectController({
   const { queueRecovery } = recovery;
   const { fitToView } = view;
   const { setStatus, toast, alertUser, consoleRef = console } = ui;
+  let openProjectGeneration = 0;
 
   function captureOpenOwner() {
     return {
@@ -19765,8 +19766,10 @@ function createProjectController({
     if (blockPendingDocumentEdit()) return;
     if (!canReplaceDocument()) return;
     const owner = captureOpenOwner();
+    const generation = ++openProjectGeneration;
     try {
       const raw = await readFileAsText(file);
+      if (generation !== openProjectGeneration) return;
       const data = sanitizeProject(JSON.parse(raw));
       if (!openOwnerIsCurrent(owner)) {
         setStatus('Открытие отменено: документ изменился во время чтения файла');
@@ -19782,6 +19785,7 @@ function createProjectController({
       setStatus('Проект открыт');
       toast('Открыт проект: ' + file.name, 'success');
     } catch (error) {
+      if (generation !== openProjectGeneration) return;
       consoleRef.error(error);
       alertUser('Не удалось открыть проект: ' + error.message);
       setStatus('Ошибка открытия проекта');
