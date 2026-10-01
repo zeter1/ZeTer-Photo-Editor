@@ -13,7 +13,7 @@ Application orchestrator: tool-specific pointer/keyboard dispatch, tool selectio
 ## Document lifecycle boundary — `src/document/`
 
 ### `new-document-controller.js`
-Owns File → New / Ctrl+N as one replacement transaction: pending-edit preflight, shared dirty confirmation, exact New Document modal schema, submit-time pending recheck, canonical document factory call, fresh-history replacement, clean-state publication, immediate recovery and fit-to-view. The factory must finish successfully before any runtime publication.
+Owns File → New / Ctrl+N as one replacement transaction: pending-edit preflight, shared dirty confirmation, exact New Document modal schema, delayed-submit authority, canonical document factory call, fresh-history replacement, clean-state publication, immediate recovery and fit-to-view. After the initial discard decision it captures the exact originating document + session, monotonic document-change serial and whether that dirty epoch was already authorized. Submit repeats the pending guard, fails closed on a different owner, and asks for a fresh discard decision only when the current document is dirty and a new dirty/change epoch appeared; an unchanged already-confirmed dirty epoch is not prompted twice. The factory must finish successfully before any runtime publication.
 
 Its `canReplaceDocument` policy is intentionally reused by PSD/PSB and native `.zpe` open owners through narrow ports. It does **not** own generic modal DOM, document schema/limits, session internals, recovery storage or viewport math; those stay in their existing owners. Menu/keyboard/recovery dispatch remains in `src/main.js`.
 
