@@ -98,8 +98,8 @@ browser primitives (Canvas, Worker, storage, File APIs)
 
 
 ### Native project persistence
-- `src/document/project-controller.js` owns native `.zpe` open/save orchestration. Open is preflight → exact document/session/history/change-serial snapshot → async read/parse/sanitize → exact revalidation → second pending-edit guard → one publication path. See `docs/architecture/NATIVE_PROJECT_IO.md`.
-- Read/parse/sanitize failure or stale ownership publishes no document/history/dirty/recovery/view mutation. Successful open installs sanitized state, resets history, marks clean, queues immediate recovery and fits once.
+- `src/document/project-controller.js` owns native `.zpe` open/save orchestration. Open is preflight → exact document/session/history/change-serial snapshot → controller-local generation claim → async read → generation revalidation → parse/sanitize → exact-owner revalidation → second pending-edit guard → one await-free publication path. See `docs/architecture/NATIVE_PROJECT_IO.md`.
+- A newer open may supersede only after it passes replacement preflight. Superseded success/error continuations are silent and publish no state/UI/log output; ordinary read/parse/sanitize failure or exact-owner staleness publishes no document/history/dirty/recovery/view mutation. Successful open installs sanitized state, resets history, marks clean, queues immediate recovery and fits once.
 - Save routes Smart Object child sessions to their existing owner; regular `.zpe` download refreshes recovery but does not mark the document clean.
 - Schema stays in `src/core/state.js`, browser IO in `src/core/io.js`, Smart Object persistence in `src/document/smart-object-controller.js`.
 

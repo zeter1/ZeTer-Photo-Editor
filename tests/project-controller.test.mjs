@@ -5,8 +5,12 @@ import { createProjectController } from '../src/document/project-controller.js';
 
 function deferred() {
   let resolve;
-  const promise = new Promise(done => { resolve = done; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 function makeHarness({
@@ -37,6 +41,7 @@ function makeHarness({
     errors: [],
     downloads: [],
     smartSaves: [],
+    publicationOrder: [],
   };
   let pendingIndex = 0;
   const controller = createProjectController({
@@ -48,12 +53,19 @@ function makeHarness({
       canReplaceDocument: () => canReplaceDocument,
       blockPendingDocumentEdit: () => Boolean(pendingChecks[pendingIndex++]),
       sanitizeProject,
-      replaceHistory: () => { calls.historyResets += 1; },
+      replaceHistory: () => {
+        calls.historyResets += 1;
+        calls.publicationOrder.push('replaceHistory');
+      },
       setDocument: (documentValue, options) => {
         calls.documents.push([documentValue, options]);
+        calls.publicationOrder.push('setDocument');
         state.doc = documentValue;
       },
-      markDirty: value => calls.dirty.push(value),
+      markDirty: value => {
+        calls.dirty.push(value);
+        calls.publicationOrder.push('markDirty');
+      },
       getCurrentSession: () => state.session,
     },
     io: {
@@ -62,11 +74,27 @@ function makeHarness({
       safeFilename: value => String(value || 'image').replace(/\s+/g, '_'),
     },
     smartObjects: { saveContent: value => calls.smartSaves.push(value) },
-    recovery: { queueRecovery: options => calls.recoveries.push(options) },
-    view: { fitToView: () => { calls.fits += 1; } },
+    recovery: {
+      queueRecovery: options => {
+        calls.recoveries.push(options);
+        calls.publicationOrder.push('queueRecovery');
+      },
+    },
+    view: {
+      fitToView: () => {
+        calls.fits += 1;
+        calls.publicationOrder.push('fitToView');
+      },
+    },
     ui: {
-      setStatus: message => calls.statuses.push(message),
-      toast: (message, tone) => calls.toasts.push([message, tone]),
+      setStatus: message => {
+        calls.statuses.push(message);
+        calls.publicationOrder.push('setStatus');
+      },
+      toast: (message, tone) => {
+        calls.toasts.push([message, tone]);
+        calls.publicationOrder.push('toast');
+      },
       alertUser: message => calls.alerts.push(message),
       consoleRef: { error: error => calls.errors.push(error) },
     },
@@ -104,6 +132,15 @@ test('open prepares and sanitizes before one successful publication', async () =
   assert.equal(harness.calls.fits, 1);
   assert.deepEqual(harness.calls.statuses, ['Проект открыт']);
   assert.deepEqual(harness.calls.toasts, [['Открыт проект: demo.zpe', 'success']]);
+  assert.deepEqual(harness.calls.publicationOrder, [
+    'replaceHistory',
+    'setDocument',
+    'markDirty',
+    'queueRecovery',
+    'fitToView',
+    'setStatus',
+    'toast',
+  ]);
 });
 
 for (const [name, mutate] of [
@@ -124,6 +161,118 @@ for (const [name, mutate] of [
     assert.deepEqual(harness.calls.toasts.at(-1), ['Повторите открытие проекта в нужной вкладке', 'warn']);
   });
 }
+
+
+test('newer authorized open supersedes an older open before older parsing or publication', async () => {
+  const reads = new Map([
+    ['old.zpe', deferred()],
+    ['new.zpe', deferred()],
+  ]);
+  let sanitized = 0;
+  const harness = makeHarness({
+    readFileAsText: file => reads.get(file.name).promise,
+    sanitizeProject: value => { sanitized += 1; return value; },
+  });
+
+  const oldOpen = harness.controller.openProject({ name:'old.zpe' });
+  const newOpen = harness.controller.openProject({ name:'new.zpe' });
+  reads.get('old.zpe').resolve('{"name":"Old","layers":[]}');
+  await oldOpen;
+
+  assert.equal(sanitized, 0);
+  assertNoOpenPublication(harness.calls);
+  assert.deepEqual(harness.calls.statuses, []);
+  assert.deepEqual(harness.calls.toasts, []);
+
+  reads.get('new.zpe').resolve('{"name":"New","layers":[]}');
+  await newOpen;
+
+  assert.equal(sanitized, 1);
+  assert.equal(harness.state.doc.name, 'New');
+  assert.equal(harness.calls.documents.length, 1);
+  assert.deepEqual(harness.calls.statuses, ['Проект открыт']);
+  assert.deepEqual(harness.calls.toasts, [['Открыт проект: new.zpe', 'success']]);
+});
+
+test('older open stays silent when it resolves after newer open already published', async () => {
+  const reads = new Map([
+    ['old.zpe', deferred()],
+    ['new.zpe', deferred()],
+  ]);
+  const harness = makeHarness({ readFileAsText: file => reads.get(file.name).promise });
+
+  const oldOpen = harness.controller.openProject({ name:'old.zpe' });
+  const newOpen = harness.controller.openProject({ name:'new.zpe' });
+  reads.get('new.zpe').resolve('{"name":"New","layers":[]}');
+  await newOpen;
+
+  const published = {
+    doc: harness.state.doc,
+    historyResets: harness.calls.historyResets,
+    documents: harness.calls.documents.length,
+    dirty: [...harness.calls.dirty],
+    recoveries: [...harness.calls.recoveries],
+    fits: harness.calls.fits,
+    statuses: [...harness.calls.statuses],
+    toasts: [...harness.calls.toasts],
+  };
+
+  reads.get('old.zpe').resolve('{"name":"Old","layers":[]}');
+  await oldOpen;
+
+  assert.equal(harness.state.doc, published.doc);
+  assert.equal(harness.calls.historyResets, published.historyResets);
+  assert.equal(harness.calls.documents.length, published.documents);
+  assert.deepEqual(harness.calls.dirty, published.dirty);
+  assert.deepEqual(harness.calls.recoveries, published.recoveries);
+  assert.equal(harness.calls.fits, published.fits);
+  assert.deepEqual(harness.calls.statuses, published.statuses);
+  assert.deepEqual(harness.calls.toasts, published.toasts);
+});
+
+test('superseded open read failure stays silent after a newer open claims authority', async () => {
+  const reads = new Map([
+    ['old.zpe', deferred()],
+    ['new.zpe', deferred()],
+  ]);
+  const harness = makeHarness({ readFileAsText: file => reads.get(file.name).promise });
+
+  const oldOpen = harness.controller.openProject({ name:'old.zpe' });
+  const newOpen = harness.controller.openProject({ name:'new.zpe' });
+  reads.get('old.zpe').reject(new Error('old read failed'));
+  await oldOpen;
+
+  assertNoOpenPublication(harness.calls);
+  assert.deepEqual(harness.calls.alerts, []);
+  assert.deepEqual(harness.calls.errors, []);
+  assert.deepEqual(harness.calls.statuses, []);
+  assert.deepEqual(harness.calls.toasts, []);
+
+  reads.get('new.zpe').resolve('{"name":"New","layers":[]}');
+  await newOpen;
+  assert.equal(harness.state.doc.name, 'New');
+  assert.deepEqual(harness.calls.statuses, ['Проект открыт']);
+});
+
+test('blocked newer open does not supersede an already-authorized older open', async () => {
+  const oldRead = deferred();
+  const harness = makeHarness({
+    readFileAsText: () => oldRead.promise,
+    pendingChecks: [false, true, false],
+  });
+
+  const oldOpen = harness.controller.openProject({ name:'old.zpe' });
+  await harness.controller.openProject({ name:'blocked-new.zpe' });
+  assert.equal(harness.calls.reads, 1);
+
+  oldRead.resolve('{"name":"Old","layers":[]}');
+  await oldOpen;
+
+  assert.equal(harness.state.doc.name, 'Old');
+  assert.equal(harness.calls.documents.length, 1);
+  assert.deepEqual(harness.calls.statuses, ['Проект открыт']);
+  assert.deepEqual(harness.calls.toasts, [['Открыт проект: old.zpe', 'success']]);
+});
 
 test('open is blocked before reading when an edit is pending', async () => {
   const harness = makeHarness({ pendingChecks:[true] });

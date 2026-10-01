@@ -14,16 +14,24 @@
 
 ## Open transaction
 
-Native project open следует prepare-before-publish:
+Native project open следует prepare-before-publish и использует две независимые authority:
 
 1. Preflight: pending persisted edit блокирует команду; `canReplaceDocument()` должен разрешить замену.
 2. До первого await захватить exact document object, active session id, current history-entry object и `documentChangeSerial`.
-3. Без mutation: прочитать текст, `JSON.parse`, затем `sanitizeProject`.
-4. После await повторно проверить все четыре owner tokens.
-5. Снова проверить pending-edit guard.
-6. Publish once: заменить history owner, установить sanitized document с reset history, `markDirty(false)`, immediate recovery, fit-to-view, затем success status/toast.
+3. Только после успешного preflight присвоить команде новый controller-local monotonic open generation. Заблокированная/отклонённая более новая попытка не отменяет уже авторизованное старое открытие.
+4. Прочитать текст без mutation.
+5. Сразу после async read проверить generation. Superseded continuation завершается тихо до `JSON.parse` / `sanitizeProject` и до любой UI/error publication.
+6. Выполнить `JSON.parse` и `sanitizeProject`, затем отдельно доказать все четыре exact-owner tokens.
+7. Снова проверить pending-edit guard.
+8. Publish once, без await внутри publication region: заменить history owner, установить sanitized document с reset history, `markDirty(false)`, immediate recovery, fit-to-view, затем success status/toast.
 
-Ошибка чтения/JSON/sanitization и любой stale outcome не должны частично менять document/history/dirty/recovery/view.
+Обычная ошибка чтения/JSON/sanitization и exact-owner stale outcome не должны частично менять document/history/dirty/recovery/view. Ошибка уже superseded команды дополнительно не публикует alert/status/toast/error log, чтобы старый результат не перетёр feedback более нового намерения. Если в будущем между финальной authority-проверкой и первой записью появится await, после него нужно повторно проверить и generation, и exact-owner ticket.
+
+## Почему generation и exact-owner ticket нужны одновременно
+
+Generation отвечает на вопрос «эта ли команда является последним авторизованным открытием?». Exact document/session/history/change-serial ticket отвечает на другой вопрос: «то ли состояние редактора, которое разрешило эту команду, всё ещё активно?». Два открытия могут иметь одинаковый exact ticket, поэтому ticket не заменяет generation; generation, наоборот, не доказывает неизменность документа.
+
+`readFileAsText` не принимает AbortSignal, поэтому здесь generation — корректный discard/ownership protocol, а не фиктивная физическая cancellation. AbortController следует добавлять только если конкретный IO primitive реально поддерживает signal.
 
 ## Почему history entry и change serial нужны одновременно
 

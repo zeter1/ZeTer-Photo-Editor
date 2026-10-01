@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-01 — Make overlapping native .zpe opens latest-authorized-wins
+
+- Bug fix: two overlapping native project opens against the same document/session/history/change epoch now publish only the newest command that actually passed pending-edit and replacement preflight.
+- Authority model: `src/document/project-controller.js` now combines a controller-local monotonic open generation with the existing exact document/session/history/change-serial ticket; blocked newer attempts do not cancel an already-authorized older open.
+- UI/error safety: superseded reads and superseded read failures exit silently before parse/sanitize or feedback publication, so an older command cannot replace a newer project or overwrite its success/stale/error UI and logs.
+- Tests/docs: deterministic deferred regressions cover both completion orders, superseded failure, rejected-newer preservation and exact success side-effect order; the native IO spec and AI routing now document the dual-authority rule.
+
 ### 2026-10-01 — Make overlapping PSD/PSB imports latest-authorized-wins
 
 - Bug fix: when two PSD/PSB opens overlap against the same document/session/history/change epoch, only the newest import that successfully passed replacement/file preflight may continue to publication.
