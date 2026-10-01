@@ -798,6 +798,9 @@ const psdImportSemantics = createPsdImportSemantics({
 const newDocumentController = createNewDocumentController({
   documentState: {
     isDirty: () => dirty,
+    getDocument: () => doc,
+    getActiveSessionId: () => activeSessionId,
+    getDocumentChangeSerial: () => documentChangeSerial,
     blockPendingDocumentEdit,
     replaceHistory: () => { history = new HistoryStack(80); },
     setDocument: setDoc,

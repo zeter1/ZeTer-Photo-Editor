@@ -19589,6 +19589,7 @@ function createSelectionClipboardController({
 
 // ---- src/document/new-document-controller.js ----
 const DISCARD_CONFIRM_MESSAGE = 'В документе есть несохранённые изменения. Продолжить без сохранения?';
+const STALE_DOCUMENT_MESSAGE = 'Новый документ не создан: активный документ изменился';
 
 function requirePort(value, label) {
   if (typeof value !== 'function') throw new TypeError(`new document ${label} bridge is required`);
@@ -19604,6 +19605,9 @@ function requirePort(value, label) {
 function createNewDocumentController({
   documentState: {
     isDirty,
+    getDocument,
+    getActiveSessionId,
+    getDocumentChangeSerial,
     blockPendingDocumentEdit,
     replaceHistory,
     setDocument,
@@ -19620,6 +19624,9 @@ function createNewDocumentController({
   } = {},
 } = {}) {
   requirePort(isDirty, 'dirty-state');
+  requirePort(getDocument, 'document-owner');
+  requirePort(getActiveSessionId, 'session-owner');
+  requirePort(getDocumentChangeSerial, 'change-serial');
   requirePort(blockPendingDocumentEdit, 'pending-edit');
   requirePort(replaceHistory, 'history-replacement');
   requirePort(setDocument, 'document-publication');
@@ -19636,9 +19643,33 @@ function createNewDocumentController({
     return !isDirty() || confirmDiscard(DISCARD_CONFIRM_MESSAGE);
   }
 
+  function captureReplacementAuthority() {
+    return {
+      documentValue: getDocument(),
+      sessionId: getActiveSessionId(),
+      changeSerial: getDocumentChangeSerial(),
+      dirty: isDirty(),
+    };
+  }
+
+  function replacementOwnerIsCurrent(authority) {
+    return getDocument() === authority.documentValue && getActiveSessionId() === authority.sessionId;
+  }
+
+  function needsFreshDiscardConfirmation(authority) {
+    return isDirty() && (!authority.dirty || getDocumentChangeSerial() !== authority.changeSerial);
+  }
+
+  function rejectStaleReplacementOwner() {
+    setStatus(STALE_DOCUMENT_MESSAGE);
+    toast(STALE_DOCUMENT_MESSAGE, 'warn');
+    return false;
+  }
+
   async function open() {
     if (blockPendingDocumentEdit()) return;
     if (!canReplaceDocument()) return;
+    const authority = captureReplacementAuthority();
     showModal({
       title: 'Новый документ',
       fields: [
@@ -19660,6 +19691,8 @@ function createNewDocumentController({
       submitLabel: 'Создать',
       onSubmit: async values => {
         if (blockPendingDocumentEdit()) return false;
+        if (!replacementOwnerIsCurrent(authority)) return rejectStaleReplacementOwner();
+        if (needsFreshDiscardConfirmation(authority) && !confirmDiscard(DISCARD_CONFIRM_MESSAGE)) return false;
         try {
           const next = createDocument({
             name: values.name || 'Без имени',
@@ -26206,6 +26239,9 @@ const psdImportSemantics = createPsdImportSemantics({
 const newDocumentController = createNewDocumentController({
   documentState: {
     isDirty: () => dirty,
+    getDocument: () => doc,
+    getActiveSessionId: () => activeSessionId,
+    getDocumentChangeSerial: () => documentChangeSerial,
     blockPendingDocumentEdit,
     replaceHistory: () => { history = new HistoryStack(80); },
     setDocument: setDoc,
