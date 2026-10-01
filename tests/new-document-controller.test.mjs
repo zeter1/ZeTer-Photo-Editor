@@ -3,21 +3,32 @@ import assert from 'node:assert/strict';
 import { createNewDocumentController } from '../src/document/new-document-controller.js';
 
 const CONFIRM_TEXT = 'В документе есть несохранённые изменения. Продолжить без сохранения?';
+const STALE_TEXT = 'Новый документ не создан: активный документ изменился';
 
 function makeHarness({
   dirty = false,
   pendingChecks = [],
   confirmResult = true,
+  confirmResults = null,
   factory = values => ({ id: 'new-doc', ...values }),
 } = {}) {
-  const state = { dirty };
+  const state = {
+    dirty,
+    documentValue: { id: 'doc-a' },
+    sessionId: 'session-a',
+    changeSerial: 0,
+  };
   const calls = { confirms: [], factory: [], toasts: [], statuses: [] };
   const events = [];
   let pendingIndex = 0;
+  let confirmIndex = 0;
   let modal = null;
   const controller = createNewDocumentController({
     documentState: {
       isDirty: () => state.dirty,
+      getDocument: () => state.documentValue,
+      getActiveSessionId: () => state.sessionId,
+      getDocumentChangeSerial: () => state.changeSerial,
       blockPendingDocumentEdit: () => Boolean(pendingChecks[pendingIndex++]),
       replaceHistory: () => events.push('history'),
       setDocument: (documentValue, options) => events.push(['document', documentValue, options]),
@@ -34,13 +45,19 @@ function makeHarness({
     view: { fitToView: () => events.push('fit') },
     ui: {
       showModal: options => { modal = options; },
-      confirmDiscard: message => { calls.confirms.push(message); return confirmResult; },
+      confirmDiscard: message => {
+        calls.confirms.push(message);
+        if (confirmResults) return confirmResults[confirmIndex++];
+        return confirmResult;
+      },
       setStatus: message => calls.statuses.push(message),
       toast: (message, tone) => calls.toasts.push([message, tone]),
     },
   });
   return { controller, state, calls, events, getModal: () => modal };
 }
+
+const values = { name: 'X', width: '100', height: '100', background: 'transparent' };
 
 test('required bridges fail fast', () => {
   assert.throws(() => createNewDocumentController(), /new document dirty-state bridge is required/);
@@ -89,15 +106,68 @@ test('modal schema preserves exact defaults and choices', async () => {
 test('submit repeats pending guard and publishes nothing when blocked', async () => {
   const h = makeHarness({ pendingChecks: [false, true] });
   await h.controller.open();
-  assert.equal(await h.getModal().onSubmit({ name: 'X', width: '100', height: '100', background: 'transparent' }), false);
+  assert.equal(await h.getModal().onSubmit(values), false);
   assert.deepEqual(h.calls.factory, []);
   assert.deepEqual(h.events, []);
 });
 
-test('success forwards canonical values, name fallback and ordered publication', async () => {
+test('clean at open requires fresh confirmation for a later dirty epoch', async () => {
+  const h = makeHarness({ pendingChecks: [false, false], confirmResult: false });
+  await h.controller.open();
+  h.state.dirty = true;
+  h.state.changeSerial += 1;
+  assert.equal(await h.getModal().onSubmit(values), false);
+  assert.deepEqual(h.calls.confirms, [CONFIRM_TEXT]);
+  assert.deepEqual(h.calls.factory, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('already-confirmed dirty state is not confirmed twice without a new epoch', async () => {
+  const h = makeHarness({ dirty: true, pendingChecks: [false, false], confirmResult: true });
+  await h.controller.open();
+  assert.equal(await h.getModal().onSubmit(values), undefined);
+  assert.deepEqual(h.calls.confirms, [CONFIRM_TEXT]);
+  assert.equal(h.calls.factory.length, 1);
+});
+
+test('already-confirmed dirty state requires fresh confirmation after a new epoch', async () => {
+  const h = makeHarness({ dirty: true, pendingChecks: [false, false], confirmResults: [true, false] });
+  await h.controller.open();
+  h.state.changeSerial += 1;
+  assert.equal(await h.getModal().onSubmit(values), false);
+  assert.deepEqual(h.calls.confirms, [CONFIRM_TEXT, CONFIRM_TEXT]);
+  assert.deepEqual(h.calls.factory, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('stale document owner cannot redirect New publication', async () => {
   const h = makeHarness({ pendingChecks: [false, false] });
   await h.controller.open();
+  h.state.documentValue = { id: 'doc-b' };
+  h.state.sessionId = 'session-b';
+  assert.equal(await h.getModal().onSubmit(values), false);
+  assert.deepEqual(h.calls.factory, []);
+  assert.deepEqual(h.events, []);
+  assert.deepEqual(h.calls.statuses, [STALE_TEXT]);
+  assert.deepEqual(h.calls.toasts, [[STALE_TEXT, 'warn']]);
+});
+
+test('same document object in another session is still a stale owner', async () => {
+  const h = makeHarness({ pendingChecks: [false, false] });
+  await h.controller.open();
+  h.state.sessionId = 'session-b';
+  assert.equal(await h.getModal().onSubmit(values), false);
+  assert.deepEqual(h.calls.factory, []);
+  assert.deepEqual(h.events, []);
+});
+
+test('late dirty confirmation can authorize the current epoch and preserve publication order', async () => {
+  const h = makeHarness({ pendingChecks: [false, false], confirmResult: true });
+  await h.controller.open();
+  h.state.dirty = true;
+  h.state.changeSerial += 1;
   assert.equal(await h.getModal().onSubmit({ name: '', width: '640', height: '480', background: '#ffffff' }), undefined);
+  assert.deepEqual(h.calls.confirms, [CONFIRM_TEXT]);
   assert.deepEqual(h.calls.factory, [{ name: 'Без имени', width: 640, height: 480, background: '#ffffff' }]);
   assert.equal(h.events[0], 'factory');
   assert.equal(h.events[1], 'history');
