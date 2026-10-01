@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-01 — Contain Smart Object conversion preparation failures
+
+- Bug fix: accepted **Convert to Smart Object** commands now catch synchronous preparation failures (including source-bounds 48 MP safety rejection) inside the controller instead of leaking a rejected Promise through fire-and-forget menu callers.
+- Publication safety: failed preparation leaves the source layer, selection and history untouched while preserving the existing diagnostic error/status/toast path; the canvas safety limit is unchanged.
+- Authority ordering: Convert claims its monotonic generation only after snapshot/bounds validation, embedded-document construction and clone normalization succeed, so a newer failed preparation cannot revoke an older already-authorized conversion.
+- Tests/docs/build: deterministic regressions cover direct canvas-budget failure and older-authorized/newer-failed overlap; AI-facing boundary/codemap/test routing and canonical file:// generated artifacts are synchronized.
+
 ### 2026-10-01 — Make overlapping Smart Object conversions latest-authorized-wins
 
 - Bug fix: overlapping **Convert to Smart Object** commands now let only the newest conversion that passed target/type/lock/nesting/source-bounds preflight publish after asynchronous preview rendering.
