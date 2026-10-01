@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-01 — Harden Saved Path rename ownership
+
+- Bug fix: Rename Saved Path now binds the delayed modal intent to the exact originating document instead of re-reading the active tab by numeric index at submit time, preventing a stale dialog from renaming another document's path.
+- Target integrity: valid Photoshop path resource IDs are used to survive list reordering, but mutation additionally requires the exact original path object; removed or same-ID replacement targets fail closed, while sanitized ID-less paths use exact object identity as the fallback.
+- History safety: stale, empty, same-name, removed and replaced targets publish no `Переименовать контур` history entry; a real same-owner rename still trims/caps the name and commits exactly once.
+- Tests/docs/build: focused PathsController regressions cover normal rename, tab switch, reorder, same-ID replacement and ID-less fallback; AI ownership maps and test routing document delayed modal callbacks as origin-bound commands.
+
 
 ### 2026-10-01 — Extract History panel renderer
 

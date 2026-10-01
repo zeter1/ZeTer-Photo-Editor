@@ -140,7 +140,7 @@ test('panel rendering keeps option semantics, keyboard selection, context menu a
   assert.equal(typeof controls.delete.onclick,'function');
 });
 
-test('rename modal mutates the selected saved path through the controller boundary',()=>{
+test('rename modal preserves trim, cap, no-op and exact history semantics',()=>{
   const doc={paths:[savedPath('Old',2000)]};
   let modal=null;const commits=[];
   const controller=createPathsController({
@@ -150,7 +150,90 @@ test('rename modal mutates the selected saved path through the controller bounda
   controller.setSelectedIndex(0);
   assert.equal(controller.renameSelectedDocumentPath(),true);
   assert.equal(modal.title,'Переименовать контур');
-  assert.equal(modal.onSubmit({name:'  New name  '}),true);
-  assert.equal(doc.paths[0].name,'New name');
+
+  assert.equal(modal.onSubmit({name:'   '}),false);
+  assert.equal(modal.onSubmit({name:'  Old  '}),false);
+  assert.deepEqual(commits,[]);
+
+  const longName='N'.repeat(250);
+  assert.equal(modal.onSubmit({name:`  ${longName}  `}),true);
+  assert.equal(doc.paths[0].name,longName.slice(0,240));
+  assert.deepEqual(commits,['Переименовать контур']);
+});
+
+test('rename modal rejects a stale document owner instead of redirecting by numeric index',()=>{
+  const docA={paths:[savedPath('A path',2000)]};
+  const docB={paths:[savedPath('B path',2000)]};
+  let activeDoc=docA,modal=null;const commits=[];
+  const controller=createPathsController({
+    state:{getDocument:()=>activeDoc,commit:label=>commits.push(label)},
+    ui:{showModal:value=>{modal=value;}},
+  });
+  controller.setSelectedIndex(0);
+  assert.equal(controller.renameSelectedDocumentPath(),true);
+
+  activeDoc=docB;
+  assert.equal(modal.onSubmit({name:'Wrong target'}),false);
+  assert.equal(docA.paths[0].name,'A path');
+  assert.equal(docB.paths[0].name,'B path');
+  assert.deepEqual(commits,[]);
+});
+
+test('rename modal follows the same exact Saved Path across reordering by stable ID and object identity',()=>{
+  const other=savedPath('Other',2000);
+  const target=savedPath('Target',2001);
+  const doc={paths:[other,target]};
+  let modal=null;const commits=[];
+  const controller=createPathsController({
+    state:{getDocument:()=>doc,commit:label=>commits.push(label)},
+    ui:{showModal:value=>{modal=value;}},
+  });
+  controller.setSelectedIndex(1);
+  assert.equal(controller.renameSelectedDocumentPath(),true);
+
+  doc.paths=[target,other];
+  assert.equal(modal.onSubmit({name:'Renamed'}),true);
+  assert.equal(target.name,'Renamed');
+  assert.equal(other.name,'Other');
+  assert.equal(controller.getSelectedIndex(),0);
+  assert.deepEqual(commits,['Переименовать контур']);
+});
+
+test('rename modal rejects a removed or same-ID replacement target',()=>{
+  const original=savedPath('Original',2000);
+  const replacement=savedPath('Replacement',2000);
+  const doc={paths:[original]};
+  let modal=null;const commits=[];
+  const controller=createPathsController({
+    state:{getDocument:()=>doc,commit:label=>commits.push(label)},
+    ui:{showModal:value=>{modal=value;}},
+  });
+  controller.setSelectedIndex(0);
+  assert.equal(controller.renameSelectedDocumentPath(),true);
+
+  doc.paths[0]=replacement;
+  assert.equal(modal.onSubmit({name:'Must not apply'}),false);
+  assert.equal(original.name,'Original');
+  assert.equal(replacement.name,'Replacement');
+  assert.deepEqual(commits,[]);
+});
+
+test('rename modal falls back to exact object identity when a sanitized Saved Path has no stable resource ID',()=>{
+  const target=savedPath('No ID',null);
+  const other=savedPath('Other',2000);
+  const doc={paths:[target,other]};
+  let modal=null;const commits=[];
+  const controller=createPathsController({
+    state:{getDocument:()=>doc,commit:label=>commits.push(label)},
+    ui:{showModal:value=>{modal=value;}},
+  });
+  controller.setSelectedIndex(0);
+  assert.equal(controller.renameSelectedDocumentPath(),true);
+
+  doc.paths=[other,target];
+  assert.equal(modal.onSubmit({name:'Exact fallback'}),true);
+  assert.equal(target.name,'Exact fallback');
+  assert.equal(other.name,'Other');
+  assert.equal(controller.getSelectedIndex(),1);
   assert.deepEqual(commits,['Переименовать контур']);
 });

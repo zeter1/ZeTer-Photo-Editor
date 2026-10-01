@@ -1602,19 +1602,29 @@ function createPathsController({
   }
 
   function renameSelectedDocumentPath() {
+    const owner = documentValue();
     const path = selectedPath();
-    if (!path) return false;
-    const targetIndex = selectedIndex;
+    if (!owner || !path) return false;
+    const targetId = Number.isInteger(path.id)
+      && path.id >= SAVED_PATH_RESOURCE_MIN
+      && path.id <= SAVED_PATH_RESOURCE_MAX
+      ? path.id
+      : null;
     showModal({
       title: 'Переименовать контур',
       fields: [{ name:'name', label:'Имя', value:path.name || 'Контур', required:true }],
       submitLabel: 'Переименовать',
       onSubmit: values => {
-        const target = paths()[targetIndex];
+        if (documentValue() !== owner) return false;
+        const list = Array.isArray(owner.paths) ? owner.paths : [];
+        const target = targetId === null
+          ? list.find(item => item === path)
+          : list.find(item => item?.id === targetId);
+        if (target !== path) return false;
         const name = String(values.name || '').trim().slice(0, 240);
-        if (!target || !name || name === target.name) return false;
+        if (!name || name === target.name) return false;
         target.name = name;
-        selectedIndex = targetIndex;
+        selectedIndex = list.indexOf(target);
         commit('Переименовать контур');
         return true;
       },
