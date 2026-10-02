@@ -1,0 +1,96 @@
+# Smart Object lifecycle and async authority
+
+Этот документ — узкая спецификация для AI/Codex по Smart Object lifecycle. Он позволяет не восстанавливать временные инварианты из большого controller и не смешивать обычную layer identity, ZPE linked identity и Photoshop native source identity.
+
+## Карта владельцев
+
+- `src/document/smart-object-controller.js` — convert/open/save/link/unlink, content-tab lifecycle, shared-source propagation и command authority.
+- `src/document/psd-smart-object-resource.js` — prepare/publish Photoshop embedded/linked resource rewrite.
+- `src/document/psd-export-controller.js` + `src/formats/psd.js` — PSD/PSB mapping и binary codec.
+- `src/core/state.js` — canonical Smart Object schema, snapshot/restore и reusable layer helpers.
+- `src/document/project-controller.js` — Ctrl+S routing: content-tab делегирует Save Smart Object controller.
+- `src/workspace/session-controller.js` — document/content sessions; Smart Object controller получает session operations только через narrow ports.
+
+## Три вида parent/source identity
+
+После async boundary одного layer ID недостаточно.
+
+1. Обычный unshared ZPE Smart Object авторизуется exact object identity: найденный parent обязан быть тем же объектом `layer === parentLayer`.
+2. ZPE linked instances авторизуются canonical `linkedSourceId`: конкретный экземпляр может измениться, пока общий source identity остаётся тем же.
+3. Photoshop Smart Objects авторизуются native source identity (`psdSmartObject.uniqueId` через injected Photoshop ports).
+
+Stable ID подходит для lookup, но не является ownership proof, если domain contract не объявляет его canonical source identity.
+
+## Convert transaction
+
+Convert и Save имеют независимые monotonic generations и не должны взаимно supersede друг друга.
+
+Convert:
+1. выполняет pending/type/effective-lock/nesting preflight;
+2. выполняет synchronous bounds + embedded-document preparation внутри собственного error boundary;
+3. только после успешной preparation получает новый convert generation;
+4. пересекает preview-render await;
+5. сначала проверяет generation, затем exact document/session/source object/state;
+6. публикует замену слоя и history только после этих проверок.
+
+Новая попытка, отклонённая до generation claim, не отбирает authority у уже ожидающей старой команды. Superseded continuation полностью тихая.
+
+## Save transaction
+
+Save использует prepare-before-publish и две независимые authority: latest-authorized generation и exact live editor/source state.
+
+Порядок:
+1. pending-edit guard;
+2. sync content session;
+3. capture exact child session + serialized content snapshot;
+4. resolve parent; parent должен существовать и быть эффективно разблокирован;
+5. synchronous shared/native target discovery и `restoreDocument(sourceSnapshot)` выполняются внутри controller error boundary;
+6. только после успешной preparation Save получает новый generation;
+7. await preview render;
+8. сначала discard superseded generation; затем verify exact child/session snapshot; заново resolve parent/source identity; **снова вызвать canonical `isLayerLocked` по live parent**;
+9. для Photoshop — await native resource rewrite preparation;
+10. снова discard superseded generation, verify child/session + parent/source identity и **снова вызвать live `isLayerLocked` перед первой destructive publication**;
+11. только после этого разрешены resource publish, target rewrite, preview/content mutation, history, dirty state, recovery, cache invalidation, tab/UI success publication.
+
+## Effective lock — живая publication policy
+
+Lock нельзя захватывать boolean snapshot до await. Пока Promise ожидает, слой или любой ancestor group может стать locked. Поэтому после каждого reorderable Save await controller повторно спрашивает canonical `isLayerLocked(owner.doc, layer)`.
+
+Порядок проверки важен:
+- сначала generation: superseded continuation должна остаться полностью тихой;
+- затем exact/source identity: нельзя читать policy у уже чужого replacement;
+- затем live effective lock;
+- затем downstream await либо destructive publication.
+
+Если после последней lock-проверки в будущем появится новый reorderable await, lock и остальные authority нужно доказать заново.
+
+Lock-stale outcome — обычное состояние редактора: Save возвращает `false`, показывает существующее warning-сообщение и не публикует parent/resource/history/dirty/recovery/cache/tab/success state.
+
+## Regression oracles
+
+Главный набор: `tests/smart-object-controller.test.mjs`.
+
+Для async races использовать deferred Promise, а не sleep:
+- overlapping Save: оба completion order;
+- superseded preview/rewrite success и failure;
+- rejected/failed newer preflight/preparation не отзывает старую authority;
+- unshared same-ID replacement обязан fail closed по object identity;
+- lock, появившийся во время preview, отменяет Save до Photoshop rewrite и persisted writes;
+- lock, появившийся во время Photoshop rewrite preparation, отменяет Save до native-resource publication и любых persisted writes.
+
+Связанные regressions: `tests/linked-smart-objects.test.mjs`, `tests/psd-smart-object-resource.test.mjs`, `tests/psd-smart-object-roundtrip.test.mjs`, `tests/psd-export-integration.test.mjs`.
+
+## Не переносить сюда
+
+Binary PSD codec, generic session mechanics, project serialization, renderer implementation и global lock semantics остаются у своих canonical owners. Smart Object controller должен вызывать их через ports, а не дублировать.
+
+## Verification
+
+После изменения Smart Object lifecycle:
+1. focused Smart Object tests;
+2. relevant linked/Photoshop regressions;
+3. `npm run check`;
+4. canonical `npm run build` generated-artifact parity;
+5. `npm run test:browser` для file:// runtime composition;
+6. `git diff --check`;
+7. exact PR-head CI, затем exact merged-main push CI.
