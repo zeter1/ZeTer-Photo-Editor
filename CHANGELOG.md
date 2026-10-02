@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-02 — Revalidate Smart Object Save lock after async preparation
+
+- Bug fix: pending Smart Object content Save now revalidates the parent's **live effective lock** after preview rendering, so locking the layer or an ancestor group while Save is in flight cancels before Photoshop preparation or persisted writes.
+- Photoshop safety: after native embedded-resource preparation Save re-resolves source authority and checks effective lock again before resource publication, target metadata/preview/content mutation, history, dirty/recovery/cache/tab or success feedback.
+- Authority ordering: superseded generations stay silent; live lock is checked only after exact/source-aware parent identity is re-established, so same-ID replacements and shared/native identity semantics remain independent.
+- Tests/docs/build: deterministic deferred regressions cover both preview-time and Photoshop-rewrite-time lock races; a dedicated Smart Object lifecycle spec and canonical file:// generated artifacts are synchronized.
+
 ### 2026-10-02 — Bind unshared Smart Object Save to the exact parent layer
 
 - Bug fix: pending content Save for an ordinary unshared Smart Object can no longer publish into a different Smart Object object that replaces the parent slot with the same layer ID while preview preparation is awaiting.

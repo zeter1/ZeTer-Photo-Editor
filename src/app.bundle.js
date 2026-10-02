@@ -20714,12 +20714,14 @@ function createSmartObjectController({
       toast(message, 'error');
       return false;
     }
-    if (isLayerLocked(parentSession.doc, parentLayer)) {
+    const rejectLockedParent = (owner, layer) => {
+      if (!isLayerLocked(owner.doc, layer)) return false;
       const message = 'Родительский смарт-объект заблокирован: разблокируйте его перед сохранением содержимого';
       setStatus(message);
       toast(message, 'warn');
-      return false;
-    }
+      return true;
+    };
+    if (rejectLockedParent(parentSession, parentLayer)) return false;
 
     let saveStillAuthorized = null;
     try {
@@ -20766,6 +20768,7 @@ function createSmartObjectController({
         setStatus('Обновление смарт-объекта отменено: родитель изменился');
         return false;
       }
+      if (rejectLockedParent(liveParent, liveLayer)) return false;
 
       let photoshopRewrite = null;
       if (photoshopId) {
@@ -20796,6 +20799,7 @@ function createSmartObjectController({
         setStatus('Обновление смарт-объекта отменено: родитель изменился');
         return false;
       }
+      if (photoshopId && rejectLockedParent(publishParent, publishLayer)) return false;
 
       const liveTargets = targetsFor(publishParent.doc, publishLayer);
       if (!liveTargets.length) {
