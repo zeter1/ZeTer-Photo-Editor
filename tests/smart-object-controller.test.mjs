@@ -575,6 +575,74 @@ test('failed newer Smart Object save preparation does not revoke an older author
 });
 
 
+test('Smart Object save rejects a same-ID replacement of an unshared parent layer', async () => {
+  const preview = deferred();
+  const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({
+    name:'Parent',
+    width:10,
+    height:10,
+    previewDataUrl:'data:image/png;base64,ORIGINAL',
+    embeddedDocument:oldEmbedded,
+  });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const childDoc = createDocument({ name:'inside', width:12, height:8 });
+  childDoc.layers = [createRasterLayer({ name:'edit', width:12, height:8 })];
+  const historyCalls = [];
+  const parent = {
+    id:'parent',
+    doc:parentDoc,
+    history:{ push(...args) { historyCalls.push(args); } },
+    dirty:false,
+    smartObjectLink:null,
+  };
+  const child = {
+    id:'child',
+    doc:childDoc,
+    history:{ push() {} },
+    dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:null },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const controller = makeController(state, { renderPreview: () => preview.promise });
+
+  const save = controller.saveContent(child);
+
+  const replacementEmbedded = createDocument({ name:'replacement', width:6, height:6 });
+  const replacement = createSmartObjectLayer({
+    id:parentLayer.id,
+    name:'Replacement',
+    width:6,
+    height:6,
+    previewDataUrl:'data:image/png;base64,REPLACEMENT',
+    embeddedDocument:replacementEmbedded,
+  });
+  parentDoc.layers[0] = replacement;
+
+  preview.resolve('data:image/png;base64,STALE');
+  assert.equal(await save, false);
+
+  assert.equal(parentDoc.layers[0], replacement);
+  assert.equal(replacement.previewDataUrl, 'data:image/png;base64,REPLACEMENT');
+  assert.equal(replacement.embeddedDocument, replacementEmbedded);
+  assert.equal(replacement.width, 6);
+  assert.equal(replacement.height, 6);
+  assert.equal(historyCalls.length, 0);
+  assert.equal(parent.dirty, false);
+  assert.equal(child.dirty, true);
+  assert.equal(state.dirty, true);
+  assert.deepEqual(state.recoveries, []);
+  assert.deepEqual(state.invalidated, []);
+  assert.equal(state.tabsRendered, 0);
+  assert.deepEqual(state.toasts, []);
+  assert.match(state.statuses.at(-1), /Обновление смарт-объекта отменено: родитель изменился/);
+});
+
+
 test('overlapping Smart Object saves let only the latest authorized preview continuation publish', async () => {
   const previews = [deferred(), deferred()];
   let previewIndex = 0;

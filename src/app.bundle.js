@@ -20728,6 +20728,13 @@ function createSmartObjectController({
       const targetsFor = (owner, layer) => linkedSourceId
         ? linkedSmartObjectLayers(owner, linkedSourceId)
         : photoshopId ? findPhotoshopLayers(owner, photoshopId) : [layer];
+      const parentLayerStillAuthoritative = layer => Boolean(layer) && (
+        linkedSourceId
+          ? layer.linkedSourceId === linkedSourceId
+          : photoshopId
+            ? photoshopSourceId(layer) === photoshopId
+            : layer === parentLayer
+      );
       const initialTargets = targetsFor(parentSession.doc, parentLayer);
       const embedded = restoreDocument(sourceSnapshot);
 
@@ -20754,9 +20761,7 @@ function createSmartObjectController({
       });
       if (
         liveParent !== parentSession ||
-        !liveLayer ||
-        (linkedSourceId && liveLayer.linkedSourceId !== linkedSourceId) ||
-        (photoshopId && photoshopSourceId(liveLayer) !== photoshopId)
+        !parentLayerStillAuthoritative(liveLayer)
       ) {
         setStatus('Обновление смарт-объекта отменено: родитель изменился');
         return false;
@@ -20786,9 +20791,7 @@ function createSmartObjectController({
       });
       if (
         publishParent !== parentSession ||
-        !publishLayer ||
-        (linkedSourceId && publishLayer.linkedSourceId !== linkedSourceId) ||
-        (photoshopId && photoshopSourceId(publishLayer) !== photoshopId)
+        !parentLayerStillAuthoritative(publishLayer)
       ) {
         setStatus('Обновление смарт-объекта отменено: родитель изменился');
         return false;

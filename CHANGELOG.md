@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-02 — Bind unshared Smart Object Save to the exact parent layer
+
+- Bug fix: pending content Save for an ordinary unshared Smart Object can no longer publish into a different Smart Object object that replaces the parent slot with the same layer ID while preview preparation is awaiting.
+- Authority model: post-await Save checks now share one source-aware predicate — exact object identity for ordinary unshared Smart Objects, linked-source identity for ZPE linked instances, and Photoshop source identity for native Smart Objects.
+- Publication safety: stale same-ID replacement cancels before preview/content mutation, history, dirty/recovery/cache/tab or success feedback.
+- Tests/docs/build: deterministic replacement regression and AI-facing authority routing are synchronized with the canonical file:// browser artifacts.
+
 ### 2026-10-02 — Contain Smart Object Save preparation failures
 
 - Bug fix: Smart Object content Save now catches synchronous target/embedded-document preparation failures inside the controller instead of leaking a rejected Promise through fire-and-forget save callers.
