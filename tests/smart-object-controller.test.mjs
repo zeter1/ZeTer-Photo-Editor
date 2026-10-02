@@ -455,6 +455,126 @@ test('save propagates a linked source to every instance', async () => {
 });
 
 
+test('Smart Object save contains synchronous embedded-document preparation failure', async () => {
+  const embedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({
+    name:'Parent',
+    width:10,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD',
+    embeddedDocument:embedded,
+  });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const childDoc = createDocument({ name:'inside', width:10, height:10 });
+  childDoc.version = 999;
+  const historyCalls = [];
+  const parent = {
+    id:'parent',
+    doc:parentDoc,
+    history:{ push(...args) { historyCalls.push(args); } },
+    dirty:false,
+    smartObjectLink:null,
+  };
+  const child = {
+    id:'child',
+    doc:childDoc,
+    history:{ push() {} },
+    dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:null },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  let previewCalls = 0;
+  const controller = makeController(state, {
+    renderPreview: async () => {
+      previewCalls += 1;
+      return 'data:image/png;base64,NEW';
+    },
+  });
+
+  assert.equal(await controller.saveContent(child), false);
+  assert.equal(previewCalls, 0);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,OLD');
+  assert.equal(historyCalls.length, 0);
+  assert.deepEqual(state.recoveries, []);
+  assert.equal(state.tabsRendered, 0);
+  assert.equal(parent.dirty, false);
+  assert.equal(child.dirty, true);
+  assert.equal(state.errors.length, 1);
+  assert.match(state.statuses.at(-1), /Ошибка обновления смарт-объекта: Неподдерживаемая версия проекта/);
+  assert.deepEqual(state.toasts.at(-1), ['Не удалось обновить смарт-объект', 'error']);
+});
+
+test('failed newer Smart Object save preparation does not revoke an older authorized save', async () => {
+  const preview = deferred();
+  const embedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({
+    name:'PS',
+    width:10,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD',
+    embeddedDocument:embedded,
+    psdSmartObject:{ uniqueId:'ps-preparation', asset:{ kind:'data' }, baseline:{} },
+  });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const childDoc = createDocument({ name:'inside', width:10, height:10 });
+  const historyCalls = [];
+  const parent = {
+    id:'parent',
+    doc:parentDoc,
+    history:{ push(...args) { historyCalls.push(args); } },
+    dirty:false,
+    smartObjectLink:null,
+  };
+  const child = {
+    id:'child',
+    doc:childDoc,
+    history:{ push() {} },
+    dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:'ps-preparation' },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  let findCalls = 0;
+  const controller = makeController(state, {
+    renderPreview: () => preview.promise,
+    photoshop: {
+      findLayers: (owner, uniqueId) => {
+        findCalls += 1;
+        if (findCalls === 2) throw new Error('target discovery failed');
+        return owner.layers.filter(layer => layer.psdSmartObject?.uniqueId === uniqueId);
+      },
+    },
+  });
+
+  const saveA = controller.saveContent(child);
+  assert.equal(findCalls, 1);
+
+  assert.equal(await controller.saveContent(child), false);
+  assert.equal(findCalls, 2);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,OLD');
+  assert.equal(historyCalls.length, 0);
+  assert.equal(state.errors.length, 1);
+  assert.match(state.statuses.at(-1), /Ошибка обновления смарт-объекта: target discovery failed/);
+
+  preview.resolve('data:image/png;base64,AUTHORIZED');
+  assert.equal(await saveA, true);
+  assert.equal(findCalls, 3);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,AUTHORIZED');
+  assert.equal(historyCalls.length, 1);
+  assert.deepEqual(state.recoveries, [{ immediate:true }]);
+  assert.equal(state.tabsRendered, 1);
+  assert.equal(parent.dirty, true);
+  assert.equal(child.dirty, false);
+});
+
+
 test('overlapping Smart Object saves let only the latest authorized preview continuation publish', async () => {
   const previews = [deferred(), deferred()];
   let previewIndex = 0;

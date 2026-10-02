@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 2026-10-02 — Contain Smart Object Save preparation failures
+
+- Bug fix: Smart Object content Save now catches synchronous target/embedded-document preparation failures inside the controller instead of leaking a rejected Promise through fire-and-forget save callers.
+- Publication safety: failed preparation leaves parent/content documents, history, dirty/recovery/cache state and previews untouched while preserving the existing error/status/toast diagnostics.
+- Authority ordering: Save claims its monotonic generation only after shared/native target discovery and embedded-document restoration succeed, so a newer failed preparation cannot revoke an older already-authorized Save.
+- Tests/docs/build: deterministic regressions cover canonical restore failure and older-authorized/newer-target-discovery failure; AI-facing boundary/codemap/test routing and canonical file:// generated artifacts are synchronized.
+
 ### 2026-10-01 — Contain Smart Object conversion preparation failures
 
 - Bug fix: accepted **Convert to Smart Object** commands now catch synchronous preparation failures (including source-bounds 48 MP safety rejection) inside the controller instead of leaking a rejected Promise through fire-and-forget menu callers.
