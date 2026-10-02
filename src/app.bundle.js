@@ -20721,22 +20721,24 @@ function createSmartObjectController({
       return false;
     }
 
-    const generation = ++saveContentGeneration;
-    const saveStillAuthorized = () => generation === saveContentGeneration;
-    const linkedSourceId = parentLayer.linkedSourceId || null;
-    const photoshopId = photoshopSourceId(parentLayer) || link.photoshopSourceId || null;
-    const targetsFor = (owner, layer) => linkedSourceId
-      ? linkedSmartObjectLayers(owner, linkedSourceId)
-      : photoshopId ? findPhotoshopLayers(owner, photoshopId) : [layer];
-    const initialTargets = targetsFor(parentSession.doc, parentLayer);
-    const embedded = restoreDocument(sourceSnapshot);
-    setStatus(
-      linkedSourceId || photoshopId
-        ? 'Обновление общего источника: ' + initialTargets.length + ' экземпляр(а)…'
-        : 'Обновление смарт-объекта…'
-    );
-
+    let saveStillAuthorized = null;
     try {
+      const linkedSourceId = parentLayer.linkedSourceId || null;
+      const photoshopId = photoshopSourceId(parentLayer) || link.photoshopSourceId || null;
+      const targetsFor = (owner, layer) => linkedSourceId
+        ? linkedSmartObjectLayers(owner, linkedSourceId)
+        : photoshopId ? findPhotoshopLayers(owner, photoshopId) : [layer];
+      const initialTargets = targetsFor(parentSession.doc, parentLayer);
+      const embedded = restoreDocument(sourceSnapshot);
+
+      const generation = ++saveContentGeneration;
+      saveStillAuthorized = () => generation === saveContentGeneration;
+      setStatus(
+        linkedSourceId || photoshopId
+          ? 'Обновление общего источника: ' + initialTargets.length + ' экземпляр(а)…'
+          : 'Обновление смарт-объекта…'
+      );
+
       const previewDataUrl = await renderPreview(embedded);
       if (!saveStillAuthorized()) return false;
       if (!contentStillCurrent()) {
@@ -20869,7 +20871,7 @@ function createSmartObjectController({
       }
       return true;
     } catch (error) {
-      if (!saveStillAuthorized()) return false;
+      if (saveStillAuthorized && !saveStillAuthorized()) return false;
       consoleRef?.error?.(error);
       setStatus('Ошибка обновления смарт-объекта: ' + error.message);
       toast('Не удалось обновить смарт-объект', 'error');
