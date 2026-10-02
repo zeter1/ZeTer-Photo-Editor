@@ -455,6 +455,149 @@ test('save propagates a linked source to every instance', async () => {
 });
 
 
+test('Smart Object save revalidates effective parent lock after preview preparation', async () => {
+  const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({
+    name:'Parent',
+    width:10,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD',
+    embeddedDocument:oldEmbedded,
+  });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const beforeEmbedded = parentLayer.embeddedDocument;
+  const childDoc = createDocument({ name:'inside', width:12, height:8 });
+  childDoc.layers = [createRasterLayer({ name:'edit', width:12, height:8 })];
+  const historyCalls = [];
+  const parent = {
+    id:'parent',
+    doc:parentDoc,
+    history:{ push(...args) { historyCalls.push(args); } },
+    dirty:false,
+    smartObjectLink:null,
+  };
+  const child = {
+    id:'child',
+    doc:childDoc,
+    history:{ push() {} },
+    dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:null },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const preview = deferred();
+  let locked = false;
+  const controller = makeController(state, {
+    renderPreview: () => preview.promise,
+    isLayerLocked: (owner, layer) => owner === parentDoc && layer === parentLayer && locked,
+  });
+
+  const save = controller.saveContent(child);
+  locked = true;
+  preview.resolve('data:image/png;base64,NEW');
+
+  assert.equal(await save, false);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,OLD');
+  assert.equal(parentLayer.embeddedDocument, beforeEmbedded);
+  assert.equal(historyCalls.length, 0);
+  assert.equal(parent.dirty, false);
+  assert.equal(child.dirty, true);
+  assert.equal(state.dirty, true);
+  assert.deepEqual(state.recoveries, []);
+  assert.deepEqual(state.invalidated, []);
+  assert.equal(state.tabsRendered, 0);
+  assert.equal(state.statuses.at(-1), 'Родительский смарт-объект заблокирован: разблокируйте его перед сохранением содержимого');
+  assert.deepEqual(state.toasts.at(-1), [
+    'Родительский смарт-объект заблокирован: разблокируйте его перед сохранением содержимого',
+    'warn',
+  ]);
+  assert.deepEqual(state.errors, []);
+});
+
+test('Photoshop Smart Object save revalidates effective parent lock after native rewrite preparation', async () => {
+  const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
+  const parentLayer = createSmartObjectLayer({
+    name:'Photoshop Parent',
+    width:10,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD',
+    embeddedDocument:oldEmbedded,
+    psdSmartObject:{ uniqueId:'ps-lock-race', asset:{ kind:'data' }, baseline:{} },
+  });
+  const parentDoc = createDocument({ name:'parent', width:40, height:40 });
+  parentDoc.layers = [parentLayer];
+  const beforeEmbedded = parentLayer.embeddedDocument;
+  const childDoc = createDocument({ name:'inside', width:12, height:8 });
+  childDoc.layers = [createRasterLayer({ name:'edit', width:12, height:8 })];
+  const historyCalls = [];
+  const parent = {
+    id:'parent',
+    doc:parentDoc,
+    history:{ push(...args) { historyCalls.push(args); } },
+    dirty:false,
+    smartObjectLink:null,
+  };
+  const child = {
+    id:'child',
+    doc:childDoc,
+    history:{ push() {} },
+    dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:parentLayer.id, linkedSourceId:null, photoshopSourceId:'ps-lock-race' },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const preview = deferred();
+  const rewrite = deferred();
+  let locked = false;
+  let rewriteCalls = 0;
+  let publishCalls = 0;
+  let updateCalls = 0;
+  const controller = makeController(state, {
+    renderPreview: () => preview.promise,
+    isLayerLocked: (owner, layer) => owner === parentDoc && layer === parentLayer && locked,
+    photoshop: {
+      rewriteEmbeddedSource: () => {
+        rewriteCalls += 1;
+        return rewrite.promise;
+      },
+      publishEmbeddedSourceRewrite: () => { publishCalls += 1; },
+      updateTargetAfterRewrite: () => { updateCalls += 1; },
+    },
+  });
+
+  const save = controller.saveContent(child);
+  preview.resolve('data:image/png;base64,NEW');
+  await Promise.resolve();
+  assert.equal(rewriteCalls, 1);
+
+  locked = true;
+  rewrite.resolve({ rewritten:true, type:'PNG', newSize:123 });
+
+  assert.equal(await save, false);
+  assert.equal(publishCalls, 0);
+  assert.equal(updateCalls, 0);
+  assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,OLD');
+  assert.equal(parentLayer.embeddedDocument, beforeEmbedded);
+  assert.equal(historyCalls.length, 0);
+  assert.equal(parent.dirty, false);
+  assert.equal(child.dirty, true);
+  assert.equal(state.dirty, true);
+  assert.deepEqual(state.recoveries, []);
+  assert.deepEqual(state.invalidated, []);
+  assert.equal(state.tabsRendered, 0);
+  assert.equal(state.statuses.at(-1), 'Родительский смарт-объект заблокирован: разблокируйте его перед сохранением содержимого');
+  assert.deepEqual(state.toasts.at(-1), [
+    'Родительский смарт-объект заблокирован: разблокируйте его перед сохранением содержимого',
+    'warn',
+  ]);
+  assert.deepEqual(state.errors, []);
+});
+
 test('Smart Object save contains synchronous embedded-document preparation failure', async () => {
   const embedded = createDocument({ name:'old', width:10, height:10 });
   const parentLayer = createSmartObjectLayer({
