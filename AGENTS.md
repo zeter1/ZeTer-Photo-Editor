@@ -62,6 +62,7 @@
 - какие зависимости допустимы → `docs/architecture/BOUNDARIES.md`
 - как работать AI/Codex → `docs/development/AI_WORKFLOW.md`
 - как делать refactor/debug/review/tests с доказательствами → `docs/development/QUALITY_PLAYBOOK.md`
+- как вести `CHANGELOG.md`, язык, версии и правило без `Unreleased` для `main` → `docs/development/CHANGELOG_GUIDE.md`
 - Smart Object convert/save async authority, source identity и live lock policy → `docs/architecture/SMART_OBJECT_LIFECYCLE.md`
 - export modal / immutable submit snapshot / format routing contract → `docs/architecture/DOCUMENT_EXPORT.md`
 - какие проверки запускать → `docs/testing/TEST_MATRIX.md`
@@ -72,7 +73,7 @@
 
 Сохраняй `file://` запуск на Windows, layer lock, selection boundaries, Undo/Redo, async save/export guards, high-depth/CMYK precision и PSD/PSB round-trip semantics.
 
-После source change: `npm run check`; для startup/DOM/file://: `npm run test:browser`. Любое изменение кода отражай в `CHANGELOG.md`.
+После source change: `npm run check`; для startup/DOM/file://: `npm run test:browser`. Любое изменение кода отражай в `CHANGELOG.md` по правилам `docs/development/CHANGELOG_GUIDE.md`: обычный текст на русском, технические термины можно оставлять на английском, а уже слитые в `main` изменения не помещай в `Unreleased`.
 
 AI object removal and settings ownership: [docs/architecture/AI_OBJECT_REMOVAL.md](docs/architecture/AI_OBJECT_REMOVAL.md). The separate removal tool uses device-only browser LaMa; ordinary native Content-Aware Fill keeps its own contract.
 Brush-guided background removal: [docs/architecture/AI_BACKGROUND_REMOVAL.md](docs/architecture/AI_BACKGROUND_REMOVAL.md). SAM2 treats green/red strokes as foreground/background prompts; never clip to brush bounds. Capture catalog engine before await; keep model caches and settings controls independent of LaMa.
