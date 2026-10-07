@@ -55,6 +55,7 @@ Prefer a bounded diff. Preserve existing behaviour not named by the task. If mov
 - add regression coverage for fixed behaviour;
 - prefer public/controller API tests over VM/source slicing of private function text; keep structural source tests only for architecture ownership contracts;
 - when a change establishes or discovers a reusable behavioral contract, owner split, failure pattern or non-obvious invariant, create or update the smallest targeted specification/pattern document and link it from the navigation map. Do not duplicate code comments into broad prose; document what future AI needs to avoid rediscovery or semantic drift.
+- for any changelog entry, follow `docs/development/CHANGELOG_GUIDE.md`: write ordinary prose/headings in Russian, keep technical names in English when clearer, place merged `main` changes under the current package version, and do not create `Unreleased` for already integrated work.
 
 ## 5. VERIFY
 
@@ -73,12 +74,12 @@ Inspect the final diff for:
 - stale import paths;
 - duplicated owners;
 - changed safety limits;
-- missing changelog;
+- missing or incorrectly structured changelog (`docs/development/CHANGELOG_GUIDE.md`);
 - docs that point at old paths.
 
 ## 7. DELIVER
 
-State what changed, what was actually verified, and any remaining NOT VERIFIED layer. Do not claim stronger verification than the evidence.
+State what changed, what was actually verified, and any remaining NOT VERIFIED layer. Do not claim stronger verification than the evidence. If a source/runtime change was merged, make sure its `CHANGELOG.md` entry describes facts in Russian and matches the current version/CI state.
 
 ## Token-saving search strategy
 
