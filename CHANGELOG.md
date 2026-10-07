@@ -25,6 +25,11 @@
 
 ## Unreleased
 
+### 2026-10-07T19:23:00+03:00 — Atomic lock authority for shared Smart Object Save
+
+- Fixed: Save содержимого связанного ZPE/Photoshop Smart Object теперь проверяет canonical effective lock у каждого live target, а не только у representative. Locked sibling или locked ancestor group отменяет общий Save целиком до resource/layer/history/dirty/recovery публикаций; частичное обновление общего source запрещено.
+- Added: deterministic regressions для pre-existing locked linked sibling, late ancestor lock во время preview и Photoshop sibling lock во время native rewrite preparation. Preflight выполняется до Save generation claim; post-await проверки сохраняют silent superseded semantics.
+
 ### 2026-10-07T16:49:49+03:00 — Раздельные карточки нейросетей в настройках
 
 - Changed: SlimSAM для удаления фона и LaMa для удаления объектов оформлены отдельными карточками с рамками, промежутком, заголовком и названием/размером модели. Описание, состояние и действия установки/удаления находятся внутри собственной карточки; существующие обработчики и ID сохранены.
