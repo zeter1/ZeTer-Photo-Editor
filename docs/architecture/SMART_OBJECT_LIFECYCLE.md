@@ -78,6 +78,9 @@ Lock-stale outcome — обычное состояние редактора: Sav
 - pre-existing effective lock любого linked/native sibling отменяет shared Save до async preparation/generation claim;
 - lock любого sibling/ancestor, появившийся во время preview, отменяет Save до Photoshop rewrite и persisted writes;
 - lock любого Photoshop sibling/ancestor, появившийся во время native rewrite preparation, отменяет Save до native-resource publication и любых persisted writes.
+- linked sibling, удалённый во время preview await, не должен получать stale publication из ранее захваченного массива целей;
+- linked sibling, добавленный во время preview await, обязан войти в следующий live target set и финальную публикацию;
+- Photoshop sibling, добавленный/удалённый во время native rewrite await, учитывается только по финально re-resolved source membership перед resource/target publication.
 
 Связанные regressions: `tests/linked-smart-objects.test.mjs`, `tests/psd-smart-object-resource.test.mjs`, `tests/psd-smart-object-roundtrip.test.mjs`, `tests/psd-export-integration.test.mjs`.
 
