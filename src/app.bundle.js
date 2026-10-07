@@ -21521,14 +21521,16 @@ function createSmartObjectController({
       toast(message, 'error');
       return false;
     }
-    const rejectLockedParent = (owner, layer) => {
-      if (!isLayerLocked(owner.doc, layer)) return false;
-      const message = 'Родительский смарт-объект заблокирован: разблокируйте его перед сохранением содержимого';
+    const rejectLockedTargets = (owner, targets) => {
+      if (!targets.some(target => isLayerLocked(owner.doc, target))) return false;
+      const message = targets.length > 1
+        ? 'Один из экземпляров общего источника смарт-объекта заблокирован: разблокируйте все экземпляры и их группы перед сохранением содержимого'
+        : 'Родительский смарт-объект заблокирован: разблокируйте его перед сохранением содержимого';
       setStatus(message);
       toast(message, 'warn');
       return true;
     };
-    if (rejectLockedParent(parentSession, parentLayer)) return false;
+    if (rejectLockedTargets(parentSession, [parentLayer])) return false;
 
     let saveStillAuthorized = null;
     try {
@@ -21545,6 +21547,7 @@ function createSmartObjectController({
             : layer === parentLayer
       );
       const initialTargets = targetsFor(parentSession.doc, parentLayer);
+      if (rejectLockedTargets(parentSession, initialTargets)) return false;
       const embedded = restoreDocument(sourceSnapshot);
 
       const generation = ++saveContentGeneration;
@@ -21575,7 +21578,12 @@ function createSmartObjectController({
         setStatus('Обновление смарт-объекта отменено: родитель изменился');
         return false;
       }
-      if (rejectLockedParent(liveParent, liveLayer)) return false;
+      const previewTargets = targetsFor(liveParent.doc, liveLayer);
+      if (!previewTargets.length) {
+        setStatus('Обновление смарт-объекта отменено: связанные экземпляры удалены');
+        return false;
+      }
+      if (rejectLockedTargets(liveParent, previewTargets)) return false;
 
       let photoshopRewrite = null;
       if (photoshopId) {
@@ -21606,13 +21614,12 @@ function createSmartObjectController({
         setStatus('Обновление смарт-объекта отменено: родитель изменился');
         return false;
       }
-      if (photoshopId && rejectLockedParent(publishParent, publishLayer)) return false;
-
       const liveTargets = targetsFor(publishParent.doc, publishLayer);
       if (!liveTargets.length) {
         setStatus('Обновление смарт-объекта отменено: связанные экземпляры удалены');
         return false;
       }
+      if (rejectLockedTargets(publishParent, liveTargets)) return false;
       if (photoshopRewrite?.rewritten) {
         publishEmbeddedSourceRewrite(publishParent.doc, photoshopRewrite);
       }
