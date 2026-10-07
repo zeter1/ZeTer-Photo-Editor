@@ -1,5 +1,11 @@
 # 062 — Verify fail-safe final publication for Photoshop Smart Object Save
 
+- **Priority:** P2 — reliability / transaction safety.
+- **Status:** готова к работе.
+- **Evidence:** свежий code review после task 061; риск пока является явно помеченной гипотезой, а не подтверждённым багом.
+- **Source SHA:** `c255c1d8761c83f97b5f2278489941fefed16ab0` (merged task 061; main CI #485 green).
+- **Next action:** воспроизвести или опровергнуть реальную throwability canonical final-publication ports до изменения production-кода.
+
 ## Goal
 
 Determine whether a synchronous exception during the **final Photoshop Smart Object publication region** can leave a partially mutated parent/resource/target state without matching history/dirty/recovery publication, and fix the canonical owner only if the risk is reproducible with realistic production ports.
