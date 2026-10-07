@@ -9,7 +9,7 @@
 3. Task-файл хранит intent/acceptance, но не является source of truth. Текущий код, GitHub, логи, тесты и CI имеют приоритет.
 4. Перед изменением всё равно делай INSPECT → DIAGNOSE; не исполняй старый план механически.
 5. Одна проходка должна оставаться bounded: один связный owner/root cause, его tests/docs и verification. Не смешивай независимые feature/fix/refactor.
-6. Для code change обновляй `CHANGELOG.md`; generated `src/app.bundle.js` меняется только через canonical build graph.
+6. Для code change обновляй `CHANGELOG.md`; для production/runtime change с изменением пользовательского поведения одновременно делай SemVer bump по `docs/development/CHANGELOG_GUIDE.md`; `package.json` — источник версии, а `index.html`/`version.json` синхронизируются canonical build. Generated `src/app.bundle.js` вручную не редактировать.
 7. После PR: дождись CI, разберись с первым failed step по логам, исправь root cause, затем merge. После merge проверь main CI.
 8. **Завершённую задачу удалить из `task/` только после merge + green main CI.** README остаётся.
 9. Если задача стала неактуальной из-за нового кода/решения, удали или перепиши её отдельным docs-only изменением; не сохраняй stale queue.

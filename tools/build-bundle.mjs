@@ -109,6 +109,13 @@ function stripBuildMeta(source) {
   return source.replace(/^  <meta name="application-build" content="[^"]*" \/>\r?\n/m, '');
 }
 
+function stampApplicationVersion(source, version) {
+  const marker = `  <meta name="application-version" content="${version}" />`;
+  const versionMeta = /^  <meta name="application-version" content="[^"]*" \/>$/m;
+  if (!versionMeta.test(source)) throw new Error('application-version meta marker is missing from index.html');
+  return source.replace(versionMeta, marker);
+}
+
 function stampBuildMeta(source, buildId) {
   const marker = `  <meta name="application-build" content="${buildId}" />`;
   if (/^  <meta name="application-build" content="[^"]*" \/>$/m.test(source)) {
@@ -150,9 +157,10 @@ const [indexSource, stylesSource, packageText] = await Promise.all([
   readFile(resolve(root, 'package.json'), 'utf8'),
 ]);
 const packageJson = JSON.parse(packageText);
-const normalizedIndex = stripBuildMeta(indexSource);
+const versionedIndex = stampApplicationVersion(indexSource, packageJson.version);
+const normalizedIndex = stripBuildMeta(versionedIndex);
 const buildId = hashBuild([normalizedIndex, stylesSource, bundle]);
-const stampedIndex = stampBuildMeta(indexSource, buildId);
+const stampedIndex = stampBuildMeta(versionedIndex, buildId);
 const versionManifest = JSON.stringify({ version: packageJson.version, build: buildId }, null, 2) + '\n';
 
 await Promise.all([
