@@ -44,27 +44,27 @@ Save использует prepare-before-publish и две независимы�
 2. sync content session;
 3. capture exact child session + serialized content snapshot;
 4. resolve parent; parent должен существовать и быть эффективно разблокирован;
-5. synchronous shared/native target discovery и `restoreDocument(sourceSnapshot)` выполняются внутри controller error boundary;
+5. synchronous shared/native target discovery выполняется внутри controller error boundary; **каждый target, который общий Save будет менять, должен пройти canonical effective-lock policy**, затем выполняется `restoreDocument(sourceSnapshot)`;
 6. только после успешной preparation Save получает новый generation;
 7. await preview render;
-8. сначала discard superseded generation; затем verify exact child/session snapshot; заново resolve parent/source identity; **снова вызвать canonical `isLayerLocked` по live parent**;
+8. сначала discard superseded generation; затем verify exact child/session snapshot, заново resolve parent/source identity и полный live target set; **повторно вызвать canonical `isLayerLocked` для каждого live target**;
 9. для Photoshop — await native resource rewrite preparation;
-10. снова discard superseded generation, verify child/session + parent/source identity и **снова вызвать live `isLayerLocked` перед первой destructive publication**;
+10. снова discard superseded generation, verify child/session + parent/source identity, заново resolve финальный live target set и **повторно проверить effective lock каждого target перед первой destructive publication**;
 11. только после этого разрешены resource publish, target rewrite, preview/content mutation, history, dirty state, recovery, cache invalidation, tab/UI success publication.
 
 ## Effective lock — живая publication policy
 
-Lock нельзя захватывать boolean snapshot до await. Пока Promise ожидает, слой или любой ancestor group может стать locked. Поэтому после каждого reorderable Save await controller повторно спрашивает canonical `isLayerLocked(owner.doc, layer)`.
+Lock нельзя захватывать boolean snapshot до await. Пока Promise ожидает, любой экземпляр общего source или его ancestor group может стать locked. Shared-source Save — одна атомарная публикация: разблокированный representative не даёт права косвенно менять locked sibling, и частичное обновление только разблокированных экземпляров запрещено.
 
 Порядок проверки важен:
 - сначала generation: superseded continuation должна остаться полностью тихой;
 - затем exact/source identity: нельзя читать policy у уже чужого replacement;
-- затем live effective lock;
+- затем заново получить полный live target set и проверить canonical `isLayerLocked(owner.doc, target)` для **каждого** target;
 - затем downstream await либо destructive publication.
 
-Если после последней lock-проверки в будущем появится новый reorderable await, lock и остальные authority нужно доказать заново.
+До generation claim выполняется такой же all-target lock preflight, чтобы отклонённая новая попытка не отзывала уже авторизованный старый Save. После каждого reorderable Save await полный target set и его locks доказываются заново. Если после последней lock-проверки в будущем появится новый reorderable await, generation, identity, membership и locks нужно доказать ещё раз.
 
-Lock-stale outcome — обычное состояние редактора: Save возвращает `false`, показывает существующее warning-сообщение и не публикует parent/resource/history/dirty/recovery/cache/tab/success state.
+Lock-stale outcome — обычное состояние редактора: Save возвращает `false`, показывает warning и не публикует parent/resource/history/dirty/recovery/cache/tab/success state.
 
 ## Regression oracles
 
@@ -75,8 +75,9 @@ Lock-stale outcome — обычное состояние редактора: Sav
 - superseded preview/rewrite success и failure;
 - rejected/failed newer preflight/preparation не отзывает старую authority;
 - unshared same-ID replacement обязан fail closed по object identity;
-- lock, появившийся во время preview, отменяет Save до Photoshop rewrite и persisted writes;
-- lock, появившийся во время Photoshop rewrite preparation, отменяет Save до native-resource publication и любых persisted writes.
+- pre-existing effective lock любого linked/native sibling отменяет shared Save до async preparation/generation claim;
+- lock любого sibling/ancestor, появившийся во время preview, отменяет Save до Photoshop rewrite и persisted writes;
+- lock любого Photoshop sibling/ancestor, появившийся во время native rewrite preparation, отменяет Save до native-resource publication и любых persisted writes.
 
 Связанные regressions: `tests/linked-smart-objects.test.mjs`, `tests/psd-smart-object-resource.test.mjs`, `tests/psd-smart-object-roundtrip.test.mjs`, `tests/psd-export-integration.test.mjs`.
 

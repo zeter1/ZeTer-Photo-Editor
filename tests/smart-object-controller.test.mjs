@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   createDocument,
+  createLayerGroup,
   createRasterLayer,
   createSmartObjectLayer,
+  isLayerLocked,
 } from '../src/core/state.js';
 import { createSmartObjectController } from '../src/document/smart-object-controller.js';
 
@@ -454,6 +456,116 @@ test('save propagates a linked source to every instance', async () => {
   assert.deepEqual(state.recoveries, [{ immediate:true }]);
 });
 
+test('linked Smart Object save rejects an effectively locked sibling before async preparation', async () => {
+  const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
+  const first = createSmartObjectLayer({
+    name:'A', width:10, height:10, previewDataUrl:'data:image/png;base64,OLD1',
+    embeddedDocument:oldEmbedded, linkedSourceId:'shared-locked',
+  });
+  const second = createSmartObjectLayer({
+    name:'B', width:10, height:10, previewDataUrl:'data:image/png;base64,OLD2',
+    embeddedDocument:oldEmbedded, linkedSourceId:'shared-locked',
+  });
+  const lockedGroup = createLayerGroup({ id:'locked-shared-group', locked:true });
+  second.groupId = lockedGroup.id;
+  const parentDoc = createDocument({ name:'parent', width:100, height:100 });
+  parentDoc.layers = [first, second];
+  parentDoc.groups = [lockedGroup];
+  const childDoc = createDocument({ name:'inside', width:18, height:16 });
+  childDoc.layers = [createRasterLayer({ name:'edit', width:18, height:16 })];
+  const historyCalls = [];
+  const parent = { id:'parent', doc:parentDoc, history:{ push(...args) { historyCalls.push(args); } }, dirty:false, smartObjectLink:null };
+  const child = {
+    id:'child', doc:childDoc, history:{ push() {} }, dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:first.id, linkedSourceId:'shared-locked', photoshopSourceId:null },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const beforeFirstEmbedded = first.embeddedDocument;
+  const beforeSecondEmbedded = second.embeddedDocument;
+  let previewCalls = 0;
+  const controller = makeController(state, {
+    renderPreview: async () => {
+      previewCalls += 1;
+      return 'data:image/png;base64,NEW';
+    },
+    isLayerLocked,
+  });
+
+  assert.equal(await controller.saveContent(child), false);
+  assert.equal(previewCalls, 0);
+  assert.equal(first.previewDataUrl, 'data:image/png;base64,OLD1');
+  assert.equal(second.previewDataUrl, 'data:image/png;base64,OLD2');
+  assert.equal(first.embeddedDocument, beforeFirstEmbedded);
+  assert.equal(second.embeddedDocument, beforeSecondEmbedded);
+  assert.equal(historyCalls.length, 0);
+  assert.equal(parent.dirty, false);
+  assert.equal(child.dirty, true);
+  assert.equal(state.dirty, true);
+  assert.deepEqual(state.recoveries, []);
+  assert.deepEqual(state.invalidated, []);
+  assert.equal(state.tabsRendered, 0);
+  const message = 'Один из экземпляров общего источника смарт-объекта заблокирован: разблокируйте все экземпляры и их группы перед сохранением содержимого';
+  assert.equal(state.statuses.at(-1), message);
+  assert.deepEqual(state.toasts.at(-1), [message, 'warn']);
+  assert.deepEqual(state.errors, []);
+});
+
+test('linked Smart Object save revalidates an ancestor-locked sibling after preview preparation', async () => {
+  const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
+  const first = createSmartObjectLayer({
+    name:'A', width:10, height:10, previewDataUrl:'data:image/png;base64,OLD1',
+    embeddedDocument:oldEmbedded, linkedSourceId:'shared-lock-race',
+  });
+  const second = createSmartObjectLayer({
+    name:'B', width:10, height:10, previewDataUrl:'data:image/png;base64,OLD2',
+    embeddedDocument:oldEmbedded, linkedSourceId:'shared-lock-race',
+  });
+  const siblingGroup = createLayerGroup({ id:'shared-race-group', locked:false });
+  second.groupId = siblingGroup.id;
+  const parentDoc = createDocument({ name:'parent', width:100, height:100 });
+  parentDoc.layers = [first, second];
+  parentDoc.groups = [siblingGroup];
+  const childDoc = createDocument({ name:'inside', width:18, height:16 });
+  childDoc.layers = [createRasterLayer({ name:'edit', width:18, height:16 })];
+  const historyCalls = [];
+  const parent = { id:'parent', doc:parentDoc, history:{ push(...args) { historyCalls.push(args); } }, dirty:false, smartObjectLink:null };
+  const child = {
+    id:'child', doc:childDoc, history:{ push() {} }, dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:first.id, linkedSourceId:'shared-lock-race', photoshopSourceId:null },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const preview = deferred();
+  const beforeFirstEmbedded = first.embeddedDocument;
+  const beforeSecondEmbedded = second.embeddedDocument;
+  const controller = makeController(state, { renderPreview: () => preview.promise, isLayerLocked });
+
+  const save = controller.saveContent(child);
+  siblingGroup.locked = true;
+  preview.resolve('data:image/png;base64,NEW');
+
+  assert.equal(await save, false);
+  assert.equal(first.previewDataUrl, 'data:image/png;base64,OLD1');
+  assert.equal(second.previewDataUrl, 'data:image/png;base64,OLD2');
+  assert.equal(first.embeddedDocument, beforeFirstEmbedded);
+  assert.equal(second.embeddedDocument, beforeSecondEmbedded);
+  assert.equal(historyCalls.length, 0);
+  assert.equal(parent.dirty, false);
+  assert.equal(child.dirty, true);
+  assert.equal(state.dirty, true);
+  assert.deepEqual(state.recoveries, []);
+  assert.deepEqual(state.invalidated, []);
+  assert.equal(state.tabsRendered, 0);
+  const message = 'Один из экземпляров общего источника смарт-объекта заблокирован: разблокируйте все экземпляры и их группы перед сохранением содержимого';
+  assert.equal(state.statuses.at(-1), message);
+  assert.deepEqual(state.toasts.at(-1), [message, 'warn']);
+  assert.deepEqual(state.errors, []);
+});
 
 test('Smart Object save revalidates effective parent lock after preview preparation', async () => {
   const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
@@ -598,6 +710,84 @@ test('Photoshop Smart Object save revalidates effective parent lock after native
   assert.deepEqual(state.errors, []);
 });
 
+test('Photoshop Smart Object save rejects an ancestor-locked sibling after native rewrite preparation', async () => {
+  const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
+  const first = createSmartObjectLayer({
+    name:'PS A', width:20, height:10, previewDataUrl:'data:image/png;base64,OLD1',
+    embeddedDocument:oldEmbedded,
+    psdSmartObject:{ uniqueId:'ps-shared-lock-race', asset:{ kind:'data' }, baseline:{} },
+  });
+  const second = createSmartObjectLayer({
+    name:'PS B', width:30, height:10, previewDataUrl:'data:image/png;base64,OLD2',
+    embeddedDocument:oldEmbedded,
+    psdSmartObject:{ uniqueId:'ps-shared-lock-race', asset:{ kind:'data' }, baseline:{} },
+  });
+  const siblingGroup = createLayerGroup({ id:'ps-shared-race-group', locked:false });
+  second.groupId = siblingGroup.id;
+  const parentDoc = createDocument({ name:'parent', width:100, height:100 });
+  parentDoc.layers = [first, second];
+  parentDoc.groups = [siblingGroup];
+  const childDoc = createDocument({ name:'inside', width:12, height:8 });
+  childDoc.layers = [createRasterLayer({ name:'edit', width:12, height:8 })];
+  const historyCalls = [];
+  const parent = { id:'parent', doc:parentDoc, history:{ push(...args) { historyCalls.push(args); } }, dirty:false, smartObjectLink:null };
+  const child = {
+    id:'child', doc:childDoc, history:{ push() {} }, dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:first.id, linkedSourceId:null, photoshopSourceId:'ps-shared-lock-race' },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const preview = deferred();
+  const rewrite = deferred();
+  const beforeFirstEmbedded = first.embeddedDocument;
+  const beforeSecondEmbedded = second.embeddedDocument;
+  let rewriteCalls = 0;
+  let publishCalls = 0;
+  let updateCalls = 0;
+  const controller = makeController(state, {
+    renderPreview: () => preview.promise,
+    isLayerLocked,
+    photoshop: {
+      rewriteEmbeddedSource: () => {
+        rewriteCalls += 1;
+        return rewrite.promise;
+      },
+      publishEmbeddedSourceRewrite: () => { publishCalls += 1; },
+      updateTargetAfterRewrite: () => { updateCalls += 1; },
+    },
+  });
+
+  const save = controller.saveContent(child);
+  preview.resolve('data:image/png;base64,NEW');
+  await Promise.resolve();
+  assert.equal(rewriteCalls, 1);
+
+  siblingGroup.locked = true;
+  rewrite.resolve({ rewritten:true, type:'PSD', newSize:456 });
+
+  assert.equal(await save, false);
+  assert.equal(publishCalls, 0);
+  assert.equal(updateCalls, 0);
+  assert.equal(first.previewDataUrl, 'data:image/png;base64,OLD1');
+  assert.equal(second.previewDataUrl, 'data:image/png;base64,OLD2');
+  assert.equal(first.embeddedDocument, beforeFirstEmbedded);
+  assert.equal(second.embeddedDocument, beforeSecondEmbedded);
+  assert.equal(historyCalls.length, 0);
+  assert.equal(parent.dirty, false);
+  assert.equal(child.dirty, true);
+  assert.equal(state.dirty, true);
+  assert.deepEqual(state.recoveries, []);
+  assert.deepEqual(state.invalidated, []);
+  assert.equal(state.tabsRendered, 0);
+  assert.deepEqual(parentDoc.psdLinkedLayerBlocks, []);
+  const message = 'Один из экземпляров общего источника смарт-объекта заблокирован: разблокируйте все экземпляры и их группы перед сохранением содержимого';
+  assert.equal(state.statuses.at(-1), message);
+  assert.deepEqual(state.toasts.at(-1), [message, 'warn']);
+  assert.deepEqual(state.errors, []);
+});
+
 test('Smart Object save contains synchronous embedded-document preparation failure', async () => {
   const embedded = createDocument({ name:'old', width:10, height:10 });
   const parentLayer = createSmartObjectLayer({
@@ -708,7 +898,7 @@ test('failed newer Smart Object save preparation does not revoke an older author
 
   preview.resolve('data:image/png;base64,AUTHORIZED');
   assert.equal(await saveA, true);
-  assert.equal(findCalls, 3);
+  assert.equal(findCalls, 4);
   assert.equal(parentLayer.previewDataUrl, 'data:image/png;base64,AUTHORIZED');
   assert.equal(historyCalls.length, 1);
   assert.deepEqual(state.recoveries, [{ immediate:true }]);
