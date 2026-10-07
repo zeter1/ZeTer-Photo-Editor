@@ -1,12 +1,13 @@
 export function createPointerLifecycleRouter({
   target,
+  eventTarget = target,
   shouldStartPointer = () => true,
   onPointerDown = () => {},
   onPointerMove = () => {},
   onPointerUp = () => {},
   onPointerCancel = () => {},
 } = {}) {
-  if (!target || typeof target.addEventListener !== 'function') {
+  if (typeof target?.addEventListener !== 'function' || typeof eventTarget?.addEventListener !== 'function') {
     throw new TypeError('pointer lifecycle target is required');
   }
   if (typeof target.setPointerCapture !== 'function' || typeof target.releasePointerCapture !== 'function') {
@@ -86,10 +87,10 @@ export function createPointerLifecycleRouter({
     return onPointerCancel(event, { reason:'lostpointercapture' });
   }
 
-  target.addEventListener('pointerdown', handlePointerDown);
-  target.addEventListener('pointermove', handlePointerMove);
-  target.addEventListener('pointerup', handlePointerUp);
-  target.addEventListener('pointercancel', handlePointerCancel);
+  eventTarget.addEventListener('pointerdown', handlePointerDown);
+  eventTarget.addEventListener('pointermove', handlePointerMove);
+  eventTarget.addEventListener('pointerup', handlePointerUp);
+  eventTarget.addEventListener('pointercancel', handlePointerCancel);
   target.addEventListener('lostpointercapture', handleLostPointerCapture);
 
   return { isActivePointer, hasActivePointer, releaseActivePointer };

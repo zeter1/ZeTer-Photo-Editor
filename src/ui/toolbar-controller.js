@@ -1,7 +1,8 @@
 import { sanitizeToolOrder, moveToolToIndex, gridCellIndexFromPoint } from './tool-layout.js';
 import { TOOL_LABELS, TOOL_HELP } from './tool-config.js';
 
-export function createToolbarController({ toolbar, setStatus = () => {} } = {}) {
+export function createToolbarController({ toolbar, setStatus = () => {}, onHelpAction = () => {}, getToolHelp = tool => TOOL_HELP[tool] } = {}) {
+  let refreshToolHelp = () => {};
   let dragToolId = '';
   let dropIndex = -1;
   let suppressClick = false;
@@ -179,15 +180,37 @@ export function createToolbarController({ toolbar, setStatus = () => {} } = {}) 
     tooltip.setAttribute('role', 'tooltip');
     tooltip.hidden = true;
     document.body.append(tooltip);
-    const hide = () => { tooltip.hidden = true; };
+    let hideTimer=null,origin=null;
+    const keep=()=>{clearTimeout(hideTimer);hideTimer=null;};
+    const hide=()=>{keep();tooltip.hidden=true;};
+    const leave=()=>{if(!tooltip.dataset.action){hide();return;}keep();hideTimer=setTimeout(()=>{if(!tooltip.contains(document.activeElement))hide();},250);};
+    tooltip.addEventListener('pointerenter',keep);
+    tooltip.addEventListener('pointerleave',leave);
+    tooltip.addEventListener('focusin',keep);
+    tooltip.addEventListener('focusout',event=>{if(!tooltip.contains(event.relatedTarget))leave();});
+    tooltip.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();origin?.focus();hide();}});
+    const shows=new Map();
+    refreshToolHelp=()=>{if(!tooltip.hidden&&origin)shows.get(origin)?.();};
     for (const button of tools()) {
-      const help = TOOL_HELP[button.dataset.tool];
+      const help = getToolHelp(button.dataset.tool);
       if (!help) continue;
       button.removeAttribute('title');
       button.setAttribute('aria-describedby', tooltip.id);
+      if(help.action)button.setAttribute('aria-haspopup','dialog');
       const show = () => {
+        const help=getToolHelp(button.dataset.tool);
+        if(!help){hide();return;}
+        if(help.action)button.setAttribute('aria-haspopup','dialog');else button.removeAttribute('aria-haspopup');
+        keep();origin=button;
         const rect = button.getBoundingClientRect();
         tooltip.innerHTML = `<strong>${TOOL_LABELS[button.dataset.tool]}</strong><span>${help.description}</span><kbd>${help.shortcut}</kbd>`;
+        tooltip.dataset.action=help.action||'';
+        tooltip.setAttribute('role',help.action?'dialog':'tooltip');
+        if(help.action){
+          tooltip.setAttribute('aria-label',TOOL_LABELS[button.dataset.tool]);
+          const action=document.createElement('button');action.type='button';action.className='primary-button tool-help-action';action.textContent=help.actionLabel;
+          action.onclick=()=>{hide();onHelpAction(help.action);};tooltip.append(action);
+        }else tooltip.removeAttribute('aria-label');
         tooltip.hidden = false;
         const width = tooltip.offsetWidth;
         const height = tooltip.offsetHeight;
@@ -195,10 +218,12 @@ export function createToolbarController({ toolbar, setStatus = () => {} } = {}) 
         tooltip.style.left = `${Math.min(window.innerWidth - width - 10, rect.right + 10)}px`;
         tooltip.style.top = `${Math.max(8, Math.min(maxTop, rect.top + rect.height / 2 - height / 2))}px`;
       };
+      shows.set(button,show);
       button.addEventListener('pointerenter', show);
-      button.addEventListener('pointerleave', hide);
+      button.addEventListener('pointerleave', leave);
       button.addEventListener('focus', show);
-      button.addEventListener('blur', hide);
+      button.addEventListener('blur', event=>{if(!tooltip.contains(event.relatedTarget))leave();});
+      button.addEventListener('keydown',event=>{if(getToolHelp(button.dataset.tool)?.action&&event.key==='ArrowRight'){event.preventDefault();event.stopPropagation();if(tooltip.hidden)show();tooltip.querySelector('.tool-help-action')?.focus();}});
       button.addEventListener('dragstart', hide);
       button.addEventListener('dragend', hide);
     }
@@ -207,6 +232,7 @@ export function createToolbarController({ toolbar, setStatus = () => {} } = {}) 
   return {
     initReorder,
     initTooltips,
+    refreshToolHelp:()=>refreshToolHelp(),
     isClickSuppressed: () => suppressClick,
   };
 }

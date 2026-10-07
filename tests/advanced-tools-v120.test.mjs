@@ -48,13 +48,12 @@ test('about dialog identifies the developer and exposes safe contact links',()=>
   assert.match(css,/\.developer-card \{/);
 });
 
-test('selected layer is highlighted on canvas outside move mode with corners and a name badge',()=>{
+test('selected layer is highlighted on canvas outside move mode with corners and no name badge',()=>{
   assert.match(layerTransformSurface,/if \(!layer \|\| !isLayerVisible\(owner, layer\) \|\| !isTransformableLayer\(layer\)\) return false/);
   assert.match(layerTransformSurface,/function isTransformableLayer\(layer\)/);
   assert.match(layerTransformSurface,/const moveMode = runtime\.getCurrentTool\(\) === 'move'/);
   assert.match(layerTransformSurface,/for \(const corner of frame\.corners\)/);
-  assert.match(layerTransformSurface,/const label = String\(layer\.name \|\| 'Слой'\)/);
-  assert.match(layerTransformSurface,/context\.roundRect\(labelX, labelY, labelWidth, labelHeight/);
+  assert.doesNotMatch(layerTransformSurface,/context\.fillText\(|context\.roundRect\(/);
   assert.match(main,/layerTransformSurface\.draw\(ctx\)/);
   assert.doesNotMatch(main,/function isTransformableLayer\(/);
 });

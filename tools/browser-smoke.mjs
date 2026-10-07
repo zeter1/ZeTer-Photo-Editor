@@ -497,6 +497,36 @@ async function runSmoke() {
     assert(finalState.lockLabel === 'Заблокировать', 'Layer lock button should return to unlocked state', JSON.stringify(finalState));
     assertNoBrowserErrors(errors, stderrState);
 
+    // Exercise the new tool through real mouse input on a known-color raster.
+    const removalPoint = await evaluate(client, `(() => {
+      const c=document.querySelector('#editorCanvas'), r=c.getBoundingClientRect();
+      return {x:r.left+r.width/2,y:r.top+r.height/2,px:Math.floor(c.width/2),py:Math.floor(c.height/2)};
+    })()`);
+    const removalPixelExpression = `Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(${removalPoint.px},${removalPoint.py},1,1).data)`;
+    const mouse = (type) => client.send('Input.dispatchMouseEvent', {
+      type, x:removalPoint.x, y:removalPoint.y, button:'left', buttons:type==='mousePressed'?1:0, clickCount:1,
+    });
+    await evaluate(client, `document.querySelector('#primaryColor').value='#285078'; document.querySelector('[data-tool="fill"]').click(); true`);
+    await mouse('mousePressed'); await mouse('mouseReleased');
+    await waitFor('solid raster fill', async () => evaluate(client, `${removalPixelExpression}.join(',')==='40,80,120,255'`));
+    await evaluate(client, `document.querySelector('#primaryColor').value='#ed2828'; document.querySelector('#brushSize').value='24'; document.querySelector('[data-tool="brush"]').click(); true`);
+    await mouse('mousePressed');
+    await waitFor('red object brush preview', async () => evaluate(client, `${removalPixelExpression}.join(',')==='237,40,40,255'`));
+    await mouse('mouseReleased');
+    await waitFor('object stroke committed', async () => evaluate(client, `document.querySelector('#statusText').textContent==='Готово'`));
+    await evaluate(client, `document.querySelector('#brushSize').value='48'; document.querySelector('[data-tool="remove-object"]').click(); true`);
+    assert(await evaluate(client, `document.querySelector('#removeObjectApply').hidden`), 'Removal action stays hidden before a mask is painted');
+    await mouse('mousePressed'); await mouse('mouseReleased');
+    await waitFor('removal action above brush', async () => evaluate(client, `!document.querySelector('#removeObjectApply').hidden && !document.querySelector('#removeObjectApply').disabled`));
+    assert(await evaluate(client, `${removalPixelExpression}.join(',')==='237,40,40,255'`), 'Painting the mask must not change source pixels');
+    await evaluate(client, `document.querySelector('#removeObjectApply').click(); true`);
+    await waitFor('model installation guidance', async () => evaluate(client, `document.querySelector('#editorSettings').open && document.querySelector('#modelStatus').textContent.includes('Не установлена')`));
+    assert(await evaluate(client, `${removalPixelExpression}.join(',')==='237,40,40,255'`), 'Missing model must preserve the source');
+    assert(await evaluate(client, `document.querySelector('#modelInstall').textContent==='Установить нейросеть' && !document.querySelector('#modelInstall').disabled`), 'Settings explains and offers explicit model installation');
+    await evaluate(client, `document.querySelector('#settingsClose').click(); document.querySelector('#removeObjectReset').click(); true`);
+    assert(await evaluate(client, `document.querySelector('#removeObjectApply').hidden`), 'Reset removes only the mask');
+    assertNoBrowserErrors(errors, stderrState);
+
     console.log(`Browser smoke passed: ${browserExecutable}`);
     console.log(`Verified file URL: ${INDEX_URL}`);
   } finally {

@@ -305,27 +305,28 @@ export function createRasterCommandController({
   }
 
 
-  async function contentAwareFill() {
+  async function contentAwareFill({ ownerDocument, ownerLayer, isAllowed: maskPredicate, historyLabel = 'Контент-заливка' } = {}) {
     if (busy()) return false;
     const selectionSnapshot = selection?.captureSnapshot?.() ?? null;
-    if (!selectionSnapshot) {
+    if (!selectionSnapshot && typeof maskPredicate !== 'function') {
       status('Контент-заливка: сначала создайте выделение');
       return false;
     }
 
     const doc = currentDocument();
     const layer = target.selected?.() ?? null;
+    if ((ownerDocument && ownerDocument !== doc) || (ownerLayer && ownerLayer !== layer)) return false;
     if (!Array.isArray(doc?.layers) || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
       status('Контент-заливка работает по выбранному незаблокированному растровому слою');
       ui?.toast?.('Выберите растровый слой для контент-заливки', 'warn');
       return false;
     }
-    if (selection?.intersectsLayer && !selection.intersectsLayer(layer, selectionSnapshot)) {
+    if (!maskPredicate && selection?.intersectsLayer && !selection.intersectsLayer(layer, selectionSnapshot)) {
       status('Контент-заливка: выделение не пересекает выбранный слой');
       return false;
     }
 
-    const isAllowed = selectionPredicate(layer, selectionSnapshot);
+    const isAllowed = maskPredicate ?? selectionPredicate(layer, selectionSnapshot);
     if (typeof isAllowed !== 'function') {
       status('Контент-заливка: не удалось зафиксировать геометрию выделения');
       return false;
@@ -353,7 +354,7 @@ export function createRasterCommandController({
           return false;
         }
         resetNativeState();
-        ui?.commit?.('Контент-заливка');
+        ui?.commit?.(historyLabel);
         status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px · ${buffer.bitsPerChannel}-bit ${String(buffer.model).toUpperCase()}`);
         return true;
       }
@@ -378,7 +379,7 @@ export function createRasterCommandController({
         rasterEdit.clearBrushBuffer();
         return false;
       }
-      ui?.commit?.('Контент-заливка');
+      ui?.commit?.(historyLabel);
       status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
       return true;
     } catch (error) {

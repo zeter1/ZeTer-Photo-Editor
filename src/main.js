@@ -1,4 +1,11 @@
+import { createObjectRemovalProgressController } from './ui/object-removal-progress-controller.js';
+import { createBackgroundModels } from './ai/background-models.js';
+import { createBackgroundRemovalCommandController } from './painting/background-removal-command-controller.js';
+import { createLamaEngine } from './ai/lama-runtime.js';
+import { createObjectRemovalCommandController } from './painting/object-removal-command-controller.js';
+import { createEditorSettingsController } from './ui/editor-settings-controller.js';
 import { HistoryStack } from './core/history.js';
+import { createObjectRemovalController } from './painting/object-removal-controller.js';
 import { frameBounds, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, snapLineEnd, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
   createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
@@ -13,7 +20,7 @@ import { pixelBufferToRgba8Preview, serializePixelBufferSource, deserializePixel
 import { createCmykToSrgbTransform, createSrgbToCmykTransform, createCmykSoftProofTransform, inspectCmykIccProfile, inspectDisplayIccProfile, cmykPixelBufferToRgba8Preview } from './core/color-management.js';
 import { saveRecoverySnapshot, loadRecoverySnapshots, clearRecoverySnapshot } from './core/recovery.js';
 import {
-  TOOL_LABELS, RASTER_BRUSH_TOOLS,
+  TOOL_LABELS, TOOL_HELP, RASTER_BRUSH_TOOLS,
   SELECTION_TYPE_LABELS, SELECTION_TYPES, MIME_EXT,
   COLOR_CORRECTION_KEYS,
   BASIC_EFFECT_CONTROLS, RASTER_EFFECT_CONTROLS,
@@ -407,6 +414,58 @@ const {
   clearSelection: clearSelectedPixels,
 } = rasterCommands;
 
+const removalProgress = createObjectRemovalProgressController({panel:$('#objectRemovalProgressPanel'),bar:$('#objectRemovalProgressBar'),label:$('#objectRemovalProgressLabel'),elapsed:$('#objectRemovalElapsed'),remaining:$('#objectRemovalRemaining')});
+const backgroundProgress=createObjectRemovalProgressController({panel:$('#backgroundRemovalProgressPanel'),bar:$('#backgroundRemovalProgressBar'),label:$('#backgroundRemovalProgressLabel'),elapsed:$('#backgroundRemovalElapsed'),remaining:$('#backgroundRemovalRemaining'),inferenceLabel:'Определение границ объекта…'});
+const samEngine=createBackgroundModels({gpu:()=>editorSettings.useGpu()});
+const backgroundCommands=createBackgroundRemovalCommandController({state:{getDocument:()=>doc,beginPersist:()=>{if(paintPersisting)return false;paintPersisting=true;return true;},endPersist:()=>{paintPersisting=false;}},rasterEdit,engine:samEngine,getOptions:()=>({feather:Number($('#removeBackgroundFeather').value)}),ui:{setStatus,render,commit,progress:update=>backgroundProgress.update(update)}});
+const lamaEngine = createLamaEngine({gpu:()=>editorSettings.useGpu()});
+const aiRemovalCommands = createObjectRemovalCommandController({
+  state:{getDocument:()=>doc,beginPersist:()=>{if(paintPersisting)return false;paintPersisting=true;return true;},endPersist:()=>{paintPersisting=false;}},
+  rasterEdit,engine:lamaEngine,ui:{setStatus,render,commit,progress:update=>removalProgress.update(update)},
+});
+let refreshToolbarHelp=()=>{};
+const editorSettings = createEditorSettingsController({
+  dialog:$('#editorSettings'),engine:lamaEngine,backgroundEngine:samEngine,onBackgroundModelState:(ready,model)=>{
+    refreshToolbarHelp();const notice=$('#removeBackgroundModelNotice');notice.hidden=currentTool!=='remove-background'||ready;notice.textContent=`Установить ${model.name} (~${model.size} МБ)`;notice.title=`Для удаления фона нужна выбранная модель ${model.name}`;
+    const toastNotice=$('#removeBackgroundInstallToast');if(ready)toastNotice?.remove();else if(toastNotice&&toastNotice.dataset.modelId!==model.id){toastNotice.remove();if(currentTool==='remove-background')showRemovalModelInstallNotice(true);}
+  },setStatus,onModelState:ready=>{refreshToolbarHelp();$('#removeObjectModelNotice').hidden=currentTool!=='remove-object'||ready;if(ready)$('#removeObjectInstallToast')?.remove();},
+  preferences:{getSnap:()=>smartSnapEnabled,setSnap:value=>{smartSnapEnabled=value;els.smartSnapToggle.checked=value;persistSmartSnapState();clearSmartGuides();drawOverlay();},setBrush:value=>{els.brushSize.value=value;els.brushSizeValue.textContent=String(value);}},
+});
+function createRemovalBrush(background=false){
+const prefix=background?'removeBackground':'removeObject',tool=background?'remove-background':'remove-object',progress=background?backgroundProgress:removalProgress;
+return createObjectRemovalController({
+  toolName:background?'Кисть удаления фона':'Удаление объектов',historyLabel:background?'Удалить фон':'Удалить объект',successMessage:background?'Фон удалён на выбранном слое · Ctrl+Z — отменить':'Объект удалён · Ctrl+Z — отменить',previewColor:background?[65,218,136]:[255,84,148],strokeHistory:background,
+  state: {
+    getDocument: () => doc,
+    getSerial: () => documentChangeSerial,
+    selected,
+    isEditable: layer => isEditableRasterLayer(layer) && isLayerVisible(doc,layer),
+  },
+  geometry: {
+    toLocal: documentPointToLayerPixel,
+    toDocument: layerPixelToDocumentPoint,
+    isAllowed: (point,layer) => pointInsideSelection(layerPixelToDocumentPoint(point,layer)),
+  },
+  commands: { remove: args => (background?backgroundCommands:aiRemovalCommands).remove(args) },
+  ui: {
+    setStatus,
+    changed: ({hasMask,busy,active}) => {
+      const apply = $('#'+prefix+'Apply'), reset = $('#'+prefix+'Reset'), cancel = $('#'+prefix+'Cancel');
+      cancel.hidden=!busy;
+      busy?progress.begin():progress.finish();
+      apply.hidden = reset.hidden = currentTool !== tool || !hasMask;
+      apply.disabled = reset.disabled = busy || active;
+      apply.textContent = busy ? 'Удаление…' : background?'Удалить фон':'Удалить объект';
+      if(background)refreshHistoryActions();
+      if($('#editorSettings').open)editorSettings.refresh();
+    },
+  },
+});
+}
+const objectRemoval=createRemovalBrush();
+const backgroundRemoval=createRemovalBrush(true);
+const toolRemoval=()=>currentTool==='remove-background'?backgroundRemoval:objectRemoval;
+
 const gradientCommands = createGradientCommandController({
   rasterEdit,
   state: {
@@ -463,14 +522,17 @@ const {
 } = selectionRasterMutations;
 
 const toolbarController = createToolbarController({
+  getToolHelp:tool=>{const help=TOOL_HELP[tool];if(tool==='remove-background'){const model=samEngine.selectedModel();return samEngine.isReady()?{...help,description:`${model.name}. ${help.installedDescription}`,action:null,actionLabel:null}:{...help,description:`Выбрана ${model.name} (~${model.size} МБ). ${help.description}`,actionLabel:`Установить ${model.name}`};}return tool==='remove-object'&&lamaEngine.isReady()?{...help,description:help.installedDescription,action:null,actionLabel:null}:help;},
+  onHelpAction:action=>{if(action==='install-background-model'){$('#removeBackgroundInstallToast')?.remove();editorSettings.openForBackgroundInstall();}if(action==='install-removal-model'){$('#removeObjectInstallToast')?.remove();editorSettings.openForInstall();}},
   toolbar: els.toolbar,
   setStatus,
 });
+refreshToolbarHelp=toolbarController.refreshToolHelp;
 const { initReorder:initToolbarReorder, initTooltips } = toolbarController;
 const menuController = createMenuController({
   menu: els.menu,
   viewport: els.viewport,
-  menuButtons: $$('.menu-button'),
+  menuButtons: $$('.menu-button[data-menu]'),
   getItems: key => menus[key] || [],
   escapeHtml,
   toast,
@@ -963,6 +1025,19 @@ const paintGesture = createPaintGestureController({
   ui: { setStatus, toast, render, commit },
 });
 
+function showRemovalModelInstallNotice(background=false) {
+  const noticeId=background?'removeBackgroundInstallToast':'removeObjectInstallToast';
+  if($('#'+noticeId))return;
+  const notice=document.createElement('div');
+  notice.id=noticeId;notice.className='toast removal-install-toast';
+  const backgroundModel=background?samEngine.selectedModel():null;if(background)notice.dataset.modelId=backgroundModel.id;
+  const close=document.createElement('button');close.type='button';close.className='removal-install-close';close.textContent='✕';close.setAttribute('aria-label','Закрыть уведомление об установке нейросети');close.onclick=()=>notice.remove();
+  const title=document.createElement('strong');title.textContent='Установите нейросеть';
+  const text=document.createElement('p');text.textContent=background?`Для удаления фона выбрана ${backgroundModel.name} (~${backgroundModel.size} МБ). Зелёным отметьте объект, красным — лишний фон. Фото остаётся на устройстве.`:'Для удаления объектов нужна нейросеть. Установка займёт около 85 МБ; фотографии остаются на вашем устройстве.';
+  const action=document.createElement('button');action.type='button';action.className='primary-button';action.textContent='Установить нейросеть';action.onclick=()=>{notice.remove();background?editorSettings.openForBackgroundInstall():editorSettings.openForInstall();};
+  notice.append(close,title,text,action);els.toastRegion.append(notice);
+}
+
 function toast(message, tone = '') {
   const item = document.createElement('div');
   item.className = `toast${tone ? ` ${tone}` : ''}`;
@@ -1237,7 +1312,31 @@ const historyNavigationController = createHistoryNavigationController({
   },
   runtime: { updateAll, markDirty, setStatus },
 });
-const { undo, redo, jumpToHistory } = historyNavigationController;
+const { undo:undoDocument, redo:redoDocument, jumpToHistory } = historyNavigationController;
+function canUndo() {
+  return currentTool==='remove-background'?(!backgroundRemoval.isBusy()&&(backgroundRemoval.isDrawing()||backgroundRemoval.canUndo()||history.canUndo())):history.canUndo();
+}
+function canRedo() {
+  return currentTool==='remove-background'?(!backgroundRemoval.isBusy()&&!backgroundRemoval.isDrawing()&&(backgroundRemoval.canRedo()||history.canRedo())):history.canRedo();
+}
+function refreshHistoryActions() { els.undo.disabled=!canUndo();els.redo.disabled=!canRedo(); }
+function undo() {
+  if(currentTool==='remove-background'){
+    if(backgroundRemoval.isBusy()){setStatus('Дождитесь завершения удаления фона');return false;}
+    if(backgroundRemoval.isDrawing()){
+      drag=null;pointerLifecycle?.releaseActivePointer();backgroundRemoval.cancel();drawOverlay();setStatus('Штрих отменён');return true;
+    }
+    if(backgroundRemoval.undo()){drawOverlay();setStatus('Штрих удаления фона отменён · Ctrl+Y — повторить');return true;}
+  }
+  return undoDocument();
+}
+function redo() {
+  if(currentTool==='remove-background'){
+    if(backgroundRemoval.isBusy()||backgroundRemoval.isDrawing()){setStatus('Завершите текущую обработку или штрих');return false;}
+    if(backgroundRemoval.redo()){drawOverlay();setStatus('Штрих удаления фона повторён');return true;}
+  }
+  return redoDocument();
+}
 
 const historyPanelController = createHistoryPanelController({
   container: els.history,
@@ -1527,6 +1626,7 @@ async function drainRenderQueue() {
 function drawOverlay() {
   const ctx = els.overlay.getContext('2d');
   ctx.clearRect(0, 0, doc.width, doc.height);
+  objectRemoval.draw(ctx);backgroundRemoval.draw(ctx);
   cropGestures.draw(ctx, { zoom, width:doc.width, height:doc.height });
   if (selectionShape) {
     ctx.save();
@@ -1561,8 +1661,8 @@ function drawOverlay() {
     selectionGestures.drawMagneticDraft(ctx);
   }
   pathControlSurface.draw(ctx);
-  if (RASTER_BRUSH_TOOLS.has(currentTool) && hoverPoint) {
-    const paintLayer = paintLayerAtPoint(hoverPoint);
+  if ((RASTER_BRUSH_TOOLS.has(currentTool) || ['remove-object','remove-background'].includes(currentTool)) && hoverPoint) {
+    const paintLayer = currentTool==='remove-background'?selected():paintLayerAtPoint(hoverPoint);
     const radius = Math.max(.5, Number(els.brushSize.value) / 2);
     const scaleX = Math.abs(Number(paintLayer?.scaleX) || 1);
     const scaleY = Math.abs(Number(paintLayer?.scaleY) || 1);
@@ -1614,7 +1714,7 @@ function updateAll() {
   syncCurrentSession();
   els.title.textContent = doc.name;
   els.dimensions.textContent = `${doc.width} × ${doc.height}`;
-  els.undo.disabled = !history.canUndo(); els.redo.disabled = !history.canRedo();
+  refreshHistoryActions();
   els.emptyDrop.hidden = doc.layers.length > 0;
   updateCanvasSize(); layersPanelController.render(); updatePathsPanel(); historyPanelController.render(); refreshInspectorPanels(); updateLayerControls(); render();
   renderDocumentTabs();
@@ -1843,9 +1943,19 @@ function updateToolLabel() {
 
 function setTool(tool) {
   if (tool !== currentTool && blockPendingDocumentEdit()) return;
+  if (tool !== currentTool){objectRemoval.reset();backgroundRemoval.reset();}
   selectionGestures.prepareToolChange(tool);
   if(tool!=='pen'){penDraftGestures.reset();vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
+  const missingRemovalModel=tool==='remove-object'&&!lamaEngine.isReady();
+  if(missingRemovalModel && currentTool!==tool)showRemovalModelInstallNotice();
+  if(!missingRemovalModel)$('#removeObjectInstallToast')?.remove();
+  $('#removeObjectModelNotice').hidden=!missingRemovalModel;
+  const missingBackgroundModel=tool==='remove-background'&&!samEngine.isReady();
+  if(missingBackgroundModel&&currentTool!==tool)showRemovalModelInstallNotice(true);
+  if(!missingBackgroundModel)$('#removeBackgroundInstallToast')?.remove();
+  $('#removeBackgroundModelNotice').hidden=!missingBackgroundModel;
   currentTool = tool;
+  els.viewport.classList.toggle('background-brush-active',tool==='remove-background');refreshHistoryActions();
   $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   updateToolLabel();
   $$('.text-only').forEach(x => x.style.display = tool === 'text' ? '' : 'none');
@@ -1855,7 +1965,11 @@ function setTool(tool) {
   $$('.smudge-only').forEach(x => x.style.display = tool === 'smudge' ? '' : 'none');
   $$('.dodge-only').forEach(x => x.style.display = tool === 'dodge' ? '' : 'none');
   $$('.burn-only').forEach(x => x.style.display = tool === 'burn' ? '' : 'none');
-  $$('.color-option, .opacity-option').forEach(x => x.style.display = ['dodge','burn','blur'].includes(tool) ? 'none' : '');
+  $$('.color-option, .opacity-option').forEach(x => x.style.display = ['dodge','burn','blur','remove-object','remove-background'].includes(tool) ? 'none' : '');
+  $$('.remove-background-only').forEach(x=>x.hidden=tool!=='remove-background');
+  if(tool!=='remove-background')$('#removeBackgroundApply').hidden=$('#removeBackgroundReset').hidden=true;
+  $$('.remove-object-only').forEach(x => x.hidden = tool !== 'remove-object');
+  if (tool !== 'remove-object') $('#removeObjectApply').hidden = $('#removeObjectReset').hidden = true;
   $$('.gradient-only').forEach(x => x.style.display = tool === 'gradient' ? '' : 'none');
   $$('.pen-only').forEach(x => x.style.display = tool === 'pen' ? '' : 'none');
   $$('.marquee-only').forEach(x => x.style.display = tool === 'marquee' ? '' : 'none');
@@ -1863,6 +1977,8 @@ function setTool(tool) {
   els.overlay.style.cursor = defaultToolCursor();
   cropGestures.reset(); hoverPoint = null; clearSmartGuides(); drawOverlay();
   if ((tool === 'clone' || tool === 'heal') && !getRetouchCloneSource()) setStatus(`${TOOL_LABELS[tool]}: Alt+клик по растровому слою задаёт источник`);
+  if(tool==='remove-background')setStatus('Примерно закрасьте нужный объект · нейросеть сама найдёт границы · нажмите «Удалить фон»');
+  if (tool === 'remove-object') setStatus('Закрасьте объект целиком с небольшим запасом и нажмите «Удалить объект» сверху');
 }
 
 function canvasPoint(event, { clampToDocument = true } = {}) {
@@ -1883,6 +1999,12 @@ function updateTransformPropertyValues(layer) {
   }
 }
 function defaultToolCursor() {
+  if(currentTool==='remove-background'){
+    const point=hoverPoint,layer=selected();
+    const inside=point&&point.x>=0&&point.y>=0&&point.x<doc.width&&point.y<doc.height&&layer&&pointInLayer(point,layer);
+    return inside?'none':'default';
+  }
+  if (currentTool==='remove-object') return 'none';
   return currentTool === 'move' ? 'default' : currentTool === 'text' ? 'text' : currentTool === 'hand' ? 'grab' : currentTool === 'zoom' ? 'zoom-in' : RASTER_BRUSH_TOOLS.has(currentTool) ? 'none' : 'crosshair';
 }
 function brushWidthForPointer(event) {
@@ -1916,6 +2038,7 @@ function pointerWantsPan(event) {
 }
 
 function shouldStartOverlayPointer(event) {
+  if(event.target!==els.overlay&&(currentTool!=='remove-background'||!isBackgroundPointerSurface(event.target)))return false;
   if (!event.isPrimary || ![0, 1].includes(event.button)) return false;
   if (!pointerWantsPan(event) && paintPersisting && (RASTER_BRUSH_TOOLS.has(currentTool) || currentTool === 'fill' || currentTool === 'line' || currentTool === 'gradient')) {
     setStatus('Сохраняется предыдущая растровая операция…');
@@ -1926,12 +2049,18 @@ function shouldStartOverlayPointer(event) {
 
 async function onOverlayPointerDown(e) {
   const wantsPan = pointerWantsPan(e);
-  if (e.button === 1) e.preventDefault();
-  const p = canvasPoint(e);
+  if (e.button === 1 || currentTool==='remove-background') e.preventDefault();
+  if(currentTool==='remove-background')els.viewport.focus({preventScroll:true});
+  const p = canvasPoint(e,{clampToDocument:currentTool!=='remove-background'});
   if (wantsPan) {
     drag = { kind:'pan', x:e.clientX, y:e.clientY, left:els.viewport.scrollLeft, top:els.viewport.scrollTop }; els.overlay.style.cursor='grabbing'; return;
   }
   if (e.button !== 0) return;
+  if (['remove-object','remove-background'].includes(currentTool)) {
+    const mark=currentTool==='remove-background'?(e.altKey?2:Number($('#removeBackgroundHintMode').value)):1;
+    if (toolRemoval().begin(p,brushWidthForPointer(e),mark)) drag = {kind:'object-removal'};
+    drawOverlay();return;
+  }
   if (currentTool === 'move') {
     const intent = layerTransformSurface.movePointerIntent(p);
     if (intent?.kind === 'rotate') {
@@ -1991,10 +2120,11 @@ async function onOverlayPointerDown(e) {
 }
 
 function onOverlayPointerMove(e) {
-  const allowOutside = layerTransformGestures.isGesture(drag) || pathControlGestures.isGesture(drag) || drag?.kind === 'paint';
+  const allowOutside = currentTool==='remove-background' || layerTransformGestures.isGesture(drag) || pathControlGestures.isGesture(drag) || drag?.kind === 'paint' || drag?.kind === 'object-removal';
   const p = canvasPoint(e, { clampToDocument: !allowOutside });
   els.pointer.textContent = `x: ${Math.round(p.x)} y: ${Math.round(p.y)}`;
   hoverPoint = p;
+  if(currentTool==='remove-background'&&drag?.kind!=='pan')els.overlay.style.cursor=defaultToolCursor();
   if (!drag) {
     selectionGestures.updateIdleHover(p);
     if(currentTool==='pen')penDraftGestures.updateIdleHover(p);
@@ -2004,6 +2134,11 @@ function onOverlayPointerMove(e) {
     drawOverlay(); return;
   }
   if (drag.kind === 'pan') { els.viewport.scrollLeft = drag.left - (e.clientX-drag.x); els.viewport.scrollTop = drag.top - (e.clientY-drag.y); return; }
+  if (drag.kind === 'object-removal') {
+    const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
+    for (const event of events.length ? events : [e]) toolRemoval().move(canvasPoint(event,{clampToDocument:false}),brushWidthForPointer(event));
+    drawOverlay();return;
+  }
   if (layerTransformGestures.isGesture(drag)) {
     layerTransformGestures.update(drag,p,{
       shiftKey:e.shiftKey,
@@ -2044,6 +2179,10 @@ async function onOverlayPointerUp(e) {
     if (localPoint && Math.hypot(localPoint.x-drag.last.x, localPoint.y-drag.last.y) > .01) paintGesture.move(releasePoint, e);
   }
   const d = drag; drag = null;
+  if (d.kind === 'object-removal') {
+    toolRemoval().finish(canvasPoint(e,{clampToDocument:false}),brushWidthForPointer(e));
+    drawOverlay();return;
+  }
   if (['marquee','line','shape','gradient'].includes(d.kind)) d.current = canvasPoint(e);
   if (layerTransformGestures.isGesture(d)) {
     layerTransformGestures.finish(d,canvasPoint(e,{clampToDocument:false}),{
@@ -2084,11 +2223,14 @@ async function onOverlayPointerUp(e) {
   }
   updateMoveCursor(canvasPoint(e));
 }
-els.overlay.addEventListener('pointerleave', () => { els.pointer.textContent='x: — y: —';hoverPoint=null;drawOverlay(); });
+function clearPointerHover() { els.pointer.textContent='x: — y: —';hoverPoint=null;drawOverlay(); }
+els.overlay.addEventListener('pointerleave', () => { if(currentTool!=='remove-background')clearPointerHover(); });
+els.viewport.addEventListener('pointerleave',clearPointerHover);
 els.overlay.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
 async function onOverlayPointerCancel(e) {
   if (!drag) return;
   const d=drag; drag=null; clearSmartGuides();
+  if (d.kind==='object-removal') { toolRemoval().cancel();drawOverlay();return; }
   if (d.kind==='paint') { await paintGesture.end(d); }
   else {
     if (layerTransformGestures.isGesture(d)) layerTransformGestures.cancel(d);
@@ -2101,11 +2243,13 @@ async function onOverlayPointerCancel(e) {
   }
 }
 
+function isBackgroundPointerSurface(target) { return [els.viewport,els.shell,els.canvas,els.overlay].includes(target); }
 pointerLifecycle = createPointerLifecycleRouter({
   target: els.overlay,
+  eventTarget: els.viewport,
   shouldStartPointer: shouldStartOverlayPointer,
   onPointerDown: onOverlayPointerDown,
-  onPointerMove: onOverlayPointerMove,
+  onPointerMove: event=>{if(pointerLifecycle.hasActivePointer()||event.target===els.overlay||(currentTool==='remove-background'&&isBackgroundPointerSurface(event.target)))onOverlayPointerMove(event);},
   onPointerUp: onOverlayPointerUp,
   onPointerCancel: onOverlayPointerCancel,
 });
@@ -2621,8 +2765,8 @@ const menus={
     ['Экспорт…','Ctrl+Shift+S',exportDialog],
   ],
   edit:[
-    ['Отменить','Ctrl+Z',undo,()=>history.canUndo()],
-    ['Повторить','Ctrl+Y',redo,()=>history.canRedo()],
+    ['Отменить','Ctrl+Z',undo,canUndo],
+    ['Повторить','Ctrl+Y',redo,canRedo],
     ['sep'],
     ['Выделить всё','Ctrl+A',selectAllPixels],
     ['Снять выделение','Ctrl+D',deselectPixels,()=>Boolean(selectionRect)],
@@ -2742,8 +2886,8 @@ els.viewport.addEventListener('contextmenu',e=>{
   e.preventDefault();
   if(blockPendingDocumentEdit())return;
   openContextMenu('canvas',[
-    ['Отменить','Ctrl+Z',undo,()=>history.canUndo()],
-    ['Повторить','Ctrl+Y',redo,()=>history.canRedo()],
+    ['Отменить','Ctrl+Z',undo,canUndo],
+    ['Повторить','Ctrl+Y',redo,canRedo],
     ['sep'],
     ['Вставить изображение','Ctrl+V',pasteFromClipboard],
     ['Снять выделение','Ctrl+D',deselectPixels,()=>Boolean(selectionRect)],
@@ -2758,6 +2902,28 @@ window.addEventListener('blur',()=>{closeMenu();spaceHeld=false;if(!drag)els.ove
 $$('.tool').forEach(b=>b.onclick=()=>{if(toolbarController.isClickSuppressed())return;setTool(b.dataset.tool);});
 els.primaryColor.oninput=()=>els.colorChip.style.background=els.primaryColor.value;
 els.brushSize.oninput=()=>els.brushSizeValue.textContent=els.brushSize.value;
+$('#editorSettingsBtn').onclick=()=>{closeMenu();editorSettings.open();};
+$('#removeObjectModelNotice').onclick=()=>editorSettings.openForInstall();
+$('#removeBackgroundModelNotice').onclick=()=>editorSettings.openForBackgroundInstall();
+$('#removeBackgroundFeather').oninput=()=>$('#removeBackgroundFeatherValue').textContent=`${$('#removeBackgroundFeather').value} px`;
+$('#removeBackgroundCancel').onclick=()=>backgroundRemoval.abort();
+$('#backgroundRemovalProgressCancel').onclick=()=>backgroundRemoval.abort();
+$('#removeBackgroundApply').onclick=async()=>{
+  if(documentEditPending())return;
+  if(!samEngine.isReady()){editorSettings.open();setStatus(`Для удаления фона установите ${samEngine.selectedModel().name} в настройках`);return;}
+  try{await backgroundRemoval.remove();}catch(error){console.error(error);toast('Не удалось удалить фон','error');}drawOverlay();
+};
+$('#removeBackgroundReset').onclick=()=>{backgroundRemoval.reset();drawOverlay();setStatus('Подсказка для удаления фона сброшена');};
+$('#removeObjectCancel').onclick=()=>objectRemoval.abort();
+$('#objectRemovalProgressCancel').onclick=()=>objectRemoval.abort();
+$('#removeObjectApply').onclick=async()=>{
+  if(documentEditPending())return;
+  if(!lamaEngine.isReady()){editorSettings.open();setStatus('Для удаления объектов установите нейросеть в настройках');return;}
+  try { await objectRemoval.remove(); }
+  catch(error) { console.error(error);toast('Не удалось удалить объект','error'); }
+  drawOverlay();
+};
+$('#removeObjectReset').onclick=()=>{objectRemoval.reset();drawOverlay();setStatus('Область удаления сброшена');};
 els.toolOpacity.oninput=()=>els.toolOpacityValue.textContent=`${els.toolOpacity.value}%`;
 els.dodgeStrength.oninput=()=>els.dodgeStrengthValue.textContent=`${els.dodgeStrength.value}%`;
 els.burnStrength.oninput=()=>els.burnStrengthValue.textContent=`${els.burnStrength.value}%`;
@@ -2827,18 +2993,18 @@ window.addEventListener('drop',e=>{
 },{capture:true});
 
 window.addEventListener('copy',e=>{
-  if(isEditingTarget(e.target)||!selectionRect)return;
+  if($('#editorSettings').open||isEditingTarget(e.target)||!selectionRect)return;
   e.preventDefault();
   copySelection().catch(error=>{console.error(error);toast(error.message||'Ошибка копирования','error');});
 });
 window.addEventListener('cut',e=>{
-  if(isEditingTarget(e.target)||!selectionRect)return;
+  if($('#editorSettings').open||isEditingTarget(e.target)||!selectionRect)return;
   e.preventDefault();
   cutSelection().catch(error=>{console.error(error);toast(error.message||'Ошибка вырезания','error');});
 });
 
 window.addEventListener('paste',e=>{
-  if(isEditingTarget(e.target))return;
+  if($('#editorSettings').open||isEditingTarget(e.target))return;
   handleNativePasteEvent(e);
 });
 els.viewport.addEventListener('wheel',e=>{
@@ -2849,6 +3015,7 @@ els.viewport.addEventListener('wheel',e=>{
 },{passive:false});
 
 window.addEventListener('keydown',e=>{
+  if($('#editorSettings').open)return;
   const editing=isEditingTarget();
   const interactive=isInteractiveControlTarget(e.target);
   if(e.code==='Space'&&!editing&&!interactive){spaceHeld=true;if(!drag)els.overlay.style.cursor='grab';e.preventDefault();}
@@ -2864,12 +3031,19 @@ window.addEventListener('keydown',e=>{
       if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
       if(cropGestures.isGesture(d))cropGestures.cancel(d);
       if(d.kind==='marquee')selectionGestures.cancelMarquee(d);
+      if(d.kind==='object-removal')toolRemoval().cancel();
       els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;
     }
     if(selectionGestures.hasPolygonDraft()){e.preventDefault();selectionGestures.cancelPolygonDraft({restorePrevious:true,announce:true});return;}
     if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropGestures.hasDraft()){cropGestures.reset();drawOverlay();setStatus('Кадрирование отменено');return;}
+    if(toolRemoval().hasMask()){
+      e.preventDefault();
+      if(toolRemoval().reset()){drawOverlay();setStatus('Область удаления сброшена');}
+      else setStatus('Дождитесь завершения удаления объекта');
+      return;
+    }
     if(selectionRect){deselectPixels();return;}
   }
   if(e.target instanceof Node && els.modalRoot.contains(e.target))return;
@@ -2905,6 +3079,8 @@ window.addEventListener('keydown',e=>{
   }
   if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyM'){e.preventDefault();if(currentTool!=='marquee')setTool('marquee');selectionGestures.cycleType();return;}
   if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyO'){e.preventDefault();setTool('burn');return;}
+  if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyE'){e.preventDefault();setTool('remove-background');return;}
+  if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyJ'){e.preventDefault();setTool('remove-object');return;}
   if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyG'){e.preventDefault();setTool('gradient');return;}
   const map={KeyV:'move',KeyM:'marquee',KeyB:'brush',KeyS:'clone',KeyJ:'heal',KeyN:'smudge',KeyO:'dodge',KeyR:'blur',KeyE:'eraser',KeyG:'fill',KeyP:'pen',KeyA:'magnetic',KeyW:'wand',KeyL:'line',KeyT:'text',KeyU:'shape',KeyC:'crop',KeyI:'eyedropper',KeyH:'hand',KeyZ:'zoom'}; if(!ctrl&&!e.altKey&&map[e.code]){setTool(map[e.code]);return;}
   if(e.code==='Digit0'&&!ctrl){fitToView();return;}if(e.code==='Digit1'&&!ctrl){setZoom(1);return;}

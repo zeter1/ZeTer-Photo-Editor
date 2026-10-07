@@ -261,33 +261,6 @@ export function createLayerTransformSurfaceController({
         }
       }
 
-      const label = String(layer.name || 'Слой');
-      context.font = `600 ${12 / zoom}px Inter, Arial, sans-serif`;
-      const paddingX = 7 / zoom;
-      const paddingY = 5 / zoom;
-      const labelWidth = context.measureText(label).width + paddingX * 2;
-      const labelHeight = 22 / zoom;
-      const bounds = geometry.frameBounds(layer);
-      const labelX = geometry.clamp(
-        bounds.x,
-        2 / zoom,
-        Math.max(2 / zoom, owner.width - labelWidth - 2 / zoom),
-      );
-      const labelY = geometry.clamp(
-        bounds.y - labelHeight - paddingY,
-        2 / zoom,
-        Math.max(2 / zoom, owner.height - labelHeight - 2 / zoom),
-      );
-      context.fillStyle = '#101722ee';
-      context.strokeStyle = accent;
-      context.lineWidth = 1 / zoom;
-      context.beginPath();
-      context.roundRect(labelX, labelY, labelWidth, labelHeight, 5 / zoom);
-      context.fill();
-      context.stroke();
-      context.fillStyle = '#f6fbff';
-      context.textBaseline = 'middle';
-      context.fillText(label, labelX + paddingX, labelY + labelHeight / 2);
     } finally {
       context.restore();
     }

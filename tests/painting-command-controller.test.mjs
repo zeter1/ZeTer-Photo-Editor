@@ -380,6 +380,26 @@ test('caller continuation ownership is forwarded into selected-layer Canvas pers
 });
 
 
+test('object removal uses its frozen brush mask without replacing the document selection',async()=>{
+  const doc=createDocument({width:4,height:1});
+  const layer=createRasterLayer({name:'Object',width:4,height:1,dataUrl:null});addLayer(doc,layer);
+  const pixels=new Uint8ClampedArray([30,80,100,255, 255,0,0,255, 30,80,100,255, 30,80,100,255]);
+  const h=makeHarness({doc,pixels,selectionActive:false,selectionIntersects:()=>false});
+  assert.equal(await h.controller.contentAwareFill({ownerDocument:doc,ownerLayer:layer,isAllowed:x=>x===1,historyLabel:'Удалить объект'}),true);
+  assert.deepEqual([...pixels],[30,80,100,255,30,80,100,255,30,80,100,255,30,80,100,255]);
+  assert.deepEqual(h.commits,['Удалить объект']);
+  assert.equal(h.getPersistCalls(),1);
+});
+
+test('object removal rejects a different document or same-id target before raster preparation',async()=>{
+  const doc=createDocument({width:4,height:1});
+  const layer=createRasterLayer({width:4,height:1,dataUrl:null});addLayer(doc,layer);
+  const h=makeHarness({doc});
+  assert.equal(await h.controller.contentAwareFill({ownerDocument:{...doc},ownerLayer:layer,isAllowed:()=>true}),false);
+  assert.equal(await h.controller.contentAwareFill({ownerDocument:doc,ownerLayer:{...layer},isAllowed:()=>true}),false);
+  assert.equal(h.getEnsureCalls().length,0); assert.deepEqual(h.commits,[]);
+});
+
 test('content-aware fill freezes selection geometry and persists Canvas8 exactly once',async()=>{
   const doc=createDocument({width:5,height:1});
   const layer=createRasterLayer({name:'Repair',width:5,height:1,dataUrl:null});addLayer(doc,layer);

@@ -92,7 +92,7 @@ test('brush outline and painting stay bound to the selected visible raster layer
   const helper = main.match(/function paintLayerAtPoint\(point\) \{[\s\S]*?\n\}/)?.[0] ?? '';
   assert.match(helper, /const layer = selected\(\)/);
   assert.match(helper, /isEditableRasterLayer\(layer\) && isLayerVisible\(doc, layer\) && pointInLayer\(point, layer\) \? layer : null/);
-  assert.match(main, /const paintLayer = paintLayerAtPoint\(hoverPoint\)/);
+  assert.match(main, /const paintLayer = currentTool==='remove-background'\?selected\(\):paintLayerAtPoint\(hoverPoint\)/);
   assert.match(main, /atPoint: paintLayerAtPoint/);
   assert.match(gesture, /const rasterAtPoint = target\.atPoint\(point\)/);
 });

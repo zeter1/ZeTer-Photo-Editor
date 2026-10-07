@@ -136,6 +136,7 @@ test('real transform pointermove delegates point and modifiers to the canonical 
   const transformDrag = {kind:'move'};
   const calls = [];
   const context = {
+    currentTool:'move',
     drag: transformDrag,
     els:{pointer:{}},
     canvasPoint:event=>event.point,
@@ -165,6 +166,7 @@ test('real path-control pointermove delegates the point and Alt modifier to the 
   const pathDrag = {kind:'path-control'};
   const calls = [];
   const context = {
+    currentTool:'pen',
     drag:pathDrag,
     els:{pointer:{}},
     canvasPoint:event=>event.point,
@@ -186,6 +188,7 @@ test('real Crop pointermove delegates transient geometry to the canonical owner'
   const cropDrag = {kind:'crop'};
   const calls = [];
   const context = {
+    currentTool:'crop',
     drag:cropDrag,
     els:{pointer:{}},
     canvasPoint:event=>event.point,

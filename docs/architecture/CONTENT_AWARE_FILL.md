@@ -19,6 +19,10 @@ The inpaint core receives only:
 
 It has no access to UI, history, sessions, Canvas, or persistence.
 
+## Object Removal brush
+
+The separate **Удаление объектов** tool (`Shift+J`) now uses browser LaMa; its dedicated transaction and installation/privacy/runtime contract is [AI_OBJECT_REMOVAL.md](AI_OBJECT_REMOVAL.md). The normal **Edit → Content-Aware Fill** still uses the deterministic synthesis below, including native RGB/CMYK precision paths. Do not route AI errors silently through this legacy fill.
+
 ## Stage 1 — bounded boundary synthesis
 
 The first stage grows from the hole boundary inward.

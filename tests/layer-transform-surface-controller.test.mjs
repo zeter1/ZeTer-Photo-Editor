@@ -95,7 +95,7 @@ test('surface eligibility excludes Adjustment layers and draws selected frame ou
   assert.equal(h.controller.draw(context), true);
   assert.ok(context.calls.some(call => call[0] === 'set' && call[1] === 'strokeStyle' && call[2] === '#5ee7ff'));
   assert.equal(context.calls.filter(call => call[0] === 'arc').length, 4);
-  assert.ok(context.calls.some(call => call[0] === 'fillText' && call[1] === 'Слой'));
+  assert.equal(context.calls.some(call => call[0] === 'fillText' || call[0] === 'roundRect'), false);
   assert.equal(context.calls.filter(call => call[0] === 'save').length, context.calls.filter(call => call[0] === 'restore').length);
 
   h.selected.type = 'adjustment';
@@ -123,7 +123,7 @@ test('unlocked Move presentation keeps resize handles, rotate control and zoom-s
   assert.ok(context.calls.some(call => call[0] === 'setLineDash' && call[1] === 3 && call[2] === 2));
   assert.equal(context.calls.filter(call => call[0] === 'fillRect' && call[3] === 4 && call[4] === 4).length, 8);
   assert.ok(context.calls.some(call => call[0] === 'arc' && call[3] === 2.5));
-  assert.ok(context.calls.some(call => call[0] === 'set' && call[1] === 'font' && call[2] === '600 6px Inter, Arial, sans-serif'));
+  assert.equal(context.calls.some(call => call[0] === 'fillText'),false);
 });
 
 test('rotate projection clamps into canvas and rotate hit keeps exact 10 / zoom boundary', () => {
@@ -199,7 +199,7 @@ test('semantic pointer intents preserve control precedence without mutating docu
   assert.equal(JSON.stringify(h.documentValue), before);
 });
 
-test('draw uses injected text-preview display layer and clamps name badge inside document', () => {
+test('draw uses injected text-preview frame without covering image with a name badge', () => {
   const h = harness();
   const preview = layer({ id:'preview', name:'Preview', x:-20, y:-10, width:30, height:20 });
   h.setDisplayLayer(preview);
@@ -207,8 +207,6 @@ test('draw uses injected text-preview display layer and clamps name badge inside
   const context = recordingContext();
 
   assert.equal(h.controller.draw(context), true);
-  const labelCall = context.calls.find(call => call[0] === 'fillText');
-  assert.equal(labelCall[1], 'Preview');
-  assert.ok(labelCall[2] >= 1);
-  assert.ok(labelCall[3] >= 1);
+  assert.deepEqual(context.calls.find(call => call[0] === 'moveTo'), ['moveTo',-20,-10]);
+  assert.equal(context.calls.some(call => call[0] === 'fillText' || call[0] === 'roundRect'),false);
 });

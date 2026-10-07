@@ -16,10 +16,10 @@ test('history navigation and panel composition route through their narrow owners
   assert.match(main, /createHistoryNavigationController\(\{/);
   assert.match(main, /getHistory:\s*\(\)\s*=>\s*history/);
   assert.match(main, /setDocument:\s*value\s*=>\s*\{\s*doc\s*=\s*value;?\s*\}/);
-  assert.match(main, /const \{ undo, redo, jumpToHistory \} = historyNavigationController;/);
+  assert.match(main, /const \{ undo:undoDocument, redo:redoDocument, jumpToHistory \} = historyNavigationController;/);
 
-  assert.doesNotMatch(main, /function undo\s*\(/);
-  assert.doesNotMatch(main, /function redo\s*\(/);
+  assert.match(main, /function undo\s*\([\s\S]*?backgroundRemoval\.undo\(\)[\s\S]*?return undoDocument\(\)/);
+  assert.match(main, /function redo\s*\([\s\S]*?backgroundRemoval\.redo\(\)[\s\S]*?return redoDocument\(\)/);
   assert.doesNotMatch(main, /function jumpToHistory\s*\(/);
 
   assert.match(main, /from '\.\/ui\/history-panel-controller\.js'/);

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
   <meta name="application-version" content="1.42.0" />
-  <meta name="application-build" content="20ecfbdc715a76ec" />
+  <meta name="application-build" content="e26e8012ee97e710" />
   <title>ZeTer Photo Editor — локальный редактор изображений</title>
   <link rel="stylesheet" href="./src/styles.css" />
 </head>
@@ -14,6 +14,8 @@
     <defs>
       <symbol id="icon-move" viewBox="0 0 24 24"><path d="M12 2v20M2 12h20M12 2l-3 3m3-3 3 3M12 22l-3-3m3 3 3-3M2 12l3-3m-3 3 3 3M22 12l-3-3m3 3-3 3"/></symbol>
       <symbol id="icon-marquee" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5" stroke-dasharray="3 2"/></symbol>
+      <symbol id="icon-remove-background" viewBox="0 0 24 24"><path d="M4 4h5M4 4v5M20 4h-5M20 4v5M4 20h5M4 20v-5M20 20h-5M20 20v-5M10 8a3 3 0 0 1 6 0c0 2-2 4-3 5-2 0-4 2-6 3l-2-2c1-2 3-4 5-4Z"/></symbol>
+      <symbol id="icon-remove-object" viewBox="0 0 24 24"><path d="m3 18 10-10 4 4L7 22ZM14 2v4M12 4h4M20 2v6M17 5h6M3 8v4M1 10h4M3 22h13"/></symbol>
       <symbol id="icon-brush" viewBox="0 0 24 24"><path d="M14.5 5.5 18.5 1.5l4 4-4 4M3 21c4.5.4 7.1-1.2 7.8-4.8.3-1.6 1.1-3 2.3-4.2l5.4-5.4-4.1-4.1L9 7.9c-1.2 1.2-2.6 2-4.2 2.3C1.2 10.9-.4 16 3 21Z"/></symbol>
       <symbol id="icon-clone" viewBox="0 0 24 24"><path d="M8 12.5c0-2 1.8-3.5 4-3.5s4 1.5 4 3.5c0 1.2-.5 2.1-1.4 2.8 2.5.7 4.4 2.5 4.4 4.7H5c0-2.2 1.9-4 4.4-4.7-.9-.7-1.4-1.6-1.4-2.8Z"/><path d="M7 4h10M12 4v5M4 20h16"/></symbol>
       <symbol id="icon-dodge" viewBox="0 0 24 24"><circle cx="10" cy="10" r="5.5"/><path d="m14 14 6 6M10 1v2M10 17v2M1 10h2M17 10h2M3.6 3.6 5 5M15 5l1.4-1.4"/></symbol>
@@ -64,6 +66,7 @@
         <button class="menu-button" data-menu="select">Выделение</button>
         <button class="menu-button" data-menu="view">Вид</button>
         <button class="menu-button" data-menu="help">Помощь</button>
+        <button id="editorSettingsBtn" class="menu-button" type="button">⚙ Настройки</button>
       </nav>
       <div class="document-title" id="documentTitle">Без имени</div>
       <div class="top-actions">
@@ -101,6 +104,19 @@
         </select>
       </label>
       <label class="option-group color-option">Цвет <input id="primaryColor" type="color" value="#4f8cff" /></label>
+      <span class="option-group remove-background-only" hidden>SAM 2.1 Tiny</span>
+      <label class="option-group remove-background-only" hidden>Штрих <select id="removeBackgroundHintMode" aria-label="Назначение штриха"><option value="1">Оставить объект · зелёный</option><option value="2">Убрать фон · красный</option></select></label>
+      <label class="option-group remove-background-only" hidden title="Мягкость границы в пикселях">Край <input id="removeBackgroundFeather" type="range" min="0" max="3" step="0.5" value="1" aria-label="Мягкость края"><output id="removeBackgroundFeatherValue" for="removeBackgroundFeather">1 px</output></label>
+      <button id="removeBackgroundModelNotice" class="removal-model-notice" hidden title="Для удаления фона установите выбранную модель">Установить SAM 2.1 Tiny (~97 МБ)</button>
+      <button id="removeBackgroundApply" class="primary-button" hidden>Удалить фон</button>
+      <button id="removeBackgroundCancel" class="removal-reset" hidden>Отменить обработку</button>
+      <button id="removeBackgroundReset" class="removal-reset" hidden title="Сбросить подсказку (Escape)">Сбросить</button>
+      <span class="option-group remove-background-only" hidden>Зелёный — объект · красный / Alt — фон</span>
+      <button id="removeObjectModelNotice" class="removal-model-notice" hidden title="Для удаления объектов нужна нейросеть">Установить нейросеть (~85 МБ)</button>
+      <button id="removeObjectApply" class="primary-button" hidden>Удалить объект</button>
+      <button id="removeObjectCancel" class="removal-reset" hidden>Отменить обработку</button>
+      <button id="removeObjectReset" class="removal-reset" hidden title="Сбросить область удаления (Escape)">Сбросить</button>
+      <span class="option-group remove-object-only" hidden>Закрасьте объект целиком, включая тень</span>
       <label class="option-group">Размер <input id="brushSize" type="range" min="1" max="160" value="24" /><span id="brushSizeValue">24</span></label>
       <label class="option-group opacity-option">Непрозр. <input id="toolOpacity" type="range" min="1" max="100" value="100" /><span id="toolOpacityValue">100%</span></label>
       <label class="option-group dodge-only">Сила осветления <input id="dodgeStrength" type="range" min="1" max="100" value="20" /><span id="dodgeStrengthValue">20%</span></label>
@@ -142,6 +158,8 @@
         <button class="tool active" data-tool="move" title="Перемещение (V)" aria-label="Перемещение"><svg class="tool-icon"><use href="#icon-move" /></svg><small>V</small></button>
         <button class="tool" data-tool="marquee" title="Выделение (M, Shift+M — сменить тип)" aria-label="Инструменты выделения"><svg class="tool-icon"><use href="#icon-marquee" /></svg><small>M</small></button>
         <button class="tool" data-tool="brush" title="Кисть (B)" aria-label="Кисть"><svg class="tool-icon"><use href="#icon-brush" /></svg><small>B</small></button>
+        <button class="tool" data-tool="remove-background" title="Кисть удаления фона (Shift+E)" aria-label="Кисть удаления фона"><svg class="tool-icon"><use href="#icon-remove-background" /></svg></button>
+        <button class="tool" data-tool="remove-object" title="Удаление объектов (Shift+J)" aria-label="Удаление объектов"><svg class="tool-icon"><use href="#icon-remove-object" /></svg></button>
         <button class="tool" data-tool="clone" title="Штамп (S, Alt+клик — источник)" aria-label="Штамп"><svg class="tool-icon"><use href="#icon-clone" /></svg><small>S</small></button>
         <button class="tool" data-tool="heal" title="Лечебная кисть (J, Alt+клик — источник)" aria-label="Лечебная кисть"><svg class="tool-icon"><use href="#icon-heal" /></svg><small>J</small></button>
         <button class="tool" data-tool="smudge" title="Палец / смазывание (N)" aria-label="Палец / смазывание"><svg class="tool-icon"><use href="#icon-smudge" /></svg><small>N</small></button>
@@ -289,6 +307,38 @@
   </div>
 
   <div id="menuPopover" class="menu-popover" hidden></div>
+  <dialog id="editorSettings" class="editor-settings" aria-labelledby="editorSettingsTitle">
+    <header><h2 id="editorSettingsTitle">Настройки редактора</h2><button id="settingsClose" type="button" aria-label="Закрыть настройки">✕</button></header>
+    <div class="settings-tabs" role="tablist" aria-label="Разделы настроек">
+      <button id="settingsTabModels" role="tab" aria-selected="true" aria-controls="settingsPanelModels" data-settings-tab="models" tabindex="0">Нейросети</button>
+      <button id="settingsTabProcessing" role="tab" aria-selected="false" aria-controls="settingsPanelProcessing" data-settings-tab="processing" tabindex="-1">Обработка</button>
+      <button id="settingsTabWorkspace" role="tab" aria-selected="false" aria-controls="settingsPanelWorkspace" data-settings-tab="workspace" tabindex="-1">Рабочее пространство</button>
+    </div>
+    <section id="settingsPanelModels" role="tabpanel" aria-labelledby="settingsTabModels" class="settings-models">
+      <div class="settings-kicker">НЕЙРОСЕТИ · НА ВАШЕМ УСТРОЙСТВЕ</div>
+      <div class="settings-background-choice"><h3>Кисть удаления фона</h3><p class="settings-note">Используется SAM 2.1 Tiny. Зелёным отметьте нужный объект, красным — лишний фон (или удерживайте Alt). Затем нажмите «Удалить фон».</p></div>
+      <article class="settings-model settings-model-selected" aria-labelledby="qualityBackgroundModelTitle">
+      <div class="settings-model-header"><h3 id="qualityBackgroundModelTitle">SAM 2.1 Tiny</h3><span class="settings-model-badge">Удаление фона · ~97 МБ</span></div>
+      <p id="qualityBackgroundModelDescription">Модель для более точного определения объекта по зелёным и красным штрихам. Фото обрабатывается на устройстве.</p>
+      <div id="qualityBackgroundModelStatus" role="status">Проверка кэша этой модели…</div>
+      <progress id="qualityBackgroundModelProgress" max="100" value="0" hidden aria-label="Установка SAM 2.1 Tiny"></progress>
+      <p id="qualityBackgroundModelProgressText" aria-live="polite"></p>
+      <div class="settings-actions"><button id="qualityBackgroundModelInstall" class="primary-button" type="button">Установить SAM 2.1 Tiny</button><button id="qualityBackgroundModelRemove" class="danger-button" type="button">Удалить модель</button><button id="qualityBackgroundModelCancel" class="removal-reset" type="button" hidden>Отменить установку</button></div>
+      <p class="settings-note">Если объект и фон похожи, добавьте короткие штрихи внутри нужного объекта и на ошибочно захваченном фоне. Точность зависит от фотографии; Ctrl+Z отменяет результат.</p>
+      </article>
+      <article class="settings-model" aria-labelledby="objectModelTitle">
+      <div class="settings-model-header"><h3 id="objectModelTitle">Удаление объектов</h3><span class="settings-model-badge">LaMa · ~85 МБ</span></div>
+      <p id="modelDescription">LaMa восстанавливает фон на месте закрашенного объекта. Для работы установите модель — около 85 МБ. Фотографии не отправляются в интернет.</p>
+      <div id="modelStatus" role="status">Проверка установленной модели…</div>
+      <progress id="modelProgress" max="100" value="0" hidden aria-label="Установка нейросети"></progress>
+      <p id="modelProgressText" aria-live="polite"></p>
+      <div class="settings-actions"><button id="modelInstall" class="primary-button" type="button">Установить нейросеть</button><button id="modelRemove" class="danger-button" type="button">Удалить нейросеть</button><button id="modelInstallCancel" class="removal-reset" type="button" hidden>Отменить установку</button></div>
+      <p class="settings-note">После установки работает без интернета, пока браузер хранит модель. У другого браузера или адреса сайта свой кэш. Кнопка «Удалить нейросеть» очищает её кэш и память этой страницы, включая незавершённую установку. Фото и проекты сохраняются. Другие открытые вкладки могут продолжать использовать свою модель.</p>
+      </article>
+    </section>
+    <section id="settingsPanelProcessing" role="tabpanel" aria-labelledby="settingsTabProcessing" hidden><h3>Обработка</h3><label class="settings-row" for="processingMode">Режим нейросети<select id="processingMode"><option value="auto">Автоматически · видеокарта, если доступна</option><option value="cpu">Процессор · совместимый режим</option></select></label><p class="settings-note">На процессоре обработка может занимать больше времени.</p></section>
+    <section id="settingsPanelWorkspace" role="tabpanel" aria-labelledby="settingsTabWorkspace" hidden><h3>Рабочее пространство</h3><label class="settings-row"><span>Умная привязка слоёв</span><input id="settingsSmartSnap" type="checkbox"></label><label class="settings-row"><span>Начальный размер кисти, px</span><input id="defaultBrushSize" type="number" min="1" max="160" value="24"></label><p class="settings-note">Изменения применяются сразу и сохраняются для этого браузера.</p><p id="settingsNotice" role="status"></p></section>
+  </dialog>
   <div id="modalRoot"></div>
   <div id="dropOverlay" class="drop-overlay" hidden>
     <div class="drop-overlay-card">
@@ -296,6 +346,19 @@
       <span>Изображения добавятся как слои • PSD/PSB откроется как документ • .zpe / .pixforge откроются как проект</span>
     </div>
   </div>
+  <aside id="backgroundRemovalProgressPanel" class="object-removal-progress" hidden aria-label="Прогресс удаления фона">
+    <strong>Удаление фона</strong><p id="backgroundRemovalProgressLabel" role="status">Подготовка…</p>
+    <progress id="backgroundRemovalProgressBar" max="100" value="0" aria-label="Ход удаления фона"></progress>
+    <div class="removal-progress-timing"><span id="backgroundRemovalElapsed">Прошло: 0 с</span><span id="backgroundRemovalRemaining">Оставшееся время пока неизвестно</span></div>
+    <button id="backgroundRemovalProgressCancel" class="removal-reset" type="button">Отменить удаление</button>
+  </aside>
+  <aside id="objectRemovalProgressPanel" class="object-removal-progress" hidden aria-label="Прогресс удаления объекта">
+    <strong>Удаление объекта</strong>
+    <p id="objectRemovalProgressLabel" role="status">Подготовка…</p>
+    <progress id="objectRemovalProgressBar" max="100" value="0" aria-label="Ход удаления объекта"></progress>
+    <div class="removal-progress-timing"><span id="objectRemovalElapsed">Прошло: 0 с</span><span id="objectRemovalRemaining">Оставшееся время пока неизвестно</span></div>
+    <button id="objectRemovalProgressCancel" class="removal-reset" type="button">Отменить удаление</button>
+  </aside>
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
   <input id="fileInput" type="file" accept="image/*,.svg,.avif,.psd,.psb,image/vnd.adobe.photoshop" multiple hidden />
   <input id="projectInput" type="file" accept="application/json,.json,.zpe,.pixforge" hidden />

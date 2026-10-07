@@ -31,7 +31,7 @@ Tool/keyboard dispatch stays in `src/main.js`; generic pointer capture stays in 
 
 ### `layer-transform-surface-controller.js`
 
-Owns the read-only selected-layer transform interaction surface: transformable/visibility/effective-lock policy, selected rotate/resize control hits, reverse-z Move target discovery, zoom-aware frame/control/name-badge drawing, canvas-clamped rotation control and rotated idle cursor intent. A text-edit preview layer enters through an explicit display-layer port so this owner does not absorb Text transaction policy.
+Owns the read-only selected-layer transform interaction surface: transformable/visibility/effective-lock policy, selected rotate/resize control hits, reverse-z Move target discovery, zoom-aware frame/control drawing, canvas-clamped rotation control and rotated idle cursor intent. A text-edit preview layer enters through an explicit display-layer port so this owner does not absorb Text transaction policy.
 
 It deliberately publishes no document mutation/history and does not own pointer capture or DOM cursor writes. `src/main.js` consumes semantic move/resize/rotate intent; `layer-transform-gesture-controller.js` owns interactive mutation/Smart Snap/history/rollback; `src/layers/transform-command-controller.js` owns discrete nudge/center/align/fit.
 

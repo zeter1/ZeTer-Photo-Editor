@@ -656,11 +656,13 @@ function gridCellIndexFromPoint(point, layout) {
 // ---- src/ui/tool-config.js ----
 // Pure UI configuration for the editor shell.
 // Keep DOM access and mutable runtime state out of this module so it stays cheap to inspect and test.
-const TOOL_LABELS = { move: 'Перемещение', marquee: 'Выделение', brush: 'Кисть', clone: 'Штамп', heal: 'Лечебная кисть', smudge: 'Палец / смазывание', dodge: 'Осветлитель', burn: 'Затемнитель', blur: 'Кисть размытия', eraser: 'Ластик', fill: 'Заливка', gradient: 'Градиент', pen: 'Перо / контуры', magnetic: 'Магнитное лассо', wand: 'Волшебная палочка', line: 'Линия', text: 'Текст', shape: 'Фигура', crop: 'Кадрирование', eyedropper: 'Пипетка', hand: 'Рука', zoom: 'Лупа' };
+const TOOL_LABELS = { move: 'Перемещение', marquee: 'Выделение', brush: 'Кисть', 'remove-object': 'Удаление объектов', 'remove-background': 'Кисть удаления фона', clone: 'Штамп', heal: 'Лечебная кисть', smudge: 'Палец / смазывание', dodge: 'Осветлитель', burn: 'Затемнитель', blur: 'Кисть размытия', eraser: 'Ластик', fill: 'Заливка', gradient: 'Градиент', pen: 'Перо / контуры', magnetic: 'Магнитное лассо', wand: 'Волшебная палочка', line: 'Линия', text: 'Текст', shape: 'Фигура', crop: 'Кадрирование', eyedropper: 'Пипетка', hand: 'Рука', zoom: 'Лупа' };
 const TOOL_HELP = {
   move:{shortcut:'V',description:'Выбирает и перемещает слои. Тяните рамку для масштаба, круглый маркер — для поворота; Shift ограничивает направление.'},
   marquee:{shortcut:'M / Shift+M',description:'Создаёт прямоугольное, эллиптическое, свободное или многоугольное выделение. Ограничивает рисование и копирование выбранной областью.'},
   brush:{shortcut:'B',description:'Рисует основным цветом на растровом слое. Размер меняется клавишами [ и ], давление пера поддерживается.'},
+  'remove-object':{shortcut:'Shift+J',action:'install-removal-model',actionLabel:'Установить нейросеть',installedDescription:'Закрасьте объект целиком с небольшим запасом и тенью, нажмите «Удалить объект» сверху. Фото обрабатывается на устройстве. Ctrl+Z отменяет результат, Escape сбрасывает область.',description:'Перед первым использованием установите нейросеть: Настройки → Нейросети → Установить нейросеть (~85 МБ). Фото обрабатывается на устройстве. Затем закрасьте объект целиком с небольшим запасом и тенью, нажмите «Удалить объект» сверху. Ctrl+Z отменяет результат, Escape сбрасывает область.'},
+  'remove-background':{shortcut:'Shift+E',action:'install-background-model',actionLabel:'Установить модель',installedDescription:'Зелёным примерно отметьте нужный объект, красным — лишний фон (или удерживайте Alt). Нажмите «Удалить фон» сверху. Нейросеть определит полный контур; фон станет прозрачным только на выбранном слое. Ctrl+Z отменяет результат, Escape сбрасывает штрихи.',description:'Установите SAM 2.1 Tiny кнопкой ниже или в Настройки → Нейросети. Зелёный штрих — оставить объект, красный / Alt — убрать фон. Фото обрабатывается на устройстве. Ctrl+Z — отмена, Escape — сброс.'},
   clone:{shortcut:'S',description:'Копирует пиксели из одной части изображения в другую. Сначала задайте источник через Alt+клик, затем рисуйте.'},
   heal:{shortcut:'J',description:'Мягко переносит фактуру с выбранного участка для ретуши дефектов. Источник задаётся через Alt+клик.'},
   smudge:{shortcut:'N',description:'Размазывает существующие пиксели по направлению движения кисти. Силу эффекта задаёт отдельный ползунок сверху.'},
@@ -2249,7 +2251,8 @@ function createColorManagementController({
 }
 
 // ---- src/ui/toolbar-controller.js ----
-function createToolbarController({ toolbar, setStatus = () => {} } = {}) {
+function createToolbarController({ toolbar, setStatus = () => {}, onHelpAction = () => {}, getToolHelp = tool => TOOL_HELP[tool] } = {}) {
+  let refreshToolHelp = () => {};
   let dragToolId = '';
   let dropIndex = -1;
   let suppressClick = false;
@@ -2427,15 +2430,37 @@ function createToolbarController({ toolbar, setStatus = () => {} } = {}) {
     tooltip.setAttribute('role', 'tooltip');
     tooltip.hidden = true;
     document.body.append(tooltip);
-    const hide = () => { tooltip.hidden = true; };
+    let hideTimer=null,origin=null;
+    const keep=()=>{clearTimeout(hideTimer);hideTimer=null;};
+    const hide=()=>{keep();tooltip.hidden=true;};
+    const leave=()=>{if(!tooltip.dataset.action){hide();return;}keep();hideTimer=setTimeout(()=>{if(!tooltip.contains(document.activeElement))hide();},250);};
+    tooltip.addEventListener('pointerenter',keep);
+    tooltip.addEventListener('pointerleave',leave);
+    tooltip.addEventListener('focusin',keep);
+    tooltip.addEventListener('focusout',event=>{if(!tooltip.contains(event.relatedTarget))leave();});
+    tooltip.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();origin?.focus();hide();}});
+    const shows=new Map();
+    refreshToolHelp=()=>{if(!tooltip.hidden&&origin)shows.get(origin)?.();};
     for (const button of tools()) {
-      const help = TOOL_HELP[button.dataset.tool];
+      const help = getToolHelp(button.dataset.tool);
       if (!help) continue;
       button.removeAttribute('title');
       button.setAttribute('aria-describedby', tooltip.id);
+      if(help.action)button.setAttribute('aria-haspopup','dialog');
       const show = () => {
+        const help=getToolHelp(button.dataset.tool);
+        if(!help){hide();return;}
+        if(help.action)button.setAttribute('aria-haspopup','dialog');else button.removeAttribute('aria-haspopup');
+        keep();origin=button;
         const rect = button.getBoundingClientRect();
         tooltip.innerHTML = `<strong>${TOOL_LABELS[button.dataset.tool]}</strong><span>${help.description}</span><kbd>${help.shortcut}</kbd>`;
+        tooltip.dataset.action=help.action||'';
+        tooltip.setAttribute('role',help.action?'dialog':'tooltip');
+        if(help.action){
+          tooltip.setAttribute('aria-label',TOOL_LABELS[button.dataset.tool]);
+          const action=document.createElement('button');action.type='button';action.className='primary-button tool-help-action';action.textContent=help.actionLabel;
+          action.onclick=()=>{hide();onHelpAction(help.action);};tooltip.append(action);
+        }else tooltip.removeAttribute('aria-label');
         tooltip.hidden = false;
         const width = tooltip.offsetWidth;
         const height = tooltip.offsetHeight;
@@ -2443,10 +2468,12 @@ function createToolbarController({ toolbar, setStatus = () => {} } = {}) {
         tooltip.style.left = `${Math.min(window.innerWidth - width - 10, rect.right + 10)}px`;
         tooltip.style.top = `${Math.max(8, Math.min(maxTop, rect.top + rect.height / 2 - height / 2))}px`;
       };
+      shows.set(button,show);
       button.addEventListener('pointerenter', show);
-      button.addEventListener('pointerleave', hide);
+      button.addEventListener('pointerleave', leave);
       button.addEventListener('focus', show);
-      button.addEventListener('blur', hide);
+      button.addEventListener('blur', event=>{if(!tooltip.contains(event.relatedTarget))leave();});
+      button.addEventListener('keydown',event=>{if(getToolHelp(button.dataset.tool)?.action&&event.key==='ArrowRight'){event.preventDefault();event.stopPropagation();if(tooltip.hidden)show();tooltip.querySelector('.tool-help-action')?.focus();}});
       button.addEventListener('dragstart', hide);
       button.addEventListener('dragend', hide);
     }
@@ -2455,6 +2482,7 @@ function createToolbarController({ toolbar, setStatus = () => {} } = {}) {
   return {
     initReorder,
     initTooltips,
+    refreshToolHelp:()=>refreshToolHelp(),
     isClickSuppressed: () => suppressClick,
   };
 }
@@ -3791,13 +3819,14 @@ function createLearningCenterController({showInfoModal,storage=globalThis.localS
 // ---- src/interaction/pointer-lifecycle-router.js ----
 function createPointerLifecycleRouter({
   target,
+  eventTarget = target,
   shouldStartPointer = () => true,
   onPointerDown = () => {},
   onPointerMove = () => {},
   onPointerUp = () => {},
   onPointerCancel = () => {},
 } = {}) {
-  if (!target || typeof target.addEventListener !== 'function') {
+  if (typeof target?.addEventListener !== 'function' || typeof eventTarget?.addEventListener !== 'function') {
     throw new TypeError('pointer lifecycle target is required');
   }
   if (typeof target.setPointerCapture !== 'function' || typeof target.releasePointerCapture !== 'function') {
@@ -3877,10 +3906,10 @@ function createPointerLifecycleRouter({
     return onPointerCancel(event, { reason:'lostpointercapture' });
   }
 
-  target.addEventListener('pointerdown', handlePointerDown);
-  target.addEventListener('pointermove', handlePointerMove);
-  target.addEventListener('pointerup', handlePointerUp);
-  target.addEventListener('pointercancel', handlePointerCancel);
+  eventTarget.addEventListener('pointerdown', handlePointerDown);
+  eventTarget.addEventListener('pointermove', handlePointerMove);
+  eventTarget.addEventListener('pointerup', handlePointerUp);
+  eventTarget.addEventListener('pointercancel', handlePointerCancel);
   target.addEventListener('lostpointercapture', handleLostPointerCapture);
 
   return { isActivePointer, hasActivePointer, releaseActivePointer };
@@ -9722,33 +9751,6 @@ function createLayerTransformSurfaceController({
         }
       }
 
-      const label = String(layer.name || 'Слой');
-      context.font = `600 ${12 / zoom}px Inter, Arial, sans-serif`;
-      const paddingX = 7 / zoom;
-      const paddingY = 5 / zoom;
-      const labelWidth = context.measureText(label).width + paddingX * 2;
-      const labelHeight = 22 / zoom;
-      const bounds = geometry.frameBounds(layer);
-      const labelX = geometry.clamp(
-        bounds.x,
-        2 / zoom,
-        Math.max(2 / zoom, owner.width - labelWidth - 2 / zoom),
-      );
-      const labelY = geometry.clamp(
-        bounds.y - labelHeight - paddingY,
-        2 / zoom,
-        Math.max(2 / zoom, owner.height - labelHeight - 2 / zoom),
-      );
-      context.fillStyle = '#101722ee';
-      context.strokeStyle = accent;
-      context.lineWidth = 1 / zoom;
-      context.beginPath();
-      context.roundRect(labelX, labelY, labelWidth, labelHeight, 5 / zoom);
-      context.fill();
-      context.stroke();
-      context.fillStyle = '#f6fbff';
-      context.textBaseline = 'middle';
-      context.fillText(label, labelX + paddingX, labelY + labelHeight / 2);
     } finally {
       context.restore();
     }
@@ -16590,27 +16592,28 @@ function createRasterCommandController({
   }
 
 
-  async function contentAwareFill() {
+  async function contentAwareFill({ ownerDocument, ownerLayer, isAllowed: maskPredicate, historyLabel = 'Контент-заливка' } = {}) {
     if (busy()) return false;
     const selectionSnapshot = selection?.captureSnapshot?.() ?? null;
-    if (!selectionSnapshot) {
+    if (!selectionSnapshot && typeof maskPredicate !== 'function') {
       status('Контент-заливка: сначала создайте выделение');
       return false;
     }
 
     const doc = currentDocument();
     const layer = target.selected?.() ?? null;
+    if ((ownerDocument && ownerDocument !== doc) || (ownerLayer && ownerLayer !== layer)) return false;
     if (!Array.isArray(doc?.layers) || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
       status('Контент-заливка работает по выбранному незаблокированному растровому слою');
       ui?.toast?.('Выберите растровый слой для контент-заливки', 'warn');
       return false;
     }
-    if (selection?.intersectsLayer && !selection.intersectsLayer(layer, selectionSnapshot)) {
+    if (!maskPredicate && selection?.intersectsLayer && !selection.intersectsLayer(layer, selectionSnapshot)) {
       status('Контент-заливка: выделение не пересекает выбранный слой');
       return false;
     }
 
-    const isAllowed = selectionPredicate(layer, selectionSnapshot);
+    const isAllowed = maskPredicate ?? selectionPredicate(layer, selectionSnapshot);
     if (typeof isAllowed !== 'function') {
       status('Контент-заливка: не удалось зафиксировать геометрию выделения');
       return false;
@@ -16638,7 +16641,7 @@ function createRasterCommandController({
           return false;
         }
         resetNativeState();
-        ui?.commit?.('Контент-заливка');
+        ui?.commit?.(historyLabel);
         status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px · ${buffer.bitsPerChannel}-bit ${String(buffer.model).toUpperCase()}`);
         return true;
       }
@@ -16663,7 +16666,7 @@ function createRasterCommandController({
         rasterEdit.clearBrushBuffer();
         return false;
       }
-      ui?.commit?.('Контент-заливка');
+      ui?.commit?.(historyLabel);
       status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
       return true;
     } catch (error) {
@@ -16795,6 +16798,810 @@ function createRasterCommandController({
   }
 
   return { drawLine, fillAt, contentAwareFill, clearSelection };
+}
+
+// ---- src/ai/lama-assets.js ----
+// Pinned public artifacts; executable code is verified before execution.
+const LAMA_ARTIFACTS = Object.freeze([
+  {
+    "id": "ort.webgpu.min.js",
+    "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.webgpu.min.js",
+    "size": 66417,
+    "sha256": "7d65dad7eb4564ad98db9924a259af2e2c68ebfbdbf254fa5d728f1c5736e07a"
+  },
+  {
+    "id": "ort-wasm-simd-threaded.asyncify.mjs",
+    "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort-wasm-simd-threaded.asyncify.mjs",
+    "size": 53057,
+    "sha256": "3d1c85995364bb643302fc6fd877a0c3ba5ae72401815e0f24828a53d9191e28"
+  },
+  {
+    "id": "ort-wasm-simd-threaded.asyncify.wasm",
+    "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort-wasm-simd-threaded.asyncify.wasm",
+    "size": 26781914,
+    "sha256": "39f9f0894d478800487ed9f7dbe92618498db320cf55c8e3d89adff8dce658da"
+  },
+  {
+    "id": "lama_512_int8.onnx",
+    "url": "https://huggingface.co/g-ronimo/lama/resolve/418036c6b541e526cdbb0bead1ec3a87dabede53/lama_512_int8.onnx",
+    "size": 62074990,
+    "sha256": "cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe"
+  }
+].map(Object.freeze));
+
+// ---- src/ai/asset-cache.js ----
+// This database stores only four public artifacts. Never stores images, masks or tensors.
+function createLamaArtifactCache({indexedDB=globalThis.indexedDB,storage=globalThis.navigator?.storage,databaseName='zeter-object-removal-model-v1',artifacts=LAMA_ARTIFACTS}={}) {
+  async function access(id,bytes) {
+    if(!indexedDB)return null;
+    if(bytes){const estimate=await storage?.estimate?.();if(!estimate?.quota||estimate.quota-(estimate.usage||0)<bytes.byteLength+64*1024*1024)return null;}
+    return new Promise(resolve=>{
+      let db,done=false,tx;
+      const finish=value=>{if(done)return;done=true;clearTimeout(timer);db?.close();resolve(value);};
+      const timer=setTimeout(()=>{try{tx?.abort();}catch{}finish(null);},5000);
+      const open=indexedDB.open(databaseName,1);
+      open.onupgradeneeded=()=>{open.result.createObjectStore('artifacts');};
+      open.onerror=open.onblocked=()=>finish(null);
+      open.onsuccess=()=>{
+        db=open.result;if(done){db.close();return;}
+        tx=db.transaction('artifacts',bytes?'readwrite':'readonly');
+        let value=null;
+        const request=bytes?tx.objectStore('artifacts').put(bytes,id):tx.objectStore('artifacts').get(id);
+        request.onsuccess=()=>{value=bytes?true:request.result??null;};
+        tx.oncomplete=()=>finish(value);tx.onerror=tx.onabort=()=>finish(null);
+      };
+    });
+  }
+  // Delete only owned public artifacts, including a canceled installation's partial cache.
+  async function remove() {
+    if(!indexedDB)return true;
+    return new Promise(resolve=>{
+      let db,tx,done=false;
+      const finish=value=>{if(done)return;done=true;clearTimeout(timer);db?.close();resolve(value);};
+      const timer=setTimeout(()=>{try{tx?.abort();}catch{}finish(false);},5000);
+      try {
+        const open=indexedDB.open(databaseName,1);
+        open.onupgradeneeded=()=>{open.result.createObjectStore('artifacts');};
+        open.onerror=open.onblocked=()=>finish(false);
+        open.onsuccess=()=>{
+          db=open.result;if(done){db.close();return;}
+          try {
+            tx=db.transaction('artifacts','readwrite');
+            tx.oncomplete=()=>finish(true);tx.onerror=tx.onabort=()=>finish(false);
+            const store=tx.objectStore('artifacts');
+            for(const artifact of artifacts)store.delete(artifact.id);
+          } catch {try{tx?.abort();}catch{}finish(false);}
+        };
+      } catch {finish(false);}
+    });
+  }
+  return {get:id=>access(id),put:(id,bytes)=>access(id,bytes),remove};
+}
+async function loadLamaArtifact(descriptor,{signal,onProgress,onCacheResult,cache,cachedOnly=false,fetchImpl=globalThis.fetch,cryptoImpl=globalThis.crypto}={}) {
+  const aborted=()=>{if(signal?.aborted)throw new DOMException('Удаление отменено','AbortError');};
+  const verify=async bytes=>{
+    if(!(bytes instanceof ArrayBuffer)||bytes.byteLength!==descriptor.size)return false;
+    const digest=new Uint8Array(await cryptoImpl.subtle.digest('SHA-256',bytes));
+    return Array.from(digest,b=>b.toString(16).padStart(2,'0')).join('')===descriptor.sha256;
+  };
+  if(!cryptoImpl?.subtle)throw new Error('Нужен современный браузер и HTTPS или локальное открытие редактора');
+  aborted();
+  let cached;try{cached=await cache?.get(descriptor.id);}catch{cached=null;}
+  aborted();
+  if(cached&&await verify(cached)){aborted();onCacheResult?.(true);return cached;}
+  if(cachedOnly)throw new Error('Модель ещё не установлена');
+  const controller=new AbortController(),abort=()=>controller.abort();
+  signal?.addEventListener('abort',abort,{once:true});
+  const timer=setTimeout(abort,180000);
+  try {
+    aborted();
+    const response=await fetchImpl(descriptor.url,{method:'GET',credentials:'omit',referrerPolicy:'no-referrer',signal:controller.signal,cache:'no-store'});
+    if(!response.ok)throw new Error(`Загрузка модели: HTTP ${response.status}`);
+    const length=response.headers.get('content-length');
+    if(length&&Number(length)>descriptor.size)throw new Error('Размер загрузки не совпадает с проверенной моделью');
+    if(!response.body)throw new Error('Браузер не поддерживает загрузку модели');
+    const reader=response.body.getReader(),bytes=new Uint8Array(descriptor.size);let offset=0;
+    try {
+      while(true){const {done,value}=await reader.read();if(done)break;aborted();if(offset+value.byteLength>bytes.length)throw new Error('Модель превышает допустимый размер');bytes.set(value,offset);offset+=value.byteLength;onProgress?.(offset);}
+    } finally {try{await reader.cancel();}catch{}reader.releaseLock();}
+    if(offset!==bytes.length||!await verify(bytes.buffer))throw new Error('Проверка целостности модели не пройдена');
+    aborted();
+    let stored=false;
+    try{stored=await cache?.put(descriptor.id,bytes.buffer)===true;}catch{/* Cache is optional; recovery is never cleared to make space. */}
+    onCacheResult?.(stored);
+    aborted();return bytes.buffer;
+  } catch(error) {
+    aborted();
+    if(controller.signal.aborted)throw new Error('Загрузка модели заняла слишком долго. Проверьте интернет и повторите.');
+    throw error;
+  } finally {clearTimeout(timer);signal?.removeEventListener('abort',abort);}
+}
+
+// ---- src/ai/lama-preprocess.js ----
+// Fixed model contract: RGB 0..1 with masked pixels zeroed, mask=1 means erase.
+function prepareLamaInput({ width, height, data, mask }) {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width<1 || height<1 || width*height>8_000_000 || data?.length!==width*height*4 || mask?.length!==width*height) throw new Error('Некорректный размер изображения или маски');
+  let left=width,top=height,right=-1,bottom=-1,count=0;
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++)if(mask[y*width+x]){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);count++;}
+  if(!count || count===width*height)throw new Error('Закрасьте объект и оставьте вокруг него часть фона');
+  const side=Math.min(Math.max(width,height),Math.max(256,(right-left+1)*2.5,(bottom-top+1)*2.5));
+  const cw=Math.min(width,Math.ceil(side)),ch=Math.min(height,Math.ceil(side));
+  const crop={x:Math.max(0,Math.min(width-cw,Math.round((left+right+1-cw)/2))),y:Math.max(0,Math.min(height-ch,Math.round((top+bottom+1-ch)/2))),width:cw,height:ch};
+  const scale=512/Math.max(cw,ch),tw=Math.max(1,Math.round(cw*scale)),th=Math.max(1,Math.round(ch*scale)),ox=Math.floor((512-tw)/2),oy=Math.floor((512-th)/2);
+  const n=512*512,input=new Float32Array(n*4),modelMask=new Uint8Array(n);
+  for(let y=0;y<512;y++)for(let x=0;x<512;x++){
+    const sx=crop.x+Math.max(0,Math.min(cw-1,(x-ox+.5)*cw/tw-.5)),sy=crop.y+Math.max(0,Math.min(ch-1,(y-oy+.5)*ch/th-.5));
+    const x0=Math.floor(sx),y0=Math.floor(sy),x1=Math.min(width-1,x0+1),y1=Math.min(height-1,y0+1),fx=sx-x0,fy=sy-y0,i=y*512+x;
+    for(let k=0;k<3;k++)input[k*n+i]=((data[(y0*width+x0)*4+k]*(1-fx)+data[(y0*width+x1)*4+k]*fx)*(1-fy)+(data[(y1*width+x0)*4+k]*(1-fx)+data[(y1*width+x1)*4+k]*fx)*fy)/255;
+    // Conservative downsampling preserves even thin painted strokes.
+    if(x>=ox&&x<ox+tw&&y>=oy&&y<oy+th){
+      const xa=Math.max(crop.x,Math.floor(crop.x+(x-ox)*cw/tw)),xb=Math.min(crop.x+cw-1,Math.ceil(crop.x+(x-ox+1)*cw/tw)-1);
+      const ya=Math.max(crop.y,Math.floor(crop.y+(y-oy)*ch/th)),yb=Math.min(crop.y+ch-1,Math.ceil(crop.y+(y-oy+1)*ch/th)-1);
+      for(let yy=ya;yy<=yb&&!modelMask[i];yy++)for(let xx=xa;xx<=xb;xx++)if(mask[yy*width+xx]){modelMask[i]=1;break;}
+    }
+  }
+  // Small model-only margin avoids sampling the object's rim; publication is still mask-only.
+  for(let y=0;y<512;y++)for(let x=0;x<512;x++){
+    const i=y*512+x;let marked=false;
+    for(let yy=Math.max(0,y-3);yy<=Math.min(511,y+3)&&!marked;yy++)for(let xx=Math.max(0,x-3);xx<=Math.min(511,x+3);xx++)if(modelMask[yy*512+xx]){marked=true;break;}
+    if(marked){input[i]=input[n+i]=input[2*n+i]=0;input[3*n+i]=1;}
+  }
+  return {input,crop,tw,th,ox,oy};
+}
+function mergeLamaOutput({width,height,data,mask},prepared,output) {
+  const n=512*512;
+  if(!(output instanceof Float32Array)||output.length!==3*n||!output.every(Number.isFinite))throw new Error('Нейросеть вернула некорректный результат');
+  const result=new Uint8ClampedArray(data),{crop,tw,th,ox,oy}=prepared;
+  for(let y=crop.y;y<crop.y+crop.height;y++)for(let x=crop.x;x<crop.x+crop.width;x++)if(mask[y*width+x]){
+    const sx=Math.max(0,Math.min(511,ox+(x-crop.x+.5)*tw/crop.width-.5)),sy=Math.max(0,Math.min(511,oy+(y-crop.y+.5)*th/crop.height-.5));
+    const x0=Math.floor(sx),y0=Math.floor(sy),x1=Math.min(511,x0+1),y1=Math.min(511,y0+1),fx=sx-x0,fy=sy-y0;
+    for(let k=0;k<3;k++){
+      const off=k*n,value=(output[off+y0*512+x0]*(1-fx)+output[off+y0*512+x1]*fx)*(1-fy)+(output[off+y1*512+x0]*(1-fx)+output[off+y1*512+x1]*fx)*fy;
+      result[(y*width+x)*4+k]=Math.round(Math.max(0,Math.min(1,value))*255);
+    }
+  }
+  return result;
+}
+
+// ---- src/ai/lama-runtime.js ----
+// Serialized into an owned Blob worker, after all executable artifacts pass SHA-256.
+function lamaWorkerEntry() {
+  self.onmessage=async ({data})=>{
+    let stage="runtime";
+    try {
+      // No network requests are permitted from the inference worker.
+      self.fetch=()=>Promise.reject(new Error('Inference network access disabled'));
+      ort.env.wasm.numThreads=1;ort.env.wasm.proxy=false;
+      // file:// has opaque origins: create the module URL in its own worker context.
+      const moduleUrl=URL.createObjectURL(new Blob([data.mjs],{type:'text/javascript'}));
+      ort.env.wasm.wasmPaths={mjs:moduleUrl};ort.env.wasm.wasmBinary=new Uint8Array(data.wasm);
+      self.postMessage({type:'progress',stage:'initialize',message:'Подготовка нейросети на устройстве…'});
+      const providers=data.gpu&&self.navigator?.gpu?['webgpu','wasm']:['wasm'];
+      stage="session";
+      const session=await ort.InferenceSession.create(new Uint8Array(data.model),{executionProviders:providers});
+      if(session.inputNames.length!==1||session.inputNames[0]!=='input'||session.outputNames.length!==1||session.outputNames[0]!=='output')throw new Error('Unexpected model contract');
+      self.postMessage({type:'progress',stage:'inference',message:'Восстановление фона на устройстве…'});
+      const tensor=new ort.Tensor('float32',data.input,[1,4,512,512]);
+      stage="inference";
+      const result=await session.run({input:tensor});
+      const output=result.output;
+      if(output.type!=='float32'||output.dims.join(',')!=='1,3,512,512'||output.data.length!==3*512*512)throw new Error('Unexpected model output');
+      const values=new Float32Array(output.data);
+      await session.release();
+      URL.revokeObjectURL(moduleUrl);
+      self.postMessage({type:'result',output:values},[values.buffer]);
+    } catch(error) {self.postMessage({type:'error',stage,reason:String(error?.message||'').slice(0,300)});}
+  };
+}
+function createLamaEngine({gpu=()=>true,cache=createLamaArtifactCache(),load=loadLamaArtifact,workerFactory=url=>new Worker(url),artifactList=LAMA_ARTIFACTS,workerEntry=lamaWorkerEntry,makeRequest=null}={}) {
+  let active=false,assets=null,preparing=null,stored=false,deleting=false;
+  const inferenceDurations=new Map();
+  async function prepare({signal,onProgress,cachedOnly=false}={}) {
+    if(deleting)throw new Error('Дождитесь удаления нейросети');
+    if(assets)return assets;
+    if(preparing)return preparing;
+    preparing=(async()=>{
+      const candidate=[],total=artifactList.reduce((s,a)=>s+a.size,0);let loaded=0,allStored=true;
+      for(const descriptor of artifactList){
+        candidate.push(await load(descriptor,{signal,cache,cachedOnly,onCacheResult:value=>{allStored=allStored&&value;},onProgress:bytes=>onProgress?.({percent:Math.floor((loaded+bytes)/total*100),loaded:loaded+bytes,total})}));
+        loaded+=descriptor.size;if(signal?.aborted)throw new DOMException('Удаление отменено','AbortError');
+        onProgress?.({percent:Math.floor(loaded/total*100),loaded,total});
+      }
+      assets=candidate;stored=allStored;return assets;
+    })();
+    try{return await preparing;}finally{preparing=null;}
+  }
+  async function run(input,{signal,onProgress}={}) {
+    if(deleting||preparing)throw new Error('Дождитесь завершения работы с моделью');
+    if(active)throw new Error('Удаление объекта уже выполняется');
+    active=true;let worker;const urls=[];
+    const mode=typeof gpu==='function'?gpu():gpu;let inferenceStarted=null;
+    const aborted=()=>{if(signal?.aborted)throw new DOMException('Удаление отменено','AbortError');};
+    try {
+      aborted();
+      if(!assets)throw new Error('Сначала установите модель в настройках редактора');
+      const [runtime,mjs,wasm,model]=assets;
+      const workerUrl=URL.createObjectURL(new Blob([runtime,'\n;(',workerEntry.toString(),')();'],{type:'text/javascript'}));urls.push(workerUrl);
+      worker=workerFactory(workerUrl);
+      return await new Promise((resolve,reject)=>{
+        let done=false;
+        const finish=(value,error)=>{if(done)return;done=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);worker.terminate();error?reject(error):resolve(value);};
+        const abort=()=>finish(null,new DOMException('Удаление отменено','AbortError'));
+        const timer=setTimeout(()=>finish(null,new Error('Обработка заняла слишком долго. Попробуйте меньшую область.')),180000);
+        signal?.addEventListener('abort',abort,{once:true});
+        worker.onerror=event=>{event.preventDefault?.();finish(null,new Error('Не удалось запустить нейросеть в этом браузере'));};
+        worker.onmessage=({data})=>{
+          if(done)return;
+          if(data.type==='progress'){
+            if(data.stage==='inference')inferenceStarted=performance.now();
+            onProgress?.({stage:data.stage,message:data.message,estimatedSeconds:inferenceDurations.get(mode)});
+          }
+          else if(data.type==='result'){
+            if(inferenceStarted!==null)inferenceDurations.set(mode,Math.max(.5,(performance.now()-inferenceStarted)/1000));
+            finish(data.output);
+          }
+          else if(data.type==='error'){console.warn('LaMa '+data.stage+': '+data.reason);finish(null,new Error('Ошибка нейросети ('+data.stage+'). Используйте актуальный Chrome или Edge и повторите.'));}
+        };
+        if(signal?.aborted){abort();return;}
+        const request=makeRequest?makeRequest(input,assets,mode):{payload:{input,mjs,wasm,model,gpu:mode},transfer:[input.buffer]};
+        worker.postMessage(request.payload,request.transfer);
+      });
+    } finally {worker?.terminate();for(const url of urls)URL.revokeObjectURL(url);active=false;}
+  }
+  async function remove() {
+    if(active||preparing||deleting)throw new Error('Дождитесь завершения обработки или установки нейросети');
+    deleting=true;
+    try {
+      if(await cache.remove()!==true)throw new Error('Браузер не разрешил удалить файлы нейросети. Модель сохранена; попробуйте ещё раз.');
+      assets=null;stored=false;inferenceDurations.clear();
+    } finally {deleting=false;}
+  }
+  return {run,prepare,remove,isBusy:()=>Boolean(active||preparing||deleting),isReady:()=>Boolean(assets),isStored:()=>stored};
+}
+
+// ---- src/ai/sam-assets.js ----
+// SlimSAM ONNX exports, pinned revision. Shared verified ORT bytes; separate cache.
+const SAM_ARTIFACTS=Object.freeze([
+  ...LAMA_ARTIFACTS.slice(0,3),
+  {id:'slimsam-vision-q8.onnx',url:'https://huggingface.co/Xenova/slimsam-77-uniform/resolve/5850ab45f587c112167512ffef949107115e26a0/onnx/vision_encoder_quantized.onnx',size:8882165,sha256:'cce23c7b2e5d4f330932738fb67ba518e04b0d99ccdd1cccd22a7da4e01f2971'},
+  {id:'slimsam-prompt-q8.onnx',url:'https://huggingface.co/Xenova/slimsam-77-uniform/resolve/5850ab45f587c112167512ffef949107115e26a0/onnx/prompt_encoder_mask_decoder_quantized.onnx',size:4903810,sha256:'cb90b279f549d2cab7fd6e20c38522438c65d84bdcca3d2a764cff7d857fdce2'},
+].map(Object.freeze));
+
+const SAM2_BASE='https://huggingface.co/onnx-community/sam2.1-hiera-tiny-ONNX/resolve/814a066640debee5a91e70aa401fb8e17e030503/onnx/';
+const SAM2_ARTIFACTS=Object.freeze([
+  ...LAMA_ARTIFACTS.slice(0,3),
+  {id:'sam2-vision.onnx',url:SAM2_BASE+'vision_encoder_quantized.onnx',size:441167,sha256:'8800fdd04b9045cb6060ba8962b83c78ce9bb0976da8f030afa073467a888524'},
+  {id:'sam2-vision.onnx_data',url:SAM2_BASE+'vision_encoder_quantized.onnx_data',size:52573088,sha256:'ea1f677596dc82cef0dc317d78135d892f4b26e20a4439f899aa58d84965b324'},
+  {id:'sam2-prompt.onnx',url:SAM2_BASE+'prompt_encoder_mask_decoder.onnx',size:213114,sha256:'874414704c5d686db7d206a35f6e15d26563d50c8c4468fccc6739bd7e491dcf'},
+  {id:'sam2-prompt.onnx_data',url:SAM2_BASE+'prompt_encoder_mask_decoder.onnx_data',size:20958208,sha256:'e9874d900dd4134ed60eab1e97910327c2419e0b2954485d8fd6e7f1a1470f47'},
+].map(Object.freeze));
+
+// ---- src/ai/sam-preprocess.js ----
+// Brush marks are prompts, never an outline or a clipping mask.
+function prepareSamPrompts({width,height,data,mask},{square=false}={}){
+  if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<1||height<1||width*height>8_000_000||data?.length!==width*height*4||mask?.length!==width*height)throw new Error('Некорректный размер слоя или подсказки');
+  const chosen=[],labels=[],n=width*height,visited=new Uint8Array(n),queue=new Int32Array(n);
+  // One seed deep INSIDE each substantial painted region. Farthest brush-edge
+  // sampling treated accidental background fringe as mandatory foreground.
+  for(const label of [1,2]){
+    const distance=new Uint16Array(n);
+    for(let i=0;i<n;i++)if(mask[i]===label&&data[i*4+3])distance[i]=65534;
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      const i=y*width+x;if(distance[i])distance[i]=Math.min(distance[i],x?distance[i-1]+1:1,y?distance[i-width]+1:1);
+    }
+    for(let y=height-1;y>=0;y--)for(let x=width-1;x>=0;x--){
+      const i=y*width+x;if(distance[i])distance[i]=Math.min(distance[i],x+1<width?distance[i+1]+1:1,y+1<height?distance[i+width]+1:1);
+    }
+    visited.fill(0);const regions=[];
+    for(let start=0;start<n;start++)if(distance[start]&&!visited[start]){
+      let head=0,tail=1,best=start;queue[0]=start;visited[start]=1;
+      while(head<tail){const i=queue[head++],x=i%width;
+        if(distance[i]>distance[best])best=i;
+        const neighbors=[x?i-1:-1,x+1<width?i+1:-1,i-width,i+width];
+        for(const j of neighbors)if(j>=0&&j<n&&distance[j]&&!visited[j]){visited[j]=1;queue[tail++]=j;}
+      }
+      const candidates=[];const step=Math.max(1,Math.ceil(tail/2048));
+      for(let k=0;k<tail;k+=step)if(distance[queue[k]]>=Math.max(1,distance[best]*.45))candidates.push(queue[k]);
+      regions.push({count:tail,index:best,depth:distance[best],candidates});
+    }
+    regions.sort((a,b)=>b.count-a.count);
+    for(const region of regions.slice(0,label===1?4:8)){
+      if(label===1&&regions[0].count>=16&&region.count<16)continue;
+      chosen.push([region.index%width,Math.floor(region.index/width)]);labels.push(label===1?1:0);
+      // Several well-separated INTERIOR seeds prevent selecting just a detail
+      // (a car door/trunk), while excluding the uncertain brush fringe.
+      const picked=[region.index],spacing=Math.max(12,Math.min(width,height)/10)**2;
+      const squared=(a,b)=>(a%width-b%width)**2+(Math.floor(a/width)-Math.floor(b/width))**2;
+      while(picked.length<(label===1?3:2)&&chosen.length<24){
+        let next=-1,farthest=0;
+        for(const candidate of region.candidates){const d=Math.min(...picked.map(i=>squared(i,candidate)));if(d>farthest){farthest=d;next=candidate;}}
+        if(next<0||farthest<spacing)break;
+        picked.push(next);chosen.push([next%width,Math.floor(next/width)]);labels.push(label===1?1:0);
+      }
+    }
+  }
+  if(!labels.includes(1))throw new Error('Кистью «Сохранить объект» отметьте видимую часть нужного объекта');
+  const scale=1024/Math.max(width,height),resizedWidth=square?1024:Math.max(1,Math.round(width*scale)),resizedHeight=square?1024:Math.max(1,Math.round(height*scale));
+  const points=new Float32Array(chosen.flatMap(([x,y])=>[x*resizedWidth/width,y*resizedHeight/height]));
+  return {points,labels:new Int32Array(labels),resizedWidth,resizedHeight};
+}
+function prepareSamImage(rgba,width,height){
+  if(width<1||height<1||width>1024||height>1024||rgba?.length!==width*height*4)throw new Error('Некорректный вход нейросети');
+  const n=1024*1024,input=new Float32Array(3*n),mean=[.485,.456,.406],std=[.229,.224,.225];
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++)for(let k=0;k<3;k++){
+    const i=(y*width+x)*4,alpha=rgba[i+3]/255;
+    input[k*n+y*1024+x]=((rgba[i+k]*alpha+255*(1-alpha))/255-mean[k])/std[k];
+  }
+  return input;
+}
+
+function sample(values,offset,x,y){
+  x=Math.max(0,Math.min(255,x));y=Math.max(0,Math.min(255,y));
+  const x0=Math.floor(x),y0=Math.floor(y),x1=Math.min(255,x0+1),y1=Math.min(255,y0+1),fx=x-x0,fy=y-y0;
+  return (values[offset+y0*256+x0]*(1-fx)+values[offset+y0*256+x1]*fx)*(1-fy)+(values[offset+y1*256+x0]*(1-fx)+values[offset+y1*256+x1]*fx)*fy;
+}
+
+function cleanContour(binary,prepared){
+  const n=65536,visited=new Uint8Array(n),queue=new Int32Array(n),positive=new Set(),negative=new Set();
+  for(let p=0;p<prepared.points.length/2;p++){
+    const x=Math.max(0,Math.min(255,Math.floor(prepared.points[p*2]/4))),y=Math.max(0,Math.min(255,Math.floor(prepared.points[p*2+1]/4)));
+    (prepared.labels?.[p]===0?negative:positive).add(y*256+x);
+  }
+  // Drop only tiny unprompted speckles. A real paw/tail can be disconnected
+  // at model resolution, so a substantial unprompted component must survive.
+  // Fill only tiny enclosed pinholes; large/explicitly excluded holes stay.
+  for(const foreground of [1,0]){
+    visited.fill(0);
+    for(let start=0;start<n;start++)if(binary[start]===foreground&&!visited[start]){
+      let head=0,tail=1,touchesBorder=false,seed=false,excluded=false;queue[0]=start;visited[start]=1;
+      while(head<tail){const i=queue[head++],x=i%256,y=i>>8;
+        touchesBorder||=x===0||x===255||y===0||y===255;seed||=positive.has(i);excluded||=negative.has(i);
+        for(const j of [x?i-1:-1,x<255?i+1:-1,i-256,i+256])if(j>=0&&j<n&&binary[j]===foreground&&!visited[j]){visited[j]=1;queue[tail++]=j;}
+      }
+      if(foreground&&!seed&&tail<=16||!foreground&&!touchesBorder&&!excluded&&tail<=16)for(let k=0;k<tail;k++)binary[queue[k]]=foreground?0:1;
+    }
+  }
+  return binary;
+}
+function mergeSamMask({width,height,data},prepared,{masks,scores}={},options={}){
+  if(!(masks instanceof Float32Array)||masks.length!==3*256*256||!(scores instanceof Float32Array)||scores.length!==3||!masks.every(Number.isFinite)||!scores.every(Number.isFinite))throw new Error('Нейросеть вернула некорректный результат');
+  const {resizedWidth,resizedHeight}=prepared;let best=-1,quality=-Infinity;
+  for(let k=0;k<3;k++){
+    let positives=0,hits=0,negatives=0,excluded=0;
+    for(let p=0;p<prepared.points.length/2;p++){
+      const inside=sample(masks,k*65536,prepared.points[p*2]/4-.5,prepared.points[p*2+1]/4-.5)>0;
+      if(prepared.labels?.[p]===0){negatives++;if(!inside)excluded++;}else{positives++;if(inside)hits++;}
+    }
+    if(hits===positives&&excluded===negatives&&scores[k]>quality){best=k;quality=scores[k];}
+  }
+  if(best<0)throw new Error('Подсказки противоречат результату. Отметьте объект зелёной кистью, лишний фон — красной');
+  const binary=new Uint8Array(65536);
+  for(let i=0;i<binary.length;i++)binary[i]=masks[best*65536+i]>0?1:0;
+  cleanContour(binary,prepared);
+  const n=width*height,hard=new Uint8Array(n),result=new Uint8ClampedArray(data);
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++)hard[y*width+x]=sample(binary,0,(x+.5)*resizedWidth/width/4-.5,(y+.5)*resizedHeight/height/4-.5)>=.5?1:0;
+  // Distance to the opposite class gives edge-only feathering in ORIGINAL
+  // pixels. Confidence/logit noise never makes the object's interior translucent.
+  const feather=Math.max(0,Math.min(3,Number(options.feather) || 0)),distance=feather?new Float32Array(n).fill(8):null;
+  if(distance){
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      const i=y*width+x;if(x&&hard[i]!==hard[i-1]||x+1<width&&hard[i]!==hard[i+1]||y&&hard[i]!==hard[i-width]||y+1<height&&hard[i]!==hard[i+width])distance[i]=.5;
+      if(x)distance[i]=Math.min(distance[i],distance[i-1]+1);if(y)distance[i]=Math.min(distance[i],distance[i-width]+1);
+    }
+    for(let y=height-1;y>=0;y--)for(let x=width-1;x>=0;x--){const i=y*width+x;if(x+1<width)distance[i]=Math.min(distance[i],distance[i+1]+1);if(y+1<height)distance[i]=Math.min(distance[i],distance[i+width]+1);}
+  }
+  let kept=0,removed=0;
+  for(let i=0;i<n;i++){
+    const coverage=distance?Math.max(0,Math.min(1,.5+(hard[i]?1:-1)*distance[i]/feather)):hard[i];
+    result[i*4+3]=Math.round(data[i*4+3]*coverage);if(result[i*4+3])kept++;if(result[i*4+3]<data[i*4+3])removed++;
+  }
+  if(!kept)throw new Error('Нейросеть не нашла объект. Уточните подсказку');
+  if(!removed)throw new Error('Нейросеть выделила весь слой. Добавьте красную подсказку на фон');
+  return result;
+}
+
+// ---- src/ai/sam-runtime.js ----
+function samWorkerEntry(){
+  self.onmessage=async({data})=>{
+    let stage='runtime';
+    try{
+      self.fetch=()=>Promise.reject(new Error('Inference network access disabled'));
+      ort.env.wasm.numThreads=1;ort.env.wasm.proxy=false;
+      const moduleUrl=URL.createObjectURL(new Blob([data.mjs],{type:'text/javascript'}));
+      ort.env.wasm.wasmPaths={mjs:moduleUrl};ort.env.wasm.wasmBinary=new Uint8Array(data.wasm);
+      const providers=data.gpu&&self.navigator?.gpu?['webgpu','wasm']:['wasm'];
+      self.postMessage({type:'progress',stage:'initialize',message:'Подготовка нейросети удаления фона…'});
+      stage='encoder';
+      const square=data.square;
+      const names=square?['image_embeddings.0','image_embeddings.1','image_embeddings.2']:['image_embeddings','image_positional_embeddings'];
+      const shapes=square?[[1,32,256,256],[1,64,128,128],[1,256,64,64]]:[[1,256,64,64],[1,256,64,64]];
+      const external=(path,bytes)=>bytes?{externalData:[{path,data:new Uint8Array(bytes)}]}:{};
+      const encoder=await ort.InferenceSession.create(new Uint8Array(data.encoder),{executionProviders:providers,...external('vision_encoder_quantized.onnx_data',data.encoderData)});
+      if(encoder.inputNames.join(',')!=='pixel_values'||!names.every(name=>encoder.outputNames.includes(name)))throw new Error('Unexpected SlimSAM encoder contract');
+      self.postMessage({type:'progress',stage:'inference',message:'Определение границ объекта…'});
+      const encoded=await encoder.run({pixel_values:new ort.Tensor('float32',data.input,[1,3,1024,1024])});
+      const embeddings={};
+      for(let index=0;index<names.length;index++){const name=names[index],shape=shapes[index];
+        const tensor=encoded[name];
+        if(tensor.type!=='float32'||tensor.dims.join(',')!==shape.join(','))throw new Error('Unexpected embedding shape');
+        embeddings[name]=new ort.Tensor('float32',new Float32Array(tensor.data),shape);
+      }
+      for(const tensor of Object.values(encoded))tensor.dispose();await encoder.release();
+      stage='decoder';
+      const decoder=await ort.InferenceSession.create(new Uint8Array(data.decoder),{executionProviders:providers,...external('prompt_encoder_mask_decoder.onnx_data',data.decoderData)});
+      if(decoder.inputNames.length!==(square?6:4)||![...names,'input_points','input_labels',...(square?['input_boxes']:[])].every(name=>decoder.inputNames.includes(name)))throw new Error('Unexpected SlimSAM decoder contract');
+      const count=data.points.length/2;
+      if(!Number.isInteger(count)||count<1||count>32)throw new Error('Unexpected prompts');
+      const labels=data.labels||new Int32Array(count).fill(1);
+      if(labels.length!==count||!labels.every(v=>v===0||v===1)||!labels.includes(1))throw new Error('Unexpected prompt labels');
+      const result=await decoder.run({...embeddings,...(square?{input_boxes:new ort.Tensor('float32',new Float32Array(0),[1,0,4])}:{}),input_points:new ort.Tensor('float32',data.points,[1,1,count,2]),input_labels:new ort.Tensor('int64',BigInt64Array.from(labels,BigInt),[1,1,count])});
+      const masks=result.pred_masks,scores=result.iou_scores;
+      if(masks.type!=='float32'||masks.dims.join(',')!=='1,1,3,256,256'||scores.type!=='float32'||scores.dims.join(',')!=='1,1,3')throw new Error('Unexpected SlimSAM output');
+      const output={masks:new Float32Array(masks.data),scores:new Float32Array(scores.data)};
+      for(const tensor of Object.values(result))tensor.dispose();for(const tensor of Object.values(embeddings))tensor.dispose();
+      await decoder.release();URL.revokeObjectURL(moduleUrl);
+      self.postMessage({type:'result',output},[output.masks.buffer,output.scores.buffer]);
+    }catch(error){self.postMessage({type:'error',stage,reason:String(error?.message||'').slice(0,300)});}
+  };
+}
+function createSamEngine(options={}){
+  const square=options.square===true,artifacts=square?SAM2_ARTIFACTS:SAM_ARTIFACTS;
+  return createLamaEngine({
+    ...options,
+    cache:options.cache||createLamaArtifactCache({databaseName:square?'zeter-background-sam2-model-v1':'zeter-background-removal-model-v1',artifacts}),
+    artifactList:artifacts,workerEntry:samWorkerEntry,
+    makeRequest:({input,points,labels},assets,gpu)=>({payload:{input,points,labels,gpu,square,mjs:assets[1],wasm:assets[2],encoder:assets[3],encoderData:square?assets[4]:null,decoder:assets[square?5:4],decoderData:square?assets[6]:null},transfer:[input.buffer,points.buffer,...(labels?[labels.buffer]:[])]}),
+  });
+}
+
+// ---- src/ai/background-models.js ----
+const BACKGROUND_MODELS=Object.freeze([
+  Object.freeze({id:'sam2',name:'SAM 2.1 Tiny',size:97,prefix:'qualityBackgroundModel',square:true,description:'Более сильная модель для сложных границ. Рекомендуется для автомобилей, животных и нескольких объектов в кадре.'}),
+]);
+
+// Each vetted model owns a separate fixed-key cache. Existing SlimSAM installs
+// survive; switching choice never redirects a command already in progress.
+function createBackgroundModels({gpu,storage=globalThis.localStorage,engineFactory=createSamEngine}={}){
+  const key='zeter-background-removal-choice-v1',engines=new Map(BACKGROUND_MODELS.map(model=>[model.id,engineFactory({gpu,square:model.square})]));
+  let selected='sam2';try{const saved=storage?.getItem(key);if(engines.has(saved))selected=saved;}catch{}
+  const selectedModel=()=>BACKGROUND_MODELS.find(model=>model.id===selected),getEngine=id=>engines.get(id);
+  const facade={models:BACKGROUND_MODELS,selectedId:()=>selected,selectedModel,getEngine,
+    select(id){if(!engines.has(id))throw new Error('Неизвестная нейросеть');selected=id;try{storage?.setItem(key,id);}catch{}},
+    capture:()=>({engine:getEngine(selected),model:selectedModel()}),
+  };
+  for(const method of ['isReady','isBusy','isStored','prepare','remove','run'])facade[method]=(...args)=>getEngine(selected)[method](...args);
+  return facade;
+}
+
+// ---- src/ui/background-model-settings-controller.js ----
+// Each model owns its installation state; selection belongs to the model catalog.
+function createBackgroundModelSettings({dialog,engine,setStatus=()=>{},onModelState=()=>{},choices=[]}={}) {
+  const models=engine.models||[{id:'slimsam',name:'SlimSAM',size:39,prefix:'backgroundModel'}];
+  const selectedModel=()=>engine.selectedModel?.()||models[0];
+  const controls=[dialog.querySelector('#backgroundModelChoice'),...choices].filter(Boolean);
+  const cards=models.map(model=>({model,runtime:engine.getEngine?.(model.id)||engine,q:id=>dialog.querySelector('#'+model.prefix+id),checking:true,installation:null,deleting:false,checked:null}));
+  function refresh(){
+    const selected=selectedModel();
+    for(const choice of controls)choice.value=selected.id;
+    for(const card of cards){
+      const {model,runtime,q,checking,installation,deleting}=card;
+      const ready=runtime.isReady(),busy=checking||Boolean(installation)||deleting||runtime.isBusy();
+      q('Description').textContent=`${model.description||'Определяет границы объекта по примерным штрихам кисти.'} ${ready?'Установлена; фото обрабатывается на устройстве.':`Установите эту модель — около ${model.size} МБ. Фото не отправляется в интернет.`}`;
+      q('Install').hidden=ready;q('Install').disabled=busy;q('Remove').disabled=busy;
+      q('Remove').textContent=deleting?'Удаление…':'Удалить модель';q('Cancel').hidden=!installation;
+      q('Status').textContent=checking?'Проверка кэша этой модели…':deleting?'Удаление файлов этой модели…':installation?'Загрузка и проверка этой модели…':ready?(runtime.isStored()?'Готова · сохранена в этом браузере':'Готова для этой страницы · после закрытия может понадобиться загрузка'):'Не установлена';
+      q('Title')?.closest?.('.settings-model')?.classList.toggle('settings-model-selected',model.id===selected.id);
+    }
+    onModelState(engine.isReady(),selected);
+  }
+  function select(id){if(!models.some(model=>model.id===id))return false;if(engine.select)engine.select(id);refresh();return true;}
+  async function install(id=selectedModel().id){
+    const card=cards.find(item=>item.model.id===id);if(!card)return;
+    await card.checked;
+    const {runtime,q,model}=card;
+    if(card.installation||card.deleting||runtime.isBusy()||runtime.isReady())return;
+    const controller=new AbortController();card.installation=controller;refresh();
+    q('Progress').hidden=false;q('Progress').value=0;q('ProgressText').textContent='Подключение…';
+    try{
+      await runtime.prepare({signal:controller.signal,onProgress:({percent,loaded,total})=>{
+        q('Progress').value=percent;q('ProgressText').textContent=`${percent}% · ${(loaded/1024/1024).toFixed(1)} из ${(total/1024/1024).toFixed(1)} МБ`;
+      }});
+      q('Progress').value=100;q('ProgressText').textContent=`${model.name} готова. Отметьте объект кистью и нажмите «Удалить фон».`;setStatus(`${model.name}: модель удаления фона готова`);
+    }catch(error){q('ProgressText').textContent=controller.signal.aborted?'Установка отменена. Можно повторить позже.':`Не удалось установить: ${error.message}`;}
+    finally{card.installation=null;refresh();}
+  }
+  async function remove(card){
+    await card.checked;if(card.installation||card.deleting||card.runtime.isBusy())return;
+    card.deleting=true;refresh();
+    try{await card.runtime.remove();card.q('Progress').hidden=true;card.q('Progress').value=0;card.q('ProgressText').textContent=`${card.model.name} удалена. Фото, проекты и другие модели сохранены.`;setStatus(card.q('ProgressText').textContent);}
+    catch(error){card.q('ProgressText').textContent=`Не удалось удалить: ${error.message}`;}
+    finally{card.deleting=false;refresh();}
+  }
+  for(const card of cards){
+    card.checked=card.runtime.prepare({cachedOnly:true}).catch(()=>null).finally(()=>{card.checking=false;refresh();});
+    card.q('Install').onclick=()=>install(card.model.id);card.q('Cancel').onclick=()=>card.installation?.abort();card.q('Remove').onclick=()=>remove(card);
+  }
+  for(const choice of controls)choice.onchange=()=>select(choice.value);
+  return {install,refresh,select,selectedModel};
+}
+
+// ---- src/painting/background-removal-command-controller.js ----
+// Publishes alpha only, through the existing guarded raster persistence owner.
+function createBackgroundRemovalCommandController({state,rasterEdit,engine,ui,getOptions=()=>({feather:1}),documentRef=globalThis.document}={}){
+  async function remove({ownerDocument,ownerLayer,mask,isCurrent,signal}={}){
+    const current=()=>!signal?.aborted&&state.getDocument()===ownerDocument&&ownerDocument?.layers.includes(ownerLayer)&&isCurrent();
+    if(!current())return false;
+    if(ownerLayer.highDepthSource){ui?.setStatus?.('Удаление фона доступно для RGB 8 бит. Исходный high-depth/CMYK слой сохранён.');return false;}
+    if(!state.beginPersist())return false;
+    try{
+      const captured=engine.capture?.()||{engine,model:{square:false}},options={...getOptions()};
+      const prepared=await rasterEdit.ensureRasterBuffer(ownerDocument,ownerLayer);
+      if(!prepared||!current())return false;
+      const {width,height}=prepared.canvas;
+      if(mask?.width!==width||mask?.height!==height||width*height>8_000_000)throw new Error('Размер слоя или подсказки изменился');
+      const image=prepared.ctx.getImageData(0,0,width,height);
+      const prompts=prepareSamPrompts({width,height,data:image.data,mask:mask.data},captured.model);
+      const resized=documentRef.createElement('canvas');resized.width=prompts.resizedWidth;resized.height=prompts.resizedHeight;
+      const ctx=resized.getContext('2d');ctx.drawImage(prepared.canvas,0,0,resized.width,resized.height);
+      const input=prepareSamImage(ctx.getImageData(0,0,resized.width,resized.height).data,resized.width,resized.height);
+      const output=await captured.engine.run({input,points:prompts.points,labels:prompts.labels},{signal,onProgress:update=>{if(current()){ui?.setStatus?.(update.message);ui?.progress?.(update);}}});
+      if(!current())return false;
+      const result=mergeSamMask({width,height,data:image.data,mask:mask.data},prompts,output,options);
+      if(!current())return false;
+      if(result.every((value,i)=>value===image.data[i])){ui?.setStatus?.('Фон уже прозрачный · изменений нет');return false;}
+      ui?.progress?.({stage:'save',message:'Сохранение прозрачного фона…'});
+      image.data.set(result);prepared.ctx.putImageData(image,0,0);
+      if(!await rasterEdit.persistPaintLayer(ownerDocument,ownerLayer,{isContinuationCurrent:current}))return false;
+      ui?.commit?.('Удалить фон');return true;
+    }catch(error){
+      if(signal?.aborted)ui?.setStatus?.('Удаление фона отменено · подсказка сохранена');
+      else if(current())ui?.setStatus?.(`Не удалось удалить фон: ${error.message}`);
+      return false;
+    }finally{rasterEdit.clearBrushBuffer();state.endPersist();ui?.render?.();}
+  }
+  return {remove};
+}
+
+// ---- src/ui/editor-settings-controller.js ----
+function createEditorSettingsController({dialog,engine,preferences,storage=globalThis.localStorage,setStatus=()=>{},onModelState=()=>{},backgroundEngine=null,onBackgroundModelState=()=>{},backgroundModelChoices=[]}={}) {
+  let installing=null,deleting=false,checking=true,mode='auto',brush=24;
+  try{const saved=JSON.parse(storage.getItem('zeter-editor-settings-v1')||'{}');if(saved.processing==='cpu')mode='cpu';if(Number.isInteger(saved.brush)&&saved.brush>=1&&saved.brush<=160)brush=saved.brush;}catch{}
+  const q=id=>dialog.querySelector('#'+id);
+  const persist=()=>{try{storage.setItem('zeter-editor-settings-v1',JSON.stringify({processing:mode,brush}));return true;}catch{q('settingsNotice').textContent='Браузер не разрешил сохранить настройки. Они действуют до закрытия страницы.';return false;}};
+  function refresh() {
+    const ready=engine.isReady();onModelState(ready);
+    q('modelDescription').textContent=ready?'LaMa восстанавливает фон на месте закрашенного объекта. Нейросеть установлена. Фотографии обрабатываются на устройстве.':'LaMa восстанавливает фон на месте закрашенного объекта. Для работы установите модель — около 85 МБ. Фотографии не отправляются в интернет.';
+    const busy=Boolean(installing)||deleting||checking||engine.isBusy();
+    q('modelInstall').hidden=ready;
+    q('modelInstall').disabled=busy;
+    q('modelRemove').disabled=busy;
+    q('modelRemove').textContent=deleting?'Удаление…':'Удалить нейросеть';
+    q('modelInstallCancel').hidden=!installing;
+    q('modelStatus').textContent=deleting?'Удаление файлов нейросети…':installing?'Загрузка и проверка модели…':checking?'Проверка установленной модели…':ready?(engine.isStored()?'Готова · сохранена в этом браузере':'Готова для этой страницы · кэш недоступен, после закрытия понадобится загрузка'):'Не установлена · для удаления объектов нужна нейросеть';
+  }
+  const backgroundModel=backgroundEngine?createBackgroundModelSettings({dialog,engine:backgroundEngine,setStatus,onModelState:onBackgroundModelState,choices:backgroundModelChoices}):null;
+  const cacheCheck=engine.prepare({cachedOnly:true}).catch(()=>null).finally(()=>{checking=false;refresh();});
+  async function install() {
+    await cacheCheck;
+    if(installing||deleting||engine.isReady())return;
+    const controller=new AbortController();installing=controller;refresh();q('modelProgress').hidden=false;q('modelProgress').value=0;q('modelProgressText').textContent='Подключение…';
+    try {
+      await engine.prepare({signal:controller.signal,onProgress:({percent,loaded,total})=>{
+        q('modelProgress').value=percent;
+        q('modelProgressText').textContent=`${percent}% · ${(loaded/1024/1024).toFixed(1)} из ${(total/1024/1024).toFixed(1)} МБ`;
+      }});
+      q('modelProgress').value=100;q('modelProgressText').textContent='Нейросеть готова. Закройте настройки и нажмите «Удалить объект».';setStatus('Нейросеть удаления объектов готова');
+    } catch(error) {
+      q('modelProgressText').textContent=controller.signal.aborted?'Установка отменена. Можно продолжить позже.':`Не удалось установить: ${error.message}`;
+    } finally {installing=null;refresh();}
+  }
+  async function remove() {
+    await cacheCheck;
+    if(installing||deleting)return;
+    deleting=true;refresh();
+    try {
+      await engine.remove();
+      q('modelProgress').hidden=true;q('modelProgress').value=0;
+      q('modelProgressText').textContent='Нейросеть удалена. Для удаления объектов установите её снова.';
+      setStatus('Нейросеть удалена. Фотографии и проекты сохранены.');
+    } catch(error) {q('modelProgressText').textContent=`Не удалось удалить нейросеть: ${error.message}`;}
+    finally {deleting=false;refresh();}
+  }
+  q('modelRemove').onclick=remove;
+  q('settingsClose').onclick=()=>dialog.close();
+  q('modelInstall').onclick=install;
+  q('modelInstallCancel').onclick=()=>installing?.abort();
+  q('processingMode').value=mode;
+  q('processingMode').onchange=()=>{mode=q('processingMode').value==='cpu'?'cpu':'auto';persist();};
+  q('defaultBrushSize').value=brush;
+  preferences.setBrush(brush);
+  q('defaultBrushSize').onchange=()=>{const value=Number(q('defaultBrushSize').value);if(Number.isInteger(value)&&value>=1&&value<=160){brush=value;preferences.setBrush(value);persist();}else q('defaultBrushSize').value=brush;};
+  q('settingsSmartSnap').onchange=()=>preferences.setSnap(q('settingsSmartSnap').checked);
+  const tabs=Array.from(dialog.querySelectorAll('[data-settings-tab]'));
+  function activateTab(tab,focus=false){for(const item of tabs){const selected=item===tab;item.setAttribute('aria-selected',String(selected));item.tabIndex=selected?0:-1;dialog.querySelector('#'+item.getAttribute('aria-controls')).hidden=!selected;}if(focus)tab.focus();}
+  for(const tab of tabs){tab.onclick=()=>activateTab(tab);tab.onkeydown=event=>{let index=tabs.indexOf(tab);if(event.key==='ArrowRight')index=(index+1)%tabs.length;else if(event.key==='ArrowLeft')index=(index+tabs.length-1)%tabs.length;else if(event.key==='Home')index=0;else if(event.key==='End')index=tabs.length-1;else return;event.preventDefault();activateTab(tabs[index],true);};}
+  function open(section='models'){backgroundModel?.refresh();activateTab(tabs.find(t=>t.dataset.settingsTab===section)||tabs[0]);q('settingsSmartSnap').checked=preferences.getSnap();refresh();if(!dialog.open)dialog.showModal();}
+  return {open,refresh:()=>{refresh();backgroundModel?.refresh();},openForBackgroundInstall:()=>{open('models');const model=backgroundModel?.selectedModel();q((model?.prefix||'backgroundModel')+'Install').scrollIntoView?.({block:'nearest'});return backgroundModel?.install();},openForInstall:()=>{open('models');return install();},useGpu:()=>mode==='auto',isInstalling:()=>Boolean(installing)};
+}
+
+// ---- src/ui/object-removal-progress-controller.js ----
+function createObjectRemovalProgressController({panel,bar,label,elapsed,remaining,now=()=>performance.now(),schedule=callback=>setInterval(callback,1000),unschedule=id=>clearInterval(id),inferenceLabel='Восстановление фона…'}={}) {
+  let active=false,timer=null,started=0,inferenceStarted=0,estimate=null;
+  function tick(){
+    if(!active)return;
+    elapsed.textContent=`Прошло: ${Math.floor((now()-started)/1000)} с`;
+    if(estimate!==null){
+      const seconds=Math.ceil(estimate-(now()-inferenceStarted)/1000);
+      remaining.textContent=seconds>0?`Примерно осталось: ${seconds} с`:'Расчёт дольше предыдущего · обработка продолжается';
+    }
+  }
+  function begin(){
+    if(active)return;
+    active=true;started=now();estimate=null;panel.hidden=false;
+    bar.value=0;label.textContent='1 из 3 · Подготовка изображения…';remaining.textContent='Оставшееся время пока неизвестно';
+    tick();timer=schedule(tick);
+  }
+  function update({stage,message,estimatedSeconds}={}){
+    if(!active)return;
+    if(stage==='initialize'){bar.value=20;label.textContent='1 из 3 · Подготовка нейросети…';}
+    else if(stage==='inference'){
+      bar.removeAttribute('value');label.textContent=`2 из 3 · ${inferenceLabel}`;inferenceStarted=now();
+      estimate=Number.isFinite(estimatedSeconds)&&estimatedSeconds>0?estimatedSeconds:null;
+      remaining.textContent=estimate===null?'Первый запуск · оцениваем скорость устройства':'Примерное время по предыдущему удалению';
+    }else if(stage==='save'){estimate=null;bar.value=90;label.textContent='3 из 3 · Сохранение результата…';remaining.textContent='Почти готово';}
+    else if(message)label.textContent=message;
+    tick();
+  }
+  function finish(){if(!active)return;active=false;unschedule(timer);timer=null;panel.hidden=true;estimate=null;}
+  return {begin,update,finish};
+}
+
+// ---- src/painting/object-removal-command-controller.js ----
+// AI owns no document state. Only this transaction can publish its result.
+function createObjectRemovalCommandController({state,rasterEdit,engine,ui}={}) {
+  async function remove({ownerDocument,ownerLayer,mask,isCurrent,signal}={}) {
+    const current=()=>!signal?.aborted && state.getDocument()===ownerDocument && ownerDocument?.layers.includes(ownerLayer) && isCurrent();
+    if(!current())return false;
+    if(ownerLayer.highDepthSource){ui?.setStatus?.('Нейросетевое удаление доступно для RGB 8 бит. Исходный high-depth/CMYK слой сохранён.');return false;}
+    if(!state.beginPersist())return false;
+    try {
+      const prepared=await rasterEdit.ensureRasterBuffer(ownerDocument,ownerLayer);
+      if(!prepared||!current())return false;
+      const width=prepared.canvas.width,height=prepared.canvas.height;
+      if(mask?.width!==width||mask?.height!==height)throw new Error('Размер маски изменился');
+      const image=prepared.ctx.getImageData(0,0,width,height),source={width,height,data:image.data,mask:mask.data};
+      const input=prepareLamaInput(source);
+      const output=await engine.run(input.input,{signal,onProgress:update=>{if(current()){ui?.setStatus?.(typeof update==='string'?update:update.message);ui?.progress?.(update);}}});
+      if(!current())return false;
+      ui?.progress?.({stage:'save',message:'Сохранение результата…'});
+      image.data.set(mergeLamaOutput(source,input,output));
+      if(!current())return false;
+      prepared.ctx.putImageData(image,0,0);
+      if(!await rasterEdit.persistPaintLayer(ownerDocument,ownerLayer,{isContinuationCurrent:current}))return false;
+      ui?.commit?.('Удалить объект');
+      return true;
+    } catch(error) {
+      if(signal?.aborted)ui?.setStatus?.('Удаление отменено · выделенная область сохранена');
+      else if(current())ui?.setStatus?.(`Не удалось удалить объект: ${error.message}`);
+      return false;
+    } finally {
+      rasterEdit.clearBrushBuffer();state.endPersist();ui?.render?.();
+    }
+  }
+  return {remove};
+}
+
+// ---- src/painting/object-removal-controller.js ----
+// Transient, layer-local brush mask. Pixel publication belongs to rasterCommands.
+function createObjectRemovalController({ state, geometry, commands, ui, documentRef=globalThis.document,toolName='Удаление объектов',historyLabel='Удалить объект',successMessage='Объект удалён · Ctrl+Z — отменить',previewColor=[255,84,148],negativePreviewColor=[255,91,105],strokeHistory=false } = {}) {
+  let draft=null, stroke=null, busy=false, preview=null, previewDirty=false, operation=null;
+  const undoStrokes=[],redoStrokes=[];
+  const historyBudget=32*1024*1024,maxHistory=32;
+  const transformKey = layer => [layer.x,layer.y,layer.width,layer.height,layer.scaleX,layer.scaleY,layer.rotation].join('|');
+  function valid() {
+    return draft && state.getDocument()===draft.doc && state.selected()===draft.layer &&
+      draft.doc.layers.includes(draft.layer) && state.isEditable(draft.layer) &&
+      state.getSerial()===draft.serial && transformKey(draft.layer)===draft.transform;
+  }
+  function notify() { ui?.changed?.({hasMask:Boolean(draft?.count),busy,active:Boolean(stroke)}); }
+  function discard() { draft=null;stroke=null;preview=null;previewDirty=false;undoStrokes.length=redoStrokes.length=0;notify(); }
+  function validate() { if(draft&&!valid())discard(); return Boolean(draft); }
+  function reset() { if(busy)return false;discard();return true; }
+  function hasMask() { validate();return Boolean(draft?.count); }
+  function snapshot() { return validate()?{width:draft.width,height:draft.height,data:draft.data.slice()}:null; }
+  function canUndo() { return validate()&&!busy&&!stroke&&undoStrokes.length>0; }
+  function canRedo() { return validate()&&!busy&&!stroke&&redoStrokes.length>0; }
+  function travel(from,to) {
+    if(!validate()||busy||stroke||!from.length)return false;
+    to.push({data:draft.data,count:draft.count});
+    const previous=from.pop();draft.data=previous.data;draft.count=previous.count;previewDirty=true;notify();return true;
+  }
+
+  function paint(start,end,diameter) {
+    if(!validate())return;
+    const radius=Math.max(.5,Math.min(160,Number(diameter)||1)/2);
+    const {width,height,data}=draft;
+    const left=Math.max(0,Math.floor(Math.min(start.x,end.x)-radius));
+    const right=Math.min(width-1,Math.ceil(Math.max(start.x,end.x)+radius));
+    const top=Math.max(0,Math.floor(Math.min(start.y,end.y)-radius));
+    const bottom=Math.min(height-1,Math.ceil(Math.max(start.y,end.y)+radius));
+    const dx=end.x-start.x,dy=end.y-start.y,length2=dx*dx+dy*dy;
+    for(let y=top;y<=bottom;y++)for(let x=left;x<=right;x++) {
+      const t=length2?Math.max(0,Math.min(1,((x+.5-start.x)*dx+(y+.5-start.y)*dy)/length2)):0;
+      if((x+.5-start.x-t*dx)**2+(y+.5-start.y-t*dy)**2>radius*radius)continue;
+      if(geometry.isAllowed&&!geometry.isAllowed({x:x+.5,y:y+.5},draft.layer))continue;
+      const index=y*width+x;
+      const mark=stroke?.mark||1;
+      if(data[index]!==mark){if(!data[index])draft.count++;data[index]=mark;previewDirty=true;if(stroke)stroke.changed=true;}
+    }
+  }
+  function local(point) {
+    const value=geometry.toLocal(point,draft.layer);
+    return value&&Number.isFinite(value.x)&&Number.isFinite(value.y)?value:null;
+  }
+  function begin(point,diameter,mark=1) {
+    if(busy||stroke)return false;
+    validate();
+    const doc=state.getDocument(),layer=state.selected();
+    if(!doc?.layers.includes(layer)||!state.isEditable(layer)){
+      ui?.setStatus?.(`${toolName}: выберите незаблокированный растровый слой`);return false;
+    }
+    if(!draft){
+      const width=Number(layer.width),height=Number(layer.height);
+      if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<1||height<1||width*height>8_000_000){
+        ui?.setStatus?.(`${toolName}: слой должен быть не больше 8 млн пикселей`);return false;
+      }
+      draft={doc,layer,width,height,data:new Uint8Array(width*height),count:0,serial:state.getSerial(),transform:transformKey(layer)};
+    }
+    const p=local(point);if(!p)return false;
+    stroke={last:p,before:draft.data.slice(),count:draft.count,mark:mark===2?2:1,changed:false};
+    paint(p,p,diameter);notify();return true;
+  }
+  function move(point,diameter) {
+    if(!stroke||busy||!validate())return;
+    const p=local(point);if(!p)return;
+    paint(stroke.last,p,diameter);if(stroke)stroke.last=p;
+  }
+  function finish(point,diameter) {
+    move(point,diameter);
+    if(strokeHistory&&stroke?.changed&&validate()){
+      redoStrokes.length=0;undoStrokes.push({data:stroke.before,count:stroke.count});
+      const limit=Math.min(maxHistory,Math.floor(historyBudget/draft.data.byteLength));
+      while(undoStrokes.length>limit)undoStrokes.shift();
+    }
+    stroke=null;notify();
+  }
+  function cancel() {
+    if(stroke&&validate()){draft.data=stroke.before;draft.count=stroke.count;previewDirty=true;}
+    stroke=null;notify();
+  }
+  async function remove() {
+    if(busy||stroke||!hasMask())return false;
+    const owner=draft,mask=owner.data.slice();
+    operation=new AbortController();busy=true;notify();
+    try {
+      const applied=await commands.remove({
+        ownerDocument:owner.doc,ownerLayer:owner.layer,historyLabel,
+        mask:{width:owner.width,height:owner.height,data:mask},signal:operation.signal,
+        isCurrent:()=>draft===owner && Boolean(valid()),
+        isAllowed:(x,y)=>Number.isInteger(x)&&Number.isInteger(y)&&x>=0&&y>=0&&x<owner.width&&y<owner.height&&Boolean(mask[y*owner.width+x]),
+      });
+      if(applied){discard();ui?.setStatus?.(successMessage);}
+      return Boolean(applied);
+    } finally { operation=null;busy=false;notify(); }
+  }
+  function draw(ctx) {
+    if(!hasMask()||!documentRef)return;
+    if(!preview){preview=documentRef.createElement('canvas');preview.width=draft.width;preview.height=draft.height;previewDirty=true;}
+    if(previewDirty){
+      const pc=preview.getContext('2d'),image=pc.createImageData(draft.width,draft.height);
+      for(let i=0;i<draft.data.length;i++)if(draft.data[i]){const color=draft.data[i]===2?negativePreviewColor:previewColor;image.data[i*4]=color[0];image.data[i*4+1]=color[1];image.data[i*4+2]=color[2];image.data[i*4+3]=112;}
+      pc.putImageData(image,0,0);previewDirty=false;
+    }
+    const p=geometry.toDocument({x:0,y:0},draft.layer),px=geometry.toDocument({x:1,y:0},draft.layer),py=geometry.toDocument({x:0,y:1},draft.layer);
+    ctx.save();ctx.transform(px.x-p.x,px.y-p.y,py.x-p.x,py.y-p.y,p.x,p.y);ctx.drawImage(preview,0,0);ctx.restore();
+  }
+  return {begin,move,finish,cancel,reset,hasMask,snapshot,remove,draw,canUndo,canRedo,undo:()=>travel(undoStrokes,redoStrokes),redo:()=>travel(redoStrokes,undoStrokes),isBusy:()=>busy,isDrawing:()=>Boolean(stroke),abort:()=>operation?.abort()};
 }
 
 // ---- src/painting/gradient-command-controller.js ----
@@ -25890,6 +26697,58 @@ const {
   clearSelection: clearSelectedPixels,
 } = rasterCommands;
 
+const removalProgress = createObjectRemovalProgressController({panel:$('#objectRemovalProgressPanel'),bar:$('#objectRemovalProgressBar'),label:$('#objectRemovalProgressLabel'),elapsed:$('#objectRemovalElapsed'),remaining:$('#objectRemovalRemaining')});
+const backgroundProgress=createObjectRemovalProgressController({panel:$('#backgroundRemovalProgressPanel'),bar:$('#backgroundRemovalProgressBar'),label:$('#backgroundRemovalProgressLabel'),elapsed:$('#backgroundRemovalElapsed'),remaining:$('#backgroundRemovalRemaining'),inferenceLabel:'Определение границ объекта…'});
+const samEngine=createBackgroundModels({gpu:()=>editorSettings.useGpu()});
+const backgroundCommands=createBackgroundRemovalCommandController({state:{getDocument:()=>doc,beginPersist:()=>{if(paintPersisting)return false;paintPersisting=true;return true;},endPersist:()=>{paintPersisting=false;}},rasterEdit,engine:samEngine,getOptions:()=>({feather:Number($('#removeBackgroundFeather').value)}),ui:{setStatus,render,commit,progress:update=>backgroundProgress.update(update)}});
+const lamaEngine = createLamaEngine({gpu:()=>editorSettings.useGpu()});
+const aiRemovalCommands = createObjectRemovalCommandController({
+  state:{getDocument:()=>doc,beginPersist:()=>{if(paintPersisting)return false;paintPersisting=true;return true;},endPersist:()=>{paintPersisting=false;}},
+  rasterEdit,engine:lamaEngine,ui:{setStatus,render,commit,progress:update=>removalProgress.update(update)},
+});
+let refreshToolbarHelp=()=>{};
+const editorSettings = createEditorSettingsController({
+  dialog:$('#editorSettings'),engine:lamaEngine,backgroundEngine:samEngine,onBackgroundModelState:(ready,model)=>{
+    refreshToolbarHelp();const notice=$('#removeBackgroundModelNotice');notice.hidden=currentTool!=='remove-background'||ready;notice.textContent=`Установить ${model.name} (~${model.size} МБ)`;notice.title=`Для удаления фона нужна выбранная модель ${model.name}`;
+    const toastNotice=$('#removeBackgroundInstallToast');if(ready)toastNotice?.remove();else if(toastNotice&&toastNotice.dataset.modelId!==model.id){toastNotice.remove();if(currentTool==='remove-background')showRemovalModelInstallNotice(true);}
+  },setStatus,onModelState:ready=>{refreshToolbarHelp();$('#removeObjectModelNotice').hidden=currentTool!=='remove-object'||ready;if(ready)$('#removeObjectInstallToast')?.remove();},
+  preferences:{getSnap:()=>smartSnapEnabled,setSnap:value=>{smartSnapEnabled=value;els.smartSnapToggle.checked=value;persistSmartSnapState();clearSmartGuides();drawOverlay();},setBrush:value=>{els.brushSize.value=value;els.brushSizeValue.textContent=String(value);}},
+});
+function createRemovalBrush(background=false){
+const prefix=background?'removeBackground':'removeObject',tool=background?'remove-background':'remove-object',progress=background?backgroundProgress:removalProgress;
+return createObjectRemovalController({
+  toolName:background?'Кисть удаления фона':'Удаление объектов',historyLabel:background?'Удалить фон':'Удалить объект',successMessage:background?'Фон удалён на выбранном слое · Ctrl+Z — отменить':'Объект удалён · Ctrl+Z — отменить',previewColor:background?[65,218,136]:[255,84,148],strokeHistory:background,
+  state: {
+    getDocument: () => doc,
+    getSerial: () => documentChangeSerial,
+    selected,
+    isEditable: layer => isEditableRasterLayer(layer) && isLayerVisible(doc,layer),
+  },
+  geometry: {
+    toLocal: documentPointToLayerPixel,
+    toDocument: layerPixelToDocumentPoint,
+    isAllowed: (point,layer) => pointInsideSelection(layerPixelToDocumentPoint(point,layer)),
+  },
+  commands: { remove: args => (background?backgroundCommands:aiRemovalCommands).remove(args) },
+  ui: {
+    setStatus,
+    changed: ({hasMask,busy,active}) => {
+      const apply = $('#'+prefix+'Apply'), reset = $('#'+prefix+'Reset'), cancel = $('#'+prefix+'Cancel');
+      cancel.hidden=!busy;
+      busy?progress.begin():progress.finish();
+      apply.hidden = reset.hidden = currentTool !== tool || !hasMask;
+      apply.disabled = reset.disabled = busy || active;
+      apply.textContent = busy ? 'Удаление…' : background?'Удалить фон':'Удалить объект';
+      if(background)refreshHistoryActions();
+      if($('#editorSettings').open)editorSettings.refresh();
+    },
+  },
+});
+}
+const objectRemoval=createRemovalBrush();
+const backgroundRemoval=createRemovalBrush(true);
+const toolRemoval=()=>currentTool==='remove-background'?backgroundRemoval:objectRemoval;
+
 const gradientCommands = createGradientCommandController({
   rasterEdit,
   state: {
@@ -25946,14 +26805,17 @@ const {
 } = selectionRasterMutations;
 
 const toolbarController = createToolbarController({
+  getToolHelp:tool=>{const help=TOOL_HELP[tool];if(tool==='remove-background'){const model=samEngine.selectedModel();return samEngine.isReady()?{...help,description:`${model.name}. ${help.installedDescription}`,action:null,actionLabel:null}:{...help,description:`Выбрана ${model.name} (~${model.size} МБ). ${help.description}`,actionLabel:`Установить ${model.name}`};}return tool==='remove-object'&&lamaEngine.isReady()?{...help,description:help.installedDescription,action:null,actionLabel:null}:help;},
+  onHelpAction:action=>{if(action==='install-background-model'){$('#removeBackgroundInstallToast')?.remove();editorSettings.openForBackgroundInstall();}if(action==='install-removal-model'){$('#removeObjectInstallToast')?.remove();editorSettings.openForInstall();}},
   toolbar: els.toolbar,
   setStatus,
 });
+refreshToolbarHelp=toolbarController.refreshToolHelp;
 const { initReorder:initToolbarReorder, initTooltips } = toolbarController;
 const menuController = createMenuController({
   menu: els.menu,
   viewport: els.viewport,
-  menuButtons: $$('.menu-button'),
+  menuButtons: $$('.menu-button[data-menu]'),
   getItems: key => menus[key] || [],
   escapeHtml,
   toast,
@@ -26446,6 +27308,19 @@ const paintGesture = createPaintGestureController({
   ui: { setStatus, toast, render, commit },
 });
 
+function showRemovalModelInstallNotice(background=false) {
+  const noticeId=background?'removeBackgroundInstallToast':'removeObjectInstallToast';
+  if($('#'+noticeId))return;
+  const notice=document.createElement('div');
+  notice.id=noticeId;notice.className='toast removal-install-toast';
+  const backgroundModel=background?samEngine.selectedModel():null;if(background)notice.dataset.modelId=backgroundModel.id;
+  const close=document.createElement('button');close.type='button';close.className='removal-install-close';close.textContent='✕';close.setAttribute('aria-label','Закрыть уведомление об установке нейросети');close.onclick=()=>notice.remove();
+  const title=document.createElement('strong');title.textContent='Установите нейросеть';
+  const text=document.createElement('p');text.textContent=background?`Для удаления фона выбрана ${backgroundModel.name} (~${backgroundModel.size} МБ). Зелёным отметьте объект, красным — лишний фон. Фото остаётся на устройстве.`:'Для удаления объектов нужна нейросеть. Установка займёт около 85 МБ; фотографии остаются на вашем устройстве.';
+  const action=document.createElement('button');action.type='button';action.className='primary-button';action.textContent='Установить нейросеть';action.onclick=()=>{notice.remove();background?editorSettings.openForBackgroundInstall():editorSettings.openForInstall();};
+  notice.append(close,title,text,action);els.toastRegion.append(notice);
+}
+
 function toast(message, tone = '') {
   const item = document.createElement('div');
   item.className = `toast${tone ? ` ${tone}` : ''}`;
@@ -26720,7 +27595,31 @@ const historyNavigationController = createHistoryNavigationController({
   },
   runtime: { updateAll, markDirty, setStatus },
 });
-const { undo, redo, jumpToHistory } = historyNavigationController;
+const { undo:undoDocument, redo:redoDocument, jumpToHistory } = historyNavigationController;
+function canUndo() {
+  return currentTool==='remove-background'?(!backgroundRemoval.isBusy()&&(backgroundRemoval.isDrawing()||backgroundRemoval.canUndo()||history.canUndo())):history.canUndo();
+}
+function canRedo() {
+  return currentTool==='remove-background'?(!backgroundRemoval.isBusy()&&!backgroundRemoval.isDrawing()&&(backgroundRemoval.canRedo()||history.canRedo())):history.canRedo();
+}
+function refreshHistoryActions() { els.undo.disabled=!canUndo();els.redo.disabled=!canRedo(); }
+function undo() {
+  if(currentTool==='remove-background'){
+    if(backgroundRemoval.isBusy()){setStatus('Дождитесь завершения удаления фона');return false;}
+    if(backgroundRemoval.isDrawing()){
+      drag=null;pointerLifecycle?.releaseActivePointer();backgroundRemoval.cancel();drawOverlay();setStatus('Штрих отменён');return true;
+    }
+    if(backgroundRemoval.undo()){drawOverlay();setStatus('Штрих удаления фона отменён · Ctrl+Y — повторить');return true;}
+  }
+  return undoDocument();
+}
+function redo() {
+  if(currentTool==='remove-background'){
+    if(backgroundRemoval.isBusy()||backgroundRemoval.isDrawing()){setStatus('Завершите текущую обработку или штрих');return false;}
+    if(backgroundRemoval.redo()){drawOverlay();setStatus('Штрих удаления фона повторён');return true;}
+  }
+  return redoDocument();
+}
 
 const historyPanelController = createHistoryPanelController({
   container: els.history,
@@ -27010,6 +27909,7 @@ async function drainRenderQueue() {
 function drawOverlay() {
   const ctx = els.overlay.getContext('2d');
   ctx.clearRect(0, 0, doc.width, doc.height);
+  objectRemoval.draw(ctx);backgroundRemoval.draw(ctx);
   cropGestures.draw(ctx, { zoom, width:doc.width, height:doc.height });
   if (selectionShape) {
     ctx.save();
@@ -27044,8 +27944,8 @@ function drawOverlay() {
     selectionGestures.drawMagneticDraft(ctx);
   }
   pathControlSurface.draw(ctx);
-  if (RASTER_BRUSH_TOOLS.has(currentTool) && hoverPoint) {
-    const paintLayer = paintLayerAtPoint(hoverPoint);
+  if ((RASTER_BRUSH_TOOLS.has(currentTool) || ['remove-object','remove-background'].includes(currentTool)) && hoverPoint) {
+    const paintLayer = currentTool==='remove-background'?selected():paintLayerAtPoint(hoverPoint);
     const radius = Math.max(.5, Number(els.brushSize.value) / 2);
     const scaleX = Math.abs(Number(paintLayer?.scaleX) || 1);
     const scaleY = Math.abs(Number(paintLayer?.scaleY) || 1);
@@ -27097,7 +27997,7 @@ function updateAll() {
   syncCurrentSession();
   els.title.textContent = doc.name;
   els.dimensions.textContent = `${doc.width} × ${doc.height}`;
-  els.undo.disabled = !history.canUndo(); els.redo.disabled = !history.canRedo();
+  refreshHistoryActions();
   els.emptyDrop.hidden = doc.layers.length > 0;
   updateCanvasSize(); layersPanelController.render(); updatePathsPanel(); historyPanelController.render(); refreshInspectorPanels(); updateLayerControls(); render();
   renderDocumentTabs();
@@ -27326,9 +28226,19 @@ function updateToolLabel() {
 
 function setTool(tool) {
   if (tool !== currentTool && blockPendingDocumentEdit()) return;
+  if (tool !== currentTool){objectRemoval.reset();backgroundRemoval.reset();}
   selectionGestures.prepareToolChange(tool);
   if(tool!=='pen'){penDraftGestures.reset();vectorMaskEditLayerId=null;documentPathEditIndex=-1;}
+  const missingRemovalModel=tool==='remove-object'&&!lamaEngine.isReady();
+  if(missingRemovalModel && currentTool!==tool)showRemovalModelInstallNotice();
+  if(!missingRemovalModel)$('#removeObjectInstallToast')?.remove();
+  $('#removeObjectModelNotice').hidden=!missingRemovalModel;
+  const missingBackgroundModel=tool==='remove-background'&&!samEngine.isReady();
+  if(missingBackgroundModel&&currentTool!==tool)showRemovalModelInstallNotice(true);
+  if(!missingBackgroundModel)$('#removeBackgroundInstallToast')?.remove();
+  $('#removeBackgroundModelNotice').hidden=!missingBackgroundModel;
   currentTool = tool;
+  els.viewport.classList.toggle('background-brush-active',tool==='remove-background');refreshHistoryActions();
   $$('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
   updateToolLabel();
   $$('.text-only').forEach(x => x.style.display = tool === 'text' ? '' : 'none');
@@ -27338,7 +28248,11 @@ function setTool(tool) {
   $$('.smudge-only').forEach(x => x.style.display = tool === 'smudge' ? '' : 'none');
   $$('.dodge-only').forEach(x => x.style.display = tool === 'dodge' ? '' : 'none');
   $$('.burn-only').forEach(x => x.style.display = tool === 'burn' ? '' : 'none');
-  $$('.color-option, .opacity-option').forEach(x => x.style.display = ['dodge','burn','blur'].includes(tool) ? 'none' : '');
+  $$('.color-option, .opacity-option').forEach(x => x.style.display = ['dodge','burn','blur','remove-object','remove-background'].includes(tool) ? 'none' : '');
+  $$('.remove-background-only').forEach(x=>x.hidden=tool!=='remove-background');
+  if(tool!=='remove-background')$('#removeBackgroundApply').hidden=$('#removeBackgroundReset').hidden=true;
+  $$('.remove-object-only').forEach(x => x.hidden = tool !== 'remove-object');
+  if (tool !== 'remove-object') $('#removeObjectApply').hidden = $('#removeObjectReset').hidden = true;
   $$('.gradient-only').forEach(x => x.style.display = tool === 'gradient' ? '' : 'none');
   $$('.pen-only').forEach(x => x.style.display = tool === 'pen' ? '' : 'none');
   $$('.marquee-only').forEach(x => x.style.display = tool === 'marquee' ? '' : 'none');
@@ -27346,6 +28260,8 @@ function setTool(tool) {
   els.overlay.style.cursor = defaultToolCursor();
   cropGestures.reset(); hoverPoint = null; clearSmartGuides(); drawOverlay();
   if ((tool === 'clone' || tool === 'heal') && !getRetouchCloneSource()) setStatus(`${TOOL_LABELS[tool]}: Alt+клик по растровому слою задаёт источник`);
+  if(tool==='remove-background')setStatus('Примерно закрасьте нужный объект · нейросеть сама найдёт границы · нажмите «Удалить фон»');
+  if (tool === 'remove-object') setStatus('Закрасьте объект целиком с небольшим запасом и нажмите «Удалить объект» сверху');
 }
 
 function canvasPoint(event, { clampToDocument = true } = {}) {
@@ -27366,6 +28282,12 @@ function updateTransformPropertyValues(layer) {
   }
 }
 function defaultToolCursor() {
+  if(currentTool==='remove-background'){
+    const point=hoverPoint,layer=selected();
+    const inside=point&&point.x>=0&&point.y>=0&&point.x<doc.width&&point.y<doc.height&&layer&&pointInLayer(point,layer);
+    return inside?'none':'default';
+  }
+  if (currentTool==='remove-object') return 'none';
   return currentTool === 'move' ? 'default' : currentTool === 'text' ? 'text' : currentTool === 'hand' ? 'grab' : currentTool === 'zoom' ? 'zoom-in' : RASTER_BRUSH_TOOLS.has(currentTool) ? 'none' : 'crosshair';
 }
 function brushWidthForPointer(event) {
@@ -27399,6 +28321,7 @@ function pointerWantsPan(event) {
 }
 
 function shouldStartOverlayPointer(event) {
+  if(event.target!==els.overlay&&(currentTool!=='remove-background'||!isBackgroundPointerSurface(event.target)))return false;
   if (!event.isPrimary || ![0, 1].includes(event.button)) return false;
   if (!pointerWantsPan(event) && paintPersisting && (RASTER_BRUSH_TOOLS.has(currentTool) || currentTool === 'fill' || currentTool === 'line' || currentTool === 'gradient')) {
     setStatus('Сохраняется предыдущая растровая операция…');
@@ -27409,12 +28332,18 @@ function shouldStartOverlayPointer(event) {
 
 async function onOverlayPointerDown(e) {
   const wantsPan = pointerWantsPan(e);
-  if (e.button === 1) e.preventDefault();
-  const p = canvasPoint(e);
+  if (e.button === 1 || currentTool==='remove-background') e.preventDefault();
+  if(currentTool==='remove-background')els.viewport.focus({preventScroll:true});
+  const p = canvasPoint(e,{clampToDocument:currentTool!=='remove-background'});
   if (wantsPan) {
     drag = { kind:'pan', x:e.clientX, y:e.clientY, left:els.viewport.scrollLeft, top:els.viewport.scrollTop }; els.overlay.style.cursor='grabbing'; return;
   }
   if (e.button !== 0) return;
+  if (['remove-object','remove-background'].includes(currentTool)) {
+    const mark=currentTool==='remove-background'?(e.altKey?2:Number($('#removeBackgroundHintMode').value)):1;
+    if (toolRemoval().begin(p,brushWidthForPointer(e),mark)) drag = {kind:'object-removal'};
+    drawOverlay();return;
+  }
   if (currentTool === 'move') {
     const intent = layerTransformSurface.movePointerIntent(p);
     if (intent?.kind === 'rotate') {
@@ -27474,10 +28403,11 @@ async function onOverlayPointerDown(e) {
 }
 
 function onOverlayPointerMove(e) {
-  const allowOutside = layerTransformGestures.isGesture(drag) || pathControlGestures.isGesture(drag) || drag?.kind === 'paint';
+  const allowOutside = currentTool==='remove-background' || layerTransformGestures.isGesture(drag) || pathControlGestures.isGesture(drag) || drag?.kind === 'paint' || drag?.kind === 'object-removal';
   const p = canvasPoint(e, { clampToDocument: !allowOutside });
   els.pointer.textContent = `x: ${Math.round(p.x)} y: ${Math.round(p.y)}`;
   hoverPoint = p;
+  if(currentTool==='remove-background'&&drag?.kind!=='pan')els.overlay.style.cursor=defaultToolCursor();
   if (!drag) {
     selectionGestures.updateIdleHover(p);
     if(currentTool==='pen')penDraftGestures.updateIdleHover(p);
@@ -27487,6 +28417,11 @@ function onOverlayPointerMove(e) {
     drawOverlay(); return;
   }
   if (drag.kind === 'pan') { els.viewport.scrollLeft = drag.left - (e.clientX-drag.x); els.viewport.scrollTop = drag.top - (e.clientY-drag.y); return; }
+  if (drag.kind === 'object-removal') {
+    const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
+    for (const event of events.length ? events : [e]) toolRemoval().move(canvasPoint(event,{clampToDocument:false}),brushWidthForPointer(event));
+    drawOverlay();return;
+  }
   if (layerTransformGestures.isGesture(drag)) {
     layerTransformGestures.update(drag,p,{
       shiftKey:e.shiftKey,
@@ -27527,6 +28462,10 @@ async function onOverlayPointerUp(e) {
     if (localPoint && Math.hypot(localPoint.x-drag.last.x, localPoint.y-drag.last.y) > .01) paintGesture.move(releasePoint, e);
   }
   const d = drag; drag = null;
+  if (d.kind === 'object-removal') {
+    toolRemoval().finish(canvasPoint(e,{clampToDocument:false}),brushWidthForPointer(e));
+    drawOverlay();return;
+  }
   if (['marquee','line','shape','gradient'].includes(d.kind)) d.current = canvasPoint(e);
   if (layerTransformGestures.isGesture(d)) {
     layerTransformGestures.finish(d,canvasPoint(e,{clampToDocument:false}),{
@@ -27567,11 +28506,14 @@ async function onOverlayPointerUp(e) {
   }
   updateMoveCursor(canvasPoint(e));
 }
-els.overlay.addEventListener('pointerleave', () => { els.pointer.textContent='x: — y: —';hoverPoint=null;drawOverlay(); });
+function clearPointerHover() { els.pointer.textContent='x: — y: —';hoverPoint=null;drawOverlay(); }
+els.overlay.addEventListener('pointerleave', () => { if(currentTool!=='remove-background')clearPointerHover(); });
+els.viewport.addEventListener('pointerleave',clearPointerHover);
 els.overlay.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
 async function onOverlayPointerCancel(e) {
   if (!drag) return;
   const d=drag; drag=null; clearSmartGuides();
+  if (d.kind==='object-removal') { toolRemoval().cancel();drawOverlay();return; }
   if (d.kind==='paint') { await paintGesture.end(d); }
   else {
     if (layerTransformGestures.isGesture(d)) layerTransformGestures.cancel(d);
@@ -27584,11 +28526,13 @@ async function onOverlayPointerCancel(e) {
   }
 }
 
+function isBackgroundPointerSurface(target) { return [els.viewport,els.shell,els.canvas,els.overlay].includes(target); }
 pointerLifecycle = createPointerLifecycleRouter({
   target: els.overlay,
+  eventTarget: els.viewport,
   shouldStartPointer: shouldStartOverlayPointer,
   onPointerDown: onOverlayPointerDown,
-  onPointerMove: onOverlayPointerMove,
+  onPointerMove: event=>{if(pointerLifecycle.hasActivePointer()||event.target===els.overlay||(currentTool==='remove-background'&&isBackgroundPointerSurface(event.target)))onOverlayPointerMove(event);},
   onPointerUp: onOverlayPointerUp,
   onPointerCancel: onOverlayPointerCancel,
 });
@@ -28104,8 +29048,8 @@ const menus={
     ['Экспорт…','Ctrl+Shift+S',exportDialog],
   ],
   edit:[
-    ['Отменить','Ctrl+Z',undo,()=>history.canUndo()],
-    ['Повторить','Ctrl+Y',redo,()=>history.canRedo()],
+    ['Отменить','Ctrl+Z',undo,canUndo],
+    ['Повторить','Ctrl+Y',redo,canRedo],
     ['sep'],
     ['Выделить всё','Ctrl+A',selectAllPixels],
     ['Снять выделение','Ctrl+D',deselectPixels,()=>Boolean(selectionRect)],
@@ -28225,8 +29169,8 @@ els.viewport.addEventListener('contextmenu',e=>{
   e.preventDefault();
   if(blockPendingDocumentEdit())return;
   openContextMenu('canvas',[
-    ['Отменить','Ctrl+Z',undo,()=>history.canUndo()],
-    ['Повторить','Ctrl+Y',redo,()=>history.canRedo()],
+    ['Отменить','Ctrl+Z',undo,canUndo],
+    ['Повторить','Ctrl+Y',redo,canRedo],
     ['sep'],
     ['Вставить изображение','Ctrl+V',pasteFromClipboard],
     ['Снять выделение','Ctrl+D',deselectPixels,()=>Boolean(selectionRect)],
@@ -28241,6 +29185,28 @@ window.addEventListener('blur',()=>{closeMenu();spaceHeld=false;if(!drag)els.ove
 $$('.tool').forEach(b=>b.onclick=()=>{if(toolbarController.isClickSuppressed())return;setTool(b.dataset.tool);});
 els.primaryColor.oninput=()=>els.colorChip.style.background=els.primaryColor.value;
 els.brushSize.oninput=()=>els.brushSizeValue.textContent=els.brushSize.value;
+$('#editorSettingsBtn').onclick=()=>{closeMenu();editorSettings.open();};
+$('#removeObjectModelNotice').onclick=()=>editorSettings.openForInstall();
+$('#removeBackgroundModelNotice').onclick=()=>editorSettings.openForBackgroundInstall();
+$('#removeBackgroundFeather').oninput=()=>$('#removeBackgroundFeatherValue').textContent=`${$('#removeBackgroundFeather').value} px`;
+$('#removeBackgroundCancel').onclick=()=>backgroundRemoval.abort();
+$('#backgroundRemovalProgressCancel').onclick=()=>backgroundRemoval.abort();
+$('#removeBackgroundApply').onclick=async()=>{
+  if(documentEditPending())return;
+  if(!samEngine.isReady()){editorSettings.open();setStatus(`Для удаления фона установите ${samEngine.selectedModel().name} в настройках`);return;}
+  try{await backgroundRemoval.remove();}catch(error){console.error(error);toast('Не удалось удалить фон','error');}drawOverlay();
+};
+$('#removeBackgroundReset').onclick=()=>{backgroundRemoval.reset();drawOverlay();setStatus('Подсказка для удаления фона сброшена');};
+$('#removeObjectCancel').onclick=()=>objectRemoval.abort();
+$('#objectRemovalProgressCancel').onclick=()=>objectRemoval.abort();
+$('#removeObjectApply').onclick=async()=>{
+  if(documentEditPending())return;
+  if(!lamaEngine.isReady()){editorSettings.open();setStatus('Для удаления объектов установите нейросеть в настройках');return;}
+  try { await objectRemoval.remove(); }
+  catch(error) { console.error(error);toast('Не удалось удалить объект','error'); }
+  drawOverlay();
+};
+$('#removeObjectReset').onclick=()=>{objectRemoval.reset();drawOverlay();setStatus('Область удаления сброшена');};
 els.toolOpacity.oninput=()=>els.toolOpacityValue.textContent=`${els.toolOpacity.value}%`;
 els.dodgeStrength.oninput=()=>els.dodgeStrengthValue.textContent=`${els.dodgeStrength.value}%`;
 els.burnStrength.oninput=()=>els.burnStrengthValue.textContent=`${els.burnStrength.value}%`;
@@ -28310,18 +29276,18 @@ window.addEventListener('drop',e=>{
 },{capture:true});
 
 window.addEventListener('copy',e=>{
-  if(isEditingTarget(e.target)||!selectionRect)return;
+  if($('#editorSettings').open||isEditingTarget(e.target)||!selectionRect)return;
   e.preventDefault();
   copySelection().catch(error=>{console.error(error);toast(error.message||'Ошибка копирования','error');});
 });
 window.addEventListener('cut',e=>{
-  if(isEditingTarget(e.target)||!selectionRect)return;
+  if($('#editorSettings').open||isEditingTarget(e.target)||!selectionRect)return;
   e.preventDefault();
   cutSelection().catch(error=>{console.error(error);toast(error.message||'Ошибка вырезания','error');});
 });
 
 window.addEventListener('paste',e=>{
-  if(isEditingTarget(e.target))return;
+  if($('#editorSettings').open||isEditingTarget(e.target))return;
   handleNativePasteEvent(e);
 });
 els.viewport.addEventListener('wheel',e=>{
@@ -28332,6 +29298,7 @@ els.viewport.addEventListener('wheel',e=>{
 },{passive:false});
 
 window.addEventListener('keydown',e=>{
+  if($('#editorSettings').open)return;
   const editing=isEditingTarget();
   const interactive=isInteractiveControlTarget(e.target);
   if(e.code==='Space'&&!editing&&!interactive){spaceHeld=true;if(!drag)els.overlay.style.cursor='grab';e.preventDefault();}
@@ -28347,12 +29314,19 @@ window.addEventListener('keydown',e=>{
       if(pathControlGestures.isGesture(d))pathControlGestures.cancel(d);
       if(cropGestures.isGesture(d))cropGestures.cancel(d);
       if(d.kind==='marquee')selectionGestures.cancelMarquee(d);
+      if(d.kind==='object-removal')toolRemoval().cancel();
       els.overlay.style.cursor=defaultToolCursor();drawOverlay();setStatus('Действие отменено');return;
     }
     if(selectionGestures.hasPolygonDraft()){e.preventDefault();selectionGestures.cancelPolygonDraft({restorePrevious:true,announce:true});return;}
     if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropGestures.hasDraft()){cropGestures.reset();drawOverlay();setStatus('Кадрирование отменено');return;}
+    if(toolRemoval().hasMask()){
+      e.preventDefault();
+      if(toolRemoval().reset()){drawOverlay();setStatus('Область удаления сброшена');}
+      else setStatus('Дождитесь завершения удаления объекта');
+      return;
+    }
     if(selectionRect){deselectPixels();return;}
   }
   if(e.target instanceof Node && els.modalRoot.contains(e.target))return;
@@ -28388,6 +29362,8 @@ window.addEventListener('keydown',e=>{
   }
   if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyM'){e.preventDefault();if(currentTool!=='marquee')setTool('marquee');selectionGestures.cycleType();return;}
   if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyO'){e.preventDefault();setTool('burn');return;}
+  if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyE'){e.preventDefault();setTool('remove-background');return;}
+  if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyJ'){e.preventDefault();setTool('remove-object');return;}
   if(!ctrl&&!e.altKey&&e.shiftKey&&e.code==='KeyG'){e.preventDefault();setTool('gradient');return;}
   const map={KeyV:'move',KeyM:'marquee',KeyB:'brush',KeyS:'clone',KeyJ:'heal',KeyN:'smudge',KeyO:'dodge',KeyR:'blur',KeyE:'eraser',KeyG:'fill',KeyP:'pen',KeyA:'magnetic',KeyW:'wand',KeyL:'line',KeyT:'text',KeyU:'shape',KeyC:'crop',KeyI:'eyedropper',KeyH:'hand',KeyZ:'zoom'}; if(!ctrl&&!e.altKey&&map[e.code]){setTool(map[e.code]);return;}
   if(e.code==='Digit0'&&!ctrl){fitToView();return;}if(e.code==='Digit1'&&!ctrl){setZoom(1);return;}

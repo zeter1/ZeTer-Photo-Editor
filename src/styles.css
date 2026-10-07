@@ -39,6 +39,10 @@ button:disabled { opacity: .45; cursor: default; }
 .primary-button { background: var(--accent); padding: 8px 14px; border-radius: 7px; font-weight: 650; }
 .primary-button:hover { background: var(--accent-2); }
 .optionsbar { padding: 5px 10px; gap: 10px; overflow-x: auto; white-space: nowrap; }
+.removal-reset { flex-shrink: 0; padding: 7px 10px; border-radius: 6px; background: #ffffff12; }
+.removal-reset:hover { background: #ffffff20; }
+.removal-reset:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+#removeObjectApply { flex-shrink: 0; }
 .option-group { display: inline-flex; gap: 6px; align-items: center; color: #cbd2de; font-size: 13px; }
 .option-group input[type="range"] { width: 96px; }
 .option-group input[type="number"], .option-group select, .layers-toolbar select { background: #111318; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; }
@@ -103,6 +107,7 @@ button:disabled { opacity: .45; cursor: default; }
 .canvas-shell canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: auto; }
 #editorCanvas { background: transparent; }
 #overlayCanvas { touch-action: none; }
+.stage-viewport.background-brush-active { cursor:default; touch-action:none; }
 .empty-drop { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; color: var(--muted); gap: 6px; }
 .empty-drop strong { color: #dce6f7; font-size: 15px; }
 .empty-drop small { color: #778396; }
@@ -483,3 +488,64 @@ button:disabled { opacity: .45; cursor: default; }
 @media (max-width: 620px) {
   .color-correction-row { grid-template-columns: 110px minmax(100px,1fr) 58px; gap: 7px; }
 }
+
+/* Settings is an accessible native dialog with a separate model installer. */
+.editor-settings { width:min(620px,calc(100vw - 32px)); max-height:calc(100vh - 40px); overflow:auto; padding:24px; border:1px solid var(--line); border-radius:14px; color:var(--text); background:#20232c; box-shadow:0 24px 90px #0009; }
+.editor-settings::backdrop { background:#06080eb8; }
+.editor-settings header { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:20px; }
+.editor-settings h2 { margin:0; font-size:21px; }
+.editor-settings h3 { margin:0 0 12px; font-size:16px; }
+.editor-settings section { padding:18px 0; border-top:1px solid var(--line); }
+.editor-settings p { line-height:1.6; margin:8px 0 14px; }
+.editor-settings .settings-models { display:flex; flex-direction:column; gap:16px; }
+.settings-models > .settings-kicker { margin-bottom:0; }
+.editor-settings .settings-model { background:#7785ff0c; border:1px solid #7785ff40; padding:20px; border-radius:10px; }
+.editor-settings .settings-model-selected { border-color:var(--accent-2); box-shadow:inset 3px 0 var(--accent-2); }
+.settings-background-choice { min-width:0; }
+.settings-background-choice .settings-note { margin-bottom:0; }
+.editor-settings .settings-actions { flex-wrap:wrap; }
+.editor-settings .settings-actions button { max-width:100%; white-space:normal; }
+#removeBackgroundFeather { width:64px; }
+#removeBackgroundFeatherValue { min-width:28px; }
+.settings-model-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 12px; margin-bottom:12px; }
+.editor-settings .settings-model-header h3 { margin:0; }
+.settings-model-badge { flex-shrink:0; padding:4px 8px; border:1px solid #7785ff40; border-radius:6px; color:#b4bdff; font-size:11px; white-space:nowrap; }
+.editor-settings .settings-model > .settings-note:last-child { margin-bottom:0; }
+.settings-kicker { color:#9ba9ff; letter-spacing:.08em; font-size:10px; margin-bottom:10px; }
+.settings-note { color:var(--muted); font-size:12px; }
+.settings-actions { display:flex; gap:10px; flex-wrap:wrap; }
+.settings-row { display:flex; justify-content:space-between; align-items:center; gap:18px; padding:8px 0; }
+.settings-row select { max-width:65%; padding:8px; }
+.settings-row input[type=number] { width:75px; padding:7px; }
+.editor-settings progress { width:100%; height:12px; margin-top:14px; accent-color:var(--accent); }
+#modelStatus { color:#bcc6ff; font-size:13px; }
+#modelProgressText { font-size:12px; }
+#editorSettingsBtn { white-space:nowrap; }
+@media(max-width:900px) { .menu-bar #editorSettingsBtn { display:block; } .editor-settings { padding:16px; } .settings-row { flex-wrap:wrap; } .settings-row select { max-width:100%; } }
+@media(max-width:480px) { .editor-settings .settings-model { padding:14px; } .settings-model-header { align-items:flex-start; } }
+
+.settings-tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin:0 0 20px; overflow-x:auto; }
+.settings-tabs button { background:transparent; color:var(--muted); padding:11px 13px; border-bottom:2px solid transparent; white-space:nowrap; }
+.settings-tabs button[aria-selected=true] { color:#c4ceff; border-bottom-color:#8191ff; background:#7785ff0c; }
+.settings-tabs button:focus-visible { outline:2px solid var(--accent-2); outline-offset:-3px; }
+
+.removal-model-notice { background:#e7b75822; color:#f1cb79; border:1px solid #e7b75855; border-radius:6px; padding:7px 10px; flex-shrink:0; }
+
+/* Prominent, dismissible installation guidance; ordinary status toasts keep their size. */
+.toast.removal-install-toast { position:relative; width:min(440px,calc(100vw - 36px)); min-width:0; padding:22px; border:2px solid #dbb65c; border-left-width:6px; background:#302b20; color:#fff4d9; box-shadow:0 12px 44px #000b; pointer-events:auto; }
+.removal-install-toast strong { display:block; padding-right:30px; color:#ffe09a; font-size:20px; line-height:1.3; }
+.removal-install-toast p { margin:12px 0 18px; font-size:15px; line-height:1.55; }
+.removal-install-toast .primary-button { min-height:40px; font-size:15px; padding:10px 16px; }
+.removal-install-close { position:absolute; top:12px; right:12px; width:30px; height:30px; border-radius:6px; background:#ffffff10; color:#fff4d9; font-size:16px; }
+.removal-install-close:hover { background:#ffffff25; }
+.removal-install-close:focus-visible { outline:2px solid var(--accent-2); outline-offset:2px; }
+
+.tool-tooltip[data-action]:not([data-action=""]) { pointer-events:auto; }
+.tool-help-action { display:block; margin-top:12px; min-height:34px; font-size:12px; }
+.tool-help-action:focus-visible { outline:2px solid var(--accent-2); outline-offset:2px; }
+
+.object-removal-progress { position:fixed; left:50%; bottom:50px; transform:translateX(-50%); z-index:610; width:min(440px,calc(100vw - 36px)); border:1px solid #7785ff88; border-radius:12px; background:#242938; padding:20px; box-shadow:0 12px 44px #000b; }
+.object-removal-progress strong { font-size:18px; color:#edf1ff; }
+.object-removal-progress p { font-size:14px; margin:12px 0; color:#cbd5ff; }
+.object-removal-progress progress { width:100%; height:14px; accent-color:#8092ff; }
+.removal-progress-timing { display:flex; flex-wrap:wrap; gap:8px 16px; margin:10px 0 15px; font-size:12px; color:var(--muted); }

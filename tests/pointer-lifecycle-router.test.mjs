@@ -23,6 +23,18 @@ class FakePointerTarget {
   dispatch(name, event) { return this.handlers.get(name)?.(event); }
 }
 
+test('parent event surface routes outside strokes while canvas exclusively owns capture',()=>{
+  const target=new FakePointerTarget(),surface=new FakePointerTarget(),calls=[];
+  const router=createPointerLifecycleRouter({target,eventTarget:surface,
+    onPointerDown:e=>calls.push(['down',e.pointerId]),onPointerUp:e=>calls.push(['up',e.pointerId]),
+    onPointerCancel:(e,c)=>calls.push(['cancel',c.reason]),
+  });
+  surface.dispatch('pointerdown',{pointerId:12});assert.ok(target.hasPointerCapture(12));assert.equal(surface.hasPointerCapture(12),false);
+  surface.dispatch('pointerup',{pointerId:12});assert.equal(router.hasActivePointer(),false);assert.deepEqual(calls,[['down',12],['up',12]]);
+  surface.dispatch('pointerdown',{pointerId:13});target.captured.delete(13);target.dispatch('lostpointercapture',{pointerId:13});
+  assert.equal(router.hasActivePointer(),false);assert.deepEqual(calls.at(-1),['cancel','lostpointercapture']);
+});
+
 test('router owns one active pointer and keeps idle hover routing available', () => {
   const target = new FakePointerTarget();
   const calls = [];

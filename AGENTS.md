@@ -27,6 +27,7 @@
 - Raster edit state; exact-owner/target Canvas8 **and native 16/32-bit RGB/CMYK** cache + async publication (spec: `docs/architecture/RASTER_PERSISTENCE.md`), including paint preview validity: `src/painting/controller.js`
 - Fill / raster line / current-layer selection clear / Content-Aware Fill transactions: `src/painting/command-controller.js`; bounded deterministic boundary + PatchMatch-style texture synthesis: `src/core/inpaint.js` (spec: `docs/architecture/CONTENT_AWARE_FILL.md`)
 - Persisted Gradient raster-layer publication, exact-owner async revalidation and shared raster-persistence exclusion: `src/painting/gradient-command-controller.js` (spec: `docs/architecture/GRADIENT_COMMAND.md`); Gradient preview + tool pointer dispatch stay in `src/main.js`.
+- Object Removal brush transient layer-local mask, preview, stroke rollback and frozen mask submission: `src/painting/object-removal-controller.js`; pixel mutation/history stays in the existing Content-Aware Fill command. Mask invalidates on exact document/layer/selection-target, transform, lock/visibility or document-change serial mismatch.
 - Brush/eraser + retouch stroke gesture lifecycle (begin/move/end): `src/painting/gesture-controller.js`
 - Clone/heal/smudge/blur/dodge/burn mechanics (Canvas8 + high-depth/CMYK): `src/retouch/controller.js`
 - UI config + toolbar/menu/modal/workspace-layout/saved-Paths/color-management controllers: `src/ui/`
@@ -72,3 +73,6 @@
 Сохраняй `file://` запуск на Windows, layer lock, selection boundaries, Undo/Redo, async save/export guards, high-depth/CMYK precision и PSD/PSB round-trip semantics.
 
 После source change: `npm run check`; для startup/DOM/file://: `npm run test:browser`. Любое изменение кода отражай в `CHANGELOG.md`.
+
+AI object removal and settings ownership: [docs/architecture/AI_OBJECT_REMOVAL.md](docs/architecture/AI_OBJECT_REMOVAL.md). The separate removal tool uses device-only browser LaMa; ordinary native Content-Aware Fill keeps its own contract.
+Brush-guided background removal: [docs/architecture/AI_BACKGROUND_REMOVAL.md](docs/architecture/AI_BACKGROUND_REMOVAL.md). SAM2 treats green/red strokes as foreground/background prompts; never clip to brush bounds. Capture catalog engine before await; keep model caches and settings controls independent of LaMa.
