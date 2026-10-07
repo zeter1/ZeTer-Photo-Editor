@@ -52,6 +52,18 @@ Save использует prepare-before-publish и две независимы�
 10. снова discard superseded generation, verify child/session + parent/source identity, заново resolve финальный live target set и **повторно проверить effective lock каждого target перед первой destructive publication**;
 11. только после этого разрешены resource publish, target rewrite, preview/content mutation, history, dirty state, recovery, cache invalidation, tab/UI success publication.
 
+## Финальная Photoshop publication: поддерживаемая модель ошибок
+
+После последней revalidation Photoshop Save входит в короткую синхронную publication-зону. Для **канонического состояния редактора** её контракт намеренно уже, чем у preparation:
+
+- `rewriteEmbeddedSource(...)` остаётся fallible/async preparation owner: codec, binary rewrite, лимиты и любая работа, которая может завершиться ошибкой, выполняются до первой destructive publication;
+- `publishEmbeddedSourceRewrite(...)` и `updateTargetAfterRewrite(...)` принимают только уже подготовленный rewrite и обычные mutable JSON-state объекты редактора, выполняют синхронные присваивания/fingerprint math и возвращают `undefined`;
+- эти publication helpers не должны получать I/O, Promise, codec/serialization, внешний callback или другую fallible работу после начала мутации;
+- exotic host objects, `Proxy`, frozen/read-only state и process-level failures вроде OOM не входят в поддерживаемый document-state contract и не являются основанием для speculative rollback;
+- если будущая реализация потребует реально бросающую операцию после первой мутации, её нужно либо перенести в prepare-before-publish, либо ввести явную all-or-none transaction/rollback до расширения publication region.
+
+Регрессия этого контракта находится в `tests/psd-smart-object-resource.test.mjs`. Она не доказывает, что JavaScript-процесс вообще никогда не может аварийно завершиться; она защищает именно поддерживаемую production-границу: подготовленный Photoshop rewrite + канонические mutable объекты не должны вводить новый recoverable throw между resource publish и target metadata publication.
+
 ## Effective lock — живая publication policy
 
 Lock нельзя захватывать boolean snapshot до await. Пока Promise ожидает, любой экземпляр общего source или его ancestor group может стать locked. Shared-source Save — одна атомарная публикация: разблокированный representative не даёт права косвенно менять locked sibling, и частичное обновление только разблокированных экземпляров запрещено.

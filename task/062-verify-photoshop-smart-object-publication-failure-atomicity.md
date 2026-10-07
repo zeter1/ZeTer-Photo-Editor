@@ -1,10 +1,13 @@
 # 062 — Verify fail-safe final publication for Photoshop Smart Object Save
 
 - **Priority:** P2 — reliability / transaction safety.
-- **Status:** готова к работе.
-- **Evidence:** свежий code review после task 061; риск пока является явно помеченной гипотезой, а не подтверждённым багом.
-- **Source SHA:** `c255c1d8761c83f97b5f2278489941fefed16ab0` (merged task 061; main CI #485 green).
-- **Next action:** воспроизвести или опровергнуть реальную throwability canonical final-publication ports до изменения production-кода.
+- **Status:** ожидает проверки/интеграции.
+- **Evidence:** гипотеза проверена на `main@e49a714acc7ce9d22e0a623578a0b414201d3db4`: canonical Photoshop publication ports не содержат реалистичного recoverable throw для подготовленного rewrite и обычного mutable JSON-state. `publishEmbeddedSourceRewrite()` выполняет guarded assignment, `updateTargetAfterRewrite()` — обычные присваивания плюс total string/number fingerprint math. Искусственные `Proxy`/frozen-object/OOM сценарии не являются поддерживаемым document-state contract.
+- **Source SHA:** `e49a714acc7ce9d22e0a623578a0b414201d3db4` (текущий `main` на старте проходки; exact push CI run `37658961819` green).
+- **Branch:** `quality/task-062-photoshop-publication-contract`.
+- **Changes:** production runtime не изменён; в `docs/architecture/SMART_OBJECT_LIFECYCLE.md` зафиксирован поддерживаемый non-throwing/prepare-before-publish contract, а `tests/psd-smart-object-resource.test.mjs` защищает synchronous `undefined` + non-throwing publication на canonical mutable state.
+- **Verification:** локальный clone/gates `НЕ ПРОВЕРЕНО`: execution container не разрешает DNS к `github.com`; штатный GitHub Actions PR CI является обязательным oracle.
+- **Next action:** открыть PR из указанной ветки, проверить exact PR-head CI, merge только при green, затем проверить exact main push CI; после этого удалить эту карточку и оставить ровно одну следующую bounded task.
 
 ## Goal
 

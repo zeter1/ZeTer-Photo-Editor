@@ -166,6 +166,54 @@ test('successful liFD rewrite prepares new linked blocks without mutating the pa
   assert.deepEqual(parentDoc.psdLinkedLayerBlocks, rewrite.linkedLayerBlocks);
 });
 
+test('prepared Photoshop publication helpers stay synchronous and non-throwing for canonical mutable state', () => {
+  const resource = makeResource();
+  const parentDoc = { psdLinkedLayerBlocks:[{ key:'old' }] };
+  const rewrite = {
+    rewritten:true,
+    linkedLayerBlocks:[{ key:'lnk2', dataUrl:'data:application/octet-stream;base64,AA==' }],
+    newSize:20,
+    sourceKey:'lnk2',
+  };
+  const target = {
+    psdSmartObject:{
+      uniqueId:'source-uuid',
+      asset:{ kind:'data', filename:'Inside.png', sourceKey:'old', dataSize:378 },
+      baseline:{ embeddedWidth:32, embeddedHeight:32, previewFingerprint:'old', embeddedFingerprint:'old' },
+    },
+  };
+  const embedded = {
+    name:'Edited',
+    width:32,
+    height:32,
+    createdAt:'a',
+    updatedAt:'b',
+    layers:[],
+    groups:[],
+  };
+
+  let publishResult;
+  let targetResult;
+  assert.doesNotThrow(() => {
+    publishResult = resource.publishEmbeddedSourceRewrite(parentDoc, rewrite);
+    targetResult = resource.updateTargetAfterRewrite(target, {
+      rewrite,
+      previewDataUrl:'data:image/png;base64,AA==',
+      embedded,
+    });
+  });
+
+  assert.equal(publishResult, undefined);
+  assert.equal(targetResult, undefined);
+  assert.equal(parentDoc.psdLinkedLayerBlocks, rewrite.linkedLayerBlocks);
+  assert.equal(target.psdSmartObject.asset.dataSize, 20);
+  assert.equal(target.psdSmartObject.asset.sourceKey, 'lnk2');
+  assert.equal(target.psdSmartObject.baseline.embeddedWidth, 32);
+  assert.equal(target.psdSmartObject.baseline.embeddedHeight, 32);
+  assert.match(target.psdSmartObject.baseline.previewFingerprint, /^value:/);
+  assert.match(target.psdSmartObject.baseline.embeddedFingerprint, /^value:/);
+});
+
 test('missing matching UUID returns fallback without mutating the parent', async () => {
   const fixture = new Uint8Array(await readFile(new URL('psd-tools-smartobject-layer.psd', fixtureRoot)));
   const decoded = await decodePsd(fixture, { maxPixels:100_000, maxLayers:20 });
