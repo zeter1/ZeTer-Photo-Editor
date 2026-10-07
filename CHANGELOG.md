@@ -1,11 +1,33 @@
-# Changelog
+# История изменений
 
-## 2026-10-07T18:26:29+03:00
+> Канонические правила ведения журнала: [docs/development/CHANGELOG_GUIDE.md](docs/development/CHANGELOG_GUIDE.md).
+>
+> Изменения, уже слитые в `main`, считаются актуальным опубликованным состоянием репозитория и записываются в раздел текущей версии. Раздел `Unreleased` для уже интегрированных изменений не используется. Это правило не означает автоматический deploy внешнего сайта — deployment проверяется отдельно.
+
+## 1.42.0 — текущая версия
+
+### 2026-10-07 — Уточнены структура и правила CHANGELOG
+
+- Документация: обычный текст и заголовки новых записей ведутся на русском языке; технические термины, имена API, форматов, команд и кодовых сущностей можно оставлять на английском.
+- Изменено: уже слитые в `main` изменения больше не помещаются в `Unreleased`; пока версия в `package.json` не меняется, они добавляются в верхний раздел текущей версии.
+- Исправлено: записи текущей версии приведены к единой иерархии, чтобы отдельные даты не выглядели самостоятельными релизами.
+
+### 2026-10-07T20:09:52+03:00 — Проверено изменение состава общего Smart Object во время Save
+
+- Добавлено: детерминированные async-регрессии подтверждают, что linked sibling, удалённый во время preview, не изменяется; linked sibling, добавленный во время preview, входит в финальную публикацию; Photoshop sibling, добавленный во время native rewrite preparation, входит в финальный live target set.
+- Контракт: shared/native Save обязан заново вычислять membership источника после reorderable await. Текущий production-код уже соблюдает этот контракт, поэтому проходка усилила regression coverage и документацию без изменения application logic.
+
+### 2026-10-07T19:23:00+03:00 — Атомарная проверка блокировок общего Smart Object Save
+
+- Исправлено: Save содержимого связанного ZPE/Photoshop Smart Object теперь проверяет canonical effective lock у каждого live target, а не только у representative. Locked sibling или locked ancestor group отменяет общий Save целиком до resource/layer/history/dirty/recovery публикаций; частичное обновление общего source запрещено.
+- Добавлено: deterministic regressions для pre-existing locked linked sibling, late ancestor lock во время preview и Photoshop sibling lock во время native rewrite preparation. Preflight выполняется до Save generation claim; post-await проверки сохраняют silent superseded semantics.
+
+### 2026-10-07T18:26:29+03:00 — Курсор кисти удаления фона за пределами изображения
 
 - За пределами изображения у кисти удаления фона появляется обычная стрелка курсора, в том числе во время штриха с захваченным указателем. При возвращении на изображение стрелка скрывается, круг кисти и рисование пересекающейся частью сохраняются.
 - Проверено: npm run check — 997/997; изолированный Chrome на фотографии Mustang — 18 сценариев, включая вычисленный native cursor снаружи/внутри при наведении и capture, видимую дугу кисти, края, отмену/повтор и неизменность фото. Без page errors.
 
-## 2026-10-07T18:18:35+03:00
+### 2026-10-07T18:18:35+03:00 — Undo/Redo и рисование кистью удаления фона у границ
 
 - Кисть удаления фона: Ctrl+Z отменяет последний зелёный/красный штрих, восстанавливая перекрытые метки; Ctrl+Y/Ctrl+Shift+Z повторяет. Кнопки и меню используют ту же историю. Отмена активного штриха освобождает capture; история ограничена 32 состояниями/32 МиБ, сбрасывается после обработки, смены владельца и очистки.
 - Центр кисти может выходить за изображение: видимая пересекающая часть круга сохраняется, штрих можно начать снаружи у любого края/угла. Поле размера больше не перехватывает Ctrl+Z после начала штриха.
@@ -16,137 +38,125 @@
 
 ### 2026-10-07T17:47:07+03:00 — Улучшенное удаление фона SAM 2.1 и уточнение кистью
 
-- Changed: вместо выбора слабой SlimSAM в инструменте оставлена только SAM 2.1 Hiera Tiny (~97 МБ с ORT), отдельная установка/отмена/удаление и карточка; LaMa остаётся отдельной моделью удаления объектов. Старый выбор SlimSAM игнорируется, её старый кэш автоматически не очищается.
-- Added: зелёные подсказки объекта и красные исключения фона (Alt), сохранение назначения штриха до его завершения, мягкость края 0–3 исходных пикселя; RGB и прежняя alpha сохраняются, прозрачность не повышается.
-- Fixed: подсказки выбираются глубоко внутри закраски, а не на её случайных краях. Несколько внутренних точек охватывают целый объект; малые явные отдельные подсказки не теряются рядом с большой областью. Убираются мелкие пятна и внутренние проколы, сохраняются крупные отверстия/отдельные части и красные исключения. Модель/параметры захватываются до await, текущий слой и Undo/Redo защищены прежними owners.
-- Added: pinned SAM2 external-data byte/hash contracts и локальный worker; новый catalog зарегистрирован в file:// сборщике. Загрузка только при явной установке; inference не обращается к сети.
-- Verified: npm run check 989/989; независимый focused verifier 24/24 и canonical bundle/index/version parity. Реальный CPU Chrome, пять фото (Mustang, пикап, собака, пакет среди других, левый кот) с приблизительными/уточняющими штрихами: все заданные точки нужных частей сохранены, фоновые точки прозрачны, RGB неизменен, alpha не повышена. Реальный file:// UI: установка/отмена/очистка partial cache, зелёный/красный preview без записи фото, отмена обработки, unchanged другой слой, exact PNG Undo/Redo, offline восстановление кэша и фото, удаление модели без изменения фото/LaMa. Remote bytes заранее скачаны и SHA-проверены, UI tests воспроизводят их локально.
-- Verification limits: первые single-door/неполные подсказки дали неполный объект; уточнения проверены отдельно, первые результаты сохранены. В ранних UI-автопрогонах первый зелёный штрих пропадал; причина UNKNOWN. С точной трассировкой последний полный сценарий прошёл без внештатного сброса; это не доказывает отсутствие нестабильности. Pixel ground-truth, тонкая шерсть/стекло, WebGPU и произвольные фото не проверены. Исправления по недоказанной причине не добавлялись. Сайт не публиковался.
-
-## Unreleased
-
-### 2026-10-07 — Live membership regressions for shared Smart Object Save
-
-- Added: deterministic async regressions prove that a linked sibling removed during preview is not mutated, a linked sibling added during preview joins final publication, and a Photoshop sibling added during native rewrite preparation is included in the final native target set.
-- Contract: shared/native Save must re-resolve source membership after reorderable awaits; current production already does this, so this pass changes the behavioral oracle and documentation rather than application logic.
-
-### 2026-10-07T19:23:00+03:00 — Atomic lock authority for shared Smart Object Save
-
-- Fixed: Save содержимого связанного ZPE/Photoshop Smart Object теперь проверяет canonical effective lock у каждого live target, а не только у representative. Locked sibling или locked ancestor group отменяет общий Save целиком до resource/layer/history/dirty/recovery публикаций; частичное обновление общего source запрещено.
-- Added: deterministic regressions для pre-existing locked linked sibling, late ancestor lock во время preview и Photoshop sibling lock во время native rewrite preparation. Preflight выполняется до Save generation claim; post-await проверки сохраняют silent superseded semantics.
+- Изменено: вместо выбора слабой SlimSAM в инструменте оставлена только SAM 2.1 Hiera Tiny (~97 МБ с ORT), отдельная установка/отмена/удаление и карточка; LaMa остаётся отдельной моделью удаления объектов. Старый выбор SlimSAM игнорируется, её старый кэш автоматически не очищается.
+- Добавлено: зелёные подсказки объекта и красные исключения фона (Alt), сохранение назначения штриха до его завершения, мягкость края 0–3 исходных пикселя; RGB и прежняя alpha сохраняются, прозрачность не повышается.
+- Исправлено: подсказки выбираются глубоко внутри закраски, а не на её случайных краях. Несколько внутренних точек охватывают целый объект; малые явные отдельные подсказки не теряются рядом с большой областью. Убираются мелкие пятна и внутренние проколы, сохраняются крупные отверстия/отдельные части и красные исключения. Модель/параметры захватываются до await, текущий слой и Undo/Redo защищены прежними owners.
+- Добавлено: pinned SAM2 external-data byte/hash contracts и локальный worker; новый catalog зарегистрирован в file:// сборщике. Загрузка только при явной установке; inference не обращается к сети.
+- Проверено: npm run check 989/989; независимый focused verifier 24/24 и canonical bundle/index/version parity. Реальный CPU Chrome, пять фото (Mustang, пикап, собака, пакет среди других, левый кот) с приблизительными/уточняющими штрихами: все заданные точки нужных частей сохранены, фоновые точки прозрачны, RGB неизменен, alpha не повышена. Реальный file:// UI: установка/отмена/очистка partial cache, зелёный/красный preview без записи фото, отмена обработки, unchanged другой слой, exact PNG Undo/Redo, offline восстановление кэша и фото, удаление модели без изменения фото/LaMa. Remote bytes заранее скачаны и SHA-проверены, UI tests воспроизводят их локально.
+- Ограничения проверки: первые single-door/неполные подсказки дали неполный объект; уточнения проверены отдельно, первые результаты сохранены. В ранних UI-автопрогонах первый зелёный штрих пропадал; причина UNKNOWN. С точной трассировкой последний полный сценарий прошёл без внештатного сброса; это не доказывает отсутствие нестабильности. Pixel ground-truth, тонкая шерсть/стекло, WebGPU и произвольные фото не проверены. Исправления по недоказанной причине не добавлялись. Сайт не публиковался.
 
 ### 2026-10-07T16:49:49+03:00 — Раздельные карточки нейросетей в настройках
 
-- Changed: SlimSAM для удаления фона и LaMa для удаления объектов оформлены отдельными карточками с рамками, промежутком, заголовком и названием/размером модели. Описание, состояние и действия установки/удаления находятся внутри собственной карточки; существующие обработчики и ID сохранены.
-- Verification: npm run check — 980/980; Chrome file:// browser smoke — PASS. Визуально проверены 1440×1100, 1024×768 и 640×800: отдельные рамки, промежуток, принадлежность кнопок и отсутствие горизонтального переполнения; вкладки/закрытие работают, page errors отсутствуют. Перед заменой сохранена резервная копия.
+- Изменено: SlimSAM для удаления фона и LaMa для удаления объектов оформлены отдельными карточками с рамками, промежутком, заголовком и названием/размером модели. Описание, состояние и действия установки/удаления находятся внутри собственной карточки; существующие обработчики и ID сохранены.
+- Проверено: npm run check — 980/980; Chrome file:// browser smoke — PASS. Визуально проверены 1440×1100, 1024×768 и 640×800: отдельные рамки, промежуток, принадлежность кнопок и отсутствие горизонтального переполнения; вкладки/закрытие работают, page errors отсутствуют. Перед заменой сохранена резервная копия.
 
 ### 2026-10-07T16:43:01+03:00 — Кисть удаления фона по приблизительной подсказке
 
-- Added: отдельная «Кисть удаления фона» (Shift+E). Приблизительные штрихи дают SlimSAM положительные подсказки; нейросеть сама находит границы и сохраняет весь объект вне закрашенной области. «Удалить фон» меняет alpha только выбранного RGB8 растрового слоя; отдельный слой, transform и исходная прозрачность сохраняются. Один Undo/Redo; отмена, сброс, stale/lock guards и отказ для native high-depth/CMYK без конвертации.
-- Added: отдельная проверенная установка SlimSAM (~39 МБ со средой выполнения), кнопки в подсказке/постоянном уведомлении/параметрах инструмента и настройках; проценты/МБ, отмена, готовность и удаление модели. Кэш отделён от LaMa и проектов, удаляются только пять принадлежащих модели файлов. Во время обработки нет сетевых запросов с фото.
-- Changed: существующие владельцы маски, verified downloader, cache и worker lifecycle переиспользованы через узкие параметры; поведение удаления объектов сохранено. Добавлен канонический контракт AI_BACKGROUND_REMOVAL и инструкция в README.
-- Verification: npm run check — 980/980; штатный Chrome file:// smoke — PASS; независимые focused tests — 48/48 плюс native composition — 15/15. Реальная установка → отмена/повтор → CPU SlimSAM → отмена/повтор → удаление фона на публичном фото: целая машина, крыша и колёса вне штрихов, прозрачный фон, полностью непрозрачные RGB неизменны; другой слой byte-identical, Undo/Redo exact PNG, удаление модели сохраняет результат, внешние запросы только GET артефактов, page errors отсутствуют. Desktop 1440×900 и 1024×768 проверены визуально. WebGPU, offline restart и качество на произвольных фото не проверены. Перед обновлением сохранена резервная копия; сайт не публиковался.
+- Добавлено: отдельная «Кисть удаления фона» (Shift+E). Приблизительные штрихи дают SlimSAM положительные подсказки; нейросеть сама находит границы и сохраняет весь объект вне закрашенной области. «Удалить фон» меняет alpha только выбранного RGB8 растрового слоя; отдельный слой, transform и исходная прозрачность сохраняются. Один Undo/Redo; отмена, сброс, stale/lock guards и отказ для native high-depth/CMYK без конвертации.
+- Добавлено: отдельная проверенная установка SlimSAM (~39 МБ со средой выполнения), кнопки в подсказке/постоянном уведомлении/параметрах инструмента и настройках; проценты/МБ, отмена, готовность и удаление модели. Кэш отделён от LaMa и проектов, удаляются только пять принадлежащих модели файлов. Во время обработки нет сетевых запросов с фото.
+- Изменено: существующие владельцы маски, verified downloader, cache и worker lifecycle переиспользованы через узкие параметры; поведение удаления объектов сохранено. Добавлен канонический контракт AI_BACKGROUND_REMOVAL и инструкция в README.
+- Проверено: npm run check — 980/980; штатный Chrome file:// smoke — PASS; независимые focused tests — 48/48 плюс native composition — 15/15. Реальная установка → отмена/повтор → CPU SlimSAM → отмена/повтор → удаление фона на публичном фото: целая машина, крыша и колёса вне штрихов, прозрачный фон, полностью непрозрачные RGB неизменны; другой слой byte-identical, Undo/Redo exact PNG, удаление модели сохраняет результат, внешние запросы только GET артефактов, page errors отсутствуют. Desktop 1440×900 и 1024×768 проверены визуально. WebGPU, offline restart и качество на произвольных фото не проверены. Перед обновлением сохранена резервная копия; сайт не публиковался.
 
 ### 2026-10-07T16:15:30+03:00 — Состояние нейросети в подсказке и удаление модели
 
-- Changed: описание инструмента читается по текущему состоянию модели: после установки текст и кнопка установки исчезают, после удаления возвращаются. Настройки показывают состояние установленной модели без предложения установить её повторно.
-- Added: «Удалить нейросеть» в настройках: очищает ровно четыре файла модели, включая частичный кэш отменённой установки, и память текущей страницы. Фото, проекты, история, настройки и посторонние записи не очищаются. Сбой транзакции сохраняет готовую модель; обработка/установка и удаление взаимно исключены. Другие вкладки могут сохранять свою модель; ограничение указано в настройках.
-- Verification: npm run check — 965/965; независимая focused проверка — 31/31. Реальный Chrome file://: установка → подсказка без установки → удаление → подсказка установки → перезагрузка без модели → повторная установка; native IndexedDB sentinel, фото/история/настройки сохранены. Во время реального CPU inference удаление модели заблокировано, после завершения доступно без переоткрытия настроек; page errors отсутствуют. Перед обновлением сохранена резервная копия. Сайт не публиковался.
+- Изменено: описание инструмента читается по текущему состоянию модели: после установки текст и кнопка установки исчезают, после удаления возвращаются. Настройки показывают состояние установленной модели без предложения установить её повторно.
+- Добавлено: «Удалить нейросеть» в настройках: очищает ровно четыре файла модели, включая частичный кэш отменённой установки, и память текущей страницы. Фото, проекты, история, настройки и посторонние записи не очищаются. Сбой транзакции сохраняет готовую модель; обработка/установка и удаление взаимно исключены. Другие вкладки могут сохранять свою модель; ограничение указано в настройках.
+- Проверено: npm run check — 965/965; независимая focused проверка — 31/31. Реальный Chrome file://: установка → подсказка без установки → удаление → подсказка установки → перезагрузка без модели → повторная установка; native IndexedDB sentinel, фото/история/настройки сохранены. Во время реального CPU inference удаление модели заблокировано, после завершения доступно без переоткрытия настроек; page errors отсутствуют. Перед обновлением сохранена резервная копия. Сайт не публиковался.
 
 ### 2026-10-07T15:55:37+03:00 — Заметная установка модели и прогресс удаления
 
-- Added: инструкция и кликабельная установка нейросети в описании инструмента; большое контрастное уведомление справа внизу с установкой и закрытием. Уведомление не исчезает через 3 секунды; уходит при установке, закрытии или смене инструмента. Кнопки сразу открывают «Нейросети» и запускают установку, без второго нажатия.
-- Added: панель удаления с полосой обработки, реальными этапами подготовки/восстановления/сохранения, прошедшим временем и отменой. Первый запуск без выдуманного процента/ETA, следующие показывают примерный остаток по измеренному успешному вычислению этого режима. Таймер снимается при завершении; поздние сообщения отменённого worker игнорируются.
-- Verification: npm run check — 958/958; реальные Chrome pointer/keyboard сценарии в 1440×900 и 1024×768: запуск установки из обеих кнопок, отмена/повтор, CPU-прогресс, измеренная оценка следующего запуска, отмена с сохранением пикселей, без page errors. Независимая focused проверка — 26/26 и отдельный late-message probe PASS. Копия исходников перед обновлением сохранена; сайт не публиковался.
+- Добавлено: инструкция и кликабельная установка нейросети в описании инструмента; большое контрастное уведомление справа внизу с установкой и закрытием. Уведомление не исчезает через 3 секунды; уходит при установке, закрытии или смене инструмента. Кнопки сразу открывают «Нейросети» и запускают установку, без второго нажатия.
+- Добавлено: панель удаления с полосой обработки, реальными этапами подготовки/восстановления/сохранения, прошедшим временем и отменой. Первый запуск без выдуманного процента/ETA, следующие показывают примерный остаток по измеренному успешному вычислению этого режима. Таймер снимается при завершении; поздние сообщения отменённого worker игнорируются.
+- Проверено: npm run check — 958/958; реальные Chrome pointer/keyboard сценарии в 1440×900 и 1024×768: запуск установки из обеих кнопок, отмена/повтор, CPU-прогресс, измеренная оценка следующего запуска, отмена с сохранением пикселей, без page errors. Независимая focused проверка — 26/26 и отдельный late-message probe PASS. Копия исходников перед обновлением сохранена; сайт не публиковался.
 
 ### 2026-10-07T15:34:33+03:00 — Нейросетевое удаление объектов и настройки
 
-- Changed: отдельный инструмент удаления объектов использует LaMa прямо в браузере вместо слабой заливки соседними пикселями. Маска и фото остаются на устройстве; RGB изменяется только в закрашенной области, alpha сохраняется. Одна запись Undo/Redo; реальная отмена worker, защита исходного документа/слоя после ожидания. Native high-depth/CMYK источник отклоняется без конвертации.
-- Added: «Настройки» справа от «Помощь», вкладки «Нейросети», «Обработка», «Рабочее пространство». Явная установка модели (~85 МБ), прогресс процент/МБ, отмена; cache-only запуск, проверенный SHA256 кэш отдельно от проектов. Уведомление и кнопка установки при выборе инструмента без модели. Автоматическое ускорение/CPU, привязка, начальный размер кисти.
-- Verification: pure tests и сборка — 954/954; browser smoke — PASS. Реальный Chrome file://: установка/отмена/повтор, отмена удаления с неизменным фото, удаление машины с outside-mask и Undo/Redo, повторное открытие offline, CPU inference на птице/разметке, вкладки клавиатурой; запросы только GET артефактов без фото. Независимая focused проверка — 23/23 PASS. Первый worker failure (opaque-origin module Blob) исправлен созданием module URL внутри worker; тестовые таймауты recovery/dirty-confirm отделены от результата inference. Развёрнутый сайт не обновлялся.
+- Изменено: отдельный инструмент удаления объектов использует LaMa прямо в браузере вместо слабой заливки соседними пикселями. Маска и фото остаются на устройстве; RGB изменяется только в закрашенной области, alpha сохраняется. Одна запись Undo/Redo; реальная отмена worker, защита исходного документа/слоя после ожидания. Native high-depth/CMYK источник отклоняется без конвертации.
+- Добавлено: «Настройки» справа от «Помощь», вкладки «Нейросети», «Обработка», «Рабочее пространство». Явная установка модели (~85 МБ), прогресс процент/МБ, отмена; cache-only запуск, проверенный SHA256 кэш отдельно от проектов. Уведомление и кнопка установки при выборе инструмента без модели. Автоматическое ускорение/CPU, привязка, начальный размер кисти.
+- Проверено: pure tests и сборка — 954/954; browser smoke — PASS. Реальный Chrome file://: установка/отмена/повтор, отмена удаления с неизменным фото, удаление машины с outside-mask и Undo/Redo, повторное открытие offline, CPU inference на птице/разметке, вкладки клавиатурой; запросы только GET артефактов без фото. Независимая focused проверка — 23/23 PASS. Первый worker failure (opaque-origin module Blob) исправлен созданием module URL внутри worker; тестовые таймауты recovery/dirty-confirm отделены от результата inference. Развёрнутый сайт не обновлялся.
 
 ### 2026-10-07T14:35:10+03:00 — Отдельная кисть удаления объектов
 
-- Added: новый инструмент «Удаление объектов» (Shift+J), накопительная полупрозрачная маска, появляющиеся сверху «Удалить объект» и «Сбросить»; Escape отменяет штрих или сбрасывает готовую область.
-- Changed: применение замороженной маски через существующую локальную Content-Aware Fill на выбранном незаблокированном растровом слое; одна операция Undo/Redo, без замены обычного выделения и без потери native RGB/CMYK precision. Маска учитывает transform слоя и защищена от stale document/layer и повторного Apply.
-- Verification: npm run check — 940/940; npm run test:browser — PASS с pixel/Undo/Redo регрессией. Дополнительный Chrome-сценарий проверил маску и удаление при повороте 33°, scaleX 1.4 / scaleY 0.8, окна 1440×900 и 1024×768; независимая focused проверка — PASS.
+- Добавлено: новый инструмент «Удаление объектов» (Shift+J), накопительная полупрозрачная маска, появляющиеся сверху «Удалить объект» и «Сбросить»; Escape отменяет штрих или сбрасывает готовую область.
+- Изменено: применение замороженной маски через существующую локальную Content-Aware Fill на выбранном незаблокированном растровом слое; одна операция Undo/Redo, без замены обычного выделения и без потери native RGB/CMYK precision. Маска учитывает transform слоя и защищена от stale document/layer и повторного Apply.
+- Проверено: npm run check — 940/940; npm run test:browser — PASS с pixel/Undo/Redo регрессией. Дополнительный Chrome-сценарий проверил маску и удаление при повороте 33°, scaleX 1.4 / scaleY 0.8, окна 1440×900 и 1024×768; независимая focused проверка — PASS.
 
 ### 2026-10-02 — Revalidate Smart Object Save lock after async preparation
 
-- Bug fix: pending Smart Object content Save now revalidates the parent's **live effective lock** after preview rendering, so locking the layer or an ancestor group while Save is in flight cancels before Photoshop preparation or persisted writes.
+- Исправлено: pending Smart Object content Save now revalidates the parent's **live effective lock** after preview rendering, so locking the layer or an ancestor group while Save is in flight cancels before Photoshop preparation or persisted writes.
 - Photoshop safety: after native embedded-resource preparation Save re-resolves source authority and checks effective lock again before resource publication, target metadata/preview/content mutation, history, dirty/recovery/cache/tab or success feedback.
 - Authority ordering: superseded generations stay silent; live lock is checked only after exact/source-aware parent identity is re-established, so same-ID replacements and shared/native identity semantics remain independent.
-- Tests/docs/build: deterministic deferred regressions cover both preview-time and Photoshop-rewrite-time lock races; a dedicated Smart Object lifecycle spec and canonical file:// generated artifacts are synchronized.
+- Тесты/документация/сборка: deterministic deferred regressions cover both preview-time and Photoshop-rewrite-time lock races; a dedicated Smart Object lifecycle spec and canonical file:// generated artifacts are synchronized.
 
 ### 2026-10-02 — Bind unshared Smart Object Save to the exact parent layer
 
-- Bug fix: pending content Save for an ordinary unshared Smart Object can no longer publish into a different Smart Object object that replaces the parent slot with the same layer ID while preview preparation is awaiting.
+- Исправлено: pending content Save for an ordinary unshared Smart Object can no longer publish into a different Smart Object object that replaces the parent slot with the same layer ID while preview preparation is awaiting.
 - Authority model: post-await Save checks now share one source-aware predicate — exact object identity for ordinary unshared Smart Objects, linked-source identity for ZPE linked instances, and Photoshop source identity for native Smart Objects.
 - Publication safety: stale same-ID replacement cancels before preview/content mutation, history, dirty/recovery/cache/tab or success feedback.
-- Tests/docs/build: deterministic replacement regression and AI-facing authority routing are synchronized with the canonical file:// browser artifacts.
+- Тесты/документация/сборка: deterministic replacement regression and AI-facing authority routing are synchronized with the canonical file:// browser artifacts.
 
 ### 2026-10-02 — Contain Smart Object Save preparation failures
 
-- Bug fix: Smart Object content Save now catches synchronous target/embedded-document preparation failures inside the controller instead of leaking a rejected Promise through fire-and-forget save callers.
+- Исправлено: Smart Object content Save now catches synchronous target/embedded-document preparation failures inside the controller instead of leaking a rejected Promise through fire-and-forget save callers.
 - Publication safety: failed preparation leaves parent/content documents, history, dirty/recovery/cache state and previews untouched while preserving the existing error/status/toast diagnostics.
 - Authority ordering: Save claims its monotonic generation only after shared/native target discovery and embedded-document restoration succeed, so a newer failed preparation cannot revoke an older already-authorized Save.
-- Tests/docs/build: deterministic regressions cover canonical restore failure and older-authorized/newer-target-discovery failure; AI-facing boundary/codemap/test routing and canonical file:// generated artifacts are synchronized.
+- Тесты/документация/сборка: deterministic regressions cover canonical restore failure and older-authorized/newer-target-discovery failure; AI-facing boundary/codemap/test routing and canonical file:// generated artifacts are synchronized.
 
 ### 2026-10-01 — Contain Smart Object conversion preparation failures
 
-- Bug fix: accepted **Convert to Smart Object** commands now catch synchronous preparation failures (including source-bounds 48 MP safety rejection) inside the controller instead of leaking a rejected Promise through fire-and-forget menu callers.
+- Исправлено: accepted **Convert to Smart Object** commands now catch synchronous preparation failures (including source-bounds 48 MP safety rejection) inside the controller instead of leaking a rejected Promise through fire-and-forget menu callers.
 - Publication safety: failed preparation leaves the source layer, selection and history untouched while preserving the existing diagnostic error/status/toast path; the canvas safety limit is unchanged.
 - Authority ordering: Convert claims its monotonic generation only after snapshot/bounds validation, embedded-document construction and clone normalization succeed, so a newer failed preparation cannot revoke an older already-authorized conversion.
-- Tests/docs/build: deterministic regressions cover direct canvas-budget failure and older-authorized/newer-failed overlap; AI-facing boundary/codemap/test routing and canonical file:// generated artifacts are synchronized.
+- Тесты/документация/сборка: deterministic regressions cover direct canvas-budget failure and older-authorized/newer-failed overlap; AI-facing boundary/codemap/test routing and canonical file:// generated artifacts are synchronized.
 
 ### 2026-10-01 — Make overlapping Smart Object conversions latest-authorized-wins
 
-- Bug fix: overlapping **Convert to Smart Object** commands now let only the newest conversion that passed target/type/lock/nesting/source-bounds preflight publish after asynchronous preview rendering.
+- Исправлено: overlapping **Convert to Smart Object** commands now let only the newest conversion that passed target/type/lock/nesting/source-bounds preflight publish after asynchronous preview rendering.
 - Authority model: Convert owns a monotonic generation separate from Smart Object Save; exact document/session/source-slot/object-state checks remain independent, and a blocked/rejected newer Convert does not revoke an already-authorized older conversion.
 - UI/error safety: superseded preview successes and failures return silently before stale cancellation feedback, mutation, history, status/toast or error logging, so older work cannot overwrite a newer conversion result.
-- Tests/docs: deterministic deferred regressions cover both completion orders, superseded preview failure, rejected-newer preservation and ordinary exact-state cancellation; AI-facing routing now documents the separate Convert/Save generations.
+- Тесты/документация: deterministic deferred regressions cover both completion orders, superseded preview failure, rejected-newer preservation and ordinary exact-state cancellation; AI-facing routing now documents the separate Convert/Save generations.
 
 ### 2026-10-01 — Make overlapping Smart Object content saves latest-authorized-wins
 
-- Bug fix: two overlapping Smart Object content saves against the same unchanged child/parent state now let only the newest command that passed pending/parent/lock preflight publish.
+- Исправлено: two overlapping Smart Object content saves against the same unchanged child/parent state now let only the newest command that passed pending/parent/lock preflight publish.
 - Authority model: `src/document/smart-object-controller.js` now combines a controller-local monotonic Save generation with the existing exact content-session/snapshot and parent/layer/shared-source guards; a blocked newer Save does not revoke an older authorized continuation.
 - Photoshop safety: generation is revalidated after preview preparation and native embedded-resource rewrite, so superseded prepared `liFD` work cannot publish resources, targets, history, dirty/recovery/cache/UI state; superseded failures are silent.
-- Tests/docs: deterministic deferred regressions cover both completion orders, superseded preview failure, rejected-newer preservation and Photoshop rewrite overlap; AI-facing boundaries and test routing now document the dual-authority contract.
+- Тесты/документация: deterministic deferred regressions cover both completion orders, superseded preview failure, rejected-newer preservation and Photoshop rewrite overlap; AI-facing boundaries and test routing now document the dual-authority contract.
 
 ### 2026-10-01 — Make overlapping native .zpe opens latest-authorized-wins
 
-- Bug fix: two overlapping native project opens against the same document/session/history/change epoch now publish only the newest command that actually passed pending-edit and replacement preflight.
+- Исправлено: two overlapping native project opens against the same document/session/history/change epoch now publish only the newest command that actually passed pending-edit and replacement preflight.
 - Authority model: `src/document/project-controller.js` now combines a controller-local monotonic open generation with the existing exact document/session/history/change-serial ticket; blocked newer attempts do not cancel an already-authorized older open.
 - UI/error safety: superseded reads and superseded read failures exit silently before parse/sanitize or feedback publication, so an older command cannot replace a newer project or overwrite its success/stale/error UI and logs.
-- Tests/docs: deterministic deferred regressions cover both completion orders, superseded failure, rejected-newer preservation and exact success side-effect order; the native IO spec and AI routing now document the dual-authority rule.
+- Тесты/документация: deterministic deferred regressions cover both completion orders, superseded failure, rejected-newer preservation and exact success side-effect order; the native IO spec and AI routing now document the dual-authority rule.
 
 ### 2026-10-01 — Make overlapping PSD/PSB imports latest-authorized-wins
 
-- Bug fix: when two PSD/PSB opens overlap against the same document/session/history/change epoch, only the newest import that successfully passed replacement/file preflight may continue to publication.
+- Исправлено: when two PSD/PSB opens overlap against the same document/session/history/change epoch, only the newest import that successfully passed replacement/file preflight may continue to publication.
 - Authority model: the PSD import controller now owns a monotonic command generation in addition to the existing exact document/session/history/change-serial ticket; the two guards protect independent command-intent and editor-state races.
 - UI/error safety: superseded work exits silently after file read, decode and later raster/embedded preparation awaits, so an older completion or failure cannot replace the newer document or overwrite its status/toast/alert/error reporting.
-- Tests/docs: deterministic deferred regressions cover both completion orders, a superseded decode failure and a rejected newer replacement decision that must not cancel the already-authorized import; AI-facing architecture and test routing now document the dual-authority contract.
+- Тесты/документация: deterministic deferred regressions cover both completion orders, a superseded decode failure and a rejected newer replacement decision that must not cancel the already-authorized import; AI-facing architecture and test routing now document the dual-authority contract.
 
 ### 2026-10-01 — Harden New Document replacement authority
 
-- Bug fix: the delayed **File → New / Ctrl+N** dialog now binds its discard authorization to the exact originating document/session instead of allowing a later submit to act on whichever tab is active.
+- Исправлено: the delayed **File → New / Ctrl+N** dialog now binds its discard authorization to the exact originating document/session instead of allowing a later submit to act on whichever tab is active.
 - Dirty-state safety: clean→dirty transitions and additional edits in an already-dirty document advance the monotonic change epoch and require a fresh discard confirmation; an unchanged dirty epoch that was already confirmed is not prompted twice.
 - Transaction safety: stale-owner, rejected re-confirmation, pending-edit and factory-failure paths publish no replacement history/document/dirty/recovery/viewport state; successful creation keeps the existing factory-first publication order.
-- Tests/docs: focused regressions cover late dirty epochs, same-document/different-session staleness, owner replacement, no-double-confirm and exact success ordering; AI-facing boundaries and the test matrix now route future changes to the temporal-authority contract.
+- Тесты/документация: focused regressions cover late dirty epochs, same-document/different-session staleness, owner replacement, no-double-confirm and exact success ordering; AI-facing boundaries and the test matrix now route future changes to the temporal-authority contract.
 
 ### 2026-10-01 — Harden Saved Path rename ownership
 
-- Bug fix: Rename Saved Path now binds the delayed modal intent to the exact originating document instead of re-reading the active tab by numeric index at submit time, preventing a stale dialog from renaming another document's path.
+- Исправлено: Rename Saved Path now binds the delayed modal intent to the exact originating document instead of re-reading the active tab by numeric index at submit time, preventing a stale dialog from renaming another document's path.
 - Target integrity: valid Photoshop path resource IDs are used to survive list reordering, but mutation additionally requires the exact original path object; removed or same-ID replacement targets fail closed, while sanitized ID-less paths use exact object identity as the fallback.
 - History safety: stale, empty, same-name, removed and replaced targets publish no `Переименовать контур` history entry; a real same-owner rename still trims/caps the name and commits exactly once.
-- Tests/docs/build: focused PathsController regressions cover normal rename, tab switch, reorder, same-ID replacement and ID-less fallback; AI ownership maps and test routing document delayed modal callbacks as origin-bound commands.
+- Тесты/документация/сборка: focused PathsController regressions cover normal rename, tab switch, reorder, same-ID replacement and ID-less fallback; AI ownership maps and test routing document delayed modal callbacks as origin-bound commands.
 
 
 ### 2026-10-01 — Extract History panel renderer
 
 - Refactor: History-list DOM rendering moved from `src/main.js` into `src/ui/history-panel-controller.js`; the composition root now supplies only the live history getter and canonical jump command.
 - Session correctness: every panel render resolves the current mutable per-tab HistoryStack, so switching document sessions cannot leave rows bound to a stack captured when the controller was created.
-- Bug fix: the Clear History button no longer calls the removed `updateHistory()` helper; it clears the current stack and routes through the single `updateAll()` refresh path, avoiding a runtime `ReferenceError`.
+- Исправлено: the Clear History button no longer calls the removed `updateHistory()` helper; it clears the current stack and routes through the single `updateAll()` refresh path, avoiding a runtime `ReferenceError`.
 - Behavior/tests/build/docs: exact row order, marker/class/title/native disabled semantics, click delegation, bottom scroll, empty state, live rebinding, Clear History callback closure and classic `file://` bundle order are regression-guarded; AI ownership maps and the test matrix now point to the narrow renderer.
 
 
@@ -156,7 +166,7 @@
 - Neighborhood correctness: the working set exposes bounded region reads/writes; Blur reads kernel halo across tile boundaries, Smudge reads the union of destination/source footprints, and only pixels that actually change mark tiles dirty.
 - Clone/Heal semantics: stroke start creates a separate lazy read-only tile working set from the original serialized source. Source tiles are decoded on demand, so later dab samples remain immutable without a mandatory full-plane clone.
 - Dodge/Burn/Blur coverage keeps global pixel coordinates across moving regions, preserving overlap behavior independently of tile boundaries.
-- Tests/docs: regressions cover region dirty identity, lazy tiled Dodge, cross-tile Blur, Clone snapshot routing and retouch gesture opt-in; TILED_RASTER/AGENTS/PROJECT/CODEMAP/README were updated for Stage 17d.
+- Тесты/документация: regressions cover region dirty identity, lazy tiled Dodge, cross-tile Blur, Clone snapshot routing and retouch gesture opt-in; TILED_RASTER/AGENTS/PROJECT/CODEMAP/README were updated for Stage 17d.
 
 ### 2026-09-29 — Tiled interactive Brush/Eraser working set
 
@@ -164,7 +174,7 @@
 - Preview: the existing full RGBA8 display canvas is initialized tile-by-tile, then only dirty tiles are tone-mapped/repainted during the stroke; layer filters remain preview-only and are not baked into the persisted canonical preview.
 - Precision: untouched tile payloads stay byte-identical; Eraser promotes RGB→RGBA / CMYK→CMYKA tile-by-tile and serializes untouched alpha-promoted tiles sequentially instead of holding a second full source plane.
 - Ownership: exact document/layer paint guards and async publication remain unchanged; retouch/flood/inpaint still use the documented contiguous compatibility boundary.
-- Tests/docs: new regressions cover lazy tile loading, selective persistence, alpha promotion and native Brush routing; TILED_RASTER/AGENTS/README document the Stage 17c boundary.
+- Тесты/документация: new regressions cover lazy tile loading, selective persistence, alpha promotion and native Brush routing; TILED_RASTER/AGENTS/README document the Stage 17c boundary.
 
 
 ### 2026-09-29 — Tile-local high-depth raster mutations
@@ -173,7 +183,7 @@
 - Alpha/safety: clear может повысить RGB→RGBA / CMYK→CMYKA по tile с предварительной проверкой document byte budget; invalid grid/visitor result fail-closed до publication.
 - Transactions: current-layer и merged visible-layer clear сохраняют exact-owner/all-or-nothing guards; high-depth no-op больше не проваливается в Canvas8 и не теряет precision.
 - Compatibility: общий high-depth fallback reserialize теперь adaptive v1/v2, поэтому крупный source после поддержанной contiguous операции сохраняет tiled persistence.
-- Tests/docs: regressions покрывают selective tile rewrite, alpha promotion, command routing и merged no-op; `TILED_RASTER.md` фиксирует оставшиеся boundaries.
+- Тесты/документация: regressions покрывают selective tile rewrite, alpha promotion, command routing и merged no-op; `TILED_RASTER.md` фиксирует оставшиеся boundaries.
 
 
 ### 2026-09-29 — Tiled high-depth raster source foundation
@@ -181,7 +191,7 @@
 - Memory architecture: добавлен backward-compatible `zpe-pixel-buffer-source-v2` — strict row-major tiled container для native RGB/CMYK 8/16/32-bit samples; adaptive PSD/PSB import переводит sources от 8 MiB на 256×256 tiles, сохраняя существующий 48 MiB precision budget.
 - Render path: RGB v2 preview декодирует и tone-map-ит по одному tile без второго full high-depth plane; staging использует `OffscreenCanvas`, когда он доступен, с Canvas fallback.
 - Compatibility/safety: legacy v1 читается без миграции; mutable contiguous consumers материализуют v2 через прежний API. Sanitizer fail-closed проверяет grid order/geometry/byte budgets и ограничивает tile count.
-- Tests/docs: regressions фиксируют RGB16/CMYK Float32 exact round-trip, edge tiles, adaptive policy, visitor semantics и malformed-grid rejection; docs честно фиксируют оставшиеся non-tiled boundaries.
+- Тесты/документация: regressions фиксируют RGB16/CMYK Float32 exact round-trip, edge tiles, adaptive policy, visitor semantics и malformed-grid rejection; docs честно фиксируют оставшиеся non-tiled boundaries.
 
 
 ### 2026-09-29 — Native high-depth Select & Mask output
@@ -189,7 +199,7 @@
 - Precision: explicit `Новый растровый слой + маска` no longer downgrades or refuses native PixelBuffer sources; RGB/CMYK 16-bit and Float32 edge-color cleanup now runs directly on native color samples while source alpha remains exact.
 - Safety: async publication keeps the exact originating `highDepthSource` identity, serializes the duplicate only after revalidation, and refuses publication before mutation when the shared 48 MiB PixelBuffer budget cannot hold both source and non-destructive output.
 - Preview/runtime: the output layer receives a regenerated display preview through the canonical raster persistence bridge while the native serialized source remains authoritative.
-- Tests/docs: RGB16 and CMYK Float32 regressions cover native color cleanup/alpha preservation, controller tests cover native output routing, and the mask architecture/test matrix document the new precision contract.
+- Тесты/документация: RGB16 and CMYK Float32 regressions cover native color cleanup/alpha preservation, controller tests cover native output routing, and the mask architecture/test matrix document the new precision contract.
 
 
 ### 2026-09-29 — Select & Mask edge-color decontamination
@@ -197,7 +207,7 @@
 - Refinement: Select & Mask can now decontaminate partially selected edge colors from nearby confident foreground samples, while keeping mask alpha and source alpha semantics separate and deterministic.
 - Output safety: mask-only remains the default non-destructive path; pixel decontamination requires explicit `Новый растровый слой + маска`, which keeps the original source hidden instead of overwriting it and publishes one guarded history transaction.
 - Precision/performance: full-resolution raster output is capped at 12 MP with bounded edge/color work budgets, and native PixelBuffer RGB/CMYK sources are refused rather than silently downgraded to RGBA8.
-- Tests/docs: pure color-cleanup regressions, controller publication/precision guards, Stage 9e source contracts and the raster-mask architecture guide cover the new path.
+- Тесты/документация: pure color-cleanup regressions, controller publication/precision guards, Stage 9e source contracts and the raster-mask architecture guide cover the new path.
 
 
 ### 2026-09-29 — Texture-aware Content-Aware Fill
@@ -205,7 +215,7 @@
 - Quality: Content-Aware Fill now refines smaller completed holes with deterministic PatchMatch-style neighbour propagation and bounded pseudo-random donor search, so repeated textures can be reconstructed from real source samples instead of ending at a boundary-weighted blur.
 - Precision: the same refinement works directly on typed RGB/CMYK 8/16/32-bit samples; candidate donor centers and source-patch samples must stay outside the frozen original selection, and the winning donor copies the full native sample including alpha.
 - Safety/performance: the existing 8 MP layer and 2 MP fill gates remain; PatchMatch refinement is capped at 250k selected pixels and larger fills deliberately keep the deterministic boundary-synthesis fallback.
-- Tests/docs: regressions cover deterministic stripe-texture recovery and the explicit fallback path; a dedicated architecture contract documents ownership, precision, budgets and the fact that this is a bounded PatchMatch-style implementation rather than Adobe's proprietary or ML fill.
+- Тесты/документация: regressions cover deterministic stripe-texture recovery and the explicit fallback path; a dedicated architecture contract documents ownership, precision, budgets and the fact that this is a bounded PatchMatch-style implementation rather than Adobe's proprietary or ML fill.
 
 
 ### 2026-09-29 — Independent raster mask link/unlink transforms
@@ -227,35 +237,35 @@
 - Feature: в меню «Правка» добавлена контент-заливка активного выделения на текущем растровом слое; алгоритм идёт от границы выделения внутрь и использует только неизменяемые donor-пиксели вне hole, поэтому synthesized samples не размазываются рекурсивно.
 - Precision: один model-agnostic core работает с Uint8/Uint16/Float32 samples; native 16/32-bit RGB и CMYK редактируются через PixelBuffer и существующий exact-owner high-depth persistence без скрытого RGBA8 fallback.
 - Safety: команда фиксирует selection snapshot до async Canvas preparation, повторно проверяет exact document/layer перед публикацией, подавляет history/status при stale persistence и ограничивает рабочий слой 8 МП, а hole — 2 МП для предсказуемой памяти.
-- Tests/docs/build: добавлены pure inpaint regressions, Canvas8/high-depth command tests, bundle-order guard и AI-facing ownership maps; file:// bundle/cache manifest регенерированы.
+- Тесты/документация/сборка: добавлены pure inpaint regressions, Canvas8/high-depth command tests, bundle-order guard и AI-facing ownership maps; file:// bundle/cache manifest регенерированы.
 
 ### 2026-09-29 — Extract history navigation owner
 
 - Refactor: Undo / Redo / jump-to-history runtime transactions move from `src/main.js` into `src/workspace/history-navigation-controller.js`; History panel DOM and menu/keyboard/button routing remain composition concerns.
 - Session safety: every command resolves the current mutable per-session HistoryStack at invocation time instead of capturing a stack during controller composition, while pending edits still block before any stack mutation.
 - Behavior preservation: Undo/Redo keep selection → raster cleanup, Jump keeps raster → crop → selection cleanup, and all successful navigation preserves restore → `updateAll()` → dirty → exact status ordering; semantic no-ops publish nothing.
-- Tests/docs/build: direct owner regressions cover fail-fast bridges, blocked/no-op paths, exact publication ordering and live history rebinding; composition guards lock routing and file:// bundle order, with AI maps/test matrix updated to the canonical owner.
+- Тесты/документация/сборка: direct owner regressions cover fail-fast bridges, blocked/no-op paths, exact publication ordering and live history rebinding; composition guards lock routing and file:// bundle order, with AI maps/test matrix updated to the canonical owner.
 
 ### 2026-09-29 — Extract New Document lifecycle owner
 
 - Refactor: File → New / Ctrl+N dirty-confirm, exact modal schema and replacement transaction move from `src/main.js` into `src/document/new-document-controller.js`; the composition root now only wires explicit ports and routes menu/keyboard/recovery actions.
 - Shared policy: PSD/PSB and native `.zpe` open flows reuse the same extracted document-replacement confirmation policy instead of depending on a composition-root helper.
 - Atomicity: canonical `createDocument` validation runs before any publication; success preserves fresh `HistoryStack(80)` → document/session replacement → clean state → immediate recovery → fit-to-view order, while validation failures keep the modal open with zero partial replacement.
-- Tests/docs/build: direct owner tests cover preflight, exact confirmation/schema, submit recheck, ordered publication and failure rollback; a source/bundle guard locks composition routing and classic-script evaluation order; AI maps/test matrix now point to the canonical lifecycle owner.
+- Тесты/документация/сборка: direct owner tests cover preflight, exact confirmation/schema, submit recheck, ordered publication and failure rollback; a source/bundle guard locks composition routing and classic-script evaluation order; AI maps/test matrix now point to the canonical lifecycle owner.
 
 ### 2026-09-29 — Extract Document Background dialog orchestration owner
 
 - Refactor: Image → Document Background modal schema/options, exact open-time owner capture and stale-result presentation move from `src/main.js` into directly tested `src/ui/document-background-controller.js`; the composition root now only wires explicit ports and routes the Image menu action.
 - Owner safety: delayed Apply keeps the exact originating document while the dynamic “Основной цвет” option is sampled once per dialog open through an explicit primary-color port, so tab switches cannot redirect a late command.
 - Behavior preservation: transparent/white/black/current-primary options, `Применить`, existing no-pending-guard policy, REJECTED status and normal COMMITTED/NOOP modal-close semantics remain unchanged; persisted no-op/history policy stays in `src/document/background-command-controller.js`.
-- Tests/docs/build: direct UI-owner regressions cover bridge validation, schema, dynamic sampling, captured-owner routing and all command outcomes; architecture guards enforce the split and classic bundle dependency order, with AI maps/test matrix updated to the canonical owners.
+- Тесты/документация/сборка: direct UI-owner regressions cover bridge validation, schema, dynamic sampling, captured-owner routing and all command outcomes; architecture guards enforce the split and classic bundle dependency order, with AI maps/test matrix updated to the canonical owners.
 
 ### 2026-09-29 — Extract document resize dialog orchestration owner
 
 - Refactor: Image Size / Canvas Size modal schema, all nine anchor labels, repeated pending-edit guard and command-result presentation move from `src/main.js` into `src/ui/document-resize-controller.js`; the composition root now only wires the UI owner to the persisted command owner and routes menu actions.
 - Owner safety: each dialog still captures the exact originating document at open and submits that owner to `src/document/resize-command-controller.js`, so tab replacement cannot redirect a delayed resize into another document.
 - Behavior preservation: INVALID and REJECTED keep the modal open with the existing status/toast messages, while COMMITTED and semantic NOOP keep the generic modal controller's normal close behavior without duplicate history or UI publication.
-- Tests/docs/build: direct UI-controller regressions cover schema/guards/owner capture/outcome routing; architecture guards enforce the split and classic file:// bundle dependency order; AI maps and the test matrix point to the new canonical owner.
+- Тесты/документация/сборка: direct UI-controller regressions cover schema/guards/owner capture/outcome routing; architecture guards enforce the split and classic file:// bundle dependency order; AI maps and the test matrix point to the new canonical owner.
 
 ### 2026-09-29 — Extract document export orchestration owner
 
@@ -436,7 +446,7 @@
 - Refactor: persisted Image Size and Canvas Size mutation/validation/history policy moves from delayed modal callbacks in `src/main.js` into `src/document/resize-command-controller.js`; modal markup, pending-edit UI guard and status presentation remain in the composition root.
 - Stale-document fix: each dialog captures its originating document and Apply revalidates that exact owner immediately before mutation, so switching tabs while a resize modal is open cannot resize the newly active document.
 - Atomicity/history: Image Size stages `checkedCanvasSize` + `imageResizeTransforms`; Canvas Size stages all nine-anchor shifts + `MAX_LAYER_POSITION` validation before writing. Invalid/no-op/stale paths leave document, transient selection/crop state and history untouched; real commands publish once.
-- Tests/docs/build: the VM/source-slicing resize test is replaced by direct controller regressions; architecture/AI-routing docs and the canonical file:// build graph point to the new owner.
+- Тесты/документация/сборка: the VM/source-slicing resize test is replaced by direct controller regressions; architecture/AI-routing docs and the canonical file:// build graph point to the new owner.
 
 
 ### 2026-09-27 — Canonical discrete layer transform command controller
@@ -488,7 +498,7 @@
 
 ### 2026-09-27 — Открытие recovery-проекта двойным левым кликом
 
-- Bug fix: быстрый двойной клик по карточке автосохранённого проекта теперь обрабатывается только основной (левой) кнопкой мыши; двойной правый клик больше не запускает восстановление.
+- Исправлено: быстрый двойной клик по карточке автосохранённого проекта теперь обрабатывается только основной (левой) кнопкой мыши; двойной правый клик больше не запускает восстановление.
 - Cleanup: detector переименован из right-click-specific в нейтральный `createRapidDoubleClickTracker`, а recovery action теперь помечается `primary-double-click`.
 - Regression coverage: unit/source-contract тесты фиксируют primary-button contract и запрещают возврат `button === 2`/secondary-double-click поведения.
 - Cache busting: runtime-изменение создало новый build ID `c36bc347c1d8ccfa`, поэтому HTTP/HTTPS-публикация получит исправленный bundle через существующий механизм автообновления.
@@ -544,7 +554,7 @@
 - Refactor: selection-driven Vector Mask geometry, boolean subpath publication, 128-contour guard and selected-mask edit/toggle/invert/remove commands moved from the large `src/main.js` into `src/selection/vector-mask-controller.js`.
 - Pen boundary fix: entering Vector Mask edit now clears a competing Saved Path edit target before publishing the exact Vector Mask layer ID, and the old duplicate `vectorMaskEditLayerId` assignment around `setTool('pen')` is replaced by one explicit runtime edit port.
 - Boundaries: Pen anchor/handle geometry and edit state remain in `src/main.js`; Saved Paths remain in `src/ui/paths-controller.js`; PSD/PSB vector-mask import/export conversion and codec ownership remain outside the new selection controller.
-- Tests/docs: direct regressions cover rect/ellipse/path conversion, 72-point bridge usage, anchor/handle localization, boolean operations, re-enable/128-limit/guard paths and edit/lifecycle semantics; source guards and AI maps prevent the command cluster drifting back into the composition root.
+- Тесты/документация: direct regressions cover rect/ellipse/path conversion, 72-point bridge usage, anchor/handle localization, boolean operations, re-enable/128-limit/guard paths and edit/lifecycle semantics; source guards and AI maps prevent the command cluster drifting back into the composition root.
 
 ### 2026-09-26 — Selection raster-mask / Select & Mask controller extraction
 
@@ -558,28 +568,28 @@
 - Refactor: shared Text typography/font UI policy moved from the large `src/main.js` into `src/ui/text-settings-controller.js`: option sets, local-font discovery/private registry, custom-font validation/read cache, modal fields and form normalization.
 - Behavior preservation: `queryLocalFonts()` fallback/permission messages, Russian locale sorting + 1,000-font bound, stored-font fallback options, WOFF/WOFF2/TTF/OTF 5 MB validation, embedded `fontData`/`fontLabel` retention and typography clamps remain explicit controller contracts.
 - Properties safety: manual system fonts and custom font files now use the same canonical owner as Text add/edit; async custom-font publication still revalidates the originating document, exact selected layer and lock state before mutation/history commit.
-- Tests/docs: direct controller regressions cover local-font capability/error paths, de-duplication/sort/cap/select preservation, bounded manual registry, custom-font cache retry semantics, precedence/normalization and source ownership; AI maps distinguish Text transaction ownership from Text settings/font policy.
+- Тесты/документация: direct controller regressions cover local-font capability/error paths, de-duplication/sort/cap/select preservation, bounded manual registry, custom-font cache retry semantics, precedence/normalization and source ownership; AI maps distinguish Text transaction ownership from Text settings/font policy.
 
 ### 2026-09-26 — Text edit / live-preview controller extraction
 
 - Refactor: Text-tool add/edit modal transaction, visible-text hit routing, transient draft ownership, async live-preview generation and preview-canvas synchronization moved from the large `src/main.js` into `src/ui/text-edit-controller.js`.
 - Reliability: async preview is explicitly latest-wins and revalidates the originating document + exact edit-layer identity after awaited font/settings resolution; final Edit Apply also revalidates the exact selected layer and lock state before mutation.
 - Boundaries: generic `src/ui/modal-controller.js` no longer receives Text-specific preview/close callbacks; reusable per-modal `onMount`/`onClose` lifecycle keeps feature state in its owner while shared text font/form helpers remain outside until their own bounded extraction.
-- Tests/docs: direct controller regressions cover latest-wins/stale/closed preview, exact-selection Apply, locked-target rejection, Add semantics, preview-canvas DPR/zoom alignment and source ownership; AI routing docs and generated file:// bundle graph now point to the canonical Text owner.
+- Тесты/документация: direct controller regressions cover latest-wins/stale/closed preview, exact-selection Apply, locked-target rejection, Add semantics, preview-canvas DPR/zoom alignment and source ownership; AI routing docs and generated file:// bundle graph now point to the canonical Text owner.
 
 ### 2026-09-26 — Layer Blending / Layer Styles controller extraction
 
 - Refactor: Blending Options / Layer Styles dialog construction, draft/live-preview transaction, preview-canvas crop/sync and modal lifecycle moved from the large `src/main.js` into `src/ui/layer-blending-controller.js`.
 - Reliability: stale document/layer Apply and lock-after-preview now roll transient draft values back to the exact originating layer instead of leaving preview state behind; Cancel/Preview-off remain history-free and real Apply still commits exactly `Параметры наложения слоя`.
 - Module hygiene: the controller imports `makeModalDraggable()` explicitly, removing a hidden dependency that previously worked only because the generated file:// bundle flattened module scopes.
-- Tests/docs: direct session regressions cover preview/rollback/no-op/real Apply/stale-owner/lock guards, preview-canvas tests now import the canonical owner instead of VM-slicing `main.js`, and AI routing docs identify the new boundary.
+- Тесты/документация: direct session regressions cover preview/rollback/no-op/real Apply/stale-owner/lock guards, preview-canvas tests now import the canonical owner instead of VM-slicing `main.js`, and AI routing docs identify the new boundary.
 
 ### 2026-09-26 — Smart Filter UI/controller extraction
 
 - Refactor: Smart Filter stack/mask markup, reorder/toggle/remove/clear commands, mask transactions, properties-panel bindings and add/edit modal lifecycle moved from the large `src/main.js` into `src/ui/smart-filter-controller.js`.
 - Boundaries: Smart Filter schema, sanitization and the canonical `MAX_SMART_FILTERS` limit remain in `src/core/state.js`; ordered pixel filtering and mask composition remain in `src/core/render.js`; the shared selection-mask rasterizer remains a narrow runtime port because layer masks also use it.
 - Reliability: selection-mask creation preserves prepare-before-publish ownership checks, so switching documents while rasterization awaits cannot mutate or commit into the wrong document. Live density/feather preview still renders without history until the final change event.
-- Tests/docs: direct controller regressions cover stack commands, lock guards, last-filter mask cleanup, mask lifecycle, stale-document async cancellation, clamp/live-preview semantics and the canonical stack limit; architecture routing docs now point fresh AI/Codex sessions directly to the Smart Filter owner.
+- Тесты/документация: direct controller regressions cover stack commands, lock guards, last-filter mask cleanup, mask lifecycle, stale-document async cancellation, clamp/live-preview semantics and the canonical stack limit; architecture routing docs now point fresh AI/Codex sessions directly to the Smart Filter owner.
 
 
 ### 2026-09-26 — Photoshop Smart Object resource owner extraction
@@ -587,7 +597,7 @@
 - Refactor: embedded Photoshop Smart Object PNG/PSD/PSB payload serialization, bounded `liFD` linked-resource rewrite preparation/publication and native baseline metadata refresh moved from the large `src/main.js` into `src/document/psd-smart-object-resource.js`.
 - Boundaries: generic content/session lifecycle and stale-tab revalidation remain in `smart-object-controller.js`; document-to-writer preparation remains in `psd-export-controller.js`; low-level PSD/PSB encoding and linked-record byte surgery remain in `src/formats/psd.js`.
 - Reliability: resource rewrite keeps prepare-before-publish semantics, so parent linked blocks and target metadata are not mutated until the generic controller has revalidated the originating content tab and parent identity after async preparation. Existing 40 MiB asset, 4 MiB ICC, 128 MiB linked-block, 12 MP and 200-layer safety bounds are preserved.
-- Tests/docs: direct regressions cover PNG/PSD/PSB serialization selection, unsafe eligibility/fallback paths, real-fixture `liFD` preparation without parent mutation, explicit publication and identity-preserving baseline refresh; AI routing and architecture ownership docs now point directly to the resource owner.
+- Тесты/документация: direct regressions cover PNG/PSD/PSB serialization selection, unsafe eligibility/fallback paths, real-fixture `liFD` preparation without parent mutation, explicit publication and identity-preserving baseline refresh; AI routing and architecture ownership docs now point directly to the resource owner.
 
 
 ### 2026-09-26 — Smart Object content lifecycle controller extraction
@@ -595,7 +605,7 @@
 - Refactor: generic Smart Object convert/open/save/link/unlink orchestration, nesting/source-bounds rules, shared-source propagation and content-tab lifecycle moved from the large `src/main.js` into `src/document/smart-object-controller.js`.
 - Boundaries: stable core state/geometry dependencies stay direct; browser preview rendering, workspace/session publication and Photoshop embedded-resource rewrite are narrow ports. PSD/PSB/PNG embedded serialization and linked-resource byte rewrite remain outside the generic controller.
 - Bug fixes: linked Smart Object open status now counts instances against the parent document after the content tab is loaded, and async content save now revalidates the originating content tab/document after preview generation and after Photoshop embedded-resource preparation, preventing stale snapshots or native resource blocks from publishing after a tab switch.
-- Tests/docs: direct controller regressions cover linked-copy/unlink, conversion stale guards, parent-owner instance counts, shared-source save propagation, stale-tab cancellation and Photoshop rewrite port isolation; AI routing/boundary/test-matrix docs now point to the canonical lifecycle owner.
+- Тесты/документация: direct controller regressions cover linked-copy/unlink, conversion stale guards, parent-owner instance counts, shared-source save propagation, stale-tab cancellation and Photoshop rewrite port isolation; AI routing/boundary/test-matrix docs now point to the canonical lifecycle owner.
 
 
 ### 2026-09-26 — PSD import semantics owner extraction
@@ -603,7 +613,7 @@
 - Refactor: Photoshop import-specific Text, solid Shape, Adjustment and Smart Object metadata mapping plus editable embedded-asset decoding moved from the large `src/main.js` into `src/document/psd-import-semantics.js`.
 - Architecture: `src/document/psd-import-controller.js` remains the transaction/publish owner; binary codec stays in `src/formats/psd.js`. Shared vector-mask localization, opaque Photoshop resource conversion and Smart Object fingerprint helpers deliberately remain outside the new module and enter as explicit ports instead of creating duplicate owners or an import→export-plan dependency.
 - Behavior preservation: TySh/EngineData baselines, shape eligibility/style metadata, adjustment normalization/channel bounds, Smart Object fingerprints and embedded PNG/JPEG/WebP/GIF/BMP/PSD/PSB editable-content fallbacks keep their existing import contracts.
-- Tests/docs: direct semantics regressions cover supported/unsupported shape mapping, immutable metadata baselines, Smart Object identity, raster embedded assets, failure fallback and bounded nested-PSD decode; architecture/source contracts and AI navigation now follow the canonical owner.
+- Тесты/документация: direct semantics regressions cover supported/unsupported shape mapping, immutable metadata baselines, Smart Object identity, raster embedded assets, failure fallback and bounded nested-PSD decode; architecture/source contracts and AI navigation now follow the canonical owner.
 
 
 ### 2026-09-26 — Photoshop native export metadata-plan boundary
@@ -752,7 +762,7 @@
 - Architecture: controller не владеет document/layer mutation; очистка выбранного или всех видимых слоёв остаётся явным callback boundary в `src/main.js`, сохраняя lock/high-depth/Undo semantics.
 - Async safety: paste generation/timer state теперь локален controller-у, а direct/fallback paste сохраняют guard по исходному document/session при переключении вкладок.
 - Regression: async clipboard tests вызывают реальный controller API вместо source slicing; architecture gate запрещает возвращать clipboard state/functions в `src/main.js`.
-- Fixed: global keyboard handler больше не читает приватный `openMenuKey` после menu-controller extraction; используется публичный `menuController.isOpen()`, и architecture test запрещает утечку внутреннего menu state.
+- Исправлено: global keyboard handler больше не читает приватный `openMenuKey` после menu-controller extraction; используется публичный `menuController.isOpen()`, и architecture test запрещает утечку внутреннего menu state.
 - Docs/AI: PROJECT, CODEMAP, BOUNDARIES и AGENTS получили отдельную selection boundary, чтобы задачи copy/cut/paste находились без чтения большого runtime orchestrator.
 
 
@@ -783,7 +793,7 @@
 - Regression follow-up: architecture gate теперь проверяет корректную цепочку `main.js → toolbar-controller.js → tool-layout.js`, а не требует старую прямую зависимость `main.js → tool-layout.js`.
 - Diagnostics: `tools/browser-smoke.mjs` теперь отдельно распознаёт `appReady="error"` и печатает fatal bootstrap message + browser errors вместо неинформативного timeout.
 - Diagnostics follow-up: smoke также останавливается на первом top-level `Runtime.exceptionThrown`, даже если bundle упал до вызова `bootstrap()`.
-- Fixed: toolbar wiring снова использует `$$('.tool')` (querySelectorAll helper); предыдущий scripted replacement интерпретировал `$` как replacement token и случайно оставил одиночный `$`, что ломало bootstrap до запуска editor runtime.
+- Исправлено: toolbar wiring снова использует `$$('.tool')` (querySelectorAll helper); предыдущий scripted replacement интерпретировал `$` как replacement token и случайно оставил одиночный `$`, что ломало bootstrap до запуска editor runtime.
 
 ### 2026-09-26 — Workspace/session controller extraction
 
@@ -806,7 +816,7 @@
 
 ### 2026-09-25T23:11:00+03:00 — Исправлено точное размещение инструментов при перетаскивании
 
-- Fixed: drop больше не зависит от попадания именно по кнопке инструмента; пустые промежутки и свободные ячейки двухколоночной панели теперь вычисляются как реальные позиции сетки.
+- Исправлено: drop больше не зависит от попадания именно по кнопке инструмента; пустые промежутки и свободные ячейки двухколоночной панели теперь вычисляются как реальные позиции сетки.
 - UX: во время перетаскивания показывается отдельная пунктирная ячейка назначения, поэтому заранее видно точное место, куда встанет инструмент.
 - Persistence: инструмент вставляется именно в выбранный индекс, после чего новый порядок сразу сохраняется и восстанавливается после перезагрузки.
 - Regression: browser smoke теперь синтетически перетаскивает последний инструмент прямо в пустой зазор между первой и второй ячейками, проверяет фактический DOM-порядок, localStorage и восстановление после reload.
@@ -824,31 +834,29 @@
 
 ### 2026-09-25T22:34:00+03:00 — Исправлена потеря Photoshop blend modes при PSD/PSB round-trip
 
-- Fixed: PSD/PSB `sLit`, `hLit`, `diff` и `smud` больше не деградируют в Normal; они сохраняются как Soft Light, Hard Light, Difference и Exclusion при импорте и экспорте.
+- Исправлено: PSD/PSB `sLit`, `hLit`, `diff` и `smud` больше не деградируют в Normal; они сохраняются как Soft Light, Hard Light, Difference и Exclusion при импорте и экспорте.
 - Renderer/UI: новые режимы доступны слоям и группам; adjustment layers используют alpha-safe формулы Soft Light / Hard Light / Difference / Exclusion без изменения destination alpha.
 - High-depth/CMYK: typed compositors понимают тот же расширенный набор режимов вместо тихого fallback в `source-over`.
 - Regression: добавлены PSD+PSB key round-trip, project-sanitizer, 8-bit adjustment и typed RGB/CMYK pixel-level проверки; `src/app.bundle.js` синхронизирован с исходниками.
 
 ### 2026-09-25T22:19:00+03:00 — Исправлен Photoshop Hue/Saturation Colorize round-trip
 
-- Fixed: PSD/PSB `hue2`/`hue ` с включённым Colorize теперь импортируют активную тройку Colorization Hue/Saturation/Lightness вместо неактивных master-полей.
+- Исправлено: PSD/PSB `hue2`/`hue ` с включённым Colorize теперь импортируют активную тройку Colorization Hue/Saturation/Lightness вместо неактивных master-полей.
 - Renderer: Colorize saturation использует Photoshop-диапазон 0–100; значение 0 больше не превращается ошибочно в 50% насыщенности.
 - Native writeback: `rewritePsdAdjustmentBlocks()` синхронизирует Colorize flag и патчит правильные offsets — colorization при Colorize и master при обычном Hue/Saturation, сохраняя неактивную тройку byte-for-byte.
 - Regression: добавлены pixel-level Colorize checks и PSD+PSB round-trip через реальный pinned Hue/Saturation fixture.
 
 ### 2026-09-25T22:09:00+03:00 — Исправлена прозрачность корректирующих слоёв и checker preview
 
-- Fixed: корректирующие слои больше не повышают alpha полупрозрачных пикселей при повторном `source-over`; opacity, raster/vector mask и clipping теперь задают только степень цветового эффекта, а исходная alpha сохраняется.
+- Исправлено: корректирующие слои больше не повышают alpha полупрозрачных пикселей при повторном `source-over`; opacity, raster/vector mask и clipping теперь задают только степень цветового эффекта, а исходная alpha сохраняется.
 - Blend semantics: alpha-safe compositor поддерживает текущие режимы `source-over`, Multiply, Screen, Overlay, Darken, Lighten, Color Dodge и Color Burn.
-- Fixed: checkerboard прозрачности теперь композится позади уже отрендеренного документа и больше не попадает под adjustment layers или blend operations.
+- Исправлено: checkerboard прозрачности теперь композится позади уже отрендеренного документа и больше не попадает под adjustment layers или blend operations.
 - Regression: добавлены pixel-level проверки semi-transparent alpha/mask coverage и source-contract проверки checker/render boundary; browser bundle пересобирается штатным генератором.
 
 ### 2026-09-25T21:57:51+03:00 — Исправлена проверка проекта после клонирования на Windows
 
-- Fixed: текстовые файлы проекта сохраняют LF при checkout даже с `core.autocrlf=true`; для `start.bat` сохранён CRLF.
-- Verification: `npm run check` — 391 тест пройден в LF-копии; выборочная проверка падения теста в CRLF-копии установила причину.
-
-## 1.42.0 — 2026-09-25
+- Исправлено: текстовые файлы проекта сохраняют LF при checkout даже с `core.autocrlf=true`; для `start.bat` сохранён CRLF.
+- Проверено: `npm run check` — 391 тест пройден в LF-копии; выборочная проверка падения теста в CRLF-копии установила причину.
 
 ### 2026-09-25 — Native Invert / Posterize / Threshold Adjustment Layers Stage 16c
 
