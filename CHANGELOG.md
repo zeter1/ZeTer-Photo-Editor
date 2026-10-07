@@ -6,6 +6,15 @@
 
 ## 1.42.0 — текущая версия
 
+### 2026-10-07 — Зафиксирована модель ошибок Photoshop Smart Object publication
+
+- Проверено: финальные production helpers `publishEmbeddedSourceRewrite()` и `updateTargetAfterRewrite()` для уже подготовленного rewrite и канонического mutable JSON-state выполняют только синхронные присваивания и детерминированный fingerprint math; реалистичный recoverable throw после начала этой publication-зоны не подтверждён.
+- Добавлено: focused regression в `tests/psd-smart-object-resource.test.mjs`, который защищает synchronous `undefined`, отсутствие throw и фактическое обновление linked resource/target baseline для поддерживаемого состояния.
+- Документация: в `docs/architecture/SMART_OBJECT_LIFECYCLE.md` зафиксирован prepare-before-publish contract: codec/I/O/async/fallible работу нельзя переносить после первой destructive publication без явной all-or-none transaction/rollback.
+- Проверено: PR #98 — CI #490 успешно; merge `9820aa30fded07049bff4c03afd7a71b980215ea` — main push CI #491 успешно; follow-up handoff commit `2f06ec9c0fd9d02b64cef94d6c50638353f15963` — main CI #492 успешно.
+- Ограничения проверки: production runtime не изменялся; exotic `Proxy`/frozen host state и process-level failures вроде OOM не входят в поддерживаемый document-state contract этой проверки.
+
+
 ### 2026-10-07 — Уточнены структура и правила CHANGELOG
 
 - Документация: обычный текст и заголовки новых записей ведутся на русском языке; технические термины, имена API, форматов, команд и кодовых сущностей можно оставлять на английском.
