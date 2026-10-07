@@ -456,6 +456,143 @@ test('save propagates a linked source to every instance', async () => {
   assert.deepEqual(state.recoveries, [{ immediate:true }]);
 });
 
+test('linked Smart Object save drops a sibling removed while preview is pending', async () => {
+  const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
+  const first = createSmartObjectLayer({
+    name:'A',
+    width:10,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD1',
+    embeddedDocument:oldEmbedded,
+    linkedSourceId:'shared-membership-remove',
+  });
+  const second = createSmartObjectLayer({
+    name:'B',
+    width:10,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD2',
+    embeddedDocument:oldEmbedded,
+    linkedSourceId:'shared-membership-remove',
+  });
+  const parentDoc = createDocument({ name:'parent', width:100, height:100 });
+  parentDoc.layers = [first, second];
+  const childDoc = createDocument({ name:'inside', width:18, height:16 });
+  childDoc.layers = [createRasterLayer({ name:'edit', width:18, height:16 })];
+  const historyCalls = [];
+  const parent = {
+    id:'parent',
+    doc:parentDoc,
+    history:{ push:(label, snapshot) => historyCalls.push([label, snapshot]) },
+    dirty:false,
+    smartObjectLink:null,
+  };
+  const child = {
+    id:'child',
+    doc:childDoc,
+    history:{ push() {} },
+    dirty:true,
+    smartObjectLink:{
+      parentSessionId:'parent',
+      layerId:first.id,
+      linkedSourceId:'shared-membership-remove',
+      photoshopSourceId:null,
+    },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const preview = deferred();
+  const detachedEmbedded = second.embeddedDocument;
+  const controller = makeController(state, { renderPreview:() => preview.promise });
+
+  const save = controller.saveContent(child);
+  parentDoc.layers = [first];
+  preview.resolve('data:image/png;base64,NEW');
+
+  assert.equal(await save, true);
+  assert.equal(first.previewDataUrl, 'data:image/png;base64,NEW');
+  assert.equal(first.width, 18);
+  assert.equal(first.height, 16);
+  assert.equal(second.previewDataUrl, 'data:image/png;base64,OLD2');
+  assert.equal(second.embeddedDocument, detachedEmbedded);
+  assert.equal(historyCalls.length, 1);
+  assert.equal(historyCalls[0][0], 'Обновить смарт-объект');
+  assert.deepEqual(state.invalidated, ['data:image/png;base64,OLD1']);
+  assert.equal(parent.dirty, true);
+  assert.equal(child.dirty, false);
+  assert.deepEqual(state.recoveries, [{ immediate:true }]);
+});
+
+test('linked Smart Object save includes a sibling added while preview is pending', async () => {
+  const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
+  const first = createSmartObjectLayer({
+    name:'A',
+    width:10,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD1',
+    embeddedDocument:oldEmbedded,
+    linkedSourceId:'shared-membership-add',
+  });
+  const second = createSmartObjectLayer({
+    name:'B',
+    width:10,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD2',
+    embeddedDocument:oldEmbedded,
+    linkedSourceId:'shared-membership-add',
+  });
+  const parentDoc = createDocument({ name:'parent', width:100, height:100 });
+  parentDoc.layers = [first];
+  const childDoc = createDocument({ name:'inside', width:18, height:16 });
+  childDoc.layers = [createRasterLayer({ name:'edit', width:18, height:16 })];
+  const historyCalls = [];
+  const parent = {
+    id:'parent',
+    doc:parentDoc,
+    history:{ push:(label, snapshot) => historyCalls.push([label, snapshot]) },
+    dirty:false,
+    smartObjectLink:null,
+  };
+  const child = {
+    id:'child',
+    doc:childDoc,
+    history:{ push() {} },
+    dirty:true,
+    smartObjectLink:{
+      parentSessionId:'parent',
+      layerId:first.id,
+      linkedSourceId:'shared-membership-add',
+      photoshopSourceId:null,
+    },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const preview = deferred();
+  const controller = makeController(state, { renderPreview:() => preview.promise });
+
+  const save = controller.saveContent(child);
+  parentDoc.layers.push(second);
+  preview.resolve('data:image/png;base64,NEW');
+
+  assert.equal(await save, true);
+  assert.equal(first.previewDataUrl, 'data:image/png;base64,NEW');
+  assert.equal(second.previewDataUrl, 'data:image/png;base64,NEW');
+  assert.equal(first.width, 18);
+  assert.equal(second.height, 16);
+  assert.equal(historyCalls.length, 1);
+  assert.equal(historyCalls[0][0], 'Обновить общий источник смарт-объектов');
+  assert.deepEqual(new Set(state.invalidated), new Set([
+    'data:image/png;base64,OLD1',
+    'data:image/png;base64,OLD2',
+  ]));
+  assert.equal(parent.dirty, true);
+  assert.equal(child.dirty, false);
+  assert.deepEqual(state.recoveries, [{ immediate:true }]);
+});
+
 test('linked Smart Object save rejects an effectively locked sibling before async preparation', async () => {
   const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
   const first = createSmartObjectLayer({
@@ -786,6 +923,91 @@ test('Photoshop Smart Object save rejects an ancestor-locked sibling after nativ
   assert.equal(state.statuses.at(-1), message);
   assert.deepEqual(state.toasts.at(-1), [message, 'warn']);
   assert.deepEqual(state.errors, []);
+});
+
+test('Photoshop Smart Object save includes a sibling added during native rewrite preparation', async () => {
+  const oldEmbedded = createDocument({ name:'old', width:10, height:10 });
+  const first = createSmartObjectLayer({
+    name:'PS A',
+    width:20,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD1',
+    embeddedDocument:oldEmbedded,
+    psdSmartObject:{ uniqueId:'ps-membership-add', asset:{ kind:'data' }, baseline:{} },
+  });
+  const second = createSmartObjectLayer({
+    name:'PS B',
+    width:30,
+    height:10,
+    previewDataUrl:'data:image/png;base64,OLD2',
+    embeddedDocument:oldEmbedded,
+    psdSmartObject:{ uniqueId:'ps-membership-add', asset:{ kind:'data' }, baseline:{} },
+  });
+  const parentDoc = createDocument({ name:'parent', width:100, height:100 });
+  parentDoc.layers = [first];
+  const childDoc = createDocument({ name:'inside', width:12, height:8 });
+  childDoc.layers = [createRasterLayer({ name:'edit', width:12, height:8 })];
+  const historyCalls = [];
+  const parent = {
+    id:'parent',
+    doc:parentDoc,
+    history:{ push:(label, snapshot) => historyCalls.push([label, snapshot]) },
+    dirty:false,
+    smartObjectLink:null,
+  };
+  const child = {
+    id:'child',
+    doc:childDoc,
+    history:{ push() {} },
+    dirty:true,
+    smartObjectLink:{
+      parentSessionId:'parent',
+      layerId:first.id,
+      linkedSourceId:null,
+      photoshopSourceId:'ps-membership-add',
+    },
+  };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child];
+  const rewrite = deferred();
+  let rewriteCalls = 0;
+  let publishCalls = 0;
+  const updatedTargets = [];
+  const controller = makeController(state, {
+    renderPreview:async () => 'data:image/png;base64,NEW',
+    photoshop:{
+      rewriteEmbeddedSource:() => {
+        rewriteCalls += 1;
+        return rewrite.promise;
+      },
+      publishEmbeddedSourceRewrite:() => { publishCalls += 1; },
+      updateTargetAfterRewrite:target => { updatedTargets.push(target); },
+    },
+  });
+
+  const save = controller.saveContent(child);
+  await Promise.resolve();
+  assert.equal(rewriteCalls, 1);
+
+  parentDoc.layers.push(second);
+  rewrite.resolve({ rewritten:true, type:'PSD', newSize:321 });
+
+  assert.equal(await save, true);
+  assert.equal(publishCalls, 1);
+  assert.deepEqual(updatedTargets, [first, second]);
+  assert.equal(first.previewDataUrl, 'data:image/png;base64,NEW');
+  assert.equal(second.previewDataUrl, 'data:image/png;base64,NEW');
+  assert.equal(historyCalls.length, 1);
+  assert.equal(historyCalls[0][0], 'Обновить общий источник смарт-объектов');
+  assert.deepEqual(new Set(state.invalidated), new Set([
+    'data:image/png;base64,OLD1',
+    'data:image/png;base64,OLD2',
+  ]));
+  assert.equal(parent.dirty, true);
+  assert.equal(child.dirty, false);
+  assert.deepEqual(state.recoveries, [{ immediate:true }]);
 });
 
 test('Smart Object save contains synchronous embedded-document preparation failure', async () => {
