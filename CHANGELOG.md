@@ -25,6 +25,11 @@
 
 ## Unreleased
 
+### 2026-10-07 — Live membership regressions for shared Smart Object Save
+
+- Added: deterministic async regressions prove that a linked sibling removed during preview is not mutated, a linked sibling added during preview joins final publication, and a Photoshop sibling added during native rewrite preparation is included in the final native target set.
+- Contract: shared/native Save must re-resolve source membership after reorderable awaits; current production already does this, so this pass changes the behavioral oracle and documentation rather than application logic.
+
 ### 2026-10-07T19:23:00+03:00 — Atomic lock authority for shared Smart Object Save
 
 - Fixed: Save содержимого связанного ZPE/Photoshop Smart Object теперь проверяет canonical effective lock у каждого live target, а не только у representative. Locked sibling или locked ancestor group отменяет общий Save целиком до resource/layer/history/dirty/recovery публикаций; частичное обновление общего source запрещено.
