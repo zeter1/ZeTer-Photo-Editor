@@ -58,6 +58,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 | Recovery/autosave orchestration: 30s edit-triggered retry after rejected write, no automatic retry loop, no repeated warning, successful fresh dirty snapshot, foreign window-key isolation, fatal startup-read lockout | `tests/workspace-recovery-controller.test.mjs`, `tests/recovery-v110.test.mjs`, architecture test | browser smoke for startup/reload/visibility plus real IndexedDB abort/cooldown/reload in `tools/browser-smoke.mjs` (`file://`) |
 | Low-level IndexedDB recovery / IO | `tests/recovery-v110.test.mjs`, reliability/direct-open tests | browser smoke when browser storage or file IO changes |
 | Bundle/source graph | architecture test + `npm run build` | CI generated-bundle diff |
+| Regeneration of pinned ICC/LittleCMS golden vectors | `python3 -m unittest discover -s tests -p 'test_generate_icc_goldens.py'` with Pillow installed; only Pillow 12.3.0 + LittleCMS 2.19 may overwrite `lcms-2.19-golden.json` | No browser/runtime change; `npm run check` still required for repository source changes |
 | General source change | `npm run check` | `npm run test:browser` when browser contract involved |
 
 ## Repository gates
