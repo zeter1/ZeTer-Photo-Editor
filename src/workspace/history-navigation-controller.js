@@ -50,12 +50,30 @@ export function createHistoryNavigationController({
   requireHistoryNavigationPort(markDirty, 'dirty-publication');
   requireHistoryNavigationPort(setStatus, 'status');
 
+  // HistoryStack moves its cursor before returning a snapshot. A failed decode
+  // must not leave that cursor pointing to a document that was never published.
+  function restoreNavigatedEntry(method, ...args) {
+    const history = getHistory();
+    const previousIndex = history?.index;
+    const entry = requireHistoryNavigationMethod(history, method)(...args);
+    if (!entry) return null;
+    try {
+      return { entry, document: restoreDocument(entry.snapshot) };
+    } catch (error) {
+      if (Number.isSafeInteger(previousIndex) && typeof history.jump === 'function') {
+        history.jump(previousIndex);
+      }
+      throw error;
+    }
+  }
+
   function undo() {
     if (blockPendingDocumentEdit()) return false;
-    const entry = requireHistoryNavigationMethod(getHistory(), 'undo')();
-    if (!entry) return false;
+    const restored = restoreNavigatedEntry('undo');
+    if (!restored) return false;
+    const { entry, document } = restored;
 
-    setDocument(restoreDocument(entry.snapshot));
+    setDocument(document);
     clearSelection();
     clearRasterEdit();
     updateAll();
@@ -66,10 +84,11 @@ export function createHistoryNavigationController({
 
   function redo() {
     if (blockPendingDocumentEdit()) return false;
-    const entry = requireHistoryNavigationMethod(getHistory(), 'redo')();
-    if (!entry) return false;
+    const restored = restoreNavigatedEntry('redo');
+    if (!restored) return false;
+    const { entry, document } = restored;
 
-    setDocument(restoreDocument(entry.snapshot));
+    setDocument(document);
     clearSelection();
     clearRasterEdit();
     updateAll();
@@ -80,10 +99,11 @@ export function createHistoryNavigationController({
 
   function jumpToHistory(index) {
     if (blockPendingDocumentEdit()) return false;
-    const entry = requireHistoryNavigationMethod(getHistory(), 'jump')(index);
-    if (!entry) return false;
+    const restored = restoreNavigatedEntry('jump', index);
+    if (!restored) return false;
+    const { entry, document } = restored;
 
-    setDocument(restoreDocument(entry.snapshot));
+    setDocument(document);
     clearRasterEdit();
     resetCrop();
     clearSelection();
