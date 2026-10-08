@@ -14337,7 +14337,7 @@ function createRecoveryController({
   let recoveryFailureNotified = false;
   let unrestoredRecoveryDocuments = [];
 
-  function reportRecoveryFailure(error, { notify = false, retryable = false } = {}) {
+  function reportRecoveryFailure(error, { notify = false, retryable = false, toastMessage = 'Автовосстановление недоступно в этом режиме браузера' } = {}) {
     recoveryFailureEpoch += 1;
     recoveryStorageAvailable = false;
     // Only a failed autosave write can be retried. A failed startup read may
@@ -14347,7 +14347,7 @@ function createRecoveryController({
     consoleRef?.warn?.('ZeTer Photo Editor recovery storage unavailable', error);
     if (notify && !recoveryFailureNotified) {
       recoveryFailureNotified = true;
-      toast('Автовосстановление недоступно в этом режиме браузера', 'warn');
+      toast(toastMessage, 'warn');
     }
   }
 
@@ -14365,18 +14365,30 @@ function createRecoveryController({
       if (generation !== recoveryGeneration
           || (!recoveryStorageAvailable && (!recoveryRetryAllowed || now() < recoveryRetryAfter))) return;
       recoveryTimer = null;
-      syncCurrentSession();
-      const dirtySessions = getSessions().filter(session => session?.dirty);
-      const snapshots = [
-        ...unrestoredRecoveryDocuments,
-        ...dirtySessions.map(session => ({
-          name: session.doc?.name || 'Без имени',
-          modifiedAt: session.doc?.modifiedAt || '',
-          snapshot: snapshotProject(session.doc),
-        })),
-      ];
-      const activeIndex = unrestoredRecoveryDocuments.length
-        + Math.max(0, dirtySessions.findIndex(session => session.id === getActiveSessionId()));
+      let snapshots;
+      let activeIndex;
+      try {
+        syncCurrentSession();
+        const dirtySessions = getSessions().filter(session => session?.dirty);
+        snapshots = [
+          ...unrestoredRecoveryDocuments,
+          ...dirtySessions.map(session => ({
+            name: session.doc?.name || 'Без имени',
+            modifiedAt: session.doc?.modifiedAt || '',
+            snapshot: snapshotProject(session.doc),
+          })),
+        ];
+        activeIndex = unrestoredRecoveryDocuments.length
+          + Math.max(0, dirtySessions.findIndex(session => session.id === getActiveSessionId()));
+      } catch (error) {
+        // An in-memory preparation error is not an IndexedDB transaction failure.
+        // Preserve the last valid record; do not retry the same malformed state.
+        reportRecoveryFailure(error, {
+          notify: true,
+          toastMessage: 'Автосохранение не удалось: ошибка подготовки снимка проекта',
+        });
+        return;
+      }
       recoveryWritePromise = recoveryWritePromise
         .then(async () => {
           // Recheck after the preceding write settles: it may have just failed.
