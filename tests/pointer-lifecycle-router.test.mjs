@@ -124,3 +124,67 @@ test('router releases ownership even when a pointerup callback rejects', async (
   assert.equal(router.hasActivePointer(), false);
   assert.deepEqual(target.releases, [11]);
 });
+
+test('synchronous pointerdown failure releases capture and permits a new gesture', () => {
+  const target = new FakePointerTarget();
+  let attempts = 0;
+  const router = createPointerLifecycleRouter({
+    target,
+    onPointerDown: () => {
+      if (++attempts === 1) throw new Error('begin failed');
+    },
+  });
+  assert.throws(() => target.dispatch('pointerdown', { pointerId:17 }), /begin failed/);
+  assert.equal(router.hasActivePointer(), false);
+  assert.equal(target.hasPointerCapture(17), false);
+  assert.deepEqual(target.releases, [17]);
+  target.dispatch('pointerdown', { pointerId:18 });
+  assert.equal(router.isActivePointer(18), true);
+  target.dispatch('pointerup', { pointerId:18 });
+  assert.deepEqual(target.releases, [17, 18]);
+});
+
+test('rejected async pointerdown releases capture and permits a retry', async () => {
+  const target = new FakePointerTarget();
+  let rejectBegin;
+  let attempts = 0;
+  const router = createPointerLifecycleRouter({
+    target,
+    onPointerDown: () => ++attempts === 1
+      ? new Promise((resolve, reject) => { rejectBegin = reject; })
+      : Promise.resolve(),
+  });
+  const pending = target.dispatch('pointerdown', { pointerId:20 });
+  assert.equal(router.isActivePointer(20), true);
+  rejectBegin(new Error('async begin failed'));
+  await assert.rejects(pending, /async begin failed/);
+  assert.equal(router.hasActivePointer(), false);
+  assert.equal(target.hasPointerCapture(20), false);
+  assert.deepEqual(target.releases, [20]);
+  await target.dispatch('pointerdown', { pointerId:21 });
+  assert.equal(router.isActivePointer(21), true);
+  target.dispatch('pointerup', { pointerId:21 });
+  assert.deepEqual(target.releases, [20, 21]);
+});
+
+test('late failure from a prior pointerdown never releases a newer same-ID gesture', async () => {
+  const target = new FakePointerTarget();
+  let rejectFirst;
+  let attempts = 0;
+  const router = createPointerLifecycleRouter({
+    target,
+    onPointerDown: () => ++attempts === 1
+      ? new Promise((resolve, reject) => { rejectFirst = reject; })
+      : undefined,
+  });
+  const oldPending = target.dispatch('pointerdown', { pointerId:22 });
+  target.dispatch('pointerup', { pointerId:22 });
+  target.dispatch('pointerdown', { pointerId:22 });
+  assert.equal(router.isActivePointer(22), true);
+  rejectFirst(new Error('old begin failed'));
+  await assert.rejects(oldPending, /old begin failed/);
+  assert.equal(router.isActivePointer(22), true);
+  assert.equal(target.hasPointerCapture(22), true);
+  target.dispatch('pointerup', { pointerId:22 });
+  assert.deepEqual(target.releases, [22, 22]);
+});

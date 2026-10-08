@@ -3843,6 +3843,7 @@ function createPointerLifecycleRouter({
   }
 
   let activePointerId = null;
+  let activeStartToken = null;
 
   function isActivePointer(pointerId) {
     return activePointerId === pointerId;
@@ -3856,6 +3857,7 @@ function createPointerLifecycleRouter({
     if (activePointerId === null) return false;
     const pointerId = activePointerId;
     activePointerId = null;
+    activeStartToken = null;
     if (typeof target.hasPointerCapture === 'function' && !target.hasPointerCapture(pointerId)) return true;
     try {
       target.releasePointerCapture(pointerId);
@@ -3865,16 +3867,26 @@ function createPointerLifecycleRouter({
     return true;
   }
 
+  function abandonFailedStart(error, token) {
+    // A late rejection must not release a newer gesture reusing the same pointerId.
+    if (activeStartToken === token) releaseActivePointer();
+    throw error;
+  }
+
   function handlePointerDown(event) {
     if (hasActivePointer() || !shouldStartPointer(event)) return;
+    const token = {};
     activePointerId = event.pointerId;
+    activeStartToken = token;
     try {
       target.setPointerCapture(event.pointerId);
+      const result = onPointerDown(event);
+      return result && typeof result.then === 'function'
+        ? Promise.resolve(result).catch(error => abandonFailedStart(error, token))
+        : result;
     } catch (error) {
-      activePointerId = null;
-      throw error;
+      return abandonFailedStart(error, token);
     }
-    return onPointerDown(event);
   }
 
   function handlePointerMove(event) {
@@ -3903,6 +3915,7 @@ function createPointerLifecycleRouter({
   function handleLostPointerCapture(event) {
     if (!isActivePointer(event.pointerId)) return;
     activePointerId = null;
+    activeStartToken = null;
     return onPointerCancel(event, { reason:'lostpointercapture' });
   }
 
