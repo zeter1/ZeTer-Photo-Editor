@@ -39,11 +39,22 @@ export function selectionBounds(selection) {
   }
   const points = Array.isArray(selection.points) ? selection.points : [];
   if (!points.length) return null;
-  const xs = points.map(point => Number(point.x)).filter(Number.isFinite);
-  const ys = points.map(point => Number(point.y)).filter(Number.isFinite);
-  if (!xs.length || !ys.length) return null;
-  const left = Math.min(...xs); const right = Math.max(...xs);
-  const top = Math.min(...ys); const bottom = Math.max(...ys);
+  // Large freehand lassos may exceed the JS call-argument limit.
+  // Keep the existing independent finite-X / finite-Y filtering without spreads.
+  let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+  for (const point of points) {
+    const x = Number(point.x);
+    const y = Number(point.y);
+    if (Number.isFinite(x)) {
+      if (x < left) left = x;
+      if (x > right) right = x;
+    }
+    if (Number.isFinite(y)) {
+      if (y < top) top = y;
+      if (y > bottom) bottom = y;
+    }
+  }
+  if (left === Infinity || top === Infinity) return null;
   return { x:left, y:top, width:right-left, height:bottom-top };
 }
 
