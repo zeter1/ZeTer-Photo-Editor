@@ -416,7 +416,13 @@ const {
 
 const removalProgress = createObjectRemovalProgressController({panel:$('#objectRemovalProgressPanel'),bar:$('#objectRemovalProgressBar'),label:$('#objectRemovalProgressLabel'),elapsed:$('#objectRemovalElapsed'),remaining:$('#objectRemovalRemaining')});
 const backgroundProgress=createObjectRemovalProgressController({panel:$('#backgroundRemovalProgressPanel'),bar:$('#backgroundRemovalProgressBar'),label:$('#backgroundRemovalProgressLabel'),elapsed:$('#backgroundRemovalElapsed'),remaining:$('#backgroundRemovalRemaining'),inferenceLabel:'Определение границ объекта…'});
-const samEngine=createBackgroundModels({gpu:()=>editorSettings.useGpu()});
+// Some browsers throw SecurityError when the localStorage property itself is read.
+function getAvailableLocalStorage() {
+  try { return window.localStorage; }
+  catch { return null; }
+}
+const browserStorage=getAvailableLocalStorage();
+const samEngine=createBackgroundModels({gpu:()=>editorSettings.useGpu(),storage:browserStorage});
 const backgroundCommands=createBackgroundRemovalCommandController({state:{getDocument:()=>doc,beginPersist:()=>{if(paintPersisting)return false;paintPersisting=true;return true;},endPersist:()=>{paintPersisting=false;}},rasterEdit,engine:samEngine,getOptions:()=>({feather:Number($('#removeBackgroundFeather').value)}),ui:{setStatus,render,commit,progress:update=>backgroundProgress.update(update)}});
 const lamaEngine = createLamaEngine({gpu:()=>editorSettings.useGpu()});
 const aiRemovalCommands = createObjectRemovalCommandController({
@@ -425,6 +431,7 @@ const aiRemovalCommands = createObjectRemovalCommandController({
 });
 let refreshToolbarHelp=()=>{};
 const editorSettings = createEditorSettingsController({
+  storage:browserStorage,
   dialog:$('#editorSettings'),engine:lamaEngine,backgroundEngine:samEngine,onBackgroundModelState:(ready,model)=>{
     refreshToolbarHelp();const notice=$('#removeBackgroundModelNotice');notice.hidden=currentTool!=='remove-background'||ready;notice.textContent=`Установить ${model.name} (~${model.size} МБ)`;notice.title=`Для удаления фона нужна выбранная модель ${model.name}`;
     const toastNotice=$('#removeBackgroundInstallToast');if(ready)toastNotice?.remove();else if(toastNotice&&toastNotice.dataset.modelId!==model.id){toastNotice.remove();if(currentTool==='remove-background')showRemovalModelInstallNotice(true);}
@@ -681,6 +688,7 @@ const modalController = createModalController({
 const { showModal, showInfoModal, showRecoveryModal } = modalController;
 const learningCenterController = createLearningCenterController({
   showInfoModal,
+  storage:browserStorage,
   documentTarget: document,
   windowTarget: window,
 });
