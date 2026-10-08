@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   LEARNING_LESSONS,
   LEARNING_LESSON_GUIDES,
@@ -9,6 +10,7 @@ import {
   learningLessonReadiness,
   learningLevelProgress,
   renderLearningCenterHtml,
+  createLearningCenterController,
 } from '../src/ui/learning-center-controller.js';
 
 test('curriculum covers a full beginner-to-advanced editor path with a learning model and knowledge check', () => {
@@ -111,4 +113,44 @@ test('ready lesson exposes mastery completion instead of a disabled credit butto
   assert.doesNotMatch(button,/disabled/);
   assert.match(html,/Все условия выполнены/);
   assert.match(html,/✓ Зачёт/);
+});
+
+test('Learning Center initializes when browser localStorage getter throws SecurityError', () => {
+  const previous=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+  Object.defineProperty(globalThis,'localStorage',{
+    configurable:true,
+    get(){throw new DOMException('Storage is disabled','SecurityError');},
+  });
+  try {
+    let html='';
+    const controller=createLearningCenterController({
+      showInfoModal:(_title,content)=>{html=content;},
+      documentTarget:{querySelector:()=>null},
+      windowTarget:{},
+    });
+    controller.show();
+    assert.match(html,/0 \/ 10 уроков/);
+
+    // Explicitly supplied storage must still work when the browser getter is blocked.
+    const storage={getItem:()=>JSON.stringify({version:2,completed:['start']})};
+    createLearningCenterController({
+      showInfoModal:(_title,content)=>{html=content;},
+      storage,
+      documentTarget:{querySelector:()=>null},
+      windowTarget:{},
+    }).show();
+    assert.match(html,/1 \/ 10 уроков/);
+  } finally {
+    if(previous)Object.defineProperty(globalThis,'localStorage',previous);
+    else delete globalThis.localStorage;
+  }
+});
+
+test('startup wiring guards localStorage and shares the safe instance between consumers', () => {
+  const source=readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
+  assert.doesNotMatch(source,/storage:\s*window\.localStorage/);
+  assert.match(source,/function getAvailableLocalStorage\(\)\s*\{\s*try\s*\{\s*return window\.localStorage;\s*\}\s*catch\s*\{\s*return null;\s*\}/);
+  assert.match(source,/createBackgroundModels\(\{[^}]*storage:browserStorage/);
+  assert.match(source,/createEditorSettingsController\(\{\s*storage:browserStorage/);
+  assert.match(source,/createLearningCenterController\(\{\s*showInfoModal,\s*storage:browserStorage/);
 });

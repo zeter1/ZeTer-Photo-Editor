@@ -3593,6 +3593,11 @@ function escapeHtml(value) {
     .replaceAll("'",'&#039;');
 }
 
+function availableLearningStorage() {
+  try { return globalThis.localStorage; }
+  catch { return null; }
+}
+
 function readRawState(storage) {
   try {
     const value=storage?.getItem?.(LEARNING_CENTER_STORAGE_KEY);
@@ -3767,22 +3772,23 @@ function renderLearningCenterHtml(value, activeLessonId=null) {
   return '<div class="learning-center-shell" data-learning-root><section class="learning-hero"><div class="learning-hero-copy"><span class="learning-eyebrow">Понять → сделать → проверить → закрепить</span><h2>Прокачка ZeTer Photo Editor</h2><p>10 практических уроков с ментальными моделями, реальной практикой, проверкой знаний и самопроверкой мастерства. Центр не выдаёт «зачёт» за чтение — урок завершается после практики и понимания.</p><div class="learning-level-progress">'+levelProgress.map(item=>'<span><strong>'+escapeHtml(item.level)+'</strong><small>'+item.completed+'/'+item.total+'</small></span>').join('')+'</div></div>'+
     '<div class="learning-progress-panel"><div class="learning-progress-row"><strong data-learning-progress-text>'+summary.completed+' / '+summary.total+' уроков</strong><span>'+summary.percent+'%</span></div><div class="learning-progress-bar" role="progressbar" aria-label="Прогресс обучения" aria-valuemin="0" aria-valuemax="'+summary.total+'" aria-valuenow="'+summary.completed+'"><span style="width:'+summary.percent+'%"></span></div><div class="learning-progress-metrics"><span>Практика <strong data-learning-practice-progress>'+practice.completed+'/'+practice.total+'</strong></span><span>Проверки <strong data-learning-quiz-progress>'+state.quizPassed.length+'/'+LEARNING_LESSONS.length+'</strong></span></div><div class="learning-progress-actions"><button type="button" class="primary-button" data-learning-action="continue">'+(nextId?'Продолжить: '+escapeHtml(nextLesson.title):'Повторить итоговый проект')+'</button><button type="button" class="secondary-button" data-learning-action="reset">Сбросить прогресс</button></div><small>Прогресс, практика и зачёты хранятся только локально в этом браузере.</small></div></section><div class="learning-layout"><nav class="learning-nav" aria-label="Уроки центра обучения">'+navHtml(state,activeId)+'</nav><div class="learning-content">'+lessonHtml(state,activeId)+'</div></div></div>';
 }
-function createLearningCenterController({showInfoModal,storage=globalThis.localStorage,documentTarget=globalThis.document,windowTarget=globalThis.window}={}) {
+function createLearningCenterController({showInfoModal,storage,documentTarget=globalThis.document,windowTarget=globalThis.window}={}) {
   if(typeof showInfoModal!=='function')throw new Error('Learning Center requires showInfoModal');
+  const storageTarget=storage===undefined ? availableLearningStorage() : storage;
   function show() {
     const helpButton=documentTarget?.querySelector?.('.menu-button[data-menu="help"]'); helpButton?.focus?.();
-    let state=normalizeLearningState(readRawState(storage)), activeId=state.lastLessonId||DEFAULT_LESSON_ID;
+    let state=normalizeLearningState(readRawState(storageTarget)), activeId=state.lastLessonId||DEFAULT_LESSON_ID;
     showInfoModal('Центр обучения',renderLearningCenterHtml(state,activeId),{
       className:'learning-center-modal',initialFocusSelector:'[data-learning-action="continue"]',
       onMount:({body,close})=>{
         const render=(focusSelector='')=>{body.innerHTML=renderLearningCenterHtml(state,activeId);if(focusSelector)body.querySelector(focusSelector)?.focus?.();};
-        const persist=()=>{state=normalizeLearningState({...state,lastLessonId:activeId});writeState(storage,state);};
+        const persist=()=>{state=normalizeLearningState({...state,lastLessonId:activeId});writeState(storageTarget,state);};
         const activate=(id,{focus=true}={})=>{if(!LESSON_IDS.has(id))return;activeId=id;persist();render(focus?'#learning-lesson-title':'');};
         const updateChecklist=(field,index,checked)=>{
           const lesson=LEARNING_LESSONS[lessonIndex(activeId)];
           if(!lesson||!['practice','mastery'].includes(field)||!Number.isInteger(index)||index<0||index>=lesson[field].length)return;
           const values=new Set(state[field]?.[activeId]||[]); if(checked)values.add(index);else values.delete(index);
-          state=normalizeLearningState({...state,[field]:{...state[field],[activeId]:[...values]},lastLessonId:activeId});writeState(storage,state);
+          state=normalizeLearningState({...state,[field]:{...state[field],[activeId]:[...values]},lastLessonId:activeId});writeState(storageTarget,state);
           render('[data-learning-checklist="'+field+'"][data-learning-index="'+index+'"]');
         };
         const checkQuiz=()=>{
@@ -3794,7 +3800,7 @@ function createLearningCenterController({showInfoModal,storage=globalThis.localS
           const wrong=[];answers.forEach((answer,index)=>{if(answer!==guide.quiz[index].correctIndex)wrong.push(index);});
           if(wrong.length){if(feedback){feedback.textContent='Пока не зачёт. '+wrong.map(index=>guide.quiz[index].explanation).join(' ');feedback.classList.add('is-error');}return;}
           const passed=new Set(state.quizPassed);passed.add(activeId);
-          state=normalizeLearningState({...state,quizPassed:[...passed],lastLessonId:activeId});writeState(storage,state);render('.learning-quiz-passed');
+          state=normalizeLearningState({...state,quizPassed:[...passed],lastLessonId:activeId});writeState(storageTarget,state);render('.learning-quiz-passed');
         };
         const onClick=event=>{
           const button=event.target?.closest?.('[data-learning-action]');if(!button||button.disabled)return;
@@ -3804,8 +3810,8 @@ function createLearningCenterController({showInfoModal,storage=globalThis.localS
           if(action==='previous'||action==='next'){const target=LEARNING_LESSONS[lessonIndex(activeId)+(action==='next'?1:-1)];if(target)activate(target.id);return;}
           if(action==='practice-now'){persist();close();return;}
           if(action==='check-quiz'){checkQuiz();return;}
-          if(action==='toggle-complete'){const completed=new Set(state.completed), readiness=learningLessonReadiness(state,activeId);if(completed.has(activeId))completed.delete(activeId);else if(readiness.ready)completed.add(activeId);else return;state=normalizeLearningState({...state,completed:[...completed],lastLessonId:activeId});writeState(storage,state);render('[data-learning-action="toggle-complete"]');return;}
-          if(action==='reset'){if(windowTarget?.confirm&&!windowTarget.confirm('Сбросить весь прогресс, практику и зачёты Центра обучения?'))return;state=normalizeLearningState(null);activeId=state.lastLessonId;writeState(storage,state);render('[data-learning-action="continue"]');}
+          if(action==='toggle-complete'){const completed=new Set(state.completed), readiness=learningLessonReadiness(state,activeId);if(completed.has(activeId))completed.delete(activeId);else if(readiness.ready)completed.add(activeId);else return;state=normalizeLearningState({...state,completed:[...completed],lastLessonId:activeId});writeState(storageTarget,state);render('[data-learning-action="toggle-complete"]');return;}
+          if(action==='reset'){if(windowTarget?.confirm&&!windowTarget.confirm('Сбросить весь прогресс, практику и зачёты Центра обучения?'))return;state=normalizeLearningState(null);activeId=state.lastLessonId;writeState(storageTarget,state);render('[data-learning-action="continue"]');}
         };
         const onChange=event=>{const input=event.target;if(input?.type!=='checkbox'||!input.dataset.learningChecklist)return;updateChecklist(input.dataset.learningChecklist,Number(input.dataset.learningIndex),Boolean(input.checked));};
         body.addEventListener('click',onClick);body.addEventListener('change',onChange);
@@ -26763,7 +26769,13 @@ const {
 
 const removalProgress = createObjectRemovalProgressController({panel:$('#objectRemovalProgressPanel'),bar:$('#objectRemovalProgressBar'),label:$('#objectRemovalProgressLabel'),elapsed:$('#objectRemovalElapsed'),remaining:$('#objectRemovalRemaining')});
 const backgroundProgress=createObjectRemovalProgressController({panel:$('#backgroundRemovalProgressPanel'),bar:$('#backgroundRemovalProgressBar'),label:$('#backgroundRemovalProgressLabel'),elapsed:$('#backgroundRemovalElapsed'),remaining:$('#backgroundRemovalRemaining'),inferenceLabel:'Определение границ объекта…'});
-const samEngine=createBackgroundModels({gpu:()=>editorSettings.useGpu()});
+// Some browsers throw SecurityError when the localStorage property itself is read.
+function getAvailableLocalStorage() {
+  try { return window.localStorage; }
+  catch { return null; }
+}
+const browserStorage=getAvailableLocalStorage();
+const samEngine=createBackgroundModels({gpu:()=>editorSettings.useGpu(),storage:browserStorage});
 const backgroundCommands=createBackgroundRemovalCommandController({state:{getDocument:()=>doc,beginPersist:()=>{if(paintPersisting)return false;paintPersisting=true;return true;},endPersist:()=>{paintPersisting=false;}},rasterEdit,engine:samEngine,getOptions:()=>({feather:Number($('#removeBackgroundFeather').value)}),ui:{setStatus,render,commit,progress:update=>backgroundProgress.update(update)}});
 const lamaEngine = createLamaEngine({gpu:()=>editorSettings.useGpu()});
 const aiRemovalCommands = createObjectRemovalCommandController({
@@ -26772,6 +26784,7 @@ const aiRemovalCommands = createObjectRemovalCommandController({
 });
 let refreshToolbarHelp=()=>{};
 const editorSettings = createEditorSettingsController({
+  storage:browserStorage,
   dialog:$('#editorSettings'),engine:lamaEngine,backgroundEngine:samEngine,onBackgroundModelState:(ready,model)=>{
     refreshToolbarHelp();const notice=$('#removeBackgroundModelNotice');notice.hidden=currentTool!=='remove-background'||ready;notice.textContent=`Установить ${model.name} (~${model.size} МБ)`;notice.title=`Для удаления фона нужна выбранная модель ${model.name}`;
     const toastNotice=$('#removeBackgroundInstallToast');if(ready)toastNotice?.remove();else if(toastNotice&&toastNotice.dataset.modelId!==model.id){toastNotice.remove();if(currentTool==='remove-background')showRemovalModelInstallNotice(true);}
@@ -27028,7 +27041,7 @@ const modalController = createModalController({
 const { showModal, showInfoModal, showRecoveryModal } = modalController;
 const learningCenterController = createLearningCenterController({
   showInfoModal,
-  storage: window.localStorage,
+  storage:browserStorage,
   documentTarget: document,
   windowTarget: window,
 });
