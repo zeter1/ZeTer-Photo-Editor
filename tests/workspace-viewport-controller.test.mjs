@@ -113,6 +113,27 @@ test('point-anchored zoom defers scroll correction until the next animation fram
   assert.equal(h.viewport.scrollTop, 50);
 });
 
+test('deferred pointer-anchored zoom uses the latest layout rect and live zoom', () => {
+  const overlayRect = { left: 20, top: 10 };
+  const h = createHarness({ zoom: 1, overlayRect });
+  h.controller.setZoomAtClientPoint(2, 100, 90);
+
+  // Layout and zoom may change between the wheel event and its animation frame.
+  overlayRect.left = 35;
+  overlayRect.top = 45;
+  h.controller.setZoom(3);
+
+  assert.equal(h.hasPendingFrame(), true);
+  assert.equal(h.viewport.scrollLeft, 100);
+  assert.equal(h.viewport.scrollTop, 50);
+  h.runFrame();
+
+  // 100 + (35 + 60*3 - 100); 50 + (45 + 40*3 - 90).
+  assert.equal(h.viewport.scrollLeft, 215);
+  assert.equal(h.viewport.scrollTop, 125);
+  assert.deepEqual(h.calls.status, ['Масштаб 200%', 'Масштаб 300%']);
+});
+
 test('point-anchored semantic no-op keeps scroll and schedules no frame', () => {
   const h = createHarness({ zoom: 1 });
   h.controller.setZoomAtClientPoint(1, 100, 90);
