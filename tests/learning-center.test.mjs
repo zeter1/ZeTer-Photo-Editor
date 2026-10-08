@@ -146,7 +146,11 @@ test('Learning Center initializes when browser localStorage getter throws Securi
   }
 });
 
-test('startup wiring does not eagerly read blocked localStorage', () => {
+test('startup wiring guards localStorage and shares the safe instance between consumers', () => {
   const source=readFileSync(new URL('../src/main.js',import.meta.url),'utf8');
   assert.doesNotMatch(source,/storage:\s*window\.localStorage/);
+  assert.match(source,/function getAvailableLocalStorage\(\)\s*\{\s*try\s*\{\s*return window\.localStorage;\s*\}\s*catch\s*\{\s*return null;\s*\}/);
+  assert.match(source,/createBackgroundModels\(\{[^}]*storage:browserStorage/);
+  assert.match(source,/createEditorSettingsController\(\{\s*storage:browserStorage/);
+  assert.match(source,/createLearningCenterController\(\{\s*showInfoModal,\s*storage:browserStorage/);
 });
