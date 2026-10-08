@@ -176,13 +176,13 @@ class CdpClient {
     this.eventHandlers.add(handler);
   }
 
-  send(method, params = {}, timeoutMs = 8_000) {
+  send(method, params = {}) {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Timed out waiting for DevTools response: ${method}`));
-      }, timeoutMs);
+      }, 8_000);
       this.pending.set(id, { resolve, reject, timer, method });
       this.ws.send(JSON.stringify({ id, method, params }));
     });
@@ -201,13 +201,13 @@ function consoleText(args = []) {
   return args.map(arg => arg.value ?? arg.description ?? arg.type).join(' ');
 }
 
-async function evaluate(client, expression, timeoutMs = 8_000) {
+async function evaluate(client, expression) {
   const response = await client.send('Runtime.evaluate', {
     expression,
     returnByValue: true,
     awaitPromise: true,
     userGesture: true,
-  }, timeoutMs);
+  });
   if (response.exceptionDetails) fail('Browser evaluation failed', exceptionText(response.exceptionDetails));
   return response.result?.value;
 }
@@ -296,7 +296,7 @@ async function verifyRecoveryIndexedDb(client) {
     }
   }
   console.log('Recovery IndexedDB browser probe: transaction abort and retry');
-  const initial = await evaluate(client, '(async () => {\n' + recoverySource + '\nreturn (' + browserRecoveryProbe.toString() + ')();\n})()', 30_000);
+  const initial = await evaluate(client, '(async () => {\n' + recoverySource + '\nreturn (' + browserRecoveryProbe.toString() + ')();\n})()');
   assert(initial.unavailable && initial.afterAbortName === 'До отказа',
     'Aborted IndexedDB transaction must preserve previous recovery record', JSON.stringify(initial));
   assert(initial.noEarlyRetry && initial.noBackgroundRetry && initial.writes === 2,
@@ -308,9 +308,20 @@ async function verifyRecoveryIndexedDb(client) {
 
   console.log('Recovery IndexedDB browser probe: retry passed; checking reload');
   let sawPageLoad = false;
-  client.onEvent(method => { if (method === 'Page.loadEventFired') sawPageLoad = true; });
-  await evaluate(client, "document.documentElement.dataset.appReady='reloading'; location.reload(); true");
-  await waitFor('recovery IndexedDB fixture reload', () => sawPageLoad);
+  let reloadDialogError = null;
+  client.onEvent((method, params) => {
+    if (method === 'Page.loadEventFired') sawPageLoad = true;
+    if (method === 'Page.javascriptDialogOpening' && params.type === 'beforeunload') {
+      client.send('Page.handleJavaScriptDialog', { accept:true }).catch(error => { reloadDialogError = error; });
+    }
+  });
+  // Unlike Runtime.evaluate(location.reload()), Page.reload does not await a
+  // promise in a JS execution context that is about to be destroyed.
+  await client.send('Page.reload', { ignoreCache:true });
+  await waitFor('recovery IndexedDB fixture reload', () => {
+    if (reloadDialogError) throw reloadDialogError;
+    return sawPageLoad;
+  });
   async function browserRecoveryReadbackProbe() {
     const entries = await loadRecoverySnapshots();
     const current = entries.find(item => item.key === 'workspace:zpe-smoke-recovery-current')?.record;
@@ -321,7 +332,7 @@ async function verifyRecoveryIndexedDb(client) {
     await clearRecoverySnapshot({ key:'workspace:zpe-smoke-recovery-foreign' });
     return { currentName, foreignName };
   }
-  const persisted = await evaluate(client, '(async () => {\n' + storageSource + '\nreturn (' + browserRecoveryReadbackProbe.toString() + ')();\n})()', 30_000);
+  const persisted = await evaluate(client, '(async () => {\n' + storageSource + '\nreturn (' + browserRecoveryReadbackProbe.toString() + ')();\n})()');
   assert(persisted.currentName === 'После восстановления записи' && persisted.foreignName === 'Соседний документ',
     'Recovery and separate window key must survive file:// reload', JSON.stringify(persisted));
 }
