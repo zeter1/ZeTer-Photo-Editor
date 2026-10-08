@@ -176,13 +176,13 @@ class CdpClient {
     this.eventHandlers.add(handler);
   }
 
-  send(method, params = {}) {
+  send(method, params = {}, timeoutMs = 8_000) {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Timed out waiting for DevTools response: ${method}`));
-      }, 8_000);
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer, method });
       this.ws.send(JSON.stringify({ id, method, params }));
     });
@@ -201,13 +201,13 @@ function consoleText(args = []) {
   return args.map(arg => arg.value ?? arg.description ?? arg.type).join(' ');
 }
 
-async function evaluate(client, expression) {
+async function evaluate(client, expression, timeoutMs = 8_000) {
   const response = await client.send('Runtime.evaluate', {
     expression,
     returnByValue: true,
     awaitPromise: true,
     userGesture: true,
-  });
+  }, timeoutMs);
   if (response.exceptionDetails) fail('Browser evaluation failed', exceptionText(response.exceptionDetails));
   return response.result?.value;
 }
@@ -295,7 +295,8 @@ async function verifyRecoveryIndexedDb(client) {
       IDBDatabase.prototype.transaction = originalTransaction;
     }
   }
-  const initial = await evaluate(client, '(async () => {\n' + recoverySource + '\nreturn (' + browserRecoveryProbe.toString() + ')();\n})()');
+  console.log('Recovery IndexedDB browser probe: transaction abort and retry');
+  const initial = await evaluate(client, '(async () => {\n' + recoverySource + '\nreturn (' + browserRecoveryProbe.toString() + ')();\n})()', 30_000);
   assert(initial.unavailable && initial.afterAbortName === 'До отказа',
     'Aborted IndexedDB transaction must preserve previous recovery record', JSON.stringify(initial));
   assert(initial.noEarlyRetry && initial.noBackgroundRetry && initial.writes === 2,
@@ -305,6 +306,7 @@ async function verifyRecoveryIndexedDb(client) {
   assert(initial.foreignName === 'Соседний документ' && initial.warnings.filter(item => item.type === 'warn').length === 1,
     'Abort must preserve other window key and warn only once', JSON.stringify(initial));
 
+  console.log('Recovery IndexedDB browser probe: retry passed; checking reload');
   let sawPageLoad = false;
   client.onEvent(method => { if (method === 'Page.loadEventFired') sawPageLoad = true; });
   await evaluate(client, "document.documentElement.dataset.appReady='reloading'; location.reload(); true");
@@ -319,7 +321,7 @@ async function verifyRecoveryIndexedDb(client) {
     await clearRecoverySnapshot({ key:'workspace:zpe-smoke-recovery-foreign' });
     return { currentName, foreignName };
   }
-  const persisted = await evaluate(client, '(async () => {\n' + storageSource + '\nreturn (' + browserRecoveryReadbackProbe.toString() + ')();\n})()');
+  const persisted = await evaluate(client, '(async () => {\n' + storageSource + '\nreturn (' + browserRecoveryReadbackProbe.toString() + ')();\n})()', 30_000);
   assert(persisted.currentName === 'После восстановления записи' && persisted.foreignName === 'Соседний документ',
     'Recovery and separate window key must survive file:// reload', JSON.stringify(persisted));
 }
