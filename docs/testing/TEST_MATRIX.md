@@ -57,6 +57,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 | PSD/PSB binary codec / Photoshop metadata rewrite | `tests/psd-*.test.mjs` | fixture/golden round-trip |
 | Recovery/autosave orchestration: 30s edit-triggered retry after rejected write, no automatic retry loop, no repeated warning, successful fresh dirty snapshot, foreign window-key isolation, fatal startup-read lockout | `tests/workspace-recovery-controller.test.mjs`, `tests/recovery-v110.test.mjs`, architecture test | browser smoke for startup/reload/visibility plus real IndexedDB abort/cooldown/reload in `tools/browser-smoke.mjs` (`file://`) |
 | Low-level IndexedDB recovery / IO | `tests/recovery-v110.test.mjs`, reliability/direct-open tests | browser smoke when browser storage or file IO changes |
+| Bundle artifact publication: stage before replacing files; recover previous bundle/index/manifest after a failed rename and retain backups on rollback failure | `tests/build-output-transaction.test.mjs` | `npm run check`, generated-artifact parity and `npm run test:browser` in CI |
 | Bundle/source graph | architecture test + `npm run build` | CI generated-bundle diff |
 | General source change | `npm run check` | `npm run test:browser` when browser contract involved |
 
