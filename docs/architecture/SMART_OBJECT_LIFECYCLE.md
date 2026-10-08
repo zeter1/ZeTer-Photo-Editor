@@ -64,6 +64,16 @@ Save использует prepare-before-publish и две независимы�
 
 Регрессия этого контракта находится в `tests/psd-smart-object-resource.test.mjs`. Она не доказывает, что JavaScript-процесс вообще никогда не может аварийно завершиться; она защищает именно поддерживаемую production-границу: подготовленный Photoshop rewrite + канонические mutable объекты не должны вводить новый recoverable throw между resource publish и target metadata publication.
 
+## Save post-commit feedback и recovery failure boundary
+
+После изменения live targets и фиксации history snapshot команда обновляет parent/child dirty state, активный content document и Smart Object link. Затем следуют cache invalidation, рендер вкладок, немедленная постановка recovery snapshot и вывод результата. С этого момента **обновление документа уже выполнено**: отказ независимого recovery storage не означает rollback Smart Object.
+
+Production `queueRecovery({ immediate:true })` синхронно синхронизирует активную сессию и сериализует **все dirty вкладки** через `snapshotDocument()` (`JSON.stringify`). Для канонических JSON-документов, ранее уже прошедших history snapshot, это синхронная подготовка. Реальная запись IndexedDB выполняется в Promise-цепочке: `saveSnapshot`/`clearSnapshot` rejection локально обрабатывается `reportRecoveryFailure`, отключает повторную запись и показывает отдельное warning. Smart Object Save должен возвращать `true` с корректным history/dirty и успехом, а пользователь — вручную сохранить родительский документ при недоступном автовосстановлении.
+
+`invalidateImageCache` работает с Map delete/clear, а `renderDocumentTabs` создаёт стандартные DOM-элементы в исправном UI. Реалистичный recoverable synchronous throw этих портов на каноническом состоянии не установлен; общий speculative catch/rollback не добавляется. Если будущий порт начнёт делать fallible synchronous work после commit, нужно пересмотреть границу и модель feedback, чтобы уже сохранённое не выдавалось за неудачное сохранение. Повреждённые JS-объекты, внедрённые throwing callbacks и process-level OOM в эту гарантию не входят.
+
+Integration regression: `tests/smart-object-controller.test.mjs` связывает реальный `createRecoveryController` с `snapshotDocument`, отдельной dirty-вкладкой и имитированной асинхронной ошибкой storage; проверяет committed preview, parent history/dirty, recovery snapshot и независимые success/warn сообщения.
+
 ## Effective lock — живая publication policy
 
 Lock нельзя захватывать boolean snapshot до await. Пока Promise ожидает, любой экземпляр общего source или его ancestor group может стать locked. Shared-source Save — одна атомарная публикация: разблокированный representative не даёт права косвенно менять locked sibling, и частичное обновление только разблокированных экземпляров запрещено.
