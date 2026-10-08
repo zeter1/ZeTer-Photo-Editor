@@ -4284,7 +4284,15 @@ async function dimensionsFromDataUrl(dataUrl) {
   return { width: image.naturalWidth, height: image.naturalHeight };
 }
 function safeFilename(name) {
-  return String(name || 'image').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim() || 'image';
+  const filename = String(name || 'image')
+    .replace(/[\\/:*?"<>|\x00-\x1f\x7f]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '') || 'image';
+  // Win32 rejects device names even when a file extension is appended.
+  return /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(filename)
+    ? `_${filename}`
+    : filename;
 }
 
 // ---- src/core/pixels.js ----

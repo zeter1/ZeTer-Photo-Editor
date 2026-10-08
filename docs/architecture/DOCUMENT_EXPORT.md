@@ -39,6 +39,10 @@ The command is intentionally split into two phases.
 
 The snapshot must be captured **before the first asynchronous export boundary**. JavaScript `await` yields execution; relying on the live document after that point would let later user edits silently change the meaning of an already-submitted command.
 
+## Windows-safe download names
+
+`src/core/io.js` exposes one `safeFilename` helper shared by raster/PSD/PSB export and native `.zpe` Save (via `src/document/project-controller.js`). A document name is a filename **stem**: these callers append the format extension after sanitization. Preserve Unicode and ordinary valid names, replace forbidden Win32 filename/control characters, remove trailing dots/spaces and prefix reserved device stems (`CON`, `PRN`, `AUX`, `NUL`, `COM1–9`, `LPT1–9`, `CONIN$`, `CONOUT$` and the Win32 superscript-digit spellings) with `_` even when the document name has a suffix. Empty/dot-only names fall back to `image`. Do not let a canvas/export controller maintain a second filename sanitizer.
+
 ## PSD/PSB invariants
 
 Do not move these concerns into the orchestration owner:
