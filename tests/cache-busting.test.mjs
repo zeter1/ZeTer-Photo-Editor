@@ -57,8 +57,8 @@ test('file protocol keeps the direct local startup path', () => {
 test('the build script owns both bundle and version manifest generation', () => {
   assert.match(buildScript, /stampBuildMeta/);
   assert.match(buildScript, /hashBuild/);
-  assert.match(buildScript, /publishBuildArtifacts\\(\\[/);
-  assert.match(buildScript, /path: resolve\\(root, 'src\\/app\\.bundle\\.js'\\), content: bundle/);
-  assert.match(buildScript, /path: resolve\\(root, 'index\\.html'\\), content: stampedIndex/);
-  assert.match(buildScript, /path: resolve\\(root, 'version\\.json'\\), content: versionManifest/);
+  assert.ok(buildScript.includes('await publishBuildArtifacts(['));
+  assert.ok(buildScript.includes("{ path: resolve(root, 'src/app.bundle.js'), content: bundle }"));
+  assert.ok(buildScript.includes("{ path: resolve(root, 'index.html'), content: stampedIndex }"));
+  assert.ok(buildScript.includes("{ path: resolve(root, 'version.json'), content: versionManifest }"));
 });
