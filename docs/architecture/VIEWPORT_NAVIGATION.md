@@ -56,7 +56,7 @@ The animation-frame seam is temporal behavior, not cosmetic implementation detai
 
 Use `tests/workspace-viewport-controller.test.mjs` for zoom math and temporal behavior. Keep only event-dispatch/source-routing assertions in `tests/workspace-navigation-v17.test.mjs`.
 
-Required regressions: min/max clamp; near-equal no-op; active-session sync; silent status; no-session runtime; deferred pointer anchoring + no-op anchoring; fit padding + scroll reset; architecture/build ownership; real `file://` browser smoke.
+Required regressions: min/max clamp; near-equal no-op; active-session sync; silent status; no-session runtime; deferred pointer anchoring using the updated overlay rectangle and live zoom at frame time (even if both changed after scheduling), plus no-op anchoring; fit padding + scroll reset; architecture/build ownership; real `file://` browser smoke.
 
 ## AI change procedure
 
