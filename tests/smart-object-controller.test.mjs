@@ -7,8 +7,10 @@ import {
   createRasterLayer,
   createSmartObjectLayer,
   isLayerLocked,
+  snapshotDocument,
 } from '../src/core/state.js';
 import { createSmartObjectController } from '../src/document/smart-object-controller.js';
+import { createRecoveryController } from '../src/workspace/recovery-controller.js';
 
 function deferred() {
   let resolve;
@@ -44,6 +46,7 @@ function makeController(state, {
   blockPendingDocumentEdit = () => false,
   isLayerLocked = () => false,
   photoshop = {},
+  queueRecovery = options => state.recoveries.push(options),
 } = {}) {
   let sessionCounter = 0;
   return createSmartObjectController({
@@ -58,7 +61,7 @@ function makeController(state, {
       commit: label => state.commits.push(label),
       updateAll: () => { state.updates += 1; },
       fitToView: () => { state.fits += 1; },
-      queueRecovery: options => state.recoveries.push(options),
+      queueRecovery,
       invalidateImageCache: value => state.invalidated.push(value),
       setActiveDocument: value => { state.doc = value; },
       setDirty: value => { state.dirty = value; },
@@ -454,6 +457,82 @@ test('save propagates a linked source to every instance', async () => {
     'data:image/png;base64,OLD2',
   ]));
   assert.deepEqual(state.recoveries, [{ immediate:true }]);
+});
+
+
+test('Smart Object Save succeeds after commit even when recovery storage rejects', async () => {
+  const embedded = createDocument({ name:'original', width:8, height:8 });
+  const layer = createSmartObjectLayer({
+    name:'object', width:8, height:8,
+    previewDataUrl:'data:image/png;base64,OLD', embeddedDocument:embedded,
+  });
+  const parentDoc = createDocument({ name:'parent', width:64, height:64 });
+  parentDoc.layers = [layer];
+  const childDoc = createDocument({ name:'edited', width:12, height:10 });
+  const peerDoc = createDocument({ name:'other dirty tab', width:16, height:16 });
+  const historyEntries = [];
+  const parent = {
+    id:'parent', doc:parentDoc,
+    history:{ push:(label, snapshot) => historyEntries.push({ label, snapshot }) },
+    dirty:false,
+  };
+  const child = {
+    id:'child', doc:childDoc, history:{ push() {} }, dirty:true,
+    smartObjectLink:{ parentSessionId:'parent', layerId:layer.id, linkedSourceId:null, photoshopSourceId:null },
+  };
+  const peer = { id:'peer', doc:peerDoc, dirty:true };
+  const state = makeState(childDoc);
+  state.activeSessionId = 'child';
+  state.dirty = true;
+  state.sessions = [parent, child, peer];
+  const writes = [];
+  const warnings = [];
+  const recovery = createRecoveryController({
+    storage:{
+      save: async snapshots => { writes.push(snapshots); throw new Error('QuotaExceededError'); },
+      loadAll:async () => [],
+      clear:async () => {},
+    },
+    projects:{ snapshot:snapshotDocument, sanitize:value => value },
+    sessions:{
+      getAll:() => state.sessions,
+      replaceAll:value => { state.sessions = value; },
+      getActiveId:() => state.activeSessionId,
+      setActiveId:value => { state.activeSessionId = value; },
+      syncCurrent:() => { child.doc = state.doc; child.dirty = state.dirty; },
+      build:() => child,
+      load:() => {},
+    },
+    ui:{ toast:(message, tone) => state.toasts.push([message, tone]) },
+    createKey:() => 'workspace:smart-object-save-test',
+    consoleRef:{ warn:(...args) => warnings.push(args) },
+  });
+  const controller = makeController(state, {
+    renderPreview:async () => 'data:image/png;base64,NEW',
+    queueRecovery:options => recovery.queueRecovery(options),
+  });
+
+  assert.equal(await controller.saveContent(child), true);
+  await recovery.whenIdle();
+
+  assert.equal(layer.previewDataUrl, 'data:image/png;base64,NEW');
+  assert.equal(layer.width, 12);
+  assert.equal(layer.height, 10);
+  assert.equal(parent.dirty, true);
+  assert.equal(child.dirty, false);
+  assert.equal(state.dirty, false);
+  assert.equal(historyEntries.length, 1);
+  assert.equal(JSON.parse(historyEntries[0].snapshot).layers[0].previewDataUrl, layer.previewDataUrl);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].map(item => item.name), ['parent', 'other dirty tab']);
+  assert.equal(JSON.parse(writes[0][0].snapshot).layers[0].previewDataUrl, layer.previewDataUrl);
+  assert.equal(recovery.isStorageAvailable(), false);
+  assert.match(String(warnings[0][0]), /recovery storage unavailable/);
+  assert.match(state.statuses.at(-1), /Смарт-объект обновлён в родительском документе/);
+  assert.ok(state.toasts.some(([, tone]) => tone === 'success'));
+  assert.ok(state.toasts.some(([, tone]) => tone === 'warn'));
+  assert.equal(state.toasts.some(([, tone]) => tone === 'error'), false);
+  assert.deepEqual(state.errors, []);
 });
 
 test('linked Smart Object save drops a sibling removed while preview is pending', async () => {
