@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
+import { stopBrowserProcess } from './browser-smoke-process.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -651,18 +652,7 @@ async function runSmoke() {
     console.log(`Verified file URL: ${INDEX_URL}`);
   } finally {
     try { client?.close(); } catch {}
-    if (browser.exitCode === null && !browser.killed) browser.kill('SIGTERM');
-    await new Promise(resolve => {
-      if (browser.exitCode !== null) return resolve();
-      const timer = setTimeout(() => {
-        if (browser.exitCode === null && !browser.killed) browser.kill('SIGKILL');
-        resolve();
-      }, 2_000);
-      browser.once('exit', () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
+    await stopBrowserProcess(browser);
     await rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 150 });
   }
 }
