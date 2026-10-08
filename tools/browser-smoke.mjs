@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -219,6 +219,109 @@ function assert(condition, message, details = '') {
 function assertNoBrowserErrors(errors, stderrState) {
   if (!errors.length) return;
   fail('Browser reported runtime errors', `${errors.join('\n')}\n\nBrowser stderr tail:\n${stderrState.text.slice(-3_000)}`);
+}
+
+
+async function verifyRecoveryIndexedDb(client) {
+  // Real production storage + controller sources inside the file:// Chromium page.
+  // The fixture's session ports are synthetic; IndexedDB transactions are not.
+  const sources = await Promise.all([
+    readFile(path.join(ROOT, 'src/core/recovery.js'), 'utf8'),
+    readFile(path.join(ROOT, 'src/workspace/recovery-controller.js'), 'utf8'),
+  ]);
+  const storageSource = sources[0].replace(/^export /gm, '');
+  const recoverySource = sources.map(source => source.replace(/^export /gm, '')).join('\n');
+  async function browserRecoveryProbe() {
+    const key = 'workspace:zpe-smoke-recovery-current';
+    const foreignKey = 'workspace:zpe-smoke-recovery-foreign';
+    const initialSnapshot = name => [{ name, snapshot: JSON.stringify({ name }) }];
+    await saveRecoverySnapshot(initialSnapshot('До отказа'), { activeIndex:0 }, { key });
+    await saveRecoverySnapshot(initialSnapshot('Соседний документ'), { activeIndex:0 }, { key:foreignKey });
+
+    const originalTransaction = IDBDatabase.prototype.transaction;
+    let abortNext = true;
+    let writes = 0;
+    const warnings = [];
+    let currentTime = 100_000;
+    const documentState = { name:'Первая несохранённая правка' };
+    IDBDatabase.prototype.transaction = function(storeNames, mode, ...rest) {
+      const transaction = originalTransaction.call(this, storeNames, mode, ...rest);
+      if (this.name === 'zeter-photo-editor' && mode === 'readwrite') {
+        writes += 1;
+        if (abortNext) {
+          abortNext = false;
+          queueMicrotask(() => transaction.abort());
+        }
+      }
+      return transaction;
+    };
+    try {
+      const controller = createRecoveryController({
+        storage: { save:saveRecoverySnapshot, loadAll:loadRecoverySnapshots, clear:clearRecoverySnapshot },
+        projects: { snapshot:doc => JSON.stringify({ name:doc.name }), sanitize:doc => doc },
+        sessions: {
+          getAll:() => [{ id:'smoke-session', dirty:true, doc:documentState }],
+          replaceAll:() => {}, getActiveId:() => 'smoke-session',
+          setActiveId:() => {}, syncCurrent:() => {}, build:() => ({}), load:() => {},
+        },
+        ui: { toast:(message, type) => warnings.push({ message, type }) },
+        createKey:() => key, now:() => currentTime, consoleRef: { warn:() => {} },
+      });
+      controller.queueRecovery({ immediate:true });
+      await controller.whenIdle();
+      const afterAbort = (await loadRecoverySnapshots()).find(item => item.key === key)?.record;
+      const unavailable = !controller.isStorageAvailable();
+      const afterAbortName = JSON.parse(afterAbort.documents[0].snapshot).name;
+      documentState.name = 'Правка до cooldown';
+      controller.queueRecovery({ immediate:true });
+      await controller.whenIdle();
+      const noEarlyRetry = writes === 1;
+      currentTime += RECOVERY_RETRY_COOLDOWN_MS + 1;
+      await new Promise(resolve => setTimeout(resolve, 60));
+      const noBackgroundRetry = writes === 1;
+      documentState.name = 'После восстановления записи';
+      controller.queueRecovery({ immediate:true });
+      await controller.whenIdle();
+      const afterRetry = await loadRecoverySnapshots();
+      const current = afterRetry.find(item => item.key === key)?.record;
+      const foreign = afterRetry.find(item => item.key === foreignKey)?.record;
+      return {
+        unavailable, afterAbortName, noEarlyRetry, noBackgroundRetry,
+        availableAgain:controller.isStorageAvailable(), writes,
+        savedName:JSON.parse(current.documents[0].snapshot).name,
+        foreignName:JSON.parse(foreign.documents[0].snapshot).name, warnings,
+      };
+    } finally {
+      IDBDatabase.prototype.transaction = originalTransaction;
+    }
+  }
+  const initial = await evaluate(client, '(async () => {\n' + recoverySource + '\nreturn (' + browserRecoveryProbe.toString() + ')();\n})()');
+  assert(initial.unavailable && initial.afterAbortName === 'До отказа',
+    'Aborted IndexedDB transaction must preserve previous recovery record', JSON.stringify(initial));
+  assert(initial.noEarlyRetry && initial.noBackgroundRetry && initial.writes === 2,
+    'Recovery must await a new dirty event after cooldown without an automatic retry loop', JSON.stringify(initial));
+  assert(initial.availableAgain && initial.savedName === 'После восстановления записи',
+    'Authorized dirty change must replace recovery after cooldown', JSON.stringify(initial));
+  assert(initial.foreignName === 'Соседний документ' && initial.warnings.filter(item => item.type === 'warn').length === 1,
+    'Abort must preserve other window key and warn only once', JSON.stringify(initial));
+
+  let sawPageLoad = false;
+  client.onEvent(method => { if (method === 'Page.loadEventFired') sawPageLoad = true; });
+  await evaluate(client, "document.documentElement.dataset.appReady='reloading'; location.reload(); true");
+  await waitFor('recovery IndexedDB fixture reload', () => sawPageLoad);
+  async function browserRecoveryReadbackProbe() {
+    const entries = await loadRecoverySnapshots();
+    const current = entries.find(item => item.key === 'workspace:zpe-smoke-recovery-current')?.record;
+    const foreign = entries.find(item => item.key === 'workspace:zpe-smoke-recovery-foreign')?.record;
+    const currentName = current && JSON.parse(current.documents[0].snapshot).name;
+    const foreignName = foreign && JSON.parse(foreign.documents[0].snapshot).name;
+    await clearRecoverySnapshot({ key:'workspace:zpe-smoke-recovery-current' });
+    await clearRecoverySnapshot({ key:'workspace:zpe-smoke-recovery-foreign' });
+    return { currentName, foreignName };
+  }
+  const persisted = await evaluate(client, '(async () => {\n' + storageSource + '\nreturn (' + browserRecoveryReadbackProbe.toString() + ')();\n})()');
+  assert(persisted.currentName === 'После восстановления записи' && persisted.foreignName === 'Соседний документ',
+    'Recovery and separate window key must survive file:// reload', JSON.stringify(persisted));
 }
 
 const editControlStateExpression = `(() => {
@@ -525,6 +628,10 @@ async function runSmoke() {
     assert(await evaluate(client, `document.querySelector('#modelInstall').textContent==='Установить нейросеть' && !document.querySelector('#modelInstall').disabled`), 'Settings explains and offers explicit model installation');
     await evaluate(client, `document.querySelector('#settingsClose').click(); document.querySelector('#removeObjectReset').click(); true`);
     assert(await evaluate(client, `document.querySelector('#removeObjectApply').hidden`), 'Reset removes only the mask');
+    assertNoBrowserErrors(errors, stderrState);
+
+    await new Promise(resolve => setTimeout(resolve, 1_800)); // Let editor autosave quiesce.
+    await verifyRecoveryIndexedDb(client);
     assertNoBrowserErrors(errors, stderrState);
 
     console.log(`Browser smoke passed: ${browserExecutable}`);
