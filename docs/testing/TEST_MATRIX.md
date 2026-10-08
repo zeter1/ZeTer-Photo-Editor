@@ -4,6 +4,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 
 | Change area | Targeted tests / checks | Extra runtime gate |
 |---|---|---|
+| Генератор встроенных WOFF2: все загрузки/конверсии до изменения любых `embedded.css`; отказ второй семьи не оставляет частично обновлённые файлы | `python3 -m unittest discover -s tests -p 'test_build_font_assets.py' -v` (выполняется в CI) | Runtime и generated browser bundle не меняются; полный `npm run check` в CI |
 | New Document replacement lifecycle: pending guard, exact document/session owner, monotonic change-epoch reconfirmation, no duplicate confirm for an unchanged authorized dirty epoch, exact dirty-confirm/modal schema, canonical factory values, fresh-history/document/clean/recovery/fit order, zero-partial failure and shared open-policy composition | `tests/new-document-controller.test.mjs`, `tests/new-document-composition.test.mjs`, workspace session/recovery regressions | `npm run test:browser` after composition/bundle wiring changes |
 | UI constants / toolbar math | `tests/tool-layout.test.mjs`, architecture test | browser smoke for drag/persistence |
 | Workspace viewport: pointer-anchored zoom uses the post-layout overlay rectangle and live zoom at the deferred animation-frame boundary, not event-time geometry | `tests/workspace-viewport-controller.test.mjs` | Existing `file://` browser smoke; no runtime or bundle changes |

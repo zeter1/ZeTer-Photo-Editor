@@ -34,6 +34,9 @@ jobs:
       - name: Build and test
         run: npm run check
 
+      - name: Font asset generator regression
+        run: python3 -m unittest discover -s tests -p 'test_build_font_assets.py' -v
+
       - name: Verify generated browser artifacts are current
         run: git diff --exit-code -- src/app.bundle.js index.html version.json
 

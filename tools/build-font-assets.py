@@ -77,9 +77,10 @@ def render_face(display_name: str, style: str, weight: str, payload: bytes) -> s
 
 
 def main() -> None:
+    # Finish all network reads and WOFF2 conversions before modifying any CSS.
+    # A late download/conversion failure must not leave mixed font generations.
+    prepared = []
     for folder, (display_name, faces) in FAMILIES.items():
-        target_dir = FONT_ROOT / folder
-        target_dir.mkdir(parents=True, exist_ok=True)
         chunks = [
             "/* Generated from google/fonts commit " + GOOGLE_FONTS_COMMIT + ". */",
             "/* cyrillic */",
@@ -89,8 +90,11 @@ def main() -> None:
         for style, weight, filename in faces:
             woff2 = to_woff2(download_ttf(folder, filename))
             chunks.append(render_face(display_name, style, weight, woff2))
-        target = target_dir / "embedded.css"
-        target.write_text("\n".join(chunks).rstrip() + "\n", encoding="utf-8")
+        prepared.append((FONT_ROOT / folder / "embedded.css", "\n".join(chunks).rstrip() + "\n"))
+
+    for target, css in prepared:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(css, encoding="utf-8")
         print(f"generated {target.relative_to(ROOT)}")
 
 
