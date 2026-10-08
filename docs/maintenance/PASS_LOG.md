@@ -6,5 +6,5 @@
 - **Исходный SHA:** `137819d2c46be0f1d2f8b580a248b76471582a1a` (`main`); **результат:** ветка `fix/large-selection-bounds-20261008`, PR к `main`.
 - **Первопричина:** `Math.min(...xs)`/`Math.max(...ys)` передавали все вершины лассо в аргументы; 200 000 точек воспроизводимо вызывают `RangeError: Maximum call stack size exceeded`.
 - **Результат:** поэлементное вычисление с исходной finite-фильтрацией, регрессия lasso/polygon, матрица проверок, PATCH 1.43.4.
-- **Доказательство/ограничения:** V8-воспроизведение прежнего отказа и корректного итеративного результата; CI PR должен выполнить `npm run check`, generated parity, `npm run test:browser`; ручной 200k-жест не проверен.
-- **Статус:** ожидает интеграции; перед merge проверить CI по точному SHA, после — push CI `main`.
+- **Доказательство/ограничения:** V8-воспроизведение прежнего отказа и корректного итеративного результата; PR #121 CI [37745975241](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/37745975241) завершился `success` на кодовом SHA `30bdc92c6fc8d5ed664ee8dcf8120e073b0a0e7c`: `npm run check` (1021 тест), generated parity, `npm run test:browser`, `git diff --check`. Ручной 200k-жест не проверен.
+- **Статус:** ожидает интеграции PR #121; после merge проверить push CI по merge-SHA `main`.
