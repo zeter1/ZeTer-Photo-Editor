@@ -14224,6 +14224,7 @@ function createHistoryNavigationController({
 
 // ---- src/workspace/recovery-controller.js ----
 const RECOVERY_DEBOUNCE_MS = 1500;
+const RECOVERY_RETRY_COOLDOWN_MS = 30_000;
 const RECOVERY_WINDOW_STORAGE_KEY = 'zeter-photo-editor.recovery-window.v1';
 function createRecoveryWindowKey({
   forceNew = false,
@@ -14269,6 +14270,7 @@ function createRecoveryController({
   setTimeoutFn = (handler, delay) => globalThis.setTimeout(handler, delay),
   clearTimeoutFn = timer => globalThis.clearTimeout(timer),
   debounceMs = RECOVERY_DEBOUNCE_MS,
+  now = Date.now,
   consoleRef = globalThis.console,
 } = {}) {
   const saveSnapshot = requirePort(storage.save, 'storage.save');
@@ -14296,11 +14298,19 @@ function createRecoveryController({
   let recoveryGeneration = 0;
   let recoveryWritePromise = Promise.resolve();
   let recoveryStorageAvailable = true;
+  let recoveryRetryAllowed = false;
+  let recoveryRetryAfter = Infinity;
+  let recoveryFailureEpoch = 0;
   let recoveryFailureNotified = false;
   let unrestoredRecoveryDocuments = [];
 
-  function reportRecoveryFailure(error, { notify = false } = {}) {
+  function reportRecoveryFailure(error, { notify = false, retryable = false } = {}) {
+    recoveryFailureEpoch += 1;
     recoveryStorageAvailable = false;
+    // Only a failed autosave write can be retried. A failed startup read may
+    // hide an existing snapshot under our key, so writing over it is unsafe.
+    recoveryRetryAllowed = retryable;
+    recoveryRetryAfter = retryable ? now() + RECOVERY_RETRY_COOLDOWN_MS : Infinity;
     consoleRef?.warn?.('ZeTer Photo Editor recovery storage unavailable', error);
     if (notify && !recoveryFailureNotified) {
       recoveryFailureNotified = true;
@@ -14315,11 +14325,12 @@ function createRecoveryController({
   }
 
   function queueRecovery({ immediate = false } = {}) {
-    if (!recoveryStorageAvailable) return recoveryWritePromise;
+    if (!recoveryStorageAvailable && (!recoveryRetryAllowed || now() < recoveryRetryAfter)) return recoveryWritePromise;
     cancelPendingWrite();
     const generation = recoveryGeneration;
     const write = () => {
-      if (generation !== recoveryGeneration || !recoveryStorageAvailable) return;
+      if (generation !== recoveryGeneration
+          || (!recoveryStorageAvailable && (!recoveryRetryAllowed || now() < recoveryRetryAfter))) return;
       recoveryTimer = null;
       syncCurrentSession();
       const dirtySessions = getSessions().filter(session => session?.dirty);
@@ -14334,10 +14345,23 @@ function createRecoveryController({
       const activeIndex = unrestoredRecoveryDocuments.length
         + Math.max(0, dirtySessions.findIndex(session => session.id === getActiveSessionId()));
       recoveryWritePromise = recoveryWritePromise
-        .then(() => snapshots.length
-          ? saveSnapshot(snapshots, { activeIndex }, { key: recoveryKey })
-          : clearSnapshot({ key: recoveryKey }))
-        .catch(error => reportRecoveryFailure(error, { notify: true }));
+        .then(async () => {
+          // Recheck after the preceding write settles: it may have just failed.
+          if (!recoveryStorageAvailable && (!recoveryRetryAllowed || now() < recoveryRetryAfter)) return;
+          const failureEpochAtStart = recoveryFailureEpoch;
+          if (snapshots.length) await saveSnapshot(snapshots, { activeIndex }, { key: recoveryKey });
+          else await clearSnapshot({ key: recoveryKey });
+          // A concurrent fatal read/rename failure must not be undone by this success.
+          if (recoveryFailureEpoch !== failureEpochAtStart) return;
+          recoveryStorageAvailable = true;
+          recoveryRetryAllowed = false;
+          recoveryRetryAfter = Infinity;
+        })
+        .catch(error => reportRecoveryFailure(error, {
+          notify: true,
+          // Do not make a concurrent, failed startup read retryable.
+          retryable: recoveryStorageAvailable || recoveryRetryAllowed,
+        }));
     };
     if (immediate) write();
     else recoveryTimer = setTimeoutFn(write, debounceMs);

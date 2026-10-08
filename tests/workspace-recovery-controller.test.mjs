@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   RECOVERY_DEBOUNCE_MS,
+  RECOVERY_RETRY_COOLDOWN_MS,
   createRecoveryController,
   createRecoveryWindowKey,
 } from '../src/workspace/recovery-controller.js';
@@ -18,6 +19,8 @@ function createHarness({
   createKey = forceNew => forceNew ? 'workspace:new' : 'workspace:own',
   save,
   clear,
+  load,
+  now = Date.now,
   sanitize = value => value,
   snapshot = value => JSON.stringify(value),
   setTimeoutFn,
@@ -29,7 +32,7 @@ function createHarness({
   const controller = createRecoveryController({
     storage: {
       save: save || (async (documents, options, config) => { calls.saves.push({ documents, options, config }); }),
-      loadAll: async () => records,
+      loadAll: load || (async () => records),
       clear: clear || (async config => { calls.clears.push(config); }),
     },
     projects: { snapshot, sanitize },
@@ -53,6 +56,7 @@ function createHarness({
       toast: (message, type) => calls.toasts.push([message, type]),
     },
     createKey,
+    now,
     setTimeoutFn,
     clearTimeoutFn,
     consoleRef: { warn: (...args) => calls.warnings.push(args) },
@@ -272,6 +276,114 @@ test('storage write failure disables repeated autosave and notifies once', async
   assert.equal(attempts, 1);
   assert.equal(controller.isStorageAvailable(), false);
   assert.equal(calls.toasts.filter(([,type]) => type === 'warn').length, 1);
+});
+
+
+test('recovery retries a transient write only after cooldown and captures the newest dirty state', async () => {
+  let clock = 100_000;
+  let attempts = 0;
+  const stored = new Map([['workspace:foreign', 'untouched']]);
+  const doc = { name:'A', value:1 };
+  const { controller, calls } = createHarness({
+    sessions:[{ id:'a', dirty:true, doc }],
+    now: () => clock,
+    save: async (documents, options, config) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('temporary transaction abort');
+      stored.set(config.key, { documents, options });
+    },
+  });
+
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(controller.isStorageAvailable(), false);
+  assert.equal(attempts, 1);
+
+  doc.value = 2;
+  clock += RECOVERY_RETRY_COOLDOWN_MS - 1;
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(attempts, 1);
+
+  clock += 1;
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(attempts, 2);
+  assert.equal(controller.isStorageAvailable(), true);
+  assert.deepEqual(JSON.parse(stored.get('workspace:own').documents[0].snapshot), { name:'A', value:2 });
+  assert.deepEqual(stored.get('workspace:own').options, { activeIndex:0 });
+  assert.equal(stored.get('workspace:foreign'), 'untouched');
+  assert.equal(calls.toasts.filter(([, type]) => type === 'warn').length, 1);
+});
+
+test('persistent autosave failure is throttled and does not create automatic retry loops', async () => {
+  let clock = 5_000;
+  let attempts = 0;
+  const { controller, calls } = createHarness({
+    sessions:[{ id:'a', dirty:true, doc:{ name:'A' } }],
+    now: () => clock,
+    save: async () => { attempts += 1; throw new Error('storage still blocked'); },
+  });
+
+  controller.queueRecovery({ immediate:true });
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(attempts, 1);
+
+  clock += RECOVERY_RETRY_COOLDOWN_MS;
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(attempts, 2);
+  assert.equal(controller.isStorageAvailable(), false);
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(attempts, 2);
+  assert.equal(calls.toasts.filter(([, type]) => type === 'warn').length, 1);
+});
+
+test('failed recovery startup read never retries an overwrite of unseen own-key data', async () => {
+  let clock = 1_000;
+  let writes = 0;
+  const { controller, calls } = createHarness({
+    sessions:[{ id:'a', dirty:true, doc:{ name:'New document' } }],
+    now: () => clock,
+    load: async () => { throw new Error('cannot inspect existing recovery'); },
+    save: async () => { writes += 1; },
+  });
+
+  assert.equal(await controller.restoreRecoveryIfAvailable(), false);
+  clock += 10 * RECOVERY_RETRY_COOLDOWN_MS;
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(writes, 0);
+  assert.equal(controller.isStorageAvailable(), false);
+  assert.equal(calls.warnings.length, 1);
+});
+
+test('a concurrent failed read keeps autosave locked even when the pending write also rejects', async () => {
+  let clock = 2_000;
+  let rejectWrite;
+  let attempts = 0;
+  const pendingWrite = new Promise((resolve, reject) => { rejectWrite = reject; });
+  const { controller } = createHarness({
+    now: () => clock,
+    sessions:[{ id:'a', dirty:true, doc:{ name:'New document' } }],
+    save: () => { attempts += 1; return pendingWrite; },
+    load: async () => { throw new Error('cannot inspect own recovery'); },
+  });
+
+  controller.queueRecovery({ immediate:true });
+  await Promise.resolve();
+  assert.equal(attempts, 1);
+  assert.equal(await controller.restoreRecoveryIfAvailable(), false);
+  rejectWrite(new Error('pending transaction also failed'));
+  await controller.whenIdle();
+
+  clock += 10 * RECOVERY_RETRY_COOLDOWN_MS;
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(attempts, 1);
+  assert.equal(controller.isStorageAvailable(), false);
 });
 
 test('default recovery debounce remains intentionally short', () => {
