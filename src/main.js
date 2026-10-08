@@ -681,7 +681,6 @@ const modalController = createModalController({
 const { showModal, showInfoModal, showRecoveryModal } = modalController;
 const learningCenterController = createLearningCenterController({
   showInfoModal,
-  storage: window.localStorage,
   documentTarget: document,
   windowTarget: window,
 });
