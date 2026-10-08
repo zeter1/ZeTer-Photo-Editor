@@ -14357,7 +14357,11 @@ function createRecoveryController({
           recoveryRetryAllowed = false;
           recoveryRetryAfter = Infinity;
         })
-        .catch(error => reportRecoveryFailure(error, { notify: true, retryable: true }));
+        .catch(error => reportRecoveryFailure(error, {
+          notify: true,
+          // Do not make a concurrent, failed startup read retryable.
+          retryable: recoveryStorageAvailable || recoveryRetryAllowed,
+        }));
     };
     if (immediate) write();
     else recoveryTimer = setTimeoutFn(write, debounceMs);

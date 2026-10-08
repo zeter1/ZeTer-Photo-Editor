@@ -360,6 +360,32 @@ test('failed recovery startup read never retries an overwrite of unseen own-key 
   assert.equal(calls.warnings.length, 1);
 });
 
+test('a concurrent failed read keeps autosave locked even when the pending write also rejects', async () => {
+  let clock = 2_000;
+  let rejectWrite;
+  let attempts = 0;
+  const pendingWrite = new Promise((resolve, reject) => { rejectWrite = reject; });
+  const { controller } = createHarness({
+    now: () => clock,
+    sessions:[{ id:'a', dirty:true, doc:{ name:'New document' } }],
+    save: () => { attempts += 1; return pendingWrite; },
+    load: async () => { throw new Error('cannot inspect own recovery'); },
+  });
+
+  controller.queueRecovery({ immediate:true });
+  await Promise.resolve();
+  assert.equal(attempts, 1);
+  assert.equal(await controller.restoreRecoveryIfAvailable(), false);
+  rejectWrite(new Error('pending transaction also failed'));
+  await controller.whenIdle();
+
+  clock += 10 * RECOVERY_RETRY_COOLDOWN_MS;
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(attempts, 1);
+  assert.equal(controller.isStorageAvailable(), false);
+});
+
 test('default recovery debounce remains intentionally short', () => {
   assert.equal(RECOVERY_DEBOUNCE_MS, 1500);
 });
