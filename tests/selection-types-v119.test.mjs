@@ -26,6 +26,18 @@ test('selection geometry supports rectangle, ellipse, free lasso and polygonal l
   assert.ok(selectionPathPoints(ellipse, 24).length >= 24);
 });
 
+test('selectionBounds handles a 200k-vertex lasso without argument-stack overflow', () => {
+  const points = Array.from({ length: 200_000 }, (_, index) => ({
+    x: index % 37,
+    y: index % 19,
+  }));
+  points.push({ x: -8, y: 80 });
+  const expected = { x: -8, y: 0, width: 44, height: 80 };
+  assert.deepEqual(selectionBounds({ type: 'lasso', points }), expected);
+  assert.deepEqual(selectionBounds({ type: 'polygon', points }), expected);
+  assert.equal(selectionBounds({ type: 'lasso', points: [{ x: NaN, y: Infinity }] }), null);
+});
+
 test('selection toolbar exposes all four selection types and Shift+M cycling', () => {
   assert.match(index, /id="selectionType"/);
   assert.match(index, /value="rect">Прямоугольное/);
