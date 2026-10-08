@@ -288,6 +288,56 @@ test('superseded PSD failure is silent while the newer import remains authoritat
   assert.equal(h.published[0].next.name,'new-ok');
 });
 
+test('failed newer PSD import keeps authority over older late success and failure', async () => {
+  for (const olderOutcome of ['success','failure']) {
+    const olderDecode=deferred();
+    const newerDecode=deferred();
+    const olderStarted=deferred();
+    const newerStarted=deferred();
+    let calls=0;
+    const h=harness({decodePsd:()=>{
+      calls+=1;
+      if(calls===1){olderStarted.resolve();return olderDecode.promise;}
+      newerStarted.resolve();
+      return newerDecode.promise;
+    }});
+
+    const olderOpen=h.controller.open(file(`older-${olderOutcome}.psd`));
+    await olderStarted.promise;
+    const newerOpen=h.controller.open(file('newer-corrupt.psd'));
+    await newerStarted.promise;
+
+    newerDecode.reject(new Error('newer decode rejected'));
+    await newerOpen;
+    assert.equal(calls,2);
+    assert.equal(h.published.length,0);
+    assert.equal(h.statuses.at(-1),'Ошибка импорта PSD/PSB');
+    assert.equal(h.alerts.length,1);
+    assert.match(h.alerts[0],/newer decode rejected/);
+    assert.equal(h.toasts.at(-1)?.type,'error');
+    assert.equal(h.errors.length,1);
+    assert.equal(h.errors[0][1].name,'newer-corrupt.psd');
+
+    const status=h.statuses.at(-1);
+    const toasts=structuredClone(h.toasts);
+    const alerts=structuredClone(h.alerts);
+    const loggedError=h.errors[0][1].error;
+    if(olderOutcome==='failure'){
+      olderDecode.reject(new Error('superseded decode rejected'));
+    }else{
+      olderDecode.resolve(parsedRgb16());
+    }
+    await olderOpen;
+
+    assert.equal(h.published.length,0,`older ${olderOutcome} must not publish a document`);
+    assert.equal(h.statuses.at(-1),status,`older ${olderOutcome} must not replace status`);
+    assert.deepEqual(h.toasts,toasts,`older ${olderOutcome} must not replace toasts`);
+    assert.deepEqual(h.alerts,alerts,`older ${olderOutcome} must not replace alert`);
+    assert.equal(h.errors.length,1,`older ${olderOutcome} must not log another error`);
+    assert.strictEqual(h.errors[0][1].error,loggedError);
+  }
+});
+
 test('rejected newer replacement preflight does not supersede an authorized PSD import', async () => {
   const decodeA=deferred();
   const startedA=deferred();
