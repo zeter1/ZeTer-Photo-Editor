@@ -43,7 +43,8 @@ Full RGBA8 display canvas пока остаётся нужен browser composito
 ## Оставшиеся contiguous/global boundaries
 
 - PSD/PSB binary decoder materializes bounded channel planes до tiled handoff.
-- Flood Fill и Content-Aware Fill требуют cross-tile/global connectivity/neighborhood semantics и пока используют contiguous PixelBuffer.
+- Flood Fill по-прежнему требует global cross-tile connectivity и использует contiguous PixelBuffer.
+- Content-Aware Fill на tiled v2 native sources теперь сканирует frozen selection без full-plane decode, строит единую bounded ROI с 24 px donor halo и публикует только изменённые tiles через exact-source guard. Это сохраняет cross-tile neighborhood внутри ROI; удалённые доноры вне halo не участвуют в PatchMatch-style search (не полная эквивалентность full-plane алгоритму). ROI свыше 8 МП и выделения свыше 2 МП отклоняются без записи. Полный RGBA8 preview после обработки остаётся global boundary.
 - Часть export/color-management paths материализует contiguous PixelBuffer.
 - Canvas compositor требует full RGBA8 display surface.
 - Нет IndexedDB/file-backed eviction store, worker-owned editing tiles, GPU renderer или RAW/DNG decode.
