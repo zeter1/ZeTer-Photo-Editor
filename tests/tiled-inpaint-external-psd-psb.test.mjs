@@ -13,6 +13,24 @@ import { decodePsd } from '../src/formats/psd.js';
 const script = fileURLToPath(new URL('../tools/profile-real-psd-inpaint.mjs', import.meta.url));
 const root = new URL('./fixtures/color-management/', import.meta.url);
 
+function psbMergedImageOnly(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 26;
+  for (let section = 0; section < 2; section += 1) {
+    const length = view.getUint32(offset, false);
+    offset += 4 + length;
+    assert.ok(offset <= bytes.length);
+  }
+  const length = view.getBigUint64(offset, false);
+  assert.ok(length > 0n && length <= BigInt(Number.MAX_SAFE_INTEGER));
+  const count = Number(length);
+  assert.ok(offset + 8 + count < bytes.length);
+  const flattened = new Uint8Array(bytes.length - count);
+  flattened.set(bytes.subarray(0, offset));
+  flattened.set(bytes.subarray(offset + 8 + count), offset + 8);
+  return flattened;
+}
+
 function run(...args) {
   return spawnSync(process.execPath, [script, ...args], {
     encoding:'utf8', maxBuffer:1024 * 1024,
@@ -82,7 +100,9 @@ test('Stage 003: external layered PSB selection can be cancelled before any ROI 
   const bytes = new Uint8Array(await readFile(new URL('psd-tools-group.psb', root)));
   const decoded = await decodePsd(bytes);
   assert.ok(decoded.groups.length >= 1);
-  const source = serializeTiledPixelBufferSource(decoded.compositePixelBuffer, { tileSize:16 });
+  const merged = await decodePsd(psbMergedImageOnly(bytes));
+  assert.ok(merged.compositePixelBuffer, 'layer-free copy exposes upstream merged bytes');
+  const source = serializeTiledPixelBufferSource(merged.compositePixelBuffer, { tileSize:16 });
   const snapshot = JSON.stringify(source);
   let calls = 0, cancelled = false;
   const result = await inpaintTiledPixelBufferSourceCooperative(source, {
