@@ -47,7 +47,7 @@ test('Stage 003: cooperative scan yields and matches synchronous cross-tile inpa
   assert.ok(yields > 1);
   assert.equal(seen.size, source.width * source.height);
   assert.equal(result.filled, 2);
-  assert.equal(result.changed, 2);
+  assert.equal(result.changed, 1, 'only the damaged tile needs new payload bytes');
   assert.deepEqual(result.source, synchronous.source);
   assert.ok(result.source.tiles.some((tile, index) => tile.dataUrl !== before[index]));
   assert.ok(source.tiles.every((tile, index) => tile.dataUrl === before[index]));
