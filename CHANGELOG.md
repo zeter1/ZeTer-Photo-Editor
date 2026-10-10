@@ -6,6 +6,11 @@
 
 ## 1.45.0 — текущая версия
 
+### 2026-10-10 — Сквозная проверка 16-bit tiled Content-Aware Fill в Chromium
+
+- Добавлена browser-регрессия реальной пользовательской команды для импортированного `.zpe`: marquee → меню Edit → native 16-bit tiled Worker → history → undo/redo. Проверяется реальный Worker dispatch и отсутствие повторной history-публикации.
+- Только тестовая инфраструктура; код пользовательского runtime, версия и generated bundle не меняются. Остаток Stage 003 — профили больших реальных PSD/PSB, широкие ROI и дополнительные отмены.
+
 ### 2026-10-10 — Tiled Content-Aware Fill запускает вычисления в browser Worker
 
 - Добавлено: команда tiled native Content-Aware Fill фиксирует выделение один раз с yield между блоками и передаёт frozen indices в существующий file:// Blob Worker.
