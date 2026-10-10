@@ -1745,7 +1745,8 @@ export function inpaintTiledPixelBufferSource(source, {
   const noChange = { source, changed:0, filled:0, changedTiles:0, loadedTiles:0 };
   if (!selected || selected === width * height) return noChange;
 
-  const padding = boundedInteger(halo, 24, 1, 128);
+  const requestedHalo = Math.trunc(Number(halo));
+  const padding = Number.isFinite(requestedHalo) ? Math.max(1, Math.min(128, requestedHalo)) : 24;
   const bounds = {
     left:Math.max(0, minX - padding),
     top:Math.max(0, minY - padding),
