@@ -1235,7 +1235,11 @@ export function clearPixelBufferPixels(buffer, { isAllowed=null } = {}) {
 
 export function inpaintPixelBuffer(buffer, options = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
-  return inpaintSelectedSamples(buffer.data, buffer.width, buffer.height, buffer.channels, options);
+  return inpaintSelectedSamples(buffer.data, buffer.width, buffer.height, buffer.channels, {
+    ...options,
+    // CMYK4 has four opaque ink channels; its K channel is not alpha.
+    alphaChannel: buffer.alphaMode === 'straight' ? buffer.channels - 1 : -1,
+  });
 }
 
 function sourceSampleBytes(bitsPerChannel) {
