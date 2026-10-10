@@ -11,11 +11,11 @@
 - **Done gate:** independent PR merged with green `main` push CI.
 - **Risks / handoff:** global connectivity cannot be naively limited to one tile; preserve the fallback.
 
-## Проходка 2026-10-10 — проверка production file:// Worker adapter (PR pending)
+## Проходка 2026-10-10 — проверка production file:// Worker adapter ([PR #155](https://github.com/zeter1/ZeTer-Photo-Editor/pull/155), merged + green main CI)
 
 - **Scope:** браузерная Chromium-регрессия в `tools/browser-smoke.mjs` проверяет не только raw classic Worker protocol, но и реальный `createBrowserTiledInpaintWorkerController`: повторную ленивую загрузку supplier через `file://`, вычисление на tiled RGBA8, immutable source, отмену уже созданного Worker через terminate и успешную работу следующего job. Записывается диагностическое `elapsedMs` (без нестабильных порогов).
 - **Non-scope:** это отдельный browser controller integration check, **не** сценарий кликов пользователя, **не** heap-профиль больших PSD/PSB и **не** оптимизация широкого связного ROI. Production bundle/версия не меняются.
-- **Gate:** `npm run check`, Chromium `npm run test:browser`, отсутствие diff generated assets, PR CI, merge и green main CI. До проверки этих пунктов подэтап остаётся pending.
+- **Gate пройден:** `npm run check`, Chromium `npm run test:browser`, bundle parity, профилировщики, diff hygiene; [PR CI #38061159764](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38061159764) **success**; [exact main push CI #38061213305](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38061213305) **success** (squash SHA `631dcac7a4b2cf60ccd2846bd58349aec7ff867a`). Подэтап browser adapter regression закрыт, **задача 003 остаётся открытой**.
 - **Осталось по 003:** end-to-end UI command, 16/32-bit PSD/PSB browser heap/latency, wide connected ROI, cancellation при других live-owner invalidations; запись `reset()` для смены документа/вкладки уже есть в `src/main.js`.
 
 ## Проходка 2026-10-10 — runtime UI Worker dispatch ([PR #154](https://github.com/zeter1/ZeTer-Photo-Editor/pull/154), merged, main CI green)
