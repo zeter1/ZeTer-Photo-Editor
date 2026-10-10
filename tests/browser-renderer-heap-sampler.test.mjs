@@ -62,3 +62,79 @@ test('Stage 003: poll failures fail the profile and clear the interval', async (
   await assert.rejects(sampler.stop(), /CDP closed/);
   assert.equal(cleared, 1);
 });
+
+test('Stage 003: browser-level CDP process private memory samples retain real values and counts', async () => {
+  const used = [150, 170, 160];
+  const processes = [
+    [{ type:'browser', privateMemory:300 }, { type:'renderer', privateMemory:200 }],
+    [{ type:'browser', privateMemory:320 }, { type:'renderer', privateMemory:280 }, { type:'utility', privateMemory:40 }],
+    [{ type:'browser', privateMemory:310 }, { type:'renderer', privateMemory:230 }],
+  ];
+  let heapCalls = 0, processCalls = 0;
+  const pageClient = { async send(method) {
+    if (method === 'Performance.enable') return {};
+    assert.equal(method, 'Performance.getMetrics');
+    return { metrics:[
+      { name:'JSHeapUsedSize', value:used[heapCalls++] },
+      { name:'JSHeapTotalSize', value:500 },
+    ] };
+  } };
+  const processClient = { async send(method) {
+    assert.equal(method, 'SystemInfo.getProcessInfo');
+    return { processInfo:processes[processCalls++] };
+  } };
+  const sampler = createBrowserRendererHeapSampler(pageClient, {
+    processClient, schedule:() => 1, unschedule:() => {},
+  });
+  await sampler.start();
+  await sampler.snapshot('worker-active');
+  const report = await sampler.stop();
+  assert.equal(heapCalls, 3);
+  assert.equal(processCalls, 3);
+  assert.equal(report.chromiumProcesses.availability, 'sampled');
+  assert.equal(report.chromiumProcesses.sampleCount, 3);
+  assert.equal(report.chromiumProcesses.baselinePrivateBytes, 500);
+  assert.equal(report.chromiumProcesses.sampledMaxPrivateBytes, 640);
+  assert.equal(report.chromiumProcesses.endPrivateBytes, 540);
+  assert.equal(report.chromiumProcesses.sampledIncreaseBytes, 140);
+  assert.equal(report.chromiumProcesses.maxSampledProcessCount, 3);
+  assert.equal(report.sampledMaxJsHeapUsedBytes, 170);
+  assert.deepEqual(report.stages.map(item => item.processPrivateMemoryBytes), [500,640,540]);
+});
+
+test('Stage 003: missing/unsupported browser process counters never fake RAM or abort heap sampling', async () => {
+  for (const response of [
+    { processInfo:[{ type:'browser', privateMemory:100 }, { type:'renderer' }] },
+    new Error('SystemInfo.getProcessInfo: Method not found'),
+  ]) {
+    let queries = 0, metrics = 0;
+    const pageClient = { async send(method) {
+      if (method === 'Performance.enable') return {};
+      assert.equal(method, 'Performance.getMetrics');
+      metrics += 1;
+      return { metrics:[
+        { name:'JSHeapUsedSize', value:120 },
+        { name:'JSHeapTotalSize', value:200 },
+      ] };
+    } };
+    const processClient = { async send(method) {
+      assert.equal(method, 'SystemInfo.getProcessInfo');
+      queries += 1;
+      if (response instanceof Error) throw response;
+      return response;
+    } };
+    const sampler = createBrowserRendererHeapSampler(pageClient, {
+      processClient, schedule:() => 1, unschedule:() => {},
+    });
+    await sampler.start();
+    await sampler.snapshot('after-worker');
+    const report = await sampler.stop();
+    assert.equal(queries, 1, 'unsupported process counters must be probed only once');
+    assert.equal(metrics, 3, 'renderer JS heap monitoring remains intact');
+    assert.equal(report.chromiumProcesses.availability, 'unavailable');
+    assert.equal(report.chromiumProcesses.sampleCount, 0);
+    assert.equal(report.chromiumProcesses.sampledMaxPrivateBytes, null);
+    assert.equal(report.chromiumProcesses.sampledIncreaseBytes, null);
+    assert.match(report.chromiumProcesses.unavailableReason, /privateMemory|Method not found/);
+  }
+});
