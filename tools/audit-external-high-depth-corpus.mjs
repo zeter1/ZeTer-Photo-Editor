@@ -2,6 +2,7 @@
 // Photoshop-authored 16-bit PSD + 32-bit PSB corpus. This intentionally does
 // NOT decode pixels or certify that a file was actually saved by Photoshop.
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { lstat, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -111,16 +112,33 @@ export async function auditExternalHighDepthCorpus(manifestPath) {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink()) fail(id + '.file', 'regular file required (no symlinks)');
     if (info.size !== expectedSize) fail(id + '.size', 'size mismatch');
-    const bytes = await readFile(path);
-    const hash = createHash('sha256').update(bytes).digest('hex');
+    // A high-depth PSB can approach the 512 MiB fixture cap. Keep only the
+    // first 27 header bytes and a bounded read chunk instead of buffering the
+    // entire file in the Node heap. Recheck the streamed byte count in case
+    // the file changed after lstat().
+    const headerBytes = Buffer.alloc(27);
+    const digest = createHash('sha256');
+    let headerLength = 0, streamedBytes = 0;
+    for await (const chunk of createReadStream(path, { highWaterMark:64 * 1024 })) {
+      streamedBytes += chunk.byteLength;
+      if (streamedBytes > expectedSize) fail(id + '.size', 'size mismatch during stream');
+      digest.update(chunk);
+      if (headerLength < headerBytes.length) {
+        const copied = Math.min(chunk.byteLength, headerBytes.length - headerLength);
+        chunk.copy(headerBytes, headerLength, 0, copied);
+        headerLength += copied;
+      }
+    }
+    if (streamedBytes !== expectedSize) fail(id + '.size', 'size mismatch during stream');
+    const hash = digest.digest('hex');
     if (hash !== item.sha256) fail(id + '.sha256', 'SHA-256 mismatch');
-    const header = inspectExternalHighDepthHeader(bytes);
+    const header = inspectExternalHighDepthHeader(headerBytes);
     if (header.version !== kind.version || header.bitsPerChannel !== kind.bitsPerChannel ||
         header.width !== width || header.height !== height ||
         header.channels !== channels || header.colorMode !== colorMode) {
       fail(id + '.header', 'raw header does not match pinned manifest metadata');
     }
-    results.push({ id, file, sha256:hash, bytes:info.size, ...header,
+    results.push({ id, file, sha256:hash, bytes:streamedBytes, ...header,
       sourceUrl:item.sourceUrl, license:item.license, licenseUrl:item.licenseUrl,
       sourceApplication:item.sourceApplication });
   }

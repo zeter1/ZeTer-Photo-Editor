@@ -1,5 +1,12 @@
 # 002 — PSD/PSB round-trip compatibility corpus
 
+## Проходка 2026-10-10 — потоковый аудит больших внешних fixtures (Stage 002 P0)
+
+- Исправлена пиковая память preflight: `tools/audit-external-high-depth-corpus.mjs` больше не загружает PSD/PSB (до 512 MiB) целиком ради хеширования, а читает фиксированными 64 KiB блоками. Для проверки заголовка держит только первые 27 байт; сравнивает число прочитанных байт с manifest после чтения, включая возможное изменение файла после `lstat`.
+- Regression: PSD16 и PSB32 header-only mocks с многоблочными payloads, фиксированными SHA-256 и повреждением последнего байта. Это **не** реальные Photoshop PSD/PSB, и тест сам по себе не является измерением пикового RSS.
+- **Дальше:** добыть законно распространяемые независимо Photoshop-authored 16-bit PSD / 32-bit PSB, зафиксировать ссылки/лицензию/hash и проверить настоящий decode → browser file:// UI Worker → preview/Undo/Redo + memory. Задача 002 остаётся открытой; связанная 003 тоже.
+
+
 ## P0 handoff: audited external high-depth fixtures (2026-10-10)
 
 - Добавлен проверяющий CLI: `node tools/audit-external-high-depth-corpus.mjs --manifest /path/to/manifest.json`, отдельно от редакторского PSD writer/decoder. Он принимает schema `zpe-external-high-depth-psd-psb-v1` и **ровно два** entries `psd16` и `psb32`.
