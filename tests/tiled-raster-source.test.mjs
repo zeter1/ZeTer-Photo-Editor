@@ -217,3 +217,49 @@ test('Stage 003: tiled inpaint no-donor, safe ROI budget and aborted selection a
   }), /cancelled/);
   assert.equal(JSON.stringify(source), original);
 });
+
+test('Stage 003: tiled inpaint freezes each selected pixel once and never re-queries the predicate', () => {
+  const width = 12, height = 6;
+  const buffer = rgb16(width, height);
+  // A damaged pixel must be replaced by a donor. A repeat predicate query
+  // fails deliberately: the scan is the only authorized selection snapshot.
+  const damagedIndex = (3 * width + 3) * 3;
+  buffer.data.set([0, 0, 0], damagedIndex);
+  const source = serializeTiledPixelBufferSource(buffer, { tileSize:4 });
+  const before = source.tiles.map(tile => tile.dataUrl);
+  const visited = new Set();
+  const result = inpaintTiledPixelBufferSource(source, {
+    isAllowed(x, y) {
+      const key = y * width + x;
+      assert.equal(visited.has(key), false, 'selection was queried twice at ' + key);
+      visited.add(key);
+      return x === 3 && y === 3;
+    },
+    halo:2,
+    maxLayerPixels:64,
+  });
+  assert.equal(visited.size, width * height);
+  assert.equal(result.filled, 1);
+  assert.equal(result.changed, 1);
+  assert.equal(result.changedTiles, 1);
+  assert.notEqual(result.source.tiles[0].dataUrl, before[0]);
+  assert.deepEqual(result.source.tiles.slice(1).map(tile => tile.dataUrl), before.slice(1));
+  assert.notDeepEqual(
+    [...deserializePixelBufferSource(result.source).data.slice(damagedIndex, damagedIndex + 3)],
+    [0, 0, 0],
+  );
+});
+
+test('Stage 003: full-selection no-donor and over-budget selection remain non-destructive', () => {
+  const source = serializeTiledPixelBufferSource(rgb16(8, 8), { tileSize:4 });
+  const original = JSON.stringify(source);
+  const whole = inpaintTiledPixelBufferSource(source, {
+    isAllowed:() => true, maxFillPixels:1,
+  });
+  assert.equal(whole.source, source);
+  assert.equal(whole.changed, 0);
+  assert.throws(() => inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => x < 7, maxFillPixels:1,
+  }), /безопасного лимита/);
+  assert.equal(JSON.stringify(source), original);
+});
