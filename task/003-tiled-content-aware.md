@@ -1,11 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
-## Проходка 2026-10-10 — end-to-end UI Chromium regression (в работе)
+## Проходка 2026-10-10 — end-to-end UI Chromium regression (merged + green main CI)
 
 - **Контракт:** использовать настоящие `.zpe`-импорт, 16-bit four-tile RGB source, UI-маркировку выделения, Edit → Content-Aware Fill, production Worker, history + undo/redo. В отличие от PR #155 проверяется цепочка UI и persisted preview, не только автономный адаптер.
 - **Scope:** только детерминированная browser smoke regression `tools/browser-smoke.mjs`; не меняются алгоритмы, worker API, версия и generated bundle.
 - **Критерии:** в реальном `file://` Chromium видны красные дефектные пиксели до операции, ровно один `Worker.postMessage` с frozen `selectedIndices`, результат исправляет пиксели, history содержит ровно одну новую запись, Undo/Redo восстанавливают оба состояния.
-- **Done gate:** PR CI + точный `main` push CI green. Пока не подтверждено, задача и остальные ограничения Stage 003 остаются открытыми (heavy PSD/PSB memory, wide connected ROI, extra invalidations).
+- **Verified gate:** [PR #156](https://github.com/zeter1/ZeTer-Photo-Editor/pull/156) merged (squash `e2e8778a03c532c5aa2e89f71989f2fad31bd5c3`), [PR CI #38062298829](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38062298829) **success**, [exact main push CI #38062372137](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38062372137) **success**. Браузерный результат: 9 исправленных px, 4 native 16-bit tiles, 1 Worker dispatch, единственная History-запись, Undo/Redo; все 1078 Node-тестов пройдены.
+- **Следующая независимая проходка:** browser peak RAM/latency на реальных 16/32-bit PSD/PSB (decode + tiled inpaint + preview), с recording baseline/peak на заданных файлах и проверкой неизменённых источников. Затем: большой связный ROI и другие случаи proactive Worker cancellation. **Вся 003 остаётся открытой.**
 
 - **Goal:** уменьшить peak RAM для Content-Aware Fill на tiled high-depth sources, не материализуя целиком PixelBuffer.
 - **Why now / evidence:** `docs/architecture/TILED_RASTER.md` явно фиксирует Content-Aware как оставшуюся contiguous/global boundary.
