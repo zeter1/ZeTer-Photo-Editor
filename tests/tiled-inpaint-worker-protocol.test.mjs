@@ -105,3 +105,50 @@ test('Stage 003 Worker protocol: terminated idle worker never receives a job or 
   assert.ok(Number.isInteger(exitCode));
   assert.equal(JSON.stringify(source), original);
 });
+
+test('Stage 003 Worker protocol: compact selection bitmap preserves bit boundaries, order and tiled parity', () => {
+  const source = fixture();
+  const before = JSON.stringify(source);
+  // Indices on either side of an 8-bit boundary share neither a byte nor a bit.
+  const indices = [7 * WIDTH + 248, 7 * WIDTH + 8, 7 * WIDTH + 7];
+  const expectedSelection = new Set(indices);
+  const expected = inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => expectedSelection.has(y * WIDTH + x),
+    halo:2, maxLayerPixels:300,
+  });
+  const actual = runTiledInpaintWorkerJob({
+    source, selectedIndices:Uint32Array.from(indices),
+    halo:2, maxLayerPixels:300,
+  });
+  assert.deepEqual(actual, expected);
+  assert.deepEqual(runTiledInpaintWorkerJob({
+    source, selectedIndices:[...indices].reverse(),
+    halo:2, maxLayerPixels:300,
+  }), expected, 'array input and reordered indices must have identical semantics');
+  assert.equal(JSON.stringify(source), before, 'the detached worker input remains immutable');
+
+  for (const invalid of [
+    [indices[0], indices[1], indices[0]],
+    [indices[0], WIDTH * HEIGHT],
+    [-1],
+    [3.5],
+    [NaN],
+  ]) {
+    assert.throws(
+      () => runTiledInpaintWorkerJob({ source, selectedIndices:invalid }),
+      /invalid or duplicate selected index/,
+    );
+  }
+});
+
+test('Stage 003 Worker protocol: invalid geometry and oversized index lists fail before bitmap allocation', () => {
+  const source = fixture();
+  assert.throws(() => runTiledInpaintWorkerJob({
+    source:{ width:Math.floor(48 * 1024 * 1024 / 3) + 1, height:1 },
+    selectedIndices:[],
+  }), /invalid source geometry/);
+  assert.throws(() => runTiledInpaintWorkerJob({
+    source,
+    selectedIndices:new Array(WIDTH * HEIGHT + 1).fill(0),
+  }), /invalid or duplicate selected index/);
+});
