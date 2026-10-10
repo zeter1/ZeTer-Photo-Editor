@@ -6,6 +6,12 @@
 
 ## 1.44.3 — текущая версия
 
+### 2026-10-10 — Подготовлен адаптер ленивой загрузки браузерного Worker (Stage 003)
+
+- Новый `src/core/tiled-inpaint-browser-worker.js` загружает generated classic supplier по требованию при `file://` и HTTP, запускает Blob Worker, освобождает Blob URL и защищает стартующие задачи от supersession.
+- Состояния `cancelled` (устаревший владелец) и `unavailable` (недоступен Worker, скрипт или CSP) различаются. Ошибки вычислений Worker не маскируются fallback'ом. Добавлены детерминированные тесты загрузки, отмены и отказов.
+- На этом этапе адаптер не подключён к UI Content-Aware Fill; пользовательское поведение и версия не меняются.
+
 ### 2026-10-10 — Ускорен изолированный Worker Content-Aware Fill (Stage 003)
 
 - Устранён повторный полный обход source pixels в detached Worker: новое API потребляет заранее зафиксированные индексы выделения, сохраняет bounded bitmap validation и передаёт их прямо в общий ROI kernel.
