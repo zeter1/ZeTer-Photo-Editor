@@ -1,8 +1,8 @@
 # task — очередь небольших инженерных проходок
 
-## Текущая проходка — Stage 003: немедленная отмена stale Worker (2026-10-10)
+## Последний закрытый подэтап — Stage 003: отмена stale Worker (2026-10-10)
 
-- В ветке `fix/tiled-inpaint-worker-stale-poll-20261010` добавляется bounded polling `isCurrent` (50 мс) только во время active browser Worker; при смене слоя/source/lock задача завершается через `terminate()` без Worker-ответа. Node regression проверяет контроль таймера, cleanup и продолжение работы после отмены. До PR merge и зелёного `main` CI этот подэтап не закрывать.
+- **Слито в `main`:** [PR #158](https://github.com/zeter1/ZeTer-Photo-Editor/pull/158), squash `7d782443c36032e558794d58fa4f712196537b62`. Bounded polling `isCurrent` (50 мс) работает только во время активного browser Worker; при смене слоя/source/lock выполняется `terminate()` без ожидания Worker-ответа. Node regression проверяет timer cleanup, reentrant polling и restart. [PR CI #38063616039](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38063616039) **success**, [точный `main` push CI #38063682771](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38063682771) **success**. Подэтап закрыт; задача 003 остаётся открытой.
 - **Следующая проходка:** browser peak memory/latency real 16/32-bit PSD/PSB (decode → tiled fill → preview) с независимыми fixture hashes и отсутствием CI time threshold. Затем wide connected ROI и отмена синхронного fallback/preview. Целиком `003` остаётся открытой.
 
 ## Последний закрытый подэтап — Stage 003: end-to-end UI Content-Aware Fill (2026-10-10)
