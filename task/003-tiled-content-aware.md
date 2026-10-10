@@ -1,5 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
+## Проходка 2026-10-10 — end-to-end UI Chromium regression (в работе)
+
+- **Контракт:** использовать настоящие `.zpe`-импорт, 16-bit four-tile RGB source, UI-маркировку выделения, Edit → Content-Aware Fill, production Worker, history + undo/redo. В отличие от PR #155 проверяется цепочка UI и persisted preview, не только автономный адаптер.
+- **Scope:** только детерминированная browser smoke regression `tools/browser-smoke.mjs`; не меняются алгоритмы, worker API, версия и generated bundle.
+- **Критерии:** в реальном `file://` Chromium видны красные дефектные пиксели до операции, ровно один `Worker.postMessage` с frozen `selectedIndices`, результат исправляет пиксели, history содержит ровно одну новую запись, Undo/Redo восстанавливают оба состояния.
+- **Done gate:** PR CI + точный `main` push CI green. Пока не подтверждено, задача и остальные ограничения Stage 003 остаются открытыми (heavy PSD/PSB memory, wide connected ROI, extra invalidations).
+
 - **Goal:** уменьшить peak RAM для Content-Aware Fill на tiled high-depth sources, не материализуя целиком PixelBuffer.
 - **Why now / evidence:** `docs/architecture/TILED_RASTER.md` явно фиксирует Content-Aware как оставшуюся contiguous/global boundary.
 - **Scope:** bounded region/tile working set and regression at tile boundaries; **non-scope:** full virtual memory, RAW/LibRaw, GPU/AI.
