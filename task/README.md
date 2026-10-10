@@ -20,10 +20,10 @@
 14. Для post-merge verification не ограничивайся helper-ом, который может фильтровать только `pull_request` runs. Если exact merge-SHA push run не виден, используй provider-native GET коллекции `actions/runs?head_sha=<merge-sha>` через GitHub fetch и проверь `event=push`, `head_branch=main`, exact `head_sha` и `conclusion=success`; при failure переходи к jobs/logs.
 15. При добавлении модуля в canonical `file://` bundle помни, что `tools/build-bundle.mjs` снимает ESM-обёртку и конкатенирует classic-script chunks. Если новый модуль использует импортированные `const`/`let` во время module evaluation, его source-order обязан идти после owner-а этих bindings; добавь architecture guard на порядок, а не полагайся только на корректность ESM imports.
 
-## Текущая проходка — Stage 003 UI Worker handoff (2026-10-10, проверка PR ожидается)
+## Последний закрытый подэтап — Stage 003 UI Worker handoff (2026-10-10)
 
-- В рабочей ветке реализуется dispatch tiled Content-Aware Fill из `src/painting/controller.js` через `src/painting/tiled-inpaint-dispatch.js` с lazy `file://` Worker, one-pass frozen selection, guarded cancellation и fallback на те же indices при `unavailable`.
-- Код, версия 1.45.0, browser bundle и регрессии требуют успешного CI и merge. **Не считать подэтап слитым или всю задачу 003 закрытой без этого gate.** Следующие отдельные шаги — profiling real high-depth PSD/PSB в браузере, latency/RAM, wide connected ROI и proactive terminate при смене контекста без ожидания Worker event.
+- В `main` реализован dispatch tiled Content-Aware Fill из `src/painting/controller.js` через `src/painting/tiled-inpaint-dispatch.js` с lazy `file://` Worker, one-pass frozen selection, guarded cancellation и fallback на те же indices при `unavailable`.
+- **Verified gate:** [PR #154](https://github.com/zeter1/ZeTer-Photo-Editor/pull/154) merged squash `bf76922ff21455a2c16ed6c2872da22deffc28f0`; [PR CI #38060575417](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38060575417) and [exact `main` push CI #38060648765](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38060648765) passed Node tests, generated bundle parity, file:// Chromium smoke and profilers. Runtime version **1.45.0**. Подэтап закрыт; задача **003 остаётся открытой**. Следующие отдельные шаги — profiling real high-depth PSD/PSB в браузере, latency/RAM, wide connected ROI и proactive terminate при смене контекста без ожидания Worker event.
 
 ## Последний закрытый подэтап — Stage 003 browser Worker loader (2026-10-10)
 
