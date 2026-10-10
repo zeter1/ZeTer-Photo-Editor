@@ -784,6 +784,48 @@ async function runSmoke() {
     await verifyRecoveryIndexedDb(client);
     assertNoBrowserErrors(errors, stderrState);
 
+
+    // Stage 003: exercise the ACTUAL editor UI command on a 16-bit tiled .zpe
+    // document. Earlier probes cover direct Worker/controller APIs; this guards
+    // the menu -> frozen selection -> Worker -> native layer -> History wiring.
+    const stage003Fixture = await evaluate(client, "(() => {\n  const width=8,height=8,tileSize=4,channels=4;\n  const canvas=document.createElement('canvas');\n  canvas.width=width;canvas.height=height;\n  const ctx=canvas.getContext('2d'),image=ctx.createImageData(width,height);\n  for(let y=0;y<height;y++)for(let x=0;x<width;x++){\n    const defect=(x===3||x===4)&&(y===3||y===4);\n    image.data.set(defect?[234,0,0,255]:[20,40,60,255],(y*width+x)*4);\n  }\n  ctx.putImageData(image,0,0);\n  const tiles=[];\n  for(let y=0;y<height;y+=tileSize)for(let x=0;x<width;x+=tileSize){\n    const bytes=new Uint8Array(tileSize*tileSize*channels*2);\n    const view=new DataView(bytes.buffer);\n    for(let dy=0;dy<tileSize;dy++)for(let dx=0;dx<tileSize;dx++){\n      const defect=(x+dx===3||x+dx===4)&&(y+dy===3||y+dy===4);\n      const values=defect?[60000,0,0,65535]:[5140,10280,15420,65535];\n      for(let ch=0;ch<channels;ch++)view.setUint16(((dy*tileSize+dx)*channels+ch)*2,values[ch],true);\n    }\n    tiles.push({x,y,width:tileSize,height:tileSize,rawBytes:bytes.length,\n      dataUrl:'data:application/x-zeter-pixel-buffer-tile;base64,'+btoa(String.fromCharCode(...bytes))});\n  }\n  const source={kind:'zpe-pixel-buffer-source-v2',width,height,model:'rgb',channels,\n    bitsPerChannel:16,colorSpace:'srgb',alphaMode:'straight',profileName:'',tileSize,\n    rawBytes:width*height*channels*2,tiles};\n  const layer={id:'stage003-ui-layer',type:'raster',name:'Tiled 16-bit UI',\n    x:0,y:0,width,height,scaleX:1,scaleY:1,rotation:0,visible:true,locked:false,\n    opacity:1,blendMode:'source-over',dataUrl:canvas.toDataURL('image/png'),highDepthSource:source};\n  const project={version:1,name:'Stage003 browser UI fixture',width,height,\n    background:'transparent',selectedLayerId:layer.id,groups:[],layers:[layer]};\n  const input=document.querySelector('#projectInput'),transfer=new DataTransfer();\n  transfer.items.add(new File([JSON.stringify(project)],'stage003-ui.zpe',{type:'application/json'}));\n  input.files=transfer.files;\n  const oldConfirm=window.confirm;\n  window.confirm=()=>true;\n  try {input.dispatchEvent(new Event('change',{bubbles:true}));}\n  finally {window.confirm=oldConfirm;}\n  return {fileName:transfer.files[0].name,sourceBytes:source.rawBytes,tiles:tiles.length};\n})()");
+    assert(stage003Fixture.sourceBytes === 512 && stage003Fixture.tiles === 4,
+      'Stage 003 UI fixture must contain real 16-bit serialized tiles', JSON.stringify(stage003Fixture));
+    await waitFor('Stage 003 high-depth project import', async () => evaluate(client,
+      "document.querySelector('#statusText')?.textContent==='Проект открыт' && document.querySelectorAll('.layer-row').length===1"));
+    const stage003View = await evaluate(client, "(() => {\n  const zoom=document.querySelector('#zoomRange');\n  zoom.value='400';zoom.dispatchEvent(new Event('input',{bubbles:true}));\n  document.querySelector('[data-tool=\"marquee\"]').click();\n  const type=document.querySelector('#selectionType');\n  type.value='rect';type.dispatchEvent(new Event('change',{bubbles:true}));\n  const canvas=document.querySelector('#editorCanvas'),rect=canvas.getBoundingClientRect();\n  const point=(x,y)=>({x:rect.left+rect.width*x/8,y:rect.top+rect.height*y/8});\n  const ctx=canvas.getContext('2d');\n  const before=Array.from(ctx.getImageData(4,4,1,1).data);\n  return {width:canvas.width,height:canvas.height,rectWidth:rect.width,rectHeight:rect.height,\n    start:point(2.6,2.6),end:point(5.5,5.5),before};\n})()");
+    assert(stage003View.width===8 && stage003View.height===8 && stage003View.rectWidth>16 &&
+      stage003View.before[0]>150 && stage003View.before[1]<40,
+      'Stage 003 UI setup must display the defect at usable zoom', JSON.stringify(stage003View));
+    const stage003Mouse = (type,coords,buttons) => client.send('Input.dispatchMouseEvent',{
+      type,x:coords.x,y:coords.y,button:'left',buttons,clickCount:1,
+    });
+    await stage003Mouse('mouseMoved',stage003View.start,0);
+    await stage003Mouse('mousePressed',stage003View.start,1);
+    await stage003Mouse('mouseMoved',stage003View.end,1);
+    await stage003Mouse('mouseReleased',stage003View.end,0);
+    const stage003Observer = await evaluate(client, "(() => {\n  const post=Worker.prototype.postMessage;\n  window.__stage003UiWorkerJobs=0;\n  Worker.prototype.postMessage=function(value,...args){\n    if(value?.selectedIndices instanceof Uint32Array)window.__stage003UiWorkerJobs++;\n    return post.call(this,value,...args);\n  };\n  return true;\n})()");
+    assert(stage003Observer,'Stage 003 Worker dispatch observer must install');
+    const stage003Selection = await evaluate(client, "(() => {\n  document.querySelector('.menu-button[data-menu=\"edit\"]').click();\n  const item=[...document.querySelectorAll('#menuPopover .menu-item')]\n    .find(button=>button.querySelector('span')?.textContent==='Контент-заливка выделения');\n  const enabled=Boolean(item&&!item.disabled);\n  if(enabled)item.click();\n  return {enabled,status:document.querySelector('#statusText')?.textContent};\n})()");
+    assert(stage003Selection.enabled,
+      'Real marquee selection must enable Edit > Content-Aware Fill',JSON.stringify(stage003Selection));
+    await waitFor('Stage 003 tiled UI Content-Aware Fill',async()=>evaluate(client,
+      "document.querySelector('#statusText')?.textContent?.includes('tiled ') && window.__stage003UiWorkerJobs===1"));
+    const stage003Result = await evaluate(client, "(() => ({\n  status:document.querySelector('#statusText')?.textContent||'',\n  jobs:window.__stage003UiWorkerJobs||0,\n  pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data),\n  history:[...document.querySelectorAll('#historyList .history-row')].map(row=>row.textContent)\n}))");
+    assert(stage003Result.jobs===1 && stage003Result.status.includes('восстановлено') &&
+      stage003Result.history.filter(value=>value.includes('Контент-заливка')).length===1 &&
+      stage003Result.pixel[0]<150,
+      'UI tiled fill must dispatch exactly one real Worker job, repair the defect and commit once',
+      JSON.stringify(stage003Result));
+    await evaluate(client,"document.querySelector('#undoBtn').click();true");
+    await waitFor('Stage 003 UI undo',async()=>evaluate(client,
+      "document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data[0]>150"));
+    await evaluate(client,"document.querySelector('#redoBtn').click();true");
+    await waitFor('Stage 003 UI redo',async()=>evaluate(client,
+      "document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data[0]<150"));
+    console.log('Stage 003 tiled high-depth UI Worker regression:',JSON.stringify(stage003Result));
+    assertNoBrowserErrors(errors,stderrState);
+
     console.log(`Browser smoke passed: ${browserExecutable}`);
     console.log(`Verified file URL: ${INDEX_URL}`);
   } finally {
