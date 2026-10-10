@@ -1,5 +1,13 @@
 # task — очередь небольших инженерных проходок
 
+
+## Подэтап Stage 003 — упорядочивание CDP memory snapshots (2026-10-10)
+
+- Устранена гонка между таймером, явными контрольными точками и финальным `stop()` в `tools/browser-renderer-heap-sampler.mjs`: CDP-замеры выполняются строго в порядке постановки, а отказ отдельного маркера не блокирует очередь. Новые регрессии проверяют перекрывающиеся poll/marker/stop и восстановление после ошибки.
+- Это точность **тестового профилирования**, не увеличение точности измерений до истинного peak RSS/Worker heap. До успешного PR + зелёного `main` CI подэтап не считать закрытым.
+- **Следующая проходка:** независимые Photoshop-authored 16/32-bit PSD/PSB с pinned SHA-256; browser decode → tiled UI Worker → preview/Undo и информационный memory/latency профиль; затем широкий связный ROI, прерывание fallback/preview. Общие задачи **002 и 003** остаются открытыми.
+
+
 ## Закрытый подэтап — Stage 003: процессная память Chromium (2026-10-10)
 
 - К CDP renderer heap profiler добавляется независимый браузерный `SystemInfo.getProcessInfo`: информационная сумма `privateMemory` по **полному** списку процессов с baseline/sampled max/end. При отсутствии поддерживаемого поля результат будет явным `unavailable`, а не придуманным RAM-значением. Это тестовая инфраструктура, без изменения поведения приложения или версии. [PR #161](https://github.com/zeter1/ZeTer-Photo-Editor/pull/161) слит; [PR CI #38065177692](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38065177692) и [main CI #38065240683](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38065240683) **success**. Подробности в [003](003-tiled-content-aware.md).
