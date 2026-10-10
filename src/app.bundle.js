@@ -27903,10 +27903,9 @@ function documentPointToLayerPixel(point, layer) {
 }
 
 function beginPathControlDrag(hit,point,event){
-  const modifiers={altKey:event.altKey,shiftKey:event.shiftKey};
   const commandResult=event.altKey&&event.shiftKey
-    ? pathControlCommands.convertAnchorToSmooth(doc,hit,modifiers)
-    : pathControlCommands.convertAnchorToCorner(doc,hit,modifiers);
+    ? pathControlCommands.convertAnchorToSmooth(doc,hit,{altKey:event.altKey,shiftKey:event.shiftKey})
+    : pathControlCommands.convertAnchorToCorner(doc,hit,{altKey:event.altKey});
   if(commandResult!==PATH_CONTROL_COMMAND_RESULT.IGNORED)return true;
   const gesture=pathControlGestures.begin(doc,hit,point,{shiftKey:event.shiftKey});
   if(!gesture)return false;
