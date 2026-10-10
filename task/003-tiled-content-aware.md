@@ -1,5 +1,14 @@
 # 003 — Tiled Content-Aware Fill
 
+
+## Проходка 2026-10-10 — детерминированный порядок CDP memory snapshots
+
+- **Суть:** periodical `snapshot('sample')` и явные stage markers/финальный `stop()` раньше могли одновременно вызвать `Performance.getMetrics` и `SystemInfo.getProcessInfo`, заполняя `samples` в порядке завершения, а не обращения. Последняя контрольная точка могла оказаться не последним измерением.
+- **Изменение:** маленькая очередь promise-снимков в `tools/browser-renderer-heap-sampler.mjs`. Ошибка отклоняет *свой* promise; следующий снимок продолжает работать. Timer cleanup и fail-open для неподдерживаемого process counter сохраняются.
+- **Тесты:** `tests/browser-renderer-heap-sampler.test.mjs` — перекрытие poll / двух маркеров / stop с управляемыми CDP-ответами и recovered sampling после rejected marker. Нет жёстких порогов времени/RAM, влияющих на CI.
+- **Non-scope:** runtime, версия приложения, generated bundle, real external 16/32-bit PSD/PSB browser-memory corpus и широкий ROI. Общая Stage 003 остаётся **открытой**; результат PR/CI фиксировать после фактической проверки.
+
+
 ## Проходка 2026-10-10 — sampled Chromium process private memory (merged + green main CI)
 
 - **Цель:** измерять не только renderer `JSHeapUsedSize`, но и предоставляемый браузерным CDP полный список `SystemInfo.getProcessInfo` с `privateMemory` в отдельном браузерном соединении.
