@@ -54,14 +54,44 @@ test('script failure triggers a non-destructive unavailable fallback', async () 
   assert.equal(h.workers.length,0);
 });
 
-test('cancel during pending loader suppresses Worker creation and result', async () => {
+test('cancel settles a pending supplier wait before onload or timeout', async () => {
   const h=harness();
-  const pending=h.controller.run({});
-  assert.equal(h.controller.cancel(),false);
+  const pending=h.controller.run({source:'obsolete'});
+  assert.equal(h.scripts.length,1);
+  assert.equal(h.controller.cancel(),false); // no running Worker yet
+  assert.deepEqual(await pending,{cancelled:true});
+  assert.equal(h.scripts[0].removed,undefined, 'cancel did not wait for supplier timeout');
+  assert.equal(h.workers.length,0);
+
+  // A later command may reuse the supplier still loading in the background.
+  const next=h.controller.run({source:'current'});
+  assert.equal(h.scripts.length,1, 'never inject a duplicate supplier');
   h.globalRef.__zpeTiledInpaintWorkerSource=CODE;
   h.scripts[0].onload();
-  assert.deepEqual(await pending,{cancelled:true});
+  await Promise.resolve();
+  assert.equal(h.workers.length,1);
+  h.workers[0].emit('message',{ready:true});
+  assert.equal(h.workers[0].sent[0].source,'current');
+  h.workers[0].emit('message',{id:h.workers[0].sent[0].id,ok:true,result:{filled:1}});
+  assert.deepEqual(await next,{filled:1});
+});
+
+test('superseding a pending supplier wait settles the older run immediately', async () => {
+  const h=harness();
+  const first=h.controller.run({source:'old'});
+  const second=h.controller.run({source:'new'});
+  assert.deepEqual(await first,{cancelled:true});
+  assert.equal(h.scripts.length,1);
+  assert.equal(h.scripts[0].removed,undefined, 'obsolete request never waits for load');
   assert.equal(h.workers.length,0);
+  h.globalRef.__zpeTiledInpaintWorkerSource=CODE;
+  h.scripts[0].onload();
+  await Promise.resolve();
+  assert.equal(h.workers.length,1);
+  h.workers[0].emit('message',{ready:true});
+  assert.equal(h.workers[0].sent[0].source,'new');
+  h.workers[0].emit('message',{id:h.workers[0].sent[0].id,ok:true,result:{filled:1}});
+  assert.deepEqual(await second,{filled:1});
 });
 
 test('Worker constructor CSP failure falls back; successful boot compute error is never retried', async () => {
