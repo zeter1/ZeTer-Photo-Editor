@@ -20,10 +20,10 @@
 14. Для post-merge verification не ограничивайся helper-ом, который может фильтровать только `pull_request` runs. Если exact merge-SHA push run не виден, используй provider-native GET коллекции `actions/runs?head_sha=<merge-sha>` через GitHub fetch и проверь `event=push`, `head_branch=main`, exact `head_sha` и `conclusion=success`; при failure переходи к jobs/logs.
 15. При добавлении модуля в canonical `file://` bundle помни, что `tools/build-bundle.mjs` снимает ESM-обёртку и конкатенирует classic-script chunks. Если новый модуль использует импортированные `const`/`let` во время module evaluation, его source-order обязан идти после owner-а этих bindings; добавь architecture guard на порядок, а не полагайся только на корректность ESM imports.
 
-## Текущая проходка — Stage 003 browser Worker loader (2026-10-10)
+## Последний закрытый подэтап — Stage 003 browser Worker loader (2026-10-10)
 
-- Создаётся независимый browser adapter `src/core/tiled-inpaint-browser-worker.js` для generated `file://` classic Worker supplier: lazy single-flight load, bounded timeout, Blob Worker bootstrap, безопасные `unavailable` / `cancelled` outcomes и generation guards. Регрессии — `tests/tiled-inpaint-browser-worker.test.mjs`.
-- **Не считать UI Worker integration выполненной:** `src/painting/controller.js` ещё вызывает cooperative main-thread path. Следующий кандидат — реальное подключение frozen selection indices → Worker с fallback и тестом браузерной транзакции. После этого RAM/latency профили, широкий связный ROI. `003` остаётся открытой.
+- Добавлен независимый browser adapter `src/core/tiled-inpaint-browser-worker.js` для generated `file://` classic Worker supplier: lazy single-flight load, bounded timeout, Blob Worker bootstrap, безопасные `unavailable` / `cancelled` outcomes и generation guards. Регрессии — `tests/tiled-inpaint-browser-worker.test.mjs`.
+- **Не считать UI Worker integration выполненной:** `src/painting/controller.js` ещё вызывает cooperative main-thread path. Следующий кандидат — реальное подключение frozen selection indices → Worker с fallback и тестом браузерной транзакции. После этого RAM/latency профили, широкий связный ROI. [PR #153](https://github.com/zeter1/ZeTer-Photo-Editor/pull/153) слит на squash `de10a1dba24ab05017de264a383fa4f674b46e7a`, [PR CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38059806464) + [exact main push CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38059867375). `003` остаётся открытой.
 
 ## Последний закрытый подэтап — frozen-index fastpath Worker (2026-10-10)
 

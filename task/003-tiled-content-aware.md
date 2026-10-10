@@ -11,13 +11,15 @@
 - **Done gate:** independent PR merged with green `main` push CI.
 - **Risks / handoff:** global connectivity cannot be naively limited to one tile; preserve the fallback.
 
-## Проходка 2026-10-10 — browser Worker loader / fallback (PR candidate)
+## Проходка 2026-10-10 — browser Worker loader / fallback ([PR #153](https://github.com/zeter1/ZeTer-Photo-Editor/pull/153), merged + main CI green)
+
+- **Gate пройден:** [PR CI #38059806464](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38059806464) — success; [exact main push CI #38059867375](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38059867375) — success, merge squash `de10a1dba24ab05017de264a383fa4f674b46e7a`. Подэтап loader завершён, задача 003 **не завершена**.
 
 - **Проблема:** self-contained classic Worker source поставляется отдельным generated скриптом, но нет browser-side production adapter, способного лениво подгрузить его при прямом открытии `file://`.
 - **Изменение:** `src/core/tiled-inpaint-browser-worker.js` поверх существующего lifecycle client даёт `run(job, { isCurrent })` / `cancel()`: single-flight supplier загрузка, bounded script timeout, classic Blob Worker, revoke URL, generation guard во время async bootstrap, `{ cancelled:true }` на stale-owner и `{ unavailable:true }` только при bootstrap/CSP/unsupported для контролируемого cooperative fallback.
 - **Тесты:** `tests/tiled-inpaint-browser-worker.test.mjs` проверяет `file://` supplier URL, одновременные запросы, отмену до load, onerror/timeout, CSP constructor fail и отсутствие подмены computation errors fallback'ом.
 - **Граница:** loader пока **не подключён** к основному `src/main.js` / `persistTiledHighDepthInpaint()`, поэтому user-visible Worker dispatch и worker-owned compute ещё не включены. Это module-only подэтап: без версии/bundle изменения. Для будущего UI wiring нужно повторно использовать тот же frozen index snapshot и сверять exact-owner перед публикацией; не обходить существующий native precision/history path.
-- **Next:** freeze indices на главном потоке → single Worker dispatch → cooperative fallback только при `unavailable` → exact-target checks/cancellation → реальный browser memory/latency benchmark. Общая 003 открыта до merge+green main CI и выполнения всего roadmap.
+- **Next:** freeze indices на главном потоке → single Worker dispatch → cooperative fallback только при `unavailable` → exact-target checks/cancellation → реальный browser memory/latency benchmark. Общая 003 **остаётся открытой** до реального UI Worker dispatch, browser профилей и wide connected ROI.
 
 ## Проходка 2026-10-10 — bounded tiled ROI (слито, main CI green)
 
