@@ -4,7 +4,7 @@
 ## Подэтап Stage 003 — упорядочивание CDP memory snapshots (2026-10-10)
 
 - Устранена гонка между таймером, явными контрольными точками и финальным `stop()` в `tools/browser-renderer-heap-sampler.mjs`: CDP-замеры выполняются строго в порядке постановки, а отказ отдельного маркера не блокирует очередь. Новые регрессии проверяют перекрывающиеся poll/marker/stop и восстановление после ошибки.
-- Это точность **тестового профилирования**, не увеличение точности измерений до истинного peak RSS/Worker heap. До успешного PR + зелёного `main` CI подэтап не считать закрытым.
+- Это точность **тестового профилирования**, не измерение истинного peak RSS/Worker heap. **Подэтап закрыт:** [PR #162](https://github.com/zeter1/ZeTer-Photo-Editor/pull/162) слит, squash `7fce7decd0b2133aa3bf990abcd2ee5ce7677d25`; [PR CI #38065721850](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38065721850) и [точный main push CI #38065777660](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38065777660) — **success**.
 - **Следующая проходка:** независимые Photoshop-authored 16/32-bit PSD/PSB с pinned SHA-256; browser decode → tiled UI Worker → preview/Undo и информационный memory/latency профиль; затем широкий связный ROI, прерывание fallback/preview. Общие задачи **002 и 003** остаются открытыми.
 
 

@@ -6,7 +6,7 @@
 - **Суть:** periodical `snapshot('sample')` и явные stage markers/финальный `stop()` раньше могли одновременно вызвать `Performance.getMetrics` и `SystemInfo.getProcessInfo`, заполняя `samples` в порядке завершения, а не обращения. Последняя контрольная точка могла оказаться не последним измерением.
 - **Изменение:** маленькая очередь promise-снимков в `tools/browser-renderer-heap-sampler.mjs`. Ошибка отклоняет *свой* promise; следующий снимок продолжает работать. Timer cleanup и fail-open для неподдерживаемого process counter сохраняются.
 - **Тесты:** `tests/browser-renderer-heap-sampler.test.mjs` — перекрытие poll / двух маркеров / stop с управляемыми CDP-ответами и recovered sampling после rejected marker. Нет жёстких порогов времени/RAM, влияющих на CI.
-- **Non-scope:** runtime, версия приложения, generated bundle, real external 16/32-bit PSD/PSB browser-memory corpus и широкий ROI. Общая Stage 003 остаётся **открытой**; результат PR/CI фиксировать после фактической проверки.
+- **Non-scope:** runtime, версия приложения, generated bundle, real external 16/32-bit PSD/PSB browser-memory corpus и широкий ROI. **Подэтап закрыт:** [PR #162](https://github.com/zeter1/ZeTer-Photo-Editor/pull/162) слит squash `7fce7decd0b2133aa3bf990abcd2ee5ce7677d25`; [PR CI #38065721850](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38065721850) и [точный main push CI #38065777660](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38065777660) — **success**. Общая Stage 003 остаётся **открытой**.
 
 
 ## Проходка 2026-10-10 — sampled Chromium process private memory (merged + green main CI)
