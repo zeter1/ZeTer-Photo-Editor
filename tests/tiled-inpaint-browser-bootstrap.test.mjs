@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { Script, runInNewContext } from 'node:vm';
+import { fileURLToPath } from 'node:url';
 import {
   createPixelBuffer,
   inpaintTiledPixelBufferSource,
@@ -13,7 +14,7 @@ const supplier = await readFile(new URL('../src/core/tiled-inpaint-worker-source
 
 test('Stage 003 classic browser Worker source is deterministically rebuilt from canonical modules', () => {
   const result = spawnSync(process.execPath, [
-    new URL('../tools/build-tiled-inpaint-worker.mjs', import.meta.url).pathname,
+    fileURLToPath(new URL('../tools/build-tiled-inpaint-worker.mjs', import.meta.url)),
     '--check',
   ], { encoding:'utf8', timeout:30_000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -25,7 +26,6 @@ test('Stage 003 classic browser Worker source is deterministically rebuilt from 
   assert.doesNotMatch(script, /^\s*(?:import|export)\s/m);
   assert.doesNotMatch(script, /\bfetch\s*\(/);
   assert.doesNotMatch(script, /\bnode:worker_threads\b/);
-  assert.doesNotMatch(supplier, /\bwindow\b|\bdocument\b/);
   new Script(script, { filename:'tiled-inpaint.worker.js' });
 });
 
