@@ -63,6 +63,25 @@ test('unavailable Worker falls back to the same frozen indices, never double-sam
   assert.deepEqual(result, expected);
 });
 
+test('unavailable Worker cancellation before frozen ROI preserves atomic source', async () => {
+  const source = fixture(), snapshot = JSON.stringify(source);
+  let samples = 0, yields = 0, cancelled = false;
+  const result = await prepareTiledInpaintWithWorker(source, {
+    worker:{ async run() { return { unavailable:true }; } },
+    isAllowed:(x,y) => { samples++; return x === 7 && y === 7; },
+    scanChunkPixels:source.width * source.height,
+    isCancelled:() => cancelled,
+    yieldControl:async () => { yields++; cancelled = true; },
+  });
+  assert.equal(samples, source.width * source.height);
+  assert.equal(yields, 1, 'fallback must yield before the ROI kernel');
+  assert.equal(result.cancelled, true);
+  assert.equal(result.changed, 0);
+  assert.equal(result.loadedTiles, 0);
+  assert.equal(result.source, source);
+  assert.equal(JSON.stringify(source), snapshot);
+});
+
 test('scan cancellation prevents Worker creation, preview, or tile mutation', async () => {
   const source = fixture();
   let sampled = 0, cancelled = false, dispatched = 0;
