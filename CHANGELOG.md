@@ -6,6 +6,13 @@
 
 ## 1.45.1 — текущая версия
 
+### 2026-10-10 — Расширены измерения памяти Chromium в browser smoke
+
+- Добавлено: информационная попытка прочитать CDP `SystemInfo.getProcessInfo` через отдельное browser-level соединение и собрать точные значения `privateMemory` для полного списка доступных процессов. В JSON профиля сохраняются baseline, sampled maximum, end, число процессов и явная причина недоступности метрик; неполные выборки отвергаются.
+- Проверка: unit-регрессии на фактические числовые счётчики, частичную выдачу и недоступный CDP-метод. Main renderer JS heap sampling остаётся рабочим независимо от наличия process metric.
+- Интерпретация: это **сэмплированная сумма private memory Chromium**, не независимая память Worker, процессный RSS/high-water и не реальный пик. Не добавлены CI RAM/latency thresholds. Production/runtime, версия и generated bundle не меняются.
+
+
 ### 2026-10-10 — Добавлены контрольные browser-измерения памяти 16-bit tiled-заливки
 
 - Добавлено: `tools/browser-renderer-heap-sampler.mjs` собирает через Chromium DevTools Protocol периодические численные значения renderer `JSHeapUsedSize` с baseline, sampled maximum и контрольными точками.
