@@ -53,6 +53,16 @@ Alternating forward/backward passes make good offsets propagate across the hole 
 
 This is **PatchMatch-style texture synthesis**, not Adobe's proprietary implementation and not an ML/semantic fill system.
 
+## Stage 003 — tiled high-depth ROI
+
+For persisted v2 tiled RGB/CMYK sources, the command uses a single **selection bounding rectangle + 24 px halo** as the donor working region. It scans the frozen layer-local selection predicate without decoding any tiles, then reads only tiles that overlap the ROI, calls the existing native typed-sample inpaint kernel once, and writes back only changed tiles. No per-tile independent synthesis: the ROI spans tile boundaries.
+
+- The full **ROI** still obeys the existing 8 MP inpaint layer cap; the global selected count obeys the 2 MP fill cap. A selection of the whole source remains a no-donor no-op.
+- Small localized fills on an otherwise larger tiled layer can therefore succeed without the old full-plane decode; distant scattered fills may fail the ROI cap rather than silently degrading precision.
+- Donors remain immutable original non-selected pixels **inside the halo**; PatchMatch search does not see donors outside the bounded ROI. This is a deliberate changed texture-search scope, not bit-identical full-plane output.
+- Unchanged tile payloads are reused as-is; the new source/preview is published only after exact document, live raster target/lock and original serialized-source identity survive asynchronous preparation. Stale jobs have zero publication/history.
+- The browser composite still requires a full RGBA8 preview surface; this is not a virtual-memory renderer, thread/worker implementation or Adobe result parity claim.
+
 ## Large-region fallback
 
 Patch search is intentionally capped. If the selected area exceeds the PatchMatch refinement budget, Stage 1 remains the final result.
