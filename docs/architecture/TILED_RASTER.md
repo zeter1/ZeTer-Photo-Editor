@@ -87,6 +87,8 @@ Full RGBA8 display canvas пока остаётся нужен browser composito
 
 `src/core/tiled-inpaint-worker-protocol.js` принимает detached tiled source и snapshot выбранных индексов (`Array` / `Uint32Array`), валидирует геометрию и индексы, строит frozen predicate и повторно использует канонический synchronous `inpaintTiledPixelBufferSource`. `tools/tiled-inpaint-worker-thread.mjs` исполняет этот контракт в Node `worker_threads` через structured clone; отрицательные задания возвращают `{ok:false,error}`, не уничтожая процесс Worker. Тест покрывает distant CMYKA Float32 и сравнивает `source` с синхронным эталоном.
 
+Для detached Worker selection membership теперь используется битовая карта из одного бита на пиксель (до 2 MiB при общем лимите native source 48 MiB), а не `Set` из JS-чисел. Индексы из `Array`/`Uint32Array` проверяются на границы и дубликаты до запуска kernel; malformed geometry выше предельного числа RGB8-пикселей отклоняется до аллокации bitmap. Это уменьшает дополнительный RAM на Worker-side selection, **но не устраняет повторный полный scan** внутри `inpaintTiledPixelBufferSource`. Следующий performance seam — consumer frozen-index API, не меняющий общий renderer без parity tests.
+
 Это только portable compute/protocol seam: модуль **не** включён в `tools/build-bundle.mjs`, браузер не создаёт Worker, `file://` constraints не решены. Перед production integration нужны worker lifecycle, transfer/memory budget, exact-owner generation, real cancellation во время expensive ROI execution и browser smoke.
 
 ## Worker lifecycle seam — isolated Stage 003 (2026-10-10)
