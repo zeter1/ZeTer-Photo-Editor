@@ -1,5 +1,10 @@
 # task — очередь небольших инженерных проходок
 
+## Текущая проходка — Stage 003: немедленная отмена stale Worker (2026-10-10)
+
+- В ветке `fix/tiled-inpaint-worker-stale-poll-20261010` добавляется bounded polling `isCurrent` (50 мс) только во время active browser Worker; при смене слоя/source/lock задача завершается через `terminate()` без Worker-ответа. Node regression проверяет контроль таймера, cleanup и продолжение работы после отмены. До PR merge и зелёного `main` CI этот подэтап не закрывать.
+- **Следующая проходка:** browser peak memory/latency real 16/32-bit PSD/PSB (decode → tiled fill → preview) с независимыми fixture hashes и отсутствием CI time threshold. Затем wide connected ROI и отмена синхронного fallback/preview. Целиком `003` остаётся открытой.
+
 ## Последний закрытый подэтап — Stage 003: end-to-end UI Content-Aware Fill (2026-10-10)
 
 - Цель проходки: реальный `file://` импорт native `.zpe` с 16-bit RGB tiled источником, прямоугольное выделение через pointer, Edit → Content-Aware Fill, наблюдение реального `Worker.postMessage`, изменение пикселя, **одна** History-запись, Undo/Redo.

@@ -31,9 +31,10 @@ class FakeBrowserWorker {
   terminate() { this.terminated += 1; }
 }
 
-function fakeController() {
+function fakeController({ pollIntervalMs = 0, schedulePoll, cancelPoll } = {}) {
   const workers = [];
   const client = createTiledInpaintWorkerJobController({
+    pollIntervalMs, schedulePoll, cancelPoll,
     createWorker:() => {
       const worker = new FakeBrowserWorker();
       workers.push(worker);
@@ -286,4 +287,83 @@ test('Stage 003 Worker client: invalid factory return terminates a partially val
   await assert.rejects(client.run({ source:'example' }), /invalid Worker instance/);
   assert.equal(terminations, 1);
   assert.equal(client.cancel(), false);
+});
+
+
+test('Stage 003 Worker client: polling terminates stale CPU-bound job before any reply', async () => {
+  const timers = new Set();
+  const scheduler = {
+    schedulePoll(callback, ms) {
+      assert.equal(ms, 25);
+      timers.add(callback);
+      return callback;
+    },
+    cancelPoll(callback) { timers.delete(callback); },
+  };
+  const { client, workers } = fakeController({ pollIntervalMs:25, ...scheduler });
+  let current = true;
+  const pending = client.run({ source:'locked-during-compute' }, { isCurrent:() => current });
+  workers[0].emit('message', { ready:true });
+  const id = workers[0].sent[0].id;
+  assert.equal(timers.size, 1);
+  // Simulate a layer becoming locked while the Worker emits no messages.
+  current = false;
+  for (const tick of [...timers]) tick();
+  assert.deepEqual(await pending, { cancelled:true });
+  assert.equal(workers[0].terminated, 1, 'terminate stops busy computation');
+  assert.equal(timers.size, 0, 'poll timer is released immediately');
+  for (const type of ['message', 'error', 'messageerror']) {
+    assert.equal(workers[0].handlers.get(type).size, 0);
+  }
+  workers[0].emit('message', { id, ok:true, result:'forbidden' });
+  assert.equal(client.cancel(), false);
+
+  current = true;
+  const next = client.run({ source:'fresh' }, { isCurrent:() => current });
+  workers[1].emit('message', { ready:true });
+  workers[1].emit('message', { id:workers[1].sent[0].id, ok:true, result:'safe' });
+  assert.equal(await next, 'safe');
+  assert.equal(timers.size, 0, 'success must clear polling too');
+});
+
+test('Stage 003 Worker client: polling cleans up before ready, explicit cancel and errors', async () => {
+  const timers = new Set();
+  const { client, workers } = fakeController({
+    pollIntervalMs:25,
+    schedulePoll(callback) { timers.add(callback); return callback; },
+    cancelPoll(callback) { timers.delete(callback); },
+  });
+  const beforeReady = client.run({});
+  assert.equal(timers.size, 1);
+  assert.equal(client.cancel(), true);
+  assert.deepEqual(await beforeReady, { cancelled:true });
+  assert.equal(timers.size, 0);
+  assert.equal(workers[0].terminated, 1);
+
+  const error = client.run({});
+  workers[1].emit('messageerror', {});
+  await assert.rejects(error, /message deserialization failed/);
+  assert.equal(timers.size, 0);
+  assert.equal(workers[1].terminated, 1);
+
+  let current = true;
+  const staleBeforeReady = client.run({}, { isCurrent:() => current });
+  current = false;
+  for (const tick of [...timers]) tick();
+  assert.deepEqual(await staleBeforeReady, { cancelled:true });
+  assert.equal(workers[2].sent.length, 0);
+  assert.equal(timers.size, 0);
+});
+
+test('Stage 003 Worker client: reentrant scheduler is removed after immediate stale cancellation', async () => {
+  let clears = 0;
+  let current = true;
+  const { client, workers } = fakeController({
+    pollIntervalMs:10,
+    schedulePoll(tick) { current = false; tick(); return 'timer'; },
+    cancelPoll(timer) { assert.equal(timer, 'timer'); clears++; },
+  });
+  assert.deepEqual(await client.run({}, { isCurrent:() => current }), { cancelled:true });
+  assert.equal(workers[0].terminated, 1);
+  assert.equal(clears, 1);
 });
