@@ -1,5 +1,13 @@
 # task — очередь небольших инженерных проходок
 
+## Проходка Stage 002 P0 — preflight независимых 16-bit PSD / 32-bit PSB (2026-10-10)
+
+- Реализован локальный аудит `tools/audit-external-high-depth-corpus.mjs`: manifest с **двумя** внешними образцами (16-bit PSD v1 и 32-bit PSB v2), pinned SHA-256/size, исходной HTTPS-ссылкой, заявленным Photoshop provenance и лицензией; независимо проверяются 8BPS, reserved bytes, version, channels, geometry, bit depth и color mode. Нет network download и доверия имени расширения.
+- Новые Node regressions: `tests/audit-external-high-depth-corpus.test.mjs` — положительный CLI/JSON контракт на **header-only mocks**, подмена bytes, size/header mismatch, неполный corpus, ложное происхождение и path traversal.
+- **Статус:** реализован *только* инструмент предварительного аудита, ещё **нет** подтверждённых независимых реальных 16/32-bit Photoshop-authored fixtures. Header-only тесты **не** доказывают PSD decoder/Photoshop render.
+- **Дальше P0:** добыть лицензированную пару реальных файлов; сохранить `manifest.json` и оба файла в новом provenance corpus; прогнать аудит, затем полный `decodePsd → native tiles → Worker → file:// preview/Undo/Redo` с memory sample. После этого P1: широкий connected ROI и прерываемый fallback/preview. Задачи 002/003 **открыты**.
+
+
 ## Актуальный приоритет — следующая проходка (Stage 002/003, 2026-10-10)
 
 Активная задача: [003 — Tiled Content-Aware Fill](003-tiled-content-aware.md). Не считать прежние merged-подэтапы завершением всей задачи.
