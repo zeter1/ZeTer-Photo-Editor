@@ -1,5 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
+## Stage 003 P1 — cooperative ROI cancellation (2026-10-10)
+
+- Сделано: main-thread Content-Aware fallback yield после обработки каждого disjoint ROI и перед сериализацией single ROI. Отмена отбрасывает приватные tiles, не публикует неполный результат. Sync API и detached Worker используют те же ROI-шаги без asynchronous yield.
+- Проверяется: Uint16 exact parity, один scan selection, отмена после первой области и перед публикацией одиночной, исходные tile payload неизменны. Для закрытия подэтапа нужны PR CI и браузерный smoke.
+- **Следующее:** полноценная отмена ВНУТРИ одного большого ROI, wide connected ROI без inflated bounding boxes, реальные независимо созданные Photoshop PSD16/PSB32 с лицензией, hashes, browser file:// Worker/preview/Undo и memory snapshots. Задачи 002 и 003 **открыты**.
+
+
 ## Проходка — exact selection halo для соседних tiled cells (2026-10-10)
 
 - Проблема: старый oversized ROI planner сливал соседние занятые **полные** tiles, даже если фактические выбранные пиксели и их donor halo не пересекались; это давало ложный RangeError из-за inflated рабочей площади.

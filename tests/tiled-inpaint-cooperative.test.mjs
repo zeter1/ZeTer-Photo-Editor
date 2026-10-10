@@ -103,3 +103,52 @@ test('Stage 003: document replacement during a long scan aborts without preview 
   assert.equal(layer.highDepthSource, source);
   assert.equal(layer.dataUrl, null);
 });
+
+test('Stage 003: cooperative ROI boundaries preserve exact parity and atomic cancellation', async () => {
+  const width=256,height=16,channels=3;
+  const data=new Uint16Array(width*height*channels).fill(10000);
+  for(const x of [7,248]) data.fill(60000,(7*width+x)*channels,(7*width+x+1)*channels);
+  const source=serializeTiledPixelBufferSource(createPixelBuffer({
+    width,height,model:'rgb',channels,bitsPerChannel:16,colorSpace:'srgb',data,
+  }),{tileSize:8}), snapshot=JSON.stringify(source);
+  const isAllowed=(x,y)=>y===7&&(x===7||x===248);
+  const opts={halo:2,maxLayerPixels:64,scanChunkPixels:width*height};
+  const oracle=inpaintTiledPixelBufferSource(source,{...opts,isAllowed});
+  let yields=0,samples=0;
+  const complete=await inpaintTiledPixelBufferSourceCooperative(source,{
+    ...opts,isAllowed:(x,y)=>{samples++;return isAllowed(x,y);},
+    yieldControl:async()=>{yields++;},
+  });
+  assert.equal(yields,2,'yield once for each isolated ROI');
+  assert.equal(samples,width*height,'selection sampled only once');
+  assert.deepEqual(complete,oracle);
+  yields=0;
+  let cancelled=false;
+  const result=await inpaintTiledPixelBufferSourceCooperative(source,{
+    ...opts,isAllowed,isCancelled:()=>cancelled,
+    yieldControl:async()=>{yields++;cancelled=true;},
+  });
+  assert.equal(yields,1,'cancel before second ROI');
+  assert.equal(result.cancelled,true);
+  assert.equal(result.changed,0);
+  assert.equal(result.changedTiles,0);
+  assert.equal(result.loadedTiles,0);
+  assert.equal(result.source,source);
+  assert.equal(JSON.stringify(source),snapshot,'never publish partially computed tiles');
+});
+
+test('Stage 003: single-ROI fallback cancellation before serialization preserves source', async () => {
+  const source=fixture(),snapshot=JSON.stringify(source),y=Math.floor(source.height/2);
+  let yields=0,cancelled=false;
+  const result=await inpaintTiledPixelBufferSourceCooperative(source,{
+    isAllowed:(x,row)=>row===y&&x===7,
+    scanChunkPixels:source.width*source.height,halo:2,
+    isCancelled:()=>cancelled,
+    yieldControl:async()=>{yields++;cancelled=true;},
+  });
+  assert.equal(yields,1);
+  assert.equal(result.cancelled,true);
+  assert.equal(result.changed,0);
+  assert.equal(result.source,source);
+  assert.equal(JSON.stringify(source),snapshot);
+});
