@@ -78,6 +78,12 @@ The algorithm works directly on typed samples:
 
 Integer patch differences are normalized by their native sample range. Float differences use a bounded relative scale so HDR/unmanaged samples are compared without first clipping them to 0…1.
 
+### Model-aware channel and straight-alpha contract
+
+The inpaint kernel accepts an explicit `alphaChannel` (default RGBA=3, CMYKA=4, or `-1` for no alpha). The native PixelBuffer bridge derives it from validated `alphaMode`. Four-channel CMYK has **four opaque inks**, not an alpha channel; PatchMatch compares K along with C/M/Y. RGB3 and CMYK4 never exclude their final color channel.
+
+For straight alpha the boundary stage averages donor colors in premultiplied form, then returns straight colors, averaging alpha with the original spatial weights. Fully transparent donor colors cannot create colored halos; samples outside selection stay untouched. PatchMatch copies exact donor samples and retains the immutable original-selection donor rule.
+
 ## Tests
 
 Primary regressions live in `tests/content-aware-fill.test.mjs`.
