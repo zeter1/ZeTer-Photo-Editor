@@ -86,3 +86,11 @@
 - **Граница:** Worker всё ещё не подключён к `file://` runtime; не сделаны browser bootstrap, owner-aware UI publication, browser memory profiling, wide connected ROI. Весь пункт 003 **остаётся открытым**.
 
 - **Verified gate:** PR CI [#38056357279](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38056357279) — success; exact `main` push CI [#38056411335](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38056411335) — success на squash SHA `b68aaaa29cdbc13e66e184e153e9aab804857757`. Этот lifecycle подэтап завершён, вся 003 остаётся открытой.
+
+
+## Проходка 2026-10-10 — fail-closed Worker `messageerror` и invalid factory cleanup (PR pending)
+
+- **Обнаружено:** браузерный Worker при ошибке structured-clone deserialization испускает `messageerror`, а не `error`. Клиент не завершал Promise, не освобождал Worker и блокировал ожидающий job. Node-shaped `messageerror` также не обрабатывался.
+- **Исправление:** `src/core/tiled-inpaint-worker-client.js` завершает активный job typed Error, очищает listeners и вызывает `terminate()` как до `ready`, так и после dispatch. Invalid factory return с доступным `terminate` освобождается до reject; асинхронный reject terminate не порождает unhandled rejection.
+- **Проверка:** регрессии браузерного/Node-shaped `messageerror`, late reply, восстановления следующего job, утечки обработчиков и defective factory в `tests/tiled-inpaint-worker-client.test.mjs`. Запустить `npm run check` и browser smoke CI; PR + main push gates отметить только после подтверждения.
+- **Граница:** всё ещё **не** file:// Worker bootstrap, не UI integration, не true mid-kernel cancellation, не широкий связный ROI или heavy real high-depth PSD/PSB UI memory profiling; вся 003 остаётся открытой.

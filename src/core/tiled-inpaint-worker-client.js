@@ -39,6 +39,12 @@ export function createTiledInpaintWorkerJobController({ createWorker } = {}) {
       worker = createWorker();
       if (!worker || typeof worker.postMessage !== 'function' ||
           typeof worker.terminate !== 'function') {
+        // A factory may return a partially usable Worker. Release it before
+        // rejecting so a broken adapter does not leave a live thread behind.
+        try {
+          const termination = worker?.terminate?.();
+          if (termination && typeof termination.catch === 'function') termination.catch(() => {});
+        } catch { /* preserve the invalid Worker error */ }
         throw new TypeError('Tiled inpaint Worker: invalid Worker instance');
       }
     } catch (error) {
@@ -99,23 +105,31 @@ export function createTiledInpaintWorkerJobController({ createWorker } = {}) {
         if (typeof worker.addEventListener === 'function') {
           const onMessage = event => message(event.data);
           const onError = event => fail(new Error(String(event?.message || 'Worker error')));
+          // A structured-clone decoding failure emits messageerror, not error.
+          // Without this listener the awaiting UI job would never settle.
+          const onMessageError = () => fail(new Error('Tiled inpaint Worker: message deserialization failed'));
           detach = () => {
             worker.removeEventListener('message', onMessage);
             worker.removeEventListener('error', onError);
+            worker.removeEventListener('messageerror', onMessageError);
           };
           worker.addEventListener('message', onMessage);
           worker.addEventListener('error', onError);
+          worker.addEventListener('messageerror', onMessageError);
         } else if (typeof worker.on === 'function' && typeof worker.off === 'function') {
           const onMessage = data => message(data);
           const onError = error => fail(error);
+          const onMessageError = () => fail(new Error('Tiled inpaint Worker: message deserialization failed'));
           const onExit = code => fail(new Error('Tiled inpaint Worker exited before reply: ' + code));
           detach = () => {
             worker.off('message', onMessage);
             worker.off('error', onError);
+            worker.off('messageerror', onMessageError);
             worker.off('exit', onExit);
           };
           worker.on('message', onMessage);
           worker.on('error', onError);
+          worker.on('messageerror', onMessageError);
           worker.on('exit', onExit);
         } else {
           fail(new TypeError('Tiled inpaint Worker: missing message event API'));

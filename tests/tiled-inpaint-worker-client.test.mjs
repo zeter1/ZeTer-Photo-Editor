@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
+import { EventEmitter } from 'node:events';
 import {
   createPixelBuffer,
   inpaintTiledPixelBufferSource,
@@ -218,5 +219,71 @@ test('Stage 003 Worker client: exceptions while subscribing terminate a partiall
   assert.equal(worker.terminated, 1);
   assert.equal(worker.handlers.get('message').size, 0);
   assert.equal(worker.handlers.get('error').size, 0);
+  assert.equal(client.cancel(), false);
+});
+
+
+test('Stage 003 Worker client: browser messageerror before ready and after dispatch fails closed', async () => {
+  const { client, workers } = fakeController();
+
+  const before = client.run({ source:'first' });
+  workers[0].emit('messageerror', { message:'bad clone' });
+  await assert.rejects(before, /message deserialization failed/);
+  assert.equal(workers[0].sent.length, 0, 'a failed handshake must never dispatch');
+  assert.equal(workers[0].terminated, 1);
+  for (const type of ['message', 'error', 'messageerror']) {
+    assert.equal(workers[0].handlers.get(type).size, 0, type + ' listeners must be detached');
+  }
+  assert.equal(client.cancel(), false);
+
+  const after = client.run({ source:'second' });
+  workers[1].emit('message', { ready:true });
+  assert.equal(workers[1].sent.length, 1);
+  workers[1].emit('messageerror', {});
+  await assert.rejects(after, /message deserialization failed/);
+  assert.equal(workers[1].terminated, 1);
+  workers[1].emit('message', { id:workers[1].sent[0].id, ok:true, result:'stale' });
+  assert.equal(client.cancel(), false);
+
+  const recovered = client.run({ source:'third' });
+  workers[2].emit('message', { ready:true });
+  workers[2].emit('message', { id:workers[2].sent[0].id, ok:true, result:'safe' });
+  assert.equal(await recovered, 'safe', 'error must not poison later jobs');
+});
+
+test('Stage 003 Worker client: node-shaped messageerror stops active job', async () => {
+  class FakeNodeWorker extends EventEmitter {
+    terminated = 0;
+    sent = [];
+    postMessage(job) { this.sent.push(job); }
+    terminate() { this.terminated += 1; return Promise.resolve(0); }
+  }
+  const worker = new FakeNodeWorker();
+  const client = createTiledInpaintWorkerJobController({ createWorker:() => worker });
+  const pending = client.run({ source:'example' });
+  worker.emit('message', { ready:true });
+  worker.emit('messageerror', new Error('could not deserialize'));
+  await assert.rejects(pending, /message deserialization failed/);
+  assert.equal(worker.sent.length, 1);
+  assert.equal(worker.terminated, 1);
+  for (const type of ['message', 'error', 'messageerror', 'exit']) {
+    assert.equal(worker.listenerCount(type), 0);
+  }
+  assert.equal(client.cancel(), false);
+});
+
+test('Stage 003 Worker client: invalid factory return terminates a partially valid Worker', async () => {
+  let terminations = 0;
+  const client = createTiledInpaintWorkerJobController({
+    createWorker:() => ({
+      terminate() {
+        terminations += 1;
+        return Promise.reject(new Error('async termination failure'));
+      },
+      // postMessage is missing, but terminate must still be called.
+    }),
+  });
+  await assert.rejects(client.run({ source:'example' }), /invalid Worker instance/);
+  assert.equal(terminations, 1);
   assert.equal(client.cancel(), false);
 });
