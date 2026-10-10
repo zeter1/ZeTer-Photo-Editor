@@ -60,3 +60,7 @@
 
 - Добавлен отдельный informational benchmark реальных upstream PSD CMYK и layered PSB (`tools/profile-real-psd-inpaint.mjs`) со сверкой исходных SHA-256, раздельными стадиями decode→tiles→inpaint и process-wide RSS. Тест проверяет sync/cooperative parity и отмену ещё до ROI decode на *внешнем* корпусе. Это тестово-измерительная проходка без production logic / version bump.
 - **Gate внешних 8-bit PSD/PSB fixtures закрыт:** [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38054015772), [exact main push CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38054094819), squash SHA `36236c0c17584bf46669fc93a32bc90a7bec10b5`; 1046 Node tests + browser/file:// smoke. **Открыто:** большие реальные 16/32-bit PSD/PSB + browser UI profile, worker-owned kernel/true cancellation и широкий связный ROI. **003 не удалять**.
+
+### Подэтап 003 — Worker protocol probe (2026-10-10, ожидает CI/merge)
+
+- Создан узкий Node `worker_threads` proof-of-contract для frozen selection → tiled inpaint compute → structured-clone result с sync parity и отрицательными тестами. Это **не** браузерная Worker-интеграция и **не** mid-kernel cancellation. Подробности в [003](003-tiled-content-aware.md). Никаких выводов о `file://` Worker или об устранении main-thread latency пока не делать; 003 открыта.
