@@ -1,5 +1,12 @@
 # task — очередь небольших инженерных проходок
 
+## Проходка Stage 003 — быстрый abort ожидания browser Worker bootstrap (2026-10-10)
+
+- Обнаружен промежуток отмены **до** создания `Worker`: `cancel()` или новый вызов `run()` раньше оставляли предыдущее ожидание single-flight `file://` supplier до скриптового `onload` / timeout (до 5 секунд). Теперь stale bootstrap promise завершается сразу, loader для следующей операции сохраняется, compute errors по-прежнему fail closed.
+- Регрессии: `tests/tiled-inpaint-browser-worker.test.mjs` — cancel/supersede до `onload`, отсутствие дубля `script`, отсутствие создания устаревшего Worker, штатный запуск следующего задания; обновлены browser bundle и cache manifest. Статус в PR / CI — проверять перед закрытием проходки.
+- **Следующая задача:** отдельно добыть независимые Photoshop-authored 16/32-bit PSD/PSB fixtures с SHA-256 и лицензированным provenance, провести file:// decode → tiled UI Worker → preview и memory/latency profile. После этого — широкий connected ROI и реальное прерывание fallback/preview. Основные `002` и `003` **ещё не закрыты**.
+
+
 
 ## Подэтап Stage 003 — упорядочивание CDP memory snapshots (2026-10-10)
 
