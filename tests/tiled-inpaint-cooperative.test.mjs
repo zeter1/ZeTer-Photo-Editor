@@ -4,6 +4,8 @@ import {
   createPixelBuffer,
   deserializePixelBufferSource,
   inpaintTiledPixelBufferSource,
+  inpaintTiledPixelBufferSourceFromIndices,
+  inpaintTiledPixelBufferSourceFromIndicesCooperative,
   inpaintTiledPixelBufferSourceCooperative,
   serializeTiledPixelBufferSource,
 } from '../src/core/pixel-buffer.js';
@@ -151,4 +153,40 @@ test('Stage 003: single-ROI fallback cancellation before serialization preserves
   assert.equal(result.changed,0);
   assert.equal(result.source,source);
   assert.equal(JSON.stringify(source),snapshot);
+});
+
+test('Stage 003: frozen-index cooperative fallback is identical and cancels between disconnected ROIs', async () => {
+  const width = 256, height = 16, channels = 3;
+  const data = new Uint16Array(width * height * channels).fill(10000);
+  const indices = [7 * width + 7, 7 * width + 248];
+  for (const index of indices) data.fill(60000, index * channels, (index + 1) * channels);
+  const source = serializeTiledPixelBufferSource(createPixelBuffer({
+    width, height, model:'rgb', channels, bitsPerChannel:16, data,
+  }), { tileSize:8 });
+  const snapshot = JSON.stringify(source);
+  const opts = { selectedIndices:Uint32Array.from(indices), halo:2, maxLayerPixels:64 };
+  const expected = inpaintTiledPixelBufferSourceFromIndices(source, opts);
+  let yields = 0;
+  const complete = await inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+    ...opts, yieldControl:async () => { yields++; },
+  });
+  assert.deepEqual(complete, expected);
+  assert.equal(yields, 3, 'one pre-ROI yield plus two ROI-boundary yields');
+  assert.equal(JSON.stringify(source), snapshot);
+  let cancelled = false;
+  yields = 0;
+  const stopped = await inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+    ...opts,
+    isCancelled:() => cancelled,
+    yieldControl:async () => { yields++; if (yields === 2) cancelled = true; },
+  });
+  assert.equal(yields, 2, 'cancellation after first private ROI');
+  assert.equal(stopped.cancelled, true);
+  assert.equal(stopped.changed, 0);
+  assert.equal(stopped.loadedTiles, 0);
+  assert.equal(stopped.source, source);
+  assert.equal(JSON.stringify(source), snapshot);
+  await assert.rejects(inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+    ...opts, selectedIndices:[indices[0], indices[0]],
+  }), /duplicate selected index/);
 });
