@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -127,6 +127,42 @@ test('Stage 002 P0: provenance gaps and filesystem traversal cannot pass audit',
   fixture.sourceUrl = 'file:///local/unknown.psd';
   await state.save();
   await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath), /requires an HTTPS URL/);
+});
+
+test('Stage 002 P0: an identical-hash symlink cannot stand in for a pinned fixture', async t => {
+  const state = await corpus(t);
+  const fixture = state.manifest.fixtures[0];
+  const path = join(state.directory, fixture.file);
+  const backing = join(state.directory, 'backing-rgb16.psd');
+  await rename(path, backing);
+  try {
+    await symlink(backing, path);
+  } catch (error) {
+    if (error.code === 'EPERM' || error.code === 'EACCES' || error.code === 'ENOTSUP') {
+      t.skip('Symlinks unavailable in this environment');
+      return;
+    }
+    throw error;
+  }
+  // Byte size and SHA-256 still exactly match the pinned manifest. The
+  // filesystem identity rule, not just the digest, must reject this path.
+  assert.equal(createHash('sha256').update(await readFile(backing)).digest('hex'), fixture.sha256);
+  await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath), /regular file required/);
+});
+
+test('Stage 002 P0: audit can retry a corrected fixture after a streaming digest failure', async t => {
+  const state = await corpus(t);
+  const fixture = state.manifest.fixtures[1];
+  const path = join(state.directory, fixture.file);
+  const correct = await readFile(path);
+  const tampered = Buffer.from(correct);
+  tampered[tampered.length - 1] ^= 0x04;
+  await writeFile(path, tampered);
+  await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath), /SHA-256 mismatch/);
+  await writeFile(path, correct);
+  const recovered = await auditExternalHighDepthCorpus(state.manifestPath);
+  assert.equal(recovered.passed, true);
+  assert.equal(recovered.fixtures[1].sha256, fixture.sha256);
 });
 
 test('Stage 002 P0: truncated and non-PSD headers fail independent parser', () => {
