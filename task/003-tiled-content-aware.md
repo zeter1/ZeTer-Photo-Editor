@@ -1,5 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
+## Проходка 2026-10-10 — браузерные JS heap samples для реальной 16-bit UI-команды
+
+- **Тестовый подэтап:** `tools/browser-renderer-heap-sampler.mjs` читает CDP `Performance.getMetrics` в реальном Chromium, периодически фиксирует `JSHeapUsedSize`, baseline, sampled maximum и stage markers. `tools/browser-smoke.mjs` выводит JSON для уже существующего полного пути native .zpe RGB16: импорт → видимый preview → marquee → Worker Content-Aware Fill → preview → Undo/Redo.
+- **Контроль:** `tests/browser-renderer-heap-sampler.test.mjs` использует fake CDP, проверяет baseline/peak, отсутствие фиктивных значений и cleanup таймера при ошибке. Нет временных или RAM-порогов, влияющих на CI. Продуктовый runtime/форматы/версия не меняются.
+- **Интерпретация:** sampled renderer JS heap **не** является peak RSS, Worker heap или GPU/native memory; fixture синтетический .zpe RGB16 **не** является Photoshop-authored PSD/PSB. Полный browser memory benchmark реальных больших PSD/PSB ещё **не выполнен**.
+- **После подэтапа:** добавить 16/32-bit **внешние** Photoshop-authored PSD/PSB с pinned hashes/provenance и этапами decode → tiled Worker → preview; измерить независимо renderer/Worker/process RSS, подтвердить tile immutability и high-depth precision. Далее wide connected ROI и прерываемый synchronous fallback/preview. Вся 003 остаётся **открытой** до фактических проверок и green main CI.
+
 ## Проходка 2026-10-10 — stale-owner polling во время Worker compute (merged + green main CI)
 
 - **Observed gap:** `isCurrent` опрашивался только при `ready`/response, а `reset()` отменял Worker при смене документа; изменение lock или `highDepthSource` во время тяжёлого kernel без Worker-событий продолжало грузить CPU до окончания вычисления.

@@ -1,5 +1,11 @@
 # task — очередь небольших инженерных проходок
 
+## Текущий подэтап Stage 003 — sampled browser renderer JS heap (2026-10-10)
+
+- К 16-bit `file://` UI Worker regression добавлен CDP sampler для renderer JS heap: baseline, sampled maximum, отметки после import/preview, Worker/preview и Undo/Redo, информационное elapsed time. Unit-тесты проверяют числа и отказ/cleanup. Подробнее — [003](003-tiled-content-aware.md).
+- **Не путать с готовым 16/32-bit PSD/PSB профилем:** тестовый .zpe synthetic RGB16, heap метрика не включает сам Worker/RSS/native/GPU, выборочная максимальная точка не равна истинному peak. Нет допущения о поддержке тяжёлых Photoshop-файлов по одному этому измерению.
+- **Следующая проходка:** pinned реальные external Photoshop-authored 16/32-bit PSD/PSB (decode → native tiles → UI Worker → preview) с hashes и browser process/Worker high-water memory; далее широкий connected ROI и interruptible fallback/preview. Обе задачи `003` и `002` остаются открытыми.
+
 ## Последний закрытый подэтап — Stage 003: отмена stale Worker (2026-10-10)
 
 - **Слито в `main`:** [PR #158](https://github.com/zeter1/ZeTer-Photo-Editor/pull/158), squash `7d782443c36032e558794d58fa4f712196537b62`. Bounded polling `isCurrent` (50 мс) работает только во время активного browser Worker; при смене слоя/source/lock выполняется `terminate()` без ожидания Worker-ответа. Node regression проверяет timer cleanup, reentrant polling и restart. [PR CI #38063616039](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38063616039) **success**, [точный `main` push CI #38063682771](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38063682771) **success**. Подэтап закрыт; задача 003 остаётся открытой.

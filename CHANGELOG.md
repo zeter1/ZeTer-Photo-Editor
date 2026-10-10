@@ -6,6 +6,12 @@
 
 ## 1.45.1 — текущая версия
 
+### 2026-10-10 — Добавлены контрольные browser-измерения памяти 16-bit tiled-заливки
+
+- Добавлено: `tools/browser-renderer-heap-sampler.mjs` собирает через Chromium DevTools Protocol периодические численные значения renderer `JSHeapUsedSize` с baseline, sampled maximum и контрольными точками.
+- Проверка: существующий `file://` Chromium smoke теперь печатает информационный JSON профиль после реальной 16-bit tiled .zpe UI-команды с Worker, preview и Undo/Redo. Три unit-теста покрывают корректность sampled maximum, отказ при отсутствующих метриках и освобождение таймера после ошибки.
+- Ограничения проверки: нет CI-порогов latency/RAM; выборочный максимум JS heap **не является** peak RSS/Worker/native/GPU memory; benchmark внешних 16/32-bit PSD/PSB ещё предстоит. Пользовательский runtime, версия и generated bundle не меняются.
+
 ### 2026-10-10 — Прерывание устаревшей tiled Content-Aware Fill в активном Worker
 
 - Исправлено: браузерный Worker теперь периодически проверяет актуальность исходного документа, слоя, блокировки и high-depth source. Если владелец устарел, активное вычисление прерывается через `terminate()` без ожидания нового сообщения от занятого потока.
