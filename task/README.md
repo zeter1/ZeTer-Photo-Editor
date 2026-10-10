@@ -20,6 +20,10 @@
 14. Для post-merge verification не ограничивайся helper-ом, который может фильтровать только `pull_request` runs. Если exact merge-SHA push run не виден, используй provider-native GET коллекции `actions/runs?head_sha=<merge-sha>` через GitHub fetch и проверь `event=push`, `head_branch=main`, exact `head_sha` и `conclusion=success`; при failure переходи к jobs/logs.
 15. При добавлении модуля в canonical `file://` bundle помни, что `tools/build-bundle.mjs` снимает ESM-обёртку и конкатенирует classic-script chunks. Если новый модуль использует импортированные `const`/`let` во время module evaluation, его source-order обязан идти после owner-а этих bindings; добавь architecture guard на порядок, а не полагайся только на корректность ESM imports.
 
+## Текущая проходка (2026-10-10) — file:// classic Worker bootstrap
+
+- Готовится isolated **реальный compute** внутри Blob Worker из `file://` (а не только Worker echo). Код накапливается в отдельной ветке; до зелёных PR/main CI не помечать закрытым. Нормальный UI пока не подключён; следующая отдельная работа — runtime loader/fallback + exact-target cancellation + browser perf, не удалять задачу 003.
+
 ## Последний закрытый подэтап (2026-10-10) — Worker selection bitmap
 
 - **003 / Worker bitmap** — в detached compute вместо `Set` используется bitmap максимум 2 MiB; проверены CMYKA parity, дубликаты/индексы и malformed geometry. [PR #150](https://github.com/zeter1/ZeTer-Photo-Editor/pull/150) слит, [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38057597657) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38057640261) зелёные на squash `04650b6087154aeff7d8a5e4e87e70c2cb35fa43`. Полный scan остаётся; далее browser `file://` Worker bootstrap + fallback, exact-owner UI integration, mid-kernel cancellation и проверка тяжёлых PSD/PSB. Задача 003 **не закрыта**.
