@@ -288,6 +288,110 @@ test('superseded PSD failure is silent while the newer import remains authoritat
   assert.equal(h.published[0].next.name,'new-ok');
 });
 
+test('failed newer PSD import keeps authority over older late success and failure', async () => {
+  for (const olderOutcome of ['success','failure']) {
+    const olderDecode=deferred();
+    const newerDecode=deferred();
+    const olderStarted=deferred();
+    const newerStarted=deferred();
+    let calls=0;
+    const h=harness({decodePsd:()=>{
+      calls+=1;
+      if(calls===1){olderStarted.resolve();return olderDecode.promise;}
+      newerStarted.resolve();
+      return newerDecode.promise;
+    }});
+
+    const olderOpen=h.controller.open(file(`older-${olderOutcome}.psd`));
+    await olderStarted.promise;
+    const newerOpen=h.controller.open(file('newer-corrupt.psd'));
+    await newerStarted.promise;
+
+    newerDecode.reject(new Error('newer decode rejected'));
+    await newerOpen;
+    assert.equal(calls,2);
+    assert.equal(h.published.length,0);
+    assert.equal(h.statuses.at(-1),'Ошибка импорта PSD/PSB');
+    assert.equal(h.alerts.length,1);
+    assert.match(h.alerts[0],/newer decode rejected/);
+    assert.equal(h.toasts.at(-1)?.type,'error');
+    assert.equal(h.errors.length,1);
+    assert.equal(h.errors[0][1].name,'newer-corrupt.psd');
+
+    const statuses=structuredClone(h.statuses);
+    const toasts=structuredClone(h.toasts);
+    const alerts=structuredClone(h.alerts);
+    const loggedError=h.errors[0][1].error;
+    if(olderOutcome==='failure'){
+      olderDecode.reject(new Error('superseded decode rejected'));
+    }else{
+      olderDecode.resolve(parsedRgb16());
+    }
+    await olderOpen;
+
+    assert.equal(h.published.length,0,`older ${olderOutcome} must not publish a document`);
+    assert.deepEqual(h.statuses,statuses,`older ${olderOutcome} must not append or replace status`);
+    assert.deepEqual(h.toasts,toasts,`older ${olderOutcome} must not replace toasts`);
+    assert.deepEqual(h.alerts,alerts,`older ${olderOutcome} must not replace alert`);
+    assert.equal(h.errors.length,1,`older ${olderOutcome} must not log another error`);
+    assert.strictEqual(h.errors[0][1].error,loggedError);
+  }
+});
+
+
+test('failed newer PSD import cannot be overwritten by older delayed raster success or failure', async () => {
+  for (const olderOutcome of ['success','failure']) {
+    const raster=deferred();
+    const rasterStarted=deferred();
+    const newerDecode=deferred();
+    const newerStarted=deferred();
+    let decodes=0;
+    const h=harness({
+      decodePsd:()=>{
+        decodes+=1;
+        if(decodes===1)return parsedRgb16();
+        newerStarted.resolve();
+        return newerDecode.promise;
+      },
+      rgbaPixelsToDataUrl:()=>{
+        rasterStarted.resolve();
+        return raster.promise;
+      },
+    });
+
+    const olderOpen=h.controller.open(file(`older-raster-${olderOutcome}.psd`));
+    await rasterStarted.promise;
+    const newerOpen=h.controller.open(file('newer-corrupt-raster.psb'));
+    await newerStarted.promise;
+
+    newerDecode.reject(new Error('newer decode rejected during older raster preparation'));
+    await newerOpen;
+    assert.equal(decodes,2);
+    assert.equal(h.published.length,0);
+    assert.equal(h.statuses.at(-1),'Ошибка импорта PSD/PSB');
+    assert.equal(h.errors.length,1);
+    assert.equal(h.errors[0][1].name,'newer-corrupt-raster.psb');
+
+    const statuses=structuredClone(h.statuses);
+    const toasts=structuredClone(h.toasts);
+    const alerts=structuredClone(h.alerts);
+    const newerError=h.errors[0][1].error;
+    if(olderOutcome==='failure'){
+      raster.reject(new Error('superseded raster encode rejected'));
+    }else{
+      raster.resolve('data:image/png;base64,AAAA');
+    }
+    await olderOpen;
+
+    assert.equal(h.published.length,0,`older raster ${olderOutcome} must not publish`);
+    assert.deepEqual(h.statuses,statuses,`older raster ${olderOutcome} must not change statuses`);
+    assert.deepEqual(h.toasts,toasts,`older raster ${olderOutcome} must not change toasts`);
+    assert.deepEqual(h.alerts,alerts,`older raster ${olderOutcome} must not change alerts`);
+    assert.equal(h.errors.length,1,`older raster ${olderOutcome} must not log another error`);
+    assert.strictEqual(h.errors[0][1].error,newerError);
+  }
+});
+
 test('rejected newer replacement preflight does not supersede an authorized PSD import', async () => {
   const decodeA=deferred();
   const startedA=deferred();
