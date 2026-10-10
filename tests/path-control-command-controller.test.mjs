@@ -173,8 +173,8 @@ test('Alt+Shift anchor makes open Shape midpoint smooth with aligned neighbour t
   const outVector = { x:middle.handleOut.x - middle.x, y:middle.handleOut.y - middle.y };
   assert.ok(Math.abs(inVector.x * outVector.y - inVector.y * outVector.x) < 1e-9);
   assert.ok(inVector.x * outVector.x + inVector.y * outVector.y > 0);
-  assert.equal(Math.hypot(inVector.x, inVector.y), Math.hypot(12, 6) / 3);
-  assert.equal(Math.hypot(outVector.x, outVector.y), Math.hypot(18, -6) / 3);
+  assert.ok(Math.abs(Math.hypot(inVector.x, inVector.y) - Math.hypot(12, 6) / 3) < 1e-9);
+  assert.ok(Math.abs(Math.hypot(outVector.x, outVector.y) - Math.hypot(18, -6) / 3) < 1e-9);
   assert.deepEqual(points[0], before[0]);
   assert.deepEqual(points[2], before[2]);
   assert.deepEqual(h.commits, ['Сгладить Bézier-узел']);
