@@ -1,4 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { publishBuildArtifacts } from './build-output-transaction.mjs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -163,9 +164,9 @@ const buildId = hashBuild([normalizedIndex, stylesSource, bundle]);
 const stampedIndex = stampBuildMeta(versionedIndex, buildId);
 const versionManifest = JSON.stringify({ version: packageJson.version, build: buildId }, null, 2) + '\n';
 
-await Promise.all([
-  writeFile(resolve(root, 'src/app.bundle.js'), bundle, 'utf8'),
-  writeFile(resolve(root, 'index.html'), stampedIndex, 'utf8'),
-  writeFile(resolve(root, 'version.json'), versionManifest, 'utf8'),
+await publishBuildArtifacts([
+  { path: resolve(root, 'src/app.bundle.js'), content: bundle },
+  { path: resolve(root, 'index.html'), content: stampedIndex },
+  { path: resolve(root, 'version.json'), content: versionManifest },
 ]);
 console.log(`Built src/app.bundle.js and cache manifest ${buildId}`);
