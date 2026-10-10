@@ -75,6 +75,9 @@ export function createBrowserTiledInpaintWorkerController({
 
   class BootstrapUnavailableError extends Error {}
   const client = createTiledInpaintWorkerJobController({
+    // Exact-owner checks must terminate a stale in-flight computation even
+    // when the Worker is CPU-bound and cannot send another message.
+    pollIntervalMs:50,
     createWorker() {
       let url;
       try {
