@@ -535,10 +535,13 @@ async function runSmoke() {
         const start = performance.now();
         const first = await controller.run(job);
         const elapsedMs = performance.now() - start;
-        // With source cached, one microtask allows run() to create the next
-        // Worker, before its asynchronously emitted ready/reply events.
+        // Supplier bootstrap now crosses a Promise.race. Drain bounded
+        // microtasks until the second Worker is constructed, then cancel it
+        // *before* browser ready/reply events can run in the next task.
         const pending = controller.run(job);
-        await Promise.resolve();
+        for (let attempt = 0; attempt < 16 && created < 2; attempt += 1) {
+          await Promise.resolve();
+        }
         const stopped = controller.cancel();
         const cancelled = await pending;
         const third = await controller.run(job);

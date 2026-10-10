@@ -1,5 +1,13 @@
 # 003 — Tiled Content-Aware Fill
 
+## Проходка 2026-10-10 — немедленная отмена ожидания supplier при запуске Worker
+
+- **Проблема:** до создания Worker вызов `run()` ожидал общий `loadSource()` до `onload/onerror` или 5-секундного timeout; `cancel()` / новый `run()` меняли generation, но устаревшее обещание UI продолжало висеть до завершения загрузчика.
+- **Изменение:** у каждого ожидающего запуска теперь собственный прерываемый promise; `cancel()` и superseding `run()` немедленно возвращают устаревшему вызову `{ cancelled:true }`, при этом общий single-flight supplier остаётся загружаться и повторно используется новым запросом. Запущенный Worker по-прежнему отменяется через штатный client, а compute/protocol failures не переходят в fallback.
+- **Регрессии:** `tests/tiled-inpaint-browser-worker.test.mjs` проверяет завершение до события `onload` **и до supplier timeout**, отсутствие Worker для отменённой операции, один script tag и возобновление нового запроса после успешной общей загрузки. Нет искусственного таймингового CI threshold.
+- **Граница:** уже начатый синхронный fallback / UI preview этим изменением не прерывается. Browser Worker profile реальных независимых Photoshop-authored 16/32-bit PSD/PSB, широкий connected ROI и полноценно interruptible fallback остаются открыты. До green CI/слияния подэтап считать незакрытым.
+
+
 
 ## Проходка 2026-10-10 — детерминированный порядок CDP memory snapshots
 
