@@ -9,7 +9,7 @@
 3. **P1 / algorithm:** проработать широкий связный ROI без непропорционального global bounding rectangle (сохранить donor/halo и atomic publication, защиту памяти).
 4. **P1 / cancellation:** отдельная прерываемая main-thread fallback/preview ветка с immutable snapshot и exact-owner checks; без повтора выборки и без частичных tile writes.
 
-**Текущая регрессионная проходка:** синтетический (созданный ZeTer writer) RGB16 PSD и Float32 HDR PSB теперь проверяется по полной цепочке binary decode → tiles → реальный Node Worker → bounded inpaint oracle. Это закрывает внутренний seam, **не закрывает** P0 внешний corpus и browser memory. Файл: `tests/tiled-inpaint-high-depth-psd-psb-worker.test.mjs`. Дождаться успешных PR/main CI прежде чем отмечать проходку merged.
+**Текущая регрессионная проходка:** синтетический (созданный ZeTer writer) RGB16 PSD и Float32 HDR PSB теперь проверяется по полной цепочке binary decode → tiles → реальный Node Worker → bounded inpaint oracle. Это закрывает внутренний seam, **не закрывает** P0 внешний corpus и browser memory. Файл: `tests/tiled-inpaint-high-depth-psd-psb-worker.test.mjs`. [PR #165](https://github.com/zeter1/ZeTer-Photo-Editor/pull/165) **merged** (squash `454d4701ff3bc737d450c28565f6afe4eeb83d86`); [PR CI #38068148332](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38068148332) и [точный main push CI #38068208280](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38068208280) — **success**. Внутренний high-depth Worker seam закрыт; Stage 003 и P0 независимых файлов остаются открытыми.
 
 ## Stage 003 — real external PSD/PSB → Node Worker regression (2026-10-10; merged, main CI green)
 
