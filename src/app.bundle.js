@@ -6970,7 +6970,94 @@ function inpaintTiledPixelBufferSource(source, {
   };
   const area = (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
   if (area > maxLayerPixels) {
-    throw new RangeError('Контент-заливка: рабочая область ' + area + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
+    // Distant holes may use multiple bounded ROIs, but the padded tile
+    // footprints must be disjoint so another hole cannot become a donor.
+    const oversized = () => new RangeError('Контент-заливка: рабочая область ' + area + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
+    const tileSize = source.tileSize, columns = Math.ceil(width / tileSize);
+    const occupied = new Map();
+    for (const index of selectedIndices) {
+      const x = index % width, y = Math.floor(index / width);
+      const tx = Math.floor(x / tileSize), ty = Math.floor(y / tileSize);
+      const key = ty * columns + tx;
+      if (occupied.has(key)) continue;
+      if (occupied.size >= 256) throw oversized();
+      occupied.set(key, {
+        key, left:tx * tileSize, top:ty * tileSize,
+        right:Math.min(width, (tx + 1) * tileSize),
+        bottom:Math.min(height, (ty + 1) * tileSize),
+      });
+    }
+    const groups = [...occupied.values()].map(tile => ({ ...tile, keys:[tile.key], indices:[] }));
+    // Transitive bounding-rectangle merges cover even L-shaped tile unions.
+    for (let i = 0; i < groups.length; i += 1) {
+      let merged = false;
+      for (let j = i + 1; j < groups.length; j += 1) {
+        const a = groups[i], b = groups[j];
+        if (a.left - padding >= b.right + padding ||
+            b.left - padding >= a.right + padding ||
+            a.top - padding >= b.bottom + padding ||
+            b.top - padding >= a.bottom + padding) continue;
+        a.left = Math.min(a.left, b.left);
+        a.top = Math.min(a.top, b.top);
+        a.right = Math.max(a.right, b.right);
+        a.bottom = Math.max(a.bottom, b.bottom);
+        a.keys.push(...b.keys);
+        groups.splice(j, 1);
+        merged = true;
+        break;
+      }
+      if (merged) i = -1;
+    }
+    if (groups.length < 2) throw oversized();
+    const byTile = new Map();
+    for (const group of groups) {
+      group.minX = width; group.minY = height; group.maxX = -1; group.maxY = -1;
+      for (const key of group.keys) byTile.set(key, group);
+    }
+    for (const index of selectedIndices) {
+      const x = index % width, y = Math.floor(index / width);
+      const group = byTile.get(Math.floor(y / tileSize) * columns + Math.floor(x / tileSize));
+      group.indices.push(index);
+      group.minX = Math.min(group.minX, x);
+      group.minY = Math.min(group.minY, y);
+      group.maxX = Math.max(group.maxX, x);
+      group.maxY = Math.max(group.maxY, y);
+    }
+    let totalArea = 0;
+    for (const group of groups) {
+      group.bounds = {
+        left:Math.max(0, group.minX - padding), top:Math.max(0, group.minY - padding),
+        right:Math.min(width, group.maxX + 1 + padding),
+        bottom:Math.min(height, group.maxY + 1 + padding),
+      };
+      totalArea += (group.bounds.right - group.bounds.left) * (group.bounds.bottom - group.bounds.top);
+      if (totalArea > maxLayerPixels) {
+        throw new RangeError('Контент-заливка: сумма рабочих областей ' + totalArea + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
+      }
+    }
+    let totalFilled = 0, totalChanged = 0;
+    for (const group of groups) {
+      const rect = group.bounds, regionWidth = rect.right - rect.left;
+      const mask = new Uint8Array(regionWidth * (rect.bottom - rect.top));
+      for (const index of group.indices) {
+        const x = index % width, y = Math.floor(index / width);
+        mask[(y - rect.top) * regionWidth + (x - rect.left)] = 1;
+      }
+      const region = working.readRegion(rect);
+      const filled = inpaintPixelBuffer(region.buffer, {
+        isAllowed:(x, y) => mask[y * regionWidth + x] === 1,
+        maxLayerPixels, maxFillPixels,
+      });
+      if (filled !== group.indices.length) {
+        throw new RangeError('Контент-заливка: для отдельной области не найдены все доноры');
+      }
+      totalChanged += working.writeRegion(region);
+      totalFilled += filled;
+    }
+    return {
+      source:totalChanged ? working.serialize() : source, changed:totalChanged,
+      filled:totalFilled, changedTiles:working.dirtyTileCount, loadedTiles:working.loadedTileCount,
+    };
   }
   // The per-ROI mask is bounded by maxLayerPixels; no full-document mask or
   // second call into potentially mutable/expensive selection geometry is needed.
