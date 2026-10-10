@@ -1733,9 +1733,6 @@ export function inpaintTiledPixelBufferSource(source, {
     for (let x = 0; x < width; x += 1) {
       if (!isAllowed(x, y)) continue;
       selected += 1;
-      if (selected > maxFillPixels) {
-        throw new RangeError('Контент-заливка: выделено больше безопасного лимита ' + maxFillPixels + ' px');
-      }
       if (x < minX) minX = x;
       if (y < minY) minY = y;
       if (x > maxX) maxX = x;
@@ -1744,6 +1741,9 @@ export function inpaintTiledPixelBufferSource(source, {
   }
   const noChange = { source, changed:0, filled:0, changedTiles:0, loadedTiles:0 };
   if (!selected || selected === width * height) return noChange;
+  if (selected > maxFillPixels) {
+    throw new RangeError('Контент-заливка: выделено больше безопасного лимита ' + maxFillPixels + ' px');
+  }
 
   const requestedHalo = Math.trunc(Number(halo));
   const padding = Number.isFinite(requestedHalo) ? Math.max(1, Math.min(128, requestedHalo)) : 24;
