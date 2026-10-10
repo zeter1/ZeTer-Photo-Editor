@@ -22,7 +22,7 @@
 
 ## Приоритеты по плану на скриншотах
 
-- [002 — PSD/PSB compatibility corpus](002-psd-compatibility-corpus.md) — последующая проверяемая часть Photoshop round-trip.
+- [002 — PSD/PSB compatibility corpus](002-psd-compatibility-corpus.md) — в работе: self-generated nested groups + masks + adjustments regression; далее независимые Photoshop preview/semantic fixtures. Не удалять до merge + green main CI.
 - [003 — tiled Content-Aware Fill](003-tiled-content-aware.md) — отдельный следующий этап для больших high-depth слоёв.
 
 Очередь отражает незакрытые направления; реализацию не дублировать с параллельными PR. Следующую задачу брать только после сверки с кодом и статусами CI.
