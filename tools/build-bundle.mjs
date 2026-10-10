@@ -169,3 +169,7 @@ await Promise.all([
   writeFile(resolve(root, 'version.json'), versionManifest, 'utf8'),
 ]);
 console.log(`Built src/app.bundle.js and cache manifest ${buildId}`);
+
+// The detached file://-compatible Worker supplier is a second deterministic
+// generated artifact. Keep its source in sync with the shared pixel kernel.
+await import('./build-tiled-inpaint-worker.mjs');
