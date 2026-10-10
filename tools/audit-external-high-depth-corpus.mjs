@@ -2,8 +2,8 @@
 // Photoshop-authored 16-bit PSD + 32-bit PSB corpus. This intentionally does
 // NOT decode pixels or certify that a file was actually saved by Photoshop.
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { lstat, readFile } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { lstat, open, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -112,24 +112,39 @@ export async function auditExternalHighDepthCorpus(manifestPath) {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink()) fail(id + '.file', 'regular file required (no symlinks)');
     if (info.size !== expectedSize) fail(id + '.size', 'size mismatch');
-    // A high-depth PSB can approach the 512 MiB fixture cap. Keep only the
-    // first 27 header bytes and a bounded read chunk instead of buffering the
-    // entire file in the Node heap. Recheck the streamed byte count in case
-    // the file changed after lstat().
+    // Pin the opened descriptor, not only the pathname: lstat() followed by
+    // an independent createReadStream(path) allowed a rename/symlink swap
+    // between the safety check and the bytes actually hashed. O_NOFOLLOW
+    // rejects a swapped final symlink where supported; fd/path identity
+    // checks also reject a replaced regular file. Never buffer the full PSB.
+    const sameFile = (a, b) => a.isFile() && b.isFile() &&
+      a.dev === b.dev && a.ino === b.ino && a.size === b.size;
+    const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
     const headerBytes = Buffer.alloc(27);
     const digest = createHash('sha256');
     let headerLength = 0, streamedBytes = 0;
-    for await (const chunk of createReadStream(path, { highWaterMark:64 * 1024 })) {
-      streamedBytes += chunk.byteLength;
-      if (streamedBytes > expectedSize) fail(id + '.size', 'size mismatch during stream');
-      digest.update(chunk);
-      if (headerLength < headerBytes.length) {
-        const copied = Math.min(chunk.byteLength, headerBytes.length - headerLength);
-        chunk.copy(headerBytes, headerLength, 0, copied);
-        headerLength += copied;
+    try {
+      const opened = await handle.stat();
+      if (!sameFile(info, opened)) fail(id + '.file', 'file replaced before open');
+      for await (const chunk of handle.createReadStream({ highWaterMark:64 * 1024, autoClose:false })) {
+        streamedBytes += chunk.byteLength;
+        if (streamedBytes > expectedSize) fail(id + '.size', 'size mismatch during stream');
+        digest.update(chunk);
+        if (headerLength < headerBytes.length) {
+          const copied = Math.min(chunk.byteLength, headerBytes.length - headerLength);
+          chunk.copy(headerBytes, headerLength, 0, copied);
+          headerLength += copied;
+        }
       }
+      if (streamedBytes !== expectedSize) fail(id + '.size', 'size mismatch during stream');
+      const finished = await handle.stat();
+      const pathname = await lstat(path);
+      if (!sameFile(opened, finished) || !sameFile(opened, pathname)) {
+        fail(id + '.file', 'file replaced during stream');
+      }
+    } finally {
+      await handle.close();
     }
-    if (streamedBytes !== expectedSize) fail(id + '.size', 'size mismatch during stream');
     const hash = digest.digest('hex');
     if (hash !== item.sha256) fail(id + '.sha256', 'SHA-256 mismatch');
     const header = inspectExternalHighDepthHeader(headerBytes);
