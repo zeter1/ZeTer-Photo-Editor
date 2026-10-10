@@ -6,6 +6,12 @@
 
 ## 1.45.1 — текущая версия
 
+### 2026-10-10 — Проверка независимых PSD/PSB через реальный tiled Worker
+
+- Добавлена сквозная Node-регрессия для внешних 8-bit CMYK PSD и RGB PSB: decode → native tiled source → однократный снимок выделения → настоящий detached Worker → сравнение с native frozen-index kernel.
+- Проверяется отсутствие повторного чтения выделения и мутаций входных tile payloads, завершение Worker и заполнение выбранного пикселя. Это тестовый подэтап без production/runtime изменения и повышения версии.
+- Ограничения: не проверяет `file://` Chromium, Undo/Redo, peak RAM или реальные 16/32-bit Photoshop-authored файлы.
+
 
 ### 2026-10-10 — Упорядочены измерения памяти в Chromium
 

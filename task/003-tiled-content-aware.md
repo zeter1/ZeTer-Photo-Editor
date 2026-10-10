@@ -1,5 +1,11 @@
 # 003 — Tiled Content-Aware Fill
 
+## Проходка 2026-10-10 — external PSD/PSB → native tiles → настоящий Node Worker (PR, CI pending)
+
+- **Контракт:** к двум pinned независимым 8-bit fixtures (CMYK PSD и grouped RGB PSB) добавлена регрессия, которая декодирует подлинные bytes, подготавливает tiled source, однократно фиксирует selection, выполняет реальный `worker_threads` compute через production protocol и сравнивает полный результат с synchronous frozen-index oracle.
+- **Доказательства:** проверяются по одной Worker-инстанции на fixture, отсутствие повторной выборки геометрии, очищенное Worker lifecycle, `filled=1`, точное совпадение result и байтовая неизменность исходных tiles. Тест: `tests/tiled-inpaint-external-psd-psb.test.mjs`.
+- **Граница:** это **Node**, не browser `file://` UI/preview/Undo и не Photoshop-authored 16/32-bit real-world corpus. Нет измерения RAM/latency тяжёлых PSD/PSB, wide connected ROI и прерываемого synchronous fallback. Этот подэтап считать закрытым только после PR merge и green exact main push CI; вся 003 остаётся открытой.
+
 ## Проходка 2026-10-10 — немедленная отмена ожидания supplier при запуске Worker
 
 - **Проблема:** до создания Worker вызов `run()` ожидал общий `loadSource()` до `onload/onerror` или 5-секундного timeout; `cancel()` / новый `run()` меняли generation, но устаревшее обещание UI продолжало висеть до завершения загрузчика.
