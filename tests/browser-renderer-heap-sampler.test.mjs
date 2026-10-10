@@ -38,6 +38,81 @@ test('Stage 003: renderer sampler records actual CDP heap values without fragile
   assert.equal(stopped, true);
 });
 
+test('Stage 003: overlapping CDP polls, markers and stop are serialized in sample order', async () => {
+  const release = [];
+  let activeReads = 0, maxActiveReads = 0, reads = 0, cleared = 0;
+  let triggerPoll;
+  const client = { async send(method) {
+    if (method === 'Performance.enable') return {};
+    assert.equal(method, 'Performance.getMetrics');
+    const ordinal = ++reads;
+    activeReads += 1;
+    maxActiveReads = Math.max(maxActiveReads, activeReads);
+    return new Promise(resolve => release.push(() => {
+      activeReads -= 1;
+      resolve({metrics:[
+        {name:'JSHeapUsedSize', value:100 + ordinal * 10},
+        {name:'JSHeapTotalSize', value:500},
+      ]});
+    }));
+  }};
+  const sampler = createBrowserRendererHeapSampler(client, {
+    schedule(callback) { triggerPoll = callback; return 'poll-timer'; },
+    unschedule(id) { assert.equal(id, 'poll-timer'); cleared += 1; },
+  });
+  const nextTurn = () => new Promise(resolve => setImmediate(resolve));
+  const starting = sampler.start();
+  await nextTurn();
+  assert.equal(reads, 1);
+  release.shift()();
+  await starting;
+
+  const importStage = sampler.snapshot('after-import-preview');
+  triggerPoll();
+  const workerStage = sampler.snapshot('after-worker-preview');
+  const stopping = sampler.stop();
+  for (let expectedReads = 2; expectedReads <= 5; expectedReads += 1) {
+    await nextTurn();
+    assert.equal(reads, expectedReads, 'next CDP query starts after previous snapshot finishes');
+    assert.equal(activeReads, 1);
+    release.shift()();
+  }
+  await Promise.all([importStage, workerStage]);
+  const report = await stopping;
+  assert.equal(maxActiveReads, 1);
+  assert.equal(cleared, 1);
+  assert.equal(report.sampleCount, 5);
+  assert.equal(report.baselineJsHeapUsedBytes, 110);
+  assert.equal(report.endJsHeapUsedBytes, 150);
+  assert.equal(report.sampledMaxJsHeapUsedBytes, 150);
+  assert.deepEqual(report.stages.map(stage => stage.phase),
+    ['before-import', 'after-import-preview', 'after-worker-preview', 'finished']);
+});
+
+test('Stage 003: a rejected manual marker does not poison later samples', async () => {
+  let reads = 0;
+  const client = { async send(method) {
+    if (method === 'Performance.enable') return {};
+    assert.equal(method, 'Performance.getMetrics');
+    if (++reads === 2) throw new Error('CDP marker failed');
+    return {metrics:[
+      {name:'JSHeapUsedSize', value:reads * 10},
+      {name:'JSHeapTotalSize', value:100},
+    ]};
+  }};
+  const sampler = createBrowserRendererHeapSampler(client, {
+    schedule:() => 1, unschedule:() => {},
+  });
+  await sampler.start();
+  await assert.rejects(sampler.snapshot('bad-marker'), /CDP marker failed/);
+  await sampler.snapshot('recovered');
+  const result = await sampler.stop();
+  assert.equal(reads, 4);
+  assert.equal(result.endJsHeapUsedBytes, 40);
+  assert.deepEqual(result.stages.map(stage => stage.phase),
+    ['before-import', 'recovered', 'finished']);
+});
+
 test('Stage 003: missing renderer metrics fail explicitly (no invented zero/peak)', async () => {
   const client = { async send(method) {
     return method === 'Performance.enable' ? {} : {metrics:[{name:'JSHeapUsedSize',value:10}]};

@@ -21,7 +21,11 @@ export function createBrowserRendererHeapSampler(client, {
   let pollError = null;
   let processUnavailableReason = null;
 
-  async function snapshot(phase) {
+  // CDP reads can complete out of order when a periodic poll overlaps an
+  // explicit stage marker or stop(). Queue reads in invocation order so the
+  // recorded final sample is genuinely last, without discarding poll errors.
+  let snapshotTail = Promise.resolve();
+  async function readSnapshot(phase) {
     const { metrics } = await client.send('Performance.getMetrics');
     if (!Array.isArray(metrics)) throw new Error('Browser renderer heap sampler: missing metrics');
     const values = new Map(metrics.map(metric => [metric.name, metric.value]));
@@ -52,6 +56,14 @@ export function createBrowserRendererHeapSampler(client, {
     }
     samples.push(entry);
     return entry;
+  }
+
+  function snapshot(phase) {
+    const result = snapshotTail.then(() => readSnapshot(phase));
+    // A failed explicit marker must reject its own caller but must not poison
+    // the queue for subsequent sampling or the final stop() snapshot.
+    snapshotTail = result.catch(() => {});
+    return result;
   }
 
   function poll() {
