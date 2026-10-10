@@ -76,3 +76,11 @@
 - **Next actual implementation:** `file://`-совместимый browser Worker bootstrap с безопасным fallback, интеграция в `persistTiledHighDepthInpaint()` с exact document/layer/source guards и cancellation при каждой смене владельца; затем memory budget/transfer и реальный browser perf. Отдельно wide connected masks и реальный heavy PSD/PSB high-depth benchmark.
 - **Gate:** [PR CI #38055816486](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38055816486) успешно прошёл полный `npm run check`, browser `file://` smoke, profiler и diff hygiene; [exact main push CI #38055884171](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38055884171) — `success`, squash SHA `13a894c2551b35b8488e5f921a80c5c469ff4e56`. Подэтап завершён.
 - **Not done:** этот клиент не запускает Compute в браузерном UI и не доказывает полную interruptibility без `terminate()`. **003 остаётся открытой** до полноценной интеграции, профиля больших PSD/PSB и wide connected ROI.
+
+
+## Проходка 2026-10-10 — защита Worker lifecycle от синхронных событий при подписке (PR candidate)
+
+- **Дефект:** browser-shaped Worker/test-double может синхронно отправить `ready` и результат, выбросить `error` или исключение из `addEventListener` до присвоения `active`/`detach`. Ранее завершённый job мог остаться активным, а подписки — висеть на завершённом Worker.
+- **Исправление:** создать `active` и `detach` до регистрации обработчиков; завершать при ошибке подписки; после регистрации дополнительно очищать обработчики, если callback уже завершил job. Обычный асинхронный Node/browser event contract и отмена через `terminate()` сохранены.
+- **Регрессия:** browser-shaped synchronous ready→reply, synchronous startup error и partial listener-registration exception; после завершения нет активного job, все handlers сняты, возможен следующий job.
+- **Граница:** Worker всё ещё не подключён к `file://` runtime; не сделаны browser bootstrap, owner-aware UI publication, browser memory profiling, wide connected ROI. Весь пункт 003 **остаётся открытым**.

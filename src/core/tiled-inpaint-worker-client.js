@@ -91,32 +91,43 @@ export function createTiledInpaintWorkerJobController({ createWorker } = {}) {
         }
       };
 
-      if (typeof worker.addEventListener === 'function') {
-        const onMessage = event => message(event.data);
-        const onError = event => fail(new Error(String(event?.message || 'Worker error')));
-        worker.addEventListener('message', onMessage);
-        worker.addEventListener('error', onError);
-        detach = () => {
-          worker.removeEventListener('message', onMessage);
-          worker.removeEventListener('error', onError);
-        };
-      } else if (typeof worker.on === 'function' && typeof worker.off === 'function') {
-        const onMessage = data => message(data);
-        const onError = error => fail(error);
-        const onExit = code => fail(new Error('Tiled inpaint Worker exited before reply: ' + code));
-        worker.on('message', onMessage);
-        worker.on('error', onError);
-        worker.on('exit', onExit);
-        detach = () => {
-          worker.off('message', onMessage);
-          worker.off('error', onError);
-          worker.off('exit', onExit);
-        };
-      } else {
-        fail(new TypeError('Tiled inpaint Worker: missing message event API'));
+      // Subscribe may synchronously emit ready/error (or a test double may
+      // answer in postMessage). Register ownership and detachment first so
+      // a reentrant finish can clear the active job and release every listener.
+      active = { id, cancel:stop };
+      try {
+        if (typeof worker.addEventListener === 'function') {
+          const onMessage = event => message(event.data);
+          const onError = event => fail(new Error(String(event?.message || 'Worker error')));
+          detach = () => {
+            worker.removeEventListener('message', onMessage);
+            worker.removeEventListener('error', onError);
+          };
+          worker.addEventListener('message', onMessage);
+          worker.addEventListener('error', onError);
+        } else if (typeof worker.on === 'function' && typeof worker.off === 'function') {
+          const onMessage = data => message(data);
+          const onError = error => fail(error);
+          const onExit = code => fail(new Error('Tiled inpaint Worker exited before reply: ' + code));
+          detach = () => {
+            worker.off('message', onMessage);
+            worker.off('error', onError);
+            worker.off('exit', onExit);
+          };
+          worker.on('message', onMessage);
+          worker.on('error', onError);
+          worker.on('exit', onExit);
+        } else {
+          fail(new TypeError('Tiled inpaint Worker: missing message event API'));
+          return;
+        }
+      } catch (error) {
+        fail(error);
         return;
       }
-      active = { id, cancel:stop };
+      // A callback could have settled mid-subscription, before all handlers
+      // were registered: remove the late registrations as well.
+      if (settled) { detach(); return; }
       // An owner can change synchronously inside a Worker factory/subscription.
       if (!current()) stop();
     });
