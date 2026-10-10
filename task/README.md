@@ -20,11 +20,11 @@
 14. Для post-merge verification не ограничивайся helper-ом, который может фильтровать только `pull_request` runs. Если exact merge-SHA push run не виден, используй provider-native GET коллекции `actions/runs?head_sha=<merge-sha>` через GitHub fetch и проверь `event=push`, `head_branch=main`, exact `head_sha` и `conclusion=success`; при failure переходи к jobs/logs.
 15. При добавлении модуля в canonical `file://` bundle помни, что `tools/build-bundle.mjs` снимает ESM-обёртку и конкатенирует classic-script chunks. Если новый модуль использует импортированные `const`/`let` во время module evaluation, его source-order обязан идти после owner-а этих bindings; добавь architecture guard на порядок, а не полагайся только на корректность ESM imports.
 
-## Текущая проходка (2026-10-10) — Worker selection bitmap
+## Последний закрытый подэтап (2026-10-10) — Worker selection bitmap
 
-- В отдельном PR: снизить объём памяти для замороженного выделения на стороне изолированного Worker с `Set` до битовой карты, проверить дубликаты/диапазон и CMYKA cross-tile parity. **Не считать закрытой до merge + green main CI.** После неё приоритет — browser `file://` Worker bootstrap + fallback, exact-owner UI integration и прерывание вычисления; см. [003-tiled-content-aware.md](003-tiled-content-aware.md). Текущий код по-прежнему делает полный scan.
+- **003 / Worker bitmap** — в detached compute вместо `Set` используется bitmap максимум 2 MiB; проверены CMYKA parity, дубликаты/индексы и malformed geometry. [PR #150](https://github.com/zeter1/ZeTer-Photo-Editor/pull/150) слит, [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38057597657) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38057640261) зелёные на squash `04650b6087154aeff7d8a5e4e87e70c2cb35fa43`. Полный scan остаётся; далее browser `file://` Worker bootstrap + fallback, exact-owner UI integration, mid-kernel cancellation и проверка тяжёлых PSD/PSB. Задача 003 **не закрыта**.
 
-## Последний закрытый подэтап (2026-10-10)
+## Предыдущий закрытый подэтап (2026-10-10)
 
 - **003 / Worker `messageerror` fail-closed** — browser/Node Worker transport теперь отклоняет неисправное сообщение и освобождает обработчики/Worker, некорректный результат фабрики не оставляет живой поток. [PR #149](https://github.com/zeter1/ZeTer-Photo-Editor/pull/149) слит; [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38056934228) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38057003202) зелёные, squash `964b41aab9633feb4bc1b0bfb4056d6267ac46f4`. Далее browser `file://` Worker bootstrap/fallback + exact-owner UI integration. Общая задача 003 остаётся **открытой**.
 
