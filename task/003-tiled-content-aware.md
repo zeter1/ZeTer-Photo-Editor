@@ -1,11 +1,11 @@
 # 003 — Tiled Content-Aware Fill
 
-## Проходка 2026-10-10 — stale-owner polling во время Worker compute (PR/CI ожидаются)
+## Проходка 2026-10-10 — stale-owner polling во время Worker compute (merged + green main CI)
 
 - **Observed gap:** `isCurrent` опрашивался только при `ready`/response, а `reset()` отменял Worker при смене документа; изменение lock или `highDepthSource` во время тяжёлого kernel без Worker-событий продолжало грузить CPU до окончания вычисления.
 - **Изменение:** optional `pollIntervalMs` в `src/core/tiled-inpaint-worker-client.js`; `src/core/tiled-inpaint-browser-worker.js` включает 50 ms только во время active task. При stale exact-owner guard вызывает `terminate()`; при любом outcome очищаются таймер и обработчики. Worker compute failure остаётся ошибкой, а не поводом для fallback.
 - **Тесты:** `tests/tiled-inpaint-worker-client.test.mjs` deterministic injected scheduler: before-ready/after-ready stale, no late reply, manual cancel, errors, new job, reentrant poll setup.
-- **Gate:** `npm run check`, file:// Chromium smoke, bundle/version parity, PR CI, merge и exact main push CI. Пока gate не пройден, этот подэтап считать незавершённым.
+- **Gate пройден:** [PR #158](https://github.com/zeter1/ZeTer-Photo-Editor/pull/158) слит squash `7d782443c36032e558794d58fa4f712196537b62`; [PR CI #38063616039](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38063616039) и [точный `main` push CI #38063682771](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38063682771) — **success** (`npm run check`, bundle parity, Chromium `file://`, два профилировщика, diff hygiene). Подэтап polling закрыт, вся Stage 003 **открыта**.
 - **Следующее:** browser RAM/latency real 16/32-bit PSD/PSB + preview, wide connected ROI и отмена синхронного fallback. Вся задача `003` **остаётся открытой**.
 
 ## Проходка 2026-10-10 — end-to-end UI Chromium regression (merged + green main CI)
