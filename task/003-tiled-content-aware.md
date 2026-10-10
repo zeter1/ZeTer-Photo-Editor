@@ -11,11 +11,11 @@
 - **Done gate:** independent PR merged with green `main` push CI.
 - **Risks / handoff:** global connectivity cannot be naively limited to one tile; preserve the fallback.
 
-## Проходка 2026-10-10 — bounded tiled ROI (PR, до merge не закрывать)
+## Проходка 2026-10-10 — bounded tiled ROI (слито, main CI green)
 
 - Реализовано: `inpaintTiledPixelBufferSource()` — полный scan frozen local predicate без materialize samples, один cross-tile ROI + 24 px halo, прежний typed kernel, запись changed tiles; новый owner `persistTiledHighDepthInpaint()` контролирует exact document/layer/source before and after preview await.
 - Покрытие: `tests/tiled-raster-source.test.mjs` (Float32 CMYKA seam, unchanged payloads, 8 MP-ROI budget, full selection/no donor, predicate abort), `tests/painting-command-controller.test.mjs` (never contiguous fallback, single history, stale result).
 - **Существенная граница:** source scan синхронный (worker позже); halo меняет донора в сравнении с global refinement, ROI > 8 МП безопасно отклоняется; large high-depth previews всё ещё RGBA8 full surface.
-- **Не выполнено до CI:** измерение реальных peak RAM/latency на 8–48 MiB PSD/PSB sources и ручная проверка в браузере; не заявлять full virtual memory или полную эквивалентность global inpaint.
+- **Фактическая проверка:** [PR #134](https://github.com/zeter1/ZeTer-Photo-Editor/pull/134) слит squash commit `b5cf0f5fee1d098e5da90df911fec58cdad2cd46`; [PR CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38047407522) и [exact main push CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38047465391), включая Node tests, bundle parity, Chromium file:// smoke и diff hygiene. **Не выполнено:** измерение реальных peak RAM/latency на 8–48 MiB PSD/PSB sources и отдельный ручной UI сценарий.
 - **Следующая отдельная проходка:** worker-owned ROI jobs/cancellation и performance profiling, затем стратегия disconnected/wide masks вне 8 MP ROI.
-- Done gate по-прежнему: PR merge + green main push CI и измерения; не удалять задачу заранее.
+- ROI-подэтап прошёл merge + green main CI. Общую задачу `003` не удалять: perf-профилирование, worker cancellation и стратегия wide/disconnected масок ещё открыты.
