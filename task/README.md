@@ -43,6 +43,6 @@
 
 Практика основана на repository-local execution plans и progressive disclosure: OpenAI Harness Engineering (2026-02-11) и принципе Google Small CLs — одна self-contained change с related tests.
 
-### Подэтап 003 — 2026-10-10 (PR-кандидат)
+### Подэтап 003 — 2026-10-10 ([PR #138](https://github.com/zeter1/ZeTer-Photo-Editor/pull/138), слито)
 
-- Ветка `feat/tiled-disconnected-inpaint-20261010`: tiled Content-Aware Fill для удалённых независимых островков. Ещё не слито и не прошло CI. После интеграции останутся memory/latency profiling, worker/cancellation и широкие связные маски. **003 не закрывать**.
+- Реализована tiled Content-Aware Fill для удалённых halo-disjoint островков ([PR CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38049643830), [main push CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38049694526), squash `e7188ac9ec021e8dd23fdf769430e1f5d5febb0b`). Остались memory/latency profiling, worker/cancellation и широкие связные маски. **003 не закрывать**.
