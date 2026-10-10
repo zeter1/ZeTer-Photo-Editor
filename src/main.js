@@ -81,6 +81,7 @@ import { createPsdExportController } from './document/psd-export-controller.js';
 import { createDocumentExportController } from './document/export-controller.js';
 import { psdAdjustmentNativePlan, psdEmbeddedDocumentFingerprint, psdPreviewFingerprint, psdShapeNativePlan, psdTextNativePlan } from './document/psd-native-metadata-plans.js';
 import { createRasterEditController } from './painting/controller.js';
+import { createBrowserTiledInpaintWorkerController } from './core/tiled-inpaint-browser-worker.js';
 import { createRasterCommandController } from './painting/command-controller.js';
 import { createGradientCommandController } from './painting/gradient-command-controller.js';
 import { createPaintGestureController } from './painting/gesture-controller.js';
@@ -360,8 +361,10 @@ const viewportController = createViewportController({
 });
 const { setZoom, setZoomAtClientPoint, fitToView } = viewportController;
 
+const tiledInpaintWorker = createBrowserTiledInpaintWorkerController();
 const rasterEdit = createRasterEditController({
   getDocument: () => doc,
+  tiledInpaintWorker,
   getDrag: () => drag,
   getCmykPreviewTransform: () => currentCmykPreviewTransform(),
   renderPaintPreview: () => render({ paintPreview: true }),
