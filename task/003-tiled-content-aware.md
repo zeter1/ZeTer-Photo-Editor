@@ -27,3 +27,12 @@
 - Не изменено: max 8 МП ROI / 2 МП fill, immutable donor, один bounded ROI, exact-owner transaction, алгоритм синтеза; worker/cancellation и disconnected/wide masks остаются отдельными будущими этапами.
 - Gate: `npm run check`, `npm run test:browser`, bundle parity, review, PR merge + exact main push green. PR CI: [success, Node 1034 tests + bundle parity + file:// smoke + diff hygiene](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38048074508). [main push CI successful](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38048171147), exact squash SHA `ebd08b02797e1a6752df2a735af90b9a10220764` (`event=push`, `head_branch=main`). Подэтап one-shot frozen selection закрыт после merge+green; общая задача 003 остаётся открытой из-за profiling, worker/cancellation и wide/disconnected masks.
 
+
+## Проходка 2026-10-10 — разрозненные ROI ([рабочая ветка](https://github.com/zeter1/ZeTer-Photo-Editor/tree/feat/tiled-disconnected-inpaint-20261010))
+
+- **Goal:** заполнить два удалённых островка на одном high-depth tiled источнике, не отклоняя их из-за большого общего bounding rectangle.
+- **Scope:** при oversized global ROI делить выделение по занятым tile cells; halo-rectangles объединяются транзитивно, независимые области обрабатываются с прежними immutable донорами, а результат публикуется только после подготовки всех регионов.
+- **Safety:** один frozen scan, не более 256 occupied cells, total ROI area <= `maxLayerPixels`, global `maxFillPixels`; если нет доноров или ROI не проходит бюджет — нет частичных изменений.
+- **Регрессии:** `tests/tiled-inpaint-disconnected.test.mjs` — distant Float32 CMYKA, нетронутые payloads, total budget и близкие halos.
+- **Verification pending:** `npm run check`, `npm run test:browser`, generated bundle parity, PR review, merge + green exact `main` CI.
+- **Open:** profiling реального peak RAM/latency, worker/cancellation, широкие связные маски. Общую 003 задачу не удалять.
