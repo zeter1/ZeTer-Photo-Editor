@@ -6,6 +6,12 @@
 
 ## 1.43.4 — текущая версия
 
+### 2026-10-10 — Внешний эталон merged preview PSD/PSB (только тесты)
+
+- Добавлено: независимое чтение PackBits/RLE merged preview из закреплённых сторонних PSD/PSB fixtures (прозрачный Photoshop Shape Layer, PSB-группы и Adjustment Layer с маской). Пиксели сверяются с PSD decoder через отдельную in-memory копию файла без layer-section, не через ZPE writer.
+- Проверки: source SHA-256, фиксированный RGBA checksum, пиксельные samples и полное byte-level сравнение каналов RGB/A, включая 4-байтовую PSD и 8-байтовую PSB длину секции.
+- Ограничения: это oracle для embedded composite, не независимый renderer Adobe Photoshop, не pixel-perfect проверка ZPE layer compositing. Production-код и SemVer 1.43.4 не изменяются.
+
 ### 2026-10-10 — Регрессия вложенных PSD/PSB групп с масками и adjustment metadata
 
 - Добавлено: детерминированный generated PSD/PSB corpus для вложенных групп, raster masks, clipping и неизменности исходных Photoshop adjustment blocks после повторного экспорта.
