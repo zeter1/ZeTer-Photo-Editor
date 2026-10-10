@@ -70,6 +70,12 @@ Full RGBA8 display canvas пока остаётся нужен browser composito
 
 Значения — не performance SLA и не peak RSS изолированного inpaint. Задача Worker/cancellation, широкий связный ROI и браузерный memory profile остаются открытыми.
 
+## Профиль на независимых PSD/PSB bytes (Stage 003)
+
+`node tools/profile-real-psd-inpaint.mjs` декодирует pinned external psd-tools CMYK PSD v1 (native 8-bit CMYKA raster) и layered PSB v2 (merged RGB raster), проверяя manifest SHA-256. Каждый fixture запускается отдельным `--expose-gc` child process; отдельные `decodeMs`, `serializeMs`, `inpaintMs` и RSS snapshots `before`, `afterDecode`, `afterTiles`, `afterInpaint` показывают затраты реального codec→tile→ROI пути. Стандартный вывод — JSON для отслеживания в CI; без нестабильных числовых порогов.
+
+Это маленький **8-bit** upstream corpus, а не замена synthetic 8/24/48 MiB high-depth baseline: process-wide `maxRSS` не является isolated peak tiled inpaint; PSB использует merged composite и не меряет layer UI preview/Workers. Для real 16/32-bit PSD/PSB UI/RAM и wide-selection performance остаются отдельные задачи. `tests/tiled-inpaint-external-psd-psb.test.mjs` дополнительно проверяет external CMYK cooperative parity и отмену frozen external PSB selection до ROI tile reads.
+
 ## Проверка
 
 - `tests/tiled-raster-source.test.mjs`: region read/write без ложного dirty.
