@@ -1,5 +1,11 @@
 # 002 — PSD/PSB round-trip compatibility corpus
 
+## Проходка 2026-10-10 — побайтовый oracle для профиля PSD16/PSB32 Worker
+
+- После реального Node Worker профиль строит синхронный результат `inpaintTiledPixelBufferSourceFromIndices` из **тех же frozen indices**, проверяет счётчики, native source metadata, все координаты тайлов и все `dataUrl` bytes. Если Worker вернул несовпадающий результат, CLI теперь не пишет успешный профиль. Дополнительный `oracleMs` и `memory.afterOracle` вынесены отдельно от прежних `workerMs`/snapshots.
+- Отрицательная Node-регрессия проверяет подмену счётчика, битовой глубины и одного payload, в том числе невозможность мутировать исходные serialized tiles.
+- **Остаётся:** получить и независимо подтвердить лицензированные Photoshop-authored PSD16/PSB32 с baseline/goldens и `file://` Chromium UI memory + Undo/Redo. Oracle использует **то же ядро ZeTer** и не служит Photoshop-pixel-golden. Задачи 002/003 продолжаются.
+
 ## Проходка 2026-10-10 — подключён полный native Worker pipeline после corpus-аудита
 
 - Инструмент `node tools/profile-external-high-depth-psd-psb.mjs --manifest /abs/path/manifest.json` требует успешный preflight двух pinned PSD16/PSB32, затем повторно читает bytes через открытый дескриптор с фиксированным byte budget и SHA-256, декодирует `decodePsd`, проверяет native `Uint16Array`/`Float32Array`, выполняет tiled selection через настоящий `worker_threads` Worker и проверяет donor tile immutability.
