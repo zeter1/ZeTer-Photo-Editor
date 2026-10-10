@@ -51,3 +51,7 @@
 
 - Добавлен воспроизводимый `tools/profile-tiled-inpaint.mjs` с isolated process RSS/latency и regression test. Полный запуск прикреплён к CI как **информационное измерение**, без числового pass/fail порога. См. [003](003-tiled-content-aware.md) и `docs/architecture/TILED_RASTER.md`.
 - [PR CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38051881786); [main push CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38052035982); merge PR #139 squash `11932992f3213447b8cae9c183eaf80cb2ec6f06`. Benchmark-подэтап завершён после PR+main CI, но реальный PSD/PSB/UI profile остаётся незакрытым. Worker/cancellation, wide connected masks и реальный PSD/PSB + UI memory profile остаются в очереди. **003 открыта**.
+
+### Подэтап 003 — cooperative scan (2026-10-10, PR candidate)
+
+- Реализуется chunked, cancellable scan frozen selection с exact-owner abort в `src/core/pixel-buffer.js` / `src/painting/controller.js`, регрессии в `tests/tiled-inpaint-cooperative.test.mjs`. Проверка CI и merge ещё нужны; **не удалять 003**. Следующие проходки: Worker execution/kernel cancellation, wide connected selection и реальные PSD/PSB UI memory profiles.
