@@ -92,7 +92,7 @@ export function createBrowserRendererHeapSampler(client, {
       const processEnd = processSamples.at(-1) ?? null;
       return {
         metric:'CDP Performance.getMetrics / renderer JSHeapUsedSize',
-        limitations:'Informational sampled main-frame JS heap, plus optional aggregate Chromium process private memory. NOT isolated Worker heap, true RSS/HWM, native/GPU breakdown or instantaneous peak. No timing/memory pass thresholds.',
+        limitations:'Informational sampled main-frame JS heap, plus optional aggregate Chromium process private memory. NOT Worker heap in isolation, true RSS/HWM, native/GPU breakdown or instantaneous peak. No timing/memory pass thresholds.',
         chromiumProcesses: {
           metric:'CDP SystemInfo.getProcessInfo / sum of privateMemory over complete reported process list',
           availability:!processClient ? 'not-requested' : processUnavailableReason ? 'unavailable' : 'sampled',
