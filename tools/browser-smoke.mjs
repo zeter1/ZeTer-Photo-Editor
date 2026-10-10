@@ -780,11 +780,6 @@ async function runSmoke() {
     assert(await evaluate(client, `document.querySelector('#removeObjectApply').hidden`), 'Reset removes only the mask');
     assertNoBrowserErrors(errors, stderrState);
 
-    await new Promise(resolve => setTimeout(resolve, 1_800)); // Let editor autosave quiesce.
-    await verifyRecoveryIndexedDb(client);
-    assertNoBrowserErrors(errors, stderrState);
-
-
     // Stage 003: exercise the ACTUAL editor UI command on a 16-bit tiled .zpe
     // document. Earlier probes cover direct Worker/controller APIs; this guards
     // the menu -> frozen selection -> Worker -> native layer -> History wiring.
@@ -826,6 +821,12 @@ async function runSmoke() {
       "document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data[0]<150"));
     console.log('Stage 003 tiled high-depth UI Worker regression:',JSON.stringify(stage003Result));
     assertNoBrowserErrors(errors,stderrState);
+
+
+    await new Promise(resolve => setTimeout(resolve, 1_800)); // Let editor autosave quiesce.
+    await verifyRecoveryIndexedDb(client);
+    assertNoBrowserErrors(errors, stderrState);
+
 
     console.log(`Browser smoke passed: ${browserExecutable}`);
     console.log(`Verified file URL: ${INDEX_URL}`);
