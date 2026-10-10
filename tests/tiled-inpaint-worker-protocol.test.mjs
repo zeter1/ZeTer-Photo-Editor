@@ -6,6 +6,7 @@ import {
   createPixelBuffer,
   deserializePixelBufferSource,
   inpaintTiledPixelBufferSource,
+  inpaintTiledPixelBufferSourceFromIndices,
   serializeTiledPixelBufferSource,
 } from '../src/core/pixel-buffer.js';
 import { runTiledInpaintWorkerJob } from '../src/core/tiled-inpaint-worker-protocol.js';
@@ -151,4 +152,45 @@ test('Stage 003 Worker protocol: invalid geometry and oversized index lists fail
     source,
     selectedIndices:new Array(WIDTH * HEIGHT + 1).fill(0),
   }), /invalid or duplicate selected index/);
+});
+
+test('Stage 003: frozen-index compute avoids the full predicate scan and preserves sparse cross-tile semantics', () => {
+  const source = fixture();
+  const input = Uint32Array.from([SELECTED[1], SELECTED[0]]);
+  const unchanged = JSON.stringify(source);
+  const expected = inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => SELECTED.includes(y * WIDTH + x),
+    halo:2, maxLayerPixels:64,
+  });
+  const result = inpaintTiledPixelBufferSourceFromIndices(source, {
+    selectedIndices:input, halo:2, maxLayerPixels:64,
+  });
+  assert.deepEqual(result, expected);
+  assert.deepEqual([...input], [SELECTED[1], SELECTED[0]], 'caller snapshot remains unchanged');
+  assert.equal(JSON.stringify(source), unchanged);
+  assert.deepEqual(inpaintTiledPixelBufferSourceFromIndices(source, {
+    selectedIndices:[], halo:2,
+  }), inpaintTiledPixelBufferSource(source, { isAllowed:() => false, halo:2 }));
+
+  // The protocol must dispatch the frozen-index kernel, not reconstruct an
+  // isAllowed callback and perform another width*height scan in the Worker.
+  assert.match(runTiledInpaintWorkerJob.toString(), /inpaintTiledPixelBufferSourceFromIndices/);
+  assert.doesNotMatch(runTiledInpaintWorkerJob.toString(), /\bisAllowed\s*:/);
+});
+
+test('Stage 003: frozen-index input validation rejects duplicates before publication', () => {
+  const source = fixture();
+  for (const selectedIndices of [
+    [SELECTED[0], SELECTED[0]], [WIDTH * HEIGHT], [-1], [NaN], [3.5],
+  ]) {
+    assert.throws(() => inpaintTiledPixelBufferSourceFromIndices(source, {
+      selectedIndices,
+    }), /invalid or duplicate selected index/);
+  }
+  assert.throws(() => inpaintTiledPixelBufferSourceFromIndices(source, {
+    selectedIndices:'7',
+  }), /frozen selection indices/);
+  assert.throws(() => inpaintTiledPixelBufferSourceFromIndices({
+    width:Math.floor(48 * 1024 * 1024 / 3) + 1, height:1,
+  }, { selectedIndices:[] }), /invalid source geometry/);
 });
