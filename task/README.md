@@ -22,7 +22,6 @@
 
 ## Приоритеты по плану на скриншотах
 
-- [001 — CMYK4/straight-alpha Content-Aware Fill](001-content-aware-channel-alpha.md) — текущая самостоятельная проходка; удалить только после merge и green main CI.
 - [002 — PSD/PSB compatibility corpus](002-psd-compatibility-corpus.md) — последующая проверяемая часть Photoshop round-trip.
 - [003 — tiled Content-Aware Fill](003-tiled-content-aware.md) — отдельный следующий этап для больших high-depth слоёв.
 
