@@ -55,3 +55,8 @@
 ### Подэтап 003 — cooperative scan (2026-10-10, [PR #141](https://github.com/zeter1/ZeTer-Photo-Editor/pull/141), слито)
 
 - Реализуется chunked, cancellable scan frozen selection с exact-owner abort в `src/core/pixel-buffer.js` / `src/painting/controller.js`, регрессии в `tests/tiled-inpaint-cooperative.test.mjs`. [PR CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38053077787), [main push CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38053128507), exact merge SHA `74d2e14c0901c4088322c5fc3bb982f1528fe5d4`; scan-подэтап закрыт, но **не удалять 003**. Следующие проходки: Worker execution/kernel cancellation, wide connected selection и реальные PSD/PSB UI memory profiles.
+
+### Подэтап 003 — external PSD/PSB decode/profile (2026-10-10, PR / CI pending)
+
+- Добавлен отдельный informational benchmark реальных upstream PSD CMYK и layered PSB (`tools/profile-real-psd-inpaint.mjs`) со сверкой исходных SHA-256, раздельными стадиями decode→tiles→inpaint и process-wide RSS. Тест проверяет sync/cooperative parity и отмену ещё до ROI decode на *внешнем* корпусе. Это тестово-измерительная проходка без production logic / version bump.
+- **Открыто:** большие реальные 16/32-bit PSD/PSB + browser UI profile, worker-owned kernel/true cancellation и широкий связный ROI. Не удалять 003 до gate.
