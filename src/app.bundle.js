@@ -7405,6 +7405,13 @@ function createBrowserTiledInpaintWorkerController({
   let source = null;
   let unavailable = false;
   let generation = 0;
+  // Loading the file:// supplier is shared, but each caller must be able to
+  // stop awaiting it immediately when cancelled or superseded.
+  const pendingBootstraps = new Set();
+  function interruptPendingBootstraps() {
+    for (const interrupt of pendingBootstraps) interrupt();
+    pendingBootstraps.clear();
+  }
 
   const currentSource = () => {
     const value = globalRef?.[supplierName];
@@ -7482,11 +7489,13 @@ function createBrowserTiledInpaintWorkerController({
 
   function cancel() {
     generation += 1;
+    interruptPendingBootstraps();
     return client.cancel();
   }
 
   async function run(job, { isCurrent = () => true } = {}) {
     const owner = ++generation;
+    interruptPendingBootstraps();
     client.cancel();
     if (typeof isCurrent !== 'function') throw new TypeError('Tiled inpaint Worker: isCurrent must be a function');
     const current = () => {
@@ -7494,7 +7503,19 @@ function createBrowserTiledInpaintWorkerController({
       catch { return false; }
     };
     if (!current()) return { cancelled:true };
-    const ready = await loadSource();
+    // Do not hold a stale UI command until the supplier script loads or times
+    // out (up to loadTimeoutMs). Keep the shared loader alive for a successor.
+    let interrupt;
+    const interrupted = new Promise(resolve => {
+      interrupt = () => resolve(null);
+      pendingBootstraps.add(interrupt);
+    });
+    let ready;
+    try {
+      ready = await Promise.race([loadSource(), interrupted]);
+    } finally {
+      pendingBootstraps.delete(interrupt);
+    }
     if (!current()) return { cancelled:true };
     if (!ready) return { unavailable:true };
     try {
