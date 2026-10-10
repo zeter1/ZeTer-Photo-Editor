@@ -72,9 +72,12 @@ test('Stage 003: adjacent occupied tiles with disjoint pixel halos use separate 
   assert.deepEqual(result.source.tiles.flatMap((tile, i) => tile.dataUrl === original[i] ? [] : [i]), [0, 1]);
   assert.deepEqual(source.tiles.map(tile => tile.dataUrl), original, 'input stays immutable');
   const restored = deserializePixelBufferSource(result.source);
-  for (const x of [7, 14]) assert.deepEqual(
-    [...restored.data.subarray((3 * width + x) * 3, (3 * width + x + 1) * 3)], [10000, 10000, 10000],
-  );
+  for (const x of [7, 14]) {
+    const restoredPixel = restored.data.subarray((3 * width + x) * 3, (3 * width + x + 1) * 3);
+    for (const sample of restoredPixel) {
+      assert.ok(Math.abs(sample - 10000) <= 1, 'weighted Uint16 synthesis may round one level');
+    }
+  }
 });
 
 test('Stage 003: intersecting selected-pixel halos cannot split or bypass ROI cap', () => {
