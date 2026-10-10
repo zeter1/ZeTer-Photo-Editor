@@ -16665,23 +16665,6 @@ function createRasterCommandController({
     try {
       const local = target.toLocal(point, layer);
       if (layer.highDepthSource) {
-        if (
-          layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND &&
-          typeof rasterEdit.persistTiledHighDepthInpaint === 'function'
-        ) {
-          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, { isAllowed });
-          if (result) {
-            resetNativeState();
-            if (result.stale) return false;
-            if (!result.applied) {
-              status('Контент-заливка: нужны исходные пиксели за пределами выделения или результат не изменился');
-              return false;
-            }
-            ui?.commit?.(historyLabel);
-            status(`Контент-заливка: восстановлено ${result.filled.toLocaleString('ru-RU')} px · tiled ${result.changedTiles} tiles`);
-            return true;
-          }
-        }
         const buffer = rasterEdit.editableHighDepthBuffer(layer);
         if (buffer) {
           const x = Math.floor(local.x);
@@ -16803,6 +16786,23 @@ function createRasterCommandController({
       status('Контент-заливка: анализ окружения…');
 
       if (layer.highDepthSource) {
+        if (
+          layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND &&
+          typeof rasterEdit.persistTiledHighDepthInpaint === 'function'
+        ) {
+          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, { isAllowed });
+          if (result) {
+            resetNativeState();
+            if (result.stale) return false;
+            if (!result.applied) {
+              status('Контент-заливка: нужны исходные пиксели за пределами выделения или результат не изменился');
+              return false;
+            }
+            ui?.commit?.(historyLabel);
+            status(`Контент-заливка: восстановлено ${result.filled.toLocaleString('ru-RU')} px · tiled ${result.changedTiles} tiles`);
+            return true;
+          }
+        }
         const buffer = rasterEdit.editableHighDepthBuffer(layer);
         if (!buffer) {
           resetNativeState();
