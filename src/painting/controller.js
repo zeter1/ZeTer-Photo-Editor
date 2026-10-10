@@ -8,7 +8,6 @@ import {
   applyCmykPixelBufferStrokeSegment,
   clonePixelBuffer,
   createSerializedPixelBufferTileWorkingSet,
-  inpaintTiledPixelBufferSourceCooperative,
   deserializePixelBufferSource,
   forEachSerializedPixelBufferTile,
   mutateSerializedPixelBufferTiles,
