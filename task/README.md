@@ -3,7 +3,7 @@
 ## Проходка Stage 003 — быстрый abort ожидания browser Worker bootstrap (2026-10-10)
 
 - Обнаружен промежуток отмены **до** создания `Worker`: `cancel()` или новый вызов `run()` раньше оставляли предыдущее ожидание single-flight `file://` supplier до скриптового `onload` / timeout (до 5 секунд). Теперь stale bootstrap promise завершается сразу, loader для следующей операции сохраняется, compute errors по-прежнему fail closed.
-- Регрессии: `tests/tiled-inpaint-browser-worker.test.mjs` — cancel/supersede до `onload`, отсутствие дубля `script`, отсутствие создания устаревшего Worker, штатный запуск следующего задания; обновлены browser bundle и cache manifest. Статус в PR / CI — проверять перед закрытием проходки.
+- Регрессии: `tests/tiled-inpaint-browser-worker.test.mjs` — cancel/supersede до `onload`, отсутствие дубля `script`, отсутствие создания устаревшего Worker, штатный запуск следующего задания; обновлены browser bundle и cache manifest. Подэтап закрыт: [PR #163](https://github.com/zeter1/ZeTer-Photo-Editor/pull/163) слит (squash `ef2b820d940dc32bd6e0a325d96f0bc9ed60644b`), [PR CI #38066925074](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38066925074) и [точный `main` push CI #38066973642](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38066973642) завершились **success**.
 - **Следующая задача:** отдельно добыть независимые Photoshop-authored 16/32-bit PSD/PSB fixtures с SHA-256 и лицензированным provenance, провести file:// decode → tiled UI Worker → preview и memory/latency profile. После этого — широкий connected ROI и реальное прерывание fallback/preview. Основные `002` и `003` **ещё не закрыты**.
 
 
