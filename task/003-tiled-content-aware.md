@@ -11,11 +11,11 @@
 - **Done gate:** independent PR merged with green `main` push CI.
 - **Risks / handoff:** global connectivity cannot be naively limited to one tile; preserve the fallback.
 
-## Проходка 2026-10-10 — runtime UI Worker dispatch (PR/CI pending)
+## Проходка 2026-10-10 — runtime UI Worker dispatch ([PR #154](https://github.com/zeter1/ZeTer-Photo-Editor/pull/154), merged, main CI green)
 
-- **Подэтап в проверке:** `src/painting/tiled-inpaint-dispatch.js` freezes selection once in cooperative scan, sends `Uint32Array` indices and original serialized tiles to browser Worker, reuses frozen indices for bounded synchronous fallback ONLY if bootstrap is `unavailable`; compute/protocol errors propagate. Empty/full selection is a no-op.
+- **Реализовано и слито в main:** `src/painting/tiled-inpaint-dispatch.js` freezes selection once in cooperative scan, sends `Uint32Array` indices and original serialized tiles to browser Worker, reuses frozen indices for bounded synchronous fallback ONLY if bootstrap is `unavailable`; compute/protocol errors propagate. Empty/full selection is a no-op.
 - `src/painting/controller.js` retains exact document/layer/source/lock checks before and after Worker and preview; `reset()` requests termination. The result is never published when stale.
-- `src/main.js` enables lazy browser controller. Version 1.45.0; canonical bundle/supplier parity and file:// browser smoke must pass before merge.
+- `src/main.js` enables lazy browser controller. Version 1.45.0; canonical bundle/source parity and file:// browser smoke passed. [PR CI #38060575417](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38060575417) and [exact main push CI #38060648765](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38060648765) both **success**, squash SHA `bf76922ff21455a2c16ed6c2872da22deffc28f0`.
 - **Осталось:** browser heap/latency real high-depth PSD/PSB, UI end-to-end Worker scenario, proactive termination on document switch (not just result suppression), interrupts during sync kernel/preview, wide connected ROI. Entire 003 remains open.
 
 ## Проходка 2026-10-10 — browser Worker loader / fallback ([PR #153](https://github.com/zeter1/ZeTer-Photo-Editor/pull/153), merged + main CI green)
