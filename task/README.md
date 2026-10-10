@@ -1,5 +1,12 @@
 # task — очередь небольших инженерных проходок
 
+## В работе — Stage 003: end-to-end команда Content-Aware Fill в Chromium (2026-10-10)
+
+- Цель проходки: реальный `file://` импорт native `.zpe` с 16-bit RGB tiled источником, прямоугольное выделение через pointer, Edit → Content-Aware Fill, наблюдение реального `Worker.postMessage`, изменение пикселя, **одна** History-запись, Undo/Redo.
+- Охват: `tools/browser-smoke.mjs` (только regression, без изменения production runtime и SemVer). Не объявлять этот gate завершённым до PR + green main CI.
+- После этого остаются отдельные проверки: реальные большие PSD/PSB с браузерными RAM/latency измерениями; wide connected ROI; interrupt/terminate при остальных live-owner invalidations, а также расширение Photoshop-совместимости из screenshots.
+- Канонический открытый план: [003](003-tiled-content-aware.md); пока **не удалять**.
+
 Эта папка — versioned handoff между короткими ChatGPT/Codex проходками. Она помогает продолжать рефакторинг без повторного чтения всего репозитория.
 
 ## Правила
