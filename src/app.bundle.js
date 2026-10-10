@@ -6969,12 +6969,19 @@ function inpaintFrozenTiledSelection(source, working, scan, {
       const x = index % width, y = Math.floor(index / width);
       const tx = Math.floor(x / tileSize), ty = Math.floor(y / tileSize);
       const key = ty * columns + tx;
-      if (occupied.has(key)) continue;
+      const cell = occupied.get(key);
+      if (cell) {
+        // Only selected samples exclude donors. A whole-tile rectangle
+        // needlessly merges neighboring cells whose actual halos are disjoint.
+        cell.left = Math.min(cell.left, x);
+        cell.top = Math.min(cell.top, y);
+        cell.right = Math.max(cell.right, x + 1);
+        cell.bottom = Math.max(cell.bottom, y + 1);
+        continue;
+      }
       if (occupied.size >= 256) throw oversized();
       occupied.set(key, {
-        key, left:tx * tileSize, top:ty * tileSize,
-        right:Math.min(width, (tx + 1) * tileSize),
-        bottom:Math.min(height, (ty + 1) * tileSize),
+        key, left:x, top:y, right:x + 1, bottom:y + 1,
       });
     }
     const groups = [...occupied.values()].map(tile => ({ ...tile, keys:[tile.key], indices:[] }));

@@ -1,5 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
+## Проходка — exact selection halo для соседних tiled cells (2026-10-10)
+
+- Проблема: старый oversized ROI planner сливал соседние занятые **полные** tiles, даже если фактические выбранные пиксели и их donor halo не пересекались; это давало ложный RangeError из-за inflated рабочей площади.
+- Исправление: сохранять по каждой занятой tile-cell только min/max фактически выделенных pixels; intersect test и transitive merges работают по ним. Группы с пересекающимися padded footprints по-прежнему нельзя делить: исходные выбранные pixels не должны стать донорами в соседней группе.
+- Регрессии: 16-bit RGB через два соседних tiles с непересекающимися halo, точная синхронная/Worker-index parity, immutable original, сумма ROI budget и пересечение halo fail-closed. Version patch 1.45.2.
+- **Не решено:** очень длинные связанные ROI, независимый внешне созданный high-depth corpus, Chromium browser memory и прерываемый main-thread fallback/preview. Не закрывать 003 до отдельной проверки и merge+green main CI.
+
 ## P0 external high-depth corpus prerequisite (2026-10-10)
 
 - Новый `tools/audit-external-high-depth-corpus.mjs` и Node-тесты обеспечивают независимый header/SHA-256/provenance *preflight* для внешних 16-bit PSD и 32-bit PSB; детали схемы в [002](002-psd-compatibility-corpus.md).

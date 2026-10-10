@@ -1,5 +1,10 @@
 # task — очередь небольших инженерных проходок
 
+## Stage 003 — точные границы halo в соседних tiled ROI (2026-10-10)
+
+- Исправлено ложное объединение соседних занятых тайлов с раздельными фактическими selection/halo: source + оба generated Worker/browser artifacts + Uint16 parity regressions.
+- **После проверки/merge:** P0 real Photoshop-authored 16-bit PSD / 32-bit PSB с audit hashes/provenance и browser file:// decode → UI Worker → preview/Undo + memory; P1 длинные связанные выделения (без oversized bounding box), прерывание fallback/preview. Основные задачи [002](002-psd-compatibility-corpus.md) и [003](003-tiled-content-aware.md) открыты.
+
 ## Проходка Stage 002 P0 — preflight независимых 16-bit PSD / 32-bit PSB (2026-10-10)
 
 - Реализован локальный аудит `tools/audit-external-high-depth-corpus.mjs`: manifest с **двумя** внешними образцами (16-bit PSD v1 и 32-bit PSB v2), pinned SHA-256/size, исходной HTTPS-ссылкой, заявленным Photoshop provenance и лицензией; независимо проверяются 8BPS, reserved bytes, version, channels, geometry, bit depth и color mode. Нет network download и доверия имени расширения.
