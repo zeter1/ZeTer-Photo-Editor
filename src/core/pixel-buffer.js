@@ -1713,6 +1713,66 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
   };
 }
 
+// Content-Aware Fill needs one cross-tile working region, not independent per-tile
+// inpainting (which would produce seams and let synthesized pixels become donors).
+// Scan the frozen selection without decoding source samples or allocating a full-plane
+// selection mask. The ROI includes a bounded immutable donor halo.
+export function inpaintTiledPixelBufferSource(source, {
+  isAllowed,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen isAllowed predicate');
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const width = working.width, height = working.height;
+  let selected = 0, minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!isAllowed(x, y)) continue;
+      selected += 1;
+      if (selected > maxFillPixels) {
+        throw new RangeError('Контент-заливка: выделено больше безопасного лимита ' + maxFillPixels + ' px');
+      }
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const noChange = { source, changed:0, filled:0, changedTiles:0, loadedTiles:0 };
+  if (!selected || selected === width * height) return noChange;
+
+  const padding = boundedInteger(halo, 24, 1, 128);
+  const bounds = {
+    left:Math.max(0, minX - padding),
+    top:Math.max(0, minY - padding),
+    right:Math.min(width, maxX + 1 + padding),
+    bottom:Math.min(height, maxY + 1 + padding),
+  };
+  const area = (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
+  if (area > maxLayerPixels) {
+    throw new RangeError('Контент-заливка: рабочая область ' + area + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
+  }
+  const region = working.readRegion(bounds);
+  const filled = inpaintPixelBuffer(region.buffer, {
+    isAllowed:(x, y) => isAllowed(x + region.x, y + region.y),
+    maxLayerPixels,
+    maxFillPixels,
+  });
+  if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
+  const changed = working.writeRegion(region);
+  return {
+    source:changed ? working.serialize() : source,
+    changed,
+    filled,
+    changedTiles:working.dirtyTileCount,
+    loadedTiles:working.loadedTileCount,
+  };
+}
+
 export function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
   const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
   if(safe.kind===PIXEL_BUFFER_SOURCE_KIND){
