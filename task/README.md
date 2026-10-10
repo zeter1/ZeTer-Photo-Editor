@@ -1,5 +1,12 @@
 # task — очередь небольших инженерных проходок
 
+## Stage 002/003 — audited high-depth PSD/PSB → native Node Worker (2026-10-10)
+
+- В рабочей проходке добавлен `tools/profile-external-high-depth-psd-psb.mjs --manifest /path/to/manifest.json`. После существующего pinned SHA/header preflight инструмент повторно фиксирует bytes того же fixture, сверяет hash, декодирует реальный PSD/PSB, проверяет Uint16/Float32 native samples, сериализует tiles, запускает настоящий Node Worker и проверяет frozen selection / immutable tile payloads. JSON содержит snapshot RSS/heap/arrayBuffers, а **не** пиковый RSS.
+- `tests/profile-external-high-depth-psd-psb.test.mjs` прогоняет сам инструмент на **явно синтетических** ZeTer-written 16/32-bit PSD/PSB; фиктивное поле Photoshop в тестовом manifest демонстрирует, что заявленный provenance **не** является доказательством авторства.
+- **Открыто P0:** законно распространяемые независимо Photoshop-authored PSD16/PSB32 с исходниками/лицензией/референсами; запуск CLI на их pinned manifest; отдельный Chromium `file://` import → tiled UI Worker → preview → Undo/Redo и реальные browser/process/Worker snapshots. **Открыто P1:** широкий connected ROI и interruptible fallback/preview. Задачи 002 и 003 не закрывать, пока нет независимого подтверждения.
+
+
 ## Stage 002 P0 — закрепление file descriptor при аудите PSD/PSB (2026-10-10)
 
 - Аудитор теперь открывает внешний fixture через `O_NOFOLLOW` (где поддерживается), сопоставляет `dev/ino/size` результата `lstat` с открытым дескриптором и повторяет проверку по завершении потока. Хеш и заголовок читаются **с того же открытого файла**, без второго обращения по пути и без полной загрузки PSB в RAM; descriptor закрывается при успехе/ошибке.
