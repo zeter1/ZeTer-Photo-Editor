@@ -60,9 +60,9 @@ test('Stage 003 classic Worker protocol computes native CMYKA and recovers after
   const frozen=JSON.stringify(source);
   const onMessage=listeners.get('message');
   assert.equal(typeof onMessage,'function');
-  onMessage({data:{id:1,source,selectedIndices:Uint32Array.of(selected,selected)}});
+  onMessage({data:{id:1,source,selectedIndices:[selected,selected]}});
   assert.equal(replies.shift().ok,false);
-  onMessage({data:{id:2,source,selectedIndices:Uint32Array.of(selected),halo:2,maxLayerPixels:300}});
+  onMessage({data:{id:2,source,selectedIndices:[selected],halo:2,maxLayerPixels:300}});
   const reply=replies.shift();
   assert.equal(reply.id,2);
   assert.equal(reply.ok,true);
