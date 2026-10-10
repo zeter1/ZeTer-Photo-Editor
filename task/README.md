@@ -2,8 +2,8 @@
 
 ## Stage 003 — точные границы halo в соседних tiled ROI (2026-10-10)
 
-- Исправлено ложное объединение соседних занятых тайлов с раздельными фактическими selection/halo: source + оба generated Worker/browser artifacts + Uint16 parity regressions.
-- **После проверки/merge:** P0 real Photoshop-authored 16-bit PSD / 32-bit PSB с audit hashes/provenance и browser file:// decode → UI Worker → preview/Undo + memory; P1 длинные связанные выделения (без oversized bounding box), прерывание fallback/preview. Основные задачи [002](002-psd-compatibility-corpus.md) и [003](003-tiled-content-aware.md) открыты.
+- **Подэтап закрыт:** исправлено ложное объединение соседних занятых тайлов с раздельными фактическими selection/halo: source + оба generated Worker/browser artifacts + Uint16 parity regressions. [PR #167](https://github.com/zeter1/ZeTer-Photo-Editor/pull/167) merged (squash `94825723a2593d479ca8296f2a2ad8448054a420`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38069654597) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38069712550) — **success**.
+- **Следующее (002/003 ещё открыты):** P0 real Photoshop-authored 16-bit PSD / 32-bit PSB с audit hashes/provenance и browser file:// decode → UI Worker → preview/Undo + memory; P1 длинные связанные выделения (без oversized bounding box), прерывание fallback/preview. Основные задачи [002](002-psd-compatibility-corpus.md) и [003](003-tiled-content-aware.md) открыты.
 
 ## Проходка Stage 002 P0 — preflight независимых 16-bit PSD / 32-bit PSB (2026-10-10)
 

@@ -5,7 +5,8 @@
 - Проблема: старый oversized ROI planner сливал соседние занятые **полные** tiles, даже если фактические выбранные пиксели и их donor halo не пересекались; это давало ложный RangeError из-за inflated рабочей площади.
 - Исправление: сохранять по каждой занятой tile-cell только min/max фактически выделенных pixels; intersect test и transitive merges работают по ним. Группы с пересекающимися padded footprints по-прежнему нельзя делить: исходные выбранные pixels не должны стать донорами в соседней группе.
 - Регрессии: 16-bit RGB через два соседних tiles с непересекающимися halo, точная синхронная/Worker-index parity, immutable original, сумма ROI budget и пересечение halo fail-closed. Version patch 1.45.2.
-- **Не решено:** очень длинные связанные ROI, независимый внешне созданный high-depth corpus, Chromium browser memory и прерываемый main-thread fallback/preview. Не закрывать 003 до отдельной проверки и merge+green main CI.
+- **Подэтап закрыт:** [PR #167](https://github.com/zeter1/ZeTer-Photo-Editor/pull/167) merged, squash `94825723a2593d479ca8296f2a2ad8448054a420`; [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38069654597) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38069712550) — **success**.
+- **Не решено (задача 003 открыта):** очень длинные связанные ROI, независимый внешне созданный high-depth corpus, Chromium browser memory и прерываемый main-thread fallback/preview.
 
 ## P0 external high-depth corpus prerequisite (2026-10-10)
 
