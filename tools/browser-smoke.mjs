@@ -431,6 +431,62 @@ async function runSmoke() {
     })()`);
     assert(blobWorkerProbe.supported && blobWorkerProbe.ok, 'Blob Worker must work from the real file:// editor', JSON.stringify(blobWorkerProbe));
 
+    // Stage 003: verify real detached tiled compute, not only a trivial Blob
+    // Worker. The supplier is a classic file:// script; the Worker itself has
+    // no file:// imports, dynamic fetch or module loader dependency.
+    const tiledWorkerProbe = await evaluate(client, `(async () => {
+      let worker=null, url=null;
+      try {
+        await new Promise((resolve,reject)=>{
+          const script=document.createElement('script');
+          const timer=setTimeout(()=>reject(new Error('Worker supplier script timed out')),5000);
+          script.onload=()=>{clearTimeout(timer);resolve();};
+          script.onerror=()=>{clearTimeout(timer);reject(new Error('Worker supplier script failed to load'));};
+          script.src=new URL('./src/core/tiled-inpaint-worker-source.js',document.baseURI).href;
+          document.head.append(script);
+        });
+        const code=globalThis.__zpeTiledInpaintWorkerSource;
+        if(typeof code!=='string'||code.length<10000)throw new Error('Missing classic Worker source');
+        const w=8,h=8,raw=new Uint8Array(w*h*4);
+        for(let i=0;i<w*h;i++)raw.set([20,40,60,255],i*4);
+        raw.set([250,0,0,255],(4*w+4)*4);
+        const dataUrl='data:application/x-zeter-pixel-buffer-tile;base64,'+btoa(String.fromCharCode(...raw));
+        const source={
+          kind:'zpe-pixel-buffer-source-v2',width:w,height:h,model:'rgb',
+          channels:4,bitsPerChannel:8,colorSpace:'srgb',alphaMode:'straight',
+          profileName:'',rawBytes:raw.byteLength,tileSize:w,
+          tiles:[{x:0,y:0,width:w,height:h,rawBytes:raw.byteLength,dataUrl}],
+        };
+        url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
+        worker=new Worker(url);
+        const reply=await new Promise((resolve,reject)=>{
+          const timer=setTimeout(()=>reject(new Error('Tiled Worker compute timed out')),6000);
+          worker.onmessage=event=>{
+            if(event.data?.ready===true){
+              worker.postMessage({id:17,source,selectedIndices:Uint32Array.of(4*w+4),halo:2,maxLayerPixels:128});
+              return;
+            }
+            if(event.data?.id!==17)return;
+            clearTimeout(timer);
+            resolve(event.data);
+          };
+          worker.onerror=event=>{clearTimeout(timer);reject(new Error(event.message||'Tiled Worker startup error'));};
+          worker.onmessageerror=()=>{clearTimeout(timer);reject(new Error('Tiled Worker messageerror'));};
+        });
+        return {ok:reply.ok===true&&reply.result?.filled===1&&reply.result?.changedTiles===1
+          &&reply.result?.source?.tiles?.[0]?.dataUrl!==dataUrl,
+          filled:reply.result?.filled,changedTiles:reply.result?.changedTiles,
+          error:reply.error};
+      }catch(error){
+        return {ok:false,error:String(error?.message||error)};
+      }finally{
+        worker?.terminate();
+        if(url)URL.revokeObjectURL(url);
+      }
+    })()`);
+    assert(tiledWorkerProbe.ok, 'Real CMYK/RGB tiled compute must work inside file:// Blob Worker', JSON.stringify(tiledWorkerProbe));
+
+
     const initial = await evaluate(client, `(() => ({
       title: document.title,
       rows: document.querySelectorAll('.layer-row').length,
