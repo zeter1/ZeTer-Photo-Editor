@@ -3,7 +3,7 @@
 ## Stage 003 P1 — cooperative ROI cancellation (2026-10-10)
 
 - Сделано: main-thread Content-Aware fallback yield после обработки каждого disjoint ROI и перед сериализацией single ROI. Отмена отбрасывает приватные tiles, не публикует неполный результат. Sync API и detached Worker используют те же ROI-шаги без asynchronous yield.
-- Проверяется: Uint16 exact parity, один scan selection, отмена после первой области и перед публикацией одиночной, исходные tile payload неизменны. Для закрытия подэтапа нужны PR CI и браузерный smoke.
+- **Подэтап закрыт:** Uint16 exact parity, одна выборка selection, отмена после первого ROI / перед сериализацией одиночного, immutable source. [PR #172](https://github.com/zeter1/ZeTer-Photo-Editor/pull/172) merged (squash `10e5723cad556ab47a27b6d17adf3ec35d4b66a0`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38072670560) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38072737008) — **success**. Вся задача 003 остаётся открытой.
 - **Следующее:** полноценная отмена ВНУТРИ одного большого ROI, wide connected ROI без inflated bounding boxes, реальные независимо созданные Photoshop PSD16/PSB32 с лицензией, hashes, browser file:// Worker/preview/Undo и memory snapshots. Задачи 002 и 003 **открыты**.
 
 
