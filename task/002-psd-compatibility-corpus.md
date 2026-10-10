@@ -1,5 +1,13 @@
 # 002 — PSD/PSB round-trip compatibility corpus
 
+## P0 handoff: audited external high-depth fixtures (2026-10-10)
+
+- Добавлен проверяющий CLI: `node tools/audit-external-high-depth-corpus.mjs --manifest /path/to/manifest.json`, отдельно от редакторского PSD writer/decoder. Он принимает schema `zpe-external-high-depth-psd-psb-v1` и **ровно два** entries `psd16` и `psb32`.
+- Каждый entry: `id, file, size, sha256, width, height, channels, colorMode, sourceUrl, sourceApplication, license, licenseUrl, provenanceNotes`. `file` — локальный basename PSD/PSB в каталоге manifest; `sourceApplication` должно быть `Adobe Photoshop`. Поля авторства и лицензии — **заявления**, их необходимо доказать по внешнему первоисточнику; тестовый mock не является внешним Photoshop fixture.
+- Аудит проверяет SHA-256 содержимого, размер, symlink/path traversal, сигнатуру `8BPS`, reserved bytes, PSD v1/PSB v2, 16/32-bit, RGB/CMYK, размеры и число каналов. Никакого автоматического скачивания/публикации неизвестно лицензированных файлов.
+- **Не закрыто:** реальная independently authored пара high-depth PSD/PSB; Photoshop/render reference, полноценный decode и browser Worker/preview/memory. После получения валидных files добавить отдельный codec→tiles→browser тест и реальный provenance review. Эта CLI-проверка **только preflight**.
+
+
 - **Goal:** расширить проверяемую Photoshop PSD/PSB round-trip совместимость на маски, группы и корректирующие слои.
 - **Why now / evidence:** PSD import/export в `main` есть, но полное Photoshop-совпадение нельзя заявлять без совместимых реальных fixtures.
 - **Scope:** одна категория независимых byte/semantic/preview fixtures за проходку, tests/docs; **non-scope:** proprietary parity без доказательств.

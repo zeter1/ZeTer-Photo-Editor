@@ -1,5 +1,10 @@
 # 003 — Tiled Content-Aware Fill
 
+## P0 external high-depth corpus prerequisite (2026-10-10)
+
+- Новый `tools/audit-external-high-depth-corpus.mjs` и Node-тесты обеспечивают независимый header/SHA-256/provenance *preflight* для внешних 16-bit PSD и 32-bit PSB; детали схемы в [002](002-psd-compatibility-corpus.md).
+- Это **не** поставка реальных образцов, не браузерный benchmark и не доказательство Photoshop compatibility. После получения файлов: manifest validation → decode → tiles → настоящий file:// Worker → preview/Undo/Redo + memory. Wide connected ROI и interruptible fallback всё ещё P1. Вся Stage 003 **открыта**.
+
 ## Проходка 2026-10-10 — high-depth PSD/PSB binary → native tiled Worker (регрессия)
 
 - Добавлена интеграционная Node-регрессия `tests/tiled-inpaint-high-depth-psd-psb-worker.test.mjs`: writer создаёт native layered **RGB16 PSD** и **Float32 HDR PSB**, реальные binary bytes декодируются с проверкой всех исходных samples, после чего работа идёт через `serializeTiledPixelBufferSource` и настоящий `worker_threads`-Worker.
