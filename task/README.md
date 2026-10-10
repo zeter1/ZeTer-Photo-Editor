@@ -47,7 +47,7 @@
 
 - Реализована tiled Content-Aware Fill для удалённых halo-disjoint островков ([PR CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38049643830), [main push CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38049694526), squash `e7188ac9ec021e8dd23fdf769430e1f5d5febb0b`). Остались memory/latency profiling, worker/cancellation и широкие связные маски. **003 не закрывать**.
 
-### Подэтап 003 — профиль 8/24/48 MiB (2026-10-10, PR в проверке)
+### Подэтап 003 — профиль 8/24/48 MiB (2026-10-10, [PR #139](https://github.com/zeter1/ZeTer-Photo-Editor/pull/139))
 
 - Добавлен воспроизводимый `tools/profile-tiled-inpaint.mjs` с isolated process RSS/latency и regression test. Полный запуск прикреплён к CI как **информационное измерение**, без числового pass/fail порога. См. [003](003-tiled-content-aware.md) и `docs/architecture/TILED_RASTER.md`.
-- Не помечать profiling как проверенный до PR/main CI. Worker/cancellation, wide connected masks и реальный PSD/PSB + UI memory profile остаются в очереди. **003 открыта**.
+- [PR CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38051881786); exact main push CI ожидается. Не помечать подэтап полностью закрытым до merge/main green. Worker/cancellation, wide connected masks и реальный PSD/PSB + UI memory profile остаются в очереди. **003 открыта**.

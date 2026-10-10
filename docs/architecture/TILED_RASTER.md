@@ -57,6 +57,18 @@ Full RGBA8 display canvas пока остаётся нужен browser composito
 
 Поля `before`/`after` показывают `rss`, `heapUsed`, `arrayBuffers` и `process.resourceUsage().maxRSS`. `observedProcessHighWaterGrowthMiB` — **разница process-wide high-water marks**, а не точный peak RAM самой операции: максимумы включают создание fixture и сериализацию, краткоживущие аллокации могут не отражаться в конечном RSS. `fixtureMs` не смешивается с `inpaintMs`. Тайминги/память — информационные измерения без flaky CI performance gate. CI печатает baseline на Linux/Node 24. Это *не* benchmark PSD/PSB disk decode, Canvas preview, main-thread latency или Worker cancellation; эти проверки остаются отдельными этапами.
 
+### Первый baseline — 2026-10-10
+
+[PR #139, CI Linux x64 / Node v24.21.0](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38051881786) (в каждом случае один выбранный пиксель, loadedTiles=2, changedTiles=1; время только функции):
+
+| Native source | `inpaintMs` | Process-wide HWM RSS |
+| --- | ---: | ---: |
+| 8 MiB (~8.0 фактически) | 113.92 мс | 188.18 MiB |
+| 24 MiB (~24.0 фактически) | 133.50 мс | 328.00 MiB |
+| 48 MiB (~48.0 фактически) | 186.92 мс | 426.89 MiB |
+
+Значения — не performance SLA и не peak RSS изолированного inpaint. Задача Worker/cancellation, широкий связный ROI и браузерный memory profile остаются открытыми.
+
 ## Проверка
 
 - `tests/tiled-raster-source.test.mjs`: region read/write без ложного dirty.
