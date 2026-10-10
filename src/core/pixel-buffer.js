@@ -1864,6 +1864,52 @@ function inpaintFrozenTiledSelection(source, working, scan, {
   };
 }
 
+// Detached Worker consumers already have a frozen list of selected indices.
+// Validate that list once and build the same bounded ROI without a second
+// width*height predicate scan inside the Worker. The compact membership bitmap
+// rejects duplicates and preserves the old fail-closed input contract.
+export function inpaintTiledPixelBufferSourceFromIndices(source, {
+  selectedIndices,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  if (!Array.isArray(selectedIndices) && !(selectedIndices instanceof Uint32Array)) {
+    throw new TypeError('Tiled inpaint Worker: frozen selection indices must be an Array or Uint32Array');
+  }
+  const width = Number(source?.width);
+  const height = Number(source?.height);
+  const total = width * height;
+  const maxPixels = Math.floor(MAX_PIXEL_BUFFER_SOURCE_BYTES / 3);
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
+      width < 1 || height < 1 || !Number.isSafeInteger(total) || total > maxPixels) {
+    throw new RangeError('Tiled inpaint Worker: invalid source geometry');
+  }
+  if (selectedIndices.length > total) {
+    throw new RangeError('Tiled inpaint Worker: invalid or duplicate selected index');
+  }
+
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const seen = new Uint8Array(Math.ceil(total / 8));
+  const scan = newTiledInpaintSelection(width, height);
+  for (const index of selectedIndices) {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= total) {
+      throw new RangeError('Tiled inpaint Worker: invalid or duplicate selected index');
+    }
+    const byte = Math.floor(index / 8), bit = 1 << (index % 8);
+    if (seen[byte] & bit) {
+      throw new RangeError('Tiled inpaint Worker: invalid or duplicate selected index');
+    }
+    seen[byte] |= bit;
+    recordTiledInpaintSelection(scan, index % width, Math.floor(index / width), width, maxFillPixels);
+  }
+  return inpaintFrozenTiledSelection(source, working, scan, {
+    halo, maxLayerPixels, maxFillPixels,
+  });
+}
+
 // Historical synchronous API remains deterministic for callers and profiles.
 export function inpaintTiledPixelBufferSource(source, {
   isAllowed,
