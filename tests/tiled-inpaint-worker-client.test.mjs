@@ -149,3 +149,74 @@ test('Stage 003 Worker client: invalid factory and invalid isCurrent reject inst
   await assert.rejects(client.run({}, { isCurrent:true }), /isCurrent/);
   assert.equal(workers.length, 0);
 });
+
+
+test('Stage 003 Worker client: synchronous ready/reply during subscription leaves no active job or handlers', async () => {
+  class ReentrantReadyWorker extends FakeBrowserWorker {
+    addEventListener(type, handler) {
+      super.addEventListener(type, handler);
+      if (type === 'error') this.emit('message', { ready:true });
+    }
+    postMessage(job) {
+      super.postMessage(job);
+      this.emit('message', { id:job.id, ok:true, result:'instant' });
+    }
+  }
+  const workers = [];
+  const client = createTiledInpaintWorkerJobController({
+    createWorker:() => {
+      const worker = new ReentrantReadyWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  assert.equal(await client.run({ source:'example' }), 'instant');
+  assert.equal(workers[0].sent.length, 1);
+  assert.equal(workers[0].terminated, 1);
+  assert.equal(workers[0].handlers.get('message').size, 0);
+  assert.equal(workers[0].handlers.get('error').size, 0);
+  assert.equal(client.cancel(), false, 'already completed worker cannot remain active');
+  assert.equal(await client.run({ source:'next' }), 'instant', 'subsequent work remains available');
+});
+
+test('Stage 003 Worker client: synchronous subscription errors clean up and allow recovery', async () => {
+  class StartupErrorWorker extends FakeBrowserWorker {
+    addEventListener(type, handler) {
+      super.addEventListener(type, handler);
+      if (type === 'error') this.emit('error', { message:'startup failed' });
+    }
+  }
+  const workers = [];
+  const client = createTiledInpaintWorkerJobController({
+    createWorker:() => {
+      const worker = workers.length === 0 ? new StartupErrorWorker() : new FakeBrowserWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  await assert.rejects(client.run({ source:'first' }), /startup failed/);
+  assert.equal(workers[0].terminated, 1);
+  assert.equal(workers[0].handlers.get('message').size, 0);
+  assert.equal(workers[0].handlers.get('error').size, 0);
+  assert.equal(client.cancel(), false);
+  const recovered = client.run({ source:'second' });
+  workers[1].emit('message', { ready:true });
+  workers[1].emit('message', { id:workers[1].sent[0].id, ok:true, result:'recovered' });
+  assert.equal(await recovered, 'recovered');
+});
+
+test('Stage 003 Worker client: exceptions while subscribing terminate a partially attached worker', async () => {
+  class ThrowingSubscribeWorker extends FakeBrowserWorker {
+    addEventListener(type, handler) {
+      super.addEventListener(type, handler);
+      if (type === 'error') throw new Error('listener registration failed');
+    }
+  }
+  const worker = new ThrowingSubscribeWorker();
+  const client = createTiledInpaintWorkerJobController({ createWorker:() => worker });
+  await assert.rejects(client.run({}), /listener registration failed/);
+  assert.equal(worker.terminated, 1);
+  assert.equal(worker.handlers.get('message').size, 0);
+  assert.equal(worker.handlers.get('error').size, 0);
+  assert.equal(client.cancel(), false);
+});
