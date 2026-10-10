@@ -6939,10 +6939,15 @@ function inpaintTiledPixelBufferSource(source, {
   if (!working) return null;
   const width = working.width, height = working.height;
   let selected = 0, minX = width, minY = height, maxX = -1, maxY = -1;
+  // Snapshot each selected coordinate only once. Re-running a geometry predicate
+  // after the bounds scan can produce a different mask (and decode unnecessary
+  // tiles); cap storage to the caller's existing fill-pixel budget.
+  const selectedIndices = [];
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       if (!isAllowed(x, y)) continue;
       selected += 1;
+      if (selected <= maxFillPixels) selectedIndices.push(y * width + x);
       if (x < minX) minX = x;
       if (y < minY) minY = y;
       if (x > maxX) maxX = x;
@@ -6967,9 +6972,17 @@ function inpaintTiledPixelBufferSource(source, {
   if (area > maxLayerPixels) {
     throw new RangeError('Контент-заливка: рабочая область ' + area + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
   }
+  // The per-ROI mask is bounded by maxLayerPixels; no full-document mask or
+  // second call into potentially mutable/expensive selection geometry is needed.
+  const selectionMask = new Uint8Array(area);
+  const regionWidth = bounds.right - bounds.left;
+  for (const index of selectedIndices) {
+    const x = index % width, y = Math.floor(index / width);
+    selectionMask[(y - bounds.top) * regionWidth + (x - bounds.left)] = 1;
+  }
   const region = working.readRegion(bounds);
   const filled = inpaintPixelBuffer(region.buffer, {
-    isAllowed:(x, y) => isAllowed(x + region.x, y + region.y),
+    isAllowed:(x, y) => selectionMask[y * regionWidth + x] === 1,
     maxLayerPixels,
     maxFillPixels,
   });
