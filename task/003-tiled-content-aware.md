@@ -95,9 +95,9 @@
 - **Проверка:** регрессии браузерного/Node-shaped `messageerror`, late reply, восстановления следующего job, утечки обработчиков и defective factory в `tests/tiled-inpaint-worker-client.test.mjs`. [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38056934228) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38057003202) успешно завершили `npm run check`, browser `file://` smoke и другие проверки на squash `964b41aab9633feb4bc1b0bfb4056d6267ac46f4`.
 - **Граница:** всё ещё **не** file:// Worker bootstrap, не UI integration, не true mid-kernel cancellation, не широкий связный ROI или heavy real high-depth PSD/PSB UI memory profiling; вся 003 остаётся открытой.
 
-## Проходка 2026-10-10 — экономия памяти Worker selection (PR pending CI)
+## Проходка 2026-10-10 — экономия памяти Worker selection ([PR #150](https://github.com/zeter1/ZeTer-Photo-Editor/pull/150), merged, main CI green)
 
 - **Область:** только изолированный `src/core/tiled-inpaint-worker-protocol.js`, не подключённый к UI. Заменён `Set` выбранных индексов на битовую карту (1 бит/пиксель, максимум 2 MiB при 48 MiB source cap); проверка диапазона и дубликатов сохранена, неверная/слишком большая геометрия отклоняется до bitmap allocation.
 - **Регрессии:** unsorted Array/Uint32Array, индексы через границу байта, cross-tile parity и сохранность источника, неверные/повторные индексы, некорректная геометрия и слишком длинный список.
 - **Честная граница:** это memory-reduction, **не устранение полного пиксельного scan** в существующем `inpaintTiledPixelBufferSource`. Численные perf/heap deltas ещё не измерены. Browser `file://` bootstrap + fallback, exact-owner UI integration, mid-kernel cancellation, wide connected ROI и heavy PSD/PSB UI memory profile остаются следующими задачами.
-- **Закрытие подэтапа:** обновить результат только после зелёных PR CI, merge и exact main push CI. Вся задача 003 остаётся открытой.
+- **Проверенный gate:** [PR CI #38057597657](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38057597657) — success; [exact main push CI #38057640261](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38057640261) — success (`event=push`, `head_branch=main`, squash SHA `04650b6087154aeff7d8a5e4e87e70c2cb35fa43`). Worker bitmap подэтап закрыт. Вся задача 003 остаётся открытой.
