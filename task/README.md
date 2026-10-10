@@ -20,6 +20,11 @@
 14. Для post-merge verification не ограничивайся helper-ом, который может фильтровать только `pull_request` runs. Если exact merge-SHA push run не виден, используй provider-native GET коллекции `actions/runs?head_sha=<merge-sha>` через GitHub fetch и проверь `event=push`, `head_branch=main`, exact `head_sha` и `conclusion=success`; при failure переходи к jobs/logs.
 15. При добавлении модуля в canonical `file://` bundle помни, что `tools/build-bundle.mjs` снимает ESM-обёртку и конкатенирует classic-script chunks. Если новый модуль использует импортированные `const`/`let` во время module evaluation, его source-order обязан идти после owner-а этих bindings; добавь architecture guard на порядок, а не полагайся только на корректность ESM imports.
 
+## Текущая проходка — Stage 003 browser Worker loader (2026-10-10)
+
+- Создаётся независимый browser adapter `src/core/tiled-inpaint-browser-worker.js` для generated `file://` classic Worker supplier: lazy single-flight load, bounded timeout, Blob Worker bootstrap, безопасные `unavailable` / `cancelled` outcomes и generation guards. Регрессии — `tests/tiled-inpaint-browser-worker.test.mjs`.
+- **Не считать UI Worker integration выполненной:** `src/painting/controller.js` ещё вызывает cooperative main-thread path. Следующий кандидат — реальное подключение frozen selection indices → Worker с fallback и тестом браузерной транзакции. После этого RAM/latency профили, широкий связный ROI. `003` остаётся открытой.
+
 ## Последний закрытый подэтап — frozen-index fastpath Worker (2026-10-10)
 
 - **003 / frozen-index compute:** Worker передаёт валидированные selected indices непосредственно в ROI kernel без повторного полного прохода по `width × height`. [PR #152](https://github.com/zeter1/ZeTer-Photo-Editor/pull/152) слит (squash `08933fcf603aa7847d422d7c6138cc1f2f96c02c`); [PR CI #38059123293](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38059123293) и [exact main push CI #38059186053](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38059186053) **success**, включая Node tests, генерируемые файлы и Chromium file:// smoke. **003 остаётся открытой:** следующий приоритет — browser UI Worker dispatch/loader/fallback, exact-owner cancellation и большой реальный PSD/PSB browser-memory профиль. Подробности — [003-tiled-content-aware.md](003-tiled-content-aware.md).
