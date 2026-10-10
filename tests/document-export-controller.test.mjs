@@ -200,6 +200,83 @@ test('raster export owns one detached submit-time document snapshot across async
   assert.equal(harness.calls.statuses.at(-1), 'Экспортирован My_Project.png');
 });
 
+
+for (const [format, extension] of [
+  ['image/vnd.adobe.photoshop', 'psd'],
+  ['psb', 'psb'],
+]) {
+  test(`${extension.toUpperCase()} export keeps a detached snapshot across async preparation and tab switch`, async () => {
+    const prepareGate = deferred();
+    const sourceDocument = {
+      name: 'Source Master',
+      width: 1200,
+      height: 800,
+      layers: [{ id: 'source-layer' }],
+      colorProfile: {
+        kind: 'icc',
+        dataUrl: 'data:application/octet-stream;base64,AA==',
+        untagged: true,
+      },
+    };
+    const expectedSnapshot = structuredClone(sourceDocument);
+    let preparedSnapshot;
+    const harness = makeHarness({
+      documentValue: sourceDocument,
+      pendingChecks: [false, false],
+      prepareDocument: async snapshot => {
+        preparedSnapshot = snapshot;
+        await prepareGate.promise;
+        return defaultPrepared();
+      },
+    });
+
+    harness.controller.showExportDialog();
+    const exporting = harness.getModal().onSubmit({ format, quality: '92' });
+    assert.notStrictEqual(preparedSnapshot, sourceDocument);
+    assert.deepEqual(preparedSnapshot, expectedSnapshot);
+
+    sourceDocument.name = 'Edited During Export';
+    sourceDocument.width = 2000;
+    sourceDocument.layers.push({ id: 'new-layer' });
+    sourceDocument.colorProfile.dataUrl = 'data:application/octet-stream;base64,AQ==';
+    sourceDocument.colorProfile.untagged = false;
+    harness.state.documentValue = {
+      name: 'Other Tab',
+      width: 400,
+      height: 300,
+      layers: [],
+      colorProfile: null,
+    };
+    assert.deepEqual(harness.calls.downloads, [], 'no download before preparation completes');
+
+    prepareGate.resolve();
+    await exporting;
+
+    const encodes = extension === 'psd' ? harness.calls.psdEncodes : harness.calls.psbEncodes;
+    const otherEncodes = extension === 'psd' ? harness.calls.psbEncodes : harness.calls.psdEncodes;
+    assert.equal(harness.calls.snapshots, 1);
+    assert.equal(harness.calls.restores, 1);
+    assert.deepEqual(preparedSnapshot, expectedSnapshot);
+    assert.equal(encodes.length, 1);
+    assert.deepEqual(otherEncodes, []);
+    assert.equal(encodes[0].width, 1200);
+    assert.equal(encodes[0].height, 800);
+    assert.deepEqual(encodes[0].iccProfile, new Uint8Array([9, 8, 7]));
+    assert.equal(encodes[0].iccUntagged, true);
+    assert.deepEqual(harness.calls.iccReads, [{
+      value: 'data:application/octet-stream;base64,AA==',
+      options: { maxBytes: 4 * 1024 * 1024 },
+    }]);
+    assert.deepEqual(harness.calls.downloads, [{
+      blob: { kind: extension },
+      name: `Source_Master.${extension}`,
+    }]);
+    assert.equal(harness.calls.statuses.at(-1), `Экспортирован Source_Master.${extension}`);
+    assert.deepEqual(harness.calls.alerts, []);
+    assert.deepEqual(harness.calls.errors, []);
+  });
+}
+
 for (const [type, rawQuality, expectedQuality, extension] of [
   ['image/png', '92', 0.92, 'png'],
   ['image/jpeg', '500', 1, 'jpg'],
