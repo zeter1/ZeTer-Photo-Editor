@@ -6,6 +6,12 @@
 
 ## 1.43.4 — текущая версия
 
+### 2026-10-10 — Независимая проверка бинарных масок и маркеров групп PSD/PSB
+
+- Добавлено: отдельный тестовый парсер исходных PSD/PSB layer records, флагов видимости и масок, marker `lsct`, clipping и PackBits-каналов `-2`; пиксели трёх масок сверяются с явно заданными эталонами, без повторного декодирования кодеком ZPE.
+- Документация: уточнены границы внутреннего byte-oracle в `task/002-psd-compatibility-corpus.md`, fixture provenance и test matrix.
+- Ограничения проверки: независимость от decoder не означает проверку Photoshop renderer или подтверждение pixel-perfect совместимости; production-код и версия 1.43.4 не меняются. Проверку CI записать после фактического завершения.
+
 ### 2026-10-10 — Внешний эталон merged preview PSD/PSB (только тесты)
 
 - Добавлено: независимое чтение PackBits/RLE merged preview из закреплённых сторонних PSD/PSB fixtures (прозрачный Photoshop Shape Layer, PSB-группы и Adjustment Layer с маской). Пиксели сверяются с PSD decoder через отдельную in-memory копию файла без layer-section, не через ZPE writer.
