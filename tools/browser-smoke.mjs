@@ -807,7 +807,7 @@ async function runSmoke() {
       'Real marquee selection must enable Edit > Content-Aware Fill',JSON.stringify(stage003Selection));
     await waitFor('Stage 003 tiled UI Content-Aware Fill',async()=>evaluate(client,
       "document.querySelector('#statusText')?.textContent?.includes('tiled ') && window.__stage003UiWorkerJobs===1"));
-    const stage003Result = await evaluate(client, "(() => ({\n  status:document.querySelector('#statusText')?.textContent||'',\n  jobs:window.__stage003UiWorkerJobs||0,\n  pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data),\n  history:[...document.querySelectorAll('#historyList .history-row')].map(row=>row.textContent)\n}))");
+    const stage003Result = await evaluate(client, "(() => ({\n  status:document.querySelector('#statusText')?.textContent||'',\n  jobs:window.__stage003UiWorkerJobs||0,\n  pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data),\n  history:[...document.querySelectorAll('#historyList .history-row')].map(row=>row.textContent)\n}))()");
     assert(stage003Result.jobs===1 && stage003Result.status.includes('восстановлено') &&
       stage003Result.history.filter(value=>value.includes('Контент-заливка')).length===1 &&
       stage003Result.pixel[0]<150,
