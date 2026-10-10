@@ -51,6 +51,24 @@ Full RGBA8 display canvas пока остаётся нужен browser composito
 
 Следующая безопасная проходка: workerize дорогие bounded tile/halo jobs с exact-owner cancellation, затем перенести cross-tile Flood Fill / Content-Aware Fill на streaming/tiled algorithms. После этого — lazy backing store/eviction; только затем имеет смысл пересматривать 512 MiB PSD/PSB input gate.
 
+## Профилирование tiled Content-Aware Fill (Stage 003)
+
+Запуск: `node tools/profile-tiled-inpaint.mjs` (8, 24, 48 MiB) или `node tools/profile-tiled-inpaint.mjs --sizes 1,8`. Каждый размер запускается в **новом дочернем Node-процессе с `--expose-gc`**, поэтому RSS одного сценария не загрязняет следующий. Детерминированный synthetic fixture: native Float32 CMYKA, 256 px tiles, одно повреждённое непрозрачное значение на границе тайла. Инструмент проверяет, что изменён ровно один tile, и сохраняет JSON с версиями Node/OS, точным raw byte size, числом загруженных tiles, временем подготовки и временем вызова `inpaintTiledPixelBufferSource`.
+
+Поля `before`/`after` показывают `rss`, `heapUsed`, `arrayBuffers` и `process.resourceUsage().maxRSS`. `observedProcessHighWaterGrowthMiB` — **разница process-wide high-water marks**, а не точный peak RAM самой операции: максимумы включают создание fixture и сериализацию, краткоживущие аллокации могут не отражаться в конечном RSS. `fixtureMs` не смешивается с `inpaintMs`. Тайминги/память — информационные измерения без flaky CI performance gate. CI печатает baseline на Linux/Node 24. Это *не* benchmark PSD/PSB disk decode, Canvas preview, main-thread latency или Worker cancellation; эти проверки остаются отдельными этапами.
+
+### Первый baseline — 2026-10-10
+
+[PR #139, CI Linux x64 / Node v24.21.0](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38051881786) (в каждом случае один выбранный пиксель, loadedTiles=2, changedTiles=1; время только функции):
+
+| Native source | `inpaintMs` | Process-wide HWM RSS |
+| --- | ---: | ---: |
+| 8 MiB (~8.0 фактически) | 113.92 мс | 188.18 MiB |
+| 24 MiB (~24.0 фактически) | 133.50 мс | 328.00 MiB |
+| 48 MiB (~48.0 фактически) | 186.92 мс | 426.89 MiB |
+
+Значения — не performance SLA и не peak RSS изолированного inpaint. Задача Worker/cancellation, широкий связный ROI и браузерный memory profile остаются открытыми.
+
 ## Проверка
 
 - `tests/tiled-raster-source.test.mjs`: region read/write без ложного dirty.

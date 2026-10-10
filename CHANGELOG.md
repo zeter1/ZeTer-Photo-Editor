@@ -6,6 +6,13 @@
 
 ## 1.44.2 — текущая версия
 
+### 2026-10-10 — Инструмент измерения tiled Content-Aware Fill
+
+- Добавлено: отдельный JSON-профилировщик 8/24/48 MiB synthetic CMYKA Float32 tiled источников с измерением времени подготовки/операции и process-wide high-water RSS; в CI информационный отчёт и минимальная регрессия для проверяемости инструмента.
+- Совместимость: production logic, file:// bundle и версия 1.44.2 не изменены.
+- Ограничения: baseline не является измерением самого PSD/PSB декодирования, пиков RAM лишь самого inpaint или responsiveness UI; [PR CI на Linux x64 / Node 24](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38051881786) зафиксировал 113.92/133.50/186.92 мс и process-wide high-water RSS 188/328/427 MiB для 8/24/48 MiB соответственно; exact main push CI ожидается.
+
+
 ### 2026-10-10 — Далёкие островки Content-Aware Fill в tiled слоях
 
 - Добавлено: halo-disjoint ROI для удалённых выделенных островков, когда общий bounding rectangle превышает 8 МП. Сумма площадей всех ROI всё ещё ограничена прежним лимитом 8 МП.
