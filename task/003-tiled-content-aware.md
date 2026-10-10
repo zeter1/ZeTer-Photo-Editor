@@ -11,6 +11,13 @@
 - **Done gate:** independent PR merged with green `main` push CI.
 - **Risks / handoff:** global connectivity cannot be naively limited to one tile; preserve the fallback.
 
+## Проходка 2026-10-10 — проверка production file:// Worker adapter (PR pending)
+
+- **Scope:** браузерная Chromium-регрессия в `tools/browser-smoke.mjs` проверяет не только raw classic Worker protocol, но и реальный `createBrowserTiledInpaintWorkerController`: повторную ленивую загрузку supplier через `file://`, вычисление на tiled RGBA8, immutable source, отмену уже созданного Worker через terminate и успешную работу следующего job. Записывается диагностическое `elapsedMs` (без нестабильных порогов).
+- **Non-scope:** это отдельный browser controller integration check, **не** сценарий кликов пользователя, **не** heap-профиль больших PSD/PSB и **не** оптимизация широкого связного ROI. Production bundle/версия не меняются.
+- **Gate:** `npm run check`, Chromium `npm run test:browser`, отсутствие diff generated assets, PR CI, merge и green main CI. До проверки этих пунктов подэтап остаётся pending.
+- **Осталось по 003:** end-to-end UI command, 16/32-bit PSD/PSB browser heap/latency, wide connected ROI, cancellation при других live-owner invalidations; запись `reset()` для смены документа/вкладки уже есть в `src/main.js`.
+
 ## Проходка 2026-10-10 — runtime UI Worker dispatch ([PR #154](https://github.com/zeter1/ZeTer-Photo-Editor/pull/154), merged, main CI green)
 
 - **Реализовано и слито в main:** `src/painting/tiled-inpaint-dispatch.js` freezes selection once in cooperative scan, sends `Uint32Array` indices and original serialized tiles to browser Worker, reuses frozen indices for bounded synchronous fallback ONLY if bootstrap is `unavailable`; compute/protocol errors propagate. Empty/full selection is a no-op.
