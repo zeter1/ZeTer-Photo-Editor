@@ -10884,6 +10884,7 @@ function createPathControlGestureController({
 const PEN_DRAFT_BEGIN_RESULT = Object.freeze({
   STARTED: 'started',
   FINISH_REQUESTED: 'finish-requested',
+  CLOSE_REQUESTED: 'close-requested',
   TOO_SHORT: 'too-short',
   INVALID: 'invalid',
 });
@@ -10945,11 +10946,22 @@ function createPenDraftGestureController({ runtime } = {}) {
     draft = null;
   }
 
+  // Hit testing uses screen pixels at every zoom; closing never creates a duplicate node.
+  function canCloseAt(point) {
+    if (!draft || draft.points.length < 3) return false;
+    const hover = finitePoint(point);
+    if (!hover) return false;
+    const first = draft.points[0];
+    return Math.hypot(hover.x - first.x, hover.y - first.y) <= 6 / currentZoom();
+  }
+
   function updateIdleHover(point) {
     if (!draft) return false;
     const hover = finitePoint(point);
     if (!hover) return false;
-    draft.hover = hover;
+    draft.hover = canCloseAt(hover)
+      ? { x: draft.points[0].x, y: draft.points[0].y }
+      : hover;
     return true;
   }
 
@@ -10968,6 +10980,9 @@ function createPenDraftGestureController({ runtime } = {}) {
     const anchor = finitePoint(point);
     if (!anchor) {
       return { result: PEN_DRAFT_BEGIN_RESULT.INVALID, gesture: null, status: null };
+    }
+    if (canCloseAt(anchor)) {
+      return { result: PEN_DRAFT_BEGIN_RESULT.CLOSE_REQUESTED, gesture: null, status: null };
     }
     if (!draft) draft = { points: [], hover: anchor };
 
@@ -11093,6 +11108,7 @@ function createPenDraftGestureController({ runtime } = {}) {
     snapshot,
     reset,
     updateIdleHover,
+    canCloseAt,
     isGesture,
     beginPoint,
     update,
@@ -27992,7 +28008,8 @@ function drawOverlay() {
   if(penDraft?.points?.length){
     const points=penDraft.points;
     ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#72a7ff';ctx.fillStyle='#fff';ctx.setLineDash([]);
-    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover);ctx.stroke();
+    const closing=!penDraftGestures.isGesture(drag)&&penDraftGestures.canCloseAt(penDraft.hover);
+    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover,closing);ctx.stroke();
     ctx.lineWidth=1/zoom;ctx.strokeStyle='#8fc0ff';
     for(const point of points){
       for(const handle of [point.handleIn,point.handleOut]){
@@ -28003,6 +28020,7 @@ function drawOverlay() {
     }
     ctx.fillStyle='#fff';ctx.strokeStyle='#3976ea';
     for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,3/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();}
+    if(closing){ctx.beginPath();ctx.arc(points[0].x,points[0].y,6/zoom,0,Math.PI*2);ctx.stroke();}
     ctx.restore();
   } else {
     selectionGestures.drawMagneticDraft(ctx);
@@ -28444,7 +28462,8 @@ async function onOverlayPointerDown(e) {
       return;
     }
     const penResult=penDraftGestures.beginPoint(p,{finish:e.detail>=2});
-    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
+    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.CLOSE_REQUESTED)finishPenPath({forceClosed:true});
+    else if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
     else{
       if(penResult.status)setStatus(penResult.status);
       if(penResult.result===PEN_DRAFT_BEGIN_RESULT.STARTED){drag=penResult.gesture;drawOverlay();}
@@ -28641,7 +28660,7 @@ function previewGradient(start,end) {
   ctx.restore();
 }
 
-function tracePenDraftPath(ctx,points,hover=null){
+function tracePenDraftPath(ctx,points,hover=null,closing=false){
   if(!Array.isArray(points)||!points.length)return false;
   ctx.moveTo(points[0].x,points[0].y);
   const segment=(from,to)=>{
@@ -28653,23 +28672,26 @@ function tracePenDraftPath(ctx,points,hover=null){
   };
   for(let index=1;index<points.length;index+=1)segment(points[index-1],points[index]);
   if(hover){
-    const last=points.at(-1);
-    const cp1=last.handleOut||last;
-    ctx.bezierCurveTo(cp1.x,cp1.y,hover.x,hover.y,hover.x,hover.y);
+    if(closing){segment(points.at(-1),points[0]);ctx.closePath();}
+    else {
+      const last=points.at(-1);
+      const cp1=last.handleOut||last;
+      ctx.bezierCurveTo(cp1.x,cp1.y,hover.x,hover.y,hover.x,hover.y);
+    }
   }
   return true;
 }
-function finishPenPath(){
+function finishPenPath({forceClosed=false}={}){
   const points=penDraftGestures.consumePoints();
   if(penDraftGestures.isGesture(drag))drag=null;
   const outcome=penPathCommands.publish(doc,points,{
-    pathClosed:Boolean(els.penClosed?.checked),
+    pathClosed:Boolean(forceClosed||els.penClosed?.checked),
     stroke:els.primaryColor.value,
     strokeWidth:els.brushSize.value,
     opacity:Number(els.toolOpacity.value)/100,
   });
   if(outcome.result===PEN_PATH_COMMAND_RESULT.COMMITTED){
-    setStatus('Bézier-контур добавлен');drawOverlay();return true;
+    setStatus(forceClosed?'Bézier-контур замкнут':'Bézier-контур добавлен');drawOverlay();return true;
   }
   if(outcome.result===PEN_PATH_COMMAND_RESULT.NOOP&&outcome.reason===PEN_PATH_NOOP_REASON.TOO_SHORT)drawOverlay();
   return false;
