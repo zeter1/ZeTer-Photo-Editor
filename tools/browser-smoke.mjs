@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
+import { createBrowserRendererHeapSampler } from './browser-renderer-heap-sampler.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -783,12 +784,18 @@ async function runSmoke() {
     // Stage 003: exercise the ACTUAL editor UI command on a 16-bit tiled .zpe
     // document. Earlier probes cover direct Worker/controller APIs; this guards
     // the menu -> frozen selection -> Worker -> native layer -> History wiring.
+    const stage003HeapSampler = createBrowserRendererHeapSampler(client);
+    await stage003HeapSampler.start();
+    const stage003ImportStartedMs = Date.now();
     const stage003Fixture = await evaluate(client, "(() => {\n  const width=8,height=8,tileSize=4,channels=4;\n  const canvas=document.createElement('canvas');\n  canvas.width=width;canvas.height=height;\n  const ctx=canvas.getContext('2d'),image=ctx.createImageData(width,height);\n  for(let y=0;y<height;y++)for(let x=0;x<width;x++){\n    const defect=(x===3||x===4)&&(y===3||y===4);\n    image.data.set(defect?[234,0,0,255]:[20,40,60,255],(y*width+x)*4);\n  }\n  ctx.putImageData(image,0,0);\n  const tiles=[];\n  for(let y=0;y<height;y+=tileSize)for(let x=0;x<width;x+=tileSize){\n    const bytes=new Uint8Array(tileSize*tileSize*channels*2);\n    const view=new DataView(bytes.buffer);\n    for(let dy=0;dy<tileSize;dy++)for(let dx=0;dx<tileSize;dx++){\n      const defect=(x+dx===3||x+dx===4)&&(y+dy===3||y+dy===4);\n      const values=defect?[60000,0,0,65535]:[5140,10280,15420,65535];\n      for(let ch=0;ch<channels;ch++)view.setUint16(((dy*tileSize+dx)*channels+ch)*2,values[ch],true);\n    }\n    tiles.push({x,y,width:tileSize,height:tileSize,rawBytes:bytes.length,\n      dataUrl:'data:application/x-zeter-pixel-buffer-tile;base64,'+btoa(String.fromCharCode(...bytes))});\n  }\n  const source={kind:'zpe-pixel-buffer-source-v2',width,height,model:'rgb',channels,\n    bitsPerChannel:16,colorSpace:'srgb',alphaMode:'straight',profileName:'',tileSize,\n    rawBytes:width*height*channels*2,tiles};\n  const layer={id:'stage003-ui-layer',type:'raster',name:'Tiled 16-bit UI',\n    x:0,y:0,width,height,scaleX:1,scaleY:1,rotation:0,visible:true,locked:false,\n    opacity:1,blendMode:'source-over',dataUrl:canvas.toDataURL('image/png'),highDepthSource:source};\n  const project={version:1,name:'Stage003 browser UI fixture',width,height,\n    background:'transparent',selectedLayerId:layer.id,groups:[],layers:[layer]};\n  const input=document.querySelector('#projectInput'),transfer=new DataTransfer();\n  transfer.items.add(new File([JSON.stringify(project)],'stage003-ui.zpe',{type:'application/json'}));\n  const fileName=transfer.files[0].name;\n  input.files=transfer.files;\n  const oldConfirm=window.confirm;\n  window.confirm=()=>true;\n  try {input.dispatchEvent(new Event('change',{bubbles:true}));}\n  finally {window.confirm=oldConfirm;}\n  return {fileName,sourceBytes:source.rawBytes,tiles:tiles.length};\n})()");
     assert(stage003Fixture.sourceBytes === 512 && stage003Fixture.tiles === 4,
       'Stage 003 UI fixture must contain real 16-bit serialized tiles', JSON.stringify(stage003Fixture));
     await waitFor('Stage 003 high-depth project import', async () => evaluate(client,
       "document.querySelector('#statusText')?.textContent==='Проект открыт' && document.querySelectorAll('.layer-row').length===1"));
     await waitFor('Stage 003 16-bit layer render',async()=>evaluate(client, "(() => {const c=document.querySelector('#editorCanvas');return c.width===8 && c.height===8 && c.getContext('2d').getImageData(4,4,1,1).data[0]>150;})()"));
+    await stage003HeapSampler.snapshot('after-import-preview');
+    const stage003ImportAndPreviewMs = Date.now() - stage003ImportStartedMs;
+    const stage003FillStartedMs = Date.now();
     const stage003View = await evaluate(client, "(() => {\n  const zoom=document.querySelector('#zoomRange');\n  zoom.value='400';zoom.dispatchEvent(new Event('input',{bubbles:true}));\n  document.querySelector('[data-tool=\"marquee\"]').click();\n  const type=document.querySelector('#selectionType');\n  type.value='rect';type.dispatchEvent(new Event('change',{bubbles:true}));\n  const viewport=document.querySelector('#stageViewport');\n  viewport.scrollLeft=0;viewport.scrollTop=0;\n  document.querySelector('#canvasShell').scrollIntoView({block:'center',inline:'center'});\n  const canvas=document.querySelector('#editorCanvas'),rect=canvas.getBoundingClientRect();\n  const point=(x,y)=>({x:rect.left+rect.width*x/8,y:rect.top+rect.height*y/8});\n  const ctx=canvas.getContext('2d');\n  const before=Array.from(ctx.getImageData(4,4,1,1).data);\n  return {width:canvas.width,height:canvas.height,rectWidth:rect.width,rectHeight:rect.height,\n    start:point(2.6,2.6),end:point(5.5,5.5),before,hit:document.elementFromPoint(point(2.6,2.6).x,point(2.6,2.6).y)?.id,hitType:document.elementFromPoint(point(2.6,2.6).x,point(2.6,2.6).y)?.outerHTML?.slice(0,180)};\n})()");
     assert(stage003View.width===8 && stage003View.height===8 && stage003View.rectWidth>16 && stage003View.hit==='overlayCanvas' &&
       stage003View.before[0]>150 && stage003View.before[1]<40,
@@ -815,12 +822,23 @@ async function runSmoke() {
       stage003Result.pixel[0]<150,
       'UI tiled fill must dispatch exactly one real Worker job, repair the defect and commit once',
       JSON.stringify(stage003Result));
+    await stage003HeapSampler.snapshot('after-worker-preview');
+    const stage003SelectionWorkerPreviewMs = Date.now() - stage003FillStartedMs;
     await evaluate(client,"document.querySelector('#undoBtn').click();true");
     await waitFor('Stage 003 UI undo',async()=>evaluate(client,
       "document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data[0]>150"));
     await evaluate(client,"document.querySelector('#redoBtn').click();true");
     await waitFor('Stage 003 UI redo',async()=>evaluate(client,
       "document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data[0]<150"));
+    await stage003HeapSampler.snapshot('after-undo-redo');
+    const stage003HeapProfile = await stage003HeapSampler.stop();
+    console.log('Stage 003 browser renderer heap profile:', JSON.stringify({
+      kind:'stage003-file-ui-rgb16-tiled-worker-heap-samples-v1',
+      fixture:'synthetic native .zpe RGB16 8x8 (NOT external PSD/PSB)',
+      importAndPreviewMs:stage003ImportAndPreviewMs,
+      selectionWorkerAndPreviewMs:stage003SelectionWorkerPreviewMs,
+      ...stage003HeapProfile,
+    }));
     await evaluate(client,"window.__stage003RestoreWorkerPost?.();true");
     console.log('Stage 003 tiled high-depth UI Worker regression:',JSON.stringify(stage003Result));
     assertNoBrowserErrors(errors,stderrState);
