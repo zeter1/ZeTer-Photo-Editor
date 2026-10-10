@@ -59,13 +59,14 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
   patchRadius,
   passes,
   randomSearchSteps,
+  alphaChannel,
 } = {}) {
   if (!bounds || bounds.maxX < bounds.minX || bounds.maxY < bounds.minY) return;
   const radius = boundedInteger(patchRadius, 1, 1, 3);
   const passCount = boundedInteger(passes, 2, 1, 4);
   const randomSteps = boundedInteger(randomSearchSteps, 4, 0, 8);
   const scale = sampleScale(data);
-  const comparedChannels = channels === 4 ? 3 : channels === 5 ? 4 : channels;
+  const comparedChannels = alphaChannel < 0 ? channels : alphaChannel;
   const maxDimension = Math.max(width, height);
 
   const validDonor = index => index >= 0 && index < selectedMask.length && selectedMask[index] === 0;
@@ -209,10 +210,14 @@ export function inpaintSelectedSamples(data, width, height, channels, {
   patchRadius = 1,
   patchMatchPasses = 2,
   randomSearchSteps = 4,
+  alphaChannel = channels === 4 ? 3 : channels === 5 ? 4 : -1,
 } = {}) {
   width = positiveInteger(width, 'width');
   height = positiveInteger(height, 'height');
   channels = positiveInteger(channels, 'channels');
+  if (!Number.isInteger(alphaChannel) || (alphaChannel !== -1 && alphaChannel !== channels - 1)) {
+    throw new RangeError('Контент-заливка: некорректный индекс alpha-канала');
+  }
   if (!isNumericTypedArray(data)) throw new TypeError('Контент-заливка требует typed pixel buffer');
   const total = width * height;
   if (!Number.isSafeInteger(total)) throw new RangeError('Контент-заливка: размер слоя выходит за безопасный диапазон');
@@ -288,6 +293,7 @@ export function inpaintSelectedSamples(data, width, height, channels, {
 
   const radius = boundedInteger(sampleRadius, 2, 1, 6);
   const sums = new Float64Array(channels);
+  const alphaScale = sampleScale(data) || 1;
   let filled = 0;
 
   while (head < tail) {
@@ -297,6 +303,7 @@ export function inpaintSelectedSamples(data, width, height, channels, {
     const y = Math.floor(index / width);
     sums.fill(0);
     let weightTotal = 0;
+    let alphaWeightTotal = 0;
     let bestDonor = -1;
     let bestDistance = Number.POSITIVE_INFINITY;
 
@@ -319,10 +326,15 @@ export function inpaintSelectedSamples(data, width, height, channels, {
         const distanceSquared = ddx * ddx + ddy * ddy;
         const weight = 1 / (1 + distanceSquared);
         const donorOffset = donor * channels;
+        // Straight-alpha donors: invisible RGB/CMYK must not tint the replacement.
+        const donorAlpha = alphaChannel < 0 ? 1 : Math.max(0, Math.min(1,
+          Number(data[donorOffset + alphaChannel]) / alphaScale || 0));
         for (let channel = 0; channel < channels; channel += 1) {
-          sums[channel] += Number(data[donorOffset + channel]) * weight;
+          const channelWeight = channel === alphaChannel ? weight : weight * donorAlpha;
+          sums[channel] += Number(data[donorOffset + channel]) * channelWeight;
         }
         weightTotal += weight;
+        alphaWeightTotal += weight * donorAlpha;
         if (distanceSquared < bestDistance || (distanceSquared === bestDistance && (bestDonor < 0 || donor < bestDonor))) {
           bestDistance = distanceSquared;
           bestDonor = donor;
@@ -333,7 +345,8 @@ export function inpaintSelectedSamples(data, width, height, channels, {
     if (bestDonor < 0 || weightTotal <= 0) continue;
     const targetOffset = index * channels;
     for (let channel = 0; channel < channels; channel += 1) {
-      data[targetOffset + channel] = sums[channel] / weightTotal;
+      const denominator = alphaChannel < 0 || channel === alphaChannel ? weightTotal : alphaWeightTotal;
+      data[targetOffset + channel] = denominator > 0 ? sums[channel] / denominator : 0;
     }
     pending[index] = 0;
     donorIndex[index] = bestDonor;
@@ -360,6 +373,7 @@ export function inpaintSelectedSamples(data, width, height, channels, {
       patchRadius,
       passes:patchMatchPasses,
       randomSearchSteps,
+      alphaChannel,
     });
   }
 
