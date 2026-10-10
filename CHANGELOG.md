@@ -6,6 +6,13 @@
 
 ## 1.44.3 — текущая версия
 
+### 2026-10-10 — Проверка tiled Content-Aware Fill после реального PSD/PSB decode
+
+- Тесты/CI: добавлен информационный изолированный профилировщик внешних pinned PSD CMYK и layered PSB файлов для стадий decode, преобразования native PixelBuffer в tiles и bounded Content-Aware Fill; source bytes сверяются с независимыми manifest SHA-256.
+- Регрессии: PSD sync/cooperative pixel parity, однократное вычисление selection predicate, PSB cancellation до декодирования ROI tiles, иммутабельность source payload и отсутствие изменений за пределами выбранного пикселя.
+- Границы: upstream файлы небольшие и 8-bit; тест не подтверждает peak RAM больших 16/32-bit PSD/PSB, browser preview и Worker-kernel cancellation. Production/runtime не менялся; версия остаётся 1.44.3.
+
+
 ### 2026-10-10 — Кооперативное сканирование tiled Content-Aware Fill
 
 - Улучшено: при native tiled Content-Aware Fill сканирование замороженного выделения отдаёт управление интерфейсу между блоками по 32 768 пикселей; после каждого yield заново проверяется исходный документ, слой, блокировка и identity исходного high-depth source. Устаревшая операция завершается без preview, history и записи.
