@@ -1,5 +1,12 @@
 # 002 — PSD/PSB round-trip compatibility corpus
 
+## Проходка 2026-10-10 — подключён полный native Worker pipeline после corpus-аудита
+
+- Инструмент `node tools/profile-external-high-depth-psd-psb.mjs --manifest /abs/path/manifest.json` требует успешный preflight двух pinned PSD16/PSB32, затем повторно читает bytes через открытый дескриптор с фиксированным byte budget и SHA-256, декодирует `decodePsd`, проверяет native `Uint16Array`/`Float32Array`, выполняет tiled selection через настоящий `worker_threads` Worker и проверяет donor tile immutability.
+- Машинный JSON фиксирует `decodeMs/tilesMs/workerMs` и снимки process RSS/heap/arrayBuffers. Эти срезы **не** есть peak RSS или отдельная память Worker. Unit/CLI tests используют **собственные синтетические ZeTer-written** файлы и не подтверждают их Photoshop-authored происхождение.
+- После получения настоящих лицензированных Photoshop PSD16/PSB32 требуется: проверенный `manifest.json` с provenance и hashes → запуск этого CLI → отдельный browser `file://` UI import / preview / Undo/Redo / memory measurement → эталонная сверка Adobe/Photoshop. Этапы 002/003 остаются открытыми; wide connected ROI и прерываемый fallback остаются P1.
+
+
 ## Проходка 2026-10-10 — защита pinned PSD/PSB-аудита от замены файла
 
 - Закреплён один file descriptor для проверки identity и последующего потокового SHA-256/заголовка: `O_NOFOLLOW` для последнего symlink-компонента (если поддерживается), сравнение метаданных файла до открытия/после чтения и гарантированное закрытие descriptor. Размер проверяется по фактическому потоку. Это закрывает промежуток `lstat(path) → createReadStream(path)`, когда pathname мог указывать уже на другой объект.
