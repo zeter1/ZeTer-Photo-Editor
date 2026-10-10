@@ -487,6 +487,87 @@ async function runSmoke() {
     assert(tiledWorkerProbe.ok, 'Real CMYK/RGB tiled compute must work inside file:// Blob Worker', JSON.stringify(tiledWorkerProbe));
 
 
+
+    // Stage 003: exercise the *production* lazy file:// browser controller,
+    // rather than manually constructing the worker as in the protocol probe.
+    // Module bodies are evaluated in an isolated browser scope: the canonical
+    // app.bundle.js must remain unmodified and the real source files are used.
+    const browserWorkerModuleText = await Promise.all([
+      readFile(path.join(ROOT, 'src/core/tiled-inpaint-worker-client.js'), 'utf8'),
+      readFile(path.join(ROOT, 'src/core/tiled-inpaint-browser-worker.js'), 'utf8'),
+    ]);
+    const browserWorkerModules = browserWorkerModuleText.map((source, index) => (
+      (index === 1 ? source.replace(/^import[^\n]*\n/m, '') : source)
+        .replace(/^export /gm, '')
+    )).join('\n');
+
+    async function browserWorkerControllerProbe() {
+      const initialSupplier = globalThis.__zpeTiledInpaintWorkerSource;
+      // Force the actual async <script> loading branch, even though the
+      // independent protocol probe already loaded a supplier earlier.
+      delete globalThis.__zpeTiledInpaintWorkerSource;
+      let created = 0;
+      let terminated = 0;
+      class ObservedWorker extends Worker {
+        constructor(url) { super(url); created += 1; }
+        terminate() { terminated += 1; return super.terminate(); }
+      }
+      const controller = createBrowserTiledInpaintWorkerController({
+        WorkerType:ObservedWorker, loadTimeoutMs:5000,
+      });
+      try {
+        const width = 8, height = 8;
+        const raw = new Uint8Array(width * height * 4);
+        for (let offset = 0; offset < raw.length; offset += 4) raw.set([20, 40, 60, 255], offset);
+        const selectedIndex = 4 * width + 4;
+        raw.set([250, 0, 0, 255], selectedIndex * 4);
+        const dataUrl = 'data:application/x-zeter-pixel-buffer-tile;base64,' + btoa(String.fromCharCode(...raw));
+        const source = {
+          kind:'zpe-pixel-buffer-source-v2', width, height, model:'rgb',
+          channels:4, bitsPerChannel:8, colorSpace:'srgb', alphaMode:'straight',
+          profileName:'', rawBytes:raw.byteLength, tileSize:width,
+          tiles:[{x:0,y:0,width,height,rawBytes:raw.byteLength,dataUrl}],
+        };
+        const original = JSON.stringify(source);
+        const job = {source,selectedIndices:Uint32Array.of(selectedIndex),halo:2,maxLayerPixels:128};
+        const start = performance.now();
+        const first = await controller.run(job);
+        const elapsedMs = performance.now() - start;
+        // With source cached, one microtask allows run() to create the next
+        // Worker, before its asynchronously emitted ready/reply events.
+        const pending = controller.run(job);
+        await Promise.resolve();
+        const stopped = controller.cancel();
+        const cancelled = await pending;
+        const third = await controller.run(job);
+        return {
+          initialSupplierWasPresent:typeof initialSupplier === 'string',
+          loaded:typeof globalThis.__zpeTiledInpaintWorkerSource === 'string',
+          firstFilled:first.filled, firstChangedTiles:first.changedTiles,
+          firstSourceChanged:first.source?.tiles?.[0]?.dataUrl !== dataUrl,
+          thirdFilled:third.filled, cancelled:cancelled?.cancelled === true,
+          stopped, created, terminated, originalUnchanged:JSON.stringify(source) === original,
+          elapsedMs,
+        };
+      } finally {
+        controller.cancel();
+        if (initialSupplier) globalThis.__zpeTiledInpaintWorkerSource = initialSupplier;
+      }
+    }
+    const browserControllerResult = await evaluate(client, '(async () => {\n' +
+      browserWorkerModules + '\nreturn (' + browserWorkerControllerProbe.toString() + ')();\n})()');
+    assert(browserControllerResult.initialSupplierWasPresent && browserControllerResult.loaded,
+      'file:// adapter must load the generated supplier again', JSON.stringify(browserControllerResult));
+    assert(browserControllerResult.firstFilled === 1 && browserControllerResult.firstChangedTiles === 1 &&
+      browserControllerResult.firstSourceChanged && browserControllerResult.thirdFilled === 1 &&
+      browserControllerResult.originalUnchanged, 'Production browser Worker adapter must compute without mutating donors',
+      JSON.stringify(browserControllerResult));
+    assert(browserControllerResult.stopped && browserControllerResult.cancelled &&
+      browserControllerResult.created === 3 && browserControllerResult.terminated === 3,
+      'Production adapter must terminate a cancelled Worker and recover on the next job',
+      JSON.stringify(browserControllerResult));
+    console.log('Stage 003 browser Worker controller probe:', JSON.stringify(browserControllerResult));
+
     const initial = await evaluate(client, `(() => ({
       title: document.title,
       rows: document.querySelectorAll('.layer-row').length,
