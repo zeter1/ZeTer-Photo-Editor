@@ -78,9 +78,11 @@
 - **Not done:** этот клиент не запускает Compute в браузерном UI и не доказывает полную interruptibility без `terminate()`. **003 остаётся открытой** до полноценной интеграции, профиля больших PSD/PSB и wide connected ROI.
 
 
-## Проходка 2026-10-10 — защита Worker lifecycle от синхронных событий при подписке (PR candidate)
+## Проходка 2026-10-10 — защита Worker lifecycle от синхронных событий при подписке ([PR #148](https://github.com/zeter1/ZeTer-Photo-Editor/pull/148), слито, main CI green)
 
 - **Дефект:** browser-shaped Worker/test-double может синхронно отправить `ready` и результат, выбросить `error` или исключение из `addEventListener` до присвоения `active`/`detach`. Ранее завершённый job мог остаться активным, а подписки — висеть на завершённом Worker.
 - **Исправление:** создать `active` и `detach` до регистрации обработчиков; завершать при ошибке подписки; после регистрации дополнительно очищать обработчики, если callback уже завершил job. Обычный асинхронный Node/browser event contract и отмена через `terminate()` сохранены.
 - **Регрессия:** browser-shaped synchronous ready→reply, synchronous startup error и partial listener-registration exception; после завершения нет активного job, все handlers сняты, возможен следующий job.
 - **Граница:** Worker всё ещё не подключён к `file://` runtime; не сделаны browser bootstrap, owner-aware UI publication, browser memory profiling, wide connected ROI. Весь пункт 003 **остаётся открытым**.
+
+- **Verified gate:** PR CI [#38056357279](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38056357279) — success; exact `main` push CI [#38056411335](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38056411335) — success на squash SHA `b68aaaa29cdbc13e66e184e153e9aab804857757`. Этот lifecycle подэтап завершён, вся 003 остаётся открытой.

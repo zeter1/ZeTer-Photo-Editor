@@ -20,9 +20,9 @@
 14. Для post-merge verification не ограничивайся helper-ом, который может фильтровать только `pull_request` runs. Если exact merge-SHA push run не виден, используй provider-native GET коллекции `actions/runs?head_sha=<merge-sha>` через GitHub fetch и проверь `event=push`, `head_branch=main`, exact `head_sha` и `conclusion=success`; при failure переходи к jobs/logs.
 15. При добавлении модуля в canonical `file://` bundle помни, что `tools/build-bundle.mjs` снимает ESM-обёртку и конкатенирует classic-script chunks. Если новый модуль использует импортированные `const`/`let` во время module evaluation, его source-order обязан идти после owner-а этих bindings; добавь architecture guard на порядок, а не полагайся только на корректность ESM imports.
 
-## Текущая инженерная проходка (2026-10-10)
+## Последний закрытый подэтап (2026-10-10)
 
-- **003 / Worker lifecycle:** исправляется reentrant startup, при котором синхронные `ready`/`error`/registration exceptions оставляли лишние обработчики либо «активную» уже завершённую задачу. Контракт и gate описаны в [003-tiled-content-aware.md](003-tiled-content-aware.md). Не путать с ещё открытой browser `file://` Worker-интеграцией.
+- **003 / Worker lifecycle reentrant startup** — исправлены синхронные `ready`/`error`/registration exceptions, ранее оставлявшие обработчики либо «активную» уже завершённую задачу. [PR #148](https://github.com/zeter1/ZeTer-Photo-Editor/pull/148) слит; [PR CI #38056357279](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38056357279) и [exact main push CI #38056411335](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38056411335) успешны, SHA `b68aaaa29cdbc13e66e184e153e9aab804857757`. Следующая проходка: browser `file://` Worker bootstrap/fallback + UI integration с exact owner/cancellation; подробности — [003-tiled-content-aware.md](003-tiled-content-aware.md).
 
 ## Приоритеты по плану на скриншотах
 
