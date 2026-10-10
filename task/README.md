@@ -1,5 +1,11 @@
 # task — очередь небольших инженерных проходок
 
+## В работе — Stage 003: процессная память Chromium (2026-10-10)
+
+- К CDP renderer heap profiler добавляется независимый браузерный `SystemInfo.getProcessInfo`: информационная сумма `privateMemory` по **полному** списку процессов с baseline/sampled max/end. При отсутствии поддерживаемого поля результат будет явным `unavailable`, а не придуманным RAM-значением. Это тестовая инфраструктура, без изменения поведения приложения или версии. Подробности в [003](003-tiled-content-aware.md).
+- **После CI/merge:** реальные external Photoshop-authored 16/32-bit PSD/PSB с pinned hashes, browser Worker/process memory и pixel/preview invariants; широкий connected ROI и interruptible fallback. Нынешний synthetic 8×8 `.zpe` не доказывает обработку больших PSD/PSB. Открыты задачи **002 и 003**.
+
+
 ## Текущий подэтап Stage 003 — sampled browser renderer JS heap (2026-10-10)
 
 - К 16-bit `file://` UI Worker regression добавлен CDP sampler для renderer JS heap: baseline, sampled maximum, отметки после import/preview, Worker/preview и Undo/Redo, информационное elapsed time. Unit-тесты проверяют числа и отказ/cleanup. Подробнее — [003](003-tiled-content-aware.md).
