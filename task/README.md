@@ -1,5 +1,11 @@
 # task — очередь небольших инженерных проходок
 
+## Stage 002 P0 — потоковый SHA-256 preflight для больших PSD/PSB (2026-10-10)
+
+- `tools/audit-external-high-depth-corpus.mjs` теперь проверяет внешние файлы фиксированными 64 KiB блоками вместо загрузки всего PSD/PSB (лимит 512 MiB) в Node heap. Заголовок проверяется по первым 27 байтам, stream length — повторно, SHA-256 — по всем байтам. Добавлена multi-chunk/tail-corruption regression.
+- Это только инструмент аудитора, без изменения редактора/версии и без доказанной Photoshop-совместимости. **Следующее P0:** реальные лицензированные Photoshop-authored PSD16/PSB32 с provenance и end-to-end `file://` decode → UI Worker → preview/Undo/Redo, process/renderer/Worker memory samples. **Затем P1:** длинные связанные ROI и прерываемый main-thread fallback/preview. `002` и `003` остаются открытыми.
+
+
 ## Stage 003 — точные границы halo в соседних tiled ROI (2026-10-10)
 
 - **Подэтап закрыт:** исправлено ложное объединение соседних занятых тайлов с раздельными фактическими selection/halo: source + оба generated Worker/browser artifacts + Uint16 parity regressions. [PR #167](https://github.com/zeter1/ZeTer-Photo-Editor/pull/167) merged (squash `94825723a2593d479ca8296f2a2ad8448054a420`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38069654597) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38069712550) — **success**.

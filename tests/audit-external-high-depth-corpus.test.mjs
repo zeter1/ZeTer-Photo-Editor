@@ -74,6 +74,30 @@ test('Stage 002 P0: modified external payload fails SHA-256 even when the header
   await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath), /SHA-256 mismatch/);
 });
 
+test('Stage 002 P0: PSD16 and PSB32 use multi-chunk streaming hashes including the last byte', async t => {
+  const state = await corpus(t);
+  for (const [index, fixture] of state.manifest.fixtures.entries()) {
+    // Header-only mock plus a large synthetic tail, NOT a valid Photoshop file.
+    const bytes = Buffer.alloc(64 * 1024 * (index + 2) + 137, 0x40 + index);
+    mockHeader(index + 1, index ? 32 : 16).copy(bytes);
+    bytes[bytes.length - 1] = 0x73 + index;
+    await writeFile(join(state.directory, fixture.file), bytes);
+    fixture.size = bytes.length;
+    fixture.sha256 = createHash('sha256').update(bytes).digest('hex');
+  }
+  await state.save();
+  const report = await auditExternalHighDepthCorpus(state.manifestPath);
+  assert.equal(report.passed, true);
+  assert.deepEqual(report.fixtures.map(item => item.bytes), state.manifest.fixtures.map(item => item.size));
+
+  // Corruption beyond the initial 64 KiB must never escape the full-file hash.
+  const file = join(state.directory, state.manifest.fixtures[1].file);
+  const bytes = await readFile(file);
+  bytes[bytes.length - 1] ^= 1;
+  await writeFile(file, bytes);
+  await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath), /SHA-256 mismatch/);
+});
+
 test('Stage 002 P0: manifest size, depth and raw PSB version mismatches are rejected', async t => {
   const state = await corpus(t);
   state.manifest.fixtures[0].size += 1;
