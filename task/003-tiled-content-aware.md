@@ -1,12 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
-## Проходка 2026-10-10 — sampled Chromium process private memory (PR/CI ожидаются)
+## Проходка 2026-10-10 — sampled Chromium process private memory (merged + green main CI)
 
 - **Цель:** измерять не только renderer `JSHeapUsedSize`, но и предоставляемый браузерным CDP полный список `SystemInfo.getProcessInfo` с `privateMemory` в отдельном браузерном соединении.
 - **Scope:** `tools/browser-renderer-heap-sampler.mjs`, `tools/browser-smoke.mjs`, `tests/browser-renderer-heap-sampler.test.mjs`; production runtime, generated bundle и версия приложения не меняются.
 - **Корректность:** в сумме учитываются **только полные** валидные списки процессов; отсутствующие/неподдерживаемые значения не превращаются в нули или правдоподобные RAM-числа. Отдельная `chromiumProcesses` секция в информационном JSON сохраняет baseline, sampled max, конец, число процессов и причину отказа при отсутствии поля.
 - **Ограничения:** `privateMemory` — CDP aggregate по всем отражённым процессам, **не** изолированный Worker, RSS/HWM, истинный peak или разбивка GPU/native buffers. CI не устанавливает жёсткий лимит RAM/времени; наличие process metric зависит от версии Chromium.
-- **Следующее:** проверить реальный Photoshop-authored 16/32-bit PSD/PSB с pinned source hashes через decode → tiles → UI Worker → preview и с process/Worker resource baselines, затем большой связный ROI и interruptible fallback/preview. До merge и green main CI **не считать** этот подэтап закрытым. Stage 003 и 002 остаются открытыми.
+- **Следующее:** проверить реальный Photoshop-authored 16/32-bit PSD/PSB с pinned source hashes через decode → tiles → UI Worker → preview и с process/Worker resource baselines, затем большой связный ROI и interruptible fallback/preview. **Подэтап закрыт:** [PR #161](https://github.com/zeter1/ZeTer-Photo-Editor/pull/161) слит squash `59a17783417c9ed9ec7e914c617b0f0d9d7fa038`; [PR CI #38065177692](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38065177692) и [exact main push CI #38065240683](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38065240683) — **success**. Вся Stage 003 и задача 002 остаются открытыми.
 
 
 ## Проходка 2026-10-10 — браузерные JS heap samples для реальной 16-bit UI-команды
