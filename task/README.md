@@ -1,5 +1,16 @@
 # task — очередь небольших инженерных проходок
 
+## Актуальный приоритет — следующая проходка (Stage 002/003, 2026-10-10)
+
+Активная задача: [003 — Tiled Content-Aware Fill](003-tiled-content-aware.md). Не считать прежние merged-подэтапы завершением всей задачи.
+
+1. **P0 / corpus:** найти независимые Photoshop-authored **16-bit PSD и 32-bit PSB** с допустимой лицензией, pinned SHA-256, размерами и metadata/provenance в [002](002-psd-compatibility-corpus.md). Не выдавать файлы, созданные ZeTer writer, за внешний Photoshop corpus.
+2. **P0 / browser:** прогнать реальные внешние высокобитные PSD/PSB через file:// import → native tiles → UI Worker Content-Aware Fill → preview → Undo/Redo; проверить source immutability, один history commit, precision и sampled renderer/worker/process memory с честными ограничениями измерений.
+3. **P1 / algorithm:** проработать широкий связный ROI без непропорционального global bounding rectangle (сохранить donor/halo и atomic publication, защиту памяти).
+4. **P1 / cancellation:** отдельная прерываемая main-thread fallback/preview ветка с immutable snapshot и exact-owner checks; без повтора выборки и без частичных tile writes.
+
+**Текущая регрессионная проходка:** синтетический (созданный ZeTer writer) RGB16 PSD и Float32 HDR PSB теперь проверяется по полной цепочке binary decode → tiles → реальный Node Worker → bounded inpaint oracle. Это закрывает внутренний seam, **не закрывает** P0 внешний corpus и browser memory. Файл: `tests/tiled-inpaint-high-depth-psd-psb-worker.test.mjs`. Дождаться успешных PR/main CI прежде чем отмечать проходку merged.
+
 ## Stage 003 — real external PSD/PSB → Node Worker regression (2026-10-10; merged, main CI green)
 
 - Новая end-to-end Node проверка существующего tiled UI dispatch на pinned внешних 8-bit CMYK PSD и RGB PSB: decode → tiles → one-shot selection → настоящий Worker → exact native result и исходные tile payloads unchanged.
