@@ -6923,37 +6923,27 @@ function createSerializedPixelBufferTileWorkingSet(source, {
   };
 }
 
-// Content-Aware Fill needs one cross-tile working region, not independent per-tile
-// inpainting (which would produce seams and let synthesized pixels become donors).
-// Scan the frozen selection without decoding source samples or allocating a full-plane
-// selection mask. The ROI includes a bounded immutable donor halo.
-function inpaintTiledPixelBufferSource(source, {
-  isAllowed,
-  halo = 24,
-  maxLayerPixels = 8_000_000,
-  maxFillPixels = 2_000_000,
-  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
-} = {}) {
-  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen isAllowed predicate');
-  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
-  if (!working) return null;
-  const width = working.width, height = working.height;
-  let selected = 0, minX = width, minY = height, maxX = -1, maxY = -1;
-  // Snapshot each selected coordinate only once. Re-running a geometry predicate
-  // after the bounds scan can produce a different mask (and decode unnecessary
-  // tiles); cap storage to the caller's existing fill-pixel budget.
-  const selectedIndices = [];
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if (!isAllowed(x, y)) continue;
-      selected += 1;
-      if (selected <= maxFillPixels) selectedIndices.push(y * width + x);
-      if (x < minX) minX = x;
-      if (y < minY) minY = y;
-      if (x > maxX) maxX = x;
-      if (y > maxY) maxY = y;
-    }
-  }
+// Content-Aware Fill keeps source tiles private until exact-owner publication.
+// A frozen selected-index snapshot (not a full-document alpha plane) is shared
+// by synchronous and cooperative selection scanners.
+function newTiledInpaintSelection(width, height) {
+  return { selected:0, minX:width, minY:height, maxX:-1, maxY:-1, selectedIndices:[] };
+}
+
+function recordTiledInpaintSelection(scan, x, y, width, maxFillPixels) {
+  scan.selected += 1;
+  if (scan.selected <= maxFillPixels) scan.selectedIndices.push(y * width + x);
+  if (x < scan.minX) scan.minX = x;
+  if (y < scan.minY) scan.minY = y;
+  if (x > scan.maxX) scan.maxX = x;
+  if (y > scan.maxY) scan.maxY = y;
+}
+
+function inpaintFrozenTiledSelection(source, working, scan, {
+  halo, maxLayerPixels, maxFillPixels,
+}) {
+  const { width, height } = working;
+  const { selected, minX, minY, maxX, maxY, selectedIndices } = scan;
   const noChange = { source, changed:0, filled:0, changedTiles:0, loadedTiles:0 };
   if (!selected || selected === width * height) return noChange;
   if (selected > maxFillPixels) {
@@ -7082,6 +7072,69 @@ function inpaintTiledPixelBufferSource(source, {
     changedTiles:working.dirtyTileCount,
     loadedTiles:working.loadedTileCount,
   };
+}
+
+// Historical synchronous API remains deterministic for callers and profiles.
+function inpaintTiledPixelBufferSource(source, {
+  isAllowed,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen isAllowed predicate');
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const { width, height } = working;
+  const scan = newTiledInpaintSelection(width, height);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (isAllowed(x, y)) recordTiledInpaintSelection(scan, x, y, width, maxFillPixels);
+    }
+  }
+  return inpaintFrozenTiledSelection(source, working, scan, { halo, maxLayerPixels, maxFillPixels });
+}
+
+// Yield through a real macrotask between bounded scan chunks so navigation or
+// document changes can invalidate a pending job before expensive ROI decoding.
+// The synthesis kernel is still synchronous: this is cooperative scan
+// cancellation, not a dedicated Worker or a fully interruptible inpaint job.
+async function inpaintTiledPixelBufferSourceCooperative(source, {
+  isAllowed,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  scanChunkPixels = 32_768,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen isAllowed predicate');
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const { width, height } = working;
+  const scan = newTiledInpaintSelection(width, height);
+  const chunk = Math.max(1, Math.min(262_144, Math.trunc(Number(scanChunkPixels) || 32_768)));
+  const cancelled = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true });
+  const total = width * height;
+  for (let start = 0; start < total; start += chunk) {
+    if (isCancelled()) return cancelled();
+    if (start > 0) {
+      await yieldControl();
+      if (isCancelled()) return cancelled();
+    }
+    const end = Math.min(total, start + chunk);
+    for (let index = start; index < end; index += 1) {
+      const y = Math.floor(index / width);
+      const x = index - y * width;
+      if (isAllowed(x, y)) recordTiledInpaintSelection(scan, x, y, width, maxFillPixels);
+    }
+  }
+  if (isCancelled()) return cancelled();
+  return inpaintFrozenTiledSelection(source, working, scan, { halo, maxLayerPixels, maxFillPixels });
 }
 function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
   const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
@@ -16321,11 +16374,12 @@ function createRasterEditController({
     const originalSource = layer.highDepthSource;
     const stale = () => !isCurrentRasterTarget(owner, layer) || layer.highDepthSource !== originalSource;
     if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
-    const prepared = inpaintTiledPixelBufferSource(originalSource, {
+    const prepared = await inpaintTiledPixelBufferSourceCooperative(originalSource, {
       isAllowed,
+      isCancelled:stale,
       maxBytes:highDepthBudgetForLayer(layer),
     });
-    if (stale()) return { ...prepared, applied:false, stale:true };
+    if (stale() || prepared?.cancelled) return { ...prepared, applied:false, stale:true };
     if (!prepared.changed) return { ...prepared, applied:false, stale:false };
     const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
     if (stale()) return { ...prepared, applied:false, stale:true };

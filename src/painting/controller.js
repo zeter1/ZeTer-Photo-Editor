@@ -8,7 +8,7 @@ import {
   applyCmykPixelBufferStrokeSegment,
   clonePixelBuffer,
   createSerializedPixelBufferTileWorkingSet,
-  inpaintTiledPixelBufferSource,
+  inpaintTiledPixelBufferSourceCooperative,
   deserializePixelBufferSource,
   forEachSerializedPixelBufferTile,
   mutateSerializedPixelBufferTiles,
@@ -443,11 +443,12 @@ export function createRasterEditController({
     const originalSource = layer.highDepthSource;
     const stale = () => !isCurrentRasterTarget(owner, layer) || layer.highDepthSource !== originalSource;
     if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
-    const prepared = inpaintTiledPixelBufferSource(originalSource, {
+    const prepared = await inpaintTiledPixelBufferSourceCooperative(originalSource, {
       isAllowed,
+      isCancelled:stale,
       maxBytes:highDepthBudgetForLayer(layer),
     });
-    if (stale()) return { ...prepared, applied:false, stale:true };
+    if (stale() || prepared?.cancelled) return { ...prepared, applied:false, stale:true };
     if (!prepared.changed) return { ...prepared, applied:false, stale:false };
     const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
     if (stale()) return { ...prepared, applied:false, stale:true };
