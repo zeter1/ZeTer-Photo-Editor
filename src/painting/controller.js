@@ -8,6 +8,7 @@ import {
   applyCmykPixelBufferStrokeSegment,
   clonePixelBuffer,
   createSerializedPixelBufferTileWorkingSet,
+  inpaintTiledPixelBufferSource,
   deserializePixelBufferSource,
   forEachSerializedPixelBufferTile,
   mutateSerializedPixelBufferTiles,
@@ -435,6 +436,31 @@ export function createRasterEditController({
     return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:true, stale:false };
   }
 
+  // Keep all ROI tile changes private until the exact document, layer and
+  // serialized source are revalidated after the asynchronous preview build.
+  async function persistTiledHighDepthInpaint(owner, layer, { isAllowed } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const originalSource = layer.highDepthSource;
+    const stale = () => !isCurrentRasterTarget(owner, layer) || layer.highDepthSource !== originalSource;
+    if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
+    const prepared = inpaintTiledPixelBufferSource(originalSource, {
+      isAllowed,
+      maxBytes:highDepthBudgetForLayer(layer),
+    });
+    if (stale()) return { ...prepared, applied:false, stale:true };
+    if (!prepared.changed) return { ...prepared, applied:false, stale:false };
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
+    if (stale()) return { ...prepared, applied:false, stale:true };
+    applyHighDepthMutation(layer, {
+      highDepthSource:prepared.source,
+      dataUrl,
+      highDepthPreview:prepared.source.model === 'cmyk'
+        ? null
+        : sanitizeHighDepthPreview(layer.highDepthPreview),
+    });
+    return { ...prepared, applied:true, stale:false };
+  }
+
   async function prepareHighDepthMutation(layer, buffer, { maxBytes = null } = {}) {
     const byteBudget = maxBytes == null
       ? highDepthBudgetForLayer(layer)
@@ -640,6 +666,7 @@ export function createRasterEditController({
     applyNativeHighDepthStrokeSegment,
     prepareTiledHighDepthMutation,
     persistTiledHighDepthMutation,
+    persistTiledHighDepthInpaint,
     prepareHighDepthMutation,
     applyHighDepthMutation,
     persistHighDepthMutation,

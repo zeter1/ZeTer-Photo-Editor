@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createPixelBuffer, createSerializedPixelBufferTileWorkingSet, deserializePixelBufferSource, forEachSerializedPixelBufferTile, mutateSerializedPixelBufferTiles,
+  createPixelBuffer, createSerializedPixelBufferTileWorkingSet, inpaintTiledPixelBufferSource, deserializePixelBufferSource, forEachSerializedPixelBufferTile, mutateSerializedPixelBufferTiles,
   PIXEL_BUFFER_SOURCE_KIND, PIXEL_BUFFER_TILED_SOURCE_KIND, sanitizeSerializedPixelBufferSource,
   serializePixelBufferSourceAdaptive, serializeTiledPixelBufferSource,
 } from '../src/core/pixel-buffer.js';
@@ -159,4 +159,61 @@ test('Stage 17d working-set regions read halo pixels across tiles without dirtyi
   const serialized=working.serialize();
   assert.equal(serialized.tiles[1].dataUrl,untouchedSecond);
   assert.equal(deserializePixelBufferSource(serialized).data[3],4321);
+});
+
+test('Stage 003: localized CMYKA Float32 Content-Aware Fill spans tile boundaries without full-plane decode', () => {
+  const width = 80, height = 16, channels = 5;
+  const data = new Float32Array(width * height * channels);
+  for (let i = 0; i < width * height; i += 1) {
+    data.set([0.1, 0.2, 0.3, 0.4, 1], i * channels);
+  }
+  for (const x of [7, 8]) data.set([5, 5, 5, 5, 1], (7 * width + x) * channels);
+  const native = createPixelBuffer({ width, height, model:'cmyk', channels, bitsPerChannel:32, data });
+  const source = serializeTiledPixelBufferSource(native, { tileSize:8 });
+  const oldPayloads = source.tiles.map(tile => tile.dataUrl);
+  const result = inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => y === 7 && (x === 7 || x === 8),
+    halo:2,
+    maxLayerPixels:64, // whole source is 1,280 px; only the ROI may be in memory
+  });
+  assert.equal(result.filled, 2);
+  assert.equal(result.changed, 2);
+  assert.equal(result.changedTiles, 2);
+  assert.equal(result.loadedTiles, 4);
+  assert.notEqual(result.source, source);
+  for (let i = 0; i < source.tiles.length; i += 1) {
+    if (i === 0 || i === 1) assert.notEqual(result.source.tiles[i].dataUrl, oldPayloads[i]);
+    else assert.equal(result.source.tiles[i].dataUrl, oldPayloads[i]);
+  }
+  const filled = deserializePixelBufferSource(result.source);
+  for (const x of [7, 8]) {
+    const sample = filled.data.subarray((7 * width + x) * channels, (7 * width + x + 1) * channels);
+    assert.deepEqual([...sample], [...data.subarray(0, 5)]);
+  }
+  assert.deepEqual([...filled.data.subarray((7 * width + 9) * channels, (7 * width + 10) * channels)],
+    [...data.subarray((7 * width + 9) * channels, (7 * width + 10) * channels)]);
+});
+
+test('Stage 003: tiled inpaint no-donor, safe ROI budget and aborted selection are non-destructive', () => {
+  const source = serializeTiledPixelBufferSource(rgb16(24, 16), { tileSize:8 });
+  const original = JSON.stringify(source);
+  const none = inpaintTiledPixelBufferSource(source, { isAllowed:() => false });
+  const whole = inpaintTiledPixelBufferSource(source, { isAllowed:() => true });
+  assert.equal(none.changed, 0);
+  assert.equal(whole.filled, 0);
+  assert.equal(whole.loadedTiles, 0);
+  assert.equal(none.source, source);
+  assert.equal(whole.source, source);
+  assert.throws(() => inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => x >= 7 && x <= 8 && y === 7,
+    halo:2, maxLayerPixels:10,
+  }), /рабочая область/);
+  assert.throws(() => inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => x === 7 && y < 3,
+    maxFillPixels:2,
+  }), /безопасного лимита/);
+  assert.throws(() => inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => { if (x === 10 && y === 10) throw Error('cancelled'); return x === 2; },
+  }), /cancelled/);
+  assert.equal(JSON.stringify(source), original);
 });

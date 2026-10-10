@@ -6922,6 +6922,67 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     get dirtyTileCount() { return dirty.size; },
   };
 }
+
+// Content-Aware Fill needs one cross-tile working region, not independent per-tile
+// inpainting (which would produce seams and let synthesized pixels become donors).
+// Scan the frozen selection without decoding source samples or allocating a full-plane
+// selection mask. The ROI includes a bounded immutable donor halo.
+function inpaintTiledPixelBufferSource(source, {
+  isAllowed,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen isAllowed predicate');
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const width = working.width, height = working.height;
+  let selected = 0, minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (!isAllowed(x, y)) continue;
+      selected += 1;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  const noChange = { source, changed:0, filled:0, changedTiles:0, loadedTiles:0 };
+  if (!selected || selected === width * height) return noChange;
+  if (selected > maxFillPixels) {
+    throw new RangeError('Контент-заливка: выделено больше безопасного лимита ' + maxFillPixels + ' px');
+  }
+
+  const requestedHalo = Math.trunc(Number(halo));
+  const padding = Number.isFinite(requestedHalo) ? Math.max(1, Math.min(128, requestedHalo)) : 24;
+  const bounds = {
+    left:Math.max(0, minX - padding),
+    top:Math.max(0, minY - padding),
+    right:Math.min(width, maxX + 1 + padding),
+    bottom:Math.min(height, maxY + 1 + padding),
+  };
+  const area = (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
+  if (area > maxLayerPixels) {
+    throw new RangeError('Контент-заливка: рабочая область ' + area + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
+  }
+  const region = working.readRegion(bounds);
+  const filled = inpaintPixelBuffer(region.buffer, {
+    isAllowed:(x, y) => isAllowed(x + region.x, y + region.y),
+    maxLayerPixels,
+    maxFillPixels,
+  });
+  if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
+  const changed = working.writeRegion(region);
+  return {
+    source:changed ? working.serialize() : source,
+    changed,
+    filled,
+    changedTiles:working.dirtyTileCount,
+    loadedTiles:working.loadedTileCount,
+  };
+}
 function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
   const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
   if(safe.kind===PIXEL_BUFFER_SOURCE_KIND){
@@ -16153,6 +16214,31 @@ function createRasterEditController({
     return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:true, stale:false };
   }
 
+  // Keep all ROI tile changes private until the exact document, layer and
+  // serialized source are revalidated after the asynchronous preview build.
+  async function persistTiledHighDepthInpaint(owner, layer, { isAllowed } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const originalSource = layer.highDepthSource;
+    const stale = () => !isCurrentRasterTarget(owner, layer) || layer.highDepthSource !== originalSource;
+    if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
+    const prepared = inpaintTiledPixelBufferSource(originalSource, {
+      isAllowed,
+      maxBytes:highDepthBudgetForLayer(layer),
+    });
+    if (stale()) return { ...prepared, applied:false, stale:true };
+    if (!prepared.changed) return { ...prepared, applied:false, stale:false };
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
+    if (stale()) return { ...prepared, applied:false, stale:true };
+    applyHighDepthMutation(layer, {
+      highDepthSource:prepared.source,
+      dataUrl,
+      highDepthPreview:prepared.source.model === 'cmyk'
+        ? null
+        : sanitizeHighDepthPreview(layer.highDepthPreview),
+    });
+    return { ...prepared, applied:true, stale:false };
+  }
+
   async function prepareHighDepthMutation(layer, buffer, { maxBytes = null } = {}) {
     const byteBudget = maxBytes == null
       ? highDepthBudgetForLayer(layer)
@@ -16358,6 +16444,7 @@ function createRasterEditController({
     applyNativeHighDepthStrokeSegment,
     prepareTiledHighDepthMutation,
     persistTiledHighDepthMutation,
+    persistTiledHighDepthInpaint,
     prepareHighDepthMutation,
     applyHighDepthMutation,
     persistHighDepthMutation,
@@ -16699,6 +16786,23 @@ function createRasterCommandController({
       status('Контент-заливка: анализ окружения…');
 
       if (layer.highDepthSource) {
+        if (
+          layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND &&
+          typeof rasterEdit.persistTiledHighDepthInpaint === 'function'
+        ) {
+          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, { isAllowed });
+          if (result) {
+            resetNativeState();
+            if (result.stale) return false;
+            if (!result.applied) {
+              status('Контент-заливка: нужны исходные пиксели за пределами выделения или результат не изменился');
+              return false;
+            }
+            ui?.commit?.(historyLabel);
+            status(`Контент-заливка: восстановлено ${result.filled.toLocaleString('ru-RU')} px · tiled ${result.changedTiles} tiles`);
+            return true;
+          }
+        }
         const buffer = rasterEdit.editableHighDepthBuffer(layer);
         if (!buffer) {
           resetNativeState();
