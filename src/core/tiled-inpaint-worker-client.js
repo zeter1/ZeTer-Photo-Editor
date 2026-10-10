@@ -3,16 +3,26 @@
  *
  * No live document objects cross the boundary. A new job supersedes the old
  * worker, and a caller must call cancel() when its document/target changes.
- * isCurrent is checked before dispatch and again before accepting a result;
- * worker.terminate() is the only mid-kernel stop mechanism at this stage.
+ * isCurrent is checked before dispatch, periodically while pending (opt-in),
+ * and again before accepting a result. worker.terminate() stops stale kernels.
  *
  * Accept both browser Worker events and Node worker_threads events, allowing
  * the same owner/cancellation contract to be tested without a browser Worker
  * bootstrap (file:// module Worker loading is not supported by this seam).
  */
-export function createTiledInpaintWorkerJobController({ createWorker } = {}) {
+export function createTiledInpaintWorkerJobController({
+  createWorker,
+  pollIntervalMs = 0,
+  schedulePoll = setInterval,
+  cancelPoll = clearInterval,
+} = {}) {
   if (typeof createWorker !== 'function') {
     throw new TypeError('Tiled inpaint Worker: createWorker is required');
+  }
+  const pollDelay = Number.isFinite(pollIntervalMs) && pollIntervalMs > 0
+    ? Math.max(1, Math.trunc(pollIntervalMs)) : 0;
+  if (pollDelay && (typeof schedulePoll !== 'function' || typeof cancelPoll !== 'function')) {
+    throw new TypeError('Tiled inpaint Worker: invalid polling timer');
   }
   let active = null;
   let nextId = 0;
@@ -55,6 +65,7 @@ export function createTiledInpaintWorkerJobController({ createWorker } = {}) {
     return new Promise((resolve, reject) => {
       let settled = false;
       let dispatched = false;
+      let pollTimer = null;
       let detach = () => {};
       const terminate = () => {
         try {
@@ -67,6 +78,10 @@ export function createTiledInpaintWorkerJobController({ createWorker } = {}) {
       const finish = (result, error) => {
         if (settled) return;
         settled = true;
+        if (pollTimer !== null) {
+          try { cancelPoll(pollTimer); } catch { /* never leave a job pending on timer cleanup */ }
+          pollTimer = null;
+        }
         detach();
         if (active?.id === id) active = null;
         terminate();
@@ -143,7 +158,17 @@ export function createTiledInpaintWorkerJobController({ createWorker } = {}) {
       // were registered: remove the late registrations as well.
       if (settled) { detach(); return; }
       // An owner can change synchronously inside a Worker factory/subscription.
-      if (!current()) stop();
+      if (!current()) { stop(); return; }
+      if (pollDelay) {
+        try {
+          // Poll only while a Worker is alive: a stale layer/lock/source may
+          // change without any Worker message or explicit document reset.
+          const timer = schedulePoll(() => { if (!current()) stop(); }, pollDelay);
+          // Handle even a synchronous/reentrant injected scheduler safely.
+          if (settled) cancelPoll(timer);
+          else pollTimer = timer;
+        } catch (error) { fail(error); }
+      }
     });
   }
 
