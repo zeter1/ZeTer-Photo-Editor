@@ -23,6 +23,7 @@
 ## Приоритеты по плану на скриншотах
 
 - [002 — PSD/PSB compatibility corpus](002-psd-compatibility-corpus.md) — в работе: generated nested masks/groups/adjustments corpus; pinned external PSD/PSB merged-preview RLE oracle реализован и слит ([#130](https://github.com/zeter1/ZeTer-Photo-Editor/pull/130), зелёный main CI). Далее — Adobe/reference rendering semantics и cross-group mask fixtures. Не удалять до merge + green main CI.
+  - Следующий узкий подэтап 002: независимый raw-wire oracle PSD/PSB mask channels и `lsct` boundaries, работа в отдельной ветке/PR; external Photoshop rendering parity по-прежнему открыт.
 - [003 — tiled Content-Aware Fill](003-tiled-content-aware.md) — отдельный следующий этап для больших high-depth слоёв.
 
 Очередь отражает незакрытые направления; реализацию не дублировать с параллельными PR. Следующую задачу брать только после сверки с кодом и статусами CI.
