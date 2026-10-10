@@ -1,5 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
+## Проходка 2026-10-10 — high-depth PSD/PSB binary → native tiled Worker (регрессия)
+
+- Добавлена интеграционная Node-регрессия `tests/tiled-inpaint-high-depth-psd-psb-worker.test.mjs`: writer создаёт native layered **RGB16 PSD** и **Float32 HDR PSB**, реальные binary bytes декодируются с проверкой всех исходных samples, после чего работа идёт через `serializeTiledPixelBufferSource` и настоящий `worker_threads`-Worker.
+- Контракты: one-shot selection scan, сверка с синхронным frozen-index oracle, сохранение precision, immutable source и неизменённых donor tile payloads, только один modified tile у seam-adjacent дефекта, завершение Worker.
+- **Честная граница:** это собственные синтетические PSD/PSB writer fixtures и Node Worker, не независимые Photoshop-authored files и не browser `file://`/UI RAM benchmark. Реальный 16/32-bit внешний corpus, wide connected ROI и interruptible fallback/preview **остаются открытыми**.
+- Gate: проверить `npm run check`, `npm run test:browser` и exact `main` CI после слияния. Не закрывать весь Stage 003 по одному тесту.
+
 ## Проходка 2026-10-10 — external PSD/PSB → native tiles → настоящий Node Worker (merged, main CI green)
 
 - **Контракт:** к двум pinned независимым 8-bit fixtures (CMYK PSD и grouped RGB PSB) добавлена регрессия, которая декодирует подлинные bytes, подготавливает tiled source, однократно фиксирует selection, выполняет реальный `worker_threads` compute через production protocol и сравнивает полный результат с synchronous frozen-index oracle.
