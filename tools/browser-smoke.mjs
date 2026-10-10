@@ -800,7 +800,7 @@ async function runSmoke() {
     await stage003Mouse('mousePressed',stage003View.start,1);
     await stage003Mouse('mouseMoved',stage003View.end,1);
     await stage003Mouse('mouseReleased',stage003View.end,0);
-    const stage003Observer = await evaluate(client, "(() => {\n  const post=Worker.prototype.postMessage;\n  window.__stage003UiWorkerJobs=0;\n  Worker.prototype.postMessage=function(value,...args){\n    if(value?.selectedIndices instanceof Uint32Array)window.__stage003UiWorkerJobs++;\n    return post.call(this,value,...args);\n  };\n  return true;\n})()");
+    const stage003Observer = await evaluate(client, "(() => {\n  const post=Worker.prototype.postMessage;\n  window.__stage003UiWorkerJobs=0;\n  window.__stage003RestoreWorkerPost=()=>{Worker.prototype.postMessage=post;delete window.__stage003RestoreWorkerPost;};\n  Worker.prototype.postMessage=function(value,...args){\n    if(value?.selectedIndices instanceof Uint32Array)window.__stage003UiWorkerJobs++;\n    return post.call(this,value,...args);\n  };\n  return true;\n})()");
     assert(stage003Observer,'Stage 003 Worker dispatch observer must install');
     const stage003Selection = await evaluate(client, "(() => {\n  document.querySelector('.menu-button[data-menu=\"edit\"]').click();\n  const item=[...document.querySelectorAll('#menuPopover .menu-item')]\n    .find(button=>button.querySelector('span')?.textContent==='Контент-заливка выделения');\n  const enabled=Boolean(item&&!item.disabled);\n  if(enabled)item.click();\n  return {enabled,status:document.querySelector('#statusText')?.textContent,items:[...document.querySelectorAll('#menuPopover .menu-item')].map(el=>({text:el.textContent,disabled:el.disabled}))};\n})()");
     assert(stage003Selection.enabled,
@@ -819,6 +819,7 @@ async function runSmoke() {
     await evaluate(client,"document.querySelector('#redoBtn').click();true");
     await waitFor('Stage 003 UI redo',async()=>evaluate(client,
       "document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data[0]<150"));
+    await evaluate(client,"window.__stage003RestoreWorkerPost?.();true");
     console.log('Stage 003 tiled high-depth UI Worker regression:',JSON.stringify(stage003Result));
     assertNoBrowserErrors(errors,stderrState);
 
