@@ -6,7 +6,7 @@
 - Fallback отдаёт управление **до первого ROI** и между приватными ROI, проверяет отмену и не пересчитывает selection predicate. Отменённая операция не публикует изменённые tiles; Worker compute/protocol errors по-прежнему fail-closed.
 - Добавлены регрессии Float32 CMYKA single-ROI cancellation до декодировки, Uint16 RGB disconnected ROI parity/отмена между ROI, duplicate index rejection, неизменность source.
 - **Остаётся:** прерывание внутри одного kernel ROI, очень длинный connected ROI без inflated bounding box, full RGBA8 preview cancellation, реальные независимо Photoshop-authored PSD16/PSB32 и browser `file://` end-to-end memory/Undo. Задачи 002 и 003 не закрывать до независимой проверки.
-- **Проверка подэтапа:** дождаться зелёного PR CI, затем merge и точного push CI на `main`. Пока это рабочая проходка, не считать подэтап закрытым.
+- **Подэтап закрыт:** [PR #173](https://github.com/zeter1/ZeTer-Photo-Editor/pull/173) слит (squash `f88f9c4291753c35d3e4489e57f94b8e476b92d9`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38075041890) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38075098799) завершены со статусом **success**. Задачи 002 и 003 остаются открытыми.
 
 ## Stage 003 P1 — cooperative ROI cancellation (2026-10-10)
 
