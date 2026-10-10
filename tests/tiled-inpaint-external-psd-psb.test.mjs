@@ -1,14 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import {
   inpaintTiledPixelBufferSource,
   inpaintTiledPixelBufferSourceCooperative,
+  inpaintTiledPixelBufferSourceFromIndices,
   serializeTiledPixelBufferSource,
 } from '../src/core/pixel-buffer.js';
 import { decodePsd } from '../src/formats/psd.js';
+import { createTiledInpaintWorkerJobController } from '../src/core/tiled-inpaint-worker-client.js';
+import { prepareTiledInpaintWithWorker } from '../src/painting/tiled-inpaint-dispatch.js';
 
 const script = fileURLToPath(new URL('../tools/profile-real-psd-inpaint.mjs', import.meta.url));
 const root = new URL('./fixtures/color-management/', import.meta.url);
@@ -117,4 +121,48 @@ test('Stage 003: external layered PSB selection can be cancelled before any ROI 
   assert.equal(result.loadedTiles, 0);
   assert.equal(result.source, source);
   assert.equal(JSON.stringify(source), snapshot);
+});
+
+// These fixtures are pinned independently sourced PSD/PSB bytes. The same real
+// off-thread protocol used by the browser adapter must match the bounded native
+// kernel; this is Node Worker integration, NOT a browser file:// performance test.
+test('Stage 003: external PSD/PSB bytes decode to tiled sources and run through a real Worker', async t => {
+  for (const { name, file, tileSize } of [
+    { name:'PSD CMYK', file:'psd-tools-4x4-8bit-cmyk.psd', tileSize:2 },
+    { name:'PSB RGB', file:'psd-tools-group.psb', tileSize:16 },
+  ]) {
+    await t.test(name, async () => {
+      const bytes = new Uint8Array(await readFile(new URL(file, root)));
+      // The external PSB contains layer records. A layer-free copy exposes its
+      // independently authored merged composite without altering the fixture.
+      const decoded = await decodePsd(file.endsWith('.psb') ? psbMergedImageOnly(bytes) : bytes);
+      const buffer = file.endsWith('.psb') ? decoded.compositePixelBuffer : decoded.layers[0].pixelBuffer;
+      assert.ok(buffer?.data, 'external Photoshop-format pixels decoded');
+      const source = serializeTiledPixelBufferSource(buffer, { tileSize });
+      const before = JSON.stringify(source);
+      const x = Math.min(tileSize - 1, source.width - 2);
+      const y = Math.min(tileSize - 1, source.height - 2);
+      const selectedIndices = Uint32Array.of(y * source.width + x);
+      const expected = inpaintTiledPixelBufferSourceFromIndices(source, { selectedIndices });
+      let sampled = 0, workersCreated = 0;
+      const worker = createTiledInpaintWorkerJobController({
+        createWorker() {
+          workersCreated += 1;
+          return new Worker(new URL('../tools/tiled-inpaint-worker-thread.mjs', import.meta.url), { type:'module' });
+        },
+      });
+      const result = await prepareTiledInpaintWithWorker(source, {
+        worker,
+        isAllowed:(col, row) => { sampled += 1; return col === x && row === y; },
+        scanChunkPixels:7,
+        yieldControl:async () => {},
+      });
+      assert.equal(workersCreated, 1, 'real detached Worker was used');
+      assert.equal(worker.cancel(), false, 'completed Worker was cleaned up');
+      assert.equal(sampled, source.width * source.height, 'selection geometry frozen exactly once');
+      assert.equal(result.filled, 1);
+      assert.deepEqual(result, expected, 'Worker and native bounded ROI kernel agree');
+      assert.equal(JSON.stringify(source), before, 'input tiles and payloads remain immutable');
+    });
+  }
 });

@@ -1,5 +1,11 @@
 # task — очередь небольших инженерных проходок
 
+## Stage 003 — real external PSD/PSB → Node Worker regression (2026-10-10; PR/CI pending)
+
+- Новая end-to-end Node проверка существующего tiled UI dispatch на pinned внешних 8-bit CMYK PSD и RGB PSB: decode → tiles → one-shot selection → настоящий Worker → exact native result и исходные tile payloads unchanged.
+- Реализация без production/runtime изменений и без bump версии: `tests/tiled-inpaint-external-psd-psb.test.mjs`. Проверяет detached Worker и immutable source, **но не** browser `file://` preview/Undo или real 16/32-bit large PSD/PSB memory profile.
+- **Следующие задачи:** независимые Photoshop-authored 16/32-bit PSD/PSB с hashes/provenance, браузерный file:// decode → Worker → preview/Undo + memory/latency; широкий связный ROI, interruptible fallback/preview. `002` и `003` остаются открытыми. Подэтап не закрывать до merge + точного green main push CI.
+
 ## Проходка Stage 003 — быстрый abort ожидания browser Worker bootstrap (2026-10-10)
 
 - Обнаружен промежуток отмены **до** создания `Worker`: `cancel()` или новый вызов `run()` раньше оставляли предыдущее ожидание single-flight `file://` supplier до скриптового `onload` / timeout (до 5 секунд). Теперь stale bootstrap promise завершается сразу, loader для следующей операции сохраняется, compute errors по-прежнему fail closed.
