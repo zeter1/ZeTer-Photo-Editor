@@ -1729,7 +1729,7 @@ function recordTiledInpaintSelection(scan, x, y, width, maxFillPixels) {
   if (y > scan.maxY) scan.maxY = y;
 }
 
-function inpaintFrozenTiledSelection(source, working, scan, {
+function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
   halo, maxLayerPixels, maxFillPixels,
 }) {
   const { width, height } = working;
@@ -1840,6 +1840,8 @@ function inpaintFrozenTiledSelection(source, working, scan, {
       }
       totalChanged += working.writeRegion(region);
       totalFilled += filled;
+      // No private tile escapes before the full job completes.
+      yield;
     }
     return {
       source:totalChanged ? working.serialize() : source, changed:totalChanged,
@@ -1862,6 +1864,8 @@ function inpaintFrozenTiledSelection(source, working, scan, {
   });
   if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
   const changed = working.writeRegion(region);
+  // Yield before serializing the one-ROI result.
+  yield;
   return {
     source:changed ? working.serialize() : source,
     changed,
@@ -1869,6 +1873,31 @@ function inpaintFrozenTiledSelection(source, working, scan, {
     changedTiles:working.dirtyTileCount,
     loadedTiles:working.loadedTileCount,
   };
+}
+
+// Synchronous and detached Worker callers exhaust the same deterministic steps.
+function inpaintFrozenTiledSelection(source, working, scan, options) {
+  const steps = inpaintFrozenTiledSelectionSteps(source, working, scan, options);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+// Fallback may cancel between bounded ROIs without publishing partial tiles.
+// A single ROI kernel itself remains synchronous.
+async function inpaintFrozenTiledSelectionCooperative(source, working, scan, options, {
+  isCancelled, yieldControl,
+}) {
+  const cancelled = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true });
+  const steps = inpaintFrozenTiledSelectionSteps(source, working, scan, options);
+  let step = steps.next();
+  while (!step.done) {
+    if (isCancelled()) return cancelled();
+    await yieldControl();
+    if (isCancelled()) return cancelled();
+    step = steps.next();
+  }
+  return isCancelled() ? cancelled() : step.value;
 }
 
 // Detached Worker consumers already have a frozen list of selected indices.
@@ -1977,7 +2006,7 @@ export async function inpaintTiledPixelBufferSourceCooperative(source, {
     }
   }
   if (isCancelled()) return cancelled();
-  return inpaintFrozenTiledSelection(source, working, scan, { halo, maxLayerPixels, maxFillPixels });
+  return inpaintFrozenTiledSelectionCooperative(source, working, scan, { halo, maxLayerPixels, maxFillPixels }, { isCancelled, yieldControl });
 }
 
 export function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
