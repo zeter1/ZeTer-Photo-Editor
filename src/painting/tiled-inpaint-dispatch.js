@@ -1,7 +1,7 @@
 import {
   createSerializedPixelBufferTileWorkingSet,
   inpaintTiledPixelBufferSourceCooperative,
-  inpaintTiledPixelBufferSourceFromIndices,
+  inpaintTiledPixelBufferSourceFromIndicesCooperative,
 } from '../core/pixel-buffer.js';
 
 // Stage 003: freeze geometry on the UI thread, then run the bounded native
@@ -63,7 +63,9 @@ export async function prepareTiledInpaintWithWorker(source, {
   if (isCancelled() || result?.cancelled) return cancelled();
   if (result?.unavailable) {
     // Use the SAME frozen snapshot: do not call a mutable predicate twice.
-    return inpaintTiledPixelBufferSourceFromIndices(source, job);
+    return inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+      ...job, isCancelled, yieldControl,
+    });
   }
   if (!result || typeof result !== 'object' || typeof result.changed !== 'number') {
     throw new TypeError('Tiled inpaint: invalid Worker result');
