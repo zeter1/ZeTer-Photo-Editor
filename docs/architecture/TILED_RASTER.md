@@ -82,3 +82,9 @@ Full RGBA8 display canvas пока остаётся нужен browser composito
 - `tests/retouch-controller.test.mjs`: tiled Dodge, cross-tile Blur halo и immutable lazy Clone snapshot.
 - `tests/painting-gesture-controller.test.mjs`: native retouch opt-in в tiled v2 path.
 - полный gate: `npm run check`, generated bundle parity и `npm run test:browser` через CI.
+
+## Worker compute contract — Node proof stage (2026-10-10)
+
+`src/core/tiled-inpaint-worker-protocol.js` принимает detached tiled source и snapshot выбранных индексов (`Array` / `Uint32Array`), валидирует геометрию и индексы, строит frozen predicate и повторно использует канонический synchronous `inpaintTiledPixelBufferSource`. `tools/tiled-inpaint-worker-thread.mjs` исполняет этот контракт в Node `worker_threads` через structured clone; отрицательные задания возвращают `{ok:false,error}`, не уничтожая процесс Worker. Тест покрывает distant CMYKA Float32 и сравнивает `source` с синхронным эталоном.
+
+Это только portable compute/protocol seam: модуль **не** включён в `tools/build-bundle.mjs`, браузер не создаёт Worker, `file://` constraints не решены. Перед production integration нужны worker lifecycle, transfer/memory budget, exact-owner generation, real cancellation во время expensive ROI execution и browser smoke.
