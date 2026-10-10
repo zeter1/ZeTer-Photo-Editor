@@ -8,7 +8,6 @@ import {
   applyCmykPixelBufferStrokeSegment,
   clonePixelBuffer,
   createSerializedPixelBufferTileWorkingSet,
-  inpaintTiledPixelBufferSourceCooperative,
   deserializePixelBufferSource,
   forEachSerializedPixelBufferTile,
   mutateSerializedPixelBufferTiles,
@@ -20,6 +19,7 @@ import {
   MAX_PIXEL_BUFFER_SOURCE_BYTES,
 } from '../core/pixel-buffer.js';
 import { cmykPixelBufferToRgba8Preview } from '../core/color-management.js';
+import { prepareTiledInpaintWithWorker } from './tiled-inpaint-dispatch.js';
 
 export function createRasterEditController({
   getDocument,
@@ -27,6 +27,7 @@ export function createRasterEditController({
   getCmykPreviewTransform = () => null,
   renderPaintPreview = () => {},
   documentRef = globalThis.document,
+  tiledInpaintWorker = null,
   requestFrame = callback => globalThis.requestAnimationFrame(callback),
   cancelFrame = frame => globalThis.cancelAnimationFrame(frame),
 } = {}) {
@@ -116,6 +117,7 @@ export function createRasterEditController({
   }
 
   function reset() {
+    tiledInpaintWorker?.cancel?.();
     cancelPaintPreview();
     clearBrushBuffer();
     clearHighDepthPaintState();
@@ -443,9 +445,10 @@ export function createRasterEditController({
     const originalSource = layer.highDepthSource;
     const stale = () => !isCurrentRasterTarget(owner, layer) || layer.highDepthSource !== originalSource;
     if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
-    const prepared = await inpaintTiledPixelBufferSourceCooperative(originalSource, {
+    const prepared = await prepareTiledInpaintWithWorker(originalSource, {
       isAllowed,
       isCancelled:stale,
+      worker:tiledInpaintWorker,
       maxBytes:highDepthBudgetForLayer(layer),
     });
     if (stale() || prepared?.cancelled) return { ...prepared, applied:false, stale:true };

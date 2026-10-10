@@ -7207,6 +7207,279 @@ function pixelBufferByteLength(buffer) {
   return buffer.data.byteLength;
 }
 
+// ---- src/core/tiled-inpaint-worker-client.js ----
+/**
+ * Stage 003: detached tiled inpaint Worker lifecycle (not yet used by the UI).
+ *
+ * No live document objects cross the boundary. A new job supersedes the old
+ * worker, and a caller must call cancel() when its document/target changes.
+ * isCurrent is checked before dispatch and again before accepting a result;
+ * worker.terminate() is the only mid-kernel stop mechanism at this stage.
+ *
+ * Accept both browser Worker events and Node worker_threads events, allowing
+ * the same owner/cancellation contract to be tested without a browser Worker
+ * bootstrap (file:// module Worker loading is not supported by this seam).
+ */
+function createTiledInpaintWorkerJobController({ createWorker } = {}) {
+  if (typeof createWorker !== 'function') {
+    throw new TypeError('Tiled inpaint Worker: createWorker is required');
+  }
+  let active = null;
+  let nextId = 0;
+
+  function cancel() {
+    if (!active) return false;
+    active.cancel();
+    return true;
+  }
+
+  function run(job, { isCurrent = () => true } = {}) {
+    // Superseding a job must stop it even if the new request is stale.
+    cancel();
+    if (typeof isCurrent !== 'function') {
+      return Promise.reject(new TypeError('Tiled inpaint Worker: isCurrent must be a function'));
+    }
+    const current = () => {
+      try { return Boolean(isCurrent()); } catch { return false; }
+    };
+    if (!current()) return Promise.resolve({ cancelled:true });
+
+    let worker;
+    try {
+      worker = createWorker();
+      if (!worker || typeof worker.postMessage !== 'function' ||
+          typeof worker.terminate !== 'function') {
+        // A factory may return a partially usable Worker. Release it before
+        // rejecting so a broken adapter does not leave a live thread behind.
+        try {
+          const termination = worker?.terminate?.();
+          if (termination && typeof termination.catch === 'function') termination.catch(() => {});
+        } catch { /* preserve the invalid Worker error */ }
+        throw new TypeError('Tiled inpaint Worker: invalid Worker instance');
+      }
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const id = ++nextId;
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let dispatched = false;
+      let detach = () => {};
+      const terminate = () => {
+        try {
+          const result = worker.terminate();
+          // Node returns a Promise; a failed termination cannot turn a
+          // cancelled/stale result into an unhandled rejection.
+          if (result && typeof result.catch === 'function') result.catch(() => {});
+        } catch { /* the result is already settled; never publish it */ }
+      };
+      const finish = (result, error) => {
+        if (settled) return;
+        settled = true;
+        detach();
+        if (active?.id === id) active = null;
+        terminate();
+        if (error) reject(error);
+        else resolve(result);
+      };
+      const stop = () => finish({ cancelled:true });
+      const fail = error => finish(null, error instanceof Error ? error : new Error(String(error?.message || error)));
+      const message = data => {
+        if (settled) return;
+        if (!current()) { stop(); return; }
+        if (!dispatched) {
+          if (data?.ready !== true) return;
+          dispatched = true;
+          try { worker.postMessage({ ...job, id }); }
+          catch (error) { fail(error); }
+          return;
+        }
+        if (data?.id !== id) return;
+        if (data.ok === true) {
+          finish(data.result);
+        } else if (data.ok === false) {
+          const error = new Error(String(data.error?.message || 'Worker compute failed'));
+          error.name = String(data.error?.name || 'Error');
+          fail(error);
+        } else {
+          fail(new TypeError('Tiled inpaint Worker: invalid reply'));
+        }
+      };
+
+      // Subscribe may synchronously emit ready/error (or a test double may
+      // answer in postMessage). Register ownership and detachment first so
+      // a reentrant finish can clear the active job and release every listener.
+      active = { id, cancel:stop };
+      try {
+        if (typeof worker.addEventListener === 'function') {
+          const onMessage = event => message(event.data);
+          const onError = event => fail(new Error(String(event?.message || 'Worker error')));
+          // A structured-clone decoding failure emits messageerror, not error.
+          // Without this listener the awaiting UI job would never settle.
+          const onMessageError = () => fail(new Error('Tiled inpaint Worker: message deserialization failed'));
+          detach = () => {
+            worker.removeEventListener('message', onMessage);
+            worker.removeEventListener('error', onError);
+            worker.removeEventListener('messageerror', onMessageError);
+          };
+          worker.addEventListener('message', onMessage);
+          worker.addEventListener('error', onError);
+          worker.addEventListener('messageerror', onMessageError);
+        } else if (typeof worker.on === 'function' && typeof worker.off === 'function') {
+          const onMessage = data => message(data);
+          const onError = error => fail(error);
+          const onMessageError = () => fail(new Error('Tiled inpaint Worker: message deserialization failed'));
+          const onExit = code => fail(new Error('Tiled inpaint Worker exited before reply: ' + code));
+          detach = () => {
+            worker.off('message', onMessage);
+            worker.off('error', onError);
+            worker.off('messageerror', onMessageError);
+            worker.off('exit', onExit);
+          };
+          worker.on('message', onMessage);
+          worker.on('error', onError);
+          worker.on('messageerror', onMessageError);
+          worker.on('exit', onExit);
+        } else {
+          fail(new TypeError('Tiled inpaint Worker: missing message event API'));
+          return;
+        }
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      // A callback could have settled mid-subscription, before all handlers
+      // were registered: remove the late registrations as well.
+      if (settled) { detach(); return; }
+      // An owner can change synchronously inside a Worker factory/subscription.
+      if (!current()) stop();
+    });
+  }
+
+  return { run, cancel };
+}
+
+// ---- src/core/tiled-inpaint-browser-worker.js ----
+/**
+ * Browser file:// adapter for the generated classic tiled-inpaint Worker.
+ * No ESM importScripts/fetch is issued by the Worker. A failed bootstrap is
+ * reported as { unavailable:true } so the caller can use cooperative compute;
+ * protocol/compute errors still reject instead of silently changing results.
+ */
+function createBrowserTiledInpaintWorkerController({
+  documentRef = globalThis.document,
+  globalRef = globalThis,
+  WorkerType = globalThis.Worker,
+  BlobType = globalThis.Blob,
+  URLApi = globalThis.URL,
+  loadTimeoutMs = 5000,
+} = {}) {
+  const supplierName = '__zpeTiledInpaintWorkerSource';
+  let sourcePromise = null;
+  let source = null;
+  let unavailable = false;
+  let generation = 0;
+
+  const currentSource = () => {
+    const value = globalRef?.[supplierName];
+    return typeof value === 'string' && value.startsWith('/* ZeTer tiled Content-Aware Worker.')
+      ? value : null;
+  };
+
+  function loadSource() {
+    if (unavailable) return Promise.resolve(null);
+    if (source) return Promise.resolve(source);
+    if (typeof WorkerType !== 'function' || typeof BlobType !== 'function' ||
+        typeof URLApi?.createObjectURL !== 'function' || typeof URLApi?.revokeObjectURL !== 'function') {
+      unavailable = true;
+      return Promise.resolve(null);
+    }
+    const existing = currentSource();
+    if (existing) { source = existing; return Promise.resolve(source); }
+    if (sourcePromise) return sourcePromise;
+    if (!documentRef?.createElement || !documentRef?.head?.appendChild) {
+      unavailable = true;
+      return Promise.resolve(null);
+    }
+    sourcePromise = new Promise(resolve => {
+      let script;
+      let timer;
+      let finished = false;
+      const finish = candidate => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        if (script) {
+          script.onload = null;
+          script.onerror = null;
+          script.remove?.();
+        }
+        source = candidate;
+        if (!candidate) unavailable = true;
+        resolve(candidate);
+      };
+      try {
+        script = documentRef.createElement('script');
+        script.async = true;
+        script.onload = () => finish(currentSource());
+        script.onerror = () => finish(null);
+        script.src = new URL('./src/core/tiled-inpaint-worker-source.js', documentRef.baseURI).href;
+        timer = setTimeout(() => finish(null), Math.max(1, Number(loadTimeoutMs) || 5000));
+        documentRef.head.appendChild(script);
+      } catch {
+        finish(null);
+      }
+    });
+    return sourcePromise;
+  }
+
+  class BootstrapUnavailableError extends Error {}
+  const client = createTiledInpaintWorkerJobController({
+    createWorker() {
+      let url;
+      try {
+        url = URLApi.createObjectURL(new BlobType([source], { type:'text/javascript' }));
+        return new WorkerType(url);
+      } catch (error) {
+        unavailable = true;
+        throw new BootstrapUnavailableError(String(error?.message || error));
+      } finally {
+        if (url) {
+          try { URLApi.revokeObjectURL(url); } catch { /* resource already handed to Worker */ }
+        }
+      }
+    },
+  });
+
+  function cancel() {
+    generation += 1;
+    return client.cancel();
+  }
+
+  async function run(job, { isCurrent = () => true } = {}) {
+    const owner = ++generation;
+    client.cancel();
+    if (typeof isCurrent !== 'function') throw new TypeError('Tiled inpaint Worker: isCurrent must be a function');
+    const current = () => {
+      try { return owner === generation && Boolean(isCurrent()); }
+      catch { return false; }
+    };
+    if (!current()) return { cancelled:true };
+    const ready = await loadSource();
+    if (!current()) return { cancelled:true };
+    if (!ready) return { unavailable:true };
+    try {
+      return await client.run(job, { isCurrent:current });
+    } catch (error) {
+      if (error instanceof BootstrapUnavailableError) return current() ? { unavailable:true } : { cancelled:true };
+      throw error;
+    }
+  }
+
+  return { run, cancel };
+}
+
 // ---- src/core/color-management.js ----
 class ColorManagementError extends Error {
   constructor(message, code = 'COLOR_MANAGEMENT_ERROR') {
@@ -15997,6 +16270,74 @@ function clearImageCache() {
   smartFilterCache.clear();
 }
 
+// ---- src/painting/tiled-inpaint-dispatch.js ----
+// Stage 003: freeze geometry on the UI thread, then run the bounded native
+// tile kernel in the browser Worker. A missing Worker is the ONLY fallback;
+// compute/protocol failures fail closed rather than silently rerunning work.
+async function prepareTiledInpaintWithWorker(source, {
+  isAllowed,
+  isCancelled = () => false,
+  worker = null,
+  maxBytes,
+  maxFillPixels = 2_000_000,
+  scanChunkPixels = 32_768,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (!worker) {
+    return inpaintTiledPixelBufferSourceCooperative(source, {
+      isAllowed, isCancelled, maxBytes, maxFillPixels, scanChunkPixels, yieldControl,
+    });
+  }
+  if (typeof isAllowed !== 'function' || typeof isCancelled !== 'function' ||
+      typeof yieldControl !== 'function' || typeof worker.run !== 'function') {
+    throw new TypeError('Tiled inpaint: invalid Worker selection callbacks');
+  }
+  // Validate source and budget before any geometry sampling or Worker dispatch.
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const { width, height } = working;
+  const total = width * height;
+  const indices = [];
+  let selected = 0;
+  const chunk = Math.max(1, Math.min(262_144, Math.trunc(Number(scanChunkPixels) || 32_768)));
+  const cancelled = () => ({
+    source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true,
+  });
+  const unchanged = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0 });
+
+  for (let start = 0; start < total; start += chunk) {
+    if (isCancelled()) return cancelled();
+    if (start > 0) {
+      await yieldControl();
+      if (isCancelled()) return cancelled();
+    }
+    for (let index = start; index < Math.min(total, start + chunk); index += 1) {
+      const y = Math.floor(index / width), x = index - y * width;
+      if (!isAllowed(x, y)) continue;
+      selected += 1;
+      if (selected <= maxFillPixels) indices.push(index);
+    }
+  }
+  if (isCancelled()) return cancelled();
+  // Preserve existing native semantics: empty/full selection is a no-op,
+  // even when full selection exceeds the bounded maxFillPixels.
+  if (!selected || selected === total) return unchanged();
+  if (selected > maxFillPixels) {
+    throw new RangeError('Контент-заливка: выделено больше безопасного лимита ' + maxFillPixels + ' px');
+  }
+  const job = { source, selectedIndices:Uint32Array.from(indices), maxBytes, maxFillPixels };
+  const result = await worker.run(job, { isCurrent:() => !isCancelled() });
+  if (isCancelled() || result?.cancelled) return cancelled();
+  if (result?.unavailable) {
+    // Use the SAME frozen snapshot: do not call a mutable predicate twice.
+    return inpaintTiledPixelBufferSourceFromIndices(source, job);
+  }
+  if (!result || typeof result !== 'object' || typeof result.changed !== 'number') {
+    throw new TypeError('Tiled inpaint: invalid Worker result');
+  }
+  return result;
+}
+
 // ---- src/painting/controller.js ----
 function createRasterEditController({
   getDocument,
@@ -16004,6 +16345,7 @@ function createRasterEditController({
   getCmykPreviewTransform = () => null,
   renderPaintPreview = () => {},
   documentRef = globalThis.document,
+  tiledInpaintWorker = null,
   requestFrame = callback => globalThis.requestAnimationFrame(callback),
   cancelFrame = frame => globalThis.cancelAnimationFrame(frame),
 } = {}) {
@@ -16093,6 +16435,7 @@ function createRasterEditController({
   }
 
   function reset() {
+    tiledInpaintWorker?.cancel?.();
     cancelPaintPreview();
     clearBrushBuffer();
     clearHighDepthPaintState();
@@ -16420,9 +16763,10 @@ function createRasterEditController({
     const originalSource = layer.highDepthSource;
     const stale = () => !isCurrentRasterTarget(owner, layer) || layer.highDepthSource !== originalSource;
     if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
-    const prepared = await inpaintTiledPixelBufferSourceCooperative(originalSource, {
+    const prepared = await prepareTiledInpaintWithWorker(originalSource, {
       isAllowed,
       isCancelled:stale,
+      worker:tiledInpaintWorker,
       maxBytes:highDepthBudgetForLayer(layer),
     });
     if (stale() || prepared?.cancelled) return { ...prepared, applied:false, stale:true };
@@ -27029,8 +27373,10 @@ const viewportController = createViewportController({
 });
 const { setZoom, setZoomAtClientPoint, fitToView } = viewportController;
 
+const tiledInpaintWorker = createBrowserTiledInpaintWorkerController();
 const rasterEdit = createRasterEditController({
   getDocument: () => doc,
+  tiledInpaintWorker,
   getDrag: () => drag,
   getCmykPreviewTransform: () => currentCmykPreviewTransform(),
   renderPaintPreview: () => render({ paintPreview: true }),
