@@ -20,6 +20,14 @@
 14. Для post-merge verification не ограничивайся helper-ом, который может фильтровать только `pull_request` runs. Если exact merge-SHA push run не виден, используй provider-native GET коллекции `actions/runs?head_sha=<merge-sha>` через GitHub fetch и проверь `event=push`, `head_branch=main`, exact `head_sha` и `conclusion=success`; при failure переходи к jobs/logs.
 15. При добавлении модуля в canonical `file://` bundle помни, что `tools/build-bundle.mjs` снимает ESM-обёртку и конкатенирует classic-script chunks. Если новый модуль использует импортированные `const`/`let` во время module evaluation, его source-order обязан идти после owner-а этих bindings; добавь architecture guard на порядок, а не полагайся только на корректность ESM imports.
 
+## Приоритеты по плану на скриншотах
+
+- [001 — CMYK4/straight-alpha Content-Aware Fill](001-content-aware-channel-alpha.md) — текущая самостоятельная проходка; удалить только после merge и green main CI.
+- [002 — PSD/PSB compatibility corpus](002-psd-compatibility-corpus.md) — последующая проверяемая часть Photoshop round-trip.
+- [003 — tiled Content-Aware Fill](003-tiled-content-aware.md) — отдельный следующий этап для больших high-depth слоёв.
+
+Очередь отражает незакрытые направления; реализацию не дублировать с параллельными PR. Следующую задачу брать только после сверки с кодом и статусами CI.
+
 ## Минимальный шаблон задачи
 
 - Goal
