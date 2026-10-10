@@ -68,7 +68,7 @@ test('cancel settles a pending supplier wait before onload or timeout', async ()
   assert.equal(h.scripts.length,1, 'never inject a duplicate supplier');
   h.globalRef.__zpeTiledInpaintWorkerSource=CODE;
   h.scripts[0].onload();
-  await Promise.resolve();
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.workers.length,1);
   h.workers[0].emit('message',{ready:true});
   assert.equal(h.workers[0].sent[0].source,'current');
@@ -86,7 +86,7 @@ test('superseding a pending supplier wait settles the older run immediately', as
   assert.equal(h.workers.length,0);
   h.globalRef.__zpeTiledInpaintWorkerSource=CODE;
   h.scripts[0].onload();
-  await Promise.resolve();
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.workers.length,1);
   h.workers[0].emit('message',{ready:true});
   assert.equal(h.workers[0].sent[0].source,'new');
