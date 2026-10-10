@@ -42,3 +42,7 @@
 - Risks / handoff notes
 
 Практика основана на repository-local execution plans и progressive disclosure: OpenAI Harness Engineering (2026-02-11) и принципе Google Small CLs — одна self-contained change с related tests.
+
+### Подэтап 003 — 2026-10-10 (PR-кандидат)
+
+- Ветка `feat/tiled-disconnected-inpaint-20261010`: tiled Content-Aware Fill для удалённых независимых островков. Ещё не слито и не прошло CI. После интеграции останутся memory/latency profiling, worker/cancellation и широкие связные маски. **003 не закрывать**.
