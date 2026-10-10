@@ -10,3 +10,12 @@
 - **Required verification:** `npm run check`, `npm run test:browser`, memory measurements.
 - **Done gate:** independent PR merged with green `main` push CI.
 - **Risks / handoff:** global connectivity cannot be naively limited to one tile; preserve the fallback.
+
+## Проходка 2026-10-10 — bounded tiled ROI (PR, до merge не закрывать)
+
+- Реализовано: `inpaintTiledPixelBufferSource()` — полный scan frozen local predicate без materialize samples, один cross-tile ROI + 24 px halo, прежний typed kernel, запись changed tiles; новый owner `persistTiledHighDepthInpaint()` контролирует exact document/layer/source before and after preview await.
+- Покрытие: `tests/tiled-raster-source.test.mjs` (Float32 CMYKA seam, unchanged payloads, 8 MP-ROI budget, full selection/no donor, predicate abort), `tests/painting-command-controller.test.mjs` (never contiguous fallback, single history, stale result).
+- **Существенная граница:** source scan синхронный (worker позже); halo меняет донора в сравнении с global refinement, ROI > 8 МП безопасно отклоняется; large high-depth previews всё ещё RGBA8 full surface.
+- **Не выполнено до CI:** измерение реальных peak RAM/latency на 8–48 MiB PSD/PSB sources и ручная проверка в браузере; не заявлять full virtual memory или полную эквивалентность global inpaint.
+- **Следующая отдельная проходка:** worker-owned ROI jobs/cancellation и performance profiling, затем стратегия disconnected/wide masks вне 8 MP ROI.
+- Done gate по-прежнему: PR merge + green main push CI и измерения; не удалять задачу заранее.
