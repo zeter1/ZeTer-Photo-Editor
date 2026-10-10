@@ -102,7 +102,7 @@ test('Worker constructor CSP failure falls back; successful boot compute error i
   assert.equal(h.scripts.length,0);
   const k=harness({alreadyLoaded:true});
   const pending=k.controller.run({});
-  await Promise.resolve();
+  await new Promise(resolve => setImmediate(resolve));
   k.workers[0].emit('message',{ready:true});
   k.workers[0].emit('message',{id:k.workers[0].sent[0].id,ok:false,error:{message:'kernel failed'}});
   await assert.rejects(pending,/kernel failed/);
