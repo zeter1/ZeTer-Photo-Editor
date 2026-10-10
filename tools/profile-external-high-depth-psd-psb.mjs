@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { auditExternalHighDepthCorpus, inspectExternalHighDepthHeader } from './audit-external-high-depth-corpus.mjs';
 import { decodePsd } from '../src/formats/psd.js';
-import { serializeTiledPixelBufferSource } from '../src/core/pixel-buffer.js';
+import { inpaintTiledPixelBufferSourceFromIndices, serializeTiledPixelBufferSource } from '../src/core/pixel-buffer.js';
 import { createTiledInpaintWorkerJobController } from '../src/core/tiled-inpaint-worker-client.js';
 import { prepareTiledInpaintWithWorker } from '../src/painting/tiled-inpaint-dispatch.js';
 
@@ -49,6 +49,32 @@ async function readAuditedBytes(path, expected) {
     return bytes;
   } finally {
     await handle.close();
+  }
+}
+
+
+// Compare every native tile with a deterministic frozen-index inpaint oracle.
+// Worker liveness, filled count and untouched donors alone cannot prove that
+// its changed tile bytes match the synchronous kernel. This is NOT an
+// independent Photoshop rendering/color-management golden.
+export function assertHighDepthWorkerParity(actual, reference) {
+  const counters = ['changed', 'filled', 'changedTiles', 'loadedTiles'];
+  const headers = [
+    'kind', 'width', 'height', 'model', 'channels', 'bitsPerChannel',
+    'sampleType', 'colorSpace', 'alphaMode', 'profileName', 'byteOrder',
+    'rawBytes', 'tileSize', 'rows', 'columns',
+  ];
+  const tileFields = ['x', 'y', 'width', 'height', 'rawBytes', 'dataUrl'];
+  const left = actual?.source, right = reference?.source;
+  const actualTiles = left?.tiles, referenceTiles = right?.tiles;
+  if (!counters.every(field => Number.isSafeInteger(actual?.[field]) &&
+        actual[field] === reference?.[field]) ||
+      !headers.every(field => left?.[field] === right?.[field]) ||
+      !Array.isArray(actualTiles) || !Array.isArray(referenceTiles) ||
+      actualTiles.length !== referenceTiles.length ||
+      actualTiles.some((tile, index) => tileFields.some(field =>
+        tile?.[field] !== referenceTiles[index]?.[field]))) {
+    throw new Error('High-depth pipeline: Worker output differs from native frozen-index oracle');
   }
 }
 
@@ -129,13 +155,23 @@ export async function profileHighDepthBytes(bytes, expected, { tileSize = 128 } 
       throw new Error('High-depth pipeline: unselected tile payload changed');
     }
   }
+  // This reference uses the same frozen coordinates, not a second mutable
+  // selection scan. Only bounded ROI tiles are decoded by the native kernel.
+  const oracleStarted = performance.now();
+  const oracle = inpaintTiledPixelBufferSourceFromIndices(source, {
+    selectedIndices:Uint32Array.of(y * buffer.width + x),
+  });
+  assertHighDepthWorkerParity(result, oracle);
+  const oracleMs = performance.now() - oracleStarted;
+  const afterOracle = sample();
   return {
     fixture:expected.id, version:header.version,
     bitsPerChannel:header.bitsPerChannel, model:buffer.model,
     pixelOrigin:candidate.origin, width:buffer.width, height:buffer.height,
     tileCount:source.tiles.length, filled:result.filled,
     changedTiles:result.changedTiles, workersCreated, selectionSamples:sampled,
-    decodeMs, tilesMs, workerMs, memory:{ before, afterDecode, afterTiles, afterWorker },
+    workerParity:'exact', decodeMs, tilesMs, workerMs, oracleMs,
+    memory:{ before, afterDecode, afterTiles, afterWorker, afterOracle },
   };
 }
 
@@ -150,7 +186,7 @@ export async function profileExternalHighDepthCorpus(manifestPath) {
   return {
     kind:'zpe-external-high-depth-psd-psb-native-worker-v1',
     passed:true, fixtures,
-    limitations:'Input SHA/header and native Node Worker were checked. Manifest provenance/Photoshop authorship and licenses require independent verification. These are process memory snapshots, not peak RSS or Worker heap. No Chromium file:// import, preview, Undo/Redo or Photoshop rendering parity was tested.',
+    limitations:'Input SHA/header, native Node Worker and synchronous frozen-index tile parity were checked. This oracle is not independent Photoshop pixel/color parity. Manifest provenance/Photoshop authorship and licenses require independent verification. These are process memory snapshots, not peak RSS or Worker heap. No Chromium file:// import, preview, Undo/Redo or Photoshop rendering parity was tested.',
   };
 }
 

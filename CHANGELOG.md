@@ -12,6 +12,12 @@
 
 ## 1.45.2 — текущая версия
 
+### 2026-10-10 — Усилена проверка пиксельной точности high-depth Worker
+
+- Добавлено: инструмент `profile-external-high-depth-psd-psb.mjs` сравнивает все native tile payloads и метаданные Worker с синхронным frozen-index результатом. Любая разница блокирует успешный отчёт; в JSON появились `workerParity`, `oracleMs` и `memory.afterOracle`.
+- Добавлено в регрессии: отказ при подмене счётчиков, битовой глубины и одного тайла; синтетический PSD16 и PSB32 используют реальный Node Worker. Изменения ограничены тестовым tooling/документацией, без изменения production runtime и версии 1.45.2.
+- Ограничения проверки: синхронный oracle использует то же ядро ZeTer и не заменяет независимый Photoshop golden; отсутствуют лицензированные высокобитные Photoshop fixtures и browser `file://` profile. Замеры памяти — snapshots, не пик RSS.
+
 ### 2026-10-10 — Добавлена проверка внешнего PSD16/PSB32 через native Worker
 
 - Добавлено: CLI после SHA-256 preflight повторно закрепляет PSD/PSB bytes, проверяет настоящий decode в Uint16/Float32, tiled serialization и результат отдельного Node Worker. JSON включает измеренное время и снимки памяти.

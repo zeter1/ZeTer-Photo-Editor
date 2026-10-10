@@ -6,11 +6,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createPixelBuffer } from '../src/core/pixel-buffer.js';
+import { createPixelBuffer, inpaintTiledPixelBufferSourceFromIndices, serializeTiledPixelBufferSource } from '../src/core/pixel-buffer.js';
 import { encodePsd, encodePsb } from '../src/formats/psd.js';
 import { inspectExternalHighDepthHeader } from '../tools/audit-external-high-depth-corpus.mjs';
 import {
-  profileHighDepthBytes,
+  profileHighDepthBytes, assertHighDepthWorkerParity,
 } from '../tools/profile-external-high-depth-psd-psb.mjs';
 
 const cli = fileURLToPath(new URL('../tools/profile-external-high-depth-psd-psb.mjs', import.meta.url));
@@ -42,7 +42,7 @@ function syntheticFixture(id) {
   });
   const header = inspectExternalHighDepthHeader(bytes);
   return {
-    bytes, expected:{
+    bytes, pixelBuffer, expected:{
       id, file:id + (depth === 16 ? '.psd' : '.psb'),
       bytes:bytes.byteLength,
       sha256:createHash('sha256').update(bytes).digest('hex'), ...header,
@@ -62,13 +62,36 @@ test('Stage 002: synthetic PSD16/PSB32 decode, native tiling and actual Worker p
     assert.equal(report.changedTiles, 1);
     assert.equal(report.workersCreated, 1);
     assert.equal(report.selectionSamples, 64);
-    for (const stage of ['before', 'afterDecode', 'afterTiles', 'afterWorker']) {
+    assert.equal(report.workerParity, 'exact');
+    for (const stage of ['before', 'afterDecode', 'afterTiles', 'afterWorker', 'afterOracle']) {
       assert.ok(Number.isFinite(report.memory[stage].rssMiB));
     }
-    for (const stage of ['decodeMs', 'tilesMs', 'workerMs']) {
+    for (const stage of ['decodeMs', 'tilesMs', 'workerMs', 'oracleMs']) {
       assert.ok(Number.isFinite(report[stage]) && report[stage] >= 0);
     }
   }
+});
+
+
+test('Stage 002: oracle gate rejects altered Worker counters, metadata and changed tile bytes', () => {
+  const { pixelBuffer } = syntheticFixture('psd16');
+  const source = serializeTiledPixelBufferSource(pixelBuffer, { tileSize:4 });
+  const reference = inpaintTiledPixelBufferSourceFromIndices(source, {
+    selectedIndices:Uint32Array.of(4 * source.width + 4),
+  });
+  assert.doesNotThrow(() => assertHighDepthWorkerParity(reference, reference));
+  const reject = candidate => assert.throws(
+    () => assertHighDepthWorkerParity(candidate, reference), /differs from native frozen-index oracle/,
+  );
+  reject({ ...reference, filled:reference.filled + 1 });
+  reject({ ...reference, loadedTiles:reference.loadedTiles + 1 });
+  reject({ ...reference, source:{ ...reference.source, bitsPerChannel:8 } });
+  const alteredTiles = reference.source.tiles.map((tile, index) =>
+    index === 3 ? { ...tile, dataUrl:tile.dataUrl + 'corruption' } : tile);
+  reject({ ...reference, source:{ ...reference.source, tiles:alteredTiles } });
+  assert.deepEqual(source.tiles.map(tile => tile.dataUrl),
+    serializeTiledPixelBufferSource(pixelBuffer, { tileSize:4 }).tiles.map(tile => tile.dataUrl),
+    'oracle and failed parity checks do not mutate the pinned source');
 });
 
 test('Stage 002: a post-audit fixture hash or metadata mismatch fails before decode/Worker', async () => {
@@ -111,6 +134,7 @@ test('Stage 002: manifest CLI validates both synthetic files and reports explici
   assert.equal(report.kind, 'zpe-external-high-depth-psd-psb-native-worker-v1');
   assert.equal(report.passed, true);
   assert.deepEqual(report.fixtures.map(fixture => fixture.bitsPerChannel), [16, 32]);
+  assert.deepEqual(report.fixtures.map(fixture => fixture.workerParity), ['exact', 'exact']);
   assert.match(report.limitations, /not peak RSS/);
   assert.match(report.limitations, /No Chromium file:\/\//);
 });

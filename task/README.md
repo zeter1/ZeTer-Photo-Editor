@@ -1,5 +1,11 @@
 # task — очередь небольших инженерных проходок
 
+## Stage 002 P0 — exact frozen-index Worker tile parity (2026-10-10)
+
+- Добавлена **детерминированная проверка всех tile payload bytes и метаданных** результата реального Node Worker против синхронного `inpaintTiledPixelBufferSourceFromIndices` с **тем же однократно зафиксированным** пикселем выделения. Несовпадение `filled/changed/changedTiles/loadedTiles`, native metadata или любого tile payload теперь останавливает профиль вместо ложного `passed:true`; JSON фиксирует `workerParity: "exact"`, `oracleMs`, `memory.afterOracle`. Отрицательные регрессии инъецируют некорректный счётчик, depth и tile payload.
+- Ограничения: это **сверка одного и того же ядра в двух средах**, а не независимый эталон Adobe Photoshop, не доказательство лицензии и не browser `file://`/UI. Oracle выполняется после Worker и добавляет отдельную CPU/memory нагрузку; memory checkpoints — не true peak RSS.
+- **Далее P0:** лицензированные независимо Photoshop-authored PSD16/PSB32, зафиксированные hashes/provenance и референсы, запуск external CLI, браузерный import → tiled UI Worker → preview → Undo/Redo + renderer/Worker/process memory. **Далее P1:** connected wide ROI и прерываемые fallback/preview с atomic publication. `002` и `003` **не закрывать**.
+
 ## Stage 002/003 — audited high-depth PSD/PSB → native Node Worker (2026-10-10)
 
 - В рабочей проходке добавлен `tools/profile-external-high-depth-psd-psb.mjs --manifest /path/to/manifest.json`. После существующего pinned SHA/header preflight инструмент повторно фиксирует bytes того же fixture, сверяет hash, декодирует реальный PSD/PSB, проверяет Uint16/Float32 native samples, сериализует tiles, запускает настоящий Node Worker и проверяет frozen selection / immutable tile payloads. JSON содержит snapshot RSS/heap/arrayBuffers, а **не** пиковый RSS.
