@@ -20,10 +20,10 @@
 - **Следующая отдельная проходка:** worker-owned ROI jobs/cancellation и performance profiling, затем стратегия disconnected/wide masks вне 8 MP ROI.
 - ROI-подэтап прошёл merge + green main CI. Общую задачу `003` не удалять: perf-профилирование, worker cancellation и стратегия wide/disconnected масок ещё открыты.
 
-## Проходка 2026-10-10 — one-shot frozen selection snapshot (PR, CI ожидается)
+## Проходка 2026-10-10 — one-shot frozen selection snapshot ([PR #136](https://github.com/zeter1/ZeTer-Photo-Editor/pull/136))
 
 - Исправлено в `inpaintTiledPixelBufferSource`: `isAllowed(x,y)` вызывается **один раз на координату** во время global scan, а не повторно при построении ROI-mask. Выбранные позиции фиксируются в bounded списке (не более `maxFillPixels`); после проверки лимитов создаётся локальная `Uint8Array(ROI area)`. Внутренний inpaint читает только её.
 - Регрессии: бросаем исключение при повторном вызове selection predicate на координате; проверяем изменение одного damaged pixel без порчи остальных tiles, полный no-donor selection при малом лимите, safety rejection.
 - Не изменено: max 8 МП ROI / 2 МП fill, immutable donor, один bounded ROI, exact-owner transaction, алгоритм синтеза; worker/cancellation и disconnected/wide masks остаются отдельными будущими этапами.
-- Gate: `npm run check`, `npm run test:browser`, bundle parity, review, PR merge + exact main push green. До подтверждения этих проверок не считать подэтап завершённым.
+- Gate: `npm run check`, `npm run test:browser`, bundle parity, review, PR merge + exact main push green. PR CI: [success, Node 1034 tests + bundle parity + file:// smoke + diff hygiene](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38048074508). Main push CI требует отдельного подтверждения после merge.
 
