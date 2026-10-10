@@ -38,3 +38,11 @@
 - **Open:** profiling реального peak RAM/latency, worker/cancellation, широкие связные маски. Общую 003 задачу не удалять.
 
 **Итог подэтапа:** [PR #138](https://github.com/zeter1/ZeTer-Photo-Editor/pull/138) слит squash-коммитом `e7188ac9ec021e8dd23fdf769430e1f5d5febb0b`. [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38049643830) **success** и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38049694526) **success** (`event=push`, `head_branch=main`, точный SHA). Подэтап завершён; **вся 003 по-прежнему открыта**: RAM/latency profiling, worker/cancellation, wide connected masks.
+
+## Проходка 2026-10-10 — воспроизводимый benchmark memory/latency (PR в проверке)
+
+- **Подэтап:** standalone `tools/profile-tiled-inpaint.mjs` измеряет native CMYKA Float32 tiled Content-Aware Fill для raw payload 8/24/48 MiB в отдельных процессах Node; JSON содержит размеры, loaded/changed tiles, время fixture/inpaint и RSS/arrayBuffers/high-water до/после.
+- **Контроль поведения:** обработка одного повреждённого пикселя на tile seam, ровно один изменённый tile, остальные dataUrl byte-for-byte неизменны; ошибки и выход за 48 MiB fail closed.
+- **Автоматизация:** Node regression на малом 1 MiB source; полный informational run 8/24/48 MiB в GitHub CI, без заведомо нестабильных threshold assertions.
+- **Ограничения:** process-wide HWM не является точным peak памяти отдельно inpaint; benchmark synthetic, не проверяет реальный PSD/PSB decode/UI preview и не переносит вычисления в Worker.
+- **Gate:** считать доказательством профиля только сохранённые логи успешного PR CI + exact main push CI. До их появления статус — *ожидает проверки*. Worker/cancellation и wide connected masks **остаются открыты**; общую задачу 003 не удалять.

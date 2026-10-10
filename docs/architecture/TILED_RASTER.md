@@ -51,6 +51,12 @@ Full RGBA8 display canvas пока остаётся нужен browser composito
 
 Следующая безопасная проходка: workerize дорогие bounded tile/halo jobs с exact-owner cancellation, затем перенести cross-tile Flood Fill / Content-Aware Fill на streaming/tiled algorithms. После этого — lazy backing store/eviction; только затем имеет смысл пересматривать 512 MiB PSD/PSB input gate.
 
+## Профилирование tiled Content-Aware Fill (Stage 003)
+
+Запуск: `node tools/profile-tiled-inpaint.mjs` (8, 24, 48 MiB) или `node tools/profile-tiled-inpaint.mjs --sizes 1,8`. Каждый размер запускается в **новом дочернем Node-процессе с `--expose-gc`**, поэтому RSS одного сценария не загрязняет следующий. Детерминированный synthetic fixture: native Float32 CMYKA, 256 px tiles, одно повреждённое непрозрачное значение на границе тайла. Инструмент проверяет, что изменён ровно один tile, и сохраняет JSON с версиями Node/OS, точным raw byte size, числом загруженных tiles, временем подготовки и временем вызова `inpaintTiledPixelBufferSource`.
+
+Поля `before`/`after` показывают `rss`, `heapUsed`, `arrayBuffers` и `process.resourceUsage().maxRSS`. `observedProcessHighWaterGrowthMiB` — **разница process-wide high-water marks**, а не точный peak RAM самой операции: максимумы включают создание fixture и сериализацию, краткоживущие аллокации могут не отражаться в конечном RSS. `fixtureMs` не смешивается с `inpaintMs`. Тайминги/память — информационные измерения без flaky CI performance gate. CI печатает baseline на Linux/Node 24. Это *не* benchmark PSD/PSB disk decode, Canvas preview, main-thread latency или Worker cancellation; эти проверки остаются отдельными этапами.
+
 ## Проверка
 
 - `tests/tiled-raster-source.test.mjs`: region read/write без ложного dirty.
