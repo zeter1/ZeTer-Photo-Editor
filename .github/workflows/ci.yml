@@ -43,5 +43,8 @@ jobs:
       - name: Profile tiled Content-Aware Fill (informational)
         run: node tools/profile-tiled-inpaint.mjs --sizes 8,24,48
 
+      - name: Profile external PSD/PSB tiled Content-Aware Fill (informational)
+        run: node tools/profile-real-psd-inpaint.mjs
+
       - name: Diff hygiene
         run: git diff --check
