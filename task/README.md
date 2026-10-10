@@ -1,10 +1,10 @@
 # task — очередь небольших инженерных проходок
 
-## Stage 003 — real external PSD/PSB → Node Worker regression (2026-10-10; PR/CI pending)
+## Stage 003 — real external PSD/PSB → Node Worker regression (2026-10-10; merged, main CI green)
 
 - Новая end-to-end Node проверка существующего tiled UI dispatch на pinned внешних 8-bit CMYK PSD и RGB PSB: decode → tiles → one-shot selection → настоящий Worker → exact native result и исходные tile payloads unchanged.
 - Реализация без production/runtime изменений и без bump версии: `tests/tiled-inpaint-external-psd-psb.test.mjs`. Проверяет detached Worker и immutable source, **но не** browser `file://` preview/Undo или real 16/32-bit large PSD/PSB memory profile.
-- **Следующие задачи:** независимые Photoshop-authored 16/32-bit PSD/PSB с hashes/provenance, браузерный file:// decode → Worker → preview/Undo + memory/latency; широкий связный ROI, interruptible fallback/preview. `002` и `003` остаются открытыми. Подэтап не закрывать до merge + точного green main push CI.
+- **Следующие задачи:** независимые Photoshop-authored 16/32-bit PSD/PSB с hashes/provenance, браузерный file:// decode → Worker → preview/Undo + memory/latency; широкий связный ROI, interruptible fallback/preview. `002` и `003` остаются открытыми. Подэтап **закрыт**: [PR #164](https://github.com/zeter1/ZeTer-Photo-Editor/pull/164) merged (squash `f6a19f040079aef786559281f4be19fb6b23785b`), [PR CI #38067582057](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38067582057) и [точный main push CI #38067644445](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38067644445) завершились **success**. Вся 003 остаётся открытой.
 
 ## Проходка Stage 003 — быстрый abort ожидания browser Worker bootstrap (2026-10-10)
 

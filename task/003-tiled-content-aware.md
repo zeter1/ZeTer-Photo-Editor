@@ -1,10 +1,10 @@
 # 003 — Tiled Content-Aware Fill
 
-## Проходка 2026-10-10 — external PSD/PSB → native tiles → настоящий Node Worker (PR, CI pending)
+## Проходка 2026-10-10 — external PSD/PSB → native tiles → настоящий Node Worker (merged, main CI green)
 
 - **Контракт:** к двум pinned независимым 8-bit fixtures (CMYK PSD и grouped RGB PSB) добавлена регрессия, которая декодирует подлинные bytes, подготавливает tiled source, однократно фиксирует selection, выполняет реальный `worker_threads` compute через production protocol и сравнивает полный результат с synchronous frozen-index oracle.
 - **Доказательства:** проверяются по одной Worker-инстанции на fixture, отсутствие повторной выборки геометрии, очищенное Worker lifecycle, `filled=1`, точное совпадение result и байтовая неизменность исходных tiles. Тест: `tests/tiled-inpaint-external-psd-psb.test.mjs`.
-- **Граница:** это **Node**, не browser `file://` UI/preview/Undo и не Photoshop-authored 16/32-bit real-world corpus. Нет измерения RAM/latency тяжёлых PSD/PSB, wide connected ROI и прерываемого synchronous fallback. Этот подэтап считать закрытым только после PR merge и green exact main push CI; вся 003 остаётся открытой.
+- **Граница:** это **Node**, не browser `file://` UI/preview/Undo и не Photoshop-authored 16/32-bit real-world corpus. Нет измерения RAM/latency тяжёлых PSD/PSB, wide connected ROI и прерываемого synchronous fallback. Подэтап **закрыт**: [PR #164](https://github.com/zeter1/ZeTer-Photo-Editor/pull/164) merged (squash `f6a19f040079aef786559281f4be19fb6b23785b`), [PR CI #38067582057](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38067582057) и [точный main push CI #38067644445](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38067644445) завершились **success**. Вся 003 остаётся открытой.
 
 ## Проходка 2026-10-10 — немедленная отмена ожидания supplier при запуске Worker
 
