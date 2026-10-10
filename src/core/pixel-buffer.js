@@ -1900,17 +1900,8 @@ async function inpaintFrozenTiledSelectionCooperative(source, working, scan, opt
   return isCancelled() ? cancelled() : step.value;
 }
 
-// Detached Worker consumers already have a frozen list of selected indices.
-// Validate that list once and build the same bounded ROI without a second
-// width*height predicate scan inside the Worker. The compact membership bitmap
-// rejects duplicates and preserves the old fail-closed input contract.
-export function inpaintTiledPixelBufferSourceFromIndices(source, {
-  selectedIndices,
-  halo = 24,
-  maxLayerPixels = 8_000_000,
-  maxFillPixels = 2_000_000,
-  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
-} = {}) {
+// Frozen Worker indices use one validator for synchronous and cooperative paths.
+function prepareTiledInpaintFromIndices(source, selectedIndices, maxBytes, maxFillPixels) {
   if (!Array.isArray(selectedIndices) && !(selectedIndices instanceof Uint32Array)) {
     throw new TypeError('Tiled inpaint Worker: frozen selection indices must be an Array or Uint32Array');
   }
@@ -1941,9 +1932,43 @@ export function inpaintTiledPixelBufferSourceFromIndices(source, {
     seen[byte] |= bit;
     recordTiledInpaintSelection(scan, index % width, Math.floor(index / width), width, maxFillPixels);
   }
-  return inpaintFrozenTiledSelection(source, working, scan, {
-    halo, maxLayerPixels, maxFillPixels,
-  });
+  return { working, scan };
+}
+
+export function inpaintTiledPixelBufferSourceFromIndices(source, {
+  selectedIndices,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  const prepared = prepareTiledInpaintFromIndices(source, selectedIndices, maxBytes, maxFillPixels);
+  if (!prepared) return null;
+  return inpaintFrozenTiledSelection(source, prepared.working, prepared.scan, { halo, maxLayerPixels, maxFillPixels });
+}
+
+// UI fallback yields before the first ROI and between private ROI computations.
+// A single ROI kernel is still synchronous; no source tiles escape before commit.
+export async function inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+  selectedIndices,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  const prepared = prepareTiledInpaintFromIndices(source, selectedIndices, maxBytes, maxFillPixels);
+  if (!prepared) return null;
+  const cancelled = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true });
+  if (isCancelled()) return cancelled();
+  await yieldControl();
+  if (isCancelled()) return cancelled();
+  return inpaintFrozenTiledSelectionCooperative(source, prepared.working, prepared.scan,
+    { halo, maxLayerPixels, maxFillPixels }, { isCancelled, yieldControl });
 }
 
 // Historical synchronous API remains deterministic for callers and profiles.

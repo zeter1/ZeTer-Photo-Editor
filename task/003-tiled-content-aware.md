@@ -1,5 +1,13 @@
 # 003 — Tiled Content-Aware Fill
 
+## Stage 003 P1 — прерываемый fallback при недоступном Worker (2026-10-10)
+
+- Реализован единый валидатор frozen selected-index snapshot для синхронного Worker API и асинхронного UI fallback. Ответ `{ unavailable:true }` теперь ведёт в cooperative путь вместо синхронного `inpaintTiledPixelBufferSourceFromIndices`.
+- Fallback отдаёт управление **до первого ROI** и между приватными ROI, проверяет отмену и не пересчитывает selection predicate. Отменённая операция не публикует изменённые tiles; Worker compute/protocol errors по-прежнему fail-closed.
+- Добавлены регрессии Float32 CMYKA single-ROI cancellation до декодировки, Uint16 RGB disconnected ROI parity/отмена между ROI, duplicate index rejection, неизменность source.
+- **Остаётся:** прерывание внутри одного kernel ROI, очень длинный connected ROI без inflated bounding box, full RGBA8 preview cancellation, реальные независимо Photoshop-authored PSD16/PSB32 и browser `file://` end-to-end memory/Undo. Задачи 002 и 003 не закрывать до независимой проверки.
+- **Проверка подэтапа:** дождаться зелёного PR CI, затем merge и точного push CI на `main`. Пока это рабочая проходка, не считать подэтап закрытым.
+
 ## Stage 003 P1 — cooperative ROI cancellation (2026-10-10)
 
 - Сделано: main-thread Content-Aware fallback yield после обработки каждого disjoint ROI и перед сериализацией single ROI. Отмена отбрасывает приватные tiles, не публикует неполный результат. Sync API и detached Worker используют те же ROI-шаги без asynchronous yield.
