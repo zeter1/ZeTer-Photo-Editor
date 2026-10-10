@@ -1,5 +1,13 @@
 # 003 — Tiled Content-Aware Fill
 
+## Проходка 2026-10-10 — stale-owner polling во время Worker compute (PR/CI ожидаются)
+
+- **Observed gap:** `isCurrent` опрашивался только при `ready`/response, а `reset()` отменял Worker при смене документа; изменение lock или `highDepthSource` во время тяжёлого kernel без Worker-событий продолжало грузить CPU до окончания вычисления.
+- **Изменение:** optional `pollIntervalMs` в `src/core/tiled-inpaint-worker-client.js`; `src/core/tiled-inpaint-browser-worker.js` включает 50 ms только во время active task. При stale exact-owner guard вызывает `terminate()`; при любом outcome очищаются таймер и обработчики. Worker compute failure остаётся ошибкой, а не поводом для fallback.
+- **Тесты:** `tests/tiled-inpaint-worker-client.test.mjs` deterministic injected scheduler: before-ready/after-ready stale, no late reply, manual cancel, errors, new job, reentrant poll setup.
+- **Gate:** `npm run check`, file:// Chromium smoke, bundle/version parity, PR CI, merge и exact main push CI. Пока gate не пройден, этот подэтап считать незавершённым.
+- **Следующее:** browser RAM/latency real 16/32-bit PSD/PSB + preview, wide connected ROI и отмена синхронного fallback. Вся задача `003` **остаётся открытой**.
+
 ## Проходка 2026-10-10 — end-to-end UI Chromium regression (merged + green main CI)
 
 - **Контракт:** использовать настоящие `.zpe`-импорт, 16-bit four-tile RGB source, UI-маркировку выделения, Edit → Content-Aware Fill, production Worker, history + undo/redo. В отличие от PR #155 проверяется цепочка UI и persisted preview, не только автономный адаптер.
