@@ -272,11 +272,12 @@ test('canonical UI and PSD boundaries stay out of legacy compatibility paths', (
   assert.match(main, /penPathCommands\.publish\(doc,points,/);
   assert.doesNotMatch(main, /function penDraftBounds\(/);
   assert.doesNotMatch(main, /function localizePenNode\(/);
-  const finishPenPathSource = main.slice(
-    main.indexOf('function finishPenPath(){'),
-    main.indexOf('function magicWandSelect('),
-  );
-  assert.ok(finishPenPathSource.includes('function finishPenPath(){'));
+  const finishStart = main.indexOf('function finishPenPath(');
+  const finishEnd = main.indexOf('function magicWandSelect(');
+  assert.ok(finishStart >= 0 && finishEnd > finishStart);
+  const finishPenPathSource = main.slice(finishStart, finishEnd);
+  assert.match(finishPenPathSource, /^function finishPenPath\(/);
+  assert.match(finishPenPathSource, /pathClosed:Boolean\(forceClosed\|\|els\.penClosed\?\.checked\)/);
   assert.match(finishPenPathSource, /penDraftGestures\.consumePoints\(\)/);
   assert.match(finishPenPathSource, /PEN_PATH_COMMAND_RESULT\.COMMITTED/);
   assert.doesNotMatch(finishPenPathSource, /createShapeLayer|addLayer\(|commit\('Добавить Bézier-контур'\)/);
