@@ -1,11 +1,11 @@
 # task — очередь небольших инженерных проходок
 
-## В работе — Stage 003: end-to-end команда Content-Aware Fill в Chromium (2026-10-10)
+## Последний закрытый подэтап — Stage 003: end-to-end UI Content-Aware Fill (2026-10-10)
 
 - Цель проходки: реальный `file://` импорт native `.zpe` с 16-bit RGB tiled источником, прямоугольное выделение через pointer, Edit → Content-Aware Fill, наблюдение реального `Worker.postMessage`, изменение пикселя, **одна** History-запись, Undo/Redo.
-- Охват: `tools/browser-smoke.mjs` (только regression, без изменения production runtime и SemVer). Не объявлять этот gate завершённым до PR + green main CI.
-- После этого остаются отдельные проверки: реальные большие PSD/PSB с браузерными RAM/latency измерениями; wide connected ROI; interrupt/terminate при остальных live-owner invalidations, а также расширение Photoshop-совместимости из screenshots.
-- Канонический открытый план: [003](003-tiled-content-aware.md); пока **не удалять**.
+- Охват: `tools/browser-smoke.mjs` (только regression, без изменения production runtime и SemVer). 16-bit RGB: 9 восстановленных пикселей на 4 tiles, 1 Worker job, 1 History commit, Undo/Redo. [PR #156](https://github.com/zeter1/ZeTer-Photo-Editor/pull/156) merged (squash `e2e8778a03c532c5aa2e89f71989f2fad31bd5c3`), [PR CI #38062298829](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38062298829) **success**, [exact main push CI #38062372137](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38062372137) **success**.
+- **Следующая проходка по 003:** browser-side peak RAM/latency для настоящих 16/32-bit PSD/PSB (декодирование → tiled command → preview) с измерениями baseline/peak, контроль неизменённых tiles, без неустойчивых CI time thresholds. Затем отдельными проходками: wide connected ROI и отмена при остальных live-owner invalidations.
+- **После 003:** продолжить [002 — PSD compatibility corpus](002-psd-compatibility-corpus.md) и сверку импорта/экспорта Photoshop. Канонический открытый план: [003](003-tiled-content-aware.md). Обе задачи **не завершены**, пока не удалять.
 
 Эта папка — versioned handoff между короткими ChatGPT/Codex проходками. Она помогает продолжать рефакторинг без повторного чтения всего репозитория.
 
