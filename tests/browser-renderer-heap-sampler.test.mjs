@@ -219,8 +219,8 @@ import { sampleLinuxChromiumRss } from '../tools/browser-linux-process-rss.mjs';
 test('010E memory: Linux /proc RSS uses complete validated CDP PID set and never calls summed HWM a peak', async () => {
   const reads = [];
   const values = new Map([
-    ['/proc/11/status', 'Name:\\tchrome\\nVmRSS:\\t100 kB\\nVmHWM:\\t120 kB\\n'],
-    ['/proc/12/status', 'Name:\\tchrome\\nVmRSS:\\t200 kB\\nVmHWM:\\t250 kB\\n'],
+    ['/proc/11/status', 'Name:\tchrome\nVmRSS:\t100 kB\nVmHWM:\t120 kB\n'],
+    ['/proc/12/status', 'Name:\tchrome\nVmRSS:\t200 kB\nVmHWM:\t250 kB\n'],
   ]);
   const data = await sampleLinuxChromiumRss([{id:11},{id:12}], {
     platform:'linux',
@@ -243,13 +243,13 @@ test('010E memory: Linux /proc RSS uses complete validated CDP PID set and never
 });
 
 test('010E memory: malformed, duplicate, vanished PIDs and missing Linux status cannot become invented RSS', async () => {
-  const good = 'VmRSS:\\t200 kB\\nVmHWM:\\t250 kB\\n';
+  const good = 'VmRSS:\t200 kB\nVmHWM:\t250 kB\n';
   for (const [processes, status, message] of [
     [[{id:42},{id:42}], good, /duplicate/],
     [[{id:0}], good, /invalid/],
-    [[{id:42}], 'VmHWM: 300 kB\\n', /VmRSS/],
-    [[{id:42}], 'VmRSS: 250 kB\\nVmHWM: 249 kB\\n', /smaller/],
-    [[{id:42}], 'VmRSS: NaN kB\\nVmHWM: 250 kB\\n', /VmRSS/],
+    [[{id:42}], 'VmHWM: 300 kB\n', /VmRSS/],
+    [[{id:42}], 'VmRSS: 250 kB\nVmHWM: 249 kB\n', /smaller/],
+    [[{id:42}], 'VmRSS: NaN kB\nVmHWM: 250 kB\n', /VmRSS/],
   ]) {
     await assert.rejects(sampleLinuxChromiumRss(processes, {
       platform:'linux', readStatus:async () => status,
