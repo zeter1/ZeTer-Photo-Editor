@@ -1,5 +1,13 @@
 # task — очередь небольших инженерных проходок
 
+## 2026-10-11 — Stage 003 P1: cooperative native tiled readRegion (проверка PR ожидается)
+
+- Общий sync/cooperative iterator копирует native ROI с контрольной точкой каждые 32 768 pixels; отмена не возвращает частично считанные данные и не помечает tiles dirty.
+- Native Content-Aware fallback теперь использует cooperative чтение для одиночных/разделённых ROI. Synchronous Worker/Node сохраняет тот же детерминированный алгоритм.
+- Регрессии RGB16 и Float32 CMYKA: exact parity, отмена после частичной декодировки, unchanged source и прежняя отмена внутри kernel после read checkpoints.
+- **Осталось:** cooperative `writeRegion`, длинные connected ROI без inflated bbox, chunked RGBA8 preview, реальный независимый лицензированный Photoshop PSD16/PSB32 corpus и браузерная проверка Worker/Undo/RAM. Задачи 002 и 003 остаются открытыми.
+
+
 ## 2026-10-11 — Stage 003 P1: измерение узкого места tiled readRegion/writeRegion (слито, CI success)
 
 - Добавлен изолированный Node-профиль `node tools/profile-tiled-region-io.mjs --cases rgb16,cmyk32` и контрактный тест `tests/tiled-region-io-profile.test.mjs`. Каждый случай выполняется в отдельном процессе с `--expose-gc`: измеряются `readRegion`, `writeRegion`, `serialize`, sampled RSS/heap/ArrayBuffers и process-wide high-water RSS.

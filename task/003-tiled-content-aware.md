@@ -1,5 +1,13 @@
 # 003 — Tiled Content-Aware Fill
 
+## 2026-10-11 — Stage 003 P1: cooperative native tiled readRegion (проверка PR ожидается)
+
+- Общий sync/cooperative iterator копирует native ROI с контрольной точкой каждые 32 768 pixels; отмена не возвращает частично считанные данные и не помечает tiles dirty.
+- Native Content-Aware fallback теперь использует cooperative чтение для одиночных/разделённых ROI. Synchronous Worker/Node сохраняет тот же детерминированный алгоритм.
+- Регрессии RGB16 и Float32 CMYKA: exact parity, отмена после частичной декодировки, unchanged source и прежняя отмена внутри kernel после read checkpoints.
+- **Осталось:** cooperative `writeRegion`, длинные connected ROI без inflated bbox, chunked RGBA8 preview, реальный независимый лицензированный Photoshop PSD16/PSB32 corpus и браузерная проверка Worker/Undo/RAM. Задачи 002 и 003 остаются открытыми.
+
+
 ## 2026-10-11 — измеряемый синхронный tiled region IO baseline (слито, CI success)
 
 - Инструмент `tools/profile-tiled-region-io.mjs` отдельно фиксирует подготовку фикстуры, `readRegion`, `writeRegion`, сериализацию и process-level memory samples для RGB16 и CMYKA Float32 на 1024×512 с ROI через границы 256-px tiles.

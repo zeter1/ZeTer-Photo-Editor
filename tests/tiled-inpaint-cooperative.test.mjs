@@ -227,9 +227,9 @@ test('Stage 003: cancellation after entering a single ROI kernel discards every 
   const result = await inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
     selectedIndices:Uint32Array.of(center), halo:128,
     isCancelled:() => cancelled,
-    yieldControl:async () => { if (++yields === 2) cancelled = true; },
+    yieldControl:async () => { if (++yields === 4) cancelled = true; },
   });
-  assert.equal(yields, 2, 'the first checkpoint is pre-ROI, the second is inside its native kernel');
+  assert.equal(yields, 4, 'pre-ROI and two read checkpoints precede the first native kernel checkpoint');
   assert.equal(result.cancelled, true);
   assert.equal(result.changed, 0);
   assert.equal(result.changedTiles, 0);
