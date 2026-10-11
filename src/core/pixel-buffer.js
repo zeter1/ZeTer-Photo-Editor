@@ -1671,9 +1671,13 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     return changedPixels;
   }
 
-  function serialize() {
+  // Assemble privately; never expose the partially serialized tile list.
+  // Only modified/promoted tiles need encoding, and groups of four keep the
+  // cooperative fallback responsive without adding yields for tiny jobs.
+  function* serializeSteps() {
     const tiles = [];
     let total = 0;
+    let encodedTiles = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!dirty.has(index) && !promoteAlpha) {
@@ -1681,6 +1685,7 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
         total += tile.rawBytes;
         continue;
       }
+      if (encodedTiles && encodedTiles % 4 === 0) yield;
       let buffer = loaded.get(index);
       if (!buffer) {
         buffer = decodeSerializedTile(safe, tile);
@@ -1693,6 +1698,7 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
         rawBytes:bytes.byteLength,
         dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME),
       });
+      encodedTiles += 1;
     }
     if (total !== targetRawBytes) throw new RangeError('Tiled PixelBuffer working-set serialization имеет несогласованный byte budget');
     return {
@@ -1702,6 +1708,34 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
       rawBytes:targetRawBytes,
       tiles,
     };
+  }
+
+  function serialize() {
+    const steps = serializeSteps();
+    let next = steps.next();
+    while (!next.done) next = steps.next();
+    return next.value;
+  }
+
+  // null signals cancellation. The original source remains immutable; even
+  // completed private payloads from prior checkpoints are discarded.
+  async function serializeCooperative({
+    isCancelled = () => false,
+    yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  } = {}) {
+    if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+      throw new TypeError('Tiled PixelBuffer serialization: invalid cancellation callbacks');
+    }
+    if (isCancelled()) return null;
+    const steps = serializeSteps();
+    let next = steps.next();
+    while (!next.done) {
+      if (isCancelled()) return null;
+      await yieldControl();
+      if (isCancelled()) return null;
+      next = steps.next();
+    }
+    return isCancelled() ? null : next.value;
   }
 
   return {
@@ -1717,6 +1751,7 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     readRegion,
     writeRegion,
     serialize,
+    serializeCooperative,
     get loadedTileCount() { return loaded.size; },
     get dirtyTileCount() { return dirty.size; },
   };
@@ -1852,8 +1887,9 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       // No private tile escapes before the full job completes.
       yield;
     }
+    const serialized = totalChanged ? yield { kind:'serialize' } : source;
     return {
-      source:totalChanged ? working.serialize() : source, changed:totalChanged,
+      source:serialized, changed:totalChanged,
       filled:totalFilled, changedTiles:working.dirtyTileCount, loadedTiles:working.loadedTileCount,
     };
   }
@@ -1875,8 +1911,9 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
   const changed = working.writeRegion(region);
   // Yield before serializing the one-ROI result.
   yield;
+  const serialized = changed ? yield { kind:'serialize' } : source;
   return {
-    source:changed ? working.serialize() : source,
+    source:serialized,
     changed,
     filled,
     changedTiles:working.dirtyTileCount,
@@ -1889,9 +1926,13 @@ function inpaintFrozenTiledSelection(source, working, scan, options) {
   const steps = inpaintFrozenTiledSelectionSteps(source, working, scan, options);
   let step = steps.next();
   while (!step.done) {
-    step = step.value?.kind === 'inpaint'
-      ? steps.next(inpaintPixelBuffer(step.value.buffer, step.value.options))
-      : steps.next();
+    if (step.value?.kind === 'inpaint') {
+      step = steps.next(inpaintPixelBuffer(step.value.buffer, step.value.options));
+    } else if (step.value?.kind === 'serialize') {
+      step = steps.next(working.serialize());
+    } else {
+      step = steps.next();
+    }
   }
   return step.value;
 }
@@ -1911,6 +1952,12 @@ async function inpaintFrozenTiledSelectionCooperative(source, working, scan, opt
         { isCancelled, yieldControl });
       if (filled === null || isCancelled()) return cancelled();
       step = steps.next(filled);
+      continue;
+    }
+    if (step.value?.kind === 'serialize') {
+      const serialized = await working.serializeCooperative({ isCancelled, yieldControl });
+      if (serialized === null || isCancelled()) return cancelled();
+      step = steps.next(serialized);
       continue;
     }
     await yieldControl();
