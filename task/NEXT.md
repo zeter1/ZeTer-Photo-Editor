@@ -1,3 +1,9 @@
+## Проходка 009 — PSB32 / cancellation (код подготовлен, CI НЕ подтверждён)
+
+- [009](009-large-psb32-worker-cancellation.md) — в `test/stage003-large-psb32-worker-cancel-20261011` подготовлены большая ZeTer-generated PSB32 Float32 fixture, native v2 sample/bit-oracle, Chromium file:// Worker + Undo/Redo и детерминированная stale-reply отмена через UI layer lock.
+- **Статус: в работе.** Не считать доказанной проверку браузера до PR/main CI. Отмена покрывает pending Worker reply после вычисления; **не** доказывает mid-kernel termination/peak RSS.
+- **Следующее:** CI/review/merge + exact-main gate; затем dense ROI и mid-kernel cancel, Stage 002 independently Adobe-authored high-depth fixture, реальный peak RAM.
+
 ## Завершённая проходка 008 — большой PSD16 → v2 Worker в Chromium file:// (2026-10-11)
 
 - [008](008-browser-large-psd16-worker.md) — новый тест реального браузерного пути: ZeTer-generated 1025×1025 RGBA16 PSD (>8 MiB) → file input → adaptive tiled v2 → точный Save Project native byte oracle → Worker Content-Aware Fill → preview/Undo/Redo + sampled CDP memory.

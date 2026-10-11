@@ -25,6 +25,44 @@ test('Stage 003: fixture builder rejects unspecified formats', () => {
   assert.throws(() => createBrowserHighDepthFixture('unknown'),/Unknown browser high-depth fixture/);
 });
 
+test('Stage 003: large ZeTer PSB32 Float32 decodes with exact LE bits and adaptive v2 tiles', async () => {
+  const item=createBrowserHighDepthFixture('rgb32psblarge');
+  assert.equal(item.version,2);
+  assert.equal(item.bitsPerChannel,32);
+  assert.equal(item.width,1025);
+  assert.equal(item.height,1025);
+  const rawBytes=item.width*item.height*item.channels*4;
+  assert.ok(rawBytes>PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES && rawBytes<48*1024*1024);
+  const header=inspectPsdHeader(item.bytes);
+  assert.equal(header.version,2);
+  assert.equal(header.bitsPerChannel,32);
+  const decoded=await decodePsd(item.bytes);
+  assert.equal(decoded.layers.length,1);
+  const native=decoded.layers[0].pixelBuffer;
+  assert.equal(native.data.constructor,Float32Array);
+  assert.equal(native.data.byteLength,rawBytes);
+  const index=(x,y)=>(y*item.width+x)*item.channels;
+  const samples=(x,y)=>Array.from(native.data.slice(index(x,y),index(x,y)+item.channels));
+  assert.deepEqual(samples(0,0),item.normal);
+  assert.deepEqual(samples(item.width-1,item.height-1),item.normal);
+  assert.deepEqual(samples(item.defectX,item.defectY),item.damaged);
+  assert.deepEqual(samples(item.defectX+5,item.defectY),item.normal);
+  const word=(x,y,ch)=>new DataView(native.data.buffer,native.data.byteOffset)
+    .getUint32((index(x,y)+ch)*4,true);
+  const floatBits=value=>new DataView(new Float32Array([value]).buffer).getUint32(0,true);
+  for(const [x,y,values] of [
+    [0,0,item.normal],
+    [item.defectX,item.defectY,item.damaged],
+    [item.width-1,item.height-1,item.normal],
+  ])for(let ch=0;ch<item.channels;ch++)
+    assert.equal(word(x,y,ch),floatBits(values[ch]),'LE Float32 channel bit parity');
+  const source=serializePixelBufferSourceAdaptive(native);
+  assert.equal(source.kind,'zpe-pixel-buffer-source-v2');
+  assert.equal(source.bitsPerChannel,32);
+  assert.equal(source.rawBytes,rawBytes);
+  assert.ok(source.tiles.length>1);
+});
+
 test('Stage 003: large ZeTer PSD16 fixture decodes beyond the 8 MiB native v2 threshold', async () => {
   const item=createBrowserHighDepthFixture('rgb16large');
   assert.equal(item.width,1025);

@@ -17,6 +17,13 @@ const cases = {
     normal:[0.125,0.25,0.375,1],
     damaged:[4,0.0625,0.0625,1],
   },
+  rgb32psblarge: {
+    filename:'stage003-browser-large-rgb32.psb',
+    version:2, bitsPerChannel:32, ArrayType:Float32Array,
+    colorSpace:'linear-rgb-unmanaged', encode:encodePsb,
+    normal:[0.125,0.25,0.375,1],
+    damaged:[4,0.0625,0.0625,1],
+  },
   rgb16large: {
     filename:'stage003-browser-large-rgb16.psd',
     version:1, bitsPerChannel:16, ArrayType:Uint16Array,
@@ -29,9 +36,9 @@ const cases = {
 export function createBrowserHighDepthFixture(key) {
   const config=cases[key];
   if (!config) throw new RangeError('Unknown browser high-depth fixture: '+key);
-  // A 1025² RGBA16 raster is strictly above the 8 MiB v2 tile threshold.
+  // A 1025² RGBA16 / RGBA32 raster exceeds the 8 MiB v2 threshold.
   // Keep the conventional 8×8 fixtures small for fast precision smoke tests.
-  const large=key==='rgb16large';
+  const large=key==='rgb16large'||key==='rgb32psblarge';
   const width=large?1025:8,height=large?1025:8,channels=4;
   const defectX=large?Math.floor(width/2):4,defectY=large?Math.floor(height/2):4;
   const samples=new config.ArrayType(width*height*channels);
