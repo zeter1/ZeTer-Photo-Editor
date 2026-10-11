@@ -7202,14 +7202,21 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
         cell.bottom = Math.max(cell.bottom, y + 1);
         continue;
       }
-      if (occupied.size >= 256) throw oversized();
+      // Source topology is capped by MAX_PIXEL_BUFFER_SOURCE_TILES. For a wide
+      // but sparse selection, a fixed 256-cell cutoff is unnecessarily small:
+      // enforce the actual source-tile cap, then the aggregate ROI pixel budget.
+      if (occupied.size >= MAX_PIXEL_BUFFER_SOURCE_TILES) throw oversized();
       occupied.set(key, { key, left:x, top:y, right:x + 1, bottom:y + 1 });
     }
     const cells = [...occupied.values()];
     const makeFragments = () => cells.map(cell => ({ ...cell, keys:[cell.key], indices:[] }));
-    const groups = makeFragments();
+    // Pairwise halo-group merging is intentionally limited to 256 occupied
+    // cells (quadratic comparisons, repeated merges). Above that threshold,
+    // plan independent bounded cells in a linear pass instead. Each cell still
+    // shares the global frozen selection donor-exclusion bitmap.
+    const groups = cells.length <= 256 ? makeFragments() : null;
     // Preserve the old disjoint grouping whenever it fits the aggregate cap.
-    for (let i = 0; i < groups.length; i += 1) {
+    for (let i = 0; groups && i < groups.length; i += 1) {
       let merged = false;
       for (let j = i + 1; j < groups.length; j += 1) {
         const a = groups[i], b = groups[j];
@@ -7258,10 +7265,10 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       return candidate;
     }
 
-    let planned = groups.length > 1 ? planRegions(groups) : null;
+    let planned = groups?.length > 1 ? planRegions(groups) : null;
     if (!planned) planned = planRegions(makeFragments());
     if (!planned) {
-      if (groups.length < 2) throw oversized();
+      if (groups?.length === 1) throw oversized();
       throw new RangeError('Контент-заливка: сумма рабочих областей превышает безопасный лимит ' + maxLayerPixels + ' px');
     }
 
