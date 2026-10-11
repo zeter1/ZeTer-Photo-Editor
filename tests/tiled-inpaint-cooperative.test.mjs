@@ -279,3 +279,45 @@ test('Stage 003: multi-tile ROI serialization cancels atomically and preserves s
   assert.equal(stopped.source, source);
   assert.equal(JSON.stringify(source), snapshot);
 });
+
+
+test('Stage 003: inpaint cancellation during cooperative write never publishes staged tiles', async () => {
+  const width=256,height=256,channels=5;
+  const data=new Float32Array(width*height*channels);
+  for(let pixel=0;pixel<width*height;pixel++)
+    data.set([0.125,0.25,0.375,0.5,1],pixel*channels);
+  const center=128*width+128;
+  data.set([9,9,9,9,1],center*channels);
+  const source=serializeTiledPixelBufferSource(createPixelBuffer({
+    width,height,model:'cmyk',channels,bitsPerChannel:32,
+    colorSpace:'device-cmyk',data,
+  }),{tileSize:64});
+  const snapshot=JSON.stringify(source);
+  const options={selectedIndices:Uint32Array.of(center),halo:128};
+  const expected=inpaintTiledPixelBufferSourceFromIndices(source,options);
+  let yields=0;
+  const complete=await inpaintTiledPixelBufferSourceFromIndicesCooperative(source,{
+    ...options,yieldControl:async()=>{yields++;},
+  });
+  assert.deepEqual(complete,expected);
+  const total=yields;
+  assert.ok(total>=5);
+  yields=0;
+  let stopped=false;
+  const cancelled=await inpaintTiledPixelBufferSourceFromIndicesCooperative(source,{
+    ...options,
+    isCancelled:()=>stopped,
+    yieldControl:async()=>{
+      yields++;
+      // A single dirty tile needs no serialization yield: the last checkpoint
+      // follows the write, so the preceding checkpoint is inside writeRegion.
+      if(yields===total-1)stopped=true;
+    },
+  });
+  assert.equal(yields,total-1);
+  assert.equal(cancelled.cancelled,true);
+  assert.equal(cancelled.changed,0);
+  assert.equal(cancelled.changedTiles,0);
+  assert.equal(cancelled.source,source);
+  assert.equal(JSON.stringify(source),snapshot);
+});

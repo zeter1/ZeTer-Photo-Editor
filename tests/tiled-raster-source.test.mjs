@@ -161,6 +161,76 @@ test('Stage 17d working-set regions read halo pixels across tiles without dirtyi
   assert.equal(deserializePixelBufferSource(serialized).data[3],4321);
 });
 
+
+test('Stage 003: RGB16 cooperative write matches sync and cancels staged multi-tile ROI atomically', async () => {
+  const width=256,height=256;
+  const packed=serializeTiledPixelBufferSource(rgb16(width,height),{tileSize:64});
+  const before=JSON.stringify(packed);
+  const bounds={left:0,top:0,right:width,bottom:height};
+  const edit=working=>{
+    const region=working.readRegion(bounds);
+    region.buffer.data[0]=54321;
+    region.buffer.data[(width*height-1)*3]=54321;
+    return region;
+  };
+  const sync=createSerializedPixelBufferTileWorkingSet(packed);
+  assert.equal(sync.writeRegion(edit(sync)),2);
+  assert.equal(sync.dirtyTileCount,2);
+  const oracle=sync.serialize();
+  const working=createSerializedPixelBufferTileWorkingSet(packed);
+  let yields=0;
+  assert.equal(await working.writeRegionCooperative(edit(working),{
+    yieldControl:async()=>{yields++;},
+  }),2);
+  assert.ok(yields>=2,'the large single ROI yields within the write');
+  assert.deepEqual(working.serialize(),oracle);
+  const cancelled=createSerializedPixelBufferTileWorkingSet(packed);
+  let stopped=false;
+  assert.equal(await cancelled.writeRegionCooperative(edit(cancelled),{
+    isCancelled:()=>stopped,
+    yieldControl:async()=>{assert.equal(cancelled.dirtyTileCount,0);stopped=true;},
+  }),null);
+  assert.equal(cancelled.dirtyTileCount,0);
+  let previews=0;
+  cancelled.forEachPreviewDirty(()=>{previews++;});
+  assert.equal(previews,0);
+  assert.deepEqual(cancelled.serialize(),packed);
+  assert.equal(JSON.stringify(packed),before);
+});
+
+test('Stage 003: Float32 CMYKA cooperative write keeps earlier dirty pixels and precision', async () => {
+  const width=256,height=256,channels=5;
+  const data=new Float32Array(width*height*channels);
+  for(let p=0;p<width*height;p++)data.set([0.125,0.25,0.375,0.5,1],p*channels);
+  const packed=serializeTiledPixelBufferSource(createPixelBuffer({
+    width,height,model:'cmyk',channels,bitsPerChannel:32,
+    colorSpace:'device-cmyk',data,
+  }),{tileSize:64});
+  const working=createSerializedPixelBufferTileWorkingSet(packed);
+  const bounds={left:0,top:0,right:width,bottom:height};
+  const first=working.readRegion(bounds);
+  first.buffer.data[0]=0.75;
+  assert.equal(working.writeRegion(first),1);
+  const prior=working.serialize();
+  const region=working.readRegion(bounds);
+  region.buffer.data[(width*height-1)*channels+3]=0.625;
+  let stopped=false;
+  assert.equal(await working.writeRegionCooperative(region,{
+    isCancelled:()=>stopped,yieldControl:async()=>{stopped=true;},
+  }),null);
+  assert.equal(working.dirtyTileCount,1);
+  assert.deepEqual(working.serialize(),prior);
+  assert.equal(await working.writeRegionCooperative(region,{yieldControl:async()=>{}}),1);
+  const restored=deserializePixelBufferSource(working.serialize());
+  assert.equal(restored.data[0],0.75);
+  assert.equal(restored.data[(width*height-1)*channels+3],0.625);
+  assert.equal(restored.data[channels+1],0.25);
+  await assert.rejects(working.writeRegionCooperative(region,{yieldControl:1}),/invalid cancellation callbacks/);
+  assert.equal(await working.writeRegionCooperative(working.readRegion({
+    left:0,top:0,right:1,bottom:1,
+  }),{yieldControl:async()=>{}}),0);
+});
+
 test('Stage 003: localized CMYKA Float32 Content-Aware Fill spans tile boundaries without full-plane decode', () => {
   const width = 80, height = 16, channels = 5;
   const data = new Float32Array(width * height * channels);
