@@ -1,5 +1,14 @@
 # task — очередь небольших инженерных проходок
 
+## 2026-10-11 — Stage 003 P1: прерывание внутри одного ROI (PR / CI ожидаются)
+
+- В ветке `feat/stage003-cooperative-inpaint-kernel-20261011`: синхронное native inpaint/Worker и cooperative fallback используют общие детерминированные шаги ядра. Fallback отдаёт управление во время scan, очереди заполнения и PatchMatch, а не только между ROI.
+- Регрессии: точная Uint16 RGB sync/cooperative parity на 256×256 с большим ROI; отмена Float32 CMYKA после входа в единственный ROI с нулевой публикацией и неизменным source.
+- **Gate:** `npm run check` + generated browser bundle/Worker parity + Chromium `file://` smoke + CI для точного PR head, merge и CI для точного main push. До этого статус «в работе», не «выполнено».
+- **Следующее (P1):** длинный связный ROI без глобальной прямоугольной аллокации; отменяемые native tile read/write/serialization и полноразмерный RGBA8 preview; браузерный стресс-тест + memory snapshots.
+- **Отдельный блокер (P0, task 002):** независимо созданные/лицензированные Photoshop PSD16/PSB32 с pinned hash, goldens и реальным `file://` import/Worker/Undo. Не называть синтетические образцы эквивалентом Adobe.
+
+
 ## Stage 003 P1 — прерываемый fallback при недоступном Worker (2026-10-10)
 
 - Реализован единый валидатор frozen selected-index snapshot для синхронного Worker API и асинхронного UI fallback. Ответ `{ unavailable:true }` теперь ведёт в cooperative путь вместо синхронного `inpaintTiledPixelBufferSourceFromIndices`.

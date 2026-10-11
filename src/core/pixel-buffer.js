@@ -1,5 +1,5 @@
 import { bytesToDataUrl, dataUrlToBytes } from './io.js';
-import { inpaintSelectedSamples } from './inpaint.js';
+import { inpaintSelectedSamples, inpaintSelectedSamplesCooperative } from './inpaint.js';
 
 export const PIXEL_BUFFER_KIND = 'zpe-pixel-buffer-v1';
 export const PIXEL_MODELS = Object.freeze(['rgb','cmyk']);
@@ -1242,6 +1242,15 @@ export function inpaintPixelBuffer(buffer, options = {}) {
   });
 }
 
+// Private ROI pixels are never published when the cooperative kernel cancels.
+function inpaintPixelBufferCooperative(buffer, options, controls) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
+  return inpaintSelectedSamplesCooperative(buffer.data, buffer.width, buffer.height, buffer.channels, {
+    ...options,
+    alphaChannel:buffer.alphaMode === 'straight' ? buffer.channels - 1 : -1,
+  }, controls);
+}
+
 function sourceSampleBytes(bitsPerChannel) {
   if (bitsPerChannel === 8) return 1;
   if (bitsPerChannel === 16) return 2;
@@ -1831,10 +1840,10 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
         mask[(y - rect.top) * regionWidth + (x - rect.left)] = 1;
       }
       const region = working.readRegion(rect);
-      const filled = inpaintPixelBuffer(region.buffer, {
+      const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
         isAllowed:(x, y) => mask[y * regionWidth + x] === 1,
         maxLayerPixels, maxFillPixels,
-      });
+      } };
       if (filled !== group.indices.length) {
         throw new RangeError('Контент-заливка: для отдельной области не найдены все доноры');
       }
@@ -1857,11 +1866,11 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     selectionMask[(y - bounds.top) * regionWidth + (x - bounds.left)] = 1;
   }
   const region = working.readRegion(bounds);
-  const filled = inpaintPixelBuffer(region.buffer, {
+  const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
     isAllowed:(x, y) => selectionMask[y * regionWidth + x] === 1,
     maxLayerPixels,
     maxFillPixels,
-  });
+  } };
   if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
   const changed = working.writeRegion(region);
   // Yield before serializing the one-ROI result.
@@ -1879,12 +1888,16 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
 function inpaintFrozenTiledSelection(source, working, scan, options) {
   const steps = inpaintFrozenTiledSelectionSteps(source, working, scan, options);
   let step = steps.next();
-  while (!step.done) step = steps.next();
+  while (!step.done) {
+    step = step.value?.kind === 'inpaint'
+      ? steps.next(inpaintPixelBuffer(step.value.buffer, step.value.options))
+      : steps.next();
+  }
   return step.value;
 }
 
-// Fallback may cancel between bounded ROIs without publishing partial tiles.
-// A single ROI kernel itself remains synchronous.
+// The asynchronous fallback also yields inside the deterministic single-ROI
+// kernel, without committing its working tiles until the entire job finishes.
 async function inpaintFrozenTiledSelectionCooperative(source, working, scan, options, {
   isCancelled, yieldControl,
 }) {
@@ -1893,6 +1906,13 @@ async function inpaintFrozenTiledSelectionCooperative(source, working, scan, opt
   let step = steps.next();
   while (!step.done) {
     if (isCancelled()) return cancelled();
+    if (step.value?.kind === 'inpaint') {
+      const filled = await inpaintPixelBufferCooperative(step.value.buffer, step.value.options,
+        { isCancelled, yieldControl });
+      if (filled === null || isCancelled()) return cancelled();
+      step = steps.next(filled);
+      continue;
+    }
     await yieldControl();
     if (isCancelled()) return cancelled();
     step = steps.next();
@@ -1947,8 +1967,8 @@ export function inpaintTiledPixelBufferSourceFromIndices(source, {
   return inpaintFrozenTiledSelection(source, prepared.working, prepared.scan, { halo, maxLayerPixels, maxFillPixels });
 }
 
-// UI fallback yields before the first ROI and between private ROI computations.
-// A single ROI kernel is still synchronous; no source tiles escape before commit.
+// UI fallback yields before the first ROI, within large kernels, and between
+// private ROIs. No source tile escapes before the complete job commits.
 export async function inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
   selectedIndices,
   halo = 24,
@@ -1994,8 +2014,8 @@ export function inpaintTiledPixelBufferSource(source, {
 
 // Yield through a real macrotask between bounded scan chunks so navigation or
 // document changes can invalidate a pending job before expensive ROI decoding.
-// The synthesis kernel is still synchronous: this is cooperative scan
-// cancellation, not a dedicated Worker or a fully interruptible inpaint job.
+// The fallback also yields inside a large private ROI kernel, while the
+// detached Worker remains the preferred path for expensive selections.
 export async function inpaintTiledPixelBufferSourceCooperative(source, {
   isAllowed,
   isCancelled = () => false,

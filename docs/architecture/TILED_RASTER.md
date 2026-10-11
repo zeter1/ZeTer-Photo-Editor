@@ -1,5 +1,10 @@
 # Tiled high-depth raster source — Stage 17d
 
+## Stage 003 cooperative native single-ROI kernel (2026-10-11)
+
+Sync Node/Worker inpaint continues to exhaust the deterministic sample generator without asynchronous scheduling. The main-thread fallback drives the exact same steps with a macrotask yield and staleness guard through selection scan, boundary queue, and PatchMatch row checkpoints inside each private ROI. A cancelled job returns the original serialized source and zero changed/filled counters; unfinished private working tiles cannot be published. This does **not** make tile region decoding, region writes, final serialization, or RGBA8 preview interruptible, nor does it remove the large connected ROI rectangle limit. Regression coverage: native Uint16 parity and mid-kernel Float32 cancellation. This substage remains pending PR/main CI.
+
+
 Stage 17d продолжает Stage 17a–17c: большие native RGB/CMYK 8/16/32-bit PixelBuffer sources остаются backward-compatible tiled persistence, Brush/Eraser используют stroke-scoped working set, а native Clone/Heal/Blur/Smudge/Dodge/Burn больше не обязаны материализовывать полный high-depth plane на старте штриха.
 
 ## Владельцы

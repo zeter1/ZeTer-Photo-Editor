@@ -190,3 +190,50 @@ test('Stage 003: frozen-index cooperative fallback is identical and cancels betw
     ...opts, selectedIndices:[indices[0], indices[0]],
   }), /duplicate selected index/);
 });
+
+
+test('Stage 003: large single ROI yields during native synthesis and matches synchronous Uint16 tiles', async () => {
+  const width = 256, height = 256, channels = 3;
+  const data = new Uint16Array(width * height * channels).fill(12000);
+  const center = 128 * width + 128;
+  data.fill(60000, center * channels, (center + 1) * channels);
+  const source = serializeTiledPixelBufferSource(createPixelBuffer({
+    width, height, model:'rgb', channels, bitsPerChannel:16, data,
+  }), { tileSize:64 });
+  const before = JSON.stringify(source);
+  const opts = { selectedIndices:Uint32Array.of(center), halo:128 };
+  const synchronous = inpaintTiledPixelBufferSourceFromIndices(source, opts);
+  let yields = 0;
+  const cooperative = await inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+    ...opts, yieldControl:async () => { yields++; },
+  });
+  assert.ok(yields >= 3, 'pre-ROI, inner native synthesis, and final boundary yields');
+  assert.deepEqual(cooperative, synchronous, 'all native tile bytes and counters stay identical');
+  assert.equal(JSON.stringify(source), before, 'the immutable source never changes');
+});
+
+test('Stage 003: cancellation after entering a single ROI kernel discards every private tile', async () => {
+  const width = 256, height = 256, channels = 5;
+  const data = new Float32Array(width * height * channels);
+  for (let index = 0; index < width * height; index++) data.set([0.1, 0.2, 0.3, 0.4, 1], index * channels);
+  const center = 128 * width + 128;
+  data.set([9, 9, 9, 9, 1], center * channels);
+  const source = serializeTiledPixelBufferSource(createPixelBuffer({
+    width, height, model:'cmyk', channels, bitsPerChannel:32,
+    colorSpace:'device-cmyk', data,
+  }), { tileSize:64 });
+  const before = JSON.stringify(source);
+  let yields = 0, cancelled = false;
+  const result = await inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+    selectedIndices:Uint32Array.of(center), halo:128,
+    isCancelled:() => cancelled,
+    yieldControl:async () => { if (++yields === 2) cancelled = true; },
+  });
+  assert.equal(yields, 2, 'the first checkpoint is pre-ROI, the second is inside its native kernel');
+  assert.equal(result.cancelled, true);
+  assert.equal(result.changed, 0);
+  assert.equal(result.changedTiles, 0);
+  assert.equal(result.loadedTiles, 0);
+  assert.equal(result.source, source);
+  assert.equal(JSON.stringify(source), before, 'cancelled private ROI never mutates input tiles');
+});

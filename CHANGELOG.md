@@ -1,5 +1,12 @@
 # История изменений
 
+### 2026-10-11 — ZeTer 1.45.5: cooperative cancellation inside one Content-Aware ROI
+
+- Main-thread high-depth fallback now yields while its private native inpaint kernel scans pixels, fills boundary pixels, and refines PatchMatch (not merely between tiled ROIs); synchronous Worker and fallback reuse the same deterministic algorithm.
+- A cancelled single ROI cannot publish partially changed tiles. Added regression tests for Uint16 byte-exact parity and Float32 CMYKA cancellation after entering a large ROI.
+- Rebuilt browser bundle, file:// Worker supplier, HTML build stamp, and version manifest. Pending CI/merge verification; long connected ROI, RGBA8 preview, independent Photoshop-authored PSD16/PSB32 and memory benchmarks remain open.
+
+
 ### 2026-10-10 — Проверка high-depth PSD/PSB в native tiled Worker
 
 - Добавлено: тест для RGB16 PSD и HDR Float32 PSB, которые проходят бинарный round-trip, native tiled serialization и вычисления настоящим Node Worker. Результат сравнивается с эталонным frozen-index вычислением; проверяется сохранение точных samples, исходных tiles и неизменённых доноров.
@@ -10,7 +17,7 @@
 >
 > Изменения, уже слитые в `main`, считаются актуальным опубликованным состоянием репозитория и записываются в раздел текущей версии. Раздел `Unreleased` для уже интегрированных изменений не используется. Это правило не означает автоматический deploy внешнего сайта — deployment проверяется отдельно.
 
-## 1.45.4 — текущая версия
+## 1.45.5 — текущая версия
 
 ### 2026-10-10 — Прерываемая заливка при недоступном Worker
 

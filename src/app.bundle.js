@@ -4922,7 +4922,7 @@ function deterministicOffset(seed, radius) {
   return (hash32(seed) % span) - radius;
 }
 
-function patchMatchRefine(data, width, height, channels, selectedMask, donorIndex, bounds, {
+function* patchMatchRefineSteps(data, width, height, channels, selectedMask, donorIndex, bounds, {
   patchRadius,
   passes,
   randomSearchSteps,
@@ -5001,6 +5001,7 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
     return validDonor(candidate) ? candidate : -1;
   };
 
+  let processedRows = 0;
   for (let pass = 0; pass < passCount; pass += 1) {
     const forward = pass % 2 === 0;
     const yStart = forward ? bounds.minY : bounds.maxY;
@@ -5054,6 +5055,8 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
         donorIndex[index] = bestDonor;
         copyDonor(index, bestDonor);
       }
+      // An async caller can release the UI thread inside PatchMatch too.
+      if (++processedRows % 16 === 0) yield;
     }
   }
 }
@@ -5068,7 +5071,7 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
  * texture neighborhood. Large fills keep the linear boundary synthesis path so
  * the operation remains memory/time bounded.
  */
-function inpaintSelectedSamples(data, width, height, channels, {
+function* inpaintSelectedSamplesSteps(data, width, height, channels, {
   isAllowed,
   sampleRadius = 2,
   maxLayerPixels = CONTENT_AWARE_MAX_LAYER_PIXELS,
@@ -5110,6 +5113,7 @@ function inpaintSelectedSamples(data, width, height, channels, {
 
   for (let y = 0, index = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1, index += 1) {
+      if (index > 0 && index % 16_384 === 0) yield;
       if (isAllowed(x, y)) {
         pending[index] = 1;
         selectedMask[index] = 1;
@@ -5152,6 +5156,7 @@ function inpaintSelectedSamples(data, width, height, channels, {
   };
 
   for (let index = 0; index < total; index += 1) {
+    if (index > 0 && index % 16_384 === 0) yield;
     if (pending[index] && hasKnownNeighbor(index)) {
       queue[tail++] = index;
       queued[index] = 1;
@@ -5165,6 +5170,7 @@ function inpaintSelectedSamples(data, width, height, channels, {
 
   while (head < tail) {
     const index = queue[head++];
+    if (head % 1024 === 0) yield;
     if (!pending[index]) continue;
     const x = index % width;
     const y = Math.floor(index / width);
@@ -5236,7 +5242,7 @@ function inpaintSelectedSamples(data, width, height, channels, {
   }
 
   if (filled === selected && filled > 1 && selected <= patchMatchMaxFillPixels && width >= 3 && height >= 3) {
-    patchMatchRefine(data, width, height, channels, selectedMask, donorIndex, { minX, minY, maxX, maxY }, {
+    yield* patchMatchRefineSteps(data, width, height, channels, selectedMask, donorIndex, { minX, minY, maxX, maxY }, {
       patchRadius,
       passes:patchMatchPasses,
       randomSearchSteps,
@@ -5245,6 +5251,37 @@ function inpaintSelectedSamples(data, width, height, channels, {
   }
 
   return filled;
+}
+
+
+// The synchronous editor/Worker API exhausts exactly the same deterministic
+// kernel steps. Only the UI fallback awaits between checkpoints.
+function inpaintSelectedSamples(data, width, height, channels, options = {}) {
+  const steps = inpaintSelectedSamplesSteps(data, width, height, channels, options);
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
+}
+
+// null is an internal cancellation sentinel (0 remains a legitimate no-fill).
+// Callers must discard the private working buffer on cancellation.
+async function inpaintSelectedSamplesCooperative(data, width, height, channels, options = {}, {
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  if (isCancelled()) return null;
+  const steps = inpaintSelectedSamplesSteps(data, width, height, channels, options);
+  let next = steps.next();
+  while (!next.done) {
+    if (isCancelled()) return null;
+    await yieldControl();
+    if (isCancelled()) return null;
+    next = steps.next();
+  }
+  return isCancelled() ? null : next.value;
 }
 
 // ---- src/core/pixel-buffer.js ----
@@ -6459,6 +6496,15 @@ function inpaintPixelBuffer(buffer, options = {}) {
   });
 }
 
+// Private ROI pixels are never published when the cooperative kernel cancels.
+function inpaintPixelBufferCooperative(buffer, options, controls) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
+  return inpaintSelectedSamplesCooperative(buffer.data, buffer.width, buffer.height, buffer.channels, {
+    ...options,
+    alphaChannel:buffer.alphaMode === 'straight' ? buffer.channels - 1 : -1,
+  }, controls);
+}
+
 function sourceSampleBytes(bitsPerChannel) {
   if (bitsPerChannel === 8) return 1;
   if (bitsPerChannel === 16) return 2;
@@ -7041,10 +7087,10 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
         mask[(y - rect.top) * regionWidth + (x - rect.left)] = 1;
       }
       const region = working.readRegion(rect);
-      const filled = inpaintPixelBuffer(region.buffer, {
+      const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
         isAllowed:(x, y) => mask[y * regionWidth + x] === 1,
         maxLayerPixels, maxFillPixels,
-      });
+      } };
       if (filled !== group.indices.length) {
         throw new RangeError('Контент-заливка: для отдельной области не найдены все доноры');
       }
@@ -7067,11 +7113,11 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     selectionMask[(y - bounds.top) * regionWidth + (x - bounds.left)] = 1;
   }
   const region = working.readRegion(bounds);
-  const filled = inpaintPixelBuffer(region.buffer, {
+  const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
     isAllowed:(x, y) => selectionMask[y * regionWidth + x] === 1,
     maxLayerPixels,
     maxFillPixels,
-  });
+  } };
   if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
   const changed = working.writeRegion(region);
   // Yield before serializing the one-ROI result.
@@ -7089,12 +7135,16 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
 function inpaintFrozenTiledSelection(source, working, scan, options) {
   const steps = inpaintFrozenTiledSelectionSteps(source, working, scan, options);
   let step = steps.next();
-  while (!step.done) step = steps.next();
+  while (!step.done) {
+    step = step.value?.kind === 'inpaint'
+      ? steps.next(inpaintPixelBuffer(step.value.buffer, step.value.options))
+      : steps.next();
+  }
   return step.value;
 }
 
-// Fallback may cancel between bounded ROIs without publishing partial tiles.
-// A single ROI kernel itself remains synchronous.
+// The asynchronous fallback also yields inside the deterministic single-ROI
+// kernel, without committing its working tiles until the entire job finishes.
 async function inpaintFrozenTiledSelectionCooperative(source, working, scan, options, {
   isCancelled, yieldControl,
 }) {
@@ -7103,6 +7153,13 @@ async function inpaintFrozenTiledSelectionCooperative(source, working, scan, opt
   let step = steps.next();
   while (!step.done) {
     if (isCancelled()) return cancelled();
+    if (step.value?.kind === 'inpaint') {
+      const filled = await inpaintPixelBufferCooperative(step.value.buffer, step.value.options,
+        { isCancelled, yieldControl });
+      if (filled === null || isCancelled()) return cancelled();
+      step = steps.next(filled);
+      continue;
+    }
     await yieldControl();
     if (isCancelled()) return cancelled();
     step = steps.next();
@@ -7156,8 +7213,8 @@ function inpaintTiledPixelBufferSourceFromIndices(source, {
   return inpaintFrozenTiledSelection(source, prepared.working, prepared.scan, { halo, maxLayerPixels, maxFillPixels });
 }
 
-// UI fallback yields before the first ROI and between private ROI computations.
-// A single ROI kernel is still synchronous; no source tiles escape before commit.
+// UI fallback yields before the first ROI, within large kernels, and between
+// private ROIs. No source tile escapes before the complete job commits.
 async function inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
   selectedIndices,
   halo = 24,
@@ -7203,8 +7260,8 @@ function inpaintTiledPixelBufferSource(source, {
 
 // Yield through a real macrotask between bounded scan chunks so navigation or
 // document changes can invalidate a pending job before expensive ROI decoding.
-// The synthesis kernel is still synchronous: this is cooperative scan
-// cancellation, not a dedicated Worker or a fully interruptible inpaint job.
+// The fallback also yields inside a large private ROI kernel, while the
+// detached Worker remains the preferred path for expensive selections.
 async function inpaintTiledPixelBufferSourceCooperative(source, {
   isAllowed,
   isCancelled = () => false,
