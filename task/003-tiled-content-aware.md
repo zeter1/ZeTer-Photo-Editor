@@ -1,10 +1,10 @@
 # 003 — Tiled Content-Aware Fill
 
-## 2026-10-11 — один большой native ROI: cooperative kernel (PR / CI ожидаются)
+## 2026-10-11 — один большой native ROI: cooperative kernel (слито, CI success)
 
 - Новая общая пошаговая реализация ядра поддерживает и прежнее синхронное вычисление, и cooperative исполнение с `yieldControl`/`isCancelled`. Выдача управления происходит внутри одного ROI при обходе маски, очереди граничного заполнения и PatchMatch; отмена возвращает исходный immutable source, а не частичный результат.
 - Регрессии отдельно фиксируют побайтовую parity Uint16 RGB и отмену Float32 CMYKA **после** pre-ROI checkpoint на 256×256. При отсутствии выделения / на маленьких ROI поведение и число внешних boundary yields должны остаться прежними.
-- **Ещё открыто:** синхронные `readRegion`, `writeRegion` и `serialize`, ограничения oversized connected ROI, RGBA8 preview cancellation, лицензированный независимый Photoshop high-depth corpus и браузерный RAM/latency benchmark. До PR/main CI считать реализацию кандидатом, задача 003 остаётся открытой.
+- **Gate завершён:** [PR #174](https://github.com/zeter1/ZeTer-Photo-Editor/pull/174) слит, [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38120564410) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38120614660) прошли успешно. **Ещё открыто:** синхронные `readRegion`, `writeRegion` и `serialize`, ограничения oversized connected ROI, RGBA8 preview cancellation, лицензированный независимый Photoshop high-depth corpus и браузерный RAM/latency benchmark. Задача 003 остаётся открытой.
 
 
 ## Stage 003 P1 — прерываемый fallback при недоступном Worker (2026-10-10)
