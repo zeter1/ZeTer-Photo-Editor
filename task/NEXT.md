@@ -1,8 +1,8 @@
-## Проходка 010A — реальная отмена Node Worker внутри ядра (в проверке)
+## Проходка 010A — реальная отмена Node Worker внутри ядра (слито, CI success)
 
 - Регрессия `tests/tiled-inpaint-mid-kernel-cancel.test.mjs` наблюдает **настоящую запись пикселей в CPU-bound `inpaintSelectedSamples`**, затем отменяет Worker до обработки дальнего пикселя. Проверяет прямую отмену, периодический exact-owner guard и успешный новый job; отдельный SharedArrayBuffer — только тестовый probe, производственная модель остаётся private-clone + atomic publish.
 - **Оставшиеся действия 010:** объединение dense strip/segment ROI при bounded aggregate area и global frozen donors, sync/cooperative/Worker native byte parity, отдельный Chromium `file://` mid-kernel browser stress + memory samples. P0 002 — независимые Adobe Photoshop-authored лицензированные high-depth fixtures.
-- **Приёмка 010A ожидается:** PR CI `npm run check`, `npm run test:browser`, `git diff --check`, merge и exact-main CI; до этого не помечать завершённым.
+- **Приёмка 010A пройдена:** [PR #190](https://github.com/zeter1/ZeTer-Photo-Editor/pull/190) (merge `61dcd260`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38144346522), [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38144433426): Node tests, generated parity, Chromium `file://`, profiles, diff hygiene. **Не закрывает целиком 010 или Stage 003.**
 
 ## Завершённая проходка 009 — большой PSB32 / реальная Worker reply cancellation (2026-10-11)
 
