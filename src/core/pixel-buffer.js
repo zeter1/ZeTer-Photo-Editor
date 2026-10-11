@@ -1952,6 +1952,108 @@ function planAdaptiveTiledInpaintRuns(selectedIndices, width, height, padding, m
   return groups;
 }
 
+// 010E-B2: bounded 8-connected horizontal-run components within eight-row
+// bands. Unlike the greedy previous-run planner, this joins forks, merges and
+// multiple simultaneous components irrespective of original index order.
+// Caps also bound sorting, adjacency checks, and private region allocations.
+function planConnectedTiledInpaintRunBands(selectedIndices, width, height, padding, maxLayerPixels) {
+  const MAX_SORTED_PIXELS = 65_536;
+  const MAX_RUNS = 4_096;
+  const MAX_LINK_CHECKS = 32_768;
+  const MAX_REGIONS = 256;
+  const BAND_HEIGHT = 8;
+  if (selectedIndices.length > MAX_SORTED_PIXELS) return null;
+  const ordered = Uint32Array.from(selectedIndices).sort();
+  const runs = [];
+  for (let i = 0; i < ordered.length;) {
+    const first = ordered[i], y = Math.floor(first / width);
+    const left = first - y * width, start = i++;
+    let right = left + 1;
+    while (i < ordered.length && ordered[i] === ordered[i - 1] + 1 &&
+           Math.floor(ordered[i] / width) === y) {
+      right++;
+      i++;
+    }
+    if (runs.length >= MAX_RUNS) return null;
+    runs.push({ y, left, right, start, end:i });
+  }
+  const parents = Int32Array.from({ length:runs.length }, (_, i) => i);
+  const root = index => {
+    while (parents[index] !== index) {
+      parents[index] = parents[parents[index]];
+      index = parents[index];
+    }
+    return index;
+  };
+  const join = (left, right) => {
+    const a = root(left), b = root(right);
+    if (a !== b) parents[Math.max(a, b)] = Math.min(a, b);
+  };
+  let lastY = -2, previousRow = [], currentRow = [], cursor = 0, checks = 0;
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    if (run.y !== lastY) {
+      previousRow = run.y === lastY + 1 ? currentRow : [];
+      currentRow = [];
+      cursor = 0;
+      lastY = run.y;
+    }
+    // Never connect across band boundaries: this bounds each private ROI's
+    // height even if the original connected component spans the whole image.
+    if (run.y % BAND_HEIGHT !== 0) {
+      while (cursor < previousRow.length && runs[previousRow[cursor]].right < run.left) {
+        if (++checks > MAX_LINK_CHECKS) return null;
+        cursor++;
+      }
+      for (let j = cursor; j < previousRow.length; j++) {
+        const neighbor = runs[previousRow[j]];
+        if (neighbor.left > run.right) break;
+        if (++checks > MAX_LINK_CHECKS) return null;
+        if (neighbor.right >= run.left) join(i, previousRow[j]);
+      }
+    }
+    currentRow.push(i);
+  }
+  const components = new Map();
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i], id = root(i);
+    let group = components.get(id);
+    if (!group) {
+      if (components.size >= MAX_REGIONS) return null;
+      group = { minX:run.left, maxX:run.right - 1,
+        minY:run.y, maxY:run.y, runs:[] };
+      components.set(id, group);
+    }
+    group.minX = Math.min(group.minX, run.left);
+    group.maxX = Math.max(group.maxX, run.right - 1);
+    group.minY = Math.min(group.minY, run.y);
+    group.maxY = Math.max(group.maxY, run.y);
+    group.runs.push(run);
+  }
+  if (components.size < 2) return null;
+  let area = 0;
+  for (const group of components.values()) {
+    group.bounds = {
+      left:Math.max(0, group.minX - padding),
+      top:Math.max(0, group.minY - padding),
+      right:Math.min(width, group.maxX + 1 + padding),
+      bottom:Math.min(height, group.maxY + 1 + padding),
+    };
+    area += (group.bounds.right - group.bounds.left) *
+      (group.bounds.bottom - group.bounds.top);
+    if (area > maxLayerPixels) return null;
+  }
+  const groups = [...components.values()];
+  for (const group of groups) {
+    group.indices = [];
+    for (const run of group.runs) {
+      for (let i = run.start; i < run.end; i++) group.indices.push(ordered[i]);
+    }
+    delete group.runs;
+  }
+  return groups;
+}
+
 // Content-Aware Fill keeps source tiles private until exact-owner publication.
 // A frozen selected-index snapshot (not a full-document alpha plane) is shared
 // by synchronous and cooperative selection scanners.
@@ -2141,6 +2243,13 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     // checkerboard falls back to the existing atomic refusal.
     if (!planned) {
       planned = planAdaptiveTiledInpaintRuns(
+        selectedIndices, width, height, padding, maxLayerPixels);
+    }
+    // A forked/parallel 8-connected mask may have several runs per scanline.
+    // The greedy path cannot associate those runs across rows; use bounded
+    // union-find inside short bands before the existing atomic refusal.
+    if (!planned) {
+      planned = planConnectedTiledInpaintRunBands(
         selectedIndices, width, height, padding, maxLayerPixels);
     }
     if (!planned) {

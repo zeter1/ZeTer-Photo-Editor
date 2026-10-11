@@ -1,3 +1,8 @@
+## 010E-B2 / 021 — connected horizontal-run bands (implementation in review, 2026-10-11)
+
+- [021](021-connected-run-bands.md): additional bounded 8-connected run-band fallback for parallel/forked selections B1 cannot group, limits 65,536 indices / 4,096 runs / 32,768 adjacency probes / 256 regions / 8 rows, RGB16 + CMYKA32 native byte and Worker/cancel parity.
+- **State:** branch `feat/010e-b2-connected-run-bands`, PR CI and merge pending. No claim of completion or exact-main success. **Next:** 010E-B3 planning-time cooperative chunking and timing under adversarial masks; browser operation-wide peak memory method; P0 licensed Photoshop-authored high-depth corpus. Stage 002/003 still open.
+
 ## 010E-B1 / 020 — adaptive bounded horizontal runs (merged, PR CI success, 2026-10-11)
 
 - [020](020-adaptive-horizontal-runs.md): deterministic at-most-8-row connected horizontal-run fallback when halo groups, tiles and fixed stripes exceed aggregate ROI cap. Strict limits: 65,536 indices to sort, 4,096 runs, 256 groups; source immutable, global frozen donor exclusion, no partial publication. RGB16 / CMYKA32 reverse-index, Worker/cooperative parity, worst-case refusal tests.
