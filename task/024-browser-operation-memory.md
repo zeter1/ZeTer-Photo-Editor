@@ -1,9 +1,10 @@
-## 024B2a — versioned browser operation JSON + final-snapshot process visibility (PR pending, 2026-10-11)
+## 024B2a — versioned browser operation JSON + final-snapshot process visibility (merged, PR CI success, 2026-10-11)
 
 - [x] Produce `zpe-browser-operation-artifact-v1` files from actual Chromium `file://` PSD16 and PSB32 UI Worker smoke, with operation timeline, sample interval/window, available/unavailable metrics, PID+starttime per-incarnation observations, process churn, unchanged `unknown` Worker→PID mapping.
 - [x] Do **not** call a missing PID a proven exit: `observedAtLastSnapshot`, `noLongerObservedAtLastSnapshotCount` and `provenExitCount:null`; test disappearance/reappearance with same starttime and PID reuse.
 - [x] CI checks **both** report files and uploads them as an informational artifact, even when later steps fail (if files exist); no numeric performance gate, exact peak-RAM or fabricated `privateMemory`.
-- [ ] Verify PR Node + real Chromium `file://` + generated parity CI and exact-main post-merge.
+- [x] [PR #207](https://github.com/zeter1/ZeTer-Photo-Editor/pull/207) merged as `594295ad`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38166256448): Node, generated parity, real Chromium `file://`, required two JSON files/upload, native profiles, diff hygiene.
+- [ ] Verify exact-main CI after documentation status sync.
 - [ ] **024B2b still open:** instrument *actual native mid-kernel* PSD16/PSB32 cancel→new Worker recovery in the same operation timeline, original native bitwise integrity/History, optionally independently documented CDP target attribution; do not confuse this with a held-completed-reply cancellation.
 
 ## 024B1 — PID+starttime samples (merged, PR + exact-main CI success, 2026-10-11)

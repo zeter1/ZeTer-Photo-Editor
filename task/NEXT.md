@@ -1,5 +1,6 @@
-## 010E-B4 / 024B2a — Chromium operation JSON artifacts and honest process disappearance (PR pending, 2026-10-11)
+## 010E-B4 / 024B2a — Chromium operation JSON artifacts and honest process disappearance (merged, PR CI success, 2026-10-11)
 
+- **Merged:** [PR #207](https://github.com/zeter1/ZeTer-Photo-Editor/pull/207) (`594295ad`), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38166256448) including real Chromium `file://`, JSON verification/upload, Node, generated parity and informational profiles. Exact-main CI runs separately.
 - `tools/browser-operation-artifact.mjs`: versioned PSD16/PSB32 JSON files (real Chromium `file://` UI scenario) with operation timing, requested sample interval, Linux PID+starttime samples; CI verification and upload. PID missing at the final sample is **not a proven exit**. No operation peak RSS or supported Worker→PID mapping is asserted. [024 tracking](024-browser-operation-memory.md).
 - **024B2b next:** in-kernel cancel→recovery PSD16/PSB32 + unchanged native words/history evidence, only then consider documented CDP target-to-PID mapping. **P0 [002](002-psd-compatibility-corpus.md)** still lacks independent licensed Photoshop-authored RGB16/CMYK32 golden; Stage 002/003 remain open.
 
