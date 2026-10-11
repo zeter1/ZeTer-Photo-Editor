@@ -83,3 +83,25 @@ test('Stage 003: large ZeTer PSD16 fixture decodes beyond the 8 MiB native v2 th
   assert.equal(serialized.rawBytes,native.data.byteLength);
   assert.ok(serialized.tiles.length>1);
 });
+
+
+test('010D-D: two independent native PSB32 fixtures keep distinct exact Float32 samples', async () => {
+  const first=createBrowserHighDepthFixture('rgb32psblarge');
+  const second=createBrowserHighDepthFixture('rgb32psblarge-alt');
+  assert.equal(second.version,2);
+  assert.equal(second.bitsPerChannel,32);
+  assert.equal(second.width,first.width);
+  assert.equal(second.height,first.height);
+  assert.notEqual(second.filename,first.filename);
+  assert.notDeepEqual(second.normal,first.normal);
+  assert.notDeepEqual(second.damaged,first.damaged);
+  assert.notDeepEqual(Buffer.from(second.bytes).subarray(0,1024),Buffer.from(first.bytes).subarray(0,1024));
+  const decoded=await decodePsd(second.bytes);
+  const native=decoded.layers[0].pixelBuffer;
+  assert.equal(native.data.constructor,Float32Array);
+  const samples=(x,y)=>Array.from(native.data.slice((y*second.width+x)*4,(y*second.width+x)*4+4));
+  assert.deepEqual(samples(0,0),second.normal);
+  assert.deepEqual(samples(second.defectX,second.defectY),second.damaged);
+  assert.deepEqual(samples(second.width-1,second.height-1),second.normal);
+  assert.equal(serializePixelBufferSourceAdaptive(native).kind,'zpe-pixel-buffer-source-v2');
+});
