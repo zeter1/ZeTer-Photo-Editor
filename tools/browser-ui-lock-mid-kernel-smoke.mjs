@@ -41,12 +41,13 @@ export async function verifyBrowserUiLockMidKernel(client, {
       }));
       const input = document.querySelector('#fileInput');
       input.files = transfer.files;
+      const filename = input.files[0]?.name;
       delete window.__zpe010dParts;
       const originalConfirm = window.confirm;
       window.confirm = () => true;
       try { input.dispatchEvent(new Event('change', { bubbles:true })); }
       finally { window.confirm = originalConfirm; }
-      return { filename:input.files[0]?.name, count };
+      return { filename, count };
     }
     const dispatched = await evaluate(client, '(' + dispatchPsd.toString() + ')()');
     assert(dispatched.filename === fixture.filename && dispatched.count === fixture.bytes.length,
