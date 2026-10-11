@@ -951,6 +951,11 @@ async function runSmoke() {
     await verifyLargeBrowserPsd16Worker(client,{evaluate,waitFor,assert,browserClient});
     assertNoBrowserErrors(errors,stderrState);
 
+    await verifyLargeBrowserPsd16Worker(client,{
+      evaluate,waitFor,assert,browserClient,fixtureKey:'rgb32psblarge',testCancellation:true,
+    });
+    assertNoBrowserErrors(errors,stderrState);
+
 
     await new Promise(resolve => setTimeout(resolve, 1_800)); // Let editor autosave quiesce.
     await verifyRecoveryIndexedDb(client);
