@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { createBrowserRendererHeapSampler } from './browser-renderer-heap-sampler.mjs';
+import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -351,6 +352,73 @@ const layerMenuStateExpression = `(() => {
     button.disabled,
   ]));
 })()`;
+
+// Real file:// UI import, PSD/PSB decoder, native 16/32-bit persistence and
+// rendered canvas preview. These small *ZeTer-generated* files intentionally
+// do not claim Adobe cross-app parity or the tiled >8 MiB import threshold.
+async function verifyBrowserHighDepthPsdPsbImport(client) {
+  for (const key of ['rgb16','rgb32psb']) {
+    const fixture=createBrowserHighDepthFixture(key);
+    const encoded=Buffer.from(fixture.bytes).toString('base64');
+    const documentName=fixture.filename.replace(/\\.ps[db]$/i,'');
+    const dispatched=await evaluate(client, `(() => {
+      const binary=atob(${JSON.stringify(encoded)});
+      const bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
+      const input=document.querySelector('#fileInput');
+      const transfer=new DataTransfer();
+      transfer.items.add(new File([bytes],${JSON.stringify(fixture.filename)},{
+        type:'image/vnd.adobe.photoshop',
+      }));
+      input.files=transfer.files;
+      const oldConfirm=window.confirm;
+      window.confirm=()=>true;
+      try {input.dispatchEvent(new Event('change',{bubbles:true}));}
+      finally {window.confirm=oldConfirm;}
+      return {name:input.files[0].name,bytes:bytes.byteLength};
+    })()`);
+    assert(dispatched.name===fixture.filename && dispatched.bytes===fixture.bytes.byteLength,
+      'PSD/PSB UI input must receive exact fixture bytes',JSON.stringify(dispatched));
+    await waitFor(`Stage 003 browser import ${fixture.filename}`,async()=>evaluate(client,
+      `typeof doc !== 'undefined' && doc.name === ${JSON.stringify(documentName)} &&
+       doc.layers.some(layer => layer.name === 'Stage 003 native layer' &&
+         layer.highDepthSource?.bitsPerChannel === ${fixture.bitsPerChannel}) &&
+       document.querySelector('#statusText')?.textContent?.startsWith('PSD/PSB импортирован')`),
+      15_000);
+    await waitFor(`Stage 003 browser preview ${fixture.filename}`,async()=>evaluate(client,
+      `(() => {
+        const canvas=document.querySelector('#editorCanvas');
+        if(canvas.width!==${fixture.width}||canvas.height!==${fixture.height})return false;
+        const pixel=canvas.getContext('2d').getImageData(${fixture.defectX},${fixture.defectY},1,1).data;
+        return pixel[0]>100 && pixel[0]>pixel[1] && pixel[0]>pixel[2];
+      })()`),15_000);
+    const native=await evaluate(client,`(() => {
+      const layer=doc.layers.find(value=>value.name==='Stage 003 native layer');
+      const source=layer?.highDepthSource;
+      const buffer=source?deserializePixelBufferSource(source):null;
+      const index=(${fixture.defectY}*${fixture.width}+${fixture.defectX})*${fixture.channels};
+      return {
+        model:buffer?.model,bits:buffer?.bitsPerChannel,
+        nativeType:buffer?.data?.constructor?.name,
+        sourceKind:source?.kind,rawBytes:source?.rawBytes,
+        normal:buffer?Array.from(buffer.data.slice(0,${fixture.channels})):null,
+        damaged:buffer?Array.from(buffer.data.slice(index,index+${fixture.channels})):null,
+      };
+    })()`);
+    assert(native.model==='rgb' && native.bits===fixture.bitsPerChannel &&
+      native.nativeType===fixture.nativeArrayType &&
+      native.sourceKind==='zpe-pixel-buffer-source-v1' &&
+      native.rawBytes===fixture.width*fixture.height*fixture.channels*(fixture.bitsPerChannel/8) &&
+      JSON.stringify(native.normal)===JSON.stringify(fixture.normal) &&
+      JSON.stringify(native.damaged)===JSON.stringify(fixture.damaged),
+      'Browser PSD/PSB import must retain every native sample (not only RGBA8 preview)',
+      JSON.stringify({file:fixture.filename,native}));
+    console.log('Stage 003 file:// Photoshop-format high-depth import smoke:',JSON.stringify({
+      fixture:fixture.filename,bits:fixture.bitsPerChannel,version:fixture.version,
+      nativeType:native.nativeType,sourceKind:native.sourceKind,
+      provenance:'ZeTer synthetic writer; not an Adobe Photoshop authored golden',
+    }));
+  }
+}
 
 async function runSmoke() {
   const browserExecutable = findBrowser();
@@ -846,6 +914,9 @@ async function runSmoke() {
     }));
     await evaluate(client,"window.__stage003RestoreWorkerPost?.();true");
     console.log('Stage 003 tiled high-depth UI Worker regression:',JSON.stringify(stage003Result));
+    assertNoBrowserErrors(errors,stderrState);
+
+    await verifyBrowserHighDepthPsdPsbImport(client);
     assertNoBrowserErrors(errors,stderrState);
 
 
