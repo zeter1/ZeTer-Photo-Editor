@@ -1,3 +1,5 @@
+> **Текущий кодовый подэтап:** [005 — connected ROI / global frozen donors](005-connected-roi-frozen-donors.md), [PR #185](https://github.com/zeter1/ZeTer-Photo-Editor/pull/185). Состояние gate и следующие задачи — [NEXT.md](NEXT.md). Stage 002/003 пока открыты.
+
 > **Текущая исполнимая очередь:** [task/NEXT.md](NEXT.md) (2026-10-11). Стадии 002 и 003 **не закрыты**; не путать реализованный инструмент с полной Photoshop-совместимостью.
 
 ## 2026-10-11 — Stage 002 P0: bounded external manifest preflight (слито, main CI success)
