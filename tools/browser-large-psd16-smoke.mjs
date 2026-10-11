@@ -262,6 +262,10 @@ export async function verifyLargeBrowserPsd16Worker(client, {
         cancelled.history.some(x=>x.includes('Контент-заливка')),
       'Cancelled PSB32 Worker must not add a second fill or repaint pixels',
       JSON.stringify(cancelled));
+    const nativeAfter=await evaluate(client,'('+readNativeFromSaveProject.toString()+')()');
+    assert(JSON.stringify(nativeAfter)===JSON.stringify(native),
+      'Cancelled PSB32 Worker must preserve exact native samples and tile topology',
+      JSON.stringify({before:native,after:nativeAfter}));
     await sampler.snapshot('after-large-cancelled-worker');
     console.log('Stage 003 PSB32 cancelled Worker regression:',JSON.stringify({
       realWorkerJobs:cancelled.jobs,heldReplies:1,
