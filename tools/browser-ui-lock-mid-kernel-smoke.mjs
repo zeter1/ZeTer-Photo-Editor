@@ -442,12 +442,12 @@ export async function verifyBrowserUiLockMidKernel(client, {
 
     assert(await evaluate(client,'(' + startFill.toString() + ')()'),
       '010D-B original tab must permit successor Content-Aware Fill');
+    const expectedJobs = secondFixture ? 3 : 2;
     await waitFor('010D successor real Worker and visible preview', () => evaluate(client,
-      'window.__zpe010d?.jobs===2 && (' + defectPixel.toString() + ')() < 150'), 60_000);
+      'window.__zpe010d?.jobs===' + expectedJobs + ' && (' + defectPixel.toString() + ')() < 150'), 60_000);
     const recovered = await evaluate(client,'(() => ({state:{...window.__zpe010d},' +
       'pixel:(' + defectPixel.toString() + ')(),' +
       'history:[...document.querySelectorAll("#historyList .history-row")].map(r=>r.textContent)}))()');
-    const expectedJobs = secondFixture ? 3 : 2;
     assert(recovered.state.jobs===expectedJobs && recovered.state.probes===expectedJobs &&
       recovered.state.terminations===expectedJobs && recovered.pixel<150 &&
       recovered.history.filter(value=>value.includes('Контент-заливка')).length===1,
