@@ -379,12 +379,25 @@ async function verifyBrowserHighDepthPsdPsbImport(client) {
     })()`);
     assert(dispatched.name===fixture.filename && dispatched.bytes===fixture.bytes.byteLength,
       'PSD/PSB UI input must receive exact fixture bytes',JSON.stringify(dispatched));
-    await waitFor(`Stage 003 browser import ${fixture.filename}`,async()=>evaluate(client,
-      `typeof doc !== 'undefined' && doc.name === ${JSON.stringify(documentName)} &&
-       doc.layers.some(layer => layer.name === 'Stage 003 native layer' &&
-         layer.highDepthSource?.bitsPerChannel === ${fixture.bitsPerChannel}) &&
-       document.querySelector('#statusText')?.textContent?.startsWith('PSD/PSB импортирован')`),
-      15_000);
+    try {
+      await waitFor(`Stage 003 browser import ${fixture.filename}`,async()=>evaluate(client,
+        `typeof doc !== 'undefined' && doc.name === ${JSON.stringify(documentName)} &&
+         doc.layers.some(layer => layer.name === 'Stage 003 native layer' &&
+           layer.highDepthSource?.bitsPerChannel === ${fixture.bitsPerChannel}) &&
+         document.querySelector('#statusText')?.textContent?.startsWith('PSD/PSB импортирован')`),
+        15_000);
+    } catch (error) {
+      const diagnostics=await evaluate(client, `(() => ({
+        name:typeof doc!=='undefined'?doc.name:null,
+        status:document.querySelector('#statusText')?.textContent||'',
+        layers:typeof doc!=='undefined'?doc.layers.map(layer=>({
+          name:layer.name,kind:layer.highDepthSource?.kind,bits:layer.highDepthSource?.bitsPerChannel
+        })):[],
+        dialogs:[...document.querySelectorAll('dialog[open]')].map(dialog=>dialog.id),
+      }))()`);
+      fail('Stage 003 PSD/PSB browser import did not reach native state',
+        JSON.stringify({file:fixture.filename,diagnostics,error:error.message}));
+    }
     await waitFor(`Stage 003 browser preview ${fixture.filename}`,async()=>evaluate(client,
       `(() => {
         const canvas=document.querySelector('#editorCanvas');
