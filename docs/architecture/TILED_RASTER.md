@@ -32,7 +32,7 @@ Eraser без alpha логически повышает RGB→RGBA / CMYK→CMYK
 
 ## Region / halo retouch contract
 
-`readRegion(bounds)` собирает только запрошенный прямоугольник из пересекающихся tiles и не помечает их dirty. `writeRegion(region)` сравнивает samples, пишет обратно только реально изменившиеся pixels и отмечает только соответствующие tiles.
+`readRegion(bounds)` собирает только запрошенный прямоугольник из пересекающихся tiles и не помечает их dirty. `writeRegion(region)` сравнивает samples, пишет обратно только реально изменившиеся pixels и отмечает только соответствующие tiles. При недоступном Worker native Content-Aware Fill использует `readRegionCooperative()` и `writeRegionCooperative()` с checkpoint через каждые 32 768 pixels: запись сначала готовит изменённые tile arrays, а затем без `await` фиксирует их в приватном working set. Отмена отбрасывает staged arrays, не затрагивает предыдущие dirty/previewDirty и не публикует результат. Синхронный Worker использует те же пошаговые алгоритмы.
 
 - Dodge/Burn читают brush footprint; stroke coverage адресуется глобальными pixel coordinates, поэтому overlap semantics не зависят от границ tiles.
 - Blur читает brush footprint + kernel halo, поэтому neighborhood math видит соседние samples по обе стороны tile boundary.
