@@ -1,11 +1,11 @@
 # task — очередь небольших инженерных проходок
 
-## 2026-10-11 — Stage 003 P1: cancellation during dirty tile serialization (в работе)
+## 2026-10-11 — Stage 003 P1: cancellation during dirty tile serialization (слито, CI success)
 
 - Реализация в ветке `feat/stage003-cooperative-tile-serialization-20261011`: `createSerializedPixelBufferTileWorkingSet().serializeCooperative()` сохраняет byte parity с sync `serialize()`, отдаёт управление после каждых четырёх реально перекодированных tiles и не публикует частичную tile-set при отмене.
 - Обновлены обе cooperative native inpaint ветки (frozen indices и scan) через общий ROI command step; sync Worker/Node по-прежнему не использует await.
 - Тесты: прямое прерывание кодирования RGB16, alpha promotion, одинаковые tile payloads, отмена большого multi-tile ROI в serialization phase и исходные immutable bytes.
-- **Статус:** branch / CI gate ещё проверяются; не помечать как merged до подтверждения PR и exact main CI.
+- **Подэтап закрыт:** [PR #175](https://github.com/zeter1/ZeTer-Photo-Editor/pull/175) (squash `11aec98b5958dacbca97d7e7ca47096fc2301823`), [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38121282434) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38121334792) — **success**. Node tests, generated parity, Chromium `file://` smoke, profiles и diff hygiene прошли; вся Stage 003 остаётся **открытой**.
 - **Следующее (P1):** отменяемые `readRegion` / `writeRegion`, длинный связный ROI без inflated rectangle, chunked RGBA8 preview; затем Chromium `file://` real Photoshop-authored high-depth PSD/PSB с pinned hashes, memory/Undo measurements. `002` и `003` **открыты**.
 
 ## 2026-10-11 — Stage 003 P1: прерывание внутри одного ROI (слито, PR/main CI success)
