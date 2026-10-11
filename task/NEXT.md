@@ -1,7 +1,8 @@
-## 010E-A — complex connected dense ROI / native Worker baseline (в работе, 2026-10-11)
+## 010E-A — complex connected dense ROI / native Worker baseline (слито, CI success, 2026-10-11)
 
-- [018](018-complex-roi-profile.md): fixture с двумя плотными 64×64 островами и связывающим коридором, RGB16/CMYKA32 exact native parity (sync/real Node Worker), atomic refusal/cooperative cancel, separate-process timing и process-wide RSS snapshots. Не Photoshop-authored, не browser peak и не новый adaptive planner. PR/CI/merge ещё не подтверждены.
-- **Следующая 010E-B:** bounded adaptive horizontal runs/connected clusters против fixed x-grid на сложных плотных выделениях с лимитом planning work, затем browser memory HWM/Chromium PSD/PSB. Параллельно **P0 002** independently licensed Adobe Photoshop-authored corpus. Stage 002/003 не закрыты.
+- [018](018-complex-roi-profile.md): две dense области и 96px diagonal bridge, 8288 selected / 536 changed native tiles, RGB16/CMYKA32 Node Worker exact byte parity, atomic refusal/cooperative cancel, separate-process timing + RSS. [PR #199](https://github.com/zeter1/ZeTer-Photo-Editor/pull/199), squash `b8e82e6`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38153857359), [CI точного кодового main SHA success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38154037812).
+- Это synthetic Node source, **не** независимый Photoshop-authored golden и не Chromium peak-RSS; пользовательский движок в этой проходке не менялся.
+- **Следующая исполнимая P1 / 010E-B:** bounded adaptive horizontal runs и connected clusters против fixed-grid, worst-case planner work cap, ROI exact native parity + cancel; затем реальный browser peak-memory methodology. **P0 / 002:** licensed Adobe Photoshop-authored high-depth PSD/PSB corpus. Stage 002/003 не закрыты.
 
 ## 010D-D — две независимые native PSB32 Float32 вкладки (слито, CI success, 2026-10-11)
 

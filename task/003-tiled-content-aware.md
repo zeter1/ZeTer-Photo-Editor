@@ -1,6 +1,6 @@
-## 2026-10-11 — 010E-A: complex connected ROI native diagnostic (в работе)
+## 2026-10-11 — 010E-A: complex connected ROI native diagnostic (слито, CI success)
 
-- [018](018-complex-roi-profile.md): two dense islands plus diagonal connected corridor; >256 changed native tiles; RGB16/CMYKA32 Node Worker/native byte parity, bounded ROI budget/cancel, sampled process RSS. Это baseline для последующего adaptive runs planner, не Photoshop-authored cross-app fixture, не browser HWM и не завершение Stage 003. PR/CI/merge пока не подтверждены.
+- [018](018-complex-roi-profile.md): two dense islands + connected diagonal, >256 changed tiles, RGB16/CMYKA32 Node Worker native byte parity, atomic ROI budget/cancel, process RSS observations. [PR #199](https://github.com/zeter1/ZeTer-Photo-Editor/pull/199), squash `b8e82e6`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38153857359), [CI точного кодового main SHA success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38154037812). Это baseline для следующего adaptive planner, не Photoshop-authored cross-app golden или browser HWM. Stage 003 остаётся открыта.
 
 ## 2026-10-11 — 010D-D: две раздельные native PSB32 UI-сессии (слито, CI success)
 

@@ -1,6 +1,6 @@
 # 018 / 010E-A — сложная связная ROI: native Worker, строгие бюджеты и Node memory baseline
 
-**Статус: реализация в ветке, проверка и merge ещё требуются (2026-10-11).** Следующая малая P1-проходка после [017](017-dual-native-psb32-session-isolation.md); общий Stage 003 **остаётся в работе**.
+**Статус: реализовано, слито в `main`, CI success (2026-10-11).** Следующая малая P1-проходка после [017](017-dual-native-psb32-session-isolation.md); общий Stage 003 **остаётся в работе**.
 
 ## Цель и границы
 
@@ -14,11 +14,17 @@
 - [x] Измерения времени fixture/sync/Worker и RSS / parent heap / ArrayBuffers / Linux process HWM по фазам. Это **process-wide memory observations**, не isolated Worker heap, не максимальная память browser process и не peak конкретной операции.
 - [x] Node регрессия `tests/tiled-inpaint-complex-roi-profile.test.mjs` и негативные CLI-варианты.
 
-## Приёмочные критерии до слова «готово»
+## Выполненные приёмочные критерии
 
-- [ ] `npm run check` и `npm run test:browser` в CI для **точной ветки**; bundle/generated parity; diff hygiene.
-- [ ] PR review, merge в `main`, зелёный CI **точного main SHA**.
-- [ ] Обновить README/NEXT/этот чеклист ссылками на реальные PR/CI/merge SHA.
+- [x] `npm run check` и `npm run test:browser` в CI для **точной ветки**; bundle/generated parity; diff hygiene.
+- [x] Проверка diff/review, merge в `main`, зелёный CI **точного main SHA**.
+- [x] Обновить README/NEXT/этот чеклист ссылками на реальные PR/CI/merge SHA.
+
+## Подтверждённая приёмка
+
+- [PR #199](https://github.com/zeter1/ZeTer-Photo-Editor/pull/199), squash `b8e82e6`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38153857359), [CI точного кодового main SHA success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38154037812): Node check, generated parity, Chromium `file://`, три существующих профиля, отдельный комплексный ROI profile, diff hygiene — все шаги success.
+- CI baseline (Node 24/Linux x64): 8288 выбранных пикселей, 536 изменённых плиток для каждой модели; RGB16 sync 92.39 ms / Worker 159.36 ms, CMYKA32 sync 102.99 ms / Worker 185.76 ms. Эти значения информационные и не являются стабильными performance gates.
+- Source/protocol не менялись. Изменены только тесты, профилирующий инструмент, CI и задачи; версия приложения не повышалась.
 
 ## 010E-B — следующая инженерная проходка
 

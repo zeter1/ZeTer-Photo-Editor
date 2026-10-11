@@ -1,3 +1,5 @@
+> **010E-A / завершённый Node stress baseline (2026-10-11):** [018](018-complex-roi-profile.md), [PR #199](https://github.com/zeter1/ZeTer-Photo-Editor/pull/199), squash `b8e82e6`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38153857359), [CI точного кодового main SHA success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38154037812). Сложная connected ROI: native Worker/precision/cancel, Node RSS/latency. **Следом 010E-B** adaptive horizontal runs/connected clusters + planning budget. Это не завершение 010/Stage 003.
+
 > **010C — код завершён и слит:** [PR #192](https://github.com/zeter1/ZeTer-Photo-Editor/pull/192), squash `1b504b836ae3bbe28da89080ffa6877be09a2047`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146702722). Подробности: [012](012-dense-strip-segment-roi.md). [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146836584) на `46ceafe9fb578af6f285e7ced1e60cfdda747670`; последующие docs-only commits проверяются отдельно; 010D и Stage 003 остаются открытыми.
 
 > **010C (в процессе).** [012](012-dense-strip-segment-roi.md) — добавлен fallback на ограниченные полосы/горизонтальные сегменты для плотных разнесённых выделений, где прежний tile-fragment суммарный ROI budget не проходил. Exact native RGB16/Float32 CMYKA sync/cooperative/Worker regression, atomic failure/cancel. **PR CI + merge + точный main SHA ещё не подтверждены; пункт 010 и Stage 003 не закрыты.** Далее 010D — browser UI lock/session revocation + memory telemetry.
@@ -8,7 +10,7 @@
 
 # 010 — Stage 003 P1: bounded dense ROI / real mid-kernel Worker cancellation
 
-**Статус:** следующая незавершённая инженерная проходка после завершённой [009](009-large-psb32-worker-cancellation.md). Этапы 002 и 003 целиком открыты.
+**Исторический статус на старте 010 после 009:** последующие 010A–010D и 010E-A описаны выше и в отдельных карточках; 010E-B, Stage 002 и Stage 003 по-прежнему открыты.
 
 ## Почему это следующий шаг
 
