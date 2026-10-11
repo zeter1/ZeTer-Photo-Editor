@@ -237,3 +237,45 @@ test('Stage 003: cancellation after entering a single ROI kernel discards every 
   assert.equal(result.source, source);
   assert.equal(JSON.stringify(source), before, 'cancelled private ROI never mutates input tiles');
 });
+
+test('Stage 003: multi-tile ROI serialization cancels atomically and preserves synchronous high-depth parity', async () => {
+  const width = 64, height = 64, channels = 3, indices = [];
+  const data = new Uint16Array(width * height * channels).fill(10000);
+  for (let row = 0; row < 6; row++) {
+    for (let column = 0; column < 6; column++) {
+      const index = (4 + row * 8) * width + (4 + column * 8);
+      indices.push(index);
+      data.fill(50000, index * channels, (index + 1) * channels);
+    }
+  }
+  const source = serializeTiledPixelBufferSource(createPixelBuffer({
+    width, height, model:'rgb', channels, bitsPerChannel:16, data,
+  }), { tileSize:8 });
+  const snapshot = JSON.stringify(source);
+  const options = { selectedIndices:Uint32Array.from(indices), halo:2 };
+  const oracle = inpaintTiledPixelBufferSourceFromIndices(source, options);
+  assert.equal(oracle.changedTiles, 36, 'each selected pixel dirties a different tile');
+  let totalYields = 0;
+  const complete = await inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+    ...options, yieldControl:async () => { totalYields++; },
+  });
+  assert.ok(totalYields > 8, 'kernel, ROI and multi-tile serialization checkpoints must run');
+  assert.deepEqual(complete, oracle);
+  let cancelled = false, observedYields = 0;
+  const stopped = await inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+    ...options,
+    isCancelled:() => cancelled,
+    yieldControl:async () => {
+      observedYields++;
+      // The final eight yields in the successful run belong to serialization
+      // of 36 changed tiles; cancel after several private payloads are encoded.
+      if (observedYields === totalYields - 3) cancelled = true;
+    },
+  });
+  assert.equal(observedYields, totalYields - 3);
+  assert.equal(stopped.cancelled, true);
+  assert.equal(stopped.changed, 0);
+  assert.equal(stopped.changedTiles, 0);
+  assert.equal(stopped.source, source);
+  assert.equal(JSON.stringify(source), snapshot);
+});
