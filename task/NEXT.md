@@ -1,14 +1,14 @@
-## Проходка 009 — PSB32 / cancellation (код подготовлен, CI НЕ подтверждён)
+## Завершённая проходка 009 — большой PSB32 / реальная Worker reply cancellation (2026-10-11)
 
-- [009](009-large-psb32-worker-cancellation.md) — в `test/stage003-large-psb32-worker-cancel-20261011` подготовлены большая ZeTer-generated PSB32 Float32 fixture, native v2 sample/bit-oracle, Chromium file:// Worker + Undo/Redo и детерминированная stale-reply отмена через UI layer lock.
-- **Статус: в работе.** Не считать доказанной проверку браузера до PR/main CI. Отмена покрывает pending Worker reply после вычисления; **не** доказывает mid-kernel termination/peak RSS.
-- **Следующее:** CI/review/merge + exact-main gate; затем dense ROI и mid-kernel cancel, Stage 002 independently Adobe-authored high-depth fixture, реальный peak RAM.
+- [009](009-large-psb32-worker-cancellation.md) — ZeTer-generated PSB32 Float32 1025×1025, 16 810 000 native bytes, адаптивный v2 / little-endian bit oracle; Chromium `file://` UI import → Worker Content-Aware Fill → canvas preview, History, Undo/Redo.
+- **Готово и слито:** [PR #189](https://github.com/zeter1/ZeTer-Photo-Editor/pull/189), squash `0cd2c2efc260b4721737b0997d12b9e3dac12290`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38143205232), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38143299893). Отмена протестирована после **реального вычисления Worker**, с задержкой ответа, UI lock, завершением job и отсутствием повторной Fill-публикации. Это НЕ отмена во время ядра.
+- **Следующая исполнимая проходка [010](010-dense-roi-worker-mid-kernel-cancel.md):** bounded dense/connected ROI planning и настоящая mid-kernel cancellation на реальном Worker (Node + Chromium). Параллельно P0 [002](002-psd-compatibility-corpus.md) — независимо Photoshop-authored PSD16/PSB32 и reference render, plus native/Worker browser peak RAM.
 
 ## Завершённая проходка 008 — большой PSD16 → v2 Worker в Chromium file:// (2026-10-11)
 
 - [008](008-browser-large-psd16-worker.md) — новый тест реального браузерного пути: ZeTer-generated 1025×1025 RGBA16 PSD (>8 MiB) → file input → adaptive tiled v2 → точный Save Project native byte oracle → Worker Content-Aware Fill → preview/Undo/Redo + sampled CDP memory.
 - **Готово, слито и проверено:** [PR #188](https://github.com/zeter1/ZeTer-Photo-Editor/pull/188), squash f172168cbbda02ecded76818055164b63eca5ac3; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38142325168); [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38142408685). Это НЕ независимая Photoshop-authored fixture, не PSB32 end-to-end, не доказательство peak RAM и не Stage 003 done.
-- **После 008:** [009](009-large-psb32-worker-cancellation.md) — >8 MiB PSB Float32/CMYK с реальной отменой Worker на UI; затем adaptive dense ROI strip/segment, повторяемые browser/process memory profiles. Stage 002 independent corpus (P0) параллельно.
+- **После 008 выполнена 009:** PSB32 end-to-end и deterministic stale reply cancellation. Следующая 010 — adaptive dense ROI и real mid-kernel cancellation; Stage 002 independent corpus (P0) параллельно.
 
 # Очередь реализации по скриншотам (актуализация 2026-10-11)
 

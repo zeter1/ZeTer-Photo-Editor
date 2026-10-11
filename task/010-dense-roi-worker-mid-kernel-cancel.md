@@ -1,0 +1,35 @@
+# 010 — Stage 003 P1: bounded dense ROI / real mid-kernel Worker cancellation
+
+**Статус:** следующая незавершённая инженерная проходка после завершённой [009](009-large-psb32-worker-cancellation.md). Этапы 002 и 003 целиком открыты.
+
+## Почему это следующий шаг
+
+009 доказала настоящий большой PSB32 → Chromium file:// → native v2 Worker → preview/Undo/Redo и отмену **ожидающего ответа**. Текущий алгоритм может безопасно отказать на широком плотном connected ROI (в отличие от разреженных >256 tile cells), а отмена CPU-bound вычисления браузерного Worker всё ещё не проверена.
+
+## Техническая цель
+
+Добавить bounded strip/segment/group planner для плотных/широких connected selections, без аллокации огромного общего bounding box и без нарушения глобального frozen donor exclusion. Отдельно подтвердить отмену во время реально работающего kernel до reply.
+
+## Контракт приёмки
+
+- [ ] Разделить плотное связное выделение на детерминированные небольшие native ROI с halo; не запускать на полнослойном ROI без бюджета. Сохранять пересечения и корректный donor exclusion для **всего исходного выделения**, не подмешивать уже изменённые пиксели как доноров.
+- [ ] Перед вычислением проверять aggregate ROI area, max source bytes (48 MiB), max fill pixels и worst-case fragmentation. При превышении безопасный no-op/no-history; никаких частичных dirty tile publications.
+- [ ] Полный oracle на RGB16 и Float32 CMYKA: sync/Node Worker/cooperative byte parity для выбранных пикселей, идентичные нетронутые native tiles; проверить семантику overlap и крайние тайлы.
+- [ ] Cancel checkpoints в scan/read/kernel/write/serialize плюс реальная `worker.terminate()` **внутри CPU-bound работы** (не просто задержка postMessage/reply). Подтвердить нулевую публикацию и одну активную работу без zombie Worker.
+- [ ] Браузерный `file://` стресс-сценарий c UI owner/session/lock revocation, telemetry по этапам и информационным JS-heap + Chromium-process samples; НЕ приравнивать sampled max к peak RSS и проверить закрытие браузерных sampler intervals в finally.
+- [ ] Фиксировать ограничения: content-aware quality и Adobe PSD/PSB cross-app parity остаются отдельными задачами Stage 002/003.
+- [ ] `npm run check`, `npm run test:browser`, generated artifacts parity, `git diff --check`, PR CI, merge и exact-main CI; документировать реальный SHA/results в этой задаче и NEXT.
+
+## Где изменять
+
+- `src/core/pixel-buffer.js`: только native read/write source/working set primitives.
+- `src/core/tiled-inpaint-worker-protocol.js`: shared native ROI planner/worker kernel protocol.
+- `src/core/tiled-inpaint-worker-client.js`: только lifecycle; source-owner guard в `src/painting/controller.js`.
+- `src/core/inpaint.js`: общая deterministic fill kernel / donor semantics.
+- `src/painting/tiled-inpaint-dispatch.js`: bounded frozen selection -> Worker/fallback.
+- `tests/tiled-inpaint-connected-roi.test.mjs`, `tests/tiled-inpaint-many-tiles.test.mjs`, `tests/tiled-inpaint-worker-client.test.mjs`, `tools/browser-smoke.mjs`: регрессии.
+
+## Отдельные незакрытые направления
+
+- [002](002-psd-compatibility-corpus.md): независимые Photoshop-authored RGB/CMYK PSD16/PSB32, подтверждённая лицензия, origin/URL/SHA-256, cross-app golden.
+- Настоящий browser/Worker GPU/native RSS peak, RAW/DNG, ICC CMYK soft-proof reference, Adobe Smart Object metadata compatibility.
