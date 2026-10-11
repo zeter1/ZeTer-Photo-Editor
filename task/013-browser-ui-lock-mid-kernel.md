@@ -23,7 +23,7 @@
 - [x] Внедрение ограничено isolated in-memory supplier и финальной reload-фазой smoke.
 - [x] `npm run check`, `npm run test:browser`, generated parity, profiles и diff hygiene — PR #193 CI success.
 - [x] PR #193 squash-merged, exact-main CI success (merge SHA выше).
-- [ ] Вторая часть 010D: активная document/session switch **во время** настоящего CPU-bound Worker с проверкой обеих вкладок и stale target rejection.
+- [ ] Вторая часть 010D: активная document/session switch **во время** настоящего CPU-bound Worker с проверкой обеих вкладок и stale target rejection. Промежуточная [010D-B0](014-browser-session-guard-mid-kernel.md) слита ([PR #194](https://github.com/zeter1/ZeTer-Photo-Editor/pull/194), CI success): две вкладки + safe **запрет** mid-kernel переключения до завершения per-job ownership refactor.
 - [ ] Две большие глубины PSD16 **и** PSB32, sampled Worker/process memory на повторных итерациях, latency variability и настоящие peak/limits — отдельные acceptance gates.
 
 ## Следующая проходка
