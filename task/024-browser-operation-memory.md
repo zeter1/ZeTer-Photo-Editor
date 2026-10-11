@@ -1,11 +1,11 @@
-## 024B1 — PID+starttime samples (code in PR branch; CI pending, 2026-10-11)
+## 024B1 — PID+starttime samples (merged, PR + exact-main CI success, 2026-10-11)
 
 - [x] Parse /proc/<pid>/stat field 22 with nested/whitespace comm and arbitrary-size starttime; reject absent/malformed data.
 - [x] Read stat before/after VmRSS/VmHWM and fail an unstable/reused PID rather than associating mixed samples.
 - [x] Track per-incarnation observed RSS and lifetime VmHWM, PID reuse between samples, missing/arriving identities; keep CDP process type separate from unsupported Worker→PID mapping.
 - [x] Carry identity report into operation timeline. Invalid/unsupported identity is explicit unavailable, never an invented peak.
 - [x] Deterministic tests for same-PID different starttimes, missing /proc, precision, full sampler-to-report integration.
-- [ ] PR CI, exact-main CI after merge. **The broader 024B is not completed.**
+- [x] [PR #206](https://github.com/zeter1/ZeTer-Photo-Editor/pull/206) merged as `dec6db5f`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38165437542) and [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38165563357): Node tests, generated parity, real Chromium `file://`, native profiles, diff hygiene. **The broader 024B is not completed.**
 
 ### Next 024B2 (open)
 
@@ -28,7 +28,7 @@
 
 # 024 / 010E-B4 — browser operation-wide timing and memory attribution
 
-**Статус:** 024A завершена в `main`, PR и exact-main CI успешно пройдены; 024B, Stage 002/003 остаются открыты.
+**Статус:** 024A и 024B1 завершены в `main`, PR и exact-code main CI успешно пройдены; 024B2, Stage 002/003 остаются открыты.
 
 ## Цель
 

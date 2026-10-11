@@ -1,7 +1,7 @@
-## 010E-B4 / 024B1 — Linux PID incarnation identity, PR gate pending (2026-10-11)
+## 010E-B4 / 024B1 — Linux PID incarnation identity (merged, exact-main CI success, 2026-10-11)
 
 - **Implementation:** test harness reads `/proc/<pid>/stat` field 22 twice around VmRSS/VmHWM; rejects PID reuse within one sample. Track `PID+starttime` across browser CDP observations; per-incarnation sampled RSS / individual process-lifetime HWM, arrivals/missing/reuse, explicit Worker→PID `unknown`.
-- **PR:** after review/CI record link and final outcome here. `main` has **not** been updated by this branch yet.
+- **Done:** [PR #206](https://github.com/zeter1/ZeTer-Photo-Editor/pull/206) merged into `main` (`dec6db5f`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38165437542), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38165563357) with Node tests, generated parity, real Chromium `file://`, native profiles and diff hygiene.
 - **Next P1 / 024B2:** map Chromium targets to processes *only when independently supported*, run real PSD16/PSB32 mid-kernel cancel→new Worker recovery within the same timeline, JSON CI artifact, process-exit accounting with explicit limits. Missing CDP/`/proc` identity stays unavailable, not zero; sampled aggregate RSS and individual lifetime VmHWM never constitute operation peak.
 - **P0 [002](002-psd-compatibility-corpus.md):** independent licensed Photoshop-authored RGB16/CMYK32 golden files still missing. Stage 002/003 are **open**.
 
