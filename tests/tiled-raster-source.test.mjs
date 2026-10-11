@@ -263,3 +263,45 @@ test('Stage 003: full-selection no-donor and over-budget selection remain non-de
   }), /безопасного лимита/);
   assert.equal(JSON.stringify(source), original);
 });
+
+test('Stage 003: cooperative tile serialization is byte-identical and discardable during a multi-tile encode', async () => {
+  const packed = serializeTiledPixelBufferSource(rgb16(48, 32), { tileSize:8 });
+  const before = JSON.stringify(packed);
+  const working = createSerializedPixelBufferTileWorkingSet(packed);
+  const count = working.visit(null, ({ buffer }) => {
+    buffer.data[0] ^= 1;
+    return 1;
+  });
+  assert.equal(count, 24);
+  const oracle = working.serialize();
+  assert.equal(oracle.tiles.length, 24);
+  let cancelled = false, yields = 0;
+  const stopped = await working.serializeCooperative({
+    isCancelled:() => cancelled,
+    yieldControl:async () => { yields++; cancelled = true; },
+  });
+  assert.equal(yields, 1, 'four changed tiles encoded before the first cooperative checkpoint');
+  assert.equal(stopped, null, 'partial serialized output must never escape');
+  assert.equal(JSON.stringify(packed), before, 'the source stays byte-for-byte immutable');
+  cancelled = false;
+  yields = 0;
+  const completed = await working.serializeCooperative({
+    isCancelled:() => cancelled,
+    yieldControl:async () => { yields++; },
+  });
+  assert.equal(yields, 5, '24 modified tiles yield after each group of four except the last');
+  assert.deepEqual(completed, oracle);
+  assert.equal(completed.tiles.every((tile, index) => tile.dataUrl !== packed.tiles[index].dataUrl), true);
+});
+
+test('Stage 003: alpha-promoted tile serialization uses the same cooperative checkpoints', async () => {
+  const packed = serializeTiledPixelBufferSource(rgb16(48, 32), { tileSize:8 });
+  const working = createSerializedPixelBufferTileWorkingSet(packed, { requireAlpha:true });
+  const expected = working.serialize();
+  let yields = 0;
+  const actual = await working.serializeCooperative({ yieldControl:async () => { yields++; } });
+  assert.equal(yields, 5);
+  assert.deepEqual(actual, expected);
+  assert.equal(actual.channels, 4);
+  assert.equal(deserializePixelBufferSource(actual).data[3], 65535);
+});

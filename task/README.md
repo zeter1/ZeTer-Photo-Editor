@@ -1,5 +1,13 @@
 # task — очередь небольших инженерных проходок
 
+## 2026-10-11 — Stage 003 P1: cancellation during dirty tile serialization (в работе)
+
+- Реализация в ветке `feat/stage003-cooperative-tile-serialization-20261011`: `createSerializedPixelBufferTileWorkingSet().serializeCooperative()` сохраняет byte parity с sync `serialize()`, отдаёт управление после каждых четырёх реально перекодированных tiles и не публикует частичную tile-set при отмене.
+- Обновлены обе cooperative native inpaint ветки (frozen indices и scan) через общий ROI command step; sync Worker/Node по-прежнему не использует await.
+- Тесты: прямое прерывание кодирования RGB16, alpha promotion, одинаковые tile payloads, отмена большого multi-tile ROI в serialization phase и исходные immutable bytes.
+- **Статус:** branch / CI gate ещё проверяются; не помечать как merged до подтверждения PR и exact main CI.
+- **Следующее (P1):** отменяемые `readRegion` / `writeRegion`, длинный связный ROI без inflated rectangle, chunked RGBA8 preview; затем Chromium `file://` real Photoshop-authored high-depth PSD/PSB с pinned hashes, memory/Undo measurements. `002` и `003` **открыты**.
+
 ## 2026-10-11 — Stage 003 P1: прерывание внутри одного ROI (слито, PR/main CI success)
 
 - В ветке `feat/stage003-cooperative-inpaint-kernel-20261011`: синхронное native inpaint/Worker и cooperative fallback используют общие детерминированные шаги ядра. Fallback отдаёт управление во время scan, очереди заполнения и PatchMatch, а не только между ROI.
