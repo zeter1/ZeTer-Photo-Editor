@@ -1,3 +1,9 @@
+## 010D-B0 — guarded two-session Chromium UI mid-kernel regression (PR pending, 2026-10-11)
+
+- [014](014-browser-session-guard-mid-kernel.md): расширенная реальная Chromium `file://` 010D проверка двух вкладок с PSD16; mid-kernel клик по другой вкладке обязан быть **отклонён** пока `paintPersisting`, затем после блокировки слоя/отмены Worker переключение в обе стороны сохраняет native bytes/History второй сессии и успешный повторный Fill в первой. Только test-only instrumentation, production bundle не меняется.
+- **010D-B ещё НЕ выполнена:** разрешённая *активная* смена сессии во время ядра требует per-job persistence authority, отмены Worker и безопасной очистки устаревшего `finally`; затем полноценный PSB32 browser regression.
+- Проверку PR CI и exact-main CI записать после реальных результатов, не считать зелёной заранее.
+
 ## 010D-A — Chromium file:// UI layer-lock mid-kernel (слито, CI success, 2026-10-11)
 
 - **Выполнено:** [PR #193](https://github.com/zeter1/ZeTer-Photo-Editor/pull/193), squash `3b7e684ddeb50fdf60354efc4e0fc871b6fe5f45`. [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38147932831), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38148022098): Node (1160 tests), generated parity, Chromium `file://`, native profiles, diff hygiene.
