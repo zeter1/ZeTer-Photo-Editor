@@ -16,11 +16,11 @@
 - [x] Автоматические Node-regressions и real Chromium `file://` smoke оформлены.
 - [x] [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150109876): Node, generated parity, Chromium `file://`, profiles, diff hygiene.
 - [x] Merge в `main` (`edabef3d`) и [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150190339).
-- [ ] PSB32 Float32 dual-session mid-kernel active-switch reference test (эта проходка пока использует ZeTer-generated PSD16, не независимый Adobe golden).
+- [x] Последующая [010D-C / 016](016-psb32-mid-kernel-undo-redo.md) закрыла PSB32 Float32 active-switch **browser test** с native Undo/Redo bit oracle ([PR #196](https://github.com/zeter1/ZeTer-Photo-Editor/pull/196), main CI success); второй документ в ней обычный, независимый Photoshop-authored golden и две native high-depth сессии остаются открыты.
 
 ## Далее
 
-1. PSB32 actual browser active-tab-switch: atomic Worker cancel, native Float32 byte oracle двух сессий и Undo/Redo.
+1. Две независимые native PSB32 вкладки: параллельный второй Worker после отмены первого, оба separate Float32 byte/History oracles (базовая одиночная native PSB32 active-switch + Undo/Redo завершена в [016](016-psb32-mid-kernel-undo-redo.md)).
 2. 010E complex dense ROI: горизонтальные runs/connected segments, bounded planning и worst-case stress memory.
 3. P0 [002](002-psd-compatibility-corpus.md): независимо Photoshop-authored PSD16/PSB32 с лицензиями, SHA и рендерами.
 4. Browser memory high-water-mark methodology, цветовой/CMYK/ICC oracle, RAW/DNG, Select & Mask.
