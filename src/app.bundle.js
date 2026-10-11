@@ -7146,6 +7146,71 @@ function createSerializedPixelBufferTileWorkingSet(source, {
   };
 }
 
+// A bounded alternative to fixed tile/stripe fragmentation. Sort only small
+// frozen selections, then merge touching horizontal runs across at most eight
+// adjacent scanlines. This deliberately does not chase arbitrarily large
+// connected components (which can recreate an oversized bounding rectangle).
+// Caps bound sort memory, run count and number of private ROI allocations.
+function planAdaptiveTiledInpaintRuns(selectedIndices, width, height, padding, maxLayerPixels) {
+  const MAX_SORTED_PIXELS = 65_536;
+  const MAX_RUNS = 4_096;
+  const MAX_REGIONS = 256;
+  const MAX_GROUP_ROWS = 8;
+  if (selectedIndices.length > MAX_SORTED_PIXELS) return null;
+  // InpaintFromIndices accepts arbitrary input order. Numeric sorting makes
+  // identical frozen masks produce exactly the same regions across paths.
+  const ordered = Uint32Array.from(selectedIndices).sort();
+  const groups = [];
+  let runCount = 0;
+  for (let i = 0; i < ordered.length;) {
+    const first = ordered[i], y = Math.floor(first / width);
+    const left = first - y * width, start = i++;
+    let right = left + 1;
+    while (i < ordered.length && ordered[i] === ordered[i - 1] + 1 &&
+           Math.floor(ordered[i] / width) === y) {
+      right += 1;
+      i += 1;
+    }
+    if (++runCount > MAX_RUNS) return null;
+    const previous = groups[groups.length - 1];
+    const adjacent = previous && y === previous.lastY + 1 &&
+      y - previous.minY < MAX_GROUP_ROWS &&
+      left <= previous.lastRight + 1 && right >= previous.lastLeft - 1;
+    let group;
+    if (adjacent) {
+      group = previous;
+      group.minX = Math.min(group.minX, left);
+      group.maxX = Math.max(group.maxX, right - 1);
+      group.maxY = y;
+      group.lastY = y;
+      group.lastLeft = left;
+      group.lastRight = right;
+    } else {
+      if (groups.length >= MAX_REGIONS) return null;
+      group = {
+        minX:left, maxX:right - 1, minY:y, maxY:y,
+        lastY:y, lastLeft:left, lastRight:right, indices:[],
+      };
+      groups.push(group);
+    }
+    for (let j = start; j < i; j += 1) group.indices.push(ordered[j]);
+  }
+  if (groups.length < 2) return null;
+  let totalArea = 0;
+  for (const group of groups) {
+    group.bounds = {
+      left:Math.max(0, group.minX - padding),
+      top:Math.max(0, group.minY - padding),
+      right:Math.min(width, group.maxX + 1 + padding),
+      bottom:Math.min(height, group.maxY + 1 + padding),
+    };
+    totalArea += (group.bounds.right - group.bounds.left) *
+      (group.bounds.bottom - group.bounds.top);
+    if (totalArea > maxLayerPixels) return null;
+  }
+  return groups;
+}
+
 // Content-Aware Fill keeps source tiles private until exact-owner publication.
 // A frozen selected-index snapshot (not a full-document alpha plane) is shared
 // by synchronous and cooperative selection scanners.
@@ -7329,6 +7394,13 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
           best.groups.get(key).indices.push(index);
         }
       }
+    }
+    // If fixed stripes still exceed the budget, try small touching horizontal
+    // runs. The planner has strict sorting/run/region caps; a pathological
+    // checkerboard falls back to the existing atomic refusal.
+    if (!planned) {
+      planned = planAdaptiveTiledInpaintRuns(
+        selectedIndices, width, height, padding, maxLayerPixels);
     }
     if (!planned) {
       if (groups?.length === 1) throw oversized();
