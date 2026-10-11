@@ -22,13 +22,12 @@
 - **Gate подтверждён:** [PR #184](https://github.com/zeter1/ZeTer-Photo-Editor/pull/184) слит в `main` (`28ec5de2dbdd38e2782a8d5bc864a9dbdc0db5d2`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38133313481) и [точный `main` CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38133376298) — **success** (Node, Chromium `file://`, generated parity, 8 MiB diagnostics, diff hygiene). Нет browser peak RAM/Undo, лицензированного Photoshop PSD16/PSB32 и поддержки oversized connected ROI.
 - **Следующий кодовый шаг:** bounded connected ROI с глобально исключёнными source selection donors. Затем Chromium `file://` Worker / preview / Undo / memory и Stage 002 внешний high-depth oracle.
 
-## Активная проходка — P1 connected ROI fragments (PR #185)
+## Завершённая проходка — P1 connected ROI fragments (2026-10-11)
 
-- Рабочая ветка: `feat/stage003-connected-roi-donors-20261011`; [PR #185](https://github.com/zeter1/ZeTer-Photo-Editor/pull/185).
-- Изменения и чеклист: [005-connected-roi-frozen-donors.md](005-connected-roi-frozen-donors.md).
-- Связные разреженные выделения теперь могут использовать halo-overlapping ROI по занятым native tiles, с одной frozen bitmap, запрещающей всех исходных selection donors; лимиты площади и 256 занятых tiles не сняты.
-- **Текущий gate:** провести `npm run check`, `file://` Chromium, generated parity, review, merge и зелёный CI точного `main`. Пока это не выполнено, подэтап остаётся в работе, весь Stage 003 открыт.
-- **Следом:** проверить browser Worker → preview → Undo/Redo + sampled renderer memory на больших high-depth PSD/PSB; P0 Stage 002 — независимые Adobe-authored licensed fixtures с SHA-256.
+- **Реализовано и слито:** [PR #185](https://github.com/zeter1/ZeTer-Photo-Editor/pull/185) → squash `1d18f525d62b03eb6734b883e94a8cc5642ca6a1`. Детали: [005](005-connected-roi-frozen-donors.md).
+- Разреженные широкие связные выделения могут делиться на ограниченные native tile fragments при неудаче прежнего halo-disjoint плана. Глобальная замороженная bitmap запрещает все original-selection donors и PatchMatch-контекст; publish остаётся атомарным, source immutable и Worker/cooperative precision parity проверяется регрессиями.
+- **Gate пройден:** [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38135146345) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38135223279) — **success** (Node, Chromium `file://`, generated bundle/Worker parity, профили, diff hygiene).
+- **Открыто:** максимальное число 256 occupied tiles; связные плотные выделения/суммарный ROI свыше 8 MP отклоняются; нет browser end-to-end PSD16/PSB32 → UI Worker → preview → Undo/Redo/RAM или независимых Adobe pixel-goldens. Вся Stage 003 и Stage 002 остаются открытыми.
 
 ## Ближайшие выполняемые проходки
 
@@ -36,7 +35,7 @@
 |---|---|---|
 | P0 | **Stage 002: внешний high-depth corpus.** Найти **независимо Adobe Photoshop-authored** RGB/CMYK PSD16 и PSB32 с правом распространения; записать исходный URL, лицензию, происхождение и SHA-256 без подмены синтетикой. | `tools/audit-external-high-depth-corpus.mjs` PASS на реальных файлах; экспертно проверены license/authorship; pinned manifest; без скачивания сомнительных assets в репозиторий. |
 | P0 | **Stage 002 → 003: реальный cross-app oracle.** Выполнить decode/группы/маски/adjustment + внешние Photoshop render references (включая clipping/blend). | Сверка semantic + pixel snapshots, чёткий unsupported list, независимый от собственного PSD writer golden. |
-| P1 | **Stage 003: wide connected ROI.** Перейти от раздутого bounding rectangle к бюджетируемым фрагментам с запрещёнными original-selection donors и one atomic commit. | RGB16/Float32 CMYKA sync/Worker/cooperative parity, отмена в read/kernel/write/serialize, caps при worst-case связной маске, неизменность нетронутых байтов/тайлов. |
+| P1 | **Stage 003: adaptive connected ROI beyond 256 occupied tiles.** Развить безопасные ограниченные сегменты для сильно фрагментированных/плотных выделений; проверить aggregate area, memory ceilings и cancellation. | RGB16/Float32 CMYKA sync/Worker/cooperative parity, отмена в read/kernel/write/serialize, caps при worst-case связной маске, неизменность нетронутых байтов/тайлов. |
 | P1 | **Stage 003: browser end-to-end.** Chromium `file://` PSD16/PSB32 → tiled Worker → preview → Undo/Redo; отдельно lifecycle cancellation. | Автоматизированный сценарий, sample renderer + Worker/process memory и latency (не выдавать snapshot за peak), повторяемость и минимум две глубины. |
 | P1 | Profiling byte-integrity проверки Worker на крупных RGB16/Float32 CMYK PSD/PSB и real browser peak RAM. | Измерить overhead per changed tile, latency, max memory и сравнить с previous baseline; exact native byte parity + source immutability. |
 | P2 | Документы в Smart Objects, сложная структура Photoshop, текст/layout и vector path interoperability. | Поштучные independent fixtures + exact round-trip regression. |
