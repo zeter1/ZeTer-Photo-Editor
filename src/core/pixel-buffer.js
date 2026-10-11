@@ -1892,18 +1892,21 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
 // adjacent scanlines. This deliberately does not chase arbitrarily large
 // connected components (which can recreate an oversized bounding rectangle).
 // Caps bound sort memory, run count and number of private ROI allocations.
-function planAdaptiveTiledInpaintRuns(selectedIndices, width, height, padding, maxLayerPixels) {
+function planAdaptiveTiledInpaintRuns(selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit = () => {}) {
   const MAX_SORTED_PIXELS = 65_536;
   const MAX_RUNS = 4_096;
   const MAX_REGIONS = 256;
   const MAX_GROUP_ROWS = 8;
   if (selectedIndices.length > MAX_SORTED_PIXELS) return null;
+  // Reserve a bounded sort allowance before cloning the frozen indices.
+  chargePlanningVisit(selectedIndices.length * 16);
   // InpaintFromIndices accepts arbitrary input order. Numeric sorting makes
   // identical frozen masks produce exactly the same regions across paths.
   const ordered = Uint32Array.from(selectedIndices).sort();
   const groups = [];
   let runCount = 0;
   for (let i = 0; i < ordered.length;) {
+    chargePlanningVisit();
     const first = ordered[i], y = Math.floor(first / width);
     const left = first - y * width, start = i++;
     let right = left + 1;
@@ -1934,7 +1937,10 @@ function planAdaptiveTiledInpaintRuns(selectedIndices, width, height, padding, m
       };
       groups.push(group);
     }
-    for (let j = start; j < i; j += 1) group.indices.push(ordered[j]);
+    for (let j = start; j < i; j += 1) {
+      chargePlanningVisit();
+      group.indices.push(ordered[j]);
+    }
   }
   if (groups.length < 2) return null;
   let totalArea = 0;
@@ -1956,16 +1962,19 @@ function planAdaptiveTiledInpaintRuns(selectedIndices, width, height, padding, m
 // bands. Unlike the greedy previous-run planner, this joins forks, merges and
 // multiple simultaneous components irrespective of original index order.
 // Caps also bound sorting, adjacency checks, and private region allocations.
-function planConnectedTiledInpaintRunBands(selectedIndices, width, height, padding, maxLayerPixels) {
+function planConnectedTiledInpaintRunBands(selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit = () => {}) {
   const MAX_SORTED_PIXELS = 65_536;
   const MAX_RUNS = 4_096;
   const MAX_LINK_CHECKS = 32_768;
   const MAX_REGIONS = 256;
   const BAND_HEIGHT = 8;
   if (selectedIndices.length > MAX_SORTED_PIXELS) return null;
+  // Reserve a bounded sort allowance before cloning the frozen indices.
+  chargePlanningVisit(selectedIndices.length * 16);
   const ordered = Uint32Array.from(selectedIndices).sort();
   const runs = [];
   for (let i = 0; i < ordered.length;) {
+    chargePlanningVisit();
     const first = ordered[i], y = Math.floor(first / width);
     const left = first - y * width, start = i++;
     let right = left + 1;
@@ -1991,6 +2000,7 @@ function planConnectedTiledInpaintRunBands(selectedIndices, width, height, paddi
   };
   let lastY = -2, previousRow = [], currentRow = [], cursor = 0, checks = 0;
   for (let i = 0; i < runs.length; i++) {
+    chargePlanningVisit();
     const run = runs[i];
     if (run.y !== lastY) {
       previousRow = run.y === lastY + 1 ? currentRow : [];
@@ -2003,12 +2013,14 @@ function planConnectedTiledInpaintRunBands(selectedIndices, width, height, paddi
     if (run.y % BAND_HEIGHT !== 0) {
       while (cursor < previousRow.length && runs[previousRow[cursor]].right < run.left) {
         if (++checks > MAX_LINK_CHECKS) return null;
+        chargePlanningVisit();
         cursor++;
       }
       for (let j = cursor; j < previousRow.length; j++) {
         const neighbor = runs[previousRow[j]];
         if (neighbor.left > run.right) break;
         if (++checks > MAX_LINK_CHECKS) return null;
+        chargePlanningVisit();
         if (neighbor.right >= run.left) join(i, previousRow[j]);
       }
     }
@@ -2016,6 +2028,7 @@ function planConnectedTiledInpaintRunBands(selectedIndices, width, height, paddi
   }
   const components = new Map();
   for (let i = 0; i < runs.length; i++) {
+    chargePlanningVisit();
     const run = runs[i], id = root(i);
     let group = components.get(id);
     if (!group) {
@@ -2033,6 +2046,7 @@ function planConnectedTiledInpaintRunBands(selectedIndices, width, height, paddi
   if (components.size < 2) return null;
   let area = 0;
   for (const group of components.values()) {
+    chargePlanningVisit();
     group.bounds = {
       left:Math.max(0, group.minX - padding),
       top:Math.max(0, group.minY - padding),
@@ -2047,7 +2061,11 @@ function planConnectedTiledInpaintRunBands(selectedIndices, width, height, paddi
   for (const group of groups) {
     group.indices = [];
     for (const run of group.runs) {
-      for (let i = run.start; i < run.end; i++) group.indices.push(ordered[i]);
+      chargePlanningVisit();
+      for (let i = run.start; i < run.end; i++) {
+        chargePlanningVisit();
+        group.indices.push(ordered[i]);
+      }
     }
     delete group.runs;
   }
@@ -2095,7 +2113,14 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     // any private ROI is decoded. The synchronous/Worker runner simply
     // resumes these steps; the chosen groups and native bytes stay identical.
     const PLANNING_CHECKPOINT_PIXELS = 32_768;
+    const MAX_PLANNING_VISITS = 4_194_304;
     let planningVisits = 0;
+    const chargePlanningVisit = (count = 1) => {
+      planningVisits += count;
+      if (planningVisits > MAX_PLANNING_VISITS) {
+        throw new RangeError('Контент-заливка: превышен лимит планирования ' + MAX_PLANNING_VISITS + ' операций');
+      }
+    };
     // First try halo-disjoint groups for historical texture-search parity.
     // When a connected/sparse selection merges into a huge bounding box,
     // fall back to independent bounded tile fragments. Every fragment uses
@@ -2104,7 +2129,8 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     const tileSize = source.tileSize, columns = Math.ceil(width / tileSize);
     const occupied = new Map();
     for (const index of selectedIndices) {
-      if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+      chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
       const x = index % width, y = Math.floor(index / width);
       const tx = Math.floor(x / tileSize), ty = Math.floor(y / tileSize);
       const key = ty * columns + tx;
@@ -2133,7 +2159,8 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     for (let i = 0; groups && i < groups.length; i += 1) {
       let merged = false;
       for (let j = i + 1; j < groups.length; j += 1) {
-        if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+        chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
         const a = groups[i], b = groups[j];
         if (a.left - padding >= b.right + padding ||
             b.left - padding >= a.right + padding ||
@@ -2159,7 +2186,8 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
         for (const key of group.keys) byTile.set(key, group);
       }
       for (const index of selectedIndices) {
-        if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+        chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
         const x = index % width, y = Math.floor(index / width);
         const group = byTile.get(Math.floor(y / tileSize) * columns + Math.floor(x / tileSize));
         group.indices.push(index);
@@ -2198,7 +2226,8 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
           const candidates = new Map();
           let tooMany = false;
           for (const index of selectedIndices) {
-            if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+            chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
             const y = Math.floor(index / width), x = index - y * width;
             const key = Math.floor(y / stripHeight) * segments + Math.floor(x / segmentWidth);
             let group = candidates.get(key);
@@ -2240,7 +2269,8 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
         planned = [...best.groups.values()].sort((a, b) => a.key - b.key);
         for (const group of planned) group.indices = [];
         for (const index of selectedIndices) {
-          if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+          chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
           const y = Math.floor(index / width), x = index - y * width;
           const key = Math.floor(y / best.stripHeight) * best.segments +
             Math.floor(x / best.segmentWidth);
@@ -2253,14 +2283,14 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     // checkerboard falls back to the existing atomic refusal.
     if (!planned) {
       planned = planAdaptiveTiledInpaintRuns(
-        selectedIndices, width, height, padding, maxLayerPixels);
+        selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit);
     }
     // A forked/parallel 8-connected mask may have several runs per scanline.
     // The greedy path cannot associate those runs across rows; use bounded
     // union-find inside short bands before the existing atomic refusal.
     if (!planned) {
       planned = planConnectedTiledInpaintRunBands(
-        selectedIndices, width, height, padding, maxLayerPixels);
+        selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit);
     }
     if (!planned) {
       if (groups?.length === 1) throw oversized();
@@ -2273,7 +2303,8 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     // after a previous fragment has filled it.
     const selectionBits = new Uint8Array(Math.ceil(width * height / 8));
     for (const index of selectedIndices) {
-      if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+      chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
       selectionBits[index >> 3] |= 1 << (index & 7);
     }
     let totalFilled = 0, totalChanged = 0;
@@ -2281,7 +2312,8 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       const rect = group.bounds, regionWidth = rect.right - rect.left;
       const mask = new Uint8Array(regionWidth * (rect.bottom - rect.top));
       for (const index of group.indices) {
-        if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+        chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
         const x = index % width, y = Math.floor(index / width);
         mask[(y - rect.top) * regionWidth + (x - rect.left)] = 1;
       }
