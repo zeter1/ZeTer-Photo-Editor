@@ -160,8 +160,8 @@ export function createBrowserRendererHeapSampler(client, {
         linuxProcessRss: {
           metric:'Linux /proc/<pid>/status VmRSS summed over CDP process list; VmHWM individual-process diagnostic',
           availability:!processClient ? 'not-requested' :
-            processUnavailableReason || rssUnavailableReason ? 'unavailable' : 'sampled',
-          unavailableReason:processUnavailableReason || rssUnavailableReason,
+            rssUnavailableReason ? 'unavailable' : 'sampled',
+          unavailableReason:rssUnavailableReason,
           sampleCount:rssSamples.length,
           baselineAggregateRssBytes:rssBaseline?.chromiumRssBytes ?? null,
           sampledMaxAggregateRssBytes:rssMax?.chromiumRssBytes ?? null,
