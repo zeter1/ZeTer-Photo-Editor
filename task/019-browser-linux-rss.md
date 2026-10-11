@@ -1,6 +1,6 @@
 # 019 / 010E-M — Linux Chromium RSS + per-PID HWM instrumentation
 
-**Статус: реализация в рабочей ветке, gate/merge не подтверждены (2026-10-11).**
+**Статус: завершена малая инструментальная проходка, слита в `main` (2026-10-11).** [PR #200](https://github.com/zeter1/ZeTer-Photo-Editor/pull/200), squash `1d8e6fbc`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38155212317).
 
 ## Задача
 Параллельный P1 подэтап Stage 003: дополнить существующий Stage 003 реальный Chromium `file://` UI Worker/preview/Undo/Redo информационными Linux /proc метриками. Не менять production bundle. Не путать выбранный максимум с истинным peak.
@@ -9,8 +9,12 @@
 - [x] `tools/browser-linux-process-rss.mjs`: CDP `SystemInfo.getProcessInfo` PID list → validate unique positive PID → прочитать `/proc/<pid>/status` `VmRSS` и `VmHWM`, отвергать missing/partial/negative/overflow.
 - [x] `tools/browser-renderer-heap-sampler.mjs`: самостоятельное поле `linuxProcessRss` в информационном отчёте уже работающего Chromium `file://` сценария (без изменения пользовательского кода), sampled aggregate VmRSS + наибольший наблюдавшийся individual VmHWM. Несовместимая ОС, закрывшийся PID и отсутствие CDP счётчика = `unavailable`, **не** ноль и не вывод ложного peak.
 - [x] Unit test: арифметика, PID validation, отказ при пропущенном или исчезнувшем PID, fallback без потери privateMemory/renderer heap, lifecycle между этапами.
-- [ ] CI: `npm run check`, `npm run test:browser`, generated artifact parity, diff check; записать конкретный run URL.
-- [ ] Review/merge в `main`, exact-main push CI; только после этих доказательств отметить задачу завершённой.
+- [x] CI: `npm run check`, `npm run test:browser`, generated artifact parity, diff hygiene — PASS в [PR run #38155212317](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38155212317).
+- [x] PR review/merge в `main`: [#200](https://github.com/zeter1/ZeTer-Photo-Editor/pull/200), squash `1d8e6fbc`; push-CI проверяется отдельно на финальном SHA ветки `main`.
+
+## Фактический Linux Chromium CI baseline
+
+Во время реального Chrome `file://` UI Worker/Preview/Undo/Redo smoke получено **11 Linux RSS snapshots**, `baselineAggregateRssBytes = sampledMaxAggregateRssBytes = 1315647488`, `endAggregateRssBytes = 1273528320`, `maxObservedIndividualProcessHwmBytes = 305303552`. При этом CDP `privateMemory` оказался недоступен; Linux RSS независимо собрался. Числа — информационные, включают браузерный процессный набор и запуск smoke, **не** изолированный расход Content-Aware Fill и **не** доказанный пик. Нестабильные числовые thresholds не вводятся.
 
 ## Границы измерения
 `VmRSS` читается для каждого процесса **последовательно**. CDP сообщает идентификаторы процессов Chromium; aggregate не атомарен, не покрывает GPU memory allocation вне RSS, не гарантирует выборку фактического peak и не измеряет отдельно Worker. `VmHWM` — high-water-mark **одного PID**, **не** сумма пиков и не high-water-mark целой операции. Во время реальных операций короткоживущий Chromium PID может завершиться до чтения /proc: тогда Linux-счётчик помечается unavailable. Не устанавливать flaky perf thresholds в CI.

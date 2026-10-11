@@ -1,6 +1,6 @@
-## 010E-M / 019 — Linux Chromium RSS + per-PID HWM (проверка PR/CI ожидается, 2026-10-11)
+## 010E-M / 019 — Linux Chromium RSS + per-PID HWM (слито, PR CI success, 2026-10-11)
 
-- [019](019-browser-linux-rss.md): отдельные измерения Linux `/proc/PID/status` VmRSS и индивидуального VmHWM в существующем реальном Chromium `file://` UI Worker тесте; не подменяют CDP privateMemory, не выдают sampled RSS за true peak. Запланирована CI-приёмка.
+- [019](019-browser-linux-rss.md): отдельные измерения Linux `/proc/PID/status` VmRSS и индивидуального VmHWM в существующем реальном Chromium `file://` UI Worker тесте; не подменяют CDP privateMemory, не выдают sampled RSS за true peak. [PR #200](https://github.com/zeter1/ZeTer-Photo-Editor/pull/200), squash `1d8e6fbc`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38155212317); 11 реальных Linux RSS выборок, `privateMemory` CDP недоступен, RSS всё равно собран.
 - **Следующий P1 остаётся 010E-B:** bounded adaptive horizontal runs/connected clusters + strict planner work cap + RGB16/CMYKA32 precision/cancel parity. **P0 / 002:** независимый Adobe-authored high-depth corpus. Stage 002/003 не закрыты.
 
 ## 010E-A — complex connected dense ROI / native Worker baseline (слито, CI success, 2026-10-11)
