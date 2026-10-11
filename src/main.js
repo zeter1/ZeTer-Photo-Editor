@@ -125,6 +125,7 @@ let selectionCopyMode = 'merged';
 let dragDepth = 0;
 let pointerLifecycle = null;
 let paintPersisting = false;
+let rasterCommandPersistLease = null;
 let hoverPoint = null;
 let smartSnapEnabled = true;
 let smartGuides = { x:null, y:null };
@@ -378,10 +379,16 @@ const rasterCommands = createRasterCommandController({
     isPersisting: () => paintPersisting,
     beginPersist: () => {
       if (paintPersisting) return false;
+      const lease = {};
+      rasterCommandPersistLease = lease;
       paintPersisting = true;
-      return true;
+      return lease;
     },
-    endPersist: () => { paintPersisting = false; },
+    endPersist: lease => {
+      if (!lease || rasterCommandPersistLease !== lease) return;
+      rasterCommandPersistLease = null;
+      paintPersisting = false;
+    },
     resetPaintState: () => {
       rasterEdit.clearHighDepthPaintState();
       retouchController.resetStroke();
@@ -1272,12 +1279,17 @@ documentSessionController = createDocumentSessionController({
     resetRetouchStroke();
     hoverPoint = null;
     pointerLifecycle?.releaseActivePointer();
-    paintPersisting = false;
+    // No unconditional unlock: only the owner lease may release persistence.
   },
   cloneSelectionShape,
   tabs: els.tabs,
   viewport: els.viewport,
   blockPendingDocumentEdit,
+  cancelPendingContentAwareFill: () => {
+    // Never revoke an active pointer or a non-cancellable raster gesture.
+    if (drag || pointerLifecycle?.hasActivePointer()) return false;
+    return rasterCommands.cancelPendingContentAwareFill();
+  },
   updateAll,
   fitToView,
   setStatus,

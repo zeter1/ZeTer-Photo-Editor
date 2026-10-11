@@ -11,6 +11,7 @@ export function createDocumentSessionController({
   tabs = null,
   viewport = null,
   blockPendingDocumentEdit = () => false,
+  cancelPendingContentAwareFill = () => false,
   updateAll = () => {},
   fitToView = () => {},
   setStatus = () => {},
@@ -148,10 +149,12 @@ export function createDocumentSessionController({
       if (focusViewport) requestAnimationFrame(() => viewport?.focus());
       return;
     }
-    if (blockPendingDocumentEdit()) return;
-    syncCurrentSession();
     const session = sessions().find(item => item.id === id);
     if (!session) return;
+    // Activate only: other tab commands retain the ordinary pending-edit guard.
+    cancelPendingContentAwareFill();
+    if (blockPendingDocumentEdit()) return;
+    syncCurrentSession();
     setActiveSessionId(session.id);
     loadSession(session);
     updateAll();
