@@ -3,12 +3,12 @@
 Источник статуса — `main` и реальные тестовые доказательства, а не обещание «Photoshop parity».
 Подробные дневники: [002](002-psd-compatibility-corpus.md), [003](003-tiled-content-aware.md).
 
-## Текущая проверяемая проходка — 007 browser PSD16/PSB32 UI import (ветка, CI ещё не подтверждён)
+## Завершённая проходка 007 — file:// PSD16/PSB32 import precision (2026-10-11)
 
-- Работа ведётся в `feat/stage003-browser-psd-psb-import-20261011`; подробности и ограничения — [007](007-browser-psd-psb-ui-import.md).
-- Добавлены собственные binary PSD16/PSB32 fixtures и проверки `file://` GUI import → native 16/32-bit serialized samples → preview.
-- **Не отмечать как завершённое до PR CI + merge + exact-main CI.** Это не независимо Photoshop-authored corpus, не большой v2 tiled import и не полная совместимость.
-- Далее: большой PSD16/PSB32 v2 Worker → preview → Undo/Redo + отмена, затем adaptive dense grouping; параллельно реальный внешний high-depth corpus Stage 002.
+- [007](007-browser-psd-psb-ui-import.md): тестовый ZeTer-generated PSD16 и PSB32 → настоящий UI `#fileInput` → high-depth import → canvas preview → File > Save Project → точный native little-endian sample oracle из сохранённого `.zpe`.
+- **Готово и слито:** [PR #187](https://github.com/zeter1/ZeTer-Photo-Editor/pull/187), squash `c3fd57a807e941676f6b8b50b240a93537829bad`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38137491812), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38137556394). 1151 Node-тест, generated parity, Chromium `file://`, профили и diff hygiene.
+- **Не закрыто:** большой PSD16/PSB32 → v2 tiled Worker → preview → Undo/Redo/cancellation, memory peak; лицензированный независимый Adobe Photoshop-authored high-depth golden. `Stage 002/003` остаются в работе.
+- **Следующая исполнимая задача:** браузерный сквозной v2 import→Worker при >8 MiB с memory samples и атомарной отменой; затем adaptive dense ROI strip/segment grouping с aggregate budget. Внешний Stage 002 corpus — параллельный P0.
 
 ## Что считать готовым
 
