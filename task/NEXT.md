@@ -1,3 +1,8 @@
+## 010D-D — две независимые native PSB32 Float32 вкладки (в работе, CI ожидается)
+
+- [017](017-dual-native-psb32-session-isolation.md): Chromium `file://`, две разные ZeTer-generated 1025² PSB32 Float32 в **двух живых вкладках**; реальные Worker jobs, mid-kernel cancellation первого, exact little-endian words/Undo/Redo второго и повторный Worker/Undo/Redo первого. Два отдельных источника native данных, не Adobe-authored golden. Код и smoke подготовлены на feature branch; **PR CI, merge и exact-main CI ещё НЕ подтверждены**.
+- Оставить [002](002-psd-compatibility-corpus.md) как P0: независимый лицензированный Photoshop high-depth corpus + golden и provenance/hash. Далее P1 010E dense/connected ROI и настоящая browser memory high-water-mark методология. Stage 002/003 **не завершены**.
+
 ## 010D-C — PSB32 Float32 active mid-kernel switch + native Undo/Redo (merged, exact-main CI success, 2026-10-11)
 
 - [016](016-psb32-mid-kernel-undo-redo.md): Chromium `file://` ZeTer-generated 1025² PSB32 Float32; test-only probe AFTER native kernel write, active tab switch cancellation, strict native sample value/**Uint32 little-endian words** via public Save Project, two-session History isolation, successor Worker and native Undo/Redo restore.

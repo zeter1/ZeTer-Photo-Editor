@@ -989,7 +989,13 @@ async function runSmoke() {
       evaluate, waitFor, assert, browserClient, fixtureKey:'rgb32psblarge',
     });
     assertNoBrowserErrors(errors, stderrState);
-
+    // 010D-D: both document tabs are independently imported PSB32 Float32,
+    // each with distinct native words, Worker Fill, Undo/Redo and History.
+    await verifyBrowserUiLockMidKernel(client, {
+      evaluate, waitFor, assert, browserClient,
+      fixtureKey:'rgb32psblarge', secondNativeFixtureKey:'rgb32psblarge-alt',
+    });
+    assertNoBrowserErrors(errors, stderrState);
 
     console.log(`Browser smoke passed: ${browserExecutable}`);
     console.log(`Verified file URL: ${INDEX_URL}`);
