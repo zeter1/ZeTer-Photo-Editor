@@ -16615,6 +16615,63 @@ function clearImageCache() {
 }
 
 // ---- src/painting/tiled-inpaint-dispatch.js ----
+const TILED_INPAINT_RESULT_TILE_URL_PREFIX = 'data:application/x-zeter-pixel-buffer-tile;base64,';
+
+// A detached Worker crosses a structured-clone boundary. Never allow a
+// malformed or stale-shaped result to reach preview/History publication.
+// This validates changed payloads without decoding every unchanged native tile.
+function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
+  const invalid = () => new TypeError('Tiled inpaint: invalid Worker result');
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw invalid();
+  const counts = [result.changed, result.filled, result.changedTiles, result.loadedTiles];
+  if (!counts.every(value => Number.isSafeInteger(value) && value >= 0) ||
+      result.filled !== selectedIndices.length ||
+      result.changed > result.filled ||
+      result.changedTiles > result.changed ||
+      result.changedTiles > result.loadedTiles ||
+      result.loadedTiles > source.tiles.length ||
+      (result.changed === 0) !== (result.changedTiles === 0)) throw invalid();
+
+  const returned = result.source;
+  if (!returned || typeof returned !== 'object' || Array.isArray(returned) ||
+      !Array.isArray(returned.tiles) || returned.tiles.length !== source.tiles.length) throw invalid();
+  for (const field of ['kind', 'width', 'height', 'model', 'channels', 'bitsPerChannel',
+    'tileSize', 'rawBytes']) {
+    if (returned[field] !== source[field]) throw invalid();
+  }
+  if (returned.colorSpace !== String(source.colorSpace || '').slice(0, 120) ||
+      returned.profileName !== String(source.profileName || '').slice(0, 240) ||
+      returned.alphaMode !== (source.channels === (source.model === 'cmyk' ? 5 : 4) ? 'straight' : 'none') ||
+      returned.sampleType !== (source.bitsPerChannel === 32 ? 'float' : 'uint') ||
+      returned.byteOrder !== 'little-endian') throw invalid();
+
+  const columns = Math.ceil(source.width / source.tileSize);
+  const editableTiles = new Set();
+  for (const index of selectedIndices) {
+    const x = index % source.width, y = Math.floor(index / source.width);
+    editableTiles.add(Math.floor(y / source.tileSize) * columns + Math.floor(x / source.tileSize));
+  }
+
+  let changedTilePayloads = 0;
+  for (let index = 0; index < source.tiles.length; index += 1) {
+    const before = source.tiles[index], after = returned.tiles[index];
+    if (!after || typeof after !== 'object' || Array.isArray(after)) throw invalid();
+    for (const field of ['x', 'y', 'width', 'height', 'rawBytes']) {
+      if (after[field] !== before[field]) throw invalid();
+    }
+    if (typeof after.dataUrl !== 'string') throw invalid();
+    if (after.dataUrl === before.dataUrl) continue;
+    if (!editableTiles.has(index) ||
+        !after.dataUrl.startsWith(TILED_INPAINT_RESULT_TILE_URL_PREFIX)) throw invalid();
+    const encoded = after.dataUrl.slice(TILED_INPAINT_RESULT_TILE_URL_PREFIX.length);
+    if (encoded.length !== 4 * Math.ceil(before.rawBytes / 3) ||
+        !/^[a-z\d+/=]+$/i.test(encoded)) throw invalid();
+    changedTilePayloads += 1;
+  }
+  if (changedTilePayloads !== result.changedTiles) throw invalid();
+  return result;
+}
+
 // Stage 003: freeze geometry on the UI thread, then run the bounded native
 // tile kernel in the browser Worker. A missing Worker is the ONLY fallback;
 // compute/protocol failures fail closed rather than silently rerunning work.
@@ -16678,10 +16735,7 @@ async function prepareTiledInpaintWithWorker(source, {
       ...job, isCancelled, yieldControl,
     });
   }
-  if (!result || typeof result !== 'object' || typeof result.changed !== 'number') {
-    throw new TypeError('Tiled inpaint: invalid Worker result');
-  }
-  return result;
+  return assertTiledInpaintWorkerResult(result, source, job.selectedIndices);
 }
 
 // ---- src/painting/controller.js ----

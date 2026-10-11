@@ -1,3 +1,9 @@
+## 2026-10-11 — P1: fail-closed result integrity при UI Worker handoff (PR / CI ожидаются)
+
+- src/painting/tiled-inpaint-dispatch.js сверяет detached reply с frozen selectedIndices и канонической native tile topology: counters, depth/model/alpha/profile, координаты и точный подсчёт изменённых tile payloads. Изменять tile без выделенных пикселей запрещено. Некорректный reply не попадает в preview, не запускает fallback и не публикует историю.
+- Тест: negative matrix повреждённых Worker replies и сохранность исходного CMYKA Float32 source. Обработка корректного результата покрывается существующим parity test.
+- **Ограничение:** не выполняется дорогое побайтовое сравнение выбранных пикселей внутри изменённого tile и не подтверждается Photoshop/Adobe parity. Остаются wide connected ROI, browser perf/Undo/RAM и лицензированные PSD16/PSB32. До PR merge/main CI это только кандидат на подэтап.
+
 # 003 — Tiled Content-Aware Fill
 
 ## 2026-10-11 — P1: source-safe native tiled preview publication (слито, CI success)
