@@ -1,3 +1,9 @@
+## 2026-10-11 — P1: >256 occupied tile bounded fallback (PR в проверке)
+
+- [006](006-many-tile-bounded-fragments.md): убран искусственный 256-cell отказ в large sparse selection, при этом старый group-merge ограничен 256 cells для контроля алгоритмической сложности; более широкий случай обрабатывается ограниченными независимыми cells.
+- Global frozen donor-exclusion, aggregate ROI budget, private atomic writes и cooperative cancel сохранены. Новые RGB16 / Float32 CMYKA регрессии на 512 tiles, а также Worker parity / cap / cancel.
+- **Ещё не завершено:** CI/merge и exact-main verification; адаптивный dense segmentation, file:// PSD16/PSB32 end-to-end, браузерный peak memory, Adobe authored high-depth corpus и cross-app pixel parity.
+
 ## 2026-10-11 — P1: bounded connected ROI with frozen donor bitmap (слито, CI success)
 
 - Реализован резервный план halo-overlapping фрагментов по занятым tile cells для разреженных широких связных выделений, которым раньше не хватало бюджета global bounding ROI. Выбранные original pixels глобально исключены из доноров и PatchMatch-контекста, даже после заполнения соседних private ROI.
