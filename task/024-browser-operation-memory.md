@@ -1,16 +1,18 @@
-## Проходка 024A — частично реализована, проверка CI ожидается (2026-10-11)
+## Проходка 024A — завершена и слита в main, CI success (2026-10-11)
 
 - [x] `tools/browser-operation-timeline.mjs`: детерминированный `operationId`, монотонные отметки import/preview/native verification/selection/Fill/history/Undo/Redo; наблюдаемое время этапов (не точное время вычисления ядра).
 - [x] Реальные Chromium `file://` ZeTer-generated PSD16/PSB32 Worker smoke выводят operation timeline и отдельный `completed-with-cancelled-retry` outcome **только после** доказанной отмены, неизменных native samples и History. Production code не менялся.
 - [x] Самплер CDP дополнен отдельными PID observations: новые/отсутствующие между samples PID, process type maxima, неопределённая Worker→PID привязка и явное замечание про PID reuse. Эти числа **не** складывают VmHWM и не доказывают истинный peak.
 - [x] Регрессионные тесты для времени/исхода, PID churn и unavailable path.
-- [ ] GitHub PR CI и exact-main gate (пока не проверены).
+- [x] [PR #205](https://github.com/zeter1/ZeTer-Photo-Editor/pull/205) слит в `main` (`47045507`). [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38164350321) + [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38164497873): Node, generated parity, Chromium `file://`, informational profiles, diff hygiene.
+
+**Фактический CI baseline 024A:** PSD16 — 61 sampled observations, около 470 мс input→preview и 643 мс Fill command→History preview; PSB32 — 126 sampled observations, около 682 мс input→preview и 1933 мс Fill→History preview. Это нестабильные информационные замеры одного CI-прогона, **не** пороги производительности, Worker kernel timing или доказательство пика RAM. CDP privateMemory в данном прогоне не предоставлялся.
 
 **Следующая 024B (открыта):** Linux `/proc/PID/stat` starttime для PID identity/reuse, process exit accounting, per-PID sampled RSS/HWM, CDP target mapping; отдельный настоящий mid-kernel cancellation + recovery lifecycle для high-depth PSD/PSB; машинный файл с CI отчётами. Нельзя объявлять summed process HWM пиком операции.
 
 # 024 / 010E-B4 — browser operation-wide timing and memory attribution
 
-**Статус:** 024A выполнена в feature-ветке, gate пока не подтверждён; 024B, Stage 002/003 остаются открыты.
+**Статус:** 024A завершена в `main`, PR и exact-main CI успешно пройдены; 024B, Stage 002/003 остаются открыты.
 
 ## Цель
 
