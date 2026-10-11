@@ -1,6 +1,6 @@
 # 010B — Chromium file:// native Worker mid-kernel cancellation
 
-**Статус:** реализовано в ветке; критерий завершения — PR CI + merge + exact-main CI. Продолжение [010](010-dense-roi-worker-mid-kernel-cancel.md), не закрывает целиком Stage 003.
+**Статус:** код слит в `main`: [PR #191](https://github.com/zeter1/ZeTer-Photo-Editor/pull/191), squash `e77d65b02fae0e72a6e1e1ad3e3277a1a44f809b`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38145352146). Итоговый exact-main CI проверяется отдельно. Продолжение [010](010-dense-roi-worker-mid-kernel-cancel.md), не закрывает целиком Stage 003.
 
 ## Что добавлено
 
@@ -11,11 +11,11 @@
 
 ## Команды/gates
 
-- [ ] npm run check — Node suite + build generated artifacts.
-- [ ] npm run test:browser — Chromium file:// с marker реального kernel write, двумя отменами и успешным новым job.
-- [ ] node tools/build-tiled-inpaint-worker.mjs --check / generated parity.
-- [ ] PR CI success, review, merge в main.
-- [ ] exact-main CI success, зафиксировать PR/commit/run.
+- [x] npm run check — Node suite + build generated artifacts.
+- [x] npm run test:browser — Chromium file:// с marker реального kernel write, двумя отменами и успешным новым job.
+- [x] node tools/build-tiled-inpaint-worker.mjs --check / generated parity.
+- [x] PR #191 CI success и squash merge в main.
+- [ ] exact-main CI success на итоговом документационном SHA (проверить после записи этих статусов).
 
 ## После 010B: следующие незавершённые проходки
 
