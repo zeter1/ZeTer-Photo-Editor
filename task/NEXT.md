@@ -1,3 +1,9 @@
+## Проходка 010A — реальная отмена Node Worker внутри ядра (в проверке)
+
+- Регрессия `tests/tiled-inpaint-mid-kernel-cancel.test.mjs` наблюдает **настоящую запись пикселей в CPU-bound `inpaintSelectedSamples`**, затем отменяет Worker до обработки дальнего пикселя. Проверяет прямую отмену, периодический exact-owner guard и успешный новый job; отдельный SharedArrayBuffer — только тестовый probe, производственная модель остаётся private-clone + atomic publish.
+- **Оставшиеся действия 010:** объединение dense strip/segment ROI при bounded aggregate area и global frozen donors, sync/cooperative/Worker native byte parity, отдельный Chromium `file://` mid-kernel browser stress + memory samples. P0 002 — независимые Adobe Photoshop-authored лицензированные high-depth fixtures.
+- **Приёмка 010A ожидается:** PR CI `npm run check`, `npm run test:browser`, `git diff --check`, merge и exact-main CI; до этого не помечать завершённым.
+
 ## Завершённая проходка 009 — большой PSB32 / реальная Worker reply cancellation (2026-10-11)
 
 - [009](009-large-psb32-worker-cancellation.md) — ZeTer-generated PSB32 Float32 1025×1025, 16 810 000 native bytes, адаптивный v2 / little-endian bit oracle; Chromium `file://` UI import → Worker Content-Aware Fill → canvas preview, History, Undo/Redo.
