@@ -1,11 +1,11 @@
 # 003 — Tiled Content-Aware Fill
 
-## 2026-10-11 — Stage 003 P1: cooperative RGBA8 tile preview (PR предложен)
+## 2026-10-11 — Stage 003 P1: cooperative RGBA8 tile preview (слито, CI success)
 
 - Преобразование каждого native tile в RGBA8 оставлено в исходном precision pipeline; теперь тайлы обрабатываются кооперативно партиями по 2, с checkpoint `isCancelled` до следующей партии.
 - Строится только приватный canvas. В Content-Aware Fill exact document/layer/source guard отменяет изображение ещё до PNG-кодирования, без `dataUrl`, истории и частичной публикации.
 - Регрессии RGB16, Float32 CMYKA, паритета sync/cooperative tile iterator и смены документа во время RGBA conversion: `tests/tiled-preview-cooperative.test.mjs`.
-- **Gate ожидается:** npm check + Chromium `file://` + generated artifacts parity + PR CI и точный main push CI. До их завершения не считать подэтап закрытым.
+- **Gate выполнен:** [PR #179](https://github.com/zeter1/ZeTer-Photo-Editor/pull/179) слит (squash `245676f0ea5776d3c44b768cd05b596bcf020f2e`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38125653965) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38125704626) завершились **success**. Node, generated parity, Chromium `file://`, оба informational profiles и diff hygiene прошли. Это закрывает только cooperative RGBA8 preview; задачи 002/003 по-прежнему открыты.
 - **Ещё открыто:** широкий connected ROI без inflated bounding box, синхронный этап PNG encoding, независимый лицензированный Photoshop PSD16/PSB32 corpus с hash/provenance и Chromium Worker/Undo/RAM профилирование. Вся 003 открыта.
 
 
