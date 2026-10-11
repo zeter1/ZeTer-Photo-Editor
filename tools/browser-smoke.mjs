@@ -8,6 +8,7 @@ import { createBrowserRendererHeapSampler } from './browser-renderer-heap-sample
 import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
 import { verifyLargeBrowserPsd16Worker } from './browser-large-psd16-smoke.mjs';
 import { verifyBrowserMidKernelCancellation } from './browser-inpaint-mid-kernel-smoke.mjs';
+import { verifyBrowserUiLockMidKernel } from './browser-ui-lock-mid-kernel-smoke.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -976,6 +977,11 @@ async function runSmoke() {
 
     await new Promise(resolve => setTimeout(resolve, 1_800)); // Let editor autosave quiesce.
     await verifyRecoveryIndexedDb(client);
+    assertNoBrowserErrors(errors, stderrState);
+
+    // 010D: last scenario after a clean reload so the application's lazy
+    // Worker controller loads only the test-instrumented source in this phase.
+    await verifyBrowserUiLockMidKernel(client, { evaluate, waitFor, assert, browserClient });
     assertNoBrowserErrors(errors, stderrState);
 
 

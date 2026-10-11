@@ -1,3 +1,9 @@
+## 010D — Chromium file:// UI lock revocation mid-kernel (в работе, 2026-10-11)
+
+- [013](013-browser-ui-lock-mid-kernel.md): новая браузерная проверка **реального PSD16 1025², file input, живого Layer Lock и native Worker**, test-only probe после реальной записи kernel, termination во время 6s CPU-bound stall, отсутствие stale preview/History и native sample mutation, затем Unlock/recovery и sampled CDP browser memory.
+- **В ветке `feat/stage003-browser-ui-lock-mid-kernel-010d-20261011`**, ещё нет подтверждённых PR CI / exact-main CI: до их успеха и merge статус «в работе». Не путать с независимым Adobe-authored corpus.
+- **Следующий шаг:** открыть PR, проверить Node/Chromium browser gates, слить только при PASS. Затем 010D-B session/document switch mid-kernel (PSB32), 010E adaptive connected runs, P0 external licensed Stage 002.
+
 ## 010C — bounded dense ROI: код слит в main (2026-10-11)
 
 - **Готово:** [PR #192](https://github.com/zeter1/ZeTer-Photo-Editor/pull/192), squash `1b504b836ae3bbe28da89080ffa6877be09a2047`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146702722): Node, generated bundle/Worker, Chromium `file://`, profiles и diff hygiene.
