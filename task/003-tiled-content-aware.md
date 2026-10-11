@@ -1,6 +1,9 @@
 # 003 — Tiled Content-Aware Fill
 
-## 2026-10-11 — P1: source-safe native tiled preview publication (PR + CI pending)
+## 2026-10-11 — P1: source-safe native tiled preview publication (слито, CI success)
+
+- **Gate выполнен:** [PR #180](https://github.com/zeter1/ZeTer-Photo-Editor/pull/180) слит в `main` (squash `c36d64e7d5680233e118e9228c483d6ea4503050`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38126514754) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38126567513) — **success**: Node, generated bundle parity, Chromium `file://`, информативные профили и diff hygiene. Общие задачи 002/003 остаются открытыми.
+
 
 - `persistTiledHighDepthMutation` now aborts if another edit replaces the source on the same layer during an asynchronous preview. During cooperative tile conversion, it exits before encoding; after PNG completion it revalidates source before publish.
 - Added three independent regressions for replacement during tile processing, replacement in PNG encode, and caller continuation revocation. Tests use synthetic native tiles, not Photoshop-authored files.

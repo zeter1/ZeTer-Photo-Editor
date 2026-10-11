@@ -1,4 +1,7 @@
-## 2026-10-11 — Stage 003 P1: source-safe tiled high-depth mutations (PR + CI pending)
+## 2026-10-11 — Stage 003 P1: source-safe tiled high-depth mutations (слито, CI success)
+
+- **Gate выполнен:** [PR #180](https://github.com/zeter1/ZeTer-Photo-Editor/pull/180) слит в `main` (squash `c36d64e7d5680233e118e9228c483d6ea4503050`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38126514754) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38126567513) — **success**: Node, generated bundle parity, Chromium `file://`, информативные профили и diff hygiene. Общие задачи 002/003 остаются открытыми.
+
 
 - Native non-inpaint tiled mutation now preserves exact original highDepthSource identity across cooperative preview, PNG encode and atomic publication; source replacement on the same owner/layer cancels superseded work.
 - Caller continuation revocation aborts RGBA8 preview before PNG encoding. Explicit cancellation cannot yield a mutation with null dataUrl. Three regressions cover both cancellation windows and caller revocation.
