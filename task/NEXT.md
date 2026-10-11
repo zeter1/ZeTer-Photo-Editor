@@ -1,7 +1,7 @@
-## Проходка 010B — Chromium file:// mid-kernel cancellation (PR/CI ожидаются)
+## Завершённая проходка 010B — Chromium file:// mid-kernel cancellation (2026-10-11)
 
 - [011](011-browser-mid-kernel-cancellation.md): реальный Chromium native RGB16 Worker; тестовый probe строго после настоящей записи ядром первого пикселя, затем CPU-bound stall; direct cancel и owner polling до завершения ядра, новый job и immutable native source. Тестовая instrumentation только в isolated Blob, production не меняется.
-- **Статус пока НЕ done:** код/автотесты в ветке, ожидаются PR CI + merge + exact-main CI. Это отдельно от [010A](010-dense-roi-worker-mid-kernel-cancel.md) (Node); ещё не выполнены dense ROI strip/segment planner, UI lock revocation mid-kernel и независимый Photoshop corpus.
+- **Код и PR gate завершены:** [PR #191](https://github.com/zeter1/ZeTer-Photo-Editor/pull/191) слит в `main` (`e77d65b02fae0e72a6e1e1ad3e3277a1a44f809b`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38145352146) (Node, generated parity, Chromium `file://`, profiles, diff hygiene). Exact-main CI следует проверить отдельно. Это отдельно от [010A](010-dense-roi-worker-mid-kernel-cancel.md) (Node); ещё не выполнены dense ROI strip/segment planner, UI lock revocation mid-kernel и независимый Photoshop corpus.
 - **Следующий исполнимый шаг после gate:** 010C bounded dense ROI grouping с глобальной замороженной донорской маской и strict aggregate budget; RGB16/Float32 CMYKA exact parity (sync/cooperative/real Worker). P0 002 external licensed high-depth golden остаётся приоритетом.
 
 ## Проходка 010A — реальная отмена Node Worker внутри ядра (слито, CI success)
