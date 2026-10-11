@@ -216,6 +216,10 @@ test('Stage 003: missing/unsupported browser process counters never fake RAM or 
 
 import { sampleLinuxChromiumRss } from '../tools/browser-linux-process-rss.mjs';
 
+function linuxStat(pid,start='123') {
+  return `${pid} (chrome helper (GPU)) S ${Array(18).fill('0').join(' ')} ${start} 0\n`;
+}
+
 test('010E memory: Linux /proc RSS uses complete validated CDP PID set and never calls summed HWM a peak', async () => {
   const reads = [];
   const values = new Map([
@@ -229,11 +233,23 @@ test('010E memory: Linux /proc RSS uses complete validated CDP PID set and never
       reads.push(path);
       return values.get(path);
     },
+    readStat:async (path, encoding) => {
+      assert.equal(encoding, 'utf8');
+      reads.push(path);
+      return linuxStat(Number(path.split('/')[2]));
+    },
   });
-  assert.deepEqual(reads, ['/proc/11/status', '/proc/12/status']);
+  assert.deepEqual(reads, [
+    '/proc/11/stat','/proc/11/status','/proc/11/stat',
+    '/proc/12/stat','/proc/12/status','/proc/12/stat',
+  ]);
   assert.deepEqual(data, {
     supported:true, processCount:2, aggregateRssBytes:300*1024,
     largestProcessHighWaterBytes:250*1024,
+    processSamples:[
+      {pid:11,starttimeTicks:'123',type:'unknown',rssBytes:100*1024,highWaterBytes:120*1024},
+      {pid:12,starttimeTicks:'123',type:'unknown',rssBytes:200*1024,highWaterBytes:250*1024},
+    ],
   });
   const unsupported = await sampleLinuxChromiumRss([{id:11}], {
     platform:'win32', readStatus:async () => { throw new Error('should not read'); },
@@ -253,10 +269,12 @@ test('010E memory: malformed, duplicate, vanished PIDs and missing Linux status 
   ]) {
     await assert.rejects(sampleLinuxChromiumRss(processes, {
       platform:'linux', readStatus:async () => status,
+      readStat:async () => linuxStat(42),
     }), message);
   }
   await assert.rejects(sampleLinuxChromiumRss([{id:42}], {
     platform:'linux', readStatus:async () => { throw new Error('ENOENT: process exited'); },
+    readStat:async () => linuxStat(42),
   }), /ENOENT/);
 });
 

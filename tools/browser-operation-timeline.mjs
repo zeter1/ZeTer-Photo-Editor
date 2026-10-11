@@ -60,7 +60,8 @@ export function createBrowserOperationTimeline({ operationId, fixture, format, n
           linuxRssSampledMaxBytes:memoryReport.linuxProcessRss?.sampledMaxAggregateRssBytes??null,
           maxObservedSinglePidLifetimeHwmBytes:memoryReport.linuxProcessRss?.maxObservedIndividualProcessHwmBytes??null,
           processChurn:memoryReport.chromiumProcessLifecycle??null,
-          limitations:'Sampled renderer heap/CDP privateMemory/Linux RSS; PID HWM belongs to process lifetime, not this operation. No exact peak, GPU accounting or Worker-to-PID attribution.',
+          linuxProcessIdentity:memoryReport.linuxProcessIdentity??null,
+          limitations:'Sampled renderer heap/CDP privateMemory/Linux RSS; PID+starttime identifies observed Linux process incarnations when available. PID HWM belongs to process lifetime, not this operation. No exact peak, GPU accounting or Worker-to-PID attribution.',
         },
       };
     },
