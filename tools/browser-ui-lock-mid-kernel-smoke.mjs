@@ -24,8 +24,13 @@ export async function verifyBrowserUiLockMidKernel(client, {
   // project" action before importing our isolated PSD16 fixture.
   await new Promise(resolve => setTimeout(resolve, 400));
   await evaluate(client, "(() => {const newProject=document.querySelector('#modalRoot .recovery-modal [data-new-project]');if(newProject)newProject.click();return true;})()");
-  await waitFor('010D unobstructed editor', () => evaluate(client,
+  await waitFor('010D recovery prompt acknowledged', () => evaluate(client,
     "!document.querySelector('#modalRoot .recovery-modal')"), 10_000);
+  // "Start new project" deliberately opens the ordinary New Document modal.
+  // Cancel that draft through its real button: our next action is PSD import.
+  await evaluate(client, "(() => {document.querySelector('#modalRoot [data-cancel]')?.click();return true;})()");
+  await waitFor('010D unobstructed editor', () => evaluate(client,
+    "!document.querySelector('#modalRoot [role=dialog]')"), 10_000);
   await sampler.start();
   let stopped = false;
   try {
