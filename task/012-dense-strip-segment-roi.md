@@ -1,6 +1,6 @@
 # 010C — Stage 003: bounded dense ROI strip/segment fallback
 
-**Статус: код и регрессионные тесты в ветке `feat/stage003-dense-strip-segment-roi-010c`; PR / CI / merge ещё требуют проверки.** Задача продолжает [010](010-dense-roi-worker-mid-kernel-cancel.md) после 010A/010B и не означает завершение Stage 003.
+**Статус: [PR #192](https://github.com/zeter1/ZeTer-Photo-Editor/pull/192) слит в main (`1b504b836ae3bbe28da89080ffa6877be09a2047`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146702722). Exact-main CI после обновления документации ожидает проверки.** Задача продолжает [010](010-dense-roi-worker-mid-kernel-cancel.md) после 010A/010B и не означает завершение Stage 003.
 
 ## Что меняется
 
@@ -14,7 +14,7 @@
 
 - [x] Код bounded planner и тестовый файл `tests/tiled-inpaint-dense-strips.test.mjs` внесены в ветку.
 - [x] Генераторные браузерные артефакты `src/app.bundle.js`, `src/core/tiled-inpaint-worker-source.js`, `index.html`, `version.json` синхронизированы в ветке; точную parity должен подтвердить CI.
-- [ ] `npm run check`, `npm run test:browser`, generated parity, `git diff --check` — подтвердить через CI.
+- [x] `npm run check`, `npm run test:browser`, generated parity и `git diff --check` — PR CI success 38146702722.
 - [ ] Review, merge в main и **CI точного main SHA**; до этого статус «в работе».
 
 ## Следующие проходки
