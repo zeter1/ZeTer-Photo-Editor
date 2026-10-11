@@ -360,7 +360,7 @@ async function verifyBrowserHighDepthPsdPsbImport(client) {
   for (const key of ['rgb16','rgb32psb']) {
     const fixture=createBrowserHighDepthFixture(key);
     const encoded=Buffer.from(fixture.bytes).toString('base64');
-    const documentName=fixture.filename.replace(/\\.ps[db]$/i,'');
+    const documentName=fixture.filename.replace(/\.ps[db]$/i,'');
     const dispatched=await evaluate(client, `(() => {
       const binary=atob(${JSON.stringify(encoded)});
       const bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
