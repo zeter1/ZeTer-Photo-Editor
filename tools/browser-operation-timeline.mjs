@@ -53,6 +53,8 @@ export function createBrowserOperationTimeline({ operationId, fixture, format, n
         },
         memory:{
           sampleCount:memoryReport.sampleCount,
+          requestedSamplingIntervalMs:memoryReport.requestedSamplingIntervalMs??null,
+          observedSamplingWindowMs:memoryReport.observedSamplingWindowMs??null,
           rendererHeapSampledMaxBytes:memoryReport.sampledMaxJsHeapUsedBytes??null,
           chromiumPrivateMemoryAvailability:memoryReport.chromiumProcesses?.availability??'unavailable',
           chromiumPrivateSampledMaxBytes:memoryReport.chromiumProcesses?.sampledMaxPrivateBytes??null,

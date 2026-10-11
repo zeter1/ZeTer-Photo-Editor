@@ -1,3 +1,11 @@
+## 024B2a — versioned browser operation JSON + final-snapshot process visibility (PR pending, 2026-10-11)
+
+- [x] Produce `zpe-browser-operation-artifact-v1` files from actual Chromium `file://` PSD16 and PSB32 UI Worker smoke, with operation timeline, sample interval/window, available/unavailable metrics, PID+starttime per-incarnation observations, process churn, unchanged `unknown` Worker→PID mapping.
+- [x] Do **not** call a missing PID a proven exit: `observedAtLastSnapshot`, `noLongerObservedAtLastSnapshotCount` and `provenExitCount:null`; test disappearance/reappearance with same starttime and PID reuse.
+- [x] CI checks **both** report files and uploads them as an informational artifact, even when later steps fail (if files exist); no numeric performance gate, exact peak-RAM or fabricated `privateMemory`.
+- [ ] Verify PR Node + real Chromium `file://` + generated parity CI and exact-main post-merge.
+- [ ] **024B2b still open:** instrument *actual native mid-kernel* PSD16/PSB32 cancel→new Worker recovery in the same operation timeline, original native bitwise integrity/History, optionally independently documented CDP target attribution; do not confuse this with a held-completed-reply cancellation.
+
 ## 024B1 — PID+starttime samples (merged, PR + exact-main CI success, 2026-10-11)
 
 - [x] Parse /proc/<pid>/stat field 22 with nested/whitespace comm and arbitrary-size starttime; reject absent/malformed data.

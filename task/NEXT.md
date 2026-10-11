@@ -1,3 +1,8 @@
+## 010E-B4 / 024B2a — Chromium operation JSON artifacts and honest process disappearance (PR pending, 2026-10-11)
+
+- `tools/browser-operation-artifact.mjs`: versioned PSD16/PSB32 JSON files (real Chromium `file://` UI scenario) with operation timing, requested sample interval, Linux PID+starttime samples; CI verification and upload. PID missing at the final sample is **not a proven exit**. No operation peak RSS or supported Worker→PID mapping is asserted. [024 tracking](024-browser-operation-memory.md).
+- **024B2b next:** in-kernel cancel→recovery PSD16/PSB32 + unchanged native words/history evidence, only then consider documented CDP target-to-PID mapping. **P0 [002](002-psd-compatibility-corpus.md)** still lacks independent licensed Photoshop-authored RGB16/CMYK32 golden; Stage 002/003 remain open.
+
 ## 010E-B4 / 024B1 — Linux PID incarnation identity (merged, exact-main CI success, 2026-10-11)
 
 - **Implementation:** test harness reads `/proc/<pid>/stat` field 22 twice around VmRSS/VmHWM; rejects PID reuse within one sample. Track `PID+starttime` across browser CDP observations; per-incarnation sampled RSS / individual process-lifetime HWM, arrivals/missing/reuse, explicit Worker→PID `unknown`.
