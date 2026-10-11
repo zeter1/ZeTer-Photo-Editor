@@ -7,6 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createBrowserRendererHeapSampler } from './browser-renderer-heap-sampler.mjs';
 import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
 import { verifyLargeBrowserPsd16Worker } from './browser-large-psd16-smoke.mjs';
+import { verifyBrowserMidKernelCancellation } from './browser-inpaint-mid-kernel-smoke.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -669,6 +670,22 @@ async function runSmoke() {
       'Production adapter must terminate a cancelled Worker and recover on the next job',
       JSON.stringify(browserControllerResult));
     console.log('Stage 003 browser Worker controller probe:', JSON.stringify(browserControllerResult));
+
+    // 010B: unlike the delayed-reply PSB32 cancellation, this proves that
+    // Chrome terminates a Worker AFTER a real native kernel pixel write and
+    // BEFORE the CPU-bound kernel can finish. Only the isolated test Blob
+    // contains instrumentation; the production supplier stays unchanged.
+    const midKernel = await verifyBrowserMidKernelCancellation(client, {
+      evaluate, moduleSource:browserWorkerModules,
+    });
+    assert(midKernel.ok && midKernel.protocol === 'file:' &&
+      midKernel.probes === 2 && midKernel.created === 3 &&
+      midKernel.terminated === 3 && midKernel.replies === 1 &&
+      midKernel.directCancelled && midKernel.staleOwnerCancelled &&
+      midKernel.sourceImmutable && midKernel.successorFilled === 1,
+      'Stage 003 Chromium in-kernel Worker cancellation must be atomic',
+      JSON.stringify(midKernel));
+    console.log('Stage 003 Chromium real mid-kernel cancellation:', JSON.stringify(midKernel));
 
     const initial = await evaluate(client, `(() => ({
       title: document.title,
