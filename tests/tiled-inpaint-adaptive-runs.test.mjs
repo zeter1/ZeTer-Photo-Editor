@@ -83,7 +83,7 @@ test('010E-B1: insufficient ROI budget and cooperative cancellation refuse atomi
   const source = sourceFor('rgb', 16), frozen = JSON.stringify(source);
   assert.throws(() => inpaintTiledPixelBufferSourceFromIndices(source, {
     ...OPTIONS, selectedIndices:reverse, maxLayerPixels:6_000,
-  }), /сумма рабочих областей/);
+  }), /рабочая область|сумма рабочих областей/);
   let cancel = false, yields = 0;
   const cancelled = await inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
     ...OPTIONS, selectedIndices:reverse,
