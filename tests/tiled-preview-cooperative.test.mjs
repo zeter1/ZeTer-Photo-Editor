@@ -145,8 +145,8 @@ test('Stage 003: completed tiled preview publishes once with original high-depth
 });
 
 function tiledMutation(layer, editor, owner, options = {}) {
-  return editor.persistTiledHighDepthMutation(owner,layer,({x,buffer})=>{
-    if(x)return 0;
+  return editor.persistTiledHighDepthMutation(owner,layer,({x,y,buffer})=>{
+    if(x||y)return 0;
     buffer.data[0]=12345;
     return 1;
   },options);
