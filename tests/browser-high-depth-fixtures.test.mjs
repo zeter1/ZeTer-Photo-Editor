@@ -95,7 +95,7 @@ test('010D-D: two independent native PSB32 fixtures keep distinct exact Float32 
   assert.notEqual(second.filename,first.filename);
   assert.notDeepEqual(second.normal,first.normal);
   assert.notDeepEqual(second.damaged,first.damaged);
-  assert.notDeepEqual(Buffer.from(second.bytes).subarray(0,1024),Buffer.from(first.bytes).subarray(0,1024));
+  assert.notEqual(Buffer.compare(second.bytes,first.bytes),0,'distinct Float32 samples must change binary PSB payload');
   const decoded=await decodePsd(second.bytes);
   const native=decoded.layers[0].pixelBuffer;
   assert.equal(native.data.constructor,Float32Array);
