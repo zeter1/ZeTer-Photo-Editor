@@ -1,3 +1,8 @@
+## 010E-A — complex connected dense ROI / native Worker baseline (в работе, 2026-10-11)
+
+- [018](018-complex-roi-profile.md): fixture с двумя плотными 64×64 островами и связывающим коридором, RGB16/CMYKA32 exact native parity (sync/real Node Worker), atomic refusal/cooperative cancel, separate-process timing и process-wide RSS snapshots. Не Photoshop-authored, не browser peak и не новый adaptive planner. PR/CI/merge ещё не подтверждены.
+- **Следующая 010E-B:** bounded adaptive horizontal runs/connected clusters против fixed x-grid на сложных плотных выделениях с лимитом planning work, затем browser memory HWM/Chromium PSD/PSB. Параллельно **P0 002** independently licensed Adobe Photoshop-authored corpus. Stage 002/003 не закрыты.
+
 ## 010D-D — две независимые native PSB32 Float32 вкладки (слито, CI success, 2026-10-11)
 
 - [017](017-dual-native-psb32-session-isolation.md): Chromium `file://`, две разные ZeTer-generated 1025² PSB32 Float32 в двух живых вкладках; отмена первого Worker mid-kernel, второй native Worker с exact little-endian words и Undo/Redo, затем первый Worker с независимым Undo/Redo и History. **Готово:** [PR #198](https://github.com/zeter1/ZeTer-Photo-Editor/pull/198), squash `24d0edb7`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38152587196), [CI кодового main SHA success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38152760057).
