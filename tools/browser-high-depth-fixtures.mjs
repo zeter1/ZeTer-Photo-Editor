@@ -17,15 +17,29 @@ const cases = {
     normal:[0.125,0.25,0.375,1],
     damaged:[4,0.0625,0.0625,1],
   },
+  rgb16large: {
+    filename:'stage003-browser-large-rgb16.psd',
+    version:1, bitsPerChannel:16, ArrayType:Uint16Array,
+    colorSpace:'srgb', encode:encodePsd,
+    normal:[10_000,20_000,30_000,65_535],
+    damaged:[59_000,1_000,1_000,65_535],
+  },
 };
 
 export function createBrowserHighDepthFixture(key) {
   const config=cases[key];
   if (!config) throw new RangeError('Unknown browser high-depth fixture: '+key);
-  const width=8,height=8,channels=4,defectX=4,defectY=4;
+  // A 1025² RGBA16 raster is strictly above the 8 MiB v2 tile threshold.
+  // Keep the conventional 8×8 fixtures small for fast precision smoke tests.
+  const large=key==='rgb16large';
+  const width=large?1025:8,height=large?1025:8,channels=4;
+  const defectX=large?Math.floor(width/2):4,defectY=large?Math.floor(height/2):4;
   const samples=new config.ArrayType(width*height*channels);
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
-    samples.set(x===defectX&&y===defectY?config.damaged:config.normal,
+    const defect=large
+      ? Math.abs(x-defectX)<=2 && Math.abs(y-defectY)<=2
+      : x===defectX&&y===defectY;
+    samples.set(defect?config.damaged:config.normal,
       (y*width+x)*channels);
   }
   const pixels=createPixelBuffer({
@@ -42,6 +56,6 @@ export function createBrowserHighDepthFixture(key) {
     bitsPerChannel:config.bitsPerChannel,width,height,channels,
     defectX,defectY,
     normal:config.normal,damaged:config.damaged,
-    nativeArrayType:config.ArrayType.name,
+    nativeArrayType:config.ArrayType.name,large,
   };
 }

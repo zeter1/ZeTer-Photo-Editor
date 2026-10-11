@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { createBrowserRendererHeapSampler } from './browser-renderer-heap-sampler.mjs';
 import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
+import { verifyLargeBrowserPsd16Worker } from './browser-large-psd16-smoke.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -945,6 +946,9 @@ async function runSmoke() {
     assertNoBrowserErrors(errors,stderrState);
 
     await verifyBrowserHighDepthPsdPsbImport(client);
+    assertNoBrowserErrors(errors,stderrState);
+
+    await verifyLargeBrowserPsd16Worker(client,{evaluate,waitFor,assert,browserClient});
     assertNoBrowserErrors(errors,stderrState);
 
 
