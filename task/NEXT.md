@@ -22,6 +22,14 @@
 - **Gate подтверждён:** [PR #184](https://github.com/zeter1/ZeTer-Photo-Editor/pull/184) слит в `main` (`28ec5de2dbdd38e2782a8d5bc864a9dbdc0db5d2`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38133313481) и [точный `main` CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38133376298) — **success** (Node, Chromium `file://`, generated parity, 8 MiB diagnostics, diff hygiene). Нет browser peak RAM/Undo, лицензированного Photoshop PSD16/PSB32 и поддержки oversized connected ROI.
 - **Следующий кодовый шаг:** bounded connected ROI с глобально исключёнными source selection donors. Затем Chromium `file://` Worker / preview / Undo / memory и Stage 002 внешний high-depth oracle.
 
+## Активная проходка — P1 connected ROI fragments (PR #185)
+
+- Рабочая ветка: `feat/stage003-connected-roi-donors-20261011`; [PR #185](https://github.com/zeter1/ZeTer-Photo-Editor/pull/185).
+- Изменения и чеклист: [005-connected-roi-frozen-donors.md](005-connected-roi-frozen-donors.md).
+- Связные разреженные выделения теперь могут использовать halo-overlapping ROI по занятым native tiles, с одной frozen bitmap, запрещающей всех исходных selection donors; лимиты площади и 256 занятых tiles не сняты.
+- **Текущий gate:** провести `npm run check`, `file://` Chromium, generated parity, review, merge и зелёный CI точного `main`. Пока это не выполнено, подэтап остаётся в работе, весь Stage 003 открыт.
+- **Следом:** проверить browser Worker → preview → Undo/Redo + sampled renderer memory на больших high-depth PSD/PSB; P0 Stage 002 — независимые Adobe-authored licensed fixtures с SHA-256.
+
 ## Ближайшие выполняемые проходки
 
 | Приоритет | Следующая задача | Критерий приёмки |
