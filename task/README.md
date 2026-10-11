@@ -1,4 +1,4 @@
-> **Проходка 007 в работе:** [browser PSD16/PSB32 UI import + native precision smoke](007-browser-psd-psb-ui-import.md) — код в рабочей ветке, **CI/merge ещё не подтверждены**. После проверки см. [NEXT.md](NEXT.md).
+> **Последняя завершённая проходка:** [007 — PSD16/PSB32 file:// UI import + native Save Project sample parity](007-browser-psd-psb-ui-import.md), [PR #187](https://github.com/zeter1/ZeTer-Photo-Editor/pull/187) слит; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38137491812), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38137556394). **Stage 002/003 остаются открытыми** — дальнейшая очередь [NEXT.md](NEXT.md).
 
 > **Последняя завершённая проходка:** [006 — >256 occupied native tile fragments](006-many-tile-bounded-fragments.md), [PR #186](https://github.com/zeter1/ZeTer-Photo-Editor/pull/186) слит; [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38136526958). Общие Stage 002/003 остаются открыты; [очередь](NEXT.md).
 
