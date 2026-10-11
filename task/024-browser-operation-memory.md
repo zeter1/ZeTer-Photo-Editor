@@ -1,3 +1,19 @@
+## 024B1 — PID+starttime samples (code in PR branch; CI pending, 2026-10-11)
+
+- [x] Parse /proc/<pid>/stat field 22 with nested/whitespace comm and arbitrary-size starttime; reject absent/malformed data.
+- [x] Read stat before/after VmRSS/VmHWM and fail an unstable/reused PID rather than associating mixed samples.
+- [x] Track per-incarnation observed RSS and lifetime VmHWM, PID reuse between samples, missing/arriving identities; keep CDP process type separate from unsupported Worker→PID mapping.
+- [x] Carry identity report into operation timeline. Invalid/unsupported identity is explicit unavailable, never an invented peak.
+- [x] Deterministic tests for same-PID different starttimes, missing /proc, precision, full sampler-to-report integration.
+- [ ] PR CI, exact-main CI after merge. **The broader 024B is not completed.**
+
+### Next 024B2 (open)
+
+1. Instrument real Chromium `file://` PSD16 and PSB32 native Worker **mid-kernel** cancel→recovery in one operation timeline, including unchanged native byte/History evidence after cancel and successful new Worker job.
+2. Attempt CDP target/process mapping only with a documented, tested source; otherwise retain `workerPidMapping: unknown`. Distinguish observed disappearance from proven exit.
+3. Export versioned JSON artifacts from browser CI with operation ID, sampler interval, per-incarnation memory observations, missing metrics and timeline, without unsupported peak-RAM/performance claims.
+4. Verify Node, real Chromium, artifacts, PR and exact-main CI; then update this status and [NEXT](NEXT.md).
+
 ## Проходка 024A — завершена и слита в main, CI success (2026-10-11)
 
 - [x] `tools/browser-operation-timeline.mjs`: детерминированный `operationId`, монотонные отметки import/preview/native verification/selection/Fill/history/Undo/Redo; наблюдаемое время этапов (не точное время вычисления ядра).
