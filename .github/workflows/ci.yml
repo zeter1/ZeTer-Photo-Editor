@@ -46,5 +46,8 @@ jobs:
       - name: Profile external PSD/PSB tiled Content-Aware Fill (informational)
         run: node tools/profile-real-psd-inpaint.mjs
 
+      - name: Profile native Worker byte integrity (informational)
+        run: node tools/profile-native-worker-integrity.mjs --sizes 8
+
       - name: Diff hygiene
         run: git diff --check
