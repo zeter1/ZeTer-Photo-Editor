@@ -1,3 +1,8 @@
+## 2026-10-11 — 010D-D: две раздельные native PSB32 UI-сессии (в работе)
+
+- [017](017-dual-native-psb32-session-isolation.md): две разные ZeTer-generated PSB32 Float32 1025² с отдельными native v2 tile payloads; браузерная отмена первой после настоящей kernel-записи, второй native Worker и word-exact Undo/Redo; последующий первый Worker и межсессионная проверка слов/History.
+- Текущий статус — feature branch, **не считать merged или CI success** до проверок. Это не внешний Adobe Photoshop-authored golden и не реальная peak RSS. P0 [002](002-psd-compatibility-corpus.md), P1 010E и общая Stage 003 остаются открыты.
+
 ## 2026-10-11 — P1: >256 occupied tile bounded fallback (слито, CI success)
 
 - [006](006-many-tile-bounded-fragments.md): убран искусственный 256-cell отказ в large sparse selection, при этом старый group-merge ограничен 256 cells для контроля алгоритмической сложности; более широкий случай обрабатывается ограниченными независимыми cells.
