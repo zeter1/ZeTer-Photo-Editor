@@ -49,5 +49,8 @@ jobs:
       - name: Profile native Worker byte integrity (informational)
         run: node tools/profile-native-worker-integrity.mjs --sizes 8
 
+      - name: Profile complex connected ROI native Worker (informational)
+        run: node tools/profile-complex-roi.mjs --models rgb16,cmyka32
+
       - name: Diff hygiene
         run: git diff --check
