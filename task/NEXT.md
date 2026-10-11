@@ -15,6 +15,13 @@
 - [ ] Production-quality RAW/DNG и универсальный gamut/soft-proof workflow.
 - [ ] Дополнительное качество Selection/Refine/Inpaint, реальные GPU/ML ускорения.
 
+## Текущая малая проходка — P1 native Worker byte profile (PR в работе)
+
+- Инструмент: [004-native-worker-byte-integrity-profile.md](004-native-worker-byte-integrity-profile.md); `tools/profile-native-worker-integrity.mjs`.
+- **Реализовано в ветке, ещё НЕ засчитано как готовое:** synthetic RGB16 и Float32 CMYKA Node Worker profiling, exact byte oracle, immutable native tiles, отдельный процесс на случай, memory/time snapshots и regression 1 MiB; CI запускает информационный 8 MiB профиль.
+- **Gate открыт:** PR CI → review → merge → точный зелёный `main` CI. Нет browser peak RAM/Undo, лицензированного Photoshop PSD16/PSB32 и поддержки oversized connected ROI.
+- **Следующий кодовый шаг:** bounded connected ROI с глобально исключёнными source selection donors. Затем Chromium `file://` Worker / preview / Undo / memory и Stage 002 внешний high-depth oracle.
+
 ## Ближайшие выполняемые проходки
 
 | Приоритет | Следующая задача | Критерий приёмки |
