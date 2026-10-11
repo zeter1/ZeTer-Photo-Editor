@@ -40,21 +40,31 @@ export function createBrowserRendererHeapSampler(client, {
       throw new Error('Browser renderer heap sampler: invalid JS heap metrics');
     }
     const entry = { phase, elapsedMs:now(), jsHeapUsedBytes:used, jsHeapTotalBytes:total };
-    if (processClient && !processUnavailableReason) {
+    if (processClient && (!processUnavailableReason || !rssUnavailableReason)) {
       try {
         const info = await processClient.send('SystemInfo.getProcessInfo');
         const processes = info?.processInfo;
-        // Never advertise a partial sum as the memory of the whole browser.
-        if (!Array.isArray(processes) || !processes.length ||
-            processes.some(item => !Number.isSafeInteger(item?.privateMemory) || item.privateMemory < 0)) {
-          throw new Error('Chromium did not expose complete process privateMemory counters');
+        if (!Array.isArray(processes) || !processes.length) {
+          throw new Error('Chromium did not expose a complete process list');
         }
-        const sum = processes.reduce((bytes, item) => bytes + item.privateMemory, 0);
-        if (!Number.isSafeInteger(sum)) throw new Error('Chromium process privateMemory sum overflowed');
-        entry.processPrivateMemoryBytes = sum;
-        entry.processCount = processes.length;
-        // CDP privateMemory is not OS RSS. Linux /proc samples are kept
-        // separate and must never turn a partial/failed read into a fake zero.
+        // CDP privateMemory is optional. Its absence MUST NOT suppress the
+        // independent Linux VmRSS path when a usable PID list is available.
+        if (!processUnavailableReason) {
+          try {
+            if (processes.some(item =>
+              !Number.isSafeInteger(item?.privateMemory) || item.privateMemory < 0)) {
+              throw new Error('Chromium did not expose complete process privateMemory counters');
+            }
+            const sum = processes.reduce((bytes, item) => bytes + item.privateMemory, 0);
+            if (!Number.isSafeInteger(sum)) {
+              throw new Error('Chromium process privateMemory sum overflowed');
+            }
+            entry.processPrivateMemoryBytes = sum;
+            entry.processCount = processes.length;
+          } catch (error) {
+            processUnavailableReason = String(error?.message || error);
+          }
+        }
         if (!rssUnavailableReason) {
           try {
             const rss = await processRssSampler(processes);
@@ -73,9 +83,11 @@ export function createBrowserRendererHeapSampler(client, {
           }
         }
       } catch (error) {
-        // Older Chromium/CDP implementations may omit SystemInfo or the
-        // privateMemory field. Heap sampling must still complete normally.
-        processUnavailableReason = String(error?.message || error);
+        // No usable CDP process list: both OS RSS and privateMemory become
+        // unavailable, but renderer-heap sampling remains functional.
+        const reason = String(error?.message || error);
+        processUnavailableReason ??= reason;
+        rssUnavailableReason ??= reason;
       }
     }
     samples.push(entry);
