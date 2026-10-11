@@ -1,3 +1,9 @@
+## 2026-10-11 — P0 external corpus manifest hardening (PR candidate)
+
+- Проходка `feat/stage002-bounded-corpus-preflight-20261011`: потоковая ограниченная обработка metadata manifest (до 1 MiB, проверка регулярного файла и идентичности inode до/после чтения), минимум 3 RGB/4 CMYK каналов, минимальная структурная длина PSD/PSB, отрицательные тесты.
+- **Без изменений рантайма/codec.** Заголовок+SHA/заявления о происхождении не являются доказательством Photoshop authorship или фактической валидности всего файла. Не закрывать Stage 002 до independently licensed Photoshop-authored PSD16/PSB32 и external golden comparisons.
+- Следующие действия и критерии приёмки: [NEXT.md](NEXT.md).
+
 # 002 — PSD/PSB round-trip compatibility corpus
 
 ## Проходка 2026-10-10 — побайтовый oracle для профиля PSD16/PSB32 Worker

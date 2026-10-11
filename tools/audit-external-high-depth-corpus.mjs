@@ -3,12 +3,13 @@
 // NOT decode pixels or certify that a file was actually saved by Photoshop.
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { lstat, open, readFile } from 'node:fs/promises';
+import { lstat, open } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCHEMA = 'zpe-external-high-depth-psd-psb-v1';
 const MAX_FIXTURE_BYTES = 512 * 1024 * 1024;
+const MAX_MANIFEST_BYTES = 1024 * 1024;
 const KINDS = Object.freeze({
   psd16:{ extension:'.psd', version:1, bitsPerChannel:16 },
   psb32:{ extension:'.psb', version:2, bitsPerChannel:32 },
@@ -34,10 +35,14 @@ function httpsUrl(value, label) {
 }
 
 function safeSize(value, label) {
-  if (!Number.isSafeInteger(value) || value < 27 || value > MAX_FIXTURE_BYTES) {
-    fail(label, 'must be a safe byte size between 27 and 512 MiB');
+  if (!Number.isSafeInteger(value) || value < 40 || value > MAX_FIXTURE_BYTES) {
+    fail(label, 'must be a safe byte size between 40 and 512 MiB');
   }
   return value;
+}
+
+function sameFile(a, b) {
+  return a.isFile() && b.isFile() && a.dev === b.dev && a.ino === b.ino && a.size === b.size;
 }
 
 function positive(value, label) {
@@ -60,7 +65,7 @@ export function inspectExternalHighDepthHeader(bytes) {
   const width = view.getUint32(18, false);
   const bitsPerChannel = view.getUint16(22, false);
   const colorMode = view.getUint16(24, false);
-  if (![1, 2].includes(version) || channels < 1 || channels > 56 ||
+  if (![1, 2].includes(version) || channels < (colorMode === 4 ? 4 : 3) || channels > 56 ||
       width < 1 || height < 1 || width > 300000 || height > 300000 ||
       ![16, 32].includes(bitsPerChannel) || ![3, 4].includes(colorMode)) {
     fail('header', 'unsupported or invalid high-depth RGB/CMYK header');
@@ -71,7 +76,38 @@ export function inspectExternalHighDepthHeader(bytes) {
 export async function auditExternalHighDepthCorpus(manifestPath) {
   if (typeof manifestPath !== 'string' || !manifestPath.trim()) fail('manifest', 'path required');
   const absoluteManifest = resolve(manifestPath);
-  const manifest = JSON.parse(await readFile(absoluteManifest, 'utf8'));
+  // The manifest is untrusted metadata. Bound its read independently of the
+  // (much larger) fixture budget, and pin the descriptor against path swaps.
+  const manifestInfo = await lstat(absoluteManifest);
+  if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink() ||
+      manifestInfo.size > MAX_MANIFEST_BYTES) {
+    fail('manifest', 'regular file at most 1 MiB required (no symlinks)');
+  }
+  const manifestHandle = await open(absoluteManifest, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
+  let manifestText;
+  try {
+    const opened = await manifestHandle.stat();
+    if (!sameFile(manifestInfo, opened)) fail('manifest', 'replaced before open');
+    const chunks = [];
+    const buffer = Buffer.alloc(64 * 1024);
+    let total = 0;
+    while (true) {
+      const { bytesRead } = await manifestHandle.read(buffer, 0,
+        Math.min(buffer.length, MAX_MANIFEST_BYTES + 1 - total), null);
+      if (!bytesRead) break;
+      total += bytesRead;
+      if (total > MAX_MANIFEST_BYTES) fail('manifest', 'exceeds 1 MiB');
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    }
+    if (!sameFile(opened, await manifestHandle.stat()) ||
+        !sameFile(opened, await lstat(absoluteManifest))) {
+      fail('manifest', 'replaced during read');
+    }
+    manifestText = Buffer.concat(chunks).toString('utf8');
+  } finally {
+    await manifestHandle.close();
+  }
+  const manifest = JSON.parse(manifestText);
   if (manifest?.schema !== SCHEMA || !Array.isArray(manifest.fixtures) ||
       manifest.fixtures.length !== 2) {
     fail('manifest', 'expected schema ' + SCHEMA + ' with exactly psd16 and psb32 entries');
@@ -93,6 +129,9 @@ export async function auditExternalHighDepthCorpus(manifestPath) {
     }
     seenFiles.add(file);
     const expectedSize = safeSize(item.size, id + '.size');
+    if (kind.version === 2 && expectedSize < 44) {
+      fail(id + '.size', 'PSB requires at least 44 header/section bytes');
+    }
     if (typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sha256)) {
       fail(id + '.sha256', 'requires pinned lowercase SHA-256');
     }
@@ -117,8 +156,6 @@ export async function auditExternalHighDepthCorpus(manifestPath) {
     // between the safety check and the bytes actually hashed. O_NOFOLLOW
     // rejects a swapped final symlink where supported; fd/path identity
     // checks also reject a replaced regular file. Never buffer the full PSB.
-    const sameFile = (a, b) => a.isFile() && b.isFile() &&
-      a.dev === b.dev && a.ino === b.ino && a.size === b.size;
     const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0));
     const headerBytes = Buffer.alloc(27);
     const digest = createHash('sha256');
