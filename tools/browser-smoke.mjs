@@ -983,6 +983,12 @@ async function runSmoke() {
     // Worker controller loads only the test-instrumented source in this phase.
     await verifyBrowserUiLockMidKernel(client, { evaluate, waitFor, assert, browserClient });
     assertNoBrowserErrors(errors, stderrState);
+    // 010D-C: real PSB32 Float32 active switch DURING CPU kernel write,
+    // exact native little-endian word oracle across cancel + Undo/Redo.
+    await verifyBrowserUiLockMidKernel(client, {
+      evaluate, waitFor, assert, browserClient, fixtureKey:'rgb32psblarge',
+    });
+    assertNoBrowserErrors(errors, stderrState);
 
 
     console.log(`Browser smoke passed: ${browserExecutable}`);
