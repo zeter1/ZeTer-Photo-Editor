@@ -1,12 +1,12 @@
 # task — очередь небольших инженерных проходок
 
-## 2026-10-11 — Stage 003 P1: cooperative native tiled writeRegion
+## 2026-10-11 — Stage 003 P1: cooperative native tiled writeRegion (слито, CI success)
 
 - Добавлен общий iterator writeRegionSteps и отменяемый writeRegionCooperative: промежуточные массивы tiles остаются приватными, checkpoint каждые 32 768 pixels, никакой новой dirty/preview публикации до commit.
 - Native Content-Aware fallback подключён к новому generator step; sync Worker и Node используют тот же алгоритм без await.
 - Регрессии: RGB16 sync/cooperative byte parity, Float32 CMYKA, частично подготовленный ROI, сохранение предыдущих dirty tiles и отмена в inpaint write.
 - **Следующие P1:** длинный connected ROI без inflated bbox; chunked RGBA8 preview. **P0:** независимый лицензированный Photoshop PSD16/PSB32 corpus и Chromium file:// Worker/Undo/RAM profiling. Задачи 002 и 003 открыты.
-- **Gate:** npm run check, generated parity, npm run test:browser, informational profiles и diff hygiene в CI; до проверки не считать подэтап закрытым.
+- **Gate выполнен:** [PR #178](https://github.com/zeter1/ZeTer-Photo-Editor/pull/178) слит (squash `e0cefd6a86382c1382c28171aac302bf41ddd524`). [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38124785782) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38124840630) завершились **success**: Node, generated parity, Chromium `file://`, informational profiles и diff hygiene. Это закрывает только подэтап cooperative write; 002/003 открыты.
 
 ## 2026-10-11 — Stage 003 P1: cooperative native tiled readRegion (слито, CI success)
 
