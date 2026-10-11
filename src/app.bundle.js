@@ -6899,7 +6899,8 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     return isCancelled() ? null : step.value;
   }
 
-  function writeRegion(region) {
+  // Stage changes privately; cancellation must not dirty any working tiles.
+  function* writeRegionSteps(region) {
     const x = Math.trunc(Number(region?.x));
     const y = Math.trunc(Number(region?.y));
     const buffer = region?.buffer;
@@ -6915,7 +6916,9 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     ) throw new TypeError('Tiled PixelBuffer writeRegion несовместим с working set');
 
     const bounds = { left:x, top:y, right:x+buffer.width, bottom:y+buffer.height };
+    const staged = [];
     let changedPixels = 0;
+    let scannedPixels = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!intersects(tile, bounds)) continue;
@@ -6924,7 +6927,7 @@ function createSerializedPixelBufferTileWorkingSet(source, {
       const top = Math.max(bounds.top, tile.y);
       const right = Math.min(bounds.right, tile.x + tile.width);
       const bottom = Math.min(bounds.bottom, tile.y + tile.height);
-      let tileChanged = false;
+      let nextData = null;
       for (let globalY = top; globalY < bottom; globalY += 1) {
         for (let globalX = left; globalX < right; globalX += 1) {
           const sourceOffset = ((globalY - y) * buffer.width + (globalX - x)) * targetChannels;
@@ -6936,20 +6939,54 @@ function createSerializedPixelBufferTileWorkingSet(source, {
               break;
             }
           }
-          if (!pixelChanged) continue;
-          for (let channel = 0; channel < targetChannels; channel += 1) {
-            target.data[targetOffset + channel] = buffer.data[sourceOffset + channel];
+          if (pixelChanged) {
+            if (!nextData) nextData = target.data.slice();
+            nextData.set(buffer.data.subarray(sourceOffset, sourceOffset + targetChannels), targetOffset);
+            changedPixels += 1;
           }
-          changedPixels += 1;
-          tileChanged = true;
+          // One large ROI remains cancellable; staged arrays stay invisible here.
+          if (++scannedPixels >= 32_768) {
+            scannedPixels = 0;
+            yield;
+          }
         }
       }
-      if (tileChanged) {
-        dirty.add(index);
-        previewDirty.add(index);
-      }
+      if (nextData) staged.push({ index, target, data:nextData });
+    }
+    // No await or yield during the final commit; preserve data array identity.
+    for (const { index, target, data } of staged) {
+      target.data.set(data);
+      dirty.add(index);
+      previewDirty.add(index);
     }
     return changedPixels;
+  }
+
+  function writeRegion(region) {
+    const steps = writeRegionSteps(region);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    return step.value;
+  }
+
+  // null means cancelled; pending staged arrays are simply discarded.
+  async function writeRegionCooperative(region, {
+    isCancelled = () => false,
+    yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  } = {}) {
+    if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+      throw new TypeError('Tiled PixelBuffer region write: invalid cancellation callbacks');
+    }
+    if (isCancelled()) return null;
+    const steps = writeRegionSteps(region);
+    let step = steps.next();
+    while (!step.done) {
+      if (isCancelled()) return null;
+      await yieldControl();
+      if (isCancelled()) return null;
+      step = steps.next();
+    }
+    return isCancelled() ? null : step.value;
   }
 
   // Assemble privately; never expose the partially serialized tile list.
@@ -7032,6 +7069,7 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     readRegion,
     readRegionCooperative,
     writeRegion,
+    writeRegionCooperative,
     serialize,
     serializeCooperative,
     get loadedTileCount() { return loaded.size; },
@@ -7164,7 +7202,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       if (filled !== group.indices.length) {
         throw new RangeError('Контент-заливка: для отдельной области не найдены все доноры');
       }
-      totalChanged += working.writeRegion(region);
+      totalChanged += yield { kind:'writeRegion', region };
       totalFilled += filled;
       // No private tile escapes before the full job completes.
       yield;
@@ -7190,7 +7228,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     maxFillPixels,
   } };
   if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
-  const changed = working.writeRegion(region);
+  const changed = yield { kind:'writeRegion', region };
   // Yield before serializing the one-ROI result.
   yield;
   const serialized = changed ? yield { kind:'serialize' } : source;
@@ -7212,6 +7250,8 @@ function inpaintFrozenTiledSelection(source, working, scan, options) {
       step = steps.next(inpaintPixelBuffer(step.value.buffer, step.value.options));
     } else if (step.value?.kind === 'readRegion') {
       step = steps.next(working.readRegion(step.value.bounds));
+    } else if (step.value?.kind === 'writeRegion') {
+      step = steps.next(working.writeRegion(step.value.region));
     } else if (step.value?.kind === 'serialize') {
       step = steps.next(working.serialize());
     } else {
@@ -7242,6 +7282,12 @@ async function inpaintFrozenTiledSelectionCooperative(source, working, scan, opt
       const region = await working.readRegionCooperative(step.value.bounds, { isCancelled, yieldControl });
       if (region === null || isCancelled()) return cancelled();
       step = steps.next(region);
+      continue;
+    }
+    if (step.value?.kind === 'writeRegion') {
+      const changed = await working.writeRegionCooperative(step.value.region, { isCancelled, yieldControl });
+      if (changed === null || isCancelled()) return cancelled();
+      step = steps.next(changed);
       continue;
     }
     if (step.value?.kind === 'serialize') {
