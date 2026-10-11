@@ -61,7 +61,7 @@ test('Stage 003: cancelled preview drops remaining native tiles; callbacks and s
   await assert.rejects(forEachSerializedPixelBufferTileCooperative(source,()=>{},{batchTiles:0}),/invalid callbacks/);
 });
 
-function canvasHarness() {
+function canvasHarness({ onEncode = () => {} } = {}) {
   let encoded = 0, rendered = 0;
   return {
     documentRef:{
@@ -73,7 +73,7 @@ function canvasHarness() {
             createImageData:(w,h) => ({data:new Uint8ClampedArray(w*h*4)}),
             putImageData() { rendered++; },
           }),
-          toDataURL() { encoded++; return 'data:image/png;base64,preview'; },
+          toDataURL() { encoded++; onEncode(); return 'data:image/png;base64,preview'; },
         };
       },
     },
@@ -142,4 +142,68 @@ test('Stage 003: completed tiled preview publishes once with original high-depth
   assert.equal(layer.highDepthSource.bitsPerChannel,32);
   assert.equal(layer.highDepthSource.model,'cmyk');
   assert.equal(layer.dataUrl,'data:image/png;base64,preview');
+});
+
+function tiledMutation(layer, editor, owner, options = {}) {
+  return editor.persistTiledHighDepthMutation(owner,layer,({x,y,buffer})=>{
+    if(x||y)return 0;
+    buffer.data[0]=12345;
+    return 1;
+  },options);
+}
+
+test('Stage 003: new same-layer source during cooperative tiled preview cancels before PNG',async()=>{
+  const source=makeSource(),newer=makeSource({model:'cmyk',bitsPerChannel:32});
+  const layer={id:'a',name:'A',type:'raster',locked:false,groupId:null,width:16,height:16,
+    highDepthSource:source,dataUrl:'data:image/png;base64,old',highDepthPreview:null,filters:{}};
+  const owner={width:16,height:16,layers:[layer],groups:[]},harness=canvasHarness();
+  let checkpoints=0;
+  const editor=createRasterEditController({getDocument:()=>owner,documentRef:harness.documentRef,
+    previewYieldControl:async()=>{if(++checkpoints===1){
+      layer.highDepthSource=newer;
+      layer.dataUrl='data:image/png;base64,newer';
+    }},
+  });
+  const result=await tiledMutation(layer,editor,owner);
+  assert.ok(checkpoints>=1);
+  assert.equal(result.applied,false);
+  assert.equal(result.stale,true);
+  assert.equal(result.changed,1);
+  assert.equal(harness.counts().encoded,0);
+  assert.equal(layer.highDepthSource,newer);
+  assert.equal(layer.dataUrl,'data:image/png;base64,newer');
+});
+
+test('Stage 003: source superseded during PNG encoding cannot overwrite newer tiled pixels',async()=>{
+  const source=makeSource(),newer=makeSource({model:'cmyk',bitsPerChannel:32});
+  const layer={id:'a',name:'A',type:'raster',locked:false,groupId:null,width:16,height:16,
+    highDepthSource:source,dataUrl:'data:image/png;base64,old',highDepthPreview:null,filters:{}};
+  const owner={width:16,height:16,layers:[layer],groups:[]};
+  const harness=canvasHarness({onEncode:()=>{layer.highDepthSource=newer;
+    layer.dataUrl='data:image/png;base64,newer';}});
+  const editor=createRasterEditController({getDocument:()=>owner,
+    documentRef:harness.documentRef,previewYieldControl:async()=>{}});
+  const result=await tiledMutation(layer,editor,owner);
+  assert.equal(harness.counts().encoded,1);
+  assert.equal(result.applied,false);
+  assert.equal(result.stale,true);
+  assert.equal(layer.highDepthSource,newer);
+  assert.equal(layer.dataUrl,'data:image/png;base64,newer');
+});
+
+test('Stage 003: revoked continuation abandons unfinished tiled preview without PNG',async()=>{
+  const source=makeSource();
+  const layer={id:'a',name:'A',type:'raster',locked:false,groupId:null,width:16,height:16,
+    highDepthSource:source,dataUrl:'data:image/png;base64,old',highDepthPreview:null,filters:{}};
+  const owner={width:16,height:16,layers:[layer],groups:[]},harness=canvasHarness();
+  let current=true,checkpoints=0;
+  const editor=createRasterEditController({getDocument:()=>owner,documentRef:harness.documentRef,
+    previewYieldControl:async()=>{current=false;checkpoints++;}});
+  const result=await tiledMutation(layer,editor,owner,{isContinuationCurrent:()=>current});
+  assert.ok(checkpoints>=1);
+  assert.equal(result.applied,false);
+  assert.equal(result.stale,true);
+  assert.equal(harness.counts().encoded,0);
+  assert.equal(layer.highDepthSource,source);
+  assert.equal(layer.dataUrl,'data:image/png;base64,old');
 });

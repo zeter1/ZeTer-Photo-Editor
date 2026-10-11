@@ -1,3 +1,9 @@
+## 2026-10-11 — Stage 003 P1: source-safe tiled high-depth mutations (PR + CI pending)
+
+- Native non-inpaint tiled mutation now preserves exact original highDepthSource identity across cooperative preview, PNG encode and atomic publication; source replacement on the same owner/layer cancels superseded work.
+- Caller continuation revocation aborts RGBA8 preview before PNG encoding. Explicit cancellation cannot yield a mutation with null dataUrl. Three regressions cover both cancellation windows and caller revocation.
+- **Next P1:** extremely wide connected ROI without inflated bounding box, browser profiling of preview/Worker/Undo. **P0 002:** independently licensed Photoshop-authored PSD16/PSB32 with pinned hash/provenance and verified Adobe references. Neither 002 nor 003 is complete.
+
 # task — очередь небольших инженерных проходок
 
 ## 2026-10-11 — Stage 003 P1: cooperative RGBA8 tile preview (слито, CI success)

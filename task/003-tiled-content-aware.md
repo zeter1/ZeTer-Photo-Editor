@@ -1,5 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
+## 2026-10-11 — P1: source-safe native tiled preview publication (PR + CI pending)
+
+- `persistTiledHighDepthMutation` now aborts if another edit replaces the source on the same layer during an asynchronous preview. During cooperative tile conversion, it exits before encoding; after PNG completion it revalidates source before publish.
+- Added three independent regressions for replacement during tile processing, replacement in PNG encode, and caller continuation revocation. Tests use synthetic native tiles, not Photoshop-authored files.
+- **Open:** connected oversized ROI, actual licensed Adobe PSD16/PSB32 browser import/Worker/Undo with memory measurements, and browser PNG encoding cannot be forcibly interrupted once started. Keep tasks 002 and 003 open.
+
+
 ## 2026-10-11 — Stage 003 P1: cooperative RGBA8 tile preview (слито, CI success)
 
 - Преобразование каждого native tile в RGBA8 оставлено в исходном precision pipeline; теперь тайлы обрабатываются кооперативно партиями по 2, с checkpoint `isCancelled` до следующей партии.

@@ -389,6 +389,7 @@ export function createRasterEditController({
   async function prepareTiledHighDepthMutation(layer, visitor, {
     requireAlpha = false,
     maxBytes = null,
+    isCancelled = () => false,
   } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
     const byteBudget = maxBytes == null
@@ -408,7 +409,14 @@ export function createRasterEditController({
         mutation:null,
       };
     }
-    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source, { isCancelled });
+    if (dataUrl === null) return {
+      changed:prepared.changed,
+      changedTiles:prepared.changedTiles,
+      promotedAlpha:prepared.promotedAlpha,
+      mutation:null,
+      cancelled:true,
+    };
     return {
       changed:prepared.changed,
       changedTiles:prepared.changedTiles,
@@ -428,15 +436,18 @@ export function createRasterEditController({
     isContinuationCurrent,
   } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
-    const continuationCurrent = () => (
-      typeof isContinuationCurrent !== 'function' || isContinuationCurrent()
+    // Recheck canonical source identity, not just the owning layer object.
+    // A superseded async preview must not overwrite a newer edit on that layer.
+    const originalSource = layer.highDepthSource;
+    const stale = () => (
+      (typeof isContinuationCurrent === 'function' && !isContinuationCurrent()) ||
+      !isCurrentRasterTarget(owner, layer) ||
+      layer.highDepthSource !== originalSource
     );
-    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
-      return { changed:0, changedTiles:0, applied:false, stale:true };
-    }
-    const prepared = await prepareTiledHighDepthMutation(layer, visitor, { requireAlpha });
+    if (stale()) return { changed:0, changedTiles:0, applied:false, stale:true };
+    const prepared = await prepareTiledHighDepthMutation(layer, visitor, { requireAlpha, isCancelled:stale });
     if (!prepared) return null;
-    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
+    if (stale() || prepared.cancelled) {
       return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:false, stale:true };
     }
     if (!prepared.mutation) {
