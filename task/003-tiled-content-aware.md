@@ -1,10 +1,10 @@
 # 003 — Tiled Content-Aware Fill
 
-## 2026-10-11 — Cooperative dirty-tile serialization (в работе)
+## 2026-10-11 — Cooperative dirty-tile serialization (слито, CI success)
 
 - Вместо единственного blocking `working.serialize()` после private ROI новый общий generator передаёт sync-исполнителю обычную сериализацию, а cooperative fallback — `serializeCooperative()`, который отдаёт управление после каждых четырёх изменённых tiles, но не тратит checkpoints на untouched tiles.
 - Успех должен сохранять идентичные bytes/source/counters относительно синхронного пути. Отмена даже после нескольких encoded tile payloads должна вернуть `{cancelled:true,source:original,changed:0,...}` без каких-либо видимых результатов.
-- Scope tests: `tests/tiled-raster-source.test.mjs` и `tests/tiled-inpaint-cooperative.test.mjs`; `npm run check`, browser `file://` smoke и exact main CI gate ожидают проверки.
+- Scope tests: `tests/tiled-raster-source.test.mjs` и `tests/tiled-inpaint-cooperative.test.mjs`. **Gate выполнен:** [PR #175](https://github.com/zeter1/ZeTer-Photo-Editor/pull/175) (squash `11aec98b5958dacbca97d7e7ca47096fc2301823`), [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38121282434) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38121334792) — **success**; `npm run check`, generated parity, Chromium `file://` smoke, profiles и diff hygiene прошли.
 - После проходки остаются крупные задачи: sync tiled `readRegion`/`writeRegion` и preview, wide connected ROI без inflated bbox, браузерный high-depth PSD/PSB corpus с независимой provenance/license/hash и memory profiling. **003 не закрыта.**
 
 ## 2026-10-11 — один большой native ROI: cooperative kernel (слито, CI success)
