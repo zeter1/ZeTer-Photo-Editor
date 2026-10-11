@@ -1,3 +1,9 @@
+## Текущая проходка 008 — большой PSD16 → v2 Worker в Chromium file:// (2026-10-11)
+
+- [008](008-browser-large-psd16-worker.md) — новый тест реального браузерного пути: ZeTer-generated 1025×1025 RGBA16 PSD (>8 MiB) → file input → adaptive tiled v2 → точный Save Project native byte oracle → Worker Content-Aware Fill → preview/Undo/Redo + sampled CDP memory.
+- **Состояние: в проверке**, пока PR, полный CI и точный main CI не зелёные. Это НЕ независимая Photoshop-authored fixture, не PSB32 end-to-end, не доказательство peak RAM и не Stage 003 done.
+- **После 008:** 009 — >8 MiB PSB Float32/CMYK с реальной отменой Worker на UI; затем adaptive dense ROI strip/segment, повторяемые browser/process memory profiles. Stage 002 independent corpus (P0) параллельно.
+
 # Очередь реализации по скриншотам (актуализация 2026-10-11)
 
 Источник статуса — `main` и реальные тестовые доказательства, а не обещание «Photoshop parity».
