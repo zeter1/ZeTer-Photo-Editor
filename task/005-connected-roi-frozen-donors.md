@@ -12,9 +12,13 @@
 - [x] Использовать общий kernel для sync / frozen-index / Worker / cooperative; не сканировать selection predicate повторно.
 - [x] Все изменения приватные до успешной общей сериализации, прежние checkpoint и отмена сохраняются.
 - [x] Добавить RGB16 connected-diagonal parity тесты, actual Node Worker, invalid caps, cancel и прямую проверку запрещённого донора.
-- [ ] `npm run check` и `npm run test:browser` — PASS в PR CI.
-- [ ] Проверить сгенерированный `src/app.bundle.js`, `src/core/tiled-inpaint-worker-source.js`, `index.html`, `version.json` (включая версию).
-- [ ] Проверить diff, merge и exact-main push CI.
+- [x] `npm run check` и `npm run test:browser` — PASS в [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38135146345).
+- [x] Проверены сгенерированные `src/app.bundle.js`, `src/core/tiled-inpaint-worker-source.js`, `index.html`, `version.json` (включая версию 1.46.0).
+- [x] Diff review, [PR #185](https://github.com/zeter1/ZeTer-Photo-Editor/pull/185) merged (squash `1d18f525d62b03eb6734b883e94a8cc5642ca6a1`) и [exact-main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38135223279) — success.
+
+## Статус
+
+Эта малая проходка **завершена**, общие Stage 002 и Stage 003 — **нет**.
 
 ## Ограничения
 
