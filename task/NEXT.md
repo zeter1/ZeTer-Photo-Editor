@@ -1,3 +1,8 @@
+## 010E-B3B / 023 — общий лимит планирования oversized ROI (PR/CI ожидаются)
+
+- [023](023-planner-total-budget.md): общий предел 4 194 304 посещений/probes для повторных fallback планов и bounded run planners; deterministic RangeError до ROI decode; sync/cooperative/Node Worker отказ RGB16 и CMYKA32. **Это предложение, не слитая работа:** CI/PR gate ожидает проверки.
+- **Следом P1 010E-B4:** достоверная browser memory/HWM methodology и operation duration; **P0 002:** независимые лицензированные Adobe-authored high-depth PSD/PSB fixtures. Stage 002/003 остаются открытыми.
+
 ## 010E-B3A / 022 — cooperative oversized-ROI planning checkpoints (merged, exact-main CI success, 2026-10-11)
 
 - [022](022-cooperative-planning-checkpoints.md): 32,768-visit cooperative checkpoints throughout oversized-selection ROI planning, including nested tile-group scans, stripes, frozen donor-bitmaps, region masks; synchronous/Worker order remains deterministic. Two new RGB16 cancellation regressions stop **before any ROI tile reads**, for frozen indices and geometry-scanned fallback.

@@ -1,3 +1,7 @@
+## 2026-10-11 — 010E-B3B: общий предел работы планировщика (предложено, CI ожидается)
+
+- [023](023-planner-total-budget.md): общая учётная граница 4 194 304 visits/probes на full oversized ROI planning, включая резерв на bounded run sorting. Отказ до tile read при превышении, native RGB16/CMYKA32 sync/cooperative/Worker/cancellation регрессии. Stage 003 по-прежнему открыта: browser HWM/latency и внешняя Adobe quality parity ещё не доказаны.
+
 ## 2026-10-11 — 010E-A: complex connected ROI native diagnostic (слито, CI success)
 
 - [018](018-complex-roi-profile.md): two dense islands + connected diagonal, >256 changed tiles, RGB16/CMYKA32 Node Worker native byte parity, atomic ROI budget/cancel, process RSS observations. [PR #199](https://github.com/zeter1/ZeTer-Photo-Editor/pull/199), squash `b8e82e6`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38153857359), [CI точного кодового main SHA success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38154037812). Это baseline для следующего adaptive planner, не Photoshop-authored cross-app golden или browser HWM. Stage 003 остаётся открыта.
