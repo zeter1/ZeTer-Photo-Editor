@@ -5,7 +5,7 @@ import { instrumentBrowserKernelSource } from './browser-inpaint-mid-kernel-smok
 /**
  * 010D, test-only. Reload so the application's lazy Worker controller has NOT
  * cached its supplier. The real editor UI then imports a ZeTer-generated PSD16,
- * starts native tiled fill and locks the live layer after a real kernel write.
+ * starts native tiled fill and switches to another tab after a real kernel write.
  * The instrumentation only changes the in-memory classic Worker supplier in
  * this terminal browser-smoke phase; neither production assets nor app code
  * are patched. Sampled browser memory is not a true peak or isolated Worker RSS.
@@ -116,9 +116,7 @@ export async function verifyBrowserUiLockMidKernel(client, {
       '010D preflight must preserve native PSD16 v2 samples', JSON.stringify(before));
 
 
-    // 010D-B0: keep two real UI document sessions alive during the test.
-    // This stage deliberately verifies the CURRENT safe busy guard. It does
-    // not claim that switching a document while a kernel runs is supported.
+    // 010D-B: keep two real document sessions alive and switch mid-kernel.
     function prepareTabs() {
       const tabs = () => [...document.querySelectorAll('#docTabs .doc-tab')];
       if (tabs().length !== 1) return {error:'Expected isolated single tab',count:tabs().length};
@@ -255,49 +253,29 @@ export async function verifyBrowserUiLockMidKernel(client, {
       '010D must observe native synthesis before revocation', JSON.stringify(first));
     await sampler.snapshot('010d-kernel-write');
 
-    // Real user click on another document DURING the six-second CPU stall.
-    // A raster persistence guard must reject it without stopping the Worker,
-    // redirecting edits, changing History, or corrupting either session.
-    function tryBusyTabSwitch() {
+    // 010D-B: a real click must now activate the second session DURING
+    // the stalled native Worker kernel. Revocation must terminate the Worker,
+    // not publish bytes/History into either document.
+    const switchStarted = Date.now();
+    function switchWhileWorkerRuns() {
       const tabs = [...document.querySelectorAll('#docTabs .doc-tab')];
       tabs[1]?.click();
       return {
-        count:tabs.length,
-        active:tabs.map(tab=>tab.getAttribute('aria-selected')),
-        status:document.querySelector('#statusText')?.textContent,
+        active:[...document.querySelectorAll('#docTabs .doc-tab')].map(tab=>tab.getAttribute('aria-selected')),
         history:[...document.querySelectorAll('#historyList .history-row')].map(r=>r.textContent),
         probe:window.__zpe010d?.probes,
         terminations:window.__zpe010d?.terminations,
       };
     }
-    const guardedSwitch = await evaluate(client,'(' + tryBusyTabSwitch.toString() + ')()');
-    assert(guardedSwitch.count === 2 && guardedSwitch.active.join(',') === 'true,false' &&
-      guardedSwitch.status?.includes('Дождитесь завершения операции') &&
-      guardedSwitch.probe === 1 && guardedSwitch.terminations === 0 &&
-      guardedSwitch.history.every(value=>!value.includes('Контент-заливка')),
-      '010D-B0 mid-kernel tab switch must be safely rejected',JSON.stringify(guardedSwitch));
-    await sampler.snapshot('010d-guarded-mid-kernel-tab-click');
-
-    const lockStarted = Date.now();
-    await evaluate(client,"document.querySelector('.layer-row.selected .layer-lock').click();true");
-    await waitFor('010D CPU-bound Worker stopped by UI layer lock', () => evaluate(client,
-      'window.__zpe010d?.terminations>=1'), 4_500);
-    const lockLatencyMs = Date.now() - lockStarted;
-    await sampler.snapshot('010d-after-stale-worker');
-    const locked = await evaluate(client,'(() => ({state:{...window.__zpe010d},' +
-      'pixel:(' + defectPixel.toString() + ')(),' +
-      'history:[...document.querySelectorAll("#historyList .history-row")].map(r=>r.textContent),' +
-      'lockLabel:document.querySelector(".layer-row.selected .layer-lock")?.getAttribute("aria-label")}))()');
-    assert(locked.state.terminations===1 && locked.state.jobs===1 &&
-      locked.state.firstTerminationAt-locked.state.probeAt < 6000 &&
-      locked.pixel>100 && locked.lockLabel === 'Разблокировать' &&
-      locked.history.every(value=>!value.includes('Контент-заливка')),
-      '010D stale UI lock must stop CPU-bound Worker without pixels or History',JSON.stringify(locked));
-    const afterCancel = await evaluate(client,'(' + readNativeSave.toString() + ')()');
-    assert(JSON.stringify(afterCancel) === JSON.stringify(before),
-      '010D layer lock must preserve native 16-bit samples and tile topology',
-      JSON.stringify({before,afterCancel}));
-
+    const switched = await evaluate(client,'(' + switchWhileWorkerRuns.toString() + ')()');
+    assert(switched.active.join(',') === 'false,true' &&
+      switched.probe === 1 && switched.terminations === 1 &&
+      switched.history.every(value=>!value.includes('Контент-заливка')),
+      '010D-B active tab switch must terminate native Worker and preserve History',
+      JSON.stringify(switched));
+    const switchLatencyMs = Date.now() - switchStarted;
+    assert(switched.terminations === 1, '010D-B must cancel exactly one Worker');
+    await sampler.snapshot('010d-active-mid-kernel-tab-switch');
 
     // Once the stale native job has settled, both real tabs must be usable.
     // Compare a public UI snapshot, not a private editor state singleton.
@@ -340,9 +318,8 @@ export async function verifyBrowserUiLockMidKernel(client, {
       JSON.stringify({before,afterRoundTrip}));
     await sampler.snapshot('010d-two-sessions-preserved');
 
-    await evaluate(client,"document.querySelector('.layer-row.selected .layer-lock').click();true");
     assert(await evaluate(client,'(' + startFill.toString() + ')()'),
-      '010D unlocked successor command must be enabled');
+      '010D-B original tab must permit successor Content-Aware Fill');
     await waitFor('010D successor real Worker and visible preview', () => evaluate(client,
       'window.__zpe010d?.jobs===2 && (' + defectPixel.toString() + ')() < 150'), 60_000);
     const recovered = await evaluate(client,'(() => ({state:{...window.__zpe010d},' +
@@ -358,15 +335,15 @@ export async function verifyBrowserUiLockMidKernel(client, {
       '010D successor must change real 16-bit native samples',JSON.stringify(afterRecovery));
     await sampler.snapshot('010d-successor-committed');
     const memory = await sampler.stop(); stopped=true;
-    console.log('Stage 003 010D real PSD16 UI mid-kernel layer-lock:',JSON.stringify({
+    console.log('Stage 003 010D-B real PSD16 UI active mid-kernel switch:',JSON.stringify({
       source:'ZeTer-generated, NOT independent Adobe reference',
       realWorkerJobs:recovered.state.jobs, kernelWriteProbes:recovered.state.probes,
-      terminations:recovered.state.terminations, lockLatencyMs,
-      unchangedNativeAfterLock:true, midKernelTabSwitchGuarded:true,
+      terminations:recovered.state.terminations, switchLatencyMs,
+      unchangedNativeAfterSwitch:true, midKernelTabSwitchActive:true,
       bothTabsPreservedAfterCancel:true, recoveredHistoryEntries:1,
       memory:{type:'sampled renderer JS heap and optional all-process private memory; not peak RSS',...memory},
     }));
-    return { ok:true, lockLatencyMs, recovered:true };
+    return { ok:true, switchLatencyMs, recovered:true };
   } finally {
     if (!stopped) await sampler.stop().catch(()=>{});
     await evaluate(client,'window.__zpe010dRestore?.();delete window.__zpe010dMeta;true').catch(()=>{});
