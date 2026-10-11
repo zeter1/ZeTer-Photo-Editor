@@ -1,3 +1,9 @@
+## 010E-B3A / 022 — cooperative oversized-ROI planning checkpoints (PR pending, 2026-10-11)
+
+- [022](022-cooperative-planning-checkpoints.md): 32,768-visit cooperative checkpoints throughout oversized-selection ROI planning, including nested tile-group scans, stripes, frozen donor-bitmaps, region masks; synchronous/Worker order remains deterministic. Two new RGB16 cancellation regressions stop **before any ROI tile reads**, for frozen indices and geometry-scanned fallback.
+- **Gate:** branch `feat/010e-b3-planning-checkpoints-20261011`, PR/CI/merge **pending**. Stage 002/003 **not complete**; previous 020/021 are merged.
+- **Next P1 010E-B3B:** strict overall planner visit/probe cap, fragmented worst-case masks and RGB16/CMYKA32 Worker/cooperative parity; then browser operation-wide peak-memory method and timing. **P0 002:** licensed independent Photoshop-authored high-depth oracle.
+
 ## 010E-B2 / 021 — connected horizontal-run bands (merged, exact-main CI green, 2026-10-11)
 
 - [021](021-connected-run-bands.md): additional bounded 8-connected run-band fallback for parallel/forked selections B1 cannot group, limits 65,536 indices / 4,096 runs / 32,768 adjacency probes / 256 regions / 8 rows, RGB16 + CMYKA32 native byte and Worker/cancel parity.
