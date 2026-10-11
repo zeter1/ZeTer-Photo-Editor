@@ -1,13 +1,13 @@
-## 010D-B — active Content-Aware Worker cancellation on tab switch (PR, 2026-10-11)
+## 010D-B — active Content-Aware Worker cancellation on tab switch (слито, CI success, 2026-10-11)
 
 - [015](015-active-session-worker-cancel.md): scoped persistence leases, explicit CPU-bound Worker revocation, stale continuation/history/status/brush guard, valid destination only. Other edits still protected by existing busy guard.
-- Added Node delayed Worker reply regression and real Chromium `file://` PSD16 active mid-kernel switch → byte/History preservation → successor Fill. **PR/CI and main merge must be verified before marking passed.**
+- Added Node delayed Worker reply regression and real Chromium `file://` PSD16 active mid-kernel switch → byte/History preservation → successor Fill. **[PR #195](https://github.com/zeter1/ZeTer-Photo-Editor/pull/195) merged** (`edabef3d`), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150109876), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150190339).
 - **Remaining P1:** PSB32 Float32 browser active-switch regression, Undo/Redo two-document oracle, 010E complex dense ROI and true memory peak. P0 [002](002-psd-compatibility-corpus.md) independent licensed Adobe Photoshop-authored high-depth corpus remains open. Stage 002/003 NOT complete.
 
 ## 010D-B0 — guarded two-session Chromium UI mid-kernel regression (слито, CI success, 2026-10-11)
 
 - [014](014-browser-session-guard-mid-kernel.md): расширенная реальная Chromium `file://` 010D проверка двух вкладок с PSD16; mid-kernel клик по другой вкладке обязан быть **отклонён** пока `paintPersisting`, затем после блокировки слоя/отмены Worker переключение в обе стороны сохраняет native bytes/History второй сессии и успешный повторный Fill в первой. Только test-only instrumentation, production bundle не меняется.
-- **010D-B ещё НЕ выполнена:** разрешённая *активная* смена сессии во время ядра требует per-job persistence authority, отмены Worker и безопасной очистки устаревшего `finally`; затем полноценный PSB32 browser regression.
+- **Историческое состояние именно 010D-B0:** тогда активная смена сессии ещё не поддерживалась. Теперь реализована в [015](015-active-session-worker-cancel.md) / PR #195; PSB32 browser regression остаётся открытым.
 - **Gate:** [PR #194](https://github.com/zeter1/ZeTer-Photo-Editor/pull/194) слит в `main` (`7d82588d721171cd8746b71d238db5588fb273bf`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38149023595), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38149125350): Node, generated artifacts, Chromium `file://`, profiles, diff hygiene.
 
 ## 010D-A — Chromium file:// UI layer-lock mid-kernel (слито, CI success, 2026-10-11)

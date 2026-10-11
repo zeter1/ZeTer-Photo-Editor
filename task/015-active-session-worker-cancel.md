@@ -1,6 +1,6 @@
 # 010D-B — active native Worker cancellation on document-tab switch
 
-**Статус: реализовано в ветке; PR, CI и merge подлежат проверке.** Продолжает [014](014-browser-session-guard-mid-kernel.md).
+**Статус: слито в `main` (2026-10-11).** [PR #195](https://github.com/zeter1/ZeTer-Photo-Editor/pull/195), squash `edabef3dcd313310a0af8aa6fa05db97b60e6ee4`. [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150109876), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150190339): Node, generated parity, Chromium `file://`, profiles, diff hygiene. Продолжает [014](014-browser-session-guard-mid-kernel.md).
 
 ## Реализация
 
@@ -14,8 +14,8 @@
 
 - [x] Production source изменения + regenerated `src/app.bundle.js`, `index.html`, `version.json`.
 - [x] Автоматические Node-regressions и real Chromium `file://` smoke оформлены.
-- [ ] Получить зелёные Node, generated parity, browser, profiles и diff-hygiene CI в PR.
-- [ ] Merge в `main` и отдельный exact-main CI.
+- [x] [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150109876): Node, generated parity, Chromium `file://`, profiles, diff hygiene.
+- [x] Merge в `main` (`edabef3d`) и [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150190339).
 - [ ] PSB32 Float32 dual-session mid-kernel active-switch reference test (эта проходка пока использует ZeTer-generated PSD16, не независимый Adobe golden).
 
 ## Далее

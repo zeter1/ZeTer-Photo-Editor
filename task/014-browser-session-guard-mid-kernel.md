@@ -1,3 +1,5 @@
+> Историческая проверка B0: guarded busy-tab switch был правильным *на момент PR #194*. В проходке [015](015-active-session-worker-cancel.md) этот guard безопасно заменён на активную отмену Content-Aware Worker при переключении. PSB32 mid-kernel browser regression ещё в очереди.
+
 # 014 / Stage 003 / 010D-B0 — browser session-guard mid native Worker kernel
 
 Status: **merged to `main`** via [PR #194](https://github.com/zeter1/ZeTer-Photo-Editor/pull/194), squash `7d82588d721171cd8746b71d238db5588fb273bf`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38149023595), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38149125350). **Not** 010D-B active session switching. This is a bounded regression strengthening 010D-A before changing the production persistence authority contract.
