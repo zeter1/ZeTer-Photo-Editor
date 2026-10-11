@@ -313,3 +313,34 @@ test('010E memory: separate RSS and privateMemory snapshots, then explicit unava
   assert.equal(failed.linuxProcessRss.sampledMaxAggregateRssBytes, null);
   assert.equal(failed.chromiumProcesses.availability, 'sampled');
 });
+
+test('010E memory: RSS continues when CDP omits privateMemory but reports valid PIDs', async () => {
+  let calls = 0;
+  const pageClient = {async send(method) {
+    if (method === 'Performance.enable') return {};
+    return {metrics:[{name:'JSHeapUsedSize',value:10},{name:'JSHeapTotalSize',value:20}]};
+  }};
+  const processClient = {async send(method) {
+    assert.equal(method,'SystemInfo.getProcessInfo');
+    calls += 1;
+    return {processInfo:[{id:101,type:'browser'},{id:102,type:'renderer'}]};
+  }};
+  const sampler = createBrowserRendererHeapSampler(pageClient,{
+    processClient,
+    processRssSampler:async (processes) => ({
+      supported:true,processCount:processes.length,
+      aggregateRssBytes:1000+calls*100, largestProcessHighWaterBytes:800,
+    }),
+    schedule:()=>1,unschedule:()=>{},
+  });
+  await sampler.start();
+  await sampler.snapshot('worker');
+  const result = await sampler.stop();
+  assert.equal(calls,3,'PID collection must continue for Linux RSS');
+  assert.equal(result.chromiumProcesses.availability,'unavailable');
+  assert.match(result.chromiumProcesses.unavailableReason,/privateMemory/);
+  assert.equal(result.linuxProcessRss.availability,'sampled');
+  assert.equal(result.linuxProcessRss.sampleCount,3);
+  assert.equal(result.linuxProcessRss.sampledMaxAggregateRssBytes,1300);
+  assert.equal(result.linuxProcessRss.sampledIncreaseBytes,200);
+});
