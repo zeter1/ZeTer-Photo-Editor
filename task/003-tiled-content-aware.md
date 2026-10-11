@@ -1,8 +1,8 @@
-## 2026-10-11 — P1: synthetic RGB16/CMYKA32 native Worker byte/memory diagnostic (PR в работе)
+## 2026-10-11 — P1: synthetic RGB16/CMYKA32 native Worker byte/memory diagnostic (слито, CI success)
 
 - Добавлены `tools/profile-native-worker-integrity.mjs`, отдельный regression `tests/native-worker-byte-integrity-profile.test.mjs`, CI informational 8 MiB и [короткий checklist](004-native-worker-byte-integrity-profile.md).
 - Два native режима, one-shot frozen scan, Worker round-trip и synchronous oracle сравнивают точные native tile payloads и immutable input; каждый профиль изолирован отдельным процессом и пишет JSON snapshots времени/памяти без ложных peak/speed thresholds.
-- **Не закрыто:** PR/main green CI, широкий connected ROI, настоящий Chromium `file://` PSD16/PSB32 → Worker → Undo/Redo и независимые Adobe Photoshop high-depth files/reference render. Это Node synthetic diagnostic, НЕ Photoshop pixel parity.
+- **Gate пройден:** [PR #184](https://github.com/zeter1/ZeTer-Photo-Editor/pull/184) слит в `main` (`28ec5de2dbdd38e2782a8d5bc864a9dbdc0db5d2`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38133313481) и [точный `main` CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38133376298) — **success** (Node, Chromium `file://`, generated parity, 8 MiB diagnostics, diff hygiene). **Не закрыто:** широкий connected ROI, настоящий Chromium `file://` PSD16/PSB32 → Worker → Undo/Redo и независимые Adobe Photoshop high-depth files/reference render. Это Node synthetic diagnostic, НЕ Photoshop pixel parity.
 
 ## 2026-10-11 — P1: native source + Worker changed-pixel byte integrity ([PR #183](https://github.com/zeter1/ZeTer-Photo-Editor/pull/183), merged)
 
