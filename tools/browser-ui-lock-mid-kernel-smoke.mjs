@@ -373,6 +373,55 @@ export async function verifyBrowserUiLockMidKernel(client, {
     }) === JSON.stringify(secondUiBaseline),
       '010D second tab content/history must survive cancelled native job',
       JSON.stringify({before:secondUiBaseline,after:secondSession}));
+    if (secondFixture) {
+      await evaluate(client,'window.__zpe010dMeta=' + JSON.stringify(secondMetadata) + ';true');
+      const unchanged = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+      assert(JSON.stringify(unchanged) === JSON.stringify(secondNativeBefore),
+        '010D-D cancelled first Worker must not touch second native bytes',
+        JSON.stringify({secondNativeBefore,unchanged}));
+      // Complete a second, independent Worker transaction in the destination
+      // native session, including native-word Undo/Redo before returning.
+      const secondView = await evaluate(client,'(' + setupMarquee.toString() + ')()');
+      assert(secondView.visible && secondView.hit === 'overlayCanvas',
+        '010D-D second native selection must use real overlay',JSON.stringify(secondView));
+      await mouse('mouseMoved',secondView.start,0);
+      await mouse('mousePressed',secondView.start,1);
+      await mouse('mouseMoved',secondView.end,1);
+      await mouse('mouseReleased',secondView.end,0);
+      assert(await evaluate(client,'(' + startFill.toString() + ')()'),
+        '010D-D second high-depth tab must launch its own Worker Fill');
+      await waitFor('010D-D second native Worker finishes', () => evaluate(client,
+        "window.__zpe010d?.jobs===2 && window.__zpe010d?.probes===2 && [...document.querySelectorAll('#historyList .history-row')].filter(r=>r.textContent.includes('Контент-заливка')).length===1"), 90_000);
+      const edited = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+      assert(edited.tiles === secondNativeBefore.tiles &&
+        JSON.stringify(edited.normal?.words) === JSON.stringify(secondNativeBefore.normal?.words) &&
+        JSON.stringify(edited.damaged?.words) !== JSON.stringify(secondNativeBefore.damaged?.words),
+        '010D-D second Worker must commit only second selected native samples',
+        JSON.stringify({secondNativeBefore,edited}));
+      const secondDonorPreview = await evaluate(client,
+        "document.querySelector('#editorCanvas').getContext('2d').getImageData(0,0,1,1).data[0]");
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('010D-D second native Undo preview', () => evaluate(client,
+        '(' + defectPixel.toString() + ')() > ' + (secondDonorPreview + 20)), 30_000);
+      const undone = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+      assert(JSON.stringify(undone) === JSON.stringify(secondNativeBefore),
+        '010D-D second native Undo restores exact source Float32 words',
+        JSON.stringify({secondNativeBefore,undone}));
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('010D-D second native Redo preview', () => evaluate(client,
+        '(' + defectPixel.toString() + ')() < ' + (secondDonorPreview + 20)), 30_000);
+      secondAfterRedo = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+      assert(JSON.stringify(secondAfterRedo) === JSON.stringify(edited),
+        '010D-D second native Redo restores exact committed words',
+        JSON.stringify({edited,secondAfterRedo}));
+      const secondDone = await evaluate(client,'(' + selectSecondTab.toString() + ')()');
+      secondEditedSnapshot = {
+        title:secondDone.title,dimensions:secondDone.dimensions,
+        history:secondDone.history,layerNames:secondDone.layerNames,
+      };
+      await sampler.snapshot('010d-d-second-worker-native-undo-redo');
+      await evaluate(client,'window.__zpe010dMeta=' + JSON.stringify(metadata) + ';true');
+    }
     function selectFirstTab() {
       const tabs = [...document.querySelectorAll('#docTabs .doc-tab')];
       tabs[0]?.click();
@@ -398,8 +447,9 @@ export async function verifyBrowserUiLockMidKernel(client, {
     const recovered = await evaluate(client,'(() => ({state:{...window.__zpe010d},' +
       'pixel:(' + defectPixel.toString() + ')(),' +
       'history:[...document.querySelectorAll("#historyList .history-row")].map(r=>r.textContent)}))()');
-    assert(recovered.state.jobs===2 && recovered.state.probes===2 &&
-      recovered.state.terminations===2 && recovered.pixel<150 &&
+    const expectedJobs = secondFixture ? 3 : 2;
+    assert(recovered.state.jobs===expectedJobs && recovered.state.probes===expectedJobs &&
+      recovered.state.terminations===expectedJobs && recovered.pixel<150 &&
       recovered.history.filter(value=>value.includes('Контент-заливка')).length===1,
       '010D successor must publish exactly one visible edit and History entry',JSON.stringify(recovered));
     const afterRecovery = await evaluate(client,'(' + readNativeSave.toString() + ')()');
@@ -432,9 +482,17 @@ export async function verifyBrowserUiLockMidKernel(client, {
     assert(JSON.stringify({
       title:otherAfterRedo.title,dimensions:otherAfterRedo.dimensions,
       history:otherAfterRedo.history,layerNames:otherAfterRedo.layerNames,
-    }) === JSON.stringify(tabSetup.second),
+    }) === JSON.stringify(secondEditedSnapshot || secondUiBaseline),
       '010D second session must survive original document Undo/Redo',
       JSON.stringify({format,otherAfterRedo}));
+    if (secondFixture) {
+      await evaluate(client,'window.__zpe010dMeta=' + JSON.stringify(secondMetadata) + ';true');
+      const secondFinal = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+      assert(JSON.stringify(secondFinal) === JSON.stringify(secondAfterRedo),
+        '010D-D first document Undo/Redo cannot change second PSB32 native words',
+        JSON.stringify({secondAfterRedo,secondFinal}));
+      await evaluate(client,'window.__zpe010dMeta=' + JSON.stringify(metadata) + ';true');
+    }
     await evaluate(client,'(' + selectFirstTab.toString() + ')()');
     const afterHistorySwitch = await evaluate(client,'(' + readNativeSave.toString() + ')()');
     assert(JSON.stringify(afterHistorySwitch) === JSON.stringify(afterRecovery),
@@ -446,13 +504,14 @@ export async function verifyBrowserUiLockMidKernel(client, {
       source:'ZeTer-generated, NOT independent Adobe reference',
       fixtureKey,bitsPerChannel:fixture.bitsPerChannel,rawBytes:before.rawBytes,
       nativeUndoRedoWordParity:true,secondSessionPreservedAfterHistory:true,
+      independentSecondNativePsb32:Boolean(secondFixture),secondNativeWorkerWordParity:Boolean(secondAfterRedo),
       realWorkerJobs:recovered.state.jobs, kernelWriteProbes:recovered.state.probes,
       terminations:recovered.state.terminations, switchLatencyMs,
       unchangedNativeAfterSwitch:true, midKernelTabSwitchActive:true,
       bothTabsPreservedAfterCancel:true, recoveredHistoryEntries:1,
       memory:{type:'sampled renderer JS heap and optional all-process private memory; not peak RSS',...memory},
     }));
-    return { ok:true, switchLatencyMs, recovered:true };
+    return { ok:true, switchLatencyMs, recovered:true, independentSecondNative:Boolean(secondFixture) };
   } finally {
     if (!stopped) await sampler.stop().catch(()=>{});
     await evaluate(client,'window.__zpe010dRestore?.();delete window.__zpe010dMeta;true').catch(()=>{});
