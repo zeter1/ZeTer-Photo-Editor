@@ -1,5 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
+## 2026-10-11 — Cooperative dirty-tile serialization (в работе)
+
+- Вместо единственного blocking `working.serialize()` после private ROI новый общий generator передаёт sync-исполнителю обычную сериализацию, а cooperative fallback — `serializeCooperative()`, который отдаёт управление после каждых четырёх изменённых tiles, но не тратит checkpoints на untouched tiles.
+- Успех должен сохранять идентичные bytes/source/counters относительно синхронного пути. Отмена даже после нескольких encoded tile payloads должна вернуть `{cancelled:true,source:original,changed:0,...}` без каких-либо видимых результатов.
+- Scope tests: `tests/tiled-raster-source.test.mjs` и `tests/tiled-inpaint-cooperative.test.mjs`; `npm run check`, browser `file://` smoke и exact main CI gate ожидают проверки.
+- После проходки остаются крупные задачи: sync tiled `readRegion`/`writeRegion` и preview, wide connected ROI без inflated bbox, браузерный high-depth PSD/PSB corpus с независимой provenance/license/hash и memory profiling. **003 не закрыта.**
+
 ## 2026-10-11 — один большой native ROI: cooperative kernel (слито, CI success)
 
 - Новая общая пошаговая реализация ядра поддерживает и прежнее синхронное вычисление, и cooperative исполнение с `yieldControl`/`isCancelled`. Выдача управления происходит внутри одного ROI при обходе маски, очереди граничного заполнения и PatchMatch; отмена возвращает исходный immutable source, а не частичный результат.
