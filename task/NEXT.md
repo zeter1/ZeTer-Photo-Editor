@@ -1,7 +1,7 @@
-## 010E-B2 / 021 — connected horizontal-run bands (merged, PR CI green, 2026-10-11)
+## 010E-B2 / 021 — connected horizontal-run bands (merged, exact-main CI green, 2026-10-11)
 
 - [021](021-connected-run-bands.md): additional bounded 8-connected run-band fallback for parallel/forked selections B1 cannot group, limits 65,536 indices / 4,096 runs / 32,768 adjacency probes / 256 regions / 8 rows, RGB16 + CMYKA32 native byte and Worker/cancel parity.
-- **Merged:** [PR #202](https://github.com/zeter1/ZeTer-Photo-Editor/pull/202), squash `656e39f3`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158700018). Exact-main CI must be checked separately. **Next:** 010E-B3 planning-time cooperative chunking and timing under adversarial masks; browser operation-wide peak memory method; P0 licensed Photoshop-authored high-depth corpus. Stage 002/003 still open.
+- **Merged:** [PR #202](https://github.com/zeter1/ZeTer-Photo-Editor/pull/202), squash `656e39f3`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158700018). Exact code SHA `656e39f3` [exact-main code push CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158971996). **Next:** 010E-B3 planning-time cooperative chunking and timing under adversarial masks; browser operation-wide peak memory method; P0 licensed Photoshop-authored high-depth corpus. Stage 002/003 still open.
 
 ## 010E-B1 / 020 — adaptive bounded horizontal runs (merged, PR CI success, 2026-10-11)
 

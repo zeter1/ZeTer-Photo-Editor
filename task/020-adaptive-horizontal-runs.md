@@ -1,6 +1,6 @@
 # 020 / 010E-B1 — bounded adaptive horizontal-run ROI planner
 
-**Status:** merged in `main` via [PR #201](https://github.com/zeter1/ZeTer-Photo-Editor/pull/201), squash `5c3de98b`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38157871061) (2026-10-11). Exact-main CI after merge is tracked separately.
+**Status:** merged in `main` via [PR #201](https://github.com/zeter1/ZeTer-Photo-Editor/pull/201), squash `5c3de98b`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38157871061) (2026-10-11). [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158027100) on docs-backed main SHA `caf6c6c1`.
 
 ## Goal / why now
 The fixed 32/64/128/256px stripe planner and per-tile fragments reject some thin connected diagonal selections despite a small selected-pixel count. Add a deterministic, memory-bounded run grouping fallback without relaxing the aggregate private working-area budget or exposing partially filled tiles.
@@ -13,7 +13,7 @@ The fixed 32/64/128/256px stripe planner and per-tile fragments reject some thin
 - [x] New RGB16 / CMYKA32 regression for 256px diagonal, reverse-order input, full native-pixel oracle, Worker parity, cancellation, budget refusal, pathological checkerboard.
 - [x] CI `npm run check`, `npm run test:browser`, generated artifacts verification, informational profiles and diff hygiene — success, [run #38157871061](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38157871061).
 - [x] Merge to main: PR #201, squash `5c3de98b`.
-- [ ] Check exact-main push CI after merge, independently of PR CI.
+- [x] Exact-main push CI success on `caf6c6c1`, [run #38158027100](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158027100).
 
 ## Remaining / follow-up
 - 010E-B2: more general connected clusters + worst-case fragmentation caps beyond the 8-row run-band fallback; measure planning time on adversarial masks and large native PSD/PSB.

@@ -1,6 +1,6 @@
 # 021 / 010E-B2 — bounded connected horizontal-run bands
 
-**Status:** merged into `main` via [PR #202](https://github.com/zeter1/ZeTer-Photo-Editor/pull/202), squash `656e39f3`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158700018) (2026-10-11). Exact-main push CI tracked separately. Stage 003 remains open.
+**Status:** merged into `main` via [PR #202](https://github.com/zeter1/ZeTer-Photo-Editor/pull/202), squash `656e39f3`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158700018) (2026-10-11). Exact main code SHA `656e39f3` [exact-main code push CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158971996). Stage 003 remains open.
 
 ## Motivation
 
@@ -15,7 +15,7 @@
 - [x] Adversarial checkerboard refusal contract.
 - [x] PR CI `npm run check`, Chromium `file://`, generated artifacts, profiles + diff hygiene — all success, [run #38158700018](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158700018).
 - [x] Merge [PR #202](https://github.com/zeter1/ZeTer-Photo-Editor/pull/202), squash `656e39f3`.
-- [ ] Verify exact-main push CI independently of PR CI before calling the gate complete.
+- [x] Independent exact-code `main` push CI success on `656e39f3`: [run #38158971996](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38158971996), all checks including Chromium and profiles green.
 
 ## Known limits / next passes
 
