@@ -1,8 +1,9 @@
-## 2026-10-11 — Stage 003 P1: валидация результата detached Worker (PR / CI ожидаются)
+## 2026-10-11 — Stage 003 P1: валидация результата detached Worker (слито, CI success)
 
 - Валидация reply перед native preview: целочисленные counters, полнота frozen selection, модель/глубина/alpha/colorSpace, tile topology, точная численность изменённых payloads и запрет любых изменений donor tiles вне выделения.
 - tests/tiled-inpaint-ui-dispatch.test.mjs: набор повреждённых ответов Worker; отказ без повторного запуска fallback и без изменения immutable source. Это не пиксельная проверка изменений внутри выбранного tile и не внешний Adobe golden.
-- **Дальше P1:** широкие связанные ROI, профилирование памяти/латентности file:// на лицензированных Photoshop-authored PSD16/PSB32. **P0 002:** доказуемые внешние high-depth fixtures. До успешного PR CI, merge и точного main CI данный подэтап не помечать закрытым; задачи 002/003 остаются открытыми.
+- **Gate выполнен:** [PR #181](https://github.com/zeter1/ZeTer-Photo-Editor/pull/181) слит в main (squash `2e434a74193fcc2d3af3ab8c4886fc1eea83fef8`). [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38127890689) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38127939781) — **success**: 1134 Node tests, bundle parity, Chromium file://, два informational профиля и diff hygiene.
+- **Очередь:** P1 — безопасная стратегия широких connected ROI без огромного bounding rectangle, с тестами cancel/precision и честным лимитом памяти. P0 002 — independently Photoshop-authored PSD16 + PSB32 с проверяемыми license/provenance/SHA-256. Затем end-to-end file:// UI Worker → Preview → Undo/Redo + sampled renderer/process RAM. Общие 002/003 не закрыты.
 
 ## 2026-10-11 — Stage 003 P1: source-safe tiled high-depth mutations (слито, CI success)
 

@@ -1,8 +1,9 @@
-## 2026-10-11 — P1: fail-closed result integrity при UI Worker handoff (PR / CI ожидаются)
+## 2026-10-11 — P1: fail-closed result integrity при UI Worker handoff (слито, CI success)
 
 - src/painting/tiled-inpaint-dispatch.js сверяет detached reply с frozen selectedIndices и канонической native tile topology: counters, depth/model/alpha/profile, координаты и точный подсчёт изменённых tile payloads. Изменять tile без выделенных пикселей запрещено. Некорректный reply не попадает в preview, не запускает fallback и не публикует историю.
 - Тест: negative matrix повреждённых Worker replies и сохранность исходного CMYKA Float32 source. Обработка корректного результата покрывается существующим parity test.
-- **Ограничение:** не выполняется дорогое побайтовое сравнение выбранных пикселей внутри изменённого tile и не подтверждается Photoshop/Adobe parity. Остаются wide connected ROI, browser perf/Undo/RAM и лицензированные PSD16/PSB32. До PR merge/main CI это только кандидат на подэтап.
+- **Gate выполнен:** [PR #181](https://github.com/zeter1/ZeTer-Photo-Editor/pull/181) слит в main (`2e434a74193fcc2d3af3ab8c4886fc1eea83fef8`). [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38127890689), [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38127939781) — success: Node, browser file://, generated artifacts, profiles, diff hygiene.
+- **Ограничение:** нет дорогостоящего сравнения всех изменённых пикселей внутри выбранного tile; нет Adobe pixel golden. **Следующая проходка:** wide connected ROI без большого global bbox (раздельные immutable donors, atomic commit, precision parity и cancel). Отдельный P0: лицензированные Photoshop-authored PSD16/PSB32 и UI memory/Undo. Обе общие задачи остаются открытыми.
 
 # 003 — Tiled Content-Aware Fill
 
