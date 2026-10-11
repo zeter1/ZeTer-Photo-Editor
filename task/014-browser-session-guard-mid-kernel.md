@@ -1,6 +1,6 @@
 # 014 / Stage 003 / 010D-B0 — browser session-guard mid native Worker kernel
 
-Status: implementation in PR; **not** 010D-B active session switching. This is a bounded regression strengthening 010D-A before changing the production persistence authority contract.
+Status: **merged to `main`** via [PR #194](https://github.com/zeter1/ZeTer-Photo-Editor/pull/194), squash `7d82588d721171cd8746b71d238db5588fb273bf`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38149023595), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38149125350). **Not** 010D-B active session switching. This is a bounded regression strengthening 010D-A before changing the production persistence authority contract.
 
 ## Scope
 
@@ -14,8 +14,8 @@ Status: implementation in PR; **not** 010D-B active session switching. This is a
 ## Acceptance
 
 - [x] Add browser test code to `tools/browser-ui-lock-mid-kernel-smoke.mjs` (existing final isolated smoke scenario).
-- [ ] Verify `npm run test:browser` in Chrome CI on the proposed commit.
-- [ ] Verify generated parity, Node suite and CI on the exact merged `main` SHA.
+- [x] Verify Chromium `file://` smoke in PR CI (two tabs, guarded switch, native sample fidelity, successful successor).
+- [x] Verify generated parity, Node suite, Chromium, profiles and diff hygiene on the exact merged `main` SHA (`7d82588d`).
 - [ ] TRUE **010D-B**: safely allow *active* tab/session switch during the kernel by explicitly revoking the pending edit and making persistence ownership per-operation (do not clear a newer tab's persist guard in a stale `finally`). Test PSB32 and dual-session byte/history consistency.
 - [ ] 010E bounded dense ROI, independent Adobe PSD16/PSB32 corpus and production high-water-mark memory remain separate.
 
