@@ -2008,6 +2008,69 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
 
     let planned = groups?.length > 1 ? planRegions(groups) : null;
     if (!planned) planned = planRegions(makeFragments());
+
+    // Dense islands can exceed the aggregate halo budget with per-tile
+    // fragments even though their filled pixels fit comfortably. Try bounded
+    // horizontal strips, optionally split into fixed-width segments. A first
+    // pass computes only group extents (not copies of millions of indices);
+    // allocate the group index lists only for the winning plan.
+    if (!planned) {
+      let best = null;
+      const segmentWidths = [...new Set([128, 256, width].map(value => Math.min(width, value)))];
+      for (const stripHeight of [32, 64, 128, 256]) {
+        for (const segmentWidth of segmentWidths) {
+          const segments = Math.ceil(width / segmentWidth);
+          const candidates = new Map();
+          let tooMany = false;
+          for (const index of selectedIndices) {
+            const y = Math.floor(index / width), x = index - y * width;
+            const key = Math.floor(y / stripHeight) * segments + Math.floor(x / segmentWidth);
+            let group = candidates.get(key);
+            if (!group) {
+              if (candidates.size >= 256) { tooMany = true; break; }
+              group = { key, minX:x, maxX:x, minY:y, maxY:y };
+              candidates.set(key, group);
+            } else {
+              group.minX = Math.min(group.minX, x);
+              group.maxX = Math.max(group.maxX, x);
+              group.minY = Math.min(group.minY, y);
+              group.maxY = Math.max(group.maxY, y);
+            }
+          }
+          if (tooMany) continue;
+          let totalArea = 0;
+          for (const group of candidates.values()) {
+            group.bounds = {
+              left:Math.max(0, group.minX - padding),
+              top:Math.max(0, group.minY - padding),
+              right:Math.min(width, group.maxX + 1 + padding),
+              bottom:Math.min(height, group.maxY + 1 + padding),
+            };
+            totalArea += (group.bounds.right - group.bounds.left) *
+              (group.bounds.bottom - group.bounds.top);
+            if (totalArea > maxLayerPixels) break;
+          }
+          if (totalArea > maxLayerPixels) continue;
+          if (!best || totalArea < best.area ||
+              (totalArea === best.area && candidates.size < best.groups.size)) {
+            best = { area:totalArea, groups:candidates, stripHeight, segmentWidth, segments };
+          }
+        }
+      }
+      if (best) {
+        // Stripe keys are geometric, so input index ordering cannot affect
+        // region execution order. Original-selection donors remain globally
+        // excluded by selectionBits in the common region executor below.
+        planned = [...best.groups.values()].sort((a, b) => a.key - b.key);
+        for (const group of planned) group.indices = [];
+        for (const index of selectedIndices) {
+          const y = Math.floor(index / width), x = index - y * width;
+          const key = Math.floor(y / best.stripHeight) * best.segments +
+            Math.floor(x / best.segmentWidth);
+          best.groups.get(key).indices.push(index);
+        }
+      }
+    }
     if (!planned) {
       if (groups?.length === 1) throw oversized();
       throw new RangeError('Контент-заливка: сумма рабочих областей превышает безопасный лимит ' + maxLayerPixels + ' px');
