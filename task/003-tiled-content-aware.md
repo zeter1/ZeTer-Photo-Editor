@@ -1,3 +1,10 @@
+## 2026-10-11 — P1: bounded connected ROI with frozen donor bitmap (слито, CI success)
+
+- Реализован резервный план halo-overlapping фрагментов по занятым tile cells для разреженных широких связных выделений, которым раньше не хватало бюджета global bounding ROI. Выбранные original pixels глобально исключены из доноров и PatchMatch-контекста, даже после заполнения соседних private ROI.
+- `tests/tiled-inpaint-connected-roi.test.mjs`: Uint16 RGB диагональ, native sync/Node Worker/cooperative parity, bounded area refusal, cancellation без публикации, проверка запрета соседнего source donor.
+- **Gate:** [PR #185](https://github.com/zeter1/ZeTer-Photo-Editor/pull/185) merged (squash `1d18f525d62b03eb6734b883e94a8cc5642ca6a1`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38135146345), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38135223279).
+- **Ограничения:** <=256 занятых tile cells, 8 MP aggregate ROI cap, no Photoshop-authored external high-depth pixel golden, no browser PSD/PSB Worker/preview/Undo/RAM end-to-end. Stage 003 и 002 **не закрыты**. Очередь: [NEXT.md](NEXT.md).
+
 ## 2026-10-11 — P1: synthetic RGB16/CMYKA32 native Worker byte/memory diagnostic (слито, CI success)
 
 - Добавлены `tools/profile-native-worker-integrity.mjs`, отдельный regression `tests/native-worker-byte-integrity-profile.test.mjs`, CI informational 8 MiB и [короткий checklist](004-native-worker-byte-integrity-profile.md).
