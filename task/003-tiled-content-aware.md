@@ -1,8 +1,9 @@
-## 2026-10-11 — P1: >256 occupied tile bounded fallback (PR в проверке)
+## 2026-10-11 — P1: >256 occupied tile bounded fallback (слито, CI success)
 
 - [006](006-many-tile-bounded-fragments.md): убран искусственный 256-cell отказ в large sparse selection, при этом старый group-merge ограничен 256 cells для контроля алгоритмической сложности; более широкий случай обрабатывается ограниченными независимыми cells.
 - Global frozen donor-exclusion, aggregate ROI budget, private atomic writes и cooperative cancel сохранены. Новые RGB16 / Float32 CMYKA регрессии на 512 tiles, а также Worker parity / cap / cancel.
-- **Ещё не завершено:** CI/merge и exact-main verification; адаптивный dense segmentation, file:// PSD16/PSB32 end-to-end, браузерный peak memory, Adobe authored high-depth corpus и cross-app pixel parity.
+- **Gate:** [PR #186](https://github.com/zeter1/ZeTer-Photo-Editor/pull/186) слит (`6204003f26f43b3babfa370508565f6ea86225e9`), [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38136465952) и [точный main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38136526958) — **success**.
+- **Ещё не завершено:** adaptive dense segmentation, file:// PSD16/PSB32 end-to-end, браузерный peak memory, Adobe authored high-depth corpus и cross-app pixel parity.
 
 ## 2026-10-11 — P1: bounded connected ROI with frozen donor bitmap (слито, CI success)
 

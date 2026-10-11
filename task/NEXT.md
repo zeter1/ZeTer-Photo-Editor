@@ -29,11 +29,11 @@
 - **Gate пройден:** [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38135146345) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38135223279) — **success** (Node, Chromium `file://`, generated bundle/Worker parity, профили, diff hygiene).
 - **Открыто:** максимальное число 256 occupied tiles; связные плотные выделения/суммарный ROI свыше 8 MP отклоняются; нет browser end-to-end PSD16/PSB32 → UI Worker → preview → Undo/Redo/RAM или независимых Adobe pixel-goldens. Вся Stage 003 и Stage 002 остаются открытыми.
 
-## В работе — проходка 006, >256 occupied native tiles
+## Завершённая проходка 006 — >256 occupied native tiles (2026-10-11)
 
 - [006](006-many-tile-bounded-fragments.md): снят прежний жёсткий отказ на 256 tile cells; для больших разреженных выделений включён безопасный per-cell fragment plan с global frozen donor exclusion и проверкой суммарного ROI бюджета.
 - Добавлены отдельные regression fixtures RGB16 и Float32 CMYKA (512 cells, sync/cooperative/real Worker, out-of-budget, cancellation) и синхронизированы generated bundle/Worker.
-- **Gate пока открыт:** CI / review / merge / exact-main CI. Это лишь bounded sparse-selection improvement, **не** поддержка всех плотных/больших ROI, не полноценная Stage 003, не внешний Photoshop high-depth golden.
+- **Gate выполнен:** [PR #186](https://github.com/zeter1/ZeTer-Photo-Editor/pull/186) слит в main (`6204003f26f43b3babfa370508565f6ea86225e9`), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38136465952), [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38136526958). Это лишь bounded sparse-selection improvement, **не** поддержка всех плотных/больших ROI, не полноценная Stage 003, не внешний Photoshop high-depth golden.
 
 ## Ближайшие выполняемые проходки
 
@@ -41,7 +41,7 @@
 |---|---|---|
 | P0 | **Stage 002: внешний high-depth corpus.** Найти **независимо Adobe Photoshop-authored** RGB/CMYK PSD16 и PSB32 с правом распространения; записать исходный URL, лицензию, происхождение и SHA-256 без подмены синтетикой. | `tools/audit-external-high-depth-corpus.mjs` PASS на реальных файлах; экспертно проверены license/authorship; pinned manifest; без скачивания сомнительных assets в репозиторий. |
 | P0 | **Stage 002 → 003: реальный cross-app oracle.** Выполнить decode/группы/маски/adjustment + внешние Photoshop render references (включая clipping/blend). | Сверка semantic + pixel snapshots, чёткий unsupported list, независимый от собственного PSD writer golden. |
-| P1 | **Stage 003: adaptive connected ROI beyond 256 occupied tiles.** Развить безопасные ограниченные сегменты для сильно фрагментированных/плотных выделений; проверить aggregate area, memory ceilings и cancellation. | RGB16/Float32 CMYKA sync/Worker/cooperative parity, отмена в read/kernel/write/serialize, caps при worst-case связной маске, неизменность нетронутых байтов/тайлов. |
+| P1 | **Stage 003: adaptive dense ROI / strip-segment grouping после >256 sparse cells.** Расширить уже реализованные >256 sparse cells на плотные/сложные выделения через bounded strip/segment grouping; проверить aggregate area, memory ceilings и cancellation. | RGB16/Float32 CMYKA sync/Worker/cooperative parity, отмена в read/kernel/write/serialize, caps при worst-case связной маске, неизменность нетронутых байтов/тайлов. |
 | P1 | **Stage 003: browser end-to-end.** Chromium `file://` PSD16/PSB32 → tiled Worker → preview → Undo/Redo; отдельно lifecycle cancellation. | Автоматизированный сценарий, sample renderer + Worker/process memory и latency (не выдавать snapshot за peak), повторяемость и минимум две глубины. |
 | P1 | Profiling byte-integrity проверки Worker на крупных RGB16/Float32 CMYK PSD/PSB и real browser peak RAM. | Измерить overhead per changed tile, latency, max memory и сравнить с previous baseline; exact native byte parity + source immutability. |
 | P2 | Документы в Smart Objects, сложная структура Photoshop, текст/layout и vector path interoperability. | Поштучные independent fixtures + exact round-trip regression. |

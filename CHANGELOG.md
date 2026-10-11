@@ -2,6 +2,13 @@
 
 ## 1.46.0 — текущая версия
 
+### 2026-10-11 — Разреженные native Content-Aware выделения на более чем 256 тайлах
+
+- Реализовано: ранее искусственный предел 256 занятых tiles заменён безопасным per-cell fragment plan для больших разреженных выделений, с контролем числа tiles источника и суммарного `maxLayerPixels` перед чтением.
+- Сохранено: глобальный запрет selected donors, native byte precision, атомарная запись и cancellation; group-merge исторического алгоритма остаётся только для не более 256 cells.
+- Регрессии: 512 occupied cells, RGB16 sync/cooperative/Node Worker, Float32 CMYKA, budget rejection, отмена и неизменность входа. [PR #186](https://github.com/zeter1/ZeTer-Photo-Editor/pull/186), [точный main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38136526958).
+- Не закрыто: плотные connected ROI, production Photoshop PSD16/PSB32 golden и browser peak RAM; общая Stage 003 продолжается.
+
 ### 2026-10-11T14:07:44+03:00 — Все контакты разработчика в README
 
 - Добавлено: Facebook, VK, Instagram, TenChat, X, Threads, OK и Telegram-группа «обо мне, проекты и чат».
@@ -13,7 +20,7 @@
 - Исправлено: все пиксели исходного выделения исключены из доноров и PatchMatch-контекста соседних областей, даже если предыдущий фрагмент уже обработан.
 - Сохранено: точность RGB16/Float32 CMYK, неизменность исходных tiles, атомарная публикация и отмена в cooperative fallback.
 - Регрессии: связная диагональ через tiles, exact sync / Node Worker / cooperative parity, исчерпание бюджета и отмена.
-- Ограничения проверки: разбивка не гарантирует успех всех широких выделений; при превышении 256 занятых tiles или суммарного лимита выполняется безопасный отказ. Adobe-authored corpus, browser peak RAM и полная Photoshop-совместимость остаются открытыми.
+- Ограничения проверки: разбивка не гарантирует успех всех широких выделений; при превышении суммарного ROI лимита выполняется безопасный отказ (порог 256 для разреженных tiles снят последующей проходкой). Adobe-authored corpus, browser peak RAM и полная Photoshop-совместимость остаются открытыми.
 
 ## 1.45.10 — предыдущая версия (2026-10-11)
 

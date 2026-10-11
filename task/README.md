@@ -1,4 +1,4 @@
-> **Текущая проходка:** [006 — >256 occupied native tile fragments](006-many-tile-bounded-fragments.md), regression + browser/Worker build, ожидается CI/review. Общие Stage 002/003 остаются открыты; [очередь](NEXT.md).
+> **Последняя завершённая проходка:** [006 — >256 occupied native tile fragments](006-many-tile-bounded-fragments.md), [PR #186](https://github.com/zeter1/ZeTer-Photo-Editor/pull/186) слит; [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38136526958). Общие Stage 002/003 остаются открыты; [очередь](NEXT.md).
 
 > **Последний завершённый подэтап:** [005 — connected ROI / global frozen donors](005-connected-roi-frozen-donors.md), [PR #185](https://github.com/zeter1/ZeTer-Photo-Editor/pull/185), [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38135223279). Следующие задачи — [NEXT.md](NEXT.md); общие Stage 002/003 ещё открыты.
 
