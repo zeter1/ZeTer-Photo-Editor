@@ -4,16 +4,20 @@ import { instrumentBrowserKernelSource } from './browser-inpaint-mid-kernel-smok
 
 /**
  * 010D, test-only. Reload so the application's lazy Worker controller has NOT
- * cached its supplier. The real editor UI then imports a ZeTer-generated PSD16,
- * starts native tiled fill and switches to another tab after a real kernel write.
+ * cached its supplier. The real editor UI then imports a ZeTer-generated
+ * high-depth PSD16/PSB32, starts native tiled fill and switches to another tab
+ * after a real kernel write.
  * The instrumentation only changes the in-memory classic Worker supplier in
  * this terminal browser-smoke phase; neither production assets nor app code
  * are patched. Sampled browser memory is not a true peak or isolated Worker RSS.
  */
 export async function verifyBrowserUiLockMidKernel(client, {
-  evaluate, waitFor, assert, browserClient = null,
+  evaluate, waitFor, assert, browserClient = null, fixtureKey = 'rgb16large',
 } = {}) {
-  const fixture = createBrowserHighDepthFixture('rgb16large');
+  if (!['rgb16large','rgb32psblarge'].includes(fixtureKey))
+    throw new RangeError('Unsupported 010D browser fixture: ' + fixtureKey);
+  const fixture = createBrowserHighDepthFixture(fixtureKey);
+  const format = fixture.version === 2 ? 'PSB32 Float32' : 'PSD16 Uint16';
   const sampler = createBrowserRendererHeapSampler(client, { processClient:browserClient });
   // All earlier UI tests are complete before this final, isolated reload.
   await client.send('Page.reload', { ignoreCache:true });
@@ -37,6 +41,8 @@ export async function verifyBrowserUiLockMidKernel(client, {
     const metadata = {
       filename:fixture.filename, defectX:fixture.defectX, defectY:fixture.defectY,
       width:fixture.width, height:fixture.height, damaged:fixture.damaged,
+      normal:fixture.normal, bitsPerChannel:fixture.bitsPerChannel,
+      channels:fixture.channels,
     };
     await evaluate(client, 'window.__zpe010dParts=[];window.__zpe010dMeta=' + JSON.stringify(metadata) + ';true');
     const encoded = Buffer.from(fixture.bytes).toString('base64');
@@ -99,21 +105,37 @@ export async function verifyBrowserUiLockMidKernel(client, {
         const source = project.layers.find(layer => layer.name === 'Stage 003 native layer')?.highDepthSource;
         if (!source) return { error:'Missing native source' };
         const f = window.__zpe010dMeta;
-        const tile = source.tiles.find(t => f.defectX >= t.x && f.defectY >= t.y &&
-          f.defectX < t.x + t.width && f.defectY < t.y + t.height);
-        if (!tile) return { error:'Missing defect tile' };
-        const bytes = Uint8Array.from(atob(tile.dataUrl.split(',')[1]), c => c.charCodeAt(0));
-        const view = new DataView(bytes.buffer);
-        const offset = ((f.defectY - tile.y) * tile.width + f.defectX - tile.x) * 8;
-        return { kind:source.kind, rawBytes:source.rawBytes, tiles:source.tiles.length,
-          damaged:Array.from({length:4},(_,i)=>view.getUint16(offset+i*2,true)) };
+        function sample(x,y) {
+          const tile = source.tiles.find(t => x >= t.x && y >= t.y &&
+            x < t.x + t.width && y < t.y + t.height);
+          if (!tile) return null;
+          const bytes = Uint8Array.from(atob(tile.dataUrl.split(',')[1]),c=>c.charCodeAt(0));
+          const view = new DataView(bytes.buffer);
+          const bytesPerChannel = f.bitsPerChannel / 8;
+          const offset = ((y - tile.y) * tile.width + x - tile.x) *
+            f.channels * bytesPerChannel;
+          return {
+            values:Array.from({length:f.channels},(_,i)=>f.bitsPerChannel===16
+              ?view.getUint16(offset+i*bytesPerChannel,true)
+              :view.getFloat32(offset+i*bytesPerChannel,true)),
+            words:Array.from({length:f.channels},(_,i)=>f.bitsPerChannel===16
+              ?view.getUint16(offset+i*bytesPerChannel,true)
+              :view.getUint32(offset+i*bytesPerChannel,true)),
+          };
+        }
+        return { kind:source.kind, bits:source.bitsPerChannel, rawBytes:source.rawBytes,
+          tiles:source.tiles.length, normal:sample(0,0),
+          damaged:sample(f.defectX,f.defectY) };
       } finally { URL.createObjectURL = old; }
     }
     const before = await evaluate(client,'(' + readNativeSave.toString() + ')()');
     assert(before.kind === 'zpe-pixel-buffer-source-v2' &&
-      before.rawBytes === fixture.width*fixture.height*8 && before.tiles > 1 &&
-      JSON.stringify(before.damaged) === JSON.stringify(fixture.damaged),
-      '010D preflight must preserve native PSD16 v2 samples', JSON.stringify(before));
+      before.bits === fixture.bitsPerChannel &&
+      before.rawBytes === fixture.width*fixture.height*fixture.channels*(fixture.bitsPerChannel/8) &&
+      before.tiles > 1 && JSON.stringify(before.normal?.values) === JSON.stringify(fixture.normal) &&
+      JSON.stringify(before.damaged?.values) === JSON.stringify(fixture.damaged),
+      '010D preflight must preserve native PSD/PSB v2 sample values and bit patterns',
+      JSON.stringify({format,before}));
 
 
     // 010D-B: keep two real document sessions alive and switch mid-kernel.
@@ -331,12 +353,48 @@ export async function verifyBrowserUiLockMidKernel(client, {
       '010D successor must publish exactly one visible edit and History entry',JSON.stringify(recovered));
     const afterRecovery = await evaluate(client,'(' + readNativeSave.toString() + ')()');
     assert(afterRecovery.kind === before.kind && afterRecovery.tiles === before.tiles &&
-      JSON.stringify(afterRecovery.damaged) !== JSON.stringify(before.damaged),
-      '010D successor must change real 16-bit native samples',JSON.stringify(afterRecovery));
+      JSON.stringify(afterRecovery.damaged) !== JSON.stringify(before.damaged) &&
+      JSON.stringify(afterRecovery.damaged?.words) !== JSON.stringify(before.damaged?.words) &&
+      JSON.stringify(afterRecovery.normal?.words) === JSON.stringify(before.normal?.words),
+      '010D successor must change only selected native 16/32-bit samples',
+      JSON.stringify({format,afterRecovery}));
     await sampler.snapshot('010d-successor-committed');
+
+    // 010D-C: Undo and Redo must restore the *native little-endian words*,
+    // not merely an 8-bit canvas preview. A second live session remains
+    // unchanged throughout both history transactions and the round trip.
+    await evaluate(client,"document.querySelector('#undoBtn').click();true");
+    await waitFor('010D native Undo preview', () => evaluate(client,
+      '(' + defectPixel.toString() + ')() > 100'), 30_000);
+    const afterUndo = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+    assert(JSON.stringify(afterUndo) === JSON.stringify(before),
+      '010D Undo must restore exact native tile topology, words and values',
+      JSON.stringify({format,before,afterUndo}));
+    await evaluate(client,"document.querySelector('#redoBtn').click();true");
+    await waitFor('010D native Redo preview', () => evaluate(client,
+      '(' + defectPixel.toString() + ')() < 150'), 30_000);
+    const afterRedo = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+    assert(JSON.stringify(afterRedo) === JSON.stringify(afterRecovery),
+      '010D Redo must restore the exact committed native 16/32-bit words',
+      JSON.stringify({format,afterRecovery,afterRedo}));
+    const otherAfterRedo = await evaluate(client,'(' + selectSecondTab.toString() + ')()');
+    assert(JSON.stringify({
+      title:otherAfterRedo.title,dimensions:otherAfterRedo.dimensions,
+      history:otherAfterRedo.history,layerNames:otherAfterRedo.layerNames,
+    }) === JSON.stringify(tabSetup.second),
+      '010D second session must survive original document Undo/Redo',
+      JSON.stringify({format,otherAfterRedo}));
+    await evaluate(client,'(' + selectFirstTab.toString() + ')()');
+    const afterHistorySwitch = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+    assert(JSON.stringify(afterHistorySwitch) === JSON.stringify(afterRecovery),
+      '010D original native words must survive a post-Redo session switch',
+      JSON.stringify({format,afterHistorySwitch}));
+    await sampler.snapshot('010d-native-undo-redo-session-roundtrip');
     const memory = await sampler.stop(); stopped=true;
-    console.log('Stage 003 010D-B real PSD16 UI active mid-kernel switch:',JSON.stringify({
+    console.log('Stage 003 010D-C real '+format+' UI active mid-kernel switch:',JSON.stringify({
       source:'ZeTer-generated, NOT independent Adobe reference',
+      fixtureKey,bitsPerChannel:fixture.bitsPerChannel,rawBytes:before.rawBytes,
+      nativeUndoRedoWordParity:true,secondSessionPreservedAfterHistory:true,
       realWorkerJobs:recovered.state.jobs, kernelWriteProbes:recovered.state.probes,
       terminations:recovered.state.terminations, switchLatencyMs,
       unchangedNativeAfterSwitch:true, midKernelTabSwitchActive:true,
