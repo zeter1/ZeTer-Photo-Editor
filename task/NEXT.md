@@ -1,3 +1,8 @@
+## 010E-B4 / 024A — browser operation timeline + PID churn (PR, CI pending, 2026-10-11)
+
+- [024](024-browser-operation-memory.md): для реального Chromium `file://` PSD16/PSB32 Worker smoke — этапные длительности, отмена/History/native outcome и CDP PID churn отдельно от RSS/privateMemory/process HWM. Следом 024B PID identity/starttime, process attribution, mid-kernel cancel & recovery timing. Ни одно измерение не равно true peak RAM.
+- **P0** [002](002-psd-compatibility-corpus.md): лицензированные независимые Adobe Photoshop-authored RGB16/CMYK32 PSD/PSB oracle + provenance. **Stage 002/003 всё ещё открыты.**
+
 ## 010E-B3B / 023 — общий лимит планирования oversized ROI (слито, exact-main CI success)
 
 - [023](023-planner-total-budget.md): общий предел 4 194 304 посещений/probes для повторных fallback планов и bounded run planners; deterministic RangeError до ROI decode; sync/cooperative/Node Worker отказ RGB16 и CMYKA32. **Слито:** [PR #204](https://github.com/zeter1/ZeTer-Photo-Editor/pull/204) → `732ef97604`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38161611345), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38161771493).
