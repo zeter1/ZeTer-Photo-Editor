@@ -1428,6 +1428,48 @@ export function forEachSerializedPixelBufferTile(source,visitor,{maxBytes=MAX_PI
   return count;
 }
 
+
+/**
+ * Decode/render one native tile at a time and yield between bounded batches.
+ * A cancelled traversal never invokes the remaining visitors. The caller
+ * owns its private preview canvas and must discard it when this returns false.
+ */
+export async function forEachSerializedPixelBufferTileCooperative(source, visitor, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  batchTiles = 2,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof visitor !== 'function' || typeof isCancelled !== 'function' ||
+      typeof yieldControl !== 'function' || !Number.isSafeInteger(batchTiles) || batchTiles < 1) {
+    throw new TypeError('Tiled PixelBuffer cooperative preview: invalid callbacks/batchTiles');
+  }
+  const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
+  if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
+  const tiled = safe.kind === PIXEL_BUFFER_TILED_SOURCE_KIND;
+  const count = tiled ? safe.tiles.length : 1;
+  for (let index = 0; index < count; index += 1) {
+    if (isCancelled()) return false;
+    if (index > 0 && index % batchTiles === 0) {
+      await yieldControl();
+      if (isCancelled()) return false;
+    }
+    if (tiled) {
+      const tile = safe.tiles[index];
+      visitor({
+        index, count, x:tile.x, y:tile.y, width:tile.width, height:tile.height,
+        buffer:decodeSerializedTile(safe, tile),
+      });
+    } else {
+      visitor({
+        index, count, x:0, y:0, width:safe.width, height:safe.height,
+        buffer:deserializePixelBufferSource(safe, { maxBytes }),
+      });
+    }
+  }
+  return !isCancelled();
+}
+
 export function mutateSerializedPixelBufferTiles(source, visitor, {
   maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
   requireAlpha = false,

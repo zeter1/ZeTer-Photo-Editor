@@ -1,5 +1,14 @@
 # 003 — Tiled Content-Aware Fill
 
+## 2026-10-11 — Stage 003 P1: cooperative RGBA8 tile preview (PR предложен)
+
+- Преобразование каждого native tile в RGBA8 оставлено в исходном precision pipeline; теперь тайлы обрабатываются кооперативно партиями по 2, с checkpoint `isCancelled` до следующей партии.
+- Строится только приватный canvas. В Content-Aware Fill exact document/layer/source guard отменяет изображение ещё до PNG-кодирования, без `dataUrl`, истории и частичной публикации.
+- Регрессии RGB16, Float32 CMYKA, паритета sync/cooperative tile iterator и смены документа во время RGBA conversion: `tests/tiled-preview-cooperative.test.mjs`.
+- **Gate ожидается:** npm check + Chromium `file://` + generated artifacts parity + PR CI и точный main push CI. До их завершения не считать подэтап закрытым.
+- **Ещё открыто:** широкий connected ROI без inflated bounding box, синхронный этап PNG encoding, независимый лицензированный Photoshop PSD16/PSB32 corpus с hash/provenance и Chromium Worker/Undo/RAM профилирование. Вся 003 открыта.
+
+
 ## 2026-10-11 — Stage 003 P1: cooperative native tiled writeRegion (слито, CI success)
 
 - Добавлен общий iterator writeRegionSteps и отменяемый writeRegionCooperative: промежуточные массивы tiles остаются приватными, checkpoint каждые 32 768 pixels, никакой новой dirty/preview публикации до commit.

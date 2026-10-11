@@ -6676,6 +6676,48 @@ function forEachSerializedPixelBufferTile(source,visitor,{maxBytes=MAX_PIXEL_BUF
   }
   return count;
 }
+
+
+/**
+ * Decode/render one native tile at a time and yield between bounded batches.
+ * A cancelled traversal never invokes the remaining visitors. The caller
+ * owns its private preview canvas and must discard it when this returns false.
+ */
+async function forEachSerializedPixelBufferTileCooperative(source, visitor, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  batchTiles = 2,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof visitor !== 'function' || typeof isCancelled !== 'function' ||
+      typeof yieldControl !== 'function' || !Number.isSafeInteger(batchTiles) || batchTiles < 1) {
+    throw new TypeError('Tiled PixelBuffer cooperative preview: invalid callbacks/batchTiles');
+  }
+  const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
+  if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
+  const tiled = safe.kind === PIXEL_BUFFER_TILED_SOURCE_KIND;
+  const count = tiled ? safe.tiles.length : 1;
+  for (let index = 0; index < count; index += 1) {
+    if (isCancelled()) return false;
+    if (index > 0 && index % batchTiles === 0) {
+      await yieldControl();
+      if (isCancelled()) return false;
+    }
+    if (tiled) {
+      const tile = safe.tiles[index];
+      visitor({
+        index, count, x:tile.x, y:tile.y, width:tile.width, height:tile.height,
+        buffer:decodeSerializedTile(safe, tile),
+      });
+    } else {
+      visitor({
+        index, count, x:0, y:0, width:safe.width, height:safe.height,
+        buffer:deserializePixelBufferSource(safe, { maxBytes }),
+      });
+    }
+  }
+  return !isCancelled();
+}
 function mutateSerializedPixelBufferTiles(source, visitor, {
   maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
   requireAlpha = false,
@@ -16650,6 +16692,7 @@ function createRasterEditController({
   renderPaintPreview = () => {},
   documentRef = globalThis.document,
   tiledInpaintWorker = null,
+  previewYieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
   requestFrame = callback => globalThis.requestAnimationFrame(callback),
   cancelFrame = frame => globalThis.cancelAnimationFrame(frame),
 } = {}) {
@@ -16980,13 +17023,18 @@ function createRasterEditController({
   }
 
 
-  async function highDepthPreviewDataUrlFromSource(layer, source) {
+  async function highDepthPreviewDataUrlFromSource(layer, source, {
+    isCancelled = () => false,
+  } = {}) {
+    if (isCancelled()) return null;
     const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
     const canvas = documentRef.createElement('canvas');
     canvas.width = source.width;
     canvas.height = source.height;
     const context = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
-    forEachSerializedPixelBufferTile(source, ({ x, y, buffer }) => {
+    // This canvas is private until the complete preview is encoded and its
+    // exact owner has been rechecked. No partial image reaches the layer.
+    const completed = await forEachSerializedPixelBufferTileCooperative(source, ({ x, y, buffer }) => {
       const rgba = buffer.model === 'cmyk'
         ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
         : pixelBufferToToneMappedRgba8Preview(buffer, {}, {
@@ -16996,7 +17044,8 @@ function createRasterEditController({
       const image = context.createImageData(buffer.width, buffer.height);
       image.data.set(rgba);
       context.putImageData(image, x, y);
-    });
+    }, { isCancelled, yieldControl:previewYieldControl, batchTiles:2 });
+    if (!completed || isCancelled()) return null;
     return canvasToDataURL(canvas, 'image/png');
   }
 
@@ -17075,8 +17124,8 @@ function createRasterEditController({
     });
     if (stale() || prepared?.cancelled) return { ...prepared, applied:false, stale:true };
     if (!prepared.changed) return { ...prepared, applied:false, stale:false };
-    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
-    if (stale()) return { ...prepared, applied:false, stale:true };
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source, { isCancelled:stale });
+    if (dataUrl === null || stale()) return { ...prepared, applied:false, stale:true };
     applyHighDepthMutation(layer, {
       highDepthSource:prepared.source,
       dataUrl,
