@@ -1,7 +1,7 @@
 ## 010C — bounded dense ROI: код слит в main (2026-10-11)
 
 - **Готово:** [PR #192](https://github.com/zeter1/ZeTer-Photo-Editor/pull/192), squash `1b504b836ae3bbe28da89080ffa6877be09a2047`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146702722): Node, generated bundle/Worker, Chromium `file://`, profiles и diff hygiene.
-- [012](012-dense-strip-segment-roi.md): bounded deterministic strip/segment fallback для плотных ROI, frozen original-selection donors, strict aggregate budget, RGB16/Float32 CMYKA native byte parity sync/cooperative/Node Worker, safe rejection and cancellation. **Exact-main CI после обновления задач проверить отдельно.**
+- [012](012-dense-strip-segment-roi.md): bounded deterministic strip/segment fallback для плотных ROI, frozen original-selection donors, strict aggregate budget, RGB16/Float32 CMYKA native byte parity sync/cooperative/Node Worker, safe rejection and cancellation. **[exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146836584) на `46ceafe9fb578af6f285e7ced1e60cfdda747670`; последующие docs-only commits проверяются отдельно.**
 - **Следом 010D:** browser UI lock/session revocation во время настоящего CPU-bound Worker, sampled renderer/process RSS и корректная отмена/возобновление; **P0 002** independent licensed Photoshop-authored PSD16/PSB32 остаётся открытой задачей.
 
 ## Завершённая проходка 010B — Chromium file:// mid-kernel cancellation (2026-10-11)
