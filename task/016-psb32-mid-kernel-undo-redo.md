@@ -1,6 +1,6 @@
 # 016 / 010D-C — PSB32 Float32 mid-kernel active switch + exact native Undo/Redo
 
-**Status: implementation on PR branch; gate pending.** Source: [NEXT](NEXT.md), [015](015-active-session-worker-cancel.md), Stage 003 [003](003-tiled-content-aware.md). This is NOT a licensed Photoshop-authored fixture.
+**Status: merged into `main`, verified 2026-10-11.** [PR #196](https://github.com/zeter1/ZeTer-Photo-Editor/pull/196), squash `9d146eb3c17fbc85bdd4a26a321b24b595f91a24`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150936804); [exact-main push CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38151060369). Source: [NEXT](NEXT.md), [015](015-active-session-worker-cancel.md), Stage 003 [003](003-tiled-content-aware.md). This is NOT a licensed Photoshop-authored fixture.
 
 ## Goal / evidence
 
@@ -14,8 +14,8 @@
 - [x] After successor real Worker Fill, assert unchanged original words after cancellation, changed defect words on successful Fill, native Undo restores the original words/tile structure, native Redo restores the committed words, then switch tabs once more and check no cross-session publication.
 - [x] Capture sampled browser memory and timing labeled **samples**, never claim true peak RSS, independent Adobe parity or two high-depth source documents.
 - [x] Update `tools/browser-smoke.mjs` so PSD16 and PSB32 scenarios both execute in CI.
-- [ ] PR CI success (Node + generated parity + real Chromium `file://` + informational profiles + diff hygiene).
-- [ ] Merge to `main` and verify **exact main commit** push CI success.
+- [x] PR CI success (Node + generated parity + real Chromium `file://` + informational profiles + diff hygiene), run 38150936804.
+- [x] Merge to `main` (`9d146eb3`) and verify **exact main commit** push CI success, run 38151060369.
 
 ## Non-scope / limits
 
