@@ -1,3 +1,11 @@
+## 2026-10-11 — P1: native source + Worker changed-pixel byte integrity ([PR #183](https://github.com/zeter1/ZeTer-Photo-Editor/pull/183), merged)
+
+- **Исправлено:** `sanitizeSerializedPixelBufferSource` проверяет canonical Base64 (exact required padding и нулевые unused bits) для v1 и v2; detached Worker reply сравнивается с immutable input на уровне исходных little-endian bytes пикселей, в том числе в выбранном tile. Изменённый пиксель должен быть в frozen selection; `changed` равен настоящему числу changed pixels. Поддельные counts / unexpected donor mutation / pad-bit alias отвергаются до History/preview.
+- **Memory contract:** 1 bit per document pixel (до 2 MiB selection bitmap при 48 MiB source); только changed tiles декодируются, одновременно две byte arrays одного tile. Никакой 8-bit preview в integrity oracle.
+- **Тесты:** RGB16 и CMYKA32 unselected neighbor byte tamper в выбранном tile, forged counts, same-bytes noncanonical Base64 в detached reply и persisted v1/v2 source; ранее существовавшие Worker parity/cancellation тесты не изменены.
+- **Gate:** PR CI [success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38129441200), точный main CI [success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38129498774), squash SHA `884896cf6630083d5760a595c137157e1df7d874`. Node tests, browser `file://` smoke, bundle parity, profilers, diff hygiene прошли.
+- **Что не закрыто:** Stage 003 wide connected ROI; real licensed Adobe PSD16/PSB32 + high-depth cross-app oracle; browser peak RAM/Undo/Redo + performance byte validation; RAW/DNG, CMYK soft proof и полная Photoshop compatibility — отдельные gates.
+
 ## 2026-10-11 — P1: fail-closed result integrity при UI Worker handoff (слито, CI success)
 
 - src/painting/tiled-inpaint-dispatch.js сверяет detached reply с frozen selectedIndices и канонической native tile topology: counters, depth/model/alpha/profile, координаты и точный подсчёт изменённых tile payloads. Изменять tile без выделенных пикселей запрещено. Некорректный reply не попадает в preview, не запускает fallback и не публикует историю.
