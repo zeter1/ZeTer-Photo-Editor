@@ -2,6 +2,13 @@
 
 ## 1.46.0 — текущая версия
 
+### 2026-10-11 — Регрессии большого PSB32 и отмены ожидающего Worker (тестовая проходка 009)
+
+- Добавлена синтетическая 1025×1025 PSB32 Float32 фикстура и Node-проверка точности little-endian каналов после декодирования и адаптивного tiled v2.
+- Дополнен сценарий Chromium `file://`: импорт PSB32 через UI, Save Project, Content-Aware Fill в реальном Worker, canvas preview, Undo/Redo; отдельная гонка отмены задержанного ответа после реальной обработки Worker и блокировки слоя, без второго commit и изменения native samples.
+- Ограничения: синтетический ZeTer writer — не независимый Adobe golden, delayed reply — не CPU-bound kernel cancellation, CDP samples — не peak RAM. Выполнение CI/merge отслеживается в `task/009-large-psb32-worker-cancellation.md`.
+
+
 ### 2026-10-11T15:05:24+03:00 — Переключатель языка только в начале README
 
 - Исправлено: в русском и английском README оставлен один переключатель языка перед заголовком; повтор из контактов удалён.
