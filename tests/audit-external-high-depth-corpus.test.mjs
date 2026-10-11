@@ -13,7 +13,7 @@ const cli = fileURLToPath(new URL('../tools/audit-external-high-depth-corpus.mjs
 function mockHeader(version, bitsPerChannel) {
   // Header-only mock; deliberately NOT a valid Photoshop document. These
   // tests prove preflight validation, not an independent high-depth corpus.
-  const bytes = Buffer.alloc(30);
+  const bytes = Buffer.alloc(64);
   bytes.write('8BPS', 0, 'ascii');
   bytes.writeUInt16BE(version, 4);
   bytes.writeUInt16BE(4, 12);
@@ -172,4 +172,61 @@ test('Stage 002 P0: truncated and non-PSD headers fail independent parser', () =
   assert.throws(() => inspectExternalHighDepthHeader(wrong), /8BPS signature/);
   const unsupported = mockHeader(1, 8);
   assert.throws(() => inspectExternalHighDepthHeader(unsupported), /unsupported or invalid/);
+});
+
+test('Stage 002 P0: untrusted manifest is bounded and rejects symlinked metadata', async t => {
+  const state = await corpus(t);
+  const valid = await auditExternalHighDepthCorpus(state.manifestPath);
+  assert.equal(valid.passed, true);
+  await writeFile(state.manifestPath, JSON.stringify(state.manifest) + ' '.repeat(1024 * 1024));
+  await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath),
+    /manifest: regular file at most 1 MiB/);
+  await state.save();
+  const alias = join(state.directory, 'manifest-alias.json');
+  try {
+    await symlink(state.manifestPath, alias);
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) {
+      t.skip('Symlinks unavailable in this environment');
+      return;
+    }
+    throw error;
+  }
+  await assert.rejects(auditExternalHighDepthCorpus(alias), /no symlinks/);
+});
+
+test('Stage 002 P0: raw RGB/CMYK headers require their complete native ink channels', () => {
+  const rgb = mockHeader(1, 16);
+  rgb.writeUInt16BE(2, 12);
+  assert.throws(() => inspectExternalHighDepthHeader(rgb), /unsupported or invalid/);
+  const cmyk = mockHeader(2, 32);
+  cmyk.writeUInt16BE(4, 24);
+  cmyk.writeUInt16BE(3, 12);
+  assert.throws(() => inspectExternalHighDepthHeader(cmyk), /unsupported or invalid/);
+  cmyk.writeUInt16BE(5, 12);
+  assert.equal(inspectExternalHighDepthHeader(cmyk).channels, 5,
+    'CMYKA is a valid high-depth channel layout');
+});
+
+test('Stage 002 P0: reject header-only fixture sizes below minimum PSD/PSB sections', async t => {
+  const state = await corpus(t);
+  const item = state.manifest.fixtures[0];
+  let bytes = mockHeader(1, 16).subarray(0, 39);
+  await writeFile(join(state.directory, item.file), bytes);
+  item.size = bytes.length;
+  item.sha256 = createHash('sha256').update(bytes).digest('hex');
+  await state.save();
+  await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath), /between 40 and 512 MiB/);
+  const psb = state.manifest.fixtures[1];
+  bytes = mockHeader(2, 32).subarray(0, 43);
+  await writeFile(join(state.directory, psb.file), bytes);
+  psb.size = bytes.length;
+  psb.sha256 = createHash('sha256').update(bytes).digest('hex');
+  // Restore PSD so the PSB header-length check is actually reached.
+  const validPsd = mockHeader(1, 16);
+  await writeFile(join(state.directory, item.file), validPsd);
+  item.size = validPsd.length;
+  item.sha256 = createHash('sha256').update(validPsd).digest('hex');
+  await state.save();
+  await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath), /PSB requires at least 44/);
 });
