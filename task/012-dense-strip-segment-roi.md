@@ -1,6 +1,6 @@
 # 010C — Stage 003: bounded dense ROI strip/segment fallback
 
-**Статус: [PR #192](https://github.com/zeter1/ZeTer-Photo-Editor/pull/192) слит в main (`1b504b836ae3bbe28da89080ffa6877be09a2047`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146702722). Exact-main CI после обновления документации ожидает проверки.** Задача продолжает [010](010-dense-roi-worker-mid-kernel-cancel.md) после 010A/010B и не означает завершение Stage 003.
+**Статус: [PR #192](https://github.com/zeter1/ZeTer-Photo-Editor/pull/192) слит в main (`1b504b836ae3bbe28da89080ffa6877be09a2047`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146702722). [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146836584) на `46ceafe9fb578af6f285e7ced1e60cfdda747670`; последующие docs-only commits проверяются отдельно.** Задача продолжает [010](010-dense-roi-worker-mid-kernel-cancel.md) после 010A/010B и не означает завершение Stage 003.
 
 ## Что меняется
 
