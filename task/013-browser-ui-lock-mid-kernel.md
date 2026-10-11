@@ -1,6 +1,6 @@
 # 010D — реальная UI-отмена native Worker после первой записи ядра
 
-**Статус:** в реализации, ветка `feat/stage003-browser-ui-lock-mid-kernel-010d-20261011`. Эта проходка — **первый шаг 010D (live layer-lock)**; смена активного документа/session mid-kernel остаётся следующей частью. Не считать Stage 003/002 завершёнными до независимого cross-app oracle.
+**Статус:** **010D-A завершена и слита в main**: [PR #193](https://github.com/zeter1/ZeTer-Photo-Editor/pull/193), squash `3b7e684ddeb50fdf60354efc4e0fc871b6fe5f45`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38147932831), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38148022098). Смена активного документа/session mid-kernel — **отдельная оставшаяся 010D-B**. Stage 003/002 в целом не завершены.
 
 ## Предпосылки и отличие от 010B/009
 
@@ -21,8 +21,8 @@
 
 - [x] Написан тестовый file:// UI сценарий для lock-after-first-kernel-write → real terminate → unchanged native/history → unlock/successor.
 - [x] Внедрение ограничено isolated in-memory supplier и финальной reload-фазой smoke.
-- [ ] `npm run check` + `npm run test:browser` на CI, native bundle/Worker generated parity, profiles/diff hygiene.
-- [ ] PR merge + exact-main CI success.
+- [x] `npm run check`, `npm run test:browser`, generated parity, profiles и diff hygiene — PR #193 CI success.
+- [x] PR #193 squash-merged, exact-main CI success (merge SHA выше).
 - [ ] Вторая часть 010D: активная document/session switch **во время** настоящего CPU-bound Worker с проверкой обеих вкладок и stale target rejection.
 - [ ] Две большие глубины PSD16 **и** PSB32, sampled Worker/process memory на повторных итерациях, latency variability и настоящие peak/limits — отдельные acceptance gates.
 

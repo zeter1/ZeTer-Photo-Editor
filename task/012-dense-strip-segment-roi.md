@@ -15,7 +15,7 @@
 - [x] Код bounded planner и тестовый файл `tests/tiled-inpaint-dense-strips.test.mjs` внесены в ветку.
 - [x] Генераторные браузерные артефакты `src/app.bundle.js`, `src/core/tiled-inpaint-worker-source.js`, `index.html`, `version.json` синхронизированы в ветке; точную parity должен подтвердить CI.
 - [x] `npm run check`, `npm run test:browser`, generated parity и `git diff --check` — PR CI success 38146702722.
-- [ ] Review, merge в main и **CI точного main SHA**; до этого статус «в работе».
+- [x] [PR #192](https://github.com/zeter1/ZeTer-Photo-Editor/pull/192) слит, [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38146836584).
 
 ## Следующие проходки
 
