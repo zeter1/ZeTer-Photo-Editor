@@ -1,7 +1,7 @@
-## 010E-B1 / 020 — adaptive bounded horizontal runs (PR pending, 2026-10-11)
+## 010E-B1 / 020 — adaptive bounded horizontal runs (merged, PR CI success, 2026-10-11)
 
 - [020](020-adaptive-horizontal-runs.md): deterministic at-most-8-row connected horizontal-run fallback when halo groups, tiles and fixed stripes exceed aggregate ROI cap. Strict limits: 65,536 indices to sort, 4,096 runs, 256 groups; source immutable, global frozen donor exclusion, no partial publication. RGB16 / CMYKA32 reverse-index, Worker/cooperative parity, worst-case refusal tests.
-- **Next:** verify PR CI + exact-main CI before marking as complete. Continue 010E-B2 general connected clusters / planning-time budget; P0 independent Photoshop-authored high-depth corpus and browser operation-level memory peak remain open.
+- **Merged:** [PR #201](https://github.com/zeter1/ZeTer-Photo-Editor/pull/201) → squash `5c3de98b`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38157871061). Check the exact-main push CI separately. **Next:** 010E-B2 general connected clusters / planning-time budget; P0 independent Photoshop-authored high-depth corpus and browser operation-level memory peak remain open.
 
 ## 010E-M / 019 — Linux Chromium RSS + per-PID HWM (слито, PR CI success, 2026-10-11)
 
