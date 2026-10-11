@@ -55,7 +55,7 @@ function deterministicOffset(seed, radius) {
   return (hash32(seed) % span) - radius;
 }
 
-function patchMatchRefine(data, width, height, channels, selectedMask, donorIndex, bounds, {
+function* patchMatchRefineSteps(data, width, height, channels, selectedMask, donorIndex, bounds, {
   patchRadius,
   passes,
   randomSearchSteps,
@@ -134,6 +134,7 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
     return validDonor(candidate) ? candidate : -1;
   };
 
+  let processedRows = 0;
   for (let pass = 0; pass < passCount; pass += 1) {
     const forward = pass % 2 === 0;
     const yStart = forward ? bounds.minY : bounds.maxY;
@@ -187,6 +188,8 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
         donorIndex[index] = bestDonor;
         copyDonor(index, bestDonor);
       }
+      // An async caller can release the UI thread inside PatchMatch too.
+      if (++processedRows % 16 === 0) yield;
     }
   }
 }
@@ -201,7 +204,7 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
  * texture neighborhood. Large fills keep the linear boundary synthesis path so
  * the operation remains memory/time bounded.
  */
-export function inpaintSelectedSamples(data, width, height, channels, {
+export function* inpaintSelectedSamplesSteps(data, width, height, channels, {
   isAllowed,
   sampleRadius = 2,
   maxLayerPixels = CONTENT_AWARE_MAX_LAYER_PIXELS,
@@ -243,6 +246,7 @@ export function inpaintSelectedSamples(data, width, height, channels, {
 
   for (let y = 0, index = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1, index += 1) {
+      if (index > 0 && index % 16_384 === 0) yield;
       if (isAllowed(x, y)) {
         pending[index] = 1;
         selectedMask[index] = 1;
@@ -285,6 +289,7 @@ export function inpaintSelectedSamples(data, width, height, channels, {
   };
 
   for (let index = 0; index < total; index += 1) {
+    if (index > 0 && index % 16_384 === 0) yield;
     if (pending[index] && hasKnownNeighbor(index)) {
       queue[tail++] = index;
       queued[index] = 1;
@@ -298,6 +303,7 @@ export function inpaintSelectedSamples(data, width, height, channels, {
 
   while (head < tail) {
     const index = queue[head++];
+    if (head % 1024 === 0) yield;
     if (!pending[index]) continue;
     const x = index % width;
     const y = Math.floor(index / width);
@@ -369,7 +375,7 @@ export function inpaintSelectedSamples(data, width, height, channels, {
   }
 
   if (filled === selected && filled > 1 && selected <= patchMatchMaxFillPixels && width >= 3 && height >= 3) {
-    patchMatchRefine(data, width, height, channels, selectedMask, donorIndex, { minX, minY, maxX, maxY }, {
+    yield* patchMatchRefineSteps(data, width, height, channels, selectedMask, donorIndex, { minX, minY, maxX, maxY }, {
       patchRadius,
       passes:patchMatchPasses,
       randomSearchSteps,
@@ -378,4 +384,35 @@ export function inpaintSelectedSamples(data, width, height, channels, {
   }
 
   return filled;
+}
+
+
+// The synchronous editor/Worker API exhausts exactly the same deterministic
+// kernel steps. Only the UI fallback awaits between checkpoints.
+export function inpaintSelectedSamples(data, width, height, channels, options = {}) {
+  const steps = inpaintSelectedSamplesSteps(data, width, height, channels, options);
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
+}
+
+// null is an internal cancellation sentinel (0 remains a legitimate no-fill).
+// Callers must discard the private working buffer on cancellation.
+export async function inpaintSelectedSamplesCooperative(data, width, height, channels, options = {}, {
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  if (isCancelled()) return null;
+  const steps = inpaintSelectedSamplesSteps(data, width, height, channels, options);
+  let next = steps.next();
+  while (!next.done) {
+    if (isCancelled()) return null;
+    await yieldControl();
+    if (isCancelled()) return null;
+    next = steps.next();
+  }
+  return isCancelled() ? null : next.value;
 }
