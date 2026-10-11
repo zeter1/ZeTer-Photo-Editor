@@ -1,0 +1,1675 @@
+// ---- src/painting/controller.js ----
+function createRasterEditController({
+  getDocument,
+  getDrag = () => null,
+  getCmykPreviewTransform = () => null,
+  renderPaintPreview = () => {},
+  documentRef = globalThis.document,
+  tiledInpaintWorker = null,
+  previewYieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  requestFrame = callback => globalThis.requestAnimationFrame(callback),
+  cancelFrame = frame => globalThis.cancelAnimationFrame(frame),
+} = {}) {
+  if (typeof getDocument !== 'function') throw new TypeError('getDocument is required');
+
+  let brushCanvas = null;
+  let brushContext = null;
+  let brushLayerId = null;
+  let brushOwner = null;
+  let brushLayer = null;
+  let highDepthPaintBuffer = null;
+  let highDepthPaintWorkingSet = null;
+  let highDepthPaintLayerId = null;
+  let highDepthPaintOwner = null;
+  let highDepthPaintLayer = null;
+  let highDepthPaintPreviewDirty = false;
+  let paintPreviewFrame = 0;
+  let paintPreviewQueued = false;
+
+  function currentDocument() {
+    const documentValue = getDocument();
+    if (!documentValue) throw new Error('Raster edit controller has no active document');
+    return documentValue;
+  }
+
+  function clearBrushBuffer() {
+    brushCanvas = null;
+    brushContext = null;
+    brushLayerId = null;
+    brushOwner = null;
+    brushLayer = null;
+  }
+
+  function isCurrentRasterTarget(owner, layer) {
+    return Boolean(
+      owner &&
+      layer &&
+      getDocument() === owner &&
+      Array.isArray(owner.layers) &&
+      owner.layers.includes(layer) &&
+      layer.type === 'raster' &&
+      !isLayerLocked(owner, layer)
+    );
+  }
+
+  function clearHighDepthPaintState() {
+    highDepthPaintBuffer = null;
+    highDepthPaintWorkingSet = null;
+    highDepthPaintLayerId = null;
+    highDepthPaintOwner = null;
+    highDepthPaintLayer = null;
+    highDepthPaintPreviewDirty = false;
+  }
+
+  function isNativeHighDepthPaintTarget(owner, layer) {
+    return Boolean(
+      (highDepthPaintBuffer || highDepthPaintWorkingSet) &&
+      highDepthPaintOwner === owner &&
+      highDepthPaintLayer === layer &&
+      highDepthPaintLayerId === layer?.id &&
+      brushOwner === owner &&
+      brushLayer === layer &&
+      brushLayerId === layer?.id &&
+      isCurrentRasterTarget(owner, layer)
+    );
+  }
+
+  function clearNativeHighDepthPaintTarget(owner, layer, token = highDepthPaintBuffer || highDepthPaintWorkingSet) {
+    if (
+      (highDepthPaintBuffer || highDepthPaintWorkingSet) !== token ||
+      highDepthPaintOwner !== owner ||
+      highDepthPaintLayer !== layer
+    ) return false;
+    clearBrushBuffer();
+    clearHighDepthPaintState();
+    return true;
+  }
+
+  function markHighDepthPreviewDirty() {
+    highDepthPaintPreviewDirty = true;
+  }
+
+  function cancelPaintPreview() {
+    paintPreviewQueued = false;
+    if (paintPreviewFrame) cancelFrame(paintPreviewFrame);
+    paintPreviewFrame = 0;
+  }
+
+  function reset() {
+    tiledInpaintWorker?.cancel?.();
+    cancelPaintPreview();
+    clearBrushBuffer();
+    clearHighDepthPaintState();
+  }
+
+  function highDepthBudgetForLayer(layer) {
+    const used = currentDocument().layers.reduce(
+      (sum, item) => item.id === layer?.id ? sum : sum + Math.max(0, Number(item?.highDepthSource?.rawBytes) || 0),
+      0,
+    );
+    return Math.max(0, MAX_PIXEL_BUFFER_SOURCE_BYTES - used);
+  }
+
+  function editableHighDepthBuffer(layer, { requireAlpha = false } = {}) {
+    if (!layer?.highDepthSource) return null;
+    const decoded = deserializePixelBufferSource(layer.highDepthSource);
+    if (decoded.model !== 'rgb' && decoded.model !== 'cmyk') return null;
+    const working = requireAlpha ? pixelBufferWithStraightAlpha(decoded) : clonePixelBuffer(decoded);
+    if (pixelBufferByteLength(working) > highDepthBudgetForLayer(layer)) return null;
+    return working;
+  }
+
+  function refreshHighDepthPaintCanvas(owner, layer, withFilters = true, { full = false } = {}) {
+    if (!isNativeHighDepthPaintTarget(owner, layer) || !brushCanvas || !brushContext) return false;
+    const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
+    const renderTile = (x, y, buffer) => {
+      const rgba = buffer.model === 'cmyk'
+        ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
+        : pixelBufferToToneMappedRgba8Preview(
+            buffer,
+            withFilters ? (layer.filters || {}) : {},
+            { toneMap:preview.toneMap, displayExposure:preview.displayExposure },
+          );
+      const image = brushContext.createImageData(buffer.width, buffer.height);
+      image.data.set(rgba);
+      brushContext.putImageData(image, x, y);
+    };
+
+    brushContext.setTransform(1, 0, 0, 1, 0, 0);
+    brushContext.globalAlpha = 1;
+    brushContext.globalCompositeOperation = 'source-over';
+    brushContext.filter = 'none';
+
+    if (highDepthPaintWorkingSet) {
+      if (full) {
+        brushContext.clearRect(0, 0, brushCanvas.width, brushCanvas.height);
+        forEachSerializedPixelBufferTile(layer.highDepthSource, ({ x, y, buffer }) => renderTile(x, y, buffer));
+      } else {
+        highDepthPaintWorkingSet.forEachPreviewDirty(({ x, y, buffer }) => renderTile(x, y, buffer));
+      }
+      highDepthPaintPreviewDirty = false;
+      return true;
+    }
+
+    const rgba = highDepthPaintBuffer.model === 'cmyk'
+      ? cmykPixelBufferToRgba8Preview(highDepthPaintBuffer, getCmykPreviewTransform())
+      : pixelBufferToToneMappedRgba8Preview(
+          highDepthPaintBuffer,
+          withFilters ? (layer.filters || {}) : {},
+          { toneMap:preview.toneMap, displayExposure:preview.displayExposure },
+        );
+    const image = brushContext.createImageData(highDepthPaintBuffer.width, highDepthPaintBuffer.height);
+    image.data.set(rgba);
+    brushContext.clearRect(0, 0, brushCanvas.width, brushCanvas.height);
+    brushContext.putImageData(image, 0, 0);
+    highDepthPaintPreviewDirty = false;
+    return true;
+  }
+
+  async function ensureNativeHighDepthPaintBuffer(owner, layer, {
+    requireAlpha = false,
+    preferTiled = false,
+  } = {}) {
+    if (!layer?.highDepthSource || !isCurrentRasterTarget(owner, layer)) return false;
+    const wantsTiled = preferTiled && layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND;
+    const activeChannels = highDepthPaintWorkingSet?.channels ?? highDepthPaintBuffer?.channels ?? 0;
+    const activeModel = highDepthPaintWorkingSet?.model ?? highDepthPaintBuffer?.model ?? layer.highDepthSource.model;
+    const alphaChannels = activeModel === 'cmyk' ? 5 : 4;
+    if (
+      isNativeHighDepthPaintTarget(owner, layer) &&
+      Boolean(highDepthPaintWorkingSet) === wantsTiled &&
+      (!requireAlpha || activeChannels === alphaChannels)
+    ) return true;
+
+    const size = checkedCanvasSize(layer.width, layer.height, `High-depth слой «${layer.name || 'Без имени'}»`);
+    let working = null;
+    let workingSet = null;
+    if (wantsTiled) {
+      workingSet = createSerializedPixelBufferTileWorkingSet(layer.highDepthSource, {
+        maxBytes:highDepthBudgetForLayer(layer),
+        requireAlpha,
+      });
+      if (!workingSet || workingSet.width !== size.width || workingSet.height !== size.height) return false;
+    } else {
+      working = editableHighDepthBuffer(layer, { requireAlpha });
+      if (!working || working.width !== size.width || working.height !== size.height) return false;
+    }
+
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = size.width;
+    canvas.height = size.height;
+    const context = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+    if (!isCurrentRasterTarget(owner, layer)) return false;
+
+    brushCanvas = canvas;
+    brushContext = context;
+    brushLayerId = layer.id;
+    brushOwner = owner;
+    brushLayer = layer;
+    highDepthPaintBuffer = working;
+    highDepthPaintWorkingSet = workingSet;
+    highDepthPaintLayerId = layer.id;
+    highDepthPaintOwner = owner;
+    highDepthPaintLayer = layer;
+    highDepthPaintPreviewDirty = true;
+    refreshHighDepthPaintCanvas(owner, layer, true, { full:true });
+    return true;
+  }
+
+  function offsetSelectionPredicate(predicate, offsetX, offsetY) {
+    if (typeof predicate !== 'function') return null;
+    return (x, y) => predicate(x + offsetX, y + offsetY);
+  }
+
+  function brushMutationBounds(from, to, radius) {
+    const padding = Math.max(.5, Number(radius) || .5);
+    return {
+      left:Math.min(from.x, to.x) - padding,
+      top:Math.min(from.y, to.y) - padding,
+      right:Math.max(from.x, to.x) + padding,
+      bottom:Math.max(from.y, to.y) + padding,
+    };
+  }
+
+  function applyNativeHighDepthBrushDab(owner, layer, point, {
+    radius,
+    rgb,
+    cmyk,
+    opacity = 1,
+    erase = false,
+    isAllowed = null,
+  } = {}) {
+    if (!isNativeHighDepthPaintTarget(owner, layer)) return 0;
+    const editRadius = Math.max(.5, Number(radius) || .5);
+    let changed = 0;
+    if (highDepthPaintWorkingSet) {
+      changed = highDepthPaintWorkingSet.visit(
+        brushMutationBounds(point, point, editRadius),
+        ({ x, y, buffer }) => buffer.model === 'cmyk'
+          ? applyCmykPixelBufferBrushDab(
+              buffer, point.x - x, point.y - y, editRadius, cmyk,
+              { opacity, erase, isAllowed:offsetSelectionPredicate(isAllowed, x, y) },
+            )
+          : applyPixelBufferBrushDab(
+              buffer, point.x - x, point.y - y, editRadius, rgb,
+              { opacity, erase, isAllowed:offsetSelectionPredicate(isAllowed, x, y) },
+            ),
+      );
+    } else if (highDepthPaintBuffer?.model === 'cmyk') {
+      changed = applyCmykPixelBufferBrushDab(
+        highDepthPaintBuffer, point.x, point.y, editRadius, cmyk,
+        { opacity, erase, isAllowed },
+      );
+    } else if (highDepthPaintBuffer) {
+      changed = applyPixelBufferBrushDab(
+        highDepthPaintBuffer, point.x, point.y, editRadius, rgb,
+        { opacity, erase, isAllowed },
+      );
+    }
+    if (changed > 0) markHighDepthPreviewDirty();
+    return changed;
+  }
+
+  function applyNativeHighDepthStrokeSegment(owner, layer, from, to, {
+    radius,
+    rgb,
+    cmyk,
+    opacity = 1,
+    erase = false,
+    isAllowed = null,
+  } = {}) {
+    if (!isNativeHighDepthPaintTarget(owner, layer)) return 0;
+    const editRadius = Math.max(.5, Number(radius) || .5);
+    let changed = 0;
+    if (highDepthPaintWorkingSet) {
+      changed = highDepthPaintWorkingSet.visit(
+        brushMutationBounds(from, to, editRadius),
+        ({ x, y, buffer }) => buffer.model === 'cmyk'
+          ? applyCmykPixelBufferStrokeSegment(
+              buffer,
+              { x:from.x - x, y:from.y - y },
+              { x:to.x - x, y:to.y - y },
+              editRadius,
+              cmyk,
+              { opacity, erase, isAllowed:offsetSelectionPredicate(isAllowed, x, y) },
+            )
+          : applyPixelBufferStrokeSegment(
+              buffer,
+              { x:from.x - x, y:from.y - y },
+              { x:to.x - x, y:to.y - y },
+              editRadius,
+              rgb,
+              { opacity, erase, isAllowed:offsetSelectionPredicate(isAllowed, x, y) },
+            ),
+      );
+    } else if (highDepthPaintBuffer?.model === 'cmyk') {
+      changed = applyCmykPixelBufferStrokeSegment(
+        highDepthPaintBuffer, from, to, editRadius, cmyk,
+        { opacity, erase, isAllowed },
+      );
+    } else if (highDepthPaintBuffer) {
+      changed = applyPixelBufferStrokeSegment(
+        highDepthPaintBuffer, from, to, editRadius, rgb,
+        { opacity, erase, isAllowed },
+      );
+    }
+    if (changed > 0) markHighDepthPreviewDirty();
+    return changed;
+  }
+
+  async function highDepthPreviewDataUrl(layer, buffer) {
+    const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
+    const rgba = buffer.model === 'cmyk'
+      ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
+      : pixelBufferToToneMappedRgba8Preview(
+          buffer,
+          {},
+          { toneMap: preview.toneMap, displayExposure: preview.displayExposure },
+        );
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = buffer.width;
+    canvas.height = buffer.height;
+    const context = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+    const image = context.createImageData(buffer.width, buffer.height);
+    image.data.set(rgba);
+    context.putImageData(image, 0, 0);
+    return canvasToDataURL(canvas, 'image/png');
+  }
+
+
+  async function highDepthPreviewDataUrlFromSource(layer, source, {
+    isCancelled = () => false,
+  } = {}) {
+    if (isCancelled()) return null;
+    const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+    const context = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
+    // This canvas is private until the complete preview is encoded and its
+    // exact owner has been rechecked. No partial image reaches the layer.
+    const completed = await forEachSerializedPixelBufferTileCooperative(source, ({ x, y, buffer }) => {
+      const rgba = buffer.model === 'cmyk'
+        ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
+        : pixelBufferToToneMappedRgba8Preview(buffer, {}, {
+            toneMap:preview.toneMap,
+            displayExposure:preview.displayExposure,
+          });
+      const image = context.createImageData(buffer.width, buffer.height);
+      image.data.set(rgba);
+      context.putImageData(image, x, y);
+    }, { isCancelled, yieldControl:previewYieldControl, batchTiles:2 });
+    if (!completed || isCancelled()) return null;
+    return canvasToDataURL(canvas, 'image/png');
+  }
+
+  async function prepareTiledHighDepthMutation(layer, visitor, {
+    requireAlpha = false,
+    maxBytes = null,
+    isCancelled = () => false,
+  } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const byteBudget = maxBytes == null
+      ? highDepthBudgetForLayer(layer)
+      : Math.max(0, Math.trunc(Number(maxBytes) || 0));
+    const prepared = mutateSerializedPixelBufferTiles(
+      layer.highDepthSource,
+      visitor,
+      { maxBytes:byteBudget, requireAlpha },
+    );
+    if (!prepared) return null;
+    if (!prepared.changed) {
+      return {
+        changed:0,
+        changedTiles:prepared.changedTiles,
+        promotedAlpha:prepared.promotedAlpha,
+        mutation:null,
+      };
+    }
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source, { isCancelled });
+    if (dataUrl === null) return {
+      changed:prepared.changed,
+      changedTiles:prepared.changedTiles,
+      promotedAlpha:prepared.promotedAlpha,
+      mutation:null,
+      cancelled:true,
+    };
+    return {
+      changed:prepared.changed,
+      changedTiles:prepared.changedTiles,
+      promotedAlpha:prepared.promotedAlpha,
+      mutation:{
+        highDepthSource:prepared.source,
+        dataUrl,
+        highDepthPreview:prepared.source.model === 'cmyk'
+          ? null
+          : sanitizeHighDepthPreview(layer.highDepthPreview),
+      },
+    };
+  }
+
+  async function persistTiledHighDepthMutation(owner, layer, visitor, {
+    requireAlpha = false,
+    isContinuationCurrent,
+  } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    // Recheck canonical source identity, not just the owning layer object.
+    // A superseded async preview must not overwrite a newer edit on that layer.
+    const originalSource = layer.highDepthSource;
+    const stale = () => (
+      (typeof isContinuationCurrent === 'function' && !isContinuationCurrent()) ||
+      !isCurrentRasterTarget(owner, layer) ||
+      layer.highDepthSource !== originalSource
+    );
+    if (stale()) return { changed:0, changedTiles:0, applied:false, stale:true };
+    const prepared = await prepareTiledHighDepthMutation(layer, visitor, { requireAlpha, isCancelled:stale });
+    if (!prepared) return null;
+    if (stale() || prepared.cancelled) {
+      return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:false, stale:true };
+    }
+    if (!prepared.mutation) {
+      return { changed:0, changedTiles:prepared.changedTiles, applied:false, stale:false };
+    }
+    applyHighDepthMutation(layer, prepared.mutation);
+    return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:true, stale:false };
+  }
+
+  // Keep all ROI tile changes private until the exact document, layer and
+  // serialized source are revalidated after the asynchronous preview build.
+  async function persistTiledHighDepthInpaint(owner, layer, { isAllowed } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const originalSource = layer.highDepthSource;
+    const stale = () => !isCurrentRasterTarget(owner, layer) || layer.highDepthSource !== originalSource;
+    if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
+    const prepared = await prepareTiledInpaintWithWorker(originalSource, {
+      isAllowed,
+      isCancelled:stale,
+      worker:tiledInpaintWorker,
+      maxBytes:highDepthBudgetForLayer(layer),
+    });
+    if (stale() || prepared?.cancelled) return { ...prepared, applied:false, stale:true };
+    if (!prepared.changed) return { ...prepared, applied:false, stale:false };
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source, { isCancelled:stale });
+    if (dataUrl === null || stale()) return { ...prepared, applied:false, stale:true };
+    applyHighDepthMutation(layer, {
+      highDepthSource:prepared.source,
+      dataUrl,
+      highDepthPreview:prepared.source.model === 'cmyk'
+        ? null
+        : sanitizeHighDepthPreview(layer.highDepthPreview),
+    });
+    return { ...prepared, applied:true, stale:false };
+  }
+
+  async function prepareHighDepthMutation(layer, buffer, { maxBytes = null } = {}) {
+    const byteBudget = maxBytes == null
+      ? highDepthBudgetForLayer(layer)
+      : Math.max(0, Math.trunc(Number(maxBytes) || 0));
+    const highDepthSource = serializePixelBufferSourceAdaptive(buffer, { maxBytes: byteBudget });
+    const dataUrl = await highDepthPreviewDataUrl(layer, buffer);
+    return {
+      highDepthSource,
+      dataUrl,
+      highDepthPreview: buffer.model === 'cmyk' ? null : sanitizeHighDepthPreview(layer.highDepthPreview),
+    };
+  }
+
+  function applyHighDepthMutation(layer, mutation) {
+    const old = layer.dataUrl;
+    layer.highDepthSource = mutation.highDepthSource;
+    layer.highDepthPreview = mutation.highDepthPreview;
+    layer.dataUrl = mutation.dataUrl;
+    invalidateImageCache(old);
+  }
+
+  async function persistHighDepthMutation(owner, layer, buffer, { isContinuationCurrent } = {}) {
+    const continuationCurrent = () => typeof isContinuationCurrent !== 'function' || isContinuationCurrent();
+    if (!buffer || !continuationCurrent() || !isCurrentRasterTarget(owner, layer)) return false;
+    const mutation = await prepareHighDepthMutation(layer, buffer);
+    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) return false;
+    applyHighDepthMutation(layer, mutation);
+    return true;
+  }
+
+  async function persistNativeHighDepthPaintLayer(owner, layer) {
+    const token = highDepthPaintBuffer || highDepthPaintWorkingSet;
+    if (!token) return false;
+    if (!isNativeHighDepthPaintTarget(owner, layer)) {
+      clearNativeHighDepthPaintTarget(owner, layer, token);
+      return false;
+    }
+
+    let mutation;
+    try {
+      if (highDepthPaintWorkingSet) {
+        const highDepthSource = highDepthPaintWorkingSet.serialize();
+        mutation = {
+          highDepthSource,
+          dataUrl:await highDepthPreviewDataUrlFromSource(layer, highDepthSource),
+          highDepthPreview:highDepthSource.model === 'cmyk'
+            ? null
+            : sanitizeHighDepthPreview(layer.highDepthPreview),
+        };
+      } else {
+        mutation = await prepareHighDepthMutation(layer, highDepthPaintBuffer);
+      }
+    } catch (error) {
+      clearNativeHighDepthPaintTarget(owner, layer, token);
+      throw error;
+    }
+
+    if ((highDepthPaintBuffer || highDepthPaintWorkingSet) !== token) return false;
+    if (!isNativeHighDepthPaintTarget(owner, layer)) {
+      clearNativeHighDepthPaintTarget(owner, layer, token);
+      return false;
+    }
+
+    applyHighDepthMutation(layer, mutation);
+    clearNativeHighDepthPaintTarget(owner, layer, token);
+    return true;
+  }
+
+  function drawHighDepthRasterBase(layer, canvas, context) {
+    if (!layer?.highDepthSource) return false;
+    const buffer = deserializePixelBufferSource(layer.highDepthSource);
+    const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
+    const rgba = buffer.model === 'cmyk'
+      ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
+      : pixelBufferToToneMappedRgba8Preview(
+          buffer,
+          {},
+          { toneMap: preview.toneMap, displayExposure: preview.displayExposure },
+        );
+    const source = documentRef.createElement('canvas');
+    source.width = buffer.width;
+    source.height = buffer.height;
+    const sourceContext = source.getContext('2d', { alpha: true, willReadFrequently: true });
+    const image = sourceContext.createImageData(buffer.width, buffer.height);
+    image.data.set(rgba);
+    sourceContext.putImageData(image, 0, 0);
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    return true;
+  }
+
+  async function ensureRasterBuffer(owner, layer) {
+    if (!isCurrentRasterTarget(owner, layer)) return null;
+    const paintSize = checkedCanvasSize(layer.width, layer.height, `Растровый слой «${layer.name || 'Без имени'}»`);
+    const canvasWidth = paintSize.width;
+    const canvasHeight = paintSize.height;
+    const canReuse = (
+      brushOwner === owner &&
+      brushLayer === layer &&
+      brushLayerId === layer.id &&
+      brushCanvas &&
+      brushCanvas.width === canvasWidth &&
+      brushCanvas.height === canvasHeight
+    );
+    if (canReuse) return { canvas: brushCanvas, ctx: brushContext };
+
+    const canvas = documentRef.createElement('canvas');
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    const context = canvas.getContext('2d', { alpha: true });
+    if (!drawHighDepthRasterBase(layer, canvas, context) && layer.dataUrl) {
+      const image = await getImage(layer.dataUrl);
+      if (!isCurrentRasterTarget(owner, layer)) return null;
+      if (image) context.drawImage(image, 0, 0, canvasWidth, canvasHeight);
+    }
+    if (!isCurrentRasterTarget(owner, layer)) return null;
+
+    clearHighDepthPaintState();
+    brushCanvas = canvas;
+    brushContext = context;
+    brushLayerId = layer.id;
+    brushOwner = owner;
+    brushLayer = layer;
+    return { canvas, ctx: context };
+  }
+
+  async function persistPaintLayer(owner, layer, { isContinuationCurrent } = {}) {
+    const canvas = brushCanvas;
+    const continuationCurrent = () => typeof isContinuationCurrent !== 'function' || isContinuationCurrent();
+    if (
+      !continuationCurrent() ||
+      !canvas ||
+      brushOwner !== owner ||
+      brushLayer !== layer ||
+      brushLayerId !== layer?.id ||
+      !isCurrentRasterTarget(owner, layer)
+    ) return false;
+
+    const dataUrl = await canvasToDataURL(canvas, 'image/png');
+    if (
+      !continuationCurrent() ||
+      brushCanvas !== canvas ||
+      brushOwner !== owner ||
+      brushLayer !== layer ||
+      brushLayerId !== layer.id ||
+      !isCurrentRasterTarget(owner, layer)
+    ) return false;
+
+    const old = layer.dataUrl;
+    layer.dataUrl = dataUrl;
+    layer.highDepthSource = null;
+    layer.highDepthPreview = null;
+    invalidateImageCache(old);
+    return true;
+  }
+
+  function paintPreviewOverrides() {
+    if (!brushCanvas || !brushLayerId) return null;
+    if (highDepthPaintBuffer || highDepthPaintWorkingSet) {
+      if (!isNativeHighDepthPaintTarget(highDepthPaintOwner, highDepthPaintLayer)) return null;
+      return new Map([[brushLayerId, { source: brushCanvas, skipAdjustments: true }]]);
+    }
+    if (
+      !brushOwner ||
+      !brushLayer ||
+      getDocument() !== brushOwner ||
+      !Array.isArray(brushOwner.layers) ||
+      !brushOwner.layers.includes(brushLayer)
+    ) return null;
+    return new Map([[brushLayerId, brushCanvas]]);
+  }
+
+  function schedulePaintPreview() {
+    paintPreviewQueued = true;
+    if (paintPreviewFrame) return;
+    paintPreviewFrame = requestFrame(() => {
+      paintPreviewFrame = 0;
+      if (!paintPreviewQueued || getDrag()?.kind !== 'paint') return;
+      paintPreviewQueued = false;
+      if (highDepthPaintPreviewDirty && highDepthPaintOwner && highDepthPaintLayer) {
+        refreshHighDepthPaintCanvas(highDepthPaintOwner, highDepthPaintLayer, true);
+      }
+      renderPaintPreview();
+    });
+  }
+
+  return {
+    get brushCanvas() { return brushCanvas; },
+    get brushContext() { return brushContext; },
+    get brushLayerId() { return brushLayerId; },
+    get highDepthPaintBuffer() { return highDepthPaintBuffer; },
+    get highDepthPaintWorkingSet() { return highDepthPaintWorkingSet; },
+    get highDepthPaintLayerId() { return highDepthPaintLayerId; },
+    clearBrushBuffer,
+    clearHighDepthPaintState,
+    reset,
+    markHighDepthPreviewDirty,
+    isNativeHighDepthPaintTarget,
+    highDepthBudgetForLayer,
+    editableHighDepthBuffer,
+    refreshHighDepthPaintCanvas,
+    ensureNativeHighDepthPaintBuffer,
+    applyNativeHighDepthBrushDab,
+    applyNativeHighDepthStrokeSegment,
+    prepareTiledHighDepthMutation,
+    persistTiledHighDepthMutation,
+    persistTiledHighDepthInpaint,
+    prepareHighDepthMutation,
+    applyHighDepthMutation,
+    persistHighDepthMutation,
+    persistNativeHighDepthPaintLayer,
+    drawHighDepthRasterBase,
+    ensureRasterBuffer,
+    persistPaintLayer,
+    paintPreviewOverrides,
+    schedulePaintPreview,
+    cancelPaintPreview,
+  };
+}
+
+// ---- src/painting/command-controller.js ----
+function createRasterCommandController({
+  rasterEdit,
+  state,
+  target,
+  selection,
+  tools,
+  ui,
+} = {}) {
+  if (!rasterEdit) throw new TypeError('rasterEdit is required');
+  if (
+    typeof state?.getDocument !== 'function' ||
+    typeof state?.isPersisting !== 'function' ||
+    typeof state?.beginPersist !== 'function' ||
+    typeof state?.endPersist !== 'function'
+  ) {
+    throw new TypeError('raster command state bridge is required');
+  }
+  if (
+    typeof target?.isEditableRasterLayer !== 'function' ||
+    typeof target?.atPoint !== 'function' ||
+    typeof target?.toLocal !== 'function'
+  ) {
+    throw new TypeError('raster command target bridge is required');
+  }
+  if (
+    typeof tools?.primaryColor !== 'function' ||
+    typeof tools?.brushSize !== 'function' ||
+    typeof tools?.opacity !== 'function' ||
+    typeof tools?.fillTolerance !== 'function' ||
+    typeof tools?.rgbToCmyk !== 'function'
+  ) {
+    throw new TypeError('raster command tool bridge is required');
+  }
+
+  function currentDocument() {
+    const documentValue = state.getDocument();
+    if (!documentValue) throw new Error('Raster command controller has no active document');
+    return documentValue;
+  }
+
+  function status(message) {
+    ui?.setStatus?.(message);
+  }
+
+  function busy() {
+    if (!state.isPersisting()) return false;
+    status('Сохраняется предыдущая растровая операция…');
+    return true;
+  }
+
+  function beginPersist() {
+    if (state.beginPersist()) return true;
+    status('Сохраняется предыдущая растровая операция…');
+    return false;
+  }
+
+  function selectionPredicate(layer, selectionSnapshot) {
+    return selection?.predicate?.(layer, selectionSnapshot) ?? null;
+  }
+
+  function offsetPredicate(predicate, offsetX, offsetY) {
+    if (typeof predicate !== 'function') return null;
+    return (x, y) => predicate(x + offsetX, y + offsetY);
+  }
+
+  function resetNativeState() {
+    rasterEdit.clearBrushBuffer();
+    state.resetPaintState?.();
+  }
+
+  function editRadius() {
+    return Math.max(.5, tools.brushSize() / 2);
+  }
+
+  function editOpacity() {
+    return tools.opacity();
+  }
+
+  async function drawLine(start, end) {
+    if (busy()) return false;
+    const doc = currentDocument();
+    let layer = target.selected?.() ?? null;
+    if (!target.isEditableRasterLayer(layer)) {
+      layer = createRasterLayer({
+        name:'Линии',
+        x:0,
+        y:0,
+        width:doc.width,
+        height:doc.height,
+        dataUrl:null,
+      });
+      addLayer(doc, layer);
+    }
+    if (!beginPersist()) return false;
+
+    try {
+      const from = target.toLocal(start, layer);
+      const to = target.toLocal(end, layer);
+      if (layer.highDepthSource) {
+        const rgb = hexToRgb(tools.primaryColor());
+        const basePredicate = selectionPredicate(layer);
+        const tiled = typeof rasterEdit.persistTiledHighDepthMutation === 'function'
+          ? await rasterEdit.persistTiledHighDepthMutation(doc, layer, ({ x, y, buffer }) => {
+              const localFrom = { x:from.x - x, y:from.y - y };
+              const localTo = { x:to.x - x, y:to.y - y };
+              const isAllowed = offsetPredicate(basePredicate, x, y);
+              return buffer.model === 'cmyk'
+                ? applyCmykPixelBufferStrokeSegment(
+                    buffer, localFrom, localTo, editRadius(), tools.rgbToCmyk(rgb),
+                    { opacity:editOpacity(), isAllowed },
+                  )
+                : applyPixelBufferStrokeSegment(
+                    buffer, localFrom, localTo, editRadius(), rgb,
+                    { opacity:editOpacity(), isAllowed },
+                  );
+            })
+          : null;
+        if (tiled != null) {
+          if (tiled.stale) return false;
+          if (!tiled.changed) {
+            status('Линия не изменила high-depth слой');
+            return false;
+          }
+          if (!tiled.applied) return false;
+          resetNativeState();
+          doc.selectedLayerId = layer.id;
+          ui?.commit?.('Нарисовать линию');
+          status(`Линия добавлена в tiled high-depth слой «${layer.name}» · ${tiled.changedTiles} tiles`);
+          return true;
+        }
+        const buffer = rasterEdit.editableHighDepthBuffer(layer);
+        if (buffer) {
+          const changed = buffer.model === 'cmyk'
+            ? applyCmykPixelBufferStrokeSegment(
+                buffer, from, to, editRadius(), tools.rgbToCmyk(rgb),
+                { opacity:editOpacity(), isAllowed:basePredicate },
+              )
+            : applyPixelBufferStrokeSegment(
+                buffer, from, to, editRadius(), rgb,
+                { opacity:editOpacity(), isAllowed:basePredicate },
+              );
+          if (!changed) {
+            status('Линия не изменила high-depth слой');
+            return false;
+          }
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
+          resetNativeState();
+          doc.selectedLayerId = layer.id;
+          ui?.commit?.('Нарисовать линию');
+          status(`Линия добавлена в high-depth слой «${layer.name}»`);
+          return true;
+        }
+      }
+
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      const context = prepared.ctx;
+      context.save();
+      selection?.clipContext?.(context, layer);
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
+      context.lineWidth = Math.max(1, tools.brushSize());
+      context.globalAlpha = editOpacity();
+      context.globalCompositeOperation = 'source-over';
+      context.strokeStyle = tools.primaryColor();
+      context.beginPath();
+      context.moveTo(from.x, from.y);
+      context.lineTo(to.x, to.y);
+      context.stroke();
+      context.restore();
+      doc.selectedLayerId = layer.id;
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
+      ui?.commit?.('Нарисовать линию');
+      status(`Линия добавлена в слой «${layer.name}»`);
+      return true;
+    } catch (error) {
+      console.error(error);
+      rasterEdit.clearBrushBuffer();
+      ui?.render?.();
+      status(`Ошибка линии: ${error.message}`);
+      ui?.toast?.('Не удалось нарисовать линию', 'error');
+      return false;
+    } finally {
+      state.endPersist();
+    }
+  }
+
+  async function fillAt(point) {
+    if (busy()) return false;
+    if (selection?.hasActive?.() && selection?.containsPoint && !selection.containsPoint(point)) {
+      status('Заливка: щёлкните внутри активного выделения');
+      return false;
+    }
+
+    const doc = currentDocument();
+    const layer = target.atPoint(point);
+    if (!layer) {
+      status('Заливка работает по растровому слою');
+      ui?.toast?.('Выберите растровый слой или щёлкните по изображению', 'warn');
+      return false;
+    }
+    if (!beginPersist()) return false;
+
+    try {
+      const local = target.toLocal(point, layer);
+      if (layer.highDepthSource) {
+        const buffer = rasterEdit.editableHighDepthBuffer(layer);
+        if (buffer) {
+          const x = Math.floor(local.x);
+          const y = Math.floor(local.y);
+          if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
+            status('Точка заливки вне растрового слоя');
+            return false;
+          }
+          status('High-depth заливка области…');
+          const rgb = hexToRgb(tools.primaryColor());
+          const filled = buffer.model === 'cmyk'
+            ? floodFillCmykPixelBuffer(
+                buffer,
+                x,
+                y,
+                tools.rgbToCmyk(rgb),
+                { tolerance:tools.fillTolerance(), opacity:editOpacity(), isAllowed:selectionPredicate(layer) },
+              )
+            : floodFillPixelBuffer(
+                buffer,
+                x,
+                y,
+                rgb,
+                { tolerance:tools.fillTolerance(), opacity:editOpacity(), isAllowed:selectionPredicate(layer) },
+              );
+          if (!filled) {
+            status('Заливка: подходящая область не найдена');
+            return false;
+          }
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) return false;
+          resetNativeState();
+          doc.selectedLayerId = layer.id;
+          ui?.commit?.('Заливка');
+          status(`High-depth заливка: ${filled.toLocaleString('ru-RU')} px`);
+          return true;
+        }
+      }
+
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      const x = Math.floor(local.x);
+      const y = Math.floor(local.y);
+      if (x < 0 || y < 0 || x >= prepared.canvas.width || y >= prepared.canvas.height) {
+        status('Точка заливки вне растрового слоя');
+        return false;
+      }
+      status('Заливка области…');
+      const imageData = prepared.ctx.getImageData(
+        0,
+        0,
+        prepared.canvas.width,
+        prepared.canvas.height,
+      );
+      const filled = floodFillPixels(
+        imageData.data,
+        prepared.canvas.width,
+        prepared.canvas.height,
+        x,
+        y,
+        hexToRgb(tools.primaryColor()),
+        {
+          tolerance:tools.fillTolerance(),
+          opacity:editOpacity(),
+          isAllowed:selectionPredicate(layer),
+        },
+      );
+      if (!filled) {
+        status('Заливка: подходящая область не найдена');
+        return false;
+      }
+      prepared.ctx.putImageData(imageData, 0, 0);
+      doc.selectedLayerId = layer.id;
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) return false;
+      ui?.commit?.('Заливка');
+      status(`Заливка: ${filled.toLocaleString('ru-RU')} px`);
+      return true;
+    } catch (error) {
+      console.error(error);
+      rasterEdit.clearBrushBuffer();
+      ui?.render?.();
+      status(`Ошибка заливки: ${error.message}`);
+      ui?.toast?.('Не удалось выполнить заливку', 'error');
+      return false;
+    } finally {
+      state.endPersist();
+    }
+  }
+
+
+  async function contentAwareFill({ ownerDocument, ownerLayer, isAllowed: maskPredicate, historyLabel = 'Контент-заливка' } = {}) {
+    if (busy()) return false;
+    const selectionSnapshot = selection?.captureSnapshot?.() ?? null;
+    if (!selectionSnapshot && typeof maskPredicate !== 'function') {
+      status('Контент-заливка: сначала создайте выделение');
+      return false;
+    }
+
+    const doc = currentDocument();
+    const layer = target.selected?.() ?? null;
+    if ((ownerDocument && ownerDocument !== doc) || (ownerLayer && ownerLayer !== layer)) return false;
+    if (!Array.isArray(doc?.layers) || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
+      status('Контент-заливка работает по выбранному незаблокированному растровому слою');
+      ui?.toast?.('Выберите растровый слой для контент-заливки', 'warn');
+      return false;
+    }
+    if (!maskPredicate && selection?.intersectsLayer && !selection.intersectsLayer(layer, selectionSnapshot)) {
+      status('Контент-заливка: выделение не пересекает выбранный слой');
+      return false;
+    }
+
+    const isAllowed = maskPredicate ?? selectionPredicate(layer, selectionSnapshot);
+    if (typeof isAllowed !== 'function') {
+      status('Контент-заливка: не удалось зафиксировать геометрию выделения');
+      return false;
+    }
+    if (!beginPersist()) return false;
+
+    try {
+      status('Контент-заливка: анализ окружения…');
+
+      if (layer.highDepthSource) {
+        if (
+          layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND &&
+          typeof rasterEdit.persistTiledHighDepthInpaint === 'function'
+        ) {
+          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, { isAllowed });
+          if (result) {
+            resetNativeState();
+            if (result.stale) return false;
+            if (!result.applied) {
+              status('Контент-заливка: нужны исходные пиксели за пределами выделения или результат не изменился');
+              return false;
+            }
+            ui?.commit?.(historyLabel);
+            status(`Контент-заливка: восстановлено ${result.filled.toLocaleString('ru-RU')} px · tiled ${result.changedTiles} tiles`);
+            return true;
+          }
+        }
+        const buffer = rasterEdit.editableHighDepthBuffer(layer);
+        if (!buffer) {
+          resetNativeState();
+          status('Контент-заливка: native high-depth buffer недоступен; precision сохранён без raster fallback');
+          return false;
+        }
+        const filled = inpaintPixelBuffer(buffer, { isAllowed });
+        if (!filled) {
+          resetNativeState();
+          status('Контент-заливка: нужны исходные пиксели за пределами выделения');
+          return false;
+        }
+        if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) {
+          resetNativeState();
+          return false;
+        }
+        resetNativeState();
+        ui?.commit?.(historyLabel);
+        status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px · ${buffer.bitsPerChannel}-bit ${String(buffer.model).toUpperCase()}`);
+        return true;
+      }
+
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      if (state.getDocument() !== doc || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
+        rasterEdit.clearBrushBuffer();
+        status('Контент-заливка отменена: документ или слой изменился');
+        return false;
+      }
+
+      const imageData = prepared.ctx.getImageData(0, 0, prepared.canvas.width, prepared.canvas.height);
+      const filled = inpaintSelectedSamples(imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed });
+      if (!filled) {
+        rasterEdit.clearBrushBuffer();
+        status('Контент-заливка: нужны исходные пиксели за пределами выделения');
+        return false;
+      }
+      prepared.ctx.putImageData(imageData, 0, 0);
+      if (!await rasterEdit.persistPaintLayer(doc, layer)) {
+        rasterEdit.clearBrushBuffer();
+        return false;
+      }
+      ui?.commit?.(historyLabel);
+      status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
+      return true;
+    } catch (error) {
+      resetNativeState();
+      ui?.render?.();
+      if (error instanceof RangeError && String(error.message).startsWith('Контент-заливка:')) {
+        status(error.message);
+        ui?.toast?.(error.message, 'warn');
+        return false;
+      }
+      console.error(error);
+      status(`Ошибка контент-заливки: ${error.message}`);
+      ui?.toast?.('Не удалось выполнить контент-заливку', 'error');
+      return false;
+    } finally {
+      state.endPersist();
+    }
+  }
+
+  async function clearSelection({
+    historyLabel = 'Очистить выделение',
+    successStatus = 'Пиксели внутри выделения очищены',
+    ownerDocument,
+    targetLayer,
+    selectionSnapshot,
+    isContinuationCurrent,
+  } = {}) {
+    const continuationCurrent = typeof isContinuationCurrent === 'function' ? isContinuationCurrent : () => true;
+    if (!continuationCurrent()) return false;
+    const hasExplicitSelection = selectionSnapshot !== undefined;
+    if (!hasExplicitSelection && !selection?.hasActive?.()) return false;
+    if (hasExplicitSelection && !selectionSnapshot) return false;
+    if (busy()) return false;
+
+    const doc = ownerDocument === undefined ? currentDocument() : ownerDocument;
+    if (state.getDocument() !== doc) {
+      status('Очистка выделения отменена: активный документ изменился');
+      return false;
+    }
+    const layer = targetLayer === undefined ? (target.selected?.() ?? null) : targetLayer;
+    if (!Array.isArray(doc?.layers) || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
+      status('Для очистки выделения выберите незаблокированный растровый слой');
+      ui?.toast?.('Выделение очищает пиксели только на растровом слое', 'warn');
+      return false;
+    }
+    if (selection?.intersectsLayer && !selection.intersectsLayer(layer, selectionSnapshot)) {
+      status('Выделение не пересекает выбранный слой');
+      return false;
+    }
+    if (!beginPersist()) return false;
+
+    try {
+      if (layer.highDepthSource) {
+        const basePredicate = selectionPredicate(layer, selectionSnapshot);
+        const tiled = typeof rasterEdit.persistTiledHighDepthMutation === 'function'
+          ? await rasterEdit.persistTiledHighDepthMutation(
+              doc, layer,
+              ({ x, y, buffer }) => clearPixelBufferPixels(
+                buffer, { isAllowed:offsetPredicate(basePredicate, x, y) },
+              ),
+              { requireAlpha:true, isContinuationCurrent:continuationCurrent },
+            )
+          : null;
+        if (tiled != null) {
+          if (tiled.stale) {
+            resetNativeState();
+            return false;
+          }
+          if (!tiled.changed) {
+            status('В выделении нет непрозрачных high-depth пикселей');
+            return false;
+          }
+          if (!tiled.applied) return false;
+          resetNativeState();
+          ui?.commit?.(historyLabel);
+          status(`${successStatus} · tiled high-depth: ${tiled.changed.toLocaleString('ru-RU')} px`);
+          return true;
+        }
+        const buffer = rasterEdit.editableHighDepthBuffer(layer, { requireAlpha:true });
+        if (buffer) {
+          const cleared = clearPixelBufferPixels(buffer, { isAllowed:basePredicate });
+          if (!cleared) {
+            status('В выделении нет непрозрачных high-depth пикселей');
+            return false;
+          }
+          if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer, { isContinuationCurrent:continuationCurrent })) {
+            if (!continuationCurrent()) resetNativeState();
+            return false;
+          }
+          resetNativeState();
+          ui?.commit?.(historyLabel);
+          status(`${successStatus} · high-depth: ${cleared.toLocaleString('ru-RU')} px`);
+          return true;
+        }
+      }
+
+      const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!prepared) return false;
+      if (!continuationCurrent()) {
+        rasterEdit.clearBrushBuffer();
+        return false;
+      }
+      const context = prepared.ctx;
+      context.save();
+      selection?.clipContext?.(context, layer, selectionSnapshot);
+      context.clearRect(0, 0, prepared.canvas.width, prepared.canvas.height);
+      context.restore();
+      if (!await rasterEdit.persistPaintLayer(doc, layer, { isContinuationCurrent:continuationCurrent })) {
+        if (!continuationCurrent()) rasterEdit.clearBrushBuffer();
+        return false;
+      }
+      ui?.commit?.(historyLabel);
+      status(successStatus);
+      return true;
+    } catch (error) {
+      if (!continuationCurrent()) {
+        rasterEdit.clearBrushBuffer();
+        return false;
+      }
+      console.error(error);
+      rasterEdit.clearBrushBuffer();
+      ui?.render?.();
+      status(`Ошибка очистки выделения: ${error.message}`);
+      ui?.toast?.('Не удалось очистить выделение', 'error');
+      return false;
+    } finally {
+      state.endPersist();
+    }
+  }
+
+  return { drawLine, fillAt, contentAwareFill, clearSelection };
+}
+
+// ---- src/ai/lama-assets.js ----
+// Pinned public artifacts; executable code is verified before execution.
+const LAMA_ARTIFACTS = Object.freeze([
+  {
+    "id": "ort.webgpu.min.js",
+    "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.webgpu.min.js",
+    "size": 66417,
+    "sha256": "7d65dad7eb4564ad98db9924a259af2e2c68ebfbdbf254fa5d728f1c5736e07a"
+  },
+  {
+    "id": "ort-wasm-simd-threaded.asyncify.mjs",
+    "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort-wasm-simd-threaded.asyncify.mjs",
+    "size": 53057,
+    "sha256": "3d1c85995364bb643302fc6fd877a0c3ba5ae72401815e0f24828a53d9191e28"
+  },
+  {
+    "id": "ort-wasm-simd-threaded.asyncify.wasm",
+    "url": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort-wasm-simd-threaded.asyncify.wasm",
+    "size": 26781914,
+    "sha256": "39f9f0894d478800487ed9f7dbe92618498db320cf55c8e3d89adff8dce658da"
+  },
+  {
+    "id": "lama_512_int8.onnx",
+    "url": "https://huggingface.co/g-ronimo/lama/resolve/418036c6b541e526cdbb0bead1ec3a87dabede53/lama_512_int8.onnx",
+    "size": 62074990,
+    "sha256": "cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe"
+  }
+].map(Object.freeze));
+
+// ---- src/ai/asset-cache.js ----
+// This database stores only four public artifacts. Never stores images, masks or tensors.
+function createLamaArtifactCache({indexedDB=globalThis.indexedDB,storage=globalThis.navigator?.storage,databaseName='zeter-object-removal-model-v1',artifacts=LAMA_ARTIFACTS}={}) {
+  async function access(id,bytes) {
+    if(!indexedDB)return null;
+    if(bytes){const estimate=await storage?.estimate?.();if(!estimate?.quota||estimate.quota-(estimate.usage||0)<bytes.byteLength+64*1024*1024)return null;}
+    return new Promise(resolve=>{
+      let db,done=false,tx;
+      const finish=value=>{if(done)return;done=true;clearTimeout(timer);db?.close();resolve(value);};
+      const timer=setTimeout(()=>{try{tx?.abort();}catch{}finish(null);},5000);
+      const open=indexedDB.open(databaseName,1);
+      open.onupgradeneeded=()=>{open.result.createObjectStore('artifacts');};
+      open.onerror=open.onblocked=()=>finish(null);
+      open.onsuccess=()=>{
+        db=open.result;if(done){db.close();return;}
+        tx=db.transaction('artifacts',bytes?'readwrite':'readonly');
+        let value=null;
+        const request=bytes?tx.objectStore('artifacts').put(bytes,id):tx.objectStore('artifacts').get(id);
+        request.onsuccess=()=>{value=bytes?true:request.result??null;};
+        tx.oncomplete=()=>finish(value);tx.onerror=tx.onabort=()=>finish(null);
+      };
+    });
+  }
+  // Delete only owned public artifacts, including a canceled installation's partial cache.
+  async function remove() {
+    if(!indexedDB)return true;
+    return new Promise(resolve=>{
+      let db,tx,done=false;
+      const finish=value=>{if(done)return;done=true;clearTimeout(timer);db?.close();resolve(value);};
+      const timer=setTimeout(()=>{try{tx?.abort();}catch{}finish(false);},5000);
+      try {
+        const open=indexedDB.open(databaseName,1);
+        open.onupgradeneeded=()=>{open.result.createObjectStore('artifacts');};
+        open.onerror=open.onblocked=()=>finish(false);
+        open.onsuccess=()=>{
+          db=open.result;if(done){db.close();return;}
+          try {
+            tx=db.transaction('artifacts','readwrite');
+            tx.oncomplete=()=>finish(true);tx.onerror=tx.onabort=()=>finish(false);
+            const store=tx.objectStore('artifacts');
+            for(const artifact of artifacts)store.delete(artifact.id);
+          } catch {try{tx?.abort();}catch{}finish(false);}
+        };
+      } catch {finish(false);}
+    });
+  }
+  return {get:id=>access(id),put:(id,bytes)=>access(id,bytes),remove};
+}
+async function loadLamaArtifact(descriptor,{signal,onProgress,onCacheResult,cache,cachedOnly=false,fetchImpl=globalThis.fetch,cryptoImpl=globalThis.crypto}={}) {
+  const aborted=()=>{if(signal?.aborted)throw new DOMException('Удаление отменено','AbortError');};
+  const verify=async bytes=>{
+    if(!(bytes instanceof ArrayBuffer)||bytes.byteLength!==descriptor.size)return false;
+    const digest=new Uint8Array(await cryptoImpl.subtle.digest('SHA-256',bytes));
+    return Array.from(digest,b=>b.toString(16).padStart(2,'0')).join('')===descriptor.sha256;
+  };
+  if(!cryptoImpl?.subtle)throw new Error('Нужен современный браузер и HTTPS или локальное открытие редактора');
+  aborted();
+  let cached;try{cached=await cache?.get(descriptor.id);}catch{cached=null;}
+  aborted();
+  if(cached&&await verify(cached)){aborted();onCacheResult?.(true);return cached;}
+  if(cachedOnly)throw new Error('Модель ещё не установлена');
+  const controller=new AbortController(),abort=()=>controller.abort();
+  signal?.addEventListener('abort',abort,{once:true});
+  const timer=setTimeout(abort,180000);
+  try {
+    aborted();
+    const response=await fetchImpl(descriptor.url,{method:'GET',credentials:'omit',referrerPolicy:'no-referrer',signal:controller.signal,cache:'no-store'});
+    if(!response.ok)throw new Error(`Загрузка модели: HTTP ${response.status}`);
+    const length=response.headers.get('content-length');
+    if(length&&Number(length)>descriptor.size)throw new Error('Размер загрузки не совпадает с проверенной моделью');
+    if(!response.body)throw new Error('Браузер не поддерживает загрузку модели');
+    const reader=response.body.getReader(),bytes=new Uint8Array(descriptor.size);let offset=0;
+    try {
+      while(true){const {done,value}=await reader.read();if(done)break;aborted();if(offset+value.byteLength>bytes.length)throw new Error('Модель превышает допустимый размер');bytes.set(value,offset);offset+=value.byteLength;onProgress?.(offset);}
+    } finally {try{await reader.cancel();}catch{}reader.releaseLock();}
+    if(offset!==bytes.length||!await verify(bytes.buffer))throw new Error('Проверка целостности модели не пройдена');
+    aborted();
+    let stored=false;
+    try{stored=await cache?.put(descriptor.id,bytes.buffer)===true;}catch{/* Cache is optional; recovery is never cleared to make space. */}
+    onCacheResult?.(stored);
+    aborted();return bytes.buffer;
+  } catch(error) {
+    aborted();
+    if(controller.signal.aborted)throw new Error('Загрузка модели заняла слишком долго. Проверьте интернет и повторите.');
+    throw error;
+  } finally {clearTimeout(timer);signal?.removeEventListener('abort',abort);}
+}
+
+// ---- src/ai/lama-preprocess.js ----
+// Fixed model contract: RGB 0..1 with masked pixels zeroed, mask=1 means erase.
+function prepareLamaInput({ width, height, data, mask }) {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width<1 || height<1 || width*height>8_000_000 || data?.length!==width*height*4 || mask?.length!==width*height) throw new Error('Некорректный размер изображения или маски');
+  let left=width,top=height,right=-1,bottom=-1,count=0;
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++)if(mask[y*width+x]){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);count++;}
+  if(!count || count===width*height)throw new Error('Закрасьте объект и оставьте вокруг него часть фона');
+  const side=Math.min(Math.max(width,height),Math.max(256,(right-left+1)*2.5,(bottom-top+1)*2.5));
+  const cw=Math.min(width,Math.ceil(side)),ch=Math.min(height,Math.ceil(side));
+  const crop={x:Math.max(0,Math.min(width-cw,Math.round((left+right+1-cw)/2))),y:Math.max(0,Math.min(height-ch,Math.round((top+bottom+1-ch)/2))),width:cw,height:ch};
+  const scale=512/Math.max(cw,ch),tw=Math.max(1,Math.round(cw*scale)),th=Math.max(1,Math.round(ch*scale)),ox=Math.floor((512-tw)/2),oy=Math.floor((512-th)/2);
+  const n=512*512,input=new Float32Array(n*4),modelMask=new Uint8Array(n);
+  for(let y=0;y<512;y++)for(let x=0;x<512;x++){
+    const sx=crop.x+Math.max(0,Math.min(cw-1,(x-ox+.5)*cw/tw-.5)),sy=crop.y+Math.max(0,Math.min(ch-1,(y-oy+.5)*ch/th-.5));
+    const x0=Math.floor(sx),y0=Math.floor(sy),x1=Math.min(width-1,x0+1),y1=Math.min(height-1,y0+1),fx=sx-x0,fy=sy-y0,i=y*512+x;
+    for(let k=0;k<3;k++)input[k*n+i]=((data[(y0*width+x0)*4+k]*(1-fx)+data[(y0*width+x1)*4+k]*fx)*(1-fy)+(data[(y1*width+x0)*4+k]*(1-fx)+data[(y1*width+x1)*4+k]*fx)*fy)/255;
+    // Conservative downsampling preserves even thin painted strokes.
+    if(x>=ox&&x<ox+tw&&y>=oy&&y<oy+th){
+      const xa=Math.max(crop.x,Math.floor(crop.x+(x-ox)*cw/tw)),xb=Math.min(crop.x+cw-1,Math.ceil(crop.x+(x-ox+1)*cw/tw)-1);
+      const ya=Math.max(crop.y,Math.floor(crop.y+(y-oy)*ch/th)),yb=Math.min(crop.y+ch-1,Math.ceil(crop.y+(y-oy+1)*ch/th)-1);
+      for(let yy=ya;yy<=yb&&!modelMask[i];yy++)for(let xx=xa;xx<=xb;xx++)if(mask[yy*width+xx]){modelMask[i]=1;break;}
+    }
+  }
+  // Small model-only margin avoids sampling the object's rim; publication is still mask-only.
+  for(let y=0;y<512;y++)for(let x=0;x<512;x++){
+    const i=y*512+x;let marked=false;
+    for(let yy=Math.max(0,y-3);yy<=Math.min(511,y+3)&&!marked;yy++)for(let xx=Math.max(0,x-3);xx<=Math.min(511,x+3);xx++)if(modelMask[yy*512+xx]){marked=true;break;}
+    if(marked){input[i]=input[n+i]=input[2*n+i]=0;input[3*n+i]=1;}
+  }
+  return {input,crop,tw,th,ox,oy};
+}
+function mergeLamaOutput({width,height,data,mask},prepared,output) {
+  const n=512*512;
+  if(!(output instanceof Float32Array)||output.length!==3*n||!output.every(Number.isFinite))throw new Error('Нейросеть вернула некорректный результат');
+  const result=new Uint8ClampedArray(data),{crop,tw,th,ox,oy}=prepared;
+  for(let y=crop.y;y<crop.y+crop.height;y++)for(let x=crop.x;x<crop.x+crop.width;x++)if(mask[y*width+x]){
+    const sx=Math.max(0,Math.min(511,ox+(x-crop.x+.5)*tw/crop.width-.5)),sy=Math.max(0,Math.min(511,oy+(y-crop.y+.5)*th/crop.height-.5));
+    const x0=Math.floor(sx),y0=Math.floor(sy),x1=Math.min(511,x0+1),y1=Math.min(511,y0+1),fx=sx-x0,fy=sy-y0;
+    for(let k=0;k<3;k++){
+      const off=k*n,value=(output[off+y0*512+x0]*(1-fx)+output[off+y0*512+x1]*fx)*(1-fy)+(output[off+y1*512+x0]*(1-fx)+output[off+y1*512+x1]*fx)*fy;
+      result[(y*width+x)*4+k]=Math.round(Math.max(0,Math.min(1,value))*255);
+    }
+  }
+  return result;
+}
+
+// ---- src/ai/lama-runtime.js ----
+// Serialized into an owned Blob worker, after all executable artifacts pass SHA-256.
+function lamaWorkerEntry() {
+  self.onmessage=async ({data})=>{
+    let stage="runtime";
+    try {
+      // No network requests are permitted from the inference worker.
+      self.fetch=()=>Promise.reject(new Error('Inference network access disabled'));
+      ort.env.wasm.numThreads=1;ort.env.wasm.proxy=false;
+      // file:// has opaque origins: create the module URL in its own worker context.
+      const moduleUrl=URL.createObjectURL(new Blob([data.mjs],{type:'text/javascript'}));
+      ort.env.wasm.wasmPaths={mjs:moduleUrl};ort.env.wasm.wasmBinary=new Uint8Array(data.wasm);
+      self.postMessage({type:'progress',stage:'initialize',message:'Подготовка нейросети на устройстве…'});
+      const providers=data.gpu&&self.navigator?.gpu?['webgpu','wasm']:['wasm'];
+      stage="session";
+      const session=await ort.InferenceSession.create(new Uint8Array(data.model),{executionProviders:providers});
+      if(session.inputNames.length!==1||session.inputNames[0]!=='input'||session.outputNames.length!==1||session.outputNames[0]!=='output')throw new Error('Unexpected model contract');
+      self.postMessage({type:'progress',stage:'inference',message:'Восстановление фона на устройстве…'});
+      const tensor=new ort.Tensor('float32',data.input,[1,4,512,512]);
+      stage="inference";
+      const result=await session.run({input:tensor});
+      const output=result.output;
+      if(output.type!=='float32'||output.dims.join(',')!=='1,3,512,512'||output.data.length!==3*512*512)throw new Error('Unexpected model output');
+      const values=new Float32Array(output.data);
+      await session.release();
+      URL.revokeObjectURL(moduleUrl);
+      self.postMessage({type:'result',output:values},[values.buffer]);
+    } catch(error) {self.postMessage({type:'error',stage,reason:String(error?.message||'').slice(0,300)});}
+  };
+}
+function createLamaEngine({gpu=()=>true,cache=createLamaArtifactCache(),load=loadLamaArtifact,workerFactory=url=>new Worker(url),artifactList=LAMA_ARTIFACTS,workerEntry=lamaWorkerEntry,makeRequest=null}={}) {
+  let active=false,assets=null,preparing=null,stored=false,deleting=false;
+  const inferenceDurations=new Map();
+  async function prepare({signal,onProgress,cachedOnly=false}={}) {
+    if(deleting)throw new Error('Дождитесь удаления нейросети');
+    if(assets)return assets;
+    if(preparing)return preparing;
+    preparing=(async()=>{
+      const candidate=[],total=artifactList.reduce((s,a)=>s+a.size,0);let loaded=0,allStored=true;
+      for(const descriptor of artifactList){
+        candidate.push(await load(descriptor,{signal,cache,cachedOnly,onCacheResult:value=>{allStored=allStored&&value;},onProgress:bytes=>onProgress?.({percent:Math.floor((loaded+bytes)/total*100),loaded:loaded+bytes,total})}));
+        loaded+=descriptor.size;if(signal?.aborted)throw new DOMException('Удаление отменено','AbortError');
+        onProgress?.({percent:Math.floor(loaded/total*100),loaded,total});
+      }
+      assets=candidate;stored=allStored;return assets;
+    })();
+    try{return await preparing;}finally{preparing=null;}
+  }
+  async function run(input,{signal,onProgress}={}) {
+    if(deleting||preparing)throw new Error('Дождитесь завершения работы с моделью');
+    if(active)throw new Error('Удаление объекта уже выполняется');
+    active=true;let worker;const urls=[];
+    const mode=typeof gpu==='function'?gpu():gpu;let inferenceStarted=null;
+    const aborted=()=>{if(signal?.aborted)throw new DOMException('Удаление отменено','AbortError');};
+    try {
+      aborted();
+      if(!assets)throw new Error('Сначала установите модель в настройках редактора');
+      const [runtime,mjs,wasm,model]=assets;
+      const workerUrl=URL.createObjectURL(new Blob([runtime,'\n;(',workerEntry.toString(),')();'],{type:'text/javascript'}));urls.push(workerUrl);
+      worker=workerFactory(workerUrl);
+      return await new Promise((resolve,reject)=>{
+        let done=false;
+        const finish=(value,error)=>{if(done)return;done=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);worker.terminate();error?reject(error):resolve(value);};
+        const abort=()=>finish(null,new DOMException('Удаление отменено','AbortError'));
+        const timer=setTimeout(()=>finish(null,new Error('Обработка заняла слишком долго. Попробуйте меньшую область.')),180000);
+        signal?.addEventListener('abort',abort,{once:true});
+        worker.onerror=event=>{event.preventDefault?.();finish(null,new Error('Не удалось запустить нейросеть в этом браузере'));};
+        worker.onmessage=({data})=>{
+          if(done)return;
+          if(data.type==='progress'){
+            if(data.stage==='inference')inferenceStarted=performance.now();
+            onProgress?.({stage:data.stage,message:data.message,estimatedSeconds:inferenceDurations.get(mode)});
+          }
+          else if(data.type==='result'){
+            if(inferenceStarted!==null)inferenceDurations.set(mode,Math.max(.5,(performance.now()-inferenceStarted)/1000));
+            finish(data.output);
+          }
+          else if(data.type==='error'){console.warn('LaMa '+data.stage+': '+data.reason);finish(null,new Error('Ошибка нейросети ('+data.stage+'). Используйте актуальный Chrome или Edge и повторите.'));}
+        };
+        if(signal?.aborted){abort();return;}
+        const request=makeRequest?makeRequest(input,assets,mode):{payload:{input,mjs,wasm,model,gpu:mode},transfer:[input.buffer]};
+        worker.postMessage(request.payload,request.transfer);
+      });
+    } finally {worker?.terminate();for(const url of urls)URL.revokeObjectURL(url);active=false;}
+  }
+  async function remove() {
+    if(active||preparing||deleting)throw new Error('Дождитесь завершения обработки или установки нейросети');
+    deleting=true;
+    try {
+      if(await cache.remove()!==true)throw new Error('Браузер не разрешил удалить файлы нейросети. Модель сохранена; попробуйте ещё раз.');
+      assets=null;stored=false;inferenceDurations.clear();
+    } finally {deleting=false;}
+  }
+  return {run,prepare,remove,isBusy:()=>Boolean(active||preparing||deleting),isReady:()=>Boolean(assets),isStored:()=>stored};
+}
+
+// ---- src/ai/sam-assets.js ----
+// SlimSAM ONNX exports, pinned revision. Shared verified ORT bytes; separate cache.
+const SAM_ARTIFACTS=Object.freeze([
+  ...LAMA_ARTIFACTS.slice(0,3),
+  {id:'slimsam-vision-q8.onnx',url:'https://huggingface.co/Xenova/slimsam-77-uniform/resolve/5850ab45f587c112167512ffef949107115e26a0/onnx/vision_encoder_quantized.onnx',size:8882165,sha256:'cce23c7b2e5d4f330932738fb67ba518e04b0d99ccdd1cccd22a7da4e01f2971'},
+  {id:'slimsam-prompt-q8.onnx',url:'https://huggingface.co/Xenova/slimsam-77-uniform/resolve/5850ab45f587c112167512ffef949107115e26a0/onnx/prompt_encoder_mask_decoder_quantized.onnx',size:4903810,sha256:'cb90b279f549d2cab7fd6e20c38522438c65d84bdcca3d2a764cff7d857fdce2'},
+].map(Object.freeze));
+
+const SAM2_BASE='https://huggingface.co/onnx-community/sam2.1-hiera-tiny-ONNX/resolve/814a066640debee5a91e70aa401fb8e17e030503/onnx/';
+const SAM2_ARTIFACTS=Object.freeze([
+  ...LAMA_ARTIFACTS.slice(0,3),
+  {id:'sam2-vision.onnx',url:SAM2_BASE+'vision_encoder_quantized.onnx',size:441167,sha256:'8800fdd04b9045cb6060ba8962b83c78ce9bb0976da8f030afa073467a888524'},
+  {id:'sam2-vision.onnx_data',url:SAM2_BASE+'vision_encoder_quantized.onnx_data',size:52573088,sha256:'ea1f677596dc82cef0dc317d78135d892f4b26e20a4439f899aa58d84965b324'},
+  {id:'sam2-prompt.onnx',url:SAM2_BASE+'prompt_encoder_mask_decoder.onnx',size:213114,sha256:'874414704c5d686db7d206a35f6e15d26563d50c8c4468fccc6739bd7e491dcf'},
+  {id:'sam2-prompt.onnx_data',url:SAM2_BASE+'prompt_encoder_mask_decoder.onnx_data',size:20958208,sha256:'e9874d900dd4134ed60eab1e97910327c2419e0b2954485d8fd6e7f1a1470f47'},
+].map(Object.freeze));
+
+// ---- src/ai/sam-preprocess.js ----
+// Brush marks are prompts, never an outline or a clipping mask.
+function prepareSamPrompts({width,height,data,mask},{square=false}={}){
+  if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<1||height<1||width*height>8_000_000||data?.length!==width*height*4||mask?.length!==width*height)throw new Error('Некорректный размер слоя или подсказки');
+  const chosen=[],labels=[],n=width*height,visited=new Uint8Array(n),queue=new Int32Array(n);
+  // One seed deep INSIDE each substantial painted region. Farthest brush-edge
+  // sampling treated accidental background fringe as mandatory foreground.
+  for(const label of [1,2]){
+    const distance=new Uint16Array(n);
+    for(let i=0;i<n;i++)if(mask[i]===label&&data[i*4+3])distance[i]=65534;
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      const i=y*width+x;if(distance[i])distance[i]=Math.min(distance[i],x?distance[i-1]+1:1,y?distance[i-width]+1:1);
+    }
+    for(let y=height-1;y>=0;y--)for(let x=width-1;x>=0;x--){
+      const i=y*width+x;if(distance[i])distance[i]=Math.min(distance[i],x+1<width?distance[i+1]+1:1,y+1<height?distance[i+width]+1:1);
+    }
+    visited.fill(0);const regions=[];
+    for(let start=0;start<n;start++)if(distance[start]&&!visited[start]){
+      let head=0,tail=1,best=start;queue[0]=start;visited[start]=1;
+      while(head<tail){const i=queue[head++],x=i%width;
+        if(distance[i]>distance[best])best=i;
+        const neighbors=[x?i-1:-1,x+1<width?i+1:-1,i-width,i+width];
+        for(const j of neighbors)if(j>=0&&j<n&&distance[j]&&!visited[j]){visited[j]=1;queue[tail++]=j;}
+      }
+      const candidates=[];const step=Math.max(1,Math.ceil(tail/2048));
+      for(let k=0;k<tail;k+=step)if(distance[queue[k]]>=Math.max(1,distance[best]*.45))candidates.push(queue[k]);
+      regions.push({count:tail,index:best,depth:distance[best],candidates});
+    }
+    regions.sort((a,b)=>b.count-a.count);
+    for(const region of regions.slice(0,label===1?4:8)){
+      if(label===1&&regions[0].count>=16&&region.count<16)continue;
+      chosen.push([region.index%width,Math.floor(region.index/width)]);labels.push(label===1?1:0);
+      // Several well-separated INTERIOR seeds prevent selecting just a detail
+      // (a car door/trunk), while excluding the uncertain brush fringe.
+      const picked=[region.index],spacing=Math.max(12,Math.min(width,height)/10)**2;
+      const squared=(a,b)=>(a%width-b%width)**2+(Math.floor(a/width)-Math.floor(b/width))**2;
+      while(picked.length<(label===1?3:2)&&chosen.length<24){
+        let next=-1,farthest=0;
+        for(const candidate of region.candidates){const d=Math.min(...picked.map(i=>squared(i,candidate)));if(d>farthest){farthest=d;next=candidate;}}
+        if(next<0||farthest<spacing)break;
+        picked.push(next);chosen.push([next%width,Math.floor(next/width)]);labels.push(label===1?1:0);
+      }
+    }
+  }
+  if(!labels.includes(1))throw new Error('Кистью «Сохранить объект» отметьте видимую часть нужного объекта');
+  const scale=1024/Math.max(width,height),resizedWidth=square?1024:Math.max(1,Math.round(width*scale)),resizedHeight=square?1024:Math.max(1,Math.round(height*scale));
+  const points=new Float32Array(chosen.flatMap(([x,y])=>[x*resizedWidth/width,y*resizedHeight/height]));
+  return {points,labels:new Int32Array(labels),resizedWidth,resizedHeight};
+}
+function prepareSamImage(rgba,width,height){
+  if(width<1||height<1||width>1024||height>1024||rgba?.length!==width*height*4)throw new Error('Некорректный вход нейросети');
+  const n=1024*1024,input=new Float32Array(3*n),mean=[.485,.456,.406],std=[.229,.224,.225];
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++)for(let k=0;k<3;k++){
+    const i=(y*width+x)*4,alpha=rgba[i+3]/255;
+    input[k*n+y*1024+x]=((rgba[i+k]*alpha+255*(1-alpha))/255-mean[k])/std[k];
+  }
+  return input;
+}
+
+function sample(values,offset,x,y){
+  x=Math.max(0,Math.min(255,x));y=Math.max(0,Math.min(255,y));
+  const x0=Math.floor(x),y0=Math.floor(y),x1=Math.min(255,x0+1),y1=Math.min(255,y0+1),fx=x-x0,fy=y-y0;
+  return (values[offset+y0*256+x0]*(1-fx)+values[offset+y0*256+x1]*fx)*(1-fy)+(values[offset+y1*256+x0]*(1-fx)+values[offset+y1*256+x1]*fx)*fy;
+}
+
+function cleanContour(binary,prepared){
+  const n=65536,visited=new Uint8Array(n),queue=new Int32Array(n),positive=new Set(),negative=new Set();
+  for(let p=0;p<prepared.points.length/2;p++){
+    const x=Math.max(0,Math.min(255,Math.floor(prepared.points[p*2]/4))),y=Math.max(0,Math.min(255,Math.floor(prepared.points[p*2+1]/4)));
+    (prepared.labels?.[p]===0?negative:positive).add(y*256+x);
+  }
+  // Drop only tiny unprompted speckles. A real paw/tail can be disconnected
+  // at model resolution, so a substantial unprompted component must survive.
+  // Fill only tiny enclosed pinholes; large/explicitly excluded holes stay.
+  for(const foreground of [1,0]){
+    visited.fill(0);
+    for(let start=0;start<n;start++)if(binary[start]===foreground&&!visited[start]){
+      let head=0,tail=1,touchesBorder=false,seed=false,excluded=false;queue[0]=start;visited[start]=1;
+      while(head<tail){const i=queue[head++],x=i%256,y=i>>8;
+        touchesBorder||=x===0||x===255||y===0||y===255;seed||=positive.has(i);excluded||=negative.has(i);
+        for(const j of [x?i-1:-1,x<255?i+1:-1,i-256,i+256])if(j>=0&&j<n&&binary[j]===foreground&&!visited[j]){visited[j]=1;queue[tail++]=j;}
+      }
+      if(foreground&&!seed&&tail<=16||!foreground&&!touchesBorder&&!excluded&&tail<=16)for(let k=0;k<tail;k++)binary[queue[k]]=foreground?0:1;
+    }
+  }
+  return binary;
+}
+function mergeSamMask({width,height,data},prepared,{masks,scores}={},options={}){
+  if(!(masks instanceof Float32Array)||masks.length!==3*256*256||!(scores instanceof Float32Array)||scores.length!==3||!masks.every(Number.isFinite)||!scores.every(Number.isFinite))throw new Error('Нейросеть вернула некорректный результат');
+  const {resizedWidth,resizedHeight}=prepared;let best=-1,quality=-Infinity;
+  for(let k=0;k<3;k++){
+    let positives=0,hits=0,negatives=0,excluded=0;
+    for(let p=0;p<prepared.points.length/2;p++){
+      const inside=sample(masks,k*65536,prepared.points[p*2]/4-.5,prepared.points[p*2+1]/4-.5)>0;
+      if(prepared.labels?.[p]===0){negatives++;if(!inside)excluded++;}else{positives++;if(inside)hits++;}
+    }
+    if(hits===positives&&excluded===negatives&&scores[k]>quality){best=k;quality=scores[k];}
+  }
+  if(best<0)throw new Error('Подсказки противоречат результату. Отметьте объект зелёной кистью, лишний фон — красной');
+  const binary=new Uint8Array(65536);
+  for(let i=0;i<binary.length;i++)binary[i]=masks[best*65536+i]>0?1:0;
+  cleanContour(binary,prepared);
+  const n=width*height,hard=new Uint8Array(n),result=new Uint8ClampedArray(data);
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++)hard[y*width+x]=sample(binary,0,(x+.5)*resizedWidth/width/4-.5,(y+.5)*resizedHeight/height/4-.5)>=.5?1:0;
+  // Distance to the opposite class gives edge-only feathering in ORIGINAL
+  // pixels. Confidence/logit noise never makes the object's interior translucent.
+  const feather=Math.max(0,Math.min(3,Number(options.feather) || 0)),distance=feather?new Float32Array(n).fill(8):null;
+  if(distance){
+    for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+      const i=y*width+x;if(x&&hard[i]!==hard[i-1]||x+1<width&&hard[i]!==hard[i+1]||y&&hard[i]!==hard[i-width]||y+1<height&&hard[i]!==hard[i+width])distance[i]=.5;
+      if(x)distance[i]=Math.min(distance[i],distance[i-1]+1);if(y)distance[i]=Math.min(distance[i],distance[i-width]+1);
+    }
+    for(let y=height-1;y>=0;y--)for(let x=width-1;x>=0;x--){const i=y*width+x;if(x+1<width)distance[i]=Math.min(distance[i],distance[i+1]+1);if(y+1<height)distance[i]=Math.min(distance[i],distance[i+width]+1);}
+  }
+  let kept=0,removed=0;
+  for(let i=0;i<n;i++){
+    const coverage=distance?Math.max(0,Math.min(1,.5+(hard[i]?1:-1)*distance[i]/feather)):hard[i];
+    result[i*4+3]=Math.round(data[i*4+3]*coverage);if(result[i*4+3])kept++;if(result[i*4+3]<data[i*4+3])removed++;
+  }
+  if(!kept)throw new Error('Нейросеть не нашла объект. Уточните подсказку');
+  if(!removed)throw new Error('Нейросеть выделила весь слой. Добавьте красную подсказку на фон');
+  return result;
+}
+
+// ---- src/ai/sam-runtime.js ----
+function samWorkerEntry(){
+  self.onmessage=async({data})=>{
+    let stage='runtime';
+    try{
+      self.fetch=()=>Promise.reject(new Error('Inference network access disabled'));
+      ort.env.wasm.numThreads=1;ort.env.wasm.proxy=false;
+      const moduleUrl=URL.createObjectURL(new Blob([data.mjs],{type:'text/javascript'}));
+      ort.env.wasm.wasmPaths={mjs:moduleUrl};ort.env.wasm.wasmBinary=new Uint8Array(data.wasm);
+      const providers=data.gpu&&self.navigator?.gpu?['webgpu','wasm']:['wasm'];
+      self.postMessage({type:'progress',stage:'initialize',message:'Подготовка нейросети удаления фона…'});
+      stage='encoder';
+      const square=data.square;
+      const names=square?['image_embeddings.0','image_embeddings.1','image_embeddings.2']:['image_embeddings','image_positional_embeddings'];
+      const shapes=square?[[1,32,256,256],[1,64,128,128],[1,256,64,64]]:[[1,256,64,64],[1,256,64,64]];
+      const external=(path,bytes)=>bytes?{externalData:[{path,data:new Uint8Array(bytes)}]}:{};
+      const encoder=await ort.InferenceSession.create(new Uint8Array(data.encoder),{executionProviders:providers,...external('vision_encoder_quantized.onnx_data',data.encoderData)});
+      if(encoder.inputNames.join(',')!=='pixel_values'||!names.every(name=>encoder.outputNames.includes(name)))throw new Error('Unexpected SlimSAM encoder contract');
+      self.postMessage({type:'progress',stage:'inference',message:'Определение границ объекта…'});
+      const encoded=await encoder.run({pixel_values:new ort.Tensor('float32',data.input,[1,3,1024,1024])});
+      const embeddings={};
+      for(let index=0;index<names.length;index++){const name=names[index],shape=shapes[index];
+        const tensor=encoded[name];
+        if(tensor.type!=='float32'||tensor.dims.join(',')!==shape.join(','))throw new Error('Unexpected embedding shape');
+        embeddings[name]=new ort.Tensor('float32',new Float32Array(tensor.data),shape);
+      }
+      for(const tensor of Object.values(encoded))tensor.dispose();await encoder.release();
+      stage='decoder';
+      const decoder=await ort.InferenceSession.create(new Uint8Array(data.decoder),{executionProviders:providers,...external('prompt_encoder_mask_decoder.onnx_data',data.decoderData)});
+      if(decoder.inputNames.length!==(square?6:4)||![...names,'input_points','input_labels',...(square?['input_boxes']:[])].every(name=>decoder.inputNames.includes(name)))throw new Error('Unexpected SlimSAM decoder contract');
+      const count=data.points.length/2;
+      if(!Number.isInteger(count)||count<1||count>32)throw new Error('Unexpected prompts');
+      const labels=data.labels||new Int32Array(count).fill(1);
+      if(labels.length!==count||!labels.every(v=>v===0||v===1)||!labels.includes(1))throw new Error('Unexpected prompt labels');
+      const result=await decoder.run({...embeddings,...(square?{input_boxes:new ort.Tensor('float32',new Float32Array(0),[1,0,4])}:{}),input_points:new ort.Tensor('float32',data.points,[1,1,count,2]),input_labels:new ort.Tensor('int64',BigInt64Array.from(labels,BigInt),[1,1,count])});
+      const masks=result.pred_masks,scores=result.iou_scores;
+      if(masks.type!=='float32'||masks.dims.join(',')!=='1,1,3,256,256'||scores.type!=='float32'||scores.dims.join(',')!=='1,1,3')throw new Error('Unexpected SlimSAM output');
+      const output={masks:new Float32Array(masks.data),scores:new Float32Array(scores.data)};
+      for(const tensor of Object.values(result))tensor.dispose();for(const tensor of Object.values(embeddings))tensor.dispose();
+      await decoder.release();URL.revokeObjectURL(moduleUrl);
+      self.postMessage({type:'result',output},[output.masks.buffer,output.scores.buffer]);
+    }catch(error){self.postMessage({type:'error',stage,reason:String(error?.message||'').slice(0,300)});}
+  };
+}
+function createSamEngine(options={}){
+  const square=options.square===true,artifacts=square?SAM2_ARTIFACTS:SAM_ARTIFACTS;
+  return createLamaEngine({
+    ...options,
+    cache:options.cache||createLamaArtifactCache({databaseName:square?'zeter-background-sam2-model-v1':'zeter-background-removal-model-v1',artifacts}),
+    artifactList:artifacts,workerEntry:samWorkerEntry,
+    makeRequest:({input,points,labels},assets,gpu)=>({payload:{input,points,labels,gpu,square,mjs:assets[1],wasm:assets[2],encoder:assets[3],encoderData:square?assets[4]:null,decoder:assets[square?5:4],decoderData:square?assets[6]:null},transfer:[input.buffer,points.buffer,...(labels?[labels.buffer]:[])]}),
+  });
+}
+
+// ---- src/ai/background-models.js ----
+const BACKGROUND_MODELS=Object.freeze([
+  Object.freeze({id:'sam2',name:'SAM 2.1 Tiny',size:97,prefix:'qualityBackgroundModel',square:true,description:'Более сильная модель для сложных границ. Рекомендуется для автомобилей, животных и нескольких объектов в кадре.'}),
+]);
+
+// Each vetted model owns a separate fixed-key cache. Existing SlimSAM installs
+// survive; switching choice never redirects a command already in progress.
+function createBackgroundModels({gpu,storage=globalThis.localStorage,engineFactory=createSamEngine}={}){
+  const key='zeter-background-removal-choice-v1',engines=new Map(BACKGROUND_MODELS.map(model=>[model.id,engineFactory({gpu,square:model.square})]));
+  let selected='sam2';try{const saved=storage?.getItem(key);if(engines.has(saved))selected=saved;}catch{}
+  const selectedModel=()=>BACKGROUND_MODELS.find(model=>model.id===selected),getEngine=id=>engines.get(id);
+  const facade={models:BACKGROUND_MODELS,selectedId:()=>selected,selectedModel,getEngine,
+    select(id){if(!engines.has(id))throw new Error('Неизвестная нейросеть');selected=id;try{storage?.setItem(key,id);}catch{}},
+    capture:()=>({engine:getEngine(selected),model:selectedModel()}),
+  };
+  for(const method of ['isReady','isBusy','isStored','prepare','remove','run'])facade[method]=(...args)=>getEngine(selected)[method](...args);
+  return facade;
+}
