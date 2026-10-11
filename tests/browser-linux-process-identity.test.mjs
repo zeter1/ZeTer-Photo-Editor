@@ -59,6 +59,10 @@ test('024B1: per-incarnation RSS/HWM never joins different processes with recycl
     [7,'10',2,600,1000],[7,'11',1,10,50],[8,'15',2,210,310],[9,'4',1,250,280],
   ]);
   assert.equal(r.workerPidMapping,'unknown');
+  assert.equal(r.provenExitCount,null);
+  assert.equal(r.observedAtLastSnapshotCount,2);
+  assert.equal(r.noLongerObservedAtLastSnapshotCount,2);
+  assert.deepEqual(r.processes.map(p=>p.observedAtLastSnapshot),[false,true,false,true]);
   assert.match(r.limitations,/not an operation peak/);
   assert.deepEqual(r.milestones.at(-1),{
     phase:'finished',processCount:2,newIdentityObservations:2,
@@ -132,4 +136,23 @@ test('024B1: invalid identity never silently turns sampled RSS into a verified i
   assert.equal(report.linuxProcessIdentity.availability,'unavailable');
   assert.match(report.linuxProcessIdentity.unavailableReason,/invalid process snapshot/);
   assert.equal(report.linuxProcessIdentity.sampleCount,0);
+});
+
+
+test('024B2a: reappearing incarnation is observed again, not falsely counted as an exit',()=>{
+  const tracker=createLinuxChromiumIdentityTracker();
+  const p=(pid,starttimeTicks)=>({pid,starttimeTicks,rssBytes:100,highWaterBytes:150,type:'renderer'});
+  tracker.observe([p(3,'99'),p(4,'50')],'start');
+  tracker.observe([p(4,'50')],'gap');
+  const gap=tracker.report();
+  assert.equal(gap.noLongerObservedAtLastSnapshotCount,1);
+  assert.equal(gap.provenExitCount,null);
+  assert.deepEqual(gap.processes.map(process=>process.observedAtLastSnapshot),[false,true]);
+  tracker.observe([p(3,'99'),p(4,'50')],'reappeared');
+  const final=tracker.report();
+  assert.equal(final.noLongerObservedAtLastSnapshotCount,0);
+  assert.equal(final.provenExitCount,null);
+  assert.equal(final.reusedPidObservations,0);
+  assert.equal(final.processes.find(process=>process.pid===3).samples,2);
+  assert.equal(final.missingIdentityObservations,1);
 });

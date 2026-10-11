@@ -22,6 +22,7 @@ test('024A: operation duration is distinct from sampled memory and process lifet
   assert.equal(r.durationsMs.undoToRedo,5);
   assert.equal(r.durationsMs.cancelledRetryObservation,null);
   assert.equal(r.memory.linuxRssSampledMaxBytes,9000);
+  assert.equal(r.memory.requestedSamplingIntervalMs,null);
   assert.equal(r.memory.maxObservedSinglePidLifetimeHwmBytes,7000);
   assert.equal(r.memory.chromiumPrivateMemoryAvailability,'unavailable');
   assert.equal(r.memory.processChurn.workerPidMapping,'unknown');

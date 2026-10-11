@@ -246,6 +246,8 @@ export function createBrowserRendererHeapSampler(client, {
             Math.max(max, item.largestProcessHighWaterBytes), 0) || null,
         },
         sampleCount:samples.length,
+        requestedSamplingIntervalMs:intervalMs,
+        observedSamplingWindowMs:end.elapsedMs-baseline.elapsedMs,
         baselineJsHeapUsedBytes:baseline.jsHeapUsedBytes,
         sampledMaxJsHeapUsedBytes:peak.jsHeapUsedBytes,
         endJsHeapUsedBytes:end.jsHeapUsedBytes,

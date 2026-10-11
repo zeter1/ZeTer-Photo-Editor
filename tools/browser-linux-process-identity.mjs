@@ -18,7 +18,7 @@ export function parseLinuxProcStartTime(stat, expectedPid) {
 
 export function createLinuxChromiumIdentityTracker() {
   const known = new Map(), lastByPid = new Map();
-  let previous = null, observations = 0;
+  let previous = null, observations = 0, lastObservationPhase = null;
   let reusedPidObservations = 0, missingIdentityObservations = 0, newIdentityObservations = 0;
   const milestones = [];
   function observe(processes, phase) {
@@ -66,6 +66,7 @@ export function createLinuxChromiumIdentityTracker() {
     missingIdentityObservations+=misses;
     reusedPidObservations+=reuse;
     observations++;
+    lastObservationPhase = phase;
     if (phase !== 'sample') milestones.push({
       phase,processCount:current.size,newIdentityObservations:arrivals,
       missingPreviouslyObservedIdentities:misses,reusedPidObservations:reuse,
@@ -73,15 +74,22 @@ export function createLinuxChromiumIdentityTracker() {
     previous = new Map([...current].map(([pid,p])=>[pid,pid+':'+p.starttimeTicks]));
   }
   function report() {
+    const visible = new Set(previous?.values() ?? []);
     return {
       metric:'Linux /proc/<pid>/stat field 22 starttime + per-incarnation VmRSS/VmHWM',
       availability:observations?'sampled':'unavailable',
       sampleCount:observations,uniqueProcessIdentities:known.size,
       newIdentityObservations,missingIdentityObservations,reusedPidObservations,
-      processes:[...known.values()].sort((a,b)=>a.pid-b.pid ||
+      lastObservationPhase,
+      observedAtLastSnapshotCount:visible.size,
+      noLongerObservedAtLastSnapshotCount:known.size-visible.size,
+      provenExitCount:null,
+      processes:[...known.entries()].map(([key,process])=>({
+        ...process,observedAtLastSnapshot:visible.has(key),
+      })).sort((a,b)=>a.pid-b.pid ||
         (BigInt(a.starttimeTicks)<BigInt(b.starttimeTicks)?-1:1)),
       milestones,workerPidMapping:'unknown',
-      limitations:'PID+starttime identifies observed Linux incarnations, not across reboots. Missing CDP PIDs are not proven exits; VmHWM is a process lifetime maximum, not an operation peak. Worker-to-PID attribution remains unknown.',
+      limitations:'PID+starttime identifies observed Linux incarnations, not across reboots. An incarnation absent from the last sample is not a proven exit (nor a live-process assertion). A later sample may see it again; VmHWM is a process lifetime maximum, not an operation peak. Worker-to-PID attribution remains unknown.',
     };
   }
   return {observe,report};
