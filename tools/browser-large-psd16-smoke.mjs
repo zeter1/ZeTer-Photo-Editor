@@ -203,6 +203,17 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     // must terminate the pending job without accepting the withheld reply.
     await evaluate(client,"document.querySelector('#undoBtn').click();true");
     await waitFor('PSB32 pre-cancellation Undo',()=>evaluate(client,'('+beforePixel.toString()+')()'),30_000);
+    // Undo restores the import snapshot (without transient marquee state).
+    // Recreate a real overlay selection instead of calling the command on an empty selection.
+    const retryView=await evaluate(client,'('+setupMarquee.toString()+')()');
+    assert(retryView.hit==='overlayCanvas' && retryView.within,
+      'PSB32 cancellation preflight must restore a visible marquee',JSON.stringify(retryView));
+    await mouse('mouseMoved',retryView.start,0);
+    await mouse('mousePressed',retryView.start,1);
+    await mouse('mouseMoved',retryView.end,1);
+    await mouse('mouseReleased',retryView.end,0);
+    const baselineHistory=await evaluate(client,'('+result.toString()+')()');
+    const baselineFillEntries=baselineHistory.history.filter(x=>x.includes('Контент-заливка')).length;
     function interceptWorkerReply() {
       const add=Worker.prototype.addEventListener;
       const remove=Worker.prototype.removeEventListener;
@@ -258,8 +269,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     await evaluate(client,'window.__stage003LargeReleaseReplies();true');
     const cancelled=await evaluate(client,'('+result.toString()+')()');
     assert(cancelled.jobs===2 && cancelled.pixel[0]>100 &&
-        cancelled.history.filter(x=>x.includes('Контент-заливка')).length===1 &&
-        cancelled.history.some(x=>x.includes('Контент-заливка')),
+        cancelled.history.filter(x=>x.includes('Контент-заливка')).length<=baselineFillEntries,
       'Cancelled PSB32 Worker must not add a second fill or repaint pixels',
       JSON.stringify(cancelled));
     const nativeAfter=await evaluate(client,'('+readNativeFromSaveProject.toString()+')()');
