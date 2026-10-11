@@ -162,20 +162,21 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     const f=window.__stage003LargeMeta;
     const pixel=document.querySelector('#editorCanvas').getContext('2d')
       .getImageData(f.defectX,f.defectY,1,1).data;
-    return window.__stage003LargeWorkerJobs===1 && pixel[0]<150
-      && document.querySelector('#statusText')?.textContent?.includes('tiled ');
+    return window.__stage003LargeWorkerJobs===1 && pixel[0]<150;
   }
   await waitFor('large PSD16 tiled Worker and preview',
     ()=>evaluate(client,'('+filledPreview.toString()+')()'),60_000);
   function result() {
     const f=window.__stage003LargeMeta;
     return {jobs:window.__stage003LargeWorkerJobs,
+      status:document.querySelector('#statusText')?.textContent||'',
       history:[...document.querySelectorAll('#historyList .history-row')].map(row=>row.textContent),
       pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d')
         .getImageData(f.defectX,f.defectY,1,1).data)};
   }
   const after=await evaluate(client,'('+result.toString()+')()');
-  assert(after.jobs===1 && after.history.filter(x=>x.includes('Контент-заливка')).length===1,
+  assert(after.jobs===1 && after.status.includes('tiled ') &&
+      after.history.filter(x=>x.includes('Контент-заливка')).length===1,
     'Large tiled UI Worker edit must create exactly one History entry',JSON.stringify(after));
   await sampler.snapshot('after-large-worker-preview');
   const fillAndPreviewMs=Date.now()-fillStart;
