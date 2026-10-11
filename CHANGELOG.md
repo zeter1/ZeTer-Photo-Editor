@@ -5,6 +5,7 @@
 - Добавлено: общий row-copy iterator для синхронного `readRegion` и отменяемого `readRegionCooperative`. При недоступном Worker main-thread fallback отдаёт управление через каждые 32 768 пикселей большого ROI и отбрасывает частный буфер при отмене без изменения исходных tiles.
 - Добавлено: регрессии RGB16 и Float32 CMYKA на byte-exact sync/cooperative parity и отмену в середине чтения, плюс проверка отмены внутри inpaint kernel после read checkpoints.
 - Ограничения: `writeRegion`, oversized connected ROI, chunked RGBA8 preview и независимый лицензированный Photoshop-authored PSD/PSB corpus с browser memory/Undo всё ещё открыты.
+- Проверено: [PR #177](https://github.com/zeter1/ZeTer-Photo-Editor/pull/177) слит в `main` (`bff5a5ac609733a32e93513672bd21c6064b8fa1`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38122773381) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38122815550) — **success**.
 
 
 ### 2026-10-11 — Диагностический профиль native tiled readRegion/writeRegion

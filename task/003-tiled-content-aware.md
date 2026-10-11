@@ -1,12 +1,12 @@
 # 003 — Tiled Content-Aware Fill
 
-## 2026-10-11 — Stage 003 P1: cooperative native tiled readRegion (проверка PR ожидается)
+## 2026-10-11 — Stage 003 P1: cooperative native tiled readRegion (слито, CI success)
 
 - Общий sync/cooperative iterator копирует native ROI с контрольной точкой каждые 32 768 pixels; отмена не возвращает частично считанные данные и не помечает tiles dirty.
 - Native Content-Aware fallback теперь использует cooperative чтение для одиночных/разделённых ROI. Synchronous Worker/Node сохраняет тот же детерминированный алгоритм.
 - Регрессии RGB16 и Float32 CMYKA: exact parity, отмена после частичной декодировки, unchanged source и прежняя отмена внутри kernel после read checkpoints.
 - **Осталось:** cooperative `writeRegion`, длинные connected ROI без inflated bbox, chunked RGBA8 preview, реальный независимый лицензированный Photoshop PSD16/PSB32 corpus и браузерная проверка Worker/Undo/RAM. Задачи 002 и 003 остаются открытыми.
-
+- **Gate выполнен:** [PR #177](https://github.com/zeter1/ZeTer-Photo-Editor/pull/177) слит (squash `bff5a5ac609733a32e93513672bd21c6064b8fa1`). [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38122773381) и [точный main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38122815550) — **success**: Node tests, generated artifacts, Chromium `file://` smoke, informational profiles и diff hygiene. **002/003 ещё открыты**.
 
 ## 2026-10-11 — измеряемый синхронный tiled region IO baseline (слито, CI success)
 
