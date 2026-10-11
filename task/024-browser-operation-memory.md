@@ -1,6 +1,16 @@
+## Проходка 024A — частично реализована, проверка CI ожидается (2026-10-11)
+
+- [x] `tools/browser-operation-timeline.mjs`: детерминированный `operationId`, монотонные отметки import/preview/native verification/selection/Fill/history/Undo/Redo; наблюдаемое время этапов (не точное время вычисления ядра).
+- [x] Реальные Chromium `file://` ZeTer-generated PSD16/PSB32 Worker smoke выводят operation timeline и отдельный `completed-with-cancelled-retry` outcome **только после** доказанной отмены, неизменных native samples и History. Production code не менялся.
+- [x] Самплер CDP дополнен отдельными PID observations: новые/отсутствующие между samples PID, process type maxima, неопределённая Worker→PID привязка и явное замечание про PID reuse. Эти числа **не** складывают VmHWM и не доказывают истинный peak.
+- [x] Регрессионные тесты для времени/исхода, PID churn и unavailable path.
+- [ ] GitHub PR CI и exact-main gate (пока не проверены).
+
+**Следующая 024B (открыта):** Linux `/proc/PID/stat` starttime для PID identity/reuse, process exit accounting, per-PID sampled RSS/HWM, CDP target mapping; отдельный настоящий mid-kernel cancellation + recovery lifecycle для high-depth PSD/PSB; машинный файл с CI отчётами. Нельзя объявлять summed process HWM пиком операции.
+
 # 024 / 010E-B4 — browser operation-wide timing and memory attribution
 
-**Статус:** следующая невыполненная P1. Stage 002/003 открыты; не считать sampled memory истинным operation peak.
+**Статус:** 024A выполнена в feature-ветке, gate пока не подтверждён; 024B, Stage 002/003 остаются открыты.
 
 ## Цель
 
