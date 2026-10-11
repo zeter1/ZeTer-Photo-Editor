@@ -7,7 +7,7 @@
 - [x] Сравнить каждый возвращённый native tile payload с синхронным frozen-index oracle на уровне canonical bytes; сравнение не ограничивать RGBA8 preview.
 - [x] Изолировать каждый профиль в отдельном Node-процессе и выводить JSON: fixture setup, Worker roundtrip включая scan/dispatch, oracle, process RSS snapshots/parent heap.
 - [x] Отсутствие неустойчивых performance thresholds; строгие тесты CLI/args и обеих глубин.
-- [ ] PR CI, review, merge и зелёный CI конкретного SHA ветки main — **ещё не подтверждены**.
+- [x] PR CI, diff review, merge и зелёный CI точного `main` SHA подтверждены: [PR #184](https://github.com/zeter1/ZeTer-Photo-Editor/pull/184) слит в `main` (`28ec5de2dbdd38e2782a8d5bc864a9dbdc0db5d2`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38133313481) и [точный `main` CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38133376298) — **success** (Node, Chromium `file://`, generated parity, 8 MiB diagnostics, diff hygiene).
 
 ## Запуск
 
