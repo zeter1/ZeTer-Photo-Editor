@@ -1,3 +1,9 @@
+## Текущая проходка 010C — bounded dense strip/segment ROI (2026-10-11, PR gate ожидается)
+
+- **Ветка:** `feat/stage003-dense-strip-segment-roi-010c`, подробности и чеклист — [012](012-dense-strip-segment-roi.md). Добавлен ограниченный strip/segment fallback после прежнего halo-disjoint / per-cell плана, общий бюджет ROI и frozen donor exclusion; RGB16 / Float32 CMYKA sync/cooperative/Node Worker regression и отмена без частичного publish.
+- **Это ещё НЕ завершённая проходка:** требуется CI `npm run check`, `npm run test:browser`, regenerated parity, diff hygiene, review, merge и точный main CI SHA. Stage 003 и внешняя Stage 002 corpus открыты.
+- **После 010C:** 010D браузерный UI lock/session revocation в середине native Worker kernel и sampled process/heap diagnostics; 010E оптимизация сложных horizontal segments; P0 independent Photoshop authored PSD16/PSB32 fixtures.
+
 ## Завершённая проходка 010B — Chromium file:// mid-kernel cancellation (2026-10-11)
 
 - [011](011-browser-mid-kernel-cancellation.md): реальный Chromium native RGB16 Worker; тестовый probe строго после настоящей записи ядром первого пикселя, затем CPU-bound stall; direct cancel и owner polling до завершения ядра, новый job и immutable native source. Тестовая instrumentation только в isolated Blob, production не меняется.
