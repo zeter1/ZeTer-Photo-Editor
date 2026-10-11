@@ -4,7 +4,8 @@
 
 - Исправлено: при недоступном браузерном Worker cooperative fallback теперь делает checkpoint между группами изменённых high-depth/CMYK tiles на этапе кодирования перед окончательной публикацией. Отмена отбрасывает даже уже подготовленные приватные tile payloads и возвращает исходный документ без частичной записи.
 - Совместимость: синхронный Node/Worker путь использует тот же порядок сериализации, unchanged tiles сохраняются byte-for-byte, новые regression tests проверяют Uint16 parity, alpha promotion и отмену при многотайловой сериализации.
-- Ограничения: decode/writeRegion, широкий связный ROI и полный RGBA8 preview ещё выполняются синхронно. Независимые Photoshop-authored PSD16/PSB32 и реальный браузерный memory benchmark остаются открытыми. GitHub CI gate проверяется отдельно.
+- Проверено: [PR #175](https://github.com/zeter1/ZeTer-Photo-Editor/pull/175) (squash `11aec98b5958dacbca97d7e7ca47096fc2301823`), [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38121282434) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38121334792) — **success**. Node tests, generated artifacts, browser `file://` smoke, informational profiles и diff hygiene прошли.
+- Ограничения: decode/writeRegion, широкий связный ROI и полный RGBA8 preview ещё выполняются синхронно. Независимые Photoshop-authored PSD16/PSB32 и реальный браузерный memory benchmark остаются открытыми.
 
 
 ### 2026-10-11 — ZeTer 1.45.5: cooperative cancellation inside one Content-Aware ROI
