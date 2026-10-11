@@ -1,3 +1,5 @@
+import { sampleLinuxChromiumRss } from './browser-linux-process-rss.mjs';
+
 // Informational CDP renderer-heap samples. Worker heaps, native allocations and
 // process RSS are NOT represented by JSHeapUsedSize; sampled max != true peak.
 // An optional browser-level CDP connection can sample Chromium's reported
@@ -5,12 +7,14 @@
 export function createBrowserRendererHeapSampler(client, {
   intervalMs = 50,
   processClient = null,
+  processRssSampler = sampleLinuxChromiumRss,
   now = () => performance.now(),
   schedule = setInterval,
   unschedule = clearInterval,
 } = {}) {
   if (!client || typeof client.send !== 'function' ||
       (processClient !== null && typeof processClient?.send !== 'function') ||
+      typeof processRssSampler !== 'function' ||
       !Number.isFinite(intervalMs) || intervalMs < 1) {
     throw new TypeError('Browser renderer heap sampler: invalid CDP client/interval');
   }
@@ -20,6 +24,7 @@ export function createBrowserRendererHeapSampler(client, {
   let active = false;
   let pollError = null;
   let processUnavailableReason = null;
+  let rssUnavailableReason = null;
 
   // CDP reads can complete out of order when a periodic poll overlaps an
   // explicit stage marker or stop(). Queue reads in invocation order so the
@@ -48,6 +53,25 @@ export function createBrowserRendererHeapSampler(client, {
         if (!Number.isSafeInteger(sum)) throw new Error('Chromium process privateMemory sum overflowed');
         entry.processPrivateMemoryBytes = sum;
         entry.processCount = processes.length;
+        // CDP privateMemory is not OS RSS. Linux /proc samples are kept
+        // separate and must never turn a partial/failed read into a fake zero.
+        if (!rssUnavailableReason) {
+          try {
+            const rss = await processRssSampler(processes);
+            if (!rss?.supported) throw new Error(rss?.reason || 'unsupported /proc');
+            if (!Number.isSafeInteger(rss.aggregateRssBytes) ||
+                rss.aggregateRssBytes < 0 ||
+                !Number.isSafeInteger(rss.largestProcessHighWaterBytes) ||
+                rss.largestProcessHighWaterBytes < 0 ||
+                rss.processCount !== processes.length) {
+              throw new Error('invalid Linux Chromium RSS snapshot');
+            }
+            entry.chromiumRssBytes = rss.aggregateRssBytes;
+            entry.largestProcessHighWaterBytes = rss.largestProcessHighWaterBytes;
+          } catch (error) {
+            rssUnavailableReason = String(error?.message || error);
+          }
+        }
       } catch (error) {
         // Older Chromium/CDP implementations may omit SystemInfo or the
         // privateMemory field. Heap sampling must still complete normally.
@@ -102,9 +126,14 @@ export function createBrowserRendererHeapSampler(client, {
         !best || item.processPrivateMemoryBytes > best.processPrivateMemoryBytes ? item : best, null);
       const processBaseline = processSamples[0] ?? null;
       const processEnd = processSamples.at(-1) ?? null;
+      const rssSamples = samples.filter(item => Number.isSafeInteger(item.chromiumRssBytes));
+      const rssBaseline = rssSamples[0] ?? null;
+      const rssEnd = rssSamples.at(-1) ?? null;
+      const rssMax = rssSamples.reduce((max, item) =>
+        !max || item.chromiumRssBytes > max.chromiumRssBytes ? item : max, null);
       return {
         metric:'CDP Performance.getMetrics / renderer JSHeapUsedSize',
-        limitations:'Informational sampled main-frame JS heap, plus optional aggregate Chromium process private memory. NOT Worker heap in isolation, true RSS/HWM, native/GPU breakdown or instantaneous peak. No timing/memory pass thresholds.',
+        limitations:'Informational sampled main-frame JS heap, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. NOT isolated Worker heap, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
         chromiumProcesses: {
           metric:'CDP SystemInfo.getProcessInfo / sum of privateMemory over complete reported process list',
           availability:!processClient ? 'not-requested' : processUnavailableReason ? 'unavailable' : 'sampled',
@@ -115,6 +144,19 @@ export function createBrowserRendererHeapSampler(client, {
           endPrivateBytes:processEnd?.processPrivateMemoryBytes ?? null,
           sampledIncreaseBytes:processPeak ? Math.max(0, processPeak.processPrivateMemoryBytes - processBaseline.processPrivateMemoryBytes) : null,
           maxSampledProcessCount:processSamples.reduce((max, item) => Math.max(max, item.processCount), 0),
+        },
+        linuxProcessRss: {
+          metric:'Linux /proc/<pid>/status VmRSS summed over CDP process list; VmHWM individual-process diagnostic',
+          availability:!processClient ? 'not-requested' :
+            processUnavailableReason || rssUnavailableReason ? 'unavailable' : 'sampled',
+          unavailableReason:processUnavailableReason || rssUnavailableReason,
+          sampleCount:rssSamples.length,
+          baselineAggregateRssBytes:rssBaseline?.chromiumRssBytes ?? null,
+          sampledMaxAggregateRssBytes:rssMax?.chromiumRssBytes ?? null,
+          endAggregateRssBytes:rssEnd?.chromiumRssBytes ?? null,
+          sampledIncreaseBytes:rssMax ? Math.max(0, rssMax.chromiumRssBytes - rssBaseline.chromiumRssBytes) : null,
+          maxObservedIndividualProcessHwmBytes:rssSamples.reduce((max, item) =>
+            Math.max(max, item.largestProcessHighWaterBytes), 0) || null,
         },
         sampleCount:samples.length,
         baselineJsHeapUsedBytes:baseline.jsHeapUsedBytes,
