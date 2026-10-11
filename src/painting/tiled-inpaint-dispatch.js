@@ -1,8 +1,10 @@
 import {
   createSerializedPixelBufferTileWorkingSet,
+  isCanonicalPixelBufferBase64,
   inpaintTiledPixelBufferSourceCooperative,
   inpaintTiledPixelBufferSourceFromIndicesCooperative,
 } from '../core/pixel-buffer.js';
+import { dataUrlToBytes } from '../core/io.js';
 
 
 const TILED_INPAINT_RESULT_TILE_URL_PREFIX = 'data:application/x-zeter-pixel-buffer-tile;base64,';
@@ -37,12 +39,18 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
 
   const columns = Math.ceil(source.width / source.tileSize);
   const editableTiles = new Set();
+  // One bit per document pixel (at most 2 MiB with the 48 MiB source cap),
+  // avoiding a multi-million-element Set of selected coordinates.
+  const selectedBits = new Uint8Array(Math.ceil(source.width * source.height / 8));
   for (const index of selectedIndices) {
     const x = index % source.width, y = Math.floor(index / source.width);
     editableTiles.add(Math.floor(y / source.tileSize) * columns + Math.floor(x / source.tileSize));
+    selectedBits[index >> 3] |= 1 << (index & 7);
   }
 
+  const pixelBytes = source.channels * source.bitsPerChannel / 8;
   let changedTilePayloads = 0;
+  let changedPixels = 0;
   for (let index = 0; index < source.tiles.length; index += 1) {
     const before = source.tiles[index], after = returned.tiles[index];
     if (!after || typeof after !== 'object' || Array.isArray(after)) throw invalid();
@@ -54,11 +62,40 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
     if (!editableTiles.has(index) ||
         !after.dataUrl.startsWith(TILED_INPAINT_RESULT_TILE_URL_PREFIX)) throw invalid();
     const encoded = after.dataUrl.slice(TILED_INPAINT_RESULT_TILE_URL_PREFIX.length);
-    if (encoded.length !== 4 * Math.ceil(before.rawBytes / 3) ||
-        !/^[a-z\d+/=]+$/i.test(encoded)) throw invalid();
+    if (!isCanonicalPixelBufferBase64(encoded, before.rawBytes)) throw invalid();
+
+    // A selected tile may contain unselected donor pixels. Compare the exact
+    // native little-endian bytes, not a lossy 8-bit preview or float values.
+    // Only changed tiles are decoded; memory is bounded to two tile payloads.
+    let originalBytes, returnedBytes;
+    try {
+      originalBytes = dataUrlToBytes(before.dataUrl, { maxBytes:before.rawBytes });
+      returnedBytes = dataUrlToBytes(after.dataUrl, { maxBytes:before.rawBytes });
+    } catch { throw invalid(); }
+    if (originalBytes.length !== before.rawBytes ||
+        returnedBytes.length !== before.rawBytes) throw invalid();
+    let tilePixelChanges = 0;
+    for (let local = 0; local < before.width * before.height; local += 1) {
+      const offset = local * pixelBytes;
+      let different = false;
+      for (let byte = 0; byte < pixelBytes; byte += 1) {
+        if (originalBytes[offset + byte] !== returnedBytes[offset + byte]) {
+          different = true;
+          break;
+        }
+      }
+      if (!different) continue;
+      const globalX = before.x + local % before.width;
+      const globalY = before.y + Math.floor(local / before.width);
+      const global = globalY * source.width + globalX;
+      if (!(selectedBits[global >> 3] & (1 << (global & 7)))) throw invalid();
+      tilePixelChanges += 1;
+    }
+    if (!tilePixelChanges) throw invalid();
+    changedPixels += tilePixelChanges;
     changedTilePayloads += 1;
   }
-  if (changedTilePayloads !== result.changedTiles) throw invalid();
+  if (changedTilePayloads !== result.changedTiles || changedPixels !== result.changed) throw invalid();
   return result;
 }
 
