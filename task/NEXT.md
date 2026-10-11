@@ -1,7 +1,7 @@
-## 010D-D — две независимые native PSB32 Float32 вкладки (в работе, CI ожидается)
+## 010D-D — две независимые native PSB32 Float32 вкладки (слито, CI success, 2026-10-11)
 
-- [017](017-dual-native-psb32-session-isolation.md): Chromium `file://`, две разные ZeTer-generated 1025² PSB32 Float32 в **двух живых вкладках**; реальные Worker jobs, mid-kernel cancellation первого, exact little-endian words/Undo/Redo второго и повторный Worker/Undo/Redo первого. Два отдельных источника native данных, не Adobe-authored golden. Код и smoke подготовлены на feature branch; **PR CI, merge и exact-main CI ещё НЕ подтверждены**.
-- Оставить [002](002-psd-compatibility-corpus.md) как P0: независимый лицензированный Photoshop high-depth corpus + golden и provenance/hash. Далее P1 010E dense/connected ROI и настоящая browser memory high-water-mark методология. Stage 002/003 **не завершены**.
+- [017](017-dual-native-psb32-session-isolation.md): Chromium `file://`, две разные ZeTer-generated 1025² PSB32 Float32 в двух живых вкладках; отмена первого Worker mid-kernel, второй native Worker с exact little-endian words и Undo/Redo, затем первый Worker с независимым Undo/Redo и History. **Готово:** [PR #198](https://github.com/zeter1/ZeTer-Photo-Editor/pull/198), squash `24d0edb7`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38152587196), [CI кодового main SHA success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38152760057).
+- **Далее:** P0 [002](002-psd-compatibility-corpus.md) — independently Photoshop-authored licensed RGB16/CMYK32 PSD/PSB golden с provenance/hash; P1 010E complex dense ROI и настоящий browser memory HWM. Stage 002/003 **ещё открыты**.
 
 ## 010D-C — PSB32 Float32 active mid-kernel switch + native Undo/Redo (merged, exact-main CI success, 2026-10-11)
 

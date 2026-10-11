@@ -1,6 +1,6 @@
 # 017 / 010D-D — две независимые native PSB32 вкладки: Worker, отмена и Undo/Redo
 
-**Статус: в работе; код + Chromium gate подлежат проверке CI и merge.** Продолжение [016](016-psb32-mid-kernel-undo-redo.md) в рамках Stage 003. Главная очередь: [NEXT](NEXT.md).
+**Статус: реализовано и слито в `main` (2026-10-11).** [PR #198](https://github.com/zeter1/ZeTer-Photo-Editor/pull/198), squash `24d0edb7`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38152587196), [CI кодового main SHA success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38152760057). Продолжение [016](016-psb32-mid-kernel-undo-redo.md) в рамках Stage 003. Главная очередь: [NEXT](NEXT.md).
 
 ## Зачем
 
@@ -15,8 +15,8 @@
 - [x] Вторая вкладка запускает свой Worker Fill, проверяет изменённые только внутри выделения native words / неизменные donor, Undo/Redo точными little-endian словами и свою History.
 - [x] Повторное переключение в первую native-вкладку и её успешный новый Worker, Undo/Redo проверяются независимо, затем bytes/history второй вкладки должны совпасть с сохранённым oracle.
 - [x] Node regression генератора fixtures и реальный Chromium `file://` smoke wired.
-- [ ] `npm run check`, generated bundle parity, Chromium browser smoke, profiles и diff hygiene — **PR CI success**.
-- [ ] PR слит в `main`, **CI точно на получившемся main SHA success**.
+- [x] `npm run check` (1164 Node-тестов), generated parity, Chromium `file://` browser smoke, profiles и diff hygiene — **PR CI success** (run 38152587196).
+- [x] PR #198 слит в `main` (`24d0edb7`); **CI именно на кодовом merge SHA success** (run 38152760057).
 
 ## Приёмочные критерии
 
@@ -36,8 +36,8 @@
 3. **P1:** реальный browser Worker/process high-water mark и memory methodology; CDP snapshots не пиковая RSS.
 4. **P2+**: CMYK ICC/color/RAW reference pipeline и качество Refine/Content-Aware.
 
-## Перед merge
+## Проверка завершения и handoff
 
-- Проверить изменение только tests/tools/task; production source, generated bundle и версия не меняются.
-- Прогнать `npm run check`, `npm run test:browser` и diff hygiene на PR.
-- Привязать ссылку на PR/CI и точный main CI после merge; до этого статус «в работе», не «завершено».
+- В merged PR изменены только `tests/`, `tools/`, `task/`; production source / generated bundle / версия не менялись.
+- Merge, PR CI и exact-code-main CI проверены по указанным ссылкам; последующая docs-only актуализация статуса проходит свой push CI отдельно.
+- Stage 002 и Stage 003 не закрыты: следующая исполнимая P1 — 010E complex/dense connected ROI, параллельно P0 независимый лицензированный Adobe Photoshop-authored corpus.

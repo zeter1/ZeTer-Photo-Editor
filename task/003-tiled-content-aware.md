@@ -1,7 +1,7 @@
-## 2026-10-11 — 010D-D: две раздельные native PSB32 UI-сессии (в работе)
+## 2026-10-11 — 010D-D: две раздельные native PSB32 UI-сессии (слито, CI success)
 
-- [017](017-dual-native-psb32-session-isolation.md): две разные ZeTer-generated PSB32 Float32 1025² с отдельными native v2 tile payloads; браузерная отмена первой после настоящей kernel-записи, второй native Worker и word-exact Undo/Redo; последующий первый Worker и межсессионная проверка слов/History.
-- Текущий статус — feature branch, **не считать merged или CI success** до проверок. Это не внешний Adobe Photoshop-authored golden и не реальная peak RSS. P0 [002](002-psd-compatibility-corpus.md), P1 010E и общая Stage 003 остаются открыты.
+- [017](017-dual-native-psb32-session-isolation.md): две разные ZeTer-generated 1025² PSB32 Float32 v2 с отдельными native words; mid-kernel cancellation, второй и первый Worker, точный Undo/Redo и история обеих вкладок. [PR #198](https://github.com/zeter1/ZeTer-Photo-Editor/pull/198), squash `24d0edb7`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38152587196), [CI кодового main SHA success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38152760057).
+- **Не закрыто:** P0 [002](002-psd-compatibility-corpus.md) external Adobe golden, P1 010E complex dense ROI и browser peak memory методология. Stage 003 пока открыта.
 
 ## 2026-10-11 — P1: >256 occupied tile bounded fallback (слито, CI success)
 
