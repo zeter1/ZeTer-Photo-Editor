@@ -1,6 +1,6 @@
-# ZeTer Photo Editor
-
 **Язык / Language:** **Русский** · [English](README_EN.md)
+
+# ZeTer Photo Editor
 
 [![CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml/badge.svg)](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml)
 
@@ -297,8 +297,6 @@ PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip,
 Следующий imaging-этап: **Stage 17a — Isolated Groups / Vector Mask Composite Parity**: приблизить Photoshop group compositing для pass-through/isolated stacks, clipping chains и mask interactions, добавить real PSD/PSB group fixtures и pixel-reference regressions; после этого — editable Gradient/Pattern Fill renderer и tiled/worker/GPU pipeline.
 
 ## Контакты для связи с разработчиком
-
-**Язык / Language:** **Русский** · [English](README_EN.md#developer-contacts)
 
 - [zeter11@gmail.com](mailto:zeter11@gmail.com)
 - [https://t.me/zeter1](https://t.me/zeter1)

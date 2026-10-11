@@ -1,6 +1,6 @@
-# ZeTer Photo Editor
-
 **Язык / Language:** [Русский](README.md) · **English**
+
+# ZeTer Photo Editor
 
 ZeTer Photo Editor is a browser-based image editor with layers, undo/redo and Canvas 2D rendering. Images are processed in the browser during normal editing. It runs online or locally from `index.html`.
 
@@ -37,8 +37,6 @@ The [project map](docs/PROJECT.md), [architecture](README.md#архитекту�
 Report reproducible problems using https://github.com/zeter1/ZeTer-Photo-Editor/issues/new?template=bug_report.yml. Include the version, browser, OS, launch mode, document size, color mode/bit depth and exact steps. Share only minimal example files without private content. Use [SECURITY.md](SECURITY.md) for vulnerability disclosure.
 
 ## Developer contacts
-
-**Язык / Language:** [Русский](README.md#контакты-для-связи-с-разработчиком) · **English**
 
 - [zeter11@gmail.com](mailto:zeter11@gmail.com)
 - [https://t.me/zeter1](https://t.me/zeter1)
