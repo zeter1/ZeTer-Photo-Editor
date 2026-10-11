@@ -1582,11 +1582,12 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     return { left, top, right, bottom, width:right-left, height:bottom-top };
   }
 
-  function readRegion(bounds) {
+  function* readRegionSteps(bounds) {
     const area = normalizeRegionBounds(bounds);
     if (!area) return null;
     const Expected = expectedArrayConstructor(safe.bitsPerChannel);
     const data = new Expected(area.width * area.height * targetChannels);
+    let copiedPixels = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!intersects(tile, area)) continue;
@@ -1599,6 +1600,12 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
         const sourceOffset = ((y - tile.y) * tile.width + (left - tile.x)) * targetChannels;
         const targetOffset = ((y - area.top) * area.width + (left - area.left)) * targetChannels;
         data.set(buffer.data.subarray(sourceOffset, sourceOffset + (right - left) * targetChannels), targetOffset);
+        copiedPixels += right - left;
+        // Yield within a single large ROI without changing the row-copy order.
+        if (copiedPixels >= 32_768) {
+          copiedPixels = 0;
+          yield;
+        }
       }
     }
     return {
@@ -1616,6 +1623,33 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
         data,
       }),
     };
+  }
+
+  function readRegion(bounds) {
+    const steps = readRegionSteps(bounds);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    return step.value;
+  }
+
+  // A cancelled read drops the private region buffer; dirty tiles stay untouched.
+  async function readRegionCooperative(bounds, {
+    isCancelled = () => false,
+    yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  } = {}) {
+    if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+      throw new TypeError('Tiled PixelBuffer region read: invalid cancellation callbacks');
+    }
+    if (isCancelled()) return null;
+    const steps = readRegionSteps(bounds);
+    let step = steps.next();
+    while (!step.done) {
+      if (isCancelled()) return null;
+      await yieldControl();
+      if (isCancelled()) return null;
+      step = steps.next();
+    }
+    return isCancelled() ? null : step.value;
   }
 
   function writeRegion(region) {
@@ -1749,6 +1783,7 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     visit,
     forEachPreviewDirty,
     readRegion,
+    readRegionCooperative,
     writeRegion,
     serialize,
     serializeCooperative,
@@ -1874,7 +1909,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
         const x = index % width, y = Math.floor(index / width);
         mask[(y - rect.top) * regionWidth + (x - rect.left)] = 1;
       }
-      const region = working.readRegion(rect);
+      const region = yield { kind:'readRegion', bounds:rect };
       const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
         isAllowed:(x, y) => mask[y * regionWidth + x] === 1,
         maxLayerPixels, maxFillPixels,
@@ -1901,7 +1936,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     const x = index % width, y = Math.floor(index / width);
     selectionMask[(y - bounds.top) * regionWidth + (x - bounds.left)] = 1;
   }
-  const region = working.readRegion(bounds);
+  const region = yield { kind:'readRegion', bounds };
   const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
     isAllowed:(x, y) => selectionMask[y * regionWidth + x] === 1,
     maxLayerPixels,
@@ -1928,6 +1963,8 @@ function inpaintFrozenTiledSelection(source, working, scan, options) {
   while (!step.done) {
     if (step.value?.kind === 'inpaint') {
       step = steps.next(inpaintPixelBuffer(step.value.buffer, step.value.options));
+    } else if (step.value?.kind === 'readRegion') {
+      step = steps.next(working.readRegion(step.value.bounds));
     } else if (step.value?.kind === 'serialize') {
       step = steps.next(working.serialize());
     } else {
@@ -1952,6 +1989,12 @@ async function inpaintFrozenTiledSelectionCooperative(source, working, scan, opt
         { isCancelled, yieldControl });
       if (filled === null || isCancelled()) return cancelled();
       step = steps.next(filled);
+      continue;
+    }
+    if (step.value?.kind === 'readRegion') {
+      const region = await working.readRegionCooperative(step.value.bounds, { isCancelled, yieldControl });
+      if (region === null || isCancelled()) return cancelled();
+      step = steps.next(region);
       continue;
     }
     if (step.value?.kind === 'serialize') {

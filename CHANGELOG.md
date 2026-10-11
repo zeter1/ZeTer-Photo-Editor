@@ -1,8 +1,11 @@
 # История изменений
 
-### 2026-10-11T10:41:42+03:00 — Контакты разработчика в README
+### 2026-10-11 — Stage 003: прерываемое чтение native tiled ROI
 
-- Добавлено: в самом низу README размещены ссылки на почту, Telegram и LinkedIn разработчика без подписей сервисов и значков.
+- Добавлено: общий row-copy iterator для синхронного `readRegion` и отменяемого `readRegionCooperative`. При недоступном Worker main-thread fallback отдаёт управление через каждые 32 768 пикселей большого ROI и отбрасывает частный буфер при отмене без изменения исходных tiles.
+- Добавлено: регрессии RGB16 и Float32 CMYKA на byte-exact sync/cooperative parity и отмену в середине чтения, плюс проверка отмены внутри inpaint kernel после read checkpoints.
+- Ограничения: `writeRegion`, oversized connected ROI, chunked RGBA8 preview и независимый лицензированный Photoshop-authored PSD/PSB corpus с browser memory/Undo всё ещё открыты.
+
 
 ### 2026-10-11 — Диагностический профиль native tiled readRegion/writeRegion
 
