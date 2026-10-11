@@ -22,3 +22,5 @@ The fixed 32/64/128/256px stripe planner and per-tile fragments reject some thin
 - RAW/DNG pipeline, advanced CMYK/soft proof and parity/quality work are separate unfinished roadmap items.
 
 This subpass **does not complete Stage 002/003**, Photoshop parity or real browser peak-memory accounting.
+
+**010E-B2 follow-up:** implemented in branch `feat/010e-b2-connected-run-bands` via [021](021-connected-run-bands.md). The 8-row, union-find connected run-band planner covers multiple simultaneous/branching horizontal runs that cannot be handled by 010E-B1's previous-group greedy fallback. Review + CI/merge still pending; this is not a completed Stage 003.
