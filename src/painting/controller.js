@@ -679,6 +679,7 @@ export function createRasterEditController({
     clearBrushBuffer,
     clearHighDepthPaintState,
     reset,
+    cancelTiledInpaint: () => tiledInpaintWorker?.cancel?.(),
     markHighDepthPreviewDirty,
     isNativeHighDepthPaintTarget,
     highDepthBudgetForLayer,

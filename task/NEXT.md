@@ -1,3 +1,9 @@
+## 010D-B — active Content-Aware Worker cancellation on tab switch (PR, 2026-10-11)
+
+- [015](015-active-session-worker-cancel.md): scoped persistence leases, explicit CPU-bound Worker revocation, stale continuation/history/status/brush guard, valid destination only. Other edits still protected by existing busy guard.
+- Added Node delayed Worker reply regression and real Chromium `file://` PSD16 active mid-kernel switch → byte/History preservation → successor Fill. **PR/CI and main merge must be verified before marking passed.**
+- **Remaining P1:** PSB32 Float32 browser active-switch regression, Undo/Redo two-document oracle, 010E complex dense ROI and true memory peak. P0 [002](002-psd-compatibility-corpus.md) independent licensed Adobe Photoshop-authored high-depth corpus remains open. Stage 002/003 NOT complete.
+
 ## 010D-B0 — guarded two-session Chromium UI mid-kernel regression (слито, CI success, 2026-10-11)
 
 - [014](014-browser-session-guard-mid-kernel.md): расширенная реальная Chromium `file://` 010D проверка двух вкладок с PSD16; mid-kernel клик по другой вкладке обязан быть **отклонён** пока `paintPersisting`, затем после блокировки слоя/отмены Worker переключение в обе стороны сохраняет native bytes/History второй сессии и успешный повторный Fill в первой. Только test-only instrumentation, production bundle не меняется.

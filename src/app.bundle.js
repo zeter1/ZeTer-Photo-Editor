@@ -14883,6 +14883,7 @@ function createDocumentSessionController({
   tabs = null,
   viewport = null,
   blockPendingDocumentEdit = () => false,
+  cancelPendingContentAwareFill = () => false,
   updateAll = () => {},
   fitToView = () => {},
   setStatus = () => {},
@@ -15020,10 +15021,12 @@ function createDocumentSessionController({
       if (focusViewport) requestAnimationFrame(() => viewport?.focus());
       return;
     }
-    if (blockPendingDocumentEdit()) return;
-    syncCurrentSession();
     const session = sessions().find(item => item.id === id);
     if (!session) return;
+    // Activate only: other tab commands retain the ordinary pending-edit guard.
+    cancelPendingContentAwareFill();
+    if (blockPendingDocumentEdit()) return;
+    syncCurrentSession();
     setActiveSessionId(session.id);
     loadSession(session);
     updateAll();
@@ -17548,6 +17551,7 @@ function createRasterEditController({
     clearBrushBuffer,
     clearHighDepthPaintState,
     reset,
+    cancelTiledInpaint: () => tiledInpaintWorker?.cancel?.(),
     markHighDepthPreviewDirty,
     isNativeHighDepthPaintTarget,
     highDepthBudgetForLayer,
@@ -17623,10 +17627,24 @@ function createRasterCommandController({
     return true;
   }
 
+  // Keep the host's identity-checked lease; boolean test bridges also work.
   function beginPersist() {
-    if (state.beginPersist()) return true;
+    const lease = state.beginPersist();
+    if (lease) return lease;
     status('Сохраняется предыдущая растровая операция…');
     return false;
+  }
+
+  let pendingContentAwareFill = null;
+  function cancelPendingContentAwareFill() {
+    const pending = pendingContentAwareFill;
+    if (!pending || pending.cancelled) return false;
+    pending.cancelled = true;
+    // Revoke publication before terminating the CPU-bound Worker. A stale
+    // finally must never unlock a newer document's persistence lease.
+    state.endPersist(pending.lease);
+    rasterEdit.cancelTiledInpaint?.();
+    return true;
   }
 
   function selectionPredicate(layer, selectionSnapshot) {
@@ -17666,7 +17684,8 @@ function createRasterCommandController({
       });
       addLayer(doc, layer);
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
 
     try {
       const from = target.toLocal(start, layer);
@@ -17756,7 +17775,7 @@ function createRasterCommandController({
       ui?.toast?.('Не удалось нарисовать линию', 'error');
       return false;
     } finally {
-      state.endPersist();
+      state.endPersist(persistLease);
     }
   }
 
@@ -17774,7 +17793,8 @@ function createRasterCommandController({
       ui?.toast?.('Выберите растровый слой или щёлкните по изображению', 'warn');
       return false;
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
 
     try {
       const local = target.toLocal(point, layer);
@@ -17863,7 +17883,7 @@ function createRasterCommandController({
       ui?.toast?.('Не удалось выполнить заливку', 'error');
       return false;
     } finally {
-      state.endPersist();
+      state.endPersist(persistLease);
     }
   }
 
@@ -17894,7 +17914,12 @@ function createRasterCommandController({
       status('Контент-заливка: не удалось зафиксировать геометрию выделения');
       return false;
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
+    const pending = { lease:persistLease, cancelled:false };
+    pendingContentAwareFill = pending;
+    const isInpaintCurrent = () => !pending.cancelled &&
+      pendingContentAwareFill === pending && state.getDocument() === doc;
 
     try {
       status('Контент-заливка: анализ окружения…');
@@ -17905,6 +17930,7 @@ function createRasterCommandController({
           typeof rasterEdit.persistTiledHighDepthInpaint === 'function'
         ) {
           const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, { isAllowed });
+          if (!isInpaintCurrent()) return false;
           if (result) {
             resetNativeState();
             if (result.stale) return false;
@@ -17929,7 +17955,9 @@ function createRasterCommandController({
           status('Контент-заливка: нужны исходные пиксели за пределами выделения');
           return false;
         }
-        if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) {
+        const published = await rasterEdit.persistHighDepthMutation(doc, layer, buffer);
+        if (!isInpaintCurrent()) return false;
+        if (!published) {
           resetNativeState();
           return false;
         }
@@ -17940,6 +17968,7 @@ function createRasterCommandController({
       }
 
       const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      if (!isInpaintCurrent()) return false;
       if (!prepared) return false;
       if (state.getDocument() !== doc || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
         rasterEdit.clearBrushBuffer();
@@ -17955,7 +17984,9 @@ function createRasterCommandController({
         return false;
       }
       prepared.ctx.putImageData(imageData, 0, 0);
-      if (!await rasterEdit.persistPaintLayer(doc, layer)) {
+      const published = await rasterEdit.persistPaintLayer(doc, layer);
+      if (!isInpaintCurrent()) return false;
+      if (!published) {
         rasterEdit.clearBrushBuffer();
         return false;
       }
@@ -17963,6 +17994,7 @@ function createRasterCommandController({
       status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
       return true;
     } catch (error) {
+      if (!isInpaintCurrent()) return false;
       resetNativeState();
       ui?.render?.();
       if (error instanceof RangeError && String(error.message).startsWith('Контент-заливка:')) {
@@ -17975,7 +18007,8 @@ function createRasterCommandController({
       ui?.toast?.('Не удалось выполнить контент-заливку', 'error');
       return false;
     } finally {
-      state.endPersist();
+      if (pendingContentAwareFill === pending) pendingContentAwareFill = null;
+      state.endPersist(persistLease);
     }
   }
 
@@ -18009,7 +18042,8 @@ function createRasterCommandController({
       status('Выделение не пересекает выбранный слой');
       return false;
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
 
     try {
       if (layer.highDepthSource) {
@@ -18086,11 +18120,11 @@ function createRasterCommandController({
       ui?.toast?.('Не удалось очистить выделение', 'error');
       return false;
     } finally {
-      state.endPersist();
+      state.endPersist(persistLease);
     }
   }
 
-  return { drawLine, fillAt, contentAwareFill, clearSelection };
+  return { drawLine, fillAt, contentAwareFill, clearSelection, cancelPendingContentAwareFill };
 }
 
 // ---- src/ai/lama-assets.js ----
@@ -27707,6 +27741,7 @@ let selectionCopyMode = 'merged';
 let dragDepth = 0;
 let pointerLifecycle = null;
 let paintPersisting = false;
+let rasterCommandPersistLease = null;
 let hoverPoint = null;
 let smartSnapEnabled = true;
 let smartGuides = { x:null, y:null };
@@ -27960,10 +27995,16 @@ const rasterCommands = createRasterCommandController({
     isPersisting: () => paintPersisting,
     beginPersist: () => {
       if (paintPersisting) return false;
+      const lease = {};
+      rasterCommandPersistLease = lease;
       paintPersisting = true;
-      return true;
+      return lease;
     },
-    endPersist: () => { paintPersisting = false; },
+    endPersist: lease => {
+      if (!lease || rasterCommandPersistLease !== lease) return;
+      rasterCommandPersistLease = null;
+      paintPersisting = false;
+    },
     resetPaintState: () => {
       rasterEdit.clearHighDepthPaintState();
       retouchController.resetStroke();
@@ -28854,12 +28895,17 @@ documentSessionController = createDocumentSessionController({
     resetRetouchStroke();
     hoverPoint = null;
     pointerLifecycle?.releaseActivePointer();
-    paintPersisting = false;
+    // No unconditional unlock: only the owner lease may release persistence.
   },
   cloneSelectionShape,
   tabs: els.tabs,
   viewport: els.viewport,
   blockPendingDocumentEdit,
+  cancelPendingContentAwareFill: () => {
+    // Never revoke an active pointer or a non-cancellable raster gesture.
+    if (drag || pointerLifecycle?.hasActivePointer()) return false;
+    return rasterCommands.cancelPendingContentAwareFill();
+  },
   updateAll,
   fitToView,
   setStatus,
