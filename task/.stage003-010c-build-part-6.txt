@@ -1,0 +1,1668 @@
+// ---- src/ui/background-model-settings-controller.js ----
+// Each model owns its installation state; selection belongs to the model catalog.
+function createBackgroundModelSettings({dialog,engine,setStatus=()=>{},onModelState=()=>{},choices=[]}={}) {
+  const models=engine.models||[{id:'slimsam',name:'SlimSAM',size:39,prefix:'backgroundModel'}];
+  const selectedModel=()=>engine.selectedModel?.()||models[0];
+  const controls=[dialog.querySelector('#backgroundModelChoice'),...choices].filter(Boolean);
+  const cards=models.map(model=>({model,runtime:engine.getEngine?.(model.id)||engine,q:id=>dialog.querySelector('#'+model.prefix+id),checking:true,installation:null,deleting:false,checked:null}));
+  function refresh(){
+    const selected=selectedModel();
+    for(const choice of controls)choice.value=selected.id;
+    for(const card of cards){
+      const {model,runtime,q,checking,installation,deleting}=card;
+      const ready=runtime.isReady(),busy=checking||Boolean(installation)||deleting||runtime.isBusy();
+      q('Description').textContent=`${model.description||'Определяет границы объекта по примерным штрихам кисти.'} ${ready?'Установлена; фото обрабатывается на устройстве.':`Установите эту модель — около ${model.size} МБ. Фото не отправляется в интернет.`}`;
+      q('Install').hidden=ready;q('Install').disabled=busy;q('Remove').disabled=busy;
+      q('Remove').textContent=deleting?'Удаление…':'Удалить модель';q('Cancel').hidden=!installation;
+      q('Status').textContent=checking?'Проверка кэша этой модели…':deleting?'Удаление файлов этой модели…':installation?'Загрузка и проверка этой модели…':ready?(runtime.isStored()?'Готова · сохранена в этом браузере':'Готова для этой страницы · после закрытия может понадобиться загрузка'):'Не установлена';
+      q('Title')?.closest?.('.settings-model')?.classList.toggle('settings-model-selected',model.id===selected.id);
+    }
+    onModelState(engine.isReady(),selected);
+  }
+  function select(id){if(!models.some(model=>model.id===id))return false;if(engine.select)engine.select(id);refresh();return true;}
+  async function install(id=selectedModel().id){
+    const card=cards.find(item=>item.model.id===id);if(!card)return;
+    await card.checked;
+    const {runtime,q,model}=card;
+    if(card.installation||card.deleting||runtime.isBusy()||runtime.isReady())return;
+    const controller=new AbortController();card.installation=controller;refresh();
+    q('Progress').hidden=false;q('Progress').value=0;q('ProgressText').textContent='Подключение…';
+    try{
+      await runtime.prepare({signal:controller.signal,onProgress:({percent,loaded,total})=>{
+        q('Progress').value=percent;q('ProgressText').textContent=`${percent}% · ${(loaded/1024/1024).toFixed(1)} из ${(total/1024/1024).toFixed(1)} МБ`;
+      }});
+      q('Progress').value=100;q('ProgressText').textContent=`${model.name} готова. Отметьте объект кистью и нажмите «Удалить фон».`;setStatus(`${model.name}: модель удаления фона готова`);
+    }catch(error){q('ProgressText').textContent=controller.signal.aborted?'Установка отменена. Можно повторить позже.':`Не удалось установить: ${error.message}`;}
+    finally{card.installation=null;refresh();}
+  }
+  async function remove(card){
+    await card.checked;if(card.installation||card.deleting||card.runtime.isBusy())return;
+    card.deleting=true;refresh();
+    try{await card.runtime.remove();card.q('Progress').hidden=true;card.q('Progress').value=0;card.q('ProgressText').textContent=`${card.model.name} удалена. Фото, проекты и другие модели сохранены.`;setStatus(card.q('ProgressText').textContent);}
+    catch(error){card.q('ProgressText').textContent=`Не удалось удалить: ${error.message}`;}
+    finally{card.deleting=false;refresh();}
+  }
+  for(const card of cards){
+    card.checked=card.runtime.prepare({cachedOnly:true}).catch(()=>null).finally(()=>{card.checking=false;refresh();});
+    card.q('Install').onclick=()=>install(card.model.id);card.q('Cancel').onclick=()=>card.installation?.abort();card.q('Remove').onclick=()=>remove(card);
+  }
+  for(const choice of controls)choice.onchange=()=>select(choice.value);
+  return {install,refresh,select,selectedModel};
+}
+
+// ---- src/painting/background-removal-command-controller.js ----
+// Publishes alpha only, through the existing guarded raster persistence owner.
+function createBackgroundRemovalCommandController({state,rasterEdit,engine,ui,getOptions=()=>({feather:1}),documentRef=globalThis.document}={}){
+  async function remove({ownerDocument,ownerLayer,mask,isCurrent,signal}={}){
+    const current=()=>!signal?.aborted&&state.getDocument()===ownerDocument&&ownerDocument?.layers.includes(ownerLayer)&&isCurrent();
+    if(!current())return false;
+    if(ownerLayer.highDepthSource){ui?.setStatus?.('Удаление фона доступно для RGB 8 бит. Исходный high-depth/CMYK слой сохранён.');return false;}
+    if(!state.beginPersist())return false;
+    try{
+      const captured=engine.capture?.()||{engine,model:{square:false}},options={...getOptions()};
+      const prepared=await rasterEdit.ensureRasterBuffer(ownerDocument,ownerLayer);
+      if(!prepared||!current())return false;
+      const {width,height}=prepared.canvas;
+      if(mask?.width!==width||mask?.height!==height||width*height>8_000_000)throw new Error('Размер слоя или подсказки изменился');
+      const image=prepared.ctx.getImageData(0,0,width,height);
+      const prompts=prepareSamPrompts({width,height,data:image.data,mask:mask.data},captured.model);
+      const resized=documentRef.createElement('canvas');resized.width=prompts.resizedWidth;resized.height=prompts.resizedHeight;
+      const ctx=resized.getContext('2d');ctx.drawImage(prepared.canvas,0,0,resized.width,resized.height);
+      const input=prepareSamImage(ctx.getImageData(0,0,resized.width,resized.height).data,resized.width,resized.height);
+      const output=await captured.engine.run({input,points:prompts.points,labels:prompts.labels},{signal,onProgress:update=>{if(current()){ui?.setStatus?.(update.message);ui?.progress?.(update);}}});
+      if(!current())return false;
+      const result=mergeSamMask({width,height,data:image.data,mask:mask.data},prompts,output,options);
+      if(!current())return false;
+      if(result.every((value,i)=>value===image.data[i])){ui?.setStatus?.('Фон уже прозрачный · изменений нет');return false;}
+      ui?.progress?.({stage:'save',message:'Сохранение прозрачного фона…'});
+      image.data.set(result);prepared.ctx.putImageData(image,0,0);
+      if(!await rasterEdit.persistPaintLayer(ownerDocument,ownerLayer,{isContinuationCurrent:current}))return false;
+      ui?.commit?.('Удалить фон');return true;
+    }catch(error){
+      if(signal?.aborted)ui?.setStatus?.('Удаление фона отменено · подсказка сохранена');
+      else if(current())ui?.setStatus?.(`Не удалось удалить фон: ${error.message}`);
+      return false;
+    }finally{rasterEdit.clearBrushBuffer();state.endPersist();ui?.render?.();}
+  }
+  return {remove};
+}
+
+// ---- src/ui/editor-settings-controller.js ----
+function createEditorSettingsController({dialog,engine,preferences,storage=globalThis.localStorage,setStatus=()=>{},onModelState=()=>{},backgroundEngine=null,onBackgroundModelState=()=>{},backgroundModelChoices=[]}={}) {
+  let installing=null,deleting=false,checking=true,mode='auto',brush=24;
+  try{const saved=JSON.parse(storage.getItem('zeter-editor-settings-v1')||'{}');if(saved.processing==='cpu')mode='cpu';if(Number.isInteger(saved.brush)&&saved.brush>=1&&saved.brush<=160)brush=saved.brush;}catch{}
+  const q=id=>dialog.querySelector('#'+id);
+  const persist=()=>{try{storage.setItem('zeter-editor-settings-v1',JSON.stringify({processing:mode,brush}));return true;}catch{q('settingsNotice').textContent='Браузер не разрешил сохранить настройки. Они действуют до закрытия страницы.';return false;}};
+  function refresh() {
+    const ready=engine.isReady();onModelState(ready);
+    q('modelDescription').textContent=ready?'LaMa восстанавливает фон на месте закрашенного объекта. Нейросеть установлена. Фотографии обрабатываются на устройстве.':'LaMa восстанавливает фон на месте закрашенного объекта. Для работы установите модель — около 85 МБ. Фотографии не отправляются в интернет.';
+    const busy=Boolean(installing)||deleting||checking||engine.isBusy();
+    q('modelInstall').hidden=ready;
+    q('modelInstall').disabled=busy;
+    q('modelRemove').disabled=busy;
+    q('modelRemove').textContent=deleting?'Удаление…':'Удалить нейросеть';
+    q('modelInstallCancel').hidden=!installing;
+    q('modelStatus').textContent=deleting?'Удаление файлов нейросети…':installing?'Загрузка и проверка модели…':checking?'Проверка установленной модели…':ready?(engine.isStored()?'Готова · сохранена в этом браузере':'Готова для этой страницы · кэш недоступен, после закрытия понадобится загрузка'):'Не установлена · для удаления объектов нужна нейросеть';
+  }
+  const backgroundModel=backgroundEngine?createBackgroundModelSettings({dialog,engine:backgroundEngine,setStatus,onModelState:onBackgroundModelState,choices:backgroundModelChoices}):null;
+  const cacheCheck=engine.prepare({cachedOnly:true}).catch(()=>null).finally(()=>{checking=false;refresh();});
+  async function install() {
+    await cacheCheck;
+    if(installing||deleting||engine.isReady())return;
+    const controller=new AbortController();installing=controller;refresh();q('modelProgress').hidden=false;q('modelProgress').value=0;q('modelProgressText').textContent='Подключение…';
+    try {
+      await engine.prepare({signal:controller.signal,onProgress:({percent,loaded,total})=>{
+        q('modelProgress').value=percent;
+        q('modelProgressText').textContent=`${percent}% · ${(loaded/1024/1024).toFixed(1)} из ${(total/1024/1024).toFixed(1)} МБ`;
+      }});
+      q('modelProgress').value=100;q('modelProgressText').textContent='Нейросеть готова. Закройте настройки и нажмите «Удалить объект».';setStatus('Нейросеть удаления объектов готова');
+    } catch(error) {
+      q('modelProgressText').textContent=controller.signal.aborted?'Установка отменена. Можно продолжить позже.':`Не удалось установить: ${error.message}`;
+    } finally {installing=null;refresh();}
+  }
+  async function remove() {
+    await cacheCheck;
+    if(installing||deleting)return;
+    deleting=true;refresh();
+    try {
+      await engine.remove();
+      q('modelProgress').hidden=true;q('modelProgress').value=0;
+      q('modelProgressText').textContent='Нейросеть удалена. Для удаления объектов установите её снова.';
+      setStatus('Нейросеть удалена. Фотографии и проекты сохранены.');
+    } catch(error) {q('modelProgressText').textContent=`Не удалось удалить нейросеть: ${error.message}`;}
+    finally {deleting=false;refresh();}
+  }
+  q('modelRemove').onclick=remove;
+  q('settingsClose').onclick=()=>dialog.close();
+  q('modelInstall').onclick=install;
+  q('modelInstallCancel').onclick=()=>installing?.abort();
+  q('processingMode').value=mode;
+  q('processingMode').onchange=()=>{mode=q('processingMode').value==='cpu'?'cpu':'auto';persist();};
+  q('defaultBrushSize').value=brush;
+  preferences.setBrush(brush);
+  q('defaultBrushSize').onchange=()=>{const value=Number(q('defaultBrushSize').value);if(Number.isInteger(value)&&value>=1&&value<=160){brush=value;preferences.setBrush(value);persist();}else q('defaultBrushSize').value=brush;};
+  q('settingsSmartSnap').onchange=()=>preferences.setSnap(q('settingsSmartSnap').checked);
+  const tabs=Array.from(dialog.querySelectorAll('[data-settings-tab]'));
+  function activateTab(tab,focus=false){for(const item of tabs){const selected=item===tab;item.setAttribute('aria-selected',String(selected));item.tabIndex=selected?0:-1;dialog.querySelector('#'+item.getAttribute('aria-controls')).hidden=!selected;}if(focus)tab.focus();}
+  for(const tab of tabs){tab.onclick=()=>activateTab(tab);tab.onkeydown=event=>{let index=tabs.indexOf(tab);if(event.key==='ArrowRight')index=(index+1)%tabs.length;else if(event.key==='ArrowLeft')index=(index+tabs.length-1)%tabs.length;else if(event.key==='Home')index=0;else if(event.key==='End')index=tabs.length-1;else return;event.preventDefault();activateTab(tabs[index],true);};}
+  function open(section='models'){backgroundModel?.refresh();activateTab(tabs.find(t=>t.dataset.settingsTab===section)||tabs[0]);q('settingsSmartSnap').checked=preferences.getSnap();refresh();if(!dialog.open)dialog.showModal();}
+  return {open,refresh:()=>{refresh();backgroundModel?.refresh();},openForBackgroundInstall:()=>{open('models');const model=backgroundModel?.selectedModel();q((model?.prefix||'backgroundModel')+'Install').scrollIntoView?.({block:'nearest'});return backgroundModel?.install();},openForInstall:()=>{open('models');return install();},useGpu:()=>mode==='auto',isInstalling:()=>Boolean(installing)};
+}
+
+// ---- src/ui/object-removal-progress-controller.js ----
+function createObjectRemovalProgressController({panel,bar,label,elapsed,remaining,now=()=>performance.now(),schedule=callback=>setInterval(callback,1000),unschedule=id=>clearInterval(id),inferenceLabel='Восстановление фона…'}={}) {
+  let active=false,timer=null,started=0,inferenceStarted=0,estimate=null;
+  function tick(){
+    if(!active)return;
+    elapsed.textContent=`Прошло: ${Math.floor((now()-started)/1000)} с`;
+    if(estimate!==null){
+      const seconds=Math.ceil(estimate-(now()-inferenceStarted)/1000);
+      remaining.textContent=seconds>0?`Примерно осталось: ${seconds} с`:'Расчёт дольше предыдущего · обработка продолжается';
+    }
+  }
+  function begin(){
+    if(active)return;
+    active=true;started=now();estimate=null;panel.hidden=false;
+    bar.value=0;label.textContent='1 из 3 · Подготовка изображения…';remaining.textContent='Оставшееся время пока неизвестно';
+    tick();timer=schedule(tick);
+  }
+  function update({stage,message,estimatedSeconds}={}){
+    if(!active)return;
+    if(stage==='initialize'){bar.value=20;label.textContent='1 из 3 · Подготовка нейросети…';}
+    else if(stage==='inference'){
+      bar.removeAttribute('value');label.textContent=`2 из 3 · ${inferenceLabel}`;inferenceStarted=now();
+      estimate=Number.isFinite(estimatedSeconds)&&estimatedSeconds>0?estimatedSeconds:null;
+      remaining.textContent=estimate===null?'Первый запуск · оцениваем скорость устройства':'Примерное время по предыдущему удалению';
+    }else if(stage==='save'){estimate=null;bar.value=90;label.textContent='3 из 3 · Сохранение результата…';remaining.textContent='Почти готово';}
+    else if(message)label.textContent=message;
+    tick();
+  }
+  function finish(){if(!active)return;active=false;unschedule(timer);timer=null;panel.hidden=true;estimate=null;}
+  return {begin,update,finish};
+}
+
+// ---- src/painting/object-removal-command-controller.js ----
+// AI owns no document state. Only this transaction can publish its result.
+function createObjectRemovalCommandController({state,rasterEdit,engine,ui}={}) {
+  async function remove({ownerDocument,ownerLayer,mask,isCurrent,signal}={}) {
+    const current=()=>!signal?.aborted && state.getDocument()===ownerDocument && ownerDocument?.layers.includes(ownerLayer) && isCurrent();
+    if(!current())return false;
+    if(ownerLayer.highDepthSource){ui?.setStatus?.('Нейросетевое удаление доступно для RGB 8 бит. Исходный high-depth/CMYK слой сохранён.');return false;}
+    if(!state.beginPersist())return false;
+    try {
+      const prepared=await rasterEdit.ensureRasterBuffer(ownerDocument,ownerLayer);
+      if(!prepared||!current())return false;
+      const width=prepared.canvas.width,height=prepared.canvas.height;
+      if(mask?.width!==width||mask?.height!==height)throw new Error('Размер маски изменился');
+      const image=prepared.ctx.getImageData(0,0,width,height),source={width,height,data:image.data,mask:mask.data};
+      const input=prepareLamaInput(source);
+      const output=await engine.run(input.input,{signal,onProgress:update=>{if(current()){ui?.setStatus?.(typeof update==='string'?update:update.message);ui?.progress?.(update);}}});
+      if(!current())return false;
+      ui?.progress?.({stage:'save',message:'Сохранение результата…'});
+      image.data.set(mergeLamaOutput(source,input,output));
+      if(!current())return false;
+      prepared.ctx.putImageData(image,0,0);
+      if(!await rasterEdit.persistPaintLayer(ownerDocument,ownerLayer,{isContinuationCurrent:current}))return false;
+      ui?.commit?.('Удалить объект');
+      return true;
+    } catch(error) {
+      if(signal?.aborted)ui?.setStatus?.('Удаление отменено · выделенная область сохранена');
+      else if(current())ui?.setStatus?.(`Не удалось удалить объект: ${error.message}`);
+      return false;
+    } finally {
+      rasterEdit.clearBrushBuffer();state.endPersist();ui?.render?.();
+    }
+  }
+  return {remove};
+}
+
+// ---- src/painting/object-removal-controller.js ----
+// Transient, layer-local brush mask. Pixel publication belongs to rasterCommands.
+function createObjectRemovalController({ state, geometry, commands, ui, documentRef=globalThis.document,toolName='Удаление объектов',historyLabel='Удалить объект',successMessage='Объект удалён · Ctrl+Z — отменить',previewColor=[255,84,148],negativePreviewColor=[255,91,105],strokeHistory=false } = {}) {
+  let draft=null, stroke=null, busy=false, preview=null, previewDirty=false, operation=null;
+  const undoStrokes=[],redoStrokes=[];
+  const historyBudget=32*1024*1024,maxHistory=32;
+  const transformKey = layer => [layer.x,layer.y,layer.width,layer.height,layer.scaleX,layer.scaleY,layer.rotation].join('|');
+  function valid() {
+    return draft && state.getDocument()===draft.doc && state.selected()===draft.layer &&
+      draft.doc.layers.includes(draft.layer) && state.isEditable(draft.layer) &&
+      state.getSerial()===draft.serial && transformKey(draft.layer)===draft.transform;
+  }
+  function notify() { ui?.changed?.({hasMask:Boolean(draft?.count),busy,active:Boolean(stroke)}); }
+  function discard() { draft=null;stroke=null;preview=null;previewDirty=false;undoStrokes.length=redoStrokes.length=0;notify(); }
+  function validate() { if(draft&&!valid())discard(); return Boolean(draft); }
+  function reset() { if(busy)return false;discard();return true; }
+  function hasMask() { validate();return Boolean(draft?.count); }
+  function snapshot() { return validate()?{width:draft.width,height:draft.height,data:draft.data.slice()}:null; }
+  function canUndo() { return validate()&&!busy&&!stroke&&undoStrokes.length>0; }
+  function canRedo() { return validate()&&!busy&&!stroke&&redoStrokes.length>0; }
+  function travel(from,to) {
+    if(!validate()||busy||stroke||!from.length)return false;
+    to.push({data:draft.data,count:draft.count});
+    const previous=from.pop();draft.data=previous.data;draft.count=previous.count;previewDirty=true;notify();return true;
+  }
+
+  function paint(start,end,diameter) {
+    if(!validate())return;
+    const radius=Math.max(.5,Math.min(160,Number(diameter)||1)/2);
+    const {width,height,data}=draft;
+    const left=Math.max(0,Math.floor(Math.min(start.x,end.x)-radius));
+    const right=Math.min(width-1,Math.ceil(Math.max(start.x,end.x)+radius));
+    const top=Math.max(0,Math.floor(Math.min(start.y,end.y)-radius));
+    const bottom=Math.min(height-1,Math.ceil(Math.max(start.y,end.y)+radius));
+    const dx=end.x-start.x,dy=end.y-start.y,length2=dx*dx+dy*dy;
+    for(let y=top;y<=bottom;y++)for(let x=left;x<=right;x++) {
+      const t=length2?Math.max(0,Math.min(1,((x+.5-start.x)*dx+(y+.5-start.y)*dy)/length2)):0;
+      if((x+.5-start.x-t*dx)**2+(y+.5-start.y-t*dy)**2>radius*radius)continue;
+      if(geometry.isAllowed&&!geometry.isAllowed({x:x+.5,y:y+.5},draft.layer))continue;
+      const index=y*width+x;
+      const mark=stroke?.mark||1;
+      if(data[index]!==mark){if(!data[index])draft.count++;data[index]=mark;previewDirty=true;if(stroke)stroke.changed=true;}
+    }
+  }
+  function local(point) {
+    const value=geometry.toLocal(point,draft.layer);
+    return value&&Number.isFinite(value.x)&&Number.isFinite(value.y)?value:null;
+  }
+  function begin(point,diameter,mark=1) {
+    if(busy||stroke)return false;
+    validate();
+    const doc=state.getDocument(),layer=state.selected();
+    if(!doc?.layers.includes(layer)||!state.isEditable(layer)){
+      ui?.setStatus?.(`${toolName}: выберите незаблокированный растровый слой`);return false;
+    }
+    if(!draft){
+      const width=Number(layer.width),height=Number(layer.height);
+      if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||width<1||height<1||width*height>8_000_000){
+        ui?.setStatus?.(`${toolName}: слой должен быть не больше 8 млн пикселей`);return false;
+      }
+      draft={doc,layer,width,height,data:new Uint8Array(width*height),count:0,serial:state.getSerial(),transform:transformKey(layer)};
+    }
+    const p=local(point);if(!p)return false;
+    stroke={last:p,before:draft.data.slice(),count:draft.count,mark:mark===2?2:1,changed:false};
+    paint(p,p,diameter);notify();return true;
+  }
+  function move(point,diameter) {
+    if(!stroke||busy||!validate())return;
+    const p=local(point);if(!p)return;
+    paint(stroke.last,p,diameter);if(stroke)stroke.last=p;
+  }
+  function finish(point,diameter) {
+    move(point,diameter);
+    if(strokeHistory&&stroke?.changed&&validate()){
+      redoStrokes.length=0;undoStrokes.push({data:stroke.before,count:stroke.count});
+      const limit=Math.min(maxHistory,Math.floor(historyBudget/draft.data.byteLength));
+      while(undoStrokes.length>limit)undoStrokes.shift();
+    }
+    stroke=null;notify();
+  }
+  function cancel() {
+    if(stroke&&validate()){draft.data=stroke.before;draft.count=stroke.count;previewDirty=true;}
+    stroke=null;notify();
+  }
+  async function remove() {
+    if(busy||stroke||!hasMask())return false;
+    const owner=draft,mask=owner.data.slice();
+    operation=new AbortController();busy=true;notify();
+    try {
+      const applied=await commands.remove({
+        ownerDocument:owner.doc,ownerLayer:owner.layer,historyLabel,
+        mask:{width:owner.width,height:owner.height,data:mask},signal:operation.signal,
+        isCurrent:()=>draft===owner && Boolean(valid()),
+        isAllowed:(x,y)=>Number.isInteger(x)&&Number.isInteger(y)&&x>=0&&y>=0&&x<owner.width&&y<owner.height&&Boolean(mask[y*owner.width+x]),
+      });
+      if(applied){discard();ui?.setStatus?.(successMessage);}
+      return Boolean(applied);
+    } finally { operation=null;busy=false;notify(); }
+  }
+  function draw(ctx) {
+    if(!hasMask()||!documentRef)return;
+    if(!preview){preview=documentRef.createElement('canvas');preview.width=draft.width;preview.height=draft.height;previewDirty=true;}
+    if(previewDirty){
+      const pc=preview.getContext('2d'),image=pc.createImageData(draft.width,draft.height);
+      for(let i=0;i<draft.data.length;i++)if(draft.data[i]){const color=draft.data[i]===2?negativePreviewColor:previewColor;image.data[i*4]=color[0];image.data[i*4+1]=color[1];image.data[i*4+2]=color[2];image.data[i*4+3]=112;}
+      pc.putImageData(image,0,0);previewDirty=false;
+    }
+    const p=geometry.toDocument({x:0,y:0},draft.layer),px=geometry.toDocument({x:1,y:0},draft.layer),py=geometry.toDocument({x:0,y:1},draft.layer);
+    ctx.save();ctx.transform(px.x-p.x,px.y-p.y,py.x-p.x,py.y-p.y,p.x,p.y);ctx.drawImage(preview,0,0);ctx.restore();
+  }
+  return {begin,move,finish,cancel,reset,hasMask,snapshot,remove,draw,canUndo,canRedo,undo:()=>travel(undoStrokes,redoStrokes),redo:()=>travel(redoStrokes,undoStrokes),isBusy:()=>busy,isDrawing:()=>Boolean(stroke),abort:()=>operation?.abort()};
+}
+
+// ---- src/painting/gradient-command-controller.js ----
+const GRADIENT_COMMAND_RESULT = Object.freeze({
+  COMMITTED: 'committed',
+  NOOP: 'noop',
+  REJECTED: 'rejected',
+  FAILED: 'failed',
+});
+const GRADIENT_COMMAND_REASON = Object.freeze({
+  TOO_SHORT: 'too-short',
+  BUSY: 'busy',
+  STALE_OWNER: 'stale-owner',
+});
+
+function commandResult(result, reason = null, error = null) {
+  const outcome = { result };
+  if (reason) outcome.reason = reason;
+  if (error) outcome.error = error;
+  return outcome;
+}
+function createGradientCommandController({
+  rasterEdit,
+  state,
+  runtime,
+  selection,
+  tools,
+  io,
+  transaction,
+  ui = {},
+} = {}) {
+  if (typeof rasterEdit?.clearBrushBuffer !== 'function') {
+    throw new TypeError('gradient command raster-edit bridge is required');
+  }
+  if (
+    typeof state?.getDocument !== 'function' ||
+    typeof state?.isPersisting !== 'function' ||
+    typeof state?.beginPersist !== 'function' ||
+    typeof state?.endPersist !== 'function'
+  ) {
+    throw new TypeError('gradient command state bridge is required');
+  }
+  if (typeof runtime?.createCanvas !== 'function') {
+    throw new TypeError('gradient command canvas bridge is required');
+  }
+  if (typeof selection?.clipContext !== 'function') {
+    throw new TypeError('gradient command selection bridge is required');
+  }
+  if (
+    typeof tools?.type !== 'function' ||
+    typeof tools?.primaryColor !== 'function' ||
+    typeof tools?.secondaryColor !== 'function' ||
+    typeof tools?.opacity !== 'function'
+  ) {
+    throw new TypeError('gradient command tool bridge is required');
+  }
+  if (typeof io?.canvasToDataURL !== 'function') {
+    throw new TypeError('gradient command IO bridge is required');
+  }
+  if (typeof transaction?.commit !== 'function') {
+    throw new TypeError('gradient command transaction bridge is required');
+  }
+
+  const status = message => ui.setStatus?.(message);
+  const activeOwner = owner => Boolean(owner) && state.getDocument() === owner;
+  const stale = () => commandResult(
+    GRADIENT_COMMAND_RESULT.REJECTED,
+    GRADIENT_COMMAND_REASON.STALE_OWNER,
+  );
+  const busy = () => {
+    status('Сохраняется предыдущая растровая операция…');
+    return commandResult(
+      GRADIENT_COMMAND_RESULT.REJECTED,
+      GRADIENT_COMMAND_REASON.BUSY,
+    );
+  };
+
+  async function apply(owner, start, end) {
+    const distance = Math.hypot(
+      Number(end?.x) - Number(start?.x),
+      Number(end?.y) - Number(start?.y),
+    );
+    if (!Number.isFinite(distance) || distance < 2) {
+      status('Градиент: протяните линию по холсту');
+      return commandResult(
+        GRADIENT_COMMAND_RESULT.NOOP,
+        GRADIENT_COMMAND_REASON.TOO_SHORT,
+      );
+    }
+    if (!activeOwner(owner)) return stale();
+    if (state.isPersisting()) return busy();
+    if (!state.beginPersist()) return busy();
+
+    try {
+      if (!activeOwner(owner)) return stale();
+
+      const width = owner.width;
+      const height = owner.height;
+      const canvas = runtime.createCanvas();
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext?.('2d', { alpha:true });
+      if (!context) throw new Error('Canvas 2D context is unavailable');
+
+      const type = tools.type() === 'radial' ? 'radial' : 'linear';
+      const primaryColor = tools.primaryColor();
+      const secondaryColor = tools.secondaryColor() || '#ffffff';
+      const opacity = tools.opacity();
+      const gradient = type === 'radial'
+        ? context.createRadialGradient(start.x, start.y, 0, start.x, start.y, distance)
+        : context.createLinearGradient(start.x, start.y, end.x, end.y);
+      gradient.addColorStop(0, primaryColor);
+      gradient.addColorStop(1, secondaryColor);
+      context.fillStyle = gradient;
+      context.globalAlpha = opacity;
+
+      if (!activeOwner(owner)) return stale();
+      context.save();
+      try {
+        selection.clipContext(context, owner);
+        context.fillRect(0, 0, canvas.width, canvas.height);
+      } finally {
+        context.restore();
+      }
+
+      const dataUrl = await io.canvasToDataURL(canvas, 'image/png');
+      if (!activeOwner(owner)) return stale();
+
+      addLayer(owner, createRasterLayer({
+        name:'Градиент',
+        x:0,
+        y:0,
+        width,
+        height,
+        dataUrl,
+      }));
+      rasterEdit.clearBrushBuffer();
+      transaction.commit('Добавить градиент');
+      status('Градиент добавлен на новый слой');
+      return commandResult(GRADIENT_COMMAND_RESULT.COMMITTED);
+    } catch (error) {
+      ui.consoleRef?.error?.(error);
+      ui.toast?.('Не удалось создать градиент', 'error');
+      return commandResult(GRADIENT_COMMAND_RESULT.FAILED, null, error);
+    } finally {
+      state.endPersist();
+    }
+  }
+
+  return { apply };
+}
+
+// ---- src/retouch/controller.js ----
+/**
+ * Destructive retouch mechanics and their private per-stroke scratch state.
+ *
+ * Document/history/pointer state stays in the runtime. Pixel math stays in
+ * core/pixels.js and core/pixel-buffer.js.
+ */
+function createRetouchController({
+  getBrushCanvas,
+  getBrushContext,
+  getDrag,
+  getHighDepthPaintBuffer,
+  getHighDepthPaintWorkingSet = () => null,
+  getHighDepthPaintLayerId,
+  markHighDepthPreviewDirty,
+  brushWidthForPointer,
+  rasterSelectionPredicate,
+  schedulePaintPreview,
+  getToolOpacity,
+  getSmudgeStrength,
+  getDodgeStrength,
+  getBurnStrength,
+  getBlurStrength,
+  documentRef = globalThis.document,
+}) {
+  let cloneSource = null;
+  let cloneSnapshotCanvas = null;
+  let highDepthCloneSnapshotBuffer = null;
+  let highDepthCloneSnapshotWorkingSet = null;
+  let blurScratchCanvas = null;
+  let blurScratchCtx = null;
+  let retouchScratchCanvas = null;
+  let retouchScratchCtx = null;
+
+  const copyPoint = point => point ? { x:point.x, y:point.y } : null;
+  const copyCloneSource = source => source ? {
+    layerId:source.layerId,
+    documentPoint:copyPoint(source.documentPoint),
+    localPoint:copyPoint(source.localPoint),
+  } : null;
+
+  function getCloneSource() {
+    return copyCloneSource(cloneSource);
+  }
+
+  function setCloneSource(source) {
+    cloneSource = copyCloneSource(source);
+    return getCloneSource();
+  }
+
+  function resetStroke() {
+    cloneSnapshotCanvas = null;
+    highDepthCloneSnapshotBuffer = null;
+    highDepthCloneSnapshotWorkingSet = null;
+  }
+
+  function ensureRetouchScratch(width, height) {
+    if (!retouchScratchCanvas) retouchScratchCanvas = documentRef.createElement('canvas');
+    if (retouchScratchCanvas.width !== width || retouchScratchCanvas.height !== height) {
+      retouchScratchCanvas.width = width;
+      retouchScratchCanvas.height = height;
+      retouchScratchCtx = retouchScratchCanvas.getContext('2d', { alpha:true });
+    } else if (!retouchScratchCtx) {
+      retouchScratchCtx = retouchScratchCanvas.getContext('2d', { alpha:true });
+    }
+    retouchScratchCtx.setTransform(1,0,0,1,0,0);
+    retouchScratchCtx.globalAlpha = 1;
+    retouchScratchCtx.globalCompositeOperation = 'source-over';
+    retouchScratchCtx.filter = 'none';
+    retouchScratchCtx.clearRect(0,0,width,height);
+    return { canvas:retouchScratchCanvas, ctx:retouchScratchCtx };
+  }
+
+  function ensureBlurScratch(width, height) {
+    if (!blurScratchCanvas) blurScratchCanvas = documentRef.createElement('canvas');
+    if (blurScratchCanvas.width !== width || blurScratchCanvas.height !== height) {
+      blurScratchCanvas.width = width;
+      blurScratchCanvas.height = height;
+      blurScratchCtx = blurScratchCanvas.getContext('2d', { alpha:true });
+    } else if (!blurScratchCtx) {
+      blurScratchCtx = blurScratchCanvas.getContext('2d', { alpha:true });
+    }
+    return { canvas:blurScratchCanvas, ctx:blurScratchCtx };
+  }
+
+  function applyFeatherMask(ctx, centerX, centerY, radius) {
+    const gradient = ctx.createRadialGradient(
+      centerX, centerY, Math.max(0, radius*.55),
+      centerX, centerY, Math.max(.5, radius),
+    );
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height);
+    ctx.restore();
+  }
+
+  function prepareCloneStroke(layer, destinationPoint) {
+    const brushCanvas = getBrushCanvas();
+    if (!cloneSource || cloneSource.layerId !== layer?.id || !brushCanvas) return false;
+    cloneSnapshotCanvas = documentRef.createElement('canvas');
+    cloneSnapshotCanvas.width = brushCanvas.width;
+    cloneSnapshotCanvas.height = brushCanvas.height;
+    cloneSnapshotCanvas.getContext('2d', { alpha:true }).drawImage(brushCanvas,0,0);
+    return {
+      x:cloneSource.localPoint.x-destinationPoint.x,
+      y:cloneSource.localPoint.y-destinationPoint.y,
+    };
+  }
+
+  function applyCloneDab(point, offset, pointerEvent = null, healing = false) {
+    const brushCtx = getBrushContext();
+    if (!cloneSnapshotCanvas || !brushCtx || !offset) return false;
+    const radius = Math.max(.5, brushWidthForPointer(pointerEvent)/2);
+    const padding = 2;
+    const left = Math.floor(point.x-radius-padding);
+    const top = Math.floor(point.y-radius-padding);
+    const size = Math.max(2, Math.ceil(radius*2+padding*2));
+    const { canvas:scratch, ctx:scratchCtx } = ensureRetouchScratch(size,size);
+    scratchCtx.drawImage(cloneSnapshotCanvas,-left-offset.x,-top-offset.y);
+    applyFeatherMask(scratchCtx, point.x-left, point.y-top, radius);
+    brushCtx.save();
+    brushCtx.globalAlpha = clamp(getToolOpacity(),0,1) * (healing ? .68 : 1);
+    brushCtx.globalCompositeOperation = healing ? 'soft-light' : 'source-over';
+    brushCtx.drawImage(scratch,left,top);
+    brushCtx.restore();
+    return true;
+  }
+
+  function cloneStrokeSegment(from, to, offset, pointerEvent = null, healing = false) {
+    const spacing = Math.max(1,brushWidthForPointer(pointerEvent)*.18);
+    const distance = Math.hypot(to.x-from.x,to.y-from.y);
+    const steps = Math.max(1,Math.ceil(distance/spacing));
+    for (let index=1; index<=steps; index+=1) {
+      const t = index/steps;
+      applyCloneDab(
+        {x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},
+        offset,pointerEvent,healing,
+      );
+    }
+  }
+
+  function applySmudgeDab(from, to, pointerEvent = null) {
+    const brushCanvas = getBrushCanvas();
+    const brushCtx = getBrushContext();
+    if (!brushCanvas || !brushCtx) return false;
+    const radius = Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const left = Math.max(0,Math.floor(from.x-radius-2));
+    const top = Math.max(0,Math.floor(from.y-radius-2));
+    const right = Math.min(brushCanvas.width,Math.ceil(from.x+radius+2));
+    const bottom = Math.min(brushCanvas.height,Math.ceil(from.y+radius+2));
+    const width = right-left, height = bottom-top;
+    if (width<=0 || height<=0) return false;
+    const { canvas:scratch, ctx:scratchCtx } = ensureBlurScratch(width,height);
+    scratchCtx.setTransform(1,0,0,1,0,0);
+    scratchCtx.globalCompositeOperation = 'source-over';
+    scratchCtx.clearRect(0,0,width,height);
+    scratchCtx.drawImage(brushCanvas,left,top,width,height,0,0,width,height);
+    applyFeatherMask(scratchCtx,from.x-left,from.y-top,radius);
+    brushCtx.save();
+    brushCtx.globalAlpha = clamp(getSmudgeStrength(),.01,1);
+    brushCtx.globalCompositeOperation = 'source-over';
+    brushCtx.drawImage(
+      scratch,0,0,width,height,
+      to.x-(from.x-left),to.y-(from.y-top),width,height,
+    );
+    brushCtx.restore();
+    return true;
+  }
+
+  function smudgeStrokeSegment(from, to, pointerEvent = null) {
+    const spacing = Math.max(1,brushWidthForPointer(pointerEvent)*.14);
+    const distance = Math.hypot(to.x-from.x,to.y-from.y);
+    const steps = Math.max(1,Math.ceil(distance/spacing));
+    let previous = from;
+    for (let index=1; index<=steps; index+=1) {
+      const t=index/steps;
+      const point={x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t};
+      applySmudgeDab(previous,point,pointerEvent);
+      previous=point;
+    }
+  }
+
+  function applyToneDab(layer, point, pointerEvent = null, brighten = true) {
+    const brushCanvas = getBrushCanvas();
+    const brushCtx = getBrushContext();
+    if (!brushCanvas || !brushCtx || !layer) return false;
+    const radius = Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const left = Math.max(0,Math.floor(point.x-radius));
+    const top = Math.max(0,Math.floor(point.y-radius));
+    const right = Math.min(brushCanvas.width,Math.ceil(point.x+radius));
+    const bottom = Math.min(brushCanvas.height,Math.ceil(point.y+radius));
+    const width=right-left, height=bottom-top;
+    if (width<=0 || height<=0) return false;
+    const strength = brighten ? getDodgeStrength() : getBurnStrength();
+    const imageData = brushCtx.getImageData(left,top,width,height);
+    const selectionAllows = rasterSelectionPredicate(layer);
+    const drag = getDrag();
+    const changed = applyToneBrushPixels(
+      imageData.data,width,height,point.x-left,point.y-top,radius,strength,
+      {
+        brighten,
+        isAllowed:selectionAllows ? (x,y)=>selectionAllows(left+x,top+y) : null,
+        strokeCoverage:drag?.toneCoverage,
+        originX:left,originY:top,
+      },
+    );
+    if (changed) brushCtx.putImageData(imageData,left,top);
+    return changed>0;
+  }
+
+  function toneStrokeSegment(layer, from, to, pointerEvent = null, brighten = true) {
+    const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);
+    const distance=Math.hypot(to.x-from.x,to.y-from.y);
+    const steps=Math.max(1,Math.ceil(distance/spacing));
+    for (let index=1; index<=steps; index+=1) {
+      const t=index/steps;
+      applyToneDab(
+        layer,
+        {x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},
+        pointerEvent,brighten,
+      );
+    }
+  }
+
+  function applyBlurDab(layer, point, pointerEvent = null) {
+    const brushCanvas = getBrushCanvas();
+    const brushCtx = getBrushContext();
+    if (!brushCanvas || !brushCtx || !layer) return false;
+    const diameter = Math.max(1,brushWidthForPointer(pointerEvent));
+    const radius = diameter/2;
+    const blurRadius = 5;
+    const margin = Math.ceil(blurRadius*3+2);
+    const left = Math.max(0,Math.floor(point.x-radius-margin));
+    const top = Math.max(0,Math.floor(point.y-radius-margin));
+    const right = Math.min(brushCanvas.width,Math.ceil(point.x+radius+margin));
+    const bottom = Math.min(brushCanvas.height,Math.ceil(point.y+radius+margin));
+    const width=right-left, height=bottom-top;
+    if (width<=0 || height<=0) return false;
+
+    const { canvas:scratch, ctx:scratchCtx } = ensureBlurScratch(width,height);
+    scratchCtx.save();
+    scratchCtx.setTransform(1,0,0,1,0,0);
+    scratchCtx.globalAlpha=1;
+    scratchCtx.globalCompositeOperation='source-over';
+    scratchCtx.filter='none';
+    scratchCtx.clearRect(0,0,width,height);
+    scratchCtx.drawImage(brushCanvas,left,top,width,height,0,0,width,height);
+    scratchCtx.restore();
+
+    const { ctx:softenedCtx } = ensureRetouchScratch(width,height);
+    softenedCtx.save();
+    softenedCtx.filter = `blur(${blurRadius}px)`;
+    softenedCtx.drawImage(scratch,0,0);
+    softenedCtx.restore();
+    const imageData=brushCtx.getImageData(left,top,width,height);
+    const blurredData=softenedCtx.getImageData(0,0,width,height);
+    const selectionAllows=rasterSelectionPredicate(layer);
+    const drag=getDrag();
+    const changed=applyBlurBrushPixels(
+      imageData.data,blurredData.data,width,height,
+      point.x-left,point.y-top,radius,getBlurStrength(),
+      {
+        isAllowed:selectionAllows ? (x,y)=>selectionAllows(left+x,top+y) : null,
+        strokeCoverage:drag?.blurCoverage,
+        originX:left,originY:top,
+      },
+    );
+    if (changed) brushCtx.putImageData(imageData,left,top);
+    return changed>0;
+  }
+
+  function blurStrokeSegment(layer, from, to, pointerEvent = null) {
+    const diameter=Math.max(1,brushWidthForPointer(pointerEvent));
+    const spacing=Math.max(1,diameter*.22);
+    const distance=Math.hypot(to.x-from.x,to.y-from.y);
+    const steps=Math.max(1,Math.ceil(distance/spacing));
+    for (let index=1; index<=steps; index+=1) {
+      const t=index/steps;
+      applyBlurDab(
+        layer,
+        {x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},
+        pointerEvent,
+      );
+    }
+  }
+
+  function activeHighDepthBuffer(layer) {
+    const buffer=getHighDepthPaintBuffer();
+    return getHighDepthPaintLayerId()===layer?.id && buffer ? buffer : null;
+  }
+
+  function activeHighDepthWorkingSet(layer) {
+    const workingSet=getHighDepthPaintWorkingSet();
+    return getHighDepthPaintLayerId()===layer?.id && workingSet ? workingSet : null;
+  }
+
+  function offsetSelectionPredicate(predicate, offsetX, offsetY) {
+    return typeof predicate === 'function' ? (x,y)=>predicate(x+offsetX,y+offsetY) : null;
+  }
+
+  function brushBounds(point, radius, padding = 0) {
+    const extent=Math.max(.5,Number(radius)||.5)+Math.max(0,Number(padding)||0);
+    return {left:point.x-extent,top:point.y-extent,right:point.x+extent,bottom:point.y+extent};
+  }
+
+  function shiftedBounds(bounds, dx, dy) {
+    return {left:bounds.left+dx,top:bounds.top+dy,right:bounds.right+dx,bottom:bounds.bottom+dy};
+  }
+
+  function expandedBounds(bounds, padding) {
+    const amount=Math.max(0,Number(padding)||0);
+    return {left:bounds.left-amount,top:bounds.top-amount,right:bounds.right+amount,bottom:bounds.bottom+amount};
+  }
+
+  function unionBounds(...values) {
+    const bounds=values.filter(Boolean);
+    if(!bounds.length)return null;
+    return {
+      left:Math.min(...bounds.map(value=>value.left)),
+      top:Math.min(...bounds.map(value=>value.top)),
+      right:Math.max(...bounds.map(value=>value.right)),
+      bottom:Math.max(...bounds.map(value=>value.bottom)),
+    };
+  }
+
+  function markNativeHighDepthRetouchChanged(changed) {
+    if (changed>0) {
+      markHighDepthPreviewDirty();
+      schedulePaintPreview();
+      return true;
+    }
+    return false;
+  }
+
+  function applyNativeHighDepthToneDab(layer, point, pointerEvent = null, brighten = true) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const strength=brighten ? getDodgeStrength() : getBurnStrength();
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      const region=workingSet.readRegion(brushBounds(point,radius));
+      if(!region)return false;
+      const fn=region.buffer.model === 'cmyk' ? applyCmykPixelBufferToneDab : applyPixelBufferToneDab;
+      const changed=fn(region.buffer,point.x-region.x,point.y-region.y,radius,strength,{
+        brighten,
+        isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),region.x,region.y),
+        strokeCoverage:getDrag()?.toneCoverage,
+        originX:region.x,originY:region.y,
+      });
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(region));
+    }
+    const buffer=activeHighDepthBuffer(layer);
+    if (!buffer) return false;
+    const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferToneDab : applyPixelBufferToneDab;
+    const changed=fn(buffer,point.x,point.y,radius,strength,{
+      brighten,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:getDrag()?.toneCoverage,
+    });
+    return markNativeHighDepthRetouchChanged(changed);
+  }
+
+  function nativeHighDepthToneSegment(layer, from, to, pointerEvent = null, brighten = true) {
+    const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);
+    const distance=Math.hypot(to.x-from.x,to.y-from.y);
+    const steps=Math.max(1,Math.ceil(distance/spacing));
+    for (let index=1; index<=steps; index+=1) {
+      const t=index/steps;
+      applyNativeHighDepthToneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent,brighten);
+    }
+  }
+
+  function applyNativeHighDepthBlurDab(layer, point, pointerEvent = null) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const sampleRadius=3;
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      const region=workingSet.readRegion(brushBounds(point,radius,sampleRadius));
+      if(!region)return false;
+      const fn=region.buffer.model === 'cmyk' ? applyCmykPixelBufferBlurDab : applyPixelBufferBlurDab;
+      const changed=fn(region.buffer,point.x-region.x,point.y-region.y,radius,getBlurStrength(),{
+        sampleRadius,
+        isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),region.x,region.y),
+        strokeCoverage:getDrag()?.blurCoverage,
+        originX:region.x,originY:region.y,
+      });
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(region));
+    }
+    const buffer=activeHighDepthBuffer(layer);
+    if (!buffer) return false;
+    const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferBlurDab : applyPixelBufferBlurDab;
+    const changed=fn(buffer,point.x,point.y,radius,getBlurStrength(),{
+      sampleRadius,isAllowed:rasterSelectionPredicate(layer),strokeCoverage:getDrag()?.blurCoverage,
+    });
+    return markNativeHighDepthRetouchChanged(changed);
+  }
+
+  function nativeHighDepthBlurSegment(layer, from, to, pointerEvent = null) {
+    const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.22);
+    const distance=Math.hypot(to.x-from.x,to.y-from.y);
+    const steps=Math.max(1,Math.ceil(distance/spacing));
+    for (let index=1; index<=steps; index+=1) {
+      const t=index/steps;
+      applyNativeHighDepthBlurDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},pointerEvent);
+    }
+  }
+
+  function prepareNativeHighDepthCloneStroke(layer, destinationPoint) {
+    if (!cloneSource || cloneSource.layerId!==layer?.id) return false;
+    const offset={x:cloneSource.localPoint.x-destinationPoint.x,y:cloneSource.localPoint.y-destinationPoint.y};
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      highDepthCloneSnapshotBuffer=null;
+      highDepthCloneSnapshotWorkingSet=createSerializedPixelBufferTileWorkingSet(layer.highDepthSource);
+      return highDepthCloneSnapshotWorkingSet ? offset : false;
+    }
+    const buffer=activeHighDepthBuffer(layer);
+    if (!buffer) return false;
+    highDepthCloneSnapshotWorkingSet=null;
+    highDepthCloneSnapshotBuffer=clonePixelBuffer(buffer);
+    return offset;
+  }
+
+  function applyNativeHighDepthCloneDab(layer, point, offset, pointerEvent = null, healing = false) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      if(!highDepthCloneSnapshotWorkingSet || !offset)return false;
+      const targetBounds=brushBounds(point,radius);
+      const sourceBounds=expandedBounds(shiftedBounds(targetBounds,offset.x,offset.y),1);
+      const healingRadius=healing ? Math.max(2,Math.min(8,radius*.25)) : 0;
+      const bounds=unionBounds(
+        targetBounds,sourceBounds,
+        healing ? brushBounds(point,healingRadius) : null,
+        healing ? brushBounds({x:point.x+offset.x,y:point.y+offset.y},healingRadius) : null,
+      );
+      const targetRegion=workingSet.readRegion(bounds);
+      const snapshotRegion=highDepthCloneSnapshotWorkingSet.readRegion(bounds);
+      if(!targetRegion||!snapshotRegion||targetRegion.x!==snapshotRegion.x||targetRegion.y!==snapshotRegion.y||
+        targetRegion.buffer.width!==snapshotRegion.buffer.width||targetRegion.buffer.height!==snapshotRegion.buffer.height)return false;
+      const fn=targetRegion.buffer.model === 'cmyk' ? applyCmykPixelBufferCloneDab : applyPixelBufferCloneDab;
+      const changed=fn(targetRegion.buffer,snapshotRegion.buffer,
+        point.x-targetRegion.x,point.y-targetRegion.y,radius,offset,{
+          opacity:getToolOpacity(),healing,
+          isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),targetRegion.x,targetRegion.y),
+        });
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(targetRegion));
+    }
+    const buffer=activeHighDepthBuffer(layer);
+    if (!buffer || !highDepthCloneSnapshotBuffer || !offset) return false;
+    const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferCloneDab : applyPixelBufferCloneDab;
+    const changed=fn(buffer,highDepthCloneSnapshotBuffer,point.x,point.y,radius,offset,{
+      opacity:getToolOpacity(),healing,isAllowed:rasterSelectionPredicate(layer),
+    });
+    return markNativeHighDepthRetouchChanged(changed);
+  }
+
+  function nativeHighDepthCloneSegment(layer, from, to, offset, pointerEvent = null, healing = false) {
+    const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.18);
+    const distance=Math.hypot(to.x-from.x,to.y-from.y);
+    const steps=Math.max(1,Math.ceil(distance/spacing));
+    for (let index=1; index<=steps; index+=1) {
+      const t=index/steps;
+      applyNativeHighDepthCloneDab(layer,{x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t},offset,pointerEvent,healing);
+    }
+  }
+
+  function applyNativeHighDepthSmudgeDab(layer, from, to, pointerEvent = null) {
+    const radius=Math.max(.5,brushWidthForPointer(pointerEvent)/2);
+    const workingSet=activeHighDepthWorkingSet(layer);
+    if(workingSet){
+      const targetBounds=brushBounds(to,radius);
+      const sourceBounds=expandedBounds(shiftedBounds(targetBounds,from.x-to.x,from.y-to.y),1);
+      const region=workingSet.readRegion(unionBounds(targetBounds,sourceBounds));
+      if(!region)return false;
+      const fn=region.buffer.model === 'cmyk' ? applyCmykPixelBufferSmudgeDab : applyPixelBufferSmudgeDab;
+      const changed=fn(region.buffer,{x:from.x-region.x,y:from.y-region.y},{x:to.x-region.x,y:to.y-region.y},
+        radius,getSmudgeStrength(),{isAllowed:offsetSelectionPredicate(rasterSelectionPredicate(layer),region.x,region.y)});
+      if(!changed)return false;
+      return markNativeHighDepthRetouchChanged(workingSet.writeRegion(region));
+    }
+    const buffer=activeHighDepthBuffer(layer);
+    if (!buffer) return false;
+    const fn=buffer.model === 'cmyk' ? applyCmykPixelBufferSmudgeDab : applyPixelBufferSmudgeDab;
+    const changed=fn(buffer,from,to,radius,getSmudgeStrength(),{isAllowed:rasterSelectionPredicate(layer)});
+    return markNativeHighDepthRetouchChanged(changed);
+  }
+
+  function nativeHighDepthSmudgeSegment(layer, from, to, pointerEvent = null) {
+    const spacing=Math.max(1,brushWidthForPointer(pointerEvent)*.14);
+    const distance=Math.hypot(to.x-from.x,to.y-from.y);
+    const steps=Math.max(1,Math.ceil(distance/spacing));
+    let previous=from;
+    for (let index=1; index<=steps; index+=1) {
+      const t=index/steps;
+      const point={x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t};
+      applyNativeHighDepthSmudgeDab(layer,previous,point,pointerEvent);
+      previous=point;
+    }
+  }
+
+  return {
+    getCloneSource,
+    setCloneSource,
+    resetStroke,
+    prepareCloneStroke,
+    applyCloneDab,
+    cloneStrokeSegment,
+    applySmudgeDab,
+    smudgeStrokeSegment,
+    applyToneDab,
+    toneStrokeSegment,
+    applyBlurDab,
+    blurStrokeSegment,
+    applyNativeHighDepthToneDab,
+    nativeHighDepthToneSegment,
+    applyNativeHighDepthBlurDab,
+    nativeHighDepthBlurSegment,
+    prepareNativeHighDepthCloneStroke,
+    applyNativeHighDepthCloneDab,
+    nativeHighDepthCloneSegment,
+    applyNativeHighDepthSmudgeDab,
+    nativeHighDepthSmudgeSegment,
+  };
+}
+
+// ---- src/painting/gesture-controller.js ----
+const EXISTING_RASTER_ONLY_TOOLS = new Set(['eraser','blur','clone','heal','smudge','dodge','burn']);
+const PAINT_HISTORY_LABELS = {
+  eraser:'Ластик',
+  blur:'Размытие кистью',
+  clone:'Штамп',
+  heal:'Лечебная кисть',
+  smudge:'Палец / смазывание',
+  dodge:'Осветлитель',
+  burn:'Затемнитель',
+  brush:'Кисть',
+};
+function createPaintGestureController({
+  rasterEdit,
+  retouch,
+  state,
+  target,
+  selection,
+  tools,
+  nativePaint,
+  ui,
+} = {}) {
+  if (!rasterEdit) throw new TypeError('rasterEdit is required');
+  if (!retouch) throw new TypeError('retouch is required');
+  if (typeof state?.getDocument !== 'function' || typeof state?.getDrag !== 'function' || typeof state?.setDrag !== 'function') {
+    throw new TypeError('paint gesture state bridge is required');
+  }
+  if (typeof target?.atPoint !== 'function' || typeof target?.toLocal !== 'function') {
+    throw new TypeError('paint gesture target bridge is required');
+  }
+  if (typeof state?.beginPersist !== 'function' || typeof state?.endPersist !== 'function') {
+    throw new TypeError('paint persistence bridge is required');
+  }
+
+  function currentDocument() {
+    const documentValue = state.getDocument();
+    if (!documentValue) throw new Error('Paint gesture controller has no active document');
+    return documentValue;
+  }
+
+  function status(message) {
+    ui?.setStatus?.(message);
+  }
+
+  function warn(message) {
+    status(message);
+    ui?.toast?.(message, 'warn');
+  }
+
+  function nativeToolSupported(layer, tool) {
+    const model = layer?.highDepthSource?.model;
+    if (!model) return false;
+    return model === 'cmyk'
+      ? NATIVE_CMYK_PAINT_TOOLS.has(tool)
+      : NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool);
+  }
+
+  async function ensurePaintLayer(owner, point, tool, canContinue = () => true) {
+    const doc = owner;
+    let layer = target.selected?.() ?? null;
+    const rasterAtPoint = target.atPoint(point);
+
+    if (EXISTING_RASTER_ONLY_TOOLS.has(tool)) {
+      layer = rasterAtPoint;
+      if (!layer) return null;
+    } else if (rasterAtPoint) {
+      layer = rasterAtPoint;
+    } else {
+      if (!canContinue()) return null;
+      layer = createRasterLayer({
+        name:'Рисование',
+        x:0,
+        y:0,
+        width:doc.width,
+        height:doc.height,
+        dataUrl:null,
+      });
+      addLayer(doc, layer);
+    }
+
+    const nativeHighDepth = layer.highDepthSource && nativeToolSupported(layer, tool)
+      ? await rasterEdit.ensureNativeHighDepthPaintBuffer(owner, layer, {
+          requireAlpha:tool === 'eraser',
+          preferTiled:true,
+        })
+      : false;
+    if (!nativeHighDepth && !await rasterEdit.ensureRasterBuffer(owner, layer)) return null;
+    if (state.getDocument() !== owner || !owner.layers.includes(layer)) return null;
+    doc.selectedLayerId = layer.id;
+    return layer;
+  }
+
+  function unavailableMessage(tool, cloneSource) {
+    if (tool === 'eraser') return 'Ластик работает только по растровому слою. Выберите слой с изображением или рисунком.';
+    if (tool === 'blur') return 'Размытие работает только по растровому слою. Выберите слой с изображением или рисунком.';
+    if (tool === 'clone' || tool === 'heal') {
+      return cloneSource
+        ? `${TOOL_LABELS[tool]} работает по слою заданного источника.`
+        : `${TOOL_LABELS[tool]}: сначала задайте источник через Alt+клик.`;
+    }
+    if (tool === 'smudge') return 'Палец работает только по существующему растровому слою.';
+    if (tool === 'dodge' || tool === 'burn') return 'Инструмент ретуши работает только по существующему растровому слою.';
+    return 'Не удалось подготовить растровый слой для рисования.';
+  }
+
+  function resetNativeStrokeState() {
+    rasterEdit.clearHighDepthPaintState();
+    retouch.resetStroke();
+  }
+
+  async function begin({
+    point,
+    pointerEvent = null,
+    tool,
+    canContinue = () => true,
+  } = {}) {
+    if (!point || !tool) return false;
+    if (selection?.containsPoint && !selection.containsPoint(point)) {
+      status('Рисование ограничено выделением');
+      return false;
+    }
+
+    const owner = currentDocument();
+    const layer = await ensurePaintLayer(owner, point, tool, canContinue);
+    if (!canContinue() || state.getDocument() !== owner) return false;
+
+    const cloneSource = retouch.getCloneSource();
+    if (!layer) {
+      warn(unavailableMessage(tool, cloneSource));
+      return false;
+    }
+    if (!owner.layers.includes(layer)) return false;
+
+    const localPoint = target.toLocal(point, layer);
+    const drag = {
+      kind:'paint',
+      tool,
+      owner,
+      layer,
+      layerId:layer.id,
+      last:localPoint,
+      nativeHighDepth:rasterEdit.isNativeHighDepthPaintTarget(owner, layer) && NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(tool),
+    };
+    state.setDrag(drag);
+
+    if (tool === 'dodge' || tool === 'burn') {
+      drag.toneCoverage = {
+        width:drag.nativeHighDepth ? (rasterEdit.highDepthPaintWorkingSet?.width ?? rasterEdit.highDepthPaintBuffer?.width ?? layer.width) : rasterEdit.brushCanvas.width,
+        tiles:new Map(),
+      };
+    }
+    if (tool === 'blur') {
+      drag.blurCoverage = {
+        width:drag.nativeHighDepth ? (rasterEdit.highDepthPaintWorkingSet?.width ?? rasterEdit.highDepthPaintBuffer?.width ?? layer.width) : rasterEdit.brushCanvas.width,
+        tiles:new Map(),
+      };
+    }
+
+    if (drag.nativeHighDepth) {
+      if (tool === 'clone' || tool === 'heal') {
+        drag.cloneOffset = retouch.prepareNativeHighDepthCloneStroke(layer, localPoint);
+        if (!drag.cloneOffset) {
+          resetNativeStrokeState();
+          rasterEdit.clearBrushBuffer();
+          state.setDrag(null);
+          status(cloneSource ? `${TOOL_LABELS[tool]}: рисуйте по слою источника` : `${TOOL_LABELS[tool]}: Alt+клик задаёт источник`);
+          ui?.toast?.('Сначала задайте источник на этом слое', 'warn');
+          return false;
+        }
+        retouch.applyNativeHighDepthCloneDab(layer, localPoint, drag.cloneOffset, pointerEvent, tool === 'heal');
+        return true;
+      }
+      if (tool === 'smudge') {
+        drag.smudgeStarted = true;
+        return true;
+      }
+      if (tool === 'dodge' || tool === 'burn') {
+        retouch.applyNativeHighDepthToneDab(layer, localPoint, pointerEvent, tool === 'dodge');
+        return true;
+      }
+      if (tool === 'blur') {
+        retouch.applyNativeHighDepthBlurDab(layer, localPoint, pointerEvent);
+        return true;
+      }
+      nativePaint?.dab?.(owner, layer, localPoint, pointerEvent, tool === 'eraser');
+      return true;
+    }
+
+    const context = rasterEdit.brushContext;
+    context.save();
+    selection?.clipContext?.(context, layer);
+
+    if (tool === 'clone' || tool === 'heal') {
+      drag.cloneOffset = retouch.prepareCloneStroke(layer, localPoint);
+      if (!drag.cloneOffset) {
+        context.restore();
+        state.setDrag(null);
+        status(cloneSource ? `${TOOL_LABELS[tool]}: рисуйте по слою источника` : `${TOOL_LABELS[tool]}: Alt+клик задаёт источник`);
+        ui?.toast?.('Сначала задайте источник на этом слое', 'warn');
+        return false;
+      }
+      retouch.applyCloneDab(localPoint, drag.cloneOffset, pointerEvent, tool === 'heal');
+      rasterEdit.schedulePaintPreview();
+      return true;
+    }
+    if (tool === 'smudge') {
+      drag.smudgeStarted = true;
+      rasterEdit.schedulePaintPreview();
+      return true;
+    }
+    if (tool === 'dodge' || tool === 'burn') {
+      retouch.applyToneDab(layer, localPoint, pointerEvent, tool === 'dodge');
+      rasterEdit.schedulePaintPreview();
+      return true;
+    }
+    if (tool === 'blur') {
+      retouch.applyBlurDab(layer, localPoint, pointerEvent);
+      rasterEdit.schedulePaintPreview();
+      return true;
+    }
+
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.lineWidth = tools.brushWidth(pointerEvent);
+    context.globalAlpha = tools.opacity();
+    if (tool === 'eraser') context.globalCompositeOperation = 'destination-out';
+    else {
+      context.globalCompositeOperation = 'source-over';
+      context.strokeStyle = tools.primaryColor();
+    }
+
+    context.beginPath();
+    context.moveTo(localPoint.x, localPoint.y);
+    context.lineTo(localPoint.x + .01, localPoint.y + .01);
+    context.stroke();
+    rasterEdit.schedulePaintPreview();
+    return true;
+  }
+
+  function move(point, pointerEvent = null) {
+    const drag = state.getDrag();
+    if (
+      !drag ||
+      drag.kind !== 'paint' ||
+      state.getDocument() !== drag.owner ||
+      !drag.owner?.layers?.includes(drag.layer) ||
+      drag.layer?.id !== drag.layerId
+    ) return false;
+    const layer = drag.layer;
+
+    const next = target.toLocal(point, layer);
+    const last = drag.last;
+
+    if (drag.nativeHighDepth) {
+      if (drag.tool === 'blur') retouch.nativeHighDepthBlurSegment(layer, last, next, pointerEvent);
+      else if (drag.tool === 'clone' || drag.tool === 'heal') retouch.nativeHighDepthCloneSegment(layer, last, next, drag.cloneOffset, pointerEvent, drag.tool === 'heal');
+      else if (drag.tool === 'smudge') retouch.nativeHighDepthSmudgeSegment(layer, last, next, pointerEvent);
+      else if (drag.tool === 'dodge' || drag.tool === 'burn') retouch.nativeHighDepthToneSegment(layer, last, next, pointerEvent, drag.tool === 'dodge');
+      else nativePaint?.segment?.(drag.owner, layer, last, next, pointerEvent, drag.tool === 'eraser');
+      drag.last = next;
+      return true;
+    }
+
+    if (drag.tool === 'blur') retouch.blurStrokeSegment(layer, last, next, pointerEvent);
+    else if (drag.tool === 'clone' || drag.tool === 'heal') retouch.cloneStrokeSegment(last, next, drag.cloneOffset, pointerEvent, drag.tool === 'heal');
+    else if (drag.tool === 'smudge') retouch.smudgeStrokeSegment(last, next, pointerEvent);
+    else if (drag.tool === 'dodge' || drag.tool === 'burn') retouch.toneStrokeSegment(layer, last, next, pointerEvent, drag.tool === 'dodge');
+    else {
+      const context = rasterEdit.brushContext;
+      context.lineWidth = tools.brushWidth(pointerEvent);
+      context.beginPath();
+      context.moveTo(last.x, last.y);
+      context.lineTo(next.x, next.y);
+      context.stroke();
+    }
+    drag.last = next;
+    return true;
+  }
+
+  async function end(drag = state.getDrag()) {
+    rasterEdit.cancelPaintPreview();
+    const paintTool = drag?.tool;
+    const nativeHighDepth = Boolean(
+      drag?.nativeHighDepth &&
+      NATIVE_HIGH_DEPTH_PAINT_TOOLS.has(paintTool)
+    );
+    if (
+      (nativeHighDepth
+        ? !rasterEdit.isNativeHighDepthPaintTarget(drag?.owner, drag?.layer)
+        : !rasterEdit.brushContext) ||
+      !state.beginPersist()
+    ) return false;
+
+    const label = PAINT_HISTORY_LABELS[paintTool] || 'Кисть';
+    if (!nativeHighDepth) rasterEdit.brushContext.restore();
+    retouch.resetStroke();
+    status('Сохранение штриха…');
+
+    try {
+      const persisted = nativeHighDepth
+        ? await rasterEdit.persistNativeHighDepthPaintLayer(drag?.owner, drag?.layer)
+        : await rasterEdit.persistPaintLayer(drag?.owner, drag?.layer);
+      if (persisted) {
+        ui?.commit?.(label);
+        status('Готово');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error(error);
+      rasterEdit.clearBrushBuffer();
+      rasterEdit.clearHighDepthPaintState();
+      ui?.render?.();
+      status(`Ошибка сохранения штриха: ${error.message}`);
+      ui?.toast?.('Не удалось сохранить штрих', 'error');
+      return false;
+    } finally {
+      state.endPersist();
+    }
+  }
+
+  return { begin, move, end };
+}
+
+// ---- src/selection/gesture-controller.js ----
+function cloneSelectionShape(shape) {
+  if (!shape) return null;
+  if (shape.rect) return { ...shape, rect:{...shape.rect} };
+  if (Array.isArray(shape.points)) return { ...shape, points:shape.points.map(point=>({...point})) };
+  return { ...shape };
+}
+function createSelectionGestureController({
+  selectionTypes = [],
+  selectionTypeLabels = {},
+  geometry = {},
+  selection = {},
+  runtime = {},
+  ui = {},
+} = {}) {
+  const { clamp, constrainedRect, normalizeRect, selectionBounds } = geometry;
+  for (const [name, fn] of Object.entries({ clamp, constrainedRect, normalizeRect, selectionBounds })) {
+    if (typeof fn !== 'function') throw new TypeError(`Selection gesture controller requires geometry.${name}`);
+  }
+
+  let selectionType = selectionTypes.includes('rect') ? 'rect' : (selectionTypes[0] || 'rect');
+  let polygonDraft = null;
+  let magneticDraft = null;
+
+  const currentTool = () => runtime.getCurrentTool?.() || '';
+  const zoom = () => Math.max(0.01, Number(runtime.getZoom?.()) || 1);
+  const documentState = () => runtime.getDocument?.() || { width:0, height:0 };
+  const selectionShape = () => selection.getShape?.() ?? null;
+  const setSelectionShape = shape => selection.setShape?.(shape) ?? null;
+  const setPreviewShape = shape => selection.setPreviewShape?.(shape) ?? setSelectionShape(shape);
+  const setStatus = message => ui.setStatus?.(message);
+  const drawOverlay = () => ui.drawOverlay?.();
+
+  function getType() {
+    return selectionType;
+  }
+
+  function hasPolygonDraft() {
+    return Boolean(polygonDraft);
+  }
+
+  function hasMagneticDraft() {
+    return Boolean(magneticDraft);
+  }
+
+  function cancelPolygonDraft({ restorePrevious = true, announce = false, draw = true } = {}) {
+    if (!polygonDraft) return false;
+    const previous = polygonDraft.previousSelection;
+    polygonDraft = null;
+    if (restorePrevious) setSelectionShape(previous);
+    if (draw) drawOverlay();
+    if (announce) setStatus('Многоугольное выделение отменено');
+    return true;
+  }
+
+  function finishPolygonSelection() {
+    if (!polygonDraft) return false;
+    const points = polygonDraft.points || [];
+    const previousSelection = polygonDraft.previousSelection;
+    polygonDraft = null;
+    if (points.length < 3) {
+      setSelectionShape(previousSelection);
+      drawOverlay();
+      setStatus('Для многоугольного выделения нужно минимум 3 точки');
+      return false;
+    }
+    setSelectionShape({type:'polygon',points});
+    drawOverlay();
+    setStatus(`Многоугольное выделение: ${points.length} точек`);
+    return true;
+  }
+
+  function setType(type, { announce = true } = {}) {
+    const fallback = selectionTypes.includes('rect') ? 'rect' : selectionType;
+    const next = selectionTypes.includes(type) ? type : fallback;
+    if (polygonDraft) cancelPolygonDraft({restorePrevious:true});
+    selectionType = next;
+    ui.setSelectionTypeValue?.(next);
+    ui.updateToolLabel?.();
+    if (announce && currentTool() === 'marquee') setStatus(`Тип выделения: ${selectionTypeLabels[next] || next}`);
+    drawOverlay();
+    return next;
+  }
+
+  function cycleType() {
+    const index = Math.max(0, selectionTypes.indexOf(selectionType));
+    return setType(selectionTypes[(index + 1) % Math.max(1, selectionTypes.length)] || selectionType);
+  }
+
+  function prepareToolChange(nextTool) {
+    if (nextTool !== 'marquee' && polygonDraft) cancelPolygonDraft({restorePrevious:true, draw:false});
+    if (nextTool !== 'magnetic') magneticDraft = null;
+  }
+
+  function resetDrafts() {
+    polygonDraft = null;
+    magneticDraft = null;
+  }
+
+  function beginMarquee(point, { detail = 1 } = {}) {
+    const previousSelection = cloneSelectionShape(selectionShape());
+    if (selectionType === 'polygon') {
+      if (!polygonDraft) {
+        polygonDraft = { points:[{...point}], hover:{...point}, previousSelection };
+        setPreviewShape(null);
+        setStatus('Многоугольное лассо: ставьте точки, двойной щелчок или Enter — завершить');
+      } else {
+        const first = polygonDraft.points[0];
+        const nearFirst = polygonDraft.points.length >= 3 && Math.hypot(point.x-first.x,point.y-first.y) <= 10/zoom();
+        const last = polygonDraft.points.at(-1);
+        if (!last || Math.hypot(point.x-last.x,point.y-last.y) > 1/zoom()) polygonDraft.points.push({...point});
+        polygonDraft.hover = {...point};
+        if (nearFirst || detail >= 2) finishPolygonSelection();
+      }
+      drawOverlay();
+      return { drag:null, preventDefault:true };
+    }
+
+    const drag = {
+      kind:'marquee',
+      selectionType,
+      start:{...point},
+      current:{...point},
+      previousSelection,
+      points:selectionType === 'lasso' ? [{...point}] : null,
+      lockAspect:false,
+    };
+    const shape = selectionType === 'lasso'
+      ? {type:'lasso',points:[{...point}]}
+      : {type:selectionType,rect:{x:point.x,y:point.y,width:0,height:0}};
+    setPreviewShape(shape);
+    drawOverlay();
+    return { drag, preventDefault:false };
+  }
+
+  function updateIdleHover(point) {
+    if (polygonDraft && currentTool() === 'marquee' && selectionType === 'polygon') polygonDraft.hover = {...point};
+    if (magneticDraft && currentTool() === 'magnetic') magneticDraft.hover = findMagneticEdgePoint(point);
+  }
+
+  function updateMarquee(drag, point, { shiftKey = false } = {}) {
+    if (!drag || drag.kind !== 'marquee') return false;
+    drag.current = {...point};
+    if (drag.selectionType === 'lasso') {
+      const last = drag.points.at(-1);
+      const minDistance = Math.max(.5,1.5/zoom());
+      if (!last || Math.hypot(point.x-last.x,point.y-last.y) >= minDistance) drag.points.push({...point});
+      setPreviewShape({type:'lasso',points:drag.points.map(item=>({...item}))});
+    } else {
+      drag.lockAspect = Boolean(shiftKey);
+      const rect = shiftKey ? constrainedRect(drag.start,point,true) : normalizeRect(drag.start,point);
+      setPreviewShape({type:drag.selectionType,rect});
+    }
+    drawOverlay();
+    return true;
+  }
+
+  function finishMarquee(drag, point, { shiftKey = false } = {}) {
+    if (!drag || drag.kind !== 'marquee') return false;
+    drag.current = {...point};
+    if (drag.selectionType === 'lasso') {
+      const last = drag.points.at(-1);
+      if (!last || Math.hypot(point.x-last.x,point.y-last.y) > 1/zoom()) drag.points.push({...point});
+      const shape = {type:'lasso',points:drag.points.map(item=>({...item}))};
+      const bounds = selectionBounds(shape);
+      if (drag.points.length >= 3 && bounds && bounds.width >= 1 && bounds.height >= 1) setSelectionShape(shape);
+      else setSelectionShape(null);
+    } else {
+      const rect = (shiftKey || drag.lockAspect) ? constrainedRect(drag.start,drag.current,true) : normalizeRect(drag.start,drag.current);
+      if (rect.width >= 1 && rect.height >= 1) setSelectionShape({type:drag.selectionType,rect});
+      else setSelectionShape(null);
+    }
+    drawOverlay();
+    const active = selectionShape();
+    const bounds = active ? selectionBounds(active) : null;
+    const label = selectionTypeLabels[drag.selectionType] || 'Выделение';
+    setStatus(bounds ? `${label}: ${Math.round(bounds.width)} × ${Math.round(bounds.height)} px` : 'Выделение снято');
+    return true;
+  }
+
+  function cancelMarquee(drag, { draw = false } = {}) {
+    if (!drag || drag.kind !== 'marquee') return false;
+    setSelectionShape(drag.previousSelection);
+    if (draw) drawOverlay();
+    return true;
+  }
+
+  function drawPolygonDraft(ctx) {
+    if (!polygonDraft?.points?.length) return false;
+    const points = polygonDraft.points;
+    const z = zoom();
+    ctx.save();
+    ctx.lineWidth = 1/z;
+    ctx.setLineDash([5/z,4/z]);
+    ctx.strokeStyle = '#79a7ff';
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(points[0].x,points[0].y);
+    for (let i=1;i<points.length;i+=1) ctx.lineTo(points[i].x,points[i].y);
+    if (polygonDraft.hover) ctx.lineTo(polygonDraft.hover.x,polygonDraft.hover.y);
+    ctx.stroke();
+    const radius = 3/z;
+    for (const point of points) {
+      ctx.beginPath();
+      ctx.arc(point.x,point.y,radius,0,Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+    return true;
+  }
+
+  function findMagneticEdgePoint(point) {
+    const ctx = runtime.getCanvasContext?.();
+    const documentValue = documentState();
+    if (!ctx || documentValue.width < 3 || documentValue.height < 3) return {...point};
+    const radius = Math.max(4,Math.round(10/zoom()));
+    const cx = Math.round(point.x), cy = Math.round(point.y);
+    const left = clamp(cx-radius,1,Math.max(1,documentValue.width-2));
+    const top = clamp(cy-radius,1,Math.max(1,documentValue.height-2));
+    const right = clamp(cx+radius,2,documentValue.width-1);
+    const bottom = clamp(cy+radius,2,documentValue.height-1);
+    const width = right-left+1, height = bottom-top+1;
+    if (width < 3 || height < 3) return {...point};
+    const data = ctx.getImageData(left-1,top-1,width+2,height+2).data;
+    const stride = width+2;
+    const luminance = (x,y) => {
+      const index = (y*stride+x)*4;
+      return data[index]*.2126 + data[index+1]*.7152 + data[index+2]*.0722;
+    };
+    let best = {x:cx,y:cy,score:-1};
+    for (let y=1;y<=height;y+=1) {
+      for (let x=1;x<=width;x+=1) {
+        const gx = Math.abs(luminance(x+1,y)-luminance(x-1,y));
+        const gy = Math.abs(luminance(x,y+1)-luminance(x,y-1));
+        const candidateX = left+x-1, candidateY = top+y-1;
+        const score = gx+gy-Math.hypot(candidateX-point.x,candidateY-point.y)*1.5;
+        if (score > best.score) best = {x:candidateX,y:candidateY,score};
+      }
+    }
+    return {x:best.x,y:best.y};
+  }
+
+  function magneticSegmentPoints(from,to) {
+    const distance = Math.hypot(to.x-from.x,to.y-from.y);
+    const step = Math.max(5,12/zoom());
+    const steps = Math.min(256,Math.max(1,Math.ceil(distance/step)));
+    const result = [];
+    for (let index=1;index<=steps;index+=1) {
+      const t = index/steps;
+      const snapped = findMagneticEdgePoint({x:from.x+(to.x-from.x)*t,y:from.y+(to.y-from.y)*t});
+      const previous = result.at(-1) || from;
+      if (Math.hypot(snapped.x-previous.x,snapped.y-previous.y) > 1/zoom()) result.push(snapped);
+    }
+    return result;
+  }
+
+  function addMagneticPoint(point, { finish = false } = {}) {
+    const snapped = findMagneticEdgePoint(point);
+    if (!magneticDraft) magneticDraft = {points:[],hover:snapped};
+    const last = magneticDraft.points.at(-1);
+    if (last) magneticDraft.points.push(...magneticSegmentPoints(last,snapped));
+    else magneticDraft.points.push(snapped);
+    magneticDraft.hover = snapped;
+    if (finish && magneticDraft.points.length >= 3) return finishMagneticSelection();
+    setStatus(`Магнитное лассо: ${magneticDraft.points.length} точек • Enter или двойной щелчок — завершить`);
+    drawOverlay();
+    return true;
+  }
+
+  function finishMagneticSelection() {
+    if (!magneticDraft || magneticDraft.points.length < 3) return false;
+    const points = magneticDraft.points;
+    magneticDraft = null;
+    setSelectionShape({type:'polygon',points});
+    drawOverlay();
+    setStatus(`Магнитное выделение: ${points.length} точек`);
+    return true;
+  }
+
+  function cancelMagneticDraft({ announce = false, draw = true } = {}) {
+    if (!magneticDraft) return false;
+    magneticDraft = null;
+    if (draw) drawOverlay();
+    if (announce) setStatus('Магнитное выделение отменено');
+    return true;
+  }
+
+  function drawMagneticDraft(ctx) {
+    if (!magneticDraft?.points?.length) return false;
+    const points = magneticDraft.points;
+    const z = zoom();
+    ctx.save();
+    ctx.lineWidth = 1.5/z;
+    ctx.strokeStyle = '#ff5fa8';
+    ctx.fillStyle = '#fff';
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(points[0].x,points[0].y);
+    for (let i=1;i<points.length;i+=1) ctx.lineTo(points[i].x,points[i].y);
+    if (magneticDraft.hover) ctx.lineTo(magneticDraft.hover.x,magneticDraft.hover.y);
+    ctx.stroke();
+    for (const point of points) {
+      ctx.beginPath();
+      ctx.arc(point.x,point.y,2.5/z,0,Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
+    return true;
+  }
+
+  return {
+    getType,
+    setType,
+    cycleType,
+    prepareToolChange,
+    resetDrafts,
+    hasPolygonDraft,
+    hasMagneticDraft,
+    cancelPolygonDraft,
+    finishPolygonSelection,
+    beginMarquee,
+    updateIdleHover,
+    updateMarquee,
+    finishMarquee,
+    cancelMarquee,
+    addMagneticPoint,
+    finishMagneticSelection,
+    cancelMagneticDraft,
+    drawPolygonDraft,
+    drawMagneticDraft,
+  };
+}
