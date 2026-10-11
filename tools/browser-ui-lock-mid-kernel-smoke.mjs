@@ -120,7 +120,11 @@ export async function verifyBrowserUiLockMidKernel(client, {
       const start = point(f.defectX-12,f.defectY-12);
       const end = point(f.defectX+12,f.defectY+12);
       const center = point(f.defectX,f.defectY);
-      return { start,end,hit:document.elementFromPoint(center.x,center.y)?.id,
+      const top = document.elementFromPoint(center.x,center.y);
+      return { start,end,hit:top?.id,topElement:top?.outerHTML?.slice(0,500),
+        dialogs:[...document.querySelectorAll('[role="dialog"], dialog[open], #modalRoot > *')]
+          .filter(el=>el.getBoundingClientRect().width > 0)
+          .map(el=>el.outerHTML.slice(0,300)),
         visible:start.x>0 && start.y>0 && end.x<innerWidth && end.y<innerHeight };
     }
     const view = await evaluate(client,'(' + setupMarquee.toString() + ')()');
