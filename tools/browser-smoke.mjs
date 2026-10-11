@@ -370,11 +370,12 @@ async function verifyBrowserHighDepthPsdPsbImport(client) {
         type:'image/vnd.adobe.photoshop',
       }));
       input.files=transfer.files;
+      const receivedName=input.files[0]?.name;
       const oldConfirm=window.confirm;
       window.confirm=()=>true;
       try {input.dispatchEvent(new Event('change',{bubbles:true}));}
       finally {window.confirm=oldConfirm;}
-      return {name:input.files[0].name,bytes:bytes.byteLength};
+      return {name:receivedName,bytes:bytes.byteLength};
     })()`);
     assert(dispatched.name===fixture.filename && dispatched.bytes===fixture.bytes.byteLength,
       'PSD/PSB UI input must receive exact fixture bytes',JSON.stringify(dispatched));
