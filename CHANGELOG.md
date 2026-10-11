@@ -1,5 +1,11 @@
 # История изменений
 
+### 2026-10-11 — Диагностический профиль native tiled readRegion/writeRegion
+
+- Добавлено: автономный Node-профилировщик `tools/profile-tiled-region-io.mjs` с отдельными процессами RGB16 и CMYKA Float32 и замерами фаз `readRegion`, `writeRegion`, `serialize`, текущей памяти и общего process high-water RSS.
+- Добавлено: регрессия `tests/tiled-region-io-profile.test.mjs` проверяет точность samples в ROI на границах tiles, единичное изменение, исходные неизменные payloads и запрет некорректных CLI-параметров.
+- Ограничения проверки: метрики информационные; синтетические native tiles и Node не заменяют реальные Adobe PSD16/PSB32, Chromium `file://`, Worker memory или прерываемые tiled операции. Runtime/версия 1.45.6 не меняются.
+
 ### 2026-10-11 — ZeTer 1.45.6: прерываемая сериализация native Content-Aware tiles
 
 - Исправлено: при недоступном браузерном Worker cooperative fallback теперь делает checkpoint между группами изменённых high-depth/CMYK tiles на этапе кодирования перед окончательной публикацией. Отмена отбрасывает даже уже подготовленные приватные tile payloads и возвращает исходный документ без частичной записи.

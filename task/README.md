@@ -1,5 +1,13 @@
 # task — очередь небольших инженерных проходок
 
+## 2026-10-11 — Stage 003 P1: измерение узкого места tiled readRegion/writeRegion (проходка на проверке)
+
+- Добавлен изолированный Node-профиль `node tools/profile-tiled-region-io.mjs --cases rgb16,cmyk32` и контрактный тест `tests/tiled-region-io-profile.test.mjs`. Каждый случай выполняется в отдельном процессе с `--expose-gc`: измеряются `readRegion`, `writeRegion`, `serialize`, sampled RSS/heap/ArrayBuffers и process-wide high-water RSS.
+- Проверяются полные native RGB16/CMYKA Float32 данные через seam, **ровно один** изменённый пиксель/тайл, побайтово неизменные исходные payloads и исходные samples. Тайминги и память **информационные**, без нестабильных performance thresholds в CI.
+- **Граница:** это синхронный Node baseline на синтетических tiles, **не** cooperative cancellation, не Chromium `file://`, не настоящий Photoshop-authored PSD/PSB и не per-stage peak RSS. Подэтап профилирования не закрывает Stage 003.
+- **Следующие P1:** (1) общий sync/cooperative chunked readRegion с отменой внутри большого ROI, затем chunked writeRegion без частичной публикации; (2) разбивка длинного связного ROI без раздувания bbox; (3) chunked RGBA8 preview и браузерные измерения памяти; (4) P0 по 002 — независимо созданные Photoshop PSD16/PSB32 с лицензией/hash.
+- **Gate:** запустить `npm run check`, `npm run test:browser`, bundle parity и CI для PR, затем точный push-CI в `main`. До подтверждения не отмечать как merged/green.
+
 ## 2026-10-11 — Stage 003 P1: cancellation during dirty tile serialization (слито, CI success)
 
 - Реализация в ветке `feat/stage003-cooperative-tile-serialization-20261011`: `createSerializedPixelBufferTileWorkingSet().serializeCooperative()` сохраняет byte parity с sync `serialize()`, отдаёт управление после каждых четырёх реально перекодированных tiles и не публикует частичную tile-set при отмене.

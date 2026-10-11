@@ -1,5 +1,13 @@
 # 003 — Tiled Content-Aware Fill
 
+## 2026-10-11 — измеряемый синхронный tiled region IO baseline (проверяется)
+
+- Инструмент `tools/profile-tiled-region-io.mjs` отдельно фиксирует подготовку фикстуры, `readRegion`, `writeRegion`, сериализацию и process-level memory samples для RGB16 и CMYKA Float32 на 1024×512 с ROI через границы 256-px tiles.
+- Автоматическая проверка запрещает потери native precision, любое изменение исходных payloads, запись соседних tiles и изменение более одного пикселя. Это инструмент **диагностики**, не новый renderer и не реализация cooperative IO.
+- Следующий кодовый шаг: общий пошаговый iterator для sync/cooperative `readRegion`, далее `writeRegion` с exact-owner cancellation и all-or-none publish; сначала тест на отмену после декодирования первых тайлов, затем на изменение документа между чанками. Отдельно держать wide connected ROI, RGBA8 preview и реальные сторонние high-depth PSD/PSB.
+- Gate до merge: `npm run check`, `npm run test:browser`, generated artifact parity и GitHub CI. Задача 003 остаётся открытой.
+
+
 ## 2026-10-11 — Cooperative dirty-tile serialization (слито, CI success)
 
 - Вместо единственного blocking `working.serialize()` после private ROI новый общий generator передаёт sync-исполнителю обычную сериализацию, а cooperative fallback — `serializeCooperative()`, который отдаёт управление после каждых четырёх изменённых tiles, но не тратит checkpoints на untouched tiles.
