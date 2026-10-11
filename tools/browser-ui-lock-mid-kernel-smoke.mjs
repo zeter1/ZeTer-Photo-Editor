@@ -353,7 +353,7 @@ export async function verifyBrowserUiLockMidKernel(client, {
       '010D successor must publish exactly one visible edit and History entry',JSON.stringify(recovered));
     const afterRecovery = await evaluate(client,'(' + readNativeSave.toString() + ')()');
     assert(afterRecovery.kind === before.kind && afterRecovery.tiles === before.tiles &&
-      JSON.stringify(afterRecovery.damaged) !== JSON.stringify(before.damaged),
+      JSON.stringify(afterRecovery.damaged) !== JSON.stringify(before.damaged) &&
       JSON.stringify(afterRecovery.damaged?.words) !== JSON.stringify(before.damaged?.words) &&
       JSON.stringify(afterRecovery.normal?.words) === JSON.stringify(before.normal?.words),
       '010D successor must change only selected native 16/32-bit samples',
