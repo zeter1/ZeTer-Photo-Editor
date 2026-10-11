@@ -1,6 +1,7 @@
-## 2026-10-11 — P0 external corpus manifest hardening (PR candidate)
+## 2026-10-11 — P0 external corpus manifest hardening (слито, main CI success)
 
 - Проходка `feat/stage002-bounded-corpus-preflight-20261011`: потоковая ограниченная обработка metadata manifest (до 1 MiB, проверка регулярного файла и идентичности inode до/после чтения), минимум 3 RGB/4 CMYK каналов, минимальная структурная длина PSD/PSB, отрицательные тесты.
+- **Проверено:** [PR #182](https://github.com/zeter1/ZeTer-Photo-Editor/pull/182) merged (`2033a10`), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38128443224), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38128545523).
 - **Без изменений рантайма/codec.** Заголовок+SHA/заявления о происхождении не являются доказательством Photoshop authorship или фактической валидности всего файла. Не закрывать Stage 002 до independently licensed Photoshop-authored PSD16/PSB32 и external golden comparisons.
 - Следующие действия и критерии приёмки: [NEXT.md](NEXT.md).
 

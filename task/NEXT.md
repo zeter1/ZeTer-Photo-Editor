@@ -34,7 +34,7 @@
   запрещены symlink/path swaps manifest.
 - [x] Проверены минимальные каналы RGB (3) и CMYK (4), нижняя граница размера
   PSD (40 байт) и PSB (44 байта), добавлены негативные регрессии.
-- [ ] GitHub PR review и зелёные Node/CI проверки; затем merge в `main`.
+- [x] PR [#182](https://github.com/zeter1/ZeTer-Photo-Editor/pull/182) проверен и слит (`2033a10`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38128443224) и [точный main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38128545523) завершились **success**.
 - [ ] Реальные Photoshop-authored PSD16/PSB32 **пока не получены**;
   эта проходка не закрывает 002 или 003.
 

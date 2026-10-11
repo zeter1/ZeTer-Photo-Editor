@@ -1,10 +1,10 @@
 > **Текущая исполнимая очередь:** [task/NEXT.md](NEXT.md) (2026-10-11). Стадии 002 и 003 **не закрыты**; не путать реализованный инструмент с полной Photoshop-совместимостью.
 
-## 2026-10-11 — Stage 002 P0: bounded external manifest preflight (PR candidate)
+## 2026-10-11 — Stage 002 P0: bounded external manifest preflight (слито, main CI success)
 
 - Закреплён bounded (1 MiB) descriptor-based manifest read с запретом symlink/replacement; аудитор не доверяет внешнему JSON независимо от 512 MiB лимита самих PSD/PSB.
 - Заголовки RGB16/CMYK32 требуют не меньше 3/4 каналов; отклоняются неправдоподобно короткие PSD/PSB. Добавлены регрессионные тесты некорректных headers и manifest.
-- Это улучшение **preflight**, не внешний Adobe golden и не завершение corpus. Gate: PR CI → review → merge → зелёный exact-main CI. Далее брать P0 real licensed Adobe fixtures и P1 connected ROI из [NEXT.md](NEXT.md).
+- Это улучшение **preflight**, не внешний Adobe golden и не завершение corpus. Gate пройден: [PR #182](https://github.com/zeter1/ZeTer-Photo-Editor/pull/182) → [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38128443224) → merge `2033a10` → [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38128545523). Далее брать P0 real licensed Adobe fixtures и P1 connected ROI из [NEXT.md](NEXT.md).
 
 ## 2026-10-11 — Stage 003 P1: валидация результата detached Worker (слито, CI success)
 
