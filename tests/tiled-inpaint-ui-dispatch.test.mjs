@@ -148,3 +148,42 @@ test('raster owner switch while Worker runs discards late result without preview
   assert.equal(layer.highDepthSource,source);
   assert.equal(layer.dataUrl,null);
 });
+
+
+test('detached Worker results fail closed on counters, native source metadata and unrelated tiles', async () => {
+  const source = fixture(), snapshot = JSON.stringify(source);
+  const selected = 7 * source.width + 7;
+  const valid = inpaintTiledPixelBufferSourceFromIndices(source, {
+    selectedIndices:Uint32Array.of(selected),
+  });
+  assert.equal(valid.changedTiles, 1);
+  const cases = [
+    ['fractional change count', value => { value.changed = 1.5; }],
+    ['counter exceeds frozen selection', value => { value.changed = 2; }],
+    ['partially synthesized result', value => { value.filled = 0; }],
+    ['incorrect dirty count', value => { value.changedTiles = 0; }],
+    ['incorrect loaded count', value => { value.loadedTiles = 0; }],
+    ['wrong native precision', value => { value.source.bitsPerChannel = 16; }],
+    ['wrong color model', value => { value.source.model = 'rgb'; }],
+    ['wrong alpha metadata', value => { value.source.alphaMode = 'none'; }],
+    ['wrong tile coordinates', value => { value.source.tiles[0].x = 1; }],
+    ['missing changed payload', value => { value.source.tiles[0].dataUrl = source.tiles[0].dataUrl; }],
+    ['malformed changed tile payload', value => { value.source.tiles[0].dataUrl = 'data:broken'; }],
+    ['changed unselected donor tile', value => {
+      const old = value.source.tiles[1].dataUrl;
+      const prefix = old.indexOf('base64,') + 'base64,'.length;
+      value.source.tiles[1].dataUrl = old.slice(0, prefix) +
+        (old[prefix] === 'A' ? 'B' : 'A') + old.slice(prefix + 1);
+      value.changedTiles += 1;
+    }],
+  ];
+  for (const [name, corrupt] of cases) {
+    const response = structuredClone(valid);
+    corrupt(response);
+    await assert.rejects(prepareTiledInpaintWithWorker(source, {
+      worker:{ async run() { return response; } },
+      isAllowed:(x,y) => y * source.width + x === selected,
+    }), /invalid Worker result/, name);
+    assert.equal(JSON.stringify(source), snapshot, name + ': immutable donor source');
+  }
+});
