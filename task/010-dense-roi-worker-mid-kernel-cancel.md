@@ -1,3 +1,5 @@
+> **010A — тестирование реальной mid-kernel cancellation (PR в проверке).** Добавлены `tests/tiled-inpaint-mid-kernel-cancel.test.mjs` и `tests/fixtures/tiled-inpaint-kernel-probe-worker.mjs`: ядро `inpaintSelectedSamples` исполняется в настоящем Node Worker; SharedArrayBuffer используется **только в тестовом harness** как наблюдатель изменения первого пикселя. После фактического начала заполнения test вызывает `terminate()` (явно и через exact-owner poll), проверяет, что глубокий пиксель не заполняется, ответ не принят и последующий job выполняется. **Это ещё не browser file:// telemetry, не real browser cancellation и не dense ROI planner; Stage 003 открыта.** После PR CI и main CI записать ссылки и точный SHA сюда.
+
 # 010 — Stage 003 P1: bounded dense ROI / real mid-kernel Worker cancellation
 
 **Статус:** следующая незавершённая инженерная проходка после завершённой [009](009-large-psb32-worker-cancellation.md). Этапы 002 и 003 целиком открыты.
