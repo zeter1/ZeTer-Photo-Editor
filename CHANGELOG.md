@@ -4,6 +4,7 @@
 
 - Добавлено: автономный Node-профилировщик `tools/profile-tiled-region-io.mjs` с отдельными процессами RGB16 и CMYKA Float32 и замерами фаз `readRegion`, `writeRegion`, `serialize`, текущей памяти и общего process high-water RSS.
 - Добавлено: регрессия `tests/tiled-region-io-profile.test.mjs` проверяет точность samples в ROI на границах tiles, единичное изменение, исходные неизменные payloads и запрет некорректных CLI-параметров.
+- Проверено: [PR #176](https://github.com/zeter1/ZeTer-Photo-Editor/pull/176) слит (squash `b56ad540e5f7876230db0fa47bc532583a960aea`), [точный `main` push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38122037274) завершился **success**: Node tests, generated-bundle parity, Chromium `file://` smoke и diff hygiene.
 - Ограничения проверки: метрики информационные; синтетические native tiles и Node не заменяют реальные Adobe PSD16/PSB32, Chromium `file://`, Worker memory или прерываемые tiled операции. Runtime/версия 1.45.6 не меняются.
 
 ### 2026-10-11 — ZeTer 1.45.6: прерываемая сериализация native Content-Aware tiles
