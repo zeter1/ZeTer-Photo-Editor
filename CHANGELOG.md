@@ -1,5 +1,12 @@
 # История изменений
 
+### 2026-10-11 — ZeTer 1.45.6: прерываемая сериализация native Content-Aware tiles
+
+- Исправлено: при недоступном браузерном Worker cooperative fallback теперь делает checkpoint между группами изменённых high-depth/CMYK tiles на этапе кодирования перед окончательной публикацией. Отмена отбрасывает даже уже подготовленные приватные tile payloads и возвращает исходный документ без частичной записи.
+- Совместимость: синхронный Node/Worker путь использует тот же порядок сериализации, unchanged tiles сохраняются byte-for-byte, новые regression tests проверяют Uint16 parity, alpha promotion и отмену при многотайловой сериализации.
+- Ограничения: decode/writeRegion, широкий связный ROI и полный RGBA8 preview ещё выполняются синхронно. Независимые Photoshop-authored PSD16/PSB32 и реальный браузерный memory benchmark остаются открытыми. GitHub CI gate проверяется отдельно.
+
+
 ### 2026-10-11 — ZeTer 1.45.5: cooperative cancellation inside one Content-Aware ROI
 
 - Main-thread high-depth fallback now yields while its private native inpaint kernel scans pixels, fills boundary pixels, and refines PatchMatch (not merely between tiled ROIs); synchronous Worker and fallback reuse the same deterministic algorithm.
@@ -17,7 +24,9 @@
 >
 > Изменения, уже слитые в `main`, считаются актуальным опубликованным состоянием репозитория и записываются в раздел текущей версии. Раздел `Unreleased` для уже интегрированных изменений не используется. Это правило не означает автоматический deploy внешнего сайта — deployment проверяется отдельно.
 
-## 1.45.5 — текущая версия
+## 1.45.6 — текущая версия
+
+## 1.45.5 — предыдущая версия
 
 ### 2026-10-10 — Прерываемая заливка при недоступном Worker
 
