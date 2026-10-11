@@ -1343,6 +1343,21 @@ function sanitizeSourceHeader(source, maxBytes) {
     profileName:String(source.profileName||'').slice(0,240),byteOrder:'little-endian',rawBytes:expected};
 }
 
+// Keep persisted native sources and detached Worker bytes in one exact
+// representation. atob() accepts several non-canonical spellings whose
+// padding bits differ, so a regex and encoded-length check alone is unsafe.
+export function isCanonicalPixelBufferBase64(encoded, rawBytes) {
+  if (!Number.isSafeInteger(rawBytes) || rawBytes < 1 ||
+      typeof encoded !== 'string' ||
+      encoded.length !== 4 * Math.ceil(rawBytes / 3) ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
+  const padding = (3 - rawBytes % 3) % 3;
+  if (encoded.slice(encoded.length - padding) !== '='.repeat(padding)) return false;
+  const last = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    .indexOf(encoded[encoded.length - padding - 1]);
+  return last >= 0 && (last & ((1 << (2 * padding)) - 1)) === 0;
+}
+
 export function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const bytes = pixelBufferCanonicalBytes(buffer);
@@ -1383,7 +1398,7 @@ export function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIX
     const dataUrl=typeof source.dataUrl==='string'?source.dataUrl:'';
     if(dataUrl.length>MAX_PIXEL_BUFFER_SOURCE_DATA_URL)return null;
     const prefix='data:'+PIXEL_BUFFER_SOURCE_MIME+';base64,'; if(!dataUrl.startsWith(prefix))return null;
-    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(safe.rawBytes/3))return null;
+    const base64=dataUrl.slice(prefix.length); if(!isCanonicalPixelBufferBase64(base64,safe.rawBytes))return null;
     return {kind:PIXEL_BUFFER_SOURCE_KIND,...safe,dataUrl};
   }
   if(source.kind!==PIXEL_BUFFER_TILED_SOURCE_KIND)return null;
@@ -1398,7 +1413,7 @@ export function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIX
     const rawBytes=expectedSourceBytes({width,height,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel});
     if(Number(tile.x)!==x||Number(tile.y)!==y||Number(tile.width)!==width||Number(tile.height)!==height||Number(tile.rawBytes)!==rawBytes)return null;
     const dataUrl=typeof tile.dataUrl==='string'?tile.dataUrl:''; if(!dataUrl.startsWith(prefix))return null;
-    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(rawBytes/3))return null;
+    const base64=dataUrl.slice(prefix.length); if(!isCanonicalPixelBufferBase64(base64,rawBytes))return null;
     total+=rawBytes; tiles.push({x,y,width,height,rawBytes,dataUrl});
   }
   if(total!==safe.rawBytes)return null;
