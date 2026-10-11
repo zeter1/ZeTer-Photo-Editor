@@ -305,7 +305,7 @@ export async function verifyBrowserUiLockMidKernel(client, {
       const tabs = [...document.querySelectorAll('#docTabs .doc-tab')];
       tabs[1]?.click();
       return {
-        active:tabs.map(tab=>tab.getAttribute('aria-selected')),
+        active:[...document.querySelectorAll('#docTabs .doc-tab')].map(tab=>tab.getAttribute('aria-selected')),
         title:document.querySelector('#documentTitle')?.textContent,
         dimensions:document.querySelector('#docDimensions')?.textContent,
         history:[...document.querySelectorAll('#historyList .history-row')].map(r=>r.textContent),
@@ -326,7 +326,7 @@ export async function verifyBrowserUiLockMidKernel(client, {
       const tabs = [...document.querySelectorAll('#docTabs .doc-tab')];
       tabs[0]?.click();
       return {
-        active:tabs.map(tab=>tab.getAttribute('aria-selected')),
+        active:[...document.querySelectorAll('#docTabs .doc-tab')].map(tab=>tab.getAttribute('aria-selected')),
         title:document.querySelector('#documentTitle')?.textContent,
       };
     }
