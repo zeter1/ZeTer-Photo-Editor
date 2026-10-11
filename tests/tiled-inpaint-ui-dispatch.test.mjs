@@ -172,9 +172,11 @@ test('detached Worker results fail closed on counters, native source metadata an
     ['changed unselected donor tile', value => {
       const old = value.source.tiles[1].dataUrl;
       const prefix = old.indexOf('base64,') + 'base64,'.length;
+      // Replace the edited tile with its original bytes and mutate ONLY an
+      // untouched donor tile: counters remain plausible, but provenance fails.
+      value.source.tiles[0].dataUrl = source.tiles[0].dataUrl;
       value.source.tiles[1].dataUrl = old.slice(0, prefix) +
         (old[prefix] === 'A' ? 'B' : 'A') + old.slice(prefix + 1);
-      value.changedTiles += 1;
     }],
   ];
   for (const [name, corrupt] of cases) {
