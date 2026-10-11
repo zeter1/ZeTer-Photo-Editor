@@ -1,7 +1,7 @@
-## 010E-B3B / 023 — общий лимит планирования oversized ROI (PR/CI ожидаются)
+## 010E-B3B / 023 — общий лимит планирования oversized ROI (слито, exact-main CI success)
 
-- [023](023-planner-total-budget.md): общий предел 4 194 304 посещений/probes для повторных fallback планов и bounded run planners; deterministic RangeError до ROI decode; sync/cooperative/Node Worker отказ RGB16 и CMYKA32. **Это предложение, не слитая работа:** CI/PR gate ожидает проверки.
-- **Следом P1 010E-B4:** достоверная browser memory/HWM methodology и operation duration; **P0 002:** независимые лицензированные Adobe-authored high-depth PSD/PSB fixtures. Stage 002/003 остаются открытыми.
+- [023](023-planner-total-budget.md): общий предел 4 194 304 посещений/probes для повторных fallback планов и bounded run planners; deterministic RangeError до ROI decode; sync/cooperative/Node Worker отказ RGB16 и CMYKA32. **Слито:** [PR #204](https://github.com/zeter1/ZeTer-Photo-Editor/pull/204) → `732ef97604`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38161611345), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38161771493).
+- **Следом [P1 010E-B4](024-browser-operation-memory.md):** достоверная browser memory/HWM methodology и operation duration; **P0 002:** независимые лицензированные Adobe-authored high-depth PSD/PSB fixtures. Stage 002/003 остаются открытыми.
 
 ## 010E-B3A / 022 — cooperative oversized-ROI planning checkpoints (merged, exact-main CI success, 2026-10-11)
 
