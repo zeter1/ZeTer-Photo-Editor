@@ -279,3 +279,9 @@ npm test
 PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip, Stage 12e–12g сохраняют native RGB 16/32-bit typed channels и compatible high-depth composite, Stage 13a–13e закрывают native CMYK/color-management и real-world ICC corpus, Stage 14a–14c закрывают основную embedded Smart Object цепочку, Stage 15a–15d дают editable Photoshop Text/solid Shape mapping, а Stage 16a–16c дают native basic Adjustment Layers с raster masks, clipping, channel-specific Levels и editable point Curves. Ограничения здесь теперь точечные: clipping base внутри сложных isolated/pass-through group chains и Photoshop blend-if ещё не моделируются полностью; Gradient/Pattern Fill renderer, multi-subpath boolean geometry, полная isolated-group/vector-mask parity и tiled/streaming pipeline ещё впереди. Content-Aware Fill уже выполняет реальное bounded inpainting и сохраняет native sample precision, но это пока детерминированный donor-propagation v1, а не полноценный PatchMatch/ML synthesis для больших текстурных удалений.
 
 Следующий imaging-этап: **Stage 17a — Isolated Groups / Vector Mask Composite Parity**: приблизить Photoshop group compositing для pass-through/isolated stacks, clipping chains и mask interactions, добавить real PSD/PSB group fixtures и pixel-reference regressions; после этого — editable Gradient/Pattern Fill renderer и tiled/worker/GPU pipeline.
+
+## Контакты для связи с разработчиком
+
+- [zeter11@gmail.com](mailto:zeter11@gmail.com)
+- [https://t.me/zeter1](https://t.me/zeter1)
+- [https://www.linkedin.com/in/zeter/](https://www.linkedin.com/in/zeter/)
