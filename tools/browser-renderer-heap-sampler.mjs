@@ -1,4 +1,5 @@
 import { sampleLinuxChromiumRss } from './browser-linux-process-rss.mjs';
+import { createLinuxChromiumIdentityTracker } from './browser-linux-process-identity.mjs';
 
 // Informational CDP renderer-heap samples. Worker heaps, native allocations and
 // process RSS are NOT represented by JSHeapUsedSize; sampled max != true peak.
@@ -36,6 +37,8 @@ export function createBrowserRendererHeapSampler(client, {
   let missingPidObservations = 0;
   let maxSampledPidCount = 0;
   let pidSampleCount = 0;
+  const linuxIdentity = createLinuxChromiumIdentityTracker();
+  let linuxIdentityUnavailableReason = null;
 
   // CDP reads can complete out of order when a periodic poll overlaps an
   // explicit stage marker or stop(). Queue reads in invocation order so the
@@ -121,6 +124,12 @@ export function createBrowserRendererHeapSampler(client, {
             }
             entry.chromiumRssBytes = rss.aggregateRssBytes;
             entry.largestProcessHighWaterBytes = rss.largestProcessHighWaterBytes;
+            // Legacy synthetic RSS samplers may omit identity. Keep their valid
+            // RSS metrics, but never claim starttime-verified attribution.
+            if (!linuxIdentityUnavailableReason) {
+              try { linuxIdentity.observe(rss.processSamples,phase); }
+              catch (error) { linuxIdentityUnavailableReason=String(error?.message || error); }
+            }
           } catch (error) {
             rssUnavailableReason = String(error?.message || error);
           }
@@ -205,6 +214,12 @@ export function createBrowserRendererHeapSampler(client, {
           milestones:pidMarkers,
           workerPidMapping:'unknown',
           limitations:'Sampling cannot see all short-lived PIDs or distinguish PID reuse. Process types do not establish Worker identity; missing PID means absent from a later CDP snapshot, not proven exit. No sum of per-PID lifetime HWM represents concurrent peak memory.',
+        },
+        linuxProcessIdentity: {
+          ...linuxIdentity.report(),
+          availability:!processClient?'not-requested':
+            linuxIdentityUnavailableReason || rssUnavailableReason?'unavailable':'sampled',
+          unavailableReason:linuxIdentityUnavailableReason || rssUnavailableReason,
         },
         chromiumProcesses: {
           metric:'CDP SystemInfo.getProcessInfo / sum of privateMemory over complete reported process list',
