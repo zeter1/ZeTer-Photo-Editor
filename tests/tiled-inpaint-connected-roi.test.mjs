@@ -102,8 +102,10 @@ test('Stage 003: a frozen neighboring selection pixel is not a donor or PatchMat
     isAllowed:chosen,
     isDonorExcluded:(x, y) => x === 1 && y === 1,
   }), 1);
-  assert.deepEqual([...samples.subarray((width + 2) * channels, (width + 3) * channels)],
-    [1_000, 1_000, 1_000]);
+  for (const channel of samples.subarray((width + 2) * channels, (width + 3) * channels)) {
+    assert.ok(Math.abs(channel - 1_000) <= 1,
+      'Uint16 weighted synthesis may round by one level but cannot use the poisoned donor');
+  }
   assert.deepEqual([...samples.subarray((width + 1) * channels, (width + 2) * channels)],
     [65_000, 65_000, 65_000], 'globally frozen neighbors are never modified');
   assert.throws(() => inpaintSelectedSamples(samples, width, height, channels, {
