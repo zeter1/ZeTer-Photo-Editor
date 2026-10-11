@@ -1,7 +1,7 @@
-## 010E-B3A / 022 — cooperative oversized-ROI planning checkpoints (PR pending, 2026-10-11)
+## 010E-B3A / 022 — cooperative oversized-ROI planning checkpoints (merged, exact-main CI success, 2026-10-11)
 
 - [022](022-cooperative-planning-checkpoints.md): 32,768-visit cooperative checkpoints throughout oversized-selection ROI planning, including nested tile-group scans, stripes, frozen donor-bitmaps, region masks; synchronous/Worker order remains deterministic. Two new RGB16 cancellation regressions stop **before any ROI tile reads**, for frozen indices and geometry-scanned fallback.
-- **Gate:** branch `feat/010e-b3-planning-checkpoints-20261011`, PR/CI/merge **pending**. Stage 002/003 **not complete**; previous 020/021 are merged.
+- **Gate complete:** [PR #203](https://github.com/zeter1/ZeTer-Photo-Editor/pull/203) squash `55282cc3`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38160333627), [exact-code `main` CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38160516517). Stage 002/003 **not complete**; previous 020/021 are merged.
 - **Next P1 010E-B3B:** strict overall planner visit/probe cap, fragmented worst-case masks and RGB16/CMYKA32 Worker/cooperative parity; then browser operation-wide peak-memory method and timing. **P0 002:** licensed independent Photoshop-authored high-depth oracle.
 
 ## 010E-B2 / 021 — connected horizontal-run bands (merged, exact-main CI green, 2026-10-11)

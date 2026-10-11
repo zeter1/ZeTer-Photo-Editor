@@ -1,6 +1,6 @@
 # 022 / 010E-B3A — cooperative planning checkpoints for oversized native ROI
 
-**Status:** implementation proposed on `feat/010e-b3-planning-checkpoints-20261011`; merge/exact-main CI pending. Stage 003 is **not closed**.
+**Status:** merged into `main` via [PR #203](https://github.com/zeter1/ZeTer-Photo-Editor/pull/203), squash `55282cc372c90ae0f9ad6122bcc62319a64577e1`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38160333627), [exact-main code CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38160516517) (2026-10-11). Stage 003 is **not closed**.
 
 ## Problem and scope
 
@@ -15,7 +15,7 @@ This pass deliberately changes **scheduling, not the planner's chosen regions, p
 - [x] The synchronous Node / detached Worker runner exhausts the same generator steps without altering region ordering, source bytes or selection semantics.
 - [x] Cooperative `yieldControl()` always rechecks `isCancelled()` before continuing; cancellation returns the original `source` with zero changed/filled/tile counters. In particular no private ROI tile needs to be decoded before a planning-time cancellation.
 - [x] Regression fixtures for 512×512 RGB16 with >32k selected pixels: (a) `FromIndicesCooperative` aborts exactly at the planner checkpoint after the existing pre-ROI yield; (b) geometry-scanned `Cooperative` aborts at its first planner checkpoint without a second geometry sample.
-- [ ] PR checks and exact-main CI: **pending**. Do not mark complete without green checks and merge.
+- [x] PR checks (Node, generated assets, Chromium `file://`, profiles, diff hygiene), merge, and exact-main CI on code SHA `55282cc3`: all green.
 
 ## Invariants / known limits
 
