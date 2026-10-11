@@ -2091,6 +2091,11 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
   };
   const area = (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
   if (area > maxLayerPixels) {
+    // Planning checkpoints are consumed by the cooperative runner before
+    // any private ROI is decoded. The synchronous/Worker runner simply
+    // resumes these steps; the chosen groups and native bytes stay identical.
+    const PLANNING_CHECKPOINT_PIXELS = 32_768;
+    let planningVisits = 0;
     // First try halo-disjoint groups for historical texture-search parity.
     // When a connected/sparse selection merges into a huge bounding box,
     // fall back to independent bounded tile fragments. Every fragment uses
@@ -2099,6 +2104,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     const tileSize = source.tileSize, columns = Math.ceil(width / tileSize);
     const occupied = new Map();
     for (const index of selectedIndices) {
+      if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
       const x = index % width, y = Math.floor(index / width);
       const tx = Math.floor(x / tileSize), ty = Math.floor(y / tileSize);
       const key = ty * columns + tx;
@@ -2127,6 +2133,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     for (let i = 0; groups && i < groups.length; i += 1) {
       let merged = false;
       for (let j = i + 1; j < groups.length; j += 1) {
+        if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
         const a = groups[i], b = groups[j];
         if (a.left - padding >= b.right + padding ||
             b.left - padding >= a.right + padding ||
@@ -2144,7 +2151,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       if (merged) i = -1;
     }
 
-    function planRegions(candidate) {
+    function* planRegions(candidate) {
       const byTile = new Map();
       for (const group of candidate) {
         group.indices = [];
@@ -2152,6 +2159,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
         for (const key of group.keys) byTile.set(key, group);
       }
       for (const index of selectedIndices) {
+        if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
         const x = index % width, y = Math.floor(index / width);
         const group = byTile.get(Math.floor(y / tileSize) * columns + Math.floor(x / tileSize));
         group.indices.push(index);
@@ -2173,8 +2181,8 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       return candidate;
     }
 
-    let planned = groups?.length > 1 ? planRegions(groups) : null;
-    if (!planned) planned = planRegions(makeFragments());
+    let planned = groups?.length > 1 ? yield* planRegions(groups) : null;
+    if (!planned) planned = yield* planRegions(makeFragments());
 
     // Dense islands can exceed the aggregate halo budget with per-tile
     // fragments even though their filled pixels fit comfortably. Try bounded
@@ -2190,6 +2198,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
           const candidates = new Map();
           let tooMany = false;
           for (const index of selectedIndices) {
+            if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
             const y = Math.floor(index / width), x = index - y * width;
             const key = Math.floor(y / stripHeight) * segments + Math.floor(x / segmentWidth);
             let group = candidates.get(key);
@@ -2231,6 +2240,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
         planned = [...best.groups.values()].sort((a, b) => a.key - b.key);
         for (const group of planned) group.indices = [];
         for (const index of selectedIndices) {
+          if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
           const y = Math.floor(index / width), x = index - y * width;
           const key = Math.floor(y / best.stripHeight) * best.segments +
             Math.floor(x / best.segmentWidth);
@@ -2262,12 +2272,16 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
     // from ANY fragment is forbidden as a donor or PatchMatch context even
     // after a previous fragment has filled it.
     const selectionBits = new Uint8Array(Math.ceil(width * height / 8));
-    for (const index of selectedIndices) selectionBits[index >> 3] |= 1 << (index & 7);
+    for (const index of selectedIndices) {
+      if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+      selectionBits[index >> 3] |= 1 << (index & 7);
+    }
     let totalFilled = 0, totalChanged = 0;
     for (const group of planned) {
       const rect = group.bounds, regionWidth = rect.right - rect.left;
       const mask = new Uint8Array(regionWidth * (rect.bottom - rect.top));
       for (const index of group.indices) {
+        if (++planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
         const x = index % width, y = Math.floor(index / width);
         mask[(y - rect.top) * regionWidth + (x - rect.left)] = 1;
       }
