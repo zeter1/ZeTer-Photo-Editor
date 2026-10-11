@@ -1,0 +1,2485 @@
+// ---- src/core/geometry.js ----
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+function normalizeRect(a, b) {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    width: Math.abs(b.x - a.x),
+    height: Math.abs(b.y - a.y),
+  };
+}
+function selectionPixelBounds(rect, docWidth, docHeight) {
+  if (!rect) return null;
+  const width = Math.max(0, Number(docWidth) || 0);
+  const height = Math.max(0, Number(docHeight) || 0);
+  if (!width || !height) return null;
+  const x1 = Math.min(Number(rect.x) || 0, (Number(rect.x) || 0) + (Number(rect.width) || 0));
+  const y1 = Math.min(Number(rect.y) || 0, (Number(rect.y) || 0) + (Number(rect.height) || 0));
+  const x2 = Math.max(Number(rect.x) || 0, (Number(rect.x) || 0) + (Number(rect.width) || 0));
+  const y2 = Math.max(Number(rect.y) || 0, (Number(rect.y) || 0) + (Number(rect.height) || 0));
+  const left = clamp(Math.floor(x1), 0, width);
+  const top = clamp(Math.floor(y1), 0, height);
+  const right = clamp(Math.ceil(x2), 0, width);
+  const bottom = clamp(Math.ceil(y2), 0, height);
+  if (right <= left || bottom <= top) return null;
+  return { x:left, y:top, width:right-left, height:bottom-top };
+}
+function selectionBounds(selection) {
+  if (!selection) return null;
+  if (selection.type === 'rect' || selection.type === 'ellipse') {
+    const rect = selection.rect;
+    if (!rect) return null;
+    const x1 = Math.min(Number(rect.x) || 0, (Number(rect.x) || 0) + (Number(rect.width) || 0));
+    const y1 = Math.min(Number(rect.y) || 0, (Number(rect.y) || 0) + (Number(rect.height) || 0));
+    const x2 = Math.max(Number(rect.x) || 0, (Number(rect.x) || 0) + (Number(rect.width) || 0));
+    const y2 = Math.max(Number(rect.y) || 0, (Number(rect.y) || 0) + (Number(rect.height) || 0));
+    return { x:x1, y:y1, width:x2-x1, height:y2-y1 };
+  }
+  const points = Array.isArray(selection.points) ? selection.points : [];
+  if (!points.length) return null;
+  const xs = points.map(point => Number(point.x)).filter(Number.isFinite);
+  const ys = points.map(point => Number(point.y)).filter(Number.isFinite);
+  if (!xs.length || !ys.length) return null;
+  const left = Math.min(...xs); const right = Math.max(...xs);
+  const top = Math.min(...ys); const bottom = Math.max(...ys);
+  return { x:left, y:top, width:right-left, height:bottom-top };
+}
+function selectionPathPoints(selection, ellipseSegments = 64) {
+  if (!selection) return [];
+  if (selection.type === 'rect') {
+    const rect = selectionBounds(selection);
+    if (!rect) return [];
+    return [
+      {x:rect.x,y:rect.y},
+      {x:rect.x+rect.width,y:rect.y},
+      {x:rect.x+rect.width,y:rect.y+rect.height},
+      {x:rect.x,y:rect.y+rect.height},
+    ];
+  }
+  if (selection.type === 'ellipse') {
+    const rect = selectionBounds(selection);
+    if (!rect) return [];
+    const count = Math.max(12, Math.min(256, Math.round(Number(ellipseSegments) || 64)));
+    const cx = rect.x + rect.width / 2;
+    const cy = rect.y + rect.height / 2;
+    const rx = rect.width / 2;
+    const ry = rect.height / 2;
+    return Array.from({length:count}, (_, index) => {
+      const angle = index / count * Math.PI * 2;
+      return { x:cx + Math.cos(angle) * rx, y:cy + Math.sin(angle) * ry };
+    });
+  }
+  return (Array.isArray(selection.points) ? selection.points : [])
+    .filter(point => Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y)))
+    .map(point => ({x:Number(point.x),y:Number(point.y)}));
+}
+function pointInPolygon(point, points) {
+  if (!point || !Array.isArray(points) || points.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const a = points[i]; const b = points[j];
+    const ax = Number(a.x); const ay = Number(a.y);
+    const bx = Number(b.x); const by = Number(b.y);
+    const px = Number(point.x); const py = Number(point.y);
+    const cross = (px-ax)*(by-ay) - (py-ay)*(bx-ax);
+    const dot = (px-ax)*(px-bx) + (py-ay)*(py-by);
+    if (Math.abs(cross) <= 1e-8 && dot <= 1e-8) return true;
+    const intersects = ((ay > py) !== (by > py)) && (px < (bx-ax) * (py-ay) / ((by-ay) || Number.EPSILON) + ax);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+function pointInSelection(point, selection) {
+  if (!selection) return false;
+  const bounds = selectionBounds(selection);
+  if (!bounds) return false;
+  if (selection.type === 'rect') return pointInRect(point, bounds);
+  if (selection.type === 'ellipse') {
+    if (bounds.width <= 0 || bounds.height <= 0) return false;
+    const rx = bounds.width / 2; const ry = bounds.height / 2;
+    const cx = bounds.x + rx; const cy = bounds.y + ry;
+    const dx = (Number(point.x) - cx) / rx;
+    const dy = (Number(point.y) - cy) / ry;
+    return dx*dx + dy*dy <= 1 + 1e-9;
+  }
+  return pointInPolygon(point, selectionPathPoints(selection));
+}
+function pointInRect(point, rect) {
+  return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
+}
+function rotatePoint(point, center, radians) {
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const dx = point.x - center.x;
+  const dy = point.y - center.y;
+  return {
+    x: center.x + dx * cos - dy * sin,
+    y: center.y + dx * sin + dy * cos,
+  };
+}
+const IDENTITY_AFFINE_TRANSFORM = Object.freeze({ a:1, b:0, c:0, d:1, e:0, f:0 });
+
+function finiteAffineNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+function normalizeAffineTransform(transform) {
+  return {
+    a:finiteAffineNumber(transform?.a, 1),
+    b:finiteAffineNumber(transform?.b, 0),
+    c:finiteAffineNumber(transform?.c, 0),
+    d:finiteAffineNumber(transform?.d, 1),
+    e:finiteAffineNumber(transform?.e, 0),
+    f:finiteAffineNumber(transform?.f, 0),
+  };
+}
+function compactAffineTransform(transform, epsilon = 1e-10) {
+  const value = normalizeAffineTransform(transform);
+  if (
+    Math.abs(value.a - 1) <= epsilon &&
+    Math.abs(value.b) <= epsilon &&
+    Math.abs(value.c) <= epsilon &&
+    Math.abs(value.d - 1) <= epsilon &&
+    Math.abs(value.e) <= epsilon &&
+    Math.abs(value.f) <= epsilon
+  ) return null;
+  return value;
+}
+function multiplyAffineTransforms(left, right) {
+  const a = normalizeAffineTransform(left);
+  const b = normalizeAffineTransform(right);
+  return {
+    a:a.a * b.a + a.c * b.b,
+    b:a.b * b.a + a.d * b.b,
+    c:a.a * b.c + a.c * b.d,
+    d:a.b * b.c + a.d * b.d,
+    e:a.a * b.e + a.c * b.f + a.e,
+    f:a.b * b.e + a.d * b.f + a.f,
+  };
+}
+function invertAffineTransform(transform) {
+  const value = normalizeAffineTransform(transform);
+  const determinant = value.a * value.d - value.b * value.c;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) <= 1e-12) return null;
+  return {
+    a:value.d / determinant,
+    b:-value.b / determinant,
+    c:-value.c / determinant,
+    d:value.a / determinant,
+    e:(value.c * value.f - value.d * value.e) / determinant,
+    f:(value.b * value.e - value.a * value.f) / determinant,
+  };
+}
+function layerLocalTransform(layer) {
+  const width = Math.max(1, finiteAffineNumber(layer?.width, 1));
+  const height = Math.max(1, finiteAffineNumber(layer?.height, 1));
+  const scaleX = Math.max(.01, finiteAffineNumber(layer?.scaleX, 1));
+  const scaleY = Math.max(.01, finiteAffineNumber(layer?.scaleY, 1));
+  const x = finiteAffineNumber(layer?.x, 0);
+  const y = finiteAffineNumber(layer?.y, 0);
+  const radians = finiteAffineNumber(layer?.rotation, 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const a = cos * scaleX;
+  const b = sin * scaleX;
+  const c = -sin * scaleY;
+  const d = cos * scaleY;
+  const centerX = x + width * scaleX / 2;
+  const centerY = y + height * scaleY / 2;
+  return {
+    a, b, c, d,
+    e:centerX - a * width / 2 - c * height / 2,
+    f:centerY - b * width / 2 - d * height / 2,
+  };
+}
+function preserveRelativeLayerTransform(beforeLayer, afterLayer, relativeTransform = null) {
+  const inverseAfter = invertAffineTransform(layerLocalTransform(afterLayer));
+  if (!inverseAfter) return compactAffineTransform(relativeTransform);
+  const worldBefore = multiplyAffineTransforms(layerLocalTransform(beforeLayer), relativeTransform);
+  return compactAffineTransform(multiplyAffineTransforms(inverseAfter, worldBefore));
+}
+function affineTransformMaxScale(transform) {
+  const value = normalizeAffineTransform(transform);
+  return Math.max(1e-9, Math.hypot(value.a, value.b), Math.hypot(value.c, value.d));
+}
+function layerBounds(layer) {
+  const width = Math.max(1, Number(layer.width) || 1);
+  const height = Math.max(1, Number(layer.height) || 1);
+  const scaleX = Math.max(0.01, Number(layer.scaleX) || 1);
+  const scaleY = Math.max(0.01, Number(layer.scaleY) || 1);
+  return {
+    x: Number(layer.x) || 0,
+    y: Number(layer.y) || 0,
+    width: width * scaleX,
+    height: height * scaleY,
+  };
+}
+function layerFrame(layer) {
+  const bounds = layerBounds(layer);
+  const radians = (Number(layer.rotation) || 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const ux = { x: cos, y: sin };
+  const uy = { x: -sin, y: cos };
+  const center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  const offset = (du, dv) => ({
+    x: center.x + ux.x * du + uy.x * dv,
+    y: center.y + ux.y * du + uy.y * dv,
+  });
+  const halfW = bounds.width / 2;
+  const halfH = bounds.height / 2;
+  const handles = {
+    nw: offset(-halfW, -halfH), n: offset(0, -halfH), ne: offset(halfW, -halfH),
+    e: offset(halfW, 0), se: offset(halfW, halfH), s: offset(0, halfH),
+    sw: offset(-halfW, halfH), w: offset(-halfW, 0),
+  };
+  return {
+    ...bounds,
+    center,
+    radians,
+    ux,
+    uy,
+    handles,
+    corners: [handles.nw, handles.ne, handles.se, handles.sw],
+  };
+}
+function frameBounds(layer, padding = 0) {
+  const frame = layerFrame(layer);
+  const xs = frame.corners.map(point => point.x);
+  const ys = frame.corners.map(point => point.y);
+  const pad = Math.max(0, Number(padding) || 0);
+  const left = Math.min(...xs) - pad;
+  const top = Math.min(...ys) - pad;
+  const right = Math.max(...xs) + pad;
+  const bottom = Math.max(...ys) + pad;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+function snapLayerMove(layer, x, y, {
+  docWidth = 0,
+  docHeight = 0,
+  targetRects = [],
+  threshold = 8,
+} = {}) {
+  const candidate = { ...layer, x:Number(x) || 0, y:Number(y) || 0 };
+  const bounds = frameBounds(candidate);
+  const limit = Math.max(0, Number(threshold) || 0);
+
+  const movingX = [bounds.x, bounds.x + bounds.width / 2, bounds.x + bounds.width];
+  const movingY = [bounds.y, bounds.y + bounds.height / 2, bounds.y + bounds.height];
+  const targetX = [0, Number(docWidth) / 2, Number(docWidth)];
+  const targetY = [0, Number(docHeight) / 2, Number(docHeight)];
+
+  for (const rect of targetRects || []) {
+    if (!rect) continue;
+    const left = Number(rect.x) || 0;
+    const top = Number(rect.y) || 0;
+    const width = Math.max(0, Number(rect.width) || 0);
+    const height = Math.max(0, Number(rect.height) || 0);
+    targetX.push(left, left + width / 2, left + width);
+    targetY.push(top, top + height / 2, top + height);
+  }
+
+  const closest = (moving, targets) => {
+    let best = null;
+    for (const source of moving) {
+      for (const target of targets) {
+        if (!Number.isFinite(source) || !Number.isFinite(target)) continue;
+        const delta = target - source;
+        const distance = Math.abs(delta);
+        if (distance > limit || (best && distance >= best.distance)) continue;
+        best = { delta, distance, target };
+      }
+    }
+    return best;
+  };
+
+  const bestX = closest(movingX, targetX);
+  const bestY = closest(movingY, targetY);
+  return {
+    x: candidate.x + (bestX?.delta || 0),
+    y: candidate.y + (bestY?.delta || 0),
+    guides: {
+      x: bestX ? bestX.target : null,
+      y: bestY ? bestY.target : null,
+    },
+  };
+}
+function alignLayerToCanvas(layer, mode, docWidth, docHeight) {
+  const bounds = frameBounds(layer);
+  let dx = 0;
+  let dy = 0;
+  if (mode === 'left') dx = -bounds.x;
+  else if (mode === 'hcenter') dx = Number(docWidth) / 2 - (bounds.x + bounds.width / 2);
+  else if (mode === 'right') dx = Number(docWidth) - (bounds.x + bounds.width);
+  else if (mode === 'top') dy = -bounds.y;
+  else if (mode === 'vcenter') dy = Number(docHeight) / 2 - (bounds.y + bounds.height / 2);
+  else if (mode === 'bottom') dy = Number(docHeight) - (bounds.y + bounds.height);
+  else return { x:layer.x, y:layer.y, changed:false };
+  return {
+    x: (Number(layer.x) || 0) + dx,
+    y: (Number(layer.y) || 0) + dy,
+    changed: Math.abs(dx) > 1e-9 || Math.abs(dy) > 1e-9,
+  };
+}
+function rotationHandlePoint(layer, distance = 28) {
+  const frame = layerFrame(layer);
+  const offset = Math.max(0, Number(distance) || 0);
+  return {
+    x: frame.handles.n.x - frame.uy.x * offset,
+    y: frame.handles.n.y - frame.uy.y * offset,
+  };
+}
+function rotationFromDrag(initialRotation, center, startPoint, currentPoint, snapDegrees = 0) {
+  const start = Math.atan2(startPoint.y - center.y, startPoint.x - center.x);
+  const current = Math.atan2(currentPoint.y - center.y, currentPoint.x - center.x);
+  let next = (Number(initialRotation) || 0) + (current - start) * 180 / Math.PI;
+  if (snapDegrees > 0) next = Math.round(next / snapDegrees) * snapDegrees;
+  return ((next % 360) + 360) % 360;
+}
+function layerPixelToDocumentPoint(point, layer) {
+  const width = Math.max(1, Number(layer.width) || 1);
+  const height = Math.max(1, Number(layer.height) || 1);
+  const scaleX = Number(layer.scaleX) || 1;
+  const scaleY = Number(layer.scaleY) || 1;
+  const boundsWidth = width * scaleX;
+  const boundsHeight = height * scaleY;
+  const cx = layer.x + boundsWidth / 2;
+  const cy = layer.y + boundsHeight / 2;
+  const unrotatedX = layer.x + point.x * scaleX;
+  const unrotatedY = layer.y + point.y * scaleY;
+  const radians = (layer.rotation ?? 0) * Math.PI / 180;
+  const dx = unrotatedX - cx;
+  const dy = unrotatedY - cy;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  };
+}
+
+function distanceToSegment(point, a, b) {
+  const vx = b.x - a.x;
+  const vy = b.y - a.y;
+  const lengthSq = vx * vx + vy * vy;
+  if (lengthSq <= 1e-12) return Math.hypot(point.x - a.x, point.y - a.y);
+  const t = clamp(((point.x - a.x) * vx + (point.y - a.y) * vy) / lengthSq, 0, 1);
+  const x = a.x + vx * t;
+  const y = a.y + vy * t;
+  return Math.hypot(point.x - x, point.y - y);
+}
+function pointInLayer(point, layer) {
+  const frame = layerFrame(layer);
+  const local = rotatePoint(point, frame.center, -frame.radians);
+  if (layer?.type === 'shape' && layer?.shape === 'line') {
+    let a; let b;
+    if (layer.lineMode === 'horizontal') { a = { x: frame.x, y: frame.y + frame.height / 2 }; b = { x: frame.x + frame.width, y: frame.y + frame.height / 2 }; }
+    else if (layer.lineMode === 'vertical') { a = { x: frame.x + frame.width / 2, y: frame.y }; b = { x: frame.x + frame.width / 2, y: frame.y + frame.height }; }
+    else if (layer.lineFlip) { a = { x: frame.x, y: frame.y + frame.height }; b = { x: frame.x + frame.width, y: frame.y }; }
+    else { a = { x: frame.x, y: frame.y }; b = { x: frame.x + frame.width, y: frame.y + frame.height }; }
+    const tolerance = Math.max(6, (Number(layer.strokeWidth) || 1) * Math.max(Math.abs(Number(layer.scaleX) || 1), Math.abs(Number(layer.scaleY) || 1)) / 2 + 3);
+    return distanceToSegment(local, a, b) <= tolerance;
+  }
+  return pointInRect(local, frame);
+}
+function hitLayerHandle(point, layer, radius = 8) {
+  const handles = layerFrame(layer).handles;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const [name, handle] of Object.entries(handles)) {
+    const distance = Math.hypot(point.x - handle.x, point.y - handle.y);
+    if (distance <= radius && distance < bestDistance) {
+      best = name;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+function resizeLayerFromPoint(layer, handle, point, { minSize = 4, lockAspect = false, fromCenter = false } = {}) {
+  const frame = layerFrame(layer);
+  const baseWidth = Math.max(1, Number(layer.width) || 1);
+  const baseHeight = Math.max(1, Number(layer.height) || 1);
+  const project = (p, axis) => p.x * axis.x + p.y * axis.y;
+  const cu = project(frame.center, frame.ux);
+  const cv = project(frame.center, frame.uy);
+  let left = cu - frame.width / 2;
+  let right = cu + frame.width / 2;
+  let top = cv - frame.height / 2;
+  let bottom = cv + frame.height / 2;
+  const pu = project(point, frame.ux);
+  const pv = project(point, frame.uy);
+
+  if (fromCenter) {
+    if (handle.includes('e') || handle.includes('w')) {
+      const halfWidth = Math.max(minSize / 2, Math.abs(pu - cu));
+      left = cu - halfWidth;
+      right = cu + halfWidth;
+    }
+    if (handle.includes('s') || handle.includes('n')) {
+      const halfHeight = Math.max(minSize / 2, Math.abs(pv - cv));
+      top = cv - halfHeight;
+      bottom = cv + halfHeight;
+    }
+  } else {
+    if (handle.includes('e')) right = Math.max(left + minSize, pu);
+    if (handle.includes('w')) left = Math.min(right - minSize, pu);
+    if (handle.includes('s')) bottom = Math.max(top + minSize, pv);
+    if (handle.includes('n')) top = Math.min(bottom - minSize, pv);
+  }
+
+  const isCorner = handle.length === 2;
+  if (lockAspect && isCorner) {
+    const aspect = frame.width / Math.max(frame.height, 1e-9);
+    if (fromCenter) {
+      let width = Math.max(minSize, right - left);
+      let height = Math.max(minSize, bottom - top);
+      if (width / height > aspect) height = width / aspect;
+      else width = height * aspect;
+      left = cu - width / 2;
+      right = cu + width / 2;
+      top = cv - height / 2;
+      bottom = cv + height / 2;
+    } else {
+      const fixedU = handle.includes('e') ? left : right;
+      const fixedV = handle.includes('s') ? top : bottom;
+      const signU = handle.includes('e') ? 1 : -1;
+      const signV = handle.includes('s') ? 1 : -1;
+      let width = Math.max(minSize, Math.abs((handle.includes('e') ? right : left) - fixedU));
+      let height = Math.max(minSize, Math.abs((handle.includes('s') ? bottom : top) - fixedV));
+      if (width / height > aspect) height = width / aspect;
+      else width = height * aspect;
+      if (handle.includes('e')) right = fixedU + signU * width; else left = fixedU + signU * width;
+      if (handle.includes('s')) bottom = fixedV + signV * height; else top = fixedV + signV * height;
+    }
+  }
+
+  const width = Math.max(minSize, right - left);
+  const height = Math.max(minSize, bottom - top);
+  const nextCu = (left + right) / 2;
+  const nextCv = (top + bottom) / 2;
+  const center = {
+    x: frame.ux.x * nextCu + frame.uy.x * nextCv,
+    y: frame.ux.y * nextCu + frame.uy.y * nextCv,
+  };
+  return {
+    x: center.x - width / 2,
+    y: center.y - height / 2,
+    scaleX: width / baseWidth,
+    scaleY: height / baseHeight,
+  };
+}
+function constrainedRect(start, current, lockAspect = false) {
+  if (!lockAspect) return normalizeRect(start, current);
+  const dx = current.x - start.x;
+  const dy = current.y - start.y;
+  const side = Math.max(Math.abs(dx), Math.abs(dy));
+  const end = {
+    x: start.x + (dx < 0 ? -side : side),
+    y: start.y + (dy < 0 ? -side : side),
+  };
+  return normalizeRect(start, end);
+}
+function snapLineEnd(start, current, stepDegrees = 45) {
+  const dx = current.x - start.x;
+  const dy = current.y - start.y;
+  const length = Math.hypot(dx, dy);
+  const step = Math.max(0, Number(stepDegrees) || 0);
+  if (!length || !step) return { x: current.x, y: current.y };
+  const angle = Math.atan2(dy, dx);
+  const increment = step * Math.PI / 180;
+  const snapped = Math.round(angle / increment) * increment;
+  return {
+    x: start.x + Math.cos(snapped) * length,
+    y: start.y + Math.sin(snapped) * length,
+  };
+}
+function fitZoom(viewWidth, viewHeight, docWidth, docHeight, padding = 80) {
+  if (!docWidth || !docHeight) return 1;
+  const usableWidth = Math.max(1, viewWidth - padding);
+  const usableHeight = Math.max(1, viewHeight - padding);
+  return clamp(Math.min(usableWidth / docWidth, usableHeight / docHeight), 0.1, 16);
+}
+function resizeFromHandle(bounds, handle, dx, dy, minSize = 12) {
+  let { x, y, width, height } = bounds;
+  if (handle.includes('e')) width = Math.max(minSize, width + dx);
+  if (handle.includes('s')) height = Math.max(minSize, height + dy);
+  if (handle.includes('w')) {
+    const next = Math.max(minSize, width - dx);
+    x += width - next;
+    width = next;
+  }
+  if (handle.includes('n')) {
+    const next = Math.max(minSize, height - dy);
+    y += height - next;
+    height = next;
+  }
+  return { x, y, width, height };
+}
+
+// ---- src/workspace/viewport-controller.js ----
+const VIEWPORT_MIN_ZOOM = 0.1;
+const VIEWPORT_MAX_ZOOM = 16;
+const VIEWPORT_ZOOM_EPSILON = 1e-6;
+const VIEWPORT_FIT_PADDING = 90;
+function createViewportController({
+  state = {},
+  geometry = {},
+  view = {},
+  ui = {},
+} = {}) {
+  const {
+    getZoom = () => 1,
+    setZoom: writeZoom = () => {},
+    getCurrentSession = () => null,
+    getDocument = () => null,
+  } = state;
+  const { clientPointToCanvas = () => ({ x: 0, y: 0 }) } = geometry;
+  const {
+    viewport = null,
+    overlay = null,
+    updateCanvasSize = () => {},
+    drawOverlay = () => {},
+    requestFrame = callback => (globalThis.requestAnimationFrame ? globalThis.requestAnimationFrame(callback) : callback()),
+  } = view;
+  const { setStatus = () => {} } = ui;
+
+  function publishZoom(next, announce = true) {
+    const value = clamp(next, VIEWPORT_MIN_ZOOM, VIEWPORT_MAX_ZOOM);
+    if (Math.abs(value - getZoom()) < VIEWPORT_ZOOM_EPSILON) return false;
+
+    writeZoom(value);
+    const session = getCurrentSession();
+    if (session) session.zoom = value;
+    updateCanvasSize();
+    drawOverlay();
+    if (announce) setStatus(`Масштаб ${Math.round(value * 100)}%`);
+    return true;
+  }
+
+  function setZoom(next, announce = true) {
+    publishZoom(next, announce);
+  }
+
+  function setZoomAtClientPoint(next, clientX, clientY) {
+    const point = clientPointToCanvas(clientX, clientY);
+    if (!publishZoom(next, false)) return;
+
+    requestFrame(() => {
+      const rect = overlay.getBoundingClientRect();
+      const zoom = getZoom();
+      viewport.scrollLeft += rect.left + point.x * zoom - clientX;
+      viewport.scrollTop += rect.top + point.y * zoom - clientY;
+    });
+    setStatus(`Масштаб ${Math.round(getZoom() * 100)}%`);
+  }
+
+  function fitToView() {
+    const rect = viewport.getBoundingClientRect();
+    const documentValue = getDocument();
+    setZoom(fitZoom(
+      rect.width,
+      rect.height,
+      documentValue.width,
+      documentValue.height,
+      VIEWPORT_FIT_PADDING,
+    ));
+    viewport.scrollTo({ left: 0, top: 0 });
+  }
+
+  return { setZoom, setZoomAtClientPoint, fitToView };
+}
+
+// ---- src/ui/tool-layout.js ----
+function sanitizeToolOrder(order, availableIds) {
+  const available = [...new Set((Array.isArray(availableIds) ? availableIds : []).map(String).filter(Boolean))];
+  const allowed = new Set(available);
+  const result = [];
+  for (const id of Array.isArray(order) ? order : []) {
+    const key = String(id);
+    if (allowed.has(key) && !result.includes(key)) result.push(key);
+  }
+  for (const id of available) if (!result.includes(id)) result.push(id);
+  return result;
+}
+function moveToolInOrder(order, draggedId, targetId = null, placeAfter = false) {
+  const ids = [...new Set((Array.isArray(order) ? order : []).map(String).filter(Boolean))];
+  const dragged = String(draggedId || '');
+  if (!dragged || !ids.includes(dragged)) return ids;
+  const target = targetId == null ? null : String(targetId);
+  if (target === dragged) return ids;
+  const result = ids.filter(id => id !== dragged);
+  if (!target || !result.includes(target)) {
+    result.push(dragged);
+    return result;
+  }
+  const targetIndex = result.indexOf(target);
+  result.splice(targetIndex + (placeAfter ? 1 : 0), 0, dragged);
+  return result;
+}
+function moveToolToIndex(order, draggedId, targetIndex) {
+  const ids = [...new Set((Array.isArray(order) ? order : []).map(String).filter(Boolean))];
+  const dragged = String(draggedId || '');
+  if (!dragged || !ids.includes(dragged)) return ids;
+  const result = ids.filter(id => id !== dragged);
+  const numericIndex = Number(targetIndex);
+  const index = Number.isFinite(numericIndex)
+    ? Math.max(0, Math.min(result.length, Math.round(numericIndex)))
+    : result.length;
+  result.splice(index, 0, dragged);
+  return result;
+}
+function gridCellIndexFromPoint(point, layout) {
+  const columns = Math.max(1, Math.trunc(Number(layout?.columns) || 1));
+  const cellWidth = Math.max(1, Number(layout?.cellWidth) || 1);
+  const cellHeight = Math.max(1, Number(layout?.cellHeight) || 1);
+  const columnGap = Math.max(0, Number(layout?.columnGap) || 0);
+  const rowGap = Math.max(0, Number(layout?.rowGap) || 0);
+  const left = Number(layout?.left) || 0;
+  const top = Number(layout?.top) || 0;
+  const scrollTop = Math.max(0, Number(layout?.scrollTop) || 0);
+  const maxIndex = Math.max(0, Math.trunc(Number(layout?.maxIndex) || 0));
+  const x = Number(point?.x) || 0;
+  const y = Number(point?.y) || 0;
+  const localX = x - left;
+  const localY = y - top + scrollTop;
+  const column = Math.max(0, Math.min(
+    columns - 1,
+    Math.round((localX - cellWidth / 2) / (cellWidth + columnGap)),
+  ));
+  const row = Math.max(0, Math.round((localY - cellHeight / 2) / (cellHeight + rowGap)));
+  return Math.max(0, Math.min(maxIndex, row * columns + column));
+}
+
+// ---- src/ui/tool-config.js ----
+// Pure UI configuration for the editor shell.
+// Keep DOM access and mutable runtime state out of this module so it stays cheap to inspect and test.
+const TOOL_LABELS = { move: 'Перемещение', marquee: 'Выделение', brush: 'Кисть', 'remove-object': 'Удаление объектов', 'remove-background': 'Кисть удаления фона', clone: 'Штамп', heal: 'Лечебная кисть', smudge: 'Палец / смазывание', dodge: 'Осветлитель', burn: 'Затемнитель', blur: 'Кисть размытия', eraser: 'Ластик', fill: 'Заливка', gradient: 'Градиент', pen: 'Перо / контуры', magnetic: 'Магнитное лассо', wand: 'Волшебная палочка', line: 'Линия', text: 'Текст', shape: 'Фигура', crop: 'Кадрирование', eyedropper: 'Пипетка', hand: 'Рука', zoom: 'Лупа' };
+const TOOL_HELP = {
+  move:{shortcut:'V',description:'Выбирает и перемещает слои. Тяните рамку для масштаба, круглый маркер — для поворота; Shift ограничивает направление.'},
+  marquee:{shortcut:'M / Shift+M',description:'Создаёт прямоугольное, эллиптическое, свободное или многоугольное выделение. Ограничивает рисование и копирование выбранной областью.'},
+  brush:{shortcut:'B',description:'Рисует основным цветом на растровом слое. Размер меняется клавишами [ и ], давление пера поддерживается.'},
+  'remove-object':{shortcut:'Shift+J',action:'install-removal-model',actionLabel:'Установить нейросеть',installedDescription:'Закрасьте объект целиком с небольшим запасом и тенью, нажмите «Удалить объект» сверху. Фото обрабатывается на устройстве. Ctrl+Z отменяет результат, Escape сбрасывает область.',description:'Перед первым использованием установите нейросеть: Настройки → Нейросети → Установить нейросеть (~85 МБ). Фото обрабатывается на устройстве. Затем закрасьте объект целиком с небольшим запасом и тенью, нажмите «Удалить объект» сверху. Ctrl+Z отменяет результат, Escape сбрасывает область.'},
+  'remove-background':{shortcut:'Shift+E',action:'install-background-model',actionLabel:'Установить модель',installedDescription:'Зелёным примерно отметьте нужный объект, красным — лишний фон (или удерживайте Alt). Нажмите «Удалить фон» сверху. Нейросеть определит полный контур; фон станет прозрачным только на выбранном слое. Ctrl+Z отменяет результат, Escape сбрасывает штрихи.',description:'Установите SAM 2.1 Tiny кнопкой ниже или в Настройки → Нейросети. Зелёный штрих — оставить объект, красный / Alt — убрать фон. Фото обрабатывается на устройстве. Ctrl+Z — отмена, Escape — сброс.'},
+  clone:{shortcut:'S',description:'Копирует пиксели из одной части изображения в другую. Сначала задайте источник через Alt+клик, затем рисуйте.'},
+  heal:{shortcut:'J',description:'Мягко переносит фактуру с выбранного участка для ретуши дефектов. Источник задаётся через Alt+клик.'},
+  smudge:{shortcut:'N',description:'Размазывает существующие пиксели по направлению движения кисти. Силу эффекта задаёт отдельный ползунок сверху.'},
+  dodge:{shortcut:'O',description:'Осветляет существующие пиксели. Ползунок «Сила осветления» задаёт эффект одного штриха; повторные штрихи усиливают его.'},
+  burn:{shortcut:'Shift+O',description:'Затемняет существующие пиксели. Ползунок «Сила затемнения» задаёт эффект одного штриха; повторные штрихи усиливают его.'},
+  blur:{shortcut:'R',description:'Локально смягчает детали растрового слоя. Размер задаёт область, а «Сила размытия» — интенсивность одного штриха в процентах.'},
+  eraser:{shortcut:'E',description:'Удаляет пиксели с существующего растрового слоя до прозрачности. Активное выделение ограничивает стирание.'},
+  fill:{shortcut:'G',description:'Заливает связанную область основным цветом. Ползунок «Допуск» определяет, насколько близкие оттенки захватывать.'},
+  gradient:{shortcut:'Shift+G',description:'Создаёт линейный или радиальный переход между двумя цветами на новом слое. Протяните линию по холсту.'},
+  pen:{shortcut:'P',description:'Строит редактируемый векторный контур по опорным точкам. Enter или двойной щелчок завершает путь.'},
+  magnetic:{shortcut:'A',description:'Создаёт выделение, притягивая поставленные точки к заметным границам изображения. Enter завершает контур.'},
+  wand:{shortcut:'W',description:'Одним щелчком выделяет связанную область похожего цвета. Чувствительность регулируется ползунком «Допуск».'},
+  line:{shortcut:'L',description:'Рисует линию на текущем растровом слое. Если его нет, создаёт один слой «Линии»; Shift привязывает угол к шагу 45°.'},
+  text:{shortcut:'T',description:'Добавляет новый текст или открывает существующий текстовый слой для редактирования.'},
+  shape:{shortcut:'U',description:'Создаёт прямоугольник или эллипс на отдельном редактируемом слое. Shift создаёт квадрат или круг.'},
+  crop:{shortcut:'C',description:'Обрезает документ по протянутой рамке. Содержимое и размеры холста обновляются одной операцией истории.'},
+  eyedropper:{shortcut:'I',description:'Берёт цвет видимого пикселя с холста и делает его основным цветом рисования.'},
+  hand:{shortcut:'H / Space',description:'Перемещает область просмотра без изменения слоёв. Пробел временно включает руку из любого инструмента.'},
+  zoom:{shortcut:'Z',description:'Увеличивает изображение относительно точки щелчка. Alt+клик уменьшает масштаб.'},
+};
+const RASTER_BRUSH_TOOLS = new Set(['brush','clone','heal','smudge','dodge','burn','blur','eraser']);
+const SELECTION_TYPE_LABELS = { rect:'Прямоугольное выделение', ellipse:'Эллиптическое выделение', lasso:'Свободное лассо', polygon:'Многоугольное лассо' };
+const SELECTION_TYPES = Object.keys(SELECTION_TYPE_LABELS);
+const MIME_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/vnd.adobe.photoshop': 'psd' };
+const COLOR_CORRECTION_CONTROLS = [
+  { key:'exposure', label:'Экспозиция', min:-2, max:2, step:.05, unit:' EV', group:'Свет' },
+  { key:'brightness', label:'Яркость', min:0, max:200, step:1, unit:'%', group:'Свет' },
+  { key:'contrast', label:'Контраст', min:0, max:200, step:1, unit:'%', group:'Свет' },
+  { key:'highlights', label:'Светлые области', min:-100, max:100, step:1, unit:'', group:'Свет' },
+  { key:'shadows', label:'Тени', min:-100, max:100, step:1, unit:'', group:'Свет' },
+  { key:'temperature', label:'Температура', min:-100, max:100, step:1, unit:'', group:'Цвет' },
+  { key:'tint', label:'Оттенок', min:-100, max:100, step:1, unit:'', group:'Цвет' },
+  { key:'saturate', label:'Насыщенность', min:0, max:200, step:1, unit:'%', group:'Цвет' },
+  { key:'vibrance', label:'Красочность', min:-100, max:100, step:1, unit:'', group:'Цвет' },
+  { key:'hue', label:'Тон', min:-180, max:180, step:1, unit:'°', group:'Цвет' },
+  { key:'gamma', label:'Гамма', min:.2, max:3, step:.05, unit:'', group:'Тональный диапазон' },
+];
+const COLOR_CORRECTION_KEYS = new Set(COLOR_CORRECTION_CONTROLS.map(item => item.key));
+const BASIC_EFFECT_CONTROLS = [
+  { key:'brightness', label:'Яркость', min:0, max:200, step:1, group:'Цвет и эффекты' },
+  { key:'contrast', label:'Контраст', min:0, max:200, step:1, group:'Цвет и эффекты' },
+  { key:'saturate', label:'Насыщенность', min:0, max:200, step:1, group:'Цвет и эффекты' },
+  { key:'hue', label:'Тон', min:-180, max:180, step:1, group:'Цвет и эффекты' },
+  { key:'blur', label:'Размытие', min:0, max:30, step:1, group:'Эффекты' },
+];
+const RASTER_EFFECT_CONTROLS = [
+  ...COLOR_CORRECTION_CONTROLS,
+  { key:'blur', label:'Размытие', min:0, max:30, step:1, unit:' px', group:'Эффекты' },
+];
+const UI_COLLAPSE_STORAGE_KEY = 'zeter-photo-editor.ui-collapse.v1';
+const SMART_SNAP_STORAGE_KEY = 'zeter-photo-editor.smart-snap.v1';
+const TOOL_ORDER_STORAGE_KEY = 'zeter-photo-editor.tool-order.v1';
+const NATIVE_HIGH_DEPTH_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
+const NATIVE_CMYK_PAINT_TOOLS = new Set(['brush','eraser','blur','clone','heal','smudge','dodge','burn']);
+
+// ---- src/ui/workspace-layout-controller.js ----
+function createWorkspaceLayoutController({
+  panelCards = [],
+  workspace = null,
+  toolbar = null,
+  rightPanel = null,
+  viewport = null,
+  overlay = null,
+  storage = null,
+  storageKey = UI_COLLAPSE_STORAGE_KEY,
+  requestFrame = callback => (globalThis.requestAnimationFrame ? globalThis.requestAnimationFrame(callback) : callback()),
+  getZoom = () => 1,
+  clientPointToCanvas = null,
+  setStatus = () => {},
+  consoleRef = console,
+} = {}) {
+  const collapsedPanelIds = new Set();
+  let panelsVisible = true;
+
+  const cards = () => Array.from(typeof panelCards === 'function' ? panelCards() : (panelCards || []));
+
+  function readCollapseState() {
+    collapsedPanelIds.clear();
+    try {
+      const target = storage ?? globalThis.localStorage;
+      const parsed = JSON.parse(target?.getItem?.(storageKey) || '{}');
+      for (const id of Array.isArray(parsed.panels) ? parsed.panels : []) collapsedPanelIds.add(String(id));
+      if (Array.isArray(parsed.propertySections) && parsed.propertySections.includes('color-effects')) {
+        collapsedPanelIds.add('effects');
+      }
+    } catch (error) {
+      consoleRef?.warn?.('Could not restore panel collapse state', error);
+    }
+    return [...collapsedPanelIds];
+  }
+
+  function persistCollapseState() {
+    try {
+      const target = storage ?? globalThis.localStorage;
+      if (!target?.setItem) return false;
+      target.setItem(storageKey, JSON.stringify({ panels:[...collapsedPanelIds] }));
+      return true;
+    } catch (error) {
+      consoleRef?.warn?.('Could not persist panel collapse state', error);
+      return false;
+    }
+  }
+
+  function setPanelCollapsed(panel, collapsed, { persist = true } = {}) {
+    const id = panel?.dataset?.panelId;
+    if (!panel || !id) return false;
+    const next = Boolean(collapsed);
+    panel.classList.toggle('is-collapsed', next);
+    const toggle = panel.querySelector(':scope > header .panel-toggle');
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', String(!next));
+      const name = toggle.querySelector('strong')?.textContent?.trim() || 'раздел';
+      toggle.title = `${next ? 'Развернуть' : 'Свернуть'} раздел «${name}»`;
+    }
+    if (next) collapsedPanelIds.add(id);
+    else collapsedPanelIds.delete(id);
+    if (persist) persistCollapseState();
+    return true;
+  }
+
+  function initCollapsiblePanels() {
+    readCollapseState();
+    let initialized = 0;
+    for (const panel of cards()) {
+      const toggle = panel?.querySelector?.(':scope > header .panel-toggle');
+      if (!toggle) continue;
+      setPanelCollapsed(panel, collapsedPanelIds.has(panel.dataset.panelId), { persist:false });
+      toggle.addEventListener('click', () => {
+        setPanelCollapsed(panel, !panel.classList.contains('is-collapsed'));
+      });
+      initialized += 1;
+    }
+    return initialized;
+  }
+
+  function togglePanels() {
+    let centerPoint = null;
+    if (viewport && overlay && typeof clientPointToCanvas === 'function') {
+      const before = viewport.getBoundingClientRect();
+      centerPoint = clientPointToCanvas(before.left + before.width / 2, before.top + before.height / 2);
+    }
+
+    panelsVisible = !panelsVisible;
+    workspace?.classList?.toggle('panels-hidden', !panelsVisible);
+    toolbar?.setAttribute?.('aria-hidden', String(!panelsVisible));
+    rightPanel?.setAttribute?.('aria-hidden', String(!panelsVisible));
+
+    if (centerPoint && viewport && overlay) {
+      requestFrame(() => {
+        const viewportRect = viewport.getBoundingClientRect();
+        const canvasRect = overlay.getBoundingClientRect();
+        const zoom = Number(getZoom?.()) || 1;
+        viewport.scrollLeft += canvasRect.left + centerPoint.x * zoom
+          - (viewportRect.left + viewportRect.width / 2);
+        viewport.scrollTop += canvasRect.top + centerPoint.y * zoom
+          - (viewportRect.top + viewportRect.height / 2);
+      });
+    }
+
+    setStatus(panelsVisible ? 'Панели показаны' : 'Режим холста: панели скрыты');
+    return panelsVisible;
+  }
+
+  return {
+    readCollapseState,
+    persistCollapseState,
+    setPanelCollapsed,
+    initCollapsiblePanels,
+    togglePanels,
+    getCollapsedPanelIds: () => [...collapsedPanelIds],
+    arePanelsVisible: () => panelsVisible,
+  };
+}
+
+// ---- src/ui/layers-panel-controller.js ----
+const LAYERS_PANEL_TYPE_GLYPHS = Object.freeze({
+  text: 'T',
+  shape: '▭',
+  adjustment: '◐',
+  'smart-object': '◇',
+});
+
+function layersPanelMaskHints(layer) {
+  const hints = [];
+  if (layer.mask) {
+    hints.push(layer.mask.enabled === false
+      ? 'Растровая маска отключена'
+      : layer.mask.dataUrl
+        ? 'Есть растровая маска'
+        : 'Растровая маска: показать всё');
+  }
+  if (layer.vectorMask) {
+    hints.push(
+      'Векторная маска: ' + String(layer.vectorMask.subpaths?.length || 0) + ' контур(ов)' +
+      (layer.vectorMask.enabled === false ? ' · отключена' : '') +
+      (layer.vectorMask.invert ? ' · инвертирована' : ''),
+    );
+  }
+  if (layer.smartFilterMask) {
+    hints.push(
+      'Маска смарт-фильтров' +
+      (layer.smartFilterMask.enabled === false ? ' · отключена' : '') +
+      (layer.smartFilterMask.invert ? ' · инвертирована' : ''),
+    );
+  }
+  return hints;
+}
+
+function layersPanelBeforeMidpoint(event, row) {
+  const bounds = row.getBoundingClientRect();
+  return event.clientY < bounds.top + bounds.height / 2;
+}
+function createLayersPanelController({ container, state = {}, actions = {}, ui = {} } = {}) {
+  if (!container) throw new Error('Layers panel container is required');
+  const documentRef = ui.documentRef ?? globalThis.document;
+  if (!documentRef?.createElement) throw new Error('Layers panel document is required');
+  const requestFrame = ui.requestFrame ?? (callback => globalThis.requestAnimationFrame?.(callback) ?? callback());
+  const setStatus = ui.setStatus ?? (() => {});
+  const layerActions = actions.layer ?? {};
+  const groupActions = actions.group ?? {};
+  const dragActions = actions.drag ?? {};
+
+  let bound = false;
+  let dragState = null;
+  let layerRows = new Map();
+  let groupRows = new Map();
+
+  const getDocument = () => state.getDocument?.() ?? null;
+  const isCurrentDocument = owner => Boolean(owner) && getDocument() === owner;
+  const groupsOf = owner => Array.isArray(owner?.groups) ? owner.groups : [];
+  const resolveLayer = (owner, id) => isCurrentDocument(owner)
+    ? owner.layers?.find(item => item.id === id) ?? null
+    : null;
+  const resolveGroup = (owner, id) => isCurrentDocument(owner)
+    ? groupsOf(owner).find(item => item.id === id) ?? null
+    : null;
+
+  function clearDragDecorations() {
+    container.classList.remove('drop-root');
+    container.querySelectorAll('.layer-row,.layer-group-row')
+      .forEach(item => item.classList.remove('dragging', 'drop-before', 'drop-after', 'drop-into'));
+  }
+
+  function finishDrag() {
+    dragState = null;
+    clearDragDecorations();
+  }
+
+  function getLayerRow(id) { return layerRows.get(id) ?? null; }
+  function getGroupRow(id) { return groupRows.get(id) ?? null; }
+
+  function focusSelectedLayerRow(owner = getDocument()) {
+    if (!isCurrentDocument(owner)) return false;
+    const row = getLayerRow(owner.selectedLayerId);
+    row?.focus?.();
+    return Boolean(row);
+  }
+
+  function scheduleSelectedLayerFocus(owner) {
+    requestFrame(() => {
+      if (isCurrentDocument(owner)) focusSelectedLayerRow(owner);
+    });
+  }
+
+  function selectLayer(owner, layerId, { refresh = true, focus = false } = {}) {
+    if (!resolveLayer(owner, layerId)) return false;
+    const changed = state.selectLayer?.(owner, layerId, { refresh }) !== false;
+    if (changed && focus) scheduleSelectedLayerFocus(owner);
+    return changed;
+  }
+
+  function selectAdjacentLayer(owner, direction) {
+    if (!isCurrentDocument(owner) || !owner.layers?.length) return false;
+    const currentIndex = Math.max(0, owner.layers.findIndex(layer => layer.id === owner.selectedLayerId));
+    const nextIndex = Math.max(0, Math.min(owner.layers.length - 1, currentIndex + direction));
+    return selectLayer(owner, owner.layers[nextIndex].id, { refresh: true, focus: true });
+  }
+
+  function toggleGroupCollapsed(owner, groupId) {
+    const group = resolveGroup(owner, groupId);
+    if (!group) return false;
+    group.collapsed = !group.collapsed;
+    render();
+    return true;
+  }
+
+  function appendLayerRow(owner, layer, groupsById, depth) {
+    const currentGroup = layer.groupId ? groupsById.get(layer.groupId) : null;
+    const groupHidden = Boolean(currentGroup && !isGroupVisible(owner, currentGroup));
+    const groupLocked = Boolean(currentGroup && isGroupLocked(owner, currentGroup));
+    const effectiveLocked = isLayerLocked(owner, layer);
+    const row = documentRef.createElement('div');
+    row.className =
+      'layer-row' +
+      (depth > 0 ? ' in-group' : '') +
+      (groupHidden ? ' group-hidden' : '') +
+      (groupLocked ? ' group-locked' : '') +
+      (layer.id === owner.selectedLayerId ? ' selected' : '');
+    row.style.setProperty('--layer-depth', String(depth));
+    row.dataset.id = layer.id;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(layer.id === owner.selectedLayerId));
+    row.tabIndex = layer.id === owner.selectedLayerId ? 0 : -1;
+    layerRows.set(layer.id, row);
+
+    const eye = documentRef.createElement('button');
+    eye.className = 'layer-eye';
+    eye.textContent = layer.visible ? '◉' : '○';
+    eye.title = groupHidden
+      ? 'Родительская группа скрыта; переключить собственную видимость слоя'
+      : layer.visible ? 'Скрыть' : 'Показать';
+    eye.setAttribute('aria-label', eye.title);
+    eye.onclick = event => {
+      event.stopPropagation();
+      if (resolveLayer(owner, layer.id)) layerActions.toggleVisibility?.(owner, layer.id);
+    };
+
+    const thumb = documentRef.createElement('div');
+    thumb.className = 'layer-thumb';
+    if ((layer.type === 'raster' && layer.dataUrl) || (layer.type === 'smart-object' && layer.previewDataUrl)) {
+      const img = documentRef.createElement('img');
+      img.src = layer.type === 'smart-object' ? layer.previewDataUrl : layer.dataUrl;
+      thumb.append(img);
+    } else {
+      thumb.textContent = LAYERS_PANEL_TYPE_GLYPHS[layer.type] ?? '▦';
+    }
+    if (layer.type === 'smart-object') {
+      thumb.title = 'Двойной клик: редактировать содержимое смарт-объекта';
+      thumb.ondblclick = event => {
+        event.stopPropagation();
+        if (resolveLayer(owner, layer.id)) layerActions.openSmartObject?.(owner, layer.id);
+      };
+    }
+    const maskHints = layersPanelMaskHints(layer);
+    if (maskHints.length) thumb.title = [thumb.title, ...maskHints].filter(Boolean).join(' · ');
+
+    const name = documentRef.createElement('div');
+    name.className = 'layer-name';
+    name.textContent = layer.name;
+    name.title = layer.name;
+    name.ondblclick = event => {
+      event.stopPropagation();
+      if (resolveLayer(owner, layer.id)) layerActions.rename?.(owner, layer.id);
+    };
+
+    const lock = documentRef.createElement('button');
+    lock.className = 'layer-lock';
+    lock.textContent = effectiveLocked ? '🔒' : '·';
+    lock.title = groupLocked
+      ? 'Слой заблокирован одной из родительских групп'
+      : layer.locked ? 'Разблокировать' : 'Заблокировать';
+    lock.setAttribute('aria-label', lock.title);
+    lock.disabled = groupLocked;
+    lock.onclick = event => {
+      event.stopPropagation();
+      if (resolveLayer(owner, layer.id) && !groupLocked) layerActions.toggleLock?.(owner, layer.id);
+    };
+
+    row.append(eye, thumb, name, lock);
+    row.onclick = () => selectLayer(owner, layer.id, { refresh: true });
+    row.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!resolveLayer(owner, layer.id)) return;
+      layerActions.openContextMenu?.(owner, layer.id, event, row);
+    });
+    row.addEventListener('keydown', event => {
+      if (event.target !== row || !resolveLayer(owner, layer.id)) return;
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        event.stopPropagation();
+        selectAdjacentLayer(owner, event.key === 'ArrowUp' ? 1 : -1);
+        return;
+      }
+      if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault();
+        event.stopPropagation();
+        const next = event.key === 'Home' ? owner.layers.at(-1) : owner.layers[0];
+        if (next) selectLayer(owner, next.id, { refresh: true, focus: true });
+        return;
+      }
+      if (event.key === 'Enter' || event.code === 'F2') {
+        event.preventDefault();
+        event.stopPropagation();
+        layerActions.rename?.(owner, layer.id);
+        return;
+      }
+      if (event.key === 'Delete') {
+        event.preventDefault();
+        event.stopPropagation();
+        layerActions.remove?.(owner, layer.id);
+        scheduleSelectedLayerFocus(owner);
+      }
+    });
+
+    row.draggable = !effectiveLocked;
+    row.addEventListener('dragstart', event => {
+      const currentLayer = resolveLayer(owner, layer.id);
+      if (!currentLayer || isLayerLocked(owner, currentLayer)) {
+        event.preventDefault();
+        setStatus('Слой или его группа заблокированы');
+        return;
+      }
+      dragState = { kind: 'layer', id: layer.id, owner };
+      state.selectLayer?.(owner, layer.id, { refresh: false });
+      row.classList.add('dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', layer.id);
+      }
+    });
+    row.addEventListener('dragover', event => {
+      if (!dragState || dragState.kind !== 'layer' || dragState.owner !== owner) return;
+      const target = resolveLayer(owner, layer.id);
+      if (!target || dragState.id === layer.id || isLayerLocked(owner, target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      const before = layersPanelBeforeMidpoint(event, row);
+      row.classList.toggle('drop-before', before);
+      row.classList.toggle('drop-after', !before);
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-before', 'drop-after'));
+    row.addEventListener('drop', event => {
+      if (!dragState || dragState.kind !== 'layer' || dragState.owner !== owner) return;
+      const draggedLayerId = dragState.id;
+      const target = resolveLayer(owner, layer.id);
+      try {
+        if (!target || draggedLayerId === layer.id || isLayerLocked(owner, target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        dragActions.moveLayerRelative?.(owner, draggedLayerId, layer.id, layersPanelBeforeMidpoint(event, row));
+      } finally {
+        finishDrag();
+      }
+    });
+    row.addEventListener('dragend', finishDrag);
+    container.append(row);
+  }
+
+  function appendGroupRow(owner, group, directMembers, groupsById, depth) {
+    const effectiveVisible = isGroupVisible(owner, group);
+    const effectiveLocked = isGroupLocked(owner, group);
+    const parent = group.parentGroupId ? groupsById.get(group.parentGroupId) : null;
+    const ancestorLocked = Boolean(parent && isGroupLocked(owner, parent));
+    const ancestorHidden = Boolean(parent && !isGroupVisible(owner, parent));
+    const row = documentRef.createElement('div');
+    row.className =
+      'layer-group-row' +
+      (!effectiveVisible ? ' group-hidden' : '') +
+      (effectiveLocked ? ' group-locked' : '');
+    row.style.setProperty('--group-depth', String(depth));
+    row.dataset.groupId = group.id;
+    row.tabIndex = 0;
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-label', group.name + ', уровень ' + String(depth + 1) + ', ' + String(directMembers.length) + ' прямых слоёв');
+    groupRows.set(group.id, row);
+
+    const eye = documentRef.createElement('button');
+    eye.className = 'layer-eye layer-group-eye';
+    eye.textContent = group.visible === false ? '○' : '◉';
+    eye.title = ancestorHidden
+      ? 'Родительская группа скрыта; переключить собственную видимость'
+      : group.visible === false ? 'Показать группу' : 'Скрыть группу';
+    eye.setAttribute('aria-label', eye.title);
+    eye.onclick = event => {
+      event.stopPropagation();
+      if (resolveGroup(owner, group.id)) groupActions.toggleVisibility?.(owner, group.id);
+    };
+
+    const toggle = documentRef.createElement('button');
+    toggle.className = 'layer-group-toggle';
+    toggle.textContent = group.collapsed ? '▸' : '▾';
+    toggle.title = group.collapsed ? 'Развернуть группу' : 'Свернуть группу';
+    toggle.setAttribute('aria-expanded', String(!group.collapsed));
+    toggle.onclick = event => {
+      event.stopPropagation();
+      toggleGroupCollapsed(owner, group.id);
+    };
+
+    const thumb = documentRef.createElement('div');
+    thumb.className = 'layer-thumb layer-group-thumb';
+    thumb.textContent = '▰';
+
+    const name = documentRef.createElement('button');
+    name.type = 'button';
+    name.className = 'layer-name layer-group-name';
+    name.textContent = group.name;
+    const groupMode = group.blendMode === 'pass-through' ? 'Pass Through' : (group.blendMode || 'source-over');
+    name.title =
+      group.name + ' · уровень ' + String(depth + 1) +
+      ' · ' + String(directMembers.length) + ' прямых слоёв · ' +
+      String(Math.round((group.opacity ?? 1) * 100)) + '% · ' + groupMode +
+      ' · клик: свернуть/развернуть · двойной клик: переименовать';
+    name.onclick = event => {
+      event.stopPropagation();
+      toggleGroupCollapsed(owner, group.id);
+    };
+    name.ondblclick = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (resolveGroup(owner, group.id)) groupActions.rename?.(owner, group.id);
+    };
+
+    const lock = documentRef.createElement('button');
+    lock.className = 'layer-lock layer-group-lock';
+    lock.textContent = effectiveLocked ? '🔒' : '·';
+    lock.title = ancestorLocked
+      ? 'Группа заблокирована родительской группой'
+      : group.locked ? 'Разблокировать группу' : 'Заблокировать группу';
+    lock.setAttribute('aria-label', lock.title);
+    lock.disabled = ancestorLocked;
+    lock.onclick = event => {
+      event.stopPropagation();
+      if (resolveGroup(owner, group.id) && !ancestorLocked) groupActions.toggleLock?.(owner, group.id);
+    };
+
+    const remove = documentRef.createElement('button');
+    remove.className = 'layer-group-remove';
+    remove.textContent = '×';
+    remove.title = 'Удалить группу (содержимое останется)';
+    remove.setAttribute('aria-label', remove.title);
+    remove.disabled = effectiveLocked;
+    remove.onclick = event => {
+      event.stopPropagation();
+      if (resolveGroup(owner, group.id) && !effectiveLocked) groupActions.remove?.(owner, group.id);
+    };
+
+    row.append(eye, toggle, thumb, name, lock, remove);
+    row.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!resolveGroup(owner, group.id)) return;
+      groupActions.openContextMenu?.(owner, group.id, event, row);
+    });
+    row.draggable = !effectiveLocked;
+    row.addEventListener('dragstart', event => {
+      const currentGroup = resolveGroup(owner, group.id);
+      if (!currentGroup || isGroupLocked(owner, currentGroup)) {
+        event.preventDefault();
+        setStatus('Группа или её родитель заблокированы');
+        return;
+      }
+      dragState = { kind: 'group', id: group.id, owner };
+      row.classList.add('dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', 'group:' + group.id);
+      }
+    });
+    row.addEventListener('dragover', event => {
+      if (!dragState || dragState.owner !== owner) return;
+      const target = resolveGroup(owner, group.id);
+      const validGroup = dragState.kind !== 'group' || dragState.id !== group.id;
+      if (!target || !validGroup || isGroupLocked(owner, target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      row.classList.add('drop-into');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-into'));
+    row.addEventListener('drop', event => {
+      if (!dragState || dragState.owner !== owner) return;
+      const activeDrag = dragState;
+      const target = resolveGroup(owner, group.id);
+      try {
+        if (!target || isGroupLocked(owner, target)) return;
+        if (activeDrag.kind === 'group' && activeDrag.id === group.id) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (activeDrag.kind === 'layer') {
+          dragActions.moveLayerIntoGroup?.(owner, activeDrag.id, group.id);
+          return;
+        }
+        if (!dragActions.moveGroupIntoGroup?.(owner, activeDrag.id, group.id)) {
+          setStatus('Нельзя вложить группу в саму себя, потомка или заблокированную группу');
+        }
+      } finally {
+        finishDrag();
+      }
+    });
+    row.addEventListener('dragend', finishDrag);
+    container.append(row);
+  }
+
+  function render() {
+    finishDrag();
+    container.replaceChildren();
+    layerRows = new Map();
+    groupRows = new Map();
+    const owner = getDocument();
+    if (!owner || !Array.isArray(owner.layers)) return 0;
+
+    const groups = groupsOf(owner);
+    const groupsById = new Map(groups.map(group => [group.id, group]));
+    const displayLayers = [...owner.layers].reverse();
+    const displayIndex = new Map(displayLayers.map((layer, index) => [layer.id, index]));
+    const membersByGroup = new Map();
+    const childrenByParent = new Map();
+
+    for (const group of groups) {
+      const parentId = group.parentGroupId && groupsById.has(group.parentGroupId) ? group.parentGroupId : null;
+      if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
+      childrenByParent.get(parentId).push(group);
+    }
+    for (const layer of displayLayers) {
+      const groupId = layer.groupId && groupsById.has(layer.groupId) ? layer.groupId : null;
+      if (!membersByGroup.has(groupId)) membersByGroup.set(groupId, []);
+      membersByGroup.get(groupId).push(layer);
+    }
+
+    const groupRankCache = new Map();
+    const groupRank = group => {
+      if (groupRankCache.has(group.id)) return groupRankCache.get(group.id);
+      let rank = Number.POSITIVE_INFINITY;
+      for (const layer of displayLayers) {
+        let current = layer.groupId ? groupsById.get(layer.groupId) : null;
+        const seen = new Set();
+        while (current && !seen.has(current.id)) {
+          seen.add(current.id);
+          if (current.id === group.id) {
+            rank = Math.min(rank, displayIndex.get(layer.id) ?? Number.POSITIVE_INFINITY);
+            break;
+          }
+          current = current.parentGroupId ? groupsById.get(current.parentGroupId) : null;
+        }
+      }
+      groupRankCache.set(group.id, rank);
+      return rank;
+    };
+
+    const activePath = new Set();
+    const renderLevel = (parentGroupId = null, depth = 0) => {
+      const entries = [];
+      for (const group of childrenByParent.get(parentGroupId) || []) {
+        entries.push({ type: 'group', group, rank: groupRank(group), order: groups.indexOf(group) });
+      }
+      for (const layer of membersByGroup.get(parentGroupId) || []) {
+        entries.push({ type:'layer', layer, rank:displayIndex.get(layer.id) ?? Number.POSITIVE_INFINITY, order:displayIndex.get(layer.id) ?? 0 });
+      }
+      entries.sort((a, b) => {
+        if (a.rank !== b.rank) return a.rank - b.rank;
+        if (a.type !== b.type) return a.type === 'group' ? -1 : 1;
+        return a.order - b.order;
+      });
+      for (const entry of entries) {
+        if (entry.type === 'layer') {
+          appendLayerRow(owner, entry.layer, groupsById, depth);
+          continue;
+        }
+        const group = entry.group;
+        if (activePath.has(group.id)) continue;
+        appendGroupRow(owner, group, membersByGroup.get(group.id) || [], groupsById, depth);
+        if (!group.collapsed) {
+          activePath.add(group.id);
+          renderLevel(group.id, depth + 1);
+          activePath.delete(group.id);
+        }
+      }
+    };
+
+    renderLevel(null, 0);
+    return container.children?.length ?? layerRows.size + groupRows.size;
+  }
+
+  function onRootDragOver(event) {
+    if (!dragState || event.target !== container) return;
+    if (!isCurrentDocument(dragState.owner)) {
+      finishDrag();
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    container.classList.add('drop-root');
+  }
+
+  function onRootDragLeave(event) {
+    if (event.target === container) container.classList.remove('drop-root');
+  }
+
+  function onRootDrop(event) {
+    if (!dragState || event.target !== container) return;
+    const activeDrag = dragState;
+    event.preventDefault();
+    try {
+      if (!isCurrentDocument(activeDrag.owner)) return;
+      if (activeDrag.kind === 'layer') dragActions.moveLayerToRoot?.(activeDrag.owner, activeDrag.id);
+      else dragActions.moveGroupToRoot?.(activeDrag.owner, activeDrag.id);
+    } finally {
+      finishDrag();
+    }
+  }
+
+  function bind() {
+    if (bound) return false;
+    container.addEventListener('dragover', onRootDragOver);
+    container.addEventListener('dragleave', onRootDragLeave);
+    container.addEventListener('drop', onRootDrop);
+    bound = true;
+    return true;
+  }
+
+  function destroy() {
+    if (!bound) {
+      finishDrag();
+      return false;
+    }
+    container.removeEventListener('dragover', onRootDragOver);
+    container.removeEventListener('dragleave', onRootDragLeave);
+    container.removeEventListener('drop', onRootDrop);
+    bound = false;
+    finishDrag();
+    return true;
+  }
+
+  return { bind, destroy, render, focusSelectedLayerRow, getLayerRow, getGroupRow, clearDrag: finishDrag };
+}
+
+// ---- src/ui/history-panel-controller.js ----
+function createHistoryPanelController({
+  container,
+  state,
+  commands,
+  documentRef = globalThis.document,
+} = {}) {
+  if (!container || typeof container.replaceChildren !== 'function' || typeof container.append !== 'function') {
+    throw new Error('history panel container is required');
+  }
+  if (typeof state?.getHistory !== 'function') {
+    throw new Error('history panel history bridge is required');
+  }
+  if (typeof commands?.jumpToHistory !== 'function') {
+    throw new Error('history panel jump command is required');
+  }
+  if (!documentRef || typeof documentRef.createElement !== 'function') {
+    throw new Error('history panel document bridge is required');
+  }
+
+  function render() {
+    const history = state.getHistory();
+    if (!history || !Array.isArray(history.entries)) {
+      throw new Error('history panel current history is required');
+    }
+
+    container.replaceChildren();
+    history.entries.forEach((entry, index) => {
+      const current = index === history.index;
+      const row = documentRef.createElement('button');
+      row.type = 'button';
+      row.className = `history-row${current ? ' current' : ''}`;
+      row.textContent = `${current ? '● ' : ''}${entry.label}`;
+      row.title = current ? 'Текущее состояние' : 'Перейти к этому состоянию';
+      row.disabled = current;
+      row.onclick = () => commands.jumpToHistory(index);
+      container.append(row);
+    });
+    container.scrollTop = container.scrollHeight;
+  }
+
+  return { render };
+}
+
+// ---- src/ui/paths-controller.js ----
+const SAVED_PATH_RESOURCE_MIN = 2000;
+const SAVED_PATH_RESOURCE_MAX = 2997;
+const SAVED_PATH_LIMIT = 998;
+function createPathsController({
+  state = {},
+  vectors = {},
+  edit = {},
+  ui = {},
+  clone = value => globalThis.structuredClone(value),
+} = {}) {
+  const {
+    getDocument = () => null,
+    getSelectedLayer = () => null,
+    getSelectionShape = () => null,
+    isLayerLocked = () => false,
+    commit = () => {},
+  } = state;
+  const {
+    exportVectorMask = () => null,
+    importVectorMask = () => null,
+    layerPixelToDocumentPoint = point => ({ ...point }),
+    selectionDocumentNodes = () => [],
+  } = vectors;
+  const {
+    beginPathEdit = () => {},
+    syncPathEditSelection = () => {},
+    onPathDeleted = () => {},
+    normalizePathEditIndex = () => {},
+    clearVectorMaskEdit = () => {},
+    drawOverlay = () => {},
+  } = edit;
+  const {
+    setStatus = () => {},
+    toast = () => {},
+    showModal = () => {},
+    openContextMenu = () => {},
+    pathList = null,
+    controls = {},
+    documentRef = globalThis.document,
+    requestFrame = callback => (globalThis.requestAnimationFrame ? globalThis.requestAnimationFrame(callback) : callback()),
+  } = ui;
+
+  let selectedIndex = -1;
+
+  const documentValue = () => getDocument?.() || null;
+  const paths = () => {
+    const value = documentValue()?.paths;
+    return Array.isArray(value) ? value : [];
+  };
+
+  function normalizeSelectedIndex() {
+    const list = paths();
+    if (!list.length) {
+      selectedIndex = -1;
+      normalizePathEditIndex(0);
+      return -1;
+    }
+    if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= list.length) selectedIndex = 0;
+    normalizePathEditIndex(list.length);
+    return selectedIndex;
+  }
+
+  function getSelectedIndex() {
+    return selectedIndex;
+  }
+
+  function setSelectedIndex(index, { syncEdit = false, render = false, draw = false } = {}) {
+    selectedIndex = Number.isInteger(index) ? index : -1;
+    const normalized = normalizeSelectedIndex();
+    if (syncEdit && normalized >= 0) syncPathEditSelection(normalized);
+    if (render) updatePathsPanel();
+    if (draw) drawOverlay();
+    return normalized;
+  }
+
+  function selectedPath() {
+    const index = normalizeSelectedIndex();
+    return index >= 0 ? paths()[index] : null;
+  }
+
+  function allocateResourceId() {
+    const used = new Set(paths()
+      .map(path => path?.id)
+      .filter(id => Number.isInteger(id) && id >= SAVED_PATH_RESOURCE_MIN && id <= SAVED_PATH_RESOURCE_MAX));
+    for (let id = SAVED_PATH_RESOURCE_MIN; id <= SAVED_PATH_RESOURCE_MAX; id += 1) {
+      if (!used.has(id)) return id;
+    }
+    return null;
+  }
+
+  function uniqueName(base = 'Контур') {
+    const names = new Set(paths().map(path => String(path?.name || '').trim()).filter(Boolean));
+    const root = String(base || 'Контур').trim().slice(0, 220) || 'Контур';
+    if (!names.has(root)) return root;
+    let index = 2;
+    while (names.has(`${root} ${index}`)) index += 1;
+    return `${root} ${index}`;
+  }
+
+  function toDocumentNode(node, layer) {
+    const anchor = layerPixelToDocumentPoint(node, layer);
+    return {
+      x: anchor.x,
+      y: anchor.y,
+      handleIn: node.handleIn ? layerPixelToDocumentPoint(node.handleIn, layer) : null,
+      handleOut: node.handleOut ? layerPixelToDocumentPoint(node.handleOut, layer) : null,
+      kind: node.kind === 'smooth' ? 'smooth' : 'corner',
+    };
+  }
+
+  function pathFromCurrentSource() {
+    const layer = getSelectedLayer?.();
+    if (layer?.vectorMask?.subpaths?.length) {
+      const vector = exportVectorMask(layer);
+      return {
+        name: uniqueName(`${layer.name || 'Слой'} — маска`),
+        fillStartsWithAllPixels: vector.fillStartsWithAllPixels === true,
+        subpaths: clone(vector.subpaths),
+      };
+    }
+    if (layer?.type === 'shape' && layer.shape === 'path' && Array.isArray(layer.pathPoints) && layer.pathPoints.length >= 2) {
+      return {
+        name: uniqueName(`${layer.name || 'Контур'} — путь`),
+        fillStartsWithAllPixels: false,
+        subpaths: [{
+          operation: 'add',
+          closed: Boolean(layer.pathClosed),
+          fillRule: 'non-zero',
+          points: layer.pathPoints.map(node => toDocumentNode(node, layer)),
+        }],
+      };
+    }
+    if (getSelectionShape?.()) {
+      const nodes = selectionDocumentNodes() || [];
+      if (nodes.length >= 3) {
+        return {
+          name: uniqueName('Контур из выделения'),
+          fillStartsWithAllPixels: false,
+          subpaths: [{
+            operation: 'add',
+            closed: true,
+            fillRule: 'non-zero',
+            points: nodes.map(node => clone(node)),
+          }],
+        };
+      }
+    }
+    return null;
+  }
+
+  function addDocumentPathFromCurrent() {
+    const doc = documentValue();
+    if (!doc) return false;
+    if (paths().length >= SAVED_PATH_LIMIT) {
+      setStatus('Достигнут лимит 998 сохранённых контуров');
+      toast('Нельзя сохранить больше 998 Photoshop-compatible paths', 'warn');
+      return false;
+    }
+    const path = pathFromCurrentSource();
+    if (!path) {
+      setStatus('Нужен path-слой, векторная маска или активное выделение');
+      toast('Нечего сохранять как контур', 'warn');
+      return false;
+    }
+    const id = allocateResourceId();
+    if (id === null) {
+      setStatus('Исчерпан диапазон Photoshop Path Resource ID 2000..2997');
+      return false;
+    }
+    if (!Array.isArray(doc.paths)) doc.paths = [];
+    doc.paths.push({ id, ...path });
+    selectedIndex = doc.paths.length - 1;
+    commit('Сохранить контур');
+    setStatus(`Сохранён контур «${path.name}»`);
+    return true;
+  }
+
+  function renameSelectedDocumentPath() {
+    const owner = documentValue();
+    const path = selectedPath();
+    if (!owner || !path) return false;
+    const targetId = Number.isInteger(path.id)
+      && path.id >= SAVED_PATH_RESOURCE_MIN
+      && path.id <= SAVED_PATH_RESOURCE_MAX
+      ? path.id
+      : null;
+    showModal({
+      title: 'Переименовать контур',
+      fields: [{ name:'name', label:'Имя', value:path.name || 'Контур', required:true }],
+      submitLabel: 'Переименовать',
+      onSubmit: values => {
+        if (documentValue() !== owner) return false;
+        const list = Array.isArray(owner.paths) ? owner.paths : [];
+        const target = targetId === null
+          ? list.find(item => item === path)
+          : list.find(item => item?.id === targetId);
+        if (target !== path) return false;
+        const name = String(values.name || '').trim().slice(0, 240);
+        if (!name || name === target.name) return false;
+        target.name = name;
+        selectedIndex = list.indexOf(target);
+        commit('Переименовать контур');
+        return true;
+      },
+    });
+    return true;
+  }
+
+  function duplicateSelectedDocumentPath() {
+    const path = selectedPath();
+    if (!path) return false;
+    const doc = documentValue();
+    if (!doc) return false;
+    if (paths().length >= SAVED_PATH_LIMIT) {
+      setStatus('Достигнут лимит 998 сохранённых контуров');
+      return false;
+    }
+    const id = allocateResourceId();
+    if (id === null) return false;
+    const copy = clone(path);
+    copy.id = id;
+    copy.name = uniqueName(`${path.name || 'Контур'} — копия`);
+    doc.paths.push(copy);
+    selectedIndex = doc.paths.length - 1;
+    commit('Дублировать контур');
+    return true;
+  }
+
+  function deleteSelectedDocumentPath() {
+    const index = normalizeSelectedIndex();
+    if (index < 0) return false;
+    const doc = documentValue();
+    const name = paths()[index]?.name || 'Контур';
+    doc.paths.splice(index, 1);
+    onPathDeleted(index);
+    selectedIndex = Math.min(index, doc.paths.length - 1);
+    normalizePathEditIndex(doc.paths.length);
+    commit('Удалить контур');
+    setStatus(`Удалён контур «${name}»`);
+    return true;
+  }
+
+  function editSelectedDocumentPath() {
+    const index = normalizeSelectedIndex();
+    if (index < 0) return false;
+    beginPathEdit(index);
+    const path = paths()[index];
+    setStatus(`Перо: редактирование сохранённого контура «${path?.name || 'Контур'}»`);
+    return true;
+  }
+
+  function canApplyPath(path = selectedPath(), layer = getSelectedLayer?.()) {
+    return Boolean(path && layer && layer.type !== 'adjustment' && !isLayerLocked(layer, documentValue()));
+  }
+
+  function applySelectedDocumentPathAsVectorMask() {
+    const path = selectedPath();
+    const layer = getSelectedLayer?.();
+    if (!path) {
+      setStatus('Выберите сохранённый контур');
+      return false;
+    }
+    if (!layer) {
+      setStatus('Выберите слой для векторной маски');
+      return false;
+    }
+    if (layer.type === 'adjustment') {
+      setStatus('Сохранённый контур как vector mask пока применяется к обычным слоям, не к adjustment layer');
+      return false;
+    }
+    if (isLayerLocked(layer, documentValue())) {
+      setStatus('Слой или его группа заблокированы');
+      return false;
+    }
+    const mask = importVectorMask({
+      enabled: true,
+      invert: false,
+      linked: true,
+      fillStartsWithAllPixels: path.fillStartsWithAllPixels === true,
+      subpaths: path.subpaths,
+    }, layer);
+    if (!mask) {
+      setStatus('Контур не содержит пригодных subpaths');
+      return false;
+    }
+    layer.vectorMask = mask;
+    clearVectorMaskEdit();
+    commit('Применить контур как векторную маску');
+    setStatus(`Контур «${path.name || 'Контур'}» применён как векторная маска`);
+    return true;
+  }
+
+  function selectForAction(index) {
+    setSelectedIndex(index);
+    return selectedIndex;
+  }
+
+  function pathContextMenu(index) {
+    const exists = () => Boolean(paths()[index]);
+    return [
+      ['Редактировать пером', '', () => { selectForAction(index); editSelectedDocumentPath(); }, exists],
+      ['Применить как векторную маску', '', () => { selectForAction(index); applySelectedDocumentPathAsVectorMask(); }, () => exists() && canApplyPath(paths()[index], getSelectedLayer?.())],
+      ['sep'],
+      ['Переименовать…', '', () => { selectForAction(index); renameSelectedDocumentPath(); }, exists],
+      ['Дублировать', '', () => { selectForAction(index); duplicateSelectedDocumentPath(); }, exists],
+      ['Удалить', '', () => { selectForAction(index); deleteSelectedDocumentPath(); }, exists],
+    ];
+  }
+
+  function updateControls(list) {
+    const path = selectedPath();
+    const layer = getSelectedLayer?.();
+    const canSave = Boolean(
+      getSelectionShape?.()
+      || layer?.vectorMask?.subpaths?.length
+      || (layer?.type === 'shape' && layer.shape === 'path' && layer.pathPoints?.length >= 2)
+    ) && list.length < SAVED_PATH_LIMIT;
+    const enabled = {
+      add: canSave,
+      edit: Boolean(path),
+      applyMask: canApplyPath(path, layer),
+      rename: Boolean(path),
+      duplicate: Boolean(path && list.length < SAVED_PATH_LIMIT),
+      delete: Boolean(path),
+    };
+    for (const [key, value] of Object.entries(enabled)) {
+      if (controls[key]) controls[key].disabled = !value;
+    }
+    return enabled;
+  }
+
+  function updatePathsPanel() {
+    const list = paths();
+    normalizeSelectedIndex();
+    if (pathList && documentRef?.createElement) {
+      pathList.replaceChildren();
+      if (!list.length) {
+        const empty = documentRef.createElement('div');
+        empty.className = 'paths-empty';
+        empty.textContent = 'Нет сохранённых контуров';
+        pathList.append(empty);
+      } else {
+        list.forEach((path, index) => {
+          const row = documentRef.createElement('button');
+          row.type = 'button';
+          row.className = `path-row${index === selectedIndex ? ' selected' : ''}`;
+          row.setAttribute('role', 'option');
+          row.setAttribute('aria-selected', String(index === selectedIndex));
+          const name = documentRef.createElement('span');
+          name.className = 'path-row-name';
+          name.textContent = path.name || `Контур ${index + 1}`;
+          const count = (path.subpaths || []).reduce((sum, subpath) => sum + (subpath.points?.length || 0), 0);
+          const meta = documentRef.createElement('span');
+          meta.className = 'path-row-meta';
+          meta.textContent = `${path.subpaths?.length || 0} конт. · ${count} узл. · #${path.id ?? 'auto'}`;
+          row.append(name, meta);
+          row.onclick = () => {
+            setSelectedIndex(index, { syncEdit:true });
+            updatePathsPanel();
+            drawOverlay();
+          };
+          row.ondblclick = event => {
+            event.preventDefault();
+            setSelectedIndex(index);
+            renameSelectedDocumentPath();
+          };
+          row.oncontextmenu = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            setSelectedIndex(index);
+            updatePathsPanel();
+            openContextMenu(`path:${index}`, pathContextMenu(index), event, row);
+          };
+          row.onkeydown = event => {
+            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+            event.preventDefault();
+            const next = Math.max(0, Math.min(list.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+            setSelectedIndex(next);
+            updatePathsPanel();
+            requestFrame(() => pathList.querySelectorAll('.path-row')[next]?.focus());
+            drawOverlay();
+          };
+          pathList.append(row);
+        });
+      }
+    }
+    updateControls(list);
+    return { selectedIndex, count:list.length };
+  }
+
+  function bindControls() {
+    const bindings = {
+      add: addDocumentPathFromCurrent,
+      edit: editSelectedDocumentPath,
+      applyMask: applySelectedDocumentPathAsVectorMask,
+      rename: renameSelectedDocumentPath,
+      duplicate: duplicateSelectedDocumentPath,
+      delete: deleteSelectedDocumentPath,
+    };
+    let bound = 0;
+    for (const [key, handler] of Object.entries(bindings)) {
+      if (!controls[key]) continue;
+      controls[key].onclick = handler;
+      bound += 1;
+    }
+    return bound;
+  }
+
+  return {
+    getSelectedIndex,
+    setSelectedIndex,
+    normalizeSelectedIndex,
+    selectedPath,
+    pathFromCurrentSource,
+    addDocumentPathFromCurrent,
+    renameSelectedDocumentPath,
+    duplicateSelectedDocumentPath,
+    deleteSelectedDocumentPath,
+    editSelectedDocumentPath,
+    applySelectedDocumentPathAsVectorMask,
+    pathContextMenu,
+    updatePathsPanel,
+    bindControls,
+  };
+}
+
+// ---- src/ui/color-management-controller.js ----
+const ICC_PROFILE_MAX_BYTES = 4 * 1024 * 1024;
+function createColorManagementController({
+  state = {},
+  color = {},
+  pixels = {},
+  io = {},
+  render = {},
+  ui = {},
+  FileCtor = globalThis.File,
+} = {}) {
+  const { getDocument = () => null, commit = () => {} } = state;
+  const {
+    sanitizeColorManagement,
+    createCmykToSrgbTransform,
+    createSrgbToCmykTransform,
+    createCmykSoftProofTransform,
+    inspectCmykIccProfile,
+    inspectDisplayIccProfile,
+  } = color;
+  const { deserializePixelBufferSource, cmykPixelBufferToRgba8Preview } = pixels;
+  const { dataUrlToBytes, bytesToDataUrl, rgbaPixelsToDataUrl } = io;
+  const { invalidateImageCache = () => {} } = render;
+  const { setStatus = () => {}, toast = () => {}, consoleRef = console } = ui;
+
+  let previewTransformCache = { document:null, source:null, proof:null, display:null, policyKey:'', transform:null };
+  let editingTransformCache = { document:null, source:null, policyKey:'', transform:null };
+
+  function profileBytes(profile) {
+    return profile?.kind === 'icc' && profile.dataUrl
+      ? dataUrlToBytes(profile.dataUrl, { maxBytes:ICC_PROFILE_MAX_BYTES })
+      : null;
+  }
+
+  function policyKey(documentValue, kind) {
+    const policy = sanitizeColorManagement(documentValue.colorManagement);
+    return kind+'|'+policy.renderingIntent+'|'+policy.proofRenderingIntent+'|'+policy.displaySpace+'|'+Number(policy.softProofEnabled)+'|'+Number(policy.blackPointCompensation)+'|'+Number(policy.gamutWarningEnabled)+'|'+policy.gamutWarningThreshold;
+  }
+
+  function currentCmykPreviewTransform(documentValue = getDocument()) {
+    const nextPolicyKey = policyKey(documentValue, 'preview');
+    if (
+      previewTransformCache.document === documentValue
+      && previewTransformCache.source === documentValue.colorProfile
+      && previewTransformCache.proof === documentValue.proofProfile
+      && previewTransformCache.display === documentValue.displayProfile
+      && previewTransformCache.policyKey === nextPolicyKey
+      && previewTransformCache.transform
+    ) return previewTransformCache.transform;
+
+    const policy = sanitizeColorManagement(documentValue.colorManagement);
+    const source = profileBytes(documentValue.colorProfile);
+    const proof = profileBytes(documentValue.proofProfile);
+    const display = profileBytes(documentValue.displayProfile);
+    const transform = policy.softProofEnabled && proof
+      ? createCmykSoftProofTransform(source, proof, {
+          sourceIntent:policy.renderingIntent,
+          intent:policy.proofRenderingIntent,
+          blackPointCompensation:policy.blackPointCompensation,
+          displayProfileBytes:display,
+          gamutWarningThreshold:policy.gamutWarningThreshold,
+        })
+      : createCmykToSrgbTransform(source, {
+          intent:policy.renderingIntent,
+          displaySpace:policy.displaySpace,
+          displayProfileBytes:display,
+          gamutWarningThreshold:policy.gamutWarningThreshold,
+        });
+    previewTransformCache = {
+      document:documentValue,
+      source:documentValue.colorProfile,
+      proof:documentValue.proofProfile,
+      display:documentValue.displayProfile,
+      policyKey:nextPolicyKey,
+      transform,
+    };
+    return transform;
+  }
+
+  function currentSrgbToCmykTransform(documentValue = getDocument()) {
+    const nextPolicyKey = policyKey(documentValue, 'editing');
+    if (
+      editingTransformCache.document === documentValue
+      && editingTransformCache.source === documentValue.colorProfile
+      && editingTransformCache.policyKey === nextPolicyKey
+      && editingTransformCache.transform
+    ) return editingTransformCache.transform;
+
+    const policy = sanitizeColorManagement(documentValue.colorManagement);
+    const transform = createSrgbToCmykTransform(profileBytes(documentValue.colorProfile), {
+      intent:policy.renderingIntent,
+    });
+    editingTransformCache = {
+      document:documentValue,
+      source:documentValue.colorProfile,
+      policyKey:nextPolicyKey,
+      transform,
+    };
+    return transform;
+  }
+
+  function rgb8ToDocumentCmyk(rgb8, documentValue = getDocument()) {
+    const rgb = Array.isArray(rgb8) ? rgb8 : [0,0,0];
+    return currentSrgbToCmykTransform(documentValue).apply(
+      (Number(rgb[0]) || 0) / 255,
+      (Number(rgb[1]) || 0) / 255,
+      (Number(rgb[2]) || 0) / 255,
+    );
+  }
+
+  function invalidateTransformCaches() {
+    previewTransformCache = { document:null, source:null, proof:null, display:null, policyKey:'', transform:null };
+    editingTransformCache = { document:null, source:null, policyKey:'', transform:null };
+  }
+
+  async function rebuildDocumentCmykPreviews(targetDoc, transform) {
+    const updates = [];
+    const policy = sanitizeColorManagement(targetDoc.colorManagement);
+    for (const layer of targetDoc.layers) {
+      if (layer.type !== 'raster' || layer.highDepthSource?.model !== 'cmyk') continue;
+      const buffer = deserializePixelBufferSource(layer.highDepthSource);
+      const rgba = cmykPixelBufferToRgba8Preview(buffer, transform, {
+        gamutWarning:policy.gamutWarningEnabled,
+      });
+      updates.push({
+        layer,
+        dataUrl:await rgbaPixelsToDataUrl(
+          buffer.width,
+          buffer.height,
+          rgba,
+          'CMYK preview «'+(layer.name || 'Без имени')+'»',
+        ),
+      });
+    }
+    if (getDocument() !== targetDoc) return false;
+    for (const update of updates) {
+      const old = update.layer.dataUrl;
+      update.layer.dataUrl = update.dataUrl;
+      invalidateImageCache(old);
+    }
+    return true;
+  }
+
+  async function updateDocumentColorManagement(patch, options = {}) {
+    const targetDoc = getDocument();
+    const {
+      proofProfile = targetDoc.proofProfile,
+      displayProfile = targetDoc.displayProfile,
+      historyLabel = 'Изменить CMYK color management',
+    } = options;
+    const previousPolicy = sanitizeColorManagement(targetDoc.colorManagement);
+    const previousProof = targetDoc.proofProfile;
+    const previousDisplay = targetDoc.displayProfile;
+
+    targetDoc.colorManagement = sanitizeColorManagement({ ...targetDoc.colorManagement, ...patch });
+    targetDoc.proofProfile = proofProfile || null;
+    targetDoc.displayProfile = displayProfile || null;
+    invalidateTransformCaches();
+
+    const transform = currentCmykPreviewTransform(targetDoc);
+    setStatus('CMYK: пересчёт color-managed display preview…');
+    try {
+      if (!await rebuildDocumentCmykPreviews(targetDoc, transform)) {
+        targetDoc.colorManagement = previousPolicy;
+        targetDoc.proofProfile = previousProof;
+        targetDoc.displayProfile = previousDisplay;
+        invalidateTransformCaches();
+        setStatus('CMYK preview отменён: активный документ изменился');
+        return false;
+      }
+    } catch (error) {
+      targetDoc.colorManagement = previousPolicy;
+      targetDoc.proofProfile = previousProof;
+      targetDoc.displayProfile = previousDisplay;
+      invalidateTransformCaches();
+      throw error;
+    }
+
+    commit(historyLabel);
+    const policy = sanitizeColorManagement(targetDoc.colorManagement);
+    const displayLabel = targetDoc.displayProfile
+      ? 'ICC '+(targetDoc.displayProfile.name || 'RGB')
+      : policy.displaySpace.toUpperCase();
+    const proofLabel = policy.softProofEnabled && targetDoc.proofProfile
+      ? ' • soft proof '+(targetDoc.proofProfile.name || 'ICC')+' ('+policy.proofRenderingIntent+')'
+      : '';
+    const bpc = policy.softProofEnabled && targetDoc.proofProfile
+      ? (policy.blackPointCompensation ? ' • BPC on' : ' • BPC off')
+      : '';
+    const gamut = policy.gamutWarningEnabled ? ' • gamut warning ΔE>'+policy.gamutWarningThreshold : '';
+    setStatus('CMYK display: '+policy.renderingIntent+' → '+displayLabel+proofLabel+bpc+gamut+(transform.warning ? ' • '+transform.warning : ''));
+    if (transform.warning) toast('CMYK preview пересчитан с ограничением ICC transform', 'warn');
+    return true;
+  }
+
+  async function updateDocumentRenderingIntent(intent) {
+    return updateDocumentColorManagement(
+      { renderingIntent:intent },
+      { historyLabel:'Изменить CMYK rendering intent' },
+    );
+  }
+
+  async function updateDocumentProofRenderingIntent(intent) {
+    return updateDocumentColorManagement(
+      { proofRenderingIntent:intent },
+      { historyLabel:'Изменить soft-proof rendering intent' },
+    );
+  }
+
+  async function setDocumentSoftProofEnabled(enabled) {
+    if (enabled && !getDocument().proofProfile) {
+      toast('Сначала загрузите CMYK ICC proof profile', 'warn');
+      return false;
+    }
+    return updateDocumentColorManagement(
+      { softProofEnabled:Boolean(enabled) },
+      { historyLabel:enabled ? 'Включить soft proof' : 'Отключить soft proof' },
+    );
+  }
+
+  async function setDocumentBlackPointCompensation(enabled) {
+    return updateDocumentColorManagement(
+      { blackPointCompensation:Boolean(enabled) },
+      { historyLabel:'Изменить Black Point Compensation' },
+    );
+  }
+
+  async function setDocumentGamutWarningEnabled(enabled) {
+    return updateDocumentColorManagement(
+      { gamutWarningEnabled:Boolean(enabled) },
+      { historyLabel:enabled ? 'Включить gamut warning' : 'Отключить gamut warning' },
+    );
+  }
+
+  async function setDocumentGamutWarningThreshold(value) {
+    return updateDocumentColorManagement(
+      { gamutWarningThreshold:Number(value) },
+      { historyLabel:'Изменить gamut-warning threshold' },
+    );
+  }
+
+  async function loadDocumentProofProfile(file) {
+    if (!(file instanceof FileCtor) || !file.size) return false;
+    if (file.size > ICC_PROFILE_MAX_BYTES) throw new Error('ICC proof profile превышает лимит 4 МБ');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const info = inspectCmykIccProfile(bytes);
+    if (info.colorSpace !== 'CMYK') throw new Error('Proof profile должен быть CMYK ICC profile');
+    const profile = {
+      kind:'icc', untagged:false,
+      dataUrl:bytesToDataUrl(bytes, 'application/vnd.iccprofile'),
+      name:file.name.slice(0,240), version:'', deviceClass:'',
+      colorSpace:'CMYK', pcs:info.pcs, signatureValid:true,
+    };
+    return updateDocumentColorManagement(
+      { softProofEnabled:true },
+      { proofProfile:profile, historyLabel:'Загрузить soft proof ICC profile' },
+    );
+  }
+
+  async function removeDocumentProofProfile() {
+    if (!getDocument().proofProfile) return false;
+    return updateDocumentColorManagement(
+      { softProofEnabled:false },
+      { proofProfile:null, historyLabel:'Удалить soft proof ICC profile' },
+    );
+  }
+
+  async function loadDocumentDisplayProfile(file) {
+    if (!(file instanceof FileCtor) || !file.size) return false;
+    if (file.size > ICC_PROFILE_MAX_BYTES) throw new Error('Display ICC profile превышает лимит 4 МБ');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const info = inspectDisplayIccProfile(bytes);
+    const profile = {
+      kind:'icc', untagged:false,
+      dataUrl:bytesToDataUrl(bytes, 'application/vnd.iccprofile'),
+      name:file.name.slice(0,240), version:'', deviceClass:'mntr',
+      colorSpace:'RGB', pcs:info.pcs, signatureValid:true,
+    };
+    return updateDocumentColorManagement(
+      {},
+      { displayProfile:profile, historyLabel:'Загрузить display ICC profile' },
+    );
+  }
+
+  async function removeDocumentDisplayProfile() {
+    if (!getDocument().displayProfile) return false;
+    return updateDocumentColorManagement(
+      {},
+      { displayProfile:null, historyLabel:'Удалить display ICC profile' },
+    );
+  }
+
+  function bindControls(root) {
+    const intent = root?.querySelector('[data-cmyk-rendering-intent]');
+    if (intent) intent.addEventListener('change', async () => {
+      intent.disabled = true;
+      try { await updateDocumentRenderingIntent(intent.value); }
+      catch (error) {
+        consoleRef.error(error);
+        toast('Не удалось пересчитать CMYK preview', 'error');
+        setStatus('Ошибка CMYK color management: '+error.message);
+      } finally { if (intent.isConnected) intent.disabled = false; }
+    });
+    const proofIntent = root?.querySelector('[data-cmyk-proof-intent]');
+    if (proofIntent) proofIntent.addEventListener('change', async () => {
+      proofIntent.disabled = true;
+      try { await updateDocumentProofRenderingIntent(proofIntent.value); }
+      catch (error) { consoleRef.error(error); toast('Не удалось изменить proof intent', 'error'); }
+      finally { if (proofIntent.isConnected) proofIntent.disabled = false; }
+    });
+    const proofToggle = root?.querySelector('[data-cmyk-soft-proof]');
+    if (proofToggle) proofToggle.addEventListener('change', async () => {
+      proofToggle.disabled = true;
+      try { await setDocumentSoftProofEnabled(proofToggle.checked); }
+      catch (error) { consoleRef.error(error); toast(error.message || 'Ошибка soft proof', 'error'); }
+      finally { if (proofToggle.isConnected) proofToggle.disabled = false; }
+    });
+    const bpc = root?.querySelector('[data-cmyk-bpc]');
+    if (bpc) bpc.addEventListener('change', async () => {
+      bpc.disabled = true;
+      try { await setDocumentBlackPointCompensation(bpc.checked); }
+      catch (error) { consoleRef.error(error); toast(error.message || 'Ошибка BPC', 'error'); }
+      finally { if (bpc.isConnected) bpc.disabled = false; }
+    });
+    const gamut = root?.querySelector('[data-cmyk-gamut-warning]');
+    if (gamut) gamut.addEventListener('change', async () => {
+      gamut.disabled = true;
+      try { await setDocumentGamutWarningEnabled(gamut.checked); }
+      catch (error) { consoleRef.error(error); toast(error.message || 'Ошибка gamut warning', 'error'); }
+      finally { if (gamut.isConnected) gamut.disabled = false; }
+    });
+    const threshold = root?.querySelector('[data-cmyk-gamut-threshold]');
+    if (threshold) threshold.addEventListener('change', async () => {
+      threshold.disabled = true;
+      try { await setDocumentGamutWarningThreshold(threshold.value); }
+      catch (error) { consoleRef.error(error); toast(error.message || 'Ошибка gamut threshold', 'error'); }
+      finally { if (threshold.isConnected) threshold.disabled = false; }
+    });
+    const proofFile = root?.querySelector('[data-cmyk-proof-file]');
+    if (proofFile) proofFile.addEventListener('change', async () => {
+      const selected = proofFile.files?.[0];
+      if (!selected) return;
+      proofFile.disabled = true;
+      try { await loadDocumentProofProfile(selected); }
+      catch (error) {
+        consoleRef.error(error);
+        toast(error.message || 'Не удалось открыть ICC proof profile', 'error');
+        setStatus('Ошибка soft proof ICC: '+error.message);
+      } finally { if (proofFile.isConnected) proofFile.disabled = false; }
+    });
+    const displayFile = root?.querySelector('[data-cmyk-display-file]');
+    if (displayFile) displayFile.addEventListener('change', async () => {
+      const selected = displayFile.files?.[0];
+      if (!selected) return;
+      displayFile.disabled = true;
+      try { await loadDocumentDisplayProfile(selected); }
+      catch (error) {
+        consoleRef.error(error);
+        toast(error.message || 'Не удалось открыть display ICC profile', 'error');
+        setStatus('Ошибка display ICC: '+error.message);
+      } finally { if (displayFile.isConnected) displayFile.disabled = false; }
+    });
+    root?.querySelector('[data-cmyk-proof-remove]')?.addEventListener('click', () => {
+      removeDocumentProofProfile().catch(error => {
+        consoleRef.error(error);
+        toast(error.message || 'Ошибка удаления proof profile', 'error');
+      });
+    });
+    root?.querySelector('[data-cmyk-display-remove]')?.addEventListener('click', () => {
+      removeDocumentDisplayProfile().catch(error => {
+        consoleRef.error(error);
+        toast(error.message || 'Ошибка удаления display profile', 'error');
+      });
+    });
+  }
+
+  return {
+    profileBytes,
+    currentCmykPreviewTransform,
+    currentSrgbToCmykTransform,
+    rgb8ToDocumentCmyk,
+    invalidateTransformCaches,
+    rebuildDocumentCmykPreviews,
+    updateDocumentColorManagement,
+    updateDocumentRenderingIntent,
+    updateDocumentProofRenderingIntent,
+    setDocumentSoftProofEnabled,
+    setDocumentBlackPointCompensation,
+    setDocumentGamutWarningEnabled,
+    setDocumentGamutWarningThreshold,
+    loadDocumentProofProfile,
+    removeDocumentProofProfile,
+    loadDocumentDisplayProfile,
+    removeDocumentDisplayProfile,
+    bindControls,
+  };
+}
+
+// ---- src/ui/toolbar-controller.js ----
+function createToolbarController({ toolbar, setStatus = () => {}, onHelpAction = () => {}, getToolHelp = tool => TOOL_HELP[tool] } = {}) {
+  let refreshToolHelp = () => {};
+  let dragToolId = '';
+  let dropIndex = -1;
+  let suppressClick = false;
+
+  const tools = () => [...(toolbar?.querySelectorAll('.tool') || [])];
+
+  function toolIds() {
+    return tools().map(button => button.dataset.tool).filter(Boolean);
+  }
+
+  function applyToolOrder(order) {
+    const buttons = tools();
+    const available = buttons.map(button => button.dataset.tool).filter(Boolean);
+    const normalized = sanitizeToolOrder(order, available);
+    const byTool = new Map(buttons.map(button => [button.dataset.tool, button]));
+    const anchor = toolbar?.querySelector('.toolbar-spacer, .color-chip');
+    for (const tool of normalized) {
+      const button = byTool.get(tool);
+      if (button) toolbar.insertBefore(button, anchor);
+    }
+    return normalized;
+  }
+
+  function readToolOrder() {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem('zeter-photo-editor.tool-order.v1') || 'null');
+    } catch (error) {
+      console.warn('Could not restore toolbar tool order', error);
+    }
+    return applyToolOrder(saved);
+  }
+
+  function persistToolOrder(order = toolIds()) {
+    try {
+      localStorage.setItem('zeter-photo-editor.tool-order.v1', JSON.stringify(order));
+      return true;
+    } catch (error) {
+      console.warn('Could not persist toolbar tool order', error);
+      return false;
+    }
+  }
+
+  function clearDropTarget() {
+    dropIndex = -1;
+    const marker = toolbar?.querySelector('.toolbar-drop-slot');
+    if (marker) marker.hidden = true;
+  }
+
+  function gridMetrics() {
+    const buttons = tools();
+    const sample = buttons.find(button => button.dataset.tool !== dragToolId) || buttons[0];
+    if (!sample || !toolbar) return null;
+    const toolbarRect = toolbar.getBoundingClientRect();
+    const sampleRect = sample.getBoundingClientRect();
+    const style = getComputedStyle(toolbar);
+    const borderLeft = parseFloat(style.borderLeftWidth) || 0;
+    const borderTop = parseFloat(style.borderTopWidth) || 0;
+    const paddingLeft = parseFloat(style.paddingLeft) || 0;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const columnGap = parseFloat(style.columnGap) || 0;
+    const rowGap = parseFloat(style.rowGap) || 0;
+    const template = String(style.gridTemplateColumns || '').trim();
+    const columns = template && template !== 'none'
+      ? Math.max(1, template.split(/\s+/).length)
+      : 1;
+    return {
+      left: toolbarRect.left + borderLeft + paddingLeft,
+      top: toolbarRect.top + borderTop + paddingTop,
+      toolbarRect, borderLeft, borderTop, paddingLeft, paddingTop, columns,
+      cellWidth: sampleRect.width,
+      cellHeight: sampleRect.height,
+      columnGap, rowGap,
+      scrollTop: toolbar.scrollTop,
+      maxIndex: Math.max(0, buttons.length - 1),
+    };
+  }
+
+  function dropIndexFromPointer(event) {
+    const metrics = gridMetrics();
+    if (!metrics) return 0;
+    return gridCellIndexFromPoint({ x:event.clientX, y:event.clientY }, metrics);
+  }
+
+  function showDropSlot(index) {
+    const metrics = gridMetrics();
+    const marker = toolbar?.querySelector('.toolbar-drop-slot');
+    if (!metrics || !marker || !toolbar) return;
+    const clamped = Math.max(0, Math.min(metrics.maxIndex, Math.round(index)));
+    dropIndex = clamped;
+    const row = Math.floor(clamped / metrics.columns);
+    const column = clamped % metrics.columns;
+    const viewportLeft = metrics.left + column * (metrics.cellWidth + metrics.columnGap);
+    const viewportTop = metrics.top - metrics.scrollTop + row * (metrics.cellHeight + metrics.rowGap);
+    marker.style.left = `${viewportLeft - metrics.toolbarRect.left + toolbar.scrollLeft}px`;
+    marker.style.top = `${viewportTop - metrics.toolbarRect.top + toolbar.scrollTop}px`;
+    marker.style.width = `${metrics.cellWidth}px`;
+    marker.style.height = `${metrics.cellHeight}px`;
+    marker.hidden = false;
+  }
+
+  function commitMoveToIndex(index) {
+    const next = moveToolToIndex(toolIds(), dragToolId, index);
+    applyToolOrder(next);
+    return persistToolOrder(next);
+  }
+
+  function initReorder() {
+    if (!toolbar) return;
+    readToolOrder();
+    toolbar.setAttribute('aria-label', 'Инструменты. Кнопки можно перетаскивать в любую позицию панели.');
+    let marker = toolbar.querySelector('.toolbar-drop-slot');
+    if (!marker) {
+      marker = document.createElement('div');
+      marker.className = 'toolbar-drop-slot';
+      marker.hidden = true;
+      marker.setAttribute('aria-hidden', 'true');
+      toolbar.append(marker);
+    }
+
+    for (const button of tools()) {
+      button.draggable = true;
+      button.setAttribute('aria-roledescription', 'перетаскиваемый инструмент');
+      button.addEventListener('dragstart', event => {
+        dragToolId = button.dataset.tool || '';
+        if (!dragToolId) { event.preventDefault(); return; }
+        suppressClick = true;
+        button.classList.add('tool-dragging');
+        clearDropTarget();
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', `tool:${dragToolId}`);
+        }
+        setStatus(`Перемещение инструмента «${TOOL_LABELS[dragToolId] || dragToolId}»: отпустите его в нужной ячейке панели`);
+      });
+      button.addEventListener('dragend', () => {
+        button.classList.remove('tool-dragging');
+        clearDropTarget();
+        dragToolId = '';
+        setTimeout(() => { suppressClick = false; }, 0);
+      });
+    }
+
+    toolbar.addEventListener('dragover', event => {
+      if (!dragToolId) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      showDropSlot(dropIndexFromPointer(event));
+    });
+    toolbar.addEventListener('dragleave', event => {
+      if (!dragToolId) return;
+      const rect = toolbar.getBoundingClientRect();
+      const outside = event.clientX < rect.left || event.clientX > rect.right
+        || event.clientY < rect.top || event.clientY > rect.bottom;
+      if (outside) clearDropTarget();
+    });
+    toolbar.addEventListener('drop', event => {
+      if (!dragToolId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const movedLabel = TOOL_LABELS[dragToolId] || dragToolId;
+      const index = dropIndex >= 0 ? dropIndex : dropIndexFromPointer(event);
+      const saved = commitMoveToIndex(index);
+      clearDropTarget();
+      setStatus(saved
+        ? `Инструмент «${movedLabel}» перемещён в позицию ${index + 1}. Порядок сохранён.`
+        : `Инструмент «${movedLabel}» перемещён, но браузер не разрешил сохранить порядок.`);
+    });
+  }
+
+  function initTooltips() {
+    const tooltip = document.createElement('div');
+    tooltip.id = 'toolTooltip';
+    tooltip.className = 'tool-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.hidden = true;
+    document.body.append(tooltip);
+    let hideTimer=null,origin=null;
+    const keep=()=>{clearTimeout(hideTimer);hideTimer=null;};
+    const hide=()=>{keep();tooltip.hidden=true;};
+    const leave=()=>{if(!tooltip.dataset.action){hide();return;}keep();hideTimer=setTimeout(()=>{if(!tooltip.contains(document.activeElement))hide();},250);};
+    tooltip.addEventListener('pointerenter',keep);
+    tooltip.addEventListener('pointerleave',leave);
+    tooltip.addEventListener('focusin',keep);
+    tooltip.addEventListener('focusout',event=>{if(!tooltip.contains(event.relatedTarget))leave();});
+    tooltip.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();origin?.focus();hide();}});
+    const shows=new Map();
+    refreshToolHelp=()=>{if(!tooltip.hidden&&origin)shows.get(origin)?.();};
+    for (const button of tools()) {
+      const help = getToolHelp(button.dataset.tool);
+      if (!help) continue;
+      button.removeAttribute('title');
+      button.setAttribute('aria-describedby', tooltip.id);
+      if(help.action)button.setAttribute('aria-haspopup','dialog');
+      const show = () => {
+        const help=getToolHelp(button.dataset.tool);
+        if(!help){hide();return;}
+        if(help.action)button.setAttribute('aria-haspopup','dialog');else button.removeAttribute('aria-haspopup');
+        keep();origin=button;
+        const rect = button.getBoundingClientRect();
+        tooltip.innerHTML = `<strong>${TOOL_LABELS[button.dataset.tool]}</strong><span>${help.description}</span><kbd>${help.shortcut}</kbd>`;
+        tooltip.dataset.action=help.action||'';
+        tooltip.setAttribute('role',help.action?'dialog':'tooltip');
+        if(help.action){
+          tooltip.setAttribute('aria-label',TOOL_LABELS[button.dataset.tool]);
+          const action=document.createElement('button');action.type='button';action.className='primary-button tool-help-action';action.textContent=help.actionLabel;
+          action.onclick=()=>{hide();onHelpAction(help.action);};tooltip.append(action);
+        }else tooltip.removeAttribute('aria-label');
+        tooltip.hidden = false;
+        const width = tooltip.offsetWidth;
+        const height = tooltip.offsetHeight;
+        const maxTop = window.innerHeight - height - 8;
+        tooltip.style.left = `${Math.min(window.innerWidth - width - 10, rect.right + 10)}px`;
+        tooltip.style.top = `${Math.max(8, Math.min(maxTop, rect.top + rect.height / 2 - height / 2))}px`;
+      };
+      shows.set(button,show);
+      button.addEventListener('pointerenter', show);
+      button.addEventListener('pointerleave', leave);
+      button.addEventListener('focus', show);
+      button.addEventListener('blur', event=>{if(!tooltip.contains(event.relatedTarget))leave();});
+      button.addEventListener('keydown',event=>{if(getToolHelp(button.dataset.tool)?.action&&event.key==='ArrowRight'){event.preventDefault();event.stopPropagation();if(tooltip.hidden)show();tooltip.querySelector('.tool-help-action')?.focus();}});
+      button.addEventListener('dragstart', hide);
+      button.addEventListener('dragend', hide);
+    }
+  }
+
+  return {
+    initReorder,
+    initTooltips,
+    refreshToolHelp:()=>refreshToolHelp(),
+    isClickSuppressed: () => suppressClick,
+  };
+}
