@@ -19,6 +19,13 @@ export async function verifyBrowserUiLockMidKernel(client, {
   await client.send('Page.reload', { ignoreCache:true });
   await waitFor('010D editor reload', () => evaluate(client,
     "document.readyState==='complete' && !!document.querySelector('#fileInput') && !!document.querySelector('#editorCanvas')"), 15_000);
+  // A previous smoke scenario wrote a genuine recovery snapshot. On reload
+  // startup may show a blocking recovery dialog; exercise its public "new
+  // project" action before importing our isolated PSD16 fixture.
+  await new Promise(resolve => setTimeout(resolve, 400));
+  await evaluate(client, "(() => {const newProject=document.querySelector('#modalRoot .recovery-modal [data-new-project]');if(newProject)newProject.click();return true;})()");
+  await waitFor('010D unobstructed editor', () => evaluate(client,
+    "!document.querySelector('#modalRoot .recovery-modal')"), 10_000);
   await sampler.start();
   let stopped = false;
   try {
