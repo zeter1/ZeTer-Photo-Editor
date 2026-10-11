@@ -13,10 +13,16 @@ import { instrumentBrowserKernelSource } from './browser-inpaint-mid-kernel-smok
  */
 export async function verifyBrowserUiLockMidKernel(client, {
   evaluate, waitFor, assert, browserClient = null, fixtureKey = 'rgb16large',
+  secondNativeFixtureKey = null,
 } = {}) {
   if (!['rgb16large','rgb32psblarge'].includes(fixtureKey))
     throw new RangeError('Unsupported 010D browser fixture: ' + fixtureKey);
+  if (secondNativeFixtureKey &&
+      (fixtureKey !== 'rgb32psblarge' || secondNativeFixtureKey !== 'rgb32psblarge-alt'))
+    throw new RangeError('010D-D requires two distinct large PSB32 Float32 fixtures');
   const fixture = createBrowserHighDepthFixture(fixtureKey);
+  const secondFixture = secondNativeFixtureKey
+    ? createBrowserHighDepthFixture(secondNativeFixtureKey) : null;
   const format = fixture.version === 2 ? 'PSB32 Float32' : 'PSD16 Uint16';
   const sampler = createBrowserRendererHeapSampler(client, { processClient:browserClient });
   // All earlier UI tests are complete before this final, isolated reload.
@@ -44,6 +50,12 @@ export async function verifyBrowserUiLockMidKernel(client, {
       normal:fixture.normal, bitsPerChannel:fixture.bitsPerChannel,
       channels:fixture.channels,
     };
+    const secondMetadata = secondFixture ? {
+      filename:secondFixture.filename, defectX:secondFixture.defectX, defectY:secondFixture.defectY,
+      width:secondFixture.width, height:secondFixture.height,
+      damaged:secondFixture.damaged, normal:secondFixture.normal,
+      bitsPerChannel:secondFixture.bitsPerChannel, channels:secondFixture.channels,
+    } : null;
     await evaluate(client, 'window.__zpe010dParts=[];window.__zpe010dMeta=' + JSON.stringify(metadata) + ';true');
     const encoded = Buffer.from(fixture.bytes).toString('base64');
     for (let offset = 0; offset < encoded.length; offset += 192 * 1024) {
@@ -165,6 +177,45 @@ export async function verifyBrowserUiLockMidKernel(client, {
       tabSetup.restoredTitle === tabSetup.firstTitle &&
       tabSetup.second.dimensions === '1200 × 800',
       '010D-B0 must prepare two independent real document tabs',JSON.stringify(tabSetup));
+    // 010D-D: replace the ordinary second tab via its public file input with
+    // a different native PSB32; the first native session remains live.
+    let secondNativeBefore = null;
+    let secondUiBaseline = tabSetup.second;
+    let secondEditedSnapshot = null;
+    let secondAfterRedo = null;
+    if (secondFixture) {
+      const selected = await evaluate(client, "(() => {document.querySelectorAll('#docTabs .doc-tab')[1]?.click();return [...document.querySelectorAll('#docTabs .doc-tab')].map(x=>x.getAttribute('aria-selected')).join(',');})()");
+      assert(selected === 'false,true', '010D-D must activate second tab before PSB32 import',selected);
+      await evaluate(client,'window.__zpe010dParts=[];window.__zpe010dMeta=' +
+        JSON.stringify(secondMetadata) + ';true');
+      const otherEncoded = Buffer.from(secondFixture.bytes).toString('base64');
+      for (let offset = 0; offset < otherEncoded.length; offset += 192 * 1024) {
+        await evaluate(client, '(() => {const data=atob(' +
+          JSON.stringify(otherEncoded.slice(offset,offset + 192 * 1024)) +
+          ');window.__zpe010dParts.push(Uint8Array.from(data,c=>c.charCodeAt(0)));return true;})()');
+      }
+      const otherDispatched = await evaluate(client,'(' + dispatchPsd.toString() + ')()');
+      assert(otherDispatched.filename === secondFixture.filename &&
+        otherDispatched.count === secondFixture.bytes.length,
+        '010D-D second native PSB32 must enter the real file input intact',
+        JSON.stringify(otherDispatched));
+      await waitFor('010D-D independent second PSB32 import', () =>
+        evaluate(client,'(' + imported.toString() + ')()'), 60_000);
+      secondNativeBefore = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+      assert(secondNativeBefore.kind === 'zpe-pixel-buffer-source-v2' &&
+        secondNativeBefore.bits === 32 && secondNativeBefore.tiles > 1 &&
+        secondNativeBefore.rawBytes === secondFixture.width*secondFixture.height*16 &&
+        JSON.stringify(secondNativeBefore.normal?.values) === JSON.stringify(secondFixture.normal) &&
+        JSON.stringify(secondNativeBefore.damaged?.values) === JSON.stringify(secondFixture.damaged) &&
+        JSON.stringify(secondNativeBefore.normal?.words) !== JSON.stringify(before.normal?.words) &&
+        JSON.stringify(secondNativeBefore.damaged?.words) !== JSON.stringify(before.damaged?.words),
+        '010D-D two native documents must have independent exact Float32 words',
+        JSON.stringify({before,secondNativeBefore}));
+      secondUiBaseline = await evaluate(client,"(() => ({title:document.querySelector('#documentTitle')?.textContent,dimensions:document.querySelector('#docDimensions')?.textContent,history:[...document.querySelectorAll('#historyList .history-row')].map(r=>r.textContent),layerNames:[...document.querySelectorAll('.layer-row .layer-name')].map(r=>r.textContent)}))()");
+      await sampler.snapshot('010d-d-two-native-psb32-imported');
+      await evaluate(client,"(() => {document.querySelectorAll('#docTabs .doc-tab')[0]?.click();window.__zpe010dMeta=" +
+        JSON.stringify(metadata) + ";return true;})()");
+    }
     const tabsNativeBefore = await evaluate(client,'(' + readNativeSave.toString() + ')()');
     assert(JSON.stringify(tabsNativeBefore) === JSON.stringify(before),
       '010D-B0 initial tab round trip must preserve native samples',JSON.stringify(tabsNativeBefore));
@@ -319,9 +370,9 @@ export async function verifyBrowserUiLockMidKernel(client, {
     assert(JSON.stringify({
       title:secondSession.title,dimensions:secondSession.dimensions,
       history:secondSession.history,layerNames:secondSession.layerNames,
-    }) === JSON.stringify(tabSetup.second),
-      '010D-B0 second tab content/history must survive cancelled native job',
-      JSON.stringify({before:tabSetup.second,after:secondSession}));
+    }) === JSON.stringify(secondUiBaseline),
+      '010D second tab content/history must survive cancelled native job',
+      JSON.stringify({before:secondUiBaseline,after:secondSession}));
     function selectFirstTab() {
       const tabs = [...document.querySelectorAll('#docTabs .doc-tab')];
       tabs[0]?.click();
