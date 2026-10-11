@@ -91,8 +91,11 @@ function* patchMatchRefineSteps(data, width, height, channels, selectedMask, don
         if (tx < 0 || tx >= width || sx < 0 || sx >= width) continue;
         const targetNeighbor = ty * width + tx;
         const sourceNeighbor = sy * width + sx;
-        if (selectedMask[sourceNeighbor]) continue;
-        const contextWeight = selectedMask[targetNeighbor] ? 0.35 : 1;
+        // Excluded source pixels may belong to a different ROI, whose content
+        // has already changed in the private working set. Neither side of a
+        // patch comparison may use that originally selected content.
+        if (selectedMask[sourceNeighbor] || selectedMask[targetNeighbor] === 2) continue;
+        const contextWeight = selectedMask[targetNeighbor] === 1 ? 0.35 : 1;
         const spatialWeight = contextWeight / (1 + dx * dx + dy * dy);
         const targetOffset = targetNeighbor * channels;
         const sourceOffset = sourceNeighbor * channels;
@@ -147,7 +150,7 @@ function* patchMatchRefineSteps(data, width, height, channels, selectedMask, don
     for (let y = yStart; forward ? y <= yEnd : y >= yEnd; y += yStep) {
       for (let x = xStart; forward ? x <= xEnd : x >= xEnd; x += xStep) {
         const index = y * width + x;
-        if (!selectedMask[index]) continue;
+        if (selectedMask[index] !== 1) continue;
         let bestDonor = donorIndex[index];
         if (!validDonor(bestDonor)) continue;
         let bestScore = scoreDonor(index, bestDonor);
@@ -206,6 +209,7 @@ function* patchMatchRefineSteps(data, width, height, channels, selectedMask, don
  */
 export function* inpaintSelectedSamplesSteps(data, width, height, channels, {
   isAllowed,
+  isDonorExcluded = null,
   sampleRadius = 2,
   maxLayerPixels = CONTENT_AWARE_MAX_LAYER_PIXELS,
   maxFillPixels = CONTENT_AWARE_MAX_FILL_PIXELS,
@@ -226,6 +230,9 @@ export function* inpaintSelectedSamplesSteps(data, width, height, channels, {
   if (!Number.isSafeInteger(total)) throw new RangeError('Контент-заливка: размер слоя выходит за безопасный диапазон');
   if (data.length !== total * channels) throw new RangeError('Контент-заливка: размер pixel buffer не совпадает с геометрией слоя');
   if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen selection predicate');
+  if (isDonorExcluded != null && typeof isDonorExcluded !== 'function') {
+    throw new TypeError('Контент-заливка: неверный frozen donor-exclusion predicate');
+  }
 
   maxLayerPixels = positiveInteger(maxLayerPixels, 'maxLayerPixels');
   maxFillPixels = positiveInteger(maxFillPixels, 'maxFillPixels');
@@ -255,6 +262,11 @@ export function* inpaintSelectedSamplesSteps(data, width, height, channels, {
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
         maxY = Math.max(maxY, y);
+      } else if (isDonorExcluded?.(x, y)) {
+        // 2 denotes a frozen global selection pixel owned by a different ROI.
+        // It must not seed the boundary pass, supply a PatchMatch sample or
+        // become a valid source after an earlier ROI writes to the tile.
+        selectedMask[index] = 2;
       } else {
         donorIndex[index] = index;
       }
@@ -282,7 +294,7 @@ export function* inpaintSelectedSamplesSteps(data, width, height, channels, {
         if (!dx && !dy) continue;
         const xx = x + dx;
         if (xx < 0 || xx >= width) continue;
-        if (!pending[yy * width + xx]) return true;
+        if (donorIndex[yy * width + xx] >= 0) return true;
       }
     }
     return false;

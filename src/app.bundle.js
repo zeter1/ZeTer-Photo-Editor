@@ -4958,8 +4958,11 @@ function* patchMatchRefineSteps(data, width, height, channels, selectedMask, don
         if (tx < 0 || tx >= width || sx < 0 || sx >= width) continue;
         const targetNeighbor = ty * width + tx;
         const sourceNeighbor = sy * width + sx;
-        if (selectedMask[sourceNeighbor]) continue;
-        const contextWeight = selectedMask[targetNeighbor] ? 0.35 : 1;
+        // Excluded source pixels may belong to a different ROI, whose content
+        // has already changed in the private working set. Neither side of a
+        // patch comparison may use that originally selected content.
+        if (selectedMask[sourceNeighbor] || selectedMask[targetNeighbor] === 2) continue;
+        const contextWeight = selectedMask[targetNeighbor] === 1 ? 0.35 : 1;
         const spatialWeight = contextWeight / (1 + dx * dx + dy * dy);
         const targetOffset = targetNeighbor * channels;
         const sourceOffset = sourceNeighbor * channels;
@@ -5014,7 +5017,7 @@ function* patchMatchRefineSteps(data, width, height, channels, selectedMask, don
     for (let y = yStart; forward ? y <= yEnd : y >= yEnd; y += yStep) {
       for (let x = xStart; forward ? x <= xEnd : x >= xEnd; x += xStep) {
         const index = y * width + x;
-        if (!selectedMask[index]) continue;
+        if (selectedMask[index] !== 1) continue;
         let bestDonor = donorIndex[index];
         if (!validDonor(bestDonor)) continue;
         let bestScore = scoreDonor(index, bestDonor);
@@ -5073,6 +5076,7 @@ function* patchMatchRefineSteps(data, width, height, channels, selectedMask, don
  */
 function* inpaintSelectedSamplesSteps(data, width, height, channels, {
   isAllowed,
+  isDonorExcluded = null,
   sampleRadius = 2,
   maxLayerPixels = CONTENT_AWARE_MAX_LAYER_PIXELS,
   maxFillPixels = CONTENT_AWARE_MAX_FILL_PIXELS,
@@ -5093,6 +5097,9 @@ function* inpaintSelectedSamplesSteps(data, width, height, channels, {
   if (!Number.isSafeInteger(total)) throw new RangeError('Контент-заливка: размер слоя выходит за безопасный диапазон');
   if (data.length !== total * channels) throw new RangeError('Контент-заливка: размер pixel buffer не совпадает с геометрией слоя');
   if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen selection predicate');
+  if (isDonorExcluded != null && typeof isDonorExcluded !== 'function') {
+    throw new TypeError('Контент-заливка: неверный frozen donor-exclusion predicate');
+  }
 
   maxLayerPixels = positiveInteger(maxLayerPixels, 'maxLayerPixels');
   maxFillPixels = positiveInteger(maxFillPixels, 'maxFillPixels');
@@ -5122,6 +5129,11 @@ function* inpaintSelectedSamplesSteps(data, width, height, channels, {
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
         maxY = Math.max(maxY, y);
+      } else if (isDonorExcluded?.(x, y)) {
+        // 2 denotes a frozen global selection pixel owned by a different ROI.
+        // It must not seed the boundary pass, supply a PatchMatch sample or
+        // become a valid source after an earlier ROI writes to the tile.
+        selectedMask[index] = 2;
       } else {
         donorIndex[index] = index;
       }
@@ -5149,7 +5161,7 @@ function* inpaintSelectedSamplesSteps(data, width, height, channels, {
         if (!dx && !dy) continue;
         const xx = x + dx;
         if (xx < 0 || xx >= width) continue;
-        if (!pending[yy * width + xx]) return true;
+        if (donorIndex[yy * width + xx] >= 0) return true;
       }
     }
     return false;
@@ -7171,8 +7183,10 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
   };
   const area = (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
   if (area > maxLayerPixels) {
-    // Distant holes may use multiple bounded ROIs, but the padded tile
-    // footprints must be disjoint so another hole cannot become a donor.
+    // First try halo-disjoint groups for historical texture-search parity.
+    // When a connected/sparse selection merges into a huge bounding box,
+    // fall back to independent bounded tile fragments. Every fragment uses
+    // the SAME global frozen selection as the donor-exclusion authority.
     const oversized = () => new RangeError('Контент-заливка: рабочая область ' + area + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
     const tileSize = source.tileSize, columns = Math.ceil(width / tileSize);
     const occupied = new Map();
@@ -7182,8 +7196,6 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       const key = ty * columns + tx;
       const cell = occupied.get(key);
       if (cell) {
-        // Only selected samples exclude donors. A whole-tile rectangle
-        // needlessly merges neighboring cells whose actual halos are disjoint.
         cell.left = Math.min(cell.left, x);
         cell.top = Math.min(cell.top, y);
         cell.right = Math.max(cell.right, x + 1);
@@ -7191,12 +7203,12 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
         continue;
       }
       if (occupied.size >= 256) throw oversized();
-      occupied.set(key, {
-        key, left:x, top:y, right:x + 1, bottom:y + 1,
-      });
+      occupied.set(key, { key, left:x, top:y, right:x + 1, bottom:y + 1 });
     }
-    const groups = [...occupied.values()].map(tile => ({ ...tile, keys:[tile.key], indices:[] }));
-    // Transitive bounding-rectangle merges cover even L-shaped tile unions.
+    const cells = [...occupied.values()];
+    const makeFragments = () => cells.map(cell => ({ ...cell, keys:[cell.key], indices:[] }));
+    const groups = makeFragments();
+    // Preserve the old disjoint grouping whenever it fits the aggregate cap.
     for (let i = 0; i < groups.length; i += 1) {
       let merged = false;
       for (let j = i + 1; j < groups.length; j += 1) {
@@ -7216,35 +7228,51 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       }
       if (merged) i = -1;
     }
-    if (groups.length < 2) throw oversized();
-    const byTile = new Map();
-    for (const group of groups) {
-      group.minX = width; group.minY = height; group.maxX = -1; group.maxY = -1;
-      for (const key of group.keys) byTile.set(key, group);
-    }
-    for (const index of selectedIndices) {
-      const x = index % width, y = Math.floor(index / width);
-      const group = byTile.get(Math.floor(y / tileSize) * columns + Math.floor(x / tileSize));
-      group.indices.push(index);
-      group.minX = Math.min(group.minX, x);
-      group.minY = Math.min(group.minY, y);
-      group.maxX = Math.max(group.maxX, x);
-      group.maxY = Math.max(group.maxY, y);
-    }
-    let totalArea = 0;
-    for (const group of groups) {
-      group.bounds = {
-        left:Math.max(0, group.minX - padding), top:Math.max(0, group.minY - padding),
-        right:Math.min(width, group.maxX + 1 + padding),
-        bottom:Math.min(height, group.maxY + 1 + padding),
-      };
-      totalArea += (group.bounds.right - group.bounds.left) * (group.bounds.bottom - group.bounds.top);
-      if (totalArea > maxLayerPixels) {
-        throw new RangeError('Контент-заливка: сумма рабочих областей ' + totalArea + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
+
+    function planRegions(candidate) {
+      const byTile = new Map();
+      for (const group of candidate) {
+        group.indices = [];
+        group.minX = width; group.minY = height; group.maxX = -1; group.maxY = -1;
+        for (const key of group.keys) byTile.set(key, group);
       }
+      for (const index of selectedIndices) {
+        const x = index % width, y = Math.floor(index / width);
+        const group = byTile.get(Math.floor(y / tileSize) * columns + Math.floor(x / tileSize));
+        group.indices.push(index);
+        group.minX = Math.min(group.minX, x);
+        group.minY = Math.min(group.minY, y);
+        group.maxX = Math.max(group.maxX, x);
+        group.maxY = Math.max(group.maxY, y);
+      }
+      let totalArea = 0;
+      for (const group of candidate) {
+        group.bounds = {
+          left:Math.max(0, group.minX - padding), top:Math.max(0, group.minY - padding),
+          right:Math.min(width, group.maxX + 1 + padding),
+          bottom:Math.min(height, group.maxY + 1 + padding),
+        };
+        totalArea += (group.bounds.right - group.bounds.left) * (group.bounds.bottom - group.bounds.top);
+        if (totalArea > maxLayerPixels) return null;
+      }
+      return candidate;
     }
+
+    let planned = groups.length > 1 ? planRegions(groups) : null;
+    if (!planned) planned = planRegions(makeFragments());
+    if (!planned) {
+      if (groups.length < 2) throw oversized();
+      throw new RangeError('Контент-заливка: сумма рабочих областей превышает безопасный лимит ' + maxLayerPixels + ' px');
+    }
+
+    // A 1-bit global snapshot covers only frozen indices, not the mutable
+    // tile working set. Adjacent fragment halos can overlap; a selected pixel
+    // from ANY fragment is forbidden as a donor or PatchMatch context even
+    // after a previous fragment has filled it.
+    const selectionBits = new Uint8Array(Math.ceil(width * height / 8));
+    for (const index of selectedIndices) selectionBits[index >> 3] |= 1 << (index & 7);
     let totalFilled = 0, totalChanged = 0;
-    for (const group of groups) {
+    for (const group of planned) {
       const rect = group.bounds, regionWidth = rect.right - rect.left;
       const mask = new Uint8Array(regionWidth * (rect.bottom - rect.top));
       for (const index of group.indices) {
@@ -7254,6 +7282,10 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       const region = yield { kind:'readRegion', bounds:rect };
       const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
         isAllowed:(x, y) => mask[y * regionWidth + x] === 1,
+        isDonorExcluded:(x, y) => {
+          const index = (rect.top + y) * width + rect.left + x;
+          return (selectionBits[index >> 3] & (1 << (index & 7))) !== 0;
+        },
         maxLayerPixels, maxFillPixels,
       } };
       if (filled !== group.indices.length) {
@@ -7261,7 +7293,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
       }
       totalChanged += yield { kind:'writeRegion', region };
       totalFilled += filled;
-      // No private tile escapes before the full job completes.
+      // No private tile escapes before the full job finishes.
       yield;
     }
     const serialized = totalChanged ? yield { kind:'serialize' } : source;
