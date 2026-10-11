@@ -6596,6 +6596,21 @@ function sanitizeSourceHeader(source, maxBytes) {
     colorSpace:String(source.colorSpace||'').slice(0,120),alphaMode:hasAlpha?'straight':'none',
     profileName:String(source.profileName||'').slice(0,240),byteOrder:'little-endian',rawBytes:expected};
 }
+
+// Keep persisted native sources and detached Worker bytes in one exact
+// representation. atob() accepts several non-canonical spellings whose
+// padding bits differ, so a regex and encoded-length check alone is unsafe.
+function isCanonicalPixelBufferBase64(encoded, rawBytes) {
+  if (!Number.isSafeInteger(rawBytes) || rawBytes < 1 ||
+      typeof encoded !== 'string' ||
+      encoded.length !== 4 * Math.ceil(rawBytes / 3) ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
+  const padding = (3 - rawBytes % 3) % 3;
+  if (encoded.slice(encoded.length - padding) !== '='.repeat(padding)) return false;
+  const last = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    .indexOf(encoded[encoded.length - padding - 1]);
+  return last >= 0 && (last & ((1 << (2 * padding)) - 1)) === 0;
+}
 function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const bytes = pixelBufferCanonicalBytes(buffer);
@@ -6633,7 +6648,7 @@ function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFF
     const dataUrl=typeof source.dataUrl==='string'?source.dataUrl:'';
     if(dataUrl.length>MAX_PIXEL_BUFFER_SOURCE_DATA_URL)return null;
     const prefix='data:'+PIXEL_BUFFER_SOURCE_MIME+';base64,'; if(!dataUrl.startsWith(prefix))return null;
-    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(safe.rawBytes/3))return null;
+    const base64=dataUrl.slice(prefix.length); if(!isCanonicalPixelBufferBase64(base64,safe.rawBytes))return null;
     return {kind:PIXEL_BUFFER_SOURCE_KIND,...safe,dataUrl};
   }
   if(source.kind!==PIXEL_BUFFER_TILED_SOURCE_KIND)return null;
@@ -6648,7 +6663,7 @@ function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFF
     const rawBytes=expectedSourceBytes({width,height,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel});
     if(Number(tile.x)!==x||Number(tile.y)!==y||Number(tile.width)!==width||Number(tile.height)!==height||Number(tile.rawBytes)!==rawBytes)return null;
     const dataUrl=typeof tile.dataUrl==='string'?tile.dataUrl:''; if(!dataUrl.startsWith(prefix))return null;
-    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(rawBytes/3))return null;
+    const base64=dataUrl.slice(prefix.length); if(!isCanonicalPixelBufferBase64(base64,rawBytes))return null;
     total+=rawBytes; tiles.push({x,y,width,height,rawBytes,dataUrl});
   }
   if(total!==safe.rawBytes)return null;
@@ -16647,12 +16662,18 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
 
   const columns = Math.ceil(source.width / source.tileSize);
   const editableTiles = new Set();
+  // One bit per document pixel (at most 2 MiB with the 48 MiB source cap),
+  // avoiding a multi-million-element Set of selected coordinates.
+  const selectedBits = new Uint8Array(Math.ceil(source.width * source.height / 8));
   for (const index of selectedIndices) {
     const x = index % source.width, y = Math.floor(index / source.width);
     editableTiles.add(Math.floor(y / source.tileSize) * columns + Math.floor(x / source.tileSize));
+    selectedBits[index >> 3] |= 1 << (index & 7);
   }
 
+  const pixelBytes = source.channels * source.bitsPerChannel / 8;
   let changedTilePayloads = 0;
+  let changedPixels = 0;
   for (let index = 0; index < source.tiles.length; index += 1) {
     const before = source.tiles[index], after = returned.tiles[index];
     if (!after || typeof after !== 'object' || Array.isArray(after)) throw invalid();
@@ -16664,11 +16685,40 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
     if (!editableTiles.has(index) ||
         !after.dataUrl.startsWith(TILED_INPAINT_RESULT_TILE_URL_PREFIX)) throw invalid();
     const encoded = after.dataUrl.slice(TILED_INPAINT_RESULT_TILE_URL_PREFIX.length);
-    if (encoded.length !== 4 * Math.ceil(before.rawBytes / 3) ||
-        !/^[a-z\d+/=]+$/i.test(encoded)) throw invalid();
+    if (!isCanonicalPixelBufferBase64(encoded, before.rawBytes)) throw invalid();
+
+    // A selected tile may contain unselected donor pixels. Compare the exact
+    // native little-endian bytes, not a lossy 8-bit preview or float values.
+    // Only changed tiles are decoded; memory is bounded to two tile payloads.
+    let originalBytes, returnedBytes;
+    try {
+      originalBytes = dataUrlToBytes(before.dataUrl, { maxBytes:before.rawBytes });
+      returnedBytes = dataUrlToBytes(after.dataUrl, { maxBytes:before.rawBytes });
+    } catch { throw invalid(); }
+    if (originalBytes.length !== before.rawBytes ||
+        returnedBytes.length !== before.rawBytes) throw invalid();
+    let tilePixelChanges = 0;
+    for (let local = 0; local < before.width * before.height; local += 1) {
+      const offset = local * pixelBytes;
+      let different = false;
+      for (let byte = 0; byte < pixelBytes; byte += 1) {
+        if (originalBytes[offset + byte] !== returnedBytes[offset + byte]) {
+          different = true;
+          break;
+        }
+      }
+      if (!different) continue;
+      const globalX = before.x + local % before.width;
+      const globalY = before.y + Math.floor(local / before.width);
+      const global = globalY * source.width + globalX;
+      if (!(selectedBits[global >> 3] & (1 << (global & 7)))) throw invalid();
+      tilePixelChanges += 1;
+    }
+    if (!tilePixelChanges) throw invalid();
+    changedPixels += tilePixelChanges;
     changedTilePayloads += 1;
   }
-  if (changedTilePayloads !== result.changedTiles) throw invalid();
+  if (changedTilePayloads !== result.changedTiles || changedPixels !== result.changed) throw invalid();
   return result;
 }
 

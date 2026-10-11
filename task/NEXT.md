@@ -28,6 +28,15 @@
 | P2 | Color management и 16/32-bit performance на больших файлах; CMYK preview/soft proof. | ICC reference сравнения, измерения до/после и тесты конверсий. |
 | P3 | RAW/DNG pipeline (LibRaw WASM), затем Select & Mask/Content-Aware quality и GPU/ML. | Отдельные технические спецификации, права на sample fixtures и контролируемый memory budget. |
 
+## Активная проходка — P1 native Worker pixel integrity (2026-10-11)
+
+- Ветка: `feat/stage003-worker-pixel-integrity-20261011`; gate пока **в работе** (PR review/CI и точный main push CI не подтверждены).
+- **Контракт:** v1/v2 native source допускает только канонический Base64 с правильной padding-позицией и нулевыми неиспользованными битами; для Worker reply сравнить реальные little-endian bytes **каждого пикселя изменённого тайла**, не только tile ownership. Все изменённые пиксели должны входить в frozen selection, а `changed` обязан равняться реальному числу изменённых пикселей. Гарантия независима от lossless/8-bit preview.
+- **Бюджет:** один бит выделения на пиксель (до ~2 MiB при максимальном 48 MiB source); одновременно декодируются только два payload одного changed tile; unchanged tiles не декодируются.
+- **Regression:** `tests/tiled-inpaint-ui-dispatch.test.mjs` — CMYKA Float32 и RGB16 unselected neighbor tamper, forged pixel counters, alternative Base64 bits; `tests/pixel-buffer.test.mjs` — v1/v2 source padding and alphabet validation.
+- **Acceptance:** `npm run check`, Chromium `file://` smoke, generated bundle parity, review + PR CI; merge + exact main CI success. До этих gates фиксировать как **не завершено**, а общие 002/003 сохранять открытыми.
+- **Далее после gate:** connected-wide ROI planning с неизменными исходными донорами, затем Chromium Worker/Undo/Redo/RAM/latency на больших сторонних PSD16/PSB32; параллельно P0 независимый лицензированный Photoshop-authored corpus.
+
 ## Текущая малая проходка (ветка `feat/stage002-bounded-corpus-preflight-20261011`)
 
 - [x] В аудиторе P0 ограничено чтение недоверенного manifest (1 MiB) и

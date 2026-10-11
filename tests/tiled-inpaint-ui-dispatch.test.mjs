@@ -189,3 +189,85 @@ test('detached Worker results fail closed on counters, native source metadata an
     assert.equal(JSON.stringify(source), snapshot, name + ': immutable donor source');
   }
 });
+
+function rgb16Fixture() {
+  const data = new Uint16Array(8 * 8 * 3);
+  for (let pixel = 0; pixel < 64; pixel += 1) {
+    data.set([10000, 20000, 30000], pixel * 3);
+  }
+  data.set([60000, 60000, 60000], (3 * 8 + 3) * 3);
+  return serializeTiledPixelBufferSource(createPixelBuffer({
+    width:8, height:8, model:'rgb', channels:3, bitsPerChannel:16, data,
+  }), { tileSize:8 });
+}
+
+function rewriteTileByte(tile, offset) {
+  const prefix = tile.dataUrl.indexOf('base64,') + 'base64,'.length;
+  const bytes = Buffer.from(tile.dataUrl.slice(prefix), 'base64');
+  bytes[offset] ^= 1;
+  tile.dataUrl = tile.dataUrl.slice(0, prefix) + bytes.toString('base64');
+}
+
+test('UI Worker rejects unselected pixels changed inside an otherwise editable RGB16 or CMYKA32 tile', async () => {
+  for (const [name, source, x, y, neighborX, neighborY] of [
+    ['RGB16', rgb16Fixture(), 3, 3, 2, 3],
+    ['CMYKA32', fixture(), 7, 7, 6, 7],
+  ]) {
+    const snapshot = JSON.stringify(source);
+    const index = y * source.width + x;
+    const valid = inpaintTiledPixelBufferSourceFromIndices(source, {
+      selectedIndices:Uint32Array.of(index),
+    });
+    assert.equal(valid.changed, 1, name + ': baseline changes only selected pixel');
+    assert.equal(valid.changedTiles, 1, name + ': baseline changes one tile');
+    const tainted = structuredClone(valid);
+    const tile = tainted.source.tiles[0];
+    const sampleBytes = source.channels * source.bitsPerChannel / 8;
+    const byteOffset = ((neighborY - tile.y) * tile.width + neighborX - tile.x) * sampleBytes;
+    rewriteTileByte(tile, byteOffset);
+    // Counters and all metadata are unchanged; only the selected tile's donor
+    // pixel differs. The previous tile-only validator accepted this payload.
+    await assert.rejects(prepareTiledInpaintWithWorker(source, {
+      worker:{async run() { return tainted; }},
+      isAllowed:(px,py) => px === x && py === y,
+    }), /invalid Worker result/, name);
+    assert.equal(JSON.stringify(source), snapshot, name + ': original remains byte-identical');
+  }
+});
+
+test('UI Worker compares actual native changed-pixel count with reply counters', async () => {
+  const source = fixture();
+  const selected = [7 * source.width + 6, 7 * source.width + 7];
+  const valid = inpaintTiledPixelBufferSourceFromIndices(source, { selectedIndices:selected });
+  assert.ok(valid.changed >= 1 && valid.changed <= 2);
+  assert.equal(valid.changedTiles, 1);
+  const tainted = structuredClone(valid);
+  tainted.changed = valid.changed === 1 ? 2 : 1;
+  assert.ok(tainted.changed <= tainted.filled && tainted.changedTiles <= tainted.changed);
+  await assert.rejects(prepareTiledInpaintWithWorker(source, {
+    worker:{async run() { return tainted; }},
+    isAllowed:(x,y) => selected.includes(y * source.width + x),
+  }), /invalid Worker result/);
+});
+
+test('UI Worker rejects alternate Base64 pad bits even when decoded tile bytes match', async () => {
+  const source = fixture();
+  const selected = 7 * source.width + 7;
+  const valid = inpaintTiledPixelBufferSourceFromIndices(source, {
+    selectedIndices:[selected],
+  });
+  const tainted = structuredClone(valid), tile = tainted.source.tiles[0];
+  const original = tile.dataUrl;
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  assert.ok(original.endsWith('=') && !original.endsWith('=='));
+  const location = original.length - 2;
+  const value = alphabet.indexOf(original[location]);
+  assert.equal(value & 3, 0, 'canonical one-pad base64 has zero unused bits');
+  tile.dataUrl = original.slice(0, location) + alphabet[value | 1] + original.slice(location + 1);
+  assert.deepEqual(Buffer.from(tile.dataUrl.slice(tile.dataUrl.indexOf('base64,') + 7), 'base64'),
+    Buffer.from(original.slice(original.indexOf('base64,') + 7), 'base64'));
+  await assert.rejects(prepareTiledInpaintWithWorker(source, {
+    worker:{async run() { return tainted; }},
+    isAllowed:(x,y) => y * source.width + x === selected,
+  }), /invalid Worker result/);
+});
