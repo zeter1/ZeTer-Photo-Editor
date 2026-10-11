@@ -17,6 +17,8 @@ export async function verifyLargeBrowserPsd16Worker(client, {
   };
   const sampler=createBrowserRendererHeapSampler(client,{processClient:browserClient});
   await sampler.start();
+  let samplerStopped=false;
+  try {
   const importStart=Date.now();
   await evaluate(client,'window.__stage003LargeParts=[];window.__stage003LargeMeta='+JSON.stringify(metadata)+';true');
   // Chunk CDP evaluate payloads to avoid multi-megabyte WebSocket frames.
@@ -32,12 +34,13 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     const bytes=parts.reduce((sum,part)=>sum+part.byteLength,0);
     transfer.items.add(new File(parts,window.__stage003LargeMeta.filename,{type:'image/vnd.adobe.photoshop'}));
     input.files=transfer.files;
+    const receivedName=input.files[0]?.name;
     delete window.__stage003LargeParts;
     const confirm=window.confirm;
     window.confirm=()=>true;
     try { input.dispatchEvent(new Event('change',{bubbles:true})); }
     finally { window.confirm=confirm; }
-    return {name:input.files[0]?.name,bytes};
+    return {name:receivedName,bytes};
   }
   const dispatched=await evaluate(client,'('+dispatchFile.toString()+')()');
   assert(dispatched.name===fixture.filename && dispatched.bytes===fixture.bytes.length,
@@ -186,10 +189,19 @@ export async function verifyLargeBrowserPsd16Worker(client, {
   await waitFor('large PSD16 Redo',()=>evaluate(client,'('+filledPreview.toString()+')()'),30_000);
   await sampler.snapshot('after-large-undo-redo');
   const memory=await sampler.stop();
+  samplerStopped=true;
   await evaluate(client,'window.__stage003RestoreLargeWorkerPost?.();delete window.__stage003LargeMeta;true');
   console.log('Stage 003 large file:// PSD16 Worker regression:',JSON.stringify({
     fixture:fixture.filename,source:'ZeTer-generated, NOT Adobe Photoshop-authored',
     rawBytes,tiles:native.tiles,workerJobs:after.jobs,importAndPreviewMs,fillAndPreviewMs,
     memory:{type:'informational CDP sampled, NOT memory peak',...memory},
   }));
+  } finally {
+    // Keep the Node process terminable even if a browser assertion rejects.
+    // The sampler owns an interval; previous failures left it running until
+    // GitHub Actions hit its 10-minute job timeout.
+    if(!samplerStopped) await sampler.stop().catch(()=>{});
+    await evaluate(client,'window.__stage003RestoreLargeWorkerPost?.();delete window.__stage003LargeMeta;true')
+      .catch(()=>{});
+  }
 }
