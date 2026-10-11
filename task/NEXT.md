@@ -1,8 +1,8 @@
-## 010D-C — PSB32 Float32 active mid-kernel switch + native Undo/Redo (PR gate pending, 2026-10-11)
+## 010D-C — PSB32 Float32 active mid-kernel switch + native Undo/Redo (merged, exact-main CI success, 2026-10-11)
 
 - [016](016-psb32-mid-kernel-undo-redo.md): Chromium `file://` ZeTer-generated 1025² PSB32 Float32; test-only probe AFTER native kernel write, active tab switch cancellation, strict native sample value/**Uint32 little-endian words** via public Save Project, two-session History isolation, successor Worker and native Undo/Redo restore.
 - Same regression continues for PSD16 Uint16; browser smoke invokes both under fresh reload. **Not** an independent Photoshop fixture, two native high-depth tabs or true peak memory test.
-- Gate: PR CI, merge, exact main push CI **pending**. Until confirmed do not mark task completed.
+- **Gate complete:** [PR #196](https://github.com/zeter1/ZeTer-Photo-Editor/pull/196) merged (squash `9d146eb3`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38150936804) and [exact-main push CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38151060369).
 - **Next P0:** licensed Adobe-authored RGB16/CMYK32 PSD/PSB + reference render [002](002-psd-compatibility-corpus.md). **Next P1:** 010E worst-case dense ROI plan; then 010D-D *two native high-depth* concurrent-session stress and browser memory high-water-mark methodology. Stage 002/003 still open.
 
 ## 010D-B — active Content-Aware Worker cancellation on tab switch (слито, CI success, 2026-10-11)
