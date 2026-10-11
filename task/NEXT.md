@@ -3,6 +3,13 @@
 Источник статуса — `main` и реальные тестовые доказательства, а не обещание «Photoshop parity».
 Подробные дневники: [002](002-psd-compatibility-corpus.md), [003](003-tiled-content-aware.md).
 
+## Текущая проверяемая проходка — 007 browser PSD16/PSB32 UI import (ветка, CI ещё не подтверждён)
+
+- Работа ведётся в `feat/stage003-browser-psd-psb-import-20261011`; подробности и ограничения — [007](007-browser-psd-psb-ui-import.md).
+- Добавлены собственные binary PSD16/PSB32 fixtures и проверки `file://` GUI import → native 16/32-bit serialized samples → preview.
+- **Не отмечать как завершённое до PR CI + merge + exact-main CI.** Это не независимо Photoshop-authored corpus, не большой v2 tiled import и не полная совместимость.
+- Далее: большой PSD16/PSB32 v2 Worker → preview → Undo/Redo + отмена, затем adaptive dense grouping; параллельно реальный внешний high-depth corpus Stage 002.
+
 ## Что считать готовым
 
 - [x] Базовая v2-модель документов/слоёв, raster/vector masks, adjustment layers,
