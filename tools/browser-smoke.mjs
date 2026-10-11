@@ -379,25 +379,10 @@ async function verifyBrowserHighDepthPsdPsbImport(client) {
     })()`);
     assert(dispatched.name===fixture.filename && dispatched.bytes===fixture.bytes.byteLength,
       'PSD/PSB UI input must receive exact fixture bytes',JSON.stringify(dispatched));
-    try {
-      await waitFor(`Stage 003 browser import ${fixture.filename}`,async()=>evaluate(client,
-        `typeof doc !== 'undefined' && doc.name === ${JSON.stringify(documentName)} &&
-         doc.layers.some(layer => layer.name === 'Stage 003 native layer' &&
-           layer.highDepthSource?.bitsPerChannel === ${fixture.bitsPerChannel}) &&
-         document.querySelector('#statusText')?.textContent?.startsWith('PSD/PSB импортирован')`),
-        15_000);
-    } catch (error) {
-      const diagnostics=await evaluate(client, `(() => ({
-        name:typeof doc!=='undefined'?doc.name:null,
-        status:document.querySelector('#statusText')?.textContent||'',
-        layers:typeof doc!=='undefined'?doc.layers.map(layer=>({
-          name:layer.name,kind:layer.highDepthSource?.kind,bits:layer.highDepthSource?.bitsPerChannel
-        })):[],
-        dialogs:[...document.querySelectorAll('dialog[open]')].map(dialog=>dialog.id),
-      }))()`);
-      fail('Stage 003 PSD/PSB browser import did not reach native state',
-        JSON.stringify({file:fixture.filename,diagnostics,error:error.message}));
-    }
+    await waitFor(`Stage 003 browser import ${fixture.filename}`,async()=>evaluate(client,
+      `document.querySelector('#statusText')?.textContent?.startsWith('PSD/PSB импортирован') &&
+       document.querySelectorAll('.layer-row').length===1 &&
+       document.querySelector('#editorCanvas').width===${fixture.width}`),15_000);
     await waitFor(`Stage 003 browser preview ${fixture.filename}`,async()=>evaluate(client,
       `(() => {
         const canvas=document.querySelector('#editorCanvas');
@@ -405,30 +390,59 @@ async function verifyBrowserHighDepthPsdPsbImport(client) {
         const pixel=canvas.getContext('2d').getImageData(${fixture.defectX},${fixture.defectY},1,1).data;
         return pixel[0]>100 && pixel[0]>pixel[1] && pixel[0]>pixel[2];
       })()`),15_000);
-    const native=await evaluate(client,`(() => {
-      const layer=doc.layers.find(value=>value.name==='Stage 003 native layer');
-      const source=layer?.highDepthSource;
-      const buffer=source?deserializePixelBufferSource(source):null;
-      const index=(${fixture.defectY}*${fixture.width}+${fixture.defectX})*${fixture.channels};
-      return {
-        model:buffer?.model,bits:buffer?.bitsPerChannel,
-        nativeType:buffer?.data?.constructor?.name,
-        sourceKind:source?.kind,rawBytes:source?.rawBytes,
-        normal:buffer?Array.from(buffer.data.slice(0,${fixture.channels})):null,
-        damaged:buffer?Array.from(buffer.data.slice(index,index+${fixture.channels})):null,
+    // Verify the actual editor's persisted native bytes using its File > Save
+    // Project command. The application bundle is IIFE-scoped: production
+    // internal state is deliberately NOT exposed as a debug global.
+    const native=await evaluate(client,`(async () => {
+      let savedBlob=null;
+      const original=URL.createObjectURL;
+      URL.createObjectURL=function(blob,...args) {
+        if(blob instanceof Blob && blob.type==='application/json')savedBlob=blob;
+        return original.call(URL,blob,...args);
       };
+      try {
+        document.querySelector('.menu-button[data-menu="file"]').click();
+        const save=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+          button=>button.querySelector('span')?.textContent?.startsWith('Сохранить проект'));
+        if(!save || save.disabled)return {error:'Save Project UI item unavailable'};
+        save.click();
+        if(!savedBlob)return {error:'Save Project did not produce a JSON Blob'};
+        const project=JSON.parse(await savedBlob.text());
+        const layer=project.layers.find(value=>value.name==='Stage 003 native layer');
+        const source=layer?.highDepthSource;
+        if(!source)return {error:'Imported raster layer has no high-depth source',name:project.name,
+          layers:project.layers.map(item=>item.name)};
+        const raw=atob(source.dataUrl.split(',')[1]);
+        const bytes=Uint8Array.from(raw,char=>char.charCodeAt(0));
+        const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+        const sampleAt=pixel=>Array.from({length:${fixture.channels}},(_,ch)=>{
+          const byte=(pixel*${fixture.channels}+ch)*(${fixture.bitsPerChannel}/8);
+          return ${fixture.bitsPerChannel}===16
+            ? view.getUint16(byte,true)
+            : view.getFloat32(byte,true);
+        });
+        return {
+          name:project.name,model:source.model,bits:source.bitsPerChannel,
+          sampleType:source.sampleType,sourceKind:source.kind,rawBytes:source.rawBytes,
+          normal:sampleAt(0),
+          damaged:sampleAt(${fixture.defectY}*${fixture.width}+${fixture.defectX}),
+        };
+      } finally {
+        URL.createObjectURL=original;
+      }
     })()`);
-    assert(native.model==='rgb' && native.bits===fixture.bitsPerChannel &&
-      native.nativeType===fixture.nativeArrayType &&
+    assert(native.name===documentName && native.model==='rgb' &&
+      native.bits===fixture.bitsPerChannel &&
+      native.sampleType===(fixture.bitsPerChannel===16?'uint':'float') &&
       native.sourceKind==='zpe-pixel-buffer-source-v1' &&
       native.rawBytes===fixture.width*fixture.height*fixture.channels*(fixture.bitsPerChannel/8) &&
       JSON.stringify(native.normal)===JSON.stringify(fixture.normal) &&
       JSON.stringify(native.damaged)===JSON.stringify(fixture.damaged),
-      'Browser PSD/PSB import must retain every native sample (not only RGBA8 preview)',
+      'File > Save Project must preserve native PSD/PSB samples after UI import and preview',
       JSON.stringify({file:fixture.filename,native}));
     console.log('Stage 003 file:// Photoshop-format high-depth import smoke:',JSON.stringify({
       fixture:fixture.filename,bits:fixture.bitsPerChannel,version:fixture.version,
-      nativeType:native.nativeType,sourceKind:native.sourceKind,
+      sampleType:native.sampleType,sourceKind:native.sourceKind,
       provenance:'ZeTer synthetic writer; not an Adobe Photoshop authored golden',
     }));
   }
