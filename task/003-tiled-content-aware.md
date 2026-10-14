@@ -1,4 +1,4 @@
-> **036A (2026-10-14, в работе):** добавлен test-only native oracle для wide connected ROI 8288 и проверки полного byte/Undo/Redo/sampling evidence; реальные Chromium UI, operation JSON, PR/exact-main CI остаются очередью [036](036-browser-connected-roi-quality.md). Это не завершает Stage 003 и не подменяет внешние Adobe fixtures [002](002-psd-compatibility-corpus.md).
+> **036A (2026-10-14, слито; exact-code main CI success):** добавлен test-only native oracle для wide connected ROI 8288 и проверки полного byte/Undo/Redo/sampling evidence; реальные Chromium UI, operation JSON, PR/exact-main CI остаются очередью [036](036-browser-connected-roi-quality.md). [PR #220](https://github.com/zeter1/ZeTer-Photo-Editor/pull/220) → `94633e9`, [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38566438939) и [main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38566790704) success. Это не завершает Stage 003 и не подменяет внешние Adobe fixtures [002](002-psd-compatibility-corpus.md).
 
 ## 2026-10-14 — 035: Chromium recovery startup race закрыта
 

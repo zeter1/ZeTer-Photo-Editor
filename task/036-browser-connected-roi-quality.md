@@ -3,8 +3,9 @@
 **Статус: ОТКРЫТО (P1, Stage 003).**
 **Основание:** после закрытия [035](035-browser-recovery-modal-flake.md), [034](034-complex-roi-native-quality.md) по-прежнему доказывает native connected ROI только в Node Worker. Реальный Chromium проверяет небольшой 5×5 дефект ([033](033-browser-synthetic-native-quality.md)), но не широкий сложный ROI.
 
-## Проходка 036A — точный native evidence-контракт (2026-10-14, PR в подготовке)
+## Проходка 036A — точный native evidence-контракт (2026-10-14, СЛИТО, main CI success)
 
+- **Gate 036A:** [PR #220](https://github.com/zeter1/ZeTer-Photo-Editor/pull/220) → squash [`94633e9`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/94633e9e333aceb961241487853a92ea2531ed48); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38566438939) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38566790704): `npm run check`, real Chromium file:// smoke, operation JSON verification, профили и diff hygiene. Это gate **только 036A**, не wide-browser 036B/C.
 - [x] Добавлен самостоятельный test-only oracle `tools/browser-wide-connected-native-evidence.mjs`: 8288 пикселей (два острова 64×64 и диагональ 96), проверка точных индексов, оригинальных native tile bytes вне выделения, alpha, MAE/RMSE относительно ZeTer-generated фона, полная байтовая идентичность Undo и Redo.
 - [x] `tests/browser-wide-connected-native-evidence.test.mjs`: RGB16/Float32 + подменённая форма ROI, missing/overlapping/corrupt tiles, NaN, соседний пиксель/alpha, Undo/Redo и недоказанные memory samples/peaks.
 - [x] Встроен fail-closed контракт временных меток и coverage, требующий `workerPidMapping='unknown'` и `operationPeakRssBytes=null`. Ни snapshot, ни CDP target не объявляются настоящим Worker RSS.

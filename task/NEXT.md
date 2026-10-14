@@ -1,5 +1,6 @@
-## 036A — wide connected ROI evidence baseline (в процессе, 2026-10-14)
+## 036A — wide connected ROI evidence baseline (слито; PR + exact-main CI success, 2026-10-14)
 
+- [PR #220](https://github.com/zeter1/ZeTer-Photo-Editor/pull/220) слит в main [`94633e9`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/94633e9e333aceb961241487853a92ea2531ed48); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38566438939), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38566790704): Node, generated bundle parity, Chromium file:// smoke, operation artifacts, profiles, diff hygiene.
 - Добавлен test-only native tiled oracle: строго 8288 connected pixels (64×64 + диагональ + 64×64), byte/alpha invariance, native 16/32-bit MAE/RMSE, exact Undo/Redo, sampling missingness and no unproven RAM peaks. [036](036-browser-connected-roi-quality.md).
 - **Следующая проходка 036B:** реальный Chromium `file://` PSD16/PSB32 с **широким** UI selection и native Worker (не Node-only), публичный `Save Project` для точного исходного/итогового/Undo/Redo source, затем 036C measured wall-clock+RSS/CDP samples, CI artifact validation, PR/main gate. 036 **открыта** до этого.
 - P0 [002](002-psd-compatibility-corpus.md) требует внешних лицензированных Photoshop-authored goldens — не заменять их синтетикой.
