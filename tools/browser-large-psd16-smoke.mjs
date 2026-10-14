@@ -322,6 +322,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
       'Cancellation must observe a real native kernel pixel write before any result reply',
       JSON.stringify(observed));
     operation.mark('cancel-kernel-write-observed');
+    const probeAt=Date.now();
     // A real UI lock revokes the live worker owner. Polling terminates the
     // CPU-spinning worker before its instrumented 6s deadline.
     await evaluate(client,"document.querySelector('.layer-row.selected .layer-lock').click();true");
@@ -329,7 +330,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
       'window.__stage003LargeKernelProbe?.terminations>=1'),15_000);
     operation.mark('cancel-owner-revoked');
     const stopped=await evaluate(client,'window.__stage003LargeKernelProbe');
-    assert(stopped.completedReplies===0 && Date.now()-cancellationStarted<6000,
+    assert(stopped.completedReplies===0 && Date.now()-probeAt<5000,
       'Native kernel must terminate before CPU stall can finish',JSON.stringify(stopped));
     const cancelled=await evaluate(client,'('+result.toString()+')()');
     assert(cancelled.jobs===2 && cancelled.pixel[0]>100 &&
@@ -343,6 +344,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     await sampler.snapshot('after-large-mid-kernel-cancel');
     console.log('Stage 003 '+format+' actual mid-kernel cancel:',JSON.stringify({
       observed,stopped,cancellationLatencyMs:Date.now()-cancellationStarted,
+      terminateAfterObservedKernelWriteMs:Date.now()-probeAt,
       unchangedNativeTileBytes:true,
       note:'Real kernel write observed before terminate; CPU stall is test-only, not worker peak RSS',
     }));
