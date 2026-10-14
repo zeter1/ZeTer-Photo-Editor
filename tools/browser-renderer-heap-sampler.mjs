@@ -203,16 +203,38 @@ export function createBrowserRendererHeapSampler(client, {
       const processSamples = samples.filter(item => Number.isSafeInteger(item.processPrivateMemoryBytes));
       const processPeak = processSamples.reduce((best, item) =>
         !best || item.processPrivateMemoryBytes > best.processPrivateMemoryBytes ? item : best, null);
-      const processBaseline = processSamples[0] ?? null;
-      const processEnd = processSamples.at(-1) ?? null;
+      // Start/end mean the actual before-import/finished snapshots, not the
+      // first or last successful optional CDP or /proc read. A disappeared
+      // metric MUST NOT be reported as a value observed at operation finish.
+      const processBaseline = Number.isSafeInteger(baseline.processPrivateMemoryBytes)
+        ? baseline : null;
+      const processEnd = Number.isSafeInteger(end.processPrivateMemoryBytes) ? end : null;
       const rssSamples = samples.filter(item => Number.isSafeInteger(item.chromiumRssBytes));
-      const rssBaseline = rssSamples[0] ?? null;
-      const rssEnd = rssSamples.at(-1) ?? null;
+      const rssBaseline = Number.isSafeInteger(baseline.chromiumRssBytes) ? baseline : null;
+      const rssEnd = Number.isSafeInteger(end.chromiumRssBytes) ? end : null;
+      function metricCoverage(field) {
+        const observed = samples.filter(item => Number.isSafeInteger(item[field]));
+        return {
+          observedSamples:observed.length,
+          missingSamples:samples.length - observed.length,
+          observedAtStart:Number.isSafeInteger(baseline[field]),
+          observedAtFinish:Number.isSafeInteger(end[field]),
+          firstObservedPhase:observed[0]?.phase ?? null,
+          lastObservedPhase:observed.at(-1)?.phase ?? null,
+          missingMilestonePhases:samples
+            .filter(item => item.phase !== 'sample' && !Number.isSafeInteger(item[field]))
+            .map(item => item.phase),
+        };
+      }
       const rssMax = rssSamples.reduce((max, item) =>
         !max || item.chromiumRssBytes > max.chromiumRssBytes ? item : max, null);
       return {
         metric:'CDP Performance.getMetrics / renderer JSHeapUsedSize',
-        limitations:'Informational sampled main-frame JS heap, browser Worker target census, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. Target IDs cannot be joined to OS PIDs; NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
+        limitations:'Informational sampled main-frame JS heap, browser Worker target census, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. Missing start/end counters are null, not last-observed substitutes. Target IDs cannot be joined to OS PIDs; NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
+        metricCoverage: {
+          chromiumPrivateMemory:metricCoverage('processPrivateMemoryBytes'),
+          linuxAggregateRss:metricCoverage('chromiumRssBytes'),
+        },
         browserWorkerTargets: {
           ...workerTargets.report(),
           availability:!processClient ? 'not-requested' :
@@ -249,7 +271,8 @@ export function createBrowserRendererHeapSampler(client, {
           baselinePrivateBytes:processBaseline?.processPrivateMemoryBytes ?? null,
           sampledMaxPrivateBytes:processPeak?.processPrivateMemoryBytes ?? null,
           endPrivateBytes:processEnd?.processPrivateMemoryBytes ?? null,
-          sampledIncreaseBytes:processPeak ? Math.max(0, processPeak.processPrivateMemoryBytes - processBaseline.processPrivateMemoryBytes) : null,
+          sampledIncreaseBytes:processPeak && processBaseline
+            ? Math.max(0, processPeak.processPrivateMemoryBytes - processBaseline.processPrivateMemoryBytes) : null,
           maxSampledProcessCount:processSamples.reduce((max, item) => Math.max(max, item.processCount), 0),
         },
         linuxProcessRss: {
@@ -261,7 +284,8 @@ export function createBrowserRendererHeapSampler(client, {
           baselineAggregateRssBytes:rssBaseline?.chromiumRssBytes ?? null,
           sampledMaxAggregateRssBytes:rssMax?.chromiumRssBytes ?? null,
           endAggregateRssBytes:rssEnd?.chromiumRssBytes ?? null,
-          sampledIncreaseBytes:rssMax ? Math.max(0, rssMax.chromiumRssBytes - rssBaseline.chromiumRssBytes) : null,
+          sampledIncreaseBytes:rssMax && rssBaseline
+            ? Math.max(0, rssMax.chromiumRssBytes - rssBaseline.chromiumRssBytes) : null,
           maxObservedIndividualProcessHwmBytes:rssSamples.reduce((max, item) =>
             Math.max(max, item.largestProcessHighWaterBytes), 0) || null,
         },

@@ -27,6 +27,7 @@ test('024A: operation duration is distinct from sampled memory and process lifet
   assert.equal(r.memory.maxObservedSinglePidLifetimeHwmBytes,7000);
   assert.equal(r.memory.chromiumPrivateMemoryAvailability,'unavailable');
   assert.equal(r.memory.processChurn.workerPidMapping,'unknown');
+  assert.equal(r.memory.metricCoverage,null);
   assert.match(r.memory.limitations,/No exact peak/);
   assert.deepEqual(r.milestones.map(x=>x.phase),steps);
   assert.throws(()=>t.mark('too-late'),/finished/);
