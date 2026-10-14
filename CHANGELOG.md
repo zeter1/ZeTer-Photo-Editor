@@ -2,12 +2,12 @@
 
 ## 1.46.1 — текущая версия
 
-### 2026-10-14 — Подготовлен независимый popixel native эталон качества для реальной фотографии
+### 2026-10-14 — Подготовлен независимый попиксельный native эталон качества для реальной фотографии
 
 - Добавлено: test-only `tools/real-photo-native-quality.mjs` с отдельным per-pixel known-clean reference для Uint16/Float32, контроль SHA-256 канонических native LE words и MAE/RMSE без 8-битного Canvas.
 - Проверяется: неизменность alpha/outside-selection на уровне native words, независимость reference/snapshots, корректность frozen selection и защита от недостоверных данных; отдельные негативные unit-тесты.
 - Документация: CC0 кандидат реальной фотографии и невыполненные подготовительные шаги в `task/037` и `tests/fixtures/real-photo/`.
-- Проверено: локально 5/5 `node --test tests/real-photo-native-quality.test.mjs`; статус PR/CI/main фиксируется отдельно после фактических проверок.
+- Проверено: локально 5/5 `node --test tests/real-photo-native-quality.test.mjs`; [PR #223](https://github.com/zeter1/ZeTer-Photo-Editor/pull/223) → [27a6adb](https://github.com/zeter1/ZeTer-Photo-Editor/commit/27a6adb830797d3258bc640ffe09dd89c3ef92b8), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38586323259), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38586743806). `npm run check`, Chromium `file://` smoke, profiles/artifacts, generated parity, diff hygiene — success. Это не браузерный benchmark на фотографии.
 - Ограничения проверки: оригинальные байты фотографии и SHA-256 ещё не закреплены; реальное Chromium/Photoshop сравнение не проводилось; production runtime и версия 1.46.1 не менялись. 037 и P0 002 открыты.
 
 ### 2026-10-14 — Устранена гонка модального окна восстановления в Chromium smoke
