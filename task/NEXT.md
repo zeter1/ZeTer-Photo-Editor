@@ -1,6 +1,6 @@
-## Следующее P1 — [035](035-browser-recovery-modal-flake.md): нестабильная модалка восстановления при последовательных Chromium reload
+## Следующее P1 — [035](035-browser-recovery-modal-flake.md): Chromium recovery modal race (код PR, gate CI не пройден)
 
-- Основной CI первого прогона `38545678383` упал в 010D UI smoke: поздний `.recovery-modal` перекрыл `overlayCanvas` после успешного импорта. Повторная попытка CI **success**. Нужно убрать race из тестовой подготовки, не закрывая реальные окна восстановления для пользователя. **Не считать исправленным**.
+- В ветке `fix/035-browser-recovery-startup-gate` добавлено ожидание `appReady=true` после recovery scan, публичная обработка recovery modal и три реальных `file://` reload с 550 мс delayed IndexedDB. Проверки PR/merge/exact-main ещё ожидаются; **035 не закрывать**. Дальше [003](003-tiled-content-aware.md) / [002](002-psd-compatibility-corpus.md).
 
 ## 034 / 024D3 — native quality сложной связной ROI (слито, CI success)
 
