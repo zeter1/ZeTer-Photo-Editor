@@ -1,6 +1,6 @@
-## 031 / 024C6 — browser memory claim integrity (PR/CI в проверке, 2026-10-14)
+## 031 / 024C6 — browser memory claim integrity (слито, PR + exact-main CI success, 2026-10-14)
 
-- [031](031-browser-memory-claim-integrity.md): fail-closed проверка вложенного Worker census/target records и запрет ложных `provenWorkerTerminationCount`, Worker→PID, exit и operation peak RSS claims как при записи, так и при верификации Chromium JSON. Добавлены негативные unit/CI regressions. **Это только test harness**, не новый функционал редактора; не отмечать CI зелёным до проверки.
+- [031](031-browser-memory-claim-integrity.md): fail-closed проверка вложенного Worker census/target records и запрет ложных `provenWorkerTerminationCount`, Worker→PID, exit и operation peak RSS claims как при записи, так и при верификации Chromium JSON. Добавлены негативные unit/CI regressions. **Это только test harness**, не новый функционал редактора. [PR #215](https://github.com/zeter1/ZeTer-Photo-Editor/pull/215) → `505a1a9`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38533360435), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38533729179).
 - **Следом:** P0 реальные Adobe-authored и лицензированные PSD16/PSB32 goldens [002](002-psd-compatibility-corpus.md); P1 documented target→PID или `unknown` [025](025-browser-worker-target-census.md) и независимые browser quality/latency/RSS [003](003-tiled-content-aware.md). Общие Stage 002/003 открыты.
 
 ## 030 / 024C5 — пересчёт итоговых browser durations по milestone (слито, PR + exact-code main CI success, 2026-10-14)

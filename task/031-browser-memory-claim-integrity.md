@@ -1,6 +1,6 @@
 # 031 / 024C6 — защита browser memory artifact от ложных Worker/PID/exit claims
 
-**Статус (2026-10-14):** код и тесты подготовлены в `feature/031-browser-memory-claim-integrity`; CI/merge не считать завершёнными без фактического результата GitHub Actions.
+**Статус (2026-10-14):** **слито в `main`** — [PR #215](https://github.com/zeter1/ZeTer-Photo-Editor/pull/215) → squash `505a1a9`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38533360435) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38533729179). Проверены 1213 Node-тестов, browser Chromium `file://` PSD16/PSB32, JSON artifacts, профили и diff hygiene. **Только test harness**; Stage 002/003 открыты.
 
 ## Причина
 
@@ -12,8 +12,9 @@
 - [x] Запрещены претензии на operation-wide peak и Worker RSS, ложный `provenExitCount`, любое присвоение PID Worker через `workerPidMapping`.
 - [x] Для вложенного Worker target census требуются явные `workerPidMapping:'unknown'`, `provenWorkerTerminationCount:null`, согласованный `uniqueWorkerTargetIds`; неизвестные поля census и PID/URL/private fields в individual targets отклоняются.
 - [x] `tests/browser-operation-artifact.test.mjs`: негативные случаи с forged exit, Worker PID, peak RSS, подменёнными target metadata, пропущенным null, поддельным count и проверкой уже сохранённого PSD16 JSON.
-- [ ] Локальные `npm run check` и Chromium `file://` — выполнить при наличии полного репозитория.
-- [ ] GitHub Actions PR CI, merge и CI точного коммита main — фиксировать только по факту успешного результата.
+- [x] GitHub Actions: `npm run check`, generated parity, реальный Chromium `file://` PSD16/PSB32, JSON verifier, профили и diff hygiene — success.
+- [x] [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38533360435) success; [PR #215](https://github.com/zeter1/ZeTer-Photo-Editor/pull/215) слит squash `505a1a9`; [CI exact-code main](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38533729179) success.
+- [ ] Локальный запуск из этого сеанса не проводился: сеть контейнера не имеет доступа к GitHub; результат CI не выдаётся за локальный прогон.
 
 ## Границы
 
