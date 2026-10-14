@@ -70,7 +70,14 @@ export function createBrowserRendererHeapSampler(client, {
         workerTargetUnavailableReason = String(error?.message || error);
       }
     }
-    if (processClient && !entry.workerTargetsObserved) workerTargets.noteMissingSnapshot(phase);
+    // Target census validates milestone labels more strictly than the generic
+    // heap sampler. When it rejects a label (or payload), missing coverage
+    // must still be recorded without failing the independent browser smoke.
+    if (processClient && !entry.workerTargetsObserved) {
+      const censusPhase = typeof phase === 'string' && /^[a-z][a-z0-9-]*$/.test(phase)
+        ? phase : 'invalid-phase';
+      workerTargets.noteMissingSnapshot(censusPhase);
+    }
     if (processClient && (!processUnavailableReason || !rssUnavailableReason || !processIdentityUnavailableReason)) {
       try {
         const info = await processClient.send('SystemInfo.getProcessInfo');
