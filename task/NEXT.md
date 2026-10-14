@@ -1,3 +1,8 @@
+## 034 / 024D3 — native quality сложной связной ROI (PR/CI pending)
+
+- [034](034-complex-roi-native-quality.md): Node Worker RGB16/CMYKA32 native baseline/repaired MAE/RMSE по двум островам 64×64 и соединяющему диагональному коридору (8288 pixels). Новый pure oracle проверяет exact unchanged outside selection/alpha и rejects malformed inputs; синхронный результат и настоящий Worker сохраняют byte parity. **Только тестовый Node profile**, не браузерный wide ROI, не Adobe golden. Проверки полного CI и merge ещё ожидаются.
+- **Следом:** P0 лицензированный Photoshop-authored корпус [002](002-psd-compatibility-corpus.md); P1 настоящее Chromium `file://` сложное connected ROI + latencies/observational memory [003](003-tiled-content-aware.md); P1 честная атрибуция Worker→PID или `unknown` [025](025-browser-worker-target-census.md). Общие Stage 002/003 остаются открытыми.
+
 ## 033 / 024D2 — браузерный native quality reference (слито; PR + exact-main CI success)
 
 - [033](033-browser-synthetic-native-quality.md): real Chromium `file://` PSD16/PSB32 Worker + mid-kernel cancellation, retry и Undo/Redo измеряются по исходным Uint16/Float32 на ZeTer-generated постоянном фоне. Native MAE/RMSE относительно known 5×5 reference; качество должно улучшаться после Fill и точно возвращаться после Undo. CI JSON теперь содержит валидируемое quality evidence; отдельные негативные тесты. Это не Photoshop reference и не real Worker peak RSS. [PR #217](https://github.com/zeter1/ZeTer-Photo-Editor/pull/217) → `685d178`, [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38542625807), [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38543002186) — success.
