@@ -1,3 +1,9 @@
+## 028 / 024C3 — Worker Target snapshot observation gaps (PR CI success, merge pending)
+
+- [028](028-browser-worker-target-observation-gaps.md): независимые от CDP PID и Linux `/proc` пропуски `Target.getTargets`, `snapshotCoverage`, `null` при неизвестной последней видимости и безопасная invalid-phase метка.
+- **PR gate success:** [PR #212](https://github.com/zeter1/ZeTer-Photo-Editor/pull/212), [CI 38526924226](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38526924226) — `npm run check`, реальный Chromium `file://` PSD16/PSB32, JSON/profiles, diff hygiene. **Merge и exact-main CI пока не подтверждены.**
+- **Следом:** P0 [002](002-psd-compatibility-corpus.md) лицензированный independently Photoshop-authored corpus, P1 [025](025-browser-worker-target-census.md) target→PID только с доказательствами, [003](003-tiled-content-aware.md) quality/performance в браузере. Stage 002/003 открыты.
+
 ## 027 / 024C2 — PID observation gaps при cancel→retry (слито, PR + exact-code main CI success, 2026-10-14)
 
 - [027](027-browser-process-observation-gaps.md): добавлен per-snapshot CDP PID/Linux starttime coverage; пропущенный финальный /proc снимок не подменяется прежней видимостью, adjacency churn не вычисляется сквозь неизвестный интервал.
