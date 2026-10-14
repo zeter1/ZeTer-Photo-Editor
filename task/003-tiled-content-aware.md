@@ -1,3 +1,8 @@
+## 2026-10-14 — 024D3: Native synthetic connected ROI MAE/RMSE (PR/CI pending)
+
+- [034](034-complex-roi-native-quality.md): реальный **Node** Worker профиль сложного связного RGB16/CMYKA32 ROI теперь публикует независимые от inpaint-ядра baseline/repaired MAE/RMSE и гарантирует нетронутые native samples вне selection/alpha. Для 8288 выбранных пикселей сравнивает с заведомо чистым ZeTer-generated постоянным фоном. Существующие byte parity/отмена остаются в силе. PR и CI ещё не подтверждены.
+- **Открыто:** wide connected ROI в **Chromium `file://`**, внешний Adobe Photoshop-authored golden, memory peak и real-image quality. Stage 003 не закрыта.
+
 ## 2026-10-14 — 024D2: native known-reference quality в реальном браузере (слито, exact-code main CI success)
 
 - [033](033-browser-synthetic-native-quality.md): расширение настоящего Chromium `file://` PSD16/PSB32 UI Worker + cancel/retry/Undo/Redo. Сравнение по native 16/32-bit MAE/RMSE с известным ZeTer-generated фоном на дефекте 5×5, CI JSON fail-closed проверки точности. Погрешность на синтетике ещё не доказывает качества на реальных фотографиях. [PR #217](https://github.com/zeter1/ZeTer-Photo-Editor/pull/217) → `685d178`, [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38542625807), [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38543002186) — success.
