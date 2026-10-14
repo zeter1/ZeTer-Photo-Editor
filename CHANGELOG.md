@@ -6,6 +6,7 @@
 
 - В действующем Chromium `file://` сценарии PSD16/PSB32 теперь измеряется ошибка восстановления заданного дефекта 5×5 относительно известного чистого фона: native Uint16/Float32 MAE и RMSE по сохранённым тайлам, а не 8-битному Canvas preview.
 - Для первой Fill, Redo, отмены посреди Worker-ядра, повтора Fill, Undo и финального Redo фиксируются и сверяются метрики; вложенные quality values валидируются при создании JSON-артефакта и независимом CI-чтении. Добавлены тесты повреждённых native-байтов, перекрытых тайлов, nonfinite Float32 и ложных CI scores.
+- Проверено: [PR #217](https://github.com/zeter1/ZeTer-Photo-Editor/pull/217) → squash `685d178`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38542625807) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38543002186).
 - Ограничения: тестовый harness, **без** изменения пользовательского runtime и номера приложения. Эталон создан ZeTer и касается только постоянного фона, не Photoshop-authored PSD/PSB, естественной текстуры или настоящего operation-wide пика памяти.
 
 

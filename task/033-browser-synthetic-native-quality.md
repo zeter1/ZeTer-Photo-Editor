@@ -1,6 +1,6 @@
 # 033 / 024D2 — native synthetic-quality oracle для Chromium PSD16/PSB32 (Stage 003)
 
-**Статус:** проходка в проверке (2026-10-14). Это test-only расширение настоящего UI + Worker сценария; production codec/editor/render не меняется. Общие Stage 002/003 остаются **открытыми**.
+**Статус:** **слито в `main`** (2026-10-14): [PR #217](https://github.com/zeter1/ZeTer-Photo-Editor/pull/217) → squash `685d178`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38542625807), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38543002186). Это test-only расширение настоящего UI + Worker сценария; production codec/editor/render не меняется. Общие Stage 002/003 остаются **открытыми**.
 
 ## Цель
 
@@ -12,7 +12,7 @@
 - [x] tools/browser-large-psd16-smoke.mjs: реальный Chromium file:// UI PSD16/PSB32, тот же Worker, native project save после первой Fill/Redo, после mid-kernel отмены, retry/Undo/Redo; проверка улучшения относительно исходного synthetic reference и exact возврата Undo/Redo.
 - [x] tools/browser-operation-timeline.mjs / tools/browser-operation-artifact.mjs: версия quality evidence, запись рядом с timings и sampled memory в существующие JSON, проверки подмены/пропусков на writer и CI-reader. Не путать информационные RSS/CDP с истинным Worker memory peak.
 - [x] tests/browser-synthetic-native-quality.test.mjs, tests/browser-operation-artifact.test.mjs: native Uint16/Float32 и adversarial JSON regression.
-- [ ] Проверка Node npm run check, настоящий Chromium file:// PSD16/PSB32 JSON CI и PR merge + exact-main CI (фиксировать ссылки после запуска).
+- [x] `npm run check`, настоящий Chromium `file://` PSD16/PSB32 с проверкой JSON, профили, diff hygiene, merge и exact-main CI — [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38542625807) / [main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38543002186).
 
 ## Что подтверждается / не подтверждается
 
