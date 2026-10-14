@@ -24,7 +24,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
   const metadata={
     filename:fixture.filename,width:fixture.width,height:fixture.height,
     defectX:fixture.defectX,defectY:fixture.defectY,channels:fixture.channels,
-    bitsPerChannel:fixture.bitsPerChannel,
+    bitsPerChannel:fixture.bitsPerChannel,normal:fixture.normal,
   };
   const sampler=createBrowserRendererHeapSampler(client,{processClient:browserClient});
   const operation=createBrowserOperationTimeline({
