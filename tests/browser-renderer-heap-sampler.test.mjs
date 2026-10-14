@@ -362,3 +362,82 @@ test('010E memory: RSS continues when CDP omits privateMemory but reports valid 
   assert.equal(result.linuxProcessRss.sampledMaxAggregateRssBytes,1300);
   assert.equal(result.linuxProcessRss.sampledIncreaseBytes,200);
 });
+
+test('026: loss of CDP privateMemory and Linux /proc at finish does not reuse a stale end sample', async () => {
+  let processReads=0, rssReads=0;
+  const page={async send(method) {
+    if (method==='Performance.enable') return {};
+    assert.equal(method,'Performance.getMetrics');
+    return {metrics:[{name:'JSHeapUsedSize',value:100},{name:'JSHeapTotalSize',value:200}]};
+  }};
+  const processClient={async send(method) {
+    if (method==='Target.getTargets') return {targetInfos:[]};
+    assert.equal(method,'SystemInfo.getProcessInfo');
+    const privateMemory=[100,150,undefined][processReads++];
+    return {processInfo:[{id:42,type:'renderer',...(privateMemory===undefined?{}:{privateMemory})}]};
+  }};
+  const sampler=createBrowserRendererHeapSampler(page,{
+    processClient, schedule:()=>1, unschedule:()=>{},
+    processRssSampler:async () => {
+      const bytes=[1000,1300][rssReads++];
+      if (bytes===undefined) throw Error('ENOENT: process disappeared during /proc read');
+      return {supported:true,processCount:1,aggregateRssBytes:bytes,
+        largestProcessHighWaterBytes:bytes+100,
+        processSamples:[{pid:42,starttimeTicks:'123',type:'renderer',
+          rssBytes:bytes,highWaterBytes:bytes+100}]};
+    },
+  });
+  await sampler.start();
+  await sampler.snapshot('cancel-owner-revoked');
+  const report=await sampler.stop();
+  assert.equal(processReads,3);
+  assert.equal(rssReads,3);
+  assert.equal(report.sampleCount,3);
+  for (const [key,baseline,peak,delta] of [
+    ['chromiumProcesses',100,150,50],['linuxProcessRss',1000,1300,300],
+  ]) {
+    const summary=report[key];
+    assert.equal(summary.availability,'unavailable');
+    assert.equal(key==='chromiumProcesses'?summary.baselinePrivateBytes:summary.baselineAggregateRssBytes,baseline);
+    assert.equal(key==='chromiumProcesses'?summary.sampledMaxPrivateBytes:summary.sampledMaxAggregateRssBytes,peak);
+    assert.equal(key==='chromiumProcesses'?summary.endPrivateBytes:summary.endAggregateRssBytes,null);
+    assert.equal(summary.sampledIncreaseBytes,delta);
+  }
+  assert.deepEqual(report.metricCoverage.chromiumPrivateMemory,{
+    observedSamples:2,missingSamples:1,observedAtStart:true,observedAtFinish:false,
+    firstObservedPhase:'before-import',lastObservedPhase:'cancel-owner-revoked',
+    missingMilestonePhases:['finished'],
+  });
+  assert.deepEqual(report.metricCoverage.linuxAggregateRss,report.metricCoverage.chromiumPrivateMemory);
+  assert.equal(report.linuxProcessIdentity.provenExitCount,null);
+  assert.equal(report.browserWorkerTargets.workerPidMapping,'unknown');
+});
+
+test('026: denied process domain has no invented zero, baseline, end, or coverage', async () => {
+  const page={async send(method) {
+    if (method==='Performance.enable')return {};
+    return {metrics:[{name:'JSHeapUsedSize',value:5},{name:'JSHeapTotalSize',value:10}]};
+  }};
+  const sampler=createBrowserRendererHeapSampler(page,{
+    processClient:{async send(method) {
+      if(method==='Target.getTargets')throw Error('Target denied');
+      throw Error('Process domain denied');
+    }},
+    schedule:()=>1,unschedule:()=>{},
+  });
+  await sampler.start();
+  const report=await sampler.stop();
+  assert.equal(report.chromiumProcesses.baselinePrivateBytes,null);
+  assert.equal(report.chromiumProcesses.endPrivateBytes,null);
+  assert.equal(report.linuxProcessRss.baselineAggregateRssBytes,null);
+  assert.equal(report.linuxProcessRss.endAggregateRssBytes,null);
+  assert.equal(report.chromiumProcesses.sampledIncreaseBytes,null);
+  assert.equal(report.linuxProcessRss.sampledIncreaseBytes,null);
+  for (const coverage of Object.values(report.metricCoverage)) {
+    assert.equal(coverage.observedSamples,0);
+    assert.equal(coverage.missingSamples,2);
+    assert.equal(coverage.observedAtStart,false);
+    assert.equal(coverage.observedAtFinish,false);
+    assert.deepEqual(coverage.missingMilestonePhases,['before-import','finished']);
+  }
+});
