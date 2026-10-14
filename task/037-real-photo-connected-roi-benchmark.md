@@ -3,6 +3,14 @@
 **P1, OPEN (после закрытой [036C](036-browser-connected-roi-quality.md)).**
 **Не подменяет [002](002-psd-compatibility-corpus.md):** независимо Photoshop-authored RGB16/CMYK32 PSB golden — отдельная P0 и остаётся открытой.
 
+## Проходка 037A — подготовлен независимый oracle (PR, не слито)
+
+- Реализованы `tools/real-photo-native-quality.mjs` и `tests/real-photo-native-quality.test.mjs`: native Uint16/Float32 **per-pixel** known-clean reference, обязательный SHA-256 clean LE words, независимые snapshots, MAE/RMSE/max error. Не опираются на constant-color ZeTer synthetic reference или RGBA8 preview.
+- Отрицательные сценарии: любое изменение outside-selection, alpha, reference mismatch (включая неподменённый vs подменённый hash), неверный bit depth, алиасинг buffers, неупорядоченные/повторные индексы, NaN и signed-zero bit flip. Локально выполнено `node --test tests/real-photo-native-quality.test.mjs`: 5/5 success; общий проектный CI ещё не заявлен.
+- Кандидат фото: CC0 1.0 кирпичная стена, MartinThoma, JPEG 2560×1920, sRGB ([provenance](../tests/fixtures/real-photo/README.md)). **Фотографические пиксели в benchmark пока не поступили: asset SHA-256 не проверен; пункт 1 и benchmark остаются незавершёнными.** Не считать этот unit-тест реальным фото.
+- **Далее 037B:** получить разрешённые фото-байты, закрепить asset SHA-256, проверить geometry/color, создать отдельные frozen native known-clean references RGB16/PSB32 и контролируемые connected ROI defects; exact digest для каждого reference зафиксировать в fixture manifest.
+- **Далее 037C:** настоящее `file://` Chromium PSD16/PSB32 import → polygon → Worker → Save Project → Undo/Redo, минимум 3 запуска на формат; native oracle, строгая validation JSON, honest RSS/CDP missingness, negative matrix и CI exact-main gate. 037 остаётся OPEN.
+
 ## Цель
 
 Проверить Content-Aware Fill native RGB16/Float32 на **реальной текстурированной фотографии**, а не на ZeTer-generated плоском эталонном фоне. Не использовать одну только self-authored PSD/PSB как доказательство Photoshop-совместимости.
