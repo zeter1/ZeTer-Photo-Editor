@@ -1,6 +1,7 @@
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateBrowserOperationEvidence } from './browser-operation-timeline.mjs';
+import { validateBrowserSyntheticQualityEvidence } from './browser-synthetic-native-quality.mjs';
 
 // Test-only CI reports for genuine Chromium file:// scenarios. Informational
 // samples are NOT native Worker memory, simultaneous true peak, or an exit proof.
@@ -67,6 +68,7 @@ export function buildBrowserOperationArtifact(profile) {
   }
   validateBrowserOperationEvidence(profile);
   validateInformationalMemoryClaims(profile.memory);
+  validateBrowserSyntheticQualityEvidence(profile.quality,{format:profile.format,outcome:profile.outcome});
   return {
     kind:'zpe-browser-operation-artifact-v1',
     schemaVersion:1,
