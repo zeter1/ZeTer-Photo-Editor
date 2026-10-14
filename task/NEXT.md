@@ -1,3 +1,9 @@
+## 036A — wide connected ROI evidence baseline (в процессе, 2026-10-14)
+
+- Добавлен test-only native tiled oracle: строго 8288 connected pixels (64×64 + диагональ + 64×64), byte/alpha invariance, native 16/32-bit MAE/RMSE, exact Undo/Redo, sampling missingness and no unproven RAM peaks. [036](036-browser-connected-roi-quality.md).
+- **Следующая проходка 036B:** реальный Chromium `file://` PSD16/PSB32 с **широким** UI selection и native Worker (не Node-only), публичный `Save Project` для точного исходного/итогового/Undo/Redo source, затем 036C measured wall-clock+RSS/CDP samples, CI artifact validation, PR/main gate. 036 **открыта** до этого.
+- P0 [002](002-psd-compatibility-corpus.md) требует внешних лицензированных Photoshop-authored goldens — не заменять их синтетикой.
+
 ## Следующее P1 — [036](036-browser-connected-roi-quality.md): настоящий Chromium `file://` wide connected ROI
 
 - **P1 исполнимо:** после закрытия 035 перейти к браузерному широкому связному ROI (острова + диагональный коридор), native MAE/RMSE/точные bytes + preview/Undo/Redo и честные latency/RSS/CDP observation gaps. Не называть snapshot настоящим operation peak или Worker→PID. [003](003-tiled-content-aware.md).
