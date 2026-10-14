@@ -6,6 +6,7 @@
 
 - Исправлено: проверка тестового Chromium PSD16/PSB32 отчёта сверяет все итоговые `durationsMs` с наблюдаемыми отметками milestone; неверный JSON не может выдавать произвольную длительность отмены, повтора, Preview или Undo/Redo.
 - Добавлены регрессии подменённых значений, неверных типов, недостающих/лишних длительностей и нулевых интервалов. Отсутствующая пара событий обязана иметь `null`.
+- Проверено: [PR #214](https://github.com/zeter1/ZeTer-Photo-Editor/pull/214), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38531032892) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38531246576) для squash `98ea308`; Node tests, browser `file://` PSD16/PSB32, JSON verifier, профили и diff hygiene — success.
 - Ограничения: изменение затрагивает только тестовую диагностику, не production runtime. Измерения времени ядра Worker, Worker→PID и точного operation RAM peak не заявляются; внешние Photoshop-authored PSD/PSB остаются отдельной незавершённой задачей.
 
 ### 2026-10-14 — Уточнены пропуски наблюдения CDP Worker targets

@@ -1,7 +1,7 @@
-## 030 / 024C5 — пересчёт итоговых browser durations по milestone (PR/CI ожидаются, 2026-10-14)
+## 030 / 024C5 — пересчёт итоговых browser durations по milestone (слито, PR + exact-code main CI success, 2026-10-14)
 
 - [030](030-browser-operation-duration-evidence.md): проверка `durationsMs` по каждой канонической паре событий для настоящего Chromium `file://` PSD16/PSB32 cancel→retry. Неверные/неполные/подменённые summary-поля отклоняются при `finish` и при повторной проверке сохранённого JSON; unit-регрессии на forged cancel duration, типы, missing/extra поля и null/zero.
-- **Gate:** до зелёного PR CI + merge + exact-code main CI считать проходку 030 **открытой**. Production/editor bundle не изменён, это test harness.
+- **Gate выполнен:** [PR #214](https://github.com/zeter1/ZeTer-Photo-Editor/pull/214) → squash `98ea308`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38531032892) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38531246576). Node + generated parity, настоящий Chromium `file://` PSD16/PSB32, оба JSON, профили и diff hygiene — success. Это **только test harness**, production/editor bundle без изменений.
 - **Следующие приоритеты:** P0 реальный independently Photoshop-authored/лицензированный high-depth corpus [002](002-psd-compatibility-corpus.md); P1 документированный target→PID или честное `unknown` [025](025-browser-worker-target-census.md), независимое browser quality/latency/RSS для connected ROI [003](003-tiled-content-aware.md). Общие Stage 002/003 **открыты**.
 
 ## 029 / 024C4 — упорядоченные browser operation artifacts (слито, exact-code main CI success, 2026-10-14)
