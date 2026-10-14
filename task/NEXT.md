@@ -1,6 +1,8 @@
-## Следующее P1 — [035](035-browser-recovery-modal-flake.md): Chromium recovery modal race (код PR, gate CI не пройден)
+## Следующее P1 — [036](036-browser-connected-roi-quality.md): настоящий Chromium `file://` wide connected ROI
 
-- В ветке `fix/035-browser-recovery-startup-gate` добавлено ожидание `appReady=true` после recovery scan, публичная обработка recovery modal и три реальных `file://` reload с 550 мс delayed IndexedDB. Проверки PR/merge/exact-main ещё ожидаются; **035 не закрывать**. Дальше [003](003-tiled-content-aware.md) / [002](002-psd-compatibility-corpus.md).
+- **P1 исполнимо:** после закрытия 035 перейти к браузерному широкому связному ROI (острова + диагональный коридор), native MAE/RMSE/точные bytes + preview/Undo/Redo и честные latency/RSS/CDP observation gaps. Не называть snapshot настоящим operation peak или Worker→PID. [003](003-tiled-content-aware.md).
+- **P0 блокируется внешними данными:** [002](002-psd-compatibility-corpus.md) — лицензированные независимо Photoshop-authored PSD16 + CMYK32 PSB golden с provenance, SHA-256 и эталонным render.
+- **035 закрыта:** [PR #219](https://github.com/zeter1/ZeTer-Photo-Editor/pull/219) → squash `66f41e6`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38563696598), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38564063538). Падение первого старого CI 38545678383 и его retry больше не используются в качестве доказательства исправления.
 
 ## 034 / 024D3 — native quality сложной связной ROI (слито, CI success)
 
