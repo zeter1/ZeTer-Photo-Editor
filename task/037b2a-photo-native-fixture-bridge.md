@@ -1,5 +1,7 @@
 # 037B2a — bounded native reference bridge for a pinned real-photo decode
 
+**Subpass 037B2a CLOSED:** [PR #225](https://github.com/zeter1/ZeTer-Photo-Editor/pull/225) → [64c0235](https://github.com/zeter1/ZeTer-Photo-Editor/commit/64c0235b70ea724ef6b6bacdc70c5ff9ce19a5fc), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38607110005), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38607607539); full build/Node, Chromium `file://`, artifact/profile gates and diff hygiene passed. The parent 037 task is still OPEN.
+
 **P1 / 037B preparation.** Scope: deterministic **test-only** 8-bit-decoded photo → 16-bit unsigned or 32-bit float clean reference + controlled connected defects. This does **not** complete 037B, 037C, or Photoshop parity.
 
 ## Input and proof boundary

@@ -3,10 +3,11 @@
 **P1, OPEN (после закрытой [036C](036-browser-connected-roi-quality.md)).**
 **Не подменяет [002](002-psd-compatibility-corpus.md):** независимо Photoshop-authored RGB16/CMYK32 PSB golden — отдельная P0 и остаётся открытой.
 
-## Проходка 037B2a — детерминированная native fixture-подготовка (PR gate PENDING)
+## Проходка 037B2a — детерминированная native fixture-подготовка (ЗАКРЫТА; PR + main CI success)
 
 - Добавлен [исполняемый handoff](037b2a-photo-native-fixture-bridge.md): `tools/real-photo-native-fixtures.mjs` связывает pinned RGBA8 decode с bounded crop и независимыми RGB16/Float32 clean + controlled defect native arrays. Точная connected 8288 ROI, строго alpha/outside-selection неизменны. Обязателен отдельный pinned native LE SHA-256; вычисленный кандидатом digest сам по себе недостаточен.
 - Unit negative tests покрывают неверный hash/bounds/alpha и native quality parity; это **подготовительный тест с синтетическим RGBA8 суррогатом**, не измерение реальной фотографии.
+- **Gate выполнен:** [PR #225](https://github.com/zeter1/ZeTer-Photo-Editor/pull/225) → [64c0235](https://github.com/zeter1/ZeTer-Photo-Editor/commit/64c0235b70ea724ef6b6bacdc70c5ff9ce19a5fc), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38607110005), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38607607539); полный Node/build, настоящий Chromium `file://`, артефакты/профили и diff hygiene — success.
 - **Далее 037B2b:** получить genuine CC0 JPEG/декодированные байты, source+decode+native SHA-256 и ICC/EXIF evidence; построить независимые fixture PSD16/PSB32. **037C** browser ×3/format после этого. 037 в целом открыта до полной цепочки CI/real asset.
 
 ## Проходка 037A — ЗАКРЫТА (2026-10-14; PR + exact-code main CI success)

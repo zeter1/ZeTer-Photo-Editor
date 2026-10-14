@@ -1,9 +1,9 @@
-## 037B2a — bridge pinned decoded RGBA8 → RGB16/Float32 connected native references (PR gate PENDING, 2026-10-14)
+## 037B2a — bridge pinned decoded RGBA8 → RGB16/Float32 connected native references (СЛИТО; PR + exact-main CI success, 2026-10-14)
 
 - Реализован test-only [037B2a](037b2a-photo-native-fixture-bridge.md): детерминированный bounded crop RGBA8 → нативные Uint16/Float32 RGB с отдельными clean/defect buffers, точная 8288-пиксельная двухостровная diagonal connected ROI, неизменённые outside-selection и alpha. Кандидат native LE SHA-256 не считается закреплённым: допуск требует **независимый** `expectedReferenceSha256` и подтверждённый decoded RGBA8 SHA-256; есть негативные unit-проверки.
 - **Ограничение:** это 8-bit-derived нативные слова, не true photo 16/32-bit depth, не независимо Adobe-authored corpus и пока не real-photo benchmark. Проверка ICC/EXIF и лицензированного оригинала отдельно обязательна.
 - **Следующее:** 037B2b — реальные CC0 JPEG bytes + SHA-256 original/decoded RGBA8, credible ICC/EXIF/decode provenance, frozen SHA-256 clean RGB16/Float32 и PSD16/PSB32 defect documents; затем 037C browser `file://` ×3/format + quality/memory evidence. P0 [002](002-psd-compatibility-corpus.md) и общая [003](003-tiled-content-aware.md) остаются открытыми.
-- Проверять status PR, `npm run check`, реальный Chromium `file://` и exact-main CI после merge; до успешных gate не отмечать 037B2a закрытой.
+- **037B2a gate success:** [PR #225](https://github.com/zeter1/ZeTer-Photo-Editor/pull/225) → [64c0235](https://github.com/zeter1/ZeTer-Photo-Editor/commit/64c0235b70ea724ef6b6bacdc70c5ff9ce19a5fc), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38607110005), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38607607539). Build+Node, generated parity, Chromium `file://`, JSON/artifacts, profiles и diff hygiene — success. **037 в целом остаётся OPEN** до реальных фото-байтов и 037C.
 
 ## 037B1 — проверка исходного JPEG перед фиксацией real-photo эталонов (СЛИТО; PR CI success, 2026-10-14)
 
