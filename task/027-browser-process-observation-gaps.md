@@ -1,6 +1,6 @@
 # 027 / 024C2 — Полнота PID-наблюдений и разрывы при отмене Worker
 
-**Статус:** изменения подготовлены в ветке `feat/stage003-observation-gaps-027-20261014` для PR; проверка CI и merge требуют отдельного подтверждения.
+**Статус (2026-10-14):** **слито в `main`**, [PR #211](https://github.com/zeter1/ZeTer-Photo-Editor/pull/211) → `93f5c2e`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38525012524), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38525286762). Node, generated parity, настоящий Chromium `file://` PSD16/PSB32, JSON и профили прошли; Stage 002/003 открыты.
 
 ## Проблема
 - Успешные CDP PID списки и Linux `/proc` с PID+starttime не обязательно есть в каждом snapshot во время cancel→retry.
@@ -13,8 +13,8 @@
 - [x] `browser-linux-process-identity`: `noteMissingSnapshot()` снимает притворное знание последней видимости и разрывает смежность; `observedAtLastSnapshotCount`, `noLongerObservedAtLastSnapshotCount` и `processes[].observedAtLastSnapshot` становятся `null` если финальный снимок неизвестен.
 - [x] Знание ранее увиденных PID+starttime сохраняется: реальное различие starttime доказывает другой наблюдённый incarnation, но не точный момент завершения прошлого.
 - [x] Unit-регрессии для cancel→retry после CDP отказа и Linux identity пропуска/повторного появления/PID reuse.
-- [ ] GitHub PR CI: `npm run check`, реальный Chromium `file://` PSD16/PSB32, JSON artifacts.
-- [ ] Merge и **CI exact-code main** — только после подтверждения.
+- [x] GitHub PR CI: `npm run check`, реальный Chromium `file://` PSD16/PSB32, JSON artifacts — success.
+- [x] Merge и **CI exact-code main** — success, зафиксированы выше.
 
 ## Следующая очередь
 - **P0 [002](002-psd-compatibility-corpus.md):** independently licensed Photoshop-authored PSD16 RGB + PSB32 CMYK, hashes, provenance, reference renders, сравнение codec/preview/browser без заявления об авторстве ZeTer fixtures.

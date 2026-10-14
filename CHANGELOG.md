@@ -6,7 +6,7 @@
 
 - Исправлено: тестовый Chromium memory-профайлер больше не принимает прежнюю Linux PID+starttime видимость за факт последнего снимка, если финальный `/proc` недоступен; неопределённое состояние явно равно `null`.
 - Добавлено: независимый per-snapshot coverage для CDP PID membership и Linux identity, в том числе разрывы, пропущенные milestone и соседние подтверждённые переходы. PID churn не вычисляется сквозь неизвестный интервал.
-- Проверка: unit-регрессии добавлены; реальная CI проверка фиксируется отдельно после запуска. Это не делает RSS настоящим operation peak и не привязывает Worker к PID.
+- Проверено: unit-регрессии, `npm run check`, реальный Chromium `file://` PSD16/PSB32, JSON и профили в [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38525012524) и [exact-code main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38525286762) — success. Это не делает RSS настоящим operation peak и не привязывает Worker к PID.
 
 
 ### 2026-10-11 — Ограничено общее число обходов больших выделений при Content-Aware Fill
