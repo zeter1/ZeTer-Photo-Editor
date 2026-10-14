@@ -98,7 +98,7 @@ export function createBrowserOperationTimeline({ operationId, fixture, format, n
   }
   return {
     mark,
-    finish({outcome,memoryReport}={}) {
+    finish({outcome,memoryReport,qualityReport=null}={}) {
       if(finished)throw new Error('Browser operation timeline: already finished');
       if(!['completed','completed-with-cancelled-retry','failed'].includes(outcome))
         throw new TypeError('Browser operation timeline: invalid outcome');
@@ -119,6 +119,7 @@ export function createBrowserOperationTimeline({ operationId, fixture, format, n
       const profile={
         kind:'zpe-browser-high-depth-operation-timeline-v1',
         operationId,fixture,format,outcome,origin:'real Chromium file:// UI + native Worker',
+        quality:qualityReport,
         observedWindowMs:end-began,
         milestones:events.map(({phase,atMs,sincePreviousMs})=>({phase,atMs,sincePreviousMs})),
         durationsMs:{
