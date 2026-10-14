@@ -1,7 +1,7 @@
-## 2026-10-14 — 024D3: Native synthetic connected ROI MAE/RMSE (PR/CI pending)
+## 2026-10-14 — 024D3: Native synthetic connected ROI MAE/RMSE (слито, CI success)
 
-- [034](034-complex-roi-native-quality.md): реальный **Node** Worker профиль сложного связного RGB16/CMYKA32 ROI теперь публикует независимые от inpaint-ядра baseline/repaired MAE/RMSE и гарантирует нетронутые native samples вне selection/alpha. Для 8288 выбранных пикселей сравнивает с заведомо чистым ZeTer-generated постоянным фоном. Существующие byte parity/отмена остаются в силе. PR и CI ещё не подтверждены.
-- **Открыто:** wide connected ROI в **Chromium `file://`**, внешний Adobe Photoshop-authored golden, memory peak и real-image quality. Stage 003 не закрыта.
+- [034](034-complex-roi-native-quality.md): реальный **Node** Worker профиль сложного связного RGB16/CMYKA32 ROI теперь публикует независимые от inpaint-ядра baseline/repaired MAE/RMSE и гарантирует нетронутые native samples вне selection/alpha. Для 8288 выбранных пикселей сравнивает с заведомо чистым ZeTer-generated постоянным фоном. Существующие byte parity/отмена остаются в силе. [PR #218](https://github.com/zeter1/ZeTer-Photo-Editor/pull/218) слит (`8208ab9`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38545340603), [main CI rerun success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38545678383).
+- **Открыто:** wide connected ROI в **Chromium `file://`**, внешний Adobe Photoshop-authored golden, memory peak и real-image quality. Stage 003 не закрыта. Отдельный [035](035-browser-recovery-modal-flake.md) — гонка startup recovery prompt в 010D browser smoke.
 
 ## 2026-10-14 — 024D2: native known-reference quality в реальном браузере (слито, exact-code main CI success)
 

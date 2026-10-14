@@ -1,6 +1,10 @@
-## 034 / 024D3 — native quality сложной связной ROI (PR/CI pending)
+## Следующее P1 — [035](035-browser-recovery-modal-flake.md): нестабильная модалка восстановления при последовательных Chromium reload
 
-- [034](034-complex-roi-native-quality.md): Node Worker RGB16/CMYKA32 native baseline/repaired MAE/RMSE по двум островам 64×64 и соединяющему диагональному коридору (8288 pixels). Новый pure oracle проверяет exact unchanged outside selection/alpha и rejects malformed inputs; синхронный результат и настоящий Worker сохраняют byte parity. **Только тестовый Node profile**, не браузерный wide ROI, не Adobe golden. Проверки полного CI и merge ещё ожидаются.
+- Основной CI первого прогона `38545678383` упал в 010D UI smoke: поздний `.recovery-modal` перекрыл `overlayCanvas` после успешного импорта. Повторная попытка CI **success**. Нужно убрать race из тестовой подготовки, не закрывая реальные окна восстановления для пользователя. **Не считать исправленным**.
+
+## 034 / 024D3 — native quality сложной связной ROI (слито, CI success)
+
+- [034](034-complex-roi-native-quality.md): Node Worker RGB16/CMYKA32 native baseline/repaired MAE/RMSE по двум островам 64×64 и соединяющему диагональному коридору (8288 pixels). Новый pure oracle проверяет exact unchanged outside selection/alpha и rejects malformed inputs; синхронный результат и настоящий Worker сохраняют byte parity. **Только тестовый Node profile**, не браузерный wide ROI, не Adobe golden. [PR #218](https://github.com/zeter1/ZeTer-Photo-Editor/pull/218) слит (`8208ab9`): [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38545340603) и [main CI retry](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38545678383) — success.
 - **Следом:** P0 лицензированный Photoshop-authored корпус [002](002-psd-compatibility-corpus.md); P1 настоящее Chromium `file://` сложное connected ROI + latencies/observational memory [003](003-tiled-content-aware.md); P1 честная атрибуция Worker→PID или `unknown` [025](025-browser-worker-target-census.md). Общие Stage 002/003 остаются открытыми.
 
 ## 033 / 024D2 — браузерный native quality reference (слито; PR + exact-main CI success)

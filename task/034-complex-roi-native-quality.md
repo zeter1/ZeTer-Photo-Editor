@@ -1,6 +1,6 @@
 # 034 / 024D3 — native quality для сложной связной ROI
 
-**Статус:** реализация в рабочей ветке; PR/CI и merge проверить отдельно. Подпроход Stage 003, без изменения пользовательского runtime.
+**Статус: слито в `main` 2026-10-14.** [PR #218](https://github.com/zeter1/ZeTer-Photo-Editor/pull/218) → squash `8208ab9`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38545340603), [main CI success (attempt 2)](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38545678383). Только тестовая диагностика; production runtime не менялся.
 
 ## Цель
 
@@ -16,8 +16,8 @@
 
 ## До закрытия
 
-- [ ] `npm run check` в полном репозитории и CI профили (локально полный checkout недоступен).
-- [ ] PR CI success, merge, exact-main SHA CI success; после подтверждения записать PR, commit, run URLs сюда и в `task/NEXT.md`, `task/README.md`.
+- [x] В PR CI пройдены `npm run check`, `npm run test:browser`, generated parity, диагностические профили и diff hygiene. Полный локальный checkout недоступен.
+- [x] PR CI success, squash merge, main CI success для того же исходного кода с документационным `CHANGELOG` коммитом `dae2a9c` (попытка 2). Первая попытка упала из-за гонки окна восстановления в отдельном 010D UI smoke; повтор успешен — [035](035-browser-recovery-modal-flake.md).
 - [ ] Отдельно: реальный **Chromium `file://`** wide connected ROI с сохранёнными native words, временем операции, sampling coverage и memory diagnostics. Текущая проходка выполняет connected ROI только в **Node Worker**.
 - [ ] Внешние **лицензированные Adobe-authored** PSD16/PSB32 + reference renders и source hashes по [002](002-psd-compatibility-corpus.md).
 - [ ] Точное operation-wide/Worker peak RSS и доказанная target→PID attribution (сейчас `unknown`).
