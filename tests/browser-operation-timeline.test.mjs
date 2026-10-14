@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createBrowserOperationTimeline} from '../tools/browser-operation-timeline.mjs';
+import {createBrowserOperationTimeline,validateBrowserOperationEvidence} from '../tools/browser-operation-timeline.mjs';
 function report() {return {
   sampleCount:7,sampledMaxJsHeapUsedBytes:1200,
   chromiumProcesses:{availability:'unavailable',sampledMaxPrivateBytes:null},
@@ -74,4 +74,29 @@ test('029: finished timeline refuses reordered successful and cancelled-retry ev
     'retry-undo-native-verified','retry-redo-native-verified',
   ]) c.mark(step);
   assert.throws(()=>c.finish({outcome:'completed-with-cancelled-retry',memoryReport:report()}),/out-of-order evidence/);
+});
+
+test('030: validated summary durations derive from event timestamps, including zero/null',()=>{
+  let clock=1000;
+  const t=createBrowserOperationTimeline({operationId:'duration-check',fixture:'native.psd',format:'PSD16',now:()=>clock});
+  for(const phase of steps)t.mark(phase);
+  const p=t.finish({outcome:'completed',memoryReport:report()});
+  assert.equal(p.observedWindowMs,0);
+  assert.deepEqual(p.durationsMs,{
+    importInputToPreview:0,fillCommandToHistoryPreview:0,undoToRedo:0,
+    cancelledRetryObservation:null,recoveredRetryToRedo:null,
+  });
+  assert.equal(validateBrowserOperationEvidence(p),true);
+  assert.throws(()=>validateBrowserOperationEvidence({
+    ...p,durationsMs:{...p.durationsMs,undoToRedo:0.01},
+  }),/inconsistent duration evidence/);
+  assert.throws(()=>validateBrowserOperationEvidence({
+    ...p,durationsMs:{...p.durationsMs,cancelledRetryObservation:0},
+  }),/inconsistent duration evidence/);
+  assert.throws(()=>validateBrowserOperationEvidence({
+    ...p,durationsMs:{...p.durationsMs,importInputToPreview:'0'},
+  }),/inconsistent duration evidence/);
+  assert.throws(()=>validateBrowserOperationEvidence({
+    ...p,durationsMs:{...p.durationsMs,fillCommandToHistoryPreview:-1},
+  }),/inconsistent duration evidence/);
 });
