@@ -1,6 +1,6 @@
-## 2026-10-14 — 024D1: native selected-pixel byte oracle (в PR; проверка CI ещё требуется)
+## 2026-10-14 — 024D1: native selected-pixel byte oracle (слито, exact-code main CI success)
 
-- [032](032-browser-native-selection-integrity.md): новый test-only oracle проверяет изменённые native 16/32-bit bytes в реальном Chromium `file://` PSD16/PSB32 UI Worker против **фактических** frozen selection indices, а не приблизительного rect; проверка для первого Fill/Redo и cancelled-retry/Undo/Redo; новые негативные Node regressions на вневыделенные изменения. **Пока не считать завершённым до CI + merge + exact-main CI**.
+- [032](032-browser-native-selection-integrity.md): новый test-only oracle проверяет изменённые native 16/32-bit bytes в реальном Chromium `file://` PSD16/PSB32 UI Worker против **фактических** frozen selection indices, а не приблизительного rect; проверка для первого Fill/Redo и cancelled-retry/Undo/Redo; новые негативные Node regressions на вневыделенные изменения. [PR #216](https://github.com/zeter1/ZeTer-Photo-Editor/pull/216) merged `f3d1336`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538156947) и [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538532002).
 - Внешние Adobe-authored high-depth goldens отсутствуют; это не независимый Photoshop-пиксельный эталон. Real browser peak RAM и качество на широком connected ROI по-прежнему открыты; Stage 003 **не закрыта**.
 
 ## 2026-10-11 — 010E-B3B: общий предел работы планировщика (слито, exact-main CI success)
