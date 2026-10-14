@@ -1,0 +1,15 @@
+# 037 — кандидат реальной фотографии (не готовый benchmark fixture)
+
+**Статус: provenance source candidate; оригинальные JPEG-байты и SHA-256 ещё не получены/не закреплены. НЕ заявлять benchmark quality или Photoshop parity.**
+
+- Фотограф: MartinThoma (авторская фотография кирпичной стены, 7 августа 2014).
+- Источник/история: https://commons.wikimedia.org/wiki/File:Red-brick-wall-texture-clean.jpg
+- Прямая ссылка на оригинал: https://upload.wikimedia.org/wikipedia/commons/a/a8/Red-brick-wall-texture-clean.jpg
+- Лицензия оригинала: CC0 1.0 Universal Public Domain Dedication, https://creativecommons.org/publicdomain/zero/1.0/
+- Заявленные исходные параметры (Wikimedia Commons): JPEG, 2560×1920, sRGB; SHA-1 по карточке файла `c7fc9f013c70e01f164d232462ddd6e37e4079c4`.
+- **Требуется до бенчмарка:** загрузить точные bytes, вычислить/закрепить независимый SHA-256 оригинального asset, верифицировать декодированные размеры и color space, зафиксировать лицензированную копию или долговечный content-addressed тестовый артефакт; не полагаться на «живой» URL без hash gate.
+- Затем получить **отдельные** known-clean native references для RGB16/Float32, с собственными SHA-256 нативных LE words, не перемножая 8-bit preview и не переиспользуя уже исправленное изображение в качестве clean.
+- Входные массивы `before`, `after` и `clean` для oracle в `tools/real-photo-native-quality.mjs` должны быть независимыми; указать SHA-256 clean reference в fixture manifest и передать через `expectedReferenceSha256`.
+- Следующий исполнимый шаг: 037B (получение лицензированного фото + frozen fixture hashes + Native PSD16/PSB32 generation), затем 037C (Chromium UI + 3 прогона/формат + fail-closed JSON/memory + CI). Подробности: [task/037](../../../task/037-real-photo-connected-roi-benchmark.md).
+
+Не хранить здесь фотографии случайного происхождения, не приписывать этот photographed источник Adobe/Photoshop и не считать SHA-1 исходника заменой обязательному SHA-256.
