@@ -1,6 +1,7 @@
 import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
 import { createBrowserRendererHeapSampler } from './browser-renderer-heap-sampler.mjs';
 import { instrumentBrowserKernelSource } from './browser-inpaint-mid-kernel-smoke.mjs';
+import { settleBrowserRecoveryStartup } from './browser-recovery-startup.mjs';
 
 /**
  * 010D, test-only. Reload so the application's lazy Worker controller has NOT
@@ -25,22 +26,17 @@ export async function verifyBrowserUiLockMidKernel(client, {
     ? createBrowserHighDepthFixture(secondNativeFixtureKey) : null;
   const format = fixture.version === 2 ? 'PSB32 Float32' : 'PSD16 Uint16';
   const sampler = createBrowserRendererHeapSampler(client, { processClient:browserClient });
-  // All earlier UI tests are complete before this final, isolated reload.
+  // The previous page can remain evaluable briefly after Page.reload.
+  // Mark its context so no poll may mistake old DOM/ready state for the new one.
+  await evaluate(client, 'window.__zpe010dPreviousPage = true; true');
   await client.send('Page.reload', { ignoreCache:true });
-  await waitFor('010D editor reload', () => evaluate(client,
-    "document.readyState==='complete' && !!document.querySelector('#fileInput') && !!document.querySelector('#editorCanvas')"), 15_000);
-  // A previous smoke scenario wrote a genuine recovery snapshot. On reload
-  // startup may show a blocking recovery dialog; exercise its public "new
-  // project" action before importing our isolated PSD16 fixture.
-  await new Promise(resolve => setTimeout(resolve, 400));
-  await evaluate(client, "(() => {const newProject=document.querySelector('#modalRoot .recovery-modal [data-new-project]');if(newProject)newProject.click();return true;})()");
-  await waitFor('010D recovery prompt acknowledged', () => evaluate(client,
-    "!document.querySelector('#modalRoot .recovery-modal')"), 10_000);
-  // "Start new project" deliberately opens the ordinary New Document modal.
-  // Cancel that draft through its real button: our next action is PSD import.
-  await evaluate(client, "(() => {document.querySelector('#modalRoot [data-cancel]')?.click();return true;})()");
-  await waitFor('010D unobstructed editor', () => evaluate(client,
-    "!document.querySelector('#modalRoot [role=dialog]')"), 10_000);
+  await waitFor('010D new editor document', () => evaluate(client,
+    "document.readyState==='complete' && !window.__zpe010dPreviousPage && !!document.querySelector('#fileInput') && !!document.querySelector('#editorCanvas')"), 15_000);
+  // Recovery scan is asynchronous (IndexedDB). appReady becomes true ONLY
+  // after the scan or the user's real recovery-modal action has completed.
+  await settleBrowserRecoveryStartup(client, {
+    evaluate, waitFor, assert, label:`010D ${format}`,
+  });
   await sampler.start();
   let stopped = false;
   try {
