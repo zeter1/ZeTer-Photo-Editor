@@ -1,6 +1,6 @@
-## 026 / 024C1 — truthful browser memory snapshot coverage (PR pending, 2026-10-14)
+## 026 / 024C1 — truthful browser memory snapshot coverage (merged, PR + exact-main CI success, 2026-10-14)
 
-- **Реализуется:** [026](026-browser-memory-sample-coverage.md) — baseline/end privateMemory + RSS только если соответствующий **точный** стартовый/конечный снимок доступен, иначе `null`; отдельные counts/phase gaps и перенос coverage в operation JSON. Unit regression для финального `/proc ENOENT` и отказа CDP. **Не считать CI/merge пройденными до проверки.**
+- **Реализуется:** [026](026-browser-memory-sample-coverage.md) — baseline/end privateMemory + RSS только если соответствующий **точный** стартовый/конечный снимок доступен, иначе `null`; отдельные counts/phase gaps и перенос coverage в operation JSON. Unit regression для финального `/proc ENOENT` и отказа CDP. **Слито:** [PR #210](https://github.com/zeter1/ZeTer-Photo-Editor/pull/210) → `67e4451`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38522956593), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38523222466) — `npm run check`, real Chromium `file://` PSD16/PSB32, 2 JSON и профили.
 - **Следом:** P0 [002](002-psd-compatibility-corpus.md) — независимые Photoshop-authored RGB16/CMYK32 с лицензиями, hashes, renders; P1 024C2 PID-churn observation completeness и 025B только документированная target→PID attribution. Stage 002/003 ещё открыты.
 
 ## 025 / 024B3 — browser Worker target census (merged, PR + exact-code main CI success, 2026-10-14)
