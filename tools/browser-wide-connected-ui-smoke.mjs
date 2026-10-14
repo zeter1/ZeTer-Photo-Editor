@@ -38,11 +38,12 @@ export async function verifyBrowserWideConnectedNativeUi(client,{
     delete window.__wide036Parts;
     input.files=transfer.files;
     const count=input.files[0]?.size;
+    const receivedName=input.files[0]?.name;
     const previous=window.confirm;
     window.confirm=()=>true;
     try {input.dispatchEvent(new Event('change',{bubbles:true}));}
     finally {window.confirm=previous;}
-    return {name:input.files[0]?.name,bytes:count};
+    return {name:receivedName,bytes:count};
   }
   const imported=await evaluate(client,'('+importThroughUi.toString()+')()');
   assert(imported.name===fixture.filename && imported.bytes===fixture.bytes.length,
