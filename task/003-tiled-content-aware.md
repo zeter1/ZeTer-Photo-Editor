@@ -1,3 +1,8 @@
+## 2026-10-14 — 024D2: native known-reference quality в реальном браузере (проверяется)
+
+- [033](033-browser-synthetic-native-quality.md): расширение настоящего Chromium `file://` PSD16/PSB32 UI Worker + cancel/retry/Undo/Redo. Сравнение по native 16/32-bit MAE/RMSE с известным ZeTer-generated фоном на дефекте 5×5, CI JSON fail-closed проверки точности. Погрешность на синтетике ещё не доказывает качества на реальных фотографиях.
+- **Остаётся:** licensed Adobe-authored external corpus [002](002-psd-compatibility-corpus.md), браузерные wide connected ROI comparisons и реальный operation peak RAM (сейчас только sampled), полноценные Photoshop compatibility tests; Stage 003 открыта.
+
 ## 2026-10-14 — 024D1: native selected-pixel byte oracle (слито, exact-code main CI success)
 
 - [032](032-browser-native-selection-integrity.md): новый test-only oracle проверяет изменённые native 16/32-bit bytes в реальном Chromium `file://` PSD16/PSB32 UI Worker против **фактических** frozen selection indices, а не приблизительного rect; проверка для первого Fill/Redo и cancelled-retry/Undo/Redo; новые негативные Node regressions на вневыделенные изменения. [PR #216](https://github.com/zeter1/ZeTer-Photo-Editor/pull/216) merged `f3d1336`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538156947) и [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538532002).

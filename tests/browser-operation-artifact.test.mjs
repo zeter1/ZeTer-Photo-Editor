@@ -25,6 +25,16 @@ const sample=(operationId,format,outcome)=>({
     cancelledRetryObservation:outcome==='completed-with-cancelled-retry'?15:null,
     recoveredRetryToRedo:outcome==='completed-with-cancelled-retry'?15:null,
   },
+  quality:{
+    kind:'zpe-browser-synthetic-native-quality-v1',
+    reference:'ZeTer-authored constant native background; not Photoshop',
+    bitsPerChannel:format==='PSD16'?16:32,channels:4,sampledPixels:25,
+    baseline:{mae:20,rmse:25},firstFill:{mae:4,rmse:5},firstRedo:{mae:4,rmse:5},
+    cancelled:outcome==='completed-with-cancelled-retry'?{mae:20,rmse:25}:null,
+    recoveredFill:outcome==='completed-with-cancelled-retry'?{mae:3,rmse:4}:null,
+    recoveredUndo:outcome==='completed-with-cancelled-retry'?{mae:20,rmse:25}:null,
+    recoveredRedo:outcome==='completed-with-cancelled-retry'?{mae:3,rmse:4}:null,
+  },
   memory:{sampleCount:2,requestedSamplingIntervalMs:50,
     chromiumPrivateMemoryAvailability:'unavailable',chromiumPrivateSampledMaxBytes:null,
     processChurn:{workerPidMapping:'unknown'},
@@ -184,6 +194,42 @@ test('031: unsupported Worker/PID/exit/peak claims are rejected on write and JSO
     await assert.rejects(verifyBrowserOperationArtifacts(directory),
       /unsupported Worker target evidence/);
   } finally {
+    await rm(directory,{recursive:true,force:true});
+  }
+});
+
+test('033: corrupted synthetic native quality scores fail at JSON write and reread',async()=>{
+  const first=sample('stage003-psd16-with-cancelled-retry','PSD16','completed-with-cancelled-retry');
+  const mutations=[
+    q=>{q.baseline.mae=0;},
+    q=>{q.firstRedo.rmse=15;},
+    q=>{q.cancelled.mae=0;},
+    q=>{q.recoveredFill.mae=NaN;},
+    q=>{q.recoveredUndo.mae=2;},
+    q=>{q.recoveredRedo.rmse=8;},
+    q=>{q.reference='Independent Photoshop reference';},
+    q=>{delete q.firstFill;},
+  ];
+  for(const mutate of mutations){
+    const forged=structuredClone(first);
+    mutate(forged.quality);
+    assert.throws(()=>buildBrowserOperationArtifact(forged),/Synthetic native quality evidence/);
+  }
+  const directory=await mkdtemp(path.join(os.tmpdir(),'zpe-033-'));
+  try{
+    await writeBrowserOperationArtifact(first,{directory});
+    await writeBrowserOperationArtifact(
+      sample('stage003-psb32-with-cancelled-retry','PSB32','completed-with-cancelled-retry'),
+      {directory},
+    );
+    assert.equal((await verifyBrowserOperationArtifacts(directory)).length,2);
+    const location=path.join(directory,'stage003-psd16-with-cancelled-retry.json');
+    const artifact=JSON.parse(await readFile(location,'utf8'));
+    artifact.timeline.quality.recoveredRedo.mae=999;
+    await writeFile(location,JSON.stringify(artifact),'utf8');
+    await assert.rejects(verifyBrowserOperationArtifacts(directory),
+      /Synthetic native quality evidence/);
+  }finally{
     await rm(directory,{recursive:true,force:true});
   }
 });

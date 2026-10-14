@@ -1,3 +1,8 @@
+## 033 / 024D2 — браузерный native quality reference (проверяется)
+
+- [033](033-browser-synthetic-native-quality.md): real Chromium `file://` PSD16/PSB32 Worker + mid-kernel cancellation, retry и Undo/Redo измеряются по исходным Uint16/Float32 на ZeTer-generated постоянном фоне. Native MAE/RMSE относительно known 5×5 reference; качество должно улучшаться после Fill и точно возвращаться после Undo. CI JSON теперь содержит валидируемое quality evidence; отдельные негативные тесты. Это не Photoshop reference и не real Worker peak RSS.
+- **Дальше:** P0 [002](002-psd-compatibility-corpus.md) лицензированные Adobe-authored RGB16/CMYK32 golden; P1 [003](003-tiled-content-aware.md) настоящий браузерный benchmark сложных connected ROI (quality/latency/RSS), P1 [025](025-browser-worker-target-census.md) только доказанная target→PID атрибуция. Общие Stage 002/003 **открыты**.
+
 ## 032 / 024D1 — byte oracle для Chromium PSD16/PSB32 Fill + Undo/Redo (слито, PR и exact-code main CI success)
 
 - [032](032-browser-native-selection-integrity.md): test-only сравнение native 16/32-bit words в изменённых тайлах по фактическому frozen Worker `selectedIndices`, включая соседние **невыделенные** пиксели; первый Fill/Redo, mid-kernel cancellation, recovery, Undo/Redo и unit negative matrix. Изменений production bundle нет. [PR #216](https://github.com/zeter1/ZeTer-Photo-Editor/pull/216) слит (`f3d1336`), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538156947) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538532002).
