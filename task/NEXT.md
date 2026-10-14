@@ -1,3 +1,9 @@
+## 036B — Chromium UI wide connected native ROI (в PR, gate ожидается; 2026-10-14)
+
+- Реализация 036B в ветке `feat/036b-wide-connected-chromium`: ZeTer-generated wide PSD16/PSB32 (8288 дефектных пикселей), точный 10-вершинный UI polygon через настоящий CDP pointer/Enter, real native Worker, публичный File → Save Project для original/filled/Undo/Redo, browser-portable strict tile oracle с MAE/RMSE, неизменностью unselected/alpha и exact Undo/Redo. Порог **036B не считать пройденным до Chromium CI**.
+- **Далее 036C:** versioned Chromium operation JSON quality/latency/RSS/CDP с честным `unknown` Worker→PID и `null` peak; негативные тесты и повторная валидация артефактов; после — PR CI + exact-main gate. [036](036-browser-connected-roi-quality.md).
+- **Независимый P0 [002](002-psd-compatibility-corpus.md):** законно публикуемые Photoshop-authored RGB16 и CMYK32 goldens, не заменять синтетикой.
+
 ## 036A — wide connected ROI evidence baseline (слито; PR + exact-main CI success, 2026-10-14)
 
 - [PR #220](https://github.com/zeter1/ZeTer-Photo-Editor/pull/220) слит в main [`94633e9`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/94633e9e333aceb961241487853a92ea2531ed48); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38566438939), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38566790704): Node, generated bundle parity, Chromium file:// smoke, operation artifacts, profiles, diff hygiene.
