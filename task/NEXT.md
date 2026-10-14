@@ -1,9 +1,9 @@
-## 010E-B4 / 024B2b — real Chromium native mid-kernel PSD16/PSB32 cancel → retry (PR under verification, 2026-10-14)
+## 010E-B4 / 024B2b — настоящая Chromium mid-kernel отмена PSD16/PSB32 (merged, PR + exact-main CI success, 2026-10-14)
 
-- **In review, not yet merged:** isolated generated Worker Blob instrumentation after a genuine native kernel write, UI layer lock → 50ms owner-poll termination while CPU kernel is held, full serialized native tile-byte and History no-publication assertion, unmodified-worker retry followed by exact native Undo/Redo. Runs for **both** ZeTer-generated PSD16 and PSB32 under real Chromium `file://`; no Adobe-authored oracle or Worker→PID attribution claimed.
-- `tools/browser-operation-timeline.mjs` now requires cancellation-after-write and verified recovered retry milestones, not a completed held-reply event. Informational CI JSON now requires `stage003-psd16-with-cancelled-retry.json` and `stage003-psb32-with-cancelled-retry.json`.
-- **Open gate:** Node, generated parity, real Chromium `file://`, both JSON artifacts, PR CI, then exact-`main` CI. Until those gates pass, **024B2b is not completed**. [Tracking](024-browser-operation-memory.md).
-- **Still next:** optional separately evidenced CDP Worker→PID attribution (otherwise `unknown`); P0 [002](002-psd-compatibility-corpus.md) independent licensed Adobe PSD16/PSB32 golden; Stage 002/003 remain open.
+- **Слито в `main`:** [PR #208](https://github.com/zeter1/ZeTer-Photo-Editor/pull/208), squash `ad839ab6`. [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38518410697) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38518637139): 1196 Node tests, generated parity, Chromium `file://` PSD16/PSB32, проверенные и загруженные JSON, профили и diff hygiene.
+- Для **обоих** ZeTer-generated файлов: after-write probe в настоящем native kernel → lock UI с отменой Worker до CPU-stall deadline (наблюдалось 229ms PSD16 и 312ms PSB32 от probe до terminate) → 0 completed replies → полное совпадение исходных serialized native tile bytes/никакой новой Fill History записи. Затем новый **неизменённый** Worker успешно выполняет Fill, Undo/Redo строго восстанавливают native bytes.
+- Оба `stage003-*-with-cancelled-retry.json` отчёта подтверждены CI; наблюдения RSS и PID-HWM информационные, **не** точный peak и не Worker→PID атрибуция.
+- **Следующая P0:** [002](002-psd-compatibility-corpus.md) — независимый лицензированный Photoshop-authored RGB16/CMYK32 PSD/PSB golden с хешами/эталонами. **Следующая P1:** документированный и проверенный CDP Worker→PID mapping, если возможно; иначе явно `unknown`. Stage 002/003 **не завершены**. [Детали 024](024-browser-operation-memory.md).
 
 ## 010E-B4 / 024B2a — Chromium operation JSON artifacts and honest process disappearance (merged, PR CI success, 2026-10-11)
 
