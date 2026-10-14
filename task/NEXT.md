@@ -1,3 +1,11 @@
+## 037B1 — проверка исходного JPEG перед фиксацией real-photo эталонов (реализована в ветке; проверка CI/merge ожидается, 2026-10-14)
+
+- Добавлены `tools/real-photo-source-integrity.mjs`, `tools/inspect-real-photo-source.mjs` и `tests/real-photo-source-integrity.test.mjs`: строгий исходный SHA-1 карточки Wikimedia, ручная инспекция SHA-256 локальных оригинальных байтов, JPEG SOF/scan/размеры/3 канала/8-bit, **обязательный pinned SHA-256** для допуска исходника в fixture и отдельный pinned SHA-256 декодированных RGBA8 пикселей.
+- Отрицательные сценарии: missing/wrong SHA-256, изменённый JPEG/SHA-1, malformed marker/EOI/SOF, некорректные размеры, RGBA mismatch, прозрачность и незафиксированный decoder output.
+- **037B ещё открыта:** JPEG оригинал не загружен в репозиторий, реальный SHA-256 не закреплён, decoded pixels/ICC/orientation не подтверждены; настоящих frozen native RGB16/Float32 reference+defect PSD/PSB и benchmark чисел нет. Это test-only intake, не Photoshop parity.
+- **Далее 037B2:** получить оригинал по documented CC0 URL, запустить `node tools/inspect-real-photo-source.mjs <local-jpeg>`, зафиксировать source SHA-256, проверить полный decoded RGBA8 digest, ICC/orientation, затем создать frozen native LE reference SHA-256 для RGB16/PSB32 и исправляемый connected ROI 8288 пикселей. После этого 037C: real file:// Chromium ×3/формат, JSON/RSS/CI.
+- P0 [002](002-psd-compatibility-corpus.md), Stage 003 и прочие функции со скриншота по-прежнему открыты.
+
 ## 037A — native per-pixel known-clean oracle (СЛИТО; PR + exact-main CI success; 2026-10-14)
 
 - Добавлен строгий test-only reference oracle для различной цветной текстуры **каждого** пикселя RGB16/Float32. Для clean snapshot обязателен SHA-256 канонических LE native words; проверяется точная неизменность outside-selection/alpha, независимость буферов, geometry, negative matrix. 5 отдельных Node tests проходят. [PR #223](https://github.com/zeter1/ZeTer-Photo-Editor/pull/223) → [27a6adb](https://github.com/zeter1/ZeTer-Photo-Editor/commit/27a6adb830797d3258bc640ffe09dd89c3ef92b8), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38586323259), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38586743806); `npm run check`, реальный Chromium smoke, profiles/artifacts и diff hygiene — success.

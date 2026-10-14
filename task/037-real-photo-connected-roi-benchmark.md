@@ -11,6 +11,14 @@
 - **Далее 037B:** получить разрешённые фото-байты, закрепить asset SHA-256, проверить geometry/color, создать отдельные frozen native known-clean references RGB16/PSB32 и контролируемые connected ROI defects; exact digest для каждого reference зафиксировать в fixture manifest.
 - **Далее 037C:** настоящее `file://` Chromium PSD16/PSB32 import → polygon → Worker → Save Project → Undo/Redo, минимум 3 запуска на формат; native oracle, строгая validation JSON, honest RSS/CDP missingness, negative matrix и CI exact-main gate. 037 остаётся OPEN.
 
+## Проходка 037B1 — входной контроль оригинального JPEG (2026-10-14; ветка, CI/merge ожидается)
+
+- Реализована test-only проверка `inspectPhotoJpeg`: фиксированный SHA-1 оригинала с карточки CC0, SOI/EOI, SOF/scan, размеры, 8-bit/3 channels и регистрация наличия EXIF/ICC. Скрипт `node tools/inspect-real-photo-source.mjs <local-original-jpeg>` вычисляет **кандидат** SHA-256 из настоящего локального файла, без загрузки по изменяемому URL.
+- `verifyPinnedPhotoJpeg` **запрещает** допуск исходника без самостоятельной фиксации оригинального SHA-256; `verifyPinnedDecodedRgba` отдельно требует SHA-256 декодированных RGBA8, точную геометрию и opaque alpha. JPEG header-сканер НЕ доказывает корректное энтропийное декодирование, ICC/sRGB, orientation или содержание фотографии.
+- Unit negative matrix добавлена для повреждённого source и decoded payload. Эти тесты используют только structural JPEG surrogate; это **не реальные фотопиксели** и не Photoshop parity.
+- **Следующее 037B2:** получить CC0 original bytes и вычислить SHA-256; выполнить trustworthy decode, записать decoded RGBA8 SHA-256, проверить ICC/EXIF ориентацию, собрать отдельные immutable RGB16/PSB32 clean+defect fixtures с native LE SHA-256 и selection 8288. Только затем 037C.
+- **037 остаётся OPEN**, исходные JPEG-байты и frozen native clean refs пока не включены.
+
 ## Цель
 
 Проверить Content-Aware Fill native RGB16/Float32 на **реальной текстурированной фотографии**, а не на ZeTer-generated плоском эталонном фоне. Не использовать одну только self-authored PSD/PSB как доказательство Photoshop-совместимости.
