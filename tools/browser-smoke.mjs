@@ -10,6 +10,7 @@ import { verifyLargeBrowserPsd16Worker } from './browser-large-psd16-smoke.mjs';
 import { verifyBrowserMidKernelCancellation } from './browser-inpaint-mid-kernel-smoke.mjs';
 import { verifyBrowserUiLockMidKernel } from './browser-ui-lock-mid-kernel-smoke.mjs';
 import { verifyBrowserDelayedRecoveryReloads } from './browser-recovery-reload-smoke.mjs';
+import { verifyBrowserWideConnectedNativeUi } from './browser-wide-connected-ui-smoke.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -975,6 +976,13 @@ async function runSmoke() {
     });
     assertNoBrowserErrors(errors,stderrState);
 
+
+    // 036B: public file:// UI polygon (two islands + thin diagonal), real
+    // native PSD16/PSB32 Worker and four public Save Project snapshots.
+    await verifyBrowserWideConnectedNativeUi(client,{evaluate,waitFor,assert,fixtureKey:'rgb16wide'});
+    assertNoBrowserErrors(errors,stderrState);
+    await verifyBrowserWideConnectedNativeUi(client,{evaluate,waitFor,assert,fixtureKey:'rgb32psbwide'});
+    assertNoBrowserErrors(errors,stderrState);
 
     await new Promise(resolve => setTimeout(resolve, 1_800)); // Let editor autosave quiesce.
     await verifyRecoveryIndexedDb(client);
