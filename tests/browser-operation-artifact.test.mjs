@@ -135,3 +135,55 @@ test('030: forged duration summaries and malformed values are rejected at artifa
     await rm(directory,{recursive:true,force:true});
   }
 });
+
+test('031: unsupported Worker/PID/exit/peak claims are rejected on write and JSON read',async()=>{
+  const first=sample('stage003-psd16-with-cancelled-retry','PSD16','completed-with-cancelled-retry');
+  first.memory.workerTargets={
+    workerPidMapping:'unknown',provenWorkerTerminationCount:null,
+    uniqueWorkerTargetIds:1,
+    targets:[{targetId:'worker-1',type:'worker',firstSeenPhase:'before-import',
+      lastSeenPhase:'after-retry',samples:2,observedAtLastSnapshot:false}],
+  };
+  assert.equal(buildBrowserOperationArtifact(first).timeline.memory.workerTargets.targets.length,1);
+
+  const mutations=[
+    m=>{m.workerTargets.provenWorkerTerminationCount=1;},
+    m=>{delete m.workerTargets.provenWorkerTerminationCount;},
+    m=>{m.workerTargets.workerPidMapping='pid:42';},
+    m=>{m.workerTargets.targets[0].pid=42;},
+    m=>{m.workerTargets.targets[0].url='file:///private/document.psb';},
+    m=>{m.workerTargets.uniqueWorkerTargetIds=2;},
+    m=>{m.workerTargets.workerPeakRssBytes=9000;},
+    m=>{m.processChurn.provenExitCount=1;},
+    m=>{m.processChurn.workerPidMapping='known';},
+    m=>{m.linuxProcessIdentity.provenExitCount=1;},
+    m=>{m.operationPeakRssBytes=9000;},
+    m=>{m.workerRssBytes=9000;},
+  ];
+  for (const mutate of mutations) {
+    const forged=JSON.parse(JSON.stringify(first));
+    mutate(forged.memory);
+    assert.throws(()=>buildBrowserOperationArtifact(forged),
+      /unsupported .*evidence/, 'tampered claims must fail at writer boundary');
+  }
+
+  const directory=await mkdtemp(path.join(os.tmpdir(),'zpe-031-'));
+  try {
+    await writeBrowserOperationArtifact(first,{directory});
+    await writeBrowserOperationArtifact(
+      sample('stage003-psb32-with-cancelled-retry','PSB32','completed-with-cancelled-retry'),
+      {directory},
+    );
+    assert.equal((await verifyBrowserOperationArtifacts(directory)).length,2);
+    const location=path.join(directory,'stage003-psd16-with-cancelled-retry.json');
+    const artifact=JSON.parse(await readFile(location,'utf8'));
+    // The top-level wrapper is untouched: previously, rebuilt wrapper equality
+    // could not detect this nested fake proof.
+    artifact.timeline.memory.workerTargets.provenWorkerTerminationCount=1;
+    await writeFile(location,JSON.stringify(artifact),'utf8');
+    await assert.rejects(verifyBrowserOperationArtifacts(directory),
+      /unsupported Worker target evidence/);
+  } finally {
+    await rm(directory,{recursive:true,force:true});
+  }
+});
