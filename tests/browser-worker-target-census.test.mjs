@@ -208,3 +208,38 @@ test('028: CDP Target failure after a valid snapshot does not fabricate successf
   assert.equal(census.workerPidMapping,'unknown');
   assert.equal(report.chromiumProcesses.sampleCount,3);
 });
+
+test('028: an incompatible generic heap milestone remains an unavailable target snapshot', async () => {
+  let targetCalls=0;
+  const pageClient={async send(method){
+    if(method==='Performance.enable') return {};
+    assert.equal(method,'Performance.getMetrics');
+    return {metrics:[{name:'JSHeapUsedSize',value:10},{name:'JSHeapTotalSize',value:20}]};
+  }};
+  const processClient={async send(method){
+    if(method==='Target.getTargets'){
+      targetCalls++;
+      return {targetInfos:[target('w1')]};
+    }
+    assert.equal(method,'SystemInfo.getProcessInfo');
+    return {processInfo:[{id:7,type:'browser',privateMemory:12}]};
+  }};
+  const sampler=createBrowserRendererHeapSampler(pageClient,{
+    processClient,
+    processRssSampler:async()=>({supported:false,reason:'not Linux'}),
+    schedule:()=>1,unschedule:()=>{},
+  });
+  await sampler.start();
+  await sampler.snapshot('after recovery/reload');
+  const report=await sampler.stop();
+  assert.equal(targetCalls,2,'invalid target phase disables later Target queries only');
+  assert.equal(report.chromiumProcesses.sampleCount,3);
+  assert.equal(report.sampleCount,3);
+  assert.equal(report.browserWorkerTargets.availability,'unavailable');
+  assert.match(report.browserWorkerTargets.unavailableReason,/invalid target snapshot\/phase/);
+  assert.equal(report.browserWorkerTargets.snapshotCoverage.missingSamples,2);
+  assert.deepEqual(report.browserWorkerTargets.snapshotCoverage.missingMilestonePhases,
+    ['invalid-phase']);
+  assert.equal(report.browserWorkerTargets.observedAtLastSnapshotCount,null);
+  assert.equal(report.browserWorkerTargets.workerPidMapping,'unknown');
+});
