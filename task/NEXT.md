@@ -1,3 +1,10 @@
+## 037B2a — bridge pinned decoded RGBA8 → RGB16/Float32 connected native references (PR gate PENDING, 2026-10-14)
+
+- Реализован test-only [037B2a](037b2a-photo-native-fixture-bridge.md): детерминированный bounded crop RGBA8 → нативные Uint16/Float32 RGB с отдельными clean/defect buffers, точная 8288-пиксельная двухостровная diagonal connected ROI, неизменённые outside-selection и alpha. Кандидат native LE SHA-256 не считается закреплённым: допуск требует **независимый** `expectedReferenceSha256` и подтверждённый decoded RGBA8 SHA-256; есть негативные unit-проверки.
+- **Ограничение:** это 8-bit-derived нативные слова, не true photo 16/32-bit depth, не независимо Adobe-authored corpus и пока не real-photo benchmark. Проверка ICC/EXIF и лицензированного оригинала отдельно обязательна.
+- **Следующее:** 037B2b — реальные CC0 JPEG bytes + SHA-256 original/decoded RGBA8, credible ICC/EXIF/decode provenance, frozen SHA-256 clean RGB16/Float32 и PSD16/PSB32 defect documents; затем 037C browser `file://` ×3/format + quality/memory evidence. P0 [002](002-psd-compatibility-corpus.md) и общая [003](003-tiled-content-aware.md) остаются открытыми.
+- Проверять status PR, `npm run check`, реальный Chromium `file://` и exact-main CI после merge; до успешных gate не отмечать 037B2a закрытой.
+
 ## 037B1 — проверка исходного JPEG перед фиксацией real-photo эталонов (СЛИТО; PR CI success, 2026-10-14)
 
 - **Gate 037B1:** [PR #224](https://github.com/zeter1/ZeTer-Photo-Editor/pull/224) → [8fa7b12](https://github.com/zeter1/ZeTer-Photo-Editor/commit/8fa7b12719a07ac92fd5af533c799a91fa0696c0), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38593642014); `npm run check`, Chromium `file://`, JSON artifacts, профили и diff hygiene — success. Exact-code main CI после фиксации handoff — ожидается.

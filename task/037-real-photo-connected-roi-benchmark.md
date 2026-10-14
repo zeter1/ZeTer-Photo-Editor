@@ -3,6 +3,12 @@
 **P1, OPEN (после закрытой [036C](036-browser-connected-roi-quality.md)).**
 **Не подменяет [002](002-psd-compatibility-corpus.md):** независимо Photoshop-authored RGB16/CMYK32 PSB golden — отдельная P0 и остаётся открытой.
 
+## Проходка 037B2a — детерминированная native fixture-подготовка (PR gate PENDING)
+
+- Добавлен [исполняемый handoff](037b2a-photo-native-fixture-bridge.md): `tools/real-photo-native-fixtures.mjs` связывает pinned RGBA8 decode с bounded crop и независимыми RGB16/Float32 clean + controlled defect native arrays. Точная connected 8288 ROI, строго alpha/outside-selection неизменны. Обязателен отдельный pinned native LE SHA-256; вычисленный кандидатом digest сам по себе недостаточен.
+- Unit negative tests покрывают неверный hash/bounds/alpha и native quality parity; это **подготовительный тест с синтетическим RGBA8 суррогатом**, не измерение реальной фотографии.
+- **Далее 037B2b:** получить genuine CC0 JPEG/декодированные байты, source+decode+native SHA-256 и ICC/EXIF evidence; построить независимые fixture PSD16/PSB32. **037C** browser ×3/format после этого. 037 в целом открыта до полной цепочки CI/real asset.
+
 ## Проходка 037A — ЗАКРЫТА (2026-10-14; PR + exact-code main CI success)
 
 - Реализованы `tools/real-photo-native-quality.mjs` и `tests/real-photo-native-quality.test.mjs`: native Uint16/Float32 **per-pixel** known-clean reference, обязательный SHA-256 clean LE words, независимые snapshots, MAE/RMSE/max error. Не опираются на constant-color ZeTer synthetic reference или RGBA8 preview.

@@ -1,3 +1,8 @@
+## 037B2a — подготовлен native fixture bridge, original photo ещё не получено
+
+- См. [task/037B2a](../../../task/037b2a-photo-native-fixture-bridge.md): candidate RGBA8 → RGB16/Float32 native clean + 8288 connected selected defect, отдельный pinned SHA-256 LE native words обязателен до допуска.
+- Генератор не выполняет entropy JPEG decode, не доказывает EXIF/ICC/sRGB и не повышает исходную 8-bit точность. В репозитории по-прежнему **нет** настоящего CC0 JPEG, frozen clean hashes и реального бенчмарка.
+
 # 037 — кандидат реальной фотографии (не готовый benchmark fixture)
 
 **Статус: provenance source candidate; оригинальные JPEG-байты и SHA-256 ещё не получены/не закреплены. НЕ заявлять benchmark quality или Photoshop parity.**
