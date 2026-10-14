@@ -1,3 +1,5 @@
+> **036B в разработке (ветка `feat/036b-wide-connected-chromium`):** добавлены широкие PSD16/PSB32 тестовые входы, точный UI polygon + real Chromium native Worker / public Save Project ×4 / Undo/Redo oracle. Не считать готовым до Chromium CI. Следом [036C](036-browser-connected-roi-quality.md) — versioned observation JSON и exact-main gate. P0 [002](002-psd-compatibility-corpus.md) остаётся. [NEXT](NEXT.md).
+
 > **Следующая P1 / 036:** [wide connected ROI native quality/latency/RSS в реальном Chromium `file://`](036-browser-connected-roi-quality.md) после закрытой 035; внешний Photoshop-authored корпус [002](002-psd-compatibility-corpus.md) остаётся P0. [NEXT](NEXT.md).
 
 > **035 (закрыто, test-only):** [поздняя recovery-modal](035-browser-recovery-modal-flake.md) исправлена в Chromium smoke после трёх delayed IndexedDB `Page.reload`. [PR #219](https://github.com/zeter1/ZeTer-Photo-Editor/pull/219) → `66f41e6`; [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38563696598) и [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38564063538) success. Без production изменений.

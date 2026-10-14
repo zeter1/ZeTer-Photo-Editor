@@ -28,7 +28,7 @@ export function createWideConnectedRoiIndices(width, height, { x = 0, y = 0 } = 
   return Uint32Array.from(indices);
 }
 
-function decodeNativeSource(source) {
+export function decodeNativeSource(source) {
   const fail = message => { throw new TypeError('036 native tiles: ' + message); };
   if (!source || source.kind !== 'zpe-pixel-buffer-source-v2' ||
       !Number.isSafeInteger(source.width) || !Number.isSafeInteger(source.height) ||
@@ -56,9 +56,11 @@ function decodeNativeSource(source) {
     if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
       fail('invalid tile base64');
     }
-    const raw=Buffer.from(encoded,'base64');
-    if (raw.length !== tile.rawBytes || raw.toString('base64') !== encoded)
+    let binary;
+    try { binary=atob(encoded); } catch { fail('invalid base64 payload'); }
+    if (binary.length !== tile.rawBytes || btoa(binary) !== encoded)
       fail('noncanonical or truncated native tile');
+    const raw=Uint8Array.from(binary,character=>character.charCodeAt(0));
     const view=new DataView(raw.buffer,raw.byteOffset,raw.byteLength);
     for (let localY=0;localY<tile.height;localY++) {
       for (let localX=0;localX<tile.width;localX++) {
@@ -79,7 +81,7 @@ function decodeNativeSource(source) {
   return values;
 }
 
-function assertEqualNativeTiles(before, after, label) {
+export function assertEqualNativeTiles(before, after, label) {
   const fail = message => { throw new TypeError('036 '+label+': '+message); };
   if (!after || before.kind !== after.kind ||
       ['width','height','model','channels','bitsPerChannel','tileSize','rawBytes',
