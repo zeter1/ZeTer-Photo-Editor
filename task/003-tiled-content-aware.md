@@ -1,3 +1,5 @@
+> **036A (2026-10-14, в работе):** добавлен test-only native oracle для wide connected ROI 8288 и проверки полного byte/Undo/Redo/sampling evidence; реальные Chromium UI, operation JSON, PR/exact-main CI остаются очередью [036](036-browser-connected-roi-quality.md). Это не завершает Stage 003 и не подменяет внешние Adobe fixtures [002](002-psd-compatibility-corpus.md).
+
 ## 2026-10-14 — 035: Chromium recovery startup race закрыта
 
 - [035](035-browser-recovery-modal-flake.md): три настоящих Chromium `file://` reload с задержанным IndexedDB; startup barrier `appReady=true` до 010D native Fill. [PR #219](https://github.com/zeter1/ZeTer-Photo-Editor/pull/219) → `66f41e6`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38563696598), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38564063538). Это надёжность тестового smoke, не качество Inpaint.
