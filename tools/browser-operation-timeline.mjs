@@ -9,10 +9,17 @@ const CANCELLED_RETRY_PHASE_ORDER = Object.freeze([
   'cancel-native-verified','retry-fill-command-invoked','retry-preview-history-published',
   'retry-undo-native-verified','retry-redo-native-verified',
 ]);
+const DURATION_PHASE_PAIRS = Object.freeze({
+  importInputToPreview:['import-input-dispatched','import-preview-ready'],
+  fillCommandToHistoryPreview:['fill-command-invoked','preview-history-published'],
+  undoToRedo:['undo-complete','redo-complete'],
+  cancelledRetryObservation:['cancel-fill-command-invoked','cancel-native-verified'],
+  recoveredRetryToRedo:['retry-fill-command-invoked','retry-redo-native-verified'],
+});
 
 // An observed milestone set does not prove order. Verify at the timeline and
 // serialized CI-report boundary; this is not a Worker PID/peak-RAM oracle.
-export function validateBrowserOperationEvidence({outcome,observedWindowMs,milestones}={}) {
+export function validateBrowserOperationEvidence({outcome,observedWindowMs,milestones,durationsMs}={}) {
   if (!['completed','completed-with-cancelled-retry','failed'].includes(outcome) ||
       !Number.isFinite(observedWindowMs) || observedWindowMs < 0 ||
       !Array.isArray(milestones)) {
@@ -43,6 +50,27 @@ export function validateBrowserOperationEvidence({outcome,observedWindowMs,miles
       throw new Error('Browser operation timeline: missing or out-of-order evidence: '+phase);
     }
     previousIndex=index;
+  }
+  // The independent JSON verifier must derive summaries from the observed marks,
+  // not trust stored durations that could have been edited after the run.
+  if (!durationsMs || typeof durationsMs !== 'object' || Array.isArray(durationsMs) ||
+      Object.keys(durationsMs).length !== Object.keys(DURATION_PHASE_PAIRS).length) {
+    throw new TypeError('Browser operation timeline: invalid duration evidence');
+  }
+  const times = new Map(milestones.map(event => [event.phase,event.atMs]));
+  for (const [name,[start,end]] of Object.entries(DURATION_PHASE_PAIRS)) {
+    if (!Object.hasOwn(durationsMs,name)) {
+      throw new TypeError('Browser operation timeline: missing duration evidence: '+name);
+    }
+    const startMs=times.get(start), endMs=times.get(end);
+    const expected=startMs!==undefined && endMs!==undefined && endMs>=startMs
+      ? endMs-startMs : null;
+    const actual=durationsMs[name];
+    if (expected===null ? actual!==null :
+        !Number.isFinite(actual) || actual<0 || actual>observedWindowMs ||
+        Math.abs(actual-expected)>1e-6) {
+      throw new TypeError('Browser operation timeline: inconsistent duration evidence: '+name);
+    }
   }
   return true;
 }
