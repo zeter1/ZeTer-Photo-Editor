@@ -1,12 +1,12 @@
-## 024B2b — implementation candidate (PR gate pending, 2026-10-14)
+## 024B2b — завершена, слита в main, PR + exact-main CI success (2026-10-14)
 
-- [x] Replace delayed-*completed*-reply cancellation for both real `file://` large PSD16/PSB32 UI cases with **test-only generated Blob** instrumentation immediately after the real native `inpaintSelectedSamplesSteps` kernel's first pixel write. Source remains unchanged on disk and is restored before the retry.
-- [x] Use a real layer-lock UI action to revoke the active command, observe the Worker termination before a 6-second injected CPU stall can complete, reject successful Worker replies, compare every serialized native tile byte and prohibit any extra Fill History row.
-- [x] Unlock and run a fresh **unmodified** production Worker, require changed native high-depth bytes and exactly one Fill History publication; Undo must restore the entire original native source, Redo the exact successor source.
-- [x] Strengthen required operation timeline milestones and artifact verifier for **both** PSD16 and PSB32; preserve sampled-RSS vs process-HWM limitations and `workerPidMapping:unknown`.
-- [ ] Pass Node, build/parity, real Chromium `file://`, required JSON upload and PR CI. Then merge and verify exact-`main` CI.
-- [ ] CDP Worker→Linux PID attribution only with a documented, tested mapping; otherwise keep `unknown`.
-- **Important:** This is ZeTer-generated PSD/PSB coverage, not independently Photoshop-authored compatibility; injected CPU stall is only a cancellation proof, not an operation RAM benchmark. Stage 002/003 remain open.
+- [x] **Для обоих** real Chromium `file://` ZeTer-generated PSD16 и PSB32 тестовый Blob добавляет after-write probe внутри настоящего native kernel, без изменения исходного Worker supplier на диске; отмена производится реальным UI lock во время CPU-stall, без готового reply.
+- [x] Остановленный Worker не публикует результат: `completedReplies:0`, наблюдаемая остановка после настоящей записи (PSD16: 229ms, PSB32: 312ms от probe; единичные нестабильные CI timings), все serialized native tile dataUrl пословно совпадают, History не получает дополнительный Fill.
+- [x] После разблокировки новый **неизменённый** Worker вычисляет заливку, публикует ровно одну новую Fill History запись; Undo возвращает **все** первоначальные native tile bytes, Redo восстанавливает **все** bytes результата.
+- [x] Timeline/outcome и JSON-verifier требуют post-write cancellation **и** retry Undo/Redo evidence на PSD16/PSB32; memory limitations и Worker→PID=`unknown` сохраняются.
+- [x] Gate: [PR #208](https://github.com/zeter1/ZeTer-Photo-Editor/pull/208) → squash `ad839ab6`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38518410697), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38518637139): 1196 Node, generated bundle parity, Chromium smoke, 2 JSON verification/upload, informational profiles, diff hygiene.
+- [ ] **Следующий отдельный research-pass:** атрибуция CDP Worker→Linux PID только при документированном и тестируемом mapping; иначе `unknown`.
+- **Ограничение:** Synthetic ZeTer PSD/PSB не заменяют Photoshop-authored golden, 6s spin — тестовая остановка, не RAM benchmark. Stage 002/003 остаются открыты.
 
 ## 024B2a — versioned browser operation JSON + final-snapshot process visibility (merged, PR CI success, 2026-10-11)
 
@@ -15,7 +15,7 @@
 - [x] CI checks **both** report files and uploads them as an informational artifact, even when later steps fail (if files exist); no numeric performance gate, exact peak-RAM or fabricated `privateMemory`.
 - [x] [PR #207](https://github.com/zeter1/ZeTer-Photo-Editor/pull/207) merged as `594295ad`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38166256448): Node, generated parity, real Chromium `file://`, required two JSON files/upload, native profiles, diff hygiene.
 - [ ] Verify exact-main CI after documentation status sync.
-- [ ] **024B2b still open:** instrument *actual native mid-kernel* PSD16/PSB32 cancel→new Worker recovery in the same operation timeline, original native bitwise integrity/History, optionally independently documented CDP target attribution; do not confuse this with a held-completed-reply cancellation.
+- [x] **024B2b now merged:** real native in-kernel PSD16/PSB32 cancel→new Worker recovery, original native bitwise tile integrity and History ([PR #208](https://github.com/zeter1/ZeTer-Photo-Editor/pull/208)); independent CDP target→PID attribution remains unproven.
 
 ## 024B1 — PID+starttime samples (merged, PR + exact-main CI success, 2026-10-11)
 
