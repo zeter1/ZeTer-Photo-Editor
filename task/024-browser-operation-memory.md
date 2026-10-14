@@ -1,3 +1,13 @@
+## 024B2b — implementation candidate (PR gate pending, 2026-10-14)
+
+- [x] Replace delayed-*completed*-reply cancellation for both real `file://` large PSD16/PSB32 UI cases with **test-only generated Blob** instrumentation immediately after the real native `inpaintSelectedSamplesSteps` kernel's first pixel write. Source remains unchanged on disk and is restored before the retry.
+- [x] Use a real layer-lock UI action to revoke the active command, observe the Worker termination before a 6-second injected CPU stall can complete, reject successful Worker replies, compare every serialized native tile byte and prohibit any extra Fill History row.
+- [x] Unlock and run a fresh **unmodified** production Worker, require changed native high-depth bytes and exactly one Fill History publication; Undo must restore the entire original native source, Redo the exact successor source.
+- [x] Strengthen required operation timeline milestones and artifact verifier for **both** PSD16 and PSB32; preserve sampled-RSS vs process-HWM limitations and `workerPidMapping:unknown`.
+- [ ] Pass Node, build/parity, real Chromium `file://`, required JSON upload and PR CI. Then merge and verify exact-`main` CI.
+- [ ] CDP Worker→Linux PID attribution only with a documented, tested mapping; otherwise keep `unknown`.
+- **Important:** This is ZeTer-generated PSD/PSB coverage, not independently Photoshop-authored compatibility; injected CPU stall is only a cancellation proof, not an operation RAM benchmark. Stage 002/003 remain open.
+
 ## 024B2a — versioned browser operation JSON + final-snapshot process visibility (merged, PR CI success, 2026-10-11)
 
 - [x] Produce `zpe-browser-operation-artifact-v1` files from actual Chromium `file://` PSD16 and PSB32 UI Worker smoke, with operation timeline, sample interval/window, available/unavailable metrics, PID+starttime per-incarnation observations, process churn, unchanged `unknown` Worker→PID mapping.
