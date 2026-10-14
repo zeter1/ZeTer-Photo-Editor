@@ -20,6 +20,11 @@ const sample=(operationId,format,outcome)=>({
   observedWindowMs:123,
   milestones:[...completedPhases,...(outcome==='completed-with-cancelled-retry'?cancelledPhases:[])]
     .map((phase,index)=>({phase,atMs:1+index*5,sincePreviousMs:index===0?1:5})),
+  durationsMs:{
+    importInputToPreview:5,fillCommandToHistoryPreview:5,undoToRedo:5,
+    cancelledRetryObservation:outcome==='completed-with-cancelled-retry'?15:null,
+    recoveredRetryToRedo:outcome==='completed-with-cancelled-retry'?15:null,
+  },
   memory:{sampleCount:2,requestedSamplingIntervalMs:50,
     chromiumPrivateMemoryAvailability:'unavailable',chromiumPrivateSampledMaxBytes:null,
     processChurn:{workerPidMapping:'unknown'},
@@ -86,6 +91,47 @@ test('029: reordered, duplicate, inconsistent or altered serialized evidence fai
     await writeFile(location,JSON.stringify(forged),'utf8');
     await assert.rejects(verifyBrowserOperationArtifacts(directory),/invalid milestone evidence|out-of-order evidence/);
   } finally {
+    await rm(directory,{recursive:true,force:true});
+  }
+});
+
+test('030: forged duration summaries and malformed values are rejected at artifact boundary',async()=>{
+  const p=sample('stage003-psd16-with-cancelled-retry','PSD16','completed-with-cancelled-retry');
+  assert.equal(buildBrowserOperationArtifact(p).timeline.durationsMs.cancelledRetryObservation,15);
+  const forged=[
+    {...p.durationsMs,importInputToPreview:6},
+    {...p.durationsMs,fillCommandToHistoryPreview:0},
+    {...p.durationsMs,undoToRedo:-1},
+    {...p.durationsMs,cancelledRetryObservation:NaN},
+    {...p.durationsMs,recoveredRetryToRedo:Infinity},
+    {...p.durationsMs,recoveredRetryToRedo:null},
+    {...p.durationsMs,unknownMetric:0},
+  ];
+  for(const durationsMs of forged){
+    assert.throws(()=>buildBrowserOperationArtifact({...p,durationsMs}),/duration evidence/);
+  }
+  const {undoToRedo,...missing}=p.durationsMs;
+  assert.throws(()=>buildBrowserOperationArtifact({...p,durationsMs:missing}),/duration evidence/);
+  assert.throws(()=>buildBrowserOperationArtifact({...p,durationsMs:undefined}),/duration evidence/);
+  const completed=sample('other','PSD16','completed');
+  assert.throws(()=>buildBrowserOperationArtifact({
+    ...completed,durationsMs:{...completed.durationsMs,cancelledRetryObservation:0},
+  }),/duration evidence/);
+
+  const directory=await mkdtemp(path.join(os.tmpdir(),'zpe-030-'));
+  try{
+    await writeBrowserOperationArtifact(p,{directory});
+    await writeBrowserOperationArtifact(
+      sample('stage003-psb32-with-cancelled-retry','PSB32','completed-with-cancelled-retry'),
+      {directory},
+    );
+    assert.equal((await verifyBrowserOperationArtifacts(directory)).length,2);
+    const location=path.join(directory,'stage003-psd16-with-cancelled-retry.json');
+    const artifact=JSON.parse(await readFile(location,'utf8'));
+    artifact.timeline.durationsMs.cancelledRetryObservation+=2;
+    await writeFile(location,JSON.stringify(artifact),'utf8');
+    await assert.rejects(verifyBrowserOperationArtifacts(directory),/inconsistent duration evidence/);
+  }finally{
     await rm(directory,{recursive:true,force:true});
   }
 });
