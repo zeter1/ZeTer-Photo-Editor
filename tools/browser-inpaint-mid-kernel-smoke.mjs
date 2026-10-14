@@ -3,7 +3,10 @@
  * never the production supplier. A probe is emitted AFTER a real kernel write;
  * a bounded CPU spin keeps that same worker inside the kernel until terminate().
  */
-export function instrumentBrowserKernelSource(source) {
+export function instrumentBrowserKernelSource(source, { minimumWidth = 40 } = {}) {
+  if (!Number.isSafeInteger(minimumWidth) || minimumWidth < 1 || minimumWidth > 65535) {
+    throw new TypeError('Stage 003 browser probe: invalid minimum width');
+  }
   const marker = '    pending[index] = 0;\n    donorIndex[index] = bestDonor;\n    filled += 1;';
   if (typeof source !== 'string' ||
       !source.startsWith('/* ZeTer tiled Content-Aware Worker.') ||
@@ -11,7 +14,7 @@ export function instrumentBrowserKernelSource(source) {
     throw new Error('Stage 003 browser probe: native kernel write anchor changed');
   }
   const addition = [
-    '    if (width >= 40 && filled === 1) {',
+    '    if (width >= ' + minimumWidth + ' && filled === 1) {',
     '      self.postMessage({probe:"zpe-test-native-kernel-write",',
     '        filled, changedSample:Number(data[targetOffset])});',
     '      const probeDeadline = performance.now() + 6000;',

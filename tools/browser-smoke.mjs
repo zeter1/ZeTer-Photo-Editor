@@ -966,7 +966,7 @@ async function runSmoke() {
     await verifyBrowserHighDepthPsdPsbImport(client);
     assertNoBrowserErrors(errors,stderrState);
 
-    await verifyLargeBrowserPsd16Worker(client,{evaluate,waitFor,assert,browserClient});
+    await verifyLargeBrowserPsd16Worker(client,{evaluate,waitFor,assert,browserClient,testCancellation:true});
     assertNoBrowserErrors(errors,stderrState);
 
     await verifyLargeBrowserPsd16Worker(client,{

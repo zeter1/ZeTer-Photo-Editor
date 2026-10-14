@@ -34,7 +34,9 @@ export function createBrowserOperationTimeline({ operationId, fixture, format, n
         'fill-command-invoked','preview-history-published','undo-complete','redo-complete',
       ].every(phase=>names.has(phase)))throw new Error('Browser operation timeline: successful operation missing milestones');
       if(outcome==='completed-with-cancelled-retry' && ![
-        'cancel-fill-command-invoked','cancel-worker-reply-held','cancel-owner-revoked','cancel-native-verified',
+        'cancel-fill-command-invoked','cancel-kernel-write-observed','cancel-owner-revoked','cancel-native-verified',
+        'retry-fill-command-invoked','retry-preview-history-published',
+        'retry-undo-native-verified','retry-redo-native-verified',
       ].every(phase=>names.has(phase)))throw new Error('Browser operation timeline: cancellation lacks atomicity evidence');
       const end=now();
       if(!Number.isFinite(end) || end<(events.at(-1)?.absoluteMs??began))
@@ -50,6 +52,7 @@ export function createBrowserOperationTimeline({ operationId, fixture, format, n
           fillCommandToHistoryPreview:duration('fill-command-invoked','preview-history-published'),
           undoToRedo:duration('undo-complete','redo-complete'),
           cancelledRetryObservation:duration('cancel-fill-command-invoked','cancel-native-verified'),
+          recoveredRetryToRedo:duration('retry-fill-command-invoked','retry-redo-native-verified'),
         },
         memory:{
           sampleCount:memoryReport.sampleCount,

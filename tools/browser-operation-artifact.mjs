@@ -47,7 +47,7 @@ export async function verifyBrowserOperationArtifacts(directory) {
     throw new TypeError('Browser operation artifact: missing CI directory');
   }
   const required=[
-    ['stage003-psd16.json','PSD16','completed'],
+    ['stage003-psd16-with-cancelled-retry.json','PSD16','completed-with-cancelled-retry'],
     ['stage003-psb32-with-cancelled-retry.json','PSB32','completed-with-cancelled-retry'],
   ];
   for (const [filename,format,outcome] of required) {
@@ -57,7 +57,9 @@ export async function verifyBrowserOperationArtifacts(directory) {
         artifact.format!==format || artifact.outcome!==outcome ||
         artifact.timeline.memory.requestedSamplingIntervalMs!==50 ||
         artifact.timeline.memory.processChurn?.workerPidMapping!=='unknown' ||
-        artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null) {
+        artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null ||
+        !artifact.timeline.milestones.some(event=>event.phase==='cancel-kernel-write-observed') ||
+        !artifact.timeline.milestones.some(event=>event.phase==='retry-redo-native-verified')) {
       throw new Error('Browser operation artifact: incorrect or unsupported measurement claims in '+filename);
     }
   }

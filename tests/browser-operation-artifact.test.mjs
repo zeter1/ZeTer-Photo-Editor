@@ -9,7 +9,8 @@ const sample=(operationId,format,outcome)=>({
   kind:'zpe-browser-high-depth-operation-timeline-v1',
   operationId,format,fixture:format==='PSD16'?'large.psd':'large.psb',outcome,
   observedWindowMs:123,
-  milestones:[{phase:'import-input-dispatched',atMs:5,sincePreviousMs:5}],
+  milestones:[{phase:'cancel-kernel-write-observed',atMs:5,sincePreviousMs:5},
+    {phase:'retry-redo-native-verified',atMs:6,sincePreviousMs:1}],
   memory:{sampleCount:2,requestedSamplingIntervalMs:50,
     chromiumPrivateMemoryAvailability:'unavailable',chromiumPrivateSampledMaxBytes:null,
     processChurn:{workerPidMapping:'unknown'},
@@ -34,15 +35,15 @@ test('024B2a: versioned artifact preserves unavailable memory, observation and n
 test('024B2a: CI file writer and verifier require both genuine PSD16 and PSB32 timelines',async()=>{
   const directory=await mkdtemp(path.join(os.tmpdir(),'zpe-024b2-'));
   try {
-    const first=sample('stage003-psd16','PSD16','completed');
+    const first=sample('stage003-psd16-with-cancelled-retry','PSD16','completed-with-cancelled-retry');
     const second=sample('stage003-psb32-with-cancelled-retry','PSB32','completed-with-cancelled-retry');
     const location=await writeBrowserOperationArtifact(first,{directory});
-    assert.equal(location,path.join(directory,'stage003-psd16.json'));
+    assert.equal(location,path.join(directory,'stage003-psd16-with-cancelled-retry.json'));
     assert.deepEqual(JSON.parse(await readFile(location,'utf8')),buildBrowserOperationArtifact(first));
     await assert.rejects(verifyBrowserOperationArtifacts(directory),/ENOENT/);
     await writeBrowserOperationArtifact(second,{directory});
     assert.deepEqual(await verifyBrowserOperationArtifacts(directory),[
-      'stage003-psd16.json','stage003-psb32-with-cancelled-retry.json',
+      'stage003-psd16-with-cancelled-retry.json','stage003-psb32-with-cancelled-retry.json',
     ]);
     const bad=sample('stage003-psb32-with-cancelled-retry','PSB32','completed');
     await writeBrowserOperationArtifact(bad,{directory});
