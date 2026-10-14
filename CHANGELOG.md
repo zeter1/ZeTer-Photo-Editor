@@ -2,6 +2,14 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-14 — Добавлен строгий входной контроль JPEG для будущего real-photo benchmark
+
+- Добавлено: test-only `tools/real-photo-source-integrity.mjs` с JPEG SOF/scan header geometry, сверкой исторического SHA-1 источника и fail-closed pinned SHA-256 исходных JPEG bytes. Локальный CLI печатает SHA-256 только после предварительных структурных проверок.
+- Добавлено: независимая проверка SHA-256 декодированных RGBA8 пикселей с геометрией и opacity; negative matrix в `tests/real-photo-source-integrity.test.mjs`.
+- Документация: в `task/037`, `task/NEXT.md` и `tests/fixtures/real-photo/README.md` оставлены точные условия для 037B2/037C.
+- Ограничения проверки: JPEG энтропия/ICC/EXIF и реальная фотография этим scanner не проверяются. Source asset SHA-256 ещё не pinned, native reference/PSD/PSB и Chromium real-photo benchmark не созданы. Production runtime и версия не менялись.
+
+
 ### 2026-10-14 — Подготовлен независимый попиксельный native эталон качества для реальной фотографии
 
 - Добавлено: test-only `tools/real-photo-native-quality.mjs` с отдельным per-pixel known-clean reference для Uint16/Float32, контроль SHA-256 канонических native LE words и MAE/RMSE без 8-битного Canvas.
