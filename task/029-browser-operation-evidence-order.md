@@ -1,6 +1,6 @@
 # 029 / 024C4 — Проверяемый порядок событий Chromium PSD16/PSB32
 
-**Статус (2026-10-14):** реализация отправлена в PR; до green PR CI, merge и green exact-code main CI проходка считается открытой.
+**Статус (2026-10-14):** **слито в `main`**, [PR #213](https://github.com/zeter1/ZeTer-Photo-Editor/pull/213) → squash `092b02d`. [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38529014491) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38529236050). Закрыта только диагностическая проходка 029, не Stage 002/003.
 
 ## Проблема
 
@@ -13,7 +13,7 @@
 - [x] Проверяем конечные неотрицательные/неубывающие atMs, согласованные sincePreviousMs, observedWindowMs и уникальность имен; небольшой допуск только к ошибке вычитания double.
 - [x] Общий контракт в timeline.finish и buildBrowserOperationArtifact; CI verifier повторно проверяет сохранённый JSON, а не доверяет только набору названий.
 - [x] Regression tests: chronology swap, duplicate, wrong delta, time past finish, absent final redo, поддельный JSON.
-- [ ] GitHub gate: Node/npm run check, настоящий Chromium `file://` PSD16 и PSB32 mid-kernel→retry, JSON artifacts, PR CI success, merge, exact-main SHA CI success.
+- [x] GitHub gate: `npm run check`, реальный Chromium `file://` PSD16/PSB32 mid-kernel→retry, оба JSON artifacts, профили, diff hygiene, PR CI + merge + exact-code main CI — **success**.
 
 ## Ограничения и дальнейшие задачи
 

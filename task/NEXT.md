@@ -1,7 +1,7 @@
-## 029 / 024C4 — упорядоченные browser operation artifacts (PR на проверке, 2026-10-14)
+## 029 / 024C4 — упорядоченные browser operation artifacts (слито, exact-code main CI success, 2026-10-14)
 
 - [029](029-browser-operation-evidence-order.md): единую fail-closed проверку этапов cancel/repair native Worker и относительных времён применяем при finish и сериализации CI JSON; тесты пытаются подменить порядок, дублировать событие, исказить duration и файл-артефакт.
-- **Статус:** ожидает PR CI и exact-code main CI, Stage 002/003 по-прежнему открыты. **Следующее:** P0 независимый лицензированный Photoshop RGB16/CMYK32 high-depth corpus [002](002-psd-compatibility-corpus.md); P1 документированный Worker target→PID либо `unknown` [025](025-browser-worker-target-census.md), browser quality и latency [003](003-tiled-content-aware.md).
+- **Gate выполнен:** [PR #213](https://github.com/zeter1/ZeTer-Photo-Editor/pull/213) слит в `main` (`092b02d`), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38529014491), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38529236050): Node + generated parity, Chromium `file://` PSD16/PSB32, два JSON artifacts, профили и diff hygiene. Stage 002/003 по-прежнему открыты. **Следующее:** P0 независимый лицензированный Photoshop RGB16/CMYK32 high-depth corpus [002](002-psd-compatibility-corpus.md); P1 документированный Worker target→PID либо `unknown` [025](025-browser-worker-target-census.md), browser quality и latency [003](003-tiled-content-aware.md).
 
 ## 028 / 024C3 — Worker Target snapshot observation gaps (слито, exact-main CI success, 2026-10-14)
 
