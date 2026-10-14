@@ -1,3 +1,9 @@
+## 028 / 024C3 — неизвестные Worker Target snapshots (PR candidate, 2026-10-14)
+
+- [028](028-browser-worker-target-observation-gaps.md): независимые от CDP PID и Linux `/proc` пропуски `Target.getTargets`, `snapshotCoverage` и отсутствие выдуманных churn/last-visibility фактов после failed poll.
+- **Verification pending:** targeted tests, `npm run check`, Chromium `file://` PSD16/PSB32, PR CI, merge и exact-main CI. Пока не выдавать за завершённое.
+- **Следом:** P0 [002](002-psd-compatibility-corpus.md) Adobe-authored лицензированные high-depth PSD/PSB, P1 [025](025-browser-worker-target-census.md) только доказательное target→PID, [003](003-tiled-content-aware.md) real browser performance/quality. Stage 002/003 открыты.
+
 ## 027 / 024C2 — PID observation gaps при cancel→retry (слито, PR + exact-code main CI success, 2026-10-14)
 
 - [027](027-browser-process-observation-gaps.md): добавлен per-snapshot CDP PID/Linux starttime coverage; пропущенный финальный /proc снимок не подменяется прежней видимостью, adjacency churn не вычисляется сквозь неизвестный интервал.
