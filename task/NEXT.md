@@ -1,3 +1,10 @@
+## 010E-B4 / 024B2b — real Chromium native mid-kernel PSD16/PSB32 cancel → retry (PR under verification, 2026-10-14)
+
+- **In review, not yet merged:** isolated generated Worker Blob instrumentation after a genuine native kernel write, UI layer lock → 50ms owner-poll termination while CPU kernel is held, full serialized native tile-byte and History no-publication assertion, unmodified-worker retry followed by exact native Undo/Redo. Runs for **both** ZeTer-generated PSD16 and PSB32 under real Chromium `file://`; no Adobe-authored oracle or Worker→PID attribution claimed.
+- `tools/browser-operation-timeline.mjs` now requires cancellation-after-write and verified recovered retry milestones, not a completed held-reply event. Informational CI JSON now requires `stage003-psd16-with-cancelled-retry.json` and `stage003-psb32-with-cancelled-retry.json`.
+- **Open gate:** Node, generated parity, real Chromium `file://`, both JSON artifacts, PR CI, then exact-`main` CI. Until those gates pass, **024B2b is not completed**. [Tracking](024-browser-operation-memory.md).
+- **Still next:** optional separately evidenced CDP Worker→PID attribution (otherwise `unknown`); P0 [002](002-psd-compatibility-corpus.md) independent licensed Adobe PSD16/PSB32 golden; Stage 002/003 remain open.
+
 ## 010E-B4 / 024B2a — Chromium operation JSON artifacts and honest process disappearance (merged, PR CI success, 2026-10-11)
 
 - **Merged:** [PR #207](https://github.com/zeter1/ZeTer-Photo-Editor/pull/207) (`594295ad`), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38166256448) including real Chromium `file://`, JSON verification/upload, Node, generated parity and informational profiles. Exact-main CI runs separately.
