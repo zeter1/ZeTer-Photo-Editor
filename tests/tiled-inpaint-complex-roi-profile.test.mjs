@@ -34,6 +34,17 @@ test('010E-A: >256-tile connected dense ROI preserves RGB16/CMYKA32 native bytes
     assert.equal(result.cooperativeCancellation, 'atomic');
     assert.equal(result.workerParity, 'exact-native-tiles');
     assert.equal(result.sourceTiles, 'immutable');
+    assert.equal(result.quality.kind, 'zpe-known-native-connected-roi-quality-v1');
+    assert.match(result.quality.reference, /not Photoshop/);
+    assert.equal(result.quality.bitsPerChannel, model === 'rgb16' ? 16 : 32);
+    assert.equal(result.quality.selectedPixels, result.selectedPixels);
+    assert.equal(result.quality.scoredSamples,
+      result.selectedPixels * (model === 'rgb16' ? 3 : 4));
+    assert.ok(result.quality.baseline.mae > 0);
+    assert.ok(result.quality.repaired.mae < result.quality.baseline.mae);
+    assert.ok(result.quality.repaired.rmse < result.quality.baseline.rmse);
+    assert.ok(result.quality.repaired.maxAbsoluteError <= (model === 'rgb16' ? 1 : 1e-6));
+    assert.equal(result.quality.unchangedOutsideSelection, true);
     assert.ok(result.cooperativeYields >= 25);
     for (const key of ['fixtureMs', 'syncMs', 'workerRoundTripMs']) {
       assert.ok(Number.isFinite(result[key]) && result[key] >= 0);
