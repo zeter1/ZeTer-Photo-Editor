@@ -39,19 +39,30 @@ const cases = {
     damaged:[59_000,1_000,1_000,65_535],
   },
 };
+// 036B: same ZeTer-authored high-depth transport, but a full 8288-pixel
+// two-island defect joined by a 96-pixel diagonal (not Photoshop-authored).
+cases.rgb16wide={...cases.rgb16large,filename:'stage003-browser-wide-rgb16.psd'};
+cases.rgb32psbwide={...cases.rgb32psblarge,filename:'stage003-browser-wide-rgb32.psb'};
 
 export function createBrowserHighDepthFixture(key) {
   const config=cases[key];
   if (!config) throw new RangeError('Unknown browser high-depth fixture: '+key);
   // A 1025² RGBA16 / RGBA32 raster exceeds the 8 MiB v2 threshold.
   // Keep the conventional 8×8 fixtures small for fast precision smoke tests.
-  const large=key==='rgb16large'||key==='rgb32psblarge'||key==='rgb32psblarge-alt';
+  const large=key==='rgb16large'||key==='rgb32psblarge'||key==='rgb32psblarge-alt'||
+    key==='rgb16wide'||key==='rgb32psbwide';
+  const wide=key==='rgb16wide'||key==='rgb32psbwide';
+  const wideOrigin=Math.floor((1025-240)/2);
   const width=large?1025:8,height=large?1025:8,channels=4;
   const defectX=large?Math.floor(width/2):4,defectY=large?Math.floor(height/2):4;
   const samples=new config.ArrayType(width*height*channels);
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
-    const defect=large
-      ? Math.abs(x-defectX)<=2 && Math.abs(y-defectY)<=2
+    const dx=x-wideOrigin,dy=y-wideOrigin;
+    const defect=wide
+      ? (dx>=16&&dx<80&&dy>=16&&dy<80) ||
+        (dx>=176&&dx<240&&dy>=176&&dy<240) ||
+        (dx>=80&&dx<176&&dx===dy)
+      : large ? Math.abs(x-defectX)<=2 && Math.abs(y-defectY)<=2
       : x===defectX&&y===defectY;
     samples.set(defect?config.damaged:config.normal,
       (y*width+x)*channels);
@@ -70,6 +81,6 @@ export function createBrowserHighDepthFixture(key) {
     bitsPerChannel:config.bitsPerChannel,width,height,channels,
     defectX,defectY,
     normal:config.normal,damaged:config.damaged,
-    nativeArrayType:config.ArrayType.name,large,
+    nativeArrayType:config.ArrayType.name,large,wide,wideOrigin:wide?wideOrigin:null,
   };
 }
