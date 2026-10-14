@@ -333,8 +333,10 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     assert(stopped.completedReplies===0 && Date.now()-probeAt<5000,
       'Native kernel must terminate before CPU stall can finish',JSON.stringify(stopped));
     const cancelled=await evaluate(client,'('+result.toString()+')()');
+    // The lock itself creates a History branch and may prune an undone Fill;
+    // cancellation must never ADD a Fill entry to that branch.
     assert(cancelled.jobs===2 && cancelled.pixel[0]>100 &&
-      cancelled.history.filter(x=>x.includes('Контент-заливка')).length===baselineFillEntries,
+      cancelled.history.filter(x=>x.includes('Контент-заливка')).length<=baselineFillEntries,
       'Cancelled native kernel must not repaint or publish History',JSON.stringify(cancelled));
     const nativeAfter=await evaluate(client,'('+readNativeFromSaveProject.toString()+')()');
     assert(nativeAfter.exactPayloadMatchesBaseline===true,
