@@ -1,6 +1,6 @@
 # 028 / 024C3 — Пропущенные CDP Worker target snapshots и честная неизвестность
 
-**Статус (2026-10-14):** реализация предложена в отдельной ветке/PR; merge и CI **пока не подтверждены**. Это тестовый instrumentation-only подпроход Stage 003; пользовательский runtime/editor bundle не изменён.
+**Статус (2026-10-14):** [PR #212](https://github.com/zeter1/ZeTer-Photo-Editor/pull/212), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38526924226) (`npm run check`, generated parity, реальный Chromium `file://`, JSON, профили и diff hygiene). **Merge и exact-main CI ещё ожидаются.** Только test instrumentation, production/editor bundle не изменён.
 
 ## Проблема
 
@@ -15,8 +15,10 @@
 - [x] При первом успешном снимке после gap новые/пропавшие targets в milestone обозначены `null` (unknown), а не 0 или число с выдуманным переходом. Успешные соседние poll продолжают обычный census.
 - [x] `snapshotCoverage`: число успешных/пропущенных наблюдений, старт/финиш, adjacency, неизвестные интервалы и точные пропущенные milestone. В лог не копируются `url`/`title` targets.
 - [x] `browser-renderer-heap-sampler`: независимый флаг `workerTargetsObserved` и пропущенный Target snapshot для каждой попытки, включая после единичного отказа CDP Target API; доступные PID/privateMemory/RSS замеры продолжают работать.
+- [x] Generic heap milestone с неподходящим census phase безопасно фиксируется как `invalid-phase` и не роняет Chromium smoke или независимые PID чтения.
 - [x] Регрессии: две подряд неуспешные попытки во время cancel→retry, пропущенный финал, успешный CDP процессный опрос при отказавшем Target домене.
-- [ ] **Verification gate:** `node --test tests/browser-worker-target-census.test.mjs tests/browser-renderer-heap-sampler.test.mjs`; полный `npm run check`; настоящий Chromium `file://` PSD16/PSB32, JSON artifacts, diff hygiene; затем PR CI, merge и точный main CI. Нельзя отмечать без фактических результатов.
+- [x] **PR verification:** `npm run check` (включая целевые Node-регрессии), настоящий Chromium `file://` PSD16/PSB32, JSON artifacts, все профили, diff hygiene — [run 38526924226](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38526924226), success.
+- [ ] **Merge + exact-main CI:** до успешного main push workflow проходка не считается закрытой.
 
 ## Ограничения и следующий шаг
 
