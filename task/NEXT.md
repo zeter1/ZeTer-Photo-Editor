@@ -1,3 +1,8 @@
+## 032 / 024D1 — byte oracle на реальных Chromium PSD16/PSB32 Fill + Undo/Redo (в PR, gate не закрыт)
+
+- [032](032-browser-native-selection-integrity.md): test-only сравнение native 16/32-bit words в изменённых тайлах по фактическому frozen Worker `selectedIndices`, включая соседние **невыделенные** пиксели; первый Fill/Redo, mid-kernel cancellation, recovery, Undo/Redo и unit negative matrix. Изменений production bundle нет. **До PR CI + merge + exact-main CI статус в работе**.
+- **После:** P0 [002](002-psd-compatibility-corpus.md) лицензированные Photoshop RGB16/CMYK32+реальные golden; P1 [003](003-tiled-content-aware.md) браузерное качество/latency/RSS на сложных connected ROI и [025](025-browser-worker-target-census.md) documented target→PID или `unknown`. **002/003 не закрывать**.
+
 ## 031 / 024C6 — browser memory claim integrity (слито, PR + exact-main CI success, 2026-10-14)
 
 - [031](031-browser-memory-claim-integrity.md): fail-closed проверка вложенного Worker census/target records и запрет ложных `provenWorkerTerminationCount`, Worker→PID, exit и operation peak RSS claims как при записи, так и при верификации Chromium JSON. Добавлены негативные unit/CI regressions. **Это только test harness**, не новый функционал редактора. [PR #215](https://github.com/zeter1/ZeTer-Photo-Editor/pull/215) → `505a1a9`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38533360435), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38533729179).
