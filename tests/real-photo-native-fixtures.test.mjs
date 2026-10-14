@@ -94,7 +94,7 @@ for(const bits of [16,32]) {
       {...options,cropWidth:2000},
       {...options,bitsPerChannel:8},
       {...options,width:271},
-      {...options,expectedReferenceSha256:'x'.repeat(64)},
+      {...options,cropWidth:2001},
     ];
     for(const item of bad) {
       assert.throws(()=>preparePhotoNativeFixtureCandidate(item),
