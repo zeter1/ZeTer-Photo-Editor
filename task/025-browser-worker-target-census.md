@@ -1,18 +1,19 @@
 # 025 — browser CDP Worker target census (010E-B4 / 024B3)
 
-**Статус (2026-10-14):** код и регрессии подготовлены в `feat/025-browser-worker-target-census`; merge/PR CI и exact-main CI пока **не подтверждены**. Это только диагностический подпроход Stage 003.
+**Статус (2026-10-14):** **слито в `main`**, [PR #209](https://github.com/zeter1/ZeTer-Photo-Editor/pull/209) → squash `b5cd62f`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38520690545) (1200 Node tests, Chromium `file://`, artifacts, informational profiles и diff hygiene), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38520975172). Это только диагностический подпроход Stage 003.
 
 ## Цель и границы
 
 Существующие `SystemInfo.getProcessInfo` и Linux `/proc/<pid>/stat` дают снимки **процессов**, но не доказательства, какой процесс выполняет конкретный редакторский Web Worker. Новый независимый `Target.getTargets` census собирает только `targetId` и `type` для `worker`, `shared_worker`, `service_worker` (без локальных `url`/`title`). Целевой `targetId` — не PID; только одновременные снимки двух API **не устанавливают** соответствие между ними.
 
-### Сделано в коде (требует CI gate)
+### Сделано в коде (PR + exact-code main gate выполнен)
 
 - [x] `tools/browser-worker-target-census.mjs`: атомарная валидация snapshots, счётчики появлений/пропаж, типы, last-seen и `provenWorkerTerminationCount:null`; никакой автоматической атрибуции PID.
 - [x] `tools/browser-renderer-heap-sampler.mjs`: отдельный polling browser-level `Target.getTargets`, не ломает renderer heap/privateMemory/Linux RSS при отказе Target domain, не делает повторные вызовы после отказа.
 - [x] `tools/browser-operation-timeline.mjs`: `memory.workerTargets` переносится в настоящий Chromium `file://` operation JSON (PSD16/PSB32). `tools/browser-operation-artifact.mjs` отклоняет ложный `workerPidMapping`.
 - [x] `tests/browser-worker-target-census.test.mjs`: unit checks target churn, duplicate/reused IDs, no title/url leakage, independent CDP failure.
-- [ ] `npm run check`, реальный Chromium `file://` worker smoke, Node artifacts, CI на ветке/PR, merge, exact-main CI.
+- [x] `npm run check`, реальный Chromium `file://` worker smoke, Node artifacts, PR CI, merge и CI точного кодового коммита `main` — **success**.
+- [x] В PR CI реальный Chromium подтвердил `Target.getTargets: sampled` для обоих PSD16/PSB32: по 4 уникальных target IDs (включая service worker); **не** доказана их принадлежность PID.
 
 ## Чего НЕ доказали
 
@@ -20,7 +21,7 @@
 - Отсутствие target в следующем опросе не доказывает завершение Worker. JS heap, CDP privateMemory, Linux VmRSS и VmHWM являются различными метриками. Нет точного operation-wide RAM peak или Worker-specific RSS.
 - Chrome мог не показать краткоживущий Worker между polls; отсутствие `Target.getTargets` должно значить `unavailable`, а не пустой census.
 
-## Следующая проходка (после CI)
+## Следующая проходка (после успешного CI)
 
 1. **P0 / [002](002-psd-compatibility-corpus.md):** независимо Adobe Photoshop-authored и лицензированные RGB16 PSD + CMYK32 PSB, проверенный provenance/source URL/license/SHA-256 и сравнительный внешний render oracle. Не генерировать фиктивные Golden из ZeTer.
 2. **P1 / 025B:** исследовать *официально документированный* и тестируемый CDP способ `targetId`→OS `pid` для конкретной версии Chromium; при отсутствии оставить `unknown`. При наличии — проверять PID+starttime, повторное назначение и failures, избегать выводов по совпадению момента появления.

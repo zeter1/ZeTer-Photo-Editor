@@ -1,7 +1,7 @@
-## 025 / 024B3 — browser Worker target census (PR candidate; 2026-10-14)
+## 025 / 024B3 — browser Worker target census (merged, PR + exact-code main CI success, 2026-10-14)
 
-- Код и unit-регрессии предложены в [025](025-browser-worker-target-census.md): независимый CDP `Target.getTargets` census для реального `file://` PSD16/PSB32 Worker, без утечки target URL/title и без ложной target→PID атрибуции. `workerPidMapping: unknown`; Target API отказ не блокирует Chromium PID/`/proc` и renderer heap. Не считать пропажу target доказанным exit или RAM peak.
-- **Статус:** PR/CI/merge ещё не проверены; Stage 002/003 **открыты**. **Следом P0:** лицензированный independently Photoshop-authored RGB16 PSD + CMYK32 PSB с hashes/reference renders ([002](002-psd-compatibility-corpus.md)). **Следом P1:** документированный CDP target→PID способ или оставить `unknown`, memory evidence ([025](025-browser-worker-target-census.md)).
+- Код и unit-регрессии слиты через [PR #209](https://github.com/zeter1/ZeTer-Photo-Editor/pull/209) ([PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38520690545) и [exact-code main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38520975172) — success, 1200 Node tests) в [025](025-browser-worker-target-census.md): независимый CDP `Target.getTargets` census для реального `file://` PSD16/PSB32 Worker, без утечки target URL/title и без ложной target→PID атрибуции. `workerPidMapping: unknown`; Target API отказ не блокирует Chromium PID/`/proc` и renderer heap. Не считать пропажу target доказанным exit или RAM peak.
+- **Статус:** код в `main`, оба CI прошли; Stage 002/003 **открыты**. **Следом P0:** лицензированный independently Photoshop-authored RGB16 PSD + CMYK32 PSB с hashes/reference renders ([002](002-psd-compatibility-corpus.md)). **Следом P1:** документированный CDP target→PID способ или оставить `unknown`, memory evidence ([025](025-browser-worker-target-census.md)).
 
 ## 010E-B4 / 024B2b — настоящая Chromium mid-kernel отмена PSD16/PSB32 (merged, PR + exact-main CI success, 2026-10-14)
 
