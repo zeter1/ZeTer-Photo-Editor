@@ -1,5 +1,52 @@
 // Test-only observational timeline for genuine Chromium file:// PSD/PSB actions.
 // Harness milestones are not inner-kernel timestamps; sampled RAM is not peak RAM.
+const COMPLETED_PHASE_ORDER = Object.freeze([
+  'import-input-dispatched','import-preview-ready','native-source-verified','selection-created',
+  'fill-command-invoked','preview-history-published','undo-complete','redo-complete',
+]);
+const CANCELLED_RETRY_PHASE_ORDER = Object.freeze([
+  'cancel-fill-command-invoked','cancel-kernel-write-observed','cancel-owner-revoked',
+  'cancel-native-verified','retry-fill-command-invoked','retry-preview-history-published',
+  'retry-undo-native-verified','retry-redo-native-verified',
+]);
+
+// An observed milestone set does not prove order. Verify at the timeline and
+// serialized CI-report boundary; this is not a Worker PID/peak-RAM oracle.
+export function validateBrowserOperationEvidence({outcome,observedWindowMs,milestones}={}) {
+  if (!['completed','completed-with-cancelled-retry','failed'].includes(outcome) ||
+      !Number.isFinite(observedWindowMs) || observedWindowMs < 0 ||
+      !Array.isArray(milestones)) {
+    throw new TypeError('Browser operation timeline: invalid milestone evidence');
+  }
+  const observedPhases=new Map();
+  let previousAtMs=0;
+  for (const [index,event] of milestones.entries()) {
+    if (!event || typeof event.phase !== 'string' ||
+        !/^[a-z][a-z0-9-]*$/.test(event.phase) || observedPhases.has(event.phase) ||
+        !Number.isFinite(event.atMs) || event.atMs < previousAtMs ||
+        event.atMs > observedWindowMs || !Number.isFinite(event.sincePreviousMs) ||
+        event.sincePreviousMs < 0 ||
+        Math.abs(event.sincePreviousMs-(event.atMs-previousAtMs)) > 1e-6) {
+      throw new TypeError('Browser operation timeline: invalid milestone evidence');
+    }
+    observedPhases.set(event.phase,index);
+    previousAtMs=event.atMs;
+  }
+  const required=outcome==='failed' ? [] : [
+    ...COMPLETED_PHASE_ORDER,
+    ...(outcome==='completed-with-cancelled-retry' ? CANCELLED_RETRY_PHASE_ORDER : []),
+  ];
+  let previousIndex=-1;
+  for (const phase of required) {
+    const index=observedPhases.get(phase);
+    if (index===undefined || index<=previousIndex) {
+      throw new Error('Browser operation timeline: missing or out-of-order evidence: '+phase);
+    }
+    previousIndex=index;
+  }
+  return true;
+}
+
 export function createBrowserOperationTimeline({ operationId, fixture, format, now = () => performance.now() } = {}) {
   if (typeof operationId !== 'string' || !/^[a-z0-9-]+$/.test(operationId) ||
       typeof fixture !== 'string' || !fixture || !['PSD16','PSB32'].includes(format) ||
@@ -41,8 +88,7 @@ export function createBrowserOperationTimeline({ operationId, fixture, format, n
       const end=now();
       if(!Number.isFinite(end) || end<(events.at(-1)?.absoluteMs??began))
         throw new Error('Browser operation timeline: non-monotonic finish');
-      finished=true;
-      return {
+      const profile={
         kind:'zpe-browser-high-depth-operation-timeline-v1',
         operationId,fixture,format,outcome,origin:'real Chromium file:// UI + native Worker',
         observedWindowMs:end-began,
@@ -71,6 +117,9 @@ export function createBrowserOperationTimeline({ operationId, fixture, format, n
           limitations:'Sampled renderer heap/CDP privateMemory/Linux RSS; missing start/finish counters remain unknown even if earlier polls succeeded; PID+starttime identifies observed Linux process incarnations when available. PID HWM belongs to process lifetime, not this operation. No exact peak, GPU accounting or Worker-to-PID attribution; CDP target IDs are not OS PIDs.',
         },
       };
+      validateBrowserOperationEvidence(profile);
+      finished=true;
+      return profile;
     },
   };
 }
