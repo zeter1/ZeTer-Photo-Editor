@@ -1,3 +1,8 @@
+## 031 / 024C6 — browser memory claim integrity (PR/CI в проверке, 2026-10-14)
+
+- [031](031-browser-memory-claim-integrity.md): fail-closed проверка вложенного Worker census/target records и запрет ложных `provenWorkerTerminationCount`, Worker→PID, exit и operation peak RSS claims как при записи, так и при верификации Chromium JSON. Добавлены негативные unit/CI regressions. **Это только test harness**, не новый функционал редактора; не отмечать CI зелёным до проверки.
+- **Следом:** P0 реальные Adobe-authored и лицензированные PSD16/PSB32 goldens [002](002-psd-compatibility-corpus.md); P1 documented target→PID или `unknown` [025](025-browser-worker-target-census.md) и независимые browser quality/latency/RSS [003](003-tiled-content-aware.md). Общие Stage 002/003 открыты.
+
 ## 030 / 024C5 — пересчёт итоговых browser durations по milestone (слито, PR + exact-code main CI success, 2026-10-14)
 
 - [030](030-browser-operation-duration-evidence.md): проверка `durationsMs` по каждой канонической паре событий для настоящего Chromium `file://` PSD16/PSB32 cancel→retry. Неверные/неполные/подменённые summary-поля отклоняются при `finish` и при повторной проверке сохранённого JSON; unit-регрессии на forged cancel duration, типы, missing/extra поля и null/zero.
