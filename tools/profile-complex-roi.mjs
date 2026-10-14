@@ -12,6 +12,7 @@ import {
   inpaintTiledPixelBufferSourceFromIndices,
   inpaintTiledPixelBufferSourceFromIndicesCooperative,
 } from '../src/core/pixel-buffer.js';
+import { measureKnownNativeConnectedRoiQuality } from './complex-roi-native-quality.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const WIDTH = 256, HEIGHT = 256, TILE_SIZE = 4, HALO = 4;
@@ -105,6 +106,11 @@ function verifyNative(result, source, originalTiles, spec, selected) {
       }
     }
   }
+  return measureKnownNativeConnectedRoiQuality({
+    before:original, after:repaired, selectedIndices:selected,
+    clean:spec.donor, channels:spec.channels, bitsPerChannel:spec.bitsPerChannel,
+    alphaChannel:spec.channels===5 ? 4 : null,
+  });
 }
 
 async function one(model) {
@@ -132,7 +138,10 @@ async function one(model) {
   const sync = inpaintTiledPixelBufferSourceFromIndices(source, options);
   const syncMs = performance.now() - startSync;
   const afterSync = memory();
-  verifyNative(sync, source, originalTiles, spec, selected);
+  const quality=verifyNative(sync, source, originalTiles, spec, selected);
+  assert.ok(quality.repaired.mae < quality.baseline.mae &&
+    quality.repaired.rmse < quality.baseline.rmse,
+    'native selected-color reconstruction must improve the known synthetic reference');
 
   const startWorker = performance.now();
   const worker = new Worker(new URL('./tiled-inpaint-worker-thread.mjs', import.meta.url), {
@@ -169,7 +178,7 @@ async function one(model) {
     selectedPixels:selected.length, changedTiles:sync.changedTiles,
     filled:sync.filled, changed:sync.changed, maxLayerPixels:MAX_ROI_PIXELS,
     budgetRefusal:'atomic', cooperativeCancellation:'atomic',
-    workerParity:'exact-native-tiles', sourceTiles:'immutable',
+    workerParity:'exact-native-tiles', sourceTiles:'immutable', quality,
     fixtureMs:+fixtureMs.toFixed(2), syncMs:+syncMs.toFixed(2),
     workerRoundTripMs:+workerMs.toFixed(2), cooperativeYields:yields,
     memory:{ before, afterSync, afterWorker },
@@ -203,7 +212,8 @@ async function main() {
     platform:process.platform, arch:process.arch,
     limitations:'Synthetic connected ROI in Node worker_threads, not Photoshop-authored reference or browser file://. ' +
       'RSS is process-wide; parent heap excludes Worker heaps. Memory observations are not isolated per-operation peaks. ' +
-      'Exact native parity is with the same inpaint algorithm; no quality/performance threshold claimed.',
+      'Native MAE/RMSE is against a ZeTer-authored constant clean background, not an external Photoshop golden. ' +
+      'Worker parity is with the same inpaint algorithm; no latency or RAM performance threshold claimed.',
     cases,
   }, null, 2) + '\n');
 }
