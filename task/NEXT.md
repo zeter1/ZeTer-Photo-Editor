@@ -1,3 +1,10 @@
+## 037A — native per-pixel known-clean oracle (PR, ожидает CI/merge; 2026-10-14)
+
+- Добавлен строгий test-only reference oracle для различной цветной текстуры **каждого** пикселя RGB16/Float32. Для clean snapshot обязателен SHA-256 канонических LE native words; проверяется точная неизменность outside-selection/alpha, независимость буферов, geometry, negative matrix. 5 отдельных Node tests локально проходят; это не выполнение общего `npm run check` или Chromium.
+- Кандидат CC0 фото известен и документирован: [origin/licensing](../tests/fixtures/real-photo/README.md); фактические исходные bytes/SHA-256 ещё не pinned, реальных image-based измерений нет. 037 всё ещё открыта.
+- **037B next:** pinned licensed photo asset → reference+defect RGB16/Float32 native PSD/PSB with SHA-256 → unit fixture gates.
+- **037C after:** real `file://` Chromium polygon/native Worker/public project/Undo/Redo ×3, quality/nonselection/alpha, versioned timing+memory artifacts, fail-closed negatives, PR/main CI. Параллельно P0 [002](002-psd-compatibility-corpus.md) требует independent Photoshop-authored goldens; Stage 002/003 не закрыты.
+
 ## 036C — реальный Chromium wide connected ROI observation evidence (СЛИТО; PR + exact-code main CI success, 2026-10-14)
 
 - **Gate выполнен:** [PR #222](https://github.com/zeter1/ZeTer-Photo-Editor/pull/222) → squash [27dbb27](https://github.com/zeter1/ZeTer-Photo-Editor/commit/27dbb2718ea0078dbbfffe09870494d8d90480bc); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38580054433), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38580574257). 1245 Node-тестов, bundle parity, настоящий Chromium file:// smoke, **4/4 JSON artifacts verified**, все профили и diff hygiene — success.
