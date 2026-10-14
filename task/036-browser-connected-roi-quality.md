@@ -1,6 +1,6 @@
 # 036 — реальный Chromium quality/latency/RSS для широкого связного Content-Aware ROI
 
-**Статус: 036B ЗАКРЫТА, 036C ОТКРЫТА (P1, Stage 003).**
+**Статус: 036B ЗАКРЫТА, 036C РЕАЛИЗОВАНА В ВЕТКЕ (CI/merge pending); Stage 003 открыта.**
 **Основание:** после закрытия [035](035-browser-recovery-modal-flake.md), [034](034-complex-roi-native-quality.md) по-прежнему доказывает native connected ROI только в Node Worker. Реальный Chromium проверяет небольшой 5×5 дефект ([033](033-browser-synthetic-native-quality.md)), но не широкий сложный ROI.
 
 ## Проходка 036A — точный native evidence-контракт (2026-10-14, СЛИТО, main CI success)
@@ -35,3 +35,11 @@
 - **Gate 036B выполнен:** [PR #221](https://github.com/zeter1/ZeTer-Photo-Editor/pull/221) → [`7fbc9117`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7fbc9117f617c4495ac0d0c20151145a177eb165); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38576559275), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38577167032). 1242 Node tests + Chromium UI для обоих native форматов, JSON artifacts, profiles и diff hygiene — success. **036C:** независимая versioned JSON запись sampled latency/RSS/CDP gap + fail-closed verify/review/main gate. Stage 003 остаётся открытой.
 
 **Фактический результат 036B:** из настоящего Chromium Save Project оба формата показали 8288/8288 selected/changed, MAE RGB16 32333.3333 → 0, Float32 1.4583333 → 0; неизменность alpha и внешних пикселей, точные Undo/Redo native tile bytes. Время импорта 2458/4594ms и Fill+preview 2232/2788ms — одиночные наблюдения, НЕ peak RAM и не workload SLA. [CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38576559275). Продолжение 036C — observational JSON + fail-closed verifier.
+
+## Проходка 036C — versioned browser stage evidence (код подготовлен, 2026-10-14)
+
+- Реальный Chromium `file://` wide PSD16/PSB32 повторно проходит все 036B UI-path steps, но дополнительно `createBrowserRendererHeapSampler` записывает 6 timestamped явных observation steps: импорт, selection, Fill/History, public preview Save Project, Undo, Redo. Периодический sampler продолжает измерения, но в versioned JSON записываются **только эти явно синхронизированные снимки**; это не true operation peak.
+- `tools/browser-wide-connected-operation-artifact.mjs`: versioned v1 PSD16/PSB32 files, exact schema, byte-valid metrics / optional null / coverage gaps, exact milestone order и guarded `workerPidMapping:'unknown'`, `operationPeakRssBytes:null`, `provenProcessExitCount:null`. Качество прикреплено от уже существующего настоящего native Save Project oracle.
+- CI `tools/verify-browser-operation-artifacts.mjs` проверяет оба новых JSON поверх прежних двух cancel/retry, тесты `tests/browser-wide-connected-operation-artifact.test.mjs` проверяют фальсификации/missing data/round-trip.
+- **Перед закрытием:** дождаться успешного `npm run check`, Chromium smoke, 4 JSON artifact, существующих профилей; review/merge, CI точно по main SHA. Нельзя заявлять Stage 003 или Photoshop parity закрытыми.
+- **После 036C:** P0 независимый Photoshop-authored licensed corpus [002](002-psd-compatibility-corpus.md); P1 real-image quality и bounded memory observability для Stage 003 (сейчас sampled RSS не peak) / широкие pathological ROI и повторные benchmarking runs.
