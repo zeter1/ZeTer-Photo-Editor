@@ -62,8 +62,7 @@ export function buildBrowserOperationArtifact(profile) {
       !['PSD16','PSB32'].includes(profile.format) ||
       !['completed','completed-with-cancelled-retry','failed'].includes(profile.outcome) ||
       !Number.isSafeInteger(profile.memory?.sampleCount) || profile.memory.sampleCount < 1 ||
-      !Array.isArray(profile.milestones) || !Number.isFinite(profile.observedWindowMs) ||
-      (profile.memory.workerTargets && profile.memory.workerTargets.workerPidMapping !== 'unknown')) {
+      !Array.isArray(profile.milestones) || !Number.isFinite(profile.observedWindowMs)) {
     throw new TypeError('Browser operation artifact: invalid timeline or unsafe operationId');
   }
   validateBrowserOperationEvidence(profile);
