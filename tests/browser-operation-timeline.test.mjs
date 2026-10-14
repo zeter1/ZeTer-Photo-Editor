@@ -59,3 +59,19 @@ test('024A: failed/incomplete runs and invalid clocks cannot masquerade as succe
   assert.equal(r.memory.linuxRssSampledMaxBytes,null);
   assert.equal(r.durationsMs.fillCommandToHistoryPreview,null);
 });
+
+test('029: finished timeline refuses reordered successful and cancelled-retry evidence',()=>{
+  let clock=0;
+  const t=createBrowserOperationTimeline({operationId:'ordered-check',fixture:'native.psd',format:'PSD16',now:()=>clock++});
+  for (const step of [...steps.slice(0,3),steps[4],steps[3],...steps.slice(5)]) t.mark(step);
+  assert.throws(()=>t.finish({outcome:'completed',memoryReport:report()}),/out-of-order evidence/);
+
+  const c=createBrowserOperationTimeline({operationId:'cancel-order',fixture:'native.psb',format:'PSB32',now:()=>clock++});
+  for (const step of steps)c.mark(step);
+  for (const step of [
+    'cancel-fill-command-invoked','cancel-kernel-write-observed','cancel-owner-revoked',
+    'retry-fill-command-invoked','cancel-native-verified','retry-preview-history-published',
+    'retry-undo-native-verified','retry-redo-native-verified',
+  ]) c.mark(step);
+  assert.throws(()=>c.finish({outcome:'completed-with-cancelled-retry',memoryReport:report()}),/out-of-order evidence/);
+});
