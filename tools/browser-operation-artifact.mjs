@@ -4,6 +4,57 @@ import { validateBrowserOperationEvidence } from './browser-operation-timeline.m
 
 // Test-only CI reports for genuine Chromium file:// scenarios. Informational
 // samples are NOT native Worker memory, simultaneous true peak, or an exit proof.
+// Informational samples cannot be upgraded into Worker/PID/exit/peak proof by
+// editing a saved JSON report. This gate runs for both writer and CI verifier.
+function validateInformationalMemoryClaims(memory) {
+  if (!memory || typeof memory !== 'object' || Array.isArray(memory) ||
+      Object.hasOwn(memory,'operationPeakRssBytes') ||
+      Object.hasOwn(memory,'workerRssBytes') ||
+      Object.hasOwn(memory,'provenWorkerTerminationCount')) {
+    throw new TypeError('Browser operation artifact: unsupported memory evidence');
+  }
+  const churn=memory.processChurn;
+  if (churn != null && (typeof churn !== 'object' || Array.isArray(churn) ||
+      churn.workerPidMapping !== 'unknown' ||
+      Object.hasOwn(churn,'provenExitCount'))) {
+    throw new TypeError('Browser operation artifact: unsupported PID/exit evidence');
+  }
+  const identity=memory.linuxProcessIdentity;
+  if (identity != null && (typeof identity !== 'object' || Array.isArray(identity) ||
+      identity.provenExitCount !== null)) {
+    throw new TypeError('Browser operation artifact: unsupported process exit evidence');
+  }
+  const census=memory.workerTargets;
+  if (census == null) return;
+  const censusFields=new Set([
+    'metric','availability','sampleCount','snapshotCoverage',
+    'uniqueWorkerTargetIds','maxObservedConcurrentWorkerTargets',
+    'newTargetObservations','missingTargetObservations',
+    'observedAtLastSnapshotCount','noLongerObservedAtLastSnapshotCount',
+    'provenWorkerTerminationCount','targets','milestones','workerPidMapping',
+    'limitations','unavailableReason',
+  ]);
+  const targetFields=new Set([
+    'targetId','type','firstSeenPhase','lastSeenPhase','samples',
+    'observedAtLastSnapshot',
+  ]);
+  if (typeof census !== 'object' || Array.isArray(census) ||
+      census.workerPidMapping !== 'unknown' ||
+      census.provenWorkerTerminationCount !== null ||
+      !Array.isArray(census.targets) ||
+      !Number.isSafeInteger(census.uniqueWorkerTargetIds) ||
+      census.uniqueWorkerTargetIds !== census.targets.length ||
+      Object.keys(census).some(key => !censusFields.has(key)) ||
+      census.targets.some(target => !target || typeof target !== 'object' ||
+        Array.isArray(target) || Object.keys(target).some(key => !targetFields.has(key)) ||
+        typeof target.targetId !== 'string' || !target.targetId ||
+        !['worker','shared_worker','service_worker'].includes(target.type) ||
+        !Number.isSafeInteger(target.samples) || target.samples < 1 ||
+        ![true,false,null].includes(target.observedAtLastSnapshot))) {
+    throw new TypeError('Browser operation artifact: unsupported Worker target evidence');
+  }
+}
+
 export function buildBrowserOperationArtifact(profile) {
   if (!profile || profile.kind !== 'zpe-browser-high-depth-operation-timeline-v1' ||
       typeof profile.operationId !== 'string' ||
@@ -11,11 +62,11 @@ export function buildBrowserOperationArtifact(profile) {
       !['PSD16','PSB32'].includes(profile.format) ||
       !['completed','completed-with-cancelled-retry','failed'].includes(profile.outcome) ||
       !Number.isSafeInteger(profile.memory?.sampleCount) || profile.memory.sampleCount < 1 ||
-      !Array.isArray(profile.milestones) || !Number.isFinite(profile.observedWindowMs) ||
-      (profile.memory.workerTargets && profile.memory.workerTargets.workerPidMapping !== 'unknown')) {
+      !Array.isArray(profile.milestones) || !Number.isFinite(profile.observedWindowMs)) {
     throw new TypeError('Browser operation artifact: invalid timeline or unsafe operationId');
   }
   validateBrowserOperationEvidence(profile);
+  validateInformationalMemoryClaims(profile.memory);
   return {
     kind:'zpe-browser-operation-artifact-v1',
     schemaVersion:1,
