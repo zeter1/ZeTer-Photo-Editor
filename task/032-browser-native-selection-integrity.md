@@ -1,6 +1,6 @@
 # 032 / 024D1 — Chromium native selected-pixel byte oracle (Stage 003)
 
-**Статус (2026-10-14):** код и регрессии в рабочей ветке `test/stage003-browser-native-selection-pixel-oracle-20261014`; PR/CI/main gate отдельно, **не считать завершённым** до проверки точного `main` SHA.
+**Статус (2026-10-14):** **слито в `main`**, [PR #216](https://github.com/zeter1/ZeTer-Photo-Editor/pull/216) → `f3d1336`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538156947), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538532002). Только test harness. Stage 002/003 открыты.
 
 ## Goal / Why now
 
@@ -11,8 +11,8 @@
 - [x] `tools/browser-native-selection-integrity.mjs`: для v2 native source сравнить все канальные **байты** каждого изменённого тайла против исходника; проверять геометрию, битовую глубину, byte budget и frozen `selectedIndices` фактически отправленные в Worker; отказ при любой записи вне выделения.
 - [x] `tools/browser-large-psd16-smoke.mjs`: перехват копии Worker selection, immutable native source baseline сразу после UI import; проверка первой Fill, первого Redo, отмены mid-kernel, повторной Fill, Undo и Redo; без изменений production/editor bundle.
 - [x] `tests/browser-native-selection-integrity.test.mjs`: RGB16 и CMYKA32 по байтам, несколько тайлов, соседний неподвыделенный пиксель внутри changed tile, другая область, неверные индексы/топология/payload.
-- [ ] `npm run check` + `npm run test:browser`, CI Chromium `file://` PSD16/PSB32, generated parity + diff hygiene.
-- [ ] PR merge и CI точного `main` SHA; до этого статус **в работе**.
+- [x] `npm run check`, CI Chromium `file://` PSD16/PSB32, generated parity, browser JSON verifier, профили и diff hygiene — success ([PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538156947)).
+- [x] [PR #216](https://github.com/zeter1/ZeTer-Photo-Editor/pull/216) слит в `main` (`f3d1336`), [CI exact-code main](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538532002) — success.
 
 ## Contract / limitations
 
