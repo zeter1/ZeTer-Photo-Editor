@@ -1,3 +1,8 @@
+## 2026-10-14 — 035: Chromium recovery startup race закрыта
+
+- [035](035-browser-recovery-modal-flake.md): три настоящих Chromium `file://` reload с задержанным IndexedDB; startup barrier `appReady=true` до 010D native Fill. [PR #219](https://github.com/zeter1/ZeTer-Photo-Editor/pull/219) → `66f41e6`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38563696598), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38564063538). Это надёжность тестового smoke, не качество Inpaint.
+- **Далее [036](036-browser-connected-roi-quality.md):** настоящий wide connected ROI + quality/latency/RSS evidence и [002](002-psd-compatibility-corpus.md) licensed external Adobe Photoshop golden. Stage 003 остаётся открытой.
+
 ## 2026-10-14 — 024D3: Native synthetic connected ROI MAE/RMSE (слито, CI success)
 
 - [034](034-complex-roi-native-quality.md): реальный **Node** Worker профиль сложного связного RGB16/CMYKA32 ROI теперь публикует независимые от inpaint-ядра baseline/repaired MAE/RMSE и гарантирует нетронутые native samples вне selection/alpha. Для 8288 выбранных пикселей сравнивает с заведомо чистым ZeTer-generated постоянным фоном. Существующие byte parity/отмена остаются в силе. [PR #218](https://github.com/zeter1/ZeTer-Photo-Editor/pull/218) слит (`8208ab9`); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38545340603), [main CI rerun success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38545678383).
