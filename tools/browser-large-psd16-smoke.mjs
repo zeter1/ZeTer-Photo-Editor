@@ -237,6 +237,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
       after.history.filter(x=>x.includes('Контент-заливка')).length===1,
     'Large tiled UI Worker edit must create exactly one History entry',JSON.stringify(after));
   operation.mark('preview-history-published');
+  await evaluate(client,'window.__stage003LargeCaptureSuccess=true;true');
   const firstNativeEdit=await evaluate(client,readNativeExpression);
   assert(firstNativeEdit.selectionQuality?.changedSelectedPixels>0 &&
       firstNativeEdit.selectionQuality.changedOutsideSelectionPixels===0,
@@ -252,7 +253,8 @@ export async function verifyLargeBrowserPsd16Worker(client, {
   const firstRedoNative=await evaluate(client,readNativeExpression);
   assert(firstRedoNative.selectionQuality?.changedSelectedPixels===
       firstNativeEdit.selectionQuality.changedSelectedPixels &&
-      firstRedoNative.exactPayloadMatchesBaseline===false,
+      firstRedoNative.exactPayloadMatchesBaseline===false &&
+      firstRedoNative.exactPayloadMatchesSuccess===true,
     'Redo must preserve selected native pixel changes without affecting other words',
     JSON.stringify(firstRedoNative.selectionQuality));
   operation.mark('redo-complete');
