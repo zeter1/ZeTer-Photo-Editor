@@ -2,6 +2,13 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-14 — Устранена гонка модального окна восстановления в Chromium smoke
+
+- Исправлено: после последовательных `Page.reload` UI-тест ждёт завершения асинхронного IndexedDB recovery scan по `data-app-ready=true` вместо фиксированных 400 мс. Реальную recovery-modal обрабатывает штатной кнопкой «Начать новый проект» и закрывает только соответствующий draft «Новый документ».
+- Добавлено: реальный `file://` Chromium smoke с тремя перезагрузками, задержкой IndexedDB success callback на 550 мс, проверкой восстановления и удалением только тестового ключа; отдельные Node-регрессии задержанного/пустого скана, ошибки bootstrap и посторонней модалки.
+- Проверено: [PR #219](https://github.com/zeter1/ZeTer-Photo-Editor/pull/219) → squash `66f41e6`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38563696598) и [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38564063538). `npm run check`, generated parity, настоящий Chromium `file://`, JSON/profiles и diff hygiene — success.
+- Ограничения: только тестовый harness, production recovery/controller, пиксельное ядро редактора и версия `1.46.1` не менялись; [002](task/002-psd-compatibility-corpus.md) и [003](task/003-tiled-content-aware.md) остаются открытыми.
+
 ### 2026-10-14 — Измерено native качество на сложном связанном выделении
 
 - Добавлено: отдельный тестовый oracle для оценки MAE/RMSE и максимальной абсолютной ошибки RGB16 и CMYKA Float32 относительно известного чистого фона на 8288 выбранных пикселях двух островов, соединённых диагональным коридором. Оценка делается по исходным native каналам без 8-битного предпросмотра или повторного использования inpaint-алгоритма.
