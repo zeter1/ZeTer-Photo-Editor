@@ -57,7 +57,7 @@ export function createBrowserRendererHeapSampler(client, {
       throw new Error('Browser renderer heap sampler: invalid JS heap metrics');
     }
     const entry = { phase, elapsedMs:now(), jsHeapUsedBytes:used, jsHeapTotalBytes:total,
-      pidMembershipObserved:false, linuxIdentityObserved:false };
+      pidMembershipObserved:false, linuxIdentityObserved:false, workerTargetsObserved:false };
     // Browser CDP targets have their own opaque identities, independent of
     // SystemInfo PIDs. Neither API provides a documented target->PID join.
     // A denied Target domain must not disable /proc or renderer sampling.
@@ -65,10 +65,12 @@ export function createBrowserRendererHeapSampler(client, {
       try {
         const response = await processClient.send('Target.getTargets');
         workerTargets.observe(response?.targetInfos, phase);
+        entry.workerTargetsObserved = true;
       } catch (error) {
         workerTargetUnavailableReason = String(error?.message || error);
       }
     }
+    if (processClient && !entry.workerTargetsObserved) workerTargets.noteMissingSnapshot(phase);
     if (processClient && (!processUnavailableReason || !rssUnavailableReason || !processIdentityUnavailableReason)) {
       try {
         const info = await processClient.send('SystemInfo.getProcessInfo');
@@ -234,6 +236,8 @@ export function createBrowserRendererHeapSampler(client, {
             .map(item => item.phase),
         };
       }
+      // Worker target and PID observations have independent success/failure
+      // timelines. A failed final Target read must not reuse the prior target set.
       // Identity coverage is separate from privateMemory/RSS counter coverage:
       // a CDP PID list may be valid while /proc is unavailable, and vice versa.
       function identityCoverage(field) {
@@ -276,7 +280,7 @@ export function createBrowserRendererHeapSampler(client, {
         !max || item.chromiumRssBytes > max.chromiumRssBytes ? item : max, null);
       return {
         metric:'CDP Performance.getMetrics / renderer JSHeapUsedSize',
-        limitations:'Informational sampled main-frame JS heap, browser Worker target census, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. Missing identity snapshots break PID comparison continuity. Missing start/end counters are null, not last-observed substitutes. Target IDs cannot be joined to OS PIDs; NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
+        limitations:'Informational sampled main-frame JS heap, browser Worker target census, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. Missing identity/Worker target snapshots break comparisons and final visibility. Missing start/end counters are null, not last-observed substitutes. Target IDs cannot be joined to OS PIDs; NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
         metricCoverage: {
           chromiumPrivateMemory:metricCoverage('processPrivateMemoryBytes'),
           linuxAggregateRss:metricCoverage('chromiumRssBytes'),
