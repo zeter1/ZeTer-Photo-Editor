@@ -11,6 +11,7 @@ import { verifyBrowserMidKernelCancellation } from './browser-inpaint-mid-kernel
 import { verifyBrowserUiLockMidKernel } from './browser-ui-lock-mid-kernel-smoke.mjs';
 import { verifyBrowserDelayedRecoveryReloads } from './browser-recovery-reload-smoke.mjs';
 import { verifyBrowserWideConnectedNativeUi } from './browser-wide-connected-ui-smoke.mjs';
+import { writeWideConnectedBrowserArtifact } from './browser-wide-connected-operation-artifact.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -977,12 +978,42 @@ async function runSmoke() {
     assertNoBrowserErrors(errors,stderrState);
 
 
-    // 036B: public file:// UI polygon (two islands + thin diagonal), real
-    // native PSD16/PSB32 Worker and four public Save Project snapshots.
-    await verifyBrowserWideConnectedNativeUi(client,{evaluate,waitFor,assert,fixtureKey:'rgb16wide'});
-    assertNoBrowserErrors(errors,stderrState);
-    await verifyBrowserWideConnectedNativeUi(client,{evaluate,waitFor,assert,fixtureKey:'rgb32psbwide'});
-    assertNoBrowserErrors(errors,stderrState);
+    // 036C: versioned, CI-revalidated stage samples during the actual 036B
+    // Chromium PSD16/PSB32 UI paths. These are NOT native Worker/operation peaks.
+    for (const fixtureKey of ['rgb16wide','rgb32psbwide']) {
+      const wideSampler=createBrowserRendererHeapSampler(client,{processClient:browserClient});
+      await wideSampler.start();
+      const stageSamples=[];
+      let quality;
+      try {
+        quality=await verifyBrowserWideConnectedNativeUi(client,{
+          evaluate,waitFor,assert,fixtureKey,
+          observeStage:async(phase,milestoneMs)=>{
+            const sample=await wideSampler.snapshot(phase);
+            stageSamples.push({
+              phase,milestoneMs,observedAtUnixMs:Date.now(),
+              samplerElapsedMs:sample.elapsedMs,
+              rendererHeapBytes:sample.jsHeapUsedBytes,
+              cdpPrivateMemoryBytes:Number.isSafeInteger(sample.processPrivateMemoryBytes)
+                ? sample.processPrivateMemoryBytes : null,
+              linuxRssBytes:Number.isSafeInteger(sample.chromiumRssBytes)
+                ? sample.chromiumRssBytes : null,
+              pidMembershipObserved:sample.pidMembershipObserved,
+              workerTargetsObserved:sample.workerTargetsObserved,
+              linuxIdentityObserved:sample.linuxIdentityObserved,
+            });
+          },
+        });
+      } finally {
+        await wideSampler.stop();
+      }
+      const artifactPath=await writeWideConnectedBrowserArtifact({fixtureKey,quality,stageSamples});
+      console.log('036C Chromium wide stage sample evidence:',JSON.stringify({
+        fixtureKey,artifactPath,stages:stageSamples.length,
+        disclaimer:'Informational CDP/Linux samples, NOT a Worker RSS or operation peak.',
+      }));
+      assertNoBrowserErrors(errors,stderrState);
+    }
 
     await new Promise(resolve => setTimeout(resolve, 1_800)); // Let editor autosave quiesce.
     await verifyRecoveryIndexedDb(client);

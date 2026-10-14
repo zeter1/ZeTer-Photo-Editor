@@ -1,3 +1,10 @@
+## 036C — wide connected ROI: versioned Chromium observations (2026-10-14, PR/CI pending)
+
+- Реализована test-only сериализация двух `wide-connected-psd16.json` / `wide-connected-psb32.json` на реальном Chromium `file://`: шесть явных stage-snapshots с timestamp, JS heap / optional CDP privateMemory / Linux RSS, PID/Worker-target observation gaps. Schema v1 строит coverage из наблюдаемых значений и повторно сверяет при чтении CI JSON; negative matrix отвергает фальшивые latency, RSS, quality и PID/exit/peak.
+- `npm run test:browser` пишет новые файлы в `ZPE_BROWSER_OPERATION_ARTIFACT_DIR`, общий CI verifier теперь требует **четыре** JSON (два прежних cancel/retry + два wide).
+- **Гейт ещё не подтверждён:** ожидаются Node, реальный browser CI, профили, merge и exact-main CI. Пока не объявлять 036C закрытой.
+- **Далее:** [002](002-psd-compatibility-corpus.md) — P0 независимый лицензированный Photoshop-authored RGB16/CMYK32 корпус с provenance и cross-app oracle; [003](003-tiled-content-aware.md) — real-photo quality/latency/спецификация peak-RAM измерения, включая настоящую атрибуцию Worker→PID, если будет доступна. Полные Stage 002/003 остаются открытыми.
+
 ## 036B — реальный Chromium wide connected ROI (СЛИТО, 2026-10-14; exact-main CI success)
 
 - **Gate:** [PR #221](https://github.com/zeter1/ZeTer-Photo-Editor/pull/221) → [`7fbc9117`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7fbc9117f617c4495ac0d0c20151145a177eb165); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38576559275), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38577167032). Все 1242 Node tests, bundle parity, настоящий Chromium `file://` smoke, JSON artifacts/profiles и diff hygiene — success.

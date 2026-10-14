@@ -11,7 +11,7 @@ import { inspectNativeSelectedPixelChanges } from './browser-native-selection-in
 import { measureKnownNativeConnectedRoiQuality } from './complex-roi-native-quality.mjs';
 
 export async function verifyBrowserWideConnectedNativeUi(client,{
-  evaluate,waitFor,assert,fixtureKey='rgb16wide',
+  evaluate,waitFor,assert,fixtureKey='rgb16wide',observeStage=null,
 }={}) {
   if (!['rgb16wide','rgb32psbwide'].includes(fixtureKey)) throw new TypeError('036B: unsupported native fixture');
   const fixture=createBrowserHighDepthFixture(fixtureKey);
@@ -52,6 +52,7 @@ export async function verifyBrowserWideConnectedNativeUi(client,{
     'document.querySelector("#editorCanvas").width===1025 && '+
     'document.querySelector("#statusText")?.textContent?.startsWith("PSD/PSB импортирован")'),45000);
   const importedMs=Date.now()-started;
+  await observeStage?.('imported',importedMs);
 
   // Only the application's public File > Save Project JSON supplies pixel
   // evidence. No private editor runtime variable is read or injected.
@@ -123,6 +124,7 @@ export async function verifyBrowserWideConnectedNativeUi(client,{
   const selected=await evaluate(client,'document.querySelector("#statusText")?.textContent');
   assert(selected?.includes('Многоугольное выделение: 10 точек'),
     '036B: UI polygon gesture did not finish',JSON.stringify(selected));
+  await observeStage?.('selected',Date.now()-started);
 
   function hookWorker(){
     const old=Worker.prototype.postMessage;
@@ -157,7 +159,9 @@ export async function verifyBrowserWideConnectedNativeUi(client,{
         .filter(row=>row.textContent.includes('Контент-заливка')).length===1;
   }
   await waitFor('036B wide native Worker + history',()=>evaluate(client,'('+done.toString()+')()'),90000);
+  await observeStage?.('filled',Date.now()-started);
   await snapshot('filled');
+  await observeStage?.('previewed',Date.now()-started);
   const filledMs=Date.now()-filledAt;
 
   await evaluate(client,'document.querySelector("#undoBtn").click();true');
@@ -165,11 +169,13 @@ export async function verifyBrowserWideConnectedNativeUi(client,{
     'document.querySelector("#editorCanvas").getContext("2d").getImageData('+
     (offset+40)+','+(offset+40)+',1,1).data[0]>150'),30000);
   await snapshot('undone');
+  await observeStage?.('undone',Date.now()-started);
   await evaluate(client,'document.querySelector("#redoBtn").click();true');
   await waitFor('036B Redo preview',()=>evaluate(client,
     'document.querySelector("#editorCanvas").getContext("2d").getImageData('+
     (offset+40)+','+(offset+40)+',1,1).data[0]<150'),30000);
   await snapshot('redone');
+  await observeStage?.('redone',Date.now()-started);
 
   // All four full sources remain in the page; no multi-MiB CDP response.
   // Inject precisely the production geometry and test-only native oracles.
