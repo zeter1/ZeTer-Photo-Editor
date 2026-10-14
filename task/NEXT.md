@@ -1,3 +1,8 @@
+## 029 / 024C4 — упорядоченные browser operation artifacts (PR на проверке, 2026-10-14)
+
+- [029](029-browser-operation-evidence-order.md): единую fail-closed проверку этапов cancel/repair native Worker и относительных времён применяем при finish и сериализации CI JSON; тесты пытаются подменить порядок, дублировать событие, исказить duration и файл-артефакт.
+- **Статус:** ожидает PR CI и exact-code main CI, Stage 002/003 по-прежнему открыты. **Следующее:** P0 независимый лицензированный Photoshop RGB16/CMYK32 high-depth corpus [002](002-psd-compatibility-corpus.md); P1 документированный Worker target→PID либо `unknown` [025](025-browser-worker-target-census.md), browser quality и latency [003](003-tiled-content-aware.md).
+
 ## 028 / 024C3 — Worker Target snapshot observation gaps (слито, exact-main CI success, 2026-10-14)
 
 - [028](028-browser-worker-target-observation-gaps.md): независимые от CDP PID и Linux `/proc` пропуски `Target.getTargets`, `snapshotCoverage`, `null` при неизвестной последней видимости, никакой churn через gap, безопасная метка `invalid-phase`.
