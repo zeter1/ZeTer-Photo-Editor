@@ -1,4 +1,6 @@
-## 037B1 — проверка исходного JPEG перед фиксацией real-photo эталонов (реализована в ветке; проверка CI/merge ожидается, 2026-10-14)
+## 037B1 — проверка исходного JPEG перед фиксацией real-photo эталонов (СЛИТО; PR CI success, 2026-10-14)
+
+- **Gate 037B1:** [PR #224](https://github.com/zeter1/ZeTer-Photo-Editor/pull/224) → [8fa7b12](https://github.com/zeter1/ZeTer-Photo-Editor/commit/8fa7b12719a07ac92fd5af533c799a91fa0696c0), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38593642014); `npm run check`, Chromium `file://`, JSON artifacts, профили и diff hygiene — success. Exact-code main CI после фиксации handoff — ожидается.
 
 - Добавлены `tools/real-photo-source-integrity.mjs`, `tools/inspect-real-photo-source.mjs` и `tests/real-photo-source-integrity.test.mjs`: строгий исходный SHA-1 карточки Wikimedia, ручная инспекция SHA-256 локальных оригинальных байтов, JPEG SOF/scan/размеры/3 канала/8-bit, **обязательный pinned SHA-256** для допуска исходника в fixture и отдельный pinned SHA-256 декодированных RGBA8 пикселей.
 - Отрицательные сценарии: missing/wrong SHA-256, изменённый JPEG/SHA-1, malformed marker/EOI/SOF, некорректные размеры, RGBA mismatch, прозрачность и незафиксированный decoder output.

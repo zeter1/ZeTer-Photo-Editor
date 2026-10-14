@@ -11,7 +11,9 @@
 - **Далее 037B:** получить разрешённые фото-байты, закрепить asset SHA-256, проверить geometry/color, создать отдельные frozen native known-clean references RGB16/PSB32 и контролируемые connected ROI defects; exact digest для каждого reference зафиксировать в fixture manifest.
 - **Далее 037C:** настоящее `file://` Chromium PSD16/PSB32 import → polygon → Worker → Save Project → Undo/Redo, минимум 3 запуска на формат; native oracle, строгая validation JSON, honest RSS/CDP missingness, negative matrix и CI exact-main gate. 037 остаётся OPEN.
 
-## Проходка 037B1 — входной контроль оригинального JPEG (2026-10-14; ветка, CI/merge ожидается)
+## Проходка 037B1 — входной контроль оригинального JPEG (2026-10-14; СЛИТО, PR CI success)
+
+- **Gate 037B1:** [PR #224](https://github.com/zeter1/ZeTer-Photo-Editor/pull/224) → [8fa7b12](https://github.com/zeter1/ZeTer-Photo-Editor/commit/8fa7b12719a07ac92fd5af533c799a91fa0696c0), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38593642014); `npm run check`, настоящий Chromium `file://`, все JSON artifacts, профили и diff hygiene — success. Exact-code main CI после обновления handoff — ожидается.
 
 - Реализована test-only проверка `inspectPhotoJpeg`: фиксированный SHA-1 оригинала с карточки CC0, SOI/EOI, SOF/scan, размеры, 8-bit/3 channels и регистрация наличия EXIF/ICC. Скрипт `node tools/inspect-real-photo-source.mjs <local-original-jpeg>` вычисляет **кандидат** SHA-256 из настоящего локального файла, без загрузки по изменяемому URL.
 - `verifyPinnedPhotoJpeg` **запрещает** допуск исходника без самостоятельной фиксации оригинального SHA-256; `verifyPinnedDecodedRgba` отдельно требует SHA-256 декодированных RGBA8, точную геометрию и opaque alpha. JPEG header-сканер НЕ доказывает корректное энтропийное декодирование, ICC/sRGB, orientation или содержание фотографии.

@@ -7,6 +7,7 @@
 - Добавлено: test-only `tools/real-photo-source-integrity.mjs` с JPEG SOF/scan header geometry, сверкой исторического SHA-1 источника и fail-closed pinned SHA-256 исходных JPEG bytes. Локальный CLI печатает SHA-256 только после предварительных структурных проверок.
 - Добавлено: независимая проверка SHA-256 декодированных RGBA8 пикселей с геометрией и opacity; negative matrix в `tests/real-photo-source-integrity.test.mjs`.
 - Документация: в `task/037`, `task/NEXT.md` и `tests/fixtures/real-photo/README.md` оставлены точные условия для 037B2/037C.
+- Проверено: [PR #224](https://github.com/zeter1/ZeTer-Photo-Editor/pull/224) → [8fa7b12](https://github.com/zeter1/ZeTer-Photo-Editor/commit/8fa7b12719a07ac92fd5af533c799a91fa0696c0), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38593642014). Полный `npm run check`, Chromium `file://`, JSON artifacts, профили и diff hygiene — success. Exact-code main CI после handoff ожидается.
 - Ограничения проверки: JPEG энтропия/ICC/EXIF и реальная фотография этим scanner не проверяются. Source asset SHA-256 ещё не pinned, native reference/PSD/PSB и Chromium real-photo benchmark не созданы. Production runtime и версия не менялись.
 
 
