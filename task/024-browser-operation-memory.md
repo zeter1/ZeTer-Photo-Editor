@@ -1,3 +1,12 @@
+## 024C1 / 026 — точный start/finish coverage при недоступном CDP или /proc (слито, 2026-10-14)
+
+- [x] [026](026-browser-memory-sample-coverage.md), [PR #210](https://github.com/zeter1/ZeTer-Photo-Editor/pull/210) → `67e4451`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38522956593), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38523222466).
+- [x] `baselinePrivateBytes` / `endPrivateBytes` и Linux RSS baseline/end отражают только **фактически полученный** первый/последний snapshot. При пропаже метрики `null`, а не последний старый отсчёт. `sampledIncreaseBytes` требует настоящую baseline.
+- [x] `metricCoverage`: количества доступных/пропущенных опросов и missing milestones, отдельно CDP privateMemory и Linux RSS; перенос в timeline JSON и регрессионные тесты финального `/proc ENOENT`.
+- [ ] **Следующая P1 / 024C2:** observation gaps/PID churn при cancel→retry с проверяемой полнотой; не путать target IDs, PID membership, Linux PID+starttime и доказанный exit.
+- [ ] **P0 / [002](002-psd-compatibility-corpus.md):** независимые licensed Photoshop-authored high-depth goldens, hashes и Photoshop renders.
+- Нет доказательства точного operation peak RAM, Worker→PID mapping или полной Photoshop-совместимости. Stage 002/003 открыты.
+
 ## 024B2b — завершена, слита в main, PR + exact-main CI success (2026-10-14)
 
 - [x] **Для обоих** real Chromium `file://` ZeTer-generated PSD16 и PSB32 тестовый Blob добавляет after-write probe внутри настоящего native kernel, без изменения исходного Worker supplier на диске; отмена производится реальным UI lock во время CPU-stall, без готового reply.
