@@ -39,7 +39,7 @@ test('037B1: no unpinned JPEG admission; fail closed on changed bytes, wrong geo
     ()=>{const b=bytes.slice();b[5]=0xff;return inspectPhotoJpeg(b,args(b));},
     ()=>{const b=bytes.slice();b[8+4]=12;return inspectPhotoJpeg(b,args(b));},
     ()=>{const b=jpeg(1024);return inspectPhotoJpeg(b,args(b));},
-    ()=>{const b=bytes.slice();b[b.length-5]=0;return inspectPhotoJpeg(b,args(b));},
+    ()=>{const b=bytes.slice();b[b.length-1]=0;return inspectPhotoJpeg(b,args(b));},
     ()=>inspectPhotoJpeg('not bytes',options),
     ()=>inspectPhotoJpeg(bytes,{...options,expectedSha1:null}),
   ];
