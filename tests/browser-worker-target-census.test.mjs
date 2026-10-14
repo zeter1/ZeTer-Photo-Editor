@@ -239,7 +239,7 @@ test('028: an incompatible generic heap milestone remains an unavailable target 
   assert.match(report.browserWorkerTargets.unavailableReason,/invalid target snapshot\/phase/);
   assert.equal(report.browserWorkerTargets.snapshotCoverage.missingSamples,2);
   assert.deepEqual(report.browserWorkerTargets.snapshotCoverage.missingMilestonePhases,
-    ['invalid-phase']);
+    ['invalid-phase','finished']);
   assert.equal(report.browserWorkerTargets.observedAtLastSnapshotCount,null);
   assert.equal(report.browserWorkerTargets.workerPidMapping,'unknown');
 });
