@@ -21,6 +21,7 @@ test('024A: operation duration is distinct from sampled memory and process lifet
   assert.equal(r.durationsMs.fillCommandToHistoryPreview,5);
   assert.equal(r.durationsMs.undoToRedo,5);
   assert.equal(r.durationsMs.cancelledRetryObservation,null);
+  assert.equal(r.durationsMs.recoveredRetryToRedo,null);
   assert.equal(r.memory.linuxRssSampledMaxBytes,9000);
   assert.equal(r.memory.requestedSamplingIntervalMs,null);
   assert.equal(r.memory.maxObservedSinglePidLifetimeHwmBytes,7000);
@@ -36,10 +37,12 @@ test('024A: cancelled retry requires actual owner revocation plus unchanged nati
   const t=createBrowserOperationTimeline({operationId:'stage003-psb32',fixture:'native.psb',format:'PSB32',now:()=>clock++});
   for(const step of steps)t.mark(step);
   assert.throws(()=>t.finish({outcome:'completed-with-cancelled-retry',memoryReport:report()}),/atomicity evidence/);
-  for(const step of ['cancel-fill-command-invoked','cancel-worker-reply-held',
-    'cancel-owner-revoked','cancel-native-verified'])t.mark(step);
+  for(const step of ['cancel-fill-command-invoked','cancel-kernel-write-observed',
+    'cancel-owner-revoked','cancel-native-verified','retry-fill-command-invoked',
+    'retry-preview-history-published','retry-undo-native-verified','retry-redo-native-verified'])t.mark(step);
   const r=t.finish({outcome:'completed-with-cancelled-retry',memoryReport:report()});
   assert.equal(r.durationsMs.cancelledRetryObservation,3);
+  assert.equal(r.durationsMs.recoveredRetryToRedo,3);
 });
 test('024A: failed/incomplete runs and invalid clocks cannot masquerade as success',()=>{
   assert.throws(()=>createBrowserOperationTimeline({operationId:'illegal id',fixture:'native.psd',format:'PSD16'}),/invalid identity/);
