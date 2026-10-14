@@ -1,3 +1,8 @@
+## 025 / 024B3 — browser Worker target census (PR candidate; 2026-10-14)
+
+- Код и unit-регрессии предложены в [025](025-browser-worker-target-census.md): независимый CDP `Target.getTargets` census для реального `file://` PSD16/PSB32 Worker, без утечки target URL/title и без ложной target→PID атрибуции. `workerPidMapping: unknown`; Target API отказ не блокирует Chromium PID/`/proc` и renderer heap. Не считать пропажу target доказанным exit или RAM peak.
+- **Статус:** PR/CI/merge ещё не проверены; Stage 002/003 **открыты**. **Следом P0:** лицензированный independently Photoshop-authored RGB16 PSD + CMYK32 PSB с hashes/reference renders ([002](002-psd-compatibility-corpus.md)). **Следом P1:** документированный CDP target→PID способ или оставить `unknown`, memory evidence ([025](025-browser-worker-target-census.md)).
+
 ## 010E-B4 / 024B2b — настоящая Chromium mid-kernel отмена PSD16/PSB32 (merged, PR + exact-main CI success, 2026-10-14)
 
 - **Слито в `main`:** [PR #208](https://github.com/zeter1/ZeTer-Photo-Editor/pull/208), squash `ad839ab6`. [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38518410697) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38518637139): 1196 Node tests, generated parity, Chromium `file://` PSD16/PSB32, проверенные и загруженные JSON, профили и diff hygiene.

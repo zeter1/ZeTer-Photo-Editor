@@ -10,7 +10,8 @@ export function buildBrowserOperationArtifact(profile) {
       !['PSD16','PSB32'].includes(profile.format) ||
       !['completed','completed-with-cancelled-retry','failed'].includes(profile.outcome) ||
       !Number.isSafeInteger(profile.memory?.sampleCount) || profile.memory.sampleCount < 1 ||
-      !Array.isArray(profile.milestones) || !Number.isFinite(profile.observedWindowMs)) {
+      !Array.isArray(profile.milestones) || !Number.isFinite(profile.observedWindowMs) ||
+      (profile.memory.workerTargets && profile.memory.workerTargets.workerPidMapping !== 'unknown')) {
     throw new TypeError('Browser operation artifact: invalid timeline or unsafe operationId');
   }
   return {
@@ -57,6 +58,7 @@ export async function verifyBrowserOperationArtifacts(directory) {
         artifact.format!==format || artifact.outcome!==outcome ||
         artifact.timeline.memory.requestedSamplingIntervalMs!==50 ||
         artifact.timeline.memory.processChurn?.workerPidMapping!=='unknown' ||
+        (artifact.timeline.memory.workerTargets && artifact.timeline.memory.workerTargets.workerPidMapping!=='unknown') ||
         artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null ||
         !artifact.timeline.milestones.some(event=>event.phase==='cancel-kernel-write-observed') ||
         !artifact.timeline.milestones.some(event=>event.phase==='retry-redo-native-verified')) {
