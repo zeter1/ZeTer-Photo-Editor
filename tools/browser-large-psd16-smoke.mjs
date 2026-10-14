@@ -303,9 +303,9 @@ export async function verifyLargeBrowserPsd16Worker(client, {
       };
       return {installed:true};
     }
-    const installed=await evaluate(client,'(() => {\\n'+
-      instrumentBrowserKernelSource.toString()+'\\nreturn ('+
-      installRealNativeKernelProbe.toString()+')();\\n})()');
+    const installed=await evaluate(client,'(() => {\n'+
+      instrumentBrowserKernelSource.toString()+'\nreturn ('+
+      installRealNativeKernelProbe.toString()+')();\n})()');
     assert(installed.installed,'Cannot instrument isolated native Worker Blob');
     const cancellationStarted=Date.now();
     const pending=await evaluate(client,'('+fillFromMenu.toString()+')()');
