@@ -19,6 +19,7 @@ export function parseLinuxProcStartTime(stat, expectedPid) {
 export function createLinuxChromiumIdentityTracker() {
   const known = new Map(), lastByPid = new Map();
   let previous = null, observations = 0, lastObservationPhase = null;
+  let lastSnapshotObserved = false;
   let reusedPidObservations = 0, missingIdentityObservations = 0, newIdentityObservations = 0;
   const milestones = [];
   function observe(processes, phase) {
@@ -66,6 +67,7 @@ export function createLinuxChromiumIdentityTracker() {
     missingIdentityObservations+=misses;
     reusedPidObservations+=reuse;
     observations++;
+    lastSnapshotObserved = true;
     lastObservationPhase = phase;
     if (phase !== 'sample') milestones.push({
       phase,processCount:current.size,newIdentityObservations:arrivals,
@@ -73,24 +75,31 @@ export function createLinuxChromiumIdentityTracker() {
     });
     previous = new Map([...current].map(([pid,p])=>[pid,pid+':'+p.starttimeTicks]));
   }
+  // A failed /proc read is not a valid empty process list. The final snapshot
+  // has unknown visibility; the next success cannot infer churn through it.
+  function noteMissingSnapshot() {
+    previous = null;
+    lastSnapshotObserved = false;
+  }
   function report() {
-    const visible = new Set(previous?.values() ?? []);
+    const visible = lastSnapshotObserved ? new Set(previous?.values() ?? []) : null;
     return {
       metric:'Linux /proc/<pid>/stat field 22 starttime + per-incarnation VmRSS/VmHWM',
       availability:observations?'sampled':'unavailable',
       sampleCount:observations,uniqueProcessIdentities:known.size,
       newIdentityObservations,missingIdentityObservations,reusedPidObservations,
       lastObservationPhase,
-      observedAtLastSnapshotCount:visible.size,
-      noLongerObservedAtLastSnapshotCount:known.size-visible.size,
+      lastSnapshotObserved,
+      observedAtLastSnapshotCount:visible?.size ?? null,
+      noLongerObservedAtLastSnapshotCount:visible ? known.size-visible.size : null,
       provenExitCount:null,
       processes:[...known.entries()].map(([key,process])=>({
-        ...process,observedAtLastSnapshot:visible.has(key),
+        ...process,observedAtLastSnapshot:visible ? visible.has(key) : null,
       })).sort((a,b)=>a.pid-b.pid ||
         (BigInt(a.starttimeTicks)<BigInt(b.starttimeTicks)?-1:1)),
       milestones,workerPidMapping:'unknown',
-      limitations:'PID+starttime identifies observed Linux incarnations, not across reboots. An incarnation absent from the last sample is not a proven exit (nor a live-process assertion). A later sample may see it again; VmHWM is a process lifetime maximum, not an operation peak. Worker-to-PID attribution remains unknown.',
+      limitations:'PID+starttime identifies observed Linux incarnations, not across reboots. If the final snapshot is unreadable, final visibility is unknown, not falsely inferred from older samples. An incarnation absent from a successfully observed last sample is not a proven exit (nor a live-process assertion). A later sample may see it again; VmHWM is a process lifetime maximum, not an operation peak. Worker-to-PID attribution remains unknown.',
     };
   }
-  return {observe,report};
+  return {observe,noteMissingSnapshot,report};
 }

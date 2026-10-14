@@ -56,7 +56,8 @@ export function createBrowserRendererHeapSampler(client, {
     if (!Number.isFinite(used) || used < 0 || !Number.isFinite(total) || total < used) {
       throw new Error('Browser renderer heap sampler: invalid JS heap metrics');
     }
-    const entry = { phase, elapsedMs:now(), jsHeapUsedBytes:used, jsHeapTotalBytes:total };
+    const entry = { phase, elapsedMs:now(), jsHeapUsedBytes:used, jsHeapTotalBytes:total,
+      pidMembershipObserved:false, linuxIdentityObserved:false };
     // Browser CDP targets have their own opaque identities, independent of
     // SystemInfo PIDs. Neither API provides a documented target->PID join.
     // A denied Target domain must not disable /proc or renderer sampling.
@@ -81,6 +82,7 @@ export function createBrowserRendererHeapSampler(client, {
               new Set(ids).size !== ids.length) {
             processIdentityUnavailableReason = 'Invalid or duplicate CDP PID; cannot track process churn';
           } else {
+            entry.pidMembershipObserved = true;
             const current = new Set(ids);
             const newlySeen = previousPids
               ? ids.filter(pid => !previousPids.has(pid)).length : 0;
@@ -141,8 +143,10 @@ export function createBrowserRendererHeapSampler(client, {
             // Legacy synthetic RSS samplers may omit identity. Keep their valid
             // RSS metrics, but never claim starttime-verified attribution.
             if (!linuxIdentityUnavailableReason) {
-              try { linuxIdentity.observe(rss.processSamples,phase); }
-              catch (error) { linuxIdentityUnavailableReason=String(error?.message || error); }
+              try {
+                linuxIdentity.observe(rss.processSamples,phase);
+                entry.linuxIdentityObserved = true;
+              } catch (error) { linuxIdentityUnavailableReason=String(error?.message || error); }
             }
           } catch (error) {
             rssUnavailableReason = String(error?.message || error);
@@ -157,6 +161,10 @@ export function createBrowserRendererHeapSampler(client, {
         processIdentityUnavailableReason ??= reason;
       }
     }
+    // A skipped/failed optional snapshot breaks temporal adjacency. Never
+    // count PID arrivals/disappearances across an unobserved interval.
+    if (!entry.pidMembershipObserved) previousPids = null;
+    if (!entry.linuxIdentityObserved) linuxIdentity.noteMissingSnapshot();
     samples.push(entry);
     return entry;
   }
@@ -226,11 +234,49 @@ export function createBrowserRendererHeapSampler(client, {
             .map(item => item.phase),
         };
       }
+      // Identity coverage is separate from privateMemory/RSS counter coverage:
+      // a CDP PID list may be valid while /proc is unavailable, and vice versa.
+      function identityCoverage(field) {
+        let observedSamples = 0, observedAdjacentTransitions = 0, gapStart = -1;
+        let firstObservedPhase = null, lastObservedPhase = null;
+        const gaps = [];
+        function closeGap(end) {
+          gaps.push({
+            missingSamples:end-gapStart,
+            firstMissingPhase:samples[gapStart].phase,
+            lastMissingPhase:samples[end-1].phase,
+            previousObservedPhase:gapStart > 0 ? samples[gapStart-1].phase : null,
+            nextObservedPhase:end < samples.length ? samples[end].phase : null,
+          });
+          gapStart = -1;
+        }
+        for (let i = 0; i < samples.length; i++) {
+          if (samples[i][field] === true) {
+            observedSamples++;
+            firstObservedPhase ??= samples[i].phase;
+            lastObservedPhase = samples[i].phase;
+            if (i > 0 && samples[i-1][field] === true) observedAdjacentTransitions++;
+            if (gapStart >= 0) closeGap(i);
+          } else if (gapStart < 0) gapStart = i;
+        }
+        if (gapStart >= 0) closeGap(samples.length);
+        return {
+          observedSamples, missingSamples:samples.length-observedSamples,
+          observedAtStart:samples[0][field] === true,
+          observedAtFinish:end[field] === true,
+          firstObservedPhase,lastObservedPhase,
+          observedAdjacentTransitions,
+          unknownAdjacentTransitions:Math.max(0,samples.length-1-observedAdjacentTransitions),
+          missingMilestonePhases:samples.filter(s => s.phase !== 'sample' && s[field] !== true)
+            .map(s => s.phase),
+          gaps,
+        };
+      }
       const rssMax = rssSamples.reduce((max, item) =>
         !max || item.chromiumRssBytes > max.chromiumRssBytes ? item : max, null);
       return {
         metric:'CDP Performance.getMetrics / renderer JSHeapUsedSize',
-        limitations:'Informational sampled main-frame JS heap, browser Worker target census, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. Missing start/end counters are null, not last-observed substitutes. Target IDs cannot be joined to OS PIDs; NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
+        limitations:'Informational sampled main-frame JS heap, browser Worker target census, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. Missing identity snapshots break PID comparison continuity. Missing start/end counters are null, not last-observed substitutes. Target IDs cannot be joined to OS PIDs; NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
         metricCoverage: {
           chromiumPrivateMemory:metricCoverage('processPrivateMemoryBytes'),
           linuxAggregateRss:metricCoverage('chromiumRssBytes'),
@@ -243,6 +289,7 @@ export function createBrowserRendererHeapSampler(client, {
         },
         chromiumProcessLifecycle: {
           metric:'CDP SystemInfo.getProcessInfo / sampled PID membership and process types',
+          snapshotCoverage:identityCoverage('pidMembershipObserved'),
           availability:!processClient ? 'not-requested' :
             processIdentityUnavailableReason ? 'unavailable' : 'sampled',
           unavailableReason:processIdentityUnavailableReason,
@@ -255,10 +302,11 @@ export function createBrowserRendererHeapSampler(client, {
           maximumObservedTypes:Object.fromEntries([...processTypeMaximums].sort(([a],[b])=>a.localeCompare(b))),
           milestones:pidMarkers,
           workerPidMapping:'unknown',
-          limitations:'Sampling cannot see all short-lived PIDs or distinguish PID reuse. Process types do not establish Worker identity; missing PID means absent from a later CDP snapshot, not proven exit. No sum of per-PID lifetime HWM represents concurrent peak memory.',
+          limitations:'Sampling cannot see all short-lived PIDs or distinguish PID reuse. Churn counters compare only adjacent observed snapshots; missing observations make that interval unknown. Process types do not establish Worker identity; missing PID in a successful later snapshot is not proven exit. No sum of per-PID lifetime HWM represents concurrent peak memory.',
         },
         linuxProcessIdentity: {
           ...linuxIdentity.report(),
+          snapshotCoverage:identityCoverage('linuxIdentityObserved'),
           availability:!processClient?'not-requested':
             linuxIdentityUnavailableReason || rssUnavailableReason?'unavailable':'sampled',
           unavailableReason:linuxIdentityUnavailableReason || rssUnavailableReason,

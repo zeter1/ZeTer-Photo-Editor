@@ -156,3 +156,30 @@ test('024B2a: reappearing incarnation is observed again, not falsely counted as 
   assert.equal(final.processes.find(process=>process.pid===3).samples,2);
   assert.equal(final.missingIdentityObservations,1);
 });
+
+test('027 / 024C2: absent /proc snapshot breaks identity adjacency without erasing incarnation evidence', () => {
+  const tracker=createLinuxChromiumIdentityTracker();
+  const p=(pid,ticks)=>({pid,starttimeTicks:String(ticks),rssBytes:100,highWaterBytes:150});
+  tracker.observe([p(7,100),p(8,200)],'before-import');
+  tracker.noteMissingSnapshot();
+  let r=tracker.report();
+  assert.equal(r.lastSnapshotObserved,false);
+  assert.equal(r.observedAtLastSnapshotCount,null);
+  assert.equal(r.noLongerObservedAtLastSnapshotCount,null);
+  assert.deepEqual(r.processes.map(x=>x.observedAtLastSnapshot),[null,null]);
+  tracker.observe([p(7,100),p(9,300)],'retry-completed');
+  r=tracker.report();
+  assert.equal(r.newIdentityObservations,0,'no arrival inferred across an observation gap');
+  assert.equal(r.missingIdentityObservations,0,'no departure inferred across an observation gap');
+  assert.equal(r.uniqueProcessIdentities,3);
+  assert.equal(r.observedAtLastSnapshotCount,2);
+  assert.equal(r.noLongerObservedAtLastSnapshotCount,1);
+  tracker.noteMissingSnapshot();
+  tracker.observe([p(7,101)],'finished');
+  r=tracker.report();
+  assert.equal(r.reusedPidObservations,1,'changed starttime proves a distinct observed incarnation');
+  assert.equal(r.newIdentityObservations,0);
+  assert.equal(r.missingIdentityObservations,0);
+  assert.equal(r.provenExitCount,null);
+  assert.equal(r.workerPidMapping,'unknown');
+});
