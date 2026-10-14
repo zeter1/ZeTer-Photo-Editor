@@ -1,5 +1,6 @@
 import { sampleLinuxChromiumRss } from './browser-linux-process-rss.mjs';
 import { createLinuxChromiumIdentityTracker } from './browser-linux-process-identity.mjs';
+import { createBrowserWorkerTargetTracker } from './browser-worker-target-census.mjs';
 
 // Informational CDP renderer-heap samples. Worker heaps, native allocations and
 // process RSS are NOT represented by JSHeapUsedSize; sampled max != true peak.
@@ -39,6 +40,8 @@ export function createBrowserRendererHeapSampler(client, {
   let pidSampleCount = 0;
   const linuxIdentity = createLinuxChromiumIdentityTracker();
   let linuxIdentityUnavailableReason = null;
+  const workerTargets = createBrowserWorkerTargetTracker();
+  let workerTargetUnavailableReason = null;
 
   // CDP reads can complete out of order when a periodic poll overlaps an
   // explicit stage marker or stop(). Queue reads in invocation order so the
@@ -54,6 +57,17 @@ export function createBrowserRendererHeapSampler(client, {
       throw new Error('Browser renderer heap sampler: invalid JS heap metrics');
     }
     const entry = { phase, elapsedMs:now(), jsHeapUsedBytes:used, jsHeapTotalBytes:total };
+    // Browser CDP targets have their own opaque identities, independent of
+    // SystemInfo PIDs. Neither API provides a documented target->PID join.
+    // A denied Target domain must not disable /proc or renderer sampling.
+    if (processClient && !workerTargetUnavailableReason) {
+      try {
+        const response = await processClient.send('Target.getTargets');
+        workerTargets.observe(response?.targetInfos, phase);
+      } catch (error) {
+        workerTargetUnavailableReason = String(error?.message || error);
+      }
+    }
     if (processClient && (!processUnavailableReason || !rssUnavailableReason || !processIdentityUnavailableReason)) {
       try {
         const info = await processClient.send('SystemInfo.getProcessInfo');
@@ -198,7 +212,13 @@ export function createBrowserRendererHeapSampler(client, {
         !max || item.chromiumRssBytes > max.chromiumRssBytes ? item : max, null);
       return {
         metric:'CDP Performance.getMetrics / renderer JSHeapUsedSize',
-        limitations:'Informational sampled main-frame JS heap, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
+        limitations:'Informational sampled main-frame JS heap, browser Worker target census, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. Target IDs cannot be joined to OS PIDs; NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
+        browserWorkerTargets: {
+          ...workerTargets.report(),
+          availability:!processClient ? 'not-requested' :
+            workerTargetUnavailableReason ? 'unavailable' : 'sampled',
+          unavailableReason:workerTargetUnavailableReason,
+        },
         chromiumProcessLifecycle: {
           metric:'CDP SystemInfo.getProcessInfo / sampled PID membership and process types',
           availability:!processClient ? 'not-requested' :
