@@ -3,7 +3,7 @@
 - [x] [026](026-browser-memory-sample-coverage.md), [PR #210](https://github.com/zeter1/ZeTer-Photo-Editor/pull/210) → `67e4451`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38522956593), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38523222466).
 - [x] `baselinePrivateBytes` / `endPrivateBytes` и Linux RSS baseline/end отражают только **фактически полученный** первый/последний snapshot. При пропаже метрики `null`, а не последний старый отсчёт. `sampledIncreaseBytes` требует настоящую baseline.
 - [x] `metricCoverage`: количества доступных/пропущенных опросов и missing milestones, отдельно CDP privateMemory и Linux RSS; перенос в timeline JSON и регрессионные тесты финального `/proc ENOENT`.
-- [ ] **Следующая P1 / 024C2:** observation gaps/PID churn при cancel→retry с проверяемой полнотой; не путать target IDs, PID membership, Linux PID+starttime и доказанный exit.
+- [x] **027 / 024C2 (PR/CI ожидаются):** [coverage/gaps CDP PID + Linux starttime](027-browser-process-observation-gaps.md) при cancel→retry; нет ложного carryover финального состояния и churn через неизвестные интервалы. Target IDs/PIDs/exit независимы.
 - [ ] **P0 / [002](002-psd-compatibility-corpus.md):** независимые licensed Photoshop-authored high-depth goldens, hashes и Photoshop renders.
 - Нет доказательства точного operation peak RAM, Worker→PID mapping или полной Photoshop-совместимости. Stage 002/003 открыты.
 

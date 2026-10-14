@@ -441,3 +441,56 @@ test('026: denied process domain has no invented zero, baseline, end, or coverag
     assert.deepEqual(coverage.missingMilestonePhases,['before-import','finished']);
   }
 });
+
+test('027 / 024C2: CDP PID churn across cancel, then missing snapshots, is not an exit or a retry observation', async () => {
+  const page={async send(method) {
+    if (method==='Performance.enable') return {};
+    return {metrics:[{name:'JSHeapUsedSize',value:100},{name:'JSHeapTotalSize',value:200}]};
+  }};
+  let processReads=0, rssReads=0;
+  const sampler=createBrowserRendererHeapSampler(page,{
+    processClient:{async send(method) {
+      if (method==='Target.getTargets') return {targetInfos:[]};
+      assert.equal(method,'SystemInfo.getProcessInfo');
+      processReads++;
+      if (processReads===3) throw Error('CDP process domain unavailable on cancel');
+      return {processInfo:[{id:processReads===1?42:43,type:'renderer',privateMemory:100}]};
+    }},
+    processRssSampler:async processes => {
+      rssReads++;
+      const pid=processes[0].id;
+      return {supported:true,processCount:1,aggregateRssBytes:1000,
+        largestProcessHighWaterBytes:1100,
+        processSamples:[{pid,starttimeTicks:'123',type:'renderer',
+          rssBytes:1000,highWaterBytes:1100}]};
+    },
+    schedule:()=>1,unschedule:()=>{},
+  });
+  await sampler.start();
+  await sampler.snapshot('cancel-kernel-write-observed');
+  await sampler.snapshot('cancel-owner-revoked');
+  await sampler.snapshot('retry-redo-native-verified');
+  const report=await sampler.stop();
+  assert.equal(processReads,3,'sticky unsupported CDP domain is not polled again');
+  assert.equal(rssReads,2);
+  assert.equal(report.chromiumProcessLifecycle.newPidObservations,1);
+  assert.equal(report.chromiumProcessLifecycle.missingPidObservations,1);
+  const coverage=report.chromiumProcessLifecycle.snapshotCoverage;
+  assert.equal(coverage.observedSamples,2);
+  assert.equal(coverage.missingSamples,3);
+  assert.equal(coverage.observedAtFinish,false);
+  assert.equal(coverage.observedAdjacentTransitions,1);
+  assert.equal(coverage.unknownAdjacentTransitions,3);
+  assert.deepEqual(coverage.missingMilestonePhases,[
+    'cancel-owner-revoked','retry-redo-native-verified','finished']);
+  assert.deepEqual(coverage.gaps,[{missingSamples:3,
+    firstMissingPhase:'cancel-owner-revoked',lastMissingPhase:'finished',
+    previousObservedPhase:'cancel-kernel-write-observed',nextObservedPhase:null}]);
+  assert.deepEqual(report.linuxProcessIdentity.snapshotCoverage,coverage);
+  assert.equal(report.linuxProcessIdentity.lastSnapshotObserved,false);
+  assert.equal(report.linuxProcessIdentity.observedAtLastSnapshotCount,null);
+  assert.equal(report.linuxProcessIdentity.noLongerObservedAtLastSnapshotCount,null);
+  assert.deepEqual(report.linuxProcessIdentity.processes.map(p=>p.observedAtLastSnapshot),[null,null]);
+  assert.equal(report.linuxProcessIdentity.provenExitCount,null);
+  assert.equal(report.chromiumProcessLifecycle.workerPidMapping,'unknown');
+});

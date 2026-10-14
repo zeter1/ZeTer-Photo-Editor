@@ -1,3 +1,9 @@
+## 027 / 024C2 — PID observation gaps при cancel→retry (PR/CI ожидаются, 2026-10-14)
+
+- [027](027-browser-process-observation-gaps.md): добавлен per-snapshot CDP PID/Linux starttime coverage; пропущенный финальный /proc снимок не подменяется прежней видимостью, adjacency churn не вычисляется сквозь неизвестный интервал.
+- **Гейт:** unit + `npm run check` + Chromium `file://` PSD16/PSB32 в PR CI; merge; CI отдельного точного main SHA.
+- **Дальше:** P0 independently authored/licensed Photoshop RGB16 PSD + CMYK32 PSB ([002](002-psd-compatibility-corpus.md)); P1 documented Worker target→PID evidence или `unknown` ([025](025-browser-worker-target-census.md)); Stage 002/003 открыты.
+
 ## 026 / 024C1 — truthful browser memory snapshot coverage (merged, PR + exact-main CI success, 2026-10-14)
 
 - **Реализовано и проверено:** [026](026-browser-memory-sample-coverage.md) — baseline/end privateMemory + RSS только если соответствующий **точный** стартовый/конечный снимок доступен, иначе `null`; отдельные counts/phase gaps и перенос coverage в operation JSON. Unit regression для финального `/proc ENOENT` и отказа CDP. **Слито:** [PR #210](https://github.com/zeter1/ZeTer-Photo-Editor/pull/210) → `67e4451`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38522956593), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38523222466) — `npm run check`, real Chromium `file://` PSD16/PSB32, 2 JSON и профили.
