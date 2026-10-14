@@ -1,8 +1,9 @@
-## 036B — Chromium UI wide connected native ROI (в PR, gate ожидается; 2026-10-14)
+## 036B — реальный Chromium wide connected ROI (СЛИТО, 2026-10-14; exact-main CI success)
 
-- Реализация 036B в ветке `feat/036b-wide-connected-chromium`: ZeTer-generated wide PSD16/PSB32 (8288 дефектных пикселей), точный 10-вершинный UI polygon через настоящий CDP pointer/Enter, real native Worker, публичный File → Save Project для original/filled/Undo/Redo, browser-portable strict tile oracle с MAE/RMSE, неизменностью unselected/alpha и exact Undo/Redo. Порог **036B не считать пройденным до Chromium CI**.
-- **Далее 036C:** versioned Chromium operation JSON quality/latency/RSS/CDP с честным `unknown` Worker→PID и `null` peak; негативные тесты и повторная валидация артефактов; после — PR CI + exact-main gate. [036](036-browser-connected-roi-quality.md).
-- **Независимый P0 [002](002-psd-compatibility-corpus.md):** законно публикуемые Photoshop-authored RGB16 и CMYK32 goldens, не заменять синтетикой.
+- **Gate:** [PR #221](https://github.com/zeter1/ZeTer-Photo-Editor/pull/221) → [`7fbc9117`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7fbc9117f617c4495ac0d0c20151145a177eb165); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38576559275), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38577167032). Все 1242 Node tests, bundle parity, настоящий Chromium `file://` smoke, JSON artifacts/profiles и diff hygiene — success.
+- Настоящий UI PSD16 и PSB32 → 10-вершинное polygon выделение → native Worker → публичный Save Project ×4 → exact Undo/Redo. Фактически выбранных и изменённых пикселей **8288/8288**, 24864 color samples, неизменность вне selection и alpha. ZeTer-generated native 16-bit MAE: **32333.33 → 0**, Float32 MAE: **1.45833 → 0**. Наблюдалось 2 изменённых native tile payloads на формат. Браузерные import times 2458/4594ms и fill+preview 2232/2788ms — **однократные elapsed наблюдения**, не гарантии производительности.
+- **Следующая 036C:** versioned serialized Chromium evidence с timestamps, RSS/CDP coverage и честными gaps, CI round-trip validator и negative matrix; не заявлять Worker→PID или true RAM peak по snapshot. [036](036-browser-connected-roi-quality.md).
+- **P0 [002](002-psd-compatibility-corpus.md)**: независимо Photoshop-authored/лицензированный PSD16 + CMYK32 PSB corpus по-прежнему отсутствует. **Stage 003 всё ещё открыта.**
 
 ## 036A — wide connected ROI evidence baseline (слито; PR + exact-main CI success, 2026-10-14)
 

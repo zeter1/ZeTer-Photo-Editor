@@ -1,6 +1,6 @@
 # 036 — реальный Chromium quality/latency/RSS для широкого связного Content-Aware ROI
 
-**Статус: ОТКРЫТО (P1, Stage 003).**
+**Статус: 036B ЗАКРЫТА, 036C ОТКРЫТА (P1, Stage 003).**
 **Основание:** после закрытия [035](035-browser-recovery-modal-flake.md), [034](034-complex-roi-native-quality.md) по-прежнему доказывает native connected ROI только в Node Worker. Реальный Chromium проверяет небольшой 5×5 дефект ([033](033-browser-synthetic-native-quality.md)), но не широкий сложный ROI.
 
 ## Проходка 036A — точный native evidence-контракт (2026-10-14, СЛИТО, main CI success)
@@ -9,7 +9,7 @@
 - [x] Добавлен самостоятельный test-only oracle `tools/browser-wide-connected-native-evidence.mjs`: 8288 пикселей (два острова 64×64 и диагональ 96), проверка точных индексов, оригинальных native tile bytes вне выделения, alpha, MAE/RMSE относительно ZeTer-generated фона, полная байтовая идентичность Undo и Redo.
 - [x] `tests/browser-wide-connected-native-evidence.test.mjs`: RGB16/Float32 + подменённая форма ROI, missing/overlapping/corrupt tiles, NaN, соседний пиксель/alpha, Undo/Redo и недоказанные memory samples/peaks.
 - [x] Встроен fail-closed контракт временных меток и coverage, требующий `workerPidMapping='unknown'` и `operationPeakRssBytes=null`. Ни snapshot, ни CDP target не объявляются настоящим Worker RSS.
-- [ ] **036B (код в PR, CI gate ожидается):** подключить этот oracle к реальному Chromium `file://` UI импорт/широкая связная selection/Worker/preview/Undo/Redo для PSD16 и PSB32. Сохранять полный источник через публичный Save Project, а не читать приватный state; сравнить реальные `selectedIndices` со shape oracle.
+- [x] **036B (слито; PR и exact-main CI success):** подключить этот oracle к реальному Chromium `file://` UI импорт/широкая связная selection/Worker/preview/Undo/Redo для PSD16 и PSB32. Сохранять полный источник через публичный Save Project, а не читать приватный state; сравнить реальные `selectedIndices` со shape oracle.
 - [ ] **036C:** собирать реальные observation timestamps и RSS/CDP gaps в сериализованный versioned JSON с повторной CI-валидацией, затем выполнить `npm run check`, `test:browser`, два JSON artifact, профиль, review/merge и exact-main CI. До этого 036 **не закрыта**.
 - **Граница:** 036A — тестовый фундамент, **не** доказательство выполненного браузерного Fill или Photoshop-compatible reference.
 
@@ -27,9 +27,11 @@
 - Полный real-image quality / accurate operation peak RAM / GPU, AI, RAW/DNG, CMYK и Photoshop feature parity не считаются решёнными одним benchmark.
 - Сначала проверить `task/NEXT.md` на свежий статус перед выполнением. Тестовые новые вспомогательные файлы размещать в `tools/`, `tests/`; не менять generated `src/app.bundle.js` вручную.
 
-## Реализация 036B — PR ветка `feat/036b-wide-connected-chromium` (2026-10-14)
+## Реализация 036B — слито в main, 2026-10-14
 
 - Добавлен `tools/browser-wide-connected-ui-polygon.mjs`: **десять вершин** для настоящего polygon UI gesture; subpixel диагональный коридор выбирает ровно 96 pixel centres между 64×64 островами, включая 8288 целевых точек и исключая соседние. `tests/browser-wide-connected-ui-polygon.test.mjs` сравнивает production `pointInSelection` со строгим 036A pixel oracle в трёх геометриях и при offset.
 - Добавлены wide ZeTer-generated PSD16/PSB32 fixtures 1025² (обязательно native tiled source v2) и `tools/browser-wide-connected-ui-smoke.mjs`: public File Input → настоящее polygon clicking/Enter → Content-Aware Fill native Worker → публичный Save Project ×4 → native MAE/RMSE и exact Undo/Redo/outside selection/alpha; оба формата включены в `tools/browser-smoke.mjs`.
 - Строгий 036A tile decoder адаптирован к стандартному `atob`/`btoa` и может исполняться в настоящем Chromium без private app state; остальные проверки неизменны. Тестовый код и fixtures **не Photoshop-authored** и не меняют production рендерер.
-- **До зелёного браузерного CI считать 036B незакрытой.** Даже при успехе 036C: независимая versioned JSON запись sampled latency/RSS/CDP gap + fail-closed verify/review/main gate. Stage 003 остаётся открытой.
+- **Gate 036B выполнен:** [PR #221](https://github.com/zeter1/ZeTer-Photo-Editor/pull/221) → [`7fbc9117`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7fbc9117f617c4495ac0d0c20151145a177eb165); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38576559275), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38577167032). 1242 Node tests + Chromium UI для обоих native форматов, JSON artifacts, profiles и diff hygiene — success. **036C:** независимая versioned JSON запись sampled latency/RSS/CDP gap + fail-closed verify/review/main gate. Stage 003 остаётся открытой.
+
+**Фактический результат 036B:** из настоящего Chromium Save Project оба формата показали 8288/8288 selected/changed, MAE RGB16 32333.3333 → 0, Float32 1.4583333 → 0; неизменность alpha и внешних пикселей, точные Undo/Redo native tile bytes. Время импорта 2458/4594ms и Fill+preview 2232/2788ms — одиночные наблюдения, НЕ peak RAM и не workload SLA. [CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38576559275). Продолжение 036C — observational JSON + fail-closed verifier.
