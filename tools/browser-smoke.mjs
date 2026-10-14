@@ -9,6 +9,7 @@ import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs
 import { verifyLargeBrowserPsd16Worker } from './browser-large-psd16-smoke.mjs';
 import { verifyBrowserMidKernelCancellation } from './browser-inpaint-mid-kernel-smoke.mjs';
 import { verifyBrowserUiLockMidKernel } from './browser-ui-lock-mid-kernel-smoke.mjs';
+import { verifyBrowserDelayedRecoveryReloads } from './browser-recovery-reload-smoke.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -977,6 +978,14 @@ async function runSmoke() {
 
     await new Promise(resolve => setTimeout(resolve, 1_800)); // Let editor autosave quiesce.
     await verifyRecoveryIndexedDb(client);
+    assertNoBrowserErrors(errors, stderrState);
+
+    // 035: three real file:// reloads with delayed IndexedDB startup and
+    // public recovery-modal actions. This runs before the native 010D series.
+    await verifyBrowserDelayedRecoveryReloads(client, {
+      evaluate, waitFor, assert,
+      recoveryStorageSource: (await readFile(path.join(ROOT, 'src/core/recovery.js'), 'utf8')).replace(/^export /gm, ''),
+    });
     assertNoBrowserErrors(errors, stderrState);
 
     // 010D: last scenario after a clean reload so the application's lazy
