@@ -61,7 +61,7 @@ function qualityIsValid(q,bits){
       q.scoredSamples!==8288*3 || q.outsideSelectionAndAlphaUnchanged!==true ||
       q.undoNativeBytesExact!==true || q.redoNativeBytesExact!==true ||
       typeof q.reference!=='string' || !q.reference.includes('not Photoshop'))return false;
-  const names=['mae','rmse','maxError'];
+  const names=['mae','rmse','maxAbsoluteError'];
   return ['baseline','repaired'].every(key=>q[key]&&
     names.every(name=>Number.isFinite(q[key][name])&&q[key][name]>=0)) &&
     q.repaired.mae<q.baseline.mae && q.repaired.rmse<q.baseline.rmse;
