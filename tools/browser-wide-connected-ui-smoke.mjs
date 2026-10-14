@@ -17,12 +17,14 @@ export async function verifyBrowserWideConnectedNativeUi(client,{
   const fixture=createBrowserHighDepthFixture(fixtureKey);
   const offset=fixture.wideOrigin;
   const polygon=createWideConnectedUiPolygon(fixture.width,fixture.height,{x:offset,y:offset});
+  // Test fixture coordinates, not a private editor runtime read.
+  const polygonJson=JSON.stringify(polygon);
   const meta={
     filename:fixture.filename,width:fixture.width,height:fixture.height,
     bits:fixture.bitsPerChannel,normal:fixture.normal,offset,
   };
   const started=Date.now();
-  await evaluate(client,'window.__wide036={meta:'+JSON.stringify(meta)+',snapshots:{},jobs:0};window.__wide036Parts=[];true');
+  await evaluate(client,'window.__wide036={meta:'+JSON.stringify(meta)+',polygon:'+polygonJson+',snapshots:{},jobs:0};window.__wide036Parts=[];true');
   // CDP message size stays bounded even for the 16 MiB Float32 PSB source.
   const base64=Buffer.from(fixture.bytes).toString('base64');
   for(let start=0;start<base64.length;start+=192*1024) {
@@ -95,7 +97,7 @@ export async function verifyBrowserWideConnectedNativeUi(client,{
     viewport.scrollLeft=(viewport.scrollWidth-viewport.clientWidth)/2;
     viewport.scrollTop=(viewport.scrollHeight-viewport.clientHeight)/2;
     const overlay=document.querySelector('#overlayCanvas'),rect=overlay.getBoundingClientRect();
-    const polygon=JSON.parse('+JSON.stringify(JSON.stringify(polygon))+');
+    const polygon=window.__wide036.polygon;
     const points=polygon.points.map(p=>({
       x:rect.left+p.x*rect.width/overlay.width,
       y:rect.top+p.y*rect.height/overlay.height,
