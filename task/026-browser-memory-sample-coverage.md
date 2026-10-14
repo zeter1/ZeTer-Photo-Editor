@@ -1,6 +1,6 @@
 # 026 / 024C1 — Browser memory sample coverage and true finish semantics
 
-**Статус:** реализация в ветке `feat/stage003-memory-sample-coverage-026`; PR/CI и merge проверяются отдельно. Stage 002/003 остаются открытыми.
+**Статус (2026-10-14):** **слито в `main`** через [PR #210](https://github.com/zeter1/ZeTer-Photo-Editor/pull/210), squash `67e4451`; [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38522956593) и [CI точного code-commit `main` success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38523222466) (Node, generated parity, real Chromium `file://`, обе PSD16/PSB32 JSON, профили, diff hygiene). Stage 002/003 остаются открытыми.
 
 ## Проблема
 
@@ -12,8 +12,8 @@
 - [x] Добавлен независимый `metricCoverage` для Chromium `privateMemory` и aggregate Linux VmRSS: число наблюдений и пропусков, наблюдаемость в начальном/конечном снимке, первая/последняя фаза наблюдения и пропущенные этапные снимки. Отдельные JS heap, Target ID census и PID+starttime остаются независимыми.
 - [x] `tools/browser-operation-timeline.mjs`: передача `metricCoverage` в версионированный информационный артефакт операции без изменений семантики Worker→PID=`unknown`.
 - [x] Unit-регрессии: частично успешная memory sampling с `ENOENT` при конце, отказ обоих CDP domains, честные `null` вместо «end = old sample».
-- [ ] CI `npm run check`, browser `file://` PSD16/PSB32 и JSON verification — ожидается после PR.
-- [ ] PR CI success, merge в `main`, **отдельный exact-code main CI success** — не отмечать преждевременно.
+- [x] CI `npm run check`, browser `file://` PSD16/PSB32 и JSON verification — PR CI **success**.
+- [x] PR CI success, merge в `main` и **отдельный exact-code main CI success** — подтверждены.
 
 ## Ограничения и следующие действия
 
