@@ -1,6 +1,6 @@
 # 028 / 024C3 — Пропущенные CDP Worker target snapshots и честная неизвестность
 
-**Статус (2026-10-14):** [PR #212](https://github.com/zeter1/ZeTer-Photo-Editor/pull/212), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38526924226) (`npm run check`, generated parity, реальный Chromium `file://`, JSON, профили и diff hygiene). **Merge и exact-main CI ещё ожидаются.** Только test instrumentation, production/editor bundle не изменён.
+**Статус (2026-10-14):** **слито в `main`**, [PR #212](https://github.com/zeter1/ZeTer-Photo-Editor/pull/212) → squash `88ede195`. [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38527401333) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38527667389): `npm run check`, generated parity, реальный Chromium `file://` PSD16/PSB32, JSON/profiles и diff hygiene. Только test instrumentation, production/editor bundle не изменён.
 
 ## Проблема
 
@@ -18,7 +18,7 @@
 - [x] Generic heap milestone с неподходящим census phase безопасно фиксируется как `invalid-phase` и не роняет Chromium smoke или независимые PID чтения.
 - [x] Регрессии: две подряд неуспешные попытки во время cancel→retry, пропущенный финал, успешный CDP процессный опрос при отказавшем Target домене.
 - [x] **PR verification:** `npm run check` (включая целевые Node-регрессии), настоящий Chromium `file://` PSD16/PSB32, JSON artifacts, все профили, diff hygiene — [run 38526924226](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38526924226), success.
-- [ ] **Merge + exact-main CI:** до успешного main push workflow проходка не считается закрытой.
+- [x] **Merge + exact-code main CI:** `88ede195` и [run 38527667389](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38527667389) — success. Закрыта **только** диагностическая проходка 028, не общие Stage 002/003.
 
 ## Ограничения и следующий шаг
 

@@ -6,7 +6,7 @@
 
 - Исправлено: тестовый browser Worker census больше не выдаёт последний успешный `Target.getTargets` за подтверждённую видимость на финише при последующих отказах. После пропущенного снимка переходы появления/пропажи targets остаются неизвестными, а не ошибочно вычисляются между несоседними снимками.
 - Добавлено: `snapshotCoverage` для Worker target IDs, отдельные флаги успешных Target polls и безопасный `invalid-phase` fallback, не прерывающий независимый мониторинг PID/`/proc` и renderer heap; четыре новые Node-регрессии.
-- Проверено: `npm run check`, generated parity, настоящий Chromium `file://` PSD16/PSB32, JSON artifacts, профили и diff hygiene — [PR #212 CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38526924226).
+- Проверено: `npm run check`, generated parity, настоящий Chromium `file://` PSD16/PSB32, JSON artifacts, профили и diff hygiene — [PR #212 CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38527401333) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38527667389) после squash `88ede195`.
 - Ограничения: изменения только в тестовой диагностике; ни Worker→PID mapping, ни exit, ни настоящий operation-wide RAM peak не доказаны. Независимые Adobe Photoshop high-depth golden по-прежнему требуются.
 
 
