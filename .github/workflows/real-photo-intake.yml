@@ -20,6 +20,7 @@ on:
       - tools/verify-real-photo-psd-external.py
       - tools/verify-photo-native-artifact-set.py
       - tests/fixtures/real-photo/reviewed-manifest.json
+      - tests/fixtures/real-photo/reviewed-native-artifacts.json
   push:
     branches: [main]
     paths:
@@ -36,6 +37,7 @@ on:
       - tools/verify-real-photo-psd-external.py
       - tools/verify-photo-native-artifact-set.py
       - tests/fixtures/real-photo/reviewed-manifest.json
+      - tests/fixtures/real-photo/reviewed-native-artifacts.json
 
 permissions:
   contents: read
@@ -180,7 +182,9 @@ jobs:
             "$ZPE_PHOTO_DIR/native-documents" > "$ZPE_PHOTO_DIR/native-saved-js.json"
           python3 tools/verify-photo-native-artifact-set.py \
             tests/fixtures/real-photo/reviewed-manifest.json \
-            "$ZPE_PHOTO_DIR/native-documents" > "$ZPE_PHOTO_DIR/native-independent-run.json"
+            "$ZPE_PHOTO_DIR/native-documents" \
+            tests/fixtures/real-photo/reviewed-native-artifacts.json \
+            > "$ZPE_PHOTO_DIR/native-independent-run.json"
           python3 - "$ZPE_PHOTO_DIR" <<'PY'
           import json
           from pathlib import Path
@@ -194,6 +198,7 @@ jobs:
           assert independent['status'] == 'saved-native-layer-and-merged-words-verified'
           assert set(independent['documents']) == {'psd16', 'psb32'}
           assert independent['selectionPixels'] == 8288
+          assert independent['frozenFilePinsVerified'] is True
           assert not independent['photoshopParityVerified']
           assert not independent['browserBenchmarkVerified']
           for key in ('psd16', 'psb32'):
@@ -210,6 +215,7 @@ jobs:
           assert receipt['nativeRealPhotoPsdPsbVerified'] is False
           receipt['nativeRealPhotoPsdPsbVerified'] = True
           receipt['nativeArtifactReadbackStatus'] = independent['status']
+          receipt['nativeFileHashesFrozenVerified'] = True
           assert receipt['independentLicenseIccExifVisualReviewComplete'] is False
           assert receipt['photoshopCompatibilityVerified'] is False
           assert receipt['browserRealPhotoBenchmarkVerified'] is False
