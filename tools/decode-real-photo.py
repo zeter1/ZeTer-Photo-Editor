@@ -7,7 +7,9 @@ Usage: python3 tools/decode-real-photo.py input.jpg NEW-decoded.rgba NEW-decoder
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import stat
 import sys
 
 try:
@@ -137,10 +139,41 @@ def scan_exif_app1(jpeg: bytes):
     return orientation
 
 
+def publish_candidate_pair(rgba_path: Path, evidence_path: Path, rgba: bytes, evidence: dict):
+    """Publish exclusive outputs; roll back only our own inodes on an I/O error.
+
+    A Python exception cannot leave a plausible half-written candidate pair.
+    This is NOT a crash-atomic two-file transaction (SIGKILL/power loss).
+    """
+    created = []
+    try:
+        with rgba_path.open('xb') as output:
+            info = os.fstat(output.fileno())
+            created.append((rgba_path, info.st_dev, info.st_ino))
+            output.write(rgba)
+        with evidence_path.open('x', encoding='utf8') as output:
+            info = os.fstat(output.fileno())
+            created.append((evidence_path, info.st_dev, info.st_ino))
+            json.dump(evidence, output, indent=2, ensure_ascii=False)
+            output.write('\n')
+    except BaseException:
+        for path, device, inode in reversed(created):
+            try:
+                live = path.lstat()
+                # Do not delete another file that replaced ours during cleanup.
+                if (stat.S_ISREG(live.st_mode) and
+                        live.st_dev == device and live.st_ino == inode):
+                    path.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+
+
 def decode(input_path: Path, rgba_path: Path, evidence_path: Path):
     if rgba_path == evidence_path or input_path in (rgba_path, evidence_path):
         raise ValueError('Original and both output paths must be distinct')
-    if rgba_path.exists() or evidence_path.exists():
+    if (rgba_path.exists() or evidence_path.exists() or
+            rgba_path.is_symlink() or evidence_path.is_symlink()):
         raise FileExistsError('Refusing to overwrite output; choose new paths')
     size = input_path.stat().st_size
     if not 0 < size <= SOURCE_MAX_BYTES or not input_path.is_file():
@@ -203,11 +236,7 @@ def decode(input_path: Path, rgba_path: Path, evidence_path: Path):
     # be reviewed and pinned independently; never write them into a reviewed manifest.
     rgba_path.parent.mkdir(parents=True, exist_ok=True)
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
-    with rgba_path.open('xb') as output:
-        output.write(rgba)
-    with evidence_path.open('x', encoding='utf8') as output:
-        json.dump(evidence, output, indent=2, ensure_ascii=False)
-        output.write('\n')
+    publish_candidate_pair(rgba_path, evidence_path, rgba, evidence)
     return {
         'status': 'decoded-candidate-unreviewed',
         'sourceSha256Candidate': hashlib.sha256(jpeg).hexdigest(),
@@ -223,7 +252,9 @@ def main(argv):
         print('Usage: python3 tools/decode-real-photo.py original.jpg NEW-decoded.rgba NEW-decoder.json', file=sys.stderr)
         return 2
     try:
-        result = decode(*(Path(value).resolve() for value in argv[1:]))
+        # Do not dereference output symlinks: a dangling symlink must not
+        # silently redirect an exclusive write to its missing target.
+        result = decode(*(Path(value).absolute() for value in argv[1:]))
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return 0
     except (ValueError, OSError) as error:
