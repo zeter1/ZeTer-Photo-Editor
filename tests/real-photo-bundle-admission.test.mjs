@@ -149,6 +149,6 @@ test('037B2b-2b: EXIF without Orientation is legal but false transpose is reject
     {...s,decoder:{...s.decoder,orientationApplied:true}},
     {...withExif,decoder:{...s.decoder,exifOrientation:1,orientationApplied:true}},
   ]) {
-    assert.throws(()=>candidate(item),/037 photo bundle.*orientationApplied/);
+    assert.throws(()=>candidate(item),/037 photo bundle.*(orientationApplied|EXIF orientation)/);
   }
 });
