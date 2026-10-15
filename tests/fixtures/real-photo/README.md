@@ -1,4 +1,4 @@
-> **037B2b-3b, in review:** при сохранении ZeTer PSD16/PSB32 теперь формируется `codec-evidence.json` и отдельный `verify` повторно проверяет записанные байты. См. [handoff](../../../task/037b2b-3b-artifact-integrity.md). Это не заменяет реального исходника, внешнего JPEG/ICC/EXIF review или Photoshop golden.
+> **037B2b-3b merged + CI success:** [PR #228](https://github.com/zeter1/ZeTer-Photo-Editor/pull/228), [точный `main` CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38699204703). `codec-evidence.json` + `verify` rechecks saved ZPE PSD16/PSB32; это не заменяет реального оригинала и ICC/EXIF/Adobe review. [Handoff](../../../task/037b2b-3b-artifact-integrity.md).
 
 ## 037B2b-1 — offline pin verification available; actual photo still absent
 

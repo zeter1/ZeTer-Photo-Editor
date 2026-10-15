@@ -1,5 +1,7 @@
 # 037B2b-3b — persisted PSD16/PSB32 artifact verification
 
+**037B2b-3b CLOSED (2026-10-15).** [PR #228](https://github.com/zeter1/ZeTer-Photo-Editor/pull/228) merged as [927e1ec](https://github.com/zeter1/ZeTer-Photo-Editor/commit/927e1ec999592c05ff0a1231ce37e164d0807026); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38698794203) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38699204703). Тесты, generated parity, Chromium `file://`, JSON, profiles, diff hygiene прошли. Закрыт только этот test-only artifact-verification gate, а не 037B2b/037C/002/003.
+
 **Scope:** test-only, source-only follow-up to [037B2b-3a](037b2b-native-psd-psb-bridge.md). Verify saved PSD/PSB files and their persisted proof, instead of treating an in-memory self-codec proof or console text as a durable benchmark. This is **not** independent Adobe decoding, human ICC/EXIF review or real-photo quality.
 
 ## Implementation and acceptance
