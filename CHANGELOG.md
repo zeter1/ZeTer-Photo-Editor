@@ -2,6 +2,13 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-15 — Защита pinned PSD16/PSB32 от скрытых цветовых ресурсов (037B2b-3e)
+
+- Исправлено: test-only Python/std-lib native reader проверяет пустоту Color Mode Data и Image Resources для строго определённых однослойных ZeTer PSD16/PSB32; ICC-подмена не должна считаться эквивалентной при тех же RGBA hashes.
+- Добавлено: отрицательные PSD16/PSB32 тесты с дополнительным color-mode payload и 8BIM/1039 ICC resource, без изменений native layer/merged pixels.
+- Проверка: PR CI и exact-main CI ещё требуются; до успешного выполнения статусы не завышаются.
+- Ограничения: это не внешний PSD/PSB decoder, не реальный JPEG/ICC review и не Photoshop goldens. Production runtime и версия 1.46.1 без изменений.
+
 ### 2026-10-15 — Независимая Python-проверка сохранённых native PSD16/PSB32 (проходка 037B2b-3c)
 
 - Добавлено: test-only Python/std-lib разбор сохранённого PSD16/PSB32 с отдельной проверкой полного native RGBA слоя и merged-композита относительно независимо закреплённого SHA-256, без вызова ZeTer JavaScript-кодека.
