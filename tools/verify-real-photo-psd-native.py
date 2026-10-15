@@ -14,6 +14,38 @@ import sys
 
 MAX_BYTES = 48 * 1024 * 1024
 MAX_PIXELS = 2_000_000
+# This oracle verifies the exact one-layer fixture contract, not arbitrary
+# Photoshop layer records. Pixel-hash parity alone misses changes to masks,
+# protection flags, blend ranges, and names that alter visible semantics.
+EXPECTED_LAYER_NAME = 'Pinned photo defect (8-bit derived)'
+
+
+def read_expected_layer_extra(section):
+    extra = section.nested(section.read('I'))
+    require(extra.read('I') == 0, 'unexpected layer mask payload')
+    require(extra.read('I') == 0, 'unexpected layer blending ranges')
+    name_bytes = EXPECTED_LAYER_NAME.encode('latin-1')
+    length = extra.read('B')
+    require(length == len(name_bytes) and extra.ascii(length) == name_bytes,
+            'unexpected Pascal layer name')
+    pad = (4 - ((1 + length) % 4)) % 4
+    require(extra.ascii(pad) == bytes(pad), 'invalid Pascal name padding')
+    require(extra.ascii(4) == b'8BIM' and extra.ascii(4) == b'luni',
+            'expected Unicode layer name block')
+    unicode_name = extra.nested(extra.read('I'))
+    require(unicode_name.read('I') == len(EXPECTED_LAYER_NAME),
+            'unexpected Unicode layer name length')
+    require(unicode_name.ascii(len(EXPECTED_LAYER_NAME) * 2) ==
+            EXPECTED_LAYER_NAME.encode('utf-16-be'),
+            'unexpected Unicode layer name')
+    unicode_pad = unicode_name.take(
+        len(unicode_name.content) - unicode_name.offset)
+    require(len(unicode_pad) <= 3 and
+            bytes(unicode_pad) == bytes(len(unicode_pad)) and
+            (4 + len(EXPECTED_LAYER_NAME) * 2 + len(unicode_pad)) % 4 == 0,
+            'invalid Unicode layer name padding')
+    unicode_name.done()
+    extra.done()
 
 
 class InvalidPsd(ValueError):
@@ -66,7 +98,7 @@ def rgba_le_sha(channels, pixels, sample_bytes):
 
 def read_layer_planes(content, version, width, height, sample_bytes):
     section = Cursor(content)
-    require(section.read('h') in (-1, 1), 'expected exactly one layer')
+    require(section.read('h') == -1, 'expected one RGBA layer with merged transparency')
     bounds = [section.read('i') for _ in range(4)]
     require(bounds == [0, 0, height, width], 'not a full-canvas layer')
     require(section.read('H') == 4, 'expected four RGBA layer channels')
@@ -83,9 +115,9 @@ def read_layer_planes(content, version, width, height, sample_bytes):
             'invalid layer blend signature/mode')
     require(section.read('B') == 255 and section.read('B') == 0,
             'unexpected layer opacity or clipping')
-    require(section.read('B') & 0x02 == 0 and section.read('B') == 0,
-            'hidden layer or unexpected filler')
-    section.take(section.read('I'))  # layer extra: masks, name, metadata
+    require(section.read('B') == 0x08 and section.read('B') == 0,
+            'unexpected layer flags or filler')
+    read_expected_layer_extra(section)
     planes = {}
     for channel_id, length in lengths.items():
         channel = section.nested(length)
