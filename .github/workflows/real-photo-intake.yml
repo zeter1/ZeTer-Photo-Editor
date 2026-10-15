@@ -1,5 +1,6 @@
 # A deliberately separate, opt-in/repo-change-only CC0 source intake.
-# The generated hashes are CANDIDATES, never independent reviewed pins.
+# The CI still emits candidate evidence, but byte admission is checked against
+# separately reviewed, repository-frozen source/RGBA8/native pins.
 name: Real-photo CC0 intake (unreviewed)
 
 on:
@@ -12,6 +13,8 @@ on:
       - tools/fetch-real-photo-source.mjs
       - tools/decode-real-photo.py
       - tools/real-photo-bundle-admission.mjs
+      - tools/real-photo-native-fixtures.mjs
+      - tests/fixtures/real-photo/reviewed-manifest.json
   push:
     branches: [main]
     paths:
@@ -20,6 +23,8 @@ on:
       - tools/fetch-real-photo-source.mjs
       - tools/decode-real-photo.py
       - tools/real-photo-bundle-admission.mjs
+      - tools/real-photo-native-fixtures.mjs
+      - tests/fixtures/real-photo/reviewed-manifest.json
 
 permissions:
   contents: read
@@ -115,6 +120,31 @@ jobs:
           print(json.dumps(receipt, sort_keys=True))
           PY
           (cd "$ZPE_PHOTO_DIR" && sha256sum original.jpg decoded.rgba > SHA256SUMS)
+
+      - name: Verify committed, independently reviewed JPEG/RGBA/native pins
+        run: |
+          node tools/real-photo-bundle-cli.mjs verify tests/fixtures/real-photo/reviewed-manifest.json "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" > "$ZPE_PHOTO_DIR/reviewed-byte-proof.json"
+          python3 - "$ZPE_PHOTO_DIR" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          folder = Path(sys.argv[1])
+          reviewed = json.loads(Path('tests/fixtures/real-photo/reviewed-manifest.json').read_text())
+          candidate = json.loads((folder / 'bundle-candidate.json').read_text())
+          proof = json.loads((folder / 'reviewed-byte-proof.json').read_text())
+          assert candidate['status'] == 'candidate-unpinned-not-admitted'
+          assert candidate['manifest'] == reviewed, 'live decoded/native candidates changed from reviewed bytes'
+          assert proof['kind'] == 'zpe-real-photo-byte-integrity-evidence-v1'
+          assert proof['status'] == 'pinned-byte-integrity-verified'
+          assert proof['originalSha256'] == reviewed['sourceSha256']
+          assert proof['decodedRgbaSha256'] == reviewed['decoded']['sha256']
+          assert proof['rgb16CleanSha256'] == reviewed['native']['rgb16']['cleanSha256']
+          assert proof['float32CleanSha256'] == reviewed['native']['float32']['cleanSha256']
+          assert proof['selectedPixels'] == 8288 and proof['sourcePrecisionBits'] == 8
+          assert proof['browserBenchmarkVerified'] is False
+          assert proof['photoshopParityVerified'] is False
+          print('037B2b-2: frozen byte pins match downloaded photo + native references')
+          PY
 
       - name: Upload ephemeral unreviewed candidate evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
