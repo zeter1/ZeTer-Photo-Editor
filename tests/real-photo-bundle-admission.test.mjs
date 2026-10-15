@@ -131,3 +131,23 @@ test('037B2b: a candidate cannot bypass explicit decoder and opacity checks',()=
   const rgba=s.rgba.slice();rgba[3]=0;
   assert.throws(()=>candidate({...s,rgba}),/037 photo source/);
 });
+
+
+test('037B2b-2b: EXIF without Orientation is legal but false transpose is rejected',()=>{
+  const s=scenario();
+  const exif=[0xff,0xe1,0,8,69,120,105,102,0,0];
+  const jpegWithExif=Uint8Array.from([
+    ...s.jpeg.subarray(0,8),...exif,...s.jpeg.subarray(8),
+  ]);
+  const withExif={...s,jpeg:jpegWithExif,sourcePolicy:{
+    ...s.sourcePolicy,sha1:hash(jpegWithExif,'sha1'),
+  }};
+  assert.equal(candidate(withExif).manifest.decoder.exifOrientation,null);
+  for(const item of [
+    {...withExif,decoder:{...s.decoder,orientationApplied:true}},
+    {...s,decoder:{...s.decoder,orientationApplied:true}},
+    {...withExif,decoder:{...s.decoder,exifOrientation:1,orientationApplied:true}},
+  ]) {
+    assert.throws(()=>candidate(item),/037 photo bundle.*orientationApplied/);
+  }
+});
