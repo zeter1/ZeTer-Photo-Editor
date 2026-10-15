@@ -1,6 +1,6 @@
 // 037B2b-2e: network acquisition of the *documented* CC0 original only.
 // This is a source candidate, never an independently reviewed benchmark pin.
-import {writeFile} from 'node:fs/promises';
+import {publishExclusivePhotoCandidate} from './photo-source-publication.mjs';
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {inspectPhotoJpeg} from './real-photo-source-integrity.mjs';
@@ -53,9 +53,9 @@ export async function downloadPhotoSourceCandidate(path,{fetcher=globalThis.fetc
     headers:{Accept:'image/jpeg'},
   });
   const {bytes,inspection}=await readPhotoSourceResponse(response);
-  // Exclusive creation: an existing original, including a symlink, is never
-  // overwritten. Failed validation cannot create a partial candidate.
-  await writeFile(path,bytes,{flag:'wx',mode:0o600});
+  // Exclusive creation and fd-pinned write rollback: collisions or failed
+  // writes cannot overwrite an unrelated file or leave our partial candidate.
+  await publishExclusivePhotoCandidate(path,bytes);
   return Object.freeze({
     status:'source-candidate-unreviewed',
     source:ORIGINAL_PHOTO_URL,
