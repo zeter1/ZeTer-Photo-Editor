@@ -6,7 +6,7 @@
 
 - Исправлено: test-only `verifyPhotoDefectDocument` и `verifyPhotoDefectArtifactSet` не допускают непустые секции Color Mode Data или Image Resources; native RGBA word hashes сами по себе не гарантируют одинаковой цветовой интерпретации.
 - Добавлено: отрицательные тесты двух форматов с внедрением Color Mode/8BIM ICC resource и переподписью file SHA-256 при неизменённых native пикселях.
-- Проверка: PR CI и точный main CI ожидаются; до завершения проверки совместимость не заявляется.
+- Проверено: [PR #236](https://github.com/zeter1/ZeTer-Photo-Editor/pull/236) → [51e87e2](https://github.com/zeter1/ZeTer-Photo-Editor/commit/51e87e2e47c29c54406c50d1f662125188d5b54c); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38731725562) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38732120517). Сборка, Node и Chromium `file://`, JSON/профили, diff hygiene.
 - Ограничения: без нового настоящего JPEG/ICC review, Photoshop goldens, Chromium photo quality и без изменений production runtime/версии.
 
 ### 2026-10-15 — Защита pinned PSD16/PSB32 от скрытых цветовых ресурсов (037B2b-3e)
