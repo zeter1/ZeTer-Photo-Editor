@@ -2,6 +2,7 @@
 // This parser validates the JPEG header, NOT the entropy stream, decoder,
 // ICC conversion, photograph provenance, or Photoshop interoperability.
 import {createHash} from 'node:crypto';
+import {parseExifOrientation} from './real-photo-exif-orientation.mjs';
 
 const SHA1=/^[0-9a-f]{40}$/, SHA256=/^[0-9a-f]{64}$/;
 const MAX_SOURCE_BYTES=32*1024*1024;
@@ -22,6 +23,7 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
       bytes[bytes.length-2]!==0xff || bytes[bytes.length-1]!==0xd9)
     fail('missing JPEG SOI/EOI markers');
   let pos=2,frame=null,sawScan=false,hasExif=false,hasIcc=false;
+  let exifOrientation=null;
   let iccSegmentCount=null;
   const iccParts=new Set();
   while(pos<bytes.length-2) {
@@ -35,10 +37,15 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
     const length=(bytes[pos]<<8)|bytes[pos+1];
     if(length<2 || pos+length>bytes.length-2) fail('truncated JPEG segment');
     const data=pos+2, end=pos+length;
-    if(marker===0xe1 && end-data>=6 &&
+    if(marker===0xe1 && end-data>=4 &&
        bytes[data]===0x45 && bytes[data+1]===0x78 &&
-       bytes[data+2]===0x69 && bytes[data+3]===0x66 &&
-       bytes[data+4]===0 && bytes[data+5]===0) hasExif=true;
+       bytes[data+2]===0x69 && bytes[data+3]===0x66) {
+      if(end-data<14 || bytes[data+4]!==0 || bytes[data+5]!==0)
+        fail('malformed EXIF APP1 signature');
+      if(hasExif) fail('duplicate EXIF APP1 segment');
+      hasExif=true;
+      exifOrientation=parseExifOrientation(bytes,data+6,end);
+    }
     // Detect corrupt/partial ICC multipart headers before admitting JPEG data.
     if(marker===0xe2 && end-data>=11 &&
        Buffer.from(bytes.buffer,bytes.byteOffset+data,11).toString('ascii')==='ICC_PROFILE') {
@@ -77,7 +84,7 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
     sha1,sha256:createHash('sha256').update(source).digest('hex'),
     bytes:bytes.byteLength,width:frame.width,height:frame.height,
     components:frame.components,precision:frame.precision,
-    progressive:frame.progressive,hasExif,hasIcc,
+    progressive:frame.progressive,hasExif,exifOrientation,hasIcc,
     pixelDecodeVerified:false,colorSpaceVerified:false,
   });
 }
