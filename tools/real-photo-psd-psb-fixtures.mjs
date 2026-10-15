@@ -15,6 +15,62 @@ const formats=Object.freeze([
   {key:'psb32',version:2,bitsPerChannel:32,encode:encodePsb},
 ]);
 
+
+// The public ZPE decoder intentionally does not expose compositePixelBuffer
+// when editable layers exist. Read the raw RGB+A merged planes independently
+// from PSD/PSB section lengths to verify every native word without Canvas8.
+export function verifyRawPhotoMergedPlanes(bytes,native,version,bitsPerChannel) {
+  if(!(bytes instanceof Uint8Array) || bytes.byteLength<40 ||
+     ![1,2].includes(version) || ![16,32].includes(bitsPerChannel))
+    fail('invalid raw composite input');
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const u32=offset=>{
+    if(offset<0 || offset+4>bytes.length) fail('truncated composite section length');
+    return view.getUint32(offset,false);
+  };
+  let offset=26;
+  for(let section=0;section<2;section++) {
+    const length=u32(offset);
+    offset+=4+length;
+    if(!Number.isSafeInteger(offset) || offset>bytes.length)
+      fail('invalid color/resources length');
+  }
+  let maskLength;
+  if(version===1) {
+    maskLength=u32(offset);
+    offset+=4;
+  } else {
+    const high=u32(offset),low=u32(offset+4);
+    maskLength=high*0x100000000+low;
+    offset+=8;
+  }
+  offset+=maskLength;
+  if(!Number.isSafeInteger(offset) || offset+2>bytes.length ||
+     view.getUint16(offset,false)!==0)
+    fail('missing or non-raw high-depth merged composite');
+  const pixels=native.width*native.height;
+  const sampleBytes=bitsPerChannel/8;
+  const planeBytes=pixels*sampleBytes;
+  const start=offset+2;
+  if(start+planeBytes*4!==bytes.length)
+    fail('wrong high-depth merged plane count or payload bounds');
+  const actualWord=(position)=>bitsPerChannel===16
+    ?view.getUint16(position,false):view.getUint32(position,false);
+  const expectedView=new DataView(native.damaged.buffer,
+    native.damaged.byteOffset,native.damaged.byteLength);
+  const expectedWord=(position)=>bitsPerChannel===16
+    ?expectedView.getUint16(position,true):expectedView.getUint32(position,true);
+  for(let channel=0;channel<4;channel++) {
+    const base=start+channel*planeBytes;
+    for(let pixel=0;pixel<pixels;pixel++) {
+      if(actualWord(base+pixel*sampleBytes)!==
+         expectedWord((pixel*4+channel)*sampleBytes))
+        fail('merged plane native word mismatch: channel '+channel+', pixel '+pixel);
+    }
+  }
+  return true;
+}
+
 // Check the entire native layer AND merged composite, not an 8-bit preview.
 // This is a ZPE writer -> ZPE reader consistency gate, not an independent PSD oracle.
 export async function verifyPhotoDefectDocument({bytes,native,version,bitsPerChannel}={}) {
@@ -40,22 +96,13 @@ export async function verifyPhotoDefectDocument({bytes,native,version,bitsPerCha
   if(decoded.layers?.length!==1 || decoded.groups?.length ||
      decoded.layers[0]?.name!=='Pinned photo defect (8-bit derived)')
     fail('unexpected layer tree');
-  for(const [name,buffer] of [
-    ['layer',decoded.layers[0].pixelBuffer],
-    ['merged',decoded.compositePixelBuffer],
-  ]) {
-    const exact=buffer?.data &&
-      hashNativeCleanReference(buffer.data,bitsPerChannel)===expectedHash;
-    if(buffer?.width!==native.width || buffer?.height!==native.height ||
-       buffer?.model!=='rgb' || buffer?.channels!==4 ||
-       buffer?.bitsPerChannel!==bitsPerChannel || !exact)
-      fail(name+' changed native words or geometry: '+JSON.stringify({
-        width:buffer?.width,height:buffer?.height,model:buffer?.model,
-        channels:buffer?.channels,depth:buffer?.bitsPerChannel,
-        hash:buffer?.data?hashNativeCleanReference(buffer.data,bitsPerChannel):null,
-        expectedHash,
-      }));
-  }
+  const layer=decoded.layers[0].pixelBuffer;
+  if(layer?.width!==native.width || layer?.height!==native.height ||
+     layer?.model!=='rgb' || layer?.channels!==4 ||
+     layer?.bitsPerChannel!==bitsPerChannel ||
+     hashNativeCleanReference(layer.data,bitsPerChannel)!==expectedHash)
+    fail('imported layer native words or geometry mismatch');
+  verifyRawPhotoMergedPlanes(bytes,native,version,bitsPerChannel);
   const quality=measureRealPhotoNativeQuality({
     before:decoded.layers[0].pixelBuffer.data,after:native.clean.slice(),
     clean:native.clean,selectedIndices:native.selectedIndices,bitsPerChannel,
