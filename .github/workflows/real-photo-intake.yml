@@ -153,7 +153,7 @@ jobs:
           receipt['frozenBytePinsVerified'] = True
           # Automated byte checks cannot give professional ICC/color sign-off.
           assert receipt['independentLicenseIccExifVisualReviewComplete'] is False
-          receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\\n')
+          receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\n')
           PY
 
       - name: Upload ephemeral unreviewed candidate evidence
