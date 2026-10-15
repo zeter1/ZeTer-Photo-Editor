@@ -145,8 +145,12 @@ def verify_native_psd(data, fmt, expected_width, expected_height, expected_sha):
             'expected RGB document with native depth')
     pixels = width * height
     sample_bytes = depth // 8
-    reader.take(reader.read('I'))  # color mode data
-    reader.take(reader.read('I'))  # image resources
+    # Pinned RGB16/Float32 one-layer defect fixtures have empty sections.
+    # ICC and color resources can change color semantics without changing
+    # native layer/merged word hashes. Never silently skip them.
+    # This is deliberately NOT a generic Photoshop PSD/PSB decoder.
+    require(reader.read('I') == 0, 'unexpected color mode data')
+    require(reader.read('I') == 0, 'unexpected image resources')
     layer_mask = reader.nested(reader.read('Q' if version == 2 else 'I'))
     require(layer_mask.read('Q' if version == 2 else 'I') == 0,
             'ordinary layer-info must be empty for high-depth document')
