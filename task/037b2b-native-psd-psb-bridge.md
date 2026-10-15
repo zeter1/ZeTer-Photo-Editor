@@ -1,6 +1,6 @@
 # 037B2b-3a — pinned native defect → PSD16/PSB32 self-codec round-trip
 
-**P1 / CODE PROPOSED — 2026-10-15.** Эта узкая проходка подготавливает экспорт и импорт **только из допущенного manifest** с pinned original JPEG / decoded RGBA8 / RGB16+Float32 clean и damaged SHA-256. **Не завершает 037B2b-2/3 и 037C**, так как реальный original CC0 JPEG и результаты независимого decoder/ICC/EXIF review всё ещё отсутствуют.
+**037B2b-3a CLOSED — [PR #227](https://github.com/zeter1/ZeTer-Photo-Editor/pull/227) merged as [bde33df](https://github.com/zeter1/ZeTer-Photo-Editor/commit/bde33df15b4f5781ce778314f4624609f5e1bc28); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38696193576) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38696460061) (2026-10-15).** Эта узкая проходка подготавливает экспорт и импорт **только из допущенного manifest** с pinned original JPEG / decoded RGBA8 / RGB16+Float32 clean и damaged SHA-256. **Не завершает 037B2b-2/3 и 037C**, так как реальный original CC0 JPEG и результаты независимого decoder/ICC/EXIF review всё ещё отсутствуют.
 
 ## Implemented
 
@@ -21,7 +21,7 @@
 ## Gates and remaining
 
 - [x] Source-only implementation and negative tests committed to feature branch.
-- [ ] PR CI and exact-main CI — требуется фактическая проверка; не отмечать успешными заранее.
+- [x] [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38696193576) и [точный code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38696460061); Node/build, Chromium `file://`, профили/JSON и diff hygiene.
 - [ ] Real licensed source + externally reviewed JPEG decode/ICC/EXIF, durable blob/pins (037B2b-2).
 - [ ] Реальные PSD16/PSB32 byte files и independent external reader validation (remaining 037B2b-3).
 - [ ] Chromium `file://` per-pixel quality/memory 3×/format (037C).
