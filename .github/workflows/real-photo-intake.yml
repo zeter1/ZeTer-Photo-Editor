@@ -213,7 +213,7 @@ jobs:
           assert receipt['independentLicenseIccExifVisualReviewComplete'] is False
           assert receipt['photoshopCompatibilityVerified'] is False
           assert receipt['browserRealPhotoBenchmarkVerified'] is False
-          receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\\n')
+          receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\n')
           PY
 
       - name: Upload verified photo-derived native PSD16/PSB32 (not Adobe parity)
@@ -228,6 +228,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zpe-real-photo-unreviewed-candidate
-          path: /tmp/zpe-real-photo-candidate/
+          path: |
+            /tmp/zpe-real-photo-candidate/
+            !/tmp/zpe-real-photo-candidate/native-documents/**
           if-no-files-found: error
           retention-days: 7
