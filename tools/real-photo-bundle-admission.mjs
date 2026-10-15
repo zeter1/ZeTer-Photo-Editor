@@ -41,15 +41,14 @@ function validateDecoder(decoder,source) {
     fail('invalid EXIF/ICC declaration');
   // Header flags are not sufficient evidence of color correctness or
   // EXIF orientation values. But declarations must not contradict them.
-  if(source.hasExif && decoder.exifOrientation===null)
-    fail('EXIF present but orientation not recorded');
+  // EXIF may exist without an Orientation tag; null means not present.
   if(!source.hasExif && decoder.exifOrientation!==null)
     fail('EXIF orientation declared without EXIF');
   if(source.hasIcc!== (decoder.iccPolicy==='embedded-ICC-to-sRGB'))
     fail('ICC marker and color policy disagree');
-  if(decoder.exifOrientation!==null && decoder.exifOrientation!==1 &&
-     !decoder.orientationApplied)
-    fail('non-identity EXIF orientation not applied');
+  const needsTranspose=decoder.exifOrientation!==null && decoder.exifOrientation!==1;
+  if(decoder.orientationApplied!==needsTranspose)
+    fail('EXIF orientationApplied disagrees with declared orientation');
 }
 function validateCrop(crop,width,height) {
   fields(crop,['x','y','width','height'],'crop');

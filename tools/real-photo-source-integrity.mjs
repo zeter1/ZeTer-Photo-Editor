@@ -22,6 +22,8 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
       bytes[bytes.length-2]!==0xff || bytes[bytes.length-1]!==0xd9)
     fail('missing JPEG SOI/EOI markers');
   let pos=2,frame=null,sawScan=false,hasExif=false,hasIcc=false;
+  let iccSegmentCount=null;
+  const iccParts=new Set();
   while(pos<bytes.length-2) {
     if(bytes[pos++]!==0xff) fail('malformed JPEG marker sequence');
     while(pos<bytes.length && bytes[pos]===0xff) pos++;
@@ -37,8 +39,20 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
        bytes[data]===0x45 && bytes[data+1]===0x78 &&
        bytes[data+2]===0x69 && bytes[data+3]===0x66 &&
        bytes[data+4]===0 && bytes[data+5]===0) hasExif=true;
-    if(marker===0xe2 && end-data>=12 &&
-       Buffer.from(bytes.buffer,bytes.byteOffset+data,11).toString('ascii')==='ICC_PROFILE') hasIcc=true;
+    // Detect corrupt/partial ICC multipart headers before admitting JPEG data.
+    if(marker===0xe2 && end-data>=11 &&
+       Buffer.from(bytes.buffer,bytes.byteOffset+data,11).toString('ascii')==='ICC_PROFILE') {
+      if(end-data<15 || bytes[data+11]!==0)
+        fail('malformed ICC APP2 header or empty chunk');
+      const part=bytes[data+12],total=bytes[data+13];
+      if(part<1 || total<1 || part>total ||
+         (iccSegmentCount!==null && total!==iccSegmentCount) ||
+         iccParts.has(part))
+        fail('invalid ICC APP2 part numbering');
+      iccSegmentCount=total;
+      iccParts.add(part);
+      hasIcc=true;
+    }
     if([0xc0,0xc1,0xc2].includes(marker)) {
       if(frame || end-data<6) fail('duplicate or truncated JPEG SOF');
       const height=(bytes[data+1]<<8)|bytes[data+2];
@@ -51,6 +65,8 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
     pos=end;
     if(marker===0xda) {sawScan=true;break;}
   }
+  if(iccSegmentCount!==null && iccParts.size!==iccSegmentCount)
+    fail('incomplete ICC APP2 profile');
   if(!frame || !sawScan || pos>=bytes.length-2 ||
      frame.width!==expectedWidth || frame.height!==expectedHeight ||
      frame.precision!==8 || frame.components!==3) {
