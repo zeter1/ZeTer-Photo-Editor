@@ -22,6 +22,7 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
       bytes[bytes.length-2]!==0xff || bytes[bytes.length-1]!==0xd9)
     fail('missing JPEG SOI/EOI markers');
   let pos=2,frame=null,sawScan=false,hasExif=false,hasIcc=false;
+  let exifOrientation=null;
   let iccSegmentCount=null;
   const iccParts=new Set();
   while(pos<bytes.length-2) {
