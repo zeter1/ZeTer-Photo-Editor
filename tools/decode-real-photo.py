@@ -188,9 +188,19 @@ def decode(input_path: Path, rgba_path: Path, evidence_path: Path):
     raw_icc = scan_icc_app2(jpeg)
     source_orientation = scan_exif_app1(jpeg)
     with Image.open(io.BytesIO(jpeg)) as original:
-        if original.format != 'JPEG' or original.size != SOURCE_SIZE or original.mode != 'RGB':
+        # The SHA-1-pinned Commons JPEG has an MPF/MPO APP2 index and a
+        # 434-byte trailer; Pillow identifies its container as MPO. Decode
+        # only its primary JPEG (frame 0), not another embedded frame.
+        if (original.format not in ('JPEG', 'MPO') or
+                original.size != SOURCE_SIZE or original.mode != 'RGB'):
             raise ValueError('Unsupported original JPEG format, geometry or color mode: '
                              + repr((original.format, original.size, original.mode)))
+        if original.format == 'MPO':
+            frames = int(getattr(original, 'n_frames', 0))
+            if not 1 <= frames <= 32 or original.tell() != 0:
+                raise ValueError('Invalid pinned MPO primary frame')
+            original.seek(0)
+        container_format = original.format
         exif = original.getexif()
         orientation = exif.get(274)
         if orientation != source_orientation:
@@ -235,7 +245,7 @@ def decode(input_path: Path, rgba_path: Path, evidence_path: Path):
         'exifOrientation': orientation,
         'orientationApplied': orientation is not None and orientation != 1,
         'iccPolicy': policy,
-        'colorEvidence': color_evidence,
+        'colorEvidence': 'Pillow container=' + container_format + ', primaryFrame=0. ' + color_evidence,
     }
     # Evidence only describes a decoder *run*. These digests are candidates to
     # be reviewed and pinned independently; never write them into a reviewed manifest.
