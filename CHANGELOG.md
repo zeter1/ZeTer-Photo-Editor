@@ -2,6 +2,13 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-15 — Усилена JS-проверка сохранённых PSD16/PSB32 на скрытые Color Mode/ICC (037B2b-3f)
+
+- Исправлено: test-only `verifyPhotoDefectDocument` и `verifyPhotoDefectArtifactSet` не допускают непустые секции Color Mode Data или Image Resources; native RGBA word hashes сами по себе не гарантируют одинаковой цветовой интерпретации.
+- Добавлено: отрицательные тесты двух форматов с внедрением Color Mode/8BIM ICC resource и переподписью file SHA-256 при неизменённых native пикселях.
+- Проверка: PR CI и точный main CI ожидаются; до завершения проверки совместимость не заявляется.
+- Ограничения: без нового настоящего JPEG/ICC review, Photoshop goldens, Chromium photo quality и без изменений production runtime/версии.
+
 ### 2026-10-15 — Защита pinned PSD16/PSB32 от скрытых цветовых ресурсов (037B2b-3e)
 
 - Исправлено: test-only Python/std-lib native reader проверяет пустоту Color Mode Data и Image Resources для строго определённых однослойных ZeTer PSD16/PSB32; ICC-подмена не должна считаться эквивалентной при тех же RGBA hashes.
