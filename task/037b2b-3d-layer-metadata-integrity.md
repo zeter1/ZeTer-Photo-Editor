@@ -1,6 +1,6 @@
 # 037B2b-3d — strict one-layer PSD16/PSB32 metadata oracle
 
-**Status: IMPLEMENTED IN BRANCH; PR and exact-main CI are not yet verified.** Date: 2026-10-15.
+**Status: CLOSED (2026-10-15).** [PR #234](https://github.com/zeter1/ZeTer-Photo-Editor/pull/234) merged as [31a0de7](https://github.com/zeter1/ZeTer-Photo-Editor/commit/31a0de799b75600d052d46f87c8abd6b843226ec); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38726903064) and [exact merged-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38727329049).
 Scope: **test-only** offline native photo defect document integrity; does not affect
 production/UI/renderer, introduce genuine photo bytes, or prove Adobe parity.
 
@@ -25,10 +25,10 @@ defect fixture. Layers/masks/text and importer interpretation matter beyond pixe
   only (layer count, protected flag, mask, blending ranges, both names,
   `luni` key, padding) in **both** PSD16/PSB32 files and require independent
   Python rejection despite original native layer+merged pixels and their SHA.
-- [ ] Verify new tests and full `npm run check`, genuine Chromium `file://`
+- [x] Verified new tests and full `npm run check`, genuine Chromium `file://`
   smoke, generated bundle parity, JSON/profiles/diff checks via PR CI.
-- [ ] Review PR, merge to `main` and verify **exact merged code SHA** CI before
-  marking 037B2b-3d CLOSED.
+- [x] Reviewed PR, merged to `main` and verified **exact merged code SHA** CI before
+  marking 037B2b-3d CLOSED ([PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38726903064), [main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38727329049)).
 
 ## Remaining mandatory gates (unchanged)
 
