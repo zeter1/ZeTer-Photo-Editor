@@ -1,6 +1,6 @@
 # 037B2b-3g — JS saved-PSD/PSB raw layer metadata integrity
 
-**Статус: в работе, 2026-10-15.** Проверка в PR обязательна до закрытия. Это узкий test-only gate, НЕ общий PSD/PSB-парсер и НЕ доказательство совместимости с Photoshop.
+**Статус: ЗАКРЫТА (2026-10-15).** [PR #237](https://github.com/zeter1/ZeTer-Photo-Editor/pull/237) → [7522747](https://github.com/zeter1/ZeTer-Photo-Editor/commit/75227473498a79b411b71eb8407b6e87202025d3); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38737045824) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38737509166). Это узкий test-only gate, НЕ общий PSD/PSB-парсер и НЕ доказательство совместимости с Photoshop.
 
 ## Почему
 
@@ -11,8 +11,8 @@
 - [x] Новый test-only `tools/real-photo-psd-layer-envelope.mjs`: валидирует точный one-layer PSD16/PSB32 native-defect binary envelope, 4 канала, full-canvas bounds, raw channel sizes, blend/opacity/clipping/flags, пустую mask/blending ranges, Pascal/Unicode name, tagged Lr16/Lr32, padding и отсутствие добавочных layer tags.
 - [x] `tools/real-photo-psd-psb-fixtures.mjs`: вызывает raw envelope gate до общего `decodePsd`, сохраняя отдельную проверку layer+merged native words.
 - [x] `tests/real-photo-psd-psb-fixtures.test.mjs`: внесение metadata-only мутаций PSD16/PSB32, а также дополнительного high-depth tag; проверяет прямое сохранение и сохранённые artifacts при переподписанном SHA.
-- [ ] `npm run check` и GitHub PR CI (Node/build/Chromium/browser and artifact gates); проверить точную ревизию.
-- [ ] После merge проверить exact-code `main` CI и только затем отметить CLOSED.
+- [x] `npm run check` и GitHub PR CI: Node/build, Chromium `file://`, JSON artifacts/profiles, diff hygiene — success.
+- [x] После merge exact-code `main` CI — success. 037B2b-3g CLOSED.
 
 ## Следующие задания (реально остаются открытыми)
 

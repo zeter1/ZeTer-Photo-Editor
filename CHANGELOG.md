@@ -6,7 +6,7 @@
 
 - Добавлено: test-only бинарная проверка native one-layer envelope до `decodePsd`, включая флаги, маску, режим смешивания, Pascal/Unicode имена и дополнительные tagged blocks.
 - Добавлено: отрицательные проверки PSD16 и PSB32 для metadata-only подмены с новым file SHA-256 при сохранённых native RGBA пикселях.
-- Проверка: выполняется в PR; зелёные CI и merge будут отмечены только по факту.
+- Проверено: [PR #237](https://github.com/zeter1/ZeTer-Photo-Editor/pull/237) → [7522747](https://github.com/zeter1/ZeTer-Photo-Editor/commit/75227473498a79b411b71eb8407b6e87202025d3); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38737045824) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38737509166) — сборка, Node, Chromium `file://`, JSON-профили и diff hygiene.
 - Ограничения: настоящий CC0 фотоисточник, сторонняя Adobe/PSD проверка и Chromium real-photo benchmark по-прежнему открыты. Production/runtime и версия 1.46.1 не изменены.
 
 ### 2026-10-15 — Усилена JS-проверка сохранённых PSD16/PSB32 на скрытые Color Mode/ICC (037B2b-3f)
