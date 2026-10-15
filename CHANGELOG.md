@@ -6,7 +6,7 @@
 
 - Исправлено: test-only Python/std-lib native reader проверяет пустоту Color Mode Data и Image Resources для строго определённых однослойных ZeTer PSD16/PSB32; ICC-подмена не должна считаться эквивалентной при тех же RGBA hashes.
 - Добавлено: отрицательные PSD16/PSB32 тесты с дополнительным color-mode payload и 8BIM/1039 ICC resource, без изменений native layer/merged pixels.
-- Проверка: PR CI и exact-main CI ещё требуются; до успешного выполнения статусы не завышаются.
+- Проверено: [PR #235](https://github.com/zeter1/ZeTer-Photo-Editor/pull/235) → [ce2e029](https://github.com/zeter1/ZeTer-Photo-Editor/commit/ce2e02931c08f58c6dae70dfa5bc669a041d5e85); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38729586823) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38730012860). Полная сборка/Node/Python, Chromium `file://`, JSON-профили, diff hygiene.
 - Ограничения: это не внешний PSD/PSB decoder, не реальный JPEG/ICC review и не Photoshop goldens. Production runtime и версия 1.46.1 без изменений.
 
 ### 2026-10-15 — Независимая Python-проверка сохранённых native PSD16/PSB32 (проходка 037B2b-3c)

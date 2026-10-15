@@ -1,6 +1,6 @@
 # 037B2b-3e — Strict color/resource integrity for pinned PSD16/PSB32
 
-**Status: IMPLEMENTED IN PR, VERIFICATION PENDING (2026-10-15).**
+**Status: CLOSED (2026-10-15).** [PR #235](https://github.com/zeter1/ZeTer-Photo-Editor/pull/235) merged as [ce2e029](https://github.com/zeter1/ZeTer-Photo-Editor/commit/ce2e02931c08f58c6dae70dfa5bc669a041d5e85); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38729586823) and [exact merged-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38730012860).
 
 Test-only pass. The narrow Python/std-lib one-layer native SHA oracle previously
 skipped top-level Color Mode Data and Image Resources, though ICC or untagged
@@ -14,8 +14,8 @@ layer/merged bytes. The ZeTer one-layer defect fixture contains neither section.
   `8BIM` resource ID 1039 (ICC), rather than silently skipping it.
 - [x] Negative Python-oracle regressions for **both PSD16 and PSB32** insert
   color or ICC resource blocks while leaving native layer + merged words intact.
-- [ ] Verify `npm run check`, genuine Chromium `file://` smoke, and PR CI.
-- [ ] After merge verify CI for the **exact merged main SHA**, then close.
+- [x] Verified `npm run check`, real Chromium `file://` smoke and full [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38729586823).
+- [x] Verified [exact merged-code main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38730012860) success for `ce2e02931c08f58c6dae70dfa5bc669a041d5e85`; stage CLOSED.
 
 ## Commands
 
