@@ -5,6 +5,7 @@ Offline only. The output is a *candidate*, never an independently reviewed pin.
 Usage: python3 tools/decode-real-photo.py input.jpg NEW-decoded.rgba NEW-decoder.json
 """
 import hashlib
+from contextlib import ExitStack
 import io
 import json
 import os
@@ -140,33 +141,36 @@ def scan_exif_app1(jpeg: bytes):
 
 
 def publish_candidate_pair(rgba_path: Path, evidence_path: Path, rgba: bytes, evidence: dict):
-    """Publish exclusive outputs; roll back only our own inodes on an I/O error.
+    """Publish exclusive outputs and undo partial I/O without deleting replacements.
 
-    A Python exception cannot leave a plausible half-written candidate pair.
-    This is NOT a crash-atomic two-file transaction (SIGKILL/power loss).
+    Keep both new descriptors OPEN through rollback: after closing an unlinked
+    file, filesystems may immediately recycle its inode for someone else's file.
+    This is not a crash-atomic transaction (SIGKILL or power loss).
     """
     created = []
-    try:
-        with rgba_path.open('xb') as output:
-            info = os.fstat(output.fileno())
+    with ExitStack() as opened:
+        try:
+            rgba_output = opened.enter_context(rgba_path.open('xb'))
+            info = os.fstat(rgba_output.fileno())
             created.append((rgba_path, info.st_dev, info.st_ino))
-            output.write(rgba)
-        with evidence_path.open('x', encoding='utf8') as output:
-            info = os.fstat(output.fileno())
+            rgba_output.write(rgba)
+
+            report_output = opened.enter_context(evidence_path.open('x', encoding='utf8'))
+            info = os.fstat(report_output.fileno())
             created.append((evidence_path, info.st_dev, info.st_ino))
-            json.dump(evidence, output, indent=2, ensure_ascii=False)
-            output.write('\n')
-    except BaseException:
-        for path, device, inode in reversed(created):
-            try:
-                live = path.lstat()
-                # Do not delete another file that replaced ours during cleanup.
-                if (stat.S_ISREG(live.st_mode) and
-                        live.st_dev == device and live.st_ino == inode):
-                    path.unlink()
-            except FileNotFoundError:
-                pass
-        raise
+            json.dump(evidence, report_output, indent=2, ensure_ascii=False)
+            report_output.write('\\n')
+        except BaseException:
+            # Descriptors are still open during cleanup, preventing inode reuse.
+            for path, device, inode in reversed(created):
+                try:
+                    live = path.lstat()
+                    if (stat.S_ISREG(live.st_mode) and
+                            live.st_dev == device and live.st_ino == inode):
+                        path.unlink()
+                except FileNotFoundError:
+                    pass
+            raise
 
 
 def decode(input_path: Path, rgba_path: Path, evidence_path: Path):
