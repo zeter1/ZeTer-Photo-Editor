@@ -99,6 +99,18 @@ function layerMetadataOffsets(bytes,version) {
   };
 }
 
+// 037B2b-3e: splice top-level Photoshop metadata, leaving native RGBA bytes intact.
+function withInjectedTopLevelSection(bytes,lengthOffset,payload) {
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  assert.equal(view.getUint32(lengthOffset,false),0,
+    'generated pinned fixture must have empty color/resource sections');
+  const forged=new Uint8Array(bytes.length+payload.length);
+  forged.set(bytes.subarray(0,lengthOffset));
+  new DataView(forged.buffer).setUint32(lengthOffset,payload.length,false);
+  forged.set(payload,lengthOffset+4);
+  forged.set(bytes.subarray(lengthOffset+4),lengthOffset+4+payload.length);
+  return forged;
+}
 test('037B2b-3c: independent Python readback proves exact native layer and merged pins', {
   skip,
 },async()=>{
@@ -153,6 +165,21 @@ test('037B2b-3c: independent Python readback proves exact native layer and merge
         assert.match(denied.stderr,message,name);
       }
 
+      // 8BIM resource ID 1039 (ICC), intentionally invalid ICC payload.
+      // Native pixel pins remain exact; an unreviewed resource is not admissible.
+      const iccResource=Uint8Array.from([
+        0x38,0x42,0x49,0x4d,0x04,0x0f,0,0,0,0,0,4,1,2,3,4,
+      ]);
+      for(const [name,offset,payload,message] of [
+        ['color-mode-data',26,Uint8Array.of(1,2,3,4),/unexpected color mode data/],
+        ['image-icc-resource',30,iccResource,/unexpected image resources/],
+      ]) {
+        const forged=withInjectedTopLevelSection(data,offset,payload);
+        await writeFile(join(dir,filename),forged);
+        const denied=verify(fmt,forged,pin,filename);
+        assert.notEqual(denied.status,0,name+' must not pass pinned pixel-only parity');
+        assert.match(denied.stderr,message,name);
+      }
       const alteredLayer=data.slice();
       const channelOffset=layerRawChannelOffset(alteredLayer,bits===16?1:2);
       alteredLayer[channelOffset+2]^=1;
