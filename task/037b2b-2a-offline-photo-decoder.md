@@ -1,6 +1,6 @@
 # 037B2b-2a — воспроизводимое внешнее декодирование оригинального JPEG в RGBA8
 
-**Небольшая test-only подготовительная проходка.** Она не закрывает 037B2b-2, потому что в репозитории по-прежнему нет genuine CC0 photo bytes и независимо закреплённых source/decoded/native SHA-256. Не использовать суррогатные данные теста как фотографию.
+**Test-only код подготовлен, [PR #229](https://github.com/zeter1/ZeTer-Photo-Editor/pull/229), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38700917933). Main merge/CI — отдельная проверка.** Она не закрывает 037B2b-2, потому что в репозитории по-прежнему нет genuine CC0 photo bytes и независимо закреплённых source/decoded/native SHA-256. Не использовать суррогатные данные теста как фотографию.
 
 ## Реализация
 
