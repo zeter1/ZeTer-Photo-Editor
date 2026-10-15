@@ -14,7 +14,7 @@
 
 ## Что добавлено
 
-- [x] `.github/workflows/real-photo-intake.yml`: отдельный workflow на ручной `workflow_dispatch` и однократный `push main` по изменению собственного YAML (не запускается на каждом PR).
+- [x] `.github/workflows/real-photo-intake.yml`: отдельный workflow на ручной `workflow_dispatch`, `pull_request` c изменением собственного YAML и `push main` по изменению собственного YAML (не запускается на каждом PR). PR-проверка позволяет обнаружить сетевые/декодерные проблемы до merge.
 - [x] Пинованные Node 24, Pillow 12.0.0, проверенный HTTPS downloader (redirect denied, 32 MiB limit, SHA-1 до сохранения), JPEG metadata inspection, настоящий Pillow JPEG entropy decode с EXIF/ICC и offline bundle-candidate.
 - [x] Независимая Python-перепроверка SHA-1, **source/decoded SHA-256**, размера 2 783 744, RGBA8 19 660 800 bytes, нескольких JSON evidence и candidate manifest. Искажение/рассогласование приводит к fail, без выдачи фальшивого reviewed pin.
 - [x] GitHub Actions artifact `zpe-real-photo-unreviewed-candidate` (7 дней): оригинальный JPEG, decoded.rgba, acquisition/inspection/decoder evidence, bundle-candidate, SHA256SUMS, unreviewed receipt. Нет коммита бинарных фото в репозиторий и нет автоматического допуска fixture.
@@ -24,7 +24,7 @@
 
 ## Как использовать
 
-1. Перейти в GitHub Actions → **Real-photo CC0 intake (unreviewed)** → Run workflow (или открыть автоматический main push run после merge). Workflow ограничен фиксированной лицензированной фотографией.
+1. Проверить автоматический PR run изменения workflow либо открыть GitHub Actions → **Real-photo CC0 intake (unreviewed)** → Run workflow (доступно после merge; также будет main push run). Workflow ограничен фиксированной лицензированной фотографией.
 2. Скачать `zpe-real-photo-unreviewed-candidate` в течение 7 дней; проверить `SHA256SUMS`, `ci-candidate-receipt.json` и `bundle-candidate.json`.
 3. **Вручную** сравнить с опубликованными Commons историей/лицензией, ICC/EXIF и независимым JPEG декодером. Только после review создать внешне закреплённый manifest. Не брать `candidate` как `reviewed` автоматически.
 4. Продолжить [037B2b-2 → 3 → 037C](037-real-photo-connected-roi-benchmark.md) и [P0 Photoshop corpus 002](002-psd-compatibility-corpus.md) / [tiled 003](003-tiled-content-aware.md).
