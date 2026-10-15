@@ -39,11 +39,11 @@ function validateDecoder(decoder,source) {
       typeof decoder.orientationApplied!=='boolean' ||
       !['embedded-ICC-to-sRGB','assumed-sRGB'].includes(decoder.iccPolicy))
     fail('invalid EXIF/ICC declaration');
-  // Header flags are not sufficient evidence of color correctness or
-  // EXIF orientation values. But declarations must not contradict them.
-  // EXIF may exist without an Orientation tag; null means not present.
-  if(!source.hasExif && decoder.exifOrientation!==null)
-    fail('EXIF orientation declared without EXIF');
+  // EXIF Orientation is parsed directly from the original TIFF IFD0 bytes;
+  // a decoder declaration can no longer invent or suppress this source tag.
+  // ICC color conversion is still only a declared policy needing review.
+  if(decoder.exifOrientation!==source.exifOrientation)
+    fail('EXIF orientation disagrees with JPEG TIFF IFD0');
   if(source.hasIcc!== (decoder.iccPolicy==='embedded-ICC-to-sRGB'))
     fail('ICC marker and color policy disagree');
   const needsTranspose=decoder.exifOrientation!==null && decoder.exifOrientation!==1;
