@@ -1,6 +1,6 @@
 # 037B2b-2i — неизменяемые SHA-256 подлинного CC0 photo bundle
 
-**Статус: код и локальная независимая проверка выполнены 2026-10-15; PR / GitHub Actions / main CI пока требуют подтверждения.** Это test-only проходка. Не считать её Adobe compatibility, Photoshop parity, доказательством абсолютной точности цвета или browser Content-Aware benchmark.
+**Статус: 037B2b-2i ЗАКРЫТА 2026-10-15; [PR #243](https://github.com/zeter1/ZeTer-Photo-Editor/pull/243) → [531b384c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/531b384c23e4137ed39bad5c94204dead2d03a29). [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38771493344), [PR true-photo intake](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38771494329), [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38771946582), [exact-main true-photo intake](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38771945835): success.** Это test-only проходка. Не считать её Adobe compatibility, Photoshop parity, доказательством абсолютной точности цвета или browser Content-Aware benchmark.
 
 ## Проведённая независимая инспекция
 
@@ -19,7 +19,7 @@
 - [x] `tools/verify-pinned-real-photo.py`: read-only независимый Python/Pillow decode, чтение EXIF/ICC, сравнение RGBA8 и вычисление 4 native SHA-256 через `struct` без JS-кодека.
 - [x] `.github/workflows/real-photo-intake.yml`: workflow теперь запускается и при изменениях frozen manifest/Python gate; автоматически сравнивает реальные скачанные bytes с pinned manifest двумя реализациями (JS + Python). Любое несовпадение должно завершать CI ошибкой; успешный JSON evidence собирается как временный artifact.
 - [x] Локально на точных байтах main GitHub artifact обе декодирующие библиотеки и четыре native хеша совпали; Python read-only verifier вернул `independent-byte-pins-verified`.
-- [ ] Подтвердить **новые** PR CI / workflow artifact, а затем exact-code `main` CI. Без этих свидетельств не записывать «всё зелёное».
+- [x] PR CI / genuine photo gate, exact-code main CI / genuine photo gate success. Новые статусы относятся только к этой test-only photo-byte проходке, не ко всему roadmap.
 
 ## Запуск
 
