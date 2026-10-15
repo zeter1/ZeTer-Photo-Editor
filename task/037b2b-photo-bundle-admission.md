@@ -1,6 +1,6 @@
 # 037B2b-1 — offline admission for pinned original / RGBA8 / RGB16 + Float32 photo fixtures
 
-**P1 / 037 OPEN.** This is a test-only **byte-integrity admission tool**, not genuine photo pixels or a Photoshop gold standard. See [037](037-real-photo-connected-roi-benchmark.md), [037B2a](037b2a-photo-native-fixture-bridge.md), and [asset provenance](../tests/fixtures/real-photo/README.md).
+**037B2b-1 CLOSED — [PR #226](https://github.com/zeter1/ZeTer-Photo-Editor/pull/226) merged as [fab6c49](https://github.com/zeter1/ZeTer-Photo-Editor/commit/fab6c49abed85f7314ef91b1769975496f8263b7); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38691322897), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38691679311) (2026-10-15).** Full Node/build, Chromium file://, JSON/profiles and diff hygiene passed. **P1 / 037 stays OPEN.** This is a test-only **byte-integrity admission tool**, not genuine photo pixels or a Photoshop gold standard. See [037](037-real-photo-connected-roi-benchmark.md), [037B2a](037b2a-photo-native-fixture-bridge.md), and [asset provenance](../tests/fixtures/real-photo/README.md).
 
 ## Changes in this subpass
 
@@ -32,7 +32,7 @@
 
 ## Next passes / acceptance
 
-- [x] 037B2b-1: strict offline manifest/native integrity gate and negative-mutation unit suite (implementation committed; CI / merge status must be recorded separately).
+- [x] 037B2b-1: strict offline manifest/native integrity gate and negative-mutation unit suite (PR merged, PR CI and exact-main CI success).
 - [ ] 037B2b-2: receive **genuine** CC0 original bytes; independently review JPEG entropy decode, EXIF, ICC, actual SHA-256s, license and durable asset storage; check `verify` output against frozen reviewed pins. Current repository does **not** ship genuine photo pixels; DO NOT assert this is completed.
 - [ ] 037B2b-3: emit and re-import test-only PSD16 and PSB32 defect documents from admitted pinned native input, validate native tile bytes/geometry and public import provenance independently. No claim of Photoshop-authored goldens.
 - [ ] 037C: real Chromium `file://` PSD16/PSB32 import → polygon 8288 → native Worker → Save Project → Undo/Redo, three **independent** runs/format, strict per-pixel quality and observational timing/memory JSON. Blind negatives and PR/exact-main CI.
