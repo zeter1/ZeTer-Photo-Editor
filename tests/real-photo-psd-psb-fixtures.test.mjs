@@ -147,3 +147,63 @@ test('037B2b-3b: saved PSD16/PSB32 proof is strict and rechecks every native wor
   const wrongSource=input.rgba.slice();wrongSource[0]^=1;
   await assert.rejects(verify({rgba:wrongSource}));
 });
+
+
+function addUnreviewedPsdSection(bytes,lengthOffset,payload) {
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  assert.equal(view.getUint32(lengthOffset,false),0,
+    'one-layer native defect fixture must not already contain color metadata');
+  const forged=new Uint8Array(bytes.length+payload.length);
+  forged.set(bytes.subarray(0,lengthOffset+4));
+  new DataView(forged.buffer).setUint32(lengthOffset,payload.length,false);
+  forged.set(payload,lengthOffset+4);
+  forged.set(bytes.subarray(lengthOffset+4),lengthOffset+4+payload.length);
+  return forged;
+}
+
+test('037B2b-3f: saved PSD16/PSB32 verifier rejects unreviewed color/ICC metadata even if file SHA is repinned',async()=>{
+  const input=surrogate(); // synthetic structural pixels, NOT a CC0 JPEG decode.
+  const evidence=await createVerifiedPhotoDefectDocuments(input);
+  const admitted=admitPhotoBundle(input);
+  const artifact=serializePhotoDefectArtifactEvidence(evidence);
+  const files={
+    psd16:evidence.documents.psd16.bytes,
+    psb32:evidence.documents.psb32.bytes,
+  };
+  // Photoshop 8BIM image resource ID 1039 is ICC. Metadata is intentionally
+  // unreviewed, yet original native layer and merged bytes are unchanged.
+  const fakeIcc=Uint8Array.of(
+    0x38,0x42,0x49,0x4d,0x04,0x0f,0,0,0,0,0,4,1,2,3,4,
+  );
+  for(const [key,bits,version,reference] of [
+    ['psd16',16,1,'rgb16'],
+    ['psb32',32,2,'float32'],
+  ]) {
+    const native={
+      ...admitted.fixtures[reference],
+      expectedDamagedSha256:input.manifest.native[reference].damagedSha256,
+    };
+    for(const [label,offset,payload,error] of [
+      ['color-mode',26,Uint8Array.of(1,2,3,4),/unexpected color mode data/],
+      ['ICC-resource',30,fakeIcc,/unexpected image resources/],
+    ]) {
+      const forged=addUnreviewedPsdSection(files[key],offset,payload);
+      assert.notEqual(
+        createHash('sha256').update(forged).digest('hex'),artifact.documents[key].fileSha256,
+        label+' really changed PSD/PSB file bytes',
+      );
+      await assert.rejects(
+        verifyPhotoDefectDocument({bytes:forged,native,version,bitsPerChannel:bits}),
+        error,key+' must reject '+label+' even when native layer/composite pixels match',
+      );
+      const repinned=structuredClone(artifact);
+      repinned.documents[key].fileSha256=createHash('sha256').update(forged).digest('hex');
+      await assert.rejects(
+        verifyPhotoDefectArtifactSet({
+          ...input,artifact:repinned,files:{...files,[key]:forged},
+        }),
+        error,key+' saved verify must reject '+label+' despite repinned file hash',
+      );
+    }
+  }
+});
