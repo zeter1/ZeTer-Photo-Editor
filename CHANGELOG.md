@@ -2,6 +2,14 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-15 — Зафиксированы независимые real-photo byte pins и двойная CI-проверка (037B2b-2i)
+
+- Добавлено: постоянный reviewed manifest с SHA-256 оригинального CC0 JPEG, RGBA8 и четырёх native RGB16/Float32 clean/damaged references, независимо пересчитанных по реальным пикселям.
+- Добавлено: отдельная test-only Python/Pillow проверка исходного MPO frame 0, EXIF Orientation=1, EXIF Photo ColorSpace=sRGB, отсутствия embedded ICC, точного RGBA8 и native LE words без JS-кодека.
+- Изменено: `real-photo-intake` GitHub Actions отклоняет изменённый исходник/decoder/native pin по двум независимым проверкам и публикует read-only JSON evidence; генерация кандидата больше не считается достаточной.
+- Проверено: локальная независимая сверка exact main photo artifact #11990253339, Pillow/OpenCV 0 расхождений по RGB, 6 совпавших SHA-256, connected ROI 8288. Новые PR/main CI результаты должны быть подтверждены отдельно.
+- Ограничения проверки: профиль не встроен (режим assumed-sRGB согласно EXIF), 16/32-bit derived from 8-bit, не проверены Adobe parity, настоящий browser photo benchmark, ICC-калибровка и реальная память Worker. Production/runtime и версия 1.46.1 без изменений. [Задачи](task/037b2b-2i-reviewed-real-photo-pins.md).
+
 ### 2026-10-15 — Получен подлинный CC0 original и проверены native fixture candidate SHA-256 (037B2b-2h)
 
 - Исправлено: test-only JPEG admission допускает 434-байтовый MPO trailer **только** у SHA-1-pinned Commons original с фиксированным размером/позицией EOI; произвольные дополнительные байты отклоняются. Pillow-декодер читает primary frame 0 у подлинного MPO, не изменяя запрет на неподтверждённые источники.
