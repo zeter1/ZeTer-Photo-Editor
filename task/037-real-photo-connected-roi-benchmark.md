@@ -1,3 +1,5 @@
+> **037B2b-3a (branch, CI pending):** добавлена [офлайн PSD16/PSB32 native-fixture bridge](037b2b-native-psd-psb-bridge.md), сохраняющая точные ZeTer native layer+composite слова. Это не готовый genuine photo corpus, Photoshop parity либо Chromium benchmark. 037B2b-2/3 и 037C всё ещё OPEN.
+
 > **Продолжение 037B2b-1:** реализован [offline photo bundle admission](037b2b-photo-bundle-admission.md) со строгими original/decoded/native clean+defect pins и fail-closed negative matrix. **037 остаётся OPEN**: не получены настоящие CC0 байты/EXIF/ICC review, PSD16/PSB32 fixture import и Chromium real-photo runs. 037B2b-1 gate закрыт: [PR #226](https://github.com/zeter1/ZeTer-Photo-Editor/pull/226) → [fab6c49](https://github.com/zeter1/ZeTer-Photo-Editor/commit/fab6c49abed85f7314ef91b1769975496f8263b7); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38691322897) и [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38691679311) success. Дальше 037B2b-2/3 и 037C.
 
 # 037 — реальное изображение: проверяемое качество широкого connected ROI в Chromium
