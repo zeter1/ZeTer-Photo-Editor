@@ -70,7 +70,7 @@ test('037B1: independent RGBA8 decode fingerprint enforces exact native-order by
 test('037B2b-2b: ICC APP2 parts require complete unique numbering',()=>{
   const base=jpeg();
   const app2=(part,total,payload=[1,2,3])=>{
-    const data=[...Buffer.from('ICC_PROFILE\\0','ascii'),part,total,...payload];
+    const data=[...Buffer.from([73,67,67,95,80,82,79,70,73,76,69,0]),part,total,...payload];
     return [0xff,0xe2,(data.length+2)>>8,(data.length+2)&255,...data];
   };
   const source=segments=>Uint8Array.from([
