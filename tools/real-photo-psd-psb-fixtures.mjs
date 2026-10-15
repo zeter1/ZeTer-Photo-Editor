@@ -44,11 +44,17 @@ export async function verifyPhotoDefectDocument({bytes,native,version,bitsPerCha
     ['layer',decoded.layers[0].pixelBuffer],
     ['merged',decoded.compositePixelBuffer],
   ]) {
+    const exact=buffer?.data &&
+      hashNativeCleanReference(buffer.data,bitsPerChannel)===expectedHash;
     if(buffer?.width!==native.width || buffer?.height!==native.height ||
        buffer?.model!=='rgb' || buffer?.channels!==4 ||
-       buffer?.bitsPerChannel!==bitsPerChannel ||
-       hashNativeCleanReference(buffer.data,bitsPerChannel)!==expectedHash)
-      fail(name+' changed native channel words or geometry');
+       buffer?.bitsPerChannel!==bitsPerChannel || !exact)
+      fail(name+' changed native words or geometry: '+JSON.stringify({
+        width:buffer?.width,height:buffer?.height,model:buffer?.model,
+        channels:buffer?.channels,depth:buffer?.bitsPerChannel,
+        hash:buffer?.data?hashNativeCleanReference(buffer.data,bitsPerChannel):null,
+        expectedHash,
+      }));
   }
   const quality=measureRealPhotoNativeQuality({
     before:decoded.layers[0].pixelBuffer.data,after:native.clean.slice(),
