@@ -2,6 +2,7 @@
 // This parser validates the JPEG header, NOT the entropy stream, decoder,
 // ICC conversion, photograph provenance, or Photoshop interoperability.
 import {createHash} from 'node:crypto';
+import {parseExifOrientation} from './real-photo-exif-orientation.mjs';
 
 const SHA1=/^[0-9a-f]{40}$/, SHA256=/^[0-9a-f]{64}$/;
 const MAX_SOURCE_BYTES=32*1024*1024;
