@@ -37,10 +37,15 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
     const length=(bytes[pos]<<8)|bytes[pos+1];
     if(length<2 || pos+length>bytes.length-2) fail('truncated JPEG segment');
     const data=pos+2, end=pos+length;
-    if(marker===0xe1 && end-data>=6 &&
+    if(marker===0xe1 && end-data>=4 &&
        bytes[data]===0x45 && bytes[data+1]===0x78 &&
-       bytes[data+2]===0x69 && bytes[data+3]===0x66 &&
-       bytes[data+4]===0 && bytes[data+5]===0) hasExif=true;
+       bytes[data+2]===0x69 && bytes[data+3]===0x66) {
+      if(end-data<14 || bytes[data+4]!==0 || bytes[data+5]!==0)
+        fail('malformed EXIF APP1 signature');
+      if(hasExif) fail('duplicate EXIF APP1 segment');
+      hasExif=true;
+      exifOrientation=parseExifOrientation(bytes,data+6,end);
+    }
     // Detect corrupt/partial ICC multipart headers before admitting JPEG data.
     if(marker===0xe2 && end-data>=11 &&
        Buffer.from(bytes.buffer,bytes.byteOffset+data,11).toString('ascii')==='ICC_PROFILE') {
