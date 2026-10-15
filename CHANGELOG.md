@@ -6,7 +6,7 @@
 
 - Исправлено: test-only загрузчик JPEG использует эксклюзивную запись со сбросом на диск и откатом собственного нового inode при partial write/fsync failure; не удаляет чужой заменивший файл.
 - Добавлено: 5 offline-регрессий на точность байтов, существующий путь/symlink, обрыв записи, ошибку синхронизации и подмену имени во время отката.
-- Проверено: локально 5/5 Node; полный CI и Chromium file:// будут проверены в PR; подлинный CC0 JPEG не получен, independent ICC/EXIF/лицензия и фотографическое качество не подтверждены. Production/runtime и номер версии не менялись.
+- Проверено: локально 5/5 Node; [PR #241](https://github.com/zeter1/ZeTer-Photo-Editor/pull/241) → [61247d0](https://github.com/zeter1/ZeTer-Photo-Editor/commit/61247d0ee49f706ef9308ac953ec7b1da16e487d); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38759811494) (attempt 2) — 1288 Node, сборка, настоящий Chromium file://, JSON/профили, diff hygiene. Первая попытка имела DevTools launch timeout; на второй smoke успешен. Exact-main CI после закрытия handoff проверяется отдельно. Подлинный CC0 JPEG не получен; независимые ICC/EXIF/лицензия и качество не подтверждены. Production/runtime и номер версии не менялись.
 
 ### 2026-10-15 — Откат неполной пары RGBA8/JSON при ошибке Pillow-декодирования (037B2b-2f)
 
