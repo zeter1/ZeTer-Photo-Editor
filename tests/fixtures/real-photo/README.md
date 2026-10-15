@@ -1,3 +1,5 @@
+> **Получение оригинала (037B2b-2e):** `node tools/fetch-real-photo-source.mjs NEW-original.jpg` (из корня репозитория, требуется HTTPS). [Handoff](../../../task/037b2b-2e-source-acquisition.md). Скрипт проверяет SHA-1 и JPEG структуру **до** создания нового файла; SHA-256 лишь кандидат, лицензия/реальное декодирование/ICC/EXIF и photo benchmark остаются не проверенными.
+
 > **037B2b-3b merged + CI success:** [PR #228](https://github.com/zeter1/ZeTer-Photo-Editor/pull/228), [точный `main` CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38699204703). `codec-evidence.json` + `verify` rechecks saved ZPE PSD16/PSB32; это не заменяет реального оригинала и ICC/EXIF/Adobe review. [Handoff](../../../task/037b2b-3b-artifact-integrity.md).
 
 ## 037B2b-1 — offline pin verification available; actual photo still absent
