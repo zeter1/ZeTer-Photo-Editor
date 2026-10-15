@@ -7,6 +7,7 @@ import {hashNativeCleanReference,measureRealPhotoNativeQuality}
   from './real-photo-native-quality.mjs';
 import {createPixelBuffer} from '../src/core/pixel-buffer.js';
 import {encodePsd,encodePsb,decodePsd,inspectPsdHeader} from '../src/formats/psd.js';
+import {verifyRawPhotoLayerEnvelope} from './real-photo-psd-layer-envelope.mjs';
 
 const fail=reason=>{throw new TypeError('037 photo PSD/PSB: '+reason);};
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -100,6 +101,11 @@ export async function verifyPhotoDefectDocument({bytes,native,version,bitsPerCha
   // Reject any unreviewed top-level color metadata before the general codec
   // normalizes or ignores it; also validate merged native planes first.
   verifyRawPhotoMergedPlanes(bytes,native,version,bitsPerChannel);
+  // A decoded one-layer tree and unchanged native words do not prove the raw
+  // Photoshop layer has no hidden masks, locks or blending metadata.
+  verifyRawPhotoLayerEnvelope(bytes,{
+    version,width:native.width,height:native.height,bitsPerChannel,
+  });
   const decoded=await decodePsd(bytes,{maxPixels:2_000_000,maxLayers:4});
   if(decoded.layers?.length!==1 || decoded.groups?.length ||
      decoded.layers[0]?.name!=='Pinned photo defect (8-bit derived)')
