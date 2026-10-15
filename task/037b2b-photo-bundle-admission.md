@@ -1,4 +1,6 @@
-> **Продолжение 037B2b-3a (branch, CI pending):** [test-only native PSD16/PSB32 defect writer → importer](037b2b-native-psd-psb-bridge.md). Это backend/CLI для *уже независимо допущенного* photo bundle, без реальных CC0 source bytes. Original/decoded asset, external ICC/EXIF review, независимая PSD проверка и Chromium 037C по-прежнему OPEN.
+> **037B2b-3a gate:** [PR #227](https://github.com/zeter1/ZeTer-Photo-Editor/pull/227) → [bde33df](https://github.com/zeter1/ZeTer-Photo-Editor/commit/bde33df15b4f5781ce778314f4624609f5e1bc28), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38696193576) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38696460061). Code is a synthetic-surrogate native PSD16/PSB32 self-codec gate, **not** real photo/ICC/EXIF/Adobe/Chromium quality. Remaining 037B2b-2/3 and 037C OPEN. [Details](037b2b-native-psd-psb-bridge.md).
+
+> **Продолжение 037B2b-3a (слито + CI success):** [test-only native PSD16/PSB32 defect writer → importer](037b2b-native-psd-psb-bridge.md). Это backend/CLI для *уже независимо допущенного* photo bundle, без реальных CC0 source bytes. Original/decoded asset, external ICC/EXIF review, независимая PSD проверка и Chromium 037C по-прежнему OPEN.
 
 # 037B2b-1 — offline admission for pinned original / RGBA8 / RGB16 + Float32 photo fixtures
 
