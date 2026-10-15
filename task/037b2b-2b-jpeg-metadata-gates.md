@@ -1,6 +1,6 @@
 # 037B2b-2b — integrity gate for JPEG EXIF/ICC metadata (test-only)
 
-**Status: PR/CI verification pending.** The broader 037B2b-2 *genuine photo* task is OPEN; this pass does not contain original photographic pixels.
+**Status: CLOSED (2026-10-15).** [PR #230](https://github.com/zeter1/ZeTer-Photo-Editor/pull/230) merged as [`1847c0b`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/1847c0b1409d6ebe7b2cadfeae014ea3267da48d); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38703368803) and [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38703772619). The broader 037B2b-2 *genuine photo* task is OPEN; this pass does not contain original photographic pixels.
 
 ## Goal and evidence
 
@@ -18,7 +18,7 @@
 
 1. Run `node --test tests/real-photo-source-integrity.test.mjs tests/real-photo-bundle-admission.test.mjs tests/decode-real-photo.test.mjs` with `Pillow==12.0.0` (required by CI).
 2. Run `npm run check`, real Chromium `file://` smoke, profile/artifact validators, clean `git diff --check`.
-3. Confirm PR CI; if merged, separately confirm exact-main CI before marking closed. No Photoshop/photo-quality claims from these tests.
+3. **Verified:** PR CI and exact-code `main` CI both completed successfully with build/Node tests, Chromium `file://`, artifact/profile checks and diff hygiene. No Photoshop/photo-quality claims from these tests.
 
 ## Next open steps
 
