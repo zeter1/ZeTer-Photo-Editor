@@ -1,6 +1,6 @@
 # 037B2b-2g — защита записи полученного CC0 JPEG при ошибках I/O
 
-**Статус: КОД В PR, НЕ 037B2b-2 photo acceptance (2026-10-15).** [Основная очередь](README.md), [037B2b-2e](037b2b-2e-source-acquisition.md) и [037B2b-2f](037b2b-2f-decoder-output-integrity.md).
+**Статус: КОДОВАЯ ПРОХОДКА ЗАКРЫТА (2026-10-15): [PR #241](https://github.com/zeter1/ZeTer-Photo-Editor/pull/241) → [61247d0](https://github.com/zeter1/ZeTer-Photo-Editor/commit/61247d0ee49f706ef9308ac953ec7b1da16e487d); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38759811494, attempt 2). НЕ 037B2b-2 photo acceptance.** [Основная очередь](README.md), [037B2b-2e](037b2b-2e-source-acquisition.md) и [037B2b-2f](037b2b-2f-decoder-output-integrity.md).
 
 ## Причина
 
@@ -13,7 +13,8 @@
 - [x] tools/fetch-real-photo-source.mjs: после **существующей** проверки HTTP/JPEG/SHA-1 вызывает новый helper; identity источника, URL и 32 MiB cap не меняются.
 - [x] tests/real-photo-source-publication.test.mjs: точность байтов, эксклюзивность, 0600, injected partial write, fsync failure, замена имени чужим файлом, occupied output и dangling symlink.
 - [x] Локально node --test tests/real-photo-source-publication.test.mjs: 5/5 PASS; полный npm run check и Chromium smoke требуют CI проекта.
-- [ ] Проверить PR CI и exact-code main CI; записать реальные SHA/run после выполнения. До этого не утверждать об успехе CI.
+- [x] [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38759811494) (повторная попытка): 1288 Node-тестов, build/generated artifacts, настоящий Chromium file://, JSON и профили, diff hygiene. Первая попытка имела Chromium DevTools launch timeout; на второй браузерные проверки прошли.
+- [ ] Проверить **exact-code main CI** после итогового документационного обновления и записать ссылку. Не переносить успех PR на иной main SHA.
 
 ## Границы
 
