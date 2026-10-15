@@ -14,7 +14,7 @@
 - [x] tests/real-photo-source-publication.test.mjs: точность байтов, эксклюзивность, 0600, injected partial write, fsync failure, замена имени чужим файлом, occupied output и dangling symlink.
 - [x] Локально node --test tests/real-photo-source-publication.test.mjs: 5/5 PASS; полный npm run check и Chromium smoke требуют CI проекта.
 - [x] [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38759811494) (повторная попытка): 1288 Node-тестов, build/generated artifacts, настоящий Chromium file://, JSON и профили, diff hygiene. Первая попытка имела Chromium DevTools launch timeout; на второй браузерные проверки прошли.
-- [ ] Проверить **exact-code main CI** после итогового документационного обновления и записать ссылку. Не переносить успех PR на иной main SHA.
+- [x] [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38760636543) для [main 8ca8378](https://github.com/zeter1/ZeTer-Photo-Editor/commit/8ca8378fd01b9df33a07b28169b944da74adba2e): 18/18 steps success, включая Chromium file://, после merge и фиксации handoff. Последующий docs-only commit не меняет проверенный код.
 
 ## Границы
 
