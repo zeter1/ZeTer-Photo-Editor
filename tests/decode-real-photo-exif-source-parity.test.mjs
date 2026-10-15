@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory() as directory:
     rejected(inject(jpeg,app1(duplicate_tags)),'duplicate-tag',
              'Duplicate EXIF Orientation',folder)
 
-    bad_signature=b'\xff\xe1\x00\x10'+b'ExifBAD'+b'\x00'*6
+    bad_signature=b'\xff\xe1\x00\x0f'+b'ExifBAD'+b'\x00'*6
     rejected(inject(jpeg,bad_signature),'bad-signature',
              'Malformed EXIF APP1',folder)
 
