@@ -18,7 +18,7 @@ async function boundedRead(path,max) {
 const verifying=process.argv[2]==='verify';
 const args=process.argv.slice(verifying?3:2);
 const [manifestPath,jpegPath,rgbaPath,outputDir]=args;
-const usage='Usage: node tools/real-photo-psd-psb-cli.mjs reviewed-manifest.json original.jpg decoded.rgba NEW-output-dir\\n'+
+const usage='Usage: node tools/real-photo-psd-psb-cli.mjs reviewed-manifest.json original.jpg decoded.rgba NEW-output-dir\n'+
   '   or: node tools/real-photo-psd-psb-cli.mjs verify reviewed-manifest.json original.jpg decoded.rgba existing-output-dir';
 if(args.length!==4 || !args.every(Boolean)) {
   console.error(usage);
@@ -51,7 +51,7 @@ if(args.length!==4 || !args.every(Boolean)) {
           evidence.documents[key].bytes,{flag:'wx'});
       const artifact=serializePhotoDefectArtifactEvidence(evidence);
       await writeFile(join(outputDir,PHOTO_DEFECT_ARTIFACT_FILE),
-        JSON.stringify(artifact,null,2)+'\\n',{flag:'wx'});
+        JSON.stringify(artifact,null,2)+'\n',{flag:'wx'});
       console.log(JSON.stringify(artifact,null,2));
     }
   } catch(error) {
