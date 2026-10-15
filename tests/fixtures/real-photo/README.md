@@ -1,3 +1,8 @@
+## 037B2b-1 — offline pin verification available; actual photo still absent
+
+- `tools/real-photo-bundle-cli.mjs candidate` derives **unadmitted** hash candidates only; `verify` requires separately reviewed SHA-256 original, decoded RGBA8 and native RGB16/Float32 clean+defect references. See [task handoff](../../../task/037b2b-photo-bundle-admission.md).
+- Original photo JPEG and genuine decoded pixels are **still not checked into this repository**. The negative-matrix tests use a deliberately non-decodable JPEG surrogate; no quality/ICC/EXIF/Photoshop result is claimed. Next: actual source acquisition and external decoder review.
+
 ## 037B2a — подготовлен native fixture bridge, original photo ещё не получено
 
 - См. [task/037B2a](../../../task/037b2a-photo-native-fixture-bridge.md): candidate RGBA8 → RGB16/Float32 native clean + 8288 connected selected defect, отдельный pinned SHA-256 LE native words обязателен до допуска.
