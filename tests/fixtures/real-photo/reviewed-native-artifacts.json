@@ -1,0 +1,15 @@
+{
+  "kind": "zpe-real-photo-native-artifact-pins-v1",
+  "sourceSha256": "dd01cf047c9b2b7a635e29c68a52c5585d7b346f4f99713f79968ea1ea4348b8",
+  "decodedRgbaSha256": "d1aa01e37ee9944099db871be53f9d30fd00bdd12ead94ba4e09f1dd765b1641",
+  "documents": {
+    "psd16": {
+      "fileSha256": "6749ddddb9338a25197a3d2961ce5c1f555fd4ef677d14aa8c0ce73d7225a403",
+      "nativeSha256": "70816f5177ad5008ee164513931e5cf3866c0134ce1a27362df430a4594a7228"
+    },
+    "psb32": {
+      "fileSha256": "a8cfa8b2dcd745550784e86216eeb39574c9da7cc76a95db502dc4056f8a778a",
+      "nativeSha256": "5ca57278cc7e28fd440435248667ec14236b527be3609ca5f3083e0b1fb63735"
+    }
+  }
+}
