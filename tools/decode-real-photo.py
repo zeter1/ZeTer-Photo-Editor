@@ -189,7 +189,8 @@ def decode(input_path: Path, rgba_path: Path, evidence_path: Path):
     source_orientation = scan_exif_app1(jpeg)
     with Image.open(io.BytesIO(jpeg)) as original:
         if original.format != 'JPEG' or original.size != SOURCE_SIZE or original.mode != 'RGB':
-            raise ValueError('Unsupported original JPEG format, geometry or color mode')
+            raise ValueError('Unsupported original JPEG format, geometry or color mode: '
+                             + repr((original.format, original.size, original.mode)))
         exif = original.getexif()
         orientation = exif.get(274)
         if orientation != source_orientation:
