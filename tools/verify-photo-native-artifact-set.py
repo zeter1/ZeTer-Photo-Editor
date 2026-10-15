@@ -38,8 +38,15 @@ def reader(script, fmt, file, size, native_sha, file_sha):
     return json.loads(output.stdout)
 
 
-def verify(manifest_path, artifact_dir):
+def verify(manifest_path, artifact_dir, pins_path):
     manifest = load_json(manifest_path)
+    pins = load_json(pins_path)
+    require(set(pins) == {'kind', 'sourceSha256', 'decodedRgbaSha256', 'documents'}
+            and pins['kind'] == 'zpe-real-photo-native-artifact-pins-v1'
+            and pins['sourceSha256'] == manifest['sourceSha256']
+            and pins['decodedRgbaSha256'] == manifest['decoded']['sha256']
+            and set(pins['documents']) == {'psd16', 'psb32'},
+            'invalid independent frozen file SHA-256 pins')
     evidence = load_json(artifact_dir / 'codec-evidence.json')
     require(manifest['kind'] == 'zpe-real-photo-bundle-manifest-v1',
             'expected reviewed source manifest')
@@ -68,7 +75,15 @@ def verify(manifest_path, artifact_dir):
                 'missing, symlinked or oversized ' + filename)
         proof = evidence['documents'][key]
         native_sha = manifest['native'][native_key]['damagedSha256']
-        expected_file = proof['fileSha256']
+        frozen = pins['documents'][key]
+        require(set(frozen) == {'fileSha256', 'nativeSha256'}
+                and frozen['nativeSha256'] == native_sha
+                and isinstance(frozen['fileSha256'], str)
+                and PIN.fullmatch(frozen['fileSha256']),
+                'invalid frozen native/file pins for ' + key)
+        expected_file = frozen['fileSha256']
+        require(proof['fileSha256'] == expected_file,
+                'ZeTer export differs from independently frozen file: ' + key)
         require(isinstance(native_sha, str) and PIN.fullmatch(native_sha)
                 and isinstance(expected_file, str) and PIN.fullmatch(expected_file),
                 'missing native/file SHA-256')
@@ -117,6 +132,7 @@ def verify(manifest_path, artifact_dir):
         'decodedRgbaSha256': manifest['decoded']['sha256'],
         'sourcePrecisionBits': 8,
         'selectionPixels': 8288,
+        'frozenFilePinsVerified': True,
         'documents': documents,
         'adobeAuthoredVerified': False,
         'photoshopParityVerified': False,
@@ -126,12 +142,12 @@ def verify(manifest_path, artifact_dir):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        print('Usage: verify-photo-native-artifact-set.py REVIEWED_MANIFEST ARTIFACT_DIR',
+    if len(sys.argv) != 4:
+        print('Usage: verify-photo-native-artifact-set.py REVIEWED_MANIFEST ARTIFACT_DIR FROZEN_FILE_PINS',
               file=sys.stderr)
         sys.exit(2)
     try:
-        result = verify(Path(sys.argv[1]), Path(sys.argv[2]))
+        result = verify(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]))
         # Exclusive publication: a rerun must not silently overwrite evidence.
         path = Path(sys.argv[2]) / 'independent-native-readback.json'
         with path.open('x', encoding='utf-8') as output:
