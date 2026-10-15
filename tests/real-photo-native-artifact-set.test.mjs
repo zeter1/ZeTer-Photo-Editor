@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
 const manifest=JSON.parse(readFileSync('tests/fixtures/real-photo/reviewed-manifest.json','utf8'));
+const nativePins=JSON.parse(readFileSync('tests/fixtures/real-photo/reviewed-native-artifacts.json','utf8'));
 const python=process.env.PYTHON || 'python3';
 const cli='tools/verify-photo-native-artifact-set.py';
 const hasPython=spawnSync(python,['--version'],{encoding:'utf8'}).status===0;
@@ -31,11 +32,20 @@ const baseEvidence=()=>({
 test('037B2b-3 rejects fake source/ROI claims and symlinked native artifact before readback',t=>{
   if(!hasPython) return t.skip('Python required by external photo intake CI');
   const dir=mkdtempSync(join(tmpdir(),'zpe-native-receipt-'));
-  const manifestFile=join(dir,'reviewed.json'), evidenceFile=join(dir,'codec-evidence.json');
-  const run=()=>spawnSync(python,[cli,manifestFile,dir],{encoding:'utf8'});
+  const manifestFile=join(dir,'reviewed.json'), pinsFile=join(dir,'native-pins.json');
+  const evidenceFile=join(dir,'codec-evidence.json');
+  const run=()=>spawnSync(python,[cli,manifestFile,dir,pinsFile],{encoding:'utf8'});
   const save=evidence=>writeFileSync(evidenceFile,JSON.stringify(evidence));
   try {
     writeFileSync(manifestFile,JSON.stringify(manifest));
+    writeFileSync(pinsFile,JSON.stringify(nativePins));
+
+    const forgedPins=structuredClone(nativePins);
+    forgedPins.documents.psb32.fileSha256='0'.repeat(64);
+    writeFileSync(pinsFile,JSON.stringify({...forgedPins,sourceSha256:'f'.repeat(64)}));
+    save(baseEvidence());
+    assert.match(run().stderr,/invalid independent frozen file SHA-256 pins/);
+    writeFileSync(pinsFile,JSON.stringify(nativePins));
     const forgedSource=baseEvidence();forgedSource.originalSha256='f'.repeat(64);
     save(forgedSource);
     assert.match(run().stderr,/saved source\/decoder digests/);
