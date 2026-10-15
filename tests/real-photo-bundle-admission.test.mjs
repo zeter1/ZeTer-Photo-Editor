@@ -135,7 +135,8 @@ test('037B2b: a candidate cannot bypass explicit decoder and opacity checks',()=
 
 test('037B2b-2b: EXIF without Orientation is legal but false transpose is rejected',()=>{
   const s=scenario();
-  const exif=[0xff,0xe1,0,8,69,120,105,102,0,0];
+  const exif=[0xff,0xe1,0,22,69,120,105,102,0,0,
+    73,73,42,0,8,0,0,0,0,0,0,0,0,0];
   const jpegWithExif=Uint8Array.from([
     ...s.jpeg.subarray(0,8),...exif,...s.jpeg.subarray(8),
   ]);
