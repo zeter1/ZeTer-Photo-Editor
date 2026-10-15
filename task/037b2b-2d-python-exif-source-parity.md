@@ -1,6 +1,6 @@
 # 037B2b-2d — Python decoder EXIF/TIFF source-byte parity
 
-**Status: IMPLEMENTED IN PR BRANCH; OPEN until successful PR CI, merge, exact-code main CI.**
+**Status: CLOSED (2026-10-15).** [PR #232](https://github.com/zeter1/ZeTer-Photo-Editor/pull/232) merged as [`6d58f6b`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/6d58f6b8eb5280d5ece6b5f88415146319b1139e). [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38708933494) and [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38709327930).
 Date: 2026-10-15. Depends on closed [037B2b-2c](037b2b-2c-exif-source-orientation.md).
 
 ## Why
@@ -13,8 +13,8 @@ JS bundle admission already parses original APP1/TIFF IFD0 Orientation and recon
 - [x] Reject duplicate EXIF APP1 and Orientation, bad TIFF magic/endian/offset/type/count, malformed/truncated IFD0.
 - [x] Compare TIFF-derived value with Pillow Image.getexif() before decode/transposition/output; reject mismatch.
 - [x] Added tests/decode-real-photo-exif-source-parity.test.mjs with synthetic/Pillow JPEG, malformed/duplicate/mismatch negative matrix and no-output assertions.
-- [ ] Run focused tests and full npm run check / real Chromium file:// CI on PR.
-- [ ] Code review, merge and exact-main CI gate; only then mark this subpass CLOSED.
+- [x] Full CI: build, all Node/Python tests, generated bundle parity, Chromium `file://`, artifact/profile/diff gates successful on PR and exact merge SHA.
+- [x] Reviewed diff, merged PR #232, and verified exact-code main CI success; 037B2b-2d CLOSED.
 
 ## Limits
 
@@ -29,4 +29,4 @@ Source-byte EXIF parity does not supply genuine CC0 pixels, independent image-de
 
 ## Evidence
 
-- PR, CI, merge and exact-main CI: pending; record verifiable links after they succeed.
+- Evidence: [PR #232](https://github.com/zeter1/ZeTer-Photo-Editor/pull/232), [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38708933494), [merge SHA](https://github.com/zeter1/ZeTer-Photo-Editor/commit/6d58f6b8eb5280d5ece6b5f88415146319b1139e), [exact-code main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38709327930).

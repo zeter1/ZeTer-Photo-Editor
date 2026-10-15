@@ -6,6 +6,7 @@
 
 - Исправлено: test-only декодер Pillow теперь самостоятельно читает исходный EXIF APP1/TIFF IFD0 Orientation и отклоняет расхождение с `Image.getexif()` до записи RGBA8 и JSON evidence.
 - Добавлено: bounded-разбор little/big endian TIFF, проверка дублирующихся APP1/Orientation, повреждённых IFD0, неверных типов и значений; отдельные негативные тесты с синтетическими JPEG.
+- Проверено: [PR #232](https://github.com/zeter1/ZeTer-Photo-Editor/pull/232) → [`6d58f6b`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/6d58f6b8eb5280d5ece6b5f88415146319b1139e); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38708933494), [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38709327930) — сборка, Node/Python, Chromium `file://`, JSON/profiles, diff hygiene.
 - Ограничения проверки: эта проходка не получает настоящие CC0 байты и не подтверждает ICC/color fidelity, Adobe-совместимость либо Chromium photo quality. Production runtime и версия 1.46.1 не изменены.
 
 ### 2026-10-15 — Подготовлено офлайн-декодирование реального JPEG с EXIF и ICC для проверки Content-Aware Fill
