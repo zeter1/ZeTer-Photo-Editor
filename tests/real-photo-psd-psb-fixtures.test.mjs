@@ -66,7 +66,7 @@ test('037B2b-3: gated PSD16/PSB32 exports preserve exact native defect and compo
     const pin=input.manifest.native[bits===16?'rgb16':'float32'].damagedSha256;
     assert.equal(proof.nativeDefectSha256,pin);
     assert.equal(hashNativeCleanReference(decoded.layers[0].pixelBuffer.data,bits),pin);
-    assert.equal(hashNativeCleanReference(decoded.compositePixelBuffer.data,bits),pin);
+    assert.equal(decoded.compositePixelBuffer,null,'layered import intentionally does not decode merged preview');
     assert.equal(decoded.layers[0].pixelBuffer.data[3],bits===16?65535:1);
     assert.equal(native.selectedPixels,8288);
   }
@@ -84,6 +84,8 @@ test('037B2b-3: tampered source, pins, document bytes or native words fail close
   });
   const tampered=bytes.slice();tampered[0]^=1;
   await assert.rejects(verify({bytes:tampered}));
+  const compositeMutation=bytes.slice();compositeMutation[compositeMutation.length-1]^=1;
+  await assert.rejects(verify({bytes:compositeMutation}),/merged plane native word mismatch/);
   await assert.rejects(verify({version:2}),/037 photo PSD\/PSB/);
   await assert.rejects(verify({native:{...native,expectedDamagedSha256:'0'.repeat(64)}}),
     /native source changed/);
