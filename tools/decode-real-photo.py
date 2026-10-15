@@ -66,6 +66,77 @@ def scan_icc_app2(jpeg: bytes):
 
 
 
+
+def scan_exif_app1(jpeg: bytes):
+    """Read original TIFF IFD0 Orientation, independently of Pillow's EXIF parser.
+
+    This is an admission cross-check, not a JPEG entropy or color decoder.
+    """
+    if jpeg[:2] != b'\xff\xd8':
+        raise ValueError('Invalid JPEG SOI')
+    pos, seen_exif, orientation = 2, False, None
+    while pos < len(jpeg) - 2:
+        if jpeg[pos] != 0xff:
+            raise ValueError('Malformed JPEG marker before scan')
+        while pos < len(jpeg) and jpeg[pos] == 0xff:
+            pos += 1
+        if pos >= len(jpeg):
+            raise ValueError('Truncated JPEG marker')
+        marker = jpeg[pos]
+        pos += 1
+        if marker == 0xda:
+            break
+        if marker in (0, 0xd8, 0xd9) or 0xd0 <= marker <= 0xd7:
+            raise ValueError('Unexpected JPEG marker before scan')
+        if pos + 2 > len(jpeg):
+            raise ValueError('Truncated JPEG segment')
+        length = int.from_bytes(jpeg[pos:pos + 2], 'big')
+        end = pos + length
+        if length < 2 or end > len(jpeg) - 2:
+            raise ValueError('Malformed JPEG segment length')
+        payload = jpeg[pos + 2:end]
+        pos = end
+        if marker != 0xe1 or not payload.startswith(b'Exif'):
+            continue
+        if len(payload) < 14 or payload[:6] != b'Exif\x00\x00':
+            raise ValueError('Malformed EXIF APP1 signature')
+        if seen_exif:
+            raise ValueError('Duplicate EXIF APP1 container')
+        seen_exif = True
+        tiff = payload[6:]
+        byte_order = tiff[:2]
+        if byte_order == b'II':
+            endian = 'little'
+        elif byte_order == b'MM':
+            endian = 'big'
+        else:
+            raise ValueError('Invalid EXIF TIFF byte order')
+        u16 = lambda offset: int.from_bytes(tiff[offset:offset + 2], endian)
+        u32 = lambda offset: int.from_bytes(tiff[offset:offset + 4], endian)
+        if u16(2) != 42:
+            raise ValueError('Invalid EXIF TIFF magic')
+        directory = u32(4)
+        if directory < 8 or directory > len(tiff) - 2:
+            raise ValueError('Invalid EXIF IFD0 offset')
+        count = u16(directory)
+        if count > 512 or directory + 2 + count * 12 + 4 > len(tiff):
+            raise ValueError('Truncated or oversized EXIF IFD0')
+        orientation_seen = False
+        for index in range(count):
+            entry = directory + 2 + index * 12
+            if u16(entry) != 0x0112:
+                continue
+            if orientation_seen:
+                raise ValueError('Duplicate EXIF Orientation tag')
+            orientation_seen = True
+            if u16(entry + 2) != 3 or u32(entry + 4) != 1:
+                raise ValueError('Invalid EXIF Orientation type/count')
+            orientation = u16(entry + 8)
+            if not 1 <= orientation <= 8:
+                raise ValueError('Invalid EXIF Orientation value')
+    return orientation
+
+
 def decode(input_path: Path, rgba_path: Path, evidence_path: Path):
     if rgba_path == evidence_path or input_path in (rgba_path, evidence_path):
         raise ValueError('Original and both output paths must be distinct')
@@ -78,11 +149,14 @@ def decode(input_path: Path, rgba_path: Path, evidence_path: Path):
     if hashlib.sha1(jpeg).hexdigest() != SOURCE_SHA1:
         raise ValueError('Original JPEG SHA-1 differs from documented Wikimedia original')
     raw_icc = scan_icc_app2(jpeg)
+    source_orientation = scan_exif_app1(jpeg)
     with Image.open(io.BytesIO(jpeg)) as original:
         if original.format != 'JPEG' or original.size != SOURCE_SIZE or original.mode != 'RGB':
             raise ValueError('Unsupported original JPEG format, geometry or color mode')
         exif = original.getexif()
         orientation = exif.get(274)
+        if orientation != source_orientation:
+            raise ValueError('Pillow EXIF Orientation disagrees with original TIFF IFD0')
         if orientation is not None and orientation not in range(1, 9):
             raise ValueError('Invalid EXIF orientation')
         # Source admission separately reconciles APP1/APP2 flags; PIL decodes the
