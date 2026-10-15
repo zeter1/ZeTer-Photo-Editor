@@ -2,6 +2,13 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-15 — Независимое стороннее чтение native PSD16/PSB32 (037B2b-3h)
+
+- Добавлено: test-only `tools/verify-real-photo-psd-external.py` с закреплённым `psd-tools==1.19.0`; отдельно проверяются исходные 16/32-битные RGBA-слова одного слоя и merged composite без 8-bit preview, с обязательными native/file SHA-256.
+- Добавлено: отрицательные Node-тесты на неверные хеши, размеры, формат и переподписанный повреждённый merged-канал; CI устанавливает сторонний decoder и требует успешной проверки.
+- Проверено: [PR #238](https://github.com/zeter1/ZeTer-Photo-Editor/pull/238) → [3571c03](https://github.com/zeter1/ZeTer-Photo-Editor/commit/3571c030e2728ced97d652c7521570b7bc83b72a); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38742025006) — сборка/Node, настоящий Chromium `file://`, JSON, профили, diff hygiene. Exact-code main CI ожидается.
+- Ограничения проверки: только синтетический суррогат; подлинный CC0 JPEG, независимая ICC/EXIF review, PSD/PSB real-photo parity, Adobe-authored goldens и Chromium photo benchmark ещё открыты. Production и версия 1.46.1 не менялись.
+
 ### 2026-10-15 — Ужесточена JS-проверка метаданных слоя сохранённых PSD16/PSB32 (037B2b-3g)
 
 - Добавлено: test-only бинарная проверка native one-layer envelope до `decodePsd`, включая флаги, маску, режим смешивания, Pascal/Unicode имена и дополнительные tagged blocks.

@@ -1,6 +1,6 @@
 # 037B2b-3h — сторонний psd-tools PSD16/PSB32 native readback
 
-**Статус: в работе (ветка `codex/037b2b-3h-external-psd-reader`; до прохождения PR CI не считать закрытой).**
+**Статус: ЗАКРЫТА (2026-10-15).** [PR #238](https://github.com/zeter1/ZeTer-Photo-Editor/pull/238) → [3571c03](https://github.com/zeter1/ZeTer-Photo-Editor/commit/3571c030e2728ced97d652c7521570b7bc83b72a), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38742025006). Exact-code main CI проверяется отдельно.
 
 ## Зачем
 
@@ -12,7 +12,8 @@
 - [x] Проверяются PSD v1 RGB16 / PSB v2 RGB Float32, четыре канала RGBA, геометрия, единственный full-canvas слой, raw layer и merged composite; raw BE samples → LE RGBA words, SHA-256 слоя и merged в отдельности.
 - [x] На входе обязательны независимо закреплённые native и file SHA-256; несовпадения, перепутанная битность/геометрия и реподписанный испорченный merged канал отвергаются.
 - [x] Node negative/positive tests на `structural surrogate` и CI-зависимость `psd-tools==1.19.0`. Синтетический вход **НЕ** является настоящим JPEG.
-- [ ] Завершить PR CI, провести merge и проверить exact-code main CI.
+- [x] PR CI success: Node/build, настоящий Chromium `file://`, JSON/profiles и diff hygiene; PR #238 слит в `main`.
+- [ ] Подтвердить exact-code main CI для окончательного коммита с документацией.
 - [ ] Прогнать эти команды на **подлинных** pinned real-photo PSD16/PSB32 (пока не получены, 037B2b-2/3 остаются открыты).
 
 ## Ручной gate после получения настоящего фото
