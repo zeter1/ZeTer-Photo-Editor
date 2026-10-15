@@ -1,3 +1,5 @@
+> **Продолжение 037B2b-1:** реализован [offline photo bundle admission](037b2b-photo-bundle-admission.md) со строгими original/decoded/native clean+defect pins и fail-closed negative matrix. **037 остаётся OPEN**: не получены настоящие CC0 байты/EXIF/ICC review, PSD16/PSB32 fixture import и Chromium real-photo runs. Gate PR/CI требует проверки.
+
 # 037 — реальное изображение: проверяемое качество широкого connected ROI в Chromium
 
 **P1, OPEN (после закрытой [036C](036-browser-connected-roi-quality.md)).**
