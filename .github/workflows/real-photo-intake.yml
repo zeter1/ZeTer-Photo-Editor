@@ -8,10 +8,18 @@ on:
     branches: [main]
     paths:
       - .github/workflows/real-photo-intake.yml
+      - tools/real-photo-source-integrity.mjs
+      - tools/fetch-real-photo-source.mjs
+      - tools/decode-real-photo.py
+      - tools/real-photo-bundle-admission.mjs
   push:
     branches: [main]
     paths:
       - .github/workflows/real-photo-intake.yml
+      - tools/real-photo-source-integrity.mjs
+      - tools/fetch-real-photo-source.mjs
+      - tools/decode-real-photo.py
+      - tools/real-photo-bundle-admission.mjs
 
 permissions:
   contents: read
