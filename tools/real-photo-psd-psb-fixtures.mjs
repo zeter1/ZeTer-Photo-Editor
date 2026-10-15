@@ -31,8 +31,13 @@ export function verifyRawPhotoMergedPlanes(bytes,native,version,bitsPerChannel) 
   let offset=26;
   for(let section=0;section<2;section++) {
     const length=u32(offset);
-    offset+=4+length;
-    if(!Number.isSafeInteger(offset) || offset>bytes.length)
+    // Pinned one-layer PSD16/PSB32 defect fixtures have no color mode data,
+    // Image Resources or embedded ICC. Pixel hashes alone cannot prove color
+    // interpretation, so reject even well-formed unreviewed metadata.
+    if(length!==0)
+      fail(section===0?'unexpected color mode data':'unexpected image resources');
+    offset+=4;
+    if(offset>bytes.length)
       fail('invalid color/resources length');
   }
   let maskLength;
@@ -92,6 +97,9 @@ export async function verifyPhotoDefectDocument({bytes,native,version,bitsPerCha
      header.colorMode!==3 || header.channels!==4 ||
      header.width!==native.width || header.height!==native.height)
     fail('unexpected PSD/PSB header, dimensions, depth or color mode');
+  // Reject any unreviewed top-level color metadata before the general codec
+  // normalizes or ignores it; also validate merged native planes first.
+  verifyRawPhotoMergedPlanes(bytes,native,version,bitsPerChannel);
   const decoded=await decodePsd(bytes,{maxPixels:2_000_000,maxLayers:4});
   if(decoded.layers?.length!==1 || decoded.groups?.length ||
      decoded.layers[0]?.name!=='Pinned photo defect (8-bit derived)')
@@ -102,7 +110,6 @@ export async function verifyPhotoDefectDocument({bytes,native,version,bitsPerCha
      layer?.bitsPerChannel!==bitsPerChannel ||
      hashNativeCleanReference(layer.data,bitsPerChannel)!==expectedHash)
     fail('imported layer native words or geometry mismatch');
-  verifyRawPhotoMergedPlanes(bytes,native,version,bitsPerChannel);
   const quality=measureRealPhotoNativeQuality({
     before:decoded.layers[0].pixelBuffer.data,after:native.clean.slice(),
     clean:native.clean,selectedIndices:native.selectedIndices,bitsPerChannel,
