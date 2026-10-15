@@ -1,3 +1,5 @@
+> **037B2b-3a (branch, CI pending, 2026-10-15):** [native PSD16/PSB32 defect bridge](037b2b-native-psd-psb-bridge.md) проверяет точные native layer+merged words, 8288 ROI и offline pinned-manifest gate. Только ZeTer writer→reader и структурный суррогат; настоящая фотография, независимый decoder/ICC/EXIF review, внешнее чтение PSD/PSB и browser quality ещё не получены. Далее 037B2b-2/3, 037C; P0 002 / Stage 003 OPEN.
+
 ## 037B2b-1 — offline photo/native bundle admission (ЗАКРЫТА, PR + exact-main CI success, 2026-10-15)
 
 - Добавлен [037B2b-1](037b2b-photo-bundle-admission.md): CLI `candidate` / `verify` для локальных CC0 original JPEG, externally decoded RGBA8, independently pinned RGB16/Float32 clean+defect LE SHA-256; строгая схема manifest, 8288 connected ROI, проверка alpha и отказ при подмене байтов/метаданных.
