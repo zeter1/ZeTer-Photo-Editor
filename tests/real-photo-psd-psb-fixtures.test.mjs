@@ -277,13 +277,13 @@ test('037B2b-3g: saved PSD16/PSB32 refuse hidden native layer metadata even afte
       repinned.documents[key].fileSha256=createHash('sha256').update(forged).digest('hex');
       await assert.rejects(
         verifyPhotoDefectDocument({bytes:forged,native,version,bitsPerChannel:bits}),
-        /037 photo PSD\\/PSB:/,
+        /037 photo PSD.*PSB:/,
         key+' must reject raw '+label+' with native pixels unchanged',
       );
       await assert.rejects(
         verifyPhotoDefectArtifactSet({...input,artifact:repinned,
           files:{...files,[key]:forged}}),
-        /037 photo PSD\\/PSB:/,
+        /037 photo PSD.*PSB:/,
         key+' saved artifact must reject '+label+' after repinning file SHA',
       );
     }
