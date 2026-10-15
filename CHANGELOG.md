@@ -6,7 +6,7 @@
 
 - Добавлено: test-only Python/std-lib разбор сохранённого PSD16/PSB32 с отдельной проверкой полного native RGBA слоя и merged-композита относительно независимо закреплённого SHA-256, без вызова ZeTer JavaScript-кодека.
 - Добавлено: отрицательные Node-регрессии на подмену layer/merged bytes, неверные hashes, размеры, формат, сжатие и повреждение длины файла; строгое ограничение размера входа.
-- Проверка: PR/CI ожидаются; результаты фиксируются после исполнения, а не до него.
+- Проверено: [PR #233](https://github.com/zeter1/ZeTer-Photo-Editor/pull/233) → [7cc4459](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7cc4459b787f66a2590ae82d2ab4edb76f685867); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38724278629), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38724736301) — полная сборка/Node/Python, Chromium `file://`, JSON/profiles, diff hygiene.
 - Ограничения: синтетический источник; это не полноценный внешний Photoshop decoder, не реальная фотография, не ICC/EXIF review и не браузерное измерение качества. Production runtime и версия 1.46.1 не изменены.
 
 ### 2026-10-15 — Ужесточена проверка EXIF исходного JPEG перед офлайн-декодированием

@@ -1,6 +1,6 @@
 # 037B2b-3c — independent Python PSD16/PSB32 native plane readback
 
-**P1, implementation in progress (2026-10-15).** Independent of the ZeTer JavaScript PSD encoder/decoder, but **NOT** an external Adobe/Photoshop-approved decoder, and not a real CC0 image. Stage 037, 002, 003 remain OPEN.
+**037B2b-3c CLOSED (2026-10-15): [PR #233](https://github.com/zeter1/ZeTer-Photo-Editor/pull/233) merged as [7cc4459](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7cc4459b787f66a2590ae82d2ab4edb76f685867); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38724278629) and [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38724736301).** Independent of the ZeTer JavaScript PSD encoder/decoder, but **NOT** an external Adobe/Photoshop-approved decoder, and not a real CC0 image. Stage 037, 002, 003 remain OPEN.
 
 ## Scope
 
@@ -25,8 +25,8 @@ The expected SHA-256 values come from the separately reviewed manifest, not Pyth
 
 ## Evidence / next
 
-- [ ] Local `node --test tests/real-photo-psd-python-readback.test.mjs`, full `npm run check`, actual Chromium `file://` smoke / artifact / profile CI, diff hygiene.
-- [ ] PR CI, review, merge and exact-main CI; update this task and `task/NEXT.md` with actual URLs/SHAs and gate status, not assumed success.
+- [x] PR and main CI: full `npm run check` (Node and Python), real Chromium `file://` smoke, artifact/profiles, generated parity and diff hygiene passed.
+- [x] [PR #233](https://github.com/zeter1/ZeTer-Photo-Editor/pull/233) merged (squash `7cc4459`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38724278629) and [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38724736301) success. Only the Python readback subpass is closed.
 - [ ] **037B2b-2** obtain licensed genuine original, independent EXIF/ICC/color review and frozen source/decoded/native hashes.
 - [ ] **037B2b-3 remaining** run actual saved fixtures through independent third-party Photoshop-compatible reader with provenance; Python self-contained structural reader is only a cross-language native layout oracle.
 - [ ] **037C** real Chromium `file://` native Worker Content-Aware Fill, 3 trials/format, clean-photo quality + honest RSS/latency.
