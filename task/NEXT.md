@@ -1,3 +1,9 @@
+## 037B2b-1 — offline photo/native bundle admission (реализовано в PR, gate ожидается)
+
+- Добавлен [037B2b-1](037b2b-photo-bundle-admission.md): CLI `candidate` / `verify` для локальных CC0 original JPEG, externally decoded RGBA8, independently pinned RGB16/Float32 clean+defect LE SHA-256; строгая схема manifest, 8288 connected ROI, проверка alpha и отказ при подмене байтов/метаданных.
+- **Без обмана статуса:** JPEG entropy decode и ICC/EXIF остаются внешней рецензируемой процедурой; фотофайлы и reviewed source/decoded/native SHA-256 отсутствуют; test-only surrogate **не** реальная фотография. Chromium/Photoshop parity не доказаны; stage 037 OPEN.
+- **Дальше:** 037B2b-2 получить licensed original + independently decoded/versioned RGBA8 + immutable real pins; 037B2b-3 реально сформировать PSD16/PSB32 с damage-only ROI; 037C Chromium file:// ×3/format с pixel oracle/observational memory. P0 002 и Stage 003 открыты. Статус PR/CI/merge вписывать только после фактических результатов.
+
 ## 037B2a — bridge pinned decoded RGBA8 → RGB16/Float32 connected native references (СЛИТО; PR + exact-main CI success, 2026-10-14)
 
 - Реализован test-only [037B2a](037b2a-photo-native-fixture-bridge.md): детерминированный bounded crop RGBA8 → нативные Uint16/Float32 RGB с отдельными clean/defect buffers, точная 8288-пиксельная двухостровная diagonal connected ROI, неизменённые outside-selection и alpha. Кандидат native LE SHA-256 не считается закреплённым: допуск требует **независимый** `expectedReferenceSha256` и подтверждённый decoded RGBA8 SHA-256; есть негативные unit-проверки.
