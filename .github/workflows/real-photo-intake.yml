@@ -1,0 +1,125 @@
+# A deliberately separate, opt-in/repo-change-only CC0 source intake.
+# The generated hashes are CANDIDATES, never independent reviewed pins.
+name: Real-photo CC0 intake (unreviewed)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/real-photo-intake.yml
+      - tools/real-photo-source-integrity.mjs
+      - tools/fetch-real-photo-source.mjs
+      - tools/decode-real-photo.py
+      - tools/real-photo-bundle-admission.mjs
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/real-photo-intake.yml
+      - tools/real-photo-source-integrity.mjs
+      - tools/fetch-real-photo-source.mjs
+      - tools/decode-real-photo.py
+      - tools/real-photo-bundle-admission.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-photo-intake-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      ZPE_PHOTO_DIR: /tmp/zpe-real-photo-candidate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Pin external Pillow decoder
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zpe-photo-python"
+          "$RUNNER_TEMP/zpe-photo-python/bin/python" -m pip install --disable-pip-version-check Pillow==12.0.0
+          echo "$RUNNER_TEMP/zpe-photo-python/bin" >> "$GITHUB_PATH"
+
+      - name: Download exact Commons original (SHA-1 checked before write)
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR"
+          node tools/fetch-real-photo-source.mjs "$ZPE_PHOTO_DIR/original.jpg" > "$ZPE_PHOTO_DIR/acquisition.json"
+          node tools/inspect-real-photo-source.mjs "$ZPE_PHOTO_DIR/original.jpg" > "$ZPE_PHOTO_DIR/inspection.json"
+
+      - name: Decode actual JPEG entropy / orientation / ICC with Pillow
+        run: |
+          python3 tools/decode-real-photo.py "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" "$ZPE_PHOTO_DIR/decoder.json" > "$ZPE_PHOTO_DIR/decoder-run.json"
+          node tools/real-photo-bundle-cli.mjs candidate "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" "$ZPE_PHOTO_DIR/decoder.json" > "$ZPE_PHOTO_DIR/bundle-candidate.json"
+
+      - name: Independently recompute candidate digests (NOT pin review)
+        run: |
+          python3 - "$ZPE_PHOTO_DIR" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+
+          folder = Path(sys.argv[1])
+          original = (folder / 'original.jpg').read_bytes()
+          decoded = (folder / 'decoded.rgba').read_bytes()
+          acquire = json.loads((folder / 'acquisition.json').read_text())
+          inspection = json.loads((folder / 'inspection.json').read_text())
+          decoder_run = json.loads((folder / 'decoder-run.json').read_text())
+          candidate = json.loads((folder / 'bundle-candidate.json').read_text())
+          m = candidate['manifest']
+          sha1 = hashlib.sha1(original).hexdigest()
+          source_sha256 = hashlib.sha256(original).hexdigest()
+          decoded_sha256 = hashlib.sha256(decoded).hexdigest()
+          assert len(original) == 2783744, 'Commons original byte count mismatch'
+          assert sha1 == 'c7fc9f013c70e01f164d232462ddd6e37e4079c4'
+          assert len(decoded) == 2560 * 1920 * 4
+          assert acquire['status'] == 'source-candidate-unreviewed'
+          assert decoder_run['status'] == 'decoded-candidate-unreviewed'
+          assert candidate['status'] == 'candidate-unpinned-not-admitted'
+          assert acquire['sha256Candidate'] == source_sha256
+          assert inspection['sha256'] == source_sha256
+          assert decoder_run['sourceSha256Candidate'] == source_sha256
+          assert decoder_run['rgbaSha256Candidate'] == decoded_sha256
+          assert m['sourceSha256'] == source_sha256
+          assert m['decoded']['sha256'] == decoded_sha256
+          assert m['decoder'] == json.loads((folder / 'decoder.json').read_text())
+          receipt = {
+              'kind': 'zpe-real-photo-ci-candidate-receipt-v1',
+              'status': 'unreviewed-candidate',
+              'sourcePage': 'https://commons.wikimedia.org/wiki/File:Red-brick-wall-texture-clean.jpg',
+              'licenseClaim': 'CC0-1.0 (source page; human review still required)',
+              'authorClaim': 'MartinThoma',
+              'originalSha1': sha1,
+              'originalSha256Candidate': source_sha256,
+              'decodedRgbaSha256Candidate': decoded_sha256,
+              'originalBytes': len(original),
+              'decodedBytes': len(decoded),
+              'independentLicenseIccExifVisualReviewComplete': False,
+              'independentlyPinnedHashes': False,
+              'nativeRealPhotoPsdPsbVerified': False,
+              'browserRealPhotoBenchmarkVerified': False,
+              'photoshopCompatibilityVerified': False,
+          }
+          (folder / 'ci-candidate-receipt.json').write_text(
+              json.dumps(receipt, sort_keys=True, indent=2) + '\n'
+          )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+          (cd "$ZPE_PHOTO_DIR" && sha256sum original.jpg decoded.rgba > SHA256SUMS)
+
+      - name: Upload ephemeral unreviewed candidate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-unreviewed-candidate
+          path: /tmp/zpe-real-photo-candidate/
+          if-no-files-found: error
+          retention-days: 7

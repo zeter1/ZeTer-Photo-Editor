@@ -18,6 +18,7 @@ test('037B1: original JPEG marker/SOF/scan inspection reports candidate but no p
   const bytes=jpeg(),p=inspectPhotoJpeg(bytes,args(bytes));
   assert.equal(p.kind,'zpe-real-photo-jpeg-source-v1');
   assert.equal(p.sha256,hash(bytes,'sha256'));
+  assert.equal(p.jpegTrailingBytes,0);
   assert.equal(p.sha1,hash(bytes,'sha1'));
   assert.equal(p.width,1025);assert.equal(p.height,1025);
   assert.equal(p.precision,8);assert.equal(p.components,3);
@@ -45,6 +46,22 @@ test('037B1: no unpinned JPEG admission; fail closed on changed bytes, wrong geo
   ];
   for(const badCase of bad) assert.throws(badCase,/037 photo source/);
   assert.equal(verifyPinnedPhotoJpeg(bytes,{...options,expectedSha256:sha}).sha256,sha);
+});
+
+
+test('037B2b-2h: arbitrary SHA-1-pinned JPEG trailer never uses Commons-only exception',()=>{
+  // A correctly re-pinned synthetic file must NOT inherit the 434-byte
+  // trailer exception reserved for the exact original Commons SHA-1+size+EOI.
+  const raw=jpeg();
+  for(const padding of [
+    Uint8Array.from([1]),
+    new Uint8Array(434),
+    Uint8Array.from([0xff,0xd9,1,2,3]),
+  ]) {
+    const fake=Uint8Array.from([...raw,...padding]);
+    assert.throws(()=>inspectPhotoJpeg(fake,args(fake)),
+      /037 photo source.*(trailing|EOI)/);
+  }
 });
 
 test('037B1: independent RGBA8 decode fingerprint enforces exact native-order byte hash and opacity',()=>{

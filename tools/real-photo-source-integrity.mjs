@@ -5,6 +5,12 @@ import {createHash} from 'node:crypto';
 import {parseExifOrientation} from './real-photo-exif-orientation.mjs';
 
 const SHA1=/^[0-9a-f]{40}$/, SHA256=/^[0-9a-f]{64}$/;
+// The original Wikimedia JPEG has 434 non-JPEG trailing bytes AFTER its EOI.
+// Exception applies only to the exact Commons SHA-1, total size and EOI offset;
+// arbitrary JPEGs and unit-policy overrides must still terminate at EOI.
+const COMMONS_ORIGINAL_SHA1='c7fc9f013c70e01f164d232462ddd6e37e4079c4';
+const COMMONS_ORIGINAL_BYTES=2783744;
+const COMMONS_ORIGINAL_EOI_OFFSET=2783308;
 const MAX_SOURCE_BYTES=32*1024*1024;
 const fail=message=>{throw new TypeError('037 photo source: '+message);};
 
@@ -19,9 +25,16 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
   const source=Buffer.from(bytes.buffer,bytes.byteOffset,bytes.byteLength);
   const sha1=createHash('sha1').update(source).digest('hex');
   if (sha1!==expectedSha1) fail('original JPEG SHA-1 mismatch');
-  if (bytes[0]!==0xff || bytes[1]!==0xd8 ||
-      bytes[bytes.length-2]!==0xff || bytes[bytes.length-1]!==0xd9)
-    fail('missing JPEG SOI/EOI markers');
+  const lastEoiOffset=source.lastIndexOf(Buffer.from([0xff,0xd9]));
+  const trailingBytes=lastEoiOffset<0?-1:bytes.length-lastEoiOffset-2;
+  const hasExactEoi=trailingBytes===0;
+  const isDocumentedCommonsTrailer=sha1===COMMONS_ORIGINAL_SHA1 &&
+    bytes.length===COMMONS_ORIGINAL_BYTES &&
+    lastEoiOffset===COMMONS_ORIGINAL_EOI_OFFSET && trailingBytes===434;
+  if(bytes[0]!==0xff || bytes[1]!==0xd8 ||
+      (!hasExactEoi && !isDocumentedCommonsTrailer))
+    fail('missing JPEG SOI/EOI markers or untrusted trailing bytes');
+
   let pos=2,frame=null,sawScan=false,hasExif=false,hasIcc=false;
   let exifOrientation=null;
   let iccSegmentCount=null;
@@ -85,6 +98,7 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
     bytes:bytes.byteLength,width:frame.width,height:frame.height,
     components:frame.components,precision:frame.precision,
     progressive:frame.progressive,hasExif,exifOrientation,hasIcc,
+    jpegTrailingBytes:trailingBytes,
     pixelDecodeVerified:false,colorSpaceVerified:false,
   });
 }

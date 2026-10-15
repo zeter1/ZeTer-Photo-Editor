@@ -2,6 +2,13 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-15 — Получен подлинный CC0 original и проверены native fixture candidate SHA-256 (037B2b-2h)
+
+- Исправлено: test-only JPEG admission допускает 434-байтовый MPO trailer **только** у SHA-1-pinned Commons original с фиксированным размером/позицией EOI; произвольные дополнительные байты отклоняются. Pillow-декодер читает primary frame 0 у подлинного MPO, не изменяя запрет на неподтверждённые источники.
+- Добавлено: отдельный GitHub Actions PR/manual/main workflow для HTTPS/JPEG/SHA-1 acquisition → Pillow 12.0.0 RGBA8 → независимая Python SHA-256 сверка → временный artifact с JSON и оригинальными байтами, плюс offline регрессии на поддельный JPEG trailer.
+- Проверено: [реальный CI intake success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38767164287), artifact `11989382184`; source SHA-256 candidate `dd01cf047c9b2b7a635e29c68a52c5585d7b346f4f99713f79968ea1ea4348b8`, RGBA8 candidate `d1aa01e37ee9944099db871be53f9d30fd00bdd12ead94ba4e09f1dd765b1641`. Независимый локальный OpenCV 4.13.0/контейнер Pillow 12.3.0 подтвердил 0 отличий RGB и тот же RGBA8 хеш после скачивания artifact. [Подробный handoff](task/037b2b-2h-github-real-photo-intake.md).
+- Ограничения проверки: оригинальный MPO имеет EXIF Orientation=1 без встроенного ICC, цвет рассматривается как assumed sRGB согласно карточке Commons; внешнее долговечное pinned review и Photoshop/Chromium photo benchmark ещё не выполнены. Глобальный CI для PR проверяется отдельно. Production/runtime и версия не менялись.
+
 ### 2026-10-15 — Целостность записи оригинального CC0 JPEG при сбое I/O (037B2b-2g)
 
 - Исправлено: test-only загрузчик JPEG использует эксклюзивную запись со сбросом на диск и откатом собственного нового inode при partial write/fsync failure; не удаляет чужой заменивший файл.
