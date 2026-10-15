@@ -1,3 +1,5 @@
+> **037B2b-3b, in review:** при сохранении ZeTer PSD16/PSB32 теперь формируется `codec-evidence.json` и отдельный `verify` повторно проверяет записанные байты. См. [handoff](../../../task/037b2b-3b-artifact-integrity.md). Это не заменяет реального исходника, внешнего JPEG/ICC/EXIF review или Photoshop golden.
+
 ## 037B2b-1 — offline pin verification available; actual photo still absent
 
 - `tools/real-photo-bundle-cli.mjs candidate` derives **unadmitted** hash candidates only; `verify` requires separately reviewed SHA-256 original, decoded RGBA8 and native RGB16/Float32 clean+defect references. See [task handoff](../../../task/037b2b-photo-bundle-admission.md).

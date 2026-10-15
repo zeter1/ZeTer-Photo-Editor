@@ -7,6 +7,8 @@ import {inspectPhotoBundleCandidate,admitPhotoBundle}
 import {hashNativeCleanReference} from '../tools/real-photo-native-quality.mjs';
 import {createVerifiedPhotoDefectDocuments,verifyPhotoDefectDocument}
   from '../tools/real-photo-psd-psb-fixtures.mjs';
+import {serializePhotoDefectArtifactEvidence,verifyPhotoDefectArtifactSet}
+  from '../tools/real-photo-psd-psb-artifacts.mjs';
 
 // Structural, non-entropy-decodable JPEG surrogate: NOT genuine photo pixels,
 // ICC/EXIF review or an Adobe-authored document. Test-only source override.
@@ -100,4 +102,48 @@ test('037B2b-3: tampered source, pins, document bytes or native words fail close
   await assert.rejects(createVerifiedPhotoDefectDocuments({
     ...input,manifest:{...input.manifest,photoshopParityVerified:true},
   }));
+});
+
+test('037B2b-3b: saved PSD16/PSB32 proof is strict and rechecks every native word',async()=>{
+  const input=surrogate(); // NOT genuine JPEG entropy decoding.
+  const evidence=await createVerifiedPhotoDefectDocuments(input);
+  const artifact=serializePhotoDefectArtifactEvidence(evidence);
+  const files={psd16:evidence.documents.psd16.bytes,
+    psb32:evidence.documents.psb32.bytes};
+  const verify=patch=>verifyPhotoDefectArtifactSet({
+    ...input,artifact,files,...patch,
+  });
+  const ok=await verify();
+  assert.equal(ok.status,'saved-zpe-native-artifacts-verified');
+  assert.equal(ok.photoshopParityVerified,false);
+  assert.equal(ok.browserBenchmarkVerified,false);
+  assert.equal(ok.documents.psd16.nativeLayerAndCompositeExact,true);
+  assert.equal(ok.documents.psb32.nativeLayerAndCompositeExact,true);
+
+  const editedHash=structuredClone(artifact);
+  editedHash.documents.psd16.fileSha256='0'.repeat(64);
+  await assert.rejects(verify({artifact:editedHash}),/psd16 proof mismatch: fileSha256/);
+
+  const forgedClaim=structuredClone(artifact);
+  forgedClaim.photoshopParityVerified=true;
+  await assert.rejects(verify({artifact:forgedClaim}),/artifact summary mismatch/);
+
+  const extraClaim=structuredClone(artifact);
+  extraClaim.independentPsdDecoderVerified=true;
+  await assert.rejects(verify({artifact:extraClaim}),/invalid artifact fields/);
+
+  const extraProof=structuredClone(artifact);
+  extraProof.documents.psb32.qualityScore=1;
+  await assert.rejects(verify({artifact:extraProof}),/invalid psb32 proof fields/);
+
+  const corrupted=files.psd16.slice();corrupted[corrupted.length-1]^=1;
+  await assert.rejects(verify({files:{...files,psd16:corrupted}}),
+    /merged plane native word mismatch/);
+
+  await assert.rejects(verify({files:{...files,psb32:files.psd16}}));
+  await assert.rejects(verify({files:{...files,psb32:new Uint8Array()}}),
+    /missing saved psb32 bytes/);
+
+  const wrongSource=input.rgba.slice();wrongSource[0]^=1;
+  await assert.rejects(verify({rgba:wrongSource}));
 });
