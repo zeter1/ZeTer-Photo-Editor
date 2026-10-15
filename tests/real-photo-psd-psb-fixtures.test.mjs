@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
+import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {decodePsd,inspectPsdHeader} from '../src/formats/psd.js';
 import {inspectPhotoBundleCandidate,admitPhotoBundle}
   from '../tools/real-photo-bundle-admission.mjs';
@@ -287,5 +291,72 @@ test('037B2b-3g: saved PSD16/PSB32 refuse hidden native layer metadata even afte
         key+' saved artifact must reject '+label+' after repinning file SHA',
       );
     }
+  }
+});
+
+
+test('037B2b-3h: pinned psd-tools independently reads raw PSD16/PSB32 layer + composite words',async(t)=>{
+  const python=process.env.PYTHON || 'python3';
+  const probe=spawnSync(python,['-c',
+    'from importlib.metadata import version; print(version("psd-tools"))'],
+  {encoding:'utf8'});
+  if(probe.status!==0 || probe.stdout.trim()!=='1.19.0') {
+    if(process.env.ZPE_REQUIRE_EXTERNAL_PSD_TESTS==='1')
+      assert.fail('CI must install pinned psd-tools 1.19.0: '+probe.stderr);
+    t.skip('Optional psd-tools 1.19.0 not installed; CI gate requires it');
+    return;
+  }
+  const input=surrogate(); // Synthetic source, not genuine photographic evidence.
+  const artifacts=await createVerifiedPhotoDefectDocuments(input);
+  const directory=mkdtempSync(join(tmpdir(),'zpe-psd-tools-'));
+  const run=(format,path,native,fileHash,width='240',height='240')=>spawnSync(python,[
+    'tools/verify-real-photo-psd-external.py',format,path,width,height,native,fileHash,
+  ],{encoding:'utf8',maxBuffer:1024*1024});
+  const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+  try {
+    for(const [key,format,reference] of [
+      ['psd16','PSD16','rgb16'],['psb32','PSB32','float32'],
+    ]) {
+      const bytes=artifacts.documents[key].bytes;
+      const file=join(directory,key+'.'+(key==='psd16'?'psd':'psb'));
+      writeFileSync(file,bytes);
+      const fileSha=hash(bytes);
+      const nativeSha=input.manifest.native[reference].damagedSha256;
+      const result=run(format,file,nativeSha,fileSha);
+      assert.equal(result.status,0,key+': '+result.stderr);
+      const parsed=JSON.parse(result.stdout);
+      assert.deepEqual(Object.keys(parsed).sort(),[
+        'browserBenchmarkVerified','fileSha256','format','height',
+        'nativeLayerSha256','nativeMergedSha256','photoshopParityVerified',
+        'reader','readerVersion','realPhotoVerified','status','width',
+      ].sort());
+      assert.equal(parsed.reader,'psd-tools');
+      assert.equal(parsed.readerVersion,'1.19.0');
+      assert.equal(parsed.status,'external-psd-tools-native-readback-only');
+      assert.equal(parsed.nativeLayerSha256,nativeSha);
+      assert.equal(parsed.nativeMergedSha256,nativeSha);
+      assert.equal(parsed.fileSha256,fileSha);
+      assert.equal(parsed.photoshopParityVerified,false);
+      assert.equal(parsed.realPhotoVerified,false);
+      assert.equal(parsed.browserBenchmarkVerified,false);
+
+      assert.notEqual(run(format,file,'0'.repeat(64),fileSha).status,0,
+        'native mismatch must fail');
+      assert.notEqual(run(format,file,nativeSha,'0'.repeat(64)).status,0,
+        'file mismatch must fail');
+      assert.notEqual(run(format,file,nativeSha,fileSha,'241').status,0,
+        'dimension mismatch must fail');
+      assert.notEqual(run(key==='psd16'?'PSB32':'PSD16',file,nativeSha,fileSha).status,0,
+        'format mismatch must fail');
+      const mutated=bytes.slice();
+      mutated[mutated.length-1]^=1; // merged native word changes; repin file only.
+      writeFileSync(file,mutated);
+      const corrupted=run(format,file,nativeSha,hash(mutated));
+      assert.notEqual(corrupted.status,0,'repinned but corrupted merged plane must fail');
+      assert.match(corrupted.stderr,/merged native SHA-256 mismatch/);
+      writeFileSync(file,bytes);
+    }
+  } finally {
+    rmSync(directory,{recursive:true,force:true});
   }
 });
