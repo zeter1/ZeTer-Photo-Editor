@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {mkdtempSync,readFileSync,writeFileSync,symlinkSync,rmSync} from 'node:fs';
+import {mkdtempSync,readFileSync,writeFileSync,symlinkSync,rmSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
@@ -53,14 +53,9 @@ test('037B2b-3 rejects fake source/ROI claims and symlinked native artifact befo
     assert.match(run().stderr,/symlinked or oversized psd16-defect.psd/);
 
     // Neither preflight rejection nor a tampered source may publish a receipt.
-    const {existsSync}=requireExists();
     assert.equal(existsSync(join(dir,'independent-native-readback.json')),false);
   } finally {
     rmSync(dir,{force:true,recursive:true});
   }
 });
 
-function requireExists() {
-  // Bundled helper avoids masking the original failure on cleanup.
-  return {existsSync:path=>{try{return !!readFileSync(path);}catch{return false;}}};
-}
