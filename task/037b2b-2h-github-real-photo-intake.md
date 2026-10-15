@@ -1,6 +1,16 @@
+> **037B2b-2h intake SUCCESS (2026-10-15, [PR #242](https://github.com/zeter1/ZeTer-Photo-Editor/pull/242), [real-photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38767164287)).** Настоящий CC0 original + Pillow RGBA8 получены в GitHub Actions. Artifact `zpe-real-photo-unreviewed-candidate` ID `11989382184`, retention до 2026-10-22; архив SHA-256 `84687bd1bef99733e22d751529f03876e48bfe4b4995a5082da23ec4693df227`. Не отмечать `037B2b-2` полностью закрытой до persistent reviewed pins и независимой цветовой рецензии.
+
+## Реальные результаты и независимая проверка (2026-10-15)
+
+- **Источник:** точный Wikimedia SHA-1 `c7fc9f013c70e01f164d232462ddd6e37e4079c4`; размер **2 783 744 bytes**; source SHA-256 **candidate** `dd01cf047c9b2b7a635e29c68a52c5585d7b346f4f99713f79968ea1ea4348b8`.
+- **Pillow 12.0.0 / LittleCMS 2.17:** реальный MPO container (2 кадра по локальной независимой инспекции, первый frame 0 — основной JPEG 2560×1920), JPEG EOI at 2783308 и известный 434-byte trailer; EXIF Orientation **1**, встроенного ICC **нет**, `assumed-sRGB` (sRGB заявлен в metadata Commons; профиль не встроен). Точный RGBA8 19 660 800 bytes SHA-256 **candidate** `d1aa01e37ee9944099db871be53f9d30fd00bdd12ead94ba4e09f1dd765b1641`.
+- **Независимое readback из загруженного GitHub artifact:** Python SHA-1/SHA-256 полностью совпали с Node CI; локальный Pillow 12.3.0 повторно дал тот же RGBA8 SHA-256; OpenCV 4.13.0 отдельно декодировал основное изображение с **0 отличающихся из 14 745 600 RGB каналов** (max/mean absolute difference = 0). Визуальный просмотр уменьшенного изображения: неоднородная настоящая кирпичная кладка, без очевидного пустого/подставного raster. Это проверка данного декодирования, а не общая гарантия любого фото/профиля.
+- **Кандидаты native SHA-256 (ещё НЕ externally pinned)**: RGB16 clean `b1eee911c356a3815dd548d3a3d708fd8457b16e35e0eff19dc80a48429fec0a`, damaged `70816f5177ad5008ee164513931e5cf3866c0134ce1a27362df430a4594a7228`; Float32 clean `48ea38caae87ac76673bd5432f04e42408ab9d032feac8677b0d025de0794f15`, damaged `5ca57278cc7e28fd440435248667ec14236b527be3609ca5f3083e0b1fb63735`. Derived from RGBA8 (не true sensor 16/32-bit capture).
+- **CI gate:** [real-photo intake success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38767164287), raw/download/entropy/Pillow/fingerprint/manifest/upload пройдены; artifact доступен через GitHub Actions и сохранён локально для отдельной проверки. Общий `npm run check`/Chromium PR CI — проверить отдельно перед merge.
+
 # 037B2b-2h — GitHub Actions acquisition of genuine CC0 photo candidate
 
-**Статус: CI intake код добавлен; настоящее photo-admission 037B2b-2 всё ещё OPEN.** Скрипты источника и Pillow уже существовали; эта проходка соединяет их в отдельный реальный GitHub Actions workflow, а не в очередную синтетическую проверку.
+**Статус: реальный CC0 intake SUCCESS; окончательная reviewed-manifest приёмка 037B2b-2 всё ещё OPEN.** Скрипты источника и Pillow уже существовали; эта проходка соединяет их в отдельный реальный GitHub Actions workflow, а не в очередную синтетическую проверку.
 
 ## Почему это нужно
 
