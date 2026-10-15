@@ -1,0 +1,101 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {decodePsd,inspectPsdHeader} from '../src/formats/psd.js';
+import {inspectPhotoBundleCandidate,admitPhotoBundle}
+  from '../tools/real-photo-bundle-admission.mjs';
+import {hashNativeCleanReference} from '../tools/real-photo-native-quality.mjs';
+import {createVerifiedPhotoDefectDocuments,verifyPhotoDefectDocument}
+  from '../tools/real-photo-psd-psb-fixtures.mjs';
+
+// Structural, non-entropy-decodable JPEG surrogate: NOT genuine photo pixels,
+// ICC/EXIF review or an Adobe-authored document. Test-only source override.
+function surrogate() {
+  const width=240,height=240;
+  const jpeg=Uint8Array.from([0xff,0xd8,0xff,0xe0,0,4,0,0,
+    0xff,0xc0,0,17,8,0,240,0,240,3,1,0x11,0,2,0x11,0,3,0x11,0,
+    0xff,0xda,0,8,3,1,0,2,0,3,0,0x01,0x33,0xff,0xd9]);
+  const hash=(bytes,alg)=>createHash(alg).update(bytes).digest('hex');
+  const rgba=new Uint8Array(width*height*4);
+  for(let y=0;y<height;y++) for(let x=0;x<width;x++) {
+    const i=(y*width+x)*4;
+    rgba[i]=(x*7+y*13)%256;
+    rgba[i+1]=(x*11+y*17)%256;
+    rgba[i+2]=(x*19+y*23)%256;
+    rgba[i+3]=255;
+  }
+  const sourcePolicy={page:'https://example.invalid/unit-only',
+    license:'CC0-1.0',sha1:hash(jpeg,'sha1'),width,height};
+  const decoder={
+    tool:'structural-surrogate',version:'1.0',command:'no entropy decoding in unit test',
+    exifOrientation:null,orientationApplied:false,iccPolicy:'assumed-sRGB',
+    colorEvidence:'Non-photographic RGB unit data; no ICC or EXIF validation',
+  };
+  const manifest=inspectPhotoBundleCandidate({
+    jpeg,rgba,decoder,sourcePolicy,crop:{x:0,y:0,width,height},
+  }).manifest;
+  return {jpeg,rgba,manifest,sourcePolicy};
+}
+
+test('037B2b-3: gated PSD16/PSB32 exports preserve exact native defect and composite words',async()=>{
+  const input=surrogate();
+  const result=await createVerifiedPhotoDefectDocuments(input);
+  assert.equal(result.kind,'zpe-photo-defect-psd-psb-codec-evidence-v1');
+  assert.equal(result.status,'zpe-codec-native-roundtrip-only');
+  assert.equal(result.sourcePrecisionBits,8);
+  assert.equal(result.selectedPixels,8288);
+  assert.equal(result.independentDecoderIccExifReviewRequired,true);
+  assert.equal(result.photoshopParityVerified,false);
+  assert.equal(result.browserBenchmarkVerified,false);
+  const admitted=admitPhotoBundle(input);
+  for(const [key,bits,version] of [['psd16',16,1],['psb32',32,2]]) {
+    const {bytes,proof}=result.documents[key];
+    assert.ok(bytes instanceof Uint8Array);
+    assert.equal(proof.format,bits===16?'PSD16':'PSB32');
+    assert.equal(proof.selectedPixels,8288);
+    assert.equal(proof.nativeLayerAndCompositeExact,true);
+    assert.equal(proof.unchangedOutsideSelectionAndAlpha,true);
+    assert.equal(proof.fileSha256,createHash('sha256').update(bytes).digest('hex'));
+    const header=inspectPsdHeader(bytes);
+    assert.equal(header.version,version);
+    assert.equal(header.bitsPerChannel,bits);
+    assert.equal(header.width,240);
+    assert.equal(header.height,240);
+    const decoded=await decodePsd(bytes);
+    const native=bits===16?admitted.fixtures.rgb16:admitted.fixtures.float32;
+    const pin=input.manifest.native[bits===16?'rgb16':'float32'].damagedSha256;
+    assert.equal(proof.nativeDefectSha256,pin);
+    assert.equal(hashNativeCleanReference(decoded.layers[0].pixelBuffer.data,bits),pin);
+    assert.equal(hashNativeCleanReference(decoded.compositePixelBuffer.data,bits),pin);
+    assert.equal(decoded.layers[0].pixelBuffer.data[3],bits===16?65535:1);
+    assert.equal(native.selectedPixels,8288);
+  }
+});
+
+test('037B2b-3: tampered source, pins, document bytes or native words fail closed',async()=>{
+  const input=surrogate();
+  const output=await createVerifiedPhotoDefectDocuments(input);
+  const admitted=admitPhotoBundle(input);
+  const native={...admitted.fixtures.rgb16,
+    expectedDamagedSha256:input.manifest.native.rgb16.damagedSha256};
+  const bytes=output.documents.psd16.bytes;
+  const verify=patch=>verifyPhotoDefectDocument({
+    bytes,native,version:1,bitsPerChannel:16,...patch,
+  });
+  const tampered=bytes.slice();tampered[0]^=1;
+  await assert.rejects(verify({bytes:tampered}));
+  await assert.rejects(verify({version:2}),/037 photo PSD\/PSB/);
+  await assert.rejects(verify({native:{...native,expectedDamagedSha256:'0'.repeat(64)}}),
+    /native source changed/);
+  const damaged=native.damaged.slice();damaged[0]^=1;
+  await assert.rejects(verify({native:{...native,damaged}}),/native source changed/);
+  const alteredRgba=input.rgba.slice();alteredRgba[0]^=1;
+  await assert.rejects(createVerifiedPhotoDefectDocuments({...input,rgba:alteredRgba}));
+  await assert.rejects(createVerifiedPhotoDefectDocuments({
+    ...input,manifest:{...input.manifest,native:{...input.manifest.native,
+      float32:{...input.manifest.native.float32,damagedSha256:'0'.repeat(64)}}},
+  }));
+  await assert.rejects(createVerifiedPhotoDefectDocuments({
+    ...input,manifest:{...input.manifest,photoshopParityVerified:true},
+  }));
+});
