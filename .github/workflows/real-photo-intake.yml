@@ -120,6 +120,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zpe-real-photo-unreviewed-candidate
-          path: ${{ runner.temp }}/zpe-real-photo-candidate/
+          path: /tmp/zpe-real-photo-candidate/
           if-no-files-found: error
           retention-days: 7
