@@ -65,3 +65,30 @@ test('037B1: independent RGBA8 decode fingerprint enforces exact native-order by
     ...opts,expectedRgbaSha256:hash(transparent,'sha256'),
   }),/037 photo source/);
 });
+
+
+test('037B2b-2b: ICC APP2 parts require complete unique numbering',()=>{
+  const base=jpeg();
+  const app2=(part,total,payload=[1,2,3])=>{
+    const data=[...Buffer.from('ICC_PROFILE\\0','ascii'),part,total,...payload];
+    return [0xff,0xe2,(data.length+2)>>8,(data.length+2)&255,...data];
+  };
+  const source=segments=>Uint8Array.from([
+    ...base.subarray(0,8),...segments.flat(),...base.subarray(8),
+  ]);
+  const valid=source([app2(2,2),app2(1,2)]);
+  assert.equal(inspectPhotoJpeg(valid,args(valid)).hasIcc,true);
+  for(const segments of [
+    [app2(1,2)],
+    [app2(1,2),app2(1,2)],
+    [app2(1,2),app2(2,3)],
+    [app2(0,1)], [app2(2,1)], [app2(1,0)],
+    [app2(1,1,[])],
+    [[0xff,0xe2,0,13,...Buffer.from('ICC_PROFILE','ascii')]],
+  ]) {
+    const bytes=source(segments);
+    assert.throws(()=>inspectPhotoJpeg(bytes,args(bytes)),/037 photo source.*ICC/);
+  }
+  const unrelated=source([[0xff,0xe2,0,6,1,2,3,4]]);
+  assert.equal(inspectPhotoJpeg(unrelated,args(unrelated)).hasIcc,false);
+});
