@@ -159,7 +159,7 @@ def publish_candidate_pair(rgba_path: Path, evidence_path: Path, rgba: bytes, ev
             info = os.fstat(report_output.fileno())
             created.append((evidence_path, info.st_dev, info.st_ino))
             json.dump(evidence, report_output, indent=2, ensure_ascii=False)
-            report_output.write('\\n')
+            report_output.write('\n')
         except BaseException:
             # Descriptors are still open during cleanup, preventing inode reuse.
             for path, device, inode in reversed(created):
