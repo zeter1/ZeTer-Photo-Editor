@@ -63,6 +63,42 @@ function layerRawChannelOffset(bytes,version) {
   return offset+4+extraLen;
 }
 
+// 037B2b-3d: locate exact one-layer fixture metadata independently of its
+// encoder. Mutations leave ALL pixel/channel bytes and native pins unchanged.
+function layerMetadataOffsets(bytes,version) {
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  let offset=26;
+  for(let i=0;i<2;i++) {
+    const length=view.getUint32(offset,false);
+    offset+=4+length;
+  }
+  offset+=(version===1?4:8)+(version===1?4:8)+4+8+(version===1?4:8);
+  const countOffset=offset;
+  assert.equal(view.getInt16(countOffset,false),-1);
+  offset+=2+16+2+4*(2+(version===1?4:8))+4+4+4;
+  const flagsOffset=offset-2;
+  const extraLength=view.getUint32(offset,false);
+  const extraStart=offset+4;
+  assert.ok(extraLength>=16);
+  assert.equal(view.getUint32(extraStart,false),0);
+  const pascalLength=bytes[extraStart+8];
+  const unicodeStart=extraStart+8+Math.ceil((1+pascalLength)/4)*4;
+  assert.equal(String.fromCharCode(...bytes.slice(unicodeStart+4,unicodeStart+8)),'luni');
+  const unicodeChars=view.getUint32(unicodeStart+12,false);
+  const unicodePadding=unicodeStart+16+unicodeChars*2;
+  assert.ok(unicodePadding<extraStart+extraLength,'fixture must have Unicode padding');
+  return {
+    count:countOffset+1,
+    flags:flagsOffset,
+    mask:extraStart+3,
+    blendingRanges:extraStart+7,
+    pascalName:extraStart+9,
+    unicodeBlock:unicodeStart+4,
+    unicodeName:unicodeStart+16,
+    unicodePadding,
+  };
+}
+
 test('037B2b-3c: independent Python readback proves exact native layer and merged pins', {
   skip,
 },async()=>{
@@ -95,6 +131,27 @@ test('037B2b-3c: independent Python readback proves exact native layer and merge
         'must reject unpinned layer reference');
       assert.notEqual(verify(fmt,data,pin,filename,239).status,0);
       assert.notEqual(verify(fmt==='PSD16'?'PSB32':'PSD16',data,pin,filename).status,0);
+
+      // All these edits preserve the native RGBA layer and merged SHA-256.
+      // A pixel-only structural reader used to accept these altered semantics.
+      const metadata=layerMetadataOffsets(data,bits===16?1:2);
+      for(const [name,position,message] of [
+        ['layer-count',metadata.count,/expected one RGBA layer/],
+        ['protected-layer',metadata.flags,/unexpected layer flags/],
+        ['silent-mask',metadata.mask,/unexpected layer mask/],
+        ['blending-ranges',metadata.blendingRanges,/unexpected layer blending ranges/],
+        ['pascal-name',metadata.pascalName,/unexpected Pascal layer name/],
+        ['unicode-key',metadata.unicodeBlock,/expected Unicode layer name block/],
+        ['unicode-name',metadata.unicodeName,/unexpected Unicode layer name/],
+        ['unicode-padding',metadata.unicodePadding,/invalid Unicode layer name padding/],
+      ]) {
+        const forged=data.slice();
+        forged[position]^=1;
+        await writeFile(join(dir,filename),forged);
+        const denied=verify(fmt,forged,pin,filename);
+        assert.notEqual(denied.status,0,name+' changed metadata must fail closed');
+        assert.match(denied.stderr,message,name);
+      }
 
       const alteredLayer=data.slice();
       const channelOffset=layerRawChannelOffset(alteredLayer,bits===16?1:2);
