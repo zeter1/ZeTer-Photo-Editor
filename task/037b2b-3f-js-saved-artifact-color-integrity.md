@@ -1,6 +1,6 @@
 # 037B2b-3f — JavaScript saved-artifact rejection of hidden PSD/PSB color metadata
 
-**Status: IN PROGRESS (2026-10-15).** This is a narrow test-only hardening pass, not photo/Photoshop interoperability.
+**Status: CLOSED (2026-10-15).** [PR #236](https://github.com/zeter1/ZeTer-Photo-Editor/pull/236) merged as [51e87e2](https://github.com/zeter1/ZeTer-Photo-Editor/commit/51e87e2e47c29c54406c50d1f662125188d5b54c); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38731725562) and [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38732120517). This is a narrow test-only hardening pass, not photo/Photoshop interoperability.
 
 ## Problem
 
@@ -22,10 +22,10 @@ verification even if pixel hashes were unchanged.
   8BIM/1039 ICC resource while leaving native layer/merged samples untouched.
 - [x] Test the real saved artifact `verifyPhotoDefectArtifactSet` entrypoint
   even when a malicious artifact's file SHA is recomputed.
-- [ ] PR CI: `npm run check`, Chromium `file://` smoke, JSON/profile checks.
-- [ ] Exact merged-code `main` CI success before marking this subpass CLOSED.
+- [x] PR CI: `npm run check`, Chromium `file://` smoke, JSON/profile checks.
+- [x] Exact merged-code `main` CI success before marking this subpass CLOSED.
 
-Run locally with `node --test tests/real-photo-psd-psb-fixtures.test.mjs`
+Verified in GitHub Actions: full Node/build, real Chromium `file://`, versioned JSON/profile checks, and diff hygiene. Run locally with `node --test tests/real-photo-psd-psb-fixtures.test.mjs`
 and `npm run check`. The reviewed genuine JPEG is not included.
 
 ## Next passes / still-open external gates
