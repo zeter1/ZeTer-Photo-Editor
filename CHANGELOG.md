@@ -4,10 +4,10 @@
 
 ### 2026-10-15 — Откат неполной пары RGBA8/JSON при ошибке Pillow-декодирования (037B2b-2f)
 
-- Исправлено: test-only декодер удаляет собственные новые RGBA8 и JSON при исключении публикации; учитывает идентичность файлов (device/inode), чтобы не удалить чужую замену.
+- Исправлено: test-only декодер удаляет собственные новые RGBA8 и JSON при исключении публикации; удерживает дескрипторы до конца отката и проверяет идентичность файлов (device/inode), чтобы не удалить чужую замену.
 - Исправлено: CLI не разыменовывает конечную символьную ссылку при выборе нового выходного файла; занятый путь и dangling symlink отвергаются.
 - Добавлено: регрессии partial JSON write, late collision, inode replacement, исходно занятого результата и dangling symlink.
-- Проверка: PR CI ожидается; подлинный JPEG и внешняя Photoshop-проверка отсутствуют. Версия и production runtime не менялись.
+- Проверено: [PR #240](https://github.com/zeter1/ZeTer-Photo-Editor/pull/240) слит в [b807ff9](https://github.com/zeter1/ZeTer-Photo-Editor/commit/b807ff9e7333564133f7ad81d53b68aa5fde3c88); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38756842339) — сборка/Node/Pillow, Chromium `file://`, diff hygiene. Exact-main CI проверяется отдельно. Подлинный JPEG и внешняя Photoshop-проверка отсутствуют; production runtime и версия не менялись.
 
 ### 2026-10-15 — Независимое стороннее чтение native PSD16/PSB32 (037B2b-3h)
 
