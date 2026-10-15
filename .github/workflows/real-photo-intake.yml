@@ -1,6 +1,6 @@
-# A deliberately separate, opt-in/repo-change-only CC0 source intake.
-# The generated hashes are CANDIDATES, never independent reviewed pins.
-name: Real-photo CC0 intake (unreviewed)
+# A separate CC0 intake followed by frozen-byte checks and photo-derived
+# PSD16/PSB32 native readback. Photoshop/ICC/Chromium parity is NOT asserted.
+name: Real-photo CC0 intake and native PSD/PSB
 
 on:
   workflow_dispatch:
@@ -13,6 +13,12 @@ on:
       - tools/decode-real-photo.py
       - tools/real-photo-bundle-admission.mjs
       - tools/verify-pinned-real-photo.py
+      - tools/real-photo-psd-psb-cli.mjs
+      - tools/real-photo-psd-psb-fixtures.mjs
+      - tools/real-photo-psd-psb-artifacts.mjs
+      - tools/verify-real-photo-psd-native.py
+      - tools/verify-real-photo-psd-external.py
+      - tools/verify-photo-native-artifact-set.py
       - tests/fixtures/real-photo/reviewed-manifest.json
   push:
     branches: [main]
@@ -23,6 +29,12 @@ on:
       - tools/decode-real-photo.py
       - tools/real-photo-bundle-admission.mjs
       - tools/verify-pinned-real-photo.py
+      - tools/real-photo-psd-psb-cli.mjs
+      - tools/real-photo-psd-psb-fixtures.mjs
+      - tools/real-photo-psd-psb-artifacts.mjs
+      - tools/verify-real-photo-psd-native.py
+      - tools/verify-real-photo-psd-external.py
+      - tools/verify-photo-native-artifact-set.py
       - tests/fixtures/real-photo/reviewed-manifest.json
 
 permissions:
@@ -50,7 +62,7 @@ jobs:
       - name: Pin external Pillow decoder
         run: |
           python3 -m venv "$RUNNER_TEMP/zpe-photo-python"
-          "$RUNNER_TEMP/zpe-photo-python/bin/python" -m pip install --disable-pip-version-check Pillow==12.0.0
+          "$RUNNER_TEMP/zpe-photo-python/bin/python" -m pip install --disable-pip-version-check Pillow==12.0.0 psd-tools==1.19.0
           echo "$RUNNER_TEMP/zpe-photo-python/bin" >> "$GITHUB_PATH"
 
       - name: Download exact Commons original (SHA-1 checked before write)
@@ -155,6 +167,62 @@ jobs:
           assert receipt['independentLicenseIccExifVisualReviewComplete'] is False
           receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\n')
           PY
+
+      - name: Generate PSD16/PSB32 from verified genuine photo and check saved bytes
+        run: |
+          node tools/real-photo-psd-psb-cli.mjs \
+            tests/fixtures/real-photo/reviewed-manifest.json \
+            "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" \
+            "$ZPE_PHOTO_DIR/native-documents" > "$ZPE_PHOTO_DIR/native-generation.json"
+          node tools/real-photo-psd-psb-cli.mjs verify \
+            tests/fixtures/real-photo/reviewed-manifest.json \
+            "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" \
+            "$ZPE_PHOTO_DIR/native-documents" > "$ZPE_PHOTO_DIR/native-saved-js.json"
+          python3 tools/verify-photo-native-artifact-set.py \
+            tests/fixtures/real-photo/reviewed-manifest.json \
+            "$ZPE_PHOTO_DIR/native-documents" > "$ZPE_PHOTO_DIR/native-independent-run.json"
+          python3 - "$ZPE_PHOTO_DIR" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          folder = Path(sys.argv[1])
+          saved = json.loads((folder/'native-saved-js.json').read_text())
+          independent = json.loads((folder/'native-independent-run.json').read_text())
+          persisted = json.loads((folder/'native-documents'/'independent-native-readback.json').read_text())
+          assert saved['status'] == 'saved-zpe-native-artifacts-verified'
+          assert independent == persisted, 'independent evidence changed after verification'
+          assert independent['status'] == 'saved-native-layer-and-merged-words-verified'
+          assert set(independent['documents']) == {'psd16', 'psb32'}
+          assert independent['selectionPixels'] == 8288
+          assert not independent['photoshopParityVerified']
+          assert not independent['browserBenchmarkVerified']
+          for key in ('psd16', 'psb32'):
+              assert (saved['documents'][key]['fileSha256'] ==
+                      independent['documents'][key]['fileSha256'])
+              assert (saved['documents'][key]['nativeDefectSha256'] ==
+                      independent['documents'][key]['nativeLayerSha256'])
+              assert (independent['documents'][key]['nativeLayerSha256'] ==
+                      independent['documents'][key]['nativeMergedSha256'])
+          receipt_path = folder/'ci-candidate-receipt.json'
+          receipt = json.loads(receipt_path.read_text())
+          assert receipt['frozenBytePinsVerified'] is True
+          assert receipt['independentlyPinnedHashes'] is True
+          assert receipt['nativeRealPhotoPsdPsbVerified'] is False
+          receipt['nativeRealPhotoPsdPsbVerified'] = True
+          receipt['nativeArtifactReadbackStatus'] = independent['status']
+          assert receipt['independentLicenseIccExifVisualReviewComplete'] is False
+          assert receipt['photoshopCompatibilityVerified'] is False
+          assert receipt['browserRealPhotoBenchmarkVerified'] is False
+          receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\\n')
+          PY
+
+      - name: Upload verified photo-derived native PSD16/PSB32 (not Adobe parity)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-native-psd-psb
+          path: /tmp/zpe-real-photo-candidate/native-documents/
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload ephemeral unreviewed candidate evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
