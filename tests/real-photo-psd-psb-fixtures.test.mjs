@@ -207,3 +207,85 @@ test('037B2b-3f: saved PSD16/PSB32 verifier rejects unreviewed color/ICC metadat
     }
   }
 });
+
+
+// 037B2b-3g: structural mutation offsets are derived from PSD/PSB lengths,
+// not from ZeTer's decoded object (which can normalize away raw metadata).
+function photoLayerMetadataOffsets(bytes,version) {
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const size=version===1?4:8;
+  const layerCountOffset=26+4+4+size+size+4+8+size;
+  assert.equal(view.getInt16(layerCountOffset,false),-1);
+  const channelRecordsOffset=layerCountOffset+2+16+2;
+  const blendModeOffset=channelRecordsOffset+4*(2+size)+4;
+  const extraLengthOffset=blendModeOffset+4+4;
+  const extraStart=extraLengthOffset+4;
+  const pascalCount=bytes[extraStart+8];
+  const unicodeStart=extraStart+8+Math.ceil((1+pascalCount)/4)*4;
+  assert.equal(String.fromCharCode(...bytes.subarray(unicodeStart+4,unicodeStart+8)),'luni');
+  const unicodeCount=view.getUint32(unicodeStart+12,false);
+  const unicodePadding=unicodeStart+16+unicodeCount*2;
+  assert.ok(unicodePadding<extraStart+view.getUint32(extraLengthOffset,false));
+  return {
+    layerCount:layerCountOffset+1,channel:channelRecordsOffset,
+    blendMode:blendModeOffset,opacity:extraLengthOffset-4,
+    flags:extraLengthOffset-2,mask:extraStart+3,
+    blendRanges:extraStart+7,pascalName:extraStart+9,
+    unicodeKey:unicodeStart+4,unicodeName:unicodeStart+16,
+    unicodePadding,
+  };
+}
+
+function addUnreviewedLayerMaskTrailer(bytes,version) {
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  const lengthOffset=34,size=version===1?4:8;
+  const length=version===1?view.getUint32(lengthOffset,false):
+    view.getUint32(lengthOffset+4,false);
+  const insertAt=lengthOffset+size+length;
+  const forged=new Uint8Array(bytes.length+4);
+  forged.set(bytes.subarray(0,insertAt));
+  forged.set(bytes.subarray(insertAt),insertAt+4);
+  const target=new DataView(forged.buffer);
+  if(version===1) target.setUint32(lengthOffset,length+4,false);
+  else target.setUint32(lengthOffset+4,length+4,false);
+  return forged;
+}
+
+test('037B2b-3g: saved PSD16/PSB32 refuse hidden native layer metadata even after file SHA is repinned',async()=>{
+  const input=surrogate(); // Structural surrogate, not a real photo.
+  const evidence=await createVerifiedPhotoDefectDocuments(input);
+  const artifact=serializePhotoDefectArtifactEvidence(evidence);
+  const admitted=admitPhotoBundle(input);
+  const files={psd16:evidence.documents.psd16.bytes,
+    psb32:evidence.documents.psb32.bytes};
+  for(const [key,version,bits,reference] of [
+    ['psd16',1,16,'rgb16'],['psb32',2,32,'float32'],
+  ]) {
+    const bytes=files[key];
+    const offsets=photoLayerMetadataOffsets(bytes,version);
+    const native={...admitted.fixtures[reference],
+      expectedDamagedSha256:input.manifest.native[reference].damagedSha256};
+    const corruptions=[
+      ...Object.entries(offsets).map(([label,offset])=>[label,()=>{
+        const changed=bytes.slice();changed[offset]^=1;return changed;
+      }]),
+      ['extra-high-depth-tag',()=>addUnreviewedLayerMaskTrailer(bytes,version)],
+    ];
+    for(const [label,corrupt] of corruptions) {
+      const forged=corrupt();
+      const repinned=structuredClone(artifact);
+      repinned.documents[key].fileSha256=createHash('sha256').update(forged).digest('hex');
+      await assert.rejects(
+        verifyPhotoDefectDocument({bytes:forged,native,version,bitsPerChannel:bits}),
+        /037 photo PSD.*PSB:/,
+        key+' must reject raw '+label+' with native pixels unchanged',
+      );
+      await assert.rejects(
+        verifyPhotoDefectArtifactSet({...input,artifact:repinned,
+          files:{...files,[key]:forged}}),
+        /037 photo PSD.*PSB:/,
+        key+' saved artifact must reject '+label+' after repinning file SHA',
+      );
+    }
+  }
+});

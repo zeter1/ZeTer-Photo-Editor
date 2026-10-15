@@ -2,6 +2,13 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-15 — Ужесточена JS-проверка метаданных слоя сохранённых PSD16/PSB32 (037B2b-3g)
+
+- Добавлено: test-only бинарная проверка native one-layer envelope до `decodePsd`, включая флаги, маску, режим смешивания, Pascal/Unicode имена и дополнительные tagged blocks.
+- Добавлено: отрицательные проверки PSD16 и PSB32 для metadata-only подмены с новым file SHA-256 при сохранённых native RGBA пикселях.
+- Проверка: выполняется в PR; зелёные CI и merge будут отмечены только по факту.
+- Ограничения: настоящий CC0 фотоисточник, сторонняя Adobe/PSD проверка и Chromium real-photo benchmark по-прежнему открыты. Production/runtime и версия 1.46.1 не изменены.
+
 ### 2026-10-15 — Усилена JS-проверка сохранённых PSD16/PSB32 на скрытые Color Mode/ICC (037B2b-3f)
 
 - Исправлено: test-only `verifyPhotoDefectDocument` и `verifyPhotoDefectArtifactSet` не допускают непустые секции Color Mode Data или Image Resources; native RGBA word hashes сами по себе не гарантируют одинаковой цветовой интерпретации.
