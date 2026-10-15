@@ -84,7 +84,7 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
     sha1,sha256:createHash('sha256').update(source).digest('hex'),
     bytes:bytes.byteLength,width:frame.width,height:frame.height,
     components:frame.components,precision:frame.precision,
-    progressive:frame.progressive,hasExif,hasIcc,
+    progressive:frame.progressive,hasExif,exifOrientation,hasIcc,
     pixelDecodeVerified:false,colorSpaceVerified:false,
   });
 }
