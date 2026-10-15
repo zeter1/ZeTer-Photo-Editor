@@ -1,6 +1,6 @@
 # 037B2b-2e — bounded HTTPS acquisition of documented CC0 JPEG
 
-**Статус:** реализация в ветке work/037b2b-2e-source-acquisition; PR CI и проверка настоящего файла пока не подтверждены. Это инфраструктурная проходка в открытом 037B2b-2, не реальный photo benchmark.
+**Статус: КОДОВАЯ ПРОХОДКА ЗАКРЫТА (2026-10-15).** [PR #239](https://github.com/zeter1/ZeTer-Photo-Editor/pull/239) merged as [00cf871](https://github.com/zeter1/ZeTer-Photo-Editor/commit/00cf871bc891e781b6e9079e9be373fe1fd39c97); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38750599295): Node/build, Chromium file://, operation JSON, profiles и diff hygiene. Exact-main CI после обновления task проверяется отдельно. Это инфраструктурная часть открытого 037B2b-2, **НЕ** готовый реальный фото-бенчмарк.
 
 ## Контекст
 
@@ -12,7 +12,8 @@
 - [x] inspectPhotoJpeg до disk write сверяет SHA-1 c7fc9f013c70e01f164d232462ddd6e37e4079c4, JPEG 2560×1920 и EXIF/ICC marker structure. SHA-256 публикуется ТОЛЬКО кандидатом, не independently reviewed pin. CLI не принимает URL или политику источника в аргументах.
 - [x] Output пишется только в новый файл (exclusive wx, mode 0600) после проверок; отклонённые ответы/изменённые JPEG не создают original.
 - [x] tests/real-photo-source-acquisition.test.mjs: offline structural surrogate; фиксированный URL/policy, аргументы CLI, отрицательные статус/MIME/redirect/length/byte mutation/oversize и no-write проверки.
-- [ ] GitHub PR CI / exact-main CI: проверить отдельно, не утверждать успех без факта.
+- [x] [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38750599295): Node/build, Chromium file://, JSON/profile/diff hygiene; [PR #239](https://github.com/zeter1/ZeTer-Photo-Editor/pull/239) merged.
+- [ ] Проверить exact-main CI для итогового документационного изменения, не переносить успех PR на иной head.
 - [ ] Загрузить и изучить подлинный source в среде с HTTPS: текущая рабочая среда не смогла получить оригинал. Фото не помещено в репозиторий.
 
 ## Получение фото и handoff
