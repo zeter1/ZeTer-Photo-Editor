@@ -20,8 +20,12 @@ export function inspectPhotoJpeg(bytes,{expectedSha1,expectedWidth,expectedHeigh
   const sha1=createHash('sha1').update(source).digest('hex');
   if (sha1!==expectedSha1) fail('original JPEG SHA-1 mismatch');
   if (bytes[0]!==0xff || bytes[1]!==0xd8 ||
-      bytes[bytes.length-2]!==0xff || bytes[bytes.length-1]!==0xd9)
-    fail('missing JPEG SOI/EOI markers');
+      bytes[bytes.length-2]!==0xff || bytes[bytes.length-1]!==0xd9) {
+    const eoi=source.lastIndexOf(Buffer.from([0xff,0xd9]));
+    fail('missing JPEG SOI/EOI markers; start='+source.subarray(0,2).toString('hex')+
+      ', last='+source.subarray(-12).toString('hex')+
+      ', lastEoiOffset='+eoi+', trailingBytes='+(eoi>=0?bytes.length-eoi-2:-1));
+  }
   let pos=2,frame=null,sawScan=false,hasExif=false,hasIcc=false;
   let exifOrientation=null;
   let iccSegmentCount=null;
