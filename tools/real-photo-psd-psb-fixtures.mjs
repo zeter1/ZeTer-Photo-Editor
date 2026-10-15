@@ -51,13 +51,14 @@ export async function verifyPhotoDefectDocument({bytes,native,version,bitsPerCha
       fail(name+' changed native channel words or geometry');
   }
   const quality=measureRealPhotoNativeQuality({
-    before:native.damaged,after:decoded.layers[0].pixelBuffer.data,
+    before:decoded.layers[0].pixelBuffer.data,after:native.clean.slice(),
     clean:native.clean,selectedIndices:native.selectedIndices,bitsPerChannel,
     expectedReferenceSha256:native.referenceNativeSha256,
   });
   if(quality.selectedPixels!==8288 ||
      quality.outsideSelectionAndAlphaNativeWordsExact!==true ||
-     quality.changedSelectedPixels!==0)
+     quality.changedSelectedPixels!==8288 ||
+     quality.baseline.mae<=0 || quality.repaired.mae!==0)
     fail('ROI or nonselection/alpha integrity mismatch');
   return {
     format:version===1?'PSD16':'PSB32',fileSha256:sha(bytes),
