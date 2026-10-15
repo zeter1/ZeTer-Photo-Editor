@@ -2,6 +2,14 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-15 — Подготовлено офлайн-декодирование реального JPEG с EXIF и ICC для проверки Content-Aware Fill
+
+- Добавлено: test-only Python/Pillow декодирование строго документированного CC0 JPEG в непрозрачный RGBA8 с проверкой исходного SHA-1, размеров, EXIF orientation и явной embedded ICC → sRGB конверсией через ImageCms; метаданные decoder/LCMS и кандидатные SHA-256 выводятся отдельно, не объявляются независимо закреплёнными.
+- Проверено: синтетические EXIF/ICC, мутация исходного SHA-1, защита от перезаписи, неверная геометрия; [PR #229 CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38700917933) — сборка, Node/Python tests (Pillow 12.0.0), Chromium `file://`, JSON artifacts, профили и diff hygiene.
+- Документация: следующая задача 037B2b-2b — настоящие JPEG-байты и независимая ICC/EXIF/asset/decoded/native hash-рецензия; далее PSD16/PSB32 и Chromium 037C.
+- Ограничения проверки: в репозитории пока нет genuine JPEG или reviewed pins; внешняя Photoshop-совместимость, true 16/32-bit исходник и photo quality не доказаны. Production runtime и версия 1.46.1 не менялись.
+
+
 ### 2026-10-14 — Добавлен строгий входной контроль JPEG для будущего real-photo benchmark
 
 - Добавлено: test-only `tools/real-photo-source-integrity.mjs` с JPEG SOF/scan header geometry, сверкой исторического SHA-1 источника и fail-closed pinned SHA-256 исходных JPEG bytes. Локальный CLI печатает SHA-256 только после предварительных структурных проверок.
