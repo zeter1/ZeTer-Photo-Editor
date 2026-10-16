@@ -4,7 +4,7 @@
 
 ## Проходка 037C-2 — genuine photo native Worker/Undo/Redo/reopen (2026-10-16)
 
-**PR CI подтверждён (6/6), merge и exact-main ещё ожидаются:** [PR #247](https://github.com/zeter1/ZeTer-Photo-Editor/pull/247), [общий PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845568478), [genuine-photo PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845568406). Код и evidence gates: [037C-2](037c2-genuine-photo-worker-evidence.md). До successful PR + exact-main acceptance статус 037C **OPEN**. После этого остаётся 037C-3 — наблюдаемая память с missingness и cancelled/stale/error matrix.
+**037C-2 ЗАКРЫТА, PR и exact-main CI успешны:** [PR #247](https://github.com/zeter1/ZeTer-Photo-Editor/pull/247) → [980ca1c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/980ca1c51096acb80f116e5da47795fe0e7454e5); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845905960), [PR photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845906006), [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38846278116), [exact-main photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38846278443). Подробное подтверждение [037C-2](037c2-genuine-photo-worker-evidence.md). **037C ещё OPEN** — далее 037C-3: честная observational память (heap/CDP/RSS, missingness, без false peak), cancel/stale-owner/malformed-cap/late-result; затем итоговый acceptance.
 
 ## Проходка 037C-1 — проверка настоящего Chromium импорта (2026-10-16)
 
