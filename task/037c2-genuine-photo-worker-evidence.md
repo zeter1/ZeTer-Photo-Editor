@@ -1,6 +1,6 @@
 # 037C-2 — настоящая фотография: Chromium Worker / 8288 ROI / native Undo / Redo / reopen
 
-**Статус: PR CI ПОДТВЕРЖДЁН (2026-10-16), merge и exact-main CI пока не завершены.** [PR #247](https://github.com/zeter1/ZeTer-Photo-Editor/pull/247), [общий PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845568478), [genuine-photo PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845568406). Шесть независимых Chromium сессий на exact-code прошли полностью, включая pinned photo / Worker native Fill / Undo/Redo/reopen; до merge и exact-main acceptance этап сохраняет статус OPEN. Основа 037C-1: [план](037c-real-photo-chromium-worker-acceptance.md).
+**Статус: ЗАКРЫТА 2026-10-16 — [PR #247](https://github.com/zeter1/ZeTer-Photo-Editor/pull/247) → [980ca1c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/980ca1c51096acb80f116e5da47795fe0e7454e5); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845905960), [PR photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845906006), [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38846278116), [exact-main photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38846278443).** На слитом коде 6 независимых Chromium `file://` (3×PSD16 / 3×PSB32) прошли настоящую Worker-заливку 8288 ROI, улучшают MAE/RMSE против frozen clean photo, сохраняют outside-selection и alpha, проходят точные native Undo/Redo/reopen. **037C в целом ещё OPEN:** остаётся 037C-3, P0 002 и Stage 003.
 
 ## Что изменено в этой попытке
 
@@ -16,7 +16,7 @@
 - [x] PR `npm run check` green, общий CI #38845568478.
 - [x] Genuine-photo PR CI #38845568406: 3× PSD16 + 3× PSB32 свежих `file://` Chromium, **все** Worker receipts valid. PR CI: 6/6 подтверждены; exact-main CI остаётся условием закрытия.
 - [x] Изучены логи шести Worker receipts: 1 Worker request/сеанс, 8288 changed native selected pixels, 2 changed tiles; PSD16 MAE 17041.527 → 3174.080; PSB32 MAE 1.0 → 0.048448; точные native Undo/Redo/reopen, alpha и outside selection без изменений.
-- [ ] Merge PR и exact-main оба green (общий CI и genuine-photo CI); добавить итоговые ссылки в `task/NEXT.md` / `task/README.md`. До этого OPEN.
+- [x] PR #247 слит как 980ca1c, exact-main CI #38846278116 и genuine-photo CI #38846278443 green; ссылки внесены в `task/NEXT.md` / `task/README.md`. 037C-2 CLOSED.
 
 ## Следующие после подтверждения 037C-2
 
