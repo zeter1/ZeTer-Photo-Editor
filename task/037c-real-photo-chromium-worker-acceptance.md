@@ -4,13 +4,13 @@
 
 ## Проходка 037C-1 — проверка настоящего Chromium импорта (2026-10-16)
 
-**Статус: код подготовлен, ожидает реального CI прогона. Это не закрытие 037C.**
+**Статус 037C-1: PR #246 слита ([5b3b072](https://github.com/zeter1/ZeTer-Photo-Editor/commit/5b3b07269dae19b025823a811283329df1175d62)); [общий PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38843677964) и [genuine-photo PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38843677938). 6 импортов baseline доказаны, но 037C ОСТАЁТСЯ OPEN.**
 
 - `tools/browser-real-photo-ui-import.mjs` читает только настоящие сохранённые PSD16/PSB32, сверяет SHA-256 файлов против independently frozen `reviewed-native-artifacts.json` до UI.
 - Opt-in `ZPE_REAL_PHOTO_BROWSER_DIR` в `tools/browser-smoke.mjs` запускает отдельный чистый `file://` Chromium профиль для каждого вызова, через `#fileInput` импортирует бинарный PSD/PSB.
 - Через публичное меню «Сохранить проект» reassemble всех `highDepthSource.tiles` в точном порядке little-endian RGBA, проверяется coverage/overlap/size и native SHA-256 против independently pinned damaged-photo bytes, не против Canvas8.
 - Workflow `real-photo-intake.yml` после source/decoder/native independent gate выполняет 3 отдельных Chromium процесса на формат и публикует 6 самостоятельных baseline JSON. `tools/verify-browser-real-photo-import-artifacts.mjs` проверяет полноту/отсутствие дублей и запрещает незаслуженные worker/repair/peak claims. Негативные тесты `tests/browser-real-photo-ui-import.test.mjs`.
-- Названия receipt имеют суффикс `-baseline-` и явно `workerVerified:false`. До реального CI green никакие browser-pass выводы не делать.
+- Названия receipt имеют суффикс `-baseline-` и явно `workerVerified:false`. На PR exact-code CI шестикратный baseline успешно проверен. Это **не** подтверждает Worker Fill, Undo/Redo, фотокачество или пиковую память.
 
 **Непосредственно следующие subpasses:**
 1. 037C-2: polygon UI 8288/Worker и native snapshot до/после, сравнить `clean` oracle (а не defect input), Undo/Redo, reopen `.zpe` с 3 × на формат.
