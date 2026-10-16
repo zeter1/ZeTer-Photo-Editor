@@ -89,11 +89,14 @@ function reopenFromPublicFileInput() {
   const input=document.querySelector('#fileInput'),transfer=new DataTransfer();
   transfer.items.add(new File([s.reopenBlob],'photo-reopened.zpe',{type:'application/json'}));
   input.files=transfer.files;
+  // The application's file input may be synchronously reset by its change
+  // handler, so freeze received File metadata BEFORE dispatching that event.
+  const received={filename:input.files[0]?.name,size:input.files[0]?.size};
   const old=window.confirm;
   window.confirm=()=>true;
   try {input.dispatchEvent(new Event('change',{bubbles:true}));}
   finally {window.confirm=old;}
-  return {filename:input.files[0]?.name,size:input.files[0]?.size};
+  return received;
 }
 
 export async function verifyGenuinePhotoUiWorker(client,{
