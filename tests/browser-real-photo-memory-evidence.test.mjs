@@ -80,5 +80,5 @@ test('037C-3a: duplicates, missing runs and spliced Worker references are reject
   const dup=structuredClone(originals);dup[5]=structuredClone(dup[4]);
   assert.throws(()=>validateRealPhotoMemoryObservationSet(dup,workers),/duplicate/);
   const tampered=structuredClone(originals);tampered[0].runIndex=3;
-  assert.throws(()=>validateRealPhotoMemoryObservationSet(tampered,workers),/duplicate/);
+  assert.throws(()=>validateRealPhotoMemoryObservationSet(tampered,workers),/unlinked Worker/);
 });
