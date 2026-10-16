@@ -25,6 +25,11 @@ on:
       - tools/browser-smoke.mjs
       - tools/verify-browser-real-photo-import-artifacts.mjs
       - tools/browser-real-photo-ui-import.mjs
+      - tools/browser-real-photo-ui-worker.mjs
+      - tools/browser-real-photo-quality.mjs
+      - tools/verify-browser-real-photo-worker-artifacts.mjs
+      - tests/browser-real-photo-quality.test.mjs
+      - tests/browser-real-photo-worker-artifacts.test.mjs
   push:
     branches: [main]
     paths:
@@ -46,6 +51,11 @@ on:
       - tools/browser-smoke.mjs
       - tools/verify-browser-real-photo-import-artifacts.mjs
       - tools/browser-real-photo-ui-import.mjs
+      - tools/browser-real-photo-ui-worker.mjs
+      - tools/browser-real-photo-quality.mjs
+      - tools/verify-browser-real-photo-worker-artifacts.mjs
+      - tests/browser-real-photo-quality.test.mjs
+      - tests/browser-real-photo-worker-artifacts.test.mjs
 
 permissions:
   contents: read
@@ -57,7 +67,7 @@ concurrency:
 jobs:
   candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       ZPE_PHOTO_DIR: /tmp/zpe-real-photo-candidate
     steps:
@@ -230,8 +240,8 @@ jobs:
           receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\n')
           PY
 
-      - name: 037C-1 six fresh file:// Chromium UI imports and saved native baseline pins
-        timeout-minutes: 14
+      - name: 037C-2 six genuine-photo Chromium imports, native Worker repair and Undo/Redo
+        timeout-minutes: 25
         run: |
           npm run build
           mkdir -p "$ZPE_PHOTO_DIR/browser-baselines"
@@ -240,18 +250,21 @@ jobs:
               ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
               ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
               ZPE_REAL_PHOTO_BROWSER_RUN="$run" \
+              ZPE_REAL_PHOTO_BROWSER_WORKER=1 \
               ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-baselines" \
                 node tools/browser-smoke.mjs
             done
           done
           node tools/verify-browser-real-photo-import-artifacts.mjs "$ZPE_PHOTO_DIR/browser-baselines" \
             > "$ZPE_PHOTO_DIR/browser-baseline-set.json"
+          node tools/verify-browser-real-photo-worker-artifacts.mjs "$ZPE_PHOTO_DIR/browser-baselines" \
+            > "$ZPE_PHOTO_DIR/browser-worker-set.json"
 
-      - name: Upload 037C-1 Chromium baseline receipts (NOT Worker/quality gate)
+      - name: Upload 037C-1 baseline and 037C-2 native Worker quality receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: zpe-real-photo-browser-import-baselines
+          name: zpe-real-photo-browser-native-worker
           path: /tmp/zpe-real-photo-candidate/browser-baselines/*.json
           if-no-files-found: warn
           retention-days: 7
