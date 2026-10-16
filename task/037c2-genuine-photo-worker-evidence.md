@@ -1,6 +1,6 @@
 # 037C-2 — настоящая фотография: Chromium Worker / 8288 ROI / native Undo / Redo / reopen
 
-**Статус: IN REVIEW / CI НЕ ПОДТВЕРЖДЁН (2026-10-16).** Не закрывать 037C-2, пока реальный PR CI на exactly committed code не выполнит 6 отдельных Chromium сессий и пока не будет независимого просмотра receipts. Основа 037C-1: [план](037c-real-photo-chromium-worker-acceptance.md).
+**Статус: PR CI ПОДТВЕРЖДЁН (2026-10-16), merge и exact-main CI пока не завершены.** [PR #247](https://github.com/zeter1/ZeTer-Photo-Editor/pull/247), [общий PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845568478), [genuine-photo PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845568406). Шесть независимых Chromium сессий на exact-code прошли полностью, включая pinned photo / Worker native Fill / Undo/Redo/reopen; до merge и exact-main acceptance этап сохраняет статус OPEN. Основа 037C-1: [план](037c-real-photo-chromium-worker-acceptance.md).
 
 ## Что изменено в этой попытке
 
@@ -13,10 +13,10 @@
 
 ## Что обязательно проверить в этой проходке
 
-- [ ] PR `npm run check` green, без flaky browser/assertion.
-- [ ] Genuine-photo CI: 3× PSD16 + 3× PSB32 свежих `file://` Chromium, **все** Worker receipts valid.
-- [ ] Отдельно открыть CI receipts: Worker действительно вызван, 8288 индексов точные; selected MAE/RMSE против clean уменьшились; exact native Undo/Redo/reopen.
-- [ ] Merge PR + exact-main оба green (общий CI и genuine-photo CI) и сохранить ссылки в `task/NEXT.md` / `task/README.md`. До этого OPEN.
+- [x] PR `npm run check` green, общий CI #38845568478.
+- [x] Genuine-photo PR CI #38845568406: 3× PSD16 + 3× PSB32 свежих `file://` Chromium, **все** Worker receipts valid. PR CI: 6/6 подтверждены; exact-main CI остаётся условием закрытия.
+- [x] Изучены логи шести Worker receipts: 1 Worker request/сеанс, 8288 changed native selected pixels, 2 changed tiles; PSD16 MAE 17041.527 → 3174.080; PSB32 MAE 1.0 → 0.048448; точные native Undo/Redo/reopen, alpha и outside selection без изменений.
+- [ ] Merge PR и exact-main оба green (общий CI и genuine-photo CI); добавить итоговые ссылки в `task/NEXT.md` / `task/README.md`. До этого OPEN.
 
 ## Следующие после подтверждения 037C-2
 
