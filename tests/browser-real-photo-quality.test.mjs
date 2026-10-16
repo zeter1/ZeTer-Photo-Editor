@@ -44,8 +44,8 @@ for (const bits of [16,32]) {
       v=>v.after[0]=bits===16?12:0.5,
       v=>v.after[selected[0]*4+3]=bits===16?0:0.5,
       v=>v.after=v.before.slice(),
-      v=>v.cleanSelected[0]=bits===16?0:3,
-      v=>v.after=Object.assign(v.before.slice(),{0:NaN}),
+      v=>v.cleanSelected[3]=0,
+      v=>v.after[0]=bits===16?1234:NaN,
     ];
     for(const mutate of failures) {
       const value=pair(bits); mutate(value);
