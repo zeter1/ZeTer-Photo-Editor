@@ -237,14 +237,14 @@ jobs:
           mkdir -p "$ZPE_PHOTO_DIR/browser-baselines"
           for format in psd16 psb32; do
             for run in 1 2 3; do
-              ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \\
-              ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \\
-              ZPE_REAL_PHOTO_BROWSER_RUN="$run" \\
-              ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-baselines" \\
+              ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+              ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+              ZPE_REAL_PHOTO_BROWSER_RUN="$run" \
+              ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-baselines" \
                 node tools/browser-smoke.mjs
             done
           done
-          node tools/verify-browser-real-photo-import-artifacts.mjs "$ZPE_PHOTO_DIR/browser-baselines" \\
+          node tools/verify-browser-real-photo-import-artifacts.mjs "$ZPE_PHOTO_DIR/browser-baselines" \
             > "$ZPE_PHOTO_DIR/browser-baseline-set.json"
 
       - name: Upload 037C-1 Chromium baseline receipts (NOT Worker/quality gate)
