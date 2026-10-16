@@ -513,17 +513,22 @@ async function runSmoke() {
     }
     assertNoBrowserErrors(errors, stderrState);
 
-    // 037C-1 opt-in, clean Chromium profile per process; do not run synthetic
-    // smoke in this mode and never call an import-only receipt a Worker pass.
+    // 037C genuine-photo opt-in, fresh Chromium profile per process. Baseline
+    // remains baseline-only; the separate Worker/quality gate needs explicit opt-in.
     if (process.env.ZPE_REAL_PHOTO_BROWSER_DIR) {
       const {verifyGenuinePhotoUiImport}=await import('./browser-real-photo-ui-import.mjs');
-      await verifyGenuinePhotoUiImport(client,{
+      const options={
         evaluate,waitFor,assert,
         format:process.env.ZPE_REAL_PHOTO_BROWSER_FORMAT,
         runIndex:Number(process.env.ZPE_REAL_PHOTO_BROWSER_RUN),
         sourceDir:process.env.ZPE_REAL_PHOTO_BROWSER_DIR,
         artifactDir:process.env.ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR,
-      });
+      };
+      const baseline=await verifyGenuinePhotoUiImport(client,options);
+      if(process.env.ZPE_REAL_PHOTO_BROWSER_WORKER==='1'){
+        const {verifyGenuinePhotoUiWorker}=await import('./browser-real-photo-ui-worker.mjs');
+        await verifyGenuinePhotoUiWorker(client,{...options,baseline});
+      }
       assertNoBrowserErrors(errors,stderrState);
       return;
     }
