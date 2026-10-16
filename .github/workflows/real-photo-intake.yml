@@ -26,6 +26,8 @@ on:
       - tools/verify-browser-real-photo-import-artifacts.mjs
       - tools/browser-real-photo-ui-import.mjs
       - tools/browser-real-photo-ui-worker.mjs
+      - tools/browser-real-photo-memory-evidence.mjs
+      - tests/browser-real-photo-memory-evidence.test.mjs
       - tools/browser-real-photo-quality.mjs
       - tools/verify-browser-real-photo-worker-artifacts.mjs
       - tests/browser-real-photo-quality.test.mjs
@@ -52,6 +54,8 @@ on:
       - tools/verify-browser-real-photo-import-artifacts.mjs
       - tools/browser-real-photo-ui-import.mjs
       - tools/browser-real-photo-ui-worker.mjs
+      - tools/browser-real-photo-memory-evidence.mjs
+      - tests/browser-real-photo-memory-evidence.test.mjs
       - tools/browser-real-photo-quality.mjs
       - tools/verify-browser-real-photo-worker-artifacts.mjs
       - tests/browser-real-photo-quality.test.mjs
@@ -240,7 +244,7 @@ jobs:
           receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\n')
           PY
 
-      - name: 037C-2 six genuine-photo Chromium imports, native Worker repair and Undo/Redo
+      - name: 037C-3a six genuine-photo Chromium Worker sessions with observational memory
         timeout-minutes: 25
         run: |
           npm run build
@@ -259,8 +263,10 @@ jobs:
             > "$ZPE_PHOTO_DIR/browser-baseline-set.json"
           node tools/verify-browser-real-photo-worker-artifacts.mjs "$ZPE_PHOTO_DIR/browser-baselines" \
             > "$ZPE_PHOTO_DIR/browser-worker-set.json"
+          node tools/browser-real-photo-memory-evidence.mjs "$ZPE_PHOTO_DIR/browser-baselines" \
+            > "$ZPE_PHOTO_DIR/browser-memory-set.json"
 
-      - name: Upload 037C-1 baseline and 037C-2 native Worker quality receipts
+      - name: Upload 037C-1/2 evidence and 037C-3a sampled-memory receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

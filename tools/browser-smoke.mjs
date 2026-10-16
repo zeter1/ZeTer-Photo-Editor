@@ -524,10 +524,29 @@ async function runSmoke() {
         sourceDir:process.env.ZPE_REAL_PHOTO_BROWSER_DIR,
         artifactDir:process.env.ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR,
       };
-      const baseline=await verifyGenuinePhotoUiImport(client,options);
-      if(process.env.ZPE_REAL_PHOTO_BROWSER_WORKER==='1'){
-        const {verifyGenuinePhotoUiWorker}=await import('./browser-real-photo-ui-worker.mjs');
-        await verifyGenuinePhotoUiWorker(client,{...options,baseline});
+      const observe=process.env.ZPE_REAL_PHOTO_BROWSER_WORKER==='1';
+      let photoSampler=null,photoReport=null,photoWorker=null;
+      if(observe){
+        browserClient=await CdpClient.connect(browserWs);
+        photoSampler=createBrowserRendererHeapSampler(client,{processClient:browserClient});
+        await photoSampler.start();
+      }
+      try{
+        const baseline=await verifyGenuinePhotoUiImport(client,options);
+        if(observe){
+          await photoSampler.snapshot('after-import');
+          const {verifyGenuinePhotoUiWorker}=await import('./browser-real-photo-ui-worker.mjs');
+          photoWorker=await verifyGenuinePhotoUiWorker(client,{...options,baseline,
+            onStage:phase=>photoSampler.snapshot(phase)});
+        }
+      }finally{
+        if(photoSampler)photoReport=await photoSampler.stop();
+      }
+      if(photoWorker){
+        const {writeRealPhotoMemoryObservation}=await import('./browser-real-photo-memory-evidence.mjs');
+        const observation=await writeRealPhotoMemoryObservation({
+          report:photoReport,worker:photoWorker,artifactDir:options.artifactDir});
+        console.log('037C-3a genuine photo memory observation:',JSON.stringify(observation));
       }
       assertNoBrowserErrors(errors,stderrState);
       return;

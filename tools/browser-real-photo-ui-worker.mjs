@@ -100,7 +100,7 @@ function reopenFromPublicFileInput() {
 }
 
 export async function verifyGenuinePhotoUiWorker(client,{
-  evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,
+  evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,onStage,
 }={}) {
   if(!['psd16','psb32'].includes(format)||![1,2,3].includes(runIndex)||
       !baseline?.publicSaveNativeMatchedFrozenPin||!sourceDir||!artifactDir)
@@ -153,6 +153,7 @@ export async function verifyGenuinePhotoUiWorker(client,{
     assert((await evaluate(client,'document.querySelector("#statusText")?.textContent'))?.includes('Многоугольное выделение: 10 точек'),
       '037C-2 selection not completed through UI');
     await evaluate(client,'('+interceptWorker.toString()+')()');
+    await onStage?.('before-fill');
     const fillStarted=Date.now();
     const invoked=await evaluate(client,'('+invokeFill.toString()+')()');
     assert(invoked.enabled,'037C-2 public Content-Aware Fill unavailable');
@@ -163,20 +164,24 @@ export async function verifyGenuinePhotoUiWorker(client,{
       'r=>r.textContent.includes("Контент-заливка")).length===1'),120000);
     const fillElapsedMs=Date.now()-fillStarted;
     await stage('filled');
+    await onStage?.('after-fill');
     await evaluate(client,'document.querySelector("#undoBtn").click();true');
     await waitFor('037C-2 undo restored',()=>evaluate(client,
       'document.querySelector("#statusText")?.textContent?.startsWith("Отменено")'),30000);
     await stage('undone');
+    await onStage?.('after-undo');
     await evaluate(client,'document.querySelector("#redoBtn").click();true');
     await waitFor('037C-2 redo restored',()=>evaluate(client,
       'document.querySelector("#statusText")?.textContent?.startsWith("Повторено")'),30000);
     await stage('redone');
+    await onStage?.('after-redo');
     const reopened=await evaluate(client,'('+reopenFromPublicFileInput.toString()+')()');
     assert(reopened.filename==='photo-reopened.zpe' && reopened.size>10000,
       '037C-2 public reopen did not use saved project');
     await waitFor('037C-2 public .zpe reopen',()=>evaluate(client,
       'document.querySelector("#statusText")?.textContent==="Проект открыт"'),60000);
     await stage('reopened');
+    await onStage?.('after-reopen');
 
     // Execute every comparison on the *saved* public native tile snapshots,
     // never private application runtime state or the 8-bit canvas preview.
