@@ -2,6 +2,10 @@
 
 **Статус: OPEN, следующий приоритет после закрытой 037B2b-3.** Источник и документы: [037B2b-3i](037b2b-3i-genuine-native-psd-psb-ci.md); неизменяемые SHA-256: `tests/fixtures/real-photo/reviewed-manifest.json`, `tests/fixtures/real-photo/reviewed-native-artifacts.json`. PNG-preview/self-codec alone НЕ достаточны.
 
+## Проходка 037C-2 — genuine photo native Worker/Undo/Redo/reopen (2026-10-16)
+
+**PR CI подтверждён (6/6), merge и exact-main ещё ожидаются:** [PR #247](https://github.com/zeter1/ZeTer-Photo-Editor/pull/247), [общий PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845568478), [genuine-photo PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38845568406). Код и evidence gates: [037C-2](037c2-genuine-photo-worker-evidence.md). До successful PR + exact-main acceptance статус 037C **OPEN**. После этого остаётся 037C-3 — наблюдаемая память с missingness и cancelled/stale/error matrix.
+
 ## Проходка 037C-1 — проверка настоящего Chromium импорта (2026-10-16)
 
 **Статус 037C-1: PR #246 слита ([5b3b072](https://github.com/zeter1/ZeTer-Photo-Editor/commit/5b3b07269dae19b025823a811283329df1175d62)); [общий PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38843677964) и [genuine-photo PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38843677938). 6 импортов baseline доказаны, но 037C ОСТАЁТСЯ OPEN.**
