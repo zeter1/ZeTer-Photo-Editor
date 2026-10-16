@@ -2,6 +2,21 @@
 
 **Статус: OPEN, следующий приоритет после закрытой 037B2b-3.** Источник и документы: [037B2b-3i](037b2b-3i-genuine-native-psd-psb-ci.md); неизменяемые SHA-256: `tests/fixtures/real-photo/reviewed-manifest.json`, `tests/fixtures/real-photo/reviewed-native-artifacts.json`. PNG-preview/self-codec alone НЕ достаточны.
 
+## Проходка 037C-1 — проверка настоящего Chromium импорта (2026-10-16)
+
+**Статус: код подготовлен, ожидает реального CI прогона. Это не закрытие 037C.**
+
+- `tools/browser-real-photo-ui-import.mjs` читает только настоящие сохранённые PSD16/PSB32, сверяет SHA-256 файлов против independently frozen `reviewed-native-artifacts.json` до UI.
+- Opt-in `ZPE_REAL_PHOTO_BROWSER_DIR` в `tools/browser-smoke.mjs` запускает отдельный чистый `file://` Chromium профиль для каждого вызова, через `#fileInput` импортирует бинарный PSD/PSB.
+- Через публичное меню «Сохранить проект» reassemble всех `highDepthSource.tiles` в точном порядке little-endian RGBA, проверяется coverage/overlap/size и native SHA-256 против independently pinned damaged-photo bytes, не против Canvas8.
+- Workflow `real-photo-intake.yml` после source/decoder/native independent gate выполняет 3 отдельных Chromium процесса на формат и публикует 6 самостоятельных baseline JSON. `tools/verify-browser-real-photo-import-artifacts.mjs` проверяет полноту/отсутствие дублей и запрещает незаслуженные worker/repair/peak claims. Негативные тесты `tests/browser-real-photo-ui-import.test.mjs`.
+- Названия receipt имеют суффикс `-baseline-` и явно `workerVerified:false`. До реального CI green никакие browser-pass выводы не делать.
+
+**Непосредственно следующие subpasses:**
+1. 037C-2: polygon UI 8288/Worker и native snapshot до/после, сравнить `clean` oracle (а не defect input), Undo/Redo, reopen `.zpe` с 3 × на формат.
+2. 037C-3: observational timing, renderer heap/CDP/Linux RSS с явными unknown, cancellation/stale document/tab/abort failures.
+3. CI verification: 037C полное подтверждение на PR и exact main с ссылками, без этого OPEN.
+
 ## Предлагаемый порядок реализации
 
 1. Добавить opt-in Chromium `file://` end-to-end в `tools/browser-smoke.mjs`/подчинённый тестовый owner, используя **подлинные** pinned PSD16 и PSB32 из genuine-photo CI artifact, а не структурный synthetic surrogate. Никаких больших двоичных fixture в Git.

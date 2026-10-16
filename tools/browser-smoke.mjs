@@ -513,6 +513,21 @@ async function runSmoke() {
     }
     assertNoBrowserErrors(errors, stderrState);
 
+    // 037C-1 opt-in, clean Chromium profile per process; do not run synthetic
+    // smoke in this mode and never call an import-only receipt a Worker pass.
+    if (process.env.ZPE_REAL_PHOTO_BROWSER_DIR) {
+      const {verifyGenuinePhotoUiImport}=await import('./browser-real-photo-ui-import.mjs');
+      await verifyGenuinePhotoUiImport(client,{
+        evaluate,waitFor,assert,
+        format:process.env.ZPE_REAL_PHOTO_BROWSER_FORMAT,
+        runIndex:Number(process.env.ZPE_REAL_PHOTO_BROWSER_RUN),
+        sourceDir:process.env.ZPE_REAL_PHOTO_BROWSER_DIR,
+        artifactDir:process.env.ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR,
+      });
+      assertNoBrowserErrors(errors,stderrState);
+      return;
+    }
+
     const blobWorkerProbe = await evaluate(client, `(async () => {
       if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') {
         return { supported:false, ok:false, error:'Worker/Blob API unavailable' };
