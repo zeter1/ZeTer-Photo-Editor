@@ -1,6 +1,6 @@
 # 037C-3b-2b/3b — настоящий completed Worker → async preview → Escape
 
-**Приоритет P1. Статус /3b-1: реализация в PR; CI и exact-main ожидают проверки; 037C OPEN.**
+**Приоритет P1. Статус /3b-1: ЗАКРЫТА 2026-10-18 ([PR #257](https://github.com/zeter1/ZeTer-Photo-Editor/pull/257) → [main 04ca338](https://github.com/zeter1/ZeTer-Photo-Editor/commit/04ca33876b3e8a1a4752d5e6e1acf97d705d319b)); /3b-2 и полная 037C остаются OPEN.**
 
 ## /3b-1: cancel-first
 - Независимый pinned photo-derived PSD16 и PSB32 Chromium file://, публичный import + Save Project, 8288 polygon ROI.
@@ -9,10 +9,10 @@
 - Публичный CDP Escape во время preview, затем возобновить callback: полная native v2 source byte equality, отсутствие Fill в History, вторая вкладка неизменна.
 - Проверить отдельные строго именованные receipts, hashes frozen pins, offline verifier и negative tests.
 
-## Для проверки, не считать уже выполненным
-- [ ] npm run check, npm run test:browser (точный PR SHA).
-- [ ] Два genuine photo Chromium file:// completed-preview Escape; fail-closed verifier, artifacts.
-- [ ] PR merge и два exact-main CI; только тогда закрыть /3b-1, обновить ссылки в task.
+## Подтверждённые проверки на точном коде
+- [x] npm run check, npm run test:browser (точный PR SHA): [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39122450799).
+- [x] Два genuine photo Chromium file:// completed-preview Escape; fail-closed verifier, artifacts: [PR genuine-photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39122450793).
+- [x] PR merge; [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39122768696), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39122768707). /3b-1 закрыта.
 
 ## Далее OPEN
 1. /3b-2 genuine PSD16/PSB32 generation restart cancel-first -> второй Worker success без stale overwrite; success-first -> одна публикация и Escape не откатывает завершённое. Полный native readback/History.
@@ -20,4 +20,4 @@
 3. 037C-3c final acceptance: photo quality/memory/failure matrix, PR + exact-main gates.
 4. P0 002 Photoshop-authored corpus; Stage 003 full tiling; ICC/CMYK, RAW/HDR и остальной roadmap скриншота.
 
-**Нельзя утверждать:** Photoshop compatibility, memory peak, Adobe-authored parity, complete 037C. Тестовое удержание preview само по себе не доказательство без зелёного real photo CI.
+**Граница доказательств:** Photoshop compatibility, memory peak, Adobe-authored parity, complete 037C. Тестовое удержание preview само по себе не доказательство без зелёного real photo CI.
