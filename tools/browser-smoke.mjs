@@ -531,7 +531,8 @@ async function runSmoke() {
       const verifyEscape=process.env.ZPE_REAL_PHOTO_BROWSER_MID_KERNEL_ESCAPE==='1';
       const verifyCompletedPreview=process.env.ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_ESCAPE==='1';
       const verifyPreviewSuccess=process.env.ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_SUCCESS==='1';
-      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)+Number(verifyPreviewSuccess)>1)
+      const verifyCancelSuccessor=process.env.ZPE_REAL_PHOTO_BROWSER_CANCEL_SUCCESSOR==='1';
+      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)+Number(verifyPreviewSuccess)+Number(verifyCancelSuccessor)>1)
         throw new Error('037C-3b real photo modes require independent Chromium sessions');
       let photoSampler=null,photoReport=null,photoWorker=null;
       if(observe){
@@ -541,12 +542,12 @@ async function runSmoke() {
       }
       try{
         const baseline=await verifyGenuinePhotoUiImport(client,options);
-        if(verifySwitchFailure || verifyMidKernel || verifyClose || verifyEscape || verifyCompletedPreview || verifyPreviewSuccess){
+        if(verifySwitchFailure || verifyMidKernel || verifyClose || verifyEscape || verifyCompletedPreview || verifyPreviewSuccess || verifyCancelSuccessor){
           const {verifyGenuinePhotoUiSwitchFailure}=await import('./browser-real-photo-switch-failure.mjs');
           await verifyGenuinePhotoUiSwitchFailure(client,{...options,baseline,
             midKernel:verifyMidKernel||verifyClose||verifyEscape,closeDocument:verifyClose,
             escapeCancel:verifyEscape,completedPreviewEscape:verifyCompletedPreview,
-            completedPreviewSuccess:verifyPreviewSuccess});
+            completedPreviewSuccess:verifyPreviewSuccess,cancelFirstSuccessor:verifyCancelSuccessor});
         }
         if(observe){
           await photoSampler.snapshot('after-import');
