@@ -363,7 +363,12 @@ export function createRasterCommandController({
           layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND &&
           typeof rasterEdit.persistTiledHighDepthInpaint === 'function'
         ) {
-          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, { isAllowed });
+          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, {
+            isAllowed,
+            // Worker completion can precede asynchronous preview publication.
+            // Escape/tab cancellation must revoke that publication too.
+            isContinuationCurrent:isInpaintCurrent,
+          });
           if (!isInpaintCurrent()) return false;
           if (result) {
             resetNativeState();
