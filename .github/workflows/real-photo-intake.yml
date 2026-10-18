@@ -29,6 +29,9 @@ on:
       - tools/browser-real-photo-switch-failure.mjs
       - tools/verify-browser-real-photo-switch-failure-artifacts.mjs
       - tests/browser-real-photo-switch-failure.test.mjs
+      - tools/verify-browser-real-photo-mid-kernel-artifacts.mjs
+      - tests/browser-real-photo-mid-kernel.test.mjs
+      - tools/browser-inpaint-mid-kernel-smoke.mjs
       - tools/browser-real-photo-memory-evidence.mjs
       - tests/browser-real-photo-memory-evidence.test.mjs
       - tools/browser-real-photo-quality.mjs
@@ -60,6 +63,9 @@ on:
       - tools/browser-real-photo-switch-failure.mjs
       - tools/verify-browser-real-photo-switch-failure-artifacts.mjs
       - tests/browser-real-photo-switch-failure.test.mjs
+      - tools/verify-browser-real-photo-mid-kernel-artifacts.mjs
+      - tests/browser-real-photo-mid-kernel.test.mjs
+      - tools/browser-inpaint-mid-kernel-smoke.mjs
       - tools/browser-real-photo-memory-evidence.mjs
       - tests/browser-real-photo-memory-evidence.test.mjs
       - tools/browser-real-photo-quality.mjs
@@ -287,6 +293,21 @@ jobs:
           node tools/verify-browser-real-photo-switch-failure-artifacts.mjs "$ZPE_PHOTO_DIR/browser-failures" \
             > "$ZPE_PHOTO_DIR/browser-switch-failure-set.json"
 
+      - name: 037C-3b-2b-1 genuine-photo Chromium post-write kernel cancellation
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-mid-kernel"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MID_KERNEL=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-mid-kernel" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-mid-kernel-artifacts.mjs "$ZPE_PHOTO_DIR/browser-mid-kernel" \
+            > "$ZPE_PHOTO_DIR/browser-mid-kernel-set.json"
+
       - name: Upload 037C-1/2 evidence and 037C-3a sampled-memory receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -302,6 +323,15 @@ jobs:
         with:
           name: zpe-real-photo-browser-cancel-switch
           path: /tmp/zpe-real-photo-candidate/browser-failures/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-2b-1 actual real-photo native kernel cancellation receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-mid-kernel
+          path: /tmp/zpe-real-photo-candidate/browser-mid-kernel/*.json
           if-no-files-found: warn
           retention-days: 7
 
