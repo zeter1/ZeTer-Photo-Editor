@@ -366,6 +366,51 @@ export function validateRealPhotoMalformedReplyReceipt(r,pins,manifest){
     !Number.isSafeInteger(r.elapsedMs) || r.elapsedMs<0) fail();
   return r;
 }
+export function validateRealPhotoMalformedCounterReceipt(r,pins,manifest){
+  const bad=()=>{throw new TypeError('037C-3b-3/2b-1: invalid counter photo receipt');};
+  const fmt=FORMATS[r?.format],pin=pins?.documents?.[r?.format];
+  if(!fmt||!pin||r.kind!=='zpe-real-photo-browser-malformed-counter-v1'||
+    r.status!=='native-worker-counter-corrupted-rejected-by-public-ui'||
+    r.protocol!=='file:'||r.runIndex!==1||
+    r.inputFileSha256!==pin.fileSha256||r.nativeDefectSha256!==pin.nativeSha256||
+    r.nativeDefectSha256!==manifest?.native?.[fmt.key]?.damagedSha256||
+    r.sourcePhotoSha256!==manifest?.sourceSha256||r.bitsPerChannel!==fmt.bits||
+    r.selectedPixels!==8288||r.workerRequests!==1||r.workerReplies!==1||
+    r.workerTerminations!==1||r.selectionMatched!==true||
+    r.realWorkerNativeResultObserved!==true||r.realWorkerReplyFilled!==8288||
+    !Number.isSafeInteger(r.realWorkerChangedTiles)||r.realWorkerChangedTiles<2||
+    !Number.isSafeInteger(r.realWorkerReplyChanged)||
+    r.realWorkerReplyChanged<=r.realWorkerChangedTiles||
+    r.realWorkerReplyChanged>r.selectedPixels||
+    r.mutatedChangedCount!==r.realWorkerReplyChanged-1||
+    r.mutatedChangedCount<r.realWorkerChangedTiles||
+    r.transportMutation!=='changed-count-minus-one'||
+    r.mutatedBeforeUiValidation!==true||r.counterCorrupted!==true||
+    r.selectedAlphaByteCorrupted!==false||
+    r.publicInvalidWorkerStatusObserved!==true||r.privatePreviewTileWrites!==0||
+    r.nativeBytesUnchanged!==true||r.originalHistoryUnchanged!==true||
+    r.fillHistoryEntries!==0||r.secondTabHistoryUnchanged!==true||
+    r.maxBytesVerified!==false||r.photoshopCompatibilityVerified!==false||
+    !Number.isSafeInteger(r.startedAtUnixMs)||r.startedAtUnixMs<=0||
+    !Number.isSafeInteger(r.elapsedMs)||r.elapsedMs<0)bad();
+  return r;
+}
+export function validateRealPhotoMalformedCounterSet(receipts,pins,manifest){
+  if(!Array.isArray(receipts)||receipts.length!==2)
+    throw new TypeError('037C-3b-3/2b-1: two independent formats required');
+  const formats=new Set(),sessions=new Set();
+  for(const r of receipts){
+    validateRealPhotoMalformedCounterReceipt(r,pins,manifest);
+    if(formats.has(r.format)||sessions.has(r.startedAtUnixMs))
+      throw new TypeError('037C-3b-3/2b-1: duplicate format/session');
+    formats.add(r.format);sessions.add(r.startedAtUnixMs);
+  }
+  if(!formats.has('psd16')||!formats.has('psb32'))
+    throw new TypeError('037C-3b-3/2b-1: both depths required');
+  return {kind:'zpe-real-photo-browser-malformed-counter-set-v1',
+    runs:2,formats:[...formats].sort(),counterRejected:true,
+    maxBytesVerified:false,photoshopCompatibilityVerified:false};
+}
 export function validateRealPhotoMalformedReplySet(receipts,pins,manifest){
   if(!Array.isArray(receipts) || receipts.length!==2)
     throw new TypeError('037C-3b-3/2a: two independent photo formats required');
@@ -581,6 +626,20 @@ function installMalformedNativeWorkerReply(){
         throw Error('037C-3b-3/2a missing genuine native result');
       s.workerReplies++;s.realWorkerNativeResultObserved=true;
       s.realWorkerReplyFilled=result.filled;s.realWorkerChangedTiles=result.changedTiles;
+      // Intercept only after the real Worker computed native tile bytes.
+      // The wrong count stays within plausible bounds but disagrees with
+      // the byte-exact changed-pixel count validated by the application.
+      if(s.malformedKind==='counter'){
+        if(!Number.isSafeInteger(result.changed) ||
+          result.changed<=result.changedTiles||result.changed>result.filled)
+          throw Error('037C-3b-3/2b-1 invalid real Worker baseline count');
+        s.realWorkerReplyChanged=result.changed;
+        s.mutatedChangedCount=result.changed-1;
+        s.counterCorrupted=true;s.selectedAlphaByteCorrupted=false;
+        s.mutated=true;s.mutatedBeforeUiValidation=true;
+        return listener.call(this,{data:{...reply,
+          result:{...result,changed:s.mutatedChangedCount}}});
+      }
       const index=s.expectedIndices[0],x=index%1025,y=Math.floor(index/1025);
       const tiles=result.source.tiles.map(tile=>({...tile}));
       const ti=tiles.findIndex(tile=>x>=tile.x&&y>=tile.y&&
@@ -899,6 +958,7 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
   evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,
   midKernel=false,closeDocument=false,escapeCancel=false,completedPreviewEscape=false,
   completedPreviewSuccess=false,cancelFirstSuccessor=false,malformedReply=false,
+  malformedKind='alpha',
 }={}){
   if(closeDocument && !midKernel)
     throw new TypeError('037C-3b-2b/2 requires genuine post-write kernel cancellation');
@@ -910,6 +970,8 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
     throw new TypeError('037C-3b-2b/3b-2b requires isolated cancel-first successor');
   if(completedPreviewSuccess && (midKernel || closeDocument || escapeCancel))
     throw new TypeError('037C-3b-2b/3b-2a requires an isolated preview success');
+  if(malformedReply && !['alpha','counter'].includes(malformedKind))
+    throw new TypeError('037C-3b-3 unknown malformed kind');
   if(malformedReply && (midKernel || closeDocument || escapeCancel || completedPreviewEscape || completedPreviewSuccess || cancelFirstSuccessor))
     throw new TypeError('037C-3b-3/2a requires an isolated real Worker malformed reply');
   const fmt=FORMATS[format];
@@ -930,7 +992,7 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
     '037C-3b-2a genuine photo independent pins unavailable');
   const started=Date.now();
   const polygon=createWideConnectedUiPolygon(1025,1025,admitted.roiOrigin);
-  await evaluate(client,'window.__photoFailure={bits:'+fmt.bits+
+  await evaluate(client,'window.__photoFailure={malformedKind:'+JSON.stringify(malformedKind)+',bits:'+fmt.bits+
     ',polygon:'+JSON.stringify(polygon)+',expectedIndices:'+
     JSON.stringify(Array.from(admitted.selectedIndices))+
     ',snapshots:{},survivorSnapshots:{},workerRequests:0,workerTerminations:0};true');
@@ -1021,11 +1083,17 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
         'filled:window.__photoFailure.realWorkerReplyFilled,'+
         'tiles:window.__photoFailure.realWorkerChangedTiles,'+
         'alpha:window.__photoFailure.selectedAlphaByteCorrupted,'+
+        'counter:window.__photoFailure.counterCorrupted,'+
+        'replyChanged:window.__photoFailure.realWorkerReplyChanged,'+
+        'mutatedChanged:window.__photoFailure.mutatedChangedCount,'+
         'before:window.__photoFailure.mutatedBeforeUiValidation,'+
         'preview:window.__photoFailure.previewTileWrites})');
       assert(state.requests===1 && state.replies===1 && state.terminations===1 &&
         state.selectionMatched && state.real && state.filled===8288 && state.tiles>=2 &&
-        state.alpha && state.before && state.preview===0,
+        (malformedKind==='counter'
+          ? state.counter && state.alpha===false &&
+            state.replyChanged>state.tiles && state.mutatedChanged===state.replyChanged-1
+          : state.alpha) && state.before && state.preview===0,
         '037C-3b-3/2a malformed Worker was not blocked before preview',
         JSON.stringify(state));
       await snapshot('after');
@@ -1036,9 +1104,12 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       const other=await evaluate(client,'('+checkOtherHistoryAfterEscape.toString()+')()');
       assert(other.historyUnchanged && other.originalSelected,
         '037C-3b-3/2a malformed result changed unrelated tab',JSON.stringify(other));
+      const counter=malformedKind==='counter';
       const receipt={
-        kind:'zpe-real-photo-browser-malformed-alpha-v1',
-        status:'native-worker-alpha-corrupted-rejected-by-public-ui',
+        kind:counter?'zpe-real-photo-browser-malformed-counter-v1':
+          'zpe-real-photo-browser-malformed-alpha-v1',
+        status:counter?'native-worker-counter-corrupted-rejected-by-public-ui':
+          'native-worker-alpha-corrupted-rejected-by-public-ui',
         format,runIndex,protocol:'file:',inputFileSha256:baseline.inputFileSha256,
         nativeDefectSha256:baseline.nativeDefectSha256,
         sourcePhotoSha256:manifest.sourceSha256,
@@ -1047,8 +1118,11 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
         workerTerminations:state.terminations,selectionMatched:state.selectionMatched,
         realWorkerNativeResultObserved:state.real,realWorkerReplyFilled:state.filled,
         realWorkerChangedTiles:state.tiles,
-        transportMutation:'selected-alpha-one-byte',
+        realWorkerReplyChanged:counter?state.replyChanged:undefined,
+        mutatedChangedCount:counter?state.mutatedChanged:undefined,
+        transportMutation:counter?'changed-count-minus-one':'selected-alpha-one-byte',
         mutatedBeforeUiValidation:state.before,selectedAlphaByteCorrupted:state.alpha,
+        counterCorrupted:counter?state.counter:undefined,
         publicInvalidWorkerStatusObserved:true,privatePreviewTileWrites:state.preview,
         nativeBytesUnchanged:cancelled.nativeExact,originalHistoryUnchanged:cancelled.historyExact,
         fillHistoryEntries:cancelled.fillHistoryEntries,
@@ -1056,11 +1130,13 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
         maxBytesVerified:false,photoshopCompatibilityVerified:false,
         startedAtUnixMs:started,elapsedMs:Date.now()-started,
       };
-      validateRealPhotoMalformedReplyReceipt(receipt,pins,manifest);
+      if(counter)validateRealPhotoMalformedCounterReceipt(receipt,pins,manifest);
+      else validateRealPhotoMalformedReplyReceipt(receipt,pins,manifest);
       await mkdir(artifactDir,{recursive:true});
-      const output=path.join(artifactDir,'real-photo-'+format+'-malformed-alpha-run-1.json');
+      const output=path.join(artifactDir,'real-photo-'+format+
+        (counter?'-malformed-counter-run-1.json':'-malformed-alpha-run-1.json'));
       await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
-      console.log('037C-3b-3/2a real-photo malformed native alpha blocked:',JSON.stringify({output,...receipt}));
+      console.log('037C-3b-3 malformed genuine Worker rejected:',JSON.stringify({output,...receipt}));
       return receipt;
     }
 

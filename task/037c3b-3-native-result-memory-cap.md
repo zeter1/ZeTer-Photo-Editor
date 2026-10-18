@@ -29,3 +29,7 @@
 ## 037C-3b-3/2a — принятая genuine-photo alpha-mutation матрица
 
 [PR #262](https://github.com/zeter1/ZeTer-Photo-Editor/pull/262) → [main 7caacf7](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7caacf75760bd4097bdaf7a99135774b7866b64f); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130130353), [PR photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130130421), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130492852), [exact-main photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130492841). Два независимых настоящих pinned PSD16/PSB32 photo Chromium сценария с native Worker и corrupt selected-alpha, публичной ошибкой, без preview/History и exact native v2 parity. **/2b: counters/Float32/outside-ROI + реальный public UI maxBytes/refusal-retry ещё OPEN.** После /2b — 037C-3c.
+
+## 037C-3b-3/2b-1 — реальный Worker corrupted changed-counter (IN PROGRESS)
+
+Отдельные PSD16/PSB32 pinned-photo Chromium `file://` проверки; native Worker вычисляет реальный результат, test transport снижает `changed` на единицу до UI validator. Нужны public error, no-preview/no-History, byte-exact Save Project, offline pinned receipt, PR/exact-main CI. Остальные /2b кейсы (Float32 non-finite, outside-ROI, maxBytes public UI refusal/retry) остаются TODO. [Подзадача](037c3b-3-2b-1-photo-malformed-counter.md).
