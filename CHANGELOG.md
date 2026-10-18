@@ -2,6 +2,13 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-18 — Проверена отмена real-photo Worker после записи пикселя внутри native ядра (037C-3b-2b/1)
+
+- Добавлено: отдельная opt-in test-only Chromium `file://` проверка двух independently pinned photo-derived PSD16/PSB32, где реальный native Worker записывает как минимум один пиксель, затем удерживается тестовым kernel probe до публичного переключения вкладки и принудительного `terminate()`.
+- Проверено: через публичный File → Save Project полные native tiles и две History не меняются; искусственный поздний ответ после отмены игнорируется. Strict JSON verifier отклоняет поддельный pre-kernel/metadata/no-publication receipt. Production Worker, bundle, runtime и версия не изменены.
+- Проверено: [PR #252](https://github.com/zeter1/ZeTer-Photo-Editor/pull/252) → [15721fe](https://github.com/zeter1/ZeTer-Photo-Editor/commit/15721fe5e87b6ab63aa67d5d5de25575badf7670), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284685), [PR genuine-photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284680).
+- Ограничения: этот gate доказывает начало native вычисления до отмены, а не завершение всего ядра; поздний ответ инъецирован искусственно. `close`, explicit cancel, stale-generation/real late-completion и memory-cap, Photoshop-authored PSD/ICC/RAW/Stage 003 остаются OPEN. [Остаток](task/037c3b-2b-real-photo-mid-kernel.md).
+
 ### 2026-10-18 — Проверена отмена real-photo native Worker на переключении вкладки (037C-3b-2a)
 
 - Добавлено: opt-in test-only Chromium `file://` сценарий с настоящими frozen PSD16/PSB32: публичное переключение вкладки после handshake и перехвата native job (8288 ROI), остановка Worker и инъекция позднего сообщения.
