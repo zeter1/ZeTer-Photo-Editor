@@ -528,8 +528,9 @@ async function runSmoke() {
       const verifySwitchFailure=process.env.ZPE_REAL_PHOTO_BROWSER_FAILURE==='1';
       const verifyMidKernel=process.env.ZPE_REAL_PHOTO_BROWSER_MID_KERNEL==='1';
       const verifyClose=process.env.ZPE_REAL_PHOTO_BROWSER_MID_KERNEL_CLOSE==='1';
-       const verifyEscape=process.env.ZPE_REAL_PHOTO_BROWSER_MID_KERNEL_ESCAPE==='1';
-      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)>1)
+      const verifyEscape=process.env.ZPE_REAL_PHOTO_BROWSER_MID_KERNEL_ESCAPE==='1';
+      const verifyCompletedPreview=process.env.ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_ESCAPE==='1';
+      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)>1)
         throw new Error('037C-3b real photo modes require independent Chromium sessions');
       let photoSampler=null,photoReport=null,photoWorker=null;
       if(observe){
@@ -539,11 +540,11 @@ async function runSmoke() {
       }
       try{
         const baseline=await verifyGenuinePhotoUiImport(client,options);
-        if(verifySwitchFailure || verifyMidKernel || verifyClose || verifyEscape){
+        if(verifySwitchFailure || verifyMidKernel || verifyClose || verifyEscape || verifyCompletedPreview){
           const {verifyGenuinePhotoUiSwitchFailure}=await import('./browser-real-photo-switch-failure.mjs');
           await verifyGenuinePhotoUiSwitchFailure(client,{...options,baseline,
             midKernel:verifyMidKernel||verifyClose||verifyEscape,closeDocument:verifyClose,
-             escapeCancel:verifyEscape});
+            escapeCancel:verifyEscape,completedPreviewEscape:verifyCompletedPreview});
         }
         if(observe){
           await photoSampler.snapshot('after-import');
