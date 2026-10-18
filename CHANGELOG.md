@@ -1,6 +1,15 @@
 # История изменений
 
-## 1.46.3 — текущая версия
+## 1.46.4 — текущая версия
+
+### 2026-10-18 — Запрещена публикация повреждённых native Worker результатов (037C-3b-3/1)
+
+- Исправлено: Content-Aware Fill теперь отвергает изменение alpha-канала даже у выбранных native RGB/CMYK пикселей и не допускает NaN/Infinity в изменённых Float32 цветовых каналах. Конечные HDR-сэмплы выше 1 по-прежнему разрешены.
+- Исправлено: смешанный ответ Worker `unavailable` вместе с native payload больше не запускает тихий CPU fallback; это ошибка протокола.
+- Добавлено: отрицательные регрессии CMYKA32 alpha/NaN/Infinity и RGB16/CMYKA32 maxBytes-before-dispatch, а также повторное успешное выполнение после отказа; пересобран browser bundle и cache manifest.
+- Ограничения: реальная Chromium `file://` проверка injected malformed/photo PSD16+PSB32 и UI memory-cap остаётся задачей [037C-3b-3/2](task/037c3b-3-native-result-memory-cap.md), затем финальная 037C-3c; Photoshop-authored goldens, глобальный tiled budget, ICC/CMYK/RAW и весь Photoshop roadmap открыты.
+
+## 1.46.3 — 2026-10-18
 
 - Escape в редакторе отменяет ожидающую Content-Aware Fill, не сбрасывая выделение; другие Escape-жесты и открытые модальные окна сохраняют прежнее поведение.
 - Поколение команды проверяется до записи high-depth тайлов/preview, включая отмену после успешного ответа Worker, но до завершения async preview.
