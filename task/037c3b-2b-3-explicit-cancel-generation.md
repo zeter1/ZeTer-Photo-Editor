@@ -15,7 +15,7 @@
 
 ## Следующие задачи — брать из этой папки
 
-1. **037C-3b-2b/3a (OPEN):** genuine pinned PSD16 и PSB32 в отдельных Chromium `file://`; actual native first-write, публичный Escape, snapshot исходных native tiles/History через File → Save Project, late result, негативные receipts. Проверить выделение и object-removal progress.
+1. **037C-3b-2b/3a (код/CI подготовлены, приёмка OPEN):** [отдельная проходка](037c3b-2b-3a-photo-escape-mid-kernel.md) — genuine pinned PSD16+PSB32 Chromium `file://`, actual native first-write, публичный Escape, native snapshot/History, injected late-result и строгие receipts. Проверить фактический PR/exact-main CI, затем отдельно selection и object-removal progress.
 2. **037C-3b-2b/3b (OPEN):** genuine photo stale-command-generation и completed Worker result → slow preview → Escape, включая success-first / cancel-first, exact native hashes/History; не подменять реальный Worker protocol mock-ом.
 3. **037C-3b-3 (OPEN):** malformed native result / maxBytes memory refusal; fail-closed UI без публикации.
 4. **037C-3c (OPEN):** полный CI gate PR → merge → exact-main, и только после этого закрытие 037C. P0 [002](002-psd-compatibility-corpus.md), [003](003-tiled-content-aware.md), ICC/CMYK/RAW всё ещё открыты.
