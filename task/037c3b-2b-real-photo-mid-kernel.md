@@ -1,6 +1,6 @@
 # 037C-3b-2b/1 — genuine photo Worker cancellation after native kernel write
 
-**Приоритет:** P1. **Статус:** реализация в PR, CI ещё не проверен. Более широкий 037C-3b-2b остаётся OPEN.
+**Приоритет:** P1. **Статус:** 037C-3b-2b/1 ЗАКРЫТА (2026-10-18). [PR #252](https://github.com/zeter1/ZeTer-Photo-Editor/pull/252) → [main 15721fe](https://github.com/zeter1/ZeTer-Photo-Editor/commit/15721fe5e87b6ab63aa67d5d5de25575badf7670). [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284685), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284680). Полная 037C-3b-2b остаётся OPEN, exact-main CI проверяется отдельно.
 
 ## Цель проходки
 
@@ -15,8 +15,9 @@
 - [x] После `terminate` инъецируется контролируемый *искусственный* late-result для проверки отсутствия публикации; это не натуральный поздний ответ настоящего Worker.
 - [x] Отдельные fail-closed receipts `real-photo-{psd16,psb32}-mid-kernel-run-1.json`, verifier, отрицательные tests и opt-in `ZPE_REAL_PHOTO_BROWSER_MID_KERNEL=1`.
 - [x] Изолированный per-format шаг GitHub Actions, upload проверяемых evidence.
-- [ ] PR: проверка Node suite / generated artifacts / real-photo intake + два Chromium прогона (требует реальных CI JPEG/PSD/PSB из pipeline).
-- [ ] Слитие после зелёных checks и повторная проверка точного `main` CI; тогда пометить узкий gate закрытым.
+- [x] PR: Node suite / generated artifacts / browser smoke / genuine-photo real-photo intake + два Chromium прогона: оба workflow success на SHA `23e8edae`.
+- [x] Слитие после зелёных PR checks — main `15721fe` (squash). 
+- [ ] Независимо проверить exact-main CI и photo workflow на слитом коде; добавить ссылки.
 
 ## Границы доказательства
 
