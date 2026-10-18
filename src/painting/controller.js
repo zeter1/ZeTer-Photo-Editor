@@ -459,10 +459,18 @@ export function createRasterEditController({
 
   // Keep all ROI tile changes private until the exact document, layer and
   // serialized source are revalidated after the asynchronous preview build.
-  async function persistTiledHighDepthInpaint(owner, layer, { isAllowed } = {}) {
+  async function persistTiledHighDepthInpaint(owner, layer, {
+    isAllowed, isContinuationCurrent,
+  } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
     const originalSource = layer.highDepthSource;
-    const stale = () => !isCurrentRasterTarget(owner, layer) || layer.highDepthSource !== originalSource;
+    // A completed Worker can still be awaiting preview. Never publish after
+    // the command generation/lease was revoked, even for the same document.
+    const stale = () => (
+      (typeof isContinuationCurrent === 'function' && !isContinuationCurrent()) ||
+      !isCurrentRasterTarget(owner, layer) ||
+      layer.highDepthSource !== originalSource
+    );
     if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
     const prepared = await prepareTiledInpaintWithWorker(originalSource, {
       isAllowed,
