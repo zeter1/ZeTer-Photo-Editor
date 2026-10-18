@@ -2,6 +2,13 @@
 
 ## 1.46.1 — текущая версия
 
+### 2026-10-18 — Проверена отмена real-photo native Worker на переключении вкладки (037C-3b-2a)
+
+- Добавлено: opt-in test-only Chromium `file://` сценарий с настоящими frozen PSD16/PSB32: публичное переключение вкладки после handshake и перехвата native job (8288 ROI), остановка Worker и инъекция позднего сообщения.
+- Проверено: сохранённые через публичный Save Project native tiles byte-exact неизменны, History двух вкладок не содержит старую заливку; отдельные fail-closed JSON receipts и unit-test отрицательные случаи.
+- Проверено: [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111656278), [PR photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111656280), [точный main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111881316), [точный main photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111881348) — success; [PR #251](https://github.com/zeter1/ZeTer-Photo-Editor/pull/251) слит как [1d4d376](https://github.com/zeter1/ZeTer-Photo-Editor/commit/1d4d37664905f7bd3d25523d18d7c251e11fb4fb).
+- Ограничения проверки: отправка Worker намеренно задержана **перед** выполнением ядра. Это не реальный mid-kernel photo cancel и не доказательство memory cap/Adobe parity. Production/runtime и версия 1.46.1 без изменений. [Следующая задача](task/037c3b-2a-real-photo-switch-late.md).
+
 ### 2026-10-15 — Зафиксированы независимые real-photo byte pins и двойная CI-проверка (037B2b-2i)
 
 - Добавлено: постоянный reviewed manifest с SHA-256 оригинального CC0 JPEG, RGBA8 и четырёх native RGB16/Float32 clean/damaged references, независимо пересчитанных по реальным пикселям.
