@@ -188,6 +188,27 @@ function installHeldNativeWorker(){
   };
   return true;
 }
+function ensureGeneratedWorkerSupplier(){
+  const name='__zpeTiledInpaintWorkerSource';
+  if(typeof globalThis[name]==='string') return Promise.resolve(true);
+  // The browser adapter normally lazily injects this classic file:// script
+  // on first run. Preload only in this test so the post-write probe can be
+  // inserted before the native job creates its Worker.
+  return new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    const timeout=setTimeout(()=>{script.remove();reject(Error('037C-3b-2b supplier bootstrap timeout'));},5000);
+    const complete=(err)=>{
+      clearTimeout(timeout);script.remove();
+      if(err) reject(err);
+      else if(typeof globalThis[name]!=='string') reject(Error('037C-3b-2b missing supplier after load'));
+      else resolve(true);
+    };
+    script.onload=()=>complete(null);
+    script.onerror=()=>complete(Error('037C-3b-2b supplier failed to load'));
+    script.src=new URL('./src/core/tiled-inpaint-worker-source.js',document.baseURI).href;
+    document.head.appendChild(script);
+  });
+}
 function installMidKernelNativeWorker(instrument){
   const s=window.__photoFailure;
   const descriptor=Object.getOwnPropertyDescriptor(globalThis,'__zpeTiledInpaintWorkerSource');
@@ -329,6 +350,10 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       ');window.__photoFailure.historyBefore=[...document.querySelectorAll("#historyList .history-row")].map(r=>r.textContent);true');
     // assertEqualNativeTiles throws on mismatch; wrapper returns a boolean.
     await evaluate(client,'window.__photoFailureAssertNative=((f)=>((a,b,label)=>{f(a,b,label);return true}))(window.__photoFailureAssertNative);true');
+    if(midKernel){
+      assert(await evaluate(client,'('+ensureGeneratedWorkerSupplier.toString()+')()'),
+        '037C-3b-2b generated Worker supplier unavailable');
+    }
     await evaluate(client,midKernel
       ? '('+installMidKernelNativeWorker.toString()+')('+instrumentBrowserKernelSource.toString()+')'
       : '('+installHeldNativeWorker.toString()+')()');
