@@ -17076,6 +17076,10 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
     } catch { throw invalid(); }
     if (originalBytes.length !== before.rawBytes ||
         returnedBytes.length !== before.rawBytes) throw invalid();
+    // Reuse a single view per changed tile (up to millions of selected pixels).
+    const returnedFloatView = source.bitsPerChannel === 32
+      ? new DataView(returnedBytes.buffer, returnedBytes.byteOffset, returnedBytes.byteLength)
+      : null;
     let tilePixelChanges = 0;
     for (let local = 0; local < before.width * before.height; local += 1) {
       const offset = local * pixelBytes;
@@ -17092,10 +17096,9 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
       for (let byte = pixelBytes - alphaBytes; byte < pixelBytes; byte += 1) {
         if (originalBytes[offset + byte] !== returnedBytes[offset + byte]) throw invalid();
       }
-      if (source.bitsPerChannel === 32) {
-        const view = new DataView(returnedBytes.buffer, returnedBytes.byteOffset, returnedBytes.byteLength);
+      if (returnedFloatView) {
         for (let channel = 0; channel < source.channels - (alphaBytes ? 1 : 0); channel += 1) {
-          if (!Number.isFinite(view.getFloat32(offset + channel * 4, true))) throw invalid();
+          if (!Number.isFinite(returnedFloatView.getFloat32(offset + channel * 4, true))) throw invalid();
         }
       }
       const globalX = before.x + local % before.width;
