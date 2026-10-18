@@ -1,6 +1,6 @@
 # 037C-3b-3/2b-2 — genuine-photo malformed Float32 / outside-ROI / maxBytes
 
-**Приоритет:** P1. **Статус: TODO.** **Зависимость:** 037C-3b-3/2a и /2b-1 DONE. Родитель: [037C-3b-3](037c3b-3-native-result-memory-cap.md), всё ещё OPEN.
+**Приоритет:** P1. **Статус: IN PROGRESS.** **Зависимость:** 037C-3b-3/2a и /2b-1 DONE. Родитель: [037C-3b-3](037c3b-3-native-result-memory-cap.md), всё ещё OPEN.
 
 ## Цель
 
@@ -25,3 +25,10 @@
 - [ ] Реальный maxBytes before Worker отказ и успешный retry.
 - [ ] Byte-exact native v2 + frozen SHA-256 + negative tamper suite.
 - [ ] PR CI + genuine-photo CI + exact-main CI successful, ссылки сохранены.
+
+## Проходка 2026-10-18 — подготовлены новые проверки (частично)
+
+- Код: `tools/browser-real-photo-switch-failure.mjs`, `tools/browser-smoke.mjs`; strict offline verifier `tools/verify-browser-real-photo-malformed-extra-artifacts.mjs`; негативные тесты `tests/browser-real-photo-malformed-extra.test.mjs`; opt-in workflow `.github/workflows/real-photo-intake.yml`.
+- На genuine pinned PSD16/PSB32 добавлены Chromium `file://` запуски после настоящего native Worker. PSB32 NaN/Infinity, PSD16+PSB32 изменённый цвет вне ROI; public error, полные Save Project v2/native bytes, отсутствие preview/History и side-tab mutation проверяются в harness. Не synthetic Worker.
+- Ветка: `feat/037c3b3-photo-nonfinite-outside-roi`; локальный Chromium с pinned assets недоступен. PR/genuine-photo/exact-main CI результатов пока нет: **НЕ считать критерии приёмки закрытыми**.
+- Осталось: `maxBytes < rawBytes` отказ на реальном импортированном фото до selection sampling/Worker и успешный retry; затем подтвердить 4 browser cases, CI, PR, merge/exact-main и только тогда DONE. Следом 037C-3c.
