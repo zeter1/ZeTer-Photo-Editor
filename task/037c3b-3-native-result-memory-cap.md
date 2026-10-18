@@ -1,6 +1,7 @@
 # 037C-3b-3 — native Worker malformed reply / maxBytes fail-closed
 
-**Статус: ЧАСТИЧНО ВЫПОЛНЕНО (2026-10-18); реальная Chromium/photo UI-приёмка ЕЩЁ OPEN.**
+**Статус: /1 КОДОВАЯ ПРОХОДКА ЗАКРЫТА (2026-10-18); /2 genuine-photo Chromium malformed/maxBytes UI ЕЩЁ OPEN.**
+[PR #261](https://github.com/zeter1/ZeTer-Photo-Editor/pull/261) → [main 813ccbe](https://github.com/zeter1/ZeTer-Photo-Editor/commit/813ccbeb3b8974471453948d5ba315df98d5468e); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39127286740), [PR photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39127286483), [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39127667652), [exact-main photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39127667813) — все success. Эти реальные фото workflow проверяют предшествующую matrix без специальной инъекции malformed/maxBytes; /2 ещё не доказана.
 Эта проходка следует за закрытой [037C-3b-2b/3b-2b](037c3b-2b-3b-2b-photo-cancel-successor.md).
 Это *не* доказательство полного 037C или Photoshop-compatibility.
 
