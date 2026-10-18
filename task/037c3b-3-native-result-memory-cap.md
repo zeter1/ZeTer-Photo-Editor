@@ -38,3 +38,16 @@
 ### 037C-3b-3/2b-1 подтверждённая приёмка
 
 [PR #263](https://github.com/zeter1/ZeTer-Photo-Editor/pull/263) → [main 410acedf](https://github.com/zeter1/ZeTer-Photo-Editor/commit/410acedf5649a7d52e84650b4978d51dfe3958af); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39133594716), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39133594742), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39133988525), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39133988451). Два независимых genuine photo Chromium сценария и strict offline validator прошли. **037C-3b-3/2b-2 OPEN**: non-finite Float32, outside-ROI, public UI `maxBytes` отказ/успешный повтор.
+
+
+## Подзадача /2b-2 — проходка 2026-10-18 — native memory-cap + real photo public retry (ожидает CI)
+
+**Статус: IN PROGRESS**, исходный PR #264 ранее подтвердил четыре malformed-extra сценария; текущая ветка добавляет последнюю часть /2b-2 без изменения frozen native PSD/PSB исходников.
+
+- Production: `src/painting/tiled-inpaint-dispatch.js` — явный `RangeError` с публичным сообщением при `rawBytes > maxBytes`, до любого selection predicate или Worker; одинаково для Worker и cooperative случая; невозможен прежний `null` → случайный high-depth fallback.
+- Unit: `tests/tiled-inpaint-ui-dispatch.test.mjs` — `rawBytes-1` и 0 не сканируют ROI и не отправляют job; повтор с `rawBytes` выполняет настоящий native tile algorithm и не мутирует source.
+- Browser: `tools/browser-real-photo-switch-failure.mjs`, `tools/browser-smoke.mjs` — отдельные pinned PSD16/PSB32 `file://` сессии с публичным Duplicate Layer до `budget < rawBytes`, public отказ без Worker и native/History утечки, Delete Layer, затем настоящий Worker и public .zpe readback подтверждают сохранённые native tile bytes и Fill History.
+- Offline: `tools/verify-browser-real-photo-memory-cap-artifacts.mjs`, `tests/browser-real-photo-memory-cap.test.mjs` — строго два независимых frozen SHA-256 receipts, валидаторы и negative tamper/missing-file tests.
+- CI: `.github/workflows/real-photo-intake.yml` — две независимые Chromium сессии, сбор подписанных по именам файлов receipts и offline verifier.
+- **Ограничение доказательств:** в этом окружении отсутствуют локальная копия полного репозитория и pinned-photo bundle; `npm run check` и настоящий Chromium запуск локально не подтверждены. Дождаться реального PR CI, genuine-photo CI, merge и exact-main CI, записать URL и результат. До этого НЕ помечать критерии /2b-2 как DONE.
+- **Следующая:** после принятия зелёных CI и закрытия /2b-2 — задача 037C-3c final acceptance для матриц Worker/Undo/Redo/quality/memory/fail-closed и лишь затем остальной roadmap.
