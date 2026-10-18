@@ -1,6 +1,6 @@
 # 037C-3b-2b/3b — настоящий completed Worker → async preview → Escape
 
-**Приоритет P1. Статус /3b-1: ЗАКРЫТА 2026-10-18 ([PR #257](https://github.com/zeter1/ZeTer-Photo-Editor/pull/257) → [main 04ca338](https://github.com/zeter1/ZeTer-Photo-Editor/commit/04ca33876b3e8a1a4752d5e6e1acf97d705d319b)); /3b-2 и полная 037C остаются OPEN.**
+**Приоритет P1. Статус /3b-1: ЗАКРЫТА 2026-10-18 ([PR #257](https://github.com/zeter1/ZeTer-Photo-Editor/pull/257) → [main 04ca338](https://github.com/zeter1/ZeTer-Photo-Editor/commit/04ca33876b3e8a1a4752d5e6e1acf97d705d319b)); /3b-2 также ЗАКРЫТА в [PR #260](https://github.com/zeter1/ZeTer-Photo-Editor/pull/260), полная 037C остаётся OPEN.**
 
 ## /3b-1: cancel-first
 - Независимый pinned photo-derived PSD16 и PSB32 Chromium file://, публичный import + Save Project, 8288 polygon ROI.
@@ -15,7 +15,7 @@
 - [x] PR merge; [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39122768696), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39122768707). /3b-1 закрыта.
 
 ## Далее OPEN
-1. **/3b-2a ЗАКРЫТА:** success-first real PSD16/PSB32 Worker → native publish → public Escape, полные native v2 tiles и History проверены на [PR #259](https://github.com/zeter1/ZeTer-Photo-Editor/pull/259) и [exact-main](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39124473357). [Отчёт](037c3b-2b-3b-2a-photo-success-first.md). **/3b-2b OPEN:** cancel-first и следующий успешный Worker, старое поколение не перезаписывает новое, byte-exact readback/History.
+1. **/3b-2a ЗАКРЫТА:** success-first real PSD16/PSB32 Worker → native publish → public Escape, полные native v2 tiles и History проверены на [PR #259](https://github.com/zeter1/ZeTer-Photo-Editor/pull/259) и [exact-main](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39124473357). [Отчёт](037c3b-2b-3b-2a-photo-success-first.md). **/3b-2b ЗАКРЫТА:** cancel-first → настоящий второй Worker, старое поколение не перезаписывает новое; PSD16/PSB32 byte-exact readback/History, [PR #260](https://github.com/zeter1/ZeTer-Photo-Editor/pull/260), [exact-main genuine-photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39125761836).
 2. 037C-3b-3 genuine malformed native worker / maxBytes refusal, fail-closed public UI, receipts.
 3. 037C-3c final acceptance: photo quality/memory/failure matrix, PR + exact-main gates.
 4. P0 002 Photoshop-authored corpus; Stage 003 full tiling; ICC/CMYK, RAW/HDR и остальной roadmap скриншота.
