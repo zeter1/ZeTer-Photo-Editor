@@ -13,6 +13,8 @@ export function createBrowserTiledInpaintWorkerController({
   BlobType = globalThis.Blob,
   URLApi = globalThis.URL,
   loadTimeoutMs = 5000,
+  // UI watchdog; no successful or stale result may arrive after this deadline.
+  jobTimeoutMs = 180_000,
 } = {}) {
   const supplierName = '__zpeTiledInpaintWorkerSource';
   let sourcePromise = null;
@@ -85,6 +87,7 @@ export function createBrowserTiledInpaintWorkerController({
     // Exact-owner checks must terminate a stale in-flight computation even
     // when the Worker is CPU-bound and cannot send another message.
     pollIntervalMs:50,
+    maxRunMs:jobTimeoutMs,
     createWorker() {
       let url;
       try {
