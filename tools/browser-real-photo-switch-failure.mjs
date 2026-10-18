@@ -448,6 +448,16 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       const survivor=await evaluate(client,'('+publicSurvivorSnapshot.toString()+')("before")');
       assert(survivor.photoLeaked===false && survivor.historyRows===tabs.secondHistory.length,
         '037C-3b-2b/2 survivor baseline invalid',JSON.stringify(survivor));
+      // The tab click changes the active document immediately, but the render
+      // canvases are resized in a later frame. Do not use the survivor's
+      // 1200x800 overlay to project the pinned 1025x1025 photo polygon.
+      await waitFor('037C-3b-2b/2 photo canvas restored after survivor Save Project',
+        ()=>evaluate(client,`(()=>{
+          const tabs=[...document.querySelectorAll('#docTabs .doc-tab')];
+          const overlay=document.querySelector('#overlayCanvas');
+          return tabs.length===2 && tabs[0].getAttribute('aria-selected')==='true' &&
+            overlay?.width===1025 && overlay?.height===1025;
+        })()`),10000);
     }
     const view=await evaluate(client,'('+setupPolygon.toString()+')()');
     assert(view.width===1025 && view.height===1025 && view.inWindow &&
