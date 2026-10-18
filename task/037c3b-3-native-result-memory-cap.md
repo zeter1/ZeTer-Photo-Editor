@@ -30,6 +30,11 @@
 
 [PR #262](https://github.com/zeter1/ZeTer-Photo-Editor/pull/262) → [main 7caacf7](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7caacf75760bd4097bdaf7a99135774b7866b64f); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130130353), [PR photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130130421), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130492852), [exact-main photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130492841). Два независимых настоящих pinned PSD16/PSB32 photo Chromium сценария с native Worker и corrupt selected-alpha, публичной ошибкой, без preview/History и exact native v2 parity. **/2b: counters/Float32/outside-ROI + реальный public UI maxBytes/refusal-retry ещё OPEN.** После /2b — 037C-3c.
 
-## 037C-3b-3/2b-1 — реальный Worker corrupted changed-counter (IN PROGRESS)
+## 037C-3b-3/2b-1 — реальный Worker corrupted changed-counter (DONE, 2026-10-18)
 
 Отдельные PSD16/PSB32 pinned-photo Chromium `file://` проверки; native Worker вычисляет реальный результат, test transport снижает `changed` на единицу до UI validator. Нужны public error, no-preview/no-History, byte-exact Save Project, offline pinned receipt, PR/exact-main CI. Остальные /2b кейсы (Float32 non-finite, outside-ROI, maxBytes public UI refusal/retry) остаются TODO. [Подзадача](037c3b-3-2b-1-photo-malformed-counter.md).
+
+
+### 037C-3b-3/2b-1 подтверждённая приёмка
+
+[PR #263](https://github.com/zeter1/ZeTer-Photo-Editor/pull/263) → [main 410acedf](https://github.com/zeter1/ZeTer-Photo-Editor/commit/410acedf5649a7d52e84650b4978d51dfe3958af); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39133594716), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39133594742), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39133988525), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39133988451). Два независимых genuine photo Chromium сценария и strict offline validator прошли. **037C-3b-3/2b-2 OPEN**: non-finite Float32, outside-ROI, public UI `maxBytes` отказ/успешный повтор.
