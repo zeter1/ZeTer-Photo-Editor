@@ -1,6 +1,6 @@
 # 037C-3b-2b/3a — настоящий PSD16/PSB32, публичная отмена Escape после native write
 
-**Приоритет:** P1. **Статус:** код/CI gate подготовлены в отдельной ветке; настоящая Chromium-фото-приёмка, PR и exact-main проверки **до их фактического успеха OPEN**. Полная 037C OPEN.
+**Приоритет:** P1. **Статус: ЗАКРЫТА (2026-10-18)** — [PR #256](https://github.com/zeter1/ZeTer-Photo-Editor/pull/256) → [main 3bb9b50](https://github.com/zeter1/ZeTer-Photo-Editor/commit/3bb9b509a0c4c9d641592563865137e4735414d3); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399943), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399916), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673676), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673650). Полная 037C OPEN.
 
 ## Граница проходки
 
@@ -25,12 +25,12 @@
 
 ## Проверка
 
-- [ ] Node `npm run check` и базовый `npm run test:browser` на exact PR head.
-- [ ] Genuine-photo workflow: реальные PSD16 и PSB32, обе public Escape receipts подтверждены и загружены.
-- [ ] PR reviewed/merged; exact-code `main` CI и genuine-photo CI успешны.
-- [ ] Ссылки и статусы перенесены в `task/README.md`, `task/NEXT.md`, эту запись без завышения доказательств.
+- [x] Node `npm run check` и базовый `npm run test:browser` на exact PR head: [CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399943).
+- [x] Genuine-photo workflow: реальные PSD16 и PSB32, обе public Escape receipts подтверждены и загружены: [PR photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399916).
+- [x] PR #256 слит как `3bb9b50`; [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673676), [exact-code main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673650).
+- [x] Ссылки и статусы перенесены в `task/README.md`, `task/NEXT.md` и эту запись. Полный 037C и completed Worker/preview race остаются OPEN.
 
-Локально полный checkout репозитория не доступен из среды из-за DNS `github.com`; не ставить галочки CI заранее.
+Локально полный checkout репозитория был недоступен из среды из-за DNS `github.com`. Проверки подтверждены ссылками на GitHub Actions для точных PR и main code SHA.
 
 ## Очередь после этой проходки
 
