@@ -150,9 +150,10 @@ function invokeFill(){
   action.click();return true;
 }
 function switchTab(){
-  const tabs=[...document.querySelectorAll('#docTabs .doc-tab')];
-  tabs[1]?.click();
-  return tabs[1]?.getAttribute('aria-selected')==='true';
+  document.querySelectorAll('#docTabs .doc-tab')[1]?.click();
+  // Tab activation rebuilds #docTabs; the clicked DOM node is detached.
+  return document.querySelectorAll('#docTabs .doc-tab')[1]
+    ?.getAttribute('aria-selected')==='true';
 }
 function injectLateAndReturnToOriginal(){
   const s=window.__photoFailure;
@@ -166,9 +167,9 @@ function injectLateAndReturnToOriginal(){
   }));
   const secondHistory=[...document.querySelectorAll('#historyList .history-row')]
     .map(r=>r.textContent);
-  const tabs=[...document.querySelectorAll('#docTabs .doc-tab')];
-  tabs[0].click();
-  return {delivered,secondHistory,firstSelected:tabs[0]?.getAttribute('aria-selected')};
+  document.querySelectorAll('#docTabs .doc-tab')[0]?.click();
+  return {delivered,secondHistory,firstSelected:
+    document.querySelectorAll('#docTabs .doc-tab')[0]?.getAttribute('aria-selected')};
 }
 function compareSnapshots(){
   const s=window.__photoFailure;
