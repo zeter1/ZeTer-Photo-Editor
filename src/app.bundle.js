@@ -15316,7 +15316,6 @@ function createDocumentSessionController({
   }
 
   function closeDocumentTab(id) {
-    if (blockPendingDocumentEdit()) return;
     const allSessions = sessions();
     const index = allSessions.findIndex(session => session.id === id);
     if (index === -1) return;
@@ -15336,6 +15335,9 @@ function createDocumentSessionController({
     const remaining = allSessions.filter(item => item.id !== session.id);
     const nextSession = remaining[Math.max(0, Math.min(index, remaining.length - 1))];
     if (!nextSession || nextSession.id !== activeId()) cancelPendingContentAwareFill();
+    // A cancellable Fill releases its persistence lease above. Non-cancellable
+    // paint/gesture transactions must still prevent the close.
+    if (blockPendingDocumentEdit()) return;
     allSessions.splice(index, 1);
     if (!allSessions.length) allSessions.push(buildSession(createDocument({ name:'Без имени' })));
     const nextIndex = Math.max(0, Math.min(index, allSessions.length - 1));

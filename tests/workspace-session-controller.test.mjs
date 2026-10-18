@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createDocument } from '../src/core/state.js';
 import { createDocumentSessionController } from '../src/workspace/session-controller.js';
 
-function harness({cancelPendingContentAwareFill = () => false} = {}) {
+function harness({cancelPendingContentAwareFill = () => false, blockPendingDocumentEdit = () => false} = {}) {
   let sessions = [];
   let activeSessionId = '';
   let runtime = {
@@ -25,6 +25,7 @@ function harness({cancelPendingContentAwareFill = () => false} = {}) {
     applyRuntimeState:value => { runtime = { ...runtime, ...value, selectedDocumentPathIndex:value.selectedPathIndex }; },
     cloneSelectionShape:shape => shape ? structuredClone(shape) : null,
     cancelPendingContentAwareFill,
+    blockPendingDocumentEdit,
     updateAll:() => events.push('update'),
     fitToView:() => events.push('fit'),
     setStatus:value => events.push(value),
@@ -114,7 +115,8 @@ test('workspace controller restores each session saved-path selection through th
 test('closing the active document revokes native Fill before owner removal and does not touch the surviving history', () => {
   let h;
   const cancellations=[];
-  h=harness({cancelPendingContentAwareFill:()=>{
+  h=harness({blockPendingDocumentEdit:()=>cancellations.length===0,
+    cancelPendingContentAwareFill:()=>{
     cancellations.push({active:h.activeSessionId,remaining:h.sessions.length});
     h.events.push('cancel');
     return true;
@@ -162,4 +164,18 @@ test('closing an inactive tab without switching the active owner does not revoke
   assert.equal(cancelled,0);
   assert.equal(h.activeSessionId,b.id);
   assert.deepEqual(h.sessions,[b,c]);
+});
+
+test('non-cancellable pending paint blocks close even when Fill cancellation is unavailable', () => {
+  let cancelCalls=0;
+  const h=harness({blockPendingDocumentEdit:()=>true,
+    cancelPendingContentAwareFill:()=>{cancelCalls++;return false;}});
+  const a=h.controller.buildSession(h.runtime.doc);
+  const b=h.controller.buildSession(createDocument({name:'B'}));
+  h.sessions=[a,b];h.activeSessionId=a.id;
+  h.runtime={...h.runtime,history:a.history};
+  h.controller.closeDocumentTab(a.id);
+  assert.equal(cancelCalls,1);
+  assert.equal(h.sessions.length,2);
+  assert.equal(h.activeSessionId,a.id);
 });
