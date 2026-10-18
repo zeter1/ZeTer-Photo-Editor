@@ -17047,6 +17047,10 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
   }
 
   const pixelBytes = source.channels * source.bitsPerChannel / 8;
+  // Content-Aware Fill is a color operation: even selected pixels must retain
+  // their original native alpha samples byte-for-byte (RGB and CMYK).
+  const alphaBytes = source.channels === (source.model === 'cmyk' ? 5 : 4)
+    ? source.bitsPerChannel / 8 : 0;
   let changedTilePayloads = 0;
   let changedPixels = 0;
   for (let index = 0; index < source.tiles.length; index += 1) {
@@ -17072,6 +17076,10 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
     } catch { throw invalid(); }
     if (originalBytes.length !== before.rawBytes ||
         returnedBytes.length !== before.rawBytes) throw invalid();
+    // Reuse a single view per changed tile (up to millions of selected pixels).
+    const returnedFloatView = source.bitsPerChannel === 32
+      ? new DataView(returnedBytes.buffer, returnedBytes.byteOffset, returnedBytes.byteLength)
+      : null;
     let tilePixelChanges = 0;
     for (let local = 0; local < before.width * before.height; local += 1) {
       const offset = local * pixelBytes;
@@ -17083,6 +17091,16 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
         }
       }
       if (!different) continue;
+      // A malformed Worker must never change opacity or poison the saved
+      // Float32 document with NaN/Infinity. HDR values >1 remain permitted.
+      for (let byte = pixelBytes - alphaBytes; byte < pixelBytes; byte += 1) {
+        if (originalBytes[offset + byte] !== returnedBytes[offset + byte]) throw invalid();
+      }
+      if (returnedFloatView) {
+        for (let channel = 0; channel < source.channels - (alphaBytes ? 1 : 0); channel += 1) {
+          if (!Number.isFinite(returnedFloatView.getFloat32(offset + channel * 4, true))) throw invalid();
+        }
+      }
       const globalX = before.x + local % before.width;
       const globalY = before.y + Math.floor(local / before.width);
       const global = globalY * source.width + globalX;
@@ -17155,6 +17173,11 @@ async function prepareTiledInpaintWithWorker(source, {
   const result = await worker.run(job, { isCurrent:() => !isCancelled() });
   if (isCancelled() || result?.cancelled) return cancelled();
   if (result?.unavailable) {
+    // Only a pure supplier failure may trigger fallback. A Worker reply that
+    // mixes an unavailable flag with native payloads is a protocol failure.
+    if (result.unavailable !== true || Object.keys(result).length !== 1) {
+      throw new TypeError('Tiled inpaint: invalid Worker result');
+    }
     // Use the SAME frozen snapshot: do not call a mutable predicate twice.
     return inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
       ...job, isCancelled, yieldControl,

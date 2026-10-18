@@ -1,13 +1,22 @@
 # История изменений
 
-## 1.46.3 — текущая версия
+## 1.46.4 — текущая версия
+
+### 2026-10-18 — Запрещена публикация повреждённых native Worker результатов (037C-3b-3/1)
+
+- Исправлено: Content-Aware Fill теперь отвергает изменение alpha-канала даже у выбранных native RGB/CMYK пикселей и не допускает NaN/Infinity в изменённых Float32 цветовых каналах. Конечные HDR-сэмплы выше 1 по-прежнему разрешены.
+- Исправлено: смешанный ответ Worker `unavailable` вместе с native payload больше не запускает тихий CPU fallback; это ошибка протокола.
+- Добавлено: отрицательные регрессии CMYKA32 alpha/NaN/Infinity и RGB16/CMYKA32 maxBytes-before-dispatch, а также повторное успешное выполнение после отказа; пересобран browser bundle и cache manifest.
+- Ограничения: реальная Chromium `file://` проверка injected malformed/photo PSD16+PSB32 и UI memory-cap остаётся задачей [037C-3b-3/2](task/037c3b-3-native-result-memory-cap.md), затем финальная 037C-3c; Photoshop-authored goldens, глобальный tiled budget, ICC/CMYK/RAW и весь Photoshop roadmap открыты.
+
+## 1.46.3 — 2026-10-18
 
 - Escape в редакторе отменяет ожидающую Content-Aware Fill, не сбрасывая выделение; другие Escape-жесты и открытые модальные окна сохраняют прежнее поведение.
 - Поколение команды проверяется до записи high-depth тайлов/preview, включая отмену после успешного ответа Worker, но до завершения async preview.
 - Регрессии отмены, перезапуска, позднего результата и гонки preview; настоящая фото-Chromium приёмка остаётся незакрытой задачей 037C-3b-2b/3.\n- Подтверждён test-only Chromium `file://` gate 037C-3b-2b/3a: pinned photo-derived PSD16/PSB32 и 8288 ROI, публичный Escape после native first-write, byte-exact Save Project/History до и после искусственного late-result; strict offline receipts/негативные тесты. [PR #256](https://github.com/zeter1/ZeTer-Photo-Editor/pull/256) → [main 3bb9b50](https://github.com/zeter1/ZeTer-Photo-Editor/commit/3bb9b509a0c4c9d641592563865137e4735414d3); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399943), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399916), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673676), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673650). Production и версия не менялись; completed Worker/preview race и полная 037C ещё OPEN. [План](task/037c3b-2b-3a-photo-escape-mid-kernel.md).
 
 
-## 1.46.2 — текущая версия
+## 1.46.2 — 2026-10-18
 
 ### 2026-10-18 — Исправлено закрытие документа при ожидающем native Content-Aware Fill (037C-3b-2b/2)
 

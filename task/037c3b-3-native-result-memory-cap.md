@@ -1,0 +1,22 @@
+# 037C-3b-3 — native Worker malformed reply / maxBytes fail-closed
+
+**Статус: ЧАСТИЧНО ВЫПОЛНЕНО (2026-10-18); реальная Chromium/photo UI-приёмка ЕЩЁ OPEN.**
+Эта проходка следует за закрытой [037C-3b-2b/3b-2b](037c3b-2b-3b-2b-photo-cancel-successor.md).
+Это *не* доказательство полного 037C или Photoshop-compatibility.
+
+## Выполнено в коде и тестах
+
+- `src/painting/tiled-inpaint-dispatch.js`: после freeze geometry и detached Worker ответ валидируется до preview/persistence/History: проверка неизменности unselected native bytes уже существовала. Дополнительно запрещены изменения **alpha в выбранных пикселях** и нечисловые `NaN` / `Infinity` в изменённых Float32-цветовых сэмплах; конечные HDR-сэмплы >1 допустимы.
+- Ответ `{ unavailable:true, source:... }` или с дополнительными полями отвергается. Только чистый `{unavailable:true}` от supplier не скрывает compute/protocol failure за fallback.
+- `tests/tiled-inpaint-ui-dispatch.test.mjs`: отрицательные CMYKA32 alpha, NaN, Infinity, смешанный unavailable/native, `maxBytes = source.rawBytes - 1` с отказом **до** selection sampling / Worker dispatch для RGB16 и CMYKA32; следующий нормальный запрос должен пройти. Отказ до preview проверяется через `createRasterEditController`; исходные native v2 tiles и source reference сохраняются.
+- Синхронизированы generated browser bundle и hash/index manifest (версия 1.46.4).
+
+## Следующая проходка — 037C-3b-3/2 genuine-photo Chromium
+
+1. Два независимых настоящих pinned PSD16/PSB32 file:// UI imports со строго проверенным source/native SHA-256. Не заменять их synthetic native fixtures.
+2. Через публичный UI выделить connected 8288px ROI и запустить настоящий Worker. В тестовом transport interception **после реального native Worker completion, до UI result validation** подать malformed native tile (в том числе selected alpha/non-finite color/counter/outside-ROI). Подтвердить показ ошибки через публичный status/toast, 0 new Fill History, bit-exact native v2 unchanged и 0 публикаций preview.
+3. Отдельно установить для реального photo layer `maxBytes` ниже `rawBytes` на production-boundary без подмены формата входа; доказать отказ до Worker, сохранить source/history, затем успешно выполнить корректный запрос.
+4. Артефакты и offline validator: жесткая привязка к frozen pins, отсутствие self-reported success вместо независимых native snapshots, две независимые receipt + negative tamper tests и genuine-photo GitHub CI.
+5. PR CI → merge → exact-main CI, только затем закрывать /3b-3. После него **037C-3c** full acceptance с проверкой ранее собранных 6× native worker/Undo/Redo/quality, observational memory и failure matrix.
+
+**Остаётся вне этой проходки:** P0 002 Adobe-authored compatibility goldens; Stage 003 global tiled budget; ICC/CMYK calibration; RAW pipeline; HDR/32-bit robustness и полная Photoshop compatibility.
