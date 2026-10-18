@@ -1866,7 +1866,9 @@ export async function verifyGenuinePhotoUiMemoryCap(client,{
         fillDelta:rows.filter(x=>x.includes('Контент-заливка')).length-
           s.retryHistory.filter(x=>x.includes('Контент-заливка')).length};
     })()`);
-    assert(successful.nativeChanged&&successful.historyDelta===1&&successful.fillDelta===1,
+    // UI History caps visible rows; a new commit may evict the oldest row.
+    // Count the new Fill entry rather than the total rendered row delta.
+    assert(successful.nativeChanged&&successful.fillDelta===1,
       '037C-3b-3/2b-2 public native retry was not committed',JSON.stringify(successful));
     const second=await evaluate(client,'('+checkOtherHistoryAfterEscape.toString()+')()');
     assert(second.historyUnchanged&&second.originalSelected,
