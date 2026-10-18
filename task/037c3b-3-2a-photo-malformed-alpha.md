@@ -1,6 +1,6 @@
 # 037C-3b-3/2a — реальный PSD16/PSB32 Worker: испорченный selected alpha
 
-**Статус: реализация предложена в ветке `test/037c3b3-real-photo-malformed-alpha`; CI/Chromium ещё НЕ подтверждены.** Это часть [037C-3b-3](037c3b-3-native-result-memory-cap.md), не закрытие /2 и не полная приёмка 037C.
+**Статус: /2a ЗАКРЫТА 2026-10-18 — PR и exact-main CI success.** Это часть [037C-3b-3](037c3b-3-native-result-memory-cap.md), не закрытие /2 и не полная приёмка 037C.
 
 ## Реализовано в этой проходке
 
@@ -10,12 +10,16 @@
 - Для обоих форматов свой свежий Chromium `file://` сеанс, строго совпадающий с pinned source/file/native SHA-256 из `reviewed-*`; отдельные receipts с offline verifier и отрицательными unit tamper тестами.
 - В opt-in `real-photo-intake.yml` добавлены отдельный шаг и artifact; запуск pipeline должен подтвердить сценарий.
 
-## Приёмка /2a (пока OPEN)
+## Приёмка /2a — ЗАКРЫТА
 
 1. [ ] `npm run check` и обычный Chromium smoke на PR.
 2. [ ] CI photo step PSD16 и PSB32 для genuine Worker malformed alpha: **2/2** успешных независимых запусков и offline verifier.
 3. [ ] Если обнаружены browser/CI regressions — исправить, повторить все тесты.
 4. [ ] Merge и **exact-main** CI + genuine-photo CI успешны, записать номера workflow runs в эту карточку. Только затем пометить /2a закрытой.
+
+## Ссылки на проверку
+
+[PR #262](https://github.com/zeter1/ZeTer-Photo-Editor/pull/262) → [main 7caacf7](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7caacf75760bd4097bdaf7a99135774b7866b64f); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130130353), [PR photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130130421), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130492852), [exact-main photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130492841).
 
 ## Следующая /2b — ещё НЕ реализовано
 
