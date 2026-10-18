@@ -1,6 +1,15 @@
 # История изменений
 
-## 1.46.1 — текущая версия
+## 1.46.2 — текущая версия
+
+### 2026-10-18 — Исправлено закрытие документа при ожидающем native Content-Aware Fill (037C-3b-2b/2)
+
+- Исправлено: `closeDocumentTab` отзывает незавершённую native Content-Aware Fill до удаления активной сессии, освобождая raster persistence lease, и затем продолжает обычную проверку неотменяемых операций. Отказ пользователя от закрытия не отменяет заливку.
+- Добавлено: регрессионные Node-проверки жизненного цикла close/cancel/dirty-confirm/inactive tab/non-cancellable edit; отдельный Chromium `file://` photo gate для PSD16/PSB32 после подтверждённой реальной записи пикселя внутри Worker, публичный крестик вкладки и проверка проигнорированного синтетического позднего ответа.
+- Проверено: generated bundle/version parity по штатному алгоритму; PR CI и independent genuine-photo CI — см. [PR #253](https://github.com/zeter1/ZeTer-Photo-Editor/pull/253) (результаты ожидаются до merge). Не считать непроверенный PR готовым.
+- Ограничение: оригинал после закрытия не существует для повторного byte-exact сравнения; сохранение оставшейся вкладки и её History проверяются через публичный Save Project. Photoshop-authored parity, memory peak и полная 037C остаются OPEN. [План](task/037c3b-2b-2-photo-close-mid-kernel.md).
+
+## 1.46.1 — 2026-10-18
 
 ### 2026-10-18 — Проверена отмена real-photo Worker после записи пикселя внутри native ядра (037C-3b-2b/1)
 

@@ -100,6 +100,51 @@ export function validateRealPhotoMidKernelFailureSet(receipts,pins,manifest){
     memoryCapVerified:false};
 }
 
+
+export function validateRealPhotoMidKernelCloseReceipt(r,pins,manifest){
+  const fail=()=>{throw new TypeError('037C-3b-2b/2: invalid genuine-photo close receipt');};
+  const fmt=FORMATS[r?.format],d=pins?.documents?.[r?.format];
+  if(!fmt || !d || r.kind!=='zpe-real-photo-browser-mid-kernel-close-v1' ||
+    r.status!=='public-tab-close-mid-kernel-terminated-no-survivor-publication' ||
+    r.runIndex!==1 || r.protocol!=='file:' ||
+    r.inputFileSha256!==d.fileSha256 || r.nativeDefectSha256!==d.nativeSha256 ||
+    r.nativeDefectSha256!==manifest?.native?.[fmt.key]?.damagedSha256 ||
+    r.sourcePhotoSha256!==manifest?.sourceSha256 ||
+    r.bitsPerChannel!==fmt.bits || r.selectedPixels!==8288 ||
+    r.workerRequests!==1 || r.workerTerminations!==1 ||
+    r.actualNativeWorkerJobIntercepted!==true ||
+    r.realKernelJobDispatched!==true || r.realKernelWriteProbeObserved!==true ||
+    r.probeReportedFilled!==1 || !Number.isFinite(r.firstNativeSampleAfterWrite) ||
+    r.terminatedAfterKernelWriteBeforeReply!==true ||
+    r.publicTabCloseRevokedOwner!==true || r.originalTabRemoved!==true ||
+    r.lateMessageInjectedAfterTermination!==true || r.lateMessageIgnored!==true ||
+    r.survivorProjectUnchanged!==true || r.survivorHistoryUnchanged!==true ||
+    // The closed photo tab cannot be publicly saved AFTER removal.
+    // Never forge an exact-native-after-close claim from a pre-close baseline.
+    r.originalNativeAfterCloseObservable!==false ||
+    r.actualMidKernelCancellationVerified!==true ||
+    r.memoryCapVerified!==false || r.photoshopCompatibilityVerified!==false ||
+    !Number.isSafeInteger(r.startedAtUnixMs) || r.startedAtUnixMs<=0 ||
+    !Number.isSafeInteger(r.elapsedMs) || r.elapsedMs<0) fail();
+  return r;
+}
+export function validateRealPhotoMidKernelCloseSet(receipts,pins,manifest){
+  if(!Array.isArray(receipts)||receipts.length!==2)
+    throw new TypeError('037C-3b-2b/2: expected two independent close receipts');
+  const formats=new Set(),starts=new Set();
+  for(const receipt of receipts){
+    validateRealPhotoMidKernelCloseReceipt(receipt,pins,manifest);
+    if(formats.has(receipt.format)||starts.has(receipt.startedAtUnixMs))
+      throw new TypeError('037C-3b-2b/2: duplicate format or Chromium session');
+    formats.add(receipt.format);starts.add(receipt.startedAtUnixMs);
+  }
+  if(!formats.has('psd16')||!formats.has('psb32'))
+    throw new TypeError('037C-3b-2b/2: both native depths required');
+  return {kind:'zpe-real-photo-browser-mid-kernel-close-set-v1',runs:2,
+    formats:[...formats].sort(),actualMidKernelCancellationVerified:true,
+    originalNativeAfterCloseObservable:false,memoryCapVerified:false};
+}
+
 // The following functions execute in a real CDP browser page, not in Node.
 // The only document readback is the public File -> Save Project route.
 async function publicNativeSnapshot(label){
@@ -257,6 +302,73 @@ function installMidKernelNativeWorker(instrument){
   };
   return true;
 }
+
+async function publicSurvivorSnapshot(label){
+  const s=window.__photoFailure;
+  if(!['before','after'].includes(label)) throw Error('037C-3b-2b/2 invalid survivor stage');
+  const tabs=()=>[...document.querySelectorAll('#docTabs .doc-tab')];
+  if(label==='before'){
+    if(tabs().length!==2) throw Error('037C-3b-2b/2 needs two tabs before close');
+    tabs()[1].click();
+  }else if(tabs().length!==1 || tabs()[0].getAttribute('aria-selected')!=='true'){
+    throw Error('037C-3b-2b/2 close did not leave one active survivor');
+  }
+  let blob=null;
+  const original=URL.createObjectURL;
+  URL.createObjectURL=function(value,...args){
+    if(value instanceof Blob && value.type==='application/json')blob=value;
+    return original.call(URL,value,...args);
+  };
+  try{
+    document.querySelector('.menu-button[data-menu="file"]').click();
+    const save=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+      b=>b.querySelector('span')?.textContent?.startsWith('Сохранить проект'));
+    if(!save || save.disabled) throw Error('037C-3b-2b/2 public survivor Save Project unavailable');
+    save.click();
+    if(!blob)throw Error('037C-3b-2b/2 missing survivor project JSON');
+    const project=JSON.parse(await blob.text());
+    const history=[...document.querySelectorAll('#historyList .history-row')]
+      .map(row=>row.textContent);
+    const photoLeaked=!!project.layers?.some(layer=>
+      layer.name==='Pinned photo defect (8-bit derived)' || layer.highDepthSource);
+    s.survivorSnapshots[label]={project:JSON.stringify(project),history};
+    return {stage:label,photoLeaked,historyRows:history.length,
+      projectUnchanged:label==='after'
+        ? s.survivorSnapshots.before?.project===s.survivorSnapshots.after.project
+        : null,
+      historyUnchanged:label==='after'
+        ? JSON.stringify(s.survivorSnapshots.before?.history)===JSON.stringify(history)
+        : null};
+  }finally{
+    URL.createObjectURL=original;
+    if(label==='before') tabs()[0]?.click();
+  }
+}
+function closeActivePhotoTab(){
+  const s=window.__photoFailure;
+  const tabs=[...document.querySelectorAll('#docTabs .doc-tab-shell')];
+  const close=tabs[0]?.querySelector('.doc-tab-close');
+  if(tabs.length!==2 || close?.hidden || !close ||
+    tabs[0]?.querySelector('.doc-tab')?.getAttribute('aria-selected')!=='true')
+    throw Error('037C-3b-2b/2 photo tab not selected or close unavailable');
+  const originalConfirm=window.confirm;
+  window.confirm=()=>true;
+  try{close.click();}finally{window.confirm=originalConfirm;}
+  return {originalRemoved:document.querySelectorAll('#docTabs .doc-tab').length===1,
+    survivorSelected:document.querySelector('#docTabs .doc-tab')?.getAttribute('aria-selected')==='true',
+    terminations:s.workerTerminations};
+}
+function injectLateAfterClose(){
+  const s=window.__photoFailure;
+  if(!s.worker || s.workerTerminations!==1 || s.workerRequests!==1 ||
+    !Number.isSafeInteger(s.jobId))
+    throw Error('037C-3b-2b/2 close cancellation not observed before late message');
+  const delivered=s.worker.dispatchEvent(new MessageEvent('message',{
+    data:{id:s.jobId,ok:true,result:{source:s.snapshots.before,
+      changed:1,filled:8288,changedTiles:1,loadedTiles:1}},
+  }));
+  return {delivered,tabs:document.querySelectorAll('#docTabs .doc-tab').length};
+}
 function invokeFill(){
   document.querySelector('.menu-button[data-menu="edit"]').click();
   const action=[...document.querySelectorAll('#menuPopover .menu-item')].find(
@@ -301,8 +413,10 @@ function compareSnapshots(){
 
 export async function verifyGenuinePhotoUiSwitchFailure(client,{
   evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,
-  midKernel=false,
+  midKernel=false,closeDocument=false,
 }={}){
+  if(closeDocument && !midKernel)
+    throw new TypeError('037C-3b-2b/2 requires genuine post-write kernel cancellation');
   const fmt=FORMATS[format];
   if(!fmt || runIndex!==1 || !sourceDir || !artifactDir ||
     !baseline?.publicSaveNativeMatchedFrozenPin || baseline.nativeDefectSha256?.length!==64)
@@ -324,12 +438,27 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
   await evaluate(client,'window.__photoFailure={bits:'+fmt.bits+
     ',polygon:'+JSON.stringify(polygon)+',expectedIndices:'+
     JSON.stringify(Array.from(admitted.selectedIndices))+
-    ',snapshots:{},workerRequests:0,workerTerminations:0};true');
+    ',snapshots:{},survivorSnapshots:{},workerRequests:0,workerTerminations:0};true');
   const snapshot=label=>evaluate(client,'('+publicNativeSnapshot.toString()+')('+JSON.stringify(label)+')');
   try{
     const before=await snapshot('before');
     assert(before.tiles>1 && before.bits===fmt.bits,'037C-3b-2a invalid initial native tiles');
     const tabs=await evaluate(client,'('+prepareTabs.toString()+')()');
+    if(closeDocument){
+      const survivor=await evaluate(client,'('+publicSurvivorSnapshot.toString()+')("before")');
+      assert(survivor.photoLeaked===false && survivor.historyRows===tabs.secondHistory.length,
+        '037C-3b-2b/2 survivor baseline invalid',JSON.stringify(survivor));
+      // The tab click changes the active document immediately, but the render
+      // canvases are resized in a later frame. Do not use the survivor's
+      // 1200x800 overlay to project the pinned 1025x1025 photo polygon.
+      await waitFor('037C-3b-2b/2 photo canvas restored after survivor Save Project',
+        ()=>evaluate(client,`(()=>{
+          const tabs=[...document.querySelectorAll('#docTabs .doc-tab')];
+          const overlay=document.querySelector('#overlayCanvas');
+          return tabs.length===2 && tabs[0].getAttribute('aria-selected')==='true' &&
+            overlay?.width===1025 && overlay?.height===1025;
+        })()`),10000);
+    }
     const view=await evaluate(client,'('+setupPolygon.toString()+')()');
     assert(view.width===1025 && view.height===1025 && view.inWindow &&
       view.hits.every(x=>x==='overlayCanvas'),
@@ -375,6 +504,53 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       assert(progress.dispatched===true && progress.filled===1 &&
         Number.isFinite(progress.sample) && progress.replies===0,
         '037C-3b-2b real kernel write not observed before cancellation',JSON.stringify(progress));
+    }
+
+    if(closeDocument){
+      const closed=await evaluate(client,'('+closeActivePhotoTab.toString()+')()');
+      assert(closed.originalRemoved && closed.survivorSelected,
+        '037C-3b-2b/2 public close failed',JSON.stringify(closed));
+      await waitFor('037C-3b-2b/2 post-write Worker terminated on public document close',
+        ()=>evaluate(client,'window.__photoFailure?.workerTerminations===1'),10000);
+      const inKernel=await evaluate(client,'window.__photoFailure?.terminatedDuringKernel===true');
+      assert(inKernel,'037C-3b-2b/2 closed document Worker did not terminate after native write');
+      const late=await evaluate(client,'('+injectLateAfterClose.toString()+')()');
+      assert(late.delivered===true && late.tabs===1,
+        '037C-3b-2b/2 late result was not dispatched after close',JSON.stringify(late));
+      await evaluate(client,'new Promise(resolve=>setTimeout(resolve,120))');
+      const survivor=await evaluate(client,'('+publicSurvivorSnapshot.toString()+')("after")');
+      assert(survivor.projectUnchanged===true && survivor.historyUnchanged===true &&
+        survivor.photoLeaked===false && survivor.historyRows===tabs.secondHistory.length,
+        '037C-3b-2b/2 closed Worker polluted surviving project/history',
+        JSON.stringify(survivor));
+      const sample=await evaluate(client,'window.__photoFailure.firstNativeSampleAfterWrite');
+      const receipt={
+        kind:'zpe-real-photo-browser-mid-kernel-close-v1',
+        status:'public-tab-close-mid-kernel-terminated-no-survivor-publication',
+        format,runIndex,protocol:'file:',
+        inputFileSha256:baseline.inputFileSha256,
+        nativeDefectSha256:baseline.nativeDefectSha256,
+        sourcePhotoSha256:manifest.sourceSha256,
+        bitsPerChannel:fmt.bits,selectedPixels:8288,
+        workerRequests:1,workerTerminations:1,
+        actualNativeWorkerJobIntercepted:true,
+        realKernelJobDispatched:true,realKernelWriteProbeObserved:true,
+        probeReportedFilled:1,firstNativeSampleAfterWrite:sample,
+        terminatedAfterKernelWriteBeforeReply:true,
+        publicTabCloseRevokedOwner:true,originalTabRemoved:true,
+        lateMessageInjectedAfterTermination:true,lateMessageIgnored:true,
+        survivorProjectUnchanged:true,survivorHistoryUnchanged:true,
+        originalNativeAfterCloseObservable:false,
+        actualMidKernelCancellationVerified:true,memoryCapVerified:false,
+        photoshopCompatibilityVerified:false,
+        startedAtUnixMs:started,elapsedMs:Date.now()-started,
+      };
+      validateRealPhotoMidKernelCloseReceipt(receipt,pins,manifest);
+      await mkdir(artifactDir,{recursive:true});
+      const output=path.join(artifactDir,'real-photo-'+format+'-mid-kernel-close-run-1.json');
+      await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
+      console.log('037C-3b-2b/2 real photo public close post-write:',JSON.stringify({output,...receipt}));
+      return receipt;
     }
     assert(await evaluate(client,'('+switchTab.toString()+')()'),
       '037C-3b-2a public document tab switch blocked');
