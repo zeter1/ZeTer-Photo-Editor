@@ -21,3 +21,7 @@
 5. PR CI → merge → exact-main CI, только затем закрывать /3b-3. После него **037C-3c** full acceptance с проверкой ранее собранных 6× native worker/Undo/Redo/quality, observational memory и failure matrix.
 
 **Остаётся вне этой проходки:** P0 002 Adobe-authored compatibility goldens; Stage 003 global tiled budget; ICC/CMYK calibration; RAW pipeline; HDR/32-bit robustness и полная Photoshop compatibility.
+
+## 037C-3b-3/2a — реализация в ветке, подтверждение ожидается
+
+Начат [отдельный реальный PSD16/PSB32 Chromium selected-alpha отказ](037c3b-3-2a-photo-malformed-alpha.md). Вызов реального Worker и public UI fail-closed покрывается новой опциональной CI матрицей, но без green PR/exact-main evidence **/2a не закрыта**, /2b maxBytes + остальные malformed cases OPEN.

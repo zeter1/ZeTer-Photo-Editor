@@ -27,6 +27,8 @@ on:
       - tools/browser-real-photo-ui-import.mjs
       - tools/browser-real-photo-ui-worker.mjs
       - tools/browser-real-photo-switch-failure.mjs
+      - tools/verify-browser-real-photo-malformed-alpha-artifacts.mjs
+      - tests/browser-real-photo-malformed-alpha.test.mjs
       - tools/verify-browser-real-photo-switch-failure-artifacts.mjs
       - tests/browser-real-photo-switch-failure.test.mjs
       - tools/verify-browser-real-photo-mid-kernel-artifacts.mjs
@@ -71,6 +73,8 @@ on:
       - tools/browser-real-photo-ui-import.mjs
       - tools/browser-real-photo-ui-worker.mjs
       - tools/browser-real-photo-switch-failure.mjs
+      - tools/verify-browser-real-photo-malformed-alpha-artifacts.mjs
+      - tests/browser-real-photo-malformed-alpha.test.mjs
       - tools/verify-browser-real-photo-switch-failure-artifacts.mjs
       - tests/browser-real-photo-switch-failure.test.mjs
       - tools/verify-browser-real-photo-mid-kernel-artifacts.mjs
@@ -403,6 +407,21 @@ jobs:
           node tools/verify-browser-real-photo-cancel-successor-artifacts.mjs "$ZPE_PHOTO_DIR/browser-cancel-successor" \
             > "$ZPE_PHOTO_DIR/browser-cancel-successor-set.json"
 
+      - name: 037C-3b-3/2a genuine-photo completed native Worker -> invalid selected alpha
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-malformed-alpha"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MALFORMED_ALPHA=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-malformed-alpha" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-malformed-alpha-artifacts.mjs "$ZPE_PHOTO_DIR/browser-malformed-alpha" \
+            > "$ZPE_PHOTO_DIR/browser-malformed-alpha-set.json"
+
       - name: Upload 037C-1/2 evidence and 037C-3a sampled-memory receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -472,6 +491,15 @@ jobs:
         with:
           name: zpe-real-photo-browser-cancel-successor
           path: /tmp/zpe-real-photo-candidate/browser-cancel-successor/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-3/2a malformed real Worker alpha refusal receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-malformed-alpha
+          path: /tmp/zpe-real-photo-candidate/browser-malformed-alpha/*.json
           if-no-files-found: warn
           retention-days: 7
 
