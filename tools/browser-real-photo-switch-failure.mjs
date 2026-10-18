@@ -503,7 +503,10 @@ async function publicNativeSnapshot(label){
       !Array.isArray(source.tiles) || source.tiles.length<2)
       throw Error('037C-3b-2a invalid native public snapshot');
     s.snapshots[label]=source;
-    return {bits:source.bitsPerChannel,tiles:source.tiles.length};
+    return {bits:source.bitsPerChannel,tiles:source.tiles.length,rawBytes:source.rawBytes,
+      usedOtherNativeBytes:project.layers.reduce((total,layer)=>
+        layer.name==='Pinned photo defect (8-bit derived)' ? total :
+          total+Math.max(0,Number(layer.highDepthSource?.rawBytes)||0),0)};
   } finally {URL.createObjectURL=original;}
 }
 function prepareTabs(){
