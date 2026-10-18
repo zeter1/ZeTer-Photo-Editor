@@ -284,6 +284,61 @@ export function validateRealPhotoCompletedPreviewSuccessSet(receipts,pins,manife
     runs:2,formats:[...formats].sort(),successFirstVerified:true,cancelFirstVerified:false};
 }
 
+
+// 037C-3b-2b/3b-2b: public cancel-first completed Worker, then a genuine
+// successor Worker commits. Injected first-generation replies must never win.
+export function validateRealPhotoCancelSuccessorReceipt(r,pins,manifest){
+  const fail=()=>{throw new TypeError('037C-3b-2b/3b-2b: invalid cancel-first successor receipt');};
+  const fmt=FORMATS[r?.format],d=pins?.documents?.[r?.format];
+  if(!fmt || !d || r.kind!=='zpe-real-photo-browser-cancel-successor-v1' ||
+    r.status!=='public-cancel-first-successor-worker-committed-late-ignored' ||
+    r.runIndex!==1 || r.protocol!=='file:' ||
+    r.inputFileSha256!==d.fileSha256 || r.nativeDefectSha256!==d.nativeSha256 ||
+    r.nativeDefectSha256!==manifest?.native?.[fmt.key]?.damagedSha256 ||
+    r.sourcePhotoSha256!==manifest?.sourceSha256 || r.bitsPerChannel!==fmt.bits ||
+    r.selectedPixels!==8288 || r.workerRequests!==2 || r.workerReplies!==2 ||
+    r.workerTerminations!==2 || r.firstWorkerNativeSource!==true ||
+    r.firstWorkerReplyFilled!==8288 ||
+    !Number.isSafeInteger(r.firstWorkerChangedTiles) || r.firstWorkerChangedTiles<2 ||
+    !Number.isSafeInteger(r.firstPreviewTileWrites) || r.firstPreviewTileWrites<2 ||
+    r.firstPreviewYieldHeld!==true || r.firstWorkerTerminatedBeforeEscape!==true ||
+    r.publicEscapeKeyDispatched!==true || r.cancelStatusObserved!==true ||
+    r.firstPreviewReleasedAfterCancel!==true ||
+    r.cancelledNativeUnchanged!==true || r.cancelledHistoryUnchanged!==true ||
+    r.successorJobHeldBeforeDispatch!==true ||
+    r.lateFirstReplyDuringSuccessor!==true ||
+    r.noPrematureSuccessorPublication!==true ||
+    r.successorRealWorkerNativeSource!==true || r.successorWorkerReplyFilled!==8288 ||
+    !Number.isSafeInteger(r.successorWorkerChangedTiles) || r.successorWorkerChangedTiles<2 ||
+    !Number.isSafeInteger(r.successorNativeChangedTiles) || r.successorNativeChangedTiles<2 ||
+    r.successorHistoryAddedOnce!==true || r.successorFillHistoryEntries!==1 ||
+    r.lateFirstReplyAfterSuccessor!==true ||
+    r.successorNativeSurvivedLateReply!==true ||
+    r.successorHistorySurvivedLateReply!==true ||
+    r.secondTabHistoryUnchanged!==true || r.fillHistoryEntriesAfterLate!==1 ||
+    r.cancelFirstVerified!==true || r.successFirstVerified!==false ||
+    r.memoryCapVerified!==false || r.photoshopCompatibilityVerified!==false ||
+    !Number.isSafeInteger(r.startedAtUnixMs) || r.startedAtUnixMs<=0 ||
+    !Number.isSafeInteger(r.elapsedMs) || r.elapsedMs<0) fail();
+  return r;
+}
+export function validateRealPhotoCancelSuccessorSet(receipts,pins,manifest){
+  if(!Array.isArray(receipts)||receipts.length!==2)
+    throw new TypeError('037C-3b-2b/3b-2b: expected independent PSD16/PSB32 receipts');
+  const formats=new Set(),starts=new Set();
+  for(const r of receipts){
+    validateRealPhotoCancelSuccessorReceipt(r,pins,manifest);
+    if(formats.has(r.format)||starts.has(r.startedAtUnixMs))
+      throw new TypeError('037C-3b-2b/3b-2b: duplicate format or session');
+    formats.add(r.format);starts.add(r.startedAtUnixMs);
+  }
+  if(!formats.has('psd16')||!formats.has('psb32'))
+    throw new TypeError('037C-3b-2b/3b-2b: both native depths required');
+  return {kind:'zpe-real-photo-browser-cancel-successor-set-v1',
+    runs:2,formats:[...formats].sort(),cancelFirstVerified:true,successFirstVerified:false,
+    memoryCapVerified:false};
+}
+
 // The following functions execute in a real CDP browser page, not in Node.
 // The only document readback is the public File -> Save Project route.
 async function publicNativeSnapshot(label){
@@ -449,6 +504,7 @@ function installCompletedWorkerPreviewHold(){
   const put=CanvasRenderingContext2D.prototype.putImageData;
   const timer=window.setTimeout,clear=window.clearTimeout;
   s.workerReplies=0;s.previewTileWrites=0;s.previewYieldHeld=false;
+  s.successorMode=!!s.successorMode;s.firstCompletionRecorded=false;s.successorHeld=false;
   s.previewReleased=false;s.heldPreview=null;
   s.restore=()=>{
     Worker.prototype.postMessage=post;
@@ -463,14 +519,26 @@ function installCompletedWorkerPreviewHold(){
       s.workerRequests++;s.worker=this;s.jobId=job.id;
       s.selectionMatched=job.selectedIndices.length===s.expectedIndices.length &&
         job.selectedIndices.every((v,i)=>v===s.expectedIndices[i]);
+      if(s.successorMode && s.workerRequests===1){
+        s.firstWorker=this;s.firstJobId=job.id;
+      }
+      if(s.successorMode && s.workerRequests===2){
+        s.successorWorker=this;s.successorJobId=job.id;
+        s.successorHeld=true;s.successorPending={job,args};
+      }
       this.addEventListener('message',event=>{
-        if(event.data?.id===s.jobId && event.data?.ok===true){
+        if(event.data?.id===job.id && event.data?.ok===true){
+          // The first native reply is already counted. Deliberately injected
+          // late events on its terminated Worker cannot become a second reply.
+          if(s.successorMode && this===s.firstWorker && s.firstCompletionRecorded)return;
+          if(s.successorMode && this===s.firstWorker)s.firstCompletionRecorded=true;
           s.workerReplies++;
           s.workerReplyFilled=event.data.result?.filled;
           s.workerReplyChangedTiles=event.data.result?.changedTiles;
           s.workerResultNativeSource=event.data.result?.source?.kind==='zpe-pixel-buffer-source-v2';
         }
       });
+      if(s.successorMode && this===s.successorWorker && s.successorHeld)return;
       return post.call(this,job,...args);
     }
     return post.call(this,job,...args);
@@ -478,6 +546,14 @@ function installCompletedWorkerPreviewHold(){
   Worker.prototype.terminate=function(...args){
     if(this===s.worker)s.workerTerminations++;
     return terminate.apply(this,args);
+  };
+  s.resumeSuccessor=()=>{
+    if(!s.successorMode || !s.successorHeld || !s.successorPending)
+      throw Error('037C-3b-2b/3b-2b successor job not held');
+    const pending=s.successorPending;
+    s.successorPending=null;s.successorHeld=false;
+    post.call(s.successorWorker,pending.job,...pending.args);
+    return true;
   };
   CanvasRenderingContext2D.prototype.putImageData=function(image,x,y,...args){
     // The private tiled preview canvas has the photo's dimensions.
@@ -631,6 +707,31 @@ function injectLateAndReturnToOriginal(){
   return {delivered,secondHistory,firstSelected:
     document.querySelectorAll('#docTabs .doc-tab')[0]?.getAttribute('aria-selected')};
 }
+
+function injectStaleFirstWorkerReply(){
+  const s=window.__photoFailure;
+  if(!s.successorMode || !s.firstWorker || !s.firstCompletionRecorded ||
+    s.workerRequests!==2 || s.workerTerminations<1 ||
+    !Number.isSafeInteger(s.firstJobId))
+    throw Error('037C-3b-2b/3b-2b first native reply not completed');
+  const delivered=s.firstWorker.dispatchEvent(new MessageEvent('message',{
+    data:{id:s.firstJobId,ok:true,result:{source:s.snapshots.before,
+      changed:1,filled:8288,changedTiles:1,loadedTiles:1}},
+  }));
+  s.staleFirstMessages=(s.staleFirstMessages||0)+1;
+  return {delivered,staleMessages:s.staleFirstMessages};
+}
+function inspectHeldSuccessor(){
+  const s=window.__photoFailure;
+  const history=[...document.querySelectorAll('#historyList .history-row')]
+    .map(row=>row.textContent);
+  return {pending:s.successorHeld,requests:s.workerRequests,replies:s.workerReplies,
+    historyExact:JSON.stringify(history)===JSON.stringify(s.historyBefore),
+    fillHistoryEntries:history.filter(row=>row.includes('Контент-заливка')).length,
+    prematureSuccess:document.querySelector('#statusText')?.textContent
+      ?.includes('Контент-заливка: восстановлено')===true};
+}
+
 function inspectPublishedNativeFill(){
   const s=window.__photoFailure,a=s.snapshots.before,b=s.snapshots.published;
   if(!a || !b || a.tiles.length!==b.tiles.length)throw Error('missing public native readback');
@@ -669,7 +770,7 @@ function compareSnapshots(){
 export async function verifyGenuinePhotoUiSwitchFailure(client,{
   evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,
   midKernel=false,closeDocument=false,escapeCancel=false,completedPreviewEscape=false,
-  completedPreviewSuccess=false,
+  completedPreviewSuccess=false,cancelFirstSuccessor=false,
 }={}){
   if(closeDocument && !midKernel)
     throw new TypeError('037C-3b-2b/2 requires genuine post-write kernel cancellation');
@@ -677,6 +778,8 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
     throw new TypeError('037C-3b-2b/3a requires an isolated post-write Escape scenario');
   if(completedPreviewEscape && (midKernel || closeDocument || escapeCancel || completedPreviewSuccess))
     throw new TypeError('037C-3b-2b/3b-1 requires isolated completed-Worker preview race');
+  if(cancelFirstSuccessor && (midKernel || closeDocument || escapeCancel || completedPreviewEscape || completedPreviewSuccess))
+    throw new TypeError('037C-3b-2b/3b-2b requires isolated cancel-first successor');
   if(completedPreviewSuccess && (midKernel || closeDocument || escapeCancel))
     throw new TypeError('037C-3b-2b/3b-2a requires an isolated preview success');
   const fmt=FORMATS[format];
@@ -706,7 +809,7 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
     const before=await snapshot('before');
     assert(before.tiles>1 && before.bits===fmt.bits,'037C-3b-2a invalid initial native tiles');
     const tabs=await evaluate(client,'('+prepareTabs.toString()+')()');
-    if(escapeCancel || completedPreviewEscape || completedPreviewSuccess)await evaluate(client,'window.__photoFailure.secondHistoryBefore='+JSON.stringify(tabs.secondHistory)+';true');
+    if(escapeCancel || completedPreviewEscape || completedPreviewSuccess || cancelFirstSuccessor)await evaluate(client,'window.__photoFailure.secondHistoryBefore='+JSON.stringify(tabs.secondHistory)+';true');
     if(closeDocument){
       const survivor=await evaluate(client,'('+publicSurvivorSnapshot.toString()+')("before")');
       assert(survivor.photoLeaked===false && survivor.historyRows===tabs.secondHistory.length,
@@ -746,7 +849,8 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       assert(await evaluate(client,'('+ensureGeneratedWorkerSupplier.toString()+')()'),
         '037C-3b-2b generated Worker supplier unavailable');
     }
-    await evaluate(client,completedPreviewEscape || completedPreviewSuccess
+    if(cancelFirstSuccessor)await evaluate(client,'window.__photoFailure.successorMode=true;true');
+    await evaluate(client,completedPreviewEscape || completedPreviewSuccess || cancelFirstSuccessor
       ? '('+installCompletedWorkerPreviewHold.toString()+')()'
       : midKernel
         ? '('+installMidKernelNativeWorker.toString()+')('+instrumentBrowserKernelSource.toString()+')'
@@ -832,6 +936,117 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       const output=path.join(artifactDir,'real-photo-'+format+'-completed-preview-success-run-1.json');
       await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
       console.log('037C-3b-2b/3b-2a real completed Fill before Escape:',JSON.stringify({output,...receipt}));
+      return receipt;
+    }
+
+
+    if(cancelFirstSuccessor){
+      await waitFor('037C-3b-2b/3b-2b first genuine Worker result held in preview',
+        ()=>evaluate(client,
+          'window.__photoFailure?.workerReplies===1 && window.__photoFailure?.previewYieldHeld===true'),
+        60000);
+      const first=await evaluate(client,
+        '({replies:window.__photoFailure.workerReplies,terminations:window.__photoFailure.workerTerminations,'+
+        'filled:window.__photoFailure.workerReplyFilled,changed:window.__photoFailure.workerReplyChangedTiles,'+
+        'native:window.__photoFailure.workerResultNativeSource,writes:window.__photoFailure.previewTileWrites})');
+      assert(first.replies===1 && first.terminations===1 && first.filled===8288 &&
+        first.changed>=2 && first.native===true && first.writes>=2,
+        '037C-3b-2b/3b-2b first real Worker reply not observed',JSON.stringify(first));
+      for(const type of ['keyDown','keyUp'])await client.send('Input.dispatchKeyEvent',{
+        type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27});
+      const cancelledStatus=await evaluate(client,'document.querySelector("#statusText")?.textContent');
+      assert(cancelledStatus?.includes('Контент-заливка отменена'),
+        '037C-3b-2b/3b-2b public first Escape did not cancel Fill',cancelledStatus);
+      assert(await evaluate(client,'window.__photoFailure.releasePreview()===true'),
+        '037C-3b-2b/3b-2b first preview did not resume after cancellation');
+      await evaluate(client,'new Promise(resolve=>setTimeout(resolve,180))');
+      await snapshot('after');
+      const cancelled=await evaluate(client,'('+compareSnapshots.toString()+')()');
+      assert(cancelled.nativeExact && cancelled.historyExact && cancelled.fillHistoryEntries===0,
+        '037C-3b-2b/3b-2b first cancelled result was published',JSON.stringify(cancelled));
+      assert(await evaluate(client,'('+invokeFill.toString()+')()'),
+        '037C-3b-2b/3b-2b successor public Fill unavailable');
+      await waitFor('037C-3b-2b/3b-2b second native Worker job held before dispatch',
+        ()=>evaluate(client,'window.__photoFailure?.workerRequests===2 && window.__photoFailure?.successorHeld===true'),
+        30000);
+      const staleDuring=await evaluate(client,'('+injectStaleFirstWorkerReply.toString()+')()');
+      assert(staleDuring.delivered && staleDuring.staleMessages===1,
+        '037C-3b-2b/3b-2b first late event could not be injected during successor');
+      await evaluate(client,'new Promise(resolve=>setTimeout(resolve,120))');
+      const held=await evaluate(client,'('+inspectHeldSuccessor.toString()+')()');
+      assert(held.pending && held.requests===2 && held.replies===1 &&
+        held.historyExact && held.fillHistoryEntries===0 && !held.prematureSuccess,
+        '037C-3b-2b/3b-2b stale first result prematurely committed',JSON.stringify(held));
+      assert(await evaluate(client,'window.__photoFailure.resumeSuccessor()===true'),
+        '037C-3b-2b/3b-2b real successor Worker was not dispatched');
+      await waitFor('037C-3b-2b/3b-2b second genuine Worker published native Fill',
+        ()=>evaluate(client,
+          'window.__photoFailure?.workerReplies===2 && '+
+          'document.querySelector("#statusText")?.textContent?.includes("Контент-заливка: восстановлено")===true'),
+        60000);
+      const second=await evaluate(client,
+        '({requests:window.__photoFailure.workerRequests,replies:window.__photoFailure.workerReplies,'+
+        'terminations:window.__photoFailure.workerTerminations,'+
+        'filled:window.__photoFailure.workerReplyFilled,changed:window.__photoFailure.workerReplyChangedTiles,'+
+        'native:window.__photoFailure.workerResultNativeSource})');
+      assert(second.requests===2 && second.replies===2 && second.terminations===2 &&
+        second.filled===8288 && second.changed>=2 && second.native,
+        '037C-3b-2b/3b-2b genuine successor Worker failed',JSON.stringify(second));
+      await snapshot('published');
+      const published=await evaluate(client,'('+inspectPublishedNativeFill.toString()+')()');
+      assert(published.nativeChangedTiles>=2 && published.historyAddedExactlyOnce &&
+        published.fillHistoryEntries===1,
+        '037C-3b-2b/3b-2b successor native Fill/history absent',JSON.stringify(published));
+      const staleAfter=await evaluate(client,'('+injectStaleFirstWorkerReply.toString()+')()');
+      assert(staleAfter.delivered && staleAfter.staleMessages===2,
+        '037C-3b-2b/3b-2b first late event after successor missing');
+      await evaluate(client,'new Promise(resolve=>setTimeout(resolve,180))');
+      await snapshot('after');
+      const surviving=await evaluate(client,'('+inspectPublishedAfterEscape.toString()+')()');
+      assert(surviving.nativeExact && surviving.historyExact && surviving.fillHistoryEntries===1,
+        '037C-3b-2b/3b-2b stale Worker overwrote successor',JSON.stringify(surviving));
+      const other=await evaluate(client,'('+checkOtherHistoryAfterEscape.toString()+')()');
+      assert(other.secondSelected && other.originalSelected && other.historyUnchanged,
+        '037C-3b-2b/3b-2b other document History changed',JSON.stringify(other));
+      const receipt={
+        kind:'zpe-real-photo-browser-cancel-successor-v1',
+        status:'public-cancel-first-successor-worker-committed-late-ignored',
+        format,runIndex,protocol:'file:',
+        inputFileSha256:baseline.inputFileSha256,
+        nativeDefectSha256:baseline.nativeDefectSha256,
+        sourcePhotoSha256:manifest.sourceSha256,
+        bitsPerChannel:fmt.bits,selectedPixels:8288,
+        workerRequests:second.requests,workerReplies:second.replies,
+        workerTerminations:second.terminations,
+        firstWorkerNativeSource:first.native,firstWorkerReplyFilled:first.filled,
+        firstWorkerChangedTiles:first.changed,firstPreviewTileWrites:first.writes,
+        firstPreviewYieldHeld:true,firstWorkerTerminatedBeforeEscape:true,
+        publicEscapeKeyDispatched:true,cancelStatusObserved:true,
+        firstPreviewReleasedAfterCancel:true,
+        cancelledNativeUnchanged:cancelled.nativeExact,
+        cancelledHistoryUnchanged:cancelled.historyExact,
+        successorJobHeldBeforeDispatch:true,
+        lateFirstReplyDuringSuccessor:staleDuring.delivered,
+        noPrematureSuccessorPublication:held.historyExact && !held.prematureSuccess,
+        successorRealWorkerNativeSource:second.native,successorWorkerReplyFilled:second.filled,
+        successorWorkerChangedTiles:second.changed,
+        successorNativeChangedTiles:published.nativeChangedTiles,
+        successorHistoryAddedOnce:published.historyAddedExactlyOnce,
+        successorFillHistoryEntries:published.fillHistoryEntries,
+        lateFirstReplyAfterSuccessor:staleAfter.delivered,
+        successorNativeSurvivedLateReply:surviving.nativeExact,
+        successorHistorySurvivedLateReply:surviving.historyExact,
+        secondTabHistoryUnchanged:other.historyUnchanged,
+        fillHistoryEntriesAfterLate:surviving.fillHistoryEntries,
+        cancelFirstVerified:true,successFirstVerified:false,
+        memoryCapVerified:false,photoshopCompatibilityVerified:false,
+        startedAtUnixMs:started,elapsedMs:Date.now()-started,
+      };
+      validateRealPhotoCancelSuccessorReceipt(receipt,pins,manifest);
+      await mkdir(artifactDir,{recursive:true});
+      const output=path.join(artifactDir,'real-photo-'+format+'-cancel-successor-run-1.json');
+      await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
+      console.log('037C-3b-2b/3b-2b genuine photo cancel-first real successor:',JSON.stringify({output,...receipt}));
       return receipt;
     }
 
