@@ -31,6 +31,8 @@ on:
       - tests/browser-real-photo-malformed-alpha.test.mjs
       - tools/verify-browser-real-photo-malformed-counter-artifacts.mjs
       - tests/browser-real-photo-malformed-counter.test.mjs
+      - tools/verify-browser-real-photo-memory-cap-artifacts.mjs
+      - tests/browser-real-photo-memory-cap.test.mjs
       - tools/verify-browser-real-photo-malformed-extra-artifacts.mjs
       - tests/browser-real-photo-malformed-extra.test.mjs
       - tools/verify-browser-real-photo-switch-failure-artifacts.mjs
@@ -81,6 +83,8 @@ on:
       - tests/browser-real-photo-malformed-alpha.test.mjs
       - tools/verify-browser-real-photo-malformed-counter-artifacts.mjs
       - tests/browser-real-photo-malformed-counter.test.mjs
+      - tools/verify-browser-real-photo-memory-cap-artifacts.mjs
+      - tests/browser-real-photo-memory-cap.test.mjs
       - tools/verify-browser-real-photo-malformed-extra-artifacts.mjs
       - tests/browser-real-photo-malformed-extra.test.mjs
       - tools/verify-browser-real-photo-switch-failure-artifacts.mjs
@@ -463,6 +467,32 @@ jobs:
           done
           node tools/verify-browser-real-photo-malformed-extra-artifacts.mjs "$ZPE_PHOTO_DIR/browser-malformed-extra" \
             > "$ZPE_PHOTO_DIR/browser-malformed-extra-set.json"
+
+      - name: 037C-3b-3/2b-2 genuine-photo native memory cap and retry
+        timeout-minutes: 20
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-memory-cap"
+          for format in psd16 psb32; do
+            scenario_dir="$ZPE_PHOTO_DIR/browser-memory-cap/$format"
+            mkdir -p "$scenario_dir"
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MEMORY_CAP=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$scenario_dir" \
+              node tools/browser-smoke.mjs
+            cp "$scenario_dir/real-photo-$format-memory-cap-run-1.json" "$ZPE_PHOTO_DIR/browser-memory-cap/"
+          done
+          node tools/verify-browser-real-photo-memory-cap-artifacts.mjs "$ZPE_PHOTO_DIR/browser-memory-cap" \
+            > "$ZPE_PHOTO_DIR/browser-memory-cap-set.json"
+
+      - name: Upload 037C-3b-3/2b-2 memory-cap receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-memory-cap
+          path: /tmp/zpe-real-photo-candidate/browser-memory-cap/*.json
+          if-no-files-found: warn
 
       - name: Upload 037C-3b-3/2b-2 malformed-extra receipts
         if: always()
