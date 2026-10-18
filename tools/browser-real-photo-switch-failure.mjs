@@ -339,6 +339,50 @@ export function validateRealPhotoCancelSuccessorSet(receipts,pins,manifest){
     memoryCapVerified:false};
 }
 
+
+// 037C-3b-3/2a: the actual photo Worker finishes, but a test-only transport
+// mutation changes one selected native alpha sample before the UI validator.
+// Receipt status is not an acceptance claim without independently green CI.
+export function validateRealPhotoMalformedReplyReceipt(r,pins,manifest){
+  const fail=()=>{throw new TypeError('037C-3b-3/2a: invalid malformed-alpha photo receipt');};
+  const fmt=FORMATS[r?.format],d=pins?.documents?.[r?.format];
+  if(!fmt || !d || r.kind!=='zpe-real-photo-browser-malformed-alpha-v1' ||
+    r.status!=='native-worker-alpha-corrupted-rejected-by-public-ui' ||
+    r.protocol!=='file:' || r.runIndex!==1 ||
+    r.inputFileSha256!==d.fileSha256 || r.nativeDefectSha256!==d.nativeSha256 ||
+    r.nativeDefectSha256!==manifest?.native?.[fmt.key]?.damagedSha256 ||
+    r.sourcePhotoSha256!==manifest?.sourceSha256 || r.bitsPerChannel!==fmt.bits ||
+    r.selectedPixels!==8288 || r.workerRequests!==1 || r.workerReplies!==1 ||
+    r.workerTerminations!==1 || r.selectionMatched!==true ||
+    r.realWorkerNativeResultObserved!==true || r.realWorkerReplyFilled!==8288 ||
+    !Number.isSafeInteger(r.realWorkerChangedTiles) || r.realWorkerChangedTiles<2 ||
+    r.transportMutation==='none' || r.transportMutation!=='selected-alpha-one-byte' ||
+    r.mutatedBeforeUiValidation!==true || r.selectedAlphaByteCorrupted!==true ||
+    r.publicInvalidWorkerStatusObserved!==true || r.privatePreviewTileWrites!==0 ||
+    r.nativeBytesUnchanged!==true || r.originalHistoryUnchanged!==true ||
+    r.fillHistoryEntries!==0 || r.secondTabHistoryUnchanged!==true ||
+    r.maxBytesVerified!==false || r.photoshopCompatibilityVerified!==false ||
+    !Number.isSafeInteger(r.startedAtUnixMs) || r.startedAtUnixMs<=0 ||
+    !Number.isSafeInteger(r.elapsedMs) || r.elapsedMs<0) fail();
+  return r;
+}
+export function validateRealPhotoMalformedReplySet(receipts,pins,manifest){
+  if(!Array.isArray(receipts) || receipts.length!==2)
+    throw new TypeError('037C-3b-3/2a: two independent photo formats required');
+  const formats=new Set(),sessions=new Set();
+  for(const r of receipts){
+    validateRealPhotoMalformedReplyReceipt(r,pins,manifest);
+    if(formats.has(r.format)||sessions.has(r.startedAtUnixMs))
+      throw new TypeError('037C-3b-3/2a: duplicate session or format');
+    formats.add(r.format);sessions.add(r.startedAtUnixMs);
+  }
+  if(!formats.has('psd16')||!formats.has('psb32'))
+    throw new TypeError('037C-3b-3/2a: PSD16 and PSB32 are both required');
+  return {kind:'zpe-real-photo-browser-malformed-alpha-set-v1',
+    runs:2,formats:[...formats].sort(),selectedAlphaRejected:true,
+    maxBytesVerified:false,photoshopCompatibilityVerified:false};
+}
+
 // The following functions execute in a real CDP browser page, not in Node.
 // The only document readback is the public File -> Save Project route.
 async function publicNativeSnapshot(label){
@@ -497,6 +541,90 @@ function installMidKernelNativeWorker(instrument){
   return true;
 }
 
+
+
+function installMalformedNativeWorkerReply(){
+  const s=window.__photoFailure;
+  const post=Worker.prototype.postMessage,terminate=Worker.prototype.terminate;
+  const add=Worker.prototype.addEventListener,remove=Worker.prototype.removeEventListener;
+  const put=CanvasRenderingContext2D.prototype.putImageData;
+  const wrapped=new WeakMap();
+  s.workerReplies=0;s.previewTileWrites=0;s.mutated=false;
+  s.restore=()=>{
+    Worker.prototype.postMessage=post;
+    Worker.prototype.terminate=terminate;
+    Worker.prototype.addEventListener=add;
+    Worker.prototype.removeEventListener=remove;
+    CanvasRenderingContext2D.prototype.putImageData=put;
+  };
+  // A real Worker handles the untouched frozen ROI and produces a real native
+  // result. Only the UI-facing message is corrupted, not the Worker kernel.
+  Worker.prototype.postMessage=function(job,...args){
+    if(job?.selectedIndices instanceof Uint32Array &&
+       job?.source?.kind==='zpe-pixel-buffer-source-v2'){
+      s.workerRequests++;s.worker=this;s.jobId=job.id;
+      s.selectionMatched=job.selectedIndices.length===s.expectedIndices.length &&
+        job.selectedIndices.every((v,i)=>v===s.expectedIndices[i]);
+    }
+    return post.call(this,job,...args);
+  };
+  Worker.prototype.addEventListener=function(type,listener,options){
+    if(type!=='message' || typeof listener!=='function')return add.call(this,type,listener,options);
+    const worker=this;
+    const interceptor=function(event){
+      const reply=event.data;
+      if(worker!==s.worker || reply?.id!==s.jobId ||
+         reply.ok!==true || s.mutated)return listener.call(this,event);
+      const result=reply.result;
+      if(result?.source?.kind!=='zpe-pixel-buffer-source-v2' ||
+         result.filled!==8288 || result.changedTiles<2)
+        throw Error('037C-3b-3/2a missing genuine native result');
+      s.workerReplies++;s.realWorkerNativeResultObserved=true;
+      s.realWorkerReplyFilled=result.filled;s.realWorkerChangedTiles=result.changedTiles;
+      const index=s.expectedIndices[0],x=index%1025,y=Math.floor(index/1025);
+      const tiles=result.source.tiles.map(tile=>({...tile}));
+      const ti=tiles.findIndex(tile=>x>=tile.x&&y>=tile.y&&
+        x<tile.x+tile.width&&y<tile.y+tile.height);
+      if(ti<0 || tiles[ti].dataUrl===s.snapshots.before.tiles[ti].dataUrl)
+        throw Error('037C-3b-3/2a selected tile not actually changed by real Worker');
+      const tile=tiles[ti],prefix=tile.dataUrl.slice(0,tile.dataUrl.indexOf('base64,')+7);
+      if(!prefix.startsWith('data:application/x-zeter-pixel-buffer-tile;base64,'))
+        throw Error('037C-3b-3/2a invalid native tile envelope');
+      const decoded=atob(tile.dataUrl.slice(prefix.length));
+      const bytes=Uint8Array.from(decoded,ch=>ch.charCodeAt(0));
+      const bytesPerSample=s.bits/8;
+      const offset=(((y-tile.y)*tile.width+(x-tile.x))*4+3)*bytesPerSample;
+      if(offset>=bytes.length)throw Error('037C-3b-3/2a selected alpha offset out of tile');
+      bytes[offset]^=1;
+      let encoded='';
+      for(let i=0;i<bytes.length;i+=8192)
+        encoded+=String.fromCharCode(...bytes.subarray(i,i+8192));
+      tile.dataUrl=prefix+btoa(encoded);
+      s.selectedAlphaByteCorrupted=tile.dataUrl!==result.source.tiles[ti].dataUrl;
+      s.mutated=true;s.mutatedBeforeUiValidation=true;
+      const changed={...result,source:{...result.source,tiles}};
+      return listener.call(this,{data:{...reply,result:changed}});
+    };
+    let mapping=wrapped.get(worker);
+    if(!mapping){mapping=new Map();wrapped.set(worker,mapping);}
+    mapping.set(listener,interceptor);
+    return add.call(worker,type,interceptor,options);
+  };
+  Worker.prototype.removeEventListener=function(type,listener,options){
+    return remove.call(this,type,wrapped.get(this)?.get(listener)||listener,options);
+  };
+  Worker.prototype.terminate=function(...args){
+    if(this===s.worker)s.workerTerminations++;
+    return terminate.apply(this,args);
+  };
+  CanvasRenderingContext2D.prototype.putImageData=function(image,x,y,...args){
+    if(s.workerReplies>=1 && this.canvas?.width===1025 &&
+       this.canvas?.height===1025 && image?.width<=256 && image?.height<=256)
+      s.previewTileWrites++;
+    return put.call(this,image,x,y,...args);
+  };
+  return true;
+}
 
 function installCompletedWorkerPreviewHold(){
   const s=window.__photoFailure;
@@ -770,7 +898,7 @@ function compareSnapshots(){
 export async function verifyGenuinePhotoUiSwitchFailure(client,{
   evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,
   midKernel=false,closeDocument=false,escapeCancel=false,completedPreviewEscape=false,
-  completedPreviewSuccess=false,cancelFirstSuccessor=false,
+  completedPreviewSuccess=false,cancelFirstSuccessor=false,malformedReply=false,
 }={}){
   if(closeDocument && !midKernel)
     throw new TypeError('037C-3b-2b/2 requires genuine post-write kernel cancellation');
@@ -782,6 +910,8 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
     throw new TypeError('037C-3b-2b/3b-2b requires isolated cancel-first successor');
   if(completedPreviewSuccess && (midKernel || closeDocument || escapeCancel))
     throw new TypeError('037C-3b-2b/3b-2a requires an isolated preview success');
+  if(malformedReply && (midKernel || closeDocument || escapeCancel || completedPreviewEscape || completedPreviewSuccess || cancelFirstSuccessor))
+    throw new TypeError('037C-3b-3/2a requires an isolated real Worker malformed reply');
   const fmt=FORMATS[format];
   if(!fmt || runIndex!==1 || !sourceDir || !artifactDir ||
     !baseline?.publicSaveNativeMatchedFrozenPin || baseline.nativeDefectSha256?.length!==64)
@@ -809,7 +939,7 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
     const before=await snapshot('before');
     assert(before.tiles>1 && before.bits===fmt.bits,'037C-3b-2a invalid initial native tiles');
     const tabs=await evaluate(client,'('+prepareTabs.toString()+')()');
-    if(escapeCancel || completedPreviewEscape || completedPreviewSuccess || cancelFirstSuccessor)await evaluate(client,'window.__photoFailure.secondHistoryBefore='+JSON.stringify(tabs.secondHistory)+';true');
+    if(escapeCancel || completedPreviewEscape || completedPreviewSuccess || cancelFirstSuccessor || malformedReply)await evaluate(client,'window.__photoFailure.secondHistoryBefore='+JSON.stringify(tabs.secondHistory)+';true');
     if(closeDocument){
       const survivor=await evaluate(client,'('+publicSurvivorSnapshot.toString()+')("before")');
       assert(survivor.photoLeaked===false && survivor.historyRows===tabs.secondHistory.length,
@@ -850,7 +980,9 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
         '037C-3b-2b generated Worker supplier unavailable');
     }
     if(cancelFirstSuccessor)await evaluate(client,'window.__photoFailure.successorMode=true;true');
-    await evaluate(client,completedPreviewEscape || completedPreviewSuccess || cancelFirstSuccessor
+    await evaluate(client,malformedReply
+      ? '('+installMalformedNativeWorkerReply.toString()+')()'
+      : completedPreviewEscape || completedPreviewSuccess || cancelFirstSuccessor
       ? '('+installCompletedWorkerPreviewHold.toString()+')()'
       : midKernel
         ? '('+installMidKernelNativeWorker.toString()+')('+instrumentBrowserKernelSource.toString()+')'
@@ -873,6 +1005,63 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       assert(progress.dispatched===true && progress.filled===1 &&
         Number.isFinite(progress.sample) && progress.replies===0,
         '037C-3b-2b real kernel write not observed before cancellation',JSON.stringify(progress));
+    }
+
+    if(malformedReply){
+      await waitFor('037C-3b-3/2a genuine Worker rejected before native publication',
+        ()=>evaluate(client,
+          'window.__photoFailure?.mutated===true && '+
+          'document.querySelector("#statusText")?.textContent?.includes("invalid Worker result")===true'),
+        60000);
+      const state=await evaluate(client,
+        '({requests:window.__photoFailure.workerRequests,replies:window.__photoFailure.workerReplies,'+
+        'terminations:window.__photoFailure.workerTerminations,'+
+        'selectionMatched:window.__photoFailure.selectionMatched,'+
+        'real:window.__photoFailure.realWorkerNativeResultObserved,'+
+        'filled:window.__photoFailure.realWorkerReplyFilled,'+
+        'tiles:window.__photoFailure.realWorkerChangedTiles,'+
+        'alpha:window.__photoFailure.selectedAlphaByteCorrupted,'+
+        'before:window.__photoFailure.mutatedBeforeUiValidation,'+
+        'preview:window.__photoFailure.previewTileWrites})');
+      assert(state.requests===1 && state.replies===1 && state.terminations===1 &&
+        state.selectionMatched && state.real && state.filled===8288 && state.tiles>=2 &&
+        state.alpha && state.before && state.preview===0,
+        '037C-3b-3/2a malformed Worker was not blocked before preview',
+        JSON.stringify(state));
+      await snapshot('after');
+      const cancelled=await evaluate(client,'('+compareSnapshots.toString()+')()');
+      assert(cancelled.nativeExact && cancelled.historyExact && cancelled.fillHistoryEntries===0,
+        '037C-3b-3/2a malformed Worker published private native tiles',
+        JSON.stringify(cancelled));
+      const other=await evaluate(client,'('+checkOtherHistoryAfterEscape.toString()+')()');
+      assert(other.historyUnchanged && other.originalSelected,
+        '037C-3b-3/2a malformed result changed unrelated tab',JSON.stringify(other));
+      const receipt={
+        kind:'zpe-real-photo-browser-malformed-alpha-v1',
+        status:'native-worker-alpha-corrupted-rejected-by-public-ui',
+        format,runIndex,protocol:'file:',inputFileSha256:baseline.inputFileSha256,
+        nativeDefectSha256:baseline.nativeDefectSha256,
+        sourcePhotoSha256:manifest.sourceSha256,
+        bitsPerChannel:fmt.bits,selectedPixels:8288,
+        workerRequests:state.requests,workerReplies:state.replies,
+        workerTerminations:state.terminations,selectionMatched:state.selectionMatched,
+        realWorkerNativeResultObserved:state.real,realWorkerReplyFilled:state.filled,
+        realWorkerChangedTiles:state.tiles,
+        transportMutation:'selected-alpha-one-byte',
+        mutatedBeforeUiValidation:state.before,selectedAlphaByteCorrupted:state.alpha,
+        publicInvalidWorkerStatusObserved:true,privatePreviewTileWrites:state.preview,
+        nativeBytesUnchanged:cancelled.nativeExact,originalHistoryUnchanged:cancelled.historyExact,
+        fillHistoryEntries:cancelled.fillHistoryEntries,
+        secondTabHistoryUnchanged:other.historyUnchanged,
+        maxBytesVerified:false,photoshopCompatibilityVerified:false,
+        startedAtUnixMs:started,elapsedMs:Date.now()-started,
+      };
+      validateRealPhotoMalformedReplyReceipt(receipt,pins,manifest);
+      await mkdir(artifactDir,{recursive:true});
+      const output=path.join(artifactDir,'real-photo-'+format+'-malformed-alpha-run-1.json');
+      await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
+      console.log('037C-3b-3/2a real-photo malformed native alpha blocked:',JSON.stringify({output,...receipt}));
+      return receipt;
     }
 
     if(completedPreviewSuccess){
