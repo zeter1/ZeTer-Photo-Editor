@@ -534,7 +534,10 @@ async function runSmoke() {
       const verifyCancelSuccessor=process.env.ZPE_REAL_PHOTO_BROWSER_CANCEL_SUCCESSOR==='1';
       const verifyMalformedAlpha=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_ALPHA==='1';
       const verifyMalformedCounter=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_COUNTER==='1';
-      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)+Number(verifyPreviewSuccess)+Number(verifyCancelSuccessor)+Number(verifyMalformedAlpha)+Number(verifyMalformedCounter)>1)
+      const malformedExtra=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_EXTRA||'';
+      if(malformedExtra && !['outside','nonfinite-nan','nonfinite-infinity'].includes(malformedExtra))
+        throw new Error('037C-3b-3/2b-2 invalid malformed extra kind');
+      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)+Number(verifyPreviewSuccess)+Number(verifyCancelSuccessor)+Number(verifyMalformedAlpha)+Number(verifyMalformedCounter)+Number(Boolean(malformedExtra))>1)
         throw new Error('037C-3b real photo modes require independent Chromium sessions');
       let photoSampler=null,photoReport=null,photoWorker=null;
       if(observe){
@@ -544,16 +547,16 @@ async function runSmoke() {
       }
       try{
         const baseline=await verifyGenuinePhotoUiImport(client,options);
-        if(verifySwitchFailure || verifyMidKernel || verifyClose || verifyEscape || verifyCompletedPreview || verifyPreviewSuccess || verifyCancelSuccessor || verifyMalformedAlpha || verifyMalformedCounter){
+        if(verifySwitchFailure || verifyMidKernel || verifyClose || verifyEscape || verifyCompletedPreview || verifyPreviewSuccess || verifyCancelSuccessor || verifyMalformedAlpha || verifyMalformedCounter || malformedExtra){
           const {verifyGenuinePhotoUiSwitchFailure}=await import('./browser-real-photo-switch-failure.mjs');
           const errorsBeforeExpectedFailure=errors.length;
           await verifyGenuinePhotoUiSwitchFailure(client,{...options,baseline,
             midKernel:verifyMidKernel||verifyClose||verifyEscape,closeDocument:verifyClose,
             escapeCancel:verifyEscape,completedPreviewEscape:verifyCompletedPreview,
             completedPreviewSuccess:verifyPreviewSuccess,cancelFirstSuccessor:verifyCancelSuccessor,
-            malformedReply:verifyMalformedAlpha||verifyMalformedCounter,
-            malformedKind:verifyMalformedCounter?'counter':'alpha'});
-          if(verifyMalformedAlpha||verifyMalformedCounter){
+            malformedReply:verifyMalformedAlpha||verifyMalformedCounter||Boolean(malformedExtra),
+            malformedKind:malformedExtra||(verifyMalformedCounter?'counter':'alpha')});
+          if(verifyMalformedAlpha||verifyMalformedCounter||malformedExtra){
             // Allow exactly the expected caught TypeError, and only after the UI
             // failure status/native byte parity has been checked independently.
             const reported=errors.slice(errorsBeforeExpectedFailure);
