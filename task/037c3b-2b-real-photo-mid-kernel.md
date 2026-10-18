@@ -1,6 +1,6 @@
 # 037C-3b-2b/1 — genuine photo Worker cancellation after native kernel write
 
-**Приоритет:** P1. **Статус:** 037C-3b-2b/1 ЗАКРЫТА (2026-10-18). [PR #252](https://github.com/zeter1/ZeTer-Photo-Editor/pull/252) → [main 15721fe](https://github.com/zeter1/ZeTer-Photo-Editor/commit/15721fe5e87b6ab63aa67d5d5de25575badf7670). [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284685), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284680). Полная 037C-3b-2b остаётся OPEN, exact-main CI проверяется отдельно.
+**Приоритет:** P1. **Статус:** 037C-3b-2b/1 ЗАКРЫТА (2026-10-18). [PR #252](https://github.com/zeter1/ZeTer-Photo-Editor/pull/252) → [main 15721fe](https://github.com/zeter1/ZeTer-Photo-Editor/commit/15721fe5e87b6ab63aa67d5d5de25575badf7670). [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284685), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284680). Полная 037C-3b-2b остаётся OPEN. [exact-main photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113526445), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113593888) — success.
 
 ## Цель проходки
 
@@ -17,7 +17,7 @@
 - [x] Изолированный per-format шаг GitHub Actions, upload проверяемых evidence.
 - [x] PR: Node suite / generated artifacts / browser smoke / genuine-photo real-photo intake + два Chromium прогона: оба workflow success на SHA `23e8edae`.
 - [x] Слитие после зелёных PR checks — main `15721fe` (squash). 
-- [ ] Независимо проверить exact-main CI и photo workflow на слитом коде; добавить ссылки.
+- [x] Независимый [exact-main photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113526445) проверил точный код merge 15721fe; [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113593888) проверил окончательный основной код и документацию.
 
 ## Границы доказательства
 
