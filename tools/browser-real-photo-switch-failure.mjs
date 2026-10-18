@@ -1856,14 +1856,14 @@ export async function verifyGenuinePhotoUiMemoryCap(client,{
       actual.filled===8288&&actual.tiles>=2,
       '037C-3b-3/2b-2 real Worker retry not observed',JSON.stringify(actual));
     await snapshot('success');
-    const successful=await evaluate(client,\`(()=>{
+    const successful=await evaluate(client,`(()=>{
       const s=window.__photoFailure,a=s.snapshots.retryBefore,b=s.snapshots.success;
       const rows=[...document.querySelectorAll('#historyList .history-row')].map(r=>r.textContent);
       return {nativeChanged:a.tiles.some((tile,i)=>tile.dataUrl!==b.tiles[i]?.dataUrl),
         historyDelta:rows.length-s.retryHistory.length,
         fillDelta:rows.filter(x=>x.includes('Контент-заливка')).length-
           s.retryHistory.filter(x=>x.includes('Контент-заливка')).length};
-    })()\`);
+    })()`);
     assert(successful.nativeChanged&&successful.historyDelta===1&&successful.fillDelta===1,
       '037C-3b-3/2b-2 public native retry was not committed',JSON.stringify(successful));
     const second=await evaluate(client,'('+checkOtherHistoryAfterEscape.toString()+')()');
