@@ -17601,10 +17601,18 @@ function createRasterEditController({
 
   // Keep all ROI tile changes private until the exact document, layer and
   // serialized source are revalidated after the asynchronous preview build.
-  async function persistTiledHighDepthInpaint(owner, layer, { isAllowed } = {}) {
+  async function persistTiledHighDepthInpaint(owner, layer, {
+    isAllowed, isContinuationCurrent,
+  } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
     const originalSource = layer.highDepthSource;
-    const stale = () => !isCurrentRasterTarget(owner, layer) || layer.highDepthSource !== originalSource;
+    // A completed Worker can still be awaiting preview. Never publish after
+    // the command generation/lease was revoked, even for the same document.
+    const stale = () => (
+      (typeof isContinuationCurrent === 'function' && !isContinuationCurrent()) ||
+      !isCurrentRasterTarget(owner, layer) ||
+      layer.highDepthSource !== originalSource
+    );
     if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
     const prepared = await prepareTiledInpaintWithWorker(originalSource, {
       isAllowed,
@@ -18199,7 +18207,12 @@ function createRasterCommandController({
           layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND &&
           typeof rasterEdit.persistTiledHighDepthInpaint === 'function'
         ) {
-          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, { isAllowed });
+          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, {
+            isAllowed,
+            // Worker completion can precede asynchronous preview publication.
+            // Escape/tab cancellation must revoke that publication too.
+            isContinuationCurrent:isInpaintCurrent,
+          });
           if (!isInpaintCurrent()) return false;
           if (result) {
             resetNativeState();
@@ -30939,6 +30952,13 @@ window.addEventListener('keydown',e=>{
     if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropGestures.hasDraft()){cropGestures.reset();drawOverlay();setStatus('Кадрирование отменено');return;}
+    // Escape has its usual selection/draft meaning when no Fill is pending.
+    // Do not intercept Escape inside a modal or during an active gesture.
+    if(!drag && !pointerLifecycle?.hasActivePointer() &&
+       !(e.target instanceof Node && els.modalRoot.contains(e.target)) &&
+       rasterCommands.cancelPendingContentAwareFill()){
+      e.preventDefault();setStatus('Контент-заливка отменена');return;
+    }
     if(toolRemoval().hasMask()){
       e.preventDefault();
       if(toolRemoval().reset()){drawOverlay();setStatus('Область удаления сброшена');}
