@@ -25,3 +25,7 @@
 ## 037C-3b-3/2a — реализация в ветке, подтверждение ожидается
 
 Начат [отдельный реальный PSD16/PSB32 Chromium selected-alpha отказ](037c3b-3-2a-photo-malformed-alpha.md). Вызов реального Worker и public UI fail-closed покрывается новой опциональной CI матрицей, но без green PR/exact-main evidence **/2a не закрыта**, /2b maxBytes + остальные malformed cases OPEN.
+
+## 037C-3b-3/2a — принятая genuine-photo alpha-mutation матрица
+
+[PR #262](https://github.com/zeter1/ZeTer-Photo-Editor/pull/262) → [main 7caacf7](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7caacf75760bd4097bdaf7a99135774b7866b64f); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130130353), [PR photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130130421), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130492852), [exact-main photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39130492841). Два независимых настоящих pinned PSD16/PSB32 photo Chromium сценария с native Worker и corrupt selected-alpha, публичной ошибкой, без preview/History и exact native v2 parity. **/2b: counters/Float32/outside-ROI + реальный public UI maxBytes/refusal-retry ещё OPEN.** После /2b — 037C-3c.
