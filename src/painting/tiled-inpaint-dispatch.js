@@ -129,6 +129,14 @@ export async function prepareTiledInpaintWithWorker(source, {
   scanChunkPixels = 32_768,
   yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
 } = {}) {
+  // Refuse over-budget sources before the first selection predicate call,
+  // cooperative yield or Worker message. Returning null here used to send the
+  // caller into a second (contiguous) native fallback, hiding the budget error.
+  if (Number.isSafeInteger(maxBytes) && Number.isSafeInteger(source?.rawBytes) &&
+      source.rawBytes > maxBytes) {
+    throw new RangeError('Контент-заливка: native source превышает доступный лимит памяти (' +
+      source.rawBytes + ' > ' + maxBytes + ' байт)');
+  }
   if (!worker) {
     return inpaintTiledPixelBufferSourceCooperative(source, {
       isAllowed, isCancelled, maxBytes, maxFillPixels, scanChunkPixels, yieldControl,
@@ -137,14 +145,6 @@ export async function prepareTiledInpaintWithWorker(source, {
   if (typeof isAllowed !== 'function' || typeof isCancelled !== 'function' ||
       typeof yieldControl !== 'function' || typeof worker.run !== 'function') {
     throw new TypeError('Tiled inpaint: invalid Worker selection callbacks');
-  }
-  // Refuse over-budget sources before the first selection predicate call,
-  // cooperative yield or Worker message. Returning null here used to send the
-  // caller into a second (contiguous) native fallback, hiding the budget error.
-  if (Number.isSafeInteger(maxBytes) && Number.isSafeInteger(source?.rawBytes) &&
-      source.rawBytes > maxBytes) {
-    throw new RangeError('Контент-заливка: native source превышает доступный лимит памяти (' +
-      source.rawBytes + ' > ' + maxBytes + ' байт)');
   }
   const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
   if (!working) throw new TypeError('Tiled inpaint: invalid native source');
