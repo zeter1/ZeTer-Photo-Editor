@@ -197,7 +197,9 @@ function installMidKernelNativeWorker(instrument){
   // Only the test page's supplier descriptor is patched; production artifacts
   // are untouched and the actual native PSD16/PSB32 job enters the real kernel.
   Object.defineProperty(globalThis,'__zpeTiledInpaintWorkerSource',{
-    configurable:true,value:instrument(descriptor.value,{minimumWidth:1025}),
+    // The kernel receives a bounded ROI buffer, NOT the 1025px document.
+    // Keep the probe conditional on a real multi-pixel photo ROI width.
+    configurable:true,value:instrument(descriptor.value,{minimumWidth:40}),
   });
   s.restore=()=>{
     Worker.prototype.postMessage=post;
