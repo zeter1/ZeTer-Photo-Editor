@@ -15,6 +15,10 @@ export function createTiledInpaintWorkerJobController({
   pollIntervalMs = 0,
   schedulePoll = setInterval,
   cancelPoll = clearInterval,
+  // The portable Node client defaults to no deadline; browser enables one.
+  maxRunMs = 0,
+  scheduleDeadline = setTimeout,
+  cancelDeadline = clearTimeout,
 } = {}) {
   if (typeof createWorker !== 'function') {
     throw new TypeError('Tiled inpaint Worker: createWorker is required');
@@ -23,6 +27,13 @@ export function createTiledInpaintWorkerJobController({
     ? Math.max(1, Math.trunc(pollIntervalMs)) : 0;
   if (pollDelay && (typeof schedulePoll !== 'function' || typeof cancelPoll !== 'function')) {
     throw new TypeError('Tiled inpaint Worker: invalid polling timer');
+  }
+  if (!Number.isSafeInteger(maxRunMs) || maxRunMs < 0) {
+    throw new RangeError('Tiled inpaint Worker: invalid execution deadline');
+  }
+  if (maxRunMs && (typeof scheduleDeadline !== 'function' ||
+                   typeof cancelDeadline !== 'function')) {
+    throw new TypeError('Tiled inpaint Worker: invalid deadline timer');
   }
   let active = null;
   let nextId = 0;
@@ -66,6 +77,7 @@ export function createTiledInpaintWorkerJobController({
       let settled = false;
       let dispatched = false;
       let pollTimer = null;
+      let deadlineTimer = null;
       let detach = () => {};
       const terminate = () => {
         try {
@@ -81,6 +93,10 @@ export function createTiledInpaintWorkerJobController({
         if (pollTimer !== null) {
           try { cancelPoll(pollTimer); } catch { /* never leave a job pending on timer cleanup */ }
           pollTimer = null;
+        }
+        if (deadlineTimer !== null) {
+          try { cancelDeadline(deadlineTimer); } catch { /* never publish stale tiles */ }
+          deadlineTimer = null;
         }
         detach();
         if (active?.id === id) active = null;
@@ -167,6 +183,22 @@ export function createTiledInpaintWorkerJobController({
           // Handle even a synchronous/reentrant injected scheduler safely.
           if (settled) cancelPoll(timer);
           else pollTimer = timer;
+        } catch (error) { fail(error); }
+      }
+      if (!settled && maxRunMs) {
+        try {
+          // The UI-thread timer can stop a CPU-bound Worker that never replies.
+          // A timeout is a compute failure, never a cooperative fallback.
+          const token = scheduleDeadline(
+            () => fail(new Error('Tiled inpaint Worker: timed out after ' + maxRunMs + ' ms')),
+            maxRunMs,
+          );
+          // A test scheduler may fire synchronously during registration.
+          if (settled) {
+            try { cancelDeadline(token); } catch { /* already stopped */ }
+          } else {
+            deadlineTimer = token;
+          }
         } catch (error) { fail(error); }
       }
     });
