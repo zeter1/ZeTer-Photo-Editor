@@ -271,3 +271,71 @@ test('UI Worker rejects alternate Base64 pad bits even when decoded tile bytes m
     isAllowed:(x,y) => y * source.width + x === selected,
   }), /invalid Worker result/);
 });
+
+test('037C-3b-3: malformed native alpha/Float32 replies fail closed before preview or History', async () => {
+  const source = fixture(), snapshot = JSON.stringify(source);
+  const index = 7 * source.width + 7;
+  const valid = inpaintTiledPixelBufferSourceFromIndices(source, {
+    selectedIndices:Uint32Array.of(index),
+  });
+  const corruptions = [
+    ['alpha changed in selected CMYKA32 pixel', bytes => bytes.writeFloatLE(0.25, (7 * 8 + 7) * 20 + 16)],
+    ['NaN in selected C channel', bytes => bytes.writeFloatLE(NaN, (7 * 8 + 7) * 20)],
+    ['Infinity in selected M channel', bytes => bytes.writeFloatLE(Infinity, (7 * 8 + 7) * 20 + 4)],
+  ];
+  for (const [name, corrupt] of corruptions) {
+    const reply = structuredClone(valid);
+    const tile = reply.source.tiles[0];
+    const prefix = tile.dataUrl.indexOf('base64,') + 7;
+    const bytes = Buffer.from(tile.dataUrl.slice(prefix), 'base64');
+    corrupt(bytes);
+    tile.dataUrl = tile.dataUrl.slice(0, prefix) + bytes.toString('base64');
+    const layer = { id:'native', type:'raster', locked:false, groupId:null,
+      width:source.width, height:source.height, highDepthSource:source,
+      dataUrl:null, highDepthPreview:null, filters:{} };
+    const document = { width:source.width,height:source.height,layers:[layer],groups:[] };
+    const editor = createRasterEditController({
+      getDocument:()=>document,
+      tiledInpaintWorker:{async run() {return reply;}},
+      documentRef:{createElement() {throw new Error('preview must not render');}},
+    });
+    await assert.rejects(editor.persistTiledHighDepthInpaint(document,layer,{
+      isAllowed:(x,y)=>y * source.width + x === index,
+    }), /invalid Worker result/, name);
+    assert.equal(layer.highDepthSource,source,name + ': original native source retained');
+    assert.equal(layer.dataUrl,null,name + ': no preview published');
+    assert.equal(JSON.stringify(source),snapshot,name + ': byte-exact source');
+  }
+});
+
+test('037C-3b-3: strict maxBytes rejects before sampling/Worker dispatch, then normal job recovers', async () => {
+  for (const source of [rgb16Fixture(),fixture()]) {
+    let sampled = 0,dispatched = 0;
+    await assert.rejects(prepareTiledInpaintWithWorker(source,{
+      maxBytes:source.rawBytes-1,
+      worker:{async run(){dispatched++; throw new Error('unexpected Worker launch');}},
+      isAllowed:()=>{sampled++;return true;},
+    }), /serialized PixelBuffer source|лимит|working set/);
+    assert.equal(sampled,0,'cap checked before touching selection');
+    assert.equal(dispatched,0,'cap checked before creating Worker job');
+    const selected = source.model === 'rgb' ? 3 * source.width + 3 : 7 * source.width + 7;
+    const result = await prepareTiledInpaintWithWorker(source,{
+      maxBytes:source.rawBytes,
+      isAllowed:(x,y)=>y * source.width + x === selected,
+      worker:{async run(job) {dispatched++;return inpaintTiledPixelBufferSourceFromIndices(job.source,job);}},
+    });
+    assert.equal(dispatched,1,'a refused job does not poison the next valid job');
+    assert.ok(result.changed>0);
+    assert.equal(result.source.rawBytes,source.rawBytes);
+  }
+});
+
+test('037C-3b-3: mixed unavailable/native Worker result must not silently trigger CPU fallback', async () => {
+  const source=fixture();
+  let selected=0;
+  await assert.rejects(prepareTiledInpaintWithWorker(source,{
+    isAllowed:(x,y)=>{selected++;return x===7&&y===7;},
+    worker:{async run(){return {unavailable:true, source};}},
+  }),/invalid Worker result/);
+  assert.equal(selected,source.width*source.height,'no repeated selection sampling');
+});
