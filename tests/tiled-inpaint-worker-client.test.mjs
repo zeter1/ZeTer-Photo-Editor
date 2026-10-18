@@ -367,3 +367,73 @@ test('Stage 003 Worker client: reentrant scheduler is removed after immediate st
   assert.equal(workers[0].terminated, 1);
   assert.equal(clears, 1);
 });
+
+test('037C-3b-1: stalled Worker times out, drops late replies, and recovers next document', async () => {
+  const timers=new Map(),workers=[];
+  let serial=0;
+  const client=createTiledInpaintWorkerJobController({
+    createWorker:()=>{const w=new FakeBrowserWorker();workers.push(w);return w;},
+    maxRunMs:125,
+    scheduleDeadline(fn,ms){
+      assert.equal(ms,125);
+      const token=++serial;timers.set(token,fn);return token;
+    },
+    cancelDeadline(token){timers.delete(token);},
+  });
+  const pending=client.run({source:'photo-native'});
+  workers[0].emit('message',{ready:true});
+  const id=workers[0].sent[0].id;
+  assert.equal(timers.size,1);
+  [...timers.values()][0]();
+  await assert.rejects(pending,/timed out after 125 ms/);
+  assert.equal(workers[0].terminated,1);
+  assert.equal(timers.size,0);
+  workers[0].emit('message',{id,ok:true,result:'stale tiles'});
+  assert.equal(workers[0].handlers.get('message').size,0);
+  assert.equal(client.cancel(),false);
+  const next=client.run({source:'new session'});
+  workers[1].emit('message',{ready:true});
+  workers[1].emit('message',{id:workers[1].sent[0].id,ok:true,result:'safe'});
+  assert.equal(await next,'safe');
+  assert.equal(timers.size,0);
+});
+
+test('037C-3b-1: closing a tab before Worker ready cancels and clears deadline', async () => {
+  const timers=new Map(),workers=[];
+  let serial=0,current=true;
+  const client=createTiledInpaintWorkerJobController({
+    createWorker:()=>{const w=new FakeBrowserWorker();workers.push(w);return w;},
+    maxRunMs:300,
+    scheduleDeadline(fn){const token=++serial;timers.set(token,fn);return token;},
+    cancelDeadline(token){timers.delete(token);},
+  });
+  const pending=client.run({source:'old-tab'},{isCurrent:()=>current});
+  assert.equal(timers.size,1);
+  current=false;
+  workers[0].emit('message',{ready:true});
+  assert.deepEqual(await pending,{cancelled:true});
+  assert.equal(workers[0].sent.length,0);
+  assert.equal(workers[0].terminated,1);
+  assert.equal(timers.size,0);
+  for(const type of ['message','error','messageerror'])
+    assert.equal(workers[0].handlers.get(type).size,0);
+});
+
+test('037C-3b-1: invalid and reentrant deadline timers fail closed', async () => {
+  const createWorker=()=>new FakeBrowserWorker();
+  assert.throws(()=>createTiledInpaintWorkerJobController({createWorker,maxRunMs:-1}),/deadline/);
+  assert.throws(()=>createTiledInpaintWorkerJobController({createWorker,maxRunMs:1.5}),/deadline/);
+  assert.throws(()=>createTiledInpaintWorkerJobController({createWorker,maxRunMs:10,scheduleDeadline:null}),/deadline timer/);
+  const workers=[];
+  let cleared=0;
+  const client=createTiledInpaintWorkerJobController({
+    createWorker:()=>{const w=createWorker();workers.push(w);return w;},
+    maxRunMs:1,
+    scheduleDeadline(fn){fn();return 'fired';},
+    cancelDeadline(token){assert.equal(token,'fired');cleared++;},
+  });
+  await assert.rejects(client.run({source:'hung'}),/timed out/);
+  assert.equal(cleared,1);
+  assert.equal(workers[0].terminated,1);
+  assert.equal(client.cancel(),false);
+});
