@@ -278,6 +278,7 @@ function compareSnapshots(){
 
 export async function verifyGenuinePhotoUiSwitchFailure(client,{
   evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,
+  midKernel=false,
 }={}){
   const fmt=FORMATS[format];
   if(!fmt || runIndex!==1 || !sourceDir || !artifactDir ||
@@ -326,7 +327,9 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       ');window.__photoFailure.historyBefore=[...document.querySelectorAll("#historyList .history-row")].map(r=>r.textContent);true');
     // assertEqualNativeTiles throws on mismatch; wrapper returns a boolean.
     await evaluate(client,'window.__photoFailureAssertNative=((f)=>((a,b,label)=>{f(a,b,label);return true}))(window.__photoFailureAssertNative);true');
-    await evaluate(client,'('+installHeldNativeWorker.toString()+')()');
+    await evaluate(client,midKernel
+      ? '('+installMidKernelNativeWorker.toString()+')('+instrumentBrowserKernelSource.toString()+')'
+      : '('+installHeldNativeWorker.toString()+')()');
     assert(await evaluate(client,'('+invokeFill.toString()+')()'),
       '037C-3b-2a UI native fill disabled');
     await waitFor('037C-3b-2a actual native Worker posted held job',()=>evaluate(client,
@@ -335,10 +338,25 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       '({selected:window.__photoFailure.selectionMatched,terminated:window.__photoFailure.workerTerminations})');
     assert(tracked.selected===true && tracked.terminated===0,
       '037C-3b-2a genuine ROI job not intercepted',JSON.stringify(tracked));
+    if(midKernel){
+      // The Worker has synthesized a native pixel and is held inside the
+      // actual kernel, not behind an intercepted job postMessage.
+      await waitFor('037C-3b-2b genuine native photo kernel write probe',()=>evaluate(client,
+        'window.__photoFailure?.kernelWrites===1'),15000);
+      const progress=await evaluate(client,
+        '({dispatched:window.__photoFailure.dispatched,filled:window.__photoFailure.probeReportedFilled,sample:window.__photoFailure.firstNativeSampleAfterWrite,replies:window.__photoFailure.workerReplies})');
+      assert(progress.dispatched===true && progress.filled===1 &&
+        Number.isFinite(progress.sample) && progress.replies===0,
+        '037C-3b-2b real kernel write not observed before cancellation',JSON.stringify(progress));
+    }
     assert(await evaluate(client,'('+switchTab.toString()+')()'),
       '037C-3b-2a public document tab switch blocked');
     await waitFor('037C-3b-2a native Worker terminated on session switch',
       ()=>evaluate(client,'window.__photoFailure?.workerTerminations===1'),10000);
+    if(midKernel){
+      const inKernel=await evaluate(client,'window.__photoFailure?.terminatedDuringKernel===true');
+      assert(inKernel,'037C-3b-2b Worker was not terminated after a real kernel write');
+    }
     const late=await evaluate(client,'('+injectLateAndReturnToOriginal.toString()+')()');
     assert(late.delivered===true && late.firstSelected==='true' &&
       JSON.stringify(late.secondHistory)===JSON.stringify(tabs.secondHistory),
@@ -349,6 +367,9 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
     assert(compared.nativeExact===true && compared.historyExact===true &&
       compared.fillHistoryEntries===0,'037C-3b-2a cancelled photo source/history changed',
       JSON.stringify(compared));
+    const trackedSample=midKernel
+      ? await evaluate(client,'window.__photoFailure.firstNativeSampleAfterWrite')
+      : null;
     const receipt={
       kind:'zpe-real-photo-browser-cancel-switch-v1',
       status:'public-tab-switch-terminated-no-publication',
@@ -366,11 +387,26 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       photoshopCompatibilityVerified:false,
       startedAtUnixMs:started,elapsedMs:Date.now()-started,
     };
-    validateRealPhotoSwitchFailureReceipt(receipt,pins,manifest);
+    if(midKernel){
+      Object.assign(receipt,{
+        kind:'zpe-real-photo-browser-mid-kernel-switch-v1',
+        status:'public-tab-switch-mid-kernel-terminated-no-publication',
+        realKernelJobDispatched:true,realKernelWriteProbeObserved:true,
+        probeReportedFilled:1,firstNativeSampleAfterWrite:trackedSample,
+        terminatedAfterKernelWriteBeforeReply:true,
+        actualMidKernelCancellationVerified:true,
+      });
+      delete receipt.jobHeldBeforeKernelDispatch;
+      validateRealPhotoMidKernelFailureReceipt(receipt,pins,manifest);
+    }else{
+      validateRealPhotoSwitchFailureReceipt(receipt,pins,manifest);
+    }
     await mkdir(artifactDir,{recursive:true});
-    const output=path.join(artifactDir,'real-photo-'+format+'-failure-run-1.json');
+    const output=path.join(artifactDir,'real-photo-'+format+
+      (midKernel?'-mid-kernel-run-1.json':'-failure-run-1.json'));
     await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
-    console.log('037C-3b-2a real photo Chromium cancellation:',JSON.stringify({output,...receipt}));
+    console.log(midKernel?'037C-3b-2b real-photo mid-kernel cancellation:':
+      '037C-3b-2a real photo Chromium cancellation:',JSON.stringify({output,...receipt}));
     return receipt;
   } finally{
     await evaluate(client,'window.__photoFailure?.restore?.();'+
