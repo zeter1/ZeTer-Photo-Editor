@@ -525,6 +525,8 @@ async function runSmoke() {
         artifactDir:process.env.ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR,
       };
       const observe=process.env.ZPE_REAL_PHOTO_BROWSER_WORKER==='1';
+      const verifySwitchFailure=process.env.ZPE_REAL_PHOTO_BROWSER_FAILURE==='1';
+      if(observe && verifySwitchFailure) throw new Error('037C-3b-2a failure run must have its own Chromium session');
       let photoSampler=null,photoReport=null,photoWorker=null;
       if(observe){
         browserClient=await CdpClient.connect(browserWs);
@@ -533,6 +535,10 @@ async function runSmoke() {
       }
       try{
         const baseline=await verifyGenuinePhotoUiImport(client,options);
+        if(verifySwitchFailure){
+          const {verifyGenuinePhotoUiSwitchFailure}=await import('./browser-real-photo-switch-failure.mjs');
+          await verifyGenuinePhotoUiSwitchFailure(client,{...options,baseline});
+        }
         if(observe){
           await photoSampler.snapshot('after-import');
           const {verifyGenuinePhotoUiWorker}=await import('./browser-real-photo-ui-worker.mjs');
