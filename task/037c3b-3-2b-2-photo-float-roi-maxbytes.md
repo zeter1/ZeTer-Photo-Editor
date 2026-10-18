@@ -32,3 +32,14 @@
 - На genuine pinned PSD16/PSB32 добавлены Chromium `file://` запуски после настоящего native Worker. PSB32 NaN/Infinity, PSD16+PSB32 изменённый цвет вне ROI; public error, полные Save Project v2/native bytes, отсутствие preview/History и side-tab mutation проверяются в harness. Не synthetic Worker.
 - Ветка: `feat/037c3b3-photo-nonfinite-outside-roi`; локальный Chromium с pinned assets недоступен. PR/genuine-photo/exact-main CI результатов пока нет: **НЕ считать критерии приёмки закрытыми**.
 - Осталось: `maxBytes < rawBytes` отказ на реальном импортированном фото до selection sampling/Worker и успешный retry; затем подтвердить 4 browser cases, CI, PR, merge/exact-main и только тогда DONE. Следом 037C-3c.
+
+## 037C-3b-3/2b-2 — результаты слитой матрицы, 2026-10-18
+
+**Статус: IN PROGRESS, maxBytes refusal+retry ещё TODO.** Частичное подтверждение реальными фото не закрывает весь идентификатор задачи.
+
+- [PR #264](https://github.com/zeter1/ZeTer-Photo-Editor/pull/264) **merged** → [main 7194141](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7194141d3b9e6440e211525dcc2ff3ffa8fed667).
+- [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39135873883); [PR genuine-photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39135873896), четыре изолированных Chromium `file://` сценария на реальных frozen PSD16/PSB32.
+- [Exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39136335763); [exact-main genuine-photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39136335830) на том же кодовом коммите 7194141.
+- Первый PR genuine-photo запуск [39135495538](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39135495538) отказал только по `EEXIST` для двух PSB32 baseline snapshot в общей директории; исправлена изоляция путей, следующие PR/main прогоны успешно прошли.
+- Подтверждены post-native-Worker Float32 NaN/Infinity и changed color вне выделения, public invalid error, 0 preview writes/new Fill History, без изменений исходных native v2 tiles/History соседней вкладки, independent verified SHA-256 receipts, negative tamper tests.
+- **Остаётся:** production-boundary maxBytes below real imported source rawBytes **до** selection scan/Worker + публичный отказ/точные native snapshots, затем снять лимит и успешно применить Fill в обоих форматах. Только после этой проверки и PR/exact-main CI закрыть 037C-3b-3/2b-2 и перейти к 037C-3c final acceptance.
