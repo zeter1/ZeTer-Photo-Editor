@@ -339,3 +339,35 @@ test('037C-3b-3: mixed unavailable/native Worker result must not silently trigge
   }),/invalid Worker result/);
   assert.equal(selected,source.width*source.height,'no repeated selection sampling');
 });
+
+test('over-budget native source fails before selection sampling or Worker, and retry succeeds', async () => {
+  const source = fixture(), snapshot = JSON.stringify(source);
+  let samples = 0, jobs = 0, yields = 0;
+  const worker = { async run(job) {
+    jobs++;
+    return inpaintTiledPixelBufferSourceFromIndices(job.source, job);
+  } };
+  const options = {
+    worker,
+    isAllowed:(x,y) => { samples++; return x === 7 && y === 7; },
+    yieldControl:async () => { yields++; },
+  };
+  for (const maxBytes of [source.rawBytes - 1, 0]) {
+    await assert.rejects(prepareTiledInpaintWithWorker(source, {
+      ...options, maxBytes,
+    }), error => error instanceof RangeError &&
+      error.message.startsWith('Контент-заливка: native source превышает'));
+    assert.equal(samples, 0, 'no geometry sample on refused budget');
+    assert.equal(yields, 0, 'no cooperative scan on refused budget');
+    assert.equal(jobs, 0, 'no Worker job on refused budget');
+    assert.equal(JSON.stringify(source), snapshot);
+  }
+  const success = await prepareTiledInpaintWithWorker(source, {
+    ...options, maxBytes:source.rawBytes,
+  });
+  assert.equal(jobs, 1);
+  assert.equal(samples, source.width * source.height);
+  assert.equal(success.filled, 1);
+  assert.ok(success.changed > 0);
+  assert.equal(JSON.stringify(source), snapshot);
+});
