@@ -535,9 +535,10 @@ async function runSmoke() {
       const verifyMalformedAlpha=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_ALPHA==='1';
       const verifyMalformedCounter=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_COUNTER==='1';
       const malformedExtra=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_EXTRA||'';
+      const verifyMemoryCap=process.env.ZPE_REAL_PHOTO_BROWSER_MEMORY_CAP==='1';
       if(malformedExtra && !['outside','nonfinite-nan','nonfinite-infinity'].includes(malformedExtra))
         throw new Error('037C-3b-3/2b-2 invalid malformed extra kind');
-      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)+Number(verifyPreviewSuccess)+Number(verifyCancelSuccessor)+Number(verifyMalformedAlpha)+Number(verifyMalformedCounter)+Number(Boolean(malformedExtra))>1)
+      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)+Number(verifyPreviewSuccess)+Number(verifyCancelSuccessor)+Number(verifyMalformedAlpha)+Number(verifyMalformedCounter)+Number(Boolean(malformedExtra))+Number(verifyMemoryCap)>1)
         throw new Error('037C-3b real photo modes require independent Chromium sessions');
       let photoSampler=null,photoReport=null,photoWorker=null;
       if(observe){
@@ -565,6 +566,10 @@ async function runSmoke() {
               fail('037C-3b-3/2a unexpected browser errors',reported.join('\n'));
             errors.splice(errorsBeforeExpectedFailure,1);
           }
+        }
+        if(verifyMemoryCap){
+          const {verifyGenuinePhotoUiMemoryCap}=await import('./browser-real-photo-switch-failure.mjs');
+          await verifyGenuinePhotoUiMemoryCap(client,{...options,baseline});
         }
         if(observe){
           await photoSampler.snapshot('after-import');

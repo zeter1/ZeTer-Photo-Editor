@@ -503,7 +503,10 @@ async function publicNativeSnapshot(label){
       !Array.isArray(source.tiles) || source.tiles.length<2)
       throw Error('037C-3b-2a invalid native public snapshot');
     s.snapshots[label]=source;
-    return {bits:source.bitsPerChannel,tiles:source.tiles.length};
+    return {bits:source.bitsPerChannel,tiles:source.tiles.length,rawBytes:source.rawBytes,
+      usedOtherNativeBytes:project.layers.reduce((total,layer)=>
+        layer.name==='Pinned photo defect (8-bit derived)' ? total :
+          total+Math.max(0,Number(layer.highDepthSource?.rawBytes)||0),0)};
   } finally {URL.createObjectURL=original;}
 }
 function prepareTabs(){
@@ -1627,6 +1630,279 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       '037C-3b-2a real photo Chromium cancellation:',JSON.stringify({output,...receipt}));
     return receipt;
   } finally{
+    await evaluate(client,'window.__photoFailure?.restore?.();'+
+      'delete window.__photoFailure;delete window.__photoFailureAssertNative;true');
+  }
+}
+
+
+// 037C-3b-3/2b-2: REAL pinned photo UI memory-pressure refusal and retry.
+// The source remains a native PSD16/PSB32-imported v2 layer. Memory pressure
+// comes from PUBLIC Duplicate Layer, not a forged source or Worker response.
+export function validateRealPhotoMemoryCapReceipt(r,pins,manifest){
+  const bad=()=>{throw new TypeError('037C-3b-3/2b-2: invalid photo memory cap receipt');};
+  const fmt=FORMATS[r?.format],pin=pins?.documents?.[r?.format];
+  if(!fmt||!pin||r.kind!=='zpe-real-photo-browser-memory-cap-v1'||
+    r.status!=='public-cap-refusal-real-worker-retry'||r.protocol!=='file:'||r.runIndex!==1||
+    r.inputFileSha256!==pin.fileSha256||r.nativeDefectSha256!==pin.nativeSha256||
+    r.nativeDefectSha256!==manifest?.native?.[fmt.key]?.damagedSha256||
+    r.sourcePhotoSha256!==manifest?.sourceSha256||r.bitsPerChannel!==fmt.bits||
+    r.selectedPixels!==8288||r.rawBytes!==1025*1025*4*fmt.bits/8||
+    !Number.isSafeInteger(r.refusedMaxBytes)||r.refusedMaxBytes<0||
+    r.refusedMaxBytes>=r.rawBytes||
+    !Number.isSafeInteger(r.recoveredMaxBytes)||r.recoveredMaxBytes<r.rawBytes||
+    !Number.isSafeInteger(r.publicDuplicates)||r.publicDuplicates<1||
+    r.budgetErrorObserved!==true||r.refusalWorkerRequests!==0||
+    r.refusalNativeBytesUnchanged!==true||r.refusalHistoryUnchanged!==true||
+    r.refusalFillHistoryEntries!==0||r.retryWorkerRequests!==1||
+    r.retryWorkerReplies!==1||r.retryNativeResultObserved!==true||
+    r.retrySelectionMatched!==true||r.retryFilled!==8288||
+    !Number.isSafeInteger(r.retryChangedTiles)||r.retryChangedTiles<2||
+    r.retryNativeBytesChanged!==true||r.retryFillHistoryAdded!==1||
+    r.secondTabHistoryUnchanged!==true||r.photoshopCompatibilityVerified!==false||
+    !Number.isSafeInteger(r.startedAtUnixMs)||r.startedAtUnixMs<=0||
+    !Number.isSafeInteger(r.elapsedMs)||r.elapsedMs<0)bad();
+  return r;
+}
+export function validateRealPhotoMemoryCapSet(receipts,pins,manifest){
+  if(!Array.isArray(receipts)||receipts.length!==2)
+    throw new TypeError('037C-3b-3/2b-2: two isolated native photo cap runs required');
+  const formats=new Set(),starts=new Set();
+  for(const r of receipts){
+    validateRealPhotoMemoryCapReceipt(r,pins,manifest);
+    if(formats.has(r.format)||starts.has(r.startedAtUnixMs))
+      throw new TypeError('037C-3b-3/2b-2: duplicate format/session');
+    formats.add(r.format);starts.add(r.startedAtUnixMs);
+  }
+  if(!formats.has('psd16')||!formats.has('psb32'))
+    throw new TypeError('037C-3b-3/2b-2: missing a native format');
+  return {kind:'zpe-real-photo-browser-memory-cap-set-v1',runs:2,
+    formats:[...formats].sort(),refusalAndRetryVerified:true,
+    photoshopCompatibilityVerified:false};
+}
+
+function publicPhotoMemoryPressure(){
+  const s=window.__photoFailure,original=()=>[...document.querySelectorAll('.layer-row')]
+    .find(r=>r.querySelector('.layer-name')?.textContent==='Pinned photo defect (8-bit derived)');
+  const bytes=s.snapshots.original.rawBytes,budget=48*1024*1024;
+  const copies=Math.floor((budget-s.originalOtherBytes-bytes)/bytes)+1;
+  if(!Number.isSafeInteger(bytes)||bytes<1||copies<1||copies>6)
+    throw Error('037C-3b-3/2b-2 unexpected pinned-photo budget');
+  s.pressureCopies=[];
+  for(let i=0;i<copies;i++){
+    const row=original();
+    if(!row)throw Error('037C-3b-3/2b-2 original layer missing');
+    row.click();
+    const dup=document.querySelector('#duplicateLayerBtn');
+    if(!dup||dup.disabled)throw Error('037C-3b-3/2b-2 public duplicate disabled');
+    dup.click();
+    const created=document.querySelector('.layer-row.selected');
+    if(!created||created.dataset.id===row.dataset.id)
+      throw Error('037C-3b-3/2b-2 duplicate did not select new layer');
+    s.pressureCopies.push(created.dataset.id);
+  }
+  original().click();
+  return {copies,originalSelected:original().classList.contains('selected')};
+}
+function publicPhotoPressureRelease(){
+  const s=window.__photoFailure,id=s.pressureCopies.pop();
+  const copy=[...document.querySelectorAll('.layer-row')].find(r=>r.dataset.id===id);
+  if(!copy)throw Error('037C-3b-3/2b-2 budget copy missing');
+  copy.click();
+  const del=document.querySelector('#deleteLayerBtn');
+  if(!del||del.disabled)throw Error('037C-3b-3/2b-2 public delete disabled');
+  del.click();
+  const original=[...document.querySelectorAll('.layer-row')].find(
+    r=>r.querySelector('.layer-name')?.textContent==='Pinned photo defect (8-bit derived)');
+  if(!original)throw Error('037C-3b-3/2b-2 missing original after release');
+  const originalId=original.dataset.id;
+  original.click();
+  // Layer selection rebuilds the panel; the clicked row is now detached.
+  return document.querySelector('.layer-row.selected')?.dataset.id===originalId;
+}
+function installPublicNativeReplyProbe(){
+  const s=window.__photoFailure,post=Worker.prototype.postMessage;
+  const add=Worker.prototype.addEventListener,remove=Worker.prototype.removeEventListener;
+  const listeners=new WeakMap();
+  s.workerReplies=0;s.realWorkerNativeResultObserved=false;
+  s.restore=()=>{
+    Worker.prototype.postMessage=post;Worker.prototype.addEventListener=add;
+    Worker.prototype.removeEventListener=remove;
+  };
+  Worker.prototype.postMessage=function(job,...args){
+    if(job?.selectedIndices instanceof Uint32Array &&
+       job.source?.kind==='zpe-pixel-buffer-source-v2'){
+      s.workerRequests++;s.worker=this;s.jobId=job.id;
+      s.selectionMatched=job.selectedIndices.length===s.expectedIndices.length &&
+        job.selectedIndices.every((v,i)=>v===s.expectedIndices[i]);
+    }
+    return post.call(this,job,...args);
+  };
+  Worker.prototype.addEventListener=function(type,listener,options){
+    if(type!=='message'||typeof listener!=='function')
+      return add.call(this,type,listener,options);
+    const worker=this;
+    const intercepted=function(event){
+      if(worker===s.worker&&event.data?.id===s.jobId&&event.data.ok===true){
+        s.workerReplies++;
+        s.realWorkerNativeResultObserved=
+          event.data.result?.source?.kind==='zpe-pixel-buffer-source-v2';
+        s.replyFilled=event.data.result?.filled;
+        s.replyChangedTiles=event.data.result?.changedTiles;
+      }
+      return listener.call(this,event);
+    };
+    let map=listeners.get(worker);if(!map){map=new Map();listeners.set(worker,map);}
+    map.set(listener,intercepted);
+    return add.call(worker,type,intercepted,options);
+  };
+  Worker.prototype.removeEventListener=function(type,listener,options){
+    return remove.call(this,type,listeners.get(this)?.get(listener)||listener,options);
+  };
+  return true;
+}
+
+export async function verifyGenuinePhotoUiMemoryCap(client,{
+  evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,
+}={}){
+  const fmt=FORMATS[format];
+  if(!fmt||runIndex!==1||!sourceDir||!artifactDir||
+     !baseline?.publicSaveNativeMatchedFrozenPin)
+    throw new TypeError('037C-3b-3/2b-2 requires frozen native photo baseline');
+  const [pins,manifest,rgba]=await Promise.all([
+    readFile(path.join(ROOT,'tests/fixtures/real-photo/reviewed-native-artifacts.json'),'utf8').then(JSON.parse),
+    readFile(path.join(ROOT,'tests/fixtures/real-photo/reviewed-manifest.json'),'utf8').then(JSON.parse),
+    readFile(path.join(sourceDir,'..','decoded.rgba')),
+  ]);
+  const admitted=createPinnedPhotoNativeFixture({rgba,width:manifest.decoded.width,
+    height:manifest.decoded.height,expectedRgbaSha256:manifest.decoded.sha256,
+    bitsPerChannel:fmt.bits,expectedReferenceSha256:manifest.native[fmt.key].cleanSha256});
+  assert(admitted.admitted&&admitted.selectedIndices.length===8288&&
+    baseline.nativeDefectSha256===pins.documents[format].nativeSha256,
+    '037C-3b-3/2b-2 photo pins mismatch');
+  const started=Date.now();
+  const polygon=createWideConnectedUiPolygon(1025,1025,admitted.roiOrigin);
+  await evaluate(client,'window.__photoFailure={bits:'+fmt.bits+
+    ',polygon:'+JSON.stringify(polygon)+
+    ',expectedIndices:'+JSON.stringify(Array.from(admitted.selectedIndices))+
+    ',snapshots:{},workerRequests:0};true');
+  const snapshot=label=>evaluate(client,'('+publicNativeSnapshot.toString()+')('+JSON.stringify(label)+')');
+  try{
+    const original=await snapshot('original');
+    assert(original.bits===fmt.bits&&original.tiles>1&&original.rawBytes>0,
+      '037C-3b-3/2b-2 public pinned source invalid');
+    const tabs=await evaluate(client,'('+prepareTabs.toString()+')()');
+    await evaluate(client,'window.__photoFailure.secondHistoryBefore='+
+      JSON.stringify(tabs.secondHistory)+';window.__photoFailure.originalOtherBytes='+
+      original.usedOtherNativeBytes+';true');
+    const view=await evaluate(client,'('+setupPolygon.toString()+')()');
+    assert(view.width===1025&&view.height===1025&&view.inWindow&&
+      view.hits.every(x=>x==='overlayCanvas'),
+      '037C-3b-3/2b-2 native photo ROI not in viewport',JSON.stringify(view));
+    for(const p of view.points){
+      await client.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y,button:'left',buttons:0});
+      await client.send('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button:'left',buttons:1,clickCount:1});
+      await client.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button:'left',buttons:0,clickCount:1});
+    }
+    for(const type of ['keyDown','keyUp'])await client.send('Input.dispatchKeyEvent',{
+      type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13,nativeVirtualKeyCode:13});
+    const selection=await evaluate(client,'document.querySelector("#statusText")?.textContent');
+    assert(selection?.includes('Многоугольное выделение: 10 точек'),
+      '037C-3b-3/2b-2 selection was not committed',selection);
+
+    const pressure=await evaluate(client,'('+publicPhotoMemoryPressure.toString()+')()');
+    assert(pressure.copies>=1&&pressure.originalSelected,
+      '037C-3b-3/2b-2 cannot reproduce public memory budget');
+    const before=await snapshot('before');
+    const MAX=48*1024*1024;
+    assert(before.rawBytes===original.rawBytes&&before.usedOtherNativeBytes>MAX-before.rawBytes,
+      '037C-3b-3/2b-2 budget not below real source bytes',JSON.stringify(before));
+    await evaluate(client,'window.__photoFailure.historyBefore='+
+      '([...document.querySelectorAll("#historyList .history-row")].map(r=>r.textContent));true');
+    await evaluate(client,'window.__photoFailureAssertNative=((f)=>((a,b,label)=>{'+
+      'f(a,b,label);return true}))(('+assertEqualNativeTiles.toString()+'));true');
+    await evaluate(client,'('+installPublicNativeReplyProbe.toString()+')()');
+    assert(await evaluate(client,'('+invokeFill.toString()+')()'),
+      '037C-3b-3/2b-2 public native Fill refused before execution');
+    await waitFor('037C-3b-3/2b-2 public over-budget error',
+      ()=>evaluate(client,
+        'document.querySelector("#statusText")?.textContent?.includes("native source превышает доступный лимит памяти")===true'),10000);
+    const beforeRetryRequests=await evaluate(client,'window.__photoFailure.workerRequests');
+    assert(beforeRetryRequests===0,'037C-3b-3/2b-2 Worker ran before cap refusal');
+    await snapshot('after');
+    const refused=await evaluate(client,'('+compareSnapshots.toString()+')()');
+    assert(refused.nativeExact&&refused.historyExact&&refused.fillHistoryEntries===0,
+      '037C-3b-3/2b-2 cap refusal changed source/history',JSON.stringify(refused));
+
+    assert(await evaluate(client,'('+publicPhotoPressureRelease.toString()+')()'),
+      '037C-3b-3/2b-2 public pressure release failed');
+    const available=await snapshot('retryBefore');
+    assert(available.rawBytes===before.rawBytes&&
+      available.usedOtherNativeBytes<=MAX-before.rawBytes,
+      '037C-3b-3/2b-2 retry memory budget not restored',JSON.stringify(available));
+    const retryHistory=await evaluate(client,
+      '[...document.querySelectorAll("#historyList .history-row")].map(r=>r.textContent)');
+    await evaluate(client,'window.__photoFailure.retryHistory='+
+      JSON.stringify(retryHistory)+';true');
+    assert(await evaluate(client,'('+invokeFill.toString()+')()'),
+      '037C-3b-3/2b-2 public retry Fill disabled');
+    await waitFor('037C-3b-3/2b-2 genuine native Worker success',
+      ()=>evaluate(client,
+        'window.__photoFailure.workerReplies===1&&'+
+        'document.querySelector("#statusText")?.textContent?.includes("восстановлено")===true'),60000);
+    const actual=await evaluate(client,'({requests:window.__photoFailure.workerRequests,'+
+      'replies:window.__photoFailure.workerReplies,selection:window.__photoFailure.selectionMatched,'+
+      'native:window.__photoFailure.realWorkerNativeResultObserved,'+
+      'filled:window.__photoFailure.replyFilled,tiles:window.__photoFailure.replyChangedTiles})');
+    assert(actual.requests===1&&actual.replies===1&&actual.selection&&actual.native&&
+      actual.filled===8288&&actual.tiles>=2,
+      '037C-3b-3/2b-2 real Worker retry not observed',JSON.stringify(actual));
+    await snapshot('success');
+    const successful=await evaluate(client,`(()=>{
+      const s=window.__photoFailure,a=s.snapshots.retryBefore,b=s.snapshots.success;
+      const rows=[...document.querySelectorAll('#historyList .history-row')].map(r=>r.textContent);
+      return {nativeChanged:a.tiles.some((tile,i)=>tile.dataUrl!==b.tiles[i]?.dataUrl),
+        historyDelta:rows.length-s.retryHistory.length,
+        fillDelta:rows.filter(x=>x.includes('Контент-заливка')).length-
+          s.retryHistory.filter(x=>x.includes('Контент-заливка')).length};
+    })()`);
+    // UI History caps visible rows; a new commit may evict the oldest row.
+    // Count the new Fill entry rather than the total rendered row delta.
+    assert(successful.nativeChanged&&successful.fillDelta===1,
+      '037C-3b-3/2b-2 public native retry was not committed',JSON.stringify(successful));
+    const second=await evaluate(client,'('+checkOtherHistoryAfterEscape.toString()+')()');
+    assert(second.historyUnchanged&&second.originalSelected,
+      '037C-3b-3/2b-2 unrelated tab History mutated');
+    const receipt={
+      kind:'zpe-real-photo-browser-memory-cap-v1',
+      status:'public-cap-refusal-real-worker-retry',
+      format,runIndex,protocol:'file:',
+      inputFileSha256:baseline.inputFileSha256,
+      nativeDefectSha256:baseline.nativeDefectSha256,
+      sourcePhotoSha256:manifest.sourceSha256,
+      bitsPerChannel:fmt.bits,selectedPixels:8288,
+      rawBytes:before.rawBytes,refusedMaxBytes:MAX-before.usedOtherNativeBytes,
+      recoveredMaxBytes:MAX-available.usedOtherNativeBytes,publicDuplicates:pressure.copies,
+      budgetErrorObserved:true,refusalWorkerRequests:beforeRetryRequests,
+      refusalNativeBytesUnchanged:refused.nativeExact,
+      refusalHistoryUnchanged:refused.historyExact,
+      refusalFillHistoryEntries:refused.fillHistoryEntries,
+      retryWorkerRequests:actual.requests,retryWorkerReplies:actual.replies,
+      retryNativeResultObserved:actual.native,retrySelectionMatched:actual.selection,
+      retryFilled:actual.filled,retryChangedTiles:actual.tiles,
+      retryNativeBytesChanged:successful.nativeChanged,
+      retryFillHistoryAdded:successful.fillDelta,
+      secondTabHistoryUnchanged:second.historyUnchanged,
+      photoshopCompatibilityVerified:false,
+      startedAtUnixMs:started,elapsedMs:Date.now()-started,
+    };
+    validateRealPhotoMemoryCapReceipt(receipt,pins,manifest);
+    await mkdir(artifactDir,{recursive:true});
+    const output=path.join(artifactDir,'real-photo-'+format+'-memory-cap-run-1.json');
+    await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
+    console.log('037C-3b-3/2b-2 genuine photo memory cap:',JSON.stringify({output,...receipt}));
+    return receipt;
+  } finally {
     await evaluate(client,'window.__photoFailure?.restore?.();'+
       'delete window.__photoFailure;delete window.__photoFailureAssertNative;true');
   }
