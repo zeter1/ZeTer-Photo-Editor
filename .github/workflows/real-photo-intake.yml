@@ -35,6 +35,8 @@ on:
       - tests/browser-real-photo-mid-kernel-close.test.mjs
       - tools/verify-browser-real-photo-mid-kernel-escape-artifacts.mjs
       - tests/browser-real-photo-mid-kernel-escape.test.mjs
+      - tools/verify-browser-real-photo-completed-preview-escape-artifacts.mjs
+      - tests/browser-real-photo-completed-preview-escape.test.mjs
       - src/workspace/session-controller.js
       - src/app.bundle.js
       - tools/browser-inpaint-mid-kernel-smoke.mjs
@@ -75,6 +77,8 @@ on:
       - tests/browser-real-photo-mid-kernel-close.test.mjs
       - tools/verify-browser-real-photo-mid-kernel-escape-artifacts.mjs
       - tests/browser-real-photo-mid-kernel-escape.test.mjs
+      - tools/verify-browser-real-photo-completed-preview-escape-artifacts.mjs
+      - tests/browser-real-photo-completed-preview-escape.test.mjs
       - src/workspace/session-controller.js
       - src/app.bundle.js
       - tools/browser-inpaint-mid-kernel-smoke.mjs
@@ -350,6 +354,21 @@ jobs:
           node tools/verify-browser-real-photo-mid-kernel-escape-artifacts.mjs "$ZPE_PHOTO_DIR/browser-mid-kernel-escape" \
             > "$ZPE_PHOTO_DIR/browser-mid-kernel-escape-set.json"
 
+      - name: 037C-3b-2b-3b-1 genuine completed Worker preview -> public Escape
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-completed-preview-escape"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_ESCAPE=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-completed-preview-escape" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-completed-preview-escape-artifacts.mjs "$ZPE_PHOTO_DIR/browser-completed-preview-escape" \
+            > "$ZPE_PHOTO_DIR/browser-completed-preview-escape-set.json"
+
       - name: Upload 037C-1/2 evidence and 037C-3a sampled-memory receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -392,6 +411,15 @@ jobs:
         with:
           name: zpe-real-photo-browser-mid-kernel-escape
           path: /tmp/zpe-real-photo-candidate/browser-mid-kernel-escape/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-2b-3b-1 completed Worker preview Escape receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-completed-preview-escape
+          path: /tmp/zpe-real-photo-candidate/browser-completed-preview-escape/*.json
           if-no-files-found: warn
           retention-days: 7
 

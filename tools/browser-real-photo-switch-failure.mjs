@@ -191,6 +191,53 @@ export function validateRealPhotoMidKernelEscapeSet(receipts,pins,manifest){
     completedWorkerPreviewRaceVerified:false,memoryCapVerified:false};
 }
 
+
+export function validateRealPhotoCompletedPreviewEscapeReceipt(r,pins,manifest){
+  const fail=()=>{throw new TypeError('037C-3b-2b/3b-1: invalid completed-Worker preview receipt');};
+  const fmt=FORMATS[r?.format],d=pins?.documents?.[r?.format];
+  if(!fmt || !d || r.kind!=='zpe-real-photo-browser-completed-preview-escape-v1' ||
+    r.status!=='public-escape-after-real-worker-reply-before-preview-publication' ||
+    r.runIndex!==1 || r.protocol!=='file:' ||
+    r.inputFileSha256!==d.fileSha256 || r.nativeDefectSha256!==d.nativeSha256 ||
+    r.nativeDefectSha256!==manifest?.native?.[fmt.key]?.damagedSha256 ||
+    r.sourcePhotoSha256!==manifest?.sourceSha256 ||
+    r.bitsPerChannel!==fmt.bits || r.selectedPixels!==8288 ||
+    r.workerRequests!==1 || r.workerRepliesBeforeEscape!==1 ||
+    r.workerTerminationsBeforeEscape!==1 || r.workerTerminations!==1 ||
+    r.workerResultNativeSource!==true || r.workerReplyFilled!==8288 ||
+    !Number.isSafeInteger(r.workerReplyChangedTiles) || r.workerReplyChangedTiles<2 ||
+    r.actualNativeWorkerJobDispatched!==true ||
+    r.realWorkerResultReceivedBeforeEscape!==true ||
+    !Number.isSafeInteger(r.previewTileWritesBeforeEscape) || r.previewTileWritesBeforeEscape<2 ||
+    r.previewYieldHeldBeforeEscape!==true ||
+    r.publicEscapeKeyDispatched!==true || r.cancelStatusObserved!==true ||
+    r.previewReleasedAfterEscape!==true ||
+    r.originalNativeBytesUnchanged!==true || r.originalHistoryUnchanged!==true ||
+    r.secondTabHistoryUnchanged!==true || r.fillHistoryEntries!==0 ||
+    r.completedWorkerPreviewRaceVerified!==true ||
+    r.actualMidKernelCancellationVerified!==false ||
+    r.memoryCapVerified!==false || r.photoshopCompatibilityVerified!==false ||
+    !Number.isSafeInteger(r.startedAtUnixMs) || r.startedAtUnixMs<=0 ||
+    !Number.isSafeInteger(r.elapsedMs) || r.elapsedMs<0) fail();
+  return r;
+}
+export function validateRealPhotoCompletedPreviewEscapeSet(receipts,pins,manifest){
+  if(!Array.isArray(receipts)||receipts.length!==2)
+    throw new TypeError('037C-3b-2b/3b-1: expected two independent completed-Worker receipts');
+  const formats=new Set(),starts=new Set();
+  for(const r of receipts){
+    validateRealPhotoCompletedPreviewEscapeReceipt(r,pins,manifest);
+    if(formats.has(r.format)||starts.has(r.startedAtUnixMs))
+      throw new TypeError('037C-3b-2b/3b-1: duplicate format or Chromium session');
+    formats.add(r.format);starts.add(r.startedAtUnixMs);
+  }
+  if(!formats.has('psd16')||!formats.has('psb32'))
+    throw new TypeError('037C-3b-2b/3b-1: both native depths required');
+  return {kind:'zpe-real-photo-browser-completed-preview-escape-set-v1',
+    runs:2,formats:[...formats].sort(),completedWorkerPreviewRaceVerified:true,
+    actualMidKernelCancellationVerified:false,memoryCapVerified:false};
+}
+
 // The following functions execute in a real CDP browser page, not in Node.
 // The only document readback is the public File -> Save Project route.
 async function publicNativeSnapshot(label){
@@ -349,6 +396,74 @@ function installMidKernelNativeWorker(instrument){
   return true;
 }
 
+
+function installCompletedWorkerPreviewHold(){
+  const s=window.__photoFailure;
+  const post=Worker.prototype.postMessage,terminate=Worker.prototype.terminate;
+  const put=CanvasRenderingContext2D.prototype.putImageData;
+  const timer=window.setTimeout,clear=window.clearTimeout;
+  s.workerReplies=0;s.previewTileWrites=0;s.previewYieldHeld=false;
+  s.previewReleased=false;s.heldPreview=null;
+  s.restore=()=>{
+    Worker.prototype.postMessage=post;
+    Worker.prototype.terminate=terminate;
+    CanvasRenderingContext2D.prototype.putImageData=put;
+    window.setTimeout=timer;
+    if(s.heldPreview)clear.call(window,s.heldPreview.timerId);
+  };
+  Worker.prototype.postMessage=function(job,...args){
+    if(job?.selectedIndices instanceof Uint32Array &&
+      job?.source?.kind==='zpe-pixel-buffer-source-v2'){
+      s.workerRequests++;s.worker=this;s.jobId=job.id;
+      s.selectionMatched=job.selectedIndices.length===s.expectedIndices.length &&
+        job.selectedIndices.every((v,i)=>v===s.expectedIndices[i]);
+      this.addEventListener('message',event=>{
+        if(event.data?.id===s.jobId && event.data?.ok===true){
+          s.workerReplies++;
+          s.workerReplyFilled=event.data.result?.filled;
+          s.workerReplyChangedTiles=event.data.result?.changedTiles;
+          s.workerResultNativeSource=event.data.result?.source?.kind==='zpe-pixel-buffer-source-v2';
+        }
+      });
+      return post.call(this,job,...args);
+    }
+    return post.call(this,job,...args);
+  };
+  Worker.prototype.terminate=function(...args){
+    if(this===s.worker)s.workerTerminations++;
+    return terminate.apply(this,args);
+  };
+  CanvasRenderingContext2D.prototype.putImageData=function(image,x,y,...args){
+    // The private tiled preview canvas has the photo's dimensions.
+    if(s.workerReplies===1 && this.canvas?.width===1025 &&
+      this.canvas?.height===1025 && image?.width<=256 && image?.height<=256)
+      s.previewTileWrites++;
+    return put.call(this,image,x,y,...args);
+  };
+  window.setTimeout=function(callback,delay,...args){
+    // Hold one cooperative preview yield after at least two private tiles.
+    if(s.workerReplies===1 && s.workerTerminations===1 &&
+      s.previewTileWrites>=2 && !s.previewYieldHeld &&
+      delay===0 && typeof callback==='function'){
+      s.previewYieldHeld=true;
+      const timerId=timer.call(window,callback,300000,...args);
+      s.heldPreview={callback,args,timerId};
+      return timerId;
+    }
+    return timer.call(window,callback,delay,...args);
+  };
+  s.releasePreview=()=>{
+    if(!s.previewYieldHeld || !s.heldPreview || s.previewReleased)
+      throw Error('037C-3b-2b/3b-1 preview was not held');
+    const held=s.heldPreview;
+    s.heldPreview=null;s.previewReleased=true;
+    clear.call(window,held.timerId);
+    held.callback(...held.args);
+    return true;
+  };
+  return true;
+}
+
 async function publicSurvivorSnapshot(label){
   const s=window.__photoFailure;
   if(!['before','after'].includes(label)) throw Error('037C-3b-2b/2 invalid survivor stage');
@@ -485,12 +600,14 @@ function compareSnapshots(){
 
 export async function verifyGenuinePhotoUiSwitchFailure(client,{
   evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,
-  midKernel=false,closeDocument=false,escapeCancel=false,
+  midKernel=false,closeDocument=false,escapeCancel=false,completedPreviewEscape=false,
 }={}){
   if(closeDocument && !midKernel)
     throw new TypeError('037C-3b-2b/2 requires genuine post-write kernel cancellation');
   if(escapeCancel && (!midKernel || closeDocument))
     throw new TypeError('037C-3b-2b/3a requires an isolated post-write Escape scenario');
+  if(completedPreviewEscape && (midKernel || closeDocument || escapeCancel))
+    throw new TypeError('037C-3b-2b/3b-1 requires isolated completed-Worker preview race');
   const fmt=FORMATS[format];
   if(!fmt || runIndex!==1 || !sourceDir || !artifactDir ||
     !baseline?.publicSaveNativeMatchedFrozenPin || baseline.nativeDefectSha256?.length!==64)
@@ -518,7 +635,7 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
     const before=await snapshot('before');
     assert(before.tiles>1 && before.bits===fmt.bits,'037C-3b-2a invalid initial native tiles');
     const tabs=await evaluate(client,'('+prepareTabs.toString()+')()');
-    if(escapeCancel)await evaluate(client,'window.__photoFailure.secondHistoryBefore='+JSON.stringify(tabs.secondHistory)+';true');
+    if(escapeCancel || completedPreviewEscape)await evaluate(client,'window.__photoFailure.secondHistoryBefore='+JSON.stringify(tabs.secondHistory)+';true');
     if(closeDocument){
       const survivor=await evaluate(client,'('+publicSurvivorSnapshot.toString()+')("before")');
       assert(survivor.photoLeaked===false && survivor.historyRows===tabs.secondHistory.length,
@@ -558,9 +675,11 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       assert(await evaluate(client,'('+ensureGeneratedWorkerSupplier.toString()+')()'),
         '037C-3b-2b generated Worker supplier unavailable');
     }
-    await evaluate(client,midKernel
-      ? '('+installMidKernelNativeWorker.toString()+')('+instrumentBrowserKernelSource.toString()+')'
-      : '('+installHeldNativeWorker.toString()+')()');
+    await evaluate(client,completedPreviewEscape
+      ? '('+installCompletedWorkerPreviewHold.toString()+')()'
+      : midKernel
+        ? '('+installMidKernelNativeWorker.toString()+')('+instrumentBrowserKernelSource.toString()+')'
+        : '('+installHeldNativeWorker.toString()+')()');
     assert(await evaluate(client,'('+invokeFill.toString()+')()'),
       '037C-3b-2a UI native fill disabled');
     await waitFor('037C-3b-2a actual native Worker posted held job',()=>evaluate(client,
@@ -579,6 +698,70 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       assert(progress.dispatched===true && progress.filled===1 &&
         Number.isFinite(progress.sample) && progress.replies===0,
         '037C-3b-2b real kernel write not observed before cancellation',JSON.stringify(progress));
+    }
+
+    if(completedPreviewEscape){
+      await waitFor('037C-3b-2b/3b-1 genuine Worker reply and held preview',
+        ()=>evaluate(client,
+          'window.__photoFailure?.workerReplies===1 && window.__photoFailure?.previewYieldHeld===true'),
+        60000);
+      const state=await evaluate(client,
+        '({replies:window.__photoFailure.workerReplies,terminations:window.__photoFailure.workerTerminations,'+
+        'filled:window.__photoFailure.workerReplyFilled,changed:window.__photoFailure.workerReplyChangedTiles,'+
+        'native:window.__photoFailure.workerResultNativeSource,writes:window.__photoFailure.previewTileWrites})');
+      assert(state.replies===1 && state.terminations===1 && state.filled===8288 &&
+        state.changed>=2 && state.native===true && state.writes>=2,
+        '037C-3b-2b/3b-1 genuine completed Worker was not held in preview',
+        JSON.stringify(state));
+      for(const type of ['keyDown','keyUp'])await client.send('Input.dispatchKeyEvent',{
+        type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27});
+      const statusText=await evaluate(client,'document.querySelector("#statusText")?.textContent');
+      assert(statusText?.includes('Контент-заливка отменена'),
+        '037C-3b-2b/3b-1 Escape cancellation not observed',statusText);
+      assert(await evaluate(client,'window.__photoFailure.releasePreview()===true'),
+        '037C-3b-2b/3b-1 held preview not released after public Escape');
+      await evaluate(client,'new Promise(resolve=>setTimeout(resolve,180))');
+      await snapshot('after');
+      const compared=await evaluate(client,'('+compareSnapshots.toString()+')()');
+      assert(compared.nativeExact===true && compared.historyExact===true &&
+        compared.fillHistoryEntries===0,
+        '037C-3b-2b/3b-1 stale Worker preview published native bytes/History',
+        JSON.stringify(compared));
+      const other=await evaluate(client,'('+checkOtherHistoryAfterEscape.toString()+')()');
+      assert(other.secondSelected && other.originalSelected && other.historyUnchanged,
+        '037C-3b-2b/3b-1 other tab History changed',JSON.stringify(other));
+      const receipt={
+        kind:'zpe-real-photo-browser-completed-preview-escape-v1',
+        status:'public-escape-after-real-worker-reply-before-preview-publication',
+        format,runIndex,protocol:'file:',
+        inputFileSha256:baseline.inputFileSha256,
+        nativeDefectSha256:baseline.nativeDefectSha256,
+        sourcePhotoSha256:manifest.sourceSha256,
+        bitsPerChannel:fmt.bits,selectedPixels:8288,
+        workerRequests:1,workerRepliesBeforeEscape:state.replies,
+        workerTerminationsBeforeEscape:state.terminations,
+        workerTerminations:await evaluate(client,'window.__photoFailure.workerTerminations'),
+        workerResultNativeSource:state.native,workerReplyFilled:state.filled,
+        workerReplyChangedTiles:state.changed,
+        actualNativeWorkerJobDispatched:true,
+        realWorkerResultReceivedBeforeEscape:true,
+        previewTileWritesBeforeEscape:state.writes,previewYieldHeldBeforeEscape:true,
+        publicEscapeKeyDispatched:true,cancelStatusObserved:true,
+        previewReleasedAfterEscape:true,
+        originalNativeBytesUnchanged:true,originalHistoryUnchanged:true,
+        secondTabHistoryUnchanged:true,fillHistoryEntries:0,
+        completedWorkerPreviewRaceVerified:true,
+        actualMidKernelCancellationVerified:false,memoryCapVerified:false,
+        photoshopCompatibilityVerified:false,
+        startedAtUnixMs:started,elapsedMs:Date.now()-started,
+      };
+      validateRealPhotoCompletedPreviewEscapeReceipt(receipt,pins,manifest);
+      await mkdir(artifactDir,{recursive:true});
+      const output=path.join(artifactDir,'real-photo-'+format+'-completed-preview-escape-run-1.json');
+      await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
+      console.log('037C-3b-2b/3b-1 real Worker completion/preview Escape:',
+        JSON.stringify({output,...receipt}));
+      return receipt;
     }
 
     if(closeDocument){
