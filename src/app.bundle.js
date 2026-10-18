@@ -15330,6 +15330,12 @@ function createDocumentSessionController({
       return;
     }
     if (session.dirty && !window.confirm(`Во вкладке «${session.doc?.name || 'Без имени'}» есть несохранённые изменения. Закрыть её?`)) return;
+    // A successful close can change the active document just like tab activation.
+    // Revoke a pending native Content-Aware Fill BEFORE dropping its owner.
+    // Rejected confirmations and closes that keep the active tab must not cancel it.
+    const remaining = allSessions.filter(item => item.id !== session.id);
+    const nextSession = remaining[Math.max(0, Math.min(index, remaining.length - 1))];
+    if (!nextSession || nextSession.id !== activeId()) cancelPendingContentAwareFill();
     allSessions.splice(index, 1);
     if (!allSessions.length) allSessions.push(buildSession(createDocument({ name:'Без имени' })));
     const nextIndex = Math.max(0, Math.min(index, allSessions.length - 1));

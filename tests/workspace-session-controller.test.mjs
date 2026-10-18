@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createDocument } from '../src/core/state.js';
 import { createDocumentSessionController } from '../src/workspace/session-controller.js';
 
-function harness() {
+function harness({cancelPendingContentAwareFill = () => false} = {}) {
   let sessions = [];
   let activeSessionId = '';
   let runtime = {
@@ -24,6 +24,7 @@ function harness() {
     getRuntimeState:() => runtime,
     applyRuntimeState:value => { runtime = { ...runtime, ...value, selectedDocumentPathIndex:value.selectedPathIndex }; },
     cloneSelectionShape:shape => shape ? structuredClone(shape) : null,
+    cancelPendingContentAwareFill,
     updateAll:() => events.push('update'),
     fitToView:() => events.push('fit'),
     setStatus:value => events.push(value),
@@ -108,4 +109,57 @@ test('workspace controller restores each session saved-path selection through th
   h.activeSessionId=second.id;
   h.controller.loadSession(second);
   assert.equal(h.runtime.selectedDocumentPathIndex,3);
+});
+
+test('closing the active document revokes native Fill before owner removal and does not touch the surviving history', () => {
+  let h;
+  const cancellations=[];
+  h=harness({cancelPendingContentAwareFill:()=>{
+    cancellations.push({active:h.activeSessionId,remaining:h.sessions.length});
+    h.events.push('cancel');
+    return true;
+  }});
+  const original=h.controller.buildSession(h.runtime.doc);
+  const survivor=h.controller.buildSession(createDocument({name:'Survivor',width:40,height:30}));
+  h.sessions=[original,survivor];
+  h.activeSessionId=original.id;
+  h.runtime={...h.runtime,history:original.history};
+  const historyBefore=survivor.history.current();
+  h.controller.closeDocumentTab(original.id);
+  assert.deepEqual(cancellations,[{active:original.id,remaining:2}]);
+  assert.equal(h.sessions.length,1);
+  assert.equal(h.activeSessionId,survivor.id);
+  assert.equal(h.runtime.doc,survivor.doc);
+  assert.equal(survivor.history.current(),historyBefore);
+  assert.ok(h.events.indexOf('cancel') < h.events.indexOf('update'));
+});
+
+test('a rejected dirty close never cancels the pending Fill or removes its owner', () => {
+  let cancelled=0;
+  const h=harness({cancelPendingContentAwareFill:()=>{cancelled++;return true;}});
+  const original=h.controller.buildSession(h.runtime.doc);
+  const survivor=h.controller.buildSession(createDocument({name:'Survivor'}));
+  h.sessions=[original,survivor];h.activeSessionId=original.id;
+  h.runtime={...h.runtime,history:original.history,dirty:true};
+  const previous=globalThis.window;
+  globalThis.window={confirm:()=>false};
+  try{h.controller.closeDocumentTab(original.id);}
+  finally{if(previous===undefined)delete globalThis.window;else globalThis.window=previous;}
+  assert.equal(cancelled,0);
+  assert.deepEqual(h.sessions,[original,survivor]);
+  assert.equal(h.activeSessionId,original.id);
+});
+
+test('closing an inactive tab without switching the active owner does not revoke its Fill', () => {
+  let cancelled=0;
+  const h=harness({cancelPendingContentAwareFill:()=>{cancelled++;return true;}});
+  const a=h.controller.buildSession(h.runtime.doc);
+  const b=h.controller.buildSession(createDocument({name:'B'}));
+  const c=h.controller.buildSession(createDocument({name:'C'}));
+  h.sessions=[a,b,c];h.activeSessionId=b.id;
+  h.runtime={...h.runtime,doc:b.doc,history:b.history};
+  h.controller.closeDocumentTab(a.id);
+  assert.equal(cancelled,0);
+  assert.equal(h.activeSessionId,b.id);
+  assert.deepEqual(h.sessions,[b,c]);
 });
