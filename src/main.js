@@ -3053,6 +3053,13 @@ window.addEventListener('keydown',e=>{
     if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropGestures.hasDraft()){cropGestures.reset();drawOverlay();setStatus('Кадрирование отменено');return;}
+    // Escape has its usual selection/draft meaning when no Fill is pending.
+    // Do not intercept Escape inside a modal or during an active gesture.
+    if(!drag && !pointerLifecycle?.hasActivePointer() &&
+       !(e.target instanceof Node && els.modalRoot.contains(e.target)) &&
+       rasterCommands.cancelPendingContentAwareFill()){
+      e.preventDefault();setStatus('Контент-заливка отменена');return;
+    }
     if(toolRemoval().hasMask()){
       e.preventDefault();
       if(toolRemoval().reset()){drawOverlay();setStatus('Область удаления сброшена');}
