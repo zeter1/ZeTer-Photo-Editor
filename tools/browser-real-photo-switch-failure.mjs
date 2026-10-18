@@ -1715,8 +1715,10 @@ function publicPhotoPressureRelease(){
   const original=[...document.querySelectorAll('.layer-row')].find(
     r=>r.querySelector('.layer-name')?.textContent==='Pinned photo defect (8-bit derived)');
   if(!original)throw Error('037C-3b-3/2b-2 missing original after release');
+  const originalId=original.dataset.id;
   original.click();
-  return original.classList.contains('selected');
+  // Layer selection rebuilds the panel; the clicked row is now detached.
+  return document.querySelector('.layer-row.selected')?.dataset.id===originalId;
 }
 function installPublicNativeReplyProbe(){
   const s=window.__photoFailure,post=Worker.prototype.postMessage;
