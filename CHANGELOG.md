@@ -16,7 +16,7 @@
 - Регрессии отмены, перезапуска, позднего результата и гонки preview; настоящая фото-Chromium приёмка остаётся незакрытой задачей 037C-3b-2b/3.\n- Подтверждён test-only Chromium `file://` gate 037C-3b-2b/3a: pinned photo-derived PSD16/PSB32 и 8288 ROI, публичный Escape после native first-write, byte-exact Save Project/History до и после искусственного late-result; strict offline receipts/негативные тесты. [PR #256](https://github.com/zeter1/ZeTer-Photo-Editor/pull/256) → [main 3bb9b50](https://github.com/zeter1/ZeTer-Photo-Editor/commit/3bb9b509a0c4c9d641592563865137e4735414d3); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399943), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399916), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673676), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673650). Production и версия не менялись; completed Worker/preview race и полная 037C ещё OPEN. [План](task/037c3b-2b-3a-photo-escape-mid-kernel.md).
 
 
-## 1.46.2 — текущая версия
+## 1.46.2 — 2026-10-18
 
 ### 2026-10-18 — Исправлено закрытие документа при ожидающем native Content-Aware Fill (037C-3b-2b/2)
 
