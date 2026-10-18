@@ -1,6 +1,6 @@
 # 037C-3b-2b/3 — явная отмена Fill и защита поколения до публикации
 
-**Приоритет:** P1. **Статус: код в PR, CI и реальные фото-гейты OPEN (2026-10-18).** Это не закрытие всей 037C.
+**Приоритет:** P1. **Статус: кодовый подэтап СЛИТ (2026-10-18) / genuine-photo публичный Escape и полная 037C остаются OPEN.** [PR #254](https://github.com/zeter1/ZeTer-Photo-Editor/pull/254) → [main c1fd910](https://github.com/zeter1/ZeTer-Photo-Editor/commit/c1fd910f1384b77a01b6b585073bca1909816c2a); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39118807311), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39118807337), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39119079885), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39119079887).
 
 ## Сделано в этом инкременте
 
@@ -11,7 +11,7 @@
 
 ## Граница доказательств
 
-Тестовые native 16-bit tiles **синтетические**, а ответ Worker моделирует byte-exact protocol-valid mutation для окна между Worker completion и preview. Это не настоящая photo-derived Chromium PSD16/PSB32 E2E и не доказательство actual mid-kernel Escape. До зелёного CI и фото-браузерной проходки задача 037C-3b-2b/3 остаётся OPEN.
+Тестовые native 16-bit tiles **синтетические**, а ответ Worker моделирует byte-exact protocol-valid mutation для окна между Worker completion и preview. Это не настоящая photo-derived Chromium PSD16/PSB32 E2E и не доказательство actual mid-kernel Escape. Оба PR-гейта и оба exact-main гейта успешны на кодовом коммите. При этом публичный photo-derived Escape на настоящих PSD16/PSB32 и настоящий completion-before-preview race ещё НЕ проверены, поэтому 037C-3b-2b/3 и вся 037C остаются OPEN.
 
 ## Следующие задачи — брать из этой папки
 
@@ -22,6 +22,6 @@
 
 ## Проверки этой проходки
 
-- [ ] GitHub PR `npm run check`, Chromium smoke, `git diff --check` успешны на точном commit.
-- [ ] Ссылки на CI и результаты занесены сюда и в `task/NEXT.md`.
+- [x] GitHub PR `npm run check`, Chromium smoke, `git diff --check` успешны на точном commit в PR #254.
+- [x] PR и exact-main CI/фото-проверки успешны, ссылки занесены сюда и в `task/NEXT.md`.
 - [ ] Genuine-photo Chromium failure matrix отдельно подтверждена: пока нет, не отмечать как готовую.
