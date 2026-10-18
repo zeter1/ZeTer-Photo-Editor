@@ -8,6 +8,7 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import path from 'node:path';
 import {createPinnedPhotoNativeFixture} from './real-photo-native-fixtures.mjs';
 import {createWideConnectedUiPolygon} from './browser-wide-connected-ui-polygon.mjs';
+import {instrumentBrowserKernelSource} from './browser-inpaint-mid-kernel-smoke.mjs';
 import {assertEqualNativeTiles} from './browser-wide-connected-native-evidence.mjs';
 
 const ROOT=path.resolve(new URL('..',import.meta.url).pathname);
@@ -52,6 +53,51 @@ export function validateRealPhotoSwitchFailureSet(receipts,pins,manifest){
     throw new TypeError('037C-3b-2a: both native depths required');
   return {kind:'zpe-real-photo-browser-cancel-switch-set-v1',runs:2,formats:[...formats].sort(),
     actualMidKernelCancellationVerified:false,memoryCapVerified:false};
+}
+
+// 037C-3b-2b phase one: a real photo native kernel write must occur
+// BEFORE tab cancellation. This evidence is distinct from 2a's held job.
+export function validateRealPhotoMidKernelFailureReceipt(r,pins,manifest){
+  const fail=()=>{throw new TypeError('037C-3b-2b: invalid genuine-photo mid-kernel receipt');};
+  const fmt=FORMATS[r?.format],d=pins?.documents?.[r?.format];
+  if(!fmt || !d || r.kind!=='zpe-real-photo-browser-mid-kernel-switch-v1' ||
+    r.status!=='public-tab-switch-mid-kernel-terminated-no-publication' ||
+    r.runIndex!==1 || r.protocol!=='file:' ||
+    r.inputFileSha256!==d.fileSha256 || r.nativeDefectSha256!==d.nativeSha256 ||
+    r.nativeDefectSha256!==manifest?.native?.[fmt.key]?.damagedSha256 ||
+    r.sourcePhotoSha256!==manifest?.sourceSha256 ||
+    r.bitsPerChannel!==fmt.bits || r.selectedPixels!==8288 ||
+    r.workerRequests!==1 || r.workerTerminations!==1 ||
+    r.actualNativeWorkerJobIntercepted!==true ||
+    r.realKernelJobDispatched!==true ||
+    r.realKernelWriteProbeObserved!==true || r.probeReportedFilled!==1 ||
+    !Number.isFinite(r.firstNativeSampleAfterWrite) ||
+    r.terminatedAfterKernelWriteBeforeReply!==true ||
+    r.publicTabSwitchRevokedOwner!==true ||
+    r.lateMessageInjectedAfterTermination!==true ||
+    r.lateMessageIgnored!==true || r.nativeBytesUnchanged!==true ||
+    r.originalHistoryUnchanged!==true || r.secondTabHistoryUnchanged!==true ||
+    r.actualMidKernelCancellationVerified!==true ||
+    r.memoryCapVerified!==false || r.photoshopCompatibilityVerified!==false ||
+    !Number.isSafeInteger(r.startedAtUnixMs) || r.startedAtUnixMs<=0 ||
+    !Number.isSafeInteger(r.elapsedMs) || r.elapsedMs<0) fail();
+  return r;
+}
+export function validateRealPhotoMidKernelFailureSet(receipts,pins,manifest){
+  if(!Array.isArray(receipts) || receipts.length!==2)
+    throw new TypeError('037C-3b-2b: expected two independent format receipts');
+  const formats=new Set(),starts=new Set();
+  for(const r of receipts){
+    validateRealPhotoMidKernelFailureReceipt(r,pins,manifest);
+    if(formats.has(r.format)||starts.has(r.startedAtUnixMs))
+      throw new TypeError('037C-3b-2b: duplicate format or session');
+    formats.add(r.format);starts.add(r.startedAtUnixMs);
+  }
+  if(!formats.has('psd16')||!formats.has('psb32'))
+    throw new TypeError('037C-3b-2b: both native depths required');
+  return {kind:'zpe-real-photo-browser-mid-kernel-switch-set-v1',runs:2,
+    formats:[...formats].sort(),actualMidKernelCancellationVerified:true,
+    memoryCapVerified:false};
 }
 
 // The following functions execute in a real CDP browser page, not in Node.
@@ -138,6 +184,52 @@ function installHeldNativeWorker(){
   };
   Worker.prototype.terminate=function(...args){
     if(this===s.worker) s.workerTerminations++;
+    return terminate.apply(this,args);
+  };
+  return true;
+}
+function installMidKernelNativeWorker(instrument){
+  const s=window.__photoFailure;
+  const descriptor=Object.getOwnPropertyDescriptor(globalThis,'__zpeTiledInpaintWorkerSource');
+  if(typeof descriptor?.value!=='string' || descriptor.configurable!==true)
+    throw Error('037C-3b-2b generated file:// Worker supplier unavailable');
+  const post=Worker.prototype.postMessage,terminate=Worker.prototype.terminate;
+  // Only the test page's supplier descriptor is patched; production artifacts
+  // are untouched and the actual native PSD16/PSB32 job enters the real kernel.
+  Object.defineProperty(globalThis,'__zpeTiledInpaintWorkerSource',{
+    configurable:true,value:instrument(descriptor.value,{minimumWidth:1025}),
+  });
+  s.restore=()=>{
+    Worker.prototype.postMessage=post;
+    Worker.prototype.terminate=terminate;
+    Object.defineProperty(globalThis,'__zpeTiledInpaintWorkerSource',descriptor);
+  };
+  s.kernelWrites=0;s.workerReplies=0;s.dispatched=false;s.terminatedDuringKernel=false;
+  Worker.prototype.postMessage=function(job,...args){
+    if(job?.selectedIndices instanceof Uint32Array &&
+      job?.source?.kind==='zpe-pixel-buffer-source-v2'){
+      s.workerRequests++;s.worker=this;s.jobId=job.id;
+      s.selectionMatched=job.selectedIndices.length===s.expectedIndices.length &&
+        job.selectedIndices.every((v,i)=>v===s.expectedIndices[i]);
+      this.addEventListener('message',event=>{
+        if(event.data?.probe==='zpe-test-native-kernel-write'){
+          s.kernelWrites++;
+          s.firstNativeSampleAfterWrite=event.data.changedSample;
+          s.probeReportedFilled=event.data.filled;
+        }
+        if(event.data?.id===s.jobId && event.data?.ok===true)
+          s.workerReplies++;
+      });
+      s.dispatched=true;
+      return post.call(this,job,...args);
+    }
+    return post.call(this,job,...args);
+  };
+  Worker.prototype.terminate=function(...args){
+    if(this===s.worker){
+      s.workerTerminations++;
+      s.terminatedDuringKernel=s.kernelWrites===1 && s.workerReplies===0;
+    }
     return terminate.apply(this,args);
   };
   return true;
