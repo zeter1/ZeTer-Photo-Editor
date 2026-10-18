@@ -438,7 +438,7 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
   await evaluate(client,'window.__photoFailure={bits:'+fmt.bits+
     ',polygon:'+JSON.stringify(polygon)+',expectedIndices:'+
     JSON.stringify(Array.from(admitted.selectedIndices))+
-    ',snapshots:{},workerRequests:0,workerTerminations:0};true');
+    ',snapshots:{},survivorSnapshots:{},workerRequests:0,workerTerminations:0};true');
   const snapshot=label=>evaluate(client,'('+publicNativeSnapshot.toString()+')('+JSON.stringify(label)+')');
   try{
     const before=await snapshot('before');
@@ -538,7 +538,7 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       validateRealPhotoMidKernelCloseReceipt(receipt,pins,manifest);
       await mkdir(artifactDir,{recursive:true});
       const output=path.join(artifactDir,'real-photo-'+format+'-mid-kernel-close-run-1.json');
-      await writeFile(output,JSON.stringify(receipt,null,2)+'\\n',{flag:'wx'});
+      await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
       console.log('037C-3b-2b/2 real photo public close post-write:',JSON.stringify({output,...receipt}));
       return receipt;
     }
