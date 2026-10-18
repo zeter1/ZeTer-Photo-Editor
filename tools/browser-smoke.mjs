@@ -532,7 +532,8 @@ async function runSmoke() {
       const verifyCompletedPreview=process.env.ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_ESCAPE==='1';
       const verifyPreviewSuccess=process.env.ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_SUCCESS==='1';
       const verifyCancelSuccessor=process.env.ZPE_REAL_PHOTO_BROWSER_CANCEL_SUCCESSOR==='1';
-      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)+Number(verifyPreviewSuccess)+Number(verifyCancelSuccessor)>1)
+      const verifyMalformedAlpha=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_ALPHA==='1';
+      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)+Number(verifyPreviewSuccess)+Number(verifyCancelSuccessor)+Number(verifyMalformedAlpha)>1)
         throw new Error('037C-3b real photo modes require independent Chromium sessions');
       let photoSampler=null,photoReport=null,photoWorker=null;
       if(observe){
@@ -542,12 +543,23 @@ async function runSmoke() {
       }
       try{
         const baseline=await verifyGenuinePhotoUiImport(client,options);
-        if(verifySwitchFailure || verifyMidKernel || verifyClose || verifyEscape || verifyCompletedPreview || verifyPreviewSuccess || verifyCancelSuccessor){
+        if(verifySwitchFailure || verifyMidKernel || verifyClose || verifyEscape || verifyCompletedPreview || verifyPreviewSuccess || verifyCancelSuccessor || verifyMalformedAlpha){
           const {verifyGenuinePhotoUiSwitchFailure}=await import('./browser-real-photo-switch-failure.mjs');
+          const errorsBeforeExpectedFailure=errors.length;
           await verifyGenuinePhotoUiSwitchFailure(client,{...options,baseline,
             midKernel:verifyMidKernel||verifyClose||verifyEscape,closeDocument:verifyClose,
             escapeCancel:verifyEscape,completedPreviewEscape:verifyCompletedPreview,
-            completedPreviewSuccess:verifyPreviewSuccess,cancelFirstSuccessor:verifyCancelSuccessor});
+            completedPreviewSuccess:verifyPreviewSuccess,cancelFirstSuccessor:verifyCancelSuccessor,
+            malformedReply:verifyMalformedAlpha});
+          if(verifyMalformedAlpha){
+            // Allow exactly the expected caught TypeError, and only after the UI
+            // failure status/native byte parity has been checked independently.
+            const reported=errors.slice(errorsBeforeExpectedFailure);
+            if(reported.length!==1 ||
+              !/^console\.error: TypeError: Tiled inpaint: invalid Worker result(?:\n|$)/.test(reported[0]))
+              fail('037C-3b-3/2a unexpected browser errors',reported.join('\n'));
+            errors.splice(errorsBeforeExpectedFailure,1);
+          }
         }
         if(observe){
           await photoSampler.snapshot('after-import');
