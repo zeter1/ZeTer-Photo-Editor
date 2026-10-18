@@ -451,12 +451,15 @@ jobs:
           mkdir -p "$ZPE_PHOTO_DIR/browser-malformed-extra"
           for scenario in "psd16 outside" "psb32 outside" "psb32 nonfinite-nan" "psb32 nonfinite-infinity"; do
             set -- $scenario
+            scenario_dir="$ZPE_PHOTO_DIR/browser-malformed-extra/$1-$2"
+            mkdir -p "$scenario_dir"
             ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
             ZPE_REAL_PHOTO_BROWSER_FORMAT="$1" \
             ZPE_REAL_PHOTO_BROWSER_RUN=1 \
             ZPE_REAL_PHOTO_BROWSER_MALFORMED_EXTRA="$2" \
-            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-malformed-extra" \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$scenario_dir" \
               node tools/browser-smoke.mjs
+            cp "$scenario_dir/real-photo-$1-malformed-$2-run-1.json" "$ZPE_PHOTO_DIR/browser-malformed-extra/"
           done
           node tools/verify-browser-real-photo-malformed-extra-artifacts.mjs "$ZPE_PHOTO_DIR/browser-malformed-extra" \
             > "$ZPE_PHOTO_DIR/browser-malformed-extra-set.json"
