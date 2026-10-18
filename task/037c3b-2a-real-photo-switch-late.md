@@ -1,6 +1,6 @@
 # 037C-3b-2a — real-photo Chromium tab-switch cancellation and late reply
 
-**Приоритет:** P1. **Статус:** реализация в PR/CI, не считать CLOSED до зелёного реального photo gate и проверки точного merge-коммита. Продолжаем [037C-3b](037c3b-1-worker-deadline.md) из [NEXT.md](NEXT.md).
+**Приоритет:** P1. **Статус: ЗАКРЫТА (2026-10-18)** — [PR #251](https://github.com/zeter1/ZeTer-Photo-Editor/pull/251) → [main 1d4d376](https://github.com/zeter1/ZeTer-Photo-Editor/commit/1d4d37664905f7bd3d25523d18d7c251e11fb4fb). [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111656278), [PR photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111656280), [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111881316), [exact-main photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111881348) — все success. **2/2 реальные photo-derived PSD16/PSB32 file:// Chromium-сессии** прошли новый failure gate. Полные 037C-3b и 037C остаются OPEN.
 
 ## Проблема
 
@@ -15,8 +15,8 @@
 - [x] Публичный File → Save Project до и после отмены, побайтовое сравнение всех `highDepthSource.tiles`, топологии, метаданных, исходной и чужой History.
 - [x] JSON receipt с форматными pinned SHA, явными no-publication flags, `actualMidKernelCancellationVerified:false` и `memoryCapVerified:false`. Отдельная fail-closed проверка двух файлов и негативные unit-tests.
 - [x] Новый отдельный photo CI шаг и artifact upload, без коллизий с 037C-1/2/3a receipt именами.
-- [ ] Проверить на PR: `npm run check`, `npm run test:browser`, отдельно real-photo workflow (два самостоятельных Chromium).
-- [ ] Только после PR CI success — merge + exact-main CI success и исправить статус в `task/NEXT.md`.
+- [x] Проверить на PR: `npm run check`, `npm run test:browser`, отдельно real-photo workflow (два самостоятельных Chromium).
+- [x] После green PR CI слить [PR #251](https://github.com/zeter1/ZeTer-Photo-Editor/pull/251) и проверить exact-main CI, обновить `task/NEXT.md`.
 
 ## Честная граница
 
