@@ -1,6 +1,6 @@
 # 037C-3b-1 — browser native Worker execution watchdog
 
-**Приоритет:** P1. **Статус:** код отправлен на проверку CI, 037C-3b и 037C в целом OPEN.
+**Приоритет:** P1. **Статус:** 037C-3b-1 ЗАКРЫТА — [PR #250](https://github.com/zeter1/ZeTer-Photo-Editor/pull/250) → [main 55931afa](https://github.com/zeter1/ZeTer-Photo-Editor/commit/55931afaf3813aa2c3a28af81598a63f106353b5). [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39105168374), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39105357804). Полные 037C-3b и 037C остаются OPEN.
 
 ## Мотивация
 Worker-клиент уже имел отмену, polling владельца документа и защиту от поздних ответов, но зависший Worker без `ready` / ответа мог удерживать raster persistence lease неограниченно долго.
@@ -11,8 +11,8 @@ Worker-клиент уже имел отмену, polling владельца д�
 - [x] Таймер снимается при успехе, ошибке, отмене и stale owner. Реентерабельный scheduler и поздние Worker replies не способны опубликовать старые пиксели.
 - [x] Браузерный `file://` adapter устанавливает 180000 ms; generated bundle, index cache hash и version.json синхронизированы с source.
 - [x] Три unit-test сценария: stalled Worker + late reply + следующая операция, stale tab до handshake, invalid/reentrant deadline timer.
-- [ ] Проверить PR CI: `npm run check`, generated artifacts, file:// smoke.
-- [ ] После green PR CI объединить с main и проверить exact-main CI.
+- [x] Проверить PR CI: `npm run check`, generated artifacts, file:// smoke.
+- [x] После green PR CI объединить с main и проверить exact-main CI.
 
 ## Следующие проходки из скриншота
 - [ ] **037C-3b-2:** на *реальных* pinned CC0-derived PSD16/PSB32 через Chromium file:// воспроизвести cancel/tab switch/close/stale owner/late Worker result, проверить byte-exact исходный native и отсутствие лишней History записи.
