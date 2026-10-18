@@ -1,6 +1,6 @@
 # 037C-3b-3/2b-2 — genuine-photo malformed Float32 / outside-ROI / maxBytes
 
-**Приоритет:** P1. **Статус: IN PROGRESS.** **Зависимость:** 037C-3b-3/2a и /2b-1 DONE. Родитель: [037C-3b-3](037c3b-3-native-result-memory-cap.md), всё ещё OPEN.
+**Приоритет:** P1. **Статус: DONE (2026-10-18).** **Зависимость:** 037C-3b-3/2a и /2b-1 DONE. Родитель: [037C-3b-3](037c3b-3-native-result-memory-cap.md), DONE; следующий [037C-3c](037c3c-final-acceptance.md) OPEN.
 
 ## Цель
 
@@ -20,11 +20,11 @@
 
 ## Приёмка
 
-- [ ] Реальные pinned-файлы, два формата и независимые Chromium session receipts.
-- [ ] Non-finite Float32 + вне ROI fail-closed, публичный status и отсутствие изменений History.
-- [ ] Реальный maxBytes before Worker отказ и успешный retry.
-- [ ] Byte-exact native v2 + frozen SHA-256 + negative tamper suite.
-- [ ] PR CI + genuine-photo CI + exact-main CI successful, ссылки сохранены.
+- [x] Реальные pinned-файлы, два формата и независимые Chromium session receipts.
+- [x] Non-finite Float32 + вне ROI fail-closed, публичный status и отсутствие изменений History.
+- [x] Реальный maxBytes before Worker отказ и успешный retry.
+- [x] Byte-exact native v2 + frozen SHA-256 + negative tamper suite.
+- [x] PR CI + genuine-photo CI + exact-main CI successful, ссылки сохранены.
 
 ## Проходка 2026-10-18 — подготовлены новые проверки (частично)
 
@@ -56,3 +56,9 @@
 - CI: `.github/workflows/real-photo-intake.yml` — две независимые Chromium сессии, сбор подписанных по именам файлов receipts и offline verifier.
 - **Ограничение доказательств:** в этом окружении отсутствуют локальная копия полного репозитория и pinned-photo bundle; `npm run check` и настоящий Chromium запуск локально не подтверждены. Дождаться реального PR CI, genuine-photo CI, merge и exact-main CI, записать URL и результат. До этого НЕ помечать критерии /2b-2 как DONE.
 - **Следующая:** после принятия зелёных CI и закрытия /2b-2 — задача 037C-3c final acceptance для матриц Worker/Undo/Redo/quality/memory/fail-closed и лишь затем остальной roadmap.
+
+## 037C-3b-3/2b-2 — окончательная приёмка, 2026-10-18
+
+**037C-3b-3/2b-2 DONE (2026-10-18):** [PR #265](https://github.com/zeter1/ZeTer-Photo-Editor/pull/265) → [main 57e03278](https://github.com/zeter1/ZeTer-Photo-Editor/commit/57e03278b695f1b6e1729c3c28958164f8ba50e4); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39144583678), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39144583692), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39145086168), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39145086160). На реальных независимых frozen PSD16/PSB32 Chromium `file://` публичное дублирование high-depth слоёв снизило доступный лимит ниже `rawBytes`: публичный RangeError без native Worker/контент-заливки, 0 Fill History, native v2 unchanged; после публичного удаления копии повторная native заливка настоящим Worker, 8288px ROI, изменённые native v2 tiles и ровно один Fill History. Offline strict SHA-256 receipts и negative tamper suite; все прежние malformed-extra проверки сохранены. **037C-3b-3 DONE, next 037C-3c final acceptance OPEN.** Не означает 002 Adobe-authoring, Stage 003 global budget, ICC/CMYK, RAW/HDR, full Photoshop-compatibility.
+
+**Результат:** все пункты приёмки этой задачи подтверждены; переход к [037C-3c](037c3c-final-acceptance.md). Photoshop compatibility/Adobe-authored PSD, ICC/RAW и full global tiled budget НЕ объявлены завершёнными.
