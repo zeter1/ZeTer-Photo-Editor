@@ -13,7 +13,7 @@ export async function verifyRealPhotoMemoryCapFiles(dir){
   ]);
   const names=entries.filter(n=>/^real-photo-.*-memory-cap-run-.*\.json$/.test(n)).sort();
   const expected=['real-photo-psd16-memory-cap-run-1.json',
-    'real-photo-psb32-memory-cap-run-1.json'];
+    'real-photo-psb32-memory-cap-run-1.json'].sort();
   if(JSON.stringify(names)!==JSON.stringify(expected))
     throw new TypeError('037C-3b-3/2b-2: missing/unexpected cap receipts');
   const receipts=await Promise.all(names.map(async name=>{
