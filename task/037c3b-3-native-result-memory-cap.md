@@ -9,7 +9,7 @@
 - `src/painting/tiled-inpaint-dispatch.js`: после freeze geometry и detached Worker ответ валидируется до preview/persistence/History: проверка неизменности unselected native bytes уже существовала. Дополнительно запрещены изменения **alpha в выбранных пикселях** и нечисловые `NaN` / `Infinity` в изменённых Float32-цветовых сэмплах; конечные HDR-сэмплы >1 допустимы.
 - Ответ `{ unavailable:true, source:... }` или с дополнительными полями отвергается. Только чистый `{unavailable:true}` от supplier не скрывает compute/protocol failure за fallback.
 - `tests/tiled-inpaint-ui-dispatch.test.mjs`: отрицательные CMYKA32 alpha, NaN, Infinity, смешанный unavailable/native, `maxBytes = source.rawBytes - 1` с отказом **до** selection sampling / Worker dispatch для RGB16 и CMYKA32; следующий нормальный запрос должен пройти. Отказ до preview проверяется через `createRasterEditController`; исходные native v2 tiles и source reference сохраняются.
-- Синхронизированы generated browser bundle и hash/index manifest (версия 1.46.3).
+- Синхронизированы generated browser bundle и hash/index manifest (версия 1.46.4).
 
 ## Следующая проходка — 037C-3b-3/2 genuine-photo Chromium
 
