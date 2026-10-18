@@ -145,6 +145,52 @@ export function validateRealPhotoMidKernelCloseSet(receipts,pins,manifest){
     originalNativeAfterCloseObservable:false,memoryCapVerified:false};
 }
 
+// 037C-3b-2b/3a: the PUBLIC Escape route revokes a genuine photo Worker
+// only after the native kernel has written its first pixel. These receipts
+// never claim the Worker naturally finished or Photoshop authored the input.
+export function validateRealPhotoMidKernelEscapeReceipt(r,pins,manifest){
+  const fail=()=>{throw new TypeError('037C-3b-2b/3a: invalid genuine-photo Escape receipt');};
+  const fmt=FORMATS[r?.format],d=pins?.documents?.[r?.format];
+  if(!fmt || !d || r.kind!=='zpe-real-photo-browser-mid-kernel-escape-v1' ||
+    r.status!=='public-escape-mid-kernel-terminated-no-publication' ||
+    r.runIndex!==1 || r.protocol!=='file:' ||
+    r.inputFileSha256!==d.fileSha256 || r.nativeDefectSha256!==d.nativeSha256 ||
+    r.nativeDefectSha256!==manifest?.native?.[fmt.key]?.damagedSha256 ||
+    r.sourcePhotoSha256!==manifest?.sourceSha256 ||
+    r.bitsPerChannel!==fmt.bits || r.selectedPixels!==8288 ||
+    r.workerRequests!==1 || r.workerTerminations!==1 ||
+    r.actualNativeWorkerJobIntercepted!==true ||
+    r.realKernelJobDispatched!==true || r.realKernelWriteProbeObserved!==true ||
+    r.probeReportedFilled!==1 || !Number.isFinite(r.firstNativeSampleAfterWrite) ||
+    r.terminatedAfterKernelWriteBeforeReply!==true ||
+    r.publicEscapeKeyDispatched!==true || r.cancelStatusObserved!==true ||
+    r.lateMessageInjectedAfterTermination!==true || r.lateMessageIgnored!==true ||
+    r.originalNativeBytesUnchanged!==true || r.originalHistoryUnchanged!==true ||
+    r.secondTabHistoryUnchanged!==true || r.fillHistoryEntries!==0 ||
+    r.actualMidKernelCancellationVerified!==true ||
+    r.completedWorkerPreviewRaceVerified!==false ||
+    r.memoryCapVerified!==false || r.photoshopCompatibilityVerified!==false ||
+    !Number.isSafeInteger(r.startedAtUnixMs) || r.startedAtUnixMs<=0 ||
+    !Number.isSafeInteger(r.elapsedMs) || r.elapsedMs<0) fail();
+  return r;
+}
+export function validateRealPhotoMidKernelEscapeSet(receipts,pins,manifest){
+  if(!Array.isArray(receipts)||receipts.length!==2)
+    throw new TypeError('037C-3b-2b/3a: expected two independent Escape receipts');
+  const formats=new Set(),starts=new Set();
+  for(const r of receipts){
+    validateRealPhotoMidKernelEscapeReceipt(r,pins,manifest);
+    if(formats.has(r.format)||starts.has(r.startedAtUnixMs))
+      throw new TypeError('037C-3b-2b/3a: duplicate format or Chromium session');
+    formats.add(r.format);starts.add(r.startedAtUnixMs);
+  }
+  if(!formats.has('psd16')||!formats.has('psb32'))
+    throw new TypeError('037C-3b-2b/3a: both native depths required');
+  return {kind:'zpe-real-photo-browser-mid-kernel-escape-set-v1',runs:2,
+    formats:[...formats].sort(),actualMidKernelCancellationVerified:true,
+    completedWorkerPreviewRaceVerified:false,memoryCapVerified:false};
+}
+
 // The following functions execute in a real CDP browser page, not in Node.
 // The only document readback is the public File -> Save Project route.
 async function publicNativeSnapshot(label){
@@ -369,6 +415,32 @@ function injectLateAfterClose(){
   }));
   return {delivered,tabs:document.querySelectorAll('#docTabs .doc-tab').length};
 }
+function injectLateAfterEscape(){
+  const s=window.__photoFailure;
+  if(!s.worker || s.workerTerminations!==1 || s.workerRequests!==1 ||
+    !Number.isSafeInteger(s.jobId))
+    throw Error('037C-3b-2b/3a Escape cancellation not observed before late message');
+  const delivered=s.worker.dispatchEvent(new MessageEvent('message',{
+    data:{id:s.jobId,ok:true,result:{source:s.snapshots.before,
+      changed:1,filled:8288,changedTiles:1,loadedTiles:1}},
+  }));
+  return {delivered,activePhotoTab:
+    document.querySelectorAll('#docTabs .doc-tab')[0]?.getAttribute('aria-selected')==='true'};
+}
+function checkOtherHistoryAfterEscape(){
+  const s=window.__photoFailure;
+  const tabs=()=>[...document.querySelectorAll('#docTabs .doc-tab')];
+  if(tabs().length!==2 || tabs()[0]?.getAttribute('aria-selected')!=='true')
+    throw Error('037C-3b-2b/3a original photo tab not active');
+  tabs()[1].click();
+  const history=[...document.querySelectorAll('#historyList .history-row')]
+    .map(row=>row.textContent);
+  const secondSelected=tabs()[1]?.getAttribute('aria-selected')==='true';
+  tabs()[0].click();
+  return {secondSelected,
+    originalSelected:tabs()[0]?.getAttribute('aria-selected')==='true',
+    historyUnchanged:JSON.stringify(history)===JSON.stringify(s.secondHistoryBefore)};
+}
 function invokeFill(){
   document.querySelector('.menu-button[data-menu="edit"]').click();
   const action=[...document.querySelectorAll('#menuPopover .menu-item')].find(
@@ -413,10 +485,12 @@ function compareSnapshots(){
 
 export async function verifyGenuinePhotoUiSwitchFailure(client,{
   evaluate,waitFor,assert,format,runIndex,sourceDir,artifactDir,baseline,
-  midKernel=false,closeDocument=false,
+  midKernel=false,closeDocument=false,escapeCancel=false,
 }={}){
   if(closeDocument && !midKernel)
     throw new TypeError('037C-3b-2b/2 requires genuine post-write kernel cancellation');
+  if(escapeCancel && (!midKernel || closeDocument))
+    throw new TypeError('037C-3b-2b/3a requires an isolated post-write Escape scenario');
   const fmt=FORMATS[format];
   if(!fmt || runIndex!==1 || !sourceDir || !artifactDir ||
     !baseline?.publicSaveNativeMatchedFrozenPin || baseline.nativeDefectSha256?.length!==64)
@@ -444,6 +518,7 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
     const before=await snapshot('before');
     assert(before.tiles>1 && before.bits===fmt.bits,'037C-3b-2a invalid initial native tiles');
     const tabs=await evaluate(client,'('+prepareTabs.toString()+')()');
+    if(escapeCancel)await evaluate(client,'window.__photoFailure.secondHistoryBefore='+JSON.stringify(tabs.secondHistory)+';true');
     if(closeDocument){
       const survivor=await evaluate(client,'('+publicSurvivorSnapshot.toString()+')("before")');
       assert(survivor.photoLeaked===false && survivor.historyRows===tabs.secondHistory.length,
@@ -550,6 +625,58 @@ export async function verifyGenuinePhotoUiSwitchFailure(client,{
       const output=path.join(artifactDir,'real-photo-'+format+'-mid-kernel-close-run-1.json');
       await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
       console.log('037C-3b-2b/2 real photo public close post-write:',JSON.stringify({output,...receipt}));
+      return receipt;
+    }
+    if(escapeCancel){
+      // CDP keyboard input, NOT a direct call to the internal command.
+      // The worker is still inside the test-only post-native-write pause.
+      for(const type of ['keyDown','keyUp'])await client.send('Input.dispatchKeyEvent',{
+        type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27,nativeVirtualKeyCode:27});
+      const statusText=await evaluate(client,'document.querySelector("#statusText")?.textContent');
+      assert(statusText?.includes('Контент-заливка отменена'),
+        '037C-3b-2b/3a Escape did not use public cancellation handler',statusText);
+      await waitFor('037C-3b-2b/3a post-write Worker terminated on public Escape',
+        ()=>evaluate(client,'window.__photoFailure?.workerTerminations===1'),10000);
+      const inKernel=await evaluate(client,'window.__photoFailure?.terminatedDuringKernel===true');
+      assert(inKernel,'037C-3b-2b/3a Escape was not post native write');
+      const late=await evaluate(client,'('+injectLateAfterEscape.toString()+')()');
+      assert(late.delivered===true && late.activePhotoTab===true,
+        '037C-3b-2b/3a late Worker event not dispatched to active photo tab',JSON.stringify(late));
+      await evaluate(client,'new Promise(resolve=>setTimeout(resolve,120))');
+      await snapshot('after');
+      const compared=await evaluate(client,'('+compareSnapshots.toString()+')()');
+      assert(compared.nativeExact && compared.historyExact && compared.fillHistoryEntries===0,
+        '037C-3b-2b/3a Escape leaked a native edit or History',JSON.stringify(compared));
+      const other=await evaluate(client,'('+checkOtherHistoryAfterEscape.toString()+')()');
+      assert(other.secondSelected && other.originalSelected && other.historyUnchanged,
+        '037C-3b-2b/3a Escape changed survivor History',JSON.stringify(other));
+      const sample=await evaluate(client,'window.__photoFailure.firstNativeSampleAfterWrite');
+      const receipt={
+        kind:'zpe-real-photo-browser-mid-kernel-escape-v1',
+        status:'public-escape-mid-kernel-terminated-no-publication',
+        format,runIndex,protocol:'file:',
+        inputFileSha256:baseline.inputFileSha256,
+        nativeDefectSha256:baseline.nativeDefectSha256,
+        sourcePhotoSha256:manifest.sourceSha256,
+        bitsPerChannel:fmt.bits,selectedPixels:8288,
+        workerRequests:1,workerTerminations:1,
+        actualNativeWorkerJobIntercepted:true,realKernelJobDispatched:true,
+        realKernelWriteProbeObserved:true,probeReportedFilled:1,
+        firstNativeSampleAfterWrite:sample,terminatedAfterKernelWriteBeforeReply:true,
+        publicEscapeKeyDispatched:true,cancelStatusObserved:true,
+        lateMessageInjectedAfterTermination:true,lateMessageIgnored:true,
+        originalNativeBytesUnchanged:true,originalHistoryUnchanged:true,
+        secondTabHistoryUnchanged:true,fillHistoryEntries:0,
+        actualMidKernelCancellationVerified:true,
+        completedWorkerPreviewRaceVerified:false,memoryCapVerified:false,
+        photoshopCompatibilityVerified:false,
+        startedAtUnixMs:started,elapsedMs:Date.now()-started,
+      };
+      validateRealPhotoMidKernelEscapeReceipt(receipt,pins,manifest);
+      await mkdir(artifactDir,{recursive:true});
+      const output=path.join(artifactDir,'real-photo-'+format+'-mid-kernel-escape-run-1.json');
+      await writeFile(output,JSON.stringify(receipt,null,2)+'\n',{flag:'wx'});
+      console.log('037C-3b-2b/3a genuine-photo public Escape post-write:',JSON.stringify({output,...receipt}));
       return receipt;
     }
     assert(await evaluate(client,'('+switchTab.toString()+')()'),
