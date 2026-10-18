@@ -292,6 +292,24 @@ jobs:
           receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\n')
           PY
 
+      - name: 037C-3b-3/2b-2 genuine-photo native memory cap and retry
+        timeout-minutes: 20
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-memory-cap"
+          for format in psd16 psb32; do
+            scenario_dir="$ZPE_PHOTO_DIR/browser-memory-cap/$format"
+            mkdir -p "$scenario_dir"
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MEMORY_CAP=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$scenario_dir" \
+              node tools/browser-smoke.mjs
+            cp "$scenario_dir/real-photo-$format-memory-cap-run-1.json" "$ZPE_PHOTO_DIR/browser-memory-cap/"
+          done
+          node tools/verify-browser-real-photo-memory-cap-artifacts.mjs "$ZPE_PHOTO_DIR/browser-memory-cap" \
+            > "$ZPE_PHOTO_DIR/browser-memory-cap-set.json"
+
       - name: 037C-3a six genuine-photo Chromium Worker sessions with observational memory
         timeout-minutes: 25
         run: |
@@ -467,24 +485,6 @@ jobs:
           done
           node tools/verify-browser-real-photo-malformed-extra-artifacts.mjs "$ZPE_PHOTO_DIR/browser-malformed-extra" \
             > "$ZPE_PHOTO_DIR/browser-malformed-extra-set.json"
-
-      - name: 037C-3b-3/2b-2 genuine-photo native memory cap and retry
-        timeout-minutes: 20
-        run: |
-          mkdir -p "$ZPE_PHOTO_DIR/browser-memory-cap"
-          for format in psd16 psb32; do
-            scenario_dir="$ZPE_PHOTO_DIR/browser-memory-cap/$format"
-            mkdir -p "$scenario_dir"
-            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
-            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
-            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
-            ZPE_REAL_PHOTO_BROWSER_MEMORY_CAP=1 \
-            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$scenario_dir" \
-              node tools/browser-smoke.mjs
-            cp "$scenario_dir/real-photo-$format-memory-cap-run-1.json" "$ZPE_PHOTO_DIR/browser-memory-cap/"
-          done
-          node tools/verify-browser-real-photo-memory-cap-artifacts.mjs "$ZPE_PHOTO_DIR/browser-memory-cap" \
-            > "$ZPE_PHOTO_DIR/browser-memory-cap-set.json"
 
       - name: Upload 037C-3b-3/2b-2 memory-cap receipts
         if: always()
