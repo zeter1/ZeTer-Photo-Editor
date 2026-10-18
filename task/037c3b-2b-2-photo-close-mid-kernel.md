@@ -1,6 +1,6 @@
 # 037C-3b-2b/2 — закрытие фото-вкладки после реального native kernel write
 
-**Приоритет:** P1. **Статус:** реализовано в ветке `feat/037c3b2b2-photo-close-mid-kernel`, ожидает PR CI и genuine-photo Chromium gate. Полный 037C/037C-3b-2b ещё открыт.
+**Приоритет:** P1. **Статус: ЗАКРЫТА (2026-10-18)**. [PR #253](https://github.com/zeter1/ZeTer-Photo-Editor/pull/253) слит в [main 4117247](https://github.com/zeter1/ZeTer-Photo-Editor/commit/411724794082df2f34f5d066fd3cd55828b1646d); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39116653877), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39116653964), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39116891608), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39116891506). Версия 1.46.2. Полная 037C/037C-3b-2b всё ещё OPEN: явная отмена, stale generation и racing result предстоят.
 
 ## Исправление, подтверждаемое кодом
 
@@ -15,11 +15,11 @@
 
 ## Критерии закрытия этой проходки
 
-- [x] Source guard закрытия и три Node-регрессии.
+- [x] Source guard закрытия и четыре Node-регрессии.
 - [x] Отдельные receipts + отрицательные validator tests + фотопроверка в CI.
-- [ ] PR CI `npm run check`, `npm run test:browser`, `git diff --check` — success.
-- [ ] Real-photo CI — по одному отдельному подлинному PSD16/PSB32 Chromium-сценарию, independent artifact verification — success.
-- [ ] Merge, exact-main CI и запись ссылок в `task/NEXT.md`.
+- [x] PR CI `npm run check`, `npm run test:browser`, `git diff --check` — success, run #39116653877.
+- [x] Real-photo CI — по одному отдельному подлинному PSD16/PSB32 Chromium-сценарию, independent artifact verification — success, run #39116653964.
+- [x] Merge `4117247`, exact-main CI #39116891608, exact-main photo CI #39116891506 и запись ссылок в `task/NEXT.md`.
 
 ## Следующие задачи
 

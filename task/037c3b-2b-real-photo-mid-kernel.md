@@ -27,7 +27,7 @@
 
 ## Что делать дальше из того же скриншота
 
-1. **037C-3b-2b/2:** независимые сценарии реального close document, explicit cancel, stale owner generation и racing завершённого Worker для обоих форматов. Доказать no-publication через публичный проект, History/selection/session.
+1. **037C-3b-2b/2 ЗАКРЫТА:** public close после реальной записи native Worker проверен на genuine PSD16/PSB32 через [PR #253](https://github.com/zeter1/ZeTer-Photo-Editor/pull/253) и exact-main CI (см. [отчёт](037c3b-2b-2-photo-close-mid-kernel.md)). **Следующая /3 OPEN:** explicit cancel, stale owner generation, завершённый Worker racing reply — отдельно проверить native History/selection/session.
 2. **037C-3b-3:** malformed native replies, maxBytes/memory-budget refusal, fail-closed UI и офлайн verifier. Не путать наблюдаемый RSS sample с peak.
 3. **037C-3c:** полный CI acceptance на PR и exact-main, ревизия всех receipt gate; только тогда закрыть 037C.
 4. **P0 002 / Stage 003:** Adobe-authored PSD/PSB compatibility goldens, виртуализация tiled rendering/preview, ICC/CMYK, RAW и оставшиеся функции снимка.
