@@ -168,8 +168,7 @@ instrumentation проходки /1 и /2a. Этап 003 и полный roadmap
    1379/1380 tests; legacy serializer regression expected a delayed periodic
    fifth query. Fixed test to assert exactly four serialized marker reads and
    one missed timer poll; both new independent regressions already passed.
-   Exact-main [CI #39250278990](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39250278990)
-   **IN PROGRESS**, not yet acceptance-complete.
+   [Exact-main CI success #39250278990](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39250278990), 003T/2a accepted.
 3. Нет дополнительных native snapshots или production runtime mutations:
    изменения диагностических инструментов и test harness. Browser operation
    `sampledMax` и `VmHWM` не являются доказательством true operation peak;
