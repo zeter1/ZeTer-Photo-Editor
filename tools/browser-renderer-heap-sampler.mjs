@@ -317,11 +317,11 @@ export function createBrowserRendererHeapSampler(client, {
       }
       const rssMax = rssSamples.reduce((max, item) =>
         !max || item.chromiumRssBytes > max.chromiumRssBytes ? item : max, null);
+      const samplingTiming = summarizeBrowserSamplingTiming(samples,pollsAttempted,pollsSkippedBusy);
       return {
         metric:'CDP Performance.getMetrics / renderer JSHeapUsedSize',
-        samplingTiming:summarizeBrowserSamplingTiming(samples,pollsAttempted,pollsSkippedBusy),
-        milestoneWindowAudit:summarizeBrowserMilestoneWindows(samples,
-          summarizeBrowserSamplingTiming(samples,pollsAttempted,pollsSkippedBusy)),
+        samplingTiming,
+        milestoneWindowAudit:summarizeBrowserMilestoneWindows(samples,samplingTiming),
         limitations:'Informational sampled main-frame JS heap, browser Worker target census, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. Missing identity/Worker target snapshots break comparisons and final visibility. Missing start/end counters are null, not last-observed substitutes. Target IDs cannot be joined to OS PIDs; NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
         metricCoverage: {
           chromiumPrivateMemory:metricCoverage('processPrivateMemoryBytes'),
