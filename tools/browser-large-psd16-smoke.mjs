@@ -209,6 +209,8 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     return true;
   }
   await evaluate(client,'('+observeWorker.toString()+')()');
+  // A pre-dispatch Linux incarnation read, not the actual kernel start time.
+  await sampler.snapshot('before-first-fill');
   const fillStart=Date.now();
   function fillFromMenu() {
     document.querySelector('.menu-button[data-menu="edit"]').click();
@@ -253,6 +255,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
   await evaluate(client,"document.querySelector('#undoBtn').click();true");
   await waitFor('large PSD/PSB Undo',()=>evaluate(client,'('+beforePixel.toString()+')()'),30_000);
   operation.mark('undo-complete');
+  await sampler.snapshot('after-first-undo');
   await evaluate(client,"document.querySelector('#redoBtn').click();true");
   await waitFor('large PSD/PSB Redo',()=>evaluate(client,'('+filledPreview.toString()+')()'),30_000);
   const firstRedoNative=await evaluate(client,readNativeExpression);
@@ -360,6 +363,8 @@ export async function verifyLargeBrowserPsd16Worker(client, {
       instrumentBrowserKernelSource.toString()+'\nreturn ('+
       installRealNativeKernelProbe.toString()+')();\n})()');
     assert(installed.installed,'Cannot instrument isolated native Worker Blob');
+    // Never pause sampling between real kernel-write probe and lock revocation.
+    await sampler.snapshot('before-cancel-fill');
     const cancellationStarted=Date.now();
     const pending=await evaluate(client,'('+fillFromMenu.toString()+')()');
     assert(pending.enabled,'Native mid-kernel Content-Aware command must start',JSON.stringify(pending));
@@ -409,6 +414,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     // Restore the unmodified production Worker source before retrying.
     await evaluate(client,'window.__stage003RestoreCancelProbe?.();true');
     await evaluate(client,"document.querySelector('.layer-row.selected .layer-lock').click();true");
+    await sampler.snapshot('before-retry-fill');
     const restored=await evaluate(client,'('+fillFromMenu.toString()+')()');
     assert(restored.enabled,'Native Worker must accept a new UI Fill after unlock',JSON.stringify(restored));
     operation.mark('retry-fill-command-invoked');
@@ -441,6 +447,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
       'Undo must restore all original native little-endian tile words',JSON.stringify(undoNative));
     qualityReport.recoveredUndo=qualityMetric(undoNative);
     operation.mark('retry-undo-native-verified');
+    await sampler.snapshot('after-retry-undo');
     await evaluate(client,"document.querySelector('#redoBtn').click();true");
     await waitFor('native retry Redo',()=>evaluate(client,
       '('+retryFilledPreview.toString()+')()'),30_000);
