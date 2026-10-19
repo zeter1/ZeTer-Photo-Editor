@@ -486,3 +486,5 @@ provisioned isolated cgroup or else explicitly retain unknown. If separate,
 audit child process membership/contamination and PID reuse/exit gaps, then
 attempt real PSD16/PSB32 operation-window control with calibrated observed
 coverage; claim no true peak without a proven operation-exclusive sensor.
+
+**PR:** [#292](https://github.com/zeter1/ZeTer-Photo-Editor/pull/292) is OPEN; live CI and receipt remain PENDING until checked. The runner step now prints only cgroup availability/scope (no host path) to support an independently readable verification. The strict parser rejects private path disclosure. Do not close the gate on unit-only coverage.
