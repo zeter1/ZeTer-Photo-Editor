@@ -89,6 +89,9 @@ test('003T/2d-2: forged isolation, PID reuse, unknown reads and peak fail closed
     e=>{e.held=unavailable('made-up');},
     e=>{e.held=unavailable('not-linux');e.held.memoryCurrentBytes=12;},
     e=>{delete e.before;},
+    e=>{e.limitations+=' file:///private-home';},
+    e=>{e.limitations+=' /sys/fs/cgroup/user.slice';},
+    e=>{e.limitations+=' blob:memory';},
     e=>{e.limitations='measured peak';},
   ];
   for(const change of changes){
