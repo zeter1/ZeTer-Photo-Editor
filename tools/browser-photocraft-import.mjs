@@ -87,17 +87,33 @@ async function browserNativeLayerReceipt() {
   for(const layer of project.layers||[]) {
     const source=layer.highDepthSource;
     if(layer.type!=='raster' || !source)continue;
-    if(source.kind!=='zpe-pixel-buffer-source-v2' || source.model!=='rgb' ||
-       source.channels!==4 || ![16,32].includes(source.bitsPerChannel) ||
+    if(!['zpe-pixel-buffer-source-v1','zpe-pixel-buffer-source-v2'].includes(source.kind) ||
+       source.model!=='rgb' || source.channels!==4 ||
+       ![16,32].includes(source.bitsPerChannel) ||
        source.width!==layer.width || source.height!==layer.height ||
-       !Number.isSafeInteger(source.tileSize) || source.tileSize<1 ||
-       !Array.isArray(source.tiles) || source.tiles.length<1)
+       source.byteOrder!=='little-endian')
       throw Error('002B/2a invalid native layer metadata');
     const stride=4*(source.bitsPerChannel/8);
     if(source.rawBytes!==source.width*source.height*stride)
       throw Error('002B/2a native raw byte length mismatch');
     const raw=new Uint8Array(source.rawBytes);
     const visited=new Uint8Array(source.width*source.height);
+    if(source.kind==='zpe-pixel-buffer-source-v1') {
+      if(typeof source.dataUrl!=='string' ||
+         !source.dataUrl.startsWith('data:application/x-zeter-pixel-buffer;base64,'))
+        throw Error('002B/2a invalid v1 source');
+      const encoded=source.dataUrl.split(',')[1];
+      if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))
+        throw Error('002B/2a noncanonical v1 base64');
+      const binary=atob(encoded);
+      if(binary.length!==source.rawBytes || btoa(binary)!==encoded)
+        throw Error('002B/2a invalid v1 bytes');
+      raw.set(Uint8Array.from(binary,c=>c.charCodeAt(0)));
+      visited.fill(1);
+    } else {
+    if(!Number.isSafeInteger(source.tileSize) || source.tileSize<1 ||
+       !Array.isArray(source.tiles) || source.tiles.length<1)
+      throw Error('002B/2a invalid v2 tile list');
     for(const tile of source.tiles) {
       if(!tile || ![tile.x,tile.y,tile.width,tile.height,tile.rawBytes].every(Number.isSafeInteger) ||
          tile.x<0 || tile.y<0 || tile.width<1 || tile.height<1 ||
@@ -121,6 +137,7 @@ async function browserNativeLayerReceipt() {
         }
         raw.set(tileBytes.subarray(y*tile.width*stride,(y+1)*tile.width*stride),target*stride);
       }
+    }
     }
     if(visited.some(value=>value!==1))throw Error('002B/2a missing native tile samples');
     const digest=await crypto.subtle.digest('SHA-256',raw);
