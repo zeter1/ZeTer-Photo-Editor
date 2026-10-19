@@ -212,3 +212,71 @@ fail-closed short-lived process/PID reuse and /proc access-gaps,
 - **Files:** `tools/browser-rss-sample-identity.mjs`, `tools/browser-renderer-heap-sampler.mjs`, `tests/browser-rss-sample-identity.test.mjs`, `task/003t-operation-memory-evidence.md`, `task/NEXT.md`, `task/README.md`, `task/003-tiled-content-aware.md`.
 - **Defects/limits remaining:** sampled PID census and sequential `/proc` remain non-atomic, process lifetime HWM is not per-operation peak, OS control is not Chrome control, Worker→PID undocumented, P0 external Photoshop PSB32 corpus blocked.
 - **NEXT 003T/2b-2 P1 IN PROGRESS:** inject independent real ephemeral Chrome Worker control in `file://` high-depth test, record target census and Linux PID incarnations across before/during/after with missing snapshots; prove detected-versus-missed observations, fail-closed artifact/CI, preserve `trueOperationPeakKnown:false` unless independent calibrated operation-isolated method is established.
+
+
+## 2026-10-19 — 003T/2b-2: independent real Chromium file:// Worker visibility control (IN PROGRESS)
+
+**Priority/dependencies:** P1, depends on 003T/2b-1 DONE and existing 024/025/026
+sampler + Target/PID/proc identity diagnostics. **Scope:** test-only tooling/CI.
+**Goal:** Show under real Chromium that an acknowledged short-lived Worker can
+execute entirely between explicit target observations, while a held Worker
+produces separately observed target arrivals/disappearance. Missing CDP read
+must forbid inferred target churn or Worker-to-PID attribution.
+
+**Acceptance for this substep:** real file:// Chromium executes an acknowledged
+short-lived Blob Worker between sampled snapshots; a held acknowledged Worker
+is visible in a successful Target.getTargets observation, then absent in a
+later successful observation; an intentionally skipped target read yields
+unknown transitions; Linux/CDP process observations (where available) do not
+claim Worker PID/operation peak; artifact verifier rejects forged success,
+missing data or unsupported claims; unit+browser CI green, merged PR and
+exact-main CI green.
+
+**Implementation in work branch**
+[test/003t2b2-real-chromium-worker-control-20261019](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t2b2-real-chromium-worker-control-20261019):
+- Added \`tools/browser-worker-control-smoke.mjs\`. Launches a separate real
+  headless Chromium with clean temporary profile and **real file:// page**.
+  Short-lived Worker posts completion before termination; explicit sampled
+  target observations before/after cannot infer how many Workers lived in
+  between. A held Worker allocates/touches 8 MiB of process-managed payload,
+  announces readiness, is observed alive via real Target.getTargets, then
+  terminated and observed absent. Uses real
+  \`createBrowserRendererHeapSampler\` including CDP process membership and
+  verified /proc RSS/incarnation when available. Scheduled polling is
+  intentionally disabled for deterministic explicit-only windows, and
+  \`samplingTiming\` records this as zero periodic samples.
+- Same script exports fail-closed \`validateIndependentWorkerControlEvidence\`
+  and CLI \`--verify\`: validates five real milestone reads and one **injected**
+  missing Target read from the existing independent target tracker. The
+  induced read gap is NOT misrepresented as an actual CDP network failure.
+  Neither target identity nor process type is a documented Worker→PID join.
+  URLs/titles are not recorded; no claimed true operation peak or exit.
+- Added \`tests/browser-worker-control-evidence.test.mjs\` for positive
+  semantics, falsified peak/PID/target/coverage, accidental private path
+  leak and gap-transition regressions.
+- \`.github/workflows/ci.yml\` runs real Chromium control and offline
+  independent JSON readback, uploads receipt as
+  \`zpe-chromium-worker-control-003t2b2\`. The existing
+  \`npm run check\` + genuine browser PSD16/PSB32 operations stay enabled.
+- Updated \`task/NEXT.md\`, \`task/README.md\` and
+  \`task/003-tiled-content-aware.md\` with status and queue.
+
+**Evidence status:** unit tests, real browser control, PR CI, merge and
+exact-main CI **PENDING** until GitHub Actions results are checked. Local
+checkout unavailable because \`github.com\` DNS is inaccessible from the
+execution container; no local test pass is asserted. Any failure must be
+fixed in this PR before marking the substep DONE.
+
+**Limits:** 8 MiB payload does not calibrate operation RAM peak;
+\`VmHWM\` is lifetime HWM; even real acknowledged Worker activity between
+snapshots does not imply PID identity. This substep complements but does NOT
+replace real PSD16/PSB32 Fill/cancel/retry acceptance. PID reuse inside a
+short-lived Chromium process, true operation peak and a documented
+Worker→PID join remain unproven; preserve \`trueOperationPeakKnown:false\`,
+\`workerPidMapping:'unknown'\`.
+
+**Next:** finish CI/merge/exact-main for /2b-2; then **003T/2c P1**
+controlled real Chromium process-lifetime/PID reuse or /proc-denied gaps
+and independently validated operation-isolated RAM peak method if feasible.
+P0 **002B/2c BLOCKED** on independently licensed Photoshop-authored PSB32
+with proven provenance/reference rendering; whole Stage 003 OPEN.
