@@ -204,7 +204,8 @@ test('Stage 003: missing/unsupported browser process counters never fake RAM or 
     await sampler.start();
     await sampler.snapshot('after-worker');
     const report = await sampler.stop();
-    assert.equal(queries, 1, 'unsupported process counters must be probed only once');
+    assert.equal(queries, response instanceof Error ? 1 : 3,
+      'denied process domain is probed once, but valid PIDs remain observable for independent RSS');
     assert.equal(metrics, 3, 'renderer JS heap monitoring remains intact');
     assert.equal(report.chromiumProcesses.availability, 'unavailable');
     assert.equal(report.chromiumProcesses.sampleCount, 0);
