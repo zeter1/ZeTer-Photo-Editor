@@ -342,3 +342,33 @@ a separate known-load control. Otherwise document absent proof and preserve
    browser artifact CI, without weakening prior validation.
 4. PR CI success, merge and exact-main CI success, linked here and in NEXT;
    or explicit BLOCKED reasons if reproducible real Chrome limitations.
+
+
+## 2026-10-19 — 003T/2c: controlled real Chromium Linux launcher process lifecycle (IN PROGRESS)
+
+**ID / priority / dependencies:** 003T/2c, P1; follows 003T/2b-2 DONE, RSS identity 003T/2b-1, stage 024/025/026. This is diagnostic/CI infrastructure and does **not** modify the editor runtime.
+
+**Goal:** independently demonstrate observed OS lifecycle of a spawned real Chromium `file://` Linux launcher PID, distinguishing complete /proc reads, deliberately skipped reads, injected read denial and the process's actual termination. Never infer short-lived Chrome descendants or Worker PID from a single known launcher PID.
+
+**Code and tests in branch:** [test/003t2c-chromium-os-pid-lifetime-20261019](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t2c-chromium-os-pid-lifetime-20261019).
+
+- `tools/browser-chromium-pid-lifetime-control.mjs`: launches independent real headless Chromium on temporary `file://` page, verifies live page through DevTools, captures /proc PID+starttime and validated VmRSS/VmHWM **before/after** deliberate missing snapshot, tests an explicitly **injected EACCES** failure path without counting it as real denial, observes actual child `close` after SIGTERM, then verifies original PID missing or a different incarnation. Rejects unreadable post-close data; stores only PID/starttime/RSS and sanitized, bounded evidence.
+- `tools/browser-worker-control-smoke.mjs`: exports preexisting Chrome discovery and DevTools-stderr readiness helpers for reuse; prior Worker control remains independent.
+- `tests/browser-chromium-pid-lifetime-control.test.mjs`: pure negative verification of forged peak/Worker PID/exit, PID reuse, corrupt /proc identity, hidden sampled gap, EACCES vs ENOENT and inconsistent membership.
+- `.github/workflows/ci.yml`: real Chrome Linux OS PID control + `--verify`, retained downloadable JSON artifact.
+- `task/README.md`, `task/NEXT.md`, `task/003-tiled-content-aware.md`, this card: queue + restrictions.
+
+**CI/acceptance status:** code committed in branch; `npm run check`, real Chromium control receipt, PR CI, merge and exact-main **PENDING until readback**. No local full checkout (environment has no github.com DNS); do not assert green prior to actual CI.
+
+**Evidence limits:** launcher PID verified by spawned child process, **not** a CDP Worker→OS PID join. Linux VmHWM is a lifetime watermark, not operation-isolated peak; a deliberate missed read is unknowable interval (no inferred process churn). Injected `EACCES` is a *test double*, not a real OS permission outage. A spawned launcher `close` establishes only that process's exit, not termination of every browser descendant. `trueOperationPeakKnown:false`, `workerPidMapping:'unknown'` remain mandatory.
+
+**Remaining / next:** get passing real CI artifact, review and merge, verify exact-main SHA CI; then **003T/2d P1** investigate operation-isolated calibrated RSS peak measurement against independent real Chrome reference workload if feasible, otherwise keep explicit unknown and coverage gaps. P0 002B/2c still BLOCKED on independently licensed Photoshop-authored PSB32. Whole 003T IN PROGRESS, Stage 003 OPEN.
+
+
+## 2026-10-19 — 003T/2c PR CI verified, exact-main pending
+
+- **PR:** [#287](https://github.com/zeter1/ZeTer-Photo-Editor/pull/287); test-code SHA `d16ef293e84bcc382ec8b924f7db7398e5f9ce72`.
+- **First PR run #39261014708 FAILED:** real Chromium exits normally on requested SIGTERM in this runner, whereas initial validator mistakenly required a signal-only exit. Actual observed `close` alone was not accepted. Fixed validator to accept either `SIGTERM/null` or the normal `null/0` pair, always with observed child `close`, added negative/positive test, and cleared the wait timeout on success/failure.
+- **Successful PR CI:** [#39261662672](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39261662672) **SUCCESS** for `npm run check` (including negative tests), generated browser parity, real Chromium `file://` smoke, preexisting Worker target control, **new real Chromium launcher Linux PID lifetime control**, strict JSON `--verify`, artifact upload `zpe-chromium-pid-lifetime-003t2c`, diff hygiene.
+- **Status:** PR tested; docs are being synchronized to that evidence. Merge and **exact-main CI remain PENDING**; do not count /2c DONE until both are confirmed. Production editor code remains unchanged.
+- **NEXT P1 003T/2d:** operation-isolated RSS peak/control: document instrumentation boundary (cgroup/container/process tree), launch and end snapshots, cross-process/read gaps, independent calibrated known memory control if possible, otherwise `unknown` with explicit limitations. Still not Worker→PID, high-depth operation-wide peak, or Stage 003 completion. P0 002B/2c BLOCKED.

@@ -126,6 +126,22 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Independent Linux /proc PID+starttime control of the spawned real
+      # Chromium file:// launcher, not a Worker PID join or operation RAM peak.
+      - name: Real Chromium Linux PID lifetime and /proc gap control (003T/2c)
+        run: |
+          node tools/browser-chromium-pid-lifetime-control.mjs "$RUNNER_TEMP/zpe-003t-pid-lifetime.json"
+          node tools/browser-chromium-pid-lifetime-control.mjs --verify "$RUNNER_TEMP/zpe-003t-pid-lifetime.json"
+
+      - name: Upload Chromium OS PID lifetime receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-chromium-pid-lifetime-003t2c
+          path: ${{ runner.temp }}/zpe-003t-pid-lifetime.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Profile tiled Content-Aware Fill (informational)
         run: node tools/profile-tiled-inpaint.mjs --sizes 8,24,48
 
