@@ -60,7 +60,7 @@ export function validateBrowserOperationIncarnationWindows(audit, milestoneAudit
             Object.keys(id).some(key => !incarnationFields.has(key)) ||
             !Number.isSafeInteger(id.pid) || id.pid <= previousPid ||
             typeof id.starttimeTicks !== 'string' ||
-            !/^[1-9]\\d*$/.test(id.starttimeTicks)) {
+            !/^[1-9]\d*$/.test(id.starttimeTicks)) {
           throw new TypeError('Chromium incarnation windows: duplicate/invalid/reused PID evidence');
         }
         previousPid=id.pid;
