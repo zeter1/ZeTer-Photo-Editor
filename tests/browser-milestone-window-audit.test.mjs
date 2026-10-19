@@ -16,12 +16,13 @@ const samples = () => [
     pidMembershipObserved:true,linuxIdentityObserved:false,workerTargetsObserved:false,
     processPrivateMemoryBytes:1200},
 ];
-const timing = {snapshotCount:4,readWindowMs:60};
+const timing = {snapshotCount:4,periodicSamples:1,readWindowMs:60};
 
 test('003T/2e: real sample read windows retain missing PID and identity milestones without gap or peak claims',()=>{
   const summary=summarizeBrowserMilestoneWindows(samples(),timing);
   assert.equal(validateBrowserMilestoneWindowAudit(summary,timing,4),true);
   assert.equal(summary.sampledReadCount,4);
+  assert.equal(summary.milestones.length, timing.snapshotCount-timing.periodicSamples);
   assert.deepEqual(summary.milestones.map(x=>x.phase),['before-import','after-import','finished']);
   assert.equal(summary.missingPidMilestones,1);
   assert.equal(summary.missingLinuxIdentityMilestones,2);
@@ -40,12 +41,28 @@ test('003T/2e: forged JSON peak, Worker PID, temporal boundaries and gaps fail c
     {unverifiedBetweenMilestoneIntervals:0},{sampledReadCount:3},
     {operationPeakRssBytes:123456},
     {milestones:valid.milestones.slice(1)},
+    {milestones:valid.milestones.filter(m=>m.phase!=='after-import')},
+    {milestones:valid.milestones.map((m,i)=>i===1
+      ? {...m,privateMemoryObserved:true} : m)},
+    {milestones:valid.milestones.map((m,i)=>i===1
+      ? {...m,linuxRssObserved:true} : m)},
+    {milestones:valid.milestones.map((m,i)=>i===2
+      ? {...m,linuxIdentityObserved:true} : m)},
+    {milestones:valid.milestones.map((m,i)=>i===0
+      ? {...m,pidMembershipObserved:false} : m)},
     {milestones:valid.milestones.map((m,i)=>i===1?{...m,readStartOffsetMs:0}:m)},
     {milestones:valid.milestones.map((m,i)=>i===2?{...m,readEndOffsetMs:70}:m)},
     {milestones:valid.milestones.map((m,i)=>i===2?{...m,linuxIdentityObserved:null}:m)},
     {milestones:valid.milestones.map((m,i)=>i===2?{...m,pid:7}:m)},
   ]) assert.throws(()=>validateBrowserMilestoneWindowAudit({...valid,...changes},timing,4),/milestone windows/);
   assert.throws(()=>summarizeBrowserMilestoneWindows(samples().slice(1),timing),/milestone windows/);
+  assert.throws(()=>validateBrowserMilestoneWindowAudit(valid,
+    {...timing,periodicSamples:0},4),/milestone windows/);
+  assert.throws(()=>validateBrowserMilestoneWindowAudit(valid,
+    {...timing,periodicSamples:4},4),/milestone windows/);
+  const impossible=samples();
+  impossible[2].chromiumRssBytes=9999;
+  assert.throws(()=>summarizeBrowserMilestoneWindows(impossible,timing),/milestone windows/);
 });
 
 test('003T/2e: invalid generic milestone labels cannot forge observed Worker targets',()=>{
