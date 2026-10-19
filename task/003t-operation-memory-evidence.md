@@ -534,6 +534,12 @@ failure and mark isolation BLOCKED while sampled measurements stay
 informational; never rebrand shared `memory.current` as operation peak.
 P0 **002B/2c BLOCKED** on authenticated licensed Photoshop-created PSB32.
 
+## 2026-10-19 — 003T/2e: explicit high-depth milestone observation windows (IN PROGRESS)
+
+**Priority:** P1. **Work branch:** [test/003t2e-milestone-window-audit-20261019](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t2e-milestone-window-audit-20261019). **Detailed acceptance:** [003t2e](003t2e-milestone-window-audit.md). This pass writes and independently validates the exact serialized sampling read windows at each explicit PSD16/PSB32 UI operation milestone, preserving missing PID/CDP/OS-incarnation observations as unknown. The full set of periodic samples is not represented by those milestones, and observed start/end samples are not uninterrupted observation or true operation peak.
+
+Files: `tools/browser-milestone-window-audit.mjs`, `tools/browser-renderer-heap-sampler.mjs`, `tools/browser-operation-timeline.mjs`, `tools/browser-operation-artifact.mjs`, `tools/browser-real-photo-memory-evidence.mjs`, and targeted new/extended tests. Local standalone module: 2 PASS. Full `npm run check`, browser smoke, GitHub PR CI, merge and exact-main CI PENDING. The preceding bounded cgroup delegation runner permission gate is BLOCKED [PR #294](https://github.com/zeter1/ZeTer-Photo-Editor/pull/294), and no Worker→PID or operation peak can be claimed. Next: verify CI, exact-main and independent PID incarnation/control gaps. P0 Photoshop-authored PSB32 002B/2c stays BLOCKED.
+
 ## 2026-10-19 — 003T/2d-3: real runner delegation and controlled child migration (IN PROGRESS)
 
 **Priority:** P1, **dependency:** 003T/2d-2 real shared runner cgroup CI [#292](https://github.com/zeter1/ZeTer-Photo-Editor/pull/292). **Goal:** distinguish inability to create a fresh delegated cgroup on the actual runner from a *verified, but limited* disposable child move; neither result proves Chromium descendant completeness or an operation-specific memory peak.
@@ -557,3 +563,10 @@ P0 **002B/2c BLOCKED** on authenticated licensed Photoshop-created PSB32.
 - **CI checks:** full `npm run check` with native regression tests PASS; existing `file://` Chromium PSD/PSB and Worker controls PASS; Linux scope/control verifier PASS; profiling and diff hygiene PASS. **Local checkout tests NOT RUN** because github.com DNS unavailable. **Merge and exact-main CI NOT YET VERIFIED** at time of this entry.
 - **Limits:** group creation failed before disposable Node migration, so neither an isolated browser cgroup nor complete child membership was observed. The browser/runner shared cgroup established in 003T/2d-2 remains the available sampled instrument, not a true operation peak. No Worker→Linux PID mapping. No change to runtime pixel accuracy.
 - **Next P1 003T/2e:** use existing real high-depth PSD16/PSB32 `file://` Fill/cancel/retry fixtures to record explicit sampled operation windows and process-incarnation coverage/gaps with independent controls; reject any claim of exclusive operation peak. Acceptance: typed operation receipts, robust missed-read/PID reuse denial tests, successful PR CI and exact-main after merge. Revisit dedicated cgroup only if CI runner explicitly supports delegation. **P0 002B/2c** remains BLOCKED pending licensed Photoshop-authored PSB32 provenance/reference.
+
+## 2026-10-19 — 003T/2e PR acceptance and integration handoff
+
+- [PR #295](https://github.com/zeter1/ZeTer-Photo-Editor/pull/295) merged into [main `092ff41f`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/092ff41f7e160531399c9f1f3f35c4709f67ed5f), PR [CI #39284501084 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39284501084). Exact-merged-main CI is not yet confirmed.
+- Its high-depth CDP/Linux milestone observation is a sampled non-atomic audit, not continuous memory coverage or an operation peak. No Worker→PID mapping.
+- [PR #294](https://github.com/zeter1/ZeTer-Photo-Editor/pull/294) real cgroup creation is BLOCKED by runner permissions; previous final-head CI hit unrelated intermittent Worker disappearance timeout. Merged main changes into #294 branch; new CI/merge/exact-main pending.
+- NEXT P1 003T/2f: independent PID incarnation / blind-gap control and Worker-target-lifecycle reliability; do not call 003T or Stage 003 DONE.

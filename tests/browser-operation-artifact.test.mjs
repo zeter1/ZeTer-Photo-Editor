@@ -4,6 +4,7 @@ import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {buildBrowserOperationArtifact,writeBrowserOperationArtifact,verifyBrowserOperationArtifacts} from '../tools/browser-operation-artifact.mjs';
+import {summarizeBrowserMilestoneWindows} from '../tools/browser-milestone-window-audit.mjs';
 
 const completedPhases=[
   'import-input-dispatched','import-preview-ready','native-source-verified','selection-created',
@@ -278,4 +279,28 @@ test('003T: CI operation artifact rejects invented sampling coverage or peak cla
   }finally{
     await rm(dir,{recursive:true,force:true});
   }
+});
+
+test('003T/2e: real Chromium quality artifact requires milestone windows and rejects forged PID gaps',()=>{
+  const p=sample('stage003-psd16-with-cancelled-retry','PSD16','completed-with-cancelled-retry');
+  p.origin='real Chromium file:// UI + native Worker';
+  assert.throws(()=>buildBrowserOperationArtifact(p),/missing real milestone read-window evidence/);
+  const snapshots=[
+    {phase:'before-import',readStartedMs:0,readFinishedMs:60,
+      pidMembershipObserved:true,linuxIdentityObserved:false,workerTargetsObserved:true},
+    {phase:'finished',readStartedMs:60,readFinishedMs:120,
+      pidMembershipObserved:false,linuxIdentityObserved:false,workerTargetsObserved:false},
+  ];
+  p.memory.milestoneWindowAudit=summarizeBrowserMilestoneWindows(
+    snapshots,p.memory.samplingTiming);
+  assert.equal(buildBrowserOperationArtifact(p).timeline.memory.milestoneWindowAudit.missingPidMilestones,1);
+  const falsePidClaim=structuredClone(p);
+  falsePidClaim.memory.milestoneWindowAudit.missingPidMilestones=0;
+  assert.throws(()=>buildBrowserOperationArtifact(falsePidClaim),/milestone windows/);
+  const forgedAtFinish=structuredClone(p);
+  forgedAtFinish.memory.milestoneWindowAudit.milestones[1].readEndOffsetMs=119;
+  assert.throws(()=>buildBrowserOperationArtifact(forgedAtFinish),/milestone windows/);
+  const inventedPeak=structuredClone(p);
+  inventedPeak.memory.milestoneWindowAudit.trueOperationPeakKnown=true;
+  assert.throws(()=>buildBrowserOperationArtifact(inventedPeak),/milestone windows/);
 });
