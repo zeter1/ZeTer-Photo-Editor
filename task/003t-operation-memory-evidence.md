@@ -96,3 +96,51 @@ checkout недоступен (DNS github.com); до результатов CI �
 измеренными интервалами, контролем overhead/short-lived processes и
 честной границей operation peak; 003T и Stage 003 не закрывать ранее CI
 и реального подтверждения.
+
+
+## 2026-10-19 — 003T/2a: explicit milestone cannot hide a missed timed poll (IN PROGRESS)
+
+**Приоритет:** P1; зависит от 003T/1 (PR #280 merged into main 1140b886).
+**Scope:** diagnostic Chromium CDP harness; без изменения production code или версии.
+
+### Обнаруженная причина
+
+В старом `browser-renderer-heap-sampler.mjs` timer poll пропускался,
+только когда уже имелась переменная `pending` от предыдущего таймерного poll.
+Асинхронный обязательный `snapshot('during-fill')` или
+`snapshot('after-fill')` занимал ту же serial queue, но не блокировал
+постановку в неё новых timer samples. В результате задержанный periodic read
+выдавался за допущенный timely poll, хотя был поставлен в очередь на
+занятом milestone. Это ограничивало интерпретацию `pollsSkippedBusy`.
+
+### Реализация
+
+- `tools/browser-renderer-heap-sampler.mjs`: считаем queuedSnapshots
+  при принятии каждого explicit или periodic snapshot, уменьшаем счётчик
+  после success **или** reject. Timer poll, увидев pending или queued
+  snapshot, увеличивает `pollsSkippedBusy` вместо постановки в очередь.
+  Нет unhandled rejection от cleanup и сохраняется serialized read ordering.
+- `tests/browser-sampling-timing.test.mjs`: два новых Node regression
+  сценария: активный и ожидающий milestone с тремя пропущенными ticks,
+  затем неудачный milestone освобождает busy guard и следующий timer poll
+  действительно выполняется.
+- `task/NEXT.md`, `task/README.md`, `task/003-tiled-content-aware.md`:
+  текущая очередь и зависимости обновлены.
+
+### Проверки и ограничения
+
+- Код и тесты в ветке
+  [fix/003t2-milestone-poll-busy-20261019](https://github.com/zeter1/ZeTer-Photo-Editor/tree/fix/003t2-milestone-poll-busy-20261019).
+- PR #280 (003T/1): [core CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39248237317),
+  [real-photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39248237320),
+  [merged main commit 1140b886](https://github.com/zeter1/ZeTer-Photo-Editor/commit/1140b886e598210a3b34ab946c03ce998db606b2).
+- Новый PR CI, merge и exact-main **не считать пройденными до readback**.
+- Зафиксированные read windows все ещё не являются атомарными замерами
+  всех процессов. `trueOperationPeakKnown:false`;
+  `workerPidMapping:'unknown'`; PSD/PSB Photoshop authored provenance
+  по [002B/2c](002b2c-photoshop-psb32-provenance.md) всё ещё BLOCKED.
+
+**Следующая 003T/2b:** контролируемая independent browser memory workload,
+проверка пропущенных short-lived target/PID, reused PID, реальная high-depth
+PSD16/PSB32 operation-peak методика или `unknown` с объяснением.
+**003T и Stage 003 остаются IN PROGRESS / OPEN.**
