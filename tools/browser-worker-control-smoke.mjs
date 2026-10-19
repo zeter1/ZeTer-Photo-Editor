@@ -28,10 +28,11 @@ export function validateIndependentWorkerControlEvidence(e){
     'unsupported operation peak or Worker PID attribution');
   const c=e.control;
   assert(c && Object.keys(c).sort().join(',')===[
-    'controlledAbsentAfterTerminate','controlledLiveTargetObserved',
+    'baselineWorkerTargetCount','controlledAbsentAfterTerminate','controlledLiveTargetObserved',
     'ephemeralMessageAcknowledged','gapMethod','periodicPollingDisabled',
     'workerReadyAcknowledged',
   ].sort().join(',') &&
+    Number.isSafeInteger(c.baselineWorkerTargetCount) && c.baselineWorkerTargetCount>=0 &&
     c.ephemeralMessageAcknowledged===true && c.workerReadyAcknowledged===true &&
     c.controlledLiveTargetObserved===true &&
     c.controlledAbsentAfterTerminate===true &&
@@ -50,13 +51,13 @@ export function validateIndependentWorkerControlEvidence(e){
     w.snapshotCoverage?.missingSamples===0 &&
     Array.isArray(w.milestones) && w.milestones.length===5 &&
     w.milestones.every((m,i)=>m.phase===phases[i]) &&
-    w.milestones[0].workerTargetCount===0 &&
-    w.milestones[1].workerTargetCount===0 &&
-    w.milestones[2].workerTargetCount>=1 &&
-    w.milestones[3].workerTargetCount===0 &&
-    w.milestones[4].workerTargetCount===0 &&
+    w.milestones[0].workerTargetCount===c.baselineWorkerTargetCount &&
+    w.milestones[1].workerTargetCount===c.baselineWorkerTargetCount &&
+    w.milestones[2].workerTargetCount>c.baselineWorkerTargetCount &&
+    w.milestones[3].workerTargetCount===c.baselineWorkerTargetCount &&
+    w.milestones[4].workerTargetCount===c.baselineWorkerTargetCount &&
     w.newTargetObservations>=1 && w.missingTargetObservations>=1 &&
-    w.uniqueWorkerTargetIds>=1 && w.provenWorkerTerminationCount===null &&
+    w.uniqueWorkerTargetIds>c.baselineWorkerTargetCount && w.provenWorkerTerminationCount===null &&
     w.workerPidMapping==='unknown',
     'real Worker samples do not establish live/absent transitions');
   assert(Array.isArray(w.targets) &&
@@ -81,11 +82,12 @@ export function validateIndependentWorkerControlEvidence(e){
     g.snapshotCoverage?.observedAdjacentTransitions===0 &&
     g.newTargetObservations===0 &&
     g.milestones?.length===3 &&
-    g.milestones[0].phase==='gap-before' && g.milestones[0].workerTargetCount===0 &&
+    g.milestones[0].phase==='gap-before' &&
+    g.milestones[0].workerTargetCount===c.baselineWorkerTargetCount &&
     g.milestones[1].phase==='gap-injected' &&
     g.milestones[1].workerTargetCount===null &&
     g.milestones[2].phase==='gap-after' &&
-    g.milestones[2].workerTargetCount>=1 &&
+    g.milestones[2].workerTargetCount>c.baselineWorkerTargetCount &&
     g.milestones[2].newlyObservedWorkerTargets===null,
     'CDP read gap must not claim observed Worker arrivals');
   const json=JSON.stringify(e);
@@ -202,12 +204,17 @@ async function runControl(){
       processClient:root,schedule:()=>0,unschedule:()=>{},intervalMs:50,
     });
     await sampler.start();
-    assert(workerCount(await getTargets(root))===0,'unexpected initial Worker targets in isolated profile');
+    const baselineIds=new Set((await getTargets(root)).filter(t=>workerTypes.has(t.type)).map(t=>t.targetId));
+    const baselineCount=baselineIds.size;
+    async function atBaseline(){
+      const ids=(await getTargets(root)).filter(t=>workerTypes.has(t.type)).map(t=>t.targetId);
+      return ids.length===baselineCount && ids.every(id=>baselineIds.has(id));
+    }
     // A real, acknowledged transient Worker can fall entirely between the two
     // explicit observations. Never infer zero Worker creations from zero IDs.
     await evalPage(page,'(() => { window.__zpeControl={shortDone:false,longReady:false}; const s="self.postMessage(1);self.close()"; const u=URL.createObjectURL(new Blob([s],{type:"text/javascript"})); const w=new Worker(u); w.onmessage=()=>{window.__zpeControl.shortDone=true;w.terminate();URL.revokeObjectURL(u)}; return true; })()');
     await until('short Worker acknowledgement',()=>evalPage(page,'window.__zpeControl?.shortDone===true'));
-    await until('short Worker removed from CDP',async()=>workerCount(await getTargets(root))===0);
+    await until('short Worker removed from CDP',atBaseline);
     await sampler.snapshot('short-worker-missed');
     const gap=createBrowserWorkerTargetTracker();
     gap.observe(await getTargets(root),'gap-before');
@@ -215,11 +222,12 @@ async function runControl(){
     gap.noteMissingSnapshot('gap-injected');
     await evalPage(page,'(() => {const s="self.payload=new Uint8Array(8*1024*1024);for(let i=0;i<self.payload.length;i+=4096)self.payload[i]=1;self.postMessage(1);setInterval(()=>{},1000)";const u=URL.createObjectURL(new Blob([s],{type:"text/javascript"}));const w=new Worker(u);window.__zpeControl.longWorker=w;window.__zpeControl.longUrl=u;w.onmessage=()=>{window.__zpeControl.longReady=true};return true})()');
     await until('live Worker acknowledgement',()=>evalPage(page,'window.__zpeControl?.longReady===true'));
-    await until('live real CDP Worker target',async()=>workerCount(await getTargets(root))>=1);
+    await until('live real CDP Worker target',async()=>
+      (await getTargets(root)).some(t=>workerTypes.has(t.type) && !baselineIds.has(t.targetId)));
     gap.observe(await getTargets(root),'gap-after');
     await sampler.snapshot('control-worker-live');
     await evalPage(page,'(() => {window.__zpeControl.longWorker.terminate();URL.revokeObjectURL(window.__zpeControl.longUrl);return true})()');
-    await until('terminated target absent from CDP',async()=>workerCount(await getTargets(root))===0);
+    await until('terminated target absent from CDP',atBaseline);
     await sampler.snapshot('control-worker-gone');
     const full=await sampler.stop();
     const memory={
@@ -232,7 +240,8 @@ async function runControl(){
     const result={
       kind:'zpe-independent-chromium-worker-control-v1',
       schemaVersion:1,origin:'real Chromium file:// temporary page',
-      control:{ephemeralMessageAcknowledged:true,workerReadyAcknowledged:true,
+      control:{baselineWorkerTargetCount:baselineCount,
+        ephemeralMessageAcknowledged:true,workerReadyAcknowledged:true,
         controlledLiveTargetObserved:true,controlledAbsentAfterTerminate:true,
         periodicPollingDisabled:true,gapMethod:'deliberately-skipped-cdp-target-snapshot'},
       memory,injectedGap:gap.report(),trueOperationPeakKnown:false,
