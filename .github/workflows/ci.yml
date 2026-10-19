@@ -109,6 +109,23 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # An isolated real Chromium file:// control establishes observed Worker
+      # target lifetime and an injected missing-CDP-read gap. No Worker->PID
+      # join, operation RSS peak, or process-exit inference is permitted.
+      - name: Chromium file Worker lifecycle control (003T/2b-2)
+        run: |
+          node tools/browser-worker-control-smoke.mjs "$RUNNER_TEMP/zpe-003t-worker-control.json"
+          node tools/browser-worker-control-smoke.mjs --verify "$RUNNER_TEMP/zpe-003t-worker-control.json"
+
+      - name: Upload independent Chromium Worker control receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-chromium-worker-control-003t2b2
+          path: ${{ runner.temp }}/zpe-003t-worker-control.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Profile tiled Content-Aware Fill (informational)
         run: node tools/profile-tiled-inpaint.mjs --sizes 8,24,48
 
