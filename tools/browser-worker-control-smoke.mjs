@@ -96,7 +96,7 @@ export function validateIndependentWorkerControlEvidence(e){
   return true;
 }
 
-function findChrome(){
+export function findChrome(){
   for(const bin of [process.env.CHROME_BIN,'/usr/bin/google-chrome',
     '/usr/bin/google-chrome-stable','/usr/bin/chromium','/usr/bin/chromium-browser',
     'google-chrome','chromium','chromium-browser'].filter(Boolean)){
@@ -116,7 +116,7 @@ async function until(label,fn,ms=12000){
   }
   throw new Error('003T Chromium control: timeout '+label+(last?': '+last.message:''));
 }
-function devtoolsUrl(browser){
+export function devtoolsUrl(browser){
   return new Promise((resolve,reject)=>{
     let stderr='';
     const timer=setTimeout(()=>{cleanup();reject(new Error('DevTools startup timeout: '+stderr.slice(-800)));},20000);
