@@ -1,6 +1,6 @@
 # 002B/1 — Pinned PhotoCraft Photoshop PSD16/PSD32 native embedded-composite oracle
 
-**Приоритет:** P0 (часть 002). **Статус:** IN PROGRESS (до подтверждения PR CI, merge и exact-main CI). **Дата:** 2026-10-19.
+**Приоритет:** P0 (часть 002). **Статус:** DONE (PR #271 merged, PR CI and exact-main CI success). **Дата:** 2026-10-19.
 
 ## Цель и зависимости
 Доказать на *независимо опубликованных* Adobe Photoshop-authored (по утверждению исходного автора) RGB16/PSD32 файлах, что ZeTer читает editable layer information и побитно сохраняет все native 16/32-bit значения Photoshop-embedded merged composite. Не смешивать PSD32 с PSB32.
@@ -20,15 +20,15 @@
 - `.github/workflows/ci.yml`: настоящий PR/main CI загружает **только** эти три файла из pinned immutable commit в `$RUNNER_TEMP`, проверяет SHA-256 в shell и независимо в Node, запускает oracle; отсутствие fixture/ошибка декодирования приводят к красному CI, без silent skip. 300 KiB binary fixtures не коммитятся.
 
 ## Проверки / CI
-- PR CI: **PENDING**. `npm run check` и Chromium `file://`: **не запускались локально** (в контейнере GitHub DNS недоступен). Проверять реальные результаты workflow до статуса DONE.
-- Main CI после merge: **PENDING**.
+- PR CI: **SUCCESS**, [run #39224424706](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39224424706): `npm run check`, real SHA-pinned Photoshop native oracle, Chromium `file://` general smoke, profiling and hygiene. Локально не запускалось: GitHub DNS недоступен.
+- **PR #271 MERGED** в [`main bc7f4c7`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/bc7f4c73391ce437e5aa65f34167b00f361040f8). **Exact-main CI SUCCESS** [run #39224795180](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39224795180).
 - Контракт проверки: точное совпадение native sample data после импорта Flattened Adobe embedded composite; layer section действительно импортируется; независимое чтение compressed preview из исходных bytes.
 
 ## Известные ограничения
 - Photoshop embedded composite — reference **для композитного payload**, не эталон повторного вычисления blending/adjustment layers редактором.
 - PSD32 **НЕ** PSB32. Нет разрешённого независимо Photoshop-authored PSB32, его reference render и полной формы `psd16+psb32` аудита.
 - Нет показателей browser `file://` для этих Photoshop fixtures, Undo/Redo и native Worker, ICC/CMYK calibrated truth или независимой ручной Photoshop review.
-- Рабочая ветка до подтверждения CI: тесты и документирование **не** означают завершения задачи 002B.
+- Подэтап 002B/1 **DONE** после проверки точного main SHA. Весь 002B **не завершён**: Photoshop-authored PSB32, browser Adobe PSD-specific сценарии, native Worker и render semantics остаются открыты.
 
 ## Следующая задача: 002B/2
-После green PR + exact-main CI 002B/1, найти и юридически подтвердить independently Photoshop-authored PSB32 с source URL/license/generator history/hash/reference, зафиксировать canonical dual-kind manifest, запустить существующий `audit-external-high-depth-corpus.mjs` → `profile-external-high-depth-psd-psb.mjs` с настоящим Worker → Chromium `file://` public import/preview/Undo/Redo/memory и semantic/render Adobe comparison. **Критерий:** независимое подтверждение происхождения, обе реальные high-depth разновидности и все gates green; до этого 002/002B остаётся открыта.
+Следующая **P0 002B/2 TODO**: найти и юридически подтвердить independently Photoshop-authored PSB32 с source URL/license/generator history/hash/reference, зафиксировать canonical dual-kind manifest, запустить существующий `audit-external-high-depth-corpus.mjs` → `profile-external-high-depth-psd-psb.mjs` с настоящим Worker → Chromium `file://` public import/preview/Undo/Redo/memory и semantic/render Adobe comparison. **Критерий:** независимое подтверждение происхождения, обе реальные high-depth разновидности и все gates green; до этого 002/002B остаётся открыта.
