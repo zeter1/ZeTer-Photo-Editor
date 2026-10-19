@@ -1,6 +1,6 @@
 # 037C-3b-3 — native Worker malformed reply / maxBytes fail-closed
 
-**Статус: /1 КОДОВАЯ ПРОХОДКА ЗАКРЫТА (2026-10-18); /2 genuine-photo Chromium malformed/maxBytes UI ЕЩЁ OPEN.**
+**Статус: DONE (2026-10-18): /1 + /2a + /2b-1 + /2b-2 genuine-photo Chromium malformed/maxBytes UI подтверждены. Следующая задача [037C-3c](037c3c-final-acceptance.md).**
 [PR #261](https://github.com/zeter1/ZeTer-Photo-Editor/pull/261) → [main 813ccbe](https://github.com/zeter1/ZeTer-Photo-Editor/commit/813ccbeb3b8974471453948d5ba315df98d5468e); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39127286740), [PR photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39127286483), [exact-main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39127667652), [exact-main photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39127667813) — все success. Эти реальные фото workflow проверяют предшествующую matrix без специальной инъекции malformed/maxBytes; /2 ещё не доказана.
 Эта проходка следует за закрытой [037C-3b-2b/3b-2b](037c3b-2b-3b-2b-photo-cancel-successor.md).
 Это *не* доказательство полного 037C или Photoshop-compatibility.
@@ -51,3 +51,9 @@
 - CI: `.github/workflows/real-photo-intake.yml` — две независимые Chromium сессии, сбор подписанных по именам файлов receipts и offline verifier.
 - **Ограничение доказательств:** в этом окружении отсутствуют локальная копия полного репозитория и pinned-photo bundle; `npm run check` и настоящий Chromium запуск локально не подтверждены. Дождаться реального PR CI, genuine-photo CI, merge и exact-main CI, записать URL и результат. До этого НЕ помечать критерии /2b-2 как DONE.
 - **Следующая:** после принятия зелёных CI и закрытия /2b-2 — задача 037C-3c final acceptance для матриц Worker/Undo/Redo/quality/memory/fail-closed и лишь затем остальной roadmap.
+
+## Окончательное закрытие 037C-3b-3 (2026-10-18)
+
+**037C-3b-3/2b-2 DONE (2026-10-18):** [PR #265](https://github.com/zeter1/ZeTer-Photo-Editor/pull/265) → [main 57e03278](https://github.com/zeter1/ZeTer-Photo-Editor/commit/57e03278b695f1b6e1729c3c28958164f8ba50e4); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39144583678), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39144583692), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39145086168), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39145086160). На реальных независимых frozen PSD16/PSB32 Chromium `file://` публичное дублирование high-depth слоёв снизило доступный лимит ниже `rawBytes`: публичный RangeError без native Worker/контент-заливки, 0 Fill History, native v2 unchanged; после публичного удаления копии повторная native заливка настоящим Worker, 8288px ROI, изменённые native v2 tiles и ровно один Fill History. Offline strict SHA-256 receipts и negative tamper suite; все прежние malformed-extra проверки сохранены. **037C-3b-3 DONE, next 037C-3c final acceptance OPEN.** Не означает 002 Adobe-authoring, Stage 003 global budget, ICC/CMYK, RAW/HDR, full Photoshop-compatibility.
+
+**Next:** [037C-3c final acceptance](037c3c-final-acceptance.md). Внешняя Photoshop/ICC/RAW матрица остаётся OPEN.
