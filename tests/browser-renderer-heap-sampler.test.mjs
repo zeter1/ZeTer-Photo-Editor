@@ -38,7 +38,7 @@ test('Stage 003: renderer sampler records actual CDP heap values without fragile
   assert.equal(stopped, true);
 });
 
-test('Stage 003: overlapping CDP polls, markers and stop are serialized in sample order', async () => {
+test('003T/2a: a poll overlapping explicit markers is skipped and snapshots retain serialized order', async () => {
   const release = [];
   let activeReads = 0, maxActiveReads = 0, reads = 0, cleared = 0;
   let triggerPoll;
@@ -71,7 +71,7 @@ test('Stage 003: overlapping CDP polls, markers and stop are serialized in sampl
   triggerPoll();
   const workerStage = sampler.snapshot('after-worker-preview');
   const stopping = sampler.stop();
-  for (let expectedReads = 2; expectedReads <= 5; expectedReads += 1) {
+  for (let expectedReads = 2; expectedReads <= 4; expectedReads += 1) {
     await nextTurn();
     assert.equal(reads, expectedReads, 'next CDP query starts after previous snapshot finishes');
     assert.equal(activeReads, 1);
@@ -81,10 +81,14 @@ test('Stage 003: overlapping CDP polls, markers and stop are serialized in sampl
   const report = await stopping;
   assert.equal(maxActiveReads, 1);
   assert.equal(cleared, 1);
-  assert.equal(report.sampleCount, 5);
+  assert.equal(report.sampleCount, 4);
+  assert.equal(report.samplingTiming.pollsAttempted,1);
+  assert.equal(report.samplingTiming.pollsSkippedBusy,1);
+  assert.equal(report.samplingTiming.periodicSamples,0,
+    'late periodic CDP reads must not be enqueued behind explicit milestones');
   assert.equal(report.baselineJsHeapUsedBytes, 110);
-  assert.equal(report.endJsHeapUsedBytes, 150);
-  assert.equal(report.sampledMaxJsHeapUsedBytes, 150);
+  assert.equal(report.endJsHeapUsedBytes, 140);
+  assert.equal(report.sampledMaxJsHeapUsedBytes, 140);
   assert.deepEqual(report.stages.map(stage => stage.phase),
     ['before-import', 'after-import-preview', 'after-worker-preview', 'finished']);
 });
