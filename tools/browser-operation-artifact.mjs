@@ -119,6 +119,7 @@ export async function verifyBrowserOperationArtifacts(directory) {
     if (JSON.stringify(artifact)!==JSON.stringify(expected) ||
         artifact.format!==format || artifact.outcome!==outcome ||
         artifact.timeline.memory.requestedSamplingIntervalMs!==50 ||
+        artifact.timeline.memory.samplingTiming == null ||
         artifact.timeline.memory.processChurn?.workerPidMapping!=='unknown' ||
         (artifact.timeline.memory.workerTargets && artifact.timeline.memory.workerTargets.workerPidMapping!=='unknown') ||
         artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null ||
