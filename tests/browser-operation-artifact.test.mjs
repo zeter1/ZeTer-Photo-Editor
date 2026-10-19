@@ -246,6 +246,10 @@ test('003T: CI operation artifact rejects invented sampling coverage or peak cla
   };
   p.memory.samplingTiming=timing;
   assert.equal(buildBrowserOperationArtifact(p).timeline.memory.samplingTiming.trueOperationPeakKnown,false);
+  assert.throws(()=>buildBrowserOperationArtifact({
+    ...p,origin:'real Chromium file:// UI + native Worker',
+    memory:{...p.memory,samplingTiming:null},
+  }),/missing real sampling timing coverage/);
   for(const changed of [
     {trueOperationPeakKnown:true},{workerPidMapping:'pid:123'},
     {pollsSkippedBusy:2},{snapshotCount:3},{maxReadDurationMs:121},
