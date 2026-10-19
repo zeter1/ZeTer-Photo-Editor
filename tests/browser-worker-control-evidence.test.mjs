@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validateIndependentWorkerControlEvidence} from '../tools/browser-worker-control-smoke.mjs';
+import {validateIndependentWorkerControlEvidence,workerTargetsMatchBaseline} from '../tools/browser-worker-control-smoke.mjs';
 import {createBrowserWorkerTargetTracker} from '../tools/browser-worker-target-census.mjs';
 import {summarizeBrowserSamplingTiming} from '../tools/browser-sampling-timing.mjs';
 
@@ -89,4 +89,28 @@ test('003T/2b-2: a skipped CDP target observation cannot establish a PID or targ
   assert.equal(report.snapshotCoverage.missingSamples,1);
   assert.equal(report.workerPidMapping,'unknown');
   assert.equal(report.provenWorkerTerminationCount,null);
+});
+
+test('003T/2f: delayed short-Worker CDP cleanup requires an observed clean controller snapshot',()=>{
+  const baseline=new Map([['initial-worker','worker']]);
+  const page={targetId:'controller-page',type:'page'};
+  const original={targetId:'initial-worker',type:'worker'};
+  const transient={targetId:'short-worker',type:'worker'};
+  assert.equal(workerTargetsMatchBaseline([page,original,transient],baseline,page.targetId),false,
+    'an acknowledged Worker can remain a visible CDP target');
+  assert.equal(workerTargetsMatchBaseline([page,original],baseline,page.targetId),true);
+  assert.equal(workerTargetsMatchBaseline([page],baseline,page.targetId),false,
+    'lost baseline Worker is not successful cleanup');
+  assert.equal(workerTargetsMatchBaseline([page,{...original,type:'shared_worker'}],
+    baseline,page.targetId),false,'reused target identity with different type is unknown');
+  assert.throws(()=>workerTargetsMatchBaseline([],baseline,page.targetId),
+    /omitted controller page/,'missing or dropped CDP observations cannot prove absence');
+  assert.throws(()=>workerTargetsMatchBaseline([original],baseline,page.targetId),
+    /omitted controller page/);
+  assert.throws(()=>workerTargetsMatchBaseline([page,original,original],baseline,page.targetId),
+    /duplicated CDP target/);
+  assert.throws(()=>workerTargetsMatchBaseline([{targetId:'',type:'page'}],
+    baseline,page.targetId),/CDP target identity/);
+  assert.throws(()=>workerTargetsMatchBaseline(null,baseline,page.targetId),
+    /baseline arguments/);
 });
