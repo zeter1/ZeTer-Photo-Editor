@@ -1,7 +1,6 @@
 // 003T/2c: independent Linux OS-process lifetime evidence for a real
 // Chromium file:// launch. The spawned process is NOT an identified Worker PID,
 // and process-lifetime RSS/HWM never establishes an operation peak.
-import {existsSync} from 'node:fs';
 import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
@@ -140,10 +139,16 @@ async function runRealControl(){
     const pid=chrome.pid;
     const closed=once(chrome,'close');
     assert(chrome.kill('SIGTERM')===true,'SIGTERM not delivered to Chromium launcher');
-    const [exitCode,signalObserved]=await Promise.race([
-      closed,new Promise((_,reject)=>setTimeout(()=>reject(
-        new Error('Chromium launcher did not exit after SIGTERM')),12000)),
-    ]);
+    let closeTimeout;
+    let exitCode,signalObserved;
+    try{
+      [exitCode,signalObserved]=await Promise.race([
+        closed,new Promise((_,reject)=>{closeTimeout=setTimeout(()=>reject(
+          new Error('Chromium launcher did not exit after SIGTERM')),12000);}),
+      ]);
+    }finally{
+      clearTimeout(closeTimeout);
+    }
     assert(exitCode===null && signalObserved==='SIGTERM','unexpected Chromium termination');
     const probed=await probeLinuxPid(pid);
     assert(probed.availability!=='unavailable','post-close /proc unreadable');
