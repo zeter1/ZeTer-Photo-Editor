@@ -141,9 +141,9 @@ test('Stage 003: poll failures fail the profile and clear the interval', async (
 test('Stage 003: browser-level CDP process private memory samples retain real values and counts', async () => {
   const used = [150, 170, 160];
   const processes = [
-    [{ type:'browser', privateMemory:300 }, { type:'renderer', privateMemory:200 }],
-    [{ type:'browser', privateMemory:320 }, { type:'renderer', privateMemory:280 }, { type:'utility', privateMemory:40 }],
-    [{ type:'browser', privateMemory:310 }, { type:'renderer', privateMemory:230 }],
+    [{ id:11, type:'browser', privateMemory:300 }, { id:12, type:'renderer', privateMemory:200 }],
+    [{ id:11, type:'browser', privateMemory:320 }, { id:12, type:'renderer', privateMemory:280 }, { id:13, type:'utility', privateMemory:40 }],
+    [{ id:11, type:'browser', privateMemory:310 }, { id:12, type:'renderer', privateMemory:230 }],
   ];
   let heapCalls = 0, processCalls = 0;
   const pageClient = { async send(method) {
@@ -179,7 +179,7 @@ test('Stage 003: browser-level CDP process private memory samples retain real va
 
 test('Stage 003: missing/unsupported browser process counters never fake RAM or abort heap sampling', async () => {
   for (const response of [
-    { processInfo:[{ type:'browser', privateMemory:100 }, { type:'renderer' }] },
+    { processInfo:[{ id:11, type:'browser', privateMemory:100 }, { id:12, type:'renderer' }] },
     new Error('SystemInfo.getProcessInfo: Method not found'),
   ]) {
     let queries = 0, metrics = 0;
@@ -212,6 +212,94 @@ test('Stage 003: missing/unsupported browser process counters never fake RAM or 
     assert.equal(report.chromiumProcesses.sampledIncreaseBytes, null);
     assert.match(report.chromiumProcesses.unavailableReason, /privateMemory|Method not found/);
   }
+});
+
+test('003S: invalid or duplicate CDP PID cannot produce false privateMemory/RSS aggregates', async () => {
+  for (const invalid of [
+    [{id:7,type:'browser',privateMemory:100}, {id:7,type:'renderer',privateMemory:200}],
+    [{id:7,type:'browser',privateMemory:100}, {id:0,type:'renderer',privateMemory:200}],
+    [{id:7,type:'browser',privateMemory:100}, {type:'renderer',privateMemory:200}],
+    [{id:7,type:'browser',privateMemory:100}, {id:7.5,type:'renderer',privateMemory:200}],
+  ]) {
+    let processCalls = 0, rssCalls = 0, heapCalls = 0;
+    const sampler = createBrowserRendererHeapSampler({
+      async send(method) {
+        if (method === 'Performance.enable') return {};
+        assert.equal(method,'Performance.getMetrics');
+        heapCalls++;
+        return {metrics:[{name:'JSHeapUsedSize',value:10},
+          {name:'JSHeapTotalSize',value:20}]};
+      },
+    }, {
+      processClient:{async send(method) {
+        if (method === 'Target.getTargets') return {targetInfos:[]};
+        assert.equal(method,'SystemInfo.getProcessInfo');
+        processCalls++;
+        return {processInfo:invalid};
+      }},
+      processRssSampler:async () => { rssCalls++; throw Error('must not read /proc with invalid PID'); },
+      schedule:()=>1, unschedule:()=>{},
+    });
+    await sampler.start();
+    const report = await sampler.stop();
+    assert.equal(processCalls,1,'a poisoned snapshot must not be retried');
+    assert.equal(rssCalls,0,'never sample partial/duplicate process set');
+    assert.equal(heapCalls,2,'main-frame heap sampling continues');
+    assert.equal(report.browserWorkerTargets.availability,'sampled');
+    assert.equal(report.chromiumProcesses.availability,'unavailable');
+    assert.equal(report.linuxProcessRss.availability,'unavailable');
+    assert.equal(report.chromiumProcesses.sampleCount,0);
+    assert.equal(report.linuxProcessRss.sampleCount,0);
+    assert.equal(report.chromiumProcesses.sampledMaxPrivateBytes,null);
+    assert.equal(report.linuxProcessRss.sampledMaxAggregateRssBytes,null);
+    assert.equal(report.chromiumProcesses.endPrivateBytes,null);
+    assert.equal(report.linuxProcessRss.endAggregateRssBytes,null);
+    assert.match(report.chromiumProcesses.unavailableReason,/CDP PID/);
+    assert.match(report.linuxProcessRss.unavailableReason,/CDP PID/);
+    assert.equal(report.chromiumProcessLifecycle.snapshotCoverage.observedSamples,0);
+    assert.equal(report.linuxProcessIdentity.snapshotCoverage.observedSamples,0);
+    assert.equal(report.chromiumProcessLifecycle.workerPidMapping,'unknown');
+  }
+});
+
+test('003S: invalid final CDP PID snapshot does not reuse a stale memory end value', async () => {
+  let reads=0, rssCalls=0;
+  const sampler=createBrowserRendererHeapSampler({
+    async send(method) {
+      if (method==='Performance.enable') return {};
+      return {metrics:[{name:'JSHeapUsedSize',value:20},
+        {name:'JSHeapTotalSize',value:40}]};
+    },
+  }, {
+    processClient:{async send(method) {
+      if (method==='Target.getTargets') return {targetInfos:[]};
+      reads++;
+      return {processInfo:reads===1
+        ? [{id:7,type:'browser',privateMemory:100}]
+        : [{id:7,type:'browser',privateMemory:100},
+           {id:7,type:'renderer',privateMemory:200}]};
+    }},
+    processRssSampler:async () => {
+      rssCalls++;
+      return {supported:true,processCount:1,
+        aggregateRssBytes:500,largestProcessHighWaterBytes:600};
+    },
+    schedule:()=>1,unschedule:()=>{},
+  });
+  await sampler.start();
+  const report=await sampler.stop();
+  assert.equal(rssCalls,1);
+  assert.equal(report.chromiumProcesses.sampleCount,1);
+  assert.equal(report.chromiumProcesses.baselinePrivateBytes,100);
+  assert.equal(report.chromiumProcesses.endPrivateBytes,null);
+  assert.equal(report.chromiumProcesses.sampledIncreaseBytes,0);
+  assert.equal(report.linuxProcessRss.baselineAggregateRssBytes,500);
+  assert.equal(report.linuxProcessRss.endAggregateRssBytes,null);
+  assert.equal(report.linuxProcessRss.sampleCount,1);
+  assert.deepEqual(report.metricCoverage.chromiumPrivateMemory.missingMilestonePhases,['finished']);
+  assert.deepEqual(report.metricCoverage.linuxAggregateRss.missingMilestonePhases,['finished']);
+  assert.equal(report.chromiumProcessLifecycle.snapshotCoverage.observedAtFinish,false);
+  assert.equal(report.linuxProcessIdentity.snapshotCoverage.observedAtFinish,false);
 });
 
 import { sampleLinuxChromiumRss } from '../tools/browser-linux-process-rss.mjs';
