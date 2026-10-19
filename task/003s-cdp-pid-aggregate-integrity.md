@@ -1,6 +1,6 @@
 # 003S — CDP PID integrity before Chromium memory aggregation
 
-**Приоритет:** P1, Stage 003. **Статус:** IN PROGRESS (2026-10-19).
+**Приоритет:** P1, Stage 003. **Статус:** DONE (2026-10-19).
 **Зависимости:** 003R DONE, 024/025/026/027/028/031 memory evidence реализованы.
 **Базовая ветка:** `main` at `0fb513ba3792009155e5e5c6f6e6c5203824d731`.
 **Ветка:** [fix/stage003-cdp-pid-integrity-20261019](https://github.com/zeter1/ZeTer-Photo-Editor/tree/fix/stage003-cdp-pid-integrity-20261019).
@@ -27,9 +27,9 @@ RAM-счётчика необоснованно расходились в пра
   `privateMemory` не блокирует реальный Linux RSS.
 - [x] Regression tests: four classes poisoned PID and valid baseline →
   duplicate PID at finish, no RSS reads for bad set.
-- [ ] `npm run check`, Chromium `file://` PSD16/PSB32, artifact verification
-  и generated parity реально прошли на PR CI.
-- [ ] PR review/merge и exact-main CI на конкретном SHA.
+- [x] `npm run check`, Chromium `file://` PSD16/PSB32, artifact verification
+  и generated parity прошли на PR CI.
+- [x] PR #278 слит и exact-main CI успешен на SHA `4ea1f59e6179f882d0c249dd4a6d0f49aae5e2ec`.
 
 ## Изменённые файлы
 
@@ -58,13 +58,13 @@ RAM-счётчика необоснованно расходились в пра
 process read при недоступном `privateMemory`; с валидными PID чтение
 должно продолжаться ради независимого Linux RSS. Исправлено в
 [commit a168994](https://github.com/zeter1/ZeTer-Photo-Editor/commit/a168994040c1d9ef3501b6267f5b8b445c378846).
-**Repeat PR CI, merge, exact-main:** pending; не заявлять success заранее.
+**Final PR CI: [run 39240146195](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39240146195) success**, включая Node, Chromium `file://`, реальный browser operation JSON, profiles и generated parity. **Merge:** [PR #278](https://github.com/zeter1/ZeTer-Photo-Editor/pull/278) squash → [main 4ea1f59](https://github.com/zeter1/ZeTer-Photo-Editor/commit/4ea1f59e6179f882d0c249dd4a6d0f49aae5e2ec). **Exact-main CI:** [run 39240633050](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39240633050) success on exact merge SHA. This verifies only 003S, not Stage 003.
 
 ## Что осталось и следующая работа
 
 1. Проверить PR CI, Chromium `file://` и артефакты; устранить нарушения,
    затем (при разрешённом зелёном gate) merge и exact-main verification.
-2. **P1 / [003](003-tiled-content-aware.md)**: методика operation memory
+2. **P1 / [003T](003t-operation-memory-evidence.md)**: методика operation memory
    evidence для реальных high-depth browser операций; отдельно документированная
    PID attribution, если CDP действительно даёт проверяемое соответствие;
    иначе `workerPidMapping:'unknown'`.
