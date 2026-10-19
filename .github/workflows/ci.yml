@@ -46,6 +46,27 @@ jobs:
       - name: Verify generated browser artifacts are current
         run: git diff --exit-code -- src/app.bundle.js index.html version.json
 
+      # Only the three small PSDs used here are downloaded. Each URL is pinned to
+      # the published corpus commit, and every byte is independently SHA-256 checked.
+      # Source authorship is a published upstream claim, not our certification.
+      - name: Verify pinned Photoshop-authored PSD16 and PSD32 merged composites
+        run: |
+          set -euo pipefail
+          corpus="$RUNNER_TEMP/zpe-photocraft-corpus"
+          mkdir -p "$corpus/rgb16" "$corpus/rgb32"
+          rev="b2e1dcba8954efa9ad0e7944c258cc0e9a5efc1e"
+          root="https://raw.githubusercontent.com/storytold/photocraft-corpus/$rev/photoshop/adjustments"
+          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \\
+            "$root/rgb16/baseline-layer-copy.psd" -o "$corpus/rgb16/baseline-layer-copy.psd"
+          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \\
+            "$root/rgb16/levels.psd" -o "$corpus/rgb16/levels.psd"
+          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \\
+            "$root/rgb32/baseline-layer-copy.psd" -o "$corpus/rgb32/baseline-layer-copy.psd"
+          echo "f31e10d19689df9dba71ebdc60652b28eb364ad8da9040a80bc5aeffcf34228e  $corpus/rgb16/baseline-layer-copy.psd" | sha256sum -c -
+          echo "fbb18d1cfa5fc74cf1c4777b99acdc2465b2920574bd9069b5a2ac129c8151d9  $corpus/rgb16/levels.psd" | sha256sum -c -
+          echo "73199414108280d7717cc5c908a76f51c5e3091d7471e21e7d0bac1a75734f32  $corpus/rgb32/baseline-layer-copy.psd" | sha256sum -c -
+          node tools/verify-photocraft-candidates.mjs --dir "$corpus"
+
       - name: Browser smoke (file://)
         run: npm run test:browser
         env:
