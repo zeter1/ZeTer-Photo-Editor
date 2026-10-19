@@ -67,6 +67,23 @@ jobs:
           echo "73199414108280d7717cc5c908a76f51c5e3091d7471e21e7d0bac1a75734f32  $corpus/rgb32/baseline-layer-copy.psd" | sha256sum -c -
           node tools/verify-photocraft-candidates.mjs --dir "$corpus"
 
+      # An independent PSB32 test corpus, not verified to have been authored
+      # in Photoshop. Immutable upstream commit + exact SHA-256, never main.
+      - name: Verify independently published psd-tools RGB32 PSB candidates
+        run: |
+          set -euo pipefail
+          corpus="$RUNNER_TEMP/zpe-psdtools-psb32"
+          mkdir -p "$corpus"
+          rev="c49b17525254d84c89ab42d1cb0316402ddb89b8"
+          root="https://raw.githubusercontent.com/psd-tools/psd-tools/$rev/tests/psd_files"
+          curl -fsSL --retry 3 --max-time 45 "$root/32bit.psb" -o "$corpus/32bit.psb"
+          curl -fsSL --retry 3 --max-time 45 "$root/32bit.psd" -o "$corpus/32bit.psd"
+          curl -fsSL --retry 3 --max-time 45 "$root/32bit5x5.psb" -o "$corpus/32bit5x5.psb"
+          echo "232bde4537492a671d22b7ff7025a786bc8110677ce5add180103f977be4f5ee  $corpus/32bit.psb" | sha256sum -c -
+          echo "78dd96ec74960a392db0a3bf4193478d62adfa5d93634ab7ce8a40e4468df5e1  $corpus/32bit.psd" | sha256sum -c -
+          echo "cd506872a4b1dc48bf7f64e10d321b99ea950c557cd3a83e303288e8ef6bf481  $corpus/32bit5x5.psb" | sha256sum -c -
+          node tools/verify-psdtools-psb32-candidates.mjs --dir "$corpus"
+
       - name: Browser smoke (file://)
         run: npm run test:browser
         env:
