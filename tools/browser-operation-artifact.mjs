@@ -143,8 +143,12 @@ export async function verifyBrowserOperationArtifacts(directory) {
            !['before-first-fill','after-large-worker-preview','after-first-undo',
              'after-large-undo-redo','before-cancel-fill','after-large-mid-kernel-cancel',
              'before-retry-fill','after-retry-undo',
-             'after-large-mid-kernel-recovered-redo'].every(phase =>
-               artifact.timeline.memory.incarnationWindowAudit.windows.some(w => w.phase === phase)))) ||
+             'after-large-mid-kernel-recovered-redo'].reduce((last,phase) => {
+               if (last < 0) return -1;
+               const next=artifact.timeline.memory.incarnationWindowAudit.windows.findIndex(
+                 (w,index) => index >= last && w.phase === phase);
+               return next >= 0 ? next+1 : -1;
+             },0))) ||
         artifact.timeline.memory.processChurn?.workerPidMapping!=='unknown' ||
         (artifact.timeline.memory.workerTargets && artifact.timeline.memory.workerTargets.workerPidMapping!=='unknown') ||
         artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null ||
