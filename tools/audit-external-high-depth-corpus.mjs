@@ -73,6 +73,42 @@ export function inspectExternalHighDepthHeader(bytes) {
   return { version, channels, width, height, bitsPerChannel, colorMode };
 }
 
+// Parse only top-level PSD/PSB length envelopes on the same pinned descriptor
+// that was hashed. BigInt keeps PSB uint64 lengths exact before bounding them
+// by the already-limited fixture size. This does not decode the layer section
+// or prove that the composite payload is complete or Photoshop-renderable.
+async function inspectExternalHighDepthSections(handle, bytes, version, label) {
+  let offset = 26;
+  async function readSmall(length, section) {
+    if (offset > bytes - length) fail(label + '.sections', 'truncated ' + section);
+    const data = Buffer.alloc(length);
+    let copied = 0;
+    while (copied < length) {
+      const { bytesRead } = await handle.read(data, copied, length - copied, offset + copied);
+      if (!bytesRead) fail(label + '.sections', 'truncated ' + section);
+      copied += bytesRead;
+    }
+    offset += length;
+    return data;
+  }
+  for (const [section, lengthBytes] of [
+    ['color-mode data', 4], ['image resources', 4],
+    ['layer/mask data', version === 2 ? 8 : 4],
+  ]) {
+    const lengthData = await readSmall(lengthBytes, section + ' length');
+    const declared = lengthBytes === 8 ? lengthData.readBigUInt64BE(0)
+      : BigInt(lengthData.readUInt32BE(0));
+    if (declared > BigInt(bytes - offset)) {
+      fail(label + '.sections', section + ' exceeds file bounds');
+    }
+    offset += Number(declared);
+  }
+  const compression = (await readSmall(2, 'merged image compression')).readUInt16BE(0);
+  if (compression > 3) fail(label + '.sections', 'invalid merged image compression');
+  if (offset === bytes) fail(label + '.sections', 'missing merged image payload');
+  return compression;
+}
+
 export async function auditExternalHighDepthCorpus(manifestPath) {
   if (typeof manifestPath !== 'string' || !manifestPath.trim()) fail('manifest', 'path required');
   const absoluteManifest = resolve(manifestPath);
@@ -160,6 +196,7 @@ export async function auditExternalHighDepthCorpus(manifestPath) {
     const headerBytes = Buffer.alloc(27);
     const digest = createHash('sha256');
     let headerLength = 0, streamedBytes = 0;
+    let hash, header, imageCompression;
     try {
       const opened = await handle.stat();
       if (!sameFile(info, opened)) fail(id + '.file', 'file replaced before open');
@@ -179,18 +216,22 @@ export async function auditExternalHighDepthCorpus(manifestPath) {
       if (!sameFile(opened, finished) || !sameFile(opened, pathname)) {
         fail(id + '.file', 'file replaced during stream');
       }
+      hash = digest.digest('hex');
+      if (hash !== item.sha256) fail(id + '.sha256', 'SHA-256 mismatch');
+      header = inspectExternalHighDepthHeader(headerBytes);
+      if (header.version !== kind.version || header.bitsPerChannel !== kind.bitsPerChannel ||
+          header.width !== width || header.height !== height ||
+          header.channels !== channels || header.colorMode !== colorMode) {
+        fail(id + '.header', 'raw header does not match pinned manifest metadata');
+      }
+      imageCompression = await inspectExternalHighDepthSections(handle, streamedBytes, header.version, id);
+      if (!sameFile(opened, await handle.stat()) || !sameFile(opened, await lstat(path))) {
+        fail(id + '.file', 'file replaced during section read');
+      }
     } finally {
       await handle.close();
     }
-    const hash = digest.digest('hex');
-    if (hash !== item.sha256) fail(id + '.sha256', 'SHA-256 mismatch');
-    const header = inspectExternalHighDepthHeader(headerBytes);
-    if (header.version !== kind.version || header.bitsPerChannel !== kind.bitsPerChannel ||
-        header.width !== width || header.height !== height ||
-        header.channels !== channels || header.colorMode !== colorMode) {
-      fail(id + '.header', 'raw header does not match pinned manifest metadata');
-    }
-    results.push({ id, file, sha256:hash, bytes:streamedBytes, ...header,
+    results.push({ id, file, sha256:hash, bytes:streamedBytes, ...header, imageCompression,
       sourceUrl:item.sourceUrl, license:item.license, licenseUrl:item.licenseUrl,
       sourceApplication:item.sourceApplication });
   }
@@ -198,7 +239,7 @@ export async function auditExternalHighDepthCorpus(manifestPath) {
     schema:SCHEMA,
     passed:true,
     fixtures:results,
-    limitations:'Header/hash/declared provenance preflight only. Photoshop authorship, license rights, full PSD/PSB decode, rendering, UI Worker, and RAM usage require separate evidence.',
+    limitations:'Header/hash/top-level section bounds/declared provenance preflight only. Photoshop authorship, license rights, full PSD/PSB decode, rendering, UI Worker, and RAM usage require separate evidence.',
   };
 }
 
