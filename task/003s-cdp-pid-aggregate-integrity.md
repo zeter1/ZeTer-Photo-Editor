@@ -52,7 +52,13 @@ RAM-счётчика необоснованно расходились в пра
 никакого доказательства exact operation RSS peak или Worker target→Linux PID.
 Недостоверные process counters теперь явно `unavailable`, а не 0.
 
-**PR/CI:** pending; дополнить ссылками и exact statuses после проверки.
+**PR:** [#278](https://github.com/zeter1/ZeTer-Photo-Editor/pull/278).
+**First PR CI:** [run 39239929470](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39239929470) **failure**:
+1372/1373 Node tests passed. Старый тест ошибочно ожидал один CDP
+process read при недоступном `privateMemory`; с валидными PID чтение
+должно продолжаться ради независимого Linux RSS. Исправлено в
+[commit a168994](https://github.com/zeter1/ZeTer-Photo-Editor/commit/a168994040c1d9ef3501b6267f5b8b445c378846).
+**Repeat PR CI, merge, exact-main:** pending; не заявлять success заранее.
 
 ## Что осталось и следующая работа
 
