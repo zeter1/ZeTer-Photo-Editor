@@ -1,3 +1,7 @@
+## 2026-10-19 — 002B/2a Photoshop PSD16/PSD32 real browser native source acceptance (IN PROGRESS)
+
+- [Карточка 002B/2a](002b2-photoshop-browser-native.md): публичный `file://` File Open PSD → Save Project, полного canonical 16/32-bit raster source SHA-256 против original Photoshop-published raster decoder, v1/v2 tile coverage; три pinned Photoshop PSD, unit tamper cases, CI input reuse. Пока только ветка: PR CI/merge/exact-main НЕ подтверждены. **Это не PSB32 и не Photoshop-render parity**; обязательный original licensed PSB32 всё ещё OPEN.
+
 ## 2026-10-19 — 002B/1 DONE after PR and exact-main CI
 
 - [PR #271](https://github.com/zeter1/ZeTer-Photo-Editor/pull/271) → [`bc7f4c7`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/bc7f4c73391ce437e5aa65f34167b00f361040f8). [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39224424706); [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39224795180). 3 genuine independently published pinned Photoshop (upstream claim) PSD16/PSD32 assets: downloaded bytes SHA-256 confirmed in CI, `decodePsd` layered import, every native merged composite RGBA sample against independent reference raw/RLE/ZIP oracle. General Node/browser `file://` smoke green (не specific Photoshop browser test).
