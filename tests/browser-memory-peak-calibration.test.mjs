@@ -20,7 +20,7 @@ const fixture=()=>({
   gap:{availability:'not-observed',
     reason:'no-continuous-proc-monitor-between-acknowledgements',periodicSamples:0},
   trueOperationPeakKnown:false,workerPidMapping:'unknown',
-  limitations:'Process-lifetime VmHWM is not operation peak; this is not Chromium and cannot identify Worker PID.',
+  limitations:'process-lifetime VmHWM is not operation peak; this is not Chromium and cannot identify Worker PID.',
 });
 
 test('003T/2d-1: control and operation samples are accepted without claiming a true peak',()=>{
