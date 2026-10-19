@@ -73,6 +73,7 @@ test('037C-3a: no forged peak, PID binding, missing coverage, invalid sample or 
     o=>{o.report.browserWorkerTargets.availability='estimated';},
     o=>{o.report.processPeakRssBytes=7000;},
     o=>{o.report.stages.splice(3,1);},
+    o=>{delete o.report.samplingTiming;},
   ];
   for(const change of mutations){
     const w=worker(),o=observation(w);change(o);
@@ -87,4 +88,13 @@ test('037C-3a: duplicates, missing runs and spliced Worker references are reject
   assert.throws(()=>validateRealPhotoMemoryObservationSet(dup,workers),/duplicate/);
   const tampered=structuredClone(originals);tampered[0].runIndex=3;
   assert.throws(()=>validateRealPhotoMemoryObservationSet(tampered,workers),/unlinked Worker/);
+});
+
+test('003T: genuine-photo receipt rejects forged timing peak and impossible poll gap',()=>{
+  const w=worker(),o=observation(w);
+  o.report.samplingTiming.trueOperationPeakKnown=true;
+  assert.throws(()=>validateRealPhotoMemoryObservation(o,w),/Browser sampling timing/);
+  o.report.samplingTiming.trueOperationPeakKnown=false;
+  o.report.samplingTiming.maxBetweenReadWindowsMs=300;
+  assert.throws(()=>validateRealPhotoMemoryObservation(o,w),/Browser sampling timing/);
 });
