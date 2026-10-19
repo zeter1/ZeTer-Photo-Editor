@@ -1,6 +1,6 @@
 # 002B/2a — Photoshop-published PSD16/PSD32 Chromium native-layer parity
 
-**Приоритет:** P0, часть открытого 002B/2. **Статус:** IN PROGRESS. **Дата:** 2026-10-19.
+**Приоритет:** P0, часть открытого 002B/2. **Статус:** DONE (PR #273 merged; PR and exact-main general CI success). **Дата:** 2026-10-19.
 
 ## Цель
 
@@ -23,4 +23,4 @@
 
 ## Текущая проверка
 
-PR, CI, merge и exact-main ещё не подтверждены. Локальный `npm run check` недоступен без checkout: GitHub DNS в окружении отсутствует. Не закрывать подэтап до зелёных checks.
+[PR #273](https://github.com/zeter1/ZeTer-Photo-Editor/pull/273) merged как [main 996fd1c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/996fd1cc7b4b03c7ae0b863d57a7276fa5234ff1). [PR CI #39230304359](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39230304359), [PR real-photo #39230304433](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39230304433), [exact-main CI #39230928368](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39230928368) SUCCESS. Exact-main real-photo CI #39230928344 ещё не проверен. Локальный `npm run check` недоступен без checkout: GitHub DNS в окружении отсутствует. Не закрывать подэтап до зелёных checks.
