@@ -86,3 +86,67 @@ test('003T: inconsistent, unbounded or fabricated timing is rejected before publ
   assert.throws(()=>summarizeBrowserSamplingTiming([
     samples[0],{...samples[1],elapsedMs:17},samples[2]],2,1),/non-monotonic/);
 });
+
+
+test('003T/2a: long explicit milestone and queued marker skip timer polls instead of creating delayed periodic reads',async()=>{
+  let clock=0, tick, release;
+  let signalRead;
+  const reading=new Promise(resolve=>{signalRead=resolve;});
+  let block=false;
+  const client={async send(method) {
+    if (method==='Performance.enable') return {};
+    assert.equal(method,'Performance.getMetrics');
+    if (block) {
+      signalRead();
+      await new Promise(resolve=>{release=resolve;});
+    }
+    clock+=5;
+    return {metrics:[{name:'JSHeapUsedSize',value:100},{name:'JSHeapTotalSize',value:200}]};
+  }};
+  const sampler=createBrowserRendererHeapSampler(client,{
+    now:()=>clock,
+    schedule(fn){tick=fn;return 1;},
+    unschedule(){},
+  });
+  await sampler.start(); // baseline [0,5]
+  const slow=sampler.snapshot('during-fill');
+  const queued=sampler.snapshot('after-fill');
+  block=true;
+  // Explicit reads were claimed above, even if their CDP work has not
+  // entered yet; both timer ticks must be counted as skipped.
+  tick();tick();
+  await reading;
+  tick(); // still in-flight, after a queued stage marker
+  block=false;release();
+  await Promise.all([slow,queued]);
+  const report=await sampler.stop();
+  assert.equal(report.sampleCount,4); // baseline, two markers, final
+  assert.equal(report.samplingTiming.periodicSamples,0);
+  assert.equal(report.samplingTiming.pollsAttempted,3);
+  assert.equal(report.samplingTiming.pollsSkippedBusy,3);
+  assert.equal(report.samplingTiming.trueOperationPeakKnown,false);
+  assert.equal(validateBrowserSamplingTiming(report.samplingTiming,4),true);
+});
+
+test('003T/2a: rejected milestone releases the busy guard for later periodic polls',async()=>{
+  let clock=0, tick, requests=0;
+  const sampler=createBrowserRendererHeapSampler({
+    async send(method) {
+      if(method==='Performance.enable')return {};
+      assert.equal(method,'Performance.getMetrics');
+      requests++;
+      if (requests===2) throw new Error('transient marker failure');
+      clock+=2;
+      return {metrics:[{name:'JSHeapUsedSize',value:10},{name:'JSHeapTotalSize',value:20}]};
+    },
+  },{now:()=>clock,schedule(fn){tick=fn;return 1;},unschedule(){}});
+  await sampler.start();
+  await assert.rejects(sampler.snapshot('failed-marker'),/transient marker failure/);
+  tick(); // must be admitted after failed explicit marker
+  await new Promise(resolve=>setImmediate(resolve));
+  const report=await sampler.stop();
+  assert.equal(report.sampleCount,3);
+  assert.equal(report.samplingTiming.periodicSamples,1);
+  assert.equal(report.samplingTiming.pollsSkippedBusy,0);
+  assert.equal(validateBrowserSamplingTiming(report.samplingTiming,3),true);
+});
