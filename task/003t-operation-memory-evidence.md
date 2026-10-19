@@ -533,3 +533,18 @@ If runner cannot delegate a dedicated group, record the precise permission
 failure and mark isolation BLOCKED while sampled measurements stay
 informational; never rebrand shared `memory.current` as operation peak.
 P0 **002B/2c BLOCKED** on authenticated licensed Photoshop-created PSB32.
+
+## 2026-10-19 — 003T/2d-3: real runner delegation and controlled child migration (IN PROGRESS)
+
+**Priority:** P1, **dependency:** 003T/2d-2 real shared runner cgroup CI [#292](https://github.com/zeter1/ZeTer-Photo-Editor/pull/292). **Goal:** distinguish inability to create a fresh delegated cgroup on the actual runner from a *verified, but limited* disposable child move; neither result proves Chromium descendant completeness or an operation-specific memory peak.
+
+**Implementation branch:** [test/003t2d3-cgroup-delegation-probe-20261019](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t2d3-cgroup-delegation-probe-20261019).
+
+- `tools/browser-cgroup-delegation-probe.mjs`: real `/proc/self/cgroup` + cgroup v2 controller availability, single-use child group under current membership, spawn disposable Node process, migration via `cgroup.procs`, verify incarnation and actual child membership, confirm runner membership unchanged. Guaranteed child termination and group deletion or hard CI failure; only sanitized status/reason, no host paths or Worker PID. If the runner lacks delegation, record actual EROFS/EACCES/EPERM/EBUSY class, not a fake zero or invented isolation.
+- `tests/browser-cgroup-delegation-probe.test.mjs`: success/teardown, denied group creation, denied migration, spoofed child cgroup, PID incarnation, runner migration and false operation peak/Worker-to-PID claims.
+- `.github/workflows/ci.yml`: execute real Linux probe + independent receipt verifier; upload `zpe-cgroup-delegation-003t2d3` even if probe fails.
+- `task/NEXT.md`, `task/README.md`, `task/003-tiled-content-aware.md`: preserve history and point at active milestone.
+
+**Acceptance:** only real runner CI and readback of receipt can establish a supported result. No local full checkout (the container cannot resolve github.com). Local tests / PR CI / merge / exact-main pending at writing time. A successfully moved Node child remains **not** an isolated Chromium browser tree; memory peak and Worker PID stay `unknown`. If blocked, the precise restricted stage is final for this bounded feasibility probe, but full 003T stays OPEN, requiring a different trusted instrument or more useful high-depth code fixes.
+
+**Next P1:** after actual CI verify, audit browser process-tree membership only if independently delegated; otherwise document a blocked isolation gate, maintain `trueOperationPeakKnown:false` and pursue operation observations without peak claims. P0 Photoshop-authored PSB32 provenance 002B/2c remains BLOCKED.
