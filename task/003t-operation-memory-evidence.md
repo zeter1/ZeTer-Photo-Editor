@@ -280,3 +280,65 @@ controlled real Chromium process-lifetime/PID reuse or /proc-denied gaps
 and independently validated operation-isolated RAM peak method if feasible.
 P0 **002B/2c BLOCKED** on independently licensed Photoshop-authored PSB32
 with proven provenance/reference rendering; whole Stage 003 OPEN.
+
+
+## 2026-10-19 — 003T/2b-2 accepted (DONE); NEXT 003T/2c (TODO)
+
+**Verified code change:** [PR #285](https://github.com/zeter1/ZeTer-Photo-Editor/pull/285),
+merged into [main 36953580](https://github.com/zeter1/ZeTer-Photo-Editor/commit/36953580a15622e39e8fcfc2ded5da4fd4bc2424).
+
+**Real checks:**
+- First PR run [#39256131166](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39256131166)
+  **FAILED**: isolated clean Chromium still reported pre-existing Worker targets.
+  Root cause: invalid assumption that the baseline target list is empty.
+  Fixed by comparing exact target IDs to a sampled baseline; no Worker→PID
+  attribution or URL/title matching was added.
+- Final code [PR CI #39256653417](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39256653417)
+  **SUCCESS**: \`npm run check\` (including new negative Node tests),
+  complete \`file://\` editor smoke, independent file Worker lifecycle control,
+  offline \`--verify\` JSON readback and uploaded worker control artifact,
+  external PSD/PSB checks, profiles and diff hygiene.
+- After squash merge, [exact merged-main SHA CI #39257181413](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39257181413)
+  **SUCCESS** (head SHA \`36953580a15622e39e8fcfc2ded5da4fd4bc2424\`).
+- **No separate independent local checkout test run**: local \`github.com\`
+  DNS unresolved; CI is real GitHub Ubuntu Chromium rather than a local mock.
+
+**Scope proven:** isolated real Chromium Blob Worker message acknowledged;
+separately sampled CDP target visibility while held and later target absence;
+a real acknowledged ephemeral Worker can be missed by explicit observation
+boundaries. A deliberately injected skipped target read results in unknown
+transitions rather than forged arrivals. Sampler and report retain distinct
+CDP PID, Linux /proc starttime and memory availability, with no Worker→PID
+join. No assertion of completed native process exit or true operation RSS
+peak is supported. The existing PSD16/PSB32 editor browser workflow remained
+green in this CI; the 8 MiB control by itself is not an operation peak oracle.
+
+**Files:** \`tools/browser-worker-control-smoke.mjs\`,
+\`tests/browser-worker-control-evidence.test.mjs\`, \`.github/workflows/ci.yml\`,
+\`task/NEXT.md\`, \`task/README.md\`,
+\`task/003-tiled-content-aware.md\`, this card.
+
+**Acceptance:** **003T/2b-2 DONE**; **003T whole IN PROGRESS**;
+**Stage 003 OPEN**. P0 **002B/2c BLOCKED** on verified licensed
+Photoshop-authored PSB32 and independent reference render.
+
+### NEXT — 003T/2c P1 (TODO)
+
+**Dependencies:** 003T/2b-2 accepted; 003S, 024, 025, 026.
+**Goal:** exercise controlled *actual Chromium OS process* lifetime and
+transient /proc access gaps (including PID reuse ambiguity) while an operation
+runs; do not use Worker-target/OS-process coincidence as a join. Independently
+calibrate an isolated operation memory measurement only if it can withstand
+a separate known-load control. Otherwise document absent proof and preserve
+\`trueOperationPeakKnown:false\`, \`workerPidMapping:'unknown'\`.
+
+**Acceptance criteria:**
+1. Real Linux Chromium run with before/during/after PID+starttime samples;
+   deliberately missed process during poll, partial /proc and exit/read gaps
+   flagged without presenting missing data as zero memory or proven exit.
+2. Negative unit+artifact regressions for PID reuse/starttime mismatch and
+   invalid/missing start/finish observations.
+3. Reuse real PSD16/PSB32 Fill, cancel/retry, native 16/32-bit integrity and
+   browser artifact CI, without weakening prior validation.
+4. PR CI success, merge and exact-main CI success, linked here and in NEXT;
+   or explicit BLOCKED reasons if reproducible real Chrome limitations.
