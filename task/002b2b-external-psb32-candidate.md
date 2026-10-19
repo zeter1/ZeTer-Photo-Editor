@@ -1,6 +1,6 @@
 # 002B/2b — Independent 32-bit PSB candidate admission (not Photoshop provenance)
 
-**Приоритет:** P0 (002B/2). **Статус:** IN PROGRESS. **Дата:** 2026-10-19.
+**Приоритет:** P0 (002B/2). **Статус:** DONE (PR #274 merged; PR CI + exact-main CI success). **Дата:** 2026-10-19.
 **Зависимости:** 002B/1, 002B/2a Chromium PSD16/PSD32 native import.
 
 ## Цель и границы
@@ -25,8 +25,8 @@
 
 **Критерии:** PR `npm run check`, реальные upstream PSB32 SHA-pinned assets и новая decode/native verifier зелёные; PR merge и exact-main CI success. В случае расхождения пары исследовать кодек/fixture; не ослаблять сравнительные проверки молча.
 
-**Статус:** PR CI, merge и exact-main пока не подтверждены. Локальная проверка полного репозитория недоступна из-за отказа GitHub DNS в runtime, поэтому green не заявляется.
+**Подтверждено:** [PR #274](https://github.com/zeter1/ZeTer-Photo-Editor/pull/274) merged как [main 7f866dd](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7f866dd0ebe24d5ee73f28006f3da0b14d39322b). [PR CI #39232035978 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39232035978), [exact-main CI #39232462970 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39232462970). Из реального CI log: paired `32bit.psb`/`32bit.psd` 100×150 содержат одинаковый native Float32 RGBA слой длиной 240000 bytes, SHA-256 `b39f0ed8bed3c91df753a100123afff6e04628ac4ff8002986a31ffdccdb0cad`; независимый 5×5 PSB декодировал три native raster layers. Локальный checkout всё ещё недоступен из-за DNS, но реальный PR/main CI подтверждён.
 
 ## Что остаётся
 
-P0 002B/2c: найти независимо разрешённый и **доказуемо Photoshop-authored PSB32** с provenance, оригиналом, reference render + SHA-256; объединить Photoshop PSD16 + PSB32 audit → native Worker → public Chromium `file://` Undo/Redo/History/memory/render golden. Эта кандидатная проходка не закрывает 002/002B или этап 003, ICC/CMYK, RAW/HDR и общую Photoshop-совместимость.
+P0 [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED: найти независимо разрешённый и **доказуемо Photoshop-authored PSB32** с provenance, оригиналом, reference render + SHA-256; объединить Photoshop PSD16 + PSB32 audit → native Worker → public Chromium `file://` Undo/Redo/History/memory/render golden. Эта кандидатная проходка не закрывает 002/002B или этап 003, ICC/CMYK, RAW/HDR и общую Photoshop-совместимость.
