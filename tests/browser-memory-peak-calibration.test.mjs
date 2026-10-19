@@ -17,6 +17,7 @@ const fixture=()=>({
     operationHeld:observation(107,108),
     afterOperation:observation(45,108),
   },
+  sampledMaxRssBytes:107*MIB,sampledMaxReportedHwmBytes:108*MIB,
   gap:{availability:'not-observed',
     reason:'no-continuous-proc-monitor-between-acknowledgements',periodicSamples:0},
   trueOperationPeakKnown:false,workerPidMapping:'unknown',
@@ -25,6 +26,10 @@ const fixture=()=>({
 
 test('003T/2d-1: control and operation samples are accepted without claiming a true peak',()=>{
   assert.equal(validateIndependentMemoryCalibration(fixture()),true);
+  const nonMonotonic=fixture();
+  nonMonotonic.samples.afterOperation.highWaterBytes=107*MIB;
+  assert.equal(validateIndependentMemoryCalibration(nonMonotonic),true,
+    'reported Linux VmHWM may dip slightly after allocator/GC cleanup');
 });
 
 test('003T/2d-1: fake peak, Worker PID, HWM, coverage and PID reuse fail closed',()=>{
@@ -32,6 +37,8 @@ test('003T/2d-1: fake peak, Worker PID, HWM, coverage and PID reuse fail closed'
     e=>{e.trueOperationPeakKnown=true;},
     e=>{e.workerPidMapping='8123';},
     e=>{e.operationPeakRssBytes=100;},
+    e=>{e.sampledMaxRssBytes=12;},
+    e=>{e.sampledMaxReportedHwmBytes=12;},
     e=>{e.origin='Chromium Worker';},
     e=>{e.samples.operationHeld.starttimeTicks='18446744073709551620';},
     e=>{e.samples.operationHeld.pid=8124;},
