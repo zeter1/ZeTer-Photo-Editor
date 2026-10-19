@@ -56,11 +56,11 @@ jobs:
           mkdir -p "$corpus/rgb16" "$corpus/rgb32"
           rev="b2e1dcba8954efa9ad0e7944c258cc0e9a5efc1e"
           root="https://raw.githubusercontent.com/storytold/photocraft-corpus/$rev/photoshop/adjustments"
-          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \\
+          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \
             "$root/rgb16/baseline-layer-copy.psd" -o "$corpus/rgb16/baseline-layer-copy.psd"
-          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \\
+          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \
             "$root/rgb16/levels.psd" -o "$corpus/rgb16/levels.psd"
-          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \\
+          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \
             "$root/rgb32/baseline-layer-copy.psd" -o "$corpus/rgb32/baseline-layer-copy.psd"
           echo "f31e10d19689df9dba71ebdc60652b28eb364ad8da9040a80bc5aeffcf34228e  $corpus/rgb16/baseline-layer-copy.psd" | sha256sum -c -
           echo "fbb18d1cfa5fc74cf1c4777b99acdc2465b2920574bd9069b5a2ac129c8151d9  $corpus/rgb16/levels.psd" | sha256sum -c -
