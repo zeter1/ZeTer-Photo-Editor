@@ -1,6 +1,16 @@
 # 037C-3c — финальная приёмка genuine-photo native Worker, memory и fail-closed
 
-**Приоритет:** P1. **Статус: TODO (следующая проходка после 037C-3b-3 DONE, 2026-10-18).**
+**Приоритет:** P1. **Статус: IN PROGRESS (2026-10-19; validation / CI / exact-main still pending).**
+
+## Проходка 2026-10-19 — код приёмки и CI-gate (ещё не DONE)
+
+- **ID / приоритет:** 037C-3c / P1; зависимости: закрытые 037C-1/2/3a/3b-2a/2b/3b-3, independently reviewed photo hash pins. Публичное поведение приложения не меняется.
+- **Сделано в ветке:** `tests/fixtures/real-photo/acceptance-plan.json` фиксирует SHA-256 оригинального CC0 фото, обеих PSD16/PSB32 файлов и полный обязательный список 14 сценариев. `tools/verify-browser-real-photo-acceptance.mjs` повторно прогоняет оригинальные strict validators над 42 ожидаемыми receipts (6 import, 6 Worker, 6 memory и 24 failure/race/retry), сверяет каждый уже сохранённый suite-summary без доверия к одному итоговому JSON и создаёт детерминированный SHA-256 checksum ledger с SHA каждого receipt/summary. `tests/browser-real-photo-acceptance.test.mjs` проверяет подмену pins/списка/summary и отсутствие артефактов. `.github/workflows/real-photo-intake.yml` запускает ledger только **после** всей матрицы и выгружает evidence artifact.
+- **Границы:** checksum не является цифровой подписью/доказательством происхождения вне GitHub Actions. CI run ID/SHA — контекст выполнения, а не свидетельство успешного завершения. Sampled JS heap, CDP и RSS не объявляются memory peak. Фото создано из настоящего CC0, но PSD/PSB не Adobe-authored. Внешняя Adobe parity / calibrated ICC / global virtual tiles не доказаны.
+- **Тесты и CI:** локальный clone/npm check/browser E2E недоступен в этой среде из-за отсутствия DNS/GitHub network для контейнера. Новые тесты и полная Chromium матрица должны получить реальные результаты в PR CI, затем точном main; не отмечать DONE до этого.
+- **Изменённые файлы:** `tools/verify-browser-real-photo-acceptance.mjs`, `tests/browser-real-photo-acceptance.test.mjs`, `tests/fixtures/real-photo/acceptance-plan.json`, `.github/workflows/real-photo-intake.yml`, `task/README.md`, `task/NEXT.md`, данный отчёт. Runtime, generated bundle и версия не меняются.
+- **Ошибки / блокеры:** наличие и валидность 42 receipts ещё не подтверждены новой CI матрицей; при реальном fail необходимо исправить root cause. Старые открытые PR #108–#126 не связаны с этим кодом.
+- **Следующая конкретная задача:** получить PR CI + genuine-photo CI success для точно этого commit, исправить failures, слить разрешённым процессом, проверить CI и photo exact-main **на SHA merge**; после этого закрыть 037C-3c. Далее перейти к [002](002-psd-compatibility-corpus.md) (P0 Adobe-authored PSD/PSB corpus), сохраняя [003](003-tiled-content-aware.md) OPEN.
 
 ## Цель
 
