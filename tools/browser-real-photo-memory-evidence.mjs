@@ -5,6 +5,7 @@ import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {validateRealPhotoWorkerReceiptSet} from './verify-browser-real-photo-worker-artifacts.mjs';
 import {validateBrowserSamplingTiming} from './browser-sampling-timing.mjs';
+import {validateBrowserMilestoneWindowAudit} from './browser-milestone-window-audit.mjs';
 
 const fail=message=>{throw new TypeError('037C-3a observations: '+message);};
 const count=value=>Number.isSafeInteger(value)&&value>=0;
@@ -74,6 +75,10 @@ export function validateRealPhotoMemoryObservation(observation,worker){
     fail('incomplete renderer sampling or unqualified process/Worker identity');
   if (r.samplingTiming == null) fail('missing sampling timing coverage');
   validateBrowserSamplingTiming(r.samplingTiming,r.sampleCount);
+  // New browser receipts retain explicit read windows; historical synthetic
+  // unit fixtures without raw read timestamps remain valid for this schema.
+  if(r.milestoneWindowAudit != null)
+    validateBrowserMilestoneWindowAudit(r.milestoneWindowAudit,r.samplingTiming,r.sampleCount);
   const privateCoverage=r.metricCoverage.chromiumPrivateMemory;
   const rssCoverage=r.metricCoverage.linuxAggregateRss;
   checkCoverage(privateCoverage,r.sampleCount,'CDP private memory');
