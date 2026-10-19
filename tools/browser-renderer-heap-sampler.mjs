@@ -1,6 +1,7 @@
 import { sampleLinuxChromiumRss } from './browser-linux-process-rss.mjs';
 import { createLinuxChromiumIdentityTracker } from './browser-linux-process-identity.mjs';
 import { createBrowserWorkerTargetTracker } from './browser-worker-target-census.mjs';
+import { summarizeBrowserSamplingTiming } from './browser-sampling-timing.mjs';
 
 // Informational CDP renderer-heap samples. Worker heaps, native allocations and
 // process RSS are NOT represented by JSHeapUsedSize; sampled max != true peak.
@@ -25,6 +26,8 @@ export function createBrowserRendererHeapSampler(client, {
   let pending = null;
   let active = false;
   let pollError = null;
+  let pollsAttempted = 0;
+  let pollsSkippedBusy = 0;
   let processUnavailableReason = null;
   let rssUnavailableReason = null;
   // CDP PID membership is independent of optional privateMemory and /proc
@@ -48,6 +51,7 @@ export function createBrowserRendererHeapSampler(client, {
   // recorded final sample is genuinely last, without discarding poll errors.
   let snapshotTail = Promise.resolve();
   async function readSnapshot(phase) {
+    const readStartedMs = now();
     const { metrics } = await client.send('Performance.getMetrics');
     if (!Array.isArray(metrics)) throw new Error('Browser renderer heap sampler: missing metrics');
     const values = new Map(metrics.map(metric => [metric.name, metric.value]));
@@ -56,7 +60,7 @@ export function createBrowserRendererHeapSampler(client, {
     if (!Number.isFinite(used) || used < 0 || !Number.isFinite(total) || total < used) {
       throw new Error('Browser renderer heap sampler: invalid JS heap metrics');
     }
-    const entry = { phase, elapsedMs:now(), jsHeapUsedBytes:used, jsHeapTotalBytes:total,
+    const entry = { phase, elapsedMs:now(), readStartedMs, jsHeapUsedBytes:used, jsHeapTotalBytes:total,
       pidMembershipObserved:false, linuxIdentityObserved:false, workerTargetsObserved:false };
     // Browser CDP targets have their own opaque identities, independent of
     // SystemInfo PIDs. Neither API provides a documented target->PID join.
@@ -176,6 +180,13 @@ export function createBrowserRendererHeapSampler(client, {
     // count PID arrivals/disappearances across an unobserved interval.
     if (!entry.pidMembershipObserved) previousPids = null;
     if (!entry.linuxIdentityObserved) linuxIdentity.noteMissingSnapshot();
+    entry.readFinishedMs = now();
+    // Fail rather than publishing fabricated timing coverage from a broken clock.
+    if (!Number.isFinite(readStartedMs) || !Number.isFinite(entry.readFinishedMs) ||
+        readStartedMs > entry.elapsedMs || entry.elapsedMs > entry.readFinishedMs ||
+        (samples.length && readStartedMs < samples.at(-1).readFinishedMs)) {
+      throw new Error('Browser renderer heap sampler: non-monotonic observation clock');
+    }
     samples.push(entry);
     return entry;
   }
@@ -189,7 +200,9 @@ export function createBrowserRendererHeapSampler(client, {
   }
 
   function poll() {
-    if (!active || pending) return;
+    if (!active) return;
+    pollsAttempted++;
+    if (pending) { pollsSkippedBusy++; return; }
     pending = snapshot('sample')
       .catch(error => { pollError ??= error; })
       .finally(() => { pending = null; });
@@ -289,6 +302,7 @@ export function createBrowserRendererHeapSampler(client, {
         !max || item.chromiumRssBytes > max.chromiumRssBytes ? item : max, null);
       return {
         metric:'CDP Performance.getMetrics / renderer JSHeapUsedSize',
+        samplingTiming:summarizeBrowserSamplingTiming(samples,pollsAttempted,pollsSkippedBusy),
         limitations:'Informational sampled main-frame JS heap, browser Worker target census, optional Chromium privateMemory and Linux /proc VmRSS/VmHWM. Missing identity/Worker target snapshots break comparisons and final visibility. Missing start/end counters are null, not last-observed substitutes. Target IDs cannot be joined to OS PIDs; NOT Worker heap in isolation, atomic aggregate or true operation peak; no GPU breakdown or memory thresholds.',
         metricCoverage: {
           chromiumPrivateMemory:metricCoverage('processPrivateMemoryBytes'),
