@@ -3,8 +3,30 @@ import assert from 'node:assert/strict';
 import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {buildBrowserOperationArtifact,writeBrowserOperationArtifact,verifyBrowserOperationArtifacts} from '../tools/browser-operation-artifact.mjs';
+import {buildBrowserOperationArtifact,writeBrowserOperationArtifact,verifyBrowserOperationArtifacts,hasRequiredBrowserOperationIncarnationBoundaries} from '../tools/browser-operation-artifact.mjs';
 import {summarizeBrowserMilestoneWindows} from '../tools/browser-milestone-window-audit.mjs';
+import {summarizeBrowserOperationIncarnationWindows} from '../tools/browser-operation-incarnation-windows.mjs';
+
+test('003T/2f-2: saved real browser operation phases must appear in strict order',()=>{
+  const phases=[
+    'before-first-fill','after-large-worker-preview','after-first-undo',
+    'after-large-undo-redo','before-cancel-fill','after-large-mid-kernel-cancel',
+    'before-retry-fill','after-retry-undo','after-large-mid-kernel-recovered-redo',
+  ];
+  const observed=phases.map(phase=>({phase}));
+  assert.equal(hasRequiredBrowserOperationIncarnationBoundaries(observed),true);
+  assert.equal(hasRequiredBrowserOperationIncarnationBoundaries([
+    {phase:'before-import'},...observed,{phase:'finished'},
+  ]),true);
+  assert.equal(hasRequiredBrowserOperationIncarnationBoundaries(null),false);
+  for(let i=0;i<phases.length;i++) {
+    assert.equal(hasRequiredBrowserOperationIncarnationBoundaries(
+      observed.filter((_,index)=>index!==i)),false,'missing '+phases[i]);
+  }
+  const outOfOrder=structuredClone(observed);
+  [outOfOrder[6],outOfOrder[7]]=[outOfOrder[7],outOfOrder[6]];
+  assert.equal(hasRequiredBrowserOperationIncarnationBoundaries(outOfOrder),false);
+});
 
 const completedPhases=[
   'import-input-dispatched','import-preview-ready','native-source-verified','selection-created',
@@ -293,7 +315,15 @@ test('003T/2e: real Chromium quality artifact requires milestone windows and rej
   ];
   p.memory.milestoneWindowAudit=summarizeBrowserMilestoneWindows(
     snapshots,p.memory.samplingTiming);
+  assert.throws(()=>buildBrowserOperationArtifact(p),/missing real Linux incarnation windows/);
+  p.memory.incarnationWindowAudit=summarizeBrowserOperationIncarnationWindows(
+    snapshots,p.memory.milestoneWindowAudit);
+  p.memory.stages=snapshots;
   assert.equal(buildBrowserOperationArtifact(p).timeline.memory.milestoneWindowAudit.missingPidMilestones,1);
+  const tampered=structuredClone(p);
+  tampered.memory.stages[0].linuxIncarnations=[{pid:11,starttimeTicks:'456'}];
+  assert.throws(()=>buildBrowserOperationArtifact(tampered),
+    /incarnation windows|saved raw read stages/);
   const falsePidClaim=structuredClone(p);
   falsePidClaim.memory.milestoneWindowAudit.missingPidMilestones=0;
   assert.throws(()=>buildBrowserOperationArtifact(falsePidClaim),/milestone windows/);

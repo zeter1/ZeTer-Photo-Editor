@@ -4,6 +4,10 @@ import { validateBrowserOperationEvidence } from './browser-operation-timeline.m
 import { validateBrowserSyntheticQualityEvidence } from './browser-synthetic-native-quality.mjs';
 import { validateBrowserSamplingTiming } from './browser-sampling-timing.mjs';
 import { validateBrowserMilestoneWindowAudit } from './browser-milestone-window-audit.mjs';
+import {
+  validateBrowserOperationIncarnationWindows,
+  summarizeBrowserOperationIncarnationWindows,
+} from './browser-operation-incarnation-windows.mjs';
 
 // Test-only CI reports for genuine Chromium file:// scenarios. Informational
 // samples are NOT native Worker memory, simultaneous true peak, or an exit proof.
@@ -22,6 +26,16 @@ function validateInformationalMemoryClaims(memory) {
   if (memory.milestoneWindowAudit != null) {
     validateBrowserMilestoneWindowAudit(memory.milestoneWindowAudit,
       memory.samplingTiming,memory.sampleCount);
+  }
+  if (memory.incarnationWindowAudit != null) {
+    validateBrowserOperationIncarnationWindows(memory.incarnationWindowAudit,
+      memory.milestoneWindowAudit);
+    if (!Array.isArray(memory.stages) ||
+        JSON.stringify(summarizeBrowserOperationIncarnationWindows(
+          memory.stages,memory.milestoneWindowAudit)) !==
+          JSON.stringify(memory.incarnationWindowAudit)) {
+      throw new TypeError('Browser operation artifact: incarnation windows disagree with saved raw read stages');
+    }
   }
   const churn=memory.processChurn;
   if (churn != null && (typeof churn !== 'object' || Array.isArray(churn) ||
@@ -83,6 +97,10 @@ export function buildBrowserOperationArtifact(profile) {
       profile.quality != null && !profile.memory.milestoneWindowAudit) {
     throw new TypeError('Browser operation artifact: missing real milestone read-window evidence');
   }
+  if (profile.origin === 'real Chromium file:// UI + native Worker' &&
+      profile.quality != null && !profile.memory.incarnationWindowAudit) {
+    throw new TypeError('Browser operation artifact: missing real Linux incarnation windows');
+  }
   validateInformationalMemoryClaims(profile.memory);
   validateBrowserSyntheticQualityEvidence(profile.quality,{format:profile.format,outcome:profile.outcome});
   return {
@@ -114,6 +132,22 @@ export async function writeBrowserOperationArtifact(profile, {
   return target;
 }
 
+// Test the actual persisted real UI boundaries in strict operation order.
+export function hasRequiredBrowserOperationIncarnationBoundaries(windows) {
+  if (!Array.isArray(windows)) return false;
+  const required=[
+    'before-first-fill','after-large-worker-preview','after-first-undo',
+    'after-large-undo-redo','before-cancel-fill','after-large-mid-kernel-cancel',
+    'before-retry-fill','after-retry-undo','after-large-mid-kernel-recovered-redo',
+  ];
+  let last=-1;
+  for (const phase of required) {
+    last=windows.findIndex((item,index) => index>last && item?.phase===phase);
+    if (last<0) return false;
+  }
+  return true;
+}
+
 export async function verifyBrowserOperationArtifacts(directory) {
   if (typeof directory !== 'string' || !directory.trim()) {
     throw new TypeError('Browser operation artifact: missing CI directory');
@@ -129,6 +163,9 @@ export async function verifyBrowserOperationArtifacts(directory) {
         artifact.format!==format || artifact.outcome!==outcome ||
         artifact.timeline.memory.requestedSamplingIntervalMs!==50 ||
         artifact.timeline.memory.samplingTiming == null ||
+        (artifact.timeline.origin === 'real Chromium file:// UI + native Worker' &&
+          !hasRequiredBrowserOperationIncarnationBoundaries(
+            artifact.timeline.memory.incarnationWindowAudit?.windows)) ||
         artifact.timeline.memory.processChurn?.workerPidMapping!=='unknown' ||
         (artifact.timeline.memory.workerTargets && artifact.timeline.memory.workerTargets.workerPidMapping!=='unknown') ||
         artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null ||
