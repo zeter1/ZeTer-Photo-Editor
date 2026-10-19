@@ -1,6 +1,6 @@
 # 003T — operation high-depth memory evidence, provenance and coverage
 
-**Приоритет:** P1. **Статус:** TODO. **Этап:** 003 (не закрыт).
+**Приоритет:** P1. **Статус:** IN PROGRESS (003T/1 — sampling windows; other 003T criteria OPEN). **Этап:** 003 (не закрыт).
 **Зависимости:** [003S](003s-cdp-pid-aggregate-integrity.md), [025](025-browser-worker-target-census.md), [024](024-browser-operation-memory.md), [026](026-browser-memory-sample-coverage.md), [037C-3c](037c3c-final-acceptance.md).
 **Причина:** sampled CDP `privateMemory` и Linux `VmRSS/VmHWM` — не true operation RAM peak; `Target.getTargets`/ `SystemInfo.getProcessInfo` не доказали target→OS PID.
 
@@ -34,3 +34,65 @@ P0 [002B/2c](002b2c-photoshop-psb32-provenance.md) — BLOCKED без лицен
 Проверка memory не подтверждает Adobe-authoring или совместимость с Photoshop.
 Не подменять число кратковременных выборок точным RSS peak, sum VmHWM
 и не изобретать Worker-specific RSS.
+
+## 2026-10-19 — 003T/1: действительные окна чтения и пропущенные таймеры (IN PROGRESS)
+
+**Scope:** диагностический Node/CDP harness и JSON-verifier, не production runtime.
+**Зависимости:** 003S DONE, 024/025/026 memory instrumentation.
+**Цель:** не спутать requested 50 ms с доказанной частотой или непрерывным
+покрытием процесса/операции. Асинхронный serial read запускает несколько
+независимых запросов Chrome; ни один такой read не является атомарной метрикой
+по всем процессам.
+
+### Реализовано в ветке
+
+- `tools/browser-sampling-timing.mjs`: строгая сводка observation read windows,
+  максимальной длительности запроса, интервалов между запросами, попыток
+  interval polling и пропусков при уже выполняющемся poll. Явные
+  `trueOperationPeakKnown:false`, `workerPidMapping:'unknown'` — не разрешено
+  объявлять эти значения измеренными.
+- `tools/browser-renderer-heap-sampler.mjs`: фиксирует monotonic
+  `readStartedMs`/`elapsedMs`/`readFinishedMs` и проверяет их порядок;
+  считает busy skipped polls, включает `samplingTiming` в report.
+- `tools/browser-operation-timeline.mjs`, `tools/browser-operation-artifact.mjs`,
+  `tools/browser-real-photo-memory-evidence.mjs`: транзит измерений в
+  PSD16/PSB32 evidence; genuine браузерные receipts обязаны содержать
+  `samplingTiming`, CI verifier отвергает неверные счётчики, фальшивый
+  `trueOperationPeakKnown` и необоснованный Worker→PID.
+- `tests/browser-sampling-timing.test.mjs`,
+  `tests/browser-operation-artifact.test.mjs`,
+  `tests/browser-real-photo-memory-evidence.test.mjs`: сериализация async
+  poll / занятые ticks / задержка per-PID RSS / отрицательные forged JSON.
+- `task/README.md`, `task/NEXT.md`, `task/003-tiled-content-aware.md`:
+  статус и очередь; без потери истории.
+
+**Ограничение метрики:** `maxBetweenReadWindowsMs` показывает максимальную
+паузу между завершением одного запроса и стартом следующего, но *не*
+максимальную невидимую RAM-дельту: во время read окна CDP + /proc значения
+также снимаются последовательно. Значение 0 не подтверждает full coverage.
+Отсутствующие краткоживущие процессы и Worker PID остаются `unknown`.
+В частности `maxReadDurationMs` — время исполнения harness-запроса, не
+длительность операции. Нет раздельного operation peak или PID→Worker доказательства.
+
+**PR:** [#280](https://github.com/zeter1/ZeTer-Photo-Editor/pull/280) — код и проверки на отдельной ветке; final PR CI, merge и exact-main ещё **PENDING**.
+
+**Проверки:** новые тесты подготовлены для `npm run check`, реального
+Chromium `file://` и обоих CI artifact validators. Локально полноценный
+checkout недоступен (DNS github.com); до результатов CI тесты **не считать
+пройденными**. PR CI/merge/exact-main пока **PENDING**.
+
+### Что осталось для полной 003T
+
+1. Получить успешный PR CI на настоящих PSD16/PSB32 browser receipts,
+   затем merge и проверить **exact-main** CI; сохранить ссылки на результаты.
+2. Установить независимую методику подтверждения именно operation peak
+   (если возможно в этом Chromium/CI), проверить контрольной нагрузкой,
+   а при отсутствии доказательства оставить `unknown` и sampled metrics.
+3. Проверить Linux PID reuse / short-lived target/proc failure в real browser,
+   не связывать Worker→PID по времени или совпадению количества.
+4. Отдельный P0 002B/2c всё ещё **BLOCKED** на licensed Photoshop PSB32.
+
+**Следующая проходка:** 003T/2 — real high-depth browser evidence с
+измеренными интервалами, контролем overhead/short-lived processes и
+честной границей operation peak; 003T и Stage 003 не закрывать ранее CI
+и реального подтверждения.

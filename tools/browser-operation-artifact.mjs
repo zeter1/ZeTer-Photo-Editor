@@ -2,6 +2,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateBrowserOperationEvidence } from './browser-operation-timeline.mjs';
 import { validateBrowserSyntheticQualityEvidence } from './browser-synthetic-native-quality.mjs';
+import { validateBrowserSamplingTiming } from './browser-sampling-timing.mjs';
 
 // Test-only CI reports for genuine Chromium file:// scenarios. Informational
 // samples are NOT native Worker memory, simultaneous true peak, or an exit proof.
@@ -13,6 +14,9 @@ function validateInformationalMemoryClaims(memory) {
       Object.hasOwn(memory,'workerRssBytes') ||
       Object.hasOwn(memory,'provenWorkerTerminationCount')) {
     throw new TypeError('Browser operation artifact: unsupported memory evidence');
+  }
+  if (memory.samplingTiming != null) {
+    validateBrowserSamplingTiming(memory.samplingTiming,memory.sampleCount);
   }
   const churn=memory.processChurn;
   if (churn != null && (typeof churn !== 'object' || Array.isArray(churn) ||
@@ -67,6 +71,9 @@ export function buildBrowserOperationArtifact(profile) {
     throw new TypeError('Browser operation artifact: invalid timeline or unsafe operationId');
   }
   validateBrowserOperationEvidence(profile);
+  if (profile.origin === 'real Chromium file:// UI + native Worker' && !profile.memory.samplingTiming) {
+    throw new TypeError('Browser operation artifact: missing real sampling timing coverage');
+  }
   validateInformationalMemoryClaims(profile.memory);
   validateBrowserSyntheticQualityEvidence(profile.quality,{format:profile.format,outcome:profile.outcome});
   return {
@@ -112,6 +119,7 @@ export async function verifyBrowserOperationArtifacts(directory) {
     if (JSON.stringify(artifact)!==JSON.stringify(expected) ||
         artifact.format!==format || artifact.outcome!==outcome ||
         artifact.timeline.memory.requestedSamplingIntervalMs!==50 ||
+        artifact.timeline.memory.samplingTiming == null ||
         artifact.timeline.memory.processChurn?.workerPidMapping!=='unknown' ||
         (artifact.timeline.memory.workerTargets && artifact.timeline.memory.workerTargets.workerPidMapping!=='unknown') ||
         artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null ||
