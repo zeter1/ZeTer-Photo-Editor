@@ -72,7 +72,8 @@ export function validateRealPhotoMemoryObservation(observation,worker){
       !available.includes(r.browserWorkerTargets.availability) ||
       r.chromiumProcessLifecycle.workerPidMapping!=='unknown')
     fail('incomplete renderer sampling or unqualified process/Worker identity');
-  if (r.samplingTiming != null) validateBrowserSamplingTiming(r.samplingTiming,r.sampleCount);
+  if (r.samplingTiming == null) fail('missing sampling timing coverage');
+  validateBrowserSamplingTiming(r.samplingTiming,r.sampleCount);
   const privateCoverage=r.metricCoverage.chromiumPrivateMemory;
   const rssCoverage=r.metricCoverage.linuxAggregateRss;
   checkCoverage(privateCoverage,r.sampleCount,'CDP private memory');
