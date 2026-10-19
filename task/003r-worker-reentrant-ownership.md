@@ -1,6 +1,6 @@
 # 003R — Reentrant Worker owner handoff (Stage 003)
 
-**Приоритет:** P1. **Статус:** IN PROGRESS (2026-10-19).
+**Приоритет:** P1. **Статус:** IN PROGRESS (2026-10-19). **PR:** [#276](https://github.com/zeter1/ZeTer-Photo-Editor/pull/276), открыт; PR CI/merge/exact-main PENDING.
 **Зависимости:** базовый Stage 003 file:// UI Worker и cancellation/timeout уже реализованы.
 **Контекст:** [003](003-tiled-content-aware.md). **Base:** main `ed74068c724d5885b459cac81c6613483a263be9`.
 
