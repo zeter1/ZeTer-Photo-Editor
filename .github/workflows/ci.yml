@@ -142,6 +142,23 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Independent REAL Linux PID allocation control; calibrates observable
+      # /proc RSS/HWM against known held memory without claiming Chromium
+      # operation peak, Worker PID, or uninterrupted sampling coverage.
+      - name: Independent Linux memory peak calibration control (003T/2d-1)
+        run: |
+          node tools/browser-memory-peak-calibration.mjs "$RUNNER_TEMP/zpe-003t-memory-calibration.json"
+          node tools/browser-memory-peak-calibration.mjs --verify "$RUNNER_TEMP/zpe-003t-memory-calibration.json"
+
+      - name: Upload independent Linux memory calibration receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-linux-memory-calibration-003t2d1
+          path: ${{ runner.temp }}/zpe-003t-memory-calibration.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Profile tiled Content-Aware Fill (informational)
         run: node tools/profile-tiled-inpaint.mjs --sizes 8,24,48
 
