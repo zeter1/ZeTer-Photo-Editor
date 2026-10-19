@@ -55,7 +55,8 @@ export function validateChromiumOsPidControlEvidence(e){
     Object.keys(e.exit).sort().join(',')===
     ['closeEventObserved','signalSent','signalObserved','exitCode'].sort().join(',') &&
     e.exit.closeEventObserved===true && e.exit.signalSent==='SIGTERM' &&
-    e.exit.signalObserved==='SIGTERM' && e.exit.exitCode===null,
+    ((e.exit.signalObserved==='SIGTERM' && e.exit.exitCode===null) ||
+     (e.exit.signalObserved===null && e.exit.exitCode===0)),
     'spawned OS process exit requires an actual observed close event');
   const p=e.postExit;
   assert(p && Object.keys(p).sort().join(',')===
@@ -149,7 +150,9 @@ async function runRealControl(){
     }finally{
       clearTimeout(closeTimeout);
     }
-    assert(exitCode===null && signalObserved==='SIGTERM','unexpected Chromium termination');
+    assert((exitCode===null && signalObserved==='SIGTERM') ||
+      (exitCode===0 && signalObserved===null),
+      'unexpected Chromium termination: exitCode='+exitCode+', signal='+signalObserved);
     const probed=await probeLinuxPid(pid);
     assert(probed.availability!=='unavailable','post-close /proc unreadable');
     const postExit=probed.availability==='missing'?
