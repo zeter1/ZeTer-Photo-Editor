@@ -342,3 +342,24 @@ a separate known-load control. Otherwise document absent proof and preserve
    browser artifact CI, without weakening prior validation.
 4. PR CI success, merge and exact-main CI success, linked here and in NEXT;
    or explicit BLOCKED reasons if reproducible real Chrome limitations.
+
+
+## 2026-10-19 — 003T/2c: controlled real Chromium Linux launcher process lifecycle (IN PROGRESS)
+
+**ID / priority / dependencies:** 003T/2c, P1; follows 003T/2b-2 DONE, RSS identity 003T/2b-1, stage 024/025/026. This is diagnostic/CI infrastructure and does **not** modify the editor runtime.
+
+**Goal:** independently demonstrate observed OS lifecycle of a spawned real Chromium `file://` Linux launcher PID, distinguishing complete /proc reads, deliberately skipped reads, injected read denial and the process's actual termination. Never infer short-lived Chrome descendants or Worker PID from a single known launcher PID.
+
+**Code and tests in branch:** [test/003t2c-chromium-os-pid-lifetime-20261019](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t2c-chromium-os-pid-lifetime-20261019).
+
+- `tools/browser-chromium-pid-lifetime-control.mjs`: launches independent real headless Chromium on temporary `file://` page, verifies live page through DevTools, captures /proc PID+starttime and validated VmRSS/VmHWM **before/after** deliberate missing snapshot, tests an explicitly **injected EACCES** failure path without counting it as real denial, observes actual child `close` after SIGTERM, then verifies original PID missing or a different incarnation. Rejects unreadable post-close data; stores only PID/starttime/RSS and sanitized, bounded evidence.
+- `tools/browser-worker-control-smoke.mjs`: exports preexisting Chrome discovery and DevTools-stderr readiness helpers for reuse; prior Worker control remains independent.
+- `tests/browser-chromium-pid-lifetime-control.test.mjs`: pure negative verification of forged peak/Worker PID/exit, PID reuse, corrupt /proc identity, hidden sampled gap, EACCES vs ENOENT and inconsistent membership.
+- `.github/workflows/ci.yml`: real Chrome Linux OS PID control + `--verify`, retained downloadable JSON artifact.
+- `task/README.md`, `task/NEXT.md`, `task/003-tiled-content-aware.md`, this card: queue + restrictions.
+
+**CI/acceptance status:** code committed in branch; `npm run check`, real Chromium control receipt, PR CI, merge and exact-main **PENDING until readback**. No local full checkout (environment has no github.com DNS); do not assert green prior to actual CI.
+
+**Evidence limits:** launcher PID verified by spawned child process, **not** a CDP Worker→OS PID join. Linux VmHWM is a lifetime watermark, not operation-isolated peak; a deliberate missed read is unknowable interval (no inferred process churn). Injected `EACCES` is a *test double*, not a real OS permission outage. A spawned launcher `close` establishes only that process's exit, not termination of every browser descendant. `trueOperationPeakKnown:false`, `workerPidMapping:'unknown'` remain mandatory.
+
+**Remaining / next:** get passing real CI artifact, review and merge, verify exact-main SHA CI; then **003T/2d P1** investigate operation-isolated calibrated RSS peak measurement against independent real Chrome reference workload if feasible, otherwise keep explicit unknown and coverage gaps. P0 002B/2c still BLOCKED on independently licensed Photoshop-authored PSB32. Whole 003T IN PROGRESS, Stage 003 OPEN.
