@@ -513,6 +513,21 @@ async function runSmoke() {
     }
     assertNoBrowserErrors(errors, stderrState);
 
+    // 002B/2a: a dedicated, fresh Chromium profile avoids contamination by
+    // the heavy synthetic Worker/Undo/Redo memory stress scenarios below.
+    if(process.env.ZPE_PHOTOCRAFT_BROWSER_ONLY==='1'){
+      if(!process.env.ZPE_PHOTOCRAFT_BROWSER_DIR)
+        throw new Error('002B/2a Photoshop corpus directory is required');
+      const {verifyPhotoshopBrowserImport}=await import('./browser-photocraft-import.mjs');
+      const cases=await verifyPhotoshopBrowserImport(client,{
+        evaluate,waitFor,assert,sourceDir:process.env.ZPE_PHOTOCRAFT_BROWSER_DIR,
+      });
+      assert(cases.length===3,'002B/2a Photoshop corpus UI case count');
+      assertNoBrowserErrors(errors,stderrState);
+      console.log('002B/2a Photoshop Chromium file:// native parity passed');
+      return;
+    }
+
     // 037C genuine-photo opt-in, fresh Chromium profile per process. Baseline
     // remains baseline-only; the separate Worker/quality gate needs explicit opt-in.
     if (process.env.ZPE_REAL_PHOTO_BROWSER_DIR) {
@@ -1121,18 +1136,6 @@ async function runSmoke() {
       fixtureKey:'rgb32psblarge', secondNativeFixtureKey:'rgb32psblarge-alt',
     });
     assertNoBrowserErrors(errors, stderrState);
-
-    // 002B/2a: independently published Photoshop PSD16/PSD32 must survive
-    // the actual public file:// UI import and Save Project native layer
-    // serialization without losing native 16/32-bit words.
-    if (process.env.ZPE_PHOTOCRAFT_BROWSER_DIR) {
-      const {verifyPhotoshopBrowserImport}=await import('./browser-photocraft-import.mjs');
-      const cases=await verifyPhotoshopBrowserImport(client,{
-        evaluate,waitFor,assert,sourceDir:process.env.ZPE_PHOTOCRAFT_BROWSER_DIR,
-      });
-      assert(cases.length===3,'002B/2a Photoshop corpus UI case count');
-      assertNoBrowserErrors(errors,stderrState);
-    }
 
     console.log(`Browser smoke passed: ${browserExecutable}`);
     console.log(`Verified file URL: ${INDEX_URL}`);
