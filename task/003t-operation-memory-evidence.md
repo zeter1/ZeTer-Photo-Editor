@@ -384,4 +384,39 @@ a separate known-load control. Otherwise document absent proof and preserve
 - **Bug recorded:** First [CI #39261014708 FAILED](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39261014708) due to rejecting normal Chromium exit (code 0) following SIGTERM; fixed with exclusive allowed `SIGTERM/null` and `null/0` close-event outcomes and a dedicated positive test.
 - **Unresolved:** no Chrome descendant census guarantee, no Worker→PID mapping, no operation-isolated peak, and an injected permission-denial fixture is not a real OS access outage. Thus **whole 003T remains IN PROGRESS**, Stage 003 OPEN.
 
-**NEXT P1 003T/2d TODO:** evaluate independent and preferably operation-isolated process/cgroup/container high-depth RAM observation: isolate operation (start/finish) from launcher lifetime, choose documented OS telemetry, test with controlled known memory pulse versus sampled max, track child process churn and /proc/CDP blind windows, fail closed when true peak cannot be established. Preserve `trueOperationPeakKnown:false` / `workerPidMapping:'unknown'` unless strictly proven. P0 [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED on provenance-verified licensed Photoshop-authored PSB32.
+**NEXT P1 003T/2d TODO:** evaluate independent and preferably operation-isolated process/cgroup/container high-depth RAM observation: isolate operation (start/finish) from launcher lifetime, choose documented OS telemetry, test with controlled known memory pulse versus sampled max, track child process churn and /proc/CDP blind windows, fail closed when true peak cannot be established. Preserve `trueOperationPeakKnown:false` / `workerPidMapping:'unknown'` unless strictly proven. P0 [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED on provenance-verified licensed Photoshop-authored PSB32.\n
+
+## 2026-10-19 — 003T/2d-1: independent Linux memory workload calibration (IN PROGRESS)
+
+**Scope:** separate test-only Linux Node process, not the editor runtime or Chromium.
+The control child acknowledges a **16 MiB page-touched pre-operation hold**,
+then releases it; a **64 MiB page-touched operation hold** is sampled independently
+by the parent via the existing Linux `/proc` RSS + exact PID/starttime gate.
+Five named snapshots (before control, held control, before operation, held
+operation, after operation) demonstrate what sampled VmRSS and process-lifetime
+VmHWM actually observe. Real resident growth is required, rather than assuming
+allocated bytes equal RSS growth; HWM monotonicity and identity must hold.
+There is intentionally **no continuous sampling between acknowledgements**.
+
+**Code:** `tools/browser-memory-peak-calibration.mjs` with real Linux child +
+standalone `--verify` fail-closed JSON readback, negative and real-Linux
+regressions in `tests/browser-memory-peak-calibration.test.mjs`,
+and GitHub CI verification/artifact `zpe-linux-memory-calibration-003t2d1`.
+The test rejects forged operation peaks or Worker PID claims, missing operation
+snapshots, nonresident control, inconsistent HWM and reused PID. The sampled
+values and process lifetime HWM are **not** a mathematical per-operation peak:
+the baseline, startup, allocator, GC, /proc blind spans and temporary child
+processes cannot be erased by subtracting two RSS snapshots.
+
+**Branch:** [test/003t2d-independent-memory-calibration-20261019](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t2d-independent-memory-calibration-20261019).
+**Acceptance:** PR CI, merge and exact-main **PENDING** until actual GitHub CI readback.
+Maintain `trueOperationPeakKnown:false` and `workerPidMapping:'unknown'`;
+even a passing child calibration does **not** verify Chromium process-tree/
+cgroup isolation, real PSD16/PSB32 operation peak, or full 003T completion.
+
+**NEXT P1 003T/2d-2:** research/test a dedicated Chromium operation
+process-tree or cgroup-scoped peak sensor with complete PID incarnation
+membership and controlled concurrent allocations; if kernel/CI permissions
+cannot prove operation-isolated peak, keep unknown with explicit limitations.
+Whole 003T/Stage 003 OPEN. P0 002B/2c BLOCKED on genuinely licensed,
+Photoshop-authored PSB32 with reference render and provenance.
