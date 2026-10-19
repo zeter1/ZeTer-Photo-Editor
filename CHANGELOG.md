@@ -2,6 +2,12 @@
 
 ## 1.46.4 — текущая версия
 
+### 2026-10-19 — Ограничена структура внешнего PSD/PSB перед native профилированием (002A)
+
+- Исправлено: CLI-аудитор внешних high-depth PSD/PSB после SHA-256 проверяет, что длины top-level color-mode, image-resources и layer/mask sections не выходят за файл; PSB 64-bit значения читаются точно через BigInt без больших выделений памяти.
+- Добавлено: проверки допустимого merged-image compression marker и непустого payload; диагностическое поле `imageCompression`, отрицательные PSD16/PSB32 тесты и положительный сценарий переходов по секциям.
+- Ограничения: тестовые fixtures синтетические; это только предварительная проверка envelopes, а не полный PSD/PSB decode, Adobe-authorship, лицензии или reference-rendering. Production/runtime и версия приложения не менялись. CI-проверки фиксируются отдельно в `task/002-psd-compatibility-corpus.md`.
+
 ### 2026-10-18 — Запрещена публикация повреждённых native Worker результатов (037C-3b-3/1)
 
 - Исправлено: Content-Aware Fill теперь отвергает изменение alpha-канала даже у выбранных native RGB/CMYK пикселей и не допускает NaN/Infinity в изменённых Float32 цветовых каналах. Конечные HDR-сэмплы выше 1 по-прежнему разрешены.
