@@ -71,6 +71,7 @@ jobs:
         run: npm run test:browser
         env:
           ZPE_BROWSER_OPERATION_ARTIFACT_DIR: ${{ runner.temp }}/zpe-browser-operation-reports
+          ZPE_PHOTOCRAFT_BROWSER_DIR: ${{ runner.temp }}/zpe-photocraft-corpus
 
       - name: Verify browser operation JSON (informational, not peak RAM)
         run: node tools/verify-browser-operation-artifacts.mjs
