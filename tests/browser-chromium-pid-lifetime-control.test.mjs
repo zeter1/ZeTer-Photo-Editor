@@ -23,6 +23,11 @@ const fixture=()=>({
 
 test('003T/2c: Linux PID incarnation control accepts only sampled lifetime and explicit gaps',()=>{
   assert.equal(validateChromiumOsPidControlEvidence(fixture()),true);
+  const cleanExit=fixture();
+  cleanExit.exit={closeEventObserved:true,signalSent:'SIGTERM',
+    signalObserved:null,exitCode:0};
+  assert.equal(validateChromiumOsPidControlEvidence(cleanExit),true,
+    'real Chrome may handle SIGTERM and exit normally');
   const reused=fixture();
   reused.postExit={availability:'reused',starttimeTicks:'18446744073709551620'};
   assert.equal(validateChromiumOsPidControlEvidence(reused),true,
