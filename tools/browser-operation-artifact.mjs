@@ -4,6 +4,7 @@ import { validateBrowserOperationEvidence } from './browser-operation-timeline.m
 import { validateBrowserSyntheticQualityEvidence } from './browser-synthetic-native-quality.mjs';
 import { validateBrowserSamplingTiming } from './browser-sampling-timing.mjs';
 import { validateBrowserMilestoneWindowAudit } from './browser-milestone-window-audit.mjs';
+import { validateBrowserOperationIncarnationWindows } from './browser-operation-incarnation-windows.mjs';
 
 // Test-only CI reports for genuine Chromium file:// scenarios. Informational
 // samples are NOT native Worker memory, simultaneous true peak, or an exit proof.
@@ -22,6 +23,10 @@ function validateInformationalMemoryClaims(memory) {
   if (memory.milestoneWindowAudit != null) {
     validateBrowserMilestoneWindowAudit(memory.milestoneWindowAudit,
       memory.samplingTiming,memory.sampleCount);
+  }
+  if (memory.incarnationWindowAudit != null) {
+    validateBrowserOperationIncarnationWindows(memory.incarnationWindowAudit,
+      memory.milestoneWindowAudit);
   }
   const churn=memory.processChurn;
   if (churn != null && (typeof churn !== 'object' || Array.isArray(churn) ||
@@ -83,6 +88,10 @@ export function buildBrowserOperationArtifact(profile) {
       profile.quality != null && !profile.memory.milestoneWindowAudit) {
     throw new TypeError('Browser operation artifact: missing real milestone read-window evidence');
   }
+  if (profile.origin === 'real Chromium file:// UI + native Worker' &&
+      profile.quality != null && !profile.memory.incarnationWindowAudit) {
+    throw new TypeError('Browser operation artifact: missing real Linux incarnation windows');
+  }
   validateInformationalMemoryClaims(profile.memory);
   validateBrowserSyntheticQualityEvidence(profile.quality,{format:profile.format,outcome:profile.outcome});
   return {
@@ -129,6 +138,13 @@ export async function verifyBrowserOperationArtifacts(directory) {
         artifact.format!==format || artifact.outcome!==outcome ||
         artifact.timeline.memory.requestedSamplingIntervalMs!==50 ||
         artifact.timeline.memory.samplingTiming == null ||
+        (artifact.timeline.origin === 'real Chromium file:// UI + native Worker' &&
+          (!artifact.timeline.memory.incarnationWindowAudit ||
+           !['before-first-fill','after-large-worker-preview','after-first-undo',
+             'after-large-undo-redo','before-cancel-fill','after-large-mid-kernel-cancel',
+             'before-retry-fill','after-retry-undo',
+             'after-large-mid-kernel-recovered-redo'].every(phase =>
+               artifact.timeline.memory.incarnationWindowAudit.windows.some(w => w.phase === phase)))) ||
         artifact.timeline.memory.processChurn?.workerPidMapping!=='unknown' ||
         (artifact.timeline.memory.workerTargets && artifact.timeline.memory.workerTargets.workerPidMapping!=='unknown') ||
         artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null ||
