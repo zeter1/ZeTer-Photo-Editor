@@ -41,6 +41,7 @@ export function validateBrowserMilestoneWindowAudit(audit, timing, sampleCount) 
         Object.keys(entry).some(key => !WINDOW_FIELDS.has(key)) ||
         typeof entry.phase !== 'string' || !/^[a-z][a-z0-9-]*$/.test(entry.phase) ||
         entry.phase === 'sample' ||
+        (entry.phase === 'invalid-phase' && entry.workerTargetsObserved) ||
         !ms(entry.readStartOffsetMs) || !ms(entry.readEndOffsetMs) ||
         entry.readStartOffsetMs < prevEnd ||
         entry.readStartOffsetMs > entry.readEndOffsetMs ||
@@ -75,7 +76,11 @@ export function summarizeBrowserMilestoneWindows(samples, timing) {
   }
   const origin = samples[0].readStartedMs;
   const milestones = samples.filter(item => item.phase !== 'sample').map(item => ({
-    phase:item.phase,
+    // The generic heap sampler accepts arbitrary labels, but the target
+    // census records an invalid label as a missed target observation. Retain
+    // that fail-closed sentinel here instead of failing the entire report.
+    phase:typeof item.phase === 'string' && /^[a-z][a-z0-9-]*$/.test(item.phase)
+      ? item.phase : 'invalid-phase',
     readStartOffsetMs:item.readStartedMs - origin,
     readEndOffsetMs:item.readFinishedMs - origin,
     pidMembershipObserved:item.pidMembershipObserved === true,
