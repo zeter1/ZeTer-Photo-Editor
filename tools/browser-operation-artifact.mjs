@@ -4,7 +4,10 @@ import { validateBrowserOperationEvidence } from './browser-operation-timeline.m
 import { validateBrowserSyntheticQualityEvidence } from './browser-synthetic-native-quality.mjs';
 import { validateBrowserSamplingTiming } from './browser-sampling-timing.mjs';
 import { validateBrowserMilestoneWindowAudit } from './browser-milestone-window-audit.mjs';
-import { validateBrowserOperationIncarnationWindows } from './browser-operation-incarnation-windows.mjs';
+import {
+  validateBrowserOperationIncarnationWindows,
+  summarizeBrowserOperationIncarnationWindows,
+} from './browser-operation-incarnation-windows.mjs';
 
 // Test-only CI reports for genuine Chromium file:// scenarios. Informational
 // samples are NOT native Worker memory, simultaneous true peak, or an exit proof.
@@ -27,6 +30,12 @@ function validateInformationalMemoryClaims(memory) {
   if (memory.incarnationWindowAudit != null) {
     validateBrowserOperationIncarnationWindows(memory.incarnationWindowAudit,
       memory.milestoneWindowAudit);
+    if (!Array.isArray(memory.stages) ||
+        JSON.stringify(summarizeBrowserOperationIncarnationWindows(
+          memory.stages,memory.milestoneWindowAudit)) !==
+          JSON.stringify(memory.incarnationWindowAudit)) {
+      throw new TypeError('Browser operation artifact: incarnation windows disagree with saved raw read stages');
+    }
   }
   const churn=memory.processChurn;
   if (churn != null && (typeof churn !== 'object' || Array.isArray(churn) ||
