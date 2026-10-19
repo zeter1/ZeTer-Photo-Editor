@@ -1122,6 +1122,18 @@ async function runSmoke() {
     });
     assertNoBrowserErrors(errors, stderrState);
 
+    // 002B/2a: independently published Photoshop PSD16/PSD32 must survive
+    // the actual public file:// UI import and Save Project native layer
+    // serialization without losing native 16/32-bit words.
+    if (process.env.ZPE_PHOTOCRAFT_BROWSER_DIR) {
+      const {verifyPhotoshopBrowserImport}=await import('./browser-photocraft-import.mjs');
+      const cases=await verifyPhotoshopBrowserImport(client,{
+        evaluate,waitFor,assert,sourceDir:process.env.ZPE_PHOTOCRAFT_BROWSER_DIR,
+      });
+      assert(cases.length===3,'002B/2a Photoshop corpus UI case count');
+      assertNoBrowserErrors(errors,stderrState);
+    }
+
     console.log(`Browser smoke passed: ${browserExecutable}`);
     console.log(`Verified file URL: ${INDEX_URL}`);
   } finally {
