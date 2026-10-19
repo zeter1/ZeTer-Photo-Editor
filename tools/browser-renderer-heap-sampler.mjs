@@ -85,12 +85,15 @@ export function createBrowserRendererHeapSampler(client, {
         if (!Array.isArray(processes) || !processes.length) {
           throw new Error('Chromium did not expose a complete process list');
         }
+        // Every aggregate must use a complete set of distinct OS processes.
+        // An invalid/duplicate PID invalidates privateMemory just as it does
+        // Linux RSS; otherwise we could silently count one process twice.
+        const ids = processes.map(item => item?.id);
+        if (ids.some(pid => !Number.isSafeInteger(pid) || pid <= 0) ||
+            new Set(ids).size !== ids.length) {
+          throw new Error('Chromium process snapshot: missing, duplicate or invalid CDP PID');
+        }
         if (!processIdentityUnavailableReason) {
-          const ids = processes.map(item => item?.id);
-          if (ids.some(pid => !Number.isSafeInteger(pid) || pid <= 0) ||
-              new Set(ids).size !== ids.length) {
-            processIdentityUnavailableReason = 'Invalid or duplicate CDP PID; cannot track process churn';
-          } else {
             entry.pidMembershipObserved = true;
             const current = new Set(ids);
             const newlySeen = previousPids
@@ -116,7 +119,6 @@ export function createBrowserRendererHeapSampler(client, {
                 newlyObservedPids:newlySeen, missingPreviouslyObservedPids:missing });
             }
             previousPids = current;
-          }
         }
         // CDP privateMemory is optional. Its absence MUST NOT suppress the
         // independent Linux VmRSS path when a usable PID list is available.
