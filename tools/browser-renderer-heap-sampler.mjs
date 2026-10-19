@@ -94,31 +94,31 @@ export function createBrowserRendererHeapSampler(client, {
           throw new Error('Chromium process snapshot: missing, duplicate or invalid CDP PID');
         }
         if (!processIdentityUnavailableReason) {
-            entry.pidMembershipObserved = true;
-            const current = new Set(ids);
-            const newlySeen = previousPids
-              ? ids.filter(pid => !previousPids.has(pid)).length : 0;
-            const missing = previousPids
-              ? [...previousPids].filter(pid => !current.has(pid)).length : 0;
-            newPidObservations += newlySeen;
-            missingPidObservations += missing;
-            maxSampledPidCount = Math.max(maxSampledPidCount, ids.length);
-            pidSampleCount += 1;
-            for (const pid of ids) distinctPids.add(pid);
-            const typeCounts = new Map();
-            for (const process of processes) {
-              const type = typeof process.type === 'string' && process.type
-                ? process.type : 'unknown';
-              typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
-            }
-            for (const [type, count] of typeCounts) {
-              processTypeMaximums.set(type, Math.max(processTypeMaximums.get(type) || 0, count));
-            }
-            if (phase !== 'sample') {
-              pidMarkers.push({ phase, processCount:ids.length,
-                newlyObservedPids:newlySeen, missingPreviouslyObservedPids:missing });
-            }
-            previousPids = current;
+          entry.pidMembershipObserved = true;
+          const current = new Set(ids);
+          const newlySeen = previousPids
+            ? ids.filter(pid => !previousPids.has(pid)).length : 0;
+          const missing = previousPids
+            ? [...previousPids].filter(pid => !current.has(pid)).length : 0;
+          newPidObservations += newlySeen;
+          missingPidObservations += missing;
+          maxSampledPidCount = Math.max(maxSampledPidCount, ids.length);
+          pidSampleCount += 1;
+          for (const pid of ids) distinctPids.add(pid);
+          const typeCounts = new Map();
+          for (const process of processes) {
+            const type = typeof process.type === 'string' && process.type
+              ? process.type : 'unknown';
+            typeCounts.set(type, (typeCounts.get(type) || 0) + 1);
+          }
+          for (const [type, count] of typeCounts) {
+            processTypeMaximums.set(type, Math.max(processTypeMaximums.get(type) || 0, count));
+          }
+          if (phase !== 'sample') {
+            pidMarkers.push({ phase, processCount:ids.length,
+              newlyObservedPids:newlySeen, missingPreviouslyObservedPids:missing });
+          }
+          previousPids = current;
         }
         // CDP privateMemory is optional. Its absence MUST NOT suppress the
         // independent Linux VmRSS path when a usable PID list is available.
