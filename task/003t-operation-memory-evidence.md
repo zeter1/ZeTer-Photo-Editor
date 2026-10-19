@@ -186,3 +186,19 @@ fail-closed short-lived process/PID reuse and /proc access-gaps,
 
 **P0 [002B/2c](002b2c-photoshop-psb32-provenance.md)** — BLOCKED
 без независимо лицензированного Adobe-authored PSB32/reference render.
+
+## 2026-10-19 — 003T/2b-1: fail-closed /proc identity membership + independent Linux control (IN PROGRESS)
+
+**Priority P1; dependencies:** 003T/1, /2a, 003S. Scope is diagnostic tools/tests only, not production app.
+**Goal/acceptance for this substep:** A per-PID /proc RSS sample may be published only if it contains each valid CDP PID exactly once and its aggregate VmRSS and largest VmHWM equal the verified per-PID values; one-sided process loss, changed PID/starttime, duplicate and missing records cannot become a reliable RSS measurement.
+
+**Implementation on branch `fix/003t2b-rss-identity-membership-20261019`:**
+- `tools/browser-rss-sample-identity.mjs` independently verifies PID membership, canonical positive Linux starttime, safe RSS/HWM integers, aggregate sum and max HWM. The check does **not** associate an opaque CDP Worker target with any OS process.
+- `tools/browser-renderer-heap-sampler.mjs` applies the guard before publishing RSS. Invalid real-shaped observations become `linuxProcessRss.availability: 'unavailable'` with no invented baseline/max/end; independent renderer heap, process privateMemory and PID census continue. Legacy injected test samplers without per-PID rows retain only informational RSS; Linux incarnation attribution stays unavailable.
+- `tests/browser-rss-sample-identity.test.mjs` covers incomplete, duplicate, wrong-PID, invalid starttime, inconsistent aggregate/HWM, and sampler fail-closed diagnostics; an **independent real Linux Node child process** is sampled via `/proc` while alive, then terminated and verified unreadable. This is an OS control, **not** a Chromium Worker→PID mapping or real browser operation peak.
+- Existing real Chromium `file://` browser CI exercises default `sampleLinuxChromiumRss` through actual PSD16/PSB32 operation snapshots; browser CI and real-photo artifact status must be read back before acceptance.
+
+**Verification:** Full local checkout unavailable (container DNS `github.com` unresolved); `npm run check`, real Chromium and PR CI are **PENDING**, not asserted green. PR/link and exact-main evidence to be appended after verification. Tests are proposed, not marked passed until CI readback.
+**Known limits/bugs still open:** The CDP PID census is not atomic with sequential `/proc` reads. PID membership in one sample is not Worker identity, short-lived Chrome targets can exist between polls, a process lifetime `VmHWM` is not operation RSS peak, no independent real **Chromium** control workload yet. `trueOperationPeakKnown:false`, `workerPidMapping:'unknown'` and sampled maxima remain the only supported claims.
+**Next:** **003T/2b-2 IN PROGRESS** — use an independently controlled temporary Chromium Worker/target and short-lived process in real `file://` operation, capture before/during/after target and PID/starttime coverage without timing joins, negative fail-closed receipts, CI verification; no peak unless a separately validated operation-isolated measurement method is found.
+**Stage 003:** OPEN. **P0 002B/2c:** BLOCKED without provenance-verified, licensed Adobe Photoshop-authored PSB32.
