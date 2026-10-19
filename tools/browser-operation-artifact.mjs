@@ -2,6 +2,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateBrowserOperationEvidence } from './browser-operation-timeline.mjs';
 import { validateBrowserSyntheticQualityEvidence } from './browser-synthetic-native-quality.mjs';
+import { validateBrowserSamplingTiming } from './browser-sampling-timing.mjs';
 
 // Test-only CI reports for genuine Chromium file:// scenarios. Informational
 // samples are NOT native Worker memory, simultaneous true peak, or an exit proof.
@@ -13,6 +14,9 @@ function validateInformationalMemoryClaims(memory) {
       Object.hasOwn(memory,'workerRssBytes') ||
       Object.hasOwn(memory,'provenWorkerTerminationCount')) {
     throw new TypeError('Browser operation artifact: unsupported memory evidence');
+  }
+  if (memory.samplingTiming != null) {
+    validateBrowserSamplingTiming(memory.samplingTiming,memory.sampleCount);
   }
   const churn=memory.processChurn;
   if (churn != null && (typeof churn !== 'object' || Array.isArray(churn) ||
