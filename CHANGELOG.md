@@ -1,3 +1,7 @@
+### 2026-10-19 — External independent RGB32 PSB candidate gates (002B/2b)
+
+- CI candidate: pinned real `psd-tools` PSB v2 RGB32 100×150 / 5×5 and paired PSD32, SHA-256/size/header validation, `decodePsd` native Float32 layer completeness and PSD/PSB parity, negative Node checks. External fixture authorship by Adobe Photoshop has **not** been independently established; no production/format/version changes. PR and CI initially pending.
+
 # История изменений
 
 ## 1.46.4 — текущая версия
