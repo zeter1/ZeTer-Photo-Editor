@@ -488,3 +488,48 @@ attempt real PSD16/PSB32 operation-window control with calibrated observed
 coverage; claim no true peak without a proven operation-exclusive sensor.
 
 **PR:** [#292](https://github.com/zeter1/ZeTer-Photo-Editor/pull/292) is OPEN; live CI and receipt remain PENDING until checked. The runner step now prints only cgroup availability/scope (no host path) to support an independently readable verification. The strict parser rejects private path disclosure. Do not close the gate on unit-only coverage.
+
+## 2026-10-19 — 003T/2d-2 DONE: real CI proves shared runner cgroup
+
+**Bounded acceptance:** 003T/2d-2 **DONE**; whole 003T **IN PROGRESS**,
+Stage 003 **OPEN**. This milestone establishes what the runner actually permits,
+not an operation-exclusive memory-peak sensor.
+
+**Verified GitHub evidence:**
+- [PR #292](https://github.com/zeter1/ZeTer-Photo-Editor/pull/292) merged
+  to [main fdb0509f0ac16966d02a42b04e65c30a5418c312](https://github.com/zeter1/ZeTer-Photo-Editor/commit/fdb0509f0ac16966d02a42b04e65c30a5418c312).
+- [PR CI #39273181136 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39273181136):
+  `npm run check` incl. negative unit tests; genuine Chromium `file://`
+  PSD import/UI and earlier Worker/PID/real Linux controls; actual independent
+  Chromium 64 MiB held Worker cgroup probe + strict `--verify`;
+  artifact `zpe-chromium-cgroup-scope-003t2d2` uploaded; profiling and
+  `git diff --check` all passed.
+- Real job log from **that run**:
+  `003T real Chromium cgroup probe PASS: before=sampled/shared-with-runner, held=sampled/shared-with-runner; operation peak/Worker PID unknown`.
+  This shows the harness and spawned Chrome share the observed cgroup at both
+  milestones. No exclusive operation sample or child census was established.
+- [Exact merged-main CI #39273747139 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39273747139):
+  `head_sha=fdb0509f0ac16966d02a42b04e65c30a5418c312`, the full verify
+  job including real cgroup control and previous browser and native tests passed.
+- **No independent local full-checkout tests**: the execution container
+  could not resolve `github.com`; tested through actual Ubuntu/Chromium
+  GitHub CI only. No editor runtime source changed this pass.
+
+**Findings / defect boundary:** `memory.current` belongs to the *shared*
+runner+Chrome cgroup. Even subtracting before/after values cannot isolate
+the 64 MiB Worker operation from concurrent harness/browser allocations.
+High-water counters belong to process/cgroup lifetimes, not operation windows.
+No complete descendant census, transient PID read-gap coverage, exclusive
+container, or documented Worker→PID join is proven.
+Keep `trueOperationPeakKnown:false` and `workerPidMapping:'unknown'`.
+
+**Next task 003T/2d-3 (P1, TODO):** determine whether CI can actually create
+a fresh, dedicated cgroup v2 subtree (including permission/delegation check,
+membership enforcement and clean teardown) for a browser process tree.
+Acceptance requires demonstrably *exclusive* membership for launcher +
+all children over a bounded real PSD16/PSB32 Fill/cancel/retry operation,
+independent known-load calibration and negative PID reuse/read-gap tests.
+If runner cannot delegate a dedicated group, record the precise permission
+failure and mark isolation BLOCKED while sampled measurements stay
+informational; never rebrand shared `memory.current` as operation peak.
+P0 **002B/2c BLOCKED** on authenticated licensed Photoshop-created PSB32.
