@@ -79,6 +79,7 @@ test('003T: inconsistent, unbounded or fabricated timing is rejected before publ
     {snapshotCount:2},{pollsSkippedBusy:3},{periodicSamples:2},
     {maxBetweenReadWindowsMs:10000},{readWindowMs:NaN},
     {maxReadDurationMs:-1},{pollsAttempted:-1},
+    {operationPeakRssBytes:123},{provenWorkerPid:7},
   ])assert.throws(()=>validateBrowserSamplingTiming({...timing,...change},3),/sampling timing/);
   assert.throws(()=>summarizeBrowserSamplingTiming([
     samples[0],{...samples[1],readStartedMs:4},samples[2]],2,1),/non-monotonic/);
