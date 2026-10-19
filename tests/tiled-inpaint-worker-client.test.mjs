@@ -437,3 +437,88 @@ test('037C-3b-1: invalid and reentrant deadline timers fail closed', async () =>
   assert.equal(workers[0].terminated,1);
   assert.equal(client.cancel(),false);
 });
+
+test('Stage 003: a reentrant Worker factory cannot steal a newer job owner', async () => {
+  const workers = [];
+  let client, successor;
+  client = createTiledInpaintWorkerJobController({
+    createWorker() {
+      const worker = new FakeBrowserWorker();
+      workers.push(worker);
+      if (workers.length === 1) successor = client.run({ source:'newer' });
+      return worker;
+    },
+  });
+  const superseded = client.run({ source:'older' });
+  assert.deepEqual(await superseded, { cancelled:true });
+  assert.equal(workers.length, 2);
+  assert.equal(workers[0].terminated, 1, 'superseded factory Worker must be terminated');
+  assert.equal(workers[0].sent.length, 0);
+  workers[1].emit('message', { ready:true });
+  const id = workers[1].sent[0].id;
+  assert.equal(workers[1].sent[0].source, 'newer');
+  workers[1].emit('message', { id, ok:true, result:'newer result' });
+  assert.equal(await successor, 'newer result');
+  assert.equal(workers[1].terminated, 1);
+  assert.equal(client.cancel(), false);
+});
+
+test('Stage 003: reentrant owner checks before factory and ready never dispatch stale work', async () => {
+  const workers = [];
+  const client = createTiledInpaintWorkerJobController({
+    createWorker() {
+      const worker = new FakeBrowserWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  let successor, startSuccessor = true;
+  const beforeFactory = client.run({source:'before-factory'}, {
+    isCurrent() {
+      if (startSuccessor) {
+        startSuccessor = false;
+        successor = client.run({source:'valid-factory'});
+      }
+      return true;
+    },
+  });
+  assert.deepEqual(await beforeFactory, {cancelled:true});
+  assert.equal(workers.length, 1, 'stale owner must not create a Worker');
+  workers[0].emit('message',{ready:true});
+  workers[0].emit('message',{id:workers[0].sent[0].id,ok:true,result:'first winner'});
+  assert.equal(await successor,'first winner');
+
+  let replaceOnReady = false;
+  const old = client.run({source:'old'});
+  assert.equal(workers.length, 2);
+  // The callback is evaluated from a Worker message; the new run terminates
+  // the older Worker before its ready handler may send a compute payload.
+  const guarded = createTiledInpaintWorkerJobController({
+    createWorker() {
+      const worker = new FakeBrowserWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  let duringReady;
+  const oldGuarded = guarded.run({source:'must-not-post'}, {
+    isCurrent() {
+      if (replaceOnReady) {
+        replaceOnReady = false;
+        duringReady = guarded.run({source:'successor-after-ready'});
+      }
+      return true;
+    },
+  });
+  assert.equal(workers.length, 3);
+  replaceOnReady = true;
+  workers[2].emit('message',{ready:true});
+  assert.deepEqual(await oldGuarded,{cancelled:true});
+  assert.equal(workers[2].sent.length,0,'no postMessage after reentrant cancel');
+  assert.equal(workers[2].terminated,1);
+  workers[3].emit('message',{ready:true});
+  workers[4].emit('message',{id:workers[3].sent[0].id,ok:true,result:'second winner'});
+  assert.equal(await duringReady,'second winner');
+  client.cancel();
+  assert.deepEqual(await old,{cancelled:true});
+});
