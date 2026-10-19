@@ -51,7 +51,7 @@ export function validateIndependentMemoryCalibration(e){
       p.pid===e.pid && validStart(p.starttimeTicks) &&
       Number.isSafeInteger(p.rssBytes) && p.rssBytes>0 &&
       Number.isSafeInteger(p.highWaterBytes) && p.highWaterBytes>=p.rssBytes &&
-      p.highWaterBytes>=previousHwm,'invalid /proc RSS, HWM or reused PID at '+name);
+      p.highWaterBytes>=previousHwm,'invalid /proc RSS, HWM or reused PID at '+name+': '+JSON.stringify(p)+', prevHwm='+previousHwm);
     if(incarnation!==null)check(p.starttimeTicks===incarnation,'changed PID incarnation');
     incarnation=p.starttimeTicks;
     previousHwm=p.highWaterBytes;
