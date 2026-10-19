@@ -233,3 +233,40 @@ test('033: corrupted synthetic native quality scores fail at JSON write and rere
     await rm(directory,{recursive:true,force:true});
   }
 });
+
+test('003T: CI operation artifact rejects invented sampling coverage or peak claims',async()=>{
+  const p=sample('stage003-psd16-with-cancelled-retry','PSD16','completed-with-cancelled-retry');
+  const timing={
+    method:'serialized-CDP-read-windows',
+    snapshotCount:2,periodicSamples:0,pollsAttempted:1,pollsSkippedBusy:1,
+    readWindowMs:120,maxReadDurationMs:60,maxBetweenReadWindowsMs:0,
+    maxBetweenReadStartsMs:60,trueOperationPeakKnown:false,
+    workerPidMapping:'unknown',
+    limitations:'Serialized request, not when all processes were measured atomically.',
+  };
+  p.memory.samplingTiming=timing;
+  assert.equal(buildBrowserOperationArtifact(p).timeline.memory.samplingTiming.trueOperationPeakKnown,false);
+  for(const changed of [
+    {trueOperationPeakKnown:true},{workerPidMapping:'pid:123'},
+    {pollsSkippedBusy:2},{snapshotCount:3},{maxReadDurationMs:121},
+  ]){
+    assert.throws(()=>buildBrowserOperationArtifact({
+      ...p,memory:{...p.memory,samplingTiming:{...timing,...changed}},
+    }),/sampling timing/);
+  }
+  const dir=await mkdtemp(path.join(os.tmpdir(),'zpe-003t-'));
+  try{
+    await writeBrowserOperationArtifact(p,{directory:dir});
+    await writeBrowserOperationArtifact(sample(
+      'stage003-psb32-with-cancelled-retry','PSB32','completed-with-cancelled-retry'
+    ),{directory:dir});
+    assert.equal((await verifyBrowserOperationArtifacts(dir)).length,2);
+    const filename=path.join(dir,'stage003-psd16-with-cancelled-retry.json');
+    const forged=JSON.parse(await readFile(filename,'utf8'));
+    forged.timeline.memory.samplingTiming.trueOperationPeakKnown=true;
+    await writeFile(filename,JSON.stringify(forged),'utf8');
+    await assert.rejects(verifyBrowserOperationArtifacts(dir),/sampling timing/);
+  }finally{
+    await rm(dir,{recursive:true,force:true});
+  }
+});
