@@ -1,8 +1,8 @@
 # 037C-3c — финальная приёмка genuine-photo native Worker, memory и fail-closed
 
-**Приоритет:** P1. **Статус: IN PROGRESS (2026-10-19; validation / CI / exact-main still pending).**
+**Приоритет:** P1. **Статус: DONE (2026-10-19; PR и два точных main CI успешно проверены).**
 
-## Проходка 2026-10-19 — код приёмки и CI-gate (ещё не DONE)
+## История: 2026-10-19 — код приёмки до CI
 
 - **ID / приоритет:** 037C-3c / P1; зависимости: закрытые 037C-1/2/3a/3b-2a/2b/3b-3, independently reviewed photo hash pins. Публичное поведение приложения не меняется.
 - **Сделано в ветке:** `tests/fixtures/real-photo/acceptance-plan.json` фиксирует SHA-256 оригинального CC0 фото, обеих PSD16/PSB32 файлов и полный обязательный список 14 сценариев. `tools/verify-browser-real-photo-acceptance.mjs` повторно прогоняет оригинальные strict validators над 42 ожидаемыми receipts (6 import, 6 Worker, 6 memory и 24 failure/race/retry), сверяет каждый уже сохранённый suite-summary без доверия к одному итоговому JSON и создаёт детерминированный SHA-256 checksum ledger с SHA каждого receipt/summary. `tests/browser-real-photo-acceptance.test.mjs` проверяет подмену pins/списка/summary и отсутствие артефактов. `.github/workflows/real-photo-intake.yml` запускает ledger только **после** всей матрицы и выгружает evidence artifact.
@@ -11,6 +11,16 @@
 - **Изменённые файлы:** `tools/verify-browser-real-photo-acceptance.mjs`, `tests/browser-real-photo-acceptance.test.mjs`, `tests/fixtures/real-photo/acceptance-plan.json`, `.github/workflows/real-photo-intake.yml`, `task/README.md`, `task/NEXT.md`, данный отчёт. Runtime, generated bundle и версия не меняются.
 - **Ошибки / блокеры:** наличие и валидность 42 receipts ещё не подтверждены новой CI матрицей; при реальном fail необходимо исправить root cause. Старые открытые PR #108–#126 не связаны с этим кодом.
 - **Следующая конкретная задача:** получить PR CI + genuine-photo CI success для точно этого commit, исправить failures, слить разрешённым процессом, проверить CI и photo exact-main **на SHA merge**; после этого закрыть 037C-3c. Далее перейти к [002](002-psd-compatibility-corpus.md) (P0 Adobe-authored PSD/PSB corpus), сохраняя [003](003-tiled-content-aware.md) OPEN.
+
+## Финальная приёмка 2026-10-19 — DONE
+
+- **Статус:** DONE; P1; зависимость 037C-3b-3 DONE. Фактическое завершение только после слияния и двух green checks **точного** `main`.
+- **Реализация:** [PR #267](https://github.com/zeter1/ZeTer-Photo-Editor/pull/267) слит в [main 38e4e57](https://github.com/zeter1/ZeTer-Photo-Editor/commit/38e4e57cbec8ab6f3d6baff08807cde7ee0ae578). Добавлены `tools/verify-browser-real-photo-acceptance.mjs`, `tests/browser-real-photo-acceptance.test.mjs`, `tests/fixtures/real-photo/acceptance-plan.json`, CI job + artifact, обновлены `task/NEXT.md`/`task/README.md` и этот отчёт.
+- **Coverage:** 14 suites / 42 receipts (по 6 baseline, Worker quality/Undo/Redo/reopen, memory observations; по 2 switch, mid-kernel, close, mid-kernel Escape, completed preview cancel/success, successor Worker, malformed alpha/counter, cap+retry; 4 malformed extra). Каждый исходный receipt заново проверяется существующим строгим независимым per-scenario валидатором против frozen source/file pins. Каждый summary JSON сверяется с заново вычисленным результатом. Проверена полнота набора/отсутствие дубликатов/подмены в негативных unit-тестах.
+- **CI/проверки:** [PR общий CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39207612294), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39207612316), [exact-main общий CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39208229506), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39208229432). Проверены Node unit (включая negative tamper), standard build/bundle и Chromium `file://` browser smoke через общий CI, а genuine CC0 photo-derived PSD16/PSB32 — отдельным real-photo CI. Локальная `npm run check` вне CI в этой среде отдельно не запускалась.
+- **Результат:** реальный CI выпустил `037c3c-genuine-photo-acceptance` с checksum SHA-256 на исходные receipts/summaries, привязан к GitHub run и коммиту; **не** цифровая подпись и **не** абсолютное доказательство отсутствия ошибок. Sampled memory не peak RSS. Ни настоящие Adobe Photoshop-authored reference goldens, ни Photoshop parity, ни calibrated ICC/CMYK, ни глобальный tiled memory HWM этим не проверены.
+- **Обнаруженные дефекты/ограничения:** новых runtime regressions проверка не выявила; отдельная фиксация отсутствующих high-depth Adobe provenance/goldens остаётся **P0 002**. Другие открытые UI PR и недоказанные memory peak не закрыты.
+- **Следующая задача:** **002 (TODO/P0)** — независимо лицензированные Photoshop-authored PSD16 + PSB32, проверка источника/хешей/лицензии и real Adobe output golden; затем import → Worker/edit → export → external readback, сохранение native 16/32-bit без потерь. [003](003-tiled-content-aware.md) остаётся OPEN.
 
 ## Цель
 
@@ -45,8 +55,8 @@ P0 002 Adobe-authored PSD/PSB compatibility goldens; Stage 003 global tiled memo
 
 ## Чеклист
 
-- [ ] Полный inventory реальных photo и Worker/quality receipts с frozen source provenance.
-- [ ] Independent validator + negative tamper/missing-run tests, подтверждённая полная coverage.
-- [ ] Доказанные отдельные success / cancel / failure / retry / native persistence paths.
-- [ ] Sampled-memory evidence не подменено peak RAM/VRAM утверждениями.
-- [ ] PR CI / genuine-photo CI + exact-main CI / genuine-photo CI green и ссылки в `task`.
+- [x] Полный inventory реальных photo и Worker/quality receipts с frozen source provenance.
+- [x] Independent validator + negative tamper/missing-run tests, подтверждённая полная coverage.
+- [x] Доказанные отдельные success / cancel / failure / retry / native persistence paths.
+- [x] Sampled-memory evidence не подменено peak RAM/VRAM утверждениями.
+- [x] PR CI / genuine-photo CI + exact-main CI / genuine-photo CI green и ссылки в `task`.
