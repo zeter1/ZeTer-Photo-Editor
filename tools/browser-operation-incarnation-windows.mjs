@@ -95,7 +95,8 @@ export function summarizeBrowserOperationIncarnationWindows(samples, milestoneAu
   const windows=stages.map((item,index) => {
     const source=milestoneAudit.milestones[index];
     const observed=source.linuxIdentityObserved === true && source.linuxRssObserved === true;
-    const incarnations=observed ? item.linuxIncarnations : null;
+    // A missing read must not retain a stale/forged PID list from an earlier stage.
+    const incarnations=item.linuxIncarnations ?? null;
     if ((!observed && incarnations != null) ||
         (observed && (!Array.isArray(incarnations) || incarnations.length === 0))) {
       throw new TypeError('Chromium incarnation windows: inconsistent sampled Linux identity');
