@@ -84,8 +84,9 @@ function receiptNames(spec){
 }
 async function loadReceiptSet(dir,spec){
   const names=receiptNames(spec),entries=await readdir(dir);
-  const actual=entries.filter(n=>n.startsWith('real-photo-') &&
-    n.includes('-'+spec.stem+'-run-') && n.endsWith('.json')).sort();
+  const actual=entries.filter(n=>n.startsWith('real-photo-') && n.endsWith('.json') &&
+    (spec.id==='malformed-extra'? /-malformed-(outside|nonfinite-(nan|infinity))-run-/.test(n):
+      n.includes('-'+spec.stem+'-run-'))).sort();
   // Malformed-extra excludes alpha/counter, which have their own directories.
   assert.deepStrictEqual(actual,names,'037C-3c '+spec.id+': missing/unexpected receipt');
   return Promise.all(names.map(async name=>{
