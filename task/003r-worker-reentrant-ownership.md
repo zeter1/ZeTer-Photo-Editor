@@ -43,7 +43,7 @@
 - **PR real-photo CI: success** — [39235644554](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39235644554), same exact head.
 - **Merge:** [PR #276](https://github.com/zeter1/ZeTer-Photo-Editor/pull/276) squash merged into `main` at `56da5c87f9e109437a747293a383cd03fc16bd68`.
 - **Exact-main CI: success** — [39236490603](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39236490603), exact merge SHA.
-- **Exact-main real-photo** — [39236490639](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39236490639), pending at closure documentation authoring (do not confuse with green primary exact-main CI).
+- **Exact-main real-photo: success** — [39236490639](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39236490639), exact merge SHA.
 
 ## Проверки и ограничения
 
