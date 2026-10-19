@@ -242,4 +242,8 @@ test('028: an incompatible generic heap milestone remains an unavailable target 
     ['invalid-phase','finished']);
   assert.equal(report.browserWorkerTargets.observedAtLastSnapshotCount,null);
   assert.equal(report.browserWorkerTargets.workerPidMapping,'unknown');
+  assert.deepEqual(report.milestoneWindowAudit.milestones.map(item => item.phase),
+    ['before-import','invalid-phase','finished']);
+  assert.equal(report.milestoneWindowAudit.milestones[1].workerTargetsObserved,false);
+  assert.equal(report.milestoneWindowAudit.trueOperationPeakKnown,false);
 });
