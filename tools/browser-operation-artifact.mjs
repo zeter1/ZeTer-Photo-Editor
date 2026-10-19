@@ -149,7 +149,7 @@ export async function verifyBrowserOperationArtifacts(directory) {
         artifact.timeline.memory.samplingTiming == null ||
         (artifact.timeline.origin === 'real Chromium file:// UI + native Worker' &&
           (!artifact.timeline.memory.incarnationWindowAudit ||
-           !['before-first-fill','after-large-worker-preview','after-first-undo',
+           ['before-first-fill','after-large-worker-preview','after-first-undo',
              'after-large-undo-redo','before-cancel-fill','after-large-mid-kernel-cancel',
              'before-retry-fill','after-retry-undo',
              'after-large-mid-kernel-recovered-redo'].reduce((last,phase) => {
