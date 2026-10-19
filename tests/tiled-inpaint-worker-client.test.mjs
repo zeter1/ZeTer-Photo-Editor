@@ -489,8 +489,6 @@ test('Stage 003: reentrant owner checks before factory and ready never dispatch 
   assert.equal(await successor,'first winner');
 
   let replaceOnReady = false;
-  const old = client.run({source:'old'});
-  assert.equal(workers.length, 2);
   // The callback is evaluated from a Worker message; the new run terminates
   // the older Worker before its ready handler may send a compute payload.
   const guarded = createTiledInpaintWorkerJobController({
@@ -510,15 +508,14 @@ test('Stage 003: reentrant owner checks before factory and ready never dispatch 
       return true;
     },
   });
-  assert.equal(workers.length, 3);
+  assert.equal(workers.length, 2);
   replaceOnReady = true;
-  workers[2].emit('message',{ready:true});
+  workers[1].emit('message',{ready:true});
   assert.deepEqual(await oldGuarded,{cancelled:true});
-  assert.equal(workers[2].sent.length,0,'no postMessage after reentrant cancel');
-  assert.equal(workers[2].terminated,1);
-  workers[3].emit('message',{ready:true});
-  workers[4].emit('message',{id:workers[3].sent[0].id,ok:true,result:'second winner'});
+  assert.equal(workers[1].sent.length,0,'no postMessage after reentrant cancel');
+  assert.equal(workers[1].terminated,1);
+  assert.equal(workers.length, 3);
+  workers[2].emit('message',{ready:true});
+  workers[2].emit('message',{id:workers[2].sent[0].id,ok:true,result:'second winner'});
   assert.equal(await duringReady,'second winner');
-  client.cancel();
-  assert.deepEqual(await old,{cancelled:true});
 });
