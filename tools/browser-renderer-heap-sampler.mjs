@@ -50,6 +50,10 @@ export function createBrowserRendererHeapSampler(client, {
   // explicit stage marker or stop(). Queue reads in invocation order so the
   // recorded final sample is genuinely last, without discarding poll errors.
   let snapshotTail = Promise.resolve();
+  // Count both active and queued milestone reads. A periodic tick arriving
+  // while an explicit marker is pending must be skipped, not attributed to
+  // the time at which its delayed CDP read eventually starts.
+  let queuedSnapshots = 0;
   async function readSnapshot(phase) {
     const readStartedMs = now();
     const { metrics } = await client.send('Performance.getMetrics');
@@ -192,17 +196,22 @@ export function createBrowserRendererHeapSampler(client, {
   }
 
   function snapshot(phase) {
+    queuedSnapshots++;
     const result = snapshotTail.then(() => readSnapshot(phase));
     // A failed explicit marker must reject its own caller but must not poison
     // the queue for subsequent sampling or the final stop() snapshot.
-    snapshotTail = result.catch(() => {});
+    // Decrement in both branches without creating an unobserved rejected promise.
+    snapshotTail = result.then(
+      () => { queuedSnapshots--; },
+      () => { queuedSnapshots--; },
+    );
     return result;
   }
 
   function poll() {
     if (!active) return;
     pollsAttempted++;
-    if (pending) { pollsSkippedBusy++; return; }
+    if (pending || queuedSnapshots > 0) { pollsSkippedBusy++; return; }
     pending = snapshot('sample')
       .catch(error => { pollError ??= error; })
       .finally(() => { pending = null; });

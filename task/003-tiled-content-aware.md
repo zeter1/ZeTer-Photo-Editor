@@ -1,3 +1,7 @@
+## 2026-10-19 — 003T/2a: timer polls blocked by active or queued memory milestones (IN PROGRESS)
+
+В diagnostic CDP sampler `snapshot()` теперь учитывает запущенные **и поставленные в очередь** обязательные snapshots. Пока хоть один такой read ожидает или выполняется, timer tick помечается `pollsSkippedBusy`, а не создаёт поздний периодический отсчёт. Отрицательная регрессия охватывает очередь milestone и последующее освобождение после ошибочного read. Изменение не затрагивает production Fill/Worker и не превращает samples в true operation peak; PID→Worker всё ещё `unknown`. [003T](003t-operation-memory-evidence.md) и Stage 003 OPEN. Предыдущий 003T/1 PR #280 merged `1140b886`; exact-main CI и новый PR пока проверяются.
+
 ## 2026-10-19 — 003T/1: instrumentation интервалов реального browser memory sampler (IN PROGRESS)
 
 Новый P1 подэтап [003T](003t-operation-memory-evidence.md): `browser-renderer-heap-sampler` различает requested interval и фактически пропущенные polls, продолжительность каждого async CDP→/proc чтения и паузы между чтениями. Инструментация входит в реальные PSD16/PSB32 memory artifacts и verifier, который не допускает forged true peak/Worker PID. Тесты добавлены, но PR CI и exact-main **не проверены**; Chromium read windows **не являются непрерывным измерением или истинным operation peak**. Stage 003 остаётся открытым; следующий 003T/2 — реальные CI наблюдения/independent control. P0 002B/2c без Adobe Photoshop PSB32 остаётся BLOCKED.
