@@ -148,7 +148,7 @@ export async function verifyBrowserOperationArtifacts(directory) {
                const next=artifact.timeline.memory.incarnationWindowAudit.windows.findIndex(
                  (w,index) => index >= last && w.phase === phase);
                return next >= 0 ? next+1 : -1;
-             },0))) ||
+             },0) <= 0)) ||
         artifact.timeline.memory.processChurn?.workerPidMapping!=='unknown' ||
         (artifact.timeline.memory.workerTargets && artifact.timeline.memory.workerTargets.workerPidMapping!=='unknown') ||
         artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null ||
