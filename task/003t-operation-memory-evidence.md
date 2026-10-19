@@ -431,3 +431,60 @@ Photoshop-authored PSB32 with reference render and provenance.\n
 **Bounded acceptance:** 003T/2d-1 DONE for independent controlled *Node child* observational method only. No evidence that all Chromium renderer/Worker subprocesses belong to one isolated operation, no cgroup high-water calibration, and no true PSD/PSB operation peak. Therefore `trueOperationPeakKnown:false` and `workerPidMapping:'unknown'` must remain unchanged; 003T and Stage 003 remain OPEN.
 
 **NEXT P1 003T/2d-2:** investigate whether a dedicated Chromium process-tree/cgroup operation window with frozen baseline and known-load independent control can be established in GitHub Linux CI, explicitly test short-lived descendants and read gaps. If a provable operation-isolated sensor cannot be enabled or calibrated, retain unknown rather than approximate peak with VmHWM. P0 002B/2c still BLOCKED on a verified licensed Photoshop-authored PSB32.
+
+## 2026-10-19 — 003T/2d-2 real Chromium cgroup scope feasibility (IN PROGRESS)
+
+**ID/Priority:** 003T/2d-2 / P1. **Dependencies:** accepted 003T/2d-1
+independent Linux memory control, 003T/2c real launcher PID, browser control
+003T/2b-2 and existing PSD16/PSB32 operation receipts. **Stage 003 OPEN.**
+
+**Objective:** find whether CI runner permits a kernel cgroup-v2 observation
+for a genuine headless Chromium `file://` 64 MiB page-touched *held* Blob
+Worker, and whether its cgroup is distinct from the harness. Never confuse
+cgroup `memory.current` with per-operation peak, Worker-to-PID mapping,
+full descendant census, or exclusively reserved browser memory.
+
+**Implemented on working branch:**
+- `tools/browser-chromium-cgroup-control.mjs`: starts actual isolated-profile
+  headless Chromium, connects page DevTools and waits for a real 64 MiB Worker
+  allocation acknowledgement. Reads launcher `/proc/<pid>/stat` before/after
+  cgroup-v2 `memory.current`; rejects PID starttime reuse. Compares Chromium
+  cgroup with `/proc/self/cgroup` and reports *shared-with-runner* or
+  *separate-unverified*; inaccessible/non-v2 groups are `unavailable` with
+  null memory, never zero. No cgroup host path/target URL in receipt.
+  The memory counter reflects a **sampled entire cgroup**, even if it includes
+  unrelated CI processes. No assumption of atomically observed children.
+- `tests/browser-chromium-cgroup-control.test.mjs`: parser and in-memory
+  `/proc` mocks for same/unverified membership, denied/absent counter, PID
+  reuse, forged isolation, unsupported true peak, Worker PID, missing/gapped
+  evidence and tampered artifact. Tests alone do not prove real Chrome memory.
+- `.github/workflows/ci.yml`: real Chromium control + independent offline
+  `--verify` on saved JSON; upload
+  `zpe-chromium-cgroup-scope-003t2d2` even on step failure.
+- `task/NEXT.md`, `task/README.md`, `task/003-tiled-content-aware.md`,
+  this task card: current state/next actions.
+
+**Acceptance gate:** locally a full checkout was not available because the
+execution environment cannot resolve `github.com`. Thus `npm run check`,
+live Chromium, PR CI, merge and exact-main **PENDING** until verified remotely.
+Do not mark 003T/2d-2 DONE on created code alone. If runner has shared cgroup,
+document that isolation is impossible *for this harness* rather than
+claiming `memory.current` is an operation-specific peak. A separate
+unverified cgroup also cannot certify full renderer/Worker membership.
+
+**Known limitations:** no high-depth editor operation in this control itself;
+the existing PSD16/PSB32 browser smoke remains separate. No cgroup reset,
+cgroup memory.peak, or bounded PID descendant membership audit; no
+cross-process atomic snapshots; no RSS interpolation across blind spans.
+Maintain `trueOperationPeakKnown:false`, `workerPidMapping:'unknown'`.
+The independent Photoshop-authored PSB32 provenance [002B/2c](002b2c-photoshop-psb32-provenance.md)
+is still BLOCKED.
+
+**NEXT P1 003T/2d-3:** read actual CI cgroup receipt, verify executable
+feasibility. If cgroup membership is shared, require an independently
+provisioned isolated cgroup or else explicitly retain unknown. If separate,
+audit child process membership/contamination and PID reuse/exit gaps, then
+attempt real PSD16/PSB32 operation-window control with calibrated observed
+coverage; claim no true peak without a proven operation-exclusive sensor.
+
+**PR:** [#292](https://github.com/zeter1/ZeTer-Photo-Editor/pull/292) is OPEN; live CI and receipt remain PENDING until checked. The runner step now prints only cgroup availability/scope (no host path) to support an independently readable verification. The strict parser rejects private path disclosure. Do not close the gate on unit-only coverage.

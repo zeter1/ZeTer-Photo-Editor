@@ -159,6 +159,23 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Real Chromium file:// Worker 64 MiB held allocation, sampled cgroup v2
+      # memory.current and runner membership. Not a proven operation peak or
+      # a complete renderer/Worker descendant census; unavailable stays unknown.
+      - name: Real Chromium cgroup feasibility control (003T/2d-2)
+        run: |
+          node tools/browser-chromium-cgroup-control.mjs "$RUNNER_TEMP/zpe-003t-cgroup-scope.json"
+          node tools/browser-chromium-cgroup-control.mjs --verify "$RUNNER_TEMP/zpe-003t-cgroup-scope.json"
+
+      - name: Upload Chromium cgroup feasibility receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-chromium-cgroup-scope-003t2d2
+          path: ${{ runner.temp }}/zpe-003t-cgroup-scope.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Profile tiled Content-Aware Fill (informational)
         run: node tools/profile-tiled-inpaint.mjs --sizes 8,24,48
 
