@@ -1,3 +1,5 @@
+> **PR #299 CI REPAIR (2026-10-19):** [PR #299](https://github.com/zeter1/ZeTer-Photo-Editor/pull/299), initial [CI #39296542524 FAILED](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39296542524) due starttime regex, next [#39296714490 FAILED](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39296714490) due stale array not rejected, and [#39297111414 FAILED](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39297111414) after successful Node/build at browser artifact writer because new fields were omitted by `browser-operation-timeline.mjs`. All three root causes fixed in PR branch; new full CI, merge, exact-main PENDING. Newly changed file: `tools/browser-operation-timeline.mjs`. All failing checks are recorded as failures, never as accepted CI.
+
 # 003T/2f-2 — PSD16/PSB32 PID+starttime operation boundary windows
 
 **Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003T/2f](003t2f-pid-window-control.md) → [003T](003t-operation-memory-evidence.md). **Depends on:** 003T/2f-1 context-disposal cleanup, 003T/2e explicit read windows, 003T/2d-3 cgroup permission probe.
