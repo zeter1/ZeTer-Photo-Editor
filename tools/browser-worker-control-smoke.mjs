@@ -15,6 +15,26 @@ const assert=(condition,message)=>{if(!condition)throw new Error('003T Chromium 
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const workerCount=infos=>infos.filter(t=>workerTypes.has(t.type)).length;
 
+// 003T/2f: only a complete CDP snapshot containing the original controller page
+// can establish a clean target baseline. IDs are opaque targets, never OS PIDs.
+export function workerTargetsMatchBaseline(infos,baseline,targetPageId){
+  assert(Array.isArray(infos) && baseline instanceof Map &&
+    typeof targetPageId==='string' && targetPageId.length>0,
+    'invalid Worker target baseline arguments');
+  const ids=new Set();
+  for(const info of infos){
+    assert(typeof info?.targetId==='string' && info.targetId &&
+      typeof info.type==='string' && info.type && !ids.has(info.targetId),
+      'missing or duplicated CDP target identity');
+    ids.add(info.targetId);
+  }
+  assert(infos.some(info=>info.targetId===targetPageId && info.type==='page'),
+    'CDP snapshot omitted controller page');
+  const current=infos.filter(info=>workerTypes.has(info.type));
+  return current.length===baseline.size &&
+    current.every(info=>baseline.get(info.targetId)===info.type);
+}
+
 export function validateIndependentWorkerControlEvidence(e){
   assert(e?.kind==='zpe-independent-chromium-worker-control-v1' && e.schemaVersion===1,
     'unknown artifact schema');
@@ -180,7 +200,7 @@ async function getTargets(browser){
 async function runControl(){
   const dir=await mkdtemp(path.join(tmpdir(),'zpe-003t-control-'));
   const html=path.join(dir,'control.html');
-  let browser=null,root=null,page=null;
+  let browser=null,root=null,page=null,shortPage=null,shortContextId=null;
   try{
     await writeFile(html,'<!doctype html><html><meta charset="utf-8"><title>003T control</title><body>Worker visibility control</body></html>');
     const chrome=findChrome();
@@ -204,23 +224,54 @@ async function runControl(){
       processClient:root,schedule:()=>0,unschedule:()=>{},intervalMs:50,
     });
     await sampler.start();
-    const baselineIds=new Set((await getTargets(root)).filter(t=>workerTypes.has(t.type)).map(t=>t.targetId));
+    const baselineSnapshot=await getTargets(root);
+    const baselineIds=new Map(baselineSnapshot.filter(t=>workerTypes.has(t.type))
+      .map(t=>[t.targetId,t.type]));
+    assert(workerTargetsMatchBaseline(baselineSnapshot,baselineIds,target.id),
+      'inconsistent initial Worker target baseline');
     const baselineCount=baselineIds.size;
     async function atBaseline(){
-      const ids=(await getTargets(root)).filter(t=>workerTypes.has(t.type)).map(t=>t.targetId);
-      return ids.length===baselineCount && ids.every(id=>baselineIds.has(id));
+      return workerTargetsMatchBaseline(await getTargets(root),baselineIds,target.id);
     }
-    // A real, acknowledged transient Worker can fall entirely between the two
-    // explicit observations. Never infer zero Worker creations from zero IDs.
-    await evalPage(page,'(() => { window.__zpeControl={shortDone:false,longReady:false}; const s="self.postMessage(1);self.close()"; const u=URL.createObjectURL(new Blob([s],{type:"text/javascript"})); const w=new Worker(u); w.onmessage=()=>{window.__zpeControl.shortDone=true;w.terminate();URL.revokeObjectURL(u)}; return true; })()');
-    await until('short Worker acknowledgement',()=>evalPage(page,'window.__zpeControl?.shortDone===true'));
-    await until('short Worker removed from CDP',atBaseline);
+    // A self-closing Worker may remain listed by CDP long after the message and
+    // terminate() acknowledge. Isolate this ephemeral control in a disposable
+    // browser context: disposing its owning page/context is a deterministic
+    // cleanup boundary. Do NOT infer OS process termination from target absence.
+    const isolated=await root.send('Target.createBrowserContext',{disposeOnDetach:true});
+    assert(typeof isolated?.browserContextId==='string' && isolated.browserContextId,
+      'isolated short-Worker browser context missing');
+    shortContextId=isolated.browserContextId;
+    const opened=await root.send('Target.createTarget',{
+      url:pathToFileURL(html).href,browserContextId:shortContextId,
+    });
+    assert(typeof opened?.targetId==='string' && opened.targetId,
+      'isolated short-Worker page target missing');
+    const shortTarget=await until('isolated file page target',async()=>{
+      const res=await fetch(origin+'/json/list');
+      const list=await res.json();
+      return list.find(t=>t.id===opened.targetId && t.type==='page' &&
+        t.webSocketDebuggerUrl);
+    });
+    shortPage=await CDP.connect(shortTarget.webSocketDebuggerUrl);
+    await shortPage.send('Runtime.enable');
+    await until('isolated file page ready',async()=>
+      evalPage(shortPage,'document.readyState === "complete"'));
+    // The transient Worker is independently acknowledged, but may fall entirely
+    // between samples. The original controller page stays alive throughout.
+    await evalPage(shortPage,'(() => { window.__zpeControl={shortDone:false}; const s="self.postMessage(1);self.close()"; const u=URL.createObjectURL(new Blob([s],{type:"text/javascript"})); const w=new Worker(u); w.onmessage=()=>{window.__zpeControl.shortDone=true;w.terminate();URL.revokeObjectURL(u)}; return true; })()');
+    await until('short Worker acknowledgement',()=>evalPage(shortPage,
+      'window.__zpeControl?.shortDone===true'));
+    await root.send('Target.disposeBrowserContext',{browserContextId:shortContextId});
+    shortContextId=null;
+    shortPage.close();
+    shortPage=null;
+    await until('short Worker context removed from CDP',atBaseline);
     await sampler.snapshot('short-worker-missed');
     const gap=createBrowserWorkerTargetTracker();
     gap.observe(await getTargets(root),'gap-before');
     // Deliberately skip exactly one read: negative *injected* coverage control.
     gap.noteMissingSnapshot('gap-injected');
-    await evalPage(page,'(() => {const s="self.payload=new Uint8Array(8*1024*1024);for(let i=0;i<self.payload.length;i+=4096)self.payload[i]=1;self.postMessage(1);setInterval(()=>{},1000)";const u=URL.createObjectURL(new Blob([s],{type:"text/javascript"}));const w=new Worker(u);window.__zpeControl.longWorker=w;window.__zpeControl.longUrl=u;w.onmessage=()=>{window.__zpeControl.longReady=true};return true})()');
+    await evalPage(page,'(() => {window.__zpeControl={longReady:false};const s="self.payload=new Uint8Array(8*1024*1024);for(let i=0;i<self.payload.length;i+=4096)self.payload[i]=1;self.postMessage(1);setInterval(()=>{},1000)";const u=URL.createObjectURL(new Blob([s],{type:"text/javascript"}));const w=new Worker(u);window.__zpeControl.longWorker=w;window.__zpeControl.longUrl=u;w.onmessage=()=>{window.__zpeControl.longReady=true};return true})()');
     await until('live Worker acknowledgement',()=>evalPage(page,'window.__zpeControl?.longReady===true'));
     await until('live real CDP Worker target',async()=>
       (await getTargets(root)).some(t=>workerTypes.has(t.type) && !baselineIds.has(t.targetId)));
@@ -246,11 +297,16 @@ async function runControl(){
         periodicPollingDisabled:true,gapMethod:'deliberately-skipped-cdp-target-snapshot'},
       memory,injectedGap:gap.report(),trueOperationPeakKnown:false,
       workerPidMapping:'unknown',
-      limitations:'Real target visibility and intentional read gap control. The short-lived Worker acknowledged execution but appeared in neither boundary snapshot. Target IDs do not map to Linux PIDs. /proc RSS is sequential, PID reuse and lifetime HWM are not operation peak proof.',
+      limitations:'Real target visibility and intentional read gap control. The short-lived Worker acknowledged execution in a disposed isolated browser context, but appeared in neither boundary snapshot. Target IDs do not map to Linux PIDs. /proc RSS is sequential, PID reuse and lifetime HWM are not operation peak proof.',
     };
     validateIndependentWorkerControlEvidence(result);
     return result;
   }finally{
+    shortPage?.close();
+    if(shortContextId && root){
+      try{await root.send('Target.disposeBrowserContext',{browserContextId:shortContextId});}
+      catch { /* Original failure remains authoritative; browser shutdown cleans up. */ }
+    }
     page?.close();root?.close();
     if(browser && browser.exitCode===null)browser.kill('SIGTERM');
     await rm(dir,{recursive:true,force:true,maxRetries:4,retryDelay:100});
