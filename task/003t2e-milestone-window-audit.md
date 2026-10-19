@@ -23,6 +23,14 @@ Capture the **actual time windows** of explicit CDP/OS memory readings on real C
 - Full `npm run check`, `file://` browser smoke, PR CI, merge and exact-main CI: **PENDING**. Do not claim full acceptance until those exact runs pass.
 - The previous real runner gate [PR #294](https://github.com/zeter1/ZeTer-Photo-Editor/pull/294) independently found non-privileged cgroup delegation **BLOCKED**. That is not a memory-performance result.
 
+
+## 2026-10-19 — PR #295 CI regression and bounded fix
+
+- [PR #295](https://github.com/zeter1/ZeTer-Photo-Editor/pull/295) initial [CI #39281144547](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39281144547) **FAIL** at `npm run check`: existing `tests/browser-worker-target-census.test.mjs` scenario 028 passes a generic invalid `after recovery/reload` label. The existing target census explicitly records this as **unobserved** `invalid-phase`; the new audit initially rejected the report at `stop()` instead.
+- `tools/browser-milestone-window-audit.mjs` now emits the same fail-closed `invalid-phase` sentinel for malformed generic labels while refusing `workerTargetsObserved:true` with this sentinel. It still rejects overlapping windows and forged peak/Worker→PID claims.
+- Regression assertions added to `tests/browser-worker-target-census.test.mjs` and `tests/browser-milestone-window-audit.test.mjs`. Fix commits: [`05b47c9`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/05b47c9d0ae9a214cda536d810e48e4fe5499589), [`94e0ffb`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/94e0ffb07057b449998a29442e8fbe7a2f714bbd), [`d4b6821`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/d4b682181703795079748df5a3a0c2e7e8ff60fb).
+- **CI on these fixes, merge and exact-main: PENDING readback.** Local complete checkout remains inaccessible. This section records code publication, not successful acceptance. Keep 003T/2e **IN PROGRESS** until successful exact-head CI, real Chromium receipts and merge/main checks are verified.
+
 ## Acceptance criteria
 
 - [x] Explicit milestone observation window / missing identity data derived from real report structure.
