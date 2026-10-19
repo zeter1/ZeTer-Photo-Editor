@@ -47,3 +47,15 @@ test('003T/2e: forged JSON peak, Worker PID, temporal boundaries and gaps fail c
   ]) assert.throws(()=>validateBrowserMilestoneWindowAudit({...valid,...changes},timing,4),/milestone windows/);
   assert.throws(()=>summarizeBrowserMilestoneWindows(samples().slice(1),timing),/milestone windows/);
 });
+
+test('003T/2e: invalid generic milestone labels cannot forge observed Worker targets',()=>{
+  const events=samples();
+  events[2]={...events[2],phase:'not a target label',workerTargetsObserved:false};
+  const audit=summarizeBrowserMilestoneWindows(events,timing);
+  assert.equal(audit.milestones[1].phase,'invalid-phase');
+  assert.equal(audit.milestones[1].workerTargetsObserved,false);
+  assert.throws(()=>validateBrowserMilestoneWindowAudit({
+    ...audit,milestones:audit.milestones.map((m,i)=>i===1
+      ? {...m,workerTargetsObserved:true} : m),
+  },timing,4),/invalid read window or evidence flag/);
+});
