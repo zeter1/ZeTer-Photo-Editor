@@ -1,3 +1,9 @@
+## 2026-10-19 — 002B/1 pinned independent Photoshop PSD16/PSD32 composite oracle (IN PROGRESS)
+
+- [Полная карточка текущей проходки](002b-photocraft-native-composite-oracle.md). Pinned SHA256 upstream PhotoCraft PSD16 baseline/levels + PSD32 baseline, новая независимая native raw/RLE/ZIP composite sample reference и точный `decodePsd` parity, отрицательные Node cases и настоящий CI real corpus download без silent skip.
+- **Статус:** код в ветке, PR CI / merge / exact-main CI ещё НЕ проверены, не закрывать подзадачу; Photoshop authoring по утверждению upstream, не подтверждённое нами. Runtime codec/bundle/version пока без изменений.
+- **Следующее P0:** проверить/fix реальную несовместимость на pinned Photoshop bytes, добиться green PR/exact-main CI; затем лицензированный Photoshop **PSB32**, dual-kind corpus manifest + Worker/browser tests.
+
 ## 2026-10-19 — 002B: independent Adobe-authored corpus candidate (NOT YET ADMITTED)
 
 - **Первоисточник-кандидат:** [PhotoCraft Corpus](https://github.com/storytold/photocraft-corpus) pinned revision [`b2e1dcba8954efa9ad0e7944c258cc0e9a5efc1e`](https://github.com/storytold/photocraft-corpus/tree/b2e1dcba8954efa9ad0e7944c258cc0e9a5efc1e), `SHA256SUMS`, `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE` и доступный исходник `tools/photoshop-oracles/`. README **заявляет**, что файлы созданы Adobe Photoshop 2026 (27.10) с Maximize Compatibility и двойной лицензией MIT/Apache-2.0. Это независимое публичное утверждение производителя корпуса, а не проведённая нами ручная Photoshop review или тест ZeTer.
