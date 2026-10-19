@@ -93,6 +93,10 @@ export function validateChromiumCgroupScopeEvidence(e){
     check(e.before.starttimeTicks===e.held.starttimeTicks &&
       e.before.scope===e.held.scope,
     'PID reuse or cgroup membership changed across operation');
+  check(!JSON.stringify(e).includes('file:///') &&
+    !JSON.stringify(e).includes('blob:') &&
+    !JSON.stringify(e).includes('/sys/fs/cgroup/'),
+    'private page or cgroup path leaked');
   check(typeof e.limitations==='string' &&
     e.limitations.includes('not operation peak') &&
     e.limitations.includes('not exclusive') &&
@@ -215,7 +219,10 @@ async function main(){
   check(process.argv.length===3,'usage: script ARTIFACT.json');
   const report=await runChromiumCgroupScopeControl();
   await writeFile(process.argv[2],JSON.stringify(report,null,2)+'\n',{flag:'wx'});
-  console.log('003T real Chromium cgroup probe PASS; operation peak/Worker PID unknown');
+  console.log('003T real Chromium cgroup probe PASS: before=' +
+    report.before.availability+'/'+report.before.scope +
+    ', held='+report.held.availability+'/'+report.held.scope +
+    '; operation peak/Worker PID unknown');
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)
   main().catch(error=>{console.error(error.stack||String(error));process.exitCode=1;});
