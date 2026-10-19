@@ -34,7 +34,7 @@ const CHILD=`
 
 export function validateIndependentMemoryCalibration(e){
   check(fields(e,['kind','schemaVersion','origin','pid','controlBytes',
-    'operationBytes','samples','gap','trueOperationPeakKnown','workerPidMapping','limitations']),
+    'operationBytes','samples','sampledMaxRssBytes','sampledMaxReportedHwmBytes','gap','trueOperationPeakKnown','workerPidMapping','limitations']),
     'invalid artifact field set');
   check(e.kind==='zpe-independent-linux-memory-calibration-v1' &&
     e.schemaVersion===1 && e.origin==='real isolated Node child /proc (not Chromium)' &&
@@ -44,18 +44,21 @@ export function validateIndependentMemoryCalibration(e){
     'unsupported peak/worker claim or control metadata');
   const names=['beforeControl','controlHeld','beforeOperation','operationHeld','afterOperation'];
   check(fields(e.samples,names),'missing or forged observation phase');
-  let incarnation=null,previousHwm=0;
+  let incarnation=null,maxRss=0,maxHwm=0;
   for(const name of names){
     const p=e.samples[name];
     check(fields(p,['pid','starttimeTicks','rssBytes','highWaterBytes']) &&
       p.pid===e.pid && validStart(p.starttimeTicks) &&
       Number.isSafeInteger(p.rssBytes) && p.rssBytes>0 &&
       Number.isSafeInteger(p.highWaterBytes) && p.highWaterBytes>=p.rssBytes &&
-      p.highWaterBytes>=previousHwm,'invalid /proc RSS, HWM or reused PID at '+name+': '+JSON.stringify(p)+', prevHwm='+previousHwm);
+      p.highWaterBytes>=p.rssBytes,'invalid /proc RSS, HWM or reused PID at '+name);
     if(incarnation!==null)check(p.starttimeTicks===incarnation,'changed PID incarnation');
     incarnation=p.starttimeTicks;
-    previousHwm=p.highWaterBytes;
+    maxRss=Math.max(maxRss,p.rssBytes);
+    maxHwm=Math.max(maxHwm,p.highWaterBytes);
   }
+  check(e.sampledMaxRssBytes===maxRss && e.sampledMaxReportedHwmBytes===maxHwm,
+    'forged or incomplete observed max');
   check(e.samples.controlHeld.rssBytes > e.samples.beforeControl.rssBytes + 4*MIB,
     'control workload not resident; calibration inconclusive');
   check(e.samples.operationHeld.rssBytes > e.samples.beforeOperation.rssBytes + 16*MIB,
@@ -81,6 +84,9 @@ async function sample(pid){
   return {pid,starttimeTicks,rssBytes,highWaterBytes};
 }
 
+// Linux VmHWM can differ slightly between consecutive reads (including after GC);
+// retain the maximum *reported* HWM rather than assuming monotonicity or an
+// exact operation peak. Only same-snapshot HWM >= RSS is mandatory.
 // Child ACK only proves the controlled allocation has been touched before
 // sampling. Requests and /proc reads are sequential; there is no continuous
 // process-tree census or operation-isolated peak sensor.
@@ -130,6 +136,8 @@ export async function runIndependentMemoryCalibration(){
       origin:'real isolated Node child /proc (not Chromium)',pid:child.pid,
       controlBytes:16*MIB,operationBytes:64*MIB,
       samples:{beforeControl,controlHeld,beforeOperation,operationHeld,afterOperation},
+      sampledMaxRssBytes:Math.max(...[beforeControl,controlHeld,beforeOperation,operationHeld,afterOperation].map(p=>p.rssBytes)),
+      sampledMaxReportedHwmBytes:Math.max(...[beforeControl,controlHeld,beforeOperation,operationHeld,afterOperation].map(p=>p.highWaterBytes)),
       gap:{availability:'not-observed',
         reason:'no-continuous-proc-monitor-between-acknowledgements',periodicSamples:0},
       trueOperationPeakKnown:false,workerPidMapping:'unknown',
