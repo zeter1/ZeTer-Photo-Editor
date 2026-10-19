@@ -202,3 +202,13 @@ fail-closed short-lived process/PID reuse and /proc access-gaps,
 **Known limits/bugs still open:** The CDP PID census is not atomic with sequential `/proc` reads. PID membership in one sample is not Worker identity, short-lived Chrome targets can exist between polls, a process lifetime `VmHWM` is not operation RSS peak, no independent real **Chromium** control workload yet. `trueOperationPeakKnown:false`, `workerPidMapping:'unknown'` and sampled maxima remain the only supported claims.
 **Next:** **003T/2b-2 IN PROGRESS** — use an independently controlled temporary Chromium Worker/target and short-lived process in real `file://` operation, capture before/during/after target and PID/starttime coverage without timing joins, negative fail-closed receipts, CI verification; no peak unless a separately validated operation-isolated measurement method is found.
 **Stage 003:** OPEN. **P0 002B/2c:** BLOCKED without provenance-verified, licensed Adobe Photoshop-authored PSB32.
+
+## 2026-10-19 — post-merge verification 003T/2b-1 (exact-main PENDING)
+
+- **Code PR:** [#283](https://github.com/zeter1/ZeTer-Photo-Editor/pull/283).
+- **Merged in `main`:** [73839c6](https://github.com/zeter1/ZeTer-Photo-Editor/commit/73839c6b76db181af523a7eb03216a4007ed55bf).
+- **PR CI success:** [39252673346](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39252673346), including `npm run check`, real `file://` Chromium UI smoke, Adobe-published PSD fixture browser native-layer checks, external PSB fixture checks, operation artifact verifier and informational profiles.
+- **Exact merged `main` CI:** [39253156164](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39253156164) **IN PROGRESS** when this note was prepared. Do not mark acceptance DONE before completed readback.
+- **Files:** `tools/browser-rss-sample-identity.mjs`, `tools/browser-renderer-heap-sampler.mjs`, `tests/browser-rss-sample-identity.test.mjs`, `task/003t-operation-memory-evidence.md`, `task/NEXT.md`, `task/README.md`, `task/003-tiled-content-aware.md`.
+- **Defects/limits remaining:** sampled PID census and sequential `/proc` remain non-atomic, process lifetime HWM is not per-operation peak, OS control is not Chrome control, Worker→PID undocumented, P0 external Photoshop PSB32 corpus blocked.
+- **NEXT 003T/2b-2 P1 IN PROGRESS:** inject independent real ephemeral Chrome Worker control in `file://` high-depth test, record target census and Linux PID incarnations across before/during/after with missing snapshots; prove detected-versus-missed observations, fail-closed artifact/CI, preserve `trueOperationPeakKnown:false` unless independent calibrated operation-isolated method is established.
