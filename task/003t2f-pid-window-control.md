@@ -1,3 +1,5 @@
+> **003T/2f bounded task DONE (2026-10-19):** [003T/2f-1 PR #298](https://github.com/zeter1/ZeTer-Photo-Editor/pull/298) and [003T/2f-2 PR #299](https://github.com/zeter1/ZeTer-Photo-Editor/pull/299) are merged, with final #299 [PR CI SUCCESS #39298148195](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39298148195) and [exact-code-main CI SUCCESS #39298757141](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39298757141) on merged `2522de4b`. Independent context disposal and strict PID/starttime read-window gap receipts accepted. **Parent 003T remains IN PROGRESS**, because the runner cannot delegate a dedicated cgroup; no continuous process membership, Worker→PID mapping or real operation-specific memory peak is established. Next [003T/2g](003t2g-transient-proc-gap-recovery.md), subject to test evidence. P0 licensed Photoshop PSB32 remains BLOCKED.
+
 > **003T/2f-2 CI REPAIR IN PROGRESS (2026-10-19):** [PR #299](https://github.com/zeter1/ZeTer-Photo-Editor/pull/299) actual `file://` Chromium pipeline exposed three defects: invalid starttime matcher, missing-read stale array not rejected, and dropped diagnostic fields at operation-profile serialization. Repaired matcher, fail-closed reader and passthrough of `incarnationWindowAudit` + raw stages; **final-head PR CI and exact-main acceptance not yet verified**, so subtask/parent remain OPEN. [Details](003t2f-2-operation-incarnation-windows.md).
 
 > **003T/2f-2 IN PROGRESS (2026-10-19):** Implementing [explicit real PSD16/PSB32 Linux PID/starttime operation windows](003t2f-2-operation-incarnation-windows.md) in [working branch](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t2f2-pid-incarnation-windows-20261019). Boundaries added before/after first Fill, native Undo/Redo, mid-kernel cancellation, retry; all skipped/missing Linux reads remain unknown, every inter-snapshot interval remains unverified. Strict versioned evidence verifier rejects PID reuse/duplicate/forged completeness and unsupported Worker→PID/peak. **Real PR CI, merge, exact-main acceptance pending**. Preserve all existing native-byte oracles. Whole 003T/2f, Stage 003 remain OPEN; Photoshop-authored PSB32 blocker unchanged.
@@ -8,7 +10,7 @@
 
 # 003T/2f — independent Worker target cleanup and PID window control
 
-**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003T](003t-operation-memory-evidence.md); Stage [003](003-tiled-content-aware.md).
+**Priority:** P1. **Status:** DONE. **Parent:** [003T](003t-operation-memory-evidence.md); Stage [003](003-tiled-content-aware.md).
 **Dependencies:** 003T/2d-3 real permission-denied cgroup probe ([PR #294](https://github.com/zeter1/ZeTer-Photo-Editor/pull/294)); 003T/2e high-depth milestone audit ([PR #295](https://github.com/zeter1/ZeTer-Photo-Editor/pull/295)); 003T/2c Linux launcher PID lifecycle and 003T/2b-2 Worker CDP control.
 **Status at creation:** TODO; no implementation or CI should be inferred from this card.
 
@@ -24,11 +26,11 @@ Remove ambiguity in real short-lived Chromium `file://` Worker target cleanup an
 
 ## Acceptance criteria
 
-- [ ] Reproduce or isolate short-Worker target disappearance race in actual Chromium `file://`, keep bounded explicit cleanup and no false claim of Worker OS process termination.
-- [ ] Add focused automated regression for CDP delayed target visibility/cleanup and fail-closed evidence on unexpected targets, dropped reads, or PID reuse.
-- [ ] Run genuine high-depth PSD16 and PSB32 UI Fill/cancel/retry, Undo/Redo with sampled start/end OS incarnation windows, explicitly record unknown unsampled intervals and unchanged native bytes.
-- [ ] Keep `trueOperationPeakKnown:false` and `workerPidMapping:'unknown'` unless an independent verifiable operation-exclusive sensor and documented join actually exist.
-- [ ] Pass `npm run check`, real Chromium `file://` smoke, strict artifact verifier; publish PR, merge only when CI green, verify exact merged-main and update this card/NEXT/README.
+- [x] Reproduce or isolate short-Worker target disappearance race in actual Chromium `file://`, keep bounded explicit cleanup and no false claim of Worker OS process termination.
+- [x] Add focused automated regression for CDP delayed target visibility/cleanup and fail-closed evidence on unexpected targets, dropped reads, or PID reuse.
+- [x] Run genuine high-depth PSD16 and PSB32 UI Fill/cancel/retry, Undo/Redo with sampled start/end OS incarnation windows, explicitly record unknown unsampled intervals and unchanged native bytes.
+- [x] Keep `trueOperationPeakKnown:false` and `workerPidMapping:'unknown'` unless an independent verifiable operation-exclusive sensor and documented join actually exist.
+- [x] Pass `npm run check`, real Chromium `file://` smoke, strict artifact verifier; publish PR, merge only when CI green, verify exact merged-main and update this card/NEXT/README.
 
 ## Handoff
 

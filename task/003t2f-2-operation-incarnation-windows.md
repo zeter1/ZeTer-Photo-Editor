@@ -1,8 +1,10 @@
+> **003T/2f-2 ACCEPTED (2026-10-19):** Full code and real Chromium `file://` acceptance in [PR #299](https://github.com/zeter1/ZeTer-Photo-Editor/pull/299), final head `6ae4b8ff703ebfd1c2cdd7376a02dee631ed8774`, [PR CI #39298148195 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39298148195), squash merge [main `2522de4b`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/2522de4bd0f97217f938c8c5a2dd2ca9c9f01d1b), [exact-code-main CI #39298757141 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39298757141). Node tests, generated artifacts, genuine PSD16/PSB32 Fill/cancel/retry/Undo/Redo, exact native tile bytes, strict JSON receipts, real Chromium Worker controls and diff hygiene passed. Earlier failed CI runs are retained below as historical regressions. **Bounded acceptance DONE**, not a Worker PID join, continuous OS process census or operation-exclusive memory peak. **NEXT [003T/2g](003t2g-transient-proc-gap-recovery.md)**: recover later independent snapshots after transient `/proc` gaps without filling unknown history. Whole 003T and Stage 003 remain OPEN; P0 002B/2c BLOCKED.
+
 > **PR #299 CI REPAIR (2026-10-19):** [PR #299](https://github.com/zeter1/ZeTer-Photo-Editor/pull/299), initial [CI #39296542524 FAILED](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39296542524) due starttime regex, next [#39296714490 FAILED](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39296714490) due stale array not rejected, and [#39297111414 FAILED](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39297111414) after successful Node/build at browser artifact writer because new fields were omitted by `browser-operation-timeline.mjs`. All three root causes fixed in PR branch; new full CI, merge, exact-main PENDING. Newly changed file: `tools/browser-operation-timeline.mjs`. All failing checks are recorded as failures, never as accepted CI.
 
 # 003T/2f-2 — PSD16/PSB32 PID+starttime operation boundary windows
 
-**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003T/2f](003t2f-pid-window-control.md) → [003T](003t-operation-memory-evidence.md). **Depends on:** 003T/2f-1 context-disposal cleanup, 003T/2e explicit read windows, 003T/2d-3 cgroup permission probe.
+**Priority:** P1. **Status:** DONE. **Parent:** [003T/2f](003t2f-pid-window-control.md) → [003T](003t-operation-memory-evidence.md). **Depends on:** 003T/2f-1 context-disposal cleanup, 003T/2e explicit read windows, 003T/2d-3 cgroup permission probe.
 
 ## Goal and scope
 
@@ -21,10 +23,10 @@ For genuine Chromium `file://` ZeTer-authored large PSD16 / PSB32 UI scenarios, 
 
 - [x] Implement independent read-window schema + strict negative Node regression cases (committed, not yet executed in complete CI).
 - [x] Instrument genuine PSD16 / PSB32 `file://` browser path without disabling native exact-byte / undo / cancel checks.
-- [ ] `npm run check` with new Node regressions passes on PR head.
-- [ ] Genuine Chromium `file://` CI smoke runs both PSD16 and PSB32 with real Linux incarnation receipts; JSON artifact validator succeeds.
-- [ ] Review CI artifacts for expected observed/unknown boundaries, native tile byte preservation and limitations.
-- [ ] Merge after green PR CI; verify exact-code-main CI success on merged SHA; update `task/NEXT.md`, `task/README.md` and parent task.
+- [x] `npm run check` with new Node regressions passes on PR head.
+- [x] Genuine Chromium `file://` CI smoke runs both PSD16 and PSB32 with real Linux incarnation receipts; JSON artifact validator succeeds.
+- [x] Review CI artifacts for expected observed/unknown boundaries, native tile byte preservation and limitations.
+- [x] Merge after green PR CI; verify exact-code-main CI success on merged SHA; update `task/NEXT.md`, `task/README.md` and parent task.
 
 ## Verified state and restrictions
 
