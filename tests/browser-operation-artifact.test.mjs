@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {buildBrowserOperationArtifact,writeBrowserOperationArtifact,verifyBrowserOperationArtifacts} from '../tools/browser-operation-artifact.mjs';
 import {summarizeBrowserMilestoneWindows} from '../tools/browser-milestone-window-audit.mjs';
+import {summarizeBrowserOperationIncarnationWindows} from '../tools/browser-operation-incarnation-windows.mjs';
 
 const completedPhases=[
   'import-input-dispatched','import-preview-ready','native-source-verified','selection-created',
@@ -293,6 +294,9 @@ test('003T/2e: real Chromium quality artifact requires milestone windows and rej
   ];
   p.memory.milestoneWindowAudit=summarizeBrowserMilestoneWindows(
     snapshots,p.memory.samplingTiming);
+  assert.throws(()=>buildBrowserOperationArtifact(p),/missing real Linux incarnation windows/);
+  p.memory.incarnationWindowAudit=summarizeBrowserOperationIncarnationWindows(
+    snapshots,p.memory.milestoneWindowAudit);
   assert.equal(buildBrowserOperationArtifact(p).timeline.memory.milestoneWindowAudit.missingPidMilestones,1);
   const falsePidClaim=structuredClone(p);
   falsePidClaim.memory.milestoneWindowAudit.missingPidMilestones=0;
