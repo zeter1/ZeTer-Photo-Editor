@@ -165,9 +165,6 @@ export async function verifyPhotoshopBrowserImport(client,{evaluate,waitFor,asse
     const decoded=await decodePsd(bytes);
     const expected=expectedPhotoshopNativeLayers(decoded,spec.bitsPerChannel);
     assert.ok(expected.length>0,'Photoshop-authored source must have raster layers');
-    await evaluate(client,'location.reload();true');
-    await waitFor('002B/2a Photoshop browser bootstrap',()=>
-      evaluate(client,'document.documentElement?.dataset.appReady==="true"'),30000);
     await evaluate(client,'window.__zpePhotoshopImport='+JSON.stringify({
       filename:path.basename(spec.file),parts:[],
     })+';true');
