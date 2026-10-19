@@ -21,7 +21,9 @@ function mockHeader(version, bitsPerChannel) {
   bytes.writeUInt32BE(7, 18);
   bytes.writeUInt16BE(bitsPerChannel, 22);
   bytes.writeUInt16BE(3, 24);
-  bytes.writeUInt32BE(0x1a2b3c4d, 26);
+  // Bounded but deliberately synthetic sections: zero color/resource/layer
+  // lengths and a raw merged-image marker (PSD offset 38, PSB offset 42).
+  // The trailing bytes are NOT a complete valid 5x7 high-depth composite.
   return bytes;
 }
 
@@ -229,4 +231,74 @@ test('Stage 002 P0: reject header-only fixture sizes below minimum PSD/PSB secti
   item.sha256 = createHash('sha256').update(validPsd).digest('hex');
   await state.save();
   await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath), /PSB requires at least 44/);
+});
+
+test('Stage 002 P0: top-level PSD/PSB sections are bounded before native decode', async t => {
+  const state = await corpus(t);
+  for (const [index, fixture] of state.manifest.fixtures.entries()) {
+    const path = join(state.directory, fixture.file);
+    const original = await readFile(path);
+    const mutate = async fn => {
+      const bytes = Buffer.from(original);
+      fn(bytes);
+      await writeFile(path, bytes);
+      fixture.sha256 = createHash('sha256').update(bytes).digest('hex');
+      await state.save();
+      return auditExternalHighDepthCorpus(state.manifestPath);
+    };
+    // The section lengths must not be allowed to point beyond the file even
+    // when the declared SHA-256 exactly matches the malicious bytes.
+    await assert.rejects(mutate(bytes => bytes.writeUInt32BE(0xffffffff, 26)),
+      /color-mode data exceeds file bounds/);
+    await assert.rejects(mutate(bytes => bytes.writeUInt32BE(0xffffffff, 30)),
+      /image resources exceeds file bounds/);
+    await assert.rejects(mutate(bytes => index === 0
+      ? bytes.writeUInt32BE(0xffffffff, 34)
+      : bytes.writeBigUInt64BE(0x100000000n, 34)),
+    /layer\/mask data exceeds file bounds/);
+    const compressionAt = index === 0 ? 38 : 42;
+    await assert.rejects(mutate(bytes => bytes.writeUInt16BE(4, compressionAt)),
+      /invalid merged image compression/);
+    await writeFile(path, original);
+    fixture.sha256 = createHash('sha256').update(original).digest('hex');
+    await state.save();
+  }
+  const recovered = await auditExternalHighDepthCorpus(state.manifestPath);
+  assert.deepEqual(recovered.fixtures.map(item => item.imageCompression), [0, 0]);
+});
+
+test('Stage 002 P0: valid top-level section offsets are skipped without buffering section data', async t => {
+  const state = await corpus(t);
+  for (const [index, fixture] of state.manifest.fixtures.entries()) {
+    const bytes = Buffer.alloc(96, 0);
+    mockHeader(index + 1, index ? 32 : 16).copy(bytes, 0, 0, 26);
+    let offset = 26;
+    bytes.writeUInt32BE(3, offset); offset += 4 + 3;
+    bytes.writeUInt32BE(5, offset); offset += 4 + 5;
+    if (index === 0) bytes.writeUInt32BE(7, offset);
+    else bytes.writeBigUInt64BE(7n, offset);
+    offset += (index === 0 ? 4 : 8) + 7;
+    bytes.writeUInt16BE(3, offset); // ZIP with prediction; only envelope checked.
+    await writeFile(join(state.directory, fixture.file), bytes);
+    fixture.size = bytes.length;
+    fixture.sha256 = createHash('sha256').update(bytes).digest('hex');
+  }
+  await state.save();
+  const report = await auditExternalHighDepthCorpus(state.manifestPath);
+  assert.deepEqual(report.fixtures.map(item => item.imageCompression), [3, 3]);
+  assert.match(report.limitations, /section bounds/);
+});
+
+test('Stage 002 P0: missing merged-image payload is rejected even with a pinned hash', async t => {
+  const state = await corpus(t);
+  for (const [index, fixture] of state.manifest.fixtures.entries()) {
+    const compressionAt = index === 0 ? 38 : 42;
+    const bytes = mockHeader(index + 1, index ? 32 : 16).subarray(0, compressionAt + 2);
+    await writeFile(join(state.directory, fixture.file), bytes);
+    fixture.size = bytes.length;
+    fixture.sha256 = createHash('sha256').update(bytes).digest('hex');
+  }
+  await state.save();
+  await assert.rejects(auditExternalHighDepthCorpus(state.manifestPath),
+    /missing merged image payload/);
 });
