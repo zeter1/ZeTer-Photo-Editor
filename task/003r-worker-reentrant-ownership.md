@@ -1,6 +1,6 @@
 # 003R — Reentrant Worker owner handoff (Stage 003)
 
-**Приоритет:** P1. **Статус:** IN PROGRESS (2026-10-19). **PR:** [#276](https://github.com/zeter1/ZeTer-Photo-Editor/pull/276), открыт; PR CI/merge/exact-main PENDING.
+**Приоритет:** P1. **Статус:** DONE (2026-10-19). **PR:** [#276](https://github.com/zeter1/ZeTer-Photo-Editor/pull/276), merged [main 56da5c8](https://github.com/zeter1/ZeTer-Photo-Editor/commit/56da5c87f9e109437a747293a383cd03fc16bd68).
 **Зависимости:** базовый Stage 003 file:// UI Worker и cancellation/timeout уже реализованы.
 **Контекст:** [003](003-tiled-content-aware.md). **Base:** main `ed74068c724d5885b459cac81c6613483a263be9`.
 
@@ -16,7 +16,7 @@
 **Цель:** только самая новая генерация владеет Worker; superseded Worker
 освобождается/terminate, не посылает job и не публикует результат.
 
-## Реализация в ветке (пока не подтверждено CI)
+## Реализовано и подтверждено
 
 - `src/core/tiled-inpaint-worker-client.js`: поколение захватывается до
   `cancel`/`isCurrent`/`createWorker`; после factory+owner проверяется
@@ -37,14 +37,20 @@
 4. PR слит в main, exact-main CI green на новом merge SHA.
 5. Фактические PR/CI/merge ссылки записаны здесь и в `task/NEXT.md`.
 
+## Проверенные GitHub gates
+
+- **PR CI: success** — [39235644534](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39235644534), exact head `e858207fd18a25725e1c13e3ece031de0e82a332`.
+- **PR real-photo CI: success** — [39235644554](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39235644554), same exact head.
+- **Merge:** [PR #276](https://github.com/zeter1/ZeTer-Photo-Editor/pull/276) squash merged into `main` at `56da5c87f9e109437a747293a383cd03fc16bd68`.
+- **Exact-main CI: success** — [39236490603](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39236490603), exact merge SHA.
+- **Exact-main real-photo: success** — [39236490639](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39236490639), exact merge SHA.
+
 ## Проверки и ограничения
 
 - **PASS (статическая/сборочная parity):** исходный bundle hash заново независимо
   вычислен и совпал с `version.json`; изменён ровно один source chunk;
   новый index/version hash вычислен тем же детерминированным алгоритмом.
-- **PENDING:** Node tests, browser file:// runtime, PR CI, merge и exact-main CI.
-  Локальный checkout невозможен из-за отсутствия DNS доступа к github.com,
-  поэтому не заявлять локальный запуск тестов.
+- **PASS в GitHub Actions:** Node tests, Chromium file://, generated parity, PR CI/real-photo, exact-main primary CI. Локальный checkout недоступен (DNS github.com), поэтому локальный запуск тестов не заявлен.
 - Никакого изменения native pixel kernel, .zpe версии, PSD/PSB codec,
   mask/selection, history или исходных пикселей; эта проходка — lifecycle fix,
   не завершение всей Stage 003 и не Adobe provenance acceptance.
