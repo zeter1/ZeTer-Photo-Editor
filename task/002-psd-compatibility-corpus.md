@@ -1,3 +1,8 @@
+## 2026-10-19 — 002B/1 DONE after PR and exact-main CI
+
+- [PR #271](https://github.com/zeter1/ZeTer-Photo-Editor/pull/271) → [`bc7f4c7`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/bc7f4c73391ce437e5aa65f34167b00f361040f8). [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39224424706); [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39224795180). 3 genuine independently published pinned Photoshop (upstream claim) PSD16/PSD32 assets: downloaded bytes SHA-256 confirmed in CI, `decodePsd` layered import, every native merged composite RGBA sample against independent reference raw/RLE/ZIP oracle. General Node/browser `file://` smoke green (не specific Photoshop browser test).
+- 002B/1 **DONE** as a narrow native compressed merged-composite *decode* acceptance; Photoshop producer origin still upstream claim, not recreated/reviewed independently. **Full 002 IN PROGRESS; next P0 002B/2**: Photoshop-authored licensed PSB32 and both-kind Worker/Chromium file:// UI/render semantics. [Карточка](002b-photocraft-native-composite-oracle.md).
+
 ## 2026-10-19 — 002B/1 pinned independent Photoshop PSD16/PSD32 composite oracle (IN PROGRESS)
 
 - [Полная карточка текущей проходки](002b-photocraft-native-composite-oracle.md). Pinned SHA256 upstream PhotoCraft PSD16 baseline/levels + PSD32 baseline, новая независимая native raw/RLE/ZIP composite sample reference и точный `decodePsd` parity, отрицательные Node cases и настоящий CI real corpus download без silent skip.
