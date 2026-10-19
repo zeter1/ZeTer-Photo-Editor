@@ -132,6 +132,22 @@ export async function writeBrowserOperationArtifact(profile, {
   return target;
 }
 
+// Test the actual persisted real UI boundaries in strict operation order.
+export function hasRequiredBrowserOperationIncarnationBoundaries(windows) {
+  if (!Array.isArray(windows)) return false;
+  const required=[
+    'before-first-fill','after-large-worker-preview','after-first-undo',
+    'after-large-undo-redo','before-cancel-fill','after-large-mid-kernel-cancel',
+    'before-retry-fill','after-retry-undo','after-large-mid-kernel-recovered-redo',
+  ];
+  let last=-1;
+  for (const phase of required) {
+    last=windows.findIndex((item,index) => index>last && item?.phase===phase);
+    if (last<0) return false;
+  }
+  return true;
+}
+
 export async function verifyBrowserOperationArtifacts(directory) {
   if (typeof directory !== 'string' || !directory.trim()) {
     throw new TypeError('Browser operation artifact: missing CI directory');
@@ -148,16 +164,8 @@ export async function verifyBrowserOperationArtifacts(directory) {
         artifact.timeline.memory.requestedSamplingIntervalMs!==50 ||
         artifact.timeline.memory.samplingTiming == null ||
         (artifact.timeline.origin === 'real Chromium file:// UI + native Worker' &&
-          (!artifact.timeline.memory.incarnationWindowAudit ||
-           ['before-first-fill','after-large-worker-preview','after-first-undo',
-             'after-large-undo-redo','before-cancel-fill','after-large-mid-kernel-cancel',
-             'before-retry-fill','after-retry-undo',
-             'after-large-mid-kernel-recovered-redo'].reduce((last,phase) => {
-               if (last < 0) return -1;
-               const next=artifact.timeline.memory.incarnationWindowAudit.windows.findIndex(
-                 (w,index) => index >= last && w.phase === phase);
-               return next >= 0 ? next+1 : -1;
-             },0) <= 0)) ||
+          !hasRequiredBrowserOperationIncarnationBoundaries(
+            artifact.timeline.memory.incarnationWindowAudit?.windows)) ||
         artifact.timeline.memory.processChurn?.workerPidMapping!=='unknown' ||
         (artifact.timeline.memory.workerTargets && artifact.timeline.memory.workerTargets.workerPidMapping!=='unknown') ||
         artifact.timeline.memory.linuxProcessIdentity?.provenExitCount!==null ||
