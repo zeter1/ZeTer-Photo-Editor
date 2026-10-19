@@ -1,3 +1,5 @@
+> **2026-10-19 — 003T/2e-1 IN PROGRESS:** [explicit read count and contradictory PID/RSS evidence guard](003t2e-1-milestone-evidence-consistency.md). PR #297 CI original HEAD attempt 2 SUCCESS (real Chromium file://), but branch must integrate later main and re-verify. 003T/2f independent Worker lifetime/PID window control remains NEXT. PID→Worker and operation peak still unproven; no change to native pixels.
+
 # 003T — operation high-depth memory evidence, provenance and coverage
 
 **Приоритет:** P1. **Статус:** IN PROGRESS (003T/1 — sampling windows; other 003T criteria OPEN). **Этап:** 003 (не закрыт).

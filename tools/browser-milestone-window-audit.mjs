@@ -26,7 +26,10 @@ export function validateBrowserMilestoneWindowAudit(audit, timing, sampleCount) 
       !count(sampleCount) || sampleCount < 2 ||
       !timing || timing.snapshotCount !== sampleCount || !ms(timing.readWindowMs) ||
       audit.sampledReadCount !== sampleCount || !Array.isArray(audit.milestones) ||
-      audit.milestones.length < 2 || audit.milestones.length > sampleCount ||
+      audit.milestones.length < 2 ||
+      !count(timing.periodicSamples) ||
+      timing.periodicSamples > sampleCount - 2 ||
+      audit.milestones.length !== sampleCount - timing.periodicSamples ||
       !count(audit.missingPidMilestones) ||
       !count(audit.missingLinuxIdentityMilestones) ||
       audit.unverifiedBetweenMilestoneIntervals !== audit.milestones.length - 1 ||
@@ -42,6 +45,12 @@ export function validateBrowserMilestoneWindowAudit(audit, timing, sampleCount) 
         typeof entry.phase !== 'string' || !/^[a-z][a-z0-9-]*$/.test(entry.phase) ||
         entry.phase === 'sample' ||
         (entry.phase === 'invalid-phase' && entry.workerTargetsObserved) ||
+        // Independent optional counters cannot be observed after a missing
+        // CDP process list. A verified Linux incarnation additionally needs
+        // the matching /proc RSS read; never trust contradictory receipts.
+        ((entry.privateMemoryObserved || entry.linuxRssObserved ||
+          entry.linuxIdentityObserved) && !entry.pidMembershipObserved) ||
+        (entry.linuxIdentityObserved && !entry.linuxRssObserved) ||
         !ms(entry.readStartOffsetMs) || !ms(entry.readEndOffsetMs) ||
         entry.readStartOffsetMs < prevEnd ||
         entry.readStartOffsetMs > entry.readEndOffsetMs ||
