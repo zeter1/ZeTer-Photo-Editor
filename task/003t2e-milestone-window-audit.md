@@ -48,3 +48,8 @@ This is an **observational instrumentation** pass, not true operation RSS peak; 
 
 - [PR #295](https://github.com/zeter1/ZeTer-Photo-Editor/pull/295) final head `c587db2bae4ac4e1b105e6056253df3810e610b4`: [CI #39284501084 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39284501084). Merged squash commit [092ff41f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/092ff41f7e160531399c9f1f3f35c4709f67ed5f). **Exact-main CI not yet confirmed**; bounded code and PR CI accepted, whole 003T and Stage 003 OPEN.
 - Independent cgroup delegation [PR #294](https://github.com/zeter1/ZeTer-Photo-Editor/pull/294) remains blocked in runner permissions, its final CI/merge pending. Next 003T/2f should test PID incarnation/operation gaps and handle transient Chromium Worker target lifecycle conservatively.
+
+## 2026-10-19 — exact-main acceptance readback
+
+- [PR #295](https://github.com/zeter1/ZeTer-Photo-Editor/pull/295) merged [`092ff41f`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/092ff41f7e160531399c9f1f3f35c4709f67ed5f), final PR [CI #39284501084 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39284501084), exact-main [core #39287186969 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39287186969), [real-photo #39287187012 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39287187012). **003T/2e bounded acceptance: DONE**, whole 003T and Stage 003 remain OPEN.
+- 003T/2d-3 [PR #294](https://github.com/zeter1/ZeTer-Photo-Editor/pull/294) merged, but CI runner cgroup creation is permission BLOCKED; operation-isolated memory peak and Worker→PID remain unknown. [003T/2f](003t2f-pid-window-control.md) is the next task.
