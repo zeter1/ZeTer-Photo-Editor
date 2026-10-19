@@ -1,3 +1,8 @@
+## 2026-10-19 — 002B/2a DONE; 002B/2b real external PSB32 candidate IN PROGRESS
+
+- [002B/2a](002b2-photoshop-browser-native.md): [PR #273](https://github.com/zeter1/ZeTer-Photo-Editor/pull/273) merged [996fd1c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/996fd1cc7b4b03c7ae0b863d57a7276fa5234ff1), [PR CI success #39230304359](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39230304359), [PR real-photo success #39230304433](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39230304433), [exact-main general CI success #39230928368](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39230928368). PSD16/PSD32 public Chromium `file://` imported layers Save Project native SHA parity; no PSB32 Adobe.
+- [002B/2b](002b2b-external-psb32-candidate.md): separate MIT-published `psd-tools` genuine RGB32 PSB v2 candidate from immutable commit, complete SHA-256 pins for two PSB and pair PSD; proposed real codec/Float32/PSD vs PSB native parity CI. New PR CI pending, **Photoshop authorship/provenance unproven**, so cannot satisfy overall 002B Photoshop PSB acceptance.
+
 ## 2026-10-19 — 002B/2a Photoshop PSD16/PSD32 real browser native source acceptance (IN PROGRESS)
 
 - [Карточка 002B/2a](002b2-photoshop-browser-native.md): публичный `file://` File Open PSD → Save Project, полного canonical 16/32-bit raster source SHA-256 против original Photoshop-published raster decoder, v1/v2 tile coverage; три pinned Photoshop PSD, unit tamper cases, CI input reuse. Пока только ветка: PR CI/merge/exact-main НЕ подтверждены. **Это не PSB32 и не Photoshop-render parity**; обязательный original licensed PSB32 всё ещё OPEN.
