@@ -7848,7 +7848,7 @@ function pixelBufferByteLength(buffer) {
 
 // ---- src/core/tiled-inpaint-worker-client.js ----
 /**
- * Stage 003: detached tiled inpaint Worker lifecycle (not yet used by the UI).
+ * Stage 003: detached tiled inpaint Worker lifecycle (used by the UI).
  *
  * No live document objects cross the boundary. A new job supersedes the old
  * worker, and a caller must call cancel() when its document/target changes.
@@ -7894,6 +7894,9 @@ function createTiledInpaintWorkerJobController({
   }
 
   function run(job, { isCurrent = () => true } = {}) {
+    // Claim this generation BEFORE invoking user-controlled cancel/isCurrent
+    // callbacks or Worker factories. Any reentrant run wins over this one.
+    const id = ++nextId;
     // Superseding a job must stop it even if the new request is stale.
     cancel();
     if (typeof isCurrent !== 'function') {
@@ -7902,7 +7905,7 @@ function createTiledInpaintWorkerJobController({
     const current = () => {
       try { return Boolean(isCurrent()); } catch { return false; }
     };
-    if (!current()) return Promise.resolve({ cancelled:true });
+    if (!current() || id !== nextId) return Promise.resolve({ cancelled:true });
 
     let worker;
     try {
@@ -7920,7 +7923,16 @@ function createTiledInpaintWorkerJobController({
     } catch (error) {
       return Promise.reject(error);
     }
-    const id = ++nextId;
+    // A Worker factory (or owner callback) can synchronously begin a newer
+    // run. Release the orphaned instance instead of replacing that owner's
+    // active handle or allowing a stale Worker to publish.
+    if (id !== nextId || !current() || id !== nextId) {
+      try {
+        const termination = worker.terminate();
+        if (termination && typeof termination.catch === 'function') termination.catch(() => {});
+      } catch { /* the superseded Worker must never publish */ }
+      return Promise.resolve({ cancelled:true });
+    }
 
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -7957,7 +7969,9 @@ function createTiledInpaintWorkerJobController({
       const fail = error => finish(null, error instanceof Error ? error : new Error(String(error?.message || error)));
       const message = data => {
         if (settled) return;
-        if (!current()) { stop(); return; }
+        // Checking the owner can itself trigger a newer run (and settle us).
+        // Never post a job or publish a reply after that reentrant takeover.
+        if (!current() || id !== nextId || settled) { stop(); return; }
         if (!dispatched) {
           if (data?.ready !== true) return;
           dispatched = true;
