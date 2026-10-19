@@ -533,3 +533,9 @@ If runner cannot delegate a dedicated group, record the precise permission
 failure and mark isolation BLOCKED while sampled measurements stay
 informational; never rebrand shared `memory.current` as operation peak.
 P0 **002B/2c BLOCKED** on authenticated licensed Photoshop-created PSB32.
+
+## 2026-10-19 — 003T/2e: explicit high-depth milestone observation windows (IN PROGRESS)
+
+**Priority:** P1. **Work branch:** [test/003t2e-milestone-window-audit-20261019](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t2e-milestone-window-audit-20261019). **Detailed acceptance:** [003t2e](003t2e-milestone-window-audit.md). This pass writes and independently validates the exact serialized sampling read windows at each explicit PSD16/PSB32 UI operation milestone, preserving missing PID/CDP/OS-incarnation observations as unknown. The full set of periodic samples is not represented by those milestones, and observed start/end samples are not uninterrupted observation or true operation peak.
+
+Files: `tools/browser-milestone-window-audit.mjs`, `tools/browser-renderer-heap-sampler.mjs`, `tools/browser-operation-timeline.mjs`, `tools/browser-operation-artifact.mjs`, `tools/browser-real-photo-memory-evidence.mjs`, and targeted new/extended tests. Local standalone module: 2 PASS. Full `npm run check`, browser smoke, GitHub PR CI, merge and exact-main CI PENDING. The preceding bounded cgroup delegation runner permission gate is BLOCKED [PR #294](https://github.com/zeter1/ZeTer-Photo-Editor/pull/294), and no Worker→PID or operation peak can be claimed. Next: verify CI, exact-main and independent PID incarnation/control gaps. P0 Photoshop-authored PSB32 002B/2c stays BLOCKED.
