@@ -144,3 +144,46 @@ checkout недоступен (DNS github.com); до результатов CI �
 проверка пропущенных short-lived target/PID, reused PID, реальная high-depth
 PSD16/PSB32 operation-peak методика или `unknown` с объяснением.
 **003T и Stage 003 остаются IN PROGRESS / OPEN.**
+
+
+## 2026-10-19 — close 003T/1, 003T/2a implementation; next 003T/2b (IN PROGRESS)
+
+**Сводка:** 003T как задача IN PROGRESS; завершены только bounded
+instrumentation проходки /1 и /2a. Этап 003 и полный roadmap OPEN.
+
+### Подтверждённые реальные изменения и CI
+
+1. **003T/1**: [PR #280](https://github.com/zeter1/ZeTer-Photo-Editor/pull/280)
+   merged into [main 1140b886](https://github.com/zeter1/ZeTer-Photo-Editor/commit/1140b886e598210a3b34ab946c03ce998db606b2).
+   [PR core CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39248237317);
+   [PR real-photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39248237320);
+   [exact-main core success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39249020260);
+   [exact-main real-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39249020566).
+   Настоящие `file://` sampled CDP and /proc read windows, busy ticks,
+   fail-closed PSB32/PSD16 evidence верно различают unsupported peak/PID.
+2. **003T/2a**: [PR #281](https://github.com/zeter1/ZeTer-Photo-Editor/pull/281)
+   merged into [main a18c828](https://github.com/zeter1/ZeTer-Photo-Editor/commit/a18c828d79cf8e03504fbb614904d5a3bcece6ce).
+   [PR core CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39249834322).
+   First CI [failed](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39249628004):
+   1379/1380 tests; legacy serializer regression expected a delayed periodic
+   fifth query. Fixed test to assert exactly four serialized marker reads and
+   one missed timer poll; both new independent regressions already passed.
+   Exact-main [CI #39250278990](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39250278990)
+   **IN PROGRESS**, not yet acceptance-complete.
+3. Нет дополнительных native snapshots или production runtime mutations:
+   изменения диагностических инструментов и test harness. Browser operation
+   `sampledMax` и `VmHWM` не являются доказательством true operation peak;
+   `workerPidMapping:'unknown'` сохраняется.
+
+### Следующая P1: 003T/2b
+
+**Критерии приёмки:** независимая real Chromium control нагрузка,
+подтверждённые временные границы наблюдения операции,
+fail-closed short-lived process/PID reuse and /proc access-gaps,
+основанная на документации CDP/OS Worker→PID привязка
+**или честный `unknown`**, реальные PSD16/PSB32 Fill/cancel/retry
+`file://` receipts, пройденные PR CI и exact-main CI.
+Не заявлять global operation peak из sampledMax или VmHWM.
+
+**P0 [002B/2c](002b2c-photoshop-psb32-provenance.md)** — BLOCKED
+без независимо лицензированного Adobe-authored PSB32/reference render.
