@@ -395,7 +395,7 @@ by the parent via the existing Linux `/proc` RSS + exact PID/starttime gate.
 Five named snapshots (before control, held control, before operation, held
 operation, after operation) demonstrate what sampled VmRSS and process-lifetime
 VmHWM actually observe. Real resident growth is required, rather than assuming
-allocated bytes equal RSS growth; HWM monotonicity and identity must hold.
+allocated bytes equal RSS growth; PID incarnation consistency and maxima of *observed* VmHWM must hold. Linux\nVmHWM readings may vary across GC/allocator cleanup (the first real CI run\nshowed a later HWM below an earlier sampled value); do not require\nmonotonicity of independently sampled reports or infer a true peak.
 There is intentionally **no continuous sampling between acknowledgements**.
 
 **Code:** `tools/browser-memory-peak-calibration.mjs` with real Linux child +
@@ -403,7 +403,7 @@ standalone `--verify` fail-closed JSON readback, negative and real-Linux
 regressions in `tests/browser-memory-peak-calibration.test.mjs`,
 and GitHub CI verification/artifact `zpe-linux-memory-calibration-003t2d1`.
 The test rejects forged operation peaks or Worker PID claims, missing operation
-snapshots, nonresident control, inconsistent HWM and reused PID. The sampled
+snapshots, nonresident control, same-snapshot HWM below RSS, forged sampled maxima and reused PID. The sampled
 values and process lifetime HWM are **not** a mathematical per-operation peak:
 the baseline, startup, allocator, GC, /proc blind spans and temporary child
 processes cannot be erased by subtracting two RSS snapshots.
