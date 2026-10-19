@@ -43,3 +43,8 @@ Capture the **actual time windows** of explicit CDP/OS memory readings on real C
 ## Limitations and next
 
 This is an **observational instrumentation** pass, not true operation RSS peak; periodic reads may happen between explicit milestone observations and are not presumed to bridge unknown gaps. No process-specific Worker PID or Photoshop-authored PSB32 proof. Next bounded 003T milestone: independently establish whether sampled high-depth operation intervals can be cross-checked against a separate PID/incarnation control with no interval extrapolation. P0 [002B/2c](002b2c-photoshop-psb32-provenance.md) remains BLOCKED.
+
+## 2026-10-19 — PR #295 merged, exact-main gate pending
+
+- [PR #295](https://github.com/zeter1/ZeTer-Photo-Editor/pull/295) final head `c587db2bae4ac4e1b105e6056253df3810e610b4`: [CI #39284501084 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39284501084). Merged squash commit [092ff41f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/092ff41f7e160531399c9f1f3f35c4709f67ed5f). **Exact-main CI not yet confirmed**; bounded code and PR CI accepted, whole 003T and Stage 003 OPEN.
+- Independent cgroup delegation [PR #294](https://github.com/zeter1/ZeTer-Photo-Editor/pull/294) remains blocked in runner permissions, its final CI/merge pending. Next 003T/2f should test PID incarnation/operation gaps and handle transient Chromium Worker target lifecycle conservatively.

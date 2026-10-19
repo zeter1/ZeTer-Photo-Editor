@@ -176,6 +176,22 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # Non-privileged cgroup-v2 delegation control. This may be BLOCKED by
+      # CI's read-only parent; no operation peak or browser descendant claim.
+      - name: Real Linux cgroup delegation capability (003T/2d-3)
+        run: |
+          node tools/browser-cgroup-delegation-probe.mjs "$RUNNER_TEMP/zpe-003t-cgroup-delegation.json"
+          node tools/browser-cgroup-delegation-probe.mjs --verify "$RUNNER_TEMP/zpe-003t-cgroup-delegation.json"
+
+      - name: Upload cgroup delegation capability receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-cgroup-delegation-003t2d3
+          path: ${{ runner.temp }}/zpe-003t-cgroup-delegation.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Profile tiled Content-Aware Fill (informational)
         run: node tools/profile-tiled-inpaint.mjs --sizes 8,24,48
 
