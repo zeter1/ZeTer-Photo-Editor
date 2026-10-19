@@ -174,6 +174,10 @@ export async function verifyPhotoshopBrowserImport(client,{evaluate,waitFor,asse
       await evaluate(client,'(() => {const b=atob('+JSON.stringify(chunk)+
         ');window.__zpePhotoshopImport.parts.push(Uint8Array.from(b,c=>c.charCodeAt(0)));return true;})()');
     }
+    // All pinned Photoshop documents are 96×96. The preceding import's
+    // status/canvas can otherwise satisfy the next case's wait prematurely.
+    // A test-only status sentinel requires a NEW public import completion.
+    await evaluate(client,'document.querySelector("#statusText").textContent="002B/2a pending next import";true');
     const dispatched=await evaluate(client,'('+dispatchBrowserFile.toString()+')()');
     assertBrowser(dispatched.protocol==='file:' && dispatched.size===bytes.length &&
       dispatched.name===path.basename(spec.file),'002B/2a public PSD input bytes',JSON.stringify(dispatched));
