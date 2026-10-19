@@ -1,3 +1,5 @@
+> **2026-10-19 — 003T/2f IN PROGRESS:** [bounded verification of milestone read count and contradictions](003t2f-milestone-evidence-consistency.md). Branch commits update audit verifier and negative tests; no real PR CI/merge/exact-main claim yet. 003T/2e merged as `092ff41f` with successful exact-main CI; 2d-3 merged as `d302b30f` with successful PR CI and pending exact-main. Runner delegated cgroup unavailable, so true operation peak and Worker→PID remain unknown. Next 003T/2g independently measured incarnation/boundary controls with real Chromium receipts and no inferred coverage across gaps.
+
 # 003T — operation high-depth memory evidence, provenance and coverage
 
 **Приоритет:** P1. **Статус:** IN PROGRESS (003T/1 — sampling windows; other 003T criteria OPEN). **Этап:** 003 (не закрыт).
