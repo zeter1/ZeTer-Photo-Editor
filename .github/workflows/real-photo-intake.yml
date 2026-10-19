@@ -54,6 +54,9 @@ on:
       - tests/browser-real-photo-memory-evidence.test.mjs
       - tools/browser-real-photo-quality.mjs
       - tools/verify-browser-real-photo-worker-artifacts.mjs
+      - tools/verify-browser-real-photo-acceptance.mjs
+      - tests/browser-real-photo-acceptance.test.mjs
+      - tests/fixtures/real-photo/acceptance-plan.json
       - tests/browser-real-photo-quality.test.mjs
       - tests/browser-real-photo-worker-artifacts.test.mjs
   push:
@@ -106,6 +109,9 @@ on:
       - tests/browser-real-photo-memory-evidence.test.mjs
       - tools/browser-real-photo-quality.mjs
       - tools/verify-browser-real-photo-worker-artifacts.mjs
+      - tools/verify-browser-real-photo-acceptance.mjs
+      - tests/browser-real-photo-acceptance.test.mjs
+      - tests/fixtures/real-photo/acceptance-plan.json
       - tests/browser-real-photo-quality.test.mjs
       - tests/browser-real-photo-worker-artifacts.test.mjs
 
@@ -485,6 +491,19 @@ jobs:
           done
           node tools/verify-browser-real-photo-malformed-extra-artifacts.mjs "$ZPE_PHOTO_DIR/browser-malformed-extra" \
             > "$ZPE_PHOTO_DIR/browser-malformed-extra-set.json"
+
+      - name: 037C-3c cross-check complete genuine-photo evidence matrix
+        run: |
+          node tools/verify-browser-real-photo-acceptance.mjs "$ZPE_PHOTO_DIR" \
+            > "$ZPE_PHOTO_DIR/browser-acceptance-ledger.json"
+
+      - name: Upload 037C-3c verified evidence ledger (SHA-256, not a signature)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: 037c3c-genuine-photo-acceptance
+          path: /tmp/zpe-real-photo-candidate/browser-acceptance-ledger.json
+          if-no-files-found: warn
 
       - name: Upload 037C-3b-3/2b-2 memory-cap receipts
         if: always()
