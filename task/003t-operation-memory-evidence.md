@@ -74,6 +74,8 @@ P0 [002B/2c](002b2c-photoshop-psb32-provenance.md) — BLOCKED без лицен
 В частности `maxReadDurationMs` — время исполнения harness-запроса, не
 длительность операции. Нет раздельного operation peak или PID→Worker доказательства.
 
+**PR:** [#280](https://github.com/zeter1/ZeTer-Photo-Editor/pull/280) — код и проверки на отдельной ветке; final PR CI, merge и exact-main ещё **PENDING**.
+
 **Проверки:** новые тесты подготовлены для `npm run check`, реального
 Chromium `file://` и обоих CI artifact validators. Локально полноценный
 checkout недоступен (DNS github.com); до результатов CI тесты **не считать
