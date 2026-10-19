@@ -2,6 +2,7 @@ import { sampleLinuxChromiumRss } from './browser-linux-process-rss.mjs';
 import { createLinuxChromiumIdentityTracker } from './browser-linux-process-identity.mjs';
 import { createBrowserWorkerTargetTracker } from './browser-worker-target-census.mjs';
 import { summarizeBrowserSamplingTiming } from './browser-sampling-timing.mjs';
+import { validateChromiumRssSampleMembership } from './browser-rss-sample-identity.mjs';
 
 // Informational CDP renderer-heap samples. Worker heaps, native allocations and
 // process RSS are NOT represented by JSHeapUsedSize; sampled max != true peak.
@@ -156,6 +157,12 @@ export function createBrowserRendererHeapSampler(client, {
                 rss.largestProcessHighWaterBytes < 0 ||
                 rss.processCount !== processes.length) {
               throw new Error('invalid Linux Chromium RSS snapshot');
+            }
+            // A partial or inconsistent /proc read must not become an
+            // aggregate. Legacy test samplers without processSamples retain
+            // informational RSS, but do not establish any PID identity.
+            if (rss.processSamples !== undefined) {
+              validateChromiumRssSampleMembership(processes, rss);
             }
             entry.chromiumRssBytes = rss.aggregateRssBytes;
             entry.largestProcessHighWaterBytes = rss.largestProcessHighWaterBytes;
