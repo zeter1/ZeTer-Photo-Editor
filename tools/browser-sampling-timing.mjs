@@ -3,6 +3,11 @@
 // times inside the read window. Even zero gaps do NOT prove continuous coverage.
 const validMs = n => Number.isFinite(n) && n >= 0;
 const validCount = n => Number.isSafeInteger(n) && n >= 0;
+const timingFields = new Set([
+  'method','snapshotCount','periodicSamples','pollsAttempted','pollsSkippedBusy',
+  'readWindowMs','maxReadDurationMs','maxBetweenReadWindowsMs',
+  'maxBetweenReadStartsMs','trueOperationPeakKnown','workerPidMapping','limitations',
+]);
 
 export function summarizeBrowserSamplingTiming(samples, pollsAttempted, pollsSkippedBusy) {
   if (!Array.isArray(samples) || samples.length < 2 ||
@@ -52,6 +57,7 @@ export function summarizeBrowserSamplingTiming(samples, pollsAttempted, pollsSki
 
 export function validateBrowserSamplingTiming(timing, sampleCount) {
   if (!timing || typeof timing !== 'object' || Array.isArray(timing) ||
+      Object.keys(timing).some(field => !timingFields.has(field)) ||
       timing.method !== 'serialized-CDP-read-windows' ||
       !validCount(sampleCount) || sampleCount < 2 ||
       timing.snapshotCount !== sampleCount ||
