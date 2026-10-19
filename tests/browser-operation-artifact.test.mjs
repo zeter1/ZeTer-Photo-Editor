@@ -297,7 +297,12 @@ test('003T/2e: real Chromium quality artifact requires milestone windows and rej
   assert.throws(()=>buildBrowserOperationArtifact(p),/missing real Linux incarnation windows/);
   p.memory.incarnationWindowAudit=summarizeBrowserOperationIncarnationWindows(
     snapshots,p.memory.milestoneWindowAudit);
+  p.memory.stages=snapshots;
   assert.equal(buildBrowserOperationArtifact(p).timeline.memory.milestoneWindowAudit.missingPidMilestones,1);
+  const tampered=structuredClone(p);
+  tampered.memory.stages[0].linuxIncarnations=[{pid:11,starttimeTicks:'456'}];
+  assert.throws(()=>buildBrowserOperationArtifact(tampered),
+    /incarnation windows|saved raw read stages/);
   const falsePidClaim=structuredClone(p);
   falsePidClaim.memory.milestoneWindowAudit.missingPidMilestones=0;
   assert.throws(()=>buildBrowserOperationArtifact(falsePidClaim),/milestone windows/);
