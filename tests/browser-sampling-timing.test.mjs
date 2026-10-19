@@ -34,6 +34,12 @@ test('003T: busy timer ticks and serialized CDP read windows expose unsampled ga
   assert.equal(t.maxBetweenReadStartsMs,45);
   assert.equal(t.trueOperationPeakKnown,false);
   assert.equal(t.workerPidMapping,'unknown');
+  assert.deepEqual(report.milestoneWindowAudit.milestones.map(item=>item.phase),
+    ['before-import','after-worker','finished']);
+  assert.equal(report.milestoneWindowAudit.missingPidMilestones,3);
+  assert.equal(report.milestoneWindowAudit.unverifiedBetweenMilestoneIntervals,2);
+  assert.equal(report.milestoneWindowAudit.milestones[1].readStartOffsetMs,75);
+  assert.equal(report.milestoneWindowAudit.milestones[2].readEndOffsetMs,130);
   assert.equal(validateBrowserSamplingTiming(t,report.sampleCount),true);
 });
 

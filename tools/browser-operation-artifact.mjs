@@ -3,6 +3,7 @@ import path from 'node:path';
 import { validateBrowserOperationEvidence } from './browser-operation-timeline.mjs';
 import { validateBrowserSyntheticQualityEvidence } from './browser-synthetic-native-quality.mjs';
 import { validateBrowserSamplingTiming } from './browser-sampling-timing.mjs';
+import { validateBrowserMilestoneWindowAudit } from './browser-milestone-window-audit.mjs';
 
 // Test-only CI reports for genuine Chromium file:// scenarios. Informational
 // samples are NOT native Worker memory, simultaneous true peak, or an exit proof.
@@ -17,6 +18,10 @@ function validateInformationalMemoryClaims(memory) {
   }
   if (memory.samplingTiming != null) {
     validateBrowserSamplingTiming(memory.samplingTiming,memory.sampleCount);
+  }
+  if (memory.milestoneWindowAudit != null) {
+    validateBrowserMilestoneWindowAudit(memory.milestoneWindowAudit,
+      memory.samplingTiming,memory.sampleCount);
   }
   const churn=memory.processChurn;
   if (churn != null && (typeof churn !== 'object' || Array.isArray(churn) ||
@@ -73,6 +78,10 @@ export function buildBrowserOperationArtifact(profile) {
   validateBrowserOperationEvidence(profile);
   if (profile.origin === 'real Chromium file:// UI + native Worker' && !profile.memory.samplingTiming) {
     throw new TypeError('Browser operation artifact: missing real sampling timing coverage');
+  }
+  if (profile.origin === 'real Chromium file:// UI + native Worker' &&
+      profile.quality != null && !profile.memory.milestoneWindowAudit) {
+    throw new TypeError('Browser operation artifact: missing real milestone read-window evidence');
   }
   validateInformationalMemoryClaims(profile.memory);
   validateBrowserSyntheticQualityEvidence(profile.quality,{format:profile.format,outcome:profile.outcome});
