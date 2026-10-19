@@ -71,6 +71,9 @@ export function buildBrowserOperationArtifact(profile) {
     throw new TypeError('Browser operation artifact: invalid timeline or unsafe operationId');
   }
   validateBrowserOperationEvidence(profile);
+  if (profile.origin === 'real Chromium file:// UI + native Worker' && !profile.memory.samplingTiming) {
+    throw new TypeError('Browser operation artifact: missing real sampling timing coverage');
+  }
   validateInformationalMemoryClaims(profile.memory);
   validateBrowserSyntheticQualityEvidence(profile.quality,{format:profile.format,outcome:profile.outcome});
   return {
