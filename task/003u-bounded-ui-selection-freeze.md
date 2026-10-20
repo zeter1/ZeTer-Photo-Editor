@@ -1,6 +1,6 @@
 # 003U — bounded UI-side selection index freezing for tiled native inpaint
 
-**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003 tiled Content-Aware](003-tiled-content-aware.md), Stage 6.
+**Priority:** P1. **Status:** DONE. **Parent:** [003 tiled Content-Aware](003-tiled-content-aware.md), Stage 6.
 **Dependencies:** accepted [003T/2g](003t2g-transient-proc-gap-recovery.md) diagnostics, current Worker/native source budget/owner/cancel contracts.
 
 ## Confirmed source bottleneck (2026-10-20)
@@ -26,3 +26,11 @@ This is a memory-allocation improvement, **not** proof of a global virtual tiled
 - Test: `tests/tiled-inpaint-ui-selection-freeze.test.mjs`: sparse high-depth RGB16, near-budget CMYKA32, no-op full/empty, unsafe cap and partial over-limit, cooperative cancellation, mutable live selection during unavailable Worker fallback, static no-JS-index-array guard.
 - **Node locally unavailable:** no full repo checkout under container GitHub DNS restrictions. **PR-head CI, real Chromium `file://` PSD16/PSB32 native-byte/Undo/Redo, merge, and exact-main acceptance PENDING.** Do not mark DONE until verified.
 - Next: accept/fix real CI, merge only after green and no conflicts, verify exact-main; then queue another bounded Stage 003 issue while retaining unresolved 003T memory attribution and blocked 002B/2c Photoshop PSB32 provenance.
+
+## 2026-10-20 acceptance — DONE
+
+- [PR #302](https://github.com/zeter1/ZeTer-Photo-Editor/pull/302) merged as [main 30943811](https://github.com/zeter1/ZeTer-Photo-Editor/commit/30943811c41ae89ed7558169cc1ab1197aac9882).
+- Exact final PR-head [CI #39364185349](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39364185349) and real-photo [#39364185304](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39364185304) SUCCESS.
+- Exact merged-main [CI #39364895862](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39364895862) and real-photo [#39364895814](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39364895814) SUCCESS.
+- Code and regression: `src/painting/tiled-inpaint-dispatch.js`, `tests/tiled-inpaint-ui-selection-freeze.test.mjs`, generated bundle/index/version; no licensed Photoshop-authored PSB32 or true isolated Worker memory peak implied.
+- Next [003V](003v-ui-selection-scan-cancellation.md) adds mid-chunk synchronous cancellation checks. Parent 003/003T remains open; P0 002B/2c provenance BLOCKED.
