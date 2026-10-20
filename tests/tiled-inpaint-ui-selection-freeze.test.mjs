@@ -150,3 +150,23 @@ test('003U: Worker-unavailable fallback uses frozen CMYKA32 selection when live 
   }));
   assert.equal(JSON.stringify(source),before);
 });
+
+test('003V: synchronous cancellation inside a large selection chunk stops before Worker handoff',async()=>{
+  const source=sourceFixture({bitsPerChannel:32,model:'cmyk'});
+  const before=JSON.stringify(source);
+  let samples=0,cancel=false,yields=0,workerCalls=0;
+  const result=await prepareTiledInpaintWithWorker(source,{
+    worker:{async run(){workerCalls++;throw Error('cancelled work must never dispatch');}},
+    isAllowed:()=>{samples++;if(samples===5)cancel=true;return samples%3===0;},
+    isCancelled:()=>cancel,
+    scanChunkPixels:262144,
+    yieldControl:async()=>{yields++;},
+  });
+  assert.equal(samples,64,'cancellation must be observed within 64 predicates, not at the end of a large chunk');
+  assert.equal(yields,0);
+  assert.equal(workerCalls,0);
+  assert.equal(result.cancelled,true);
+  assert.equal(result.source,source);
+  assert.equal(result.changed,0);
+  assert.equal(JSON.stringify(source),before,'cancelled scan must not touch native source bytes');
+});
