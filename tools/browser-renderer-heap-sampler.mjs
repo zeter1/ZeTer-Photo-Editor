@@ -6,6 +6,14 @@ import { summarizeBrowserMilestoneWindows } from './browser-milestone-window-aud
 import { summarizeBrowserOperationIncarnationWindows } from './browser-operation-incarnation-windows.mjs';
 import { validateChromiumRssSampleMembership } from './browser-rss-sample-identity.mjs';
 
+// A vanishing /proc member is a missing *snapshot*, not a permanent loss of
+// Linux sampling capability. Only a fresh later CDP census can be retried.
+// Other failures (including permission errors and inconsistent samples) latch.
+function isTransientProcEnoent(error) {
+  if (typeof error?.code === 'string') return error.code === 'ENOENT';
+  return typeof error?.message === 'string' && /^ENOENT\b/.test(error.message);
+}
+
 // Informational CDP renderer-heap samples. Worker heaps, native allocations and
 // process RSS are NOT represented by JSHeapUsedSize; sampled max != true peak.
 // An optional browser-level CDP connection can sample Chromium's reported
@@ -33,6 +41,7 @@ export function createBrowserRendererHeapSampler(client, {
   let pollsSkippedBusy = 0;
   let processUnavailableReason = null;
   let rssUnavailableReason = null;
+  let rssTransientReadReason = null;
   // CDP PID membership is independent of optional privateMemory and /proc
   // availability. A PID can be recycled: no cross-snapshot identity claim.
   let processIdentityUnavailableReason = null;
@@ -166,6 +175,9 @@ export function createBrowserRendererHeapSampler(client, {
             if (rss.processSamples !== undefined) {
               validateChromiumRssSampleMembership(processes, rss);
             }
+            // The entire fresh PID list was validated. Earlier ENOENT reads
+            // never contribute to this new aggregate or incarnation census.
+            rssTransientReadReason = null;
             entry.chromiumRssBytes = rss.aggregateRssBytes;
             entry.largestProcessHighWaterBytes = rss.largestProcessHighWaterBytes;
             // Legacy synthetic RSS samplers may omit identity. Keep their valid
@@ -181,7 +193,13 @@ export function createBrowserRendererHeapSampler(client, {
               } catch (error) { linuxIdentityUnavailableReason=String(error?.message || error); }
             }
           } catch (error) {
-            rssUnavailableReason = String(error?.message || error);
+            const reason = String(error?.message || error);
+            // ENOENT is expected when a CDP-reported process disappears
+            // between /proc reads. Do not retry inside the same snapshot:
+            // discard the whole partial census and try once at the next
+            // independently observed CDP milestone/poll instead.
+            if (isTransientProcEnoent(error)) rssTransientReadReason = reason;
+            else rssUnavailableReason = reason;
           }
         }
       } catch (error) {
@@ -266,6 +284,10 @@ export function createBrowserRendererHeapSampler(client, {
       const rssSamples = samples.filter(item => Number.isSafeInteger(item.chromiumRssBytes));
       const rssBaseline = Number.isSafeInteger(baseline.chromiumRssBytes) ? baseline : null;
       const rssEnd = Number.isSafeInteger(end.chromiumRssBytes) ? end : null;
+      // A transient failure at the final boundary still means that boundary
+      // was unavailable; a later successful read clears the transient state.
+      const rssCurrentUnavailableReason = rssUnavailableReason ??
+        (rssEnd ? null : rssTransientReadReason);
       function metricCoverage(field) {
         const observed = samples.filter(item => Number.isSafeInteger(item[field]));
         return {
@@ -362,8 +384,8 @@ export function createBrowserRendererHeapSampler(client, {
           ...linuxIdentity.report(),
           snapshotCoverage:identityCoverage('linuxIdentityObserved'),
           availability:!processClient?'not-requested':
-            linuxIdentityUnavailableReason || rssUnavailableReason?'unavailable':'sampled',
-          unavailableReason:linuxIdentityUnavailableReason || rssUnavailableReason,
+            linuxIdentityUnavailableReason || rssCurrentUnavailableReason?'unavailable':'sampled',
+          unavailableReason:linuxIdentityUnavailableReason || rssCurrentUnavailableReason,
         },
         chromiumProcesses: {
           metric:'CDP SystemInfo.getProcessInfo / sum of privateMemory over complete reported process list',
@@ -380,8 +402,8 @@ export function createBrowserRendererHeapSampler(client, {
         linuxProcessRss: {
           metric:'Linux /proc/<pid>/status VmRSS summed over CDP process list; VmHWM individual-process diagnostic',
           availability:!processClient ? 'not-requested' :
-            rssUnavailableReason ? 'unavailable' : 'sampled',
-          unavailableReason:rssUnavailableReason,
+            rssCurrentUnavailableReason ? 'unavailable' : 'sampled',
+          unavailableReason:rssCurrentUnavailableReason,
           sampleCount:rssSamples.length,
           baselineAggregateRssBytes:rssBaseline?.chromiumRssBytes ?? null,
           sampledMaxAggregateRssBytes:rssMax?.chromiumRssBytes ?? null,
