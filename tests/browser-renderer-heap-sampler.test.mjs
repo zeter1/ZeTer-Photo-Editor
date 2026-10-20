@@ -417,7 +417,7 @@ test('010E memory: separate RSS and privateMemory snapshots, then explicit unava
   await broken.start();
   await broken.snapshot('after');
   const failed = await broken.stop();
-  assert.equal(brokenReads, 1);
+  assert.equal(brokenReads, 3,'transient ENOENT is re-observed at each fresh CDP snapshot');
   assert.equal(failed.linuxProcessRss.availability, 'unavailable');
   assert.match(failed.linuxProcessRss.unavailableReason, /ENOENT/);
   assert.equal(failed.linuxProcessRss.sampleCount, 0);
