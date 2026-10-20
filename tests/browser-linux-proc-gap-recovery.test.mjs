@@ -125,6 +125,7 @@ test('003T/2g: repeated genuine missing PID remains unknown, with one bounded at
   const report=await sampler.stop();
   assert.deepEqual(counts(),{processReads:3,rssReads:3});
   assert.equal(report.linuxProcessRss.sampleCount,0);
+  assert.equal(report.linuxProcessRss.availability,'unavailable');
   assert.equal(report.linuxProcessRss.transientProcMissingSnapshots,3);
   assert.equal(report.linuxProcessRss.endAggregateRssBytes,null);
   assert.equal(report.linuxProcessIdentity.snapshotCoverage.observedSamples,0);
@@ -156,4 +157,49 @@ test('003T/2g: invalid duplicate/dropped CDP census is not re-used for Linux RSS
     assert.equal(report.linuxProcessIdentity.snapshotCoverage.missingSamples,2);
     assert.equal(report.chromiumProcessLifecycle.workerPidMapping,'unknown');
   }
+});
+
+test('003T/2g: a vanished second member invalidates all earlier member bytes in that census',async()=>{
+  let index = -1;
+  const {sampler,counts}=harness(
+    async i=>{
+      index=i;
+      return i < 2
+        ? [{id:42,type:'browser',privateMemory:100},{id:43,type:'renderer',privateMemory:200}]
+        : [{id:42,type:'browser',privateMemory:100}];
+    },
+    async processes=>sampleLinuxChromiumRss(processes,{
+      platform:'linux',
+      readStat:async path=>procStat(Number(path.split('/')[2]),'100'),
+      readStatus:async path=>{
+        if (index===1 && path==='/proc/43/status')throw missing(path);
+        return procStatus;
+      },
+    }),
+  );
+  await sampler.start();
+  await sampler.snapshot('vanished-member');
+  await sampler.snapshot('new-census');
+  const report=await sampler.stop();
+  assert.deepEqual(counts(),{processReads:4,rssReads:4});
+  assert.equal(report.linuxProcessRss.transientProcMissingSnapshots,1);
+  assert.equal(report.linuxProcessRss.sampleCount,3);
+  assert.equal(report.stages.find(x=>x.phase==='vanished-member').chromiumRssBytes,undefined,
+    'first successfully read member MUST NOT leak into failed aggregate');
+  assert.equal(report.stages.find(x=>x.phase==='vanished-member').linuxIncarnations,undefined);
+  assert.equal(report.stages.find(x=>x.phase==='new-census').chromiumRssBytes,100*1024);
+  assert.equal(report.linuxProcessIdentity.newIdentityObservations,0);
+  assert.equal(report.linuxProcessIdentity.missingIdentityObservations,0,
+    'the disappearance of PID 43 across the /proc gap is not a continuous transition');
+  assert.equal(report.linuxProcessIdentity.provenExitCount,null);
+});
+
+test('003T/2g: differing starttime before/after /proc status is rejected without an aggregate',async()=>{
+  let statReads=0;
+  await assert.rejects(sampleLinuxChromiumRss([{id:42,type:'renderer'}],{
+    platform:'linux',
+    readStat:async()=>procStat(42,String(++statReads===1?100:101)),
+    readStatus:async()=>procStatus,
+  }),/PID was reused/);
+  assert.equal(statReads,2);
 });
