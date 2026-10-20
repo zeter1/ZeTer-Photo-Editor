@@ -6,6 +6,9 @@ const PULSE_MS=8;
 const LIMITATIONS='Menu-to-Worker handoff includes command overhead; timer pulses miss unsampled gaps. Renderer JS heap samples are not process RSS or an operation peak. Worker OS PID is unknown.';
 
 export function installBrowserSelectionFreezeObserver() {
+  // This function is injected into a real Chromium page through CDP; keep it self-contained.
+  const LIMIT=256, PULSE_MS=8;
+  const LIMITATIONS='Menu-to-Worker handoff includes command overhead; timer pulses miss unsampled gaps. Renderer JS heap samples are not process RSS or an operation peak. Worker OS PID is unknown.';
   if (window.__stage003SelectionFreeze) throw new Error('003W observer already installed');
   const originalPost=Worker.prototype.postMessage;
   const windows=[];
