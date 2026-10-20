@@ -20,3 +20,10 @@ The UI selection freeze calls `isCancelled()` at chunk boundaries, but a large p
 - **Generated artifacts:** `src/app.bundle.js`, `index.html`, `version.json` synchronized to the exact source via the standard FNV build ID.
 - **Local testing:** UNAVAILABLE — repository checkout blocked by container GitHub DNS; PR CI and browser checks required. **PR CI, merge, exact-main:** PENDING.
 - **Remaining:** obtain/test actual PR CI, fix failures, merge if clean, verify exact-main and update this card and the pointers to the next bounded production Stage 003 task. Whole 003 and 003T open; 002B/2c blocked by external Photoshop-authored PSB32 provenance.
+
+## Merged-code checkpoint — 2026-10-20
+
+- [PR #303](https://github.com/zeter1/ZeTer-Photo-Editor/pull/303) merged as [main `2b1c89b6`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/2b1c89b6b1b8865877ad14fcf513d106b42f1f0b).
+- Exact PR-head [core CI #39367075269 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367075269), [real-photo #39367075297 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367075297); build, Node, Chromium `file://`, native photo PSD16/PSB32 tests verified.
+- Exact-code-main workflows [CI #39367728538](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367728538), [real-photo #39367728526](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367728526): **RUNNING**. Keep this card IN PROGRESS until both exact-code-main checks succeed.
+- After exact-main acceptance next P1 [003W](003w-browser-selection-freeze-responsiveness.md).
