@@ -144,3 +144,34 @@ export function summarizeBrowserSelectionFreezeEvidence(evidence,options) {
     };
   });
 }
+
+/**
+ * 003W/2a: independently reject a saved real-browser Escape result unless the
+ * broad UI selection really avoided dispatch and preserved native/preview/history.
+ * Bounding box size is only geometric coverage, NOT counted selected pixels.
+ */
+export function validateBrowserBroadPreDispatchCancellation(evidence,{format,geometryPixels}={}) {
+  const invalid=()=>new TypeError('003W/2a: invalid broad pre-Worker cancellation evidence');
+  if (!['PSD16','PSB32'].includes(format) ||
+      !Number.isSafeInteger(geometryPixels) || geometryPixels<900000 ||
+      geometryPixels>0x100000000 ||
+      !evidence || typeof evidence!=='object' || Array.isArray(evidence) ||
+      Object.keys(evidence).length!==10 ||
+      Object.keys(evidence).some(key=>![
+        'kind','format','geometryPixels','selectionBoundingPixels','cancellationEvent',
+        'workerJobsBefore','workerJobsAfter','sourceUnchanged','previewUnchanged','historyUnchanged',
+      ].includes(key)) ||
+      evidence.kind!=='zpe-browser-broad-selection-predispatch-cancel-v1' ||
+      evidence.format!==format || evidence.geometryPixels!==geometryPixels ||
+      !Number.isSafeInteger(evidence.selectionBoundingPixels) ||
+      evidence.selectionBoundingPixels<900000 ||
+      evidence.selectionBoundingPixels>=geometryPixels ||
+      evidence.cancellationEvent!=='Escape' ||
+      !Number.isSafeInteger(evidence.workerJobsBefore) ||
+      evidence.workerJobsBefore<1 ||
+      evidence.workerJobsAfter!==evidence.workerJobsBefore ||
+      evidence.sourceUnchanged!==true ||
+      evidence.previewUnchanged!==true ||
+      evidence.historyUnchanged!==true) throw invalid();
+  return true;
+}
