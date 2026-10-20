@@ -384,7 +384,8 @@ export function createBrowserRendererHeapSampler(client, {
           ...linuxIdentity.report(),
           snapshotCoverage:identityCoverage('linuxIdentityObserved'),
           availability:!processClient?'not-requested':
-            linuxIdentityUnavailableReason || rssUnavailableReason?'unavailable':'sampled',
+            linuxIdentityUnavailableReason || rssUnavailableReason ||
+              !samples.some(item => item.linuxIdentityObserved) ?'unavailable':'sampled',
           unavailableReason:linuxIdentityUnavailableReason || rssUnavailableReason,
         },
         chromiumProcesses: {
@@ -402,8 +403,10 @@ export function createBrowserRendererHeapSampler(client, {
         linuxProcessRss: {
           metric:'Linux /proc/<pid>/status VmRSS summed over CDP process list; VmHWM individual-process diagnostic',
           availability:!processClient ? 'not-requested' :
-            rssUnavailableReason ? 'unavailable' : 'sampled',
-          unavailableReason:rssUnavailableReason,
+            rssUnavailableReason || !rssSamples.length ? 'unavailable' : 'sampled',
+          unavailableReason:rssUnavailableReason ||
+            (!rssSamples.length && transientProcMissingSnapshots
+              ? 'transient /proc member disappeared in every attempted snapshot' : null),
           sampleCount:rssSamples.length,
           transientProcMissingSnapshots,
           baselineAggregateRssBytes:rssBaseline?.chromiumRssBytes ?? null,
