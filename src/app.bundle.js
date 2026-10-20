@@ -17196,7 +17196,11 @@ async function prepareTiledInpaintWithWorker(source, {
       await yieldControl();
       if (isCancelled()) return cancelled();
     }
-    for (let index = start; index < Math.min(total, start + chunk); index += 1) {
+    const end = Math.min(total, start + chunk);
+    for (let index = start; index < end; index += 1) {
+      // A synchronous owner/session cancellation can arise inside isAllowed.
+      // Honor it within a bounded number of predicates even for a large chunk.
+      if (index !== start && ((index - start) & 63) === 0 && isCancelled()) return cancelled();
       const y = Math.floor(index / width), x = index - y * width;
       if (!isAllowed(x, y)) continue;
       selected += 1;
