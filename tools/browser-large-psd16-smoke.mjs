@@ -4,6 +4,11 @@ import { createBrowserOperationTimeline } from './browser-operation-timeline.mjs
 import { writeBrowserOperationArtifact } from './browser-operation-artifact.mjs';
 import { instrumentBrowserKernelSource } from './browser-inpaint-mid-kernel-smoke.mjs';
 import { inspectNativeSelectedPixelChanges } from './browser-native-selection-integrity.mjs';
+import {
+  installBrowserSelectionFreezeObserver,
+  validateBrowserSelectionFreezeEvidence,
+  summarizeBrowserSelectionFreezeEvidence,
+} from './browser-selection-freeze-observer.mjs';
 import { measureSyntheticNativeDefectQuality } from './browser-synthetic-native-quality.mjs';
 
 // Production file:// integration without exposing private editor state.
@@ -209,6 +214,10 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     return true;
   }
   await evaluate(client,'('+observeWorker.toString()+')()');
+  // Measure the actual menu-to-Worker handoff in the live file:// editor.
+  // The timer is observational and does not intercept/modify native payloads.
+  assert(await evaluate(client,'('+installBrowserSelectionFreezeObserver.toString()+')()'),
+    '003W: Chromium selection-freeze observer could not be installed');
   // A pre-dispatch Linux incarnation read, not the actual kernel start time.
   await sampler.snapshot('before-first-fill');
   const fillStart=Date.now();
@@ -217,7 +226,11 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
       value=>value.querySelector('span')?.textContent==='Контент-заливка выделения');
     const enabled=Boolean(item&&!item.disabled);
-    if(enabled)item.click();
+    if(enabled) {
+      window.__stage003SelectionFreeze?.begin(window.__stage003SelectionFreezeNextLabel||'first-fill');
+      delete window.__stage003SelectionFreezeNextLabel;
+      item.click();
+    }
     return {enabled,status:document.querySelector('#statusText')?.textContent};
   }
   const invoked=await evaluate(client,'('+fillFromMenu.toString()+')()');
@@ -366,6 +379,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     // Never pause sampling between real kernel-write probe and lock revocation.
     await sampler.snapshot('before-cancel-fill');
     const cancellationStarted=Date.now();
+    await evaluate(client,"window.__stage003SelectionFreezeNextLabel='cancel-fill';true");
     const pending=await evaluate(client,'('+fillFromMenu.toString()+')()');
     assert(pending.enabled,'Native mid-kernel Content-Aware command must start',JSON.stringify(pending));
     operation.mark('cancel-fill-command-invoked');
@@ -415,6 +429,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     await evaluate(client,'window.__stage003RestoreCancelProbe?.();true');
     await evaluate(client,"document.querySelector('.layer-row.selected .layer-lock').click();true");
     await sampler.snapshot('before-retry-fill');
+    await evaluate(client,"window.__stage003SelectionFreezeNextLabel='retry-fill';true");
     const restored=await evaluate(client,'('+fillFromMenu.toString()+')()');
     assert(restored.enabled,'Native Worker must accept a new UI Fill after unlock',JSON.stringify(restored));
     operation.mark('retry-fill-command-invoked');
@@ -465,15 +480,27 @@ export async function verifyLargeBrowserPsd16Worker(client, {
       recoveredChangedNativeBytes:true,undoExactNativeBytes:true,redoExactNativeBytes:true,
     }));
   }
+  const selectionFreeze=await evaluate(client,'window.__stage003SelectionFreeze?.snapshot()');
+  validateBrowserSelectionFreezeEvidence(selectionFreeze,{
+    format,withCancellation:testCancellation,geometryPixels:fixture.width*fixture.height,
+  });
+  console.log('003W real Chromium selection-freeze responsiveness:',JSON.stringify({
+    fixture:fixture.filename,format,
+    observations:summarizeBrowserSelectionFreezeEvidence(selectionFreeze,{
+      format,withCancellation:testCancellation,geometryPixels:fixture.width*fixture.height,
+    }),
+    note:'Menu-to-Worker handoff is not isolated selection CPU time; sampled timer/heap are not peak RAM',
+  }));
   const memory=await sampler.stop();
   samplerStopped=true;
   const operationProfile=operation.finish({
     outcome:testCancellation?'completed-with-cancelled-retry':'completed',
     memoryReport:memory,qualityReport,
   });
+  operationProfile.selectionFreeze=selectionFreeze;
   const artifactPath=await writeBrowserOperationArtifact(operationProfile);
   if(artifactPath)console.log('Stage 003 browser operation JSON artifact:',artifactPath);
-  await evaluate(client,'window.__stage003RestoreCancelProbe?.();window.__stage003RestoreLargeWorkerPost?.();delete window.__stage003LargeMeta;delete window.__stage003LargeNativeBaseline;delete window.__stage003LargeNativeSuccess;delete window.__stage003LargeKernelProbe;delete window.__stage003LargeNativeBaselineSource;delete window.__stage003LargeFrozenSelection;true');
+  await evaluate(client,'window.__stage003RestoreCancelProbe?.();window.__stage003SelectionFreeze?.restore();window.__stage003RestoreLargeWorkerPost?.();delete window.__stage003LargeMeta;delete window.__stage003LargeNativeBaseline;delete window.__stage003LargeNativeSuccess;delete window.__stage003LargeKernelProbe;delete window.__stage003LargeNativeBaselineSource;delete window.__stage003LargeFrozenSelection;true');
   console.log('Stage 003 large file:// '+format+' Worker regression:',JSON.stringify({
     fixture:fixture.filename,source:'ZeTer-generated, NOT Adobe Photoshop-authored',
     rawBytes,tiles:native.tiles,workerJobs:after.jobs,importAndPreviewMs,fillAndPreviewMs,
@@ -485,7 +512,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     // The sampler owns an interval; previous failures left it running until
     // GitHub Actions hit its 10-minute job timeout.
     if(!samplerStopped) await sampler.stop().catch(()=>{});
-    await evaluate(client,'window.__stage003RestoreCancelProbe?.();window.__stage003RestoreLargeWorkerPost?.();delete window.__stage003LargeMeta;delete window.__stage003LargeNativeBaseline;delete window.__stage003LargeNativeSuccess;delete window.__stage003LargeKernelProbe;delete window.__stage003LargeNativeBaselineSource;delete window.__stage003LargeFrozenSelection;true')
+    await evaluate(client,'window.__stage003RestoreCancelProbe?.();window.__stage003SelectionFreeze?.restore();window.__stage003RestoreLargeWorkerPost?.();delete window.__stage003LargeMeta;delete window.__stage003LargeNativeBaseline;delete window.__stage003LargeNativeSuccess;delete window.__stage003LargeKernelProbe;delete window.__stage003LargeNativeBaselineSource;delete window.__stage003LargeFrozenSelection;true')
       .catch(()=>{});
   }
 }
