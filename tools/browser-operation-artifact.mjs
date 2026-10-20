@@ -3,7 +3,10 @@ import path from 'node:path';
 import { validateBrowserOperationEvidence } from './browser-operation-timeline.mjs';
 import { validateBrowserSyntheticQualityEvidence } from './browser-synthetic-native-quality.mjs';
 import { validateBrowserSamplingTiming } from './browser-sampling-timing.mjs';
-import { validateBrowserSelectionFreezeEvidence } from './browser-selection-freeze-observer.mjs';
+import {
+  validateBrowserSelectionFreezeEvidence,
+  validateBrowserBroadPreDispatchCancellation,
+} from './browser-selection-freeze-observer.mjs';
 import { validateBrowserMilestoneWindowAudit } from './browser-milestone-window-audit.mjs';
 import {
   validateBrowserOperationIncarnationWindows,
@@ -109,6 +112,11 @@ export function buildBrowserOperationArtifact(profile) {
       geometryPixels:profile.selectionFreezeGeometryPixels,
     });
   }
+  if (profile.preDispatchCancellation != null) {
+    validateBrowserBroadPreDispatchCancellation(profile.preDispatchCancellation,{
+      format:profile.format,geometryPixels:profile.selectionFreezeGeometryPixels,
+    });
+  }
   validateBrowserSyntheticQualityEvidence(profile.quality,{format:profile.format,outcome:profile.outcome});
   return {
     kind:'zpe-browser-operation-artifact-v1',
@@ -172,7 +180,8 @@ export async function verifyBrowserOperationArtifacts(directory) {
         artifact.timeline.memory.samplingTiming == null ||
         (artifact.timeline.origin === 'real Chromium file:// UI + native Worker' &&
           (artifact.timeline.selectionFreeze == null ||
-           artifact.timeline.selectionFreezeGeometryPixels == null)) ||
+           artifact.timeline.selectionFreezeGeometryPixels == null ||
+           artifact.timeline.preDispatchCancellation == null)) ||
         (artifact.timeline.origin === 'real Chromium file:// UI + native Worker' &&
           !hasRequiredBrowserOperationIncarnationBoundaries(
             artifact.timeline.memory.incarnationWindowAudit?.windows)) ||
