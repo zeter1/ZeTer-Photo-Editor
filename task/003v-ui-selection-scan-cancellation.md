@@ -1,6 +1,6 @@
 # 003V — bounded mid-chunk cancellation for UI tiled selection scan
 
-**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003 tiled Content-Aware](003-tiled-content-aware.md), Stage 6.
+**Priority:** P1. **Status:** DONE. **Parent:** [003 tiled Content-Aware](003-tiled-content-aware.md), Stage 6.
 **Dependencies:** accepted [003U](003u-bounded-ui-selection-freeze.md) typed index storage; existing Worker/native ownership and cancellation contracts.
 
 ## Problem and acceptance
@@ -25,5 +25,9 @@ The UI selection freeze calls `isCancelled()` at chunk boundaries, but a large p
 
 - [PR #303](https://github.com/zeter1/ZeTer-Photo-Editor/pull/303) merged as [main `2b1c89b6`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/2b1c89b6b1b8865877ad14fcf513d106b42f1f0b).
 - Exact PR-head [core CI #39367075269 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367075269), [real-photo #39367075297 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367075297); build, Node, Chromium `file://`, native photo PSD16/PSB32 tests verified.
-- Exact-code-main workflows [CI #39367728538](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367728538), [real-photo #39367728526](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367728526): **RUNNING**. Keep this card IN PROGRESS until both exact-code-main checks succeed.
+- Exact-code-main [CI #39367728538 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367728538) and [real-photo #39367728526 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39367728526) on exact merge SHA `2b1c89b6b1b8865877ad14fcf513d106b42f1f0b`. **Acceptance complete; 003V DONE**.
 - After exact-main acceptance next P1 [003W](003w-browser-selection-freeze-responsiveness.md).
+
+## Acceptance conclusion
+
+All 003V source/test/generated-artifact and genuine browser PR-head and exact merged-main gates passed. This bounded synchronous UI cancellation improvement is DONE; parent 003/003T remains OPEN. No true operation-exclusive peak/verified Worker→PID or external Photoshop-authored PSB32 parity is claimed. Next [003W](003w-browser-selection-freeze-responsiveness.md) TODO.
