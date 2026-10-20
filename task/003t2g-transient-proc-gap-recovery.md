@@ -1,6 +1,6 @@
 # 003T/2g — transient Linux /proc gap recovery in Chromium operation samples
 
-**Priority:** P1. **Status:** TODO. **Parent:** [003T](003t-operation-memory-evidence.md); Stage [003](003-tiled-content-aware.md).
+**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003T](003t-operation-memory-evidence.md); Stage [003](003-tiled-content-aware.md).
 **Dependencies:** [003T/2f-2 DONE](003t2f-2-operation-incarnation-windows.md), [003T/2e](003t2e-milestone-window-audit.md), [003T/2f](003t2f-pid-window-control.md).
 
 ## Confirmed motivation
@@ -24,3 +24,12 @@ Distinguish transient missing `/proc` files caused by process churn from persist
 No production editor code change unless a real defect is found. No new dependencies, no file-server requirement, no assumed privileged cgroup. Even successful separate PID snapshots cannot establish uninterrupted membership or an operation-exclusive peak. Independent Photoshop-authored PSB32 acceptance [002B/2c](002b2c-photoshop-psb32-provenance.md) remains BLOCKED by unavailable licensed reference.
 
 **Next concrete action:** write a focused regression reproducing stale `rssUnavailableReason` after a transient ENOENT, then implement fail-closed safe re-observation and run in real Chromium `file://`.
+
+## Pass 2026-10-20 — implementation submitted for validation
+
+- Branch: [fix/003t2g-transient-proc-gap-recovery-20261020](https://github.com/zeter1/ZeTer-Photo-Editor/tree/fix/003t2g-transient-proc-gap-recovery-20261020).
+- `tools/browser-renderer-heap-sampler.mjs`: distinguish actual `ENOENT` from an exact current-CDP-member `/proc/<pid>/stat|status` path; do not cache it as a permanent failure. Drop the entire affected Linux RSS/identity snapshot, label its diagnostic gap, and wait until the next complete fresh CDP census to re-observe; never retry or sum partial members within the same census. No added network/dependencies.
+- Preserve sticky rejection for untrusted path/code, `EACCES`, unsupported platforms, invalid counters, changed starttime and malformed/duplicate CDP PID membership. When no valid Linux RSS snapshots exist, availability is unavailable, not sampled; keep the transient miss count explicit.
+- `tests/browser-linux-proc-gap-recovery.test.mjs`: deterministic multi-snapshot regression (transient→fresh re-observation), repeated gaps, partial-member failure, permission/unsupported/untrusted errors, invalid CDP lists, and starttime disagreement.
+- **NOT YET VERIFIED:** Node tests, genuine Chromium `file://` PSD16/PSB32 UI operations, native-byte receipts, PR CI, merge, and exact-main CI. Do not check off the acceptance criteria until actual results are reviewed.
+- **Next:** open PR, verify full CI + uploaded operation JSON/native bytes; fix failures, merge only on success, record exact-main. P0 002B/2c remains BLOCKED on independently Photoshop-authored PSB32.
