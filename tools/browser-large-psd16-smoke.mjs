@@ -7,6 +7,7 @@ import { inspectNativeSelectedPixelChanges } from './browser-native-selection-in
 import {
   installBrowserSelectionFreezeObserver,
   validateBrowserSelectionFreezeEvidence,
+  validateBrowserBroadPreDispatchCancellation,
   summarizeBrowserSelectionFreezeEvidence,
 } from './browser-selection-freeze-observer.mjs';
 import { measureSyntheticNativeDefectQuality } from './browser-synthetic-native-quality.mjs';
@@ -569,6 +570,9 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     '003W/2a cancellation must never dispatch Worker, alter native tile words, preview or History',
     JSON.stringify({wideEvidence,nativeAfterBroad}));
   await sampler.snapshot('after-broad-selection-cancel');
+  validateBrowserBroadPreDispatchCancellation(wideEvidence,{
+    format,geometryPixels:fixture.width*fixture.height,
+  });
   console.log('003W/2a real Chromium broad pre-Worker Escape:',JSON.stringify(wideEvidence));
   await evaluate(client,'delete window.__stage003WideCancel;true');
   const selectionFreeze=await evaluate(client,'window.__stage003SelectionFreeze?.snapshot()');
@@ -590,6 +594,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
   });
   operationProfile.selectionFreeze=selectionFreeze;
   operationProfile.selectionFreezeGeometryPixels=fixture.width*fixture.height;
+  operationProfile.preDispatchCancellation=wideEvidence;
   const artifactPath=await writeBrowserOperationArtifact(operationProfile);
   if(artifactPath)console.log('Stage 003 browser operation JSON artifact:',artifactPath);
   await evaluate(client,'window.__stage003RestoreCancelProbe?.();window.__stage003SelectionFreeze?.restore();window.__stage003RestoreLargeWorkerPost?.();delete window.__stage003LargeMeta;delete window.__stage003LargeNativeBaseline;delete window.__stage003LargeNativeSuccess;delete window.__stage003LargeKernelProbe;delete window.__stage003LargeNativeBaselineSource;delete window.__stage003LargeFrozenSelection;true');
