@@ -480,6 +480,97 @@ export async function verifyLargeBrowserPsd16Worker(client, {
       recoveredChangedNativeBytes:true,undoExactNativeBytes:true,redoExactNativeBytes:true,
     }));
   }
+  // 003W/2a: grow the REAL overlay marquee to ~1 million document pixels,
+  // then cancel the live UI command on its first cooperative event-loop yield.
+  // No synthetic direct controller call or Worker message interception is used.
+  function setupBroadMarquee() {
+    const f=window.__stage003LargeMeta;
+    document.querySelector('[data-tool="marquee"]').click();
+    const type=document.querySelector('#selectionType');
+    type.value='rect';type.dispatchEvent(new Event('change',{bubbles:true}));
+    const canvas=document.querySelector('#editorCanvas');
+    canvas.scrollIntoView({block:'center',inline:'center'});
+    const rect=canvas.getBoundingClientRect();
+    const point=(x,y)=>({
+      x:rect.left+rect.width*x/f.width,
+      y:rect.top+rect.height*y/f.height,
+    });
+    const start=point(20,20),end=point(f.width-20,f.height-20);
+    return {
+      start,end,fromPixels:20,toPixels:f.width-20,
+      rectangularBoundingPixels:(f.width-40)*(f.height-40),
+      hit:document.elementFromPoint(start.x,start.y)?.id,
+      within:start.x>0&&start.y>0&&end.x<innerWidth&&end.y<innerHeight,
+    };
+  }
+  const broadView=await evaluate(client,'('+setupBroadMarquee.toString()+')()');
+  assert(broadView.hit==='overlayCanvas' && broadView.within &&
+    broadView.rectangularBoundingPixels>900000,
+    '003W/2a real broad marquee must cover a visible ~million-pixel region',
+    JSON.stringify(broadView));
+  await mouse('mouseMoved',broadView.start,0);
+  await mouse('mousePressed',broadView.start,1);
+  await mouse('mouseMoved',broadView.end,1);
+  await mouse('mouseReleased',broadView.end,0);
+  const beforeBroad=await evaluate(client,'('+result.toString()+')()');
+  const nativeBeforeBroad=await evaluate(client,readNativeExpression);
+  assert(nativeBeforeBroad.exactPayloadMatchesSuccess===true,
+    '003W/2a baseline high-depth source must match the committed native successor',
+    JSON.stringify(nativeBeforeBroad));
+  await sampler.snapshot('before-broad-selection-cancel');
+  function cancelBroadBeforeWorker() {
+    const beforeJobs=window.__stage003LargeWorkerJobs;
+    window.__stage003WideCancel={fired:false,defaultPrevented:false,beforeJobs};
+    document.querySelector('.menu-button[data-menu="edit"]').click();
+    const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+      button=>button.querySelector('span')?.textContent==='Контент-заливка выделения');
+    const enabled=Boolean(item&&!item.disabled);
+    if(enabled) {
+      // Enqueue Escape before the inpaint scan enqueues its first async
+      // yield; this probes the production owner/session cancellation path.
+      setTimeout(()=>{
+        const event=new KeyboardEvent('keydown',{
+          key:'Escape',code:'Escape',bubbles:true,cancelable:true,
+        });
+        window.dispatchEvent(event);
+        window.__stage003WideCancel.fired=true;
+        window.__stage003WideCancel.defaultPrevented=event.defaultPrevented;
+      },0);
+      item.click();
+    }
+    return {enabled,beforeJobs};
+  }
+  const widePending=await evaluate(client,'('+cancelBroadBeforeWorker.toString()+')()');
+  assert(widePending.enabled,'003W/2a wide native Fill menu must be enabled');
+  await waitFor('003W/2a genuine Escape during broad UI selection freeze',
+    ()=>evaluate(client,`(() => window.__stage003WideCancel?.fired &&
+      window.__stage003WideCancel?.defaultPrevented &&
+      document.querySelector('#statusText')?.textContent==='Контент-заливка отменена')()`),
+    15000);
+  // Allow the cancelled continuation to settle; owner cancellation must
+  // prevent even an eventual stale native Worker dispatch/publication.
+  await new Promise(resolve=>setTimeout(resolve,120));
+  const afterBroad=await evaluate(client,'('+result.toString()+')()');
+  const nativeAfterBroad=await evaluate(client,readNativeExpression);
+  const wideEvidence={
+    kind:'zpe-browser-broad-selection-predispatch-cancel-v1',
+    format,geometryPixels:fixture.width*fixture.height,
+    selectionBoundingPixels:broadView.rectangularBoundingPixels,
+    cancellationEvent:'Escape',
+    workerJobsBefore:widePending.beforeJobs,
+    workerJobsAfter:afterBroad.jobs,
+    sourceUnchanged:nativeAfterBroad.exactPayloadMatchesSuccess===true,
+    previewUnchanged:JSON.stringify(afterBroad.pixel)===JSON.stringify(beforeBroad.pixel),
+    historyUnchanged:JSON.stringify(afterBroad.history)===JSON.stringify(beforeBroad.history),
+  };
+  assert(wideEvidence.workerJobsBefore===wideEvidence.workerJobsAfter &&
+    wideEvidence.sourceUnchanged && wideEvidence.previewUnchanged &&
+    wideEvidence.historyUnchanged,
+    '003W/2a cancellation must never dispatch Worker, alter native tile words, preview or History',
+    JSON.stringify({wideEvidence,nativeAfterBroad}));
+  await sampler.snapshot('after-broad-selection-cancel');
+  console.log('003W/2a real Chromium broad pre-Worker Escape:',JSON.stringify(wideEvidence));
+  await evaluate(client,'delete window.__stage003WideCancel;true');
   const selectionFreeze=await evaluate(client,'window.__stage003SelectionFreeze?.snapshot()');
   validateBrowserSelectionFreezeEvidence(selectionFreeze,{
     format,withCancellation:testCancellation,geometryPixels:fixture.width*fixture.height,
