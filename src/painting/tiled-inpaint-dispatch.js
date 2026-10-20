@@ -150,8 +150,28 @@ export async function prepareTiledInpaintWithWorker(source, {
   if (!working) throw new TypeError('Tiled inpaint: invalid native source');
   const { width, height } = working;
   const total = width * height;
-  const indices = [];
+  // The Worker protocol uses Uint32 indices. Never allocate a huge JS
+  // number[] plus a second typed copy while freezing the UI selection.
+  if (!Number.isSafeInteger(total) || total < 1 || total > 0x1_0000_0000 ||
+      !Number.isSafeInteger(maxFillPixels) || maxFillPixels < 1) {
+    throw new RangeError('Tiled inpaint: unsafe selection size or maxFillPixels');
+  }
+  const maxStored = Math.min(total, maxFillPixels);
+  let indices = new Uint32Array(0);
   let selected = 0;
+  function storeSelected(index) {
+    if (selected > maxStored) return;
+    if (selected > indices.length) {
+      // Geometric growth, capped to the admissible selection; tiny sparse
+      // regions never reserve the entire multi-million-pixel fill budget.
+      const capacity = Math.min(maxStored, Math.max(selected,
+        indices.length ? indices.length * 2 : 32));
+      const next = new Uint32Array(capacity);
+      next.set(indices);
+      indices = next;
+    }
+    indices[selected - 1] = index;
+  }
   const chunk = Math.max(1, Math.min(262_144, Math.trunc(Number(scanChunkPixels) || 32_768)));
   const cancelled = () => ({
     source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true,
@@ -168,7 +188,7 @@ export async function prepareTiledInpaintWithWorker(source, {
       const y = Math.floor(index / width), x = index - y * width;
       if (!isAllowed(x, y)) continue;
       selected += 1;
-      if (selected <= maxFillPixels) indices.push(index);
+      storeSelected(index);
     }
   }
   if (isCancelled()) return cancelled();
@@ -178,7 +198,10 @@ export async function prepareTiledInpaintWithWorker(source, {
   if (selected > maxFillPixels) {
     throw new RangeError('Контент-заливка: выделено больше безопасного лимита ' + maxFillPixels + ' px');
   }
-  const job = { source, selectedIndices:Uint32Array.from(indices), maxBytes, maxFillPixels };
+  // Detach a compact, exact-length immutable snapshot from any spare buffer
+  // capacity; no transient JS Array of pixel indices is ever constructed.
+  const selectedIndices = indices.length === selected ? indices : indices.slice(0, selected);
+  const job = { source, selectedIndices, maxBytes, maxFillPixels };
   const result = await worker.run(job, { isCurrent:() => !isCancelled() });
   if (isCancelled() || result?.cancelled) return cancelled();
   if (result?.unavailable) {
