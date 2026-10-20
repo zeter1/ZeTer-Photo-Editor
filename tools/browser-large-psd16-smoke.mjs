@@ -498,6 +498,7 @@ export async function verifyLargeBrowserPsd16Worker(client, {
     memoryReport:memory,qualityReport,
   });
   operationProfile.selectionFreeze=selectionFreeze;
+  operationProfile.selectionFreezeGeometryPixels=fixture.width*fixture.height;
   const artifactPath=await writeBrowserOperationArtifact(operationProfile);
   if(artifactPath)console.log('Stage 003 browser operation JSON artifact:',artifactPath);
   await evaluate(client,'window.__stage003RestoreCancelProbe?.();window.__stage003SelectionFreeze?.restore();window.__stage003RestoreLargeWorkerPost?.();delete window.__stage003LargeMeta;delete window.__stage003LargeNativeBaseline;delete window.__stage003LargeNativeSuccess;delete window.__stage003LargeKernelProbe;delete window.__stage003LargeNativeBaselineSource;delete window.__stage003LargeFrozenSelection;true');
