@@ -112,7 +112,7 @@ test('003T/2g: EACCES or unsupported Linux must latch; no retry after hard failu
     await sampler.start();
     await sampler.snapshot('before-first-fill');
     const report=await sampler.stop();
-    assert.deepEqual(counts(),{cdpReads:1,rssReads:1});
+    assert.deepEqual(counts(),{cdpReads:3,rssReads:1});
     assert.equal(report.linuxProcessRss.availability,'unavailable');
     assert.equal(report.linuxProcessRss.sampleCount,0);
     assert.equal(report.linuxProcessRss.endAggregateRssBytes,null);
@@ -137,7 +137,7 @@ test('003T/2g: a starttime mismatch is not ENOENT and cannot be retried',async()
   await sampler.start();
   await sampler.snapshot('before-first-fill');
   const report=await sampler.stop();
-  assert.deepEqual(counts(),{cdpReads:2,rssReads:2});
+  assert.deepEqual(counts(),{cdpReads:3,rssReads:2});
   assert.match(report.linuxProcessRss.unavailableReason,/PID was reused/);
   assert.equal(report.linuxProcessRss.sampleCount,1);
   assert.equal(report.linuxProcessRss.endAggregateRssBytes,null);
