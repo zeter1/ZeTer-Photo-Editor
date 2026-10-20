@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   validateBrowserSelectionFreezeEvidence,
+  validateBrowserBroadPreDispatchCancellation,
   summarizeBrowserSelectionFreezeEvidence,
   installBrowserSelectionFreezeObserver,
 } from '../tools/browser-selection-freeze-observer.mjs';
@@ -84,4 +85,41 @@ test('003W: Chromium observer injection is independent of module-scope bindings'
   assert.match(browserFunction,/const LIMIT=256, PULSE_MS=8/);
   assert.match(browserFunction,/Worker.prototype.postMessage=function/);
   assert.match(browserFunction,/clearInterval\(timer\)/);
+});
+
+const broadCancelled=()=>({
+  kind:'zpe-browser-broad-selection-predispatch-cancel-v1',
+  format:'PSD16',geometryPixels:1025*1025,
+  selectionBoundingPixels:985*985,
+  cancellationEvent:'Escape',workerJobsBefore:3,workerJobsAfter:3,
+  sourceUnchanged:true,previewUnchanged:true,historyUnchanged:true,
+});
+
+test('003W/2a: genuine PSD16/PSB32 broad owner-cancel evidence cannot claim a dispatch or native edit',()=>{
+  const valid=broadCancelled();
+  assert.equal(validateBrowserBroadPreDispatchCancellation(valid,{
+    format:'PSD16',geometryPixels:1025*1025,
+  }),true);
+  const mutations=[
+    x=>{x.workerJobsAfter++;},
+    x=>{x.workerJobsBefore=-1;},
+    x=>{x.selectionBoundingPixels=3;},
+    x=>{x.selectionBoundingPixels=x.geometryPixels;},
+    x=>{x.sourceUnchanged=false;},
+    x=>{x.previewUnchanged=false;},
+    x=>{x.historyUnchanged=false;},
+    x=>{x.cancellationEvent='test-internal';},
+    x=>{x.operationPeakRssBytes=0;},
+    x=>{x.format='PSB32';},
+  ];
+  for(const corrupt of mutations) {
+    const evidence=broadCancelled();
+    corrupt(evidence);
+    assert.throws(()=>validateBrowserBroadPreDispatchCancellation(evidence,{
+      format:'PSD16',geometryPixels:1025*1025,
+    }),/invalid broad pre-Worker cancellation evidence/);
+  }
+  assert.throws(()=>validateBrowserBroadPreDispatchCancellation(valid,{
+    format:'PSB32',geometryPixels:1025*1025,
+  }),/invalid broad pre-Worker cancellation evidence/);
 });

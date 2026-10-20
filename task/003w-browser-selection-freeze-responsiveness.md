@@ -46,3 +46,13 @@ Move from small synthetic Node cancellation proofs to actual Chromium `file://` 
 - Genuine browser observations and measurement limitations are recorded in the preceding section. No production Fill behavior was modified by 003W/1.
 - **Remaining P1 003W/2 IN PROGRESS:** extend to broad dense/sparse UI selections approaching 2,000,000 pixels, including correct safe refusal above cap; prove a real owner-cancel in selection freeze dispatches zero Worker jobs, preserves source/native pixels, preview and History; retain sampled gap/latency/heap/RSS metadata with strict validation. Compare against 003W/1 rather than inventing thresholds. Then finish the whole 003W acceptance only after new PR+main CI.
 - **Still unresolved:** 003/003T memory peak and Worker→PID; P0 Photoshop-authored PSB32 provenance BLOCKED; no unsupported Photoshop parity claim.
+
+
+## 2026-10-20 — 003W/2a broad real-browser pre-Worker cancellation (IN PROGRESS)
+
+- Branch [test/003w2a-large-selection-predispatch-cancel-20261020](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003w2a-large-selection-predispatch-cancel-20261020), based on main `3c415617`.
+- Extend existing real `file://` Chromium PSD16 and PSB32 native tiled sessions after successful Worker/cancel/retry/Undo/Redo: actual overlay marquee geometry from (20,20) to (1005,1005) on 1025² canvas, bounding box 970,225 pixels. This is **not** a census of permitted UI selection indices.
+- Enqueue a real `window` Escape keydown before the controller's first cooperative 0ms yield; require handled owner cancellation (default prevented and cancellation status), unchanged Worker job count, exact saved native tile-byte match to pre-cancel committed success, unchanged preview sample and exact History rows after cancellation. Includes a settling observation to reject late stale handoff.
+- New `preDispatchCancellation` receipt within PSD16/PSB32 saved operation artifacts, strict verifier with bounded geometry, no illicit Worker dispatch, immutable source/preview/history and no additional peak/PID fields; negative unit tests for malformed claims. Existing sampled memory limitations remain.
+- No production image kernel or generated browser bundle change. **PR-head CI / full browser / exact merged-main NOT VERIFIED at implementation checkpoint.** Do not call 003W DONE.
+- **Next P1 003W/2b:** dense/sparse **actual** selection near the full 2,000,000-pixel Worker cap (and out-of-limit refusal), direct selection-freeze latency comparison, evidence gaps, native integrity on any successful path. Whole Stage 003/003T and Photoshop-authored PSB32 provenance remain unresolved.
