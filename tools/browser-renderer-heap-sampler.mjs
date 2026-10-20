@@ -6,6 +6,17 @@ import { summarizeBrowserMilestoneWindows } from './browser-milestone-window-aud
 import { summarizeBrowserOperationIncarnationWindows } from './browser-operation-incarnation-windows.mjs';
 import { validateChromiumRssSampleMembership } from './browser-rss-sample-identity.mjs';
 
+// An ENOENT from a specific member of the *current* CDP census can mean that
+// Chromium retired that process between the census and its /proc reads. Retry
+// only on a later, freshly collected CDP list; never retry a partial census
+// in place or infer a continuous process lifetime across the missing window.
+function isTransientProcMemberMissing(error, processes) {
+  if (error?.code !== 'ENOENT' || typeof error.path !== 'string') return false;
+  return processes.some(({id}) =>
+    error.path === '/proc/' + id + '/stat' ||
+    error.path === '/proc/' + id + '/status');
+}
+
 // Informational CDP renderer-heap samples. Worker heaps, native allocations and
 // process RSS are NOT represented by JSHeapUsedSize; sampled max != true peak.
 // An optional browser-level CDP connection can sample Chromium's reported
@@ -33,6 +44,7 @@ export function createBrowserRendererHeapSampler(client, {
   let pollsSkippedBusy = 0;
   let processUnavailableReason = null;
   let rssUnavailableReason = null;
+  let transientProcMissingSnapshots = 0;
   // CDP PID membership is independent of optional privateMemory and /proc
   // availability. A PID can be recycled: no cross-snapshot identity claim.
   let processIdentityUnavailableReason = null;
@@ -181,7 +193,17 @@ export function createBrowserRendererHeapSampler(client, {
               } catch (error) { linuxIdentityUnavailableReason=String(error?.message || error); }
             }
           } catch (error) {
-            rssUnavailableReason = String(error?.message || error);
+            if (isTransientProcMemberMissing(error, processes)) {
+              // This entire aggregate, including previously read members, is
+              // unknown. The existing missing-snapshot path breaks identity
+              // adjacency. The *next* snapshot may re-observe from scratch.
+              transientProcMissingSnapshots++;
+              entry.linuxRssGapReason = 'transient-proc-enoent';
+            } else {
+              // Permission, unsupported platform, malformed data, PID reuse
+              // during a read, and untrusted errors disable RSS capability.
+              rssUnavailableReason = String(error?.message || error);
+            }
           }
         }
       } catch (error) {
@@ -383,6 +405,7 @@ export function createBrowserRendererHeapSampler(client, {
             rssUnavailableReason ? 'unavailable' : 'sampled',
           unavailableReason:rssUnavailableReason,
           sampleCount:rssSamples.length,
+          transientProcMissingSnapshots,
           baselineAggregateRssBytes:rssBaseline?.chromiumRssBytes ?? null,
           sampledMaxAggregateRssBytes:rssMax?.chromiumRssBytes ?? null,
           endAggregateRssBytes:rssEnd?.chromiumRssBytes ?? null,
