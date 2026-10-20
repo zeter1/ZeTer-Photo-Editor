@@ -3,6 +3,7 @@ import path from 'node:path';
 import { validateBrowserOperationEvidence } from './browser-operation-timeline.mjs';
 import { validateBrowserSyntheticQualityEvidence } from './browser-synthetic-native-quality.mjs';
 import { validateBrowserSamplingTiming } from './browser-sampling-timing.mjs';
+import { validateBrowserSelectionFreezeEvidence } from './browser-selection-freeze-observer.mjs';
 import { validateBrowserMilestoneWindowAudit } from './browser-milestone-window-audit.mjs';
 import {
   validateBrowserOperationIncarnationWindows,
@@ -102,6 +103,12 @@ export function buildBrowserOperationArtifact(profile) {
     throw new TypeError('Browser operation artifact: missing real Linux incarnation windows');
   }
   validateInformationalMemoryClaims(profile.memory);
+  if (profile.selectionFreeze != null) {
+    validateBrowserSelectionFreezeEvidence(profile.selectionFreeze,{
+      format:profile.format,withCancellation:profile.outcome==='completed-with-cancelled-retry',
+      geometryPixels:profile.selectionFreezeGeometryPixels,
+    });
+  }
   validateBrowserSyntheticQualityEvidence(profile.quality,{format:profile.format,outcome:profile.outcome});
   return {
     kind:'zpe-browser-operation-artifact-v1',
@@ -163,6 +170,9 @@ export async function verifyBrowserOperationArtifacts(directory) {
         artifact.format!==format || artifact.outcome!==outcome ||
         artifact.timeline.memory.requestedSamplingIntervalMs!==50 ||
         artifact.timeline.memory.samplingTiming == null ||
+        (artifact.timeline.origin === 'real Chromium file:// UI + native Worker' &&
+          (artifact.timeline.selectionFreeze == null ||
+           artifact.timeline.selectionFreezeGeometryPixels == null)) ||
         (artifact.timeline.origin === 'real Chromium file:// UI + native Worker' &&
           !hasRequiredBrowserOperationIncarnationBoundaries(
             artifact.timeline.memory.incarnationWindowAudit?.windows)) ||
