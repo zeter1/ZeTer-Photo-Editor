@@ -70,6 +70,9 @@ export function createRasterCommandController({
   }
 
   let pendingContentAwareFill = null;
+  function hasPendingContentAwareFill() {
+    return Boolean(pendingContentAwareFill && !pendingContentAwareFill.cancelled);
+  }
   function cancelPendingContentAwareFill() {
     const pending = pendingContentAwareFill;
     if (!pending || pending.cancelled) return false;
@@ -563,5 +566,5 @@ export function createRasterCommandController({
     }
   }
 
-  return { drawLine, fillAt, contentAwareFill, clearSelection, cancelPendingContentAwareFill };
+  return { drawLine, fillAt, contentAwareFill, clearSelection, hasPendingContentAwareFill, cancelPendingContentAwareFill };
 }
