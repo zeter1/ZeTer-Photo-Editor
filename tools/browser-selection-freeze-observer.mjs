@@ -204,12 +204,13 @@ export function validateBrowserBroadPreDispatchCancellation(evidence,{format,geo
 }
 
 /** 003W/3: fail-closed receipt gate; wall-time is NOT CPU time or RSS peak. */
-export function validateBrowserSelectionPhaseEvidence(value,{format,geometryPixels}={}) {
+export function validateBrowserSelectionPhaseEvidence(value,{format,geometryPixels,selectionClass='dense'}={}) {
   const invalid=()=>new TypeError('003W/3: invalid browser selection phase evidence');
   const keys=['kind','observationClass','limitations','workerPidMapping','trueOperationPeakKnown','requestedPulseIntervalMs','windows'];
   const rowKeys=['label','startedAtMs','handoffAtMs','selectedPixels','phaseEvents','pulseIntervalsMs','pulsesTruncated'];
   const phaseKeys=['phase','atMs','selectedPixels'];
-  if(!['PSD16','PSB32'].includes(format)||!Number.isSafeInteger(geometryPixels)||geometryPixels<1900000||
+  if(!['PSD16','PSB32'].includes(format)||!['dense','sparse'].includes(selectionClass)||
+    !Number.isSafeInteger(geometryPixels)||geometryPixels<1900000||
     !value||typeof value!=='object'||Array.isArray(value)||
     Object.keys(value).length!==keys.length||Object.keys(value).some(k=>!keys.includes(k))||
     value.kind!=='zpe-browser-selection-phase-observations-v1'||
@@ -226,6 +227,7 @@ export function validateBrowserSelectionPhaseEvidence(value,{format,geometryPixe
       !Number.isFinite(row.handoffAtMs)||row.handoffAtMs<row.startedAtMs||
       !Number.isSafeInteger(row.selectedPixels)||row.selectedPixels<1||
       row.selectedPixels>Math.min(2000000,geometryPixels)||
+      (selectionClass==='dense' ? row.selectedPixels<1900000 : row.selectedPixels>=1900000)||
       !Array.isArray(row.phaseEvents)||row.phaseEvents.length!==3||
       !Array.isArray(row.pulseIntervalsMs)||row.pulseIntervalsMs.length>LIMIT||
       row.pulseIntervalsMs.some(ms=>!Number.isFinite(ms)||ms<0||ms>120000)||
