@@ -521,7 +521,8 @@ async function runSmoke() {
         process.env.ZPE_DENSE_OWNER_BROWSER_ONLY === '1' ||
         process.env.ZPE_DENSE_CLOSE_BROWSER_ONLY === '1' ||
         process.env.ZPE_DENSE_REPLACE_BROWSER_ONLY === '1' ||
-         process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1') {
+         process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1') {
       const fixtureKey=process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSD16'
         ?'rgb16nearcap'
         :process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSB32'
@@ -534,7 +535,8 @@ async function runSmoke() {
         switchDense:process.env.ZPE_DENSE_OWNER_BROWSER_ONLY === '1',
         closeDense:process.env.ZPE_DENSE_CLOSE_BROWSER_ONLY === '1',
         replaceDense:process.env.ZPE_DENSE_REPLACE_BROWSER_ONLY === '1',
-         importDense:process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1'});
+         importDense:process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1',
+        failedImportDense:process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1'});
       assertNoBrowserErrors(errors,stderrState);
       return;
     }
