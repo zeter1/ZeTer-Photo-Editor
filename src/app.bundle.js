@@ -4945,6 +4945,7 @@ function* patchMatchRefineSteps(data, width, height, channels, selectedMask, don
   passes,
   randomSearchSteps,
   alphaChannel,
+  preserveAlpha = false,
 } = {}) {
   if (!bounds || bounds.maxX < bounds.minX || bounds.maxY < bounds.minY) return;
   const radius = boundedInteger(patchRadius, 1, 1, 3);
@@ -5004,7 +5005,9 @@ function* patchMatchRefineSteps(data, width, height, channels, selectedMask, don
   const copyDonor = (targetIndex, donor) => {
     const targetOffset = targetIndex * channels;
     const donorOffset = donor * channels;
-    for (let channel = 0; channel < channels; channel += 1) data[targetOffset + channel] = data[donorOffset + channel];
+    for (let channel = 0; channel < channels; channel += 1) {
+      if (!preserveAlpha || channel !== alphaChannel) data[targetOffset + channel] = data[donorOffset + channel];
+    }
   };
 
   const propagatedDonor = (targetIndex, neighborIndex) => {
@@ -5103,6 +5106,7 @@ function* inpaintSelectedSamplesSteps(data, width, height, channels, {
   patchMatchPasses = 2,
   randomSearchSteps = 4,
   alphaChannel = channels === 4 ? 3 : channels === 5 ? 4 : -1,
+  preserveAlpha = false,
 } = {}) {
   width = positiveInteger(width, 'width');
   height = positiveInteger(height, 'height');
@@ -5248,6 +5252,8 @@ function* inpaintSelectedSamplesSteps(data, width, height, channels, {
     if (bestDonor < 0 || weightTotal <= 0) continue;
     const targetOffset = index * channels;
     for (let channel = 0; channel < channels; channel += 1) {
+      // Native tiled Fill changes only colors: avoid rounded alpha writes.
+      if (preserveAlpha && channel === alphaChannel) continue;
       const denominator = alphaChannel < 0 || channel === alphaChannel ? weightTotal : alphaWeightTotal;
       data[targetOffset + channel] = denominator > 0 ? sums[channel] / denominator : 0;
     }
@@ -5277,6 +5283,7 @@ function* inpaintSelectedSamplesSteps(data, width, height, channels, {
       passes:patchMatchPasses,
       randomSearchSteps,
       alphaChannel,
+      preserveAlpha,
     });
   }
 
@@ -7601,7 +7608,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
           const index = (rect.top + y) * width + rect.left + x;
           return (selectionBits[index >> 3] & (1 << (index & 7))) !== 0;
         },
-        maxLayerPixels, maxFillPixels,
+        maxLayerPixels, maxFillPixels, preserveAlpha:true,
       } };
       if (filled !== group.indices.length) {
         throw new RangeError('Контент-заливка: для отдельной области не найдены все доноры');
@@ -7629,7 +7636,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
   const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
     isAllowed:(x, y) => selectionMask[y * regionWidth + x] === 1,
     maxLayerPixels,
-    maxFillPixels,
+    maxFillPixels, preserveAlpha:true,
   } };
   if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
   const changed = yield { kind:'writeRegion', region };

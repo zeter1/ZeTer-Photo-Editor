@@ -36,6 +36,8 @@ function makeSource(model, bitsPerChannel) {
     for (let channel = 0; channel < (channels === 5 ? 4 : 3); channel += 1) {
       data[index * channels + channel] = bitsPerChannel === 32 ? 0.9 : 60_000;
     }
+    // Nonopaque selected alpha must survive sync/cooperative/Worker exact.
+    if (channels === 5) data[index * channels + 4] = 0.375;
   }
   return serializeTiledPixelBufferSource(createPixelBuffer({
     width:WIDTH, height:HEIGHT, model, channels, bitsPerChannel,
