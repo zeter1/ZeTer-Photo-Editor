@@ -206,3 +206,48 @@ jobs:
 
       - name: Diff hygiene
         run: git diff --check
+
+  # 003W/2b-2a runs in a separate fresh Chromium process/profile and budget.
+  # ZeTer-authored PSD16/PSB32; sparse successful, >2M refusal, NOT dense success.
+  near-cap-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 2.03M UI sparse Fill and >2M refusal
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Chromium PSB32 2.03M UI sparse Fill and >2M refusal
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Verify real near-cap browser receipts
+        run: node tools/verify-browser-near-cap-evidence.mjs
+        env:
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Upload near-cap browser receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-near-cap-003w2b2a
+          path: ${{ runner.temp }}/zpe-near-cap/*.json
+          if-no-files-found: warn
+          retention-days: 14

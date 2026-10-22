@@ -4138,6 +4138,8 @@ class HistoryStack {
     this.byteLimit = byteLimit;
     this.entries = [];
     this.index = -1;
+    // Immutable JSON strings retain their byte estimate across totalBytes calls.
+    this._stringByteSizes = new WeakMap();
   }
 
   push(label, snapshot) {
@@ -4171,12 +4173,28 @@ class HistoryStack {
 
 
   totalBytes() {
-    return this.entries.reduce((sum, entry) => sum + this.snapshotBytes(entry.snapshot), 0);
+    return this.entries.reduce((sum, entry) => {
+      // Object snapshots may be mutated by callers; never cache their size.
+      if (typeof entry.snapshot !== 'string') return sum + this.snapshotBytes(entry.snapshot);
+      let bytes = this._stringByteSizes.get(entry);
+      if (bytes === undefined) {
+        bytes = this.snapshotBytes(entry.snapshot);
+        this._stringByteSizes.set(entry, bytes);
+      }
+      return sum + bytes;
+    }, 0);
   }
 
   snapshotBytes(snapshot) {
-    if (typeof snapshot === 'string') return snapshot.length * 2;
-    try { return JSON.stringify(snapshot).length * 2; } catch { return 0; }
+    try {
+      const encoded = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot);
+      if (typeof encoded !== 'string') return 0;
+      // V8 stores Latin-1 JSON snapshots with one byte per character. PSD/PSB
+      // native tile base64 is Latin-1; charging two bytes falsely evicted the
+      // only pre-Fill Undo point for 2.03M-pixel 32-bit sources. Conservatively
+      // charge two bytes per char when ANY wide character is present.
+      return /[^\x00-\xff]/.test(encoded) ? encoded.length * 2 : encoded.length;
+    } catch { return 0; }
   }
 
   canUndo() { return this.index > 0; }

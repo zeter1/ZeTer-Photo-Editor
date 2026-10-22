@@ -513,6 +513,20 @@ async function runSmoke() {
     }
     assertNoBrowserErrors(errors, stderrState);
 
+    // 003W/2b-2a: isolated genuine Chromium file:// run with a >2M-pixel
+    // PSD16/PSB32 source. No production runtime instrumentation or mocks.
+    if (process.env.ZPE_NEAR_CAP_BROWSER_ONLY === '1') {
+      const fixtureKey=process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSD16'
+        ?'rgb16nearcap'
+        :process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSB32'
+          ?'rgb32psbnearcap':null;
+      if(!fixtureKey) throw new TypeError('003W/2b-2a: invalid near-cap browser format');
+      const {verifyBrowserNearCapUi}=await import('./browser-near-cap-ui-smoke.mjs');
+      await verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey});
+      assertNoBrowserErrors(errors,stderrState);
+      return;
+    }
+
     // 002B/2a: a dedicated, fresh Chromium profile avoids contamination by
     // the heavy synthetic Worker/Undo/Redo memory stress scenarios below.
     if(process.env.ZPE_PHOTOCRAFT_BROWSER_ONLY==='1'){
