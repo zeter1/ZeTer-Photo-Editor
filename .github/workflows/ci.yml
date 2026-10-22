@@ -387,3 +387,48 @@ jobs:
           path: ${{ runner.temp }}/zpe-dense-owner/*.json
           if-no-files-found: warn
           retention-days: 14
+
+  # 003W/2b-2e: independent fresh Chromium file:// sessions for dense
+  # post-dispatch dirty-close refusal + confirmed removal and dense survivor retry per native depth.
+  dense-close-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 dense in-flight dirty close refusal, owner removal and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CLOSE_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_CLOSE_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-close
+
+      - name: Chromium PSB32 dense in-flight dirty close refusal, owner removal and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CLOSE_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_CLOSE_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-close
+
+      - name: Verify strict independent dirty close and survivor native receipts
+        run: node tools/verify-browser-dense-close-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_CLOSE_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-close
+
+      - name: Upload real dense owner close receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-close-003w2b2e
+          path: ${{ runner.temp }}/zpe-dense-close/*.json
+          if-no-files-found: warn
+          retention-days: 14
