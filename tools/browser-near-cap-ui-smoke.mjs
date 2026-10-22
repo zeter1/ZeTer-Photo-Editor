@@ -25,11 +25,14 @@ import {
   saveBrowserDenseImportEvidence, validateBrowserDenseImportEvidence,
   BROWSER_DENSE_IMPORT_LIMITATIONS,
 } from './browser-dense-import-evidence.mjs';
+import {
+  saveBrowserDenseFailedImportEvidence, validateBrowserDenseFailedImportEvidence,
+} from './browser-dense-failed-import-evidence.mjs';
 
 // 003W/2b-2a: actual Chromium file:// PSD16/PSB32 import, UI marquee,
 // production Blob Worker + History, and >2M refusal. The successful selection
 // is intentionally small in legacy mode. Dense mode independently checks real near-2M Worker completion.
-export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false,cancelDense=false,switchDense=false,closeDense=false,replaceDense=false,importDense=false}={}) {
+export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false,cancelDense=false,switchDense=false,closeDense=false,replaceDense=false,importDense=false,failedImportDense=false}={}) {
   const fixture=createBrowserHighDepthFixture(fixtureKey);
   const format=fixture.version===1?'PSD16':'PSB32';
   assert(fixture.width===1450 && fixture.height===1400 &&
@@ -41,7 +44,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
   await evaluate(client,'window.__nearCapParts=[];window.__nearCapMeta='+
     JSON.stringify({filename:fixture.filename,width:fixture.width,height:fixture.height,
       x:fixture.defectX,y:fixture.defectY,bits:fixture.bitsPerChannel})+';true');
-  if(switchDense||closeDense||replaceDense||importDense)await evaluate(client,'window.__nearCapKeepFile=true;true');
+  if(switchDense||closeDense||replaceDense||importDense||failedImportDense)await evaluate(client,'window.__nearCapKeepFile=true;true');
   const base64=Buffer.from(fixture.bytes).toString('base64');
   for(let offset=0;offset<base64.length;offset+=192*1024) {
     const part=base64.slice(offset,offset+192*1024);
@@ -259,7 +262,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
 
     // 003W/2b-2g: an actually different File -> Open native source replaces the
     // original while its dense production Blob Worker has already dispatched.
-    if(importDense){
+    if(importDense||failedImportDense){
       const replacement=createBrowserHighDepthFixture(fixtureKey+'-alt');
       assert(replacement.width===fixture.width && replacement.height===fixture.height &&
         replacement.filename!==fixture.filename &&
@@ -302,6 +305,68 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         first.selectedBytes===first.selectedPixels*4 && first.replies===0 &&
         first.terminatedJobs===0,
         '003W/2b-2g old native Worker truly in-flight',JSON.stringify(first));
+
+      // 003W/2b-2h: exercise the *real* PSD/PSB decoder through File Open
+      // while the original 1.97M native Worker is still running. A deliberately
+      // malformed Adobe signature/version must not change document or lease.
+      let failedImport=null;
+      if(failedImportDense){
+        async function openMalformed(){
+          const input=document.querySelector('#fileInput');
+          const suffix=window.__nearCapMeta.filename.toLowerCase().endsWith('.psb')?'.psb':'.psd';
+          const name='malformed-native-'+suffix.slice(1)+suffix;
+          const malformed=new File([Uint8Array.from([56,66,80,83,0,0,0,99,0,0,0,0])],
+            name,{type:'image/vnd.adobe.photoshop'});
+          const previousConfirm=window.confirm,previousAlert=window.alert;
+          let approvedPrompts=0,alerts=0;
+          try{
+            window.confirm=()=>{approvedPrompts++;return true;};
+            window.alert=()=>{alerts++;};
+            document.querySelector('.menu-button[data-menu="file"]').click();
+            const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+              x=>x.querySelector('span')?.textContent?.startsWith('Открыть изображение'));
+            if(!item||item.disabled)return {clicked:false,name,approvedPrompts,alerts};
+            item.click();
+            const transfer=new DataTransfer();transfer.items.add(malformed);
+            input.files=transfer.files;
+            input.dispatchEvent(new Event('change',{bubbles:true}));
+            for(let attempt=0;attempt<150;attempt++){
+              if(document.querySelector('#statusText')?.textContent==='Ошибка импорта PSD/PSB')break;
+              await new Promise(resolve=>setTimeout(resolve,20));
+            }
+            return {clicked:true,name,bytes:malformed.size,approvedPrompts,alerts,
+              status:document.querySelector('#statusText')?.textContent||'',
+              worker:window.__nearCapWorkerObservation.summary(),
+              tabs:document.querySelectorAll('#docTabs .doc-tab').length};
+          }finally{window.confirm=previousConfirm;window.alert=previousAlert;}
+        }
+        const malformed=await evaluate(client,'('+openMalformed.toString()+')()');
+        const afterMalformed=await evaluate(client,snapshot);
+        const afterMalformedUi=await evaluate(client,'('+ui.toString()+')()');
+        const untouched=afterMalformed.baselineEqual && afterMalformed.bits===baseline.bits &&
+          afterMalformed.rawBytes===baseline.rawBytes &&
+          JSON.stringify(afterMalformedUi.pixel)===JSON.stringify(originalPreview.pixel) &&
+          JSON.stringify(afterMalformedUi.history)===JSON.stringify(originalPreview.history);
+        assert(malformed.clicked&&malformed.bytes===12&&malformed.approvedPrompts===1&&
+          malformed.status==='Ошибка импорта PSD/PSB' && malformed.tabs===1 &&
+          malformed.worker.jobs===1&&malformed.worker.replies===0&&
+          malformed.worker.terminatedJobs===0 && untouched,
+          '003W/2b-2h corrupt high-depth File Open must fail without revoking native Worker',
+          JSON.stringify({malformed,afterMalformed,afterMalformedUi,untouched}));
+        failedImport={
+          malformedFilename:malformed.name,malformedBytes:malformed.bytes,
+          approvedPrompts:malformed.approvedPrompts,
+          decodeFailed:malformed.status==='Ошибка импорта PSD/PSB',
+          oldWorkerRetained:malformed.worker.terminatedJobs===0 &&
+            malformed.worker.replies===0&&malformed.worker.jobs===1,
+          nativeExact:afterMalformed.baselineEqual,
+          previewUnchanged:JSON.stringify(afterMalformedUi.pixel)===
+            JSON.stringify(originalPreview.pixel),
+          historyUnchanged:JSON.stringify(afterMalformedUi.history)===
+            JSON.stringify(originalPreview.history),
+          tabsAfterFailure:malformed.tabs,
+        };
+      }
 
       // The two File -> Open actions run synchronously in the page. A denied
       // confirmation must never start decoding or revoke the old Worker.
@@ -480,6 +545,19 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         limitations:BROWSER_DENSE_IMPORT_LIMITATIONS,
       };
       validateBrowserDenseImportEvidence(evidence);
+      if(failedImportDense){
+        const recovery={
+          kind:'zpe-browser-dense-psd-import-failure-recovery-v1',
+          format,protocol:'file:',sourcePixels:fixture.width*fixture.height,
+          ...failedImport,validImportAndRetry:evidence,
+        };
+        validateBrowserDenseFailedImportEvidence(recovery);
+        const saved=await saveBrowserDenseFailedImportEvidence(recovery,
+          process.env.ZPE_BROWSER_DENSE_FAILED_IMPORT_ARTIFACT_DIR);
+        console.log('003W/2b-2h failed PSD/PSB import, retained original lease and native retry:',
+          JSON.stringify({saved,recovery}));
+        return recovery;
+      }
       const saved=await saveBrowserDenseImportEvidence(evidence,
         process.env.ZPE_BROWSER_DENSE_IMPORT_ARTIFACT_DIR);
       console.log('003W/2b-2g real File Open PSD/PSB in-flight native replacement:',JSON.stringify({saved,evidence}));
