@@ -446,7 +446,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
             ()=>evaluate(client,'document.querySelector("#statusText")?.textContent?.startsWith('+
               JSON.stringify('PSD/PSB импортирован:')+') && '+
               'document.querySelector("#docTabs .doc-tab .doc-tab-title")?.textContent?.includes('+
-              JSON.stringify(replacement.filename.replace(/\\.ps[db]$/i,''))+')'),90_000);
+              JSON.stringify(replacement.filename.replace(/\.ps[db]$/i,''))+')'),90_000);
           await evaluate(client,'window.__nearCapMeta=window.__nearCapReplacementMeta;'+
             'window.__nearCapBaseline=null;window.__nearCapBaselineSource=null;'+
             'window.__nearCapSuccess=null;true');
