@@ -38,7 +38,7 @@ test('003W/2b-2a: fail closed on forged near-cap, Worker, memory or native claim
     e=>{e.overCapPreviewUnchanged=false;},
     e=>{e.overCapHistoryUnchanged=false;},
     e=>{e.sampledPulseIntervalsMs=[Number.NaN];},
-    e=>{e.pulsesTruncated=true;},
+    e=>{e.pulsesTruncated='yes';},
     e=>{e.menuToRefusalMs=-1;},
     e=>{e.workerPidMapping='verified';},
     e=>{e.operationPeakKnown=true;},
