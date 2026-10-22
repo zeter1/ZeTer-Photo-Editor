@@ -378,6 +378,9 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         });
         await waitFor('003W/2b-2h explicit original Worker cancellation',
           async()=> (await evaluate(client,workerExpr)).terminatedJobs===1,15_000);
+        await waitFor('003W/2b-2h cancelled native command releases Save Project',
+          ()=>evaluate(client,'document.querySelector("#statusText")?.textContent==='+
+            JSON.stringify('Контент-заливка отменена')),15_000);
         const afterCancelWorker=await evaluate(client,workerExpr);
         const afterMalformed=await evaluate(client,snapshot);
         const afterCancelUi=await evaluate(client,'('+ui.toString()+')()');
