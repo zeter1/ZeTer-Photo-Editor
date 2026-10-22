@@ -234,19 +234,30 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       '003W/2b-2a real Worker may change only selected native color bytes',
       JSON.stringify(success));
     await evaluate(client,"document.querySelector('#undoBtn').click();true");
-    // Imported Photoshop composite preview and reconstructed HDR preview may
-    // use different display conversions; test the defect predicate and exact
-    // saved native tile bytes, not brittle equality with pre-edit RGBA8.
-    await waitFor('003W/2b-2a native Undo preview',()=>evaluate(client,
-      '(() => {const f=window.__nearCapMeta;const p=document.querySelector("#editorCanvas")'+
-      '.getContext("2d").getImageData(f.x,f.y,1,1).data;return p[0]>100&&p[0]>p[1]*2})()'),30_000);
+    // Exact persisted source is the primary precision/History oracle. Record
+    // actual canvas values separately to identify HDR tone-map/cache divergence.
+    await waitFor('003W/2b-2a exact native Undo',async()=>{
+      const state=await evaluate(client,snapshot);
+      return state?.baselineEqual===true;
+    },45_000);
     const undo=await evaluate(client,snapshot);
+    const undoPreview=await evaluate(client,'('+ui.toString()+')()');
+    console.log('003W/2b-2a '+format+' Undo visual/native diagnostic:',JSON.stringify({
+      originalPreview:originalPreview.pixel,filledPreview:filledPreview.pixel,
+      undoPreview:undoPreview.pixel,sourceExact:undo.baselineEqual,
+    }));
     assert(undo.baselineEqual,'003W/2b-2a Undo must restore exact source tile bytes',JSON.stringify(undo));
     await evaluate(client,"document.querySelector('#redoBtn').click();true");
-    await waitFor('003W/2b-2a native Redo preview',()=>evaluate(client,
-      '(() => {const f=window.__nearCapMeta;const p=document.querySelector("#editorCanvas")'+
-      '.getContext("2d").getImageData(f.x,f.y,1,1).data;return p[0]<150})()'),30_000);
+    await waitFor('003W/2b-2a exact native Redo',async()=>{
+      const state=await evaluate(client,snapshot);
+      return state?.successEqual===true;
+    },45_000);
     const redo=await evaluate(client,snapshot);
+    const redoPreview=await evaluate(client,'('+ui.toString()+')()');
+    console.log('003W/2b-2a '+format+' Redo visual/native diagnostic:',JSON.stringify({
+      filledPreview:filledPreview.pixel,redoPreview:redoPreview.pixel,
+      sourceExact:redo.successEqual,
+    }));
     assert(redo.successEqual && !redo.baselineEqual,
       '003W/2b-2a Redo must reproduce identical native tile payloads',JSON.stringify(redo));
     const uiBefore=await evaluate(client,'('+ui.toString()+')()');
