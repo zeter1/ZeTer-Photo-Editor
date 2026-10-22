@@ -9,6 +9,10 @@ import {
   saveBrowserDenseCancelEvidence, validateBrowserDenseCancelEvidence,
   BROWSER_DENSE_CANCEL_LIMITATIONS,
 } from './browser-dense-cancel-evidence.mjs';
+import {
+  saveBrowserDenseOwnerEvidence, validateBrowserDenseOwnerEvidence,
+  BROWSER_DENSE_OWNER_LIMITATIONS,
+} from './browser-dense-owner-evidence.mjs';
 
 // 003W/2b-2a: actual Chromium file:// PSD16/PSB32 import, UI marquee,
 // production Blob Worker + History, and >2M refusal. The successful selection
@@ -381,10 +385,11 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       assert(originalFinal.baselineEqual && uiExact(originalFinalUi,originalPreview) &&
         allWorkers.jobs===2 && allWorkers.replies===1 && allWorkers.terminatedJobs===1,
         '003W/2b-2d no old reply or cross-tab mutation even after successor Redo');
-      const evidence={format,protocol:'file:',tabs:2,sourcePixels:fixture.width*fixture.height,
+      const evidence={kind:'zpe-browser-dense-owner-switch-v1',format,protocol:'file:',
+        tabs:2,sourcePixels:fixture.width*fixture.height,
         selectedPixels:inFlight.selectedPixels,selectedBytes:inFlight.selectedBytes,
         workerJobs:finished.jobs,repliesBeforeSwitch:inFlight.replies,
-        terminatedOnSwitch:switched.terminatedJobs,finalReplies:finished.replies,
+        terminatedOnSwitch:switched.terminatedJobs,repliesAfterSettling:finished.replies,
         originalNativeExact:originalSettled.baselineEqual,
         originalUiExact:uiExact(originalAfterUi,originalPreview),
         survivorNativeExact:survivorSettled.baselineEqual,
@@ -403,8 +408,12 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         retryCompletionMs:retryTimer.elapsedMs,retryPulseIntervalsMs:retryTimer.pulseIntervalsMs,
         finalWorkerJobs:allWorkers.jobs,finalWorkerReplies:allWorkers.replies,
         finalWorkerTerminations:allWorkers.terminatedJobs,
-        limitations:'Genuine two-tab dense Worker switch and retry; bounded browser timer/heap only, no isolated CPU, operation RSS peak, Worker PID or Photoshop-authored fixture.'};
-      console.log('003W/2b-2d genuine cross-document Worker switch:',JSON.stringify(evidence));
+        limitations:BROWSER_DENSE_OWNER_LIMITATIONS};
+      validateBrowserDenseOwnerEvidence(evidence);
+      const saved=await saveBrowserDenseOwnerEvidence(evidence,
+        process.env.ZPE_BROWSER_DENSE_OWNER_ARTIFACT_DIR);
+      console.log('003W/2b-2d genuine cross-document Worker switch:',
+        JSON.stringify({saved,evidence}));
       return evidence;
     }
     // 003W/2b-2c: real near-cap Blob Worker after dispatch, real Escape,
