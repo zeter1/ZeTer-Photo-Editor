@@ -6,8 +6,10 @@ import path from 'node:path';
 const KEYS=[
   'kind','format','protocol','sourcePixels','marqueeBoundingPixels',
   'selectedPixels','selectedBytes','deniedPrompts','approvedPrompts',
-  'denialRetainedOwner','preDecodeRetainedWorker','originalName',
+  'denialRetainedOwner','deniedPreviewUnchanged','deniedHistoryUnchanged',
+  'preDecodeRetainedWorker','originalName',
   'replacementName','importedNativeDifferent','importedHighDepth',
+  'importedPreviewDifferent',
   'importedNativeExact','importedHistoryClean','stableAfterSettle',
   'originalTerminations','oldReplies','oldRepliesAfterSettle',
   'retrySelectedPixels','retrySelectedBytes','changedSelectedPixels',
@@ -37,11 +39,14 @@ export function validateBrowserDenseImportEvidence(v){
     v.selectedPixels<1_900_000||v.selectedPixels>2_000_000||
     v.selectedBytes!==v.selectedPixels*4||
     v.deniedPrompts!==1||v.approvedPrompts!==1||
-    v.denialRetainedOwner!==true||v.preDecodeRetainedWorker!==true||
+    v.denialRetainedOwner!==true||
+    v.deniedPreviewUnchanged!==true||v.deniedHistoryUnchanged!==true||
+    v.preDecodeRetainedWorker!==true||
     typeof v.originalName!=='string'||!v.originalName.endsWith(nativeExt)||
     typeof v.replacementName!=='string'||!v.replacementName.endsWith(nativeExt)||
     v.originalName===v.replacementName||
     ![v.importedNativeDifferent,v.importedHighDepth,v.importedNativeExact,
+      v.importedPreviewDifferent,
       v.importedHistoryClean,v.stableAfterSettle].every(x=>x===true)||
     v.originalTerminations!==1||v.oldReplies!==0||v.oldRepliesAfterSettle!==0||
     v.retrySelectedPixels!==v.selectedPixels||
