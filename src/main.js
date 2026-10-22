@@ -902,6 +902,10 @@ const psdImportController = createPsdImportController({
     getChangeSerial: () => documentChangeSerial,
     canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
+    canCancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
+    cancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
     publishDocument: (next,{label}) => {
       history=new HistoryStack(80);
       setDoc(next,{resetHistory:true,label});

@@ -33,8 +33,16 @@ export function createPsdImportController({
 } = {}) {
   let openGeneration=0;
 
+  // A running Content-Aware Fill has an explicit revocable persistence lease.
+  // Unlike other raster operations it may be replaced, but only after the
+  // user authorizes the import and every decode/preview step succeeds.
+  function blockUncancellableEdit() {
+    return runtime.canCancelPendingContentAwareFill?.() ? false
+      : runtime.blockPendingDocumentEdit();
+  }
+
   async function open(file){
-    if(runtime.blockPendingDocumentEdit())return;
+    if(blockUncancellableEdit())return;
     if(!runtime.canReplaceDocument())return;
     if(Number(file?.size)>512*1024*1024){
       const message='PSD/PSB больше 512 МБ пока не импортируется: tiled high-depth source уже снижает retained preview memory, но текущий PSD/PSB decoder всё ещё materializes bounded channel planes';
@@ -284,7 +292,7 @@ export function createPsdImportController({
         ui.toast('Повторите импорт PSD/PSB в нужной вкладке','warn');
         return;
       }
-      if(runtime.blockPendingDocumentEdit())return;
+      if(blockUncancellableEdit())return;
       const next=createDocument({
         name:(file.name||'PSD').replace(/\.ps[db]$/i,''),
         width:parsed.width,height:parsed.height,background:'transparent'
@@ -310,6 +318,13 @@ export function createPsdImportController({
       }:(parsed.iccUntagged?{kind:'untagged',untagged:true}:null);
       if(parsed.iccProfile)parsed.iccProfile.bytes=null;
       next.selectedLayerId=prepared.at(-1)?.id??null;
+      // Do not revoke the original Worker's lease during file read, decode,
+      // previews or failed/stale imports. Every potentially throwing prepare
+      // step has completed; cancellation and replacement now share a single
+      // synchronous publication boundary.
+      if(runtime.canCancelPendingContentAwareFill?.() &&
+        !runtime.cancelPendingContentAwareFill?.())return;
+      if(runtime.blockPendingDocumentEdit())return;
       runtime.publishDocument(next,{label:'Импорт PSD/PSB'});
       ui.setStatus(`PSD/PSB импортирован: ${prepared.length} слоёв, групп: ${importedGroups.length}, paths: ${next.paths.length}. Сохраните проект как .zpe`);
       ui.toast(`PSD/PSB открыт: ${prepared.length} слоёв, групп: ${importedGroups.length}, paths: ${next.paths.length}`,'success');
