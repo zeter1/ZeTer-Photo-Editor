@@ -522,7 +522,8 @@ async function runSmoke() {
         process.env.ZPE_DENSE_CLOSE_BROWSER_ONLY === '1' ||
         process.env.ZPE_DENSE_REPLACE_BROWSER_ONLY === '1' ||
          process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1' ||
-        process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1') {
+        process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_NATURAL_FAILED_IMPORT_BROWSER_ONLY === '1') {
       const fixtureKey=process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSD16'
         ?'rgb16nearcap'
         :process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSB32'
@@ -536,14 +537,16 @@ async function runSmoke() {
         closeDense:process.env.ZPE_DENSE_CLOSE_BROWSER_ONLY === '1',
         replaceDense:process.env.ZPE_DENSE_REPLACE_BROWSER_ONLY === '1',
          importDense:process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1',
-        failedImportDense:process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1'});
-      if(process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1'){
+        failedImportDense:process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1',
+        naturalFailedImportDense:process.env.ZPE_DENSE_NATURAL_FAILED_IMPORT_BROWSER_ONLY === '1'});
+      if(process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1' ||
+         process.env.ZPE_DENSE_NATURAL_FAILED_IMPORT_BROWSER_ONLY === '1'){
         // A malformed file is expected to produce exactly one production
         // import-failure diagnostic. Any additional console errors still fail CI.
         assert(nearCapResult?.decodeFailed===true,
-          '003W/2b-2h must demonstrate a real PSD/PSB decode failure');
+          '003W/2b-2h/2i must demonstrate a real PSD/PSB decode failure');
         const expected=errors.filter(error=>error.startsWith('console.error: PSD/PSB import failed'));
-        assert(expected.length===1,'003W/2b-2h exactly one expected import error',JSON.stringify(errors));
+        assert(expected.length===1,'003W/2b-2h/2i exactly one expected import error',JSON.stringify(errors));
         errors.splice(errors.indexOf(expected[0]),1);
       }
       assertNoBrowserErrors(errors,stderrState);

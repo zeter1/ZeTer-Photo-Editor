@@ -28,11 +28,16 @@ import {
 import {
   saveBrowserDenseFailedImportEvidence, validateBrowserDenseFailedImportEvidence,
 } from './browser-dense-failed-import-evidence.mjs';
+import {
+  saveBrowserDenseNaturalFailedImportEvidence,
+  validateBrowserDenseNaturalFailedImportEvidence,
+  BROWSER_DENSE_NATURAL_FAILED_IMPORT_LIMITATIONS,
+} from './browser-dense-natural-failed-import-evidence.mjs';
 
 // 003W/2b-2a: actual Chromium file:// PSD16/PSB32 import, UI marquee,
 // production Blob Worker + History, and >2M refusal. The successful selection
 // is intentionally small in legacy mode. Dense mode independently checks real near-2M Worker completion.
-export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false,cancelDense=false,switchDense=false,closeDense=false,replaceDense=false,importDense=false,failedImportDense=false}={}) {
+export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false,cancelDense=false,switchDense=false,closeDense=false,replaceDense=false,importDense=false,failedImportDense=false,naturalFailedImportDense=false}={}) {
   const fixture=createBrowserHighDepthFixture(fixtureKey);
   const format=fixture.version===1?'PSD16':'PSB32';
   assert(fixture.width===1450 && fixture.height===1400 &&
@@ -44,7 +49,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
   await evaluate(client,'window.__nearCapParts=[];window.__nearCapMeta='+
     JSON.stringify({filename:fixture.filename,width:fixture.width,height:fixture.height,
       x:fixture.defectX,y:fixture.defectY,bits:fixture.bitsPerChannel})+';true');
-  if(switchDense||closeDense||replaceDense||importDense||failedImportDense)await evaluate(client,'window.__nearCapKeepFile=true;true');
+  if(switchDense||closeDense||replaceDense||importDense||failedImportDense||naturalFailedImportDense)await evaluate(client,'window.__nearCapKeepFile=true;true');
   const base64=Buffer.from(fixture.bytes).toString('base64');
   for(let offset=0;offset<base64.length;offset+=192*1024) {
     const part=base64.slice(offset,offset+192*1024);
@@ -262,7 +267,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
 
     // 003W/2b-2g: an actually different File -> Open native source replaces the
     // original while its dense production Blob Worker has already dispatched.
-    if(importDense||failedImportDense){
+    if(importDense||failedImportDense||naturalFailedImportDense){
       const replacement=createBrowserHighDepthFixture(fixtureKey+'-alt');
       assert(replacement.width===fixture.width && replacement.height===fixture.height &&
         replacement.filename!==fixture.filename &&
@@ -310,7 +315,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       // while the original 1.97M native Worker is still running. A deliberately
       // malformed Adobe signature/version must not change document or lease.
       let failedImport=null;
-      if(failedImportDense){
+      if(failedImportDense||naturalFailedImportDense){
         async function openMalformed(){
           const input=document.querySelector('#fileInput');
           const suffix=window.__nearCapMeta.filename.toLowerCase().endsWith('.psb')?'.psb':'.psd';
@@ -365,6 +370,213 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
           malformed.atFailure?.worker?.terminatedJobs===0 && previewUnchanged && historyUnchanged,
           '003W/2b-2h corrupt File Open must report real decoder failure with unchanged in-flight native owner',
           JSON.stringify({malformed,previewUnchanged,historyUnchanged}));
+        // 003W/2b-2i: intentionally let the *original* real Worker finish after
+        // a failed File Open. Validate its native and History publication before
+        // importing a different real high-depth source. No Escape/cancel.
+        if(naturalFailedImportDense){
+          const atFailure=malformed.atFailure.worker;
+          await waitFor('003W/2b-2i original Worker naturally publishes',
+            ()=>evaluate(client,'(() => {const w=window.__nearCapWorkerObservation.summary();'+
+              'return w.jobs===1&&w.replies===1&&'+
+              'document.querySelector("#statusText")?.textContent?.includes("tiled ")})()'),205_000);
+          const completed=await evaluate(client,workerExpr);
+          const firstTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+          assert(completed.jobs===1&&completed.replies===1&&
+            completed.selectedPixels===first.selectedPixels&&
+            completed.terminatedJobs<=1&&atFailure.terminatedJobs===0&&
+            atFailure.replies===0,
+            '003W/2b-2i natural completion not cancelled or redirected',
+            JSON.stringify({atFailure,completed}));
+          await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+          const originalSuccess=await evaluate(client,snapshot);
+          const originalSuccessUi=await evaluate(client,'('+ui.toString()+')()');
+          const fillRows=a=>a.filter(x=>x.includes('Контент-заливка')).length;
+          const originalHistoryOnce=fillRows(originalSuccessUi.history)===
+            fillRows(originalPreview.history)+1;
+          assert(originalSuccess.bits===fixture.bitsPerChannel&&
+            !originalSuccess.baselineEqual&&
+            originalSuccess.quality?.selectedPixels===first.selectedPixels&&
+            originalSuccess.quality.changedSelectedPixels>0&&
+            originalSuccess.quality.changedOutsideSelectionPixels===0&&
+            originalSuccess.alphaUnchanged===true&&originalHistoryOnce&&
+            await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length')===1,
+            '003W/2b-2i original Worker selected-only native/alpha and single History entry',
+            JSON.stringify({originalSuccess,originalSuccessUi}));
+          await evaluate(client,"document.querySelector('#undoBtn').click();true");
+          await waitFor('003W/2b-2i original native Undo',async()=>
+            (await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+          const originalUndo=await evaluate(client,snapshot);
+          await evaluate(client,"document.querySelector('#redoBtn').click();true");
+          await waitFor('003W/2b-2i original native Redo',async()=>
+            (await evaluate(client,snapshot))?.successEqual===true,90_000);
+          const originalRedo=await evaluate(client,snapshot);
+          assert(originalUndo.baselineEqual&&originalRedo.successEqual,
+            '003W/2b-2i natural original Worker exact native Undo/Redo');
+          const previousTile=await evaluate(client,
+            'window.__nearCapBaselineSource.tiles[0].dataUrl');
+
+          // Public File menu and actual #fileInput change, not a fake decoder
+          // callback. Unlike 2g, no Worker should remain in flight here.
+          async function openAfterCompletion(){
+            const input=document.querySelector('#fileInput');
+            const originalConfirm=window.confirm;
+            let approvedPrompts=0;
+            try{
+              window.confirm=()=>{approvedPrompts++;return true;};
+              document.querySelector('.menu-button[data-menu="file"]').click();
+              const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+                x=>x.querySelector('span')?.textContent?.startsWith('Открыть изображение'));
+              if(!item||item.disabled)return {clicked:false,approvedPrompts};
+              item.click();
+              const transfer=new DataTransfer();
+              transfer.items.add(window.__nearCapReplacementFile);
+              input.files=transfer.files;
+              input.dispatchEvent(new Event('change',{bubbles:true}));
+              await new Promise(resolve=>setTimeout(resolve,25));
+              return {clicked:true,approvedPrompts,
+                worker:window.__nearCapWorkerObservation.summary()};
+            }finally{window.confirm=originalConfirm;}
+          }
+          const validOpen=await evaluate(client,'('+openAfterCompletion.toString()+')()');
+          assert(validOpen.clicked&&validOpen.approvedPrompts===1&&
+            validOpen.worker.jobs===1&&validOpen.worker.replies===1,
+            '003W/2b-2i valid import begins only after original natural completion',
+            JSON.stringify(validOpen));
+          await waitFor('003W/2b-2i distinct valid PSD/PSB File Open',
+            ()=>evaluate(client,'document.querySelector("#statusText")?.textContent?.startsWith('+
+              JSON.stringify('PSD/PSB импортирован:')+') && '+
+              'document.querySelector("#docTabs .doc-tab .doc-tab-title")?.textContent?.includes('+
+              JSON.stringify(replacement.filename.replace(/\.ps[db]$/i,''))+')'),90_000);
+          await evaluate(client,'window.__nearCapMeta=window.__nearCapReplacementMeta;'+
+            'window.__nearCapBaseline=null;window.__nearCapBaselineSource=null;'+
+            'window.__nearCapSuccess=null;true');
+          const imported=await evaluate(client,snapshot);
+          const importedUi=await evaluate(client,'('+ui.toString()+')()');
+          const importedTile=await evaluate(client,
+            'window.__nearCapBaselineSource.tiles[0].dataUrl');
+          const expectedFirstPixel=Array.from(new Uint8Array(
+            new (fixture.bitsPerChannel===16?Uint16Array:Float32Array)(replacement.normal).buffer));
+          const importedFirstPixel=await evaluate(client,
+            '(() => {const tile=window.__nearCapBaselineSource.tiles[0];'+
+            'const bytes=Uint8Array.from(atob(tile.dataUrl.split(",")[1]),c=>c.charCodeAt(0));'+
+            'return Array.from(bytes.slice(0,'+expectedFirstPixel.length+'))})()');
+          const nativeSampleExpected=
+            JSON.stringify(importedFirstPixel)===JSON.stringify(expectedFirstPixel);
+          const importedPreviewDifferent=
+            JSON.stringify(importedUi.pixel)!==JSON.stringify(originalSuccessUi.pixel);
+          const importedHistoryClean=fillRows(importedUi.history)===0;
+          assert(imported.baselineEqual&&imported.bits===fixture.bitsPerChannel&&
+            imported.rawBytes===baseline.rawBytes&&
+            importedTile!==previousTile&&nativeSampleExpected&&
+            importedPreviewDifferent&&importedHistoryClean&&
+            await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length')===1,
+            '003W/2b-2i distinct valid native source, clean history and no ghost tab',
+            JSON.stringify({imported,importedUi,nativeSampleExpected}));
+          await new Promise(resolve=>setTimeout(resolve,1_250));
+          const stableNative=await evaluate(client,snapshot);
+          const stableUi=await evaluate(client,'('+ui.toString()+')()');
+          const stableWorker=await evaluate(client,workerExpr);
+          const stableAfterImport=stableNative.baselineEqual&&
+            JSON.stringify(stableUi.pixel)===JSON.stringify(importedUi.pixel)&&
+            JSON.stringify(stableUi.history)===JSON.stringify(importedUi.history)&&
+            stableWorker.jobs===1&&stableWorker.replies===1;
+          assert(stableAfterImport,
+            '003W/2b-2i old Worker cannot mutate new owner after valid File Open');
+          const retryView=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+          assert(retryView.hit==='overlayCanvas'&&retryView.within&&
+            retryView.boundingPixels===view.boundingPixels,
+            '003W/2b-2i fresh owner genuine dense marquee');
+          await draw(retryView);
+          await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+          assert(await evaluate(client,'('+runFill.toString()+')()'),
+            '003W/2b-2i second owner accepts real dense Content-Aware Fill');
+          await waitFor('003W/2b-2i new owner real Worker dispatched',
+            async()=> (await evaluate(client,workerExpr)).jobs===2,75_000);
+          const second=await evaluate(client,workerExpr);
+          assert(second.selectedPixels===first.selectedPixels&&
+            second.selectedBytes===first.selectedBytes,
+            '003W/2b-2i second Worker gets independent dense frozen indices');
+          await waitFor('003W/2b-2i new owner Worker completes',
+            ()=>evaluate(client,'(() => {const w=window.__nearCapWorkerObservation.summary();'+
+              'return w.jobs===2&&w.replies===2&&'+
+              'document.querySelector("#statusText")?.textContent?.includes("tiled ")})()'),205_000);
+          const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+          await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+          const retrySuccess=await evaluate(client,snapshot);
+          const retryUi=await evaluate(client,'('+ui.toString()+')()');
+          const retryHistoryOnce=fillRows(retryUi.history)===
+            fillRows(importedUi.history)+1;
+          assert(!retrySuccess.baselineEqual&&
+            retrySuccess.quality?.selectedPixels===second.selectedPixels&&
+            retrySuccess.quality.changedSelectedPixels>0&&
+            retrySuccess.quality.changedOutsideSelectionPixels===0&&
+            retrySuccess.alphaUnchanged===true&&retryHistoryOnce,
+            '003W/2b-2i second owner native selected-only/alpha/History',
+            JSON.stringify({retrySuccess,retryUi}));
+          await evaluate(client,"document.querySelector('#undoBtn').click();true");
+          await waitFor('003W/2b-2i second owner native Undo',async()=>
+            (await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+          const retryUndo=await evaluate(client,snapshot);
+          await evaluate(client,"document.querySelector('#redoBtn').click();true");
+          await waitFor('003W/2b-2i second owner native Redo',async()=>
+            (await evaluate(client,snapshot))?.successEqual===true,90_000);
+          const retryRedo=await evaluate(client,snapshot);
+          const finalWorker=await evaluate(client,workerExpr);
+          const finalTabs=await evaluate(client,
+            'document.querySelectorAll("#docTabs .doc-tab").length');
+          assert(finalWorker.jobs===2&&finalWorker.replies===2&&finalTabs===1,
+            '003W/2b-2i two genuine complete Workers, no ghost tab/owner');
+          const evidence={
+            kind:'zpe-browser-dense-failed-import-natural-completion-v1',
+            format,protocol:'file:',sourcePixels:fixture.width*fixture.height,
+            malformedFilename:malformed.name,malformedBytes:malformed.bytes,
+            approvedPrompts:malformed.approvedPrompts,
+            decodeFailed:malformed.alerts===1&&
+              malformed.errorMessage.startsWith('Не удалось импортировать PSD/PSB:'),
+            originalWorkerInFlightAtFailure:atFailure.jobs===1&&
+              atFailure.replies===0&&atFailure.terminatedJobs===0,
+            failedOpenPreviewUnchanged:previewUnchanged,
+            failedOpenHistoryUnchanged:historyUnchanged,
+            failedOpenTabs:malformed.atFailure.tabs,
+            selectedPixels:first.selectedPixels,selectedBytes:first.selectedBytes,
+            originalWorkerJobs:completed.jobs,
+            originalWorkerReplies:completed.replies,
+            originalWorkerTerminations:completed.terminatedJobs,
+            originalSelectedOnly:originalSuccess.quality.changedSelectedPixels>0&&
+              originalSuccess.quality.changedOutsideSelectionPixels===0,
+            originalAlphaUnchanged:originalSuccess.alphaUnchanged,
+            originalHistoryOnce,originalUndoExact:originalUndo.baselineEqual,
+            originalRedoExact:originalRedo.successEqual,
+            importApprovedPrompts:validOpen.approvedPrompts,
+            importedName:replacement.filename,
+            importedNativeDifferent:importedTile!==previousTile,
+            importedHighDepth:imported.bits===fixture.bitsPerChannel,
+            importedNativeExact:imported.baselineEqual&&nativeSampleExpected,
+            importedPreviewDifferent,importedHistoryClean,stableAfterImport,
+            retrySelectedPixels:second.selectedPixels,
+            retrySelectedOnly:retrySuccess.quality.changedSelectedPixels>0&&
+              retrySuccess.quality.changedOutsideSelectionPixels===0,
+            retryAlphaUnchanged:retrySuccess.alphaUnchanged,
+            retryHistoryOnce,retryUndoExact:retryUndo.baselineEqual,
+            retryRedoExact:retryRedo.successEqual,
+            finalTabs,finalWorkerJobs:finalWorker.jobs,
+            finalWorkerReplies:finalWorker.replies,
+            completionMs:firstTimer.elapsedMs,
+            retryCompletionMs:retryTimer.elapsedMs,
+            pulseIntervalsMs:firstTimer.pulseIntervalsMs,
+            heapBeforeBytes:firstTimer.heapBeforeBytes,
+            heapAfterBytes:retryTimer.heapAfterBytes,
+            workerPidMapping:'unknown',operationPeakKnown:false,
+            limitations:BROWSER_DENSE_NATURAL_FAILED_IMPORT_LIMITATIONS,
+          };
+          validateBrowserDenseNaturalFailedImportEvidence(evidence);
+          const saved=await saveBrowserDenseNaturalFailedImportEvidence(evidence,
+            process.env.ZPE_BROWSER_DENSE_NATURAL_FAILED_IMPORT_ARTIFACT_DIR);
+          console.log('003W/2b-2i malformed File Open, natural original Worker completion and distinct native retry:',
+            JSON.stringify({saved,evidence}));
+          return evidence;
+        }
+
         // The active Worker may lock Save Project. Explicitly cancel only AFTER
         // proving failed import retained it, then use the public Save Project
         // path for exact native-byte verification before any valid replacement.

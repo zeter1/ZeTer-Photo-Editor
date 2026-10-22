@@ -1,6 +1,6 @@
 # 003W/2b-2i — Real failed PSD/PSB File Open with original dense Worker completing normally
 
-**Priority:** P1. **Status:** TODO. **Parent:** 003W/Stage 003. **Dependency:** [003W/2b-2h](003w2b2h-failed-native-import-recovery.md) DONE; exact PR and main checks verified in [PR #317](https://github.com/zeter1/ZeTer-Photo-Editor/pull/317).
+**Priority:** P1. **Status:** IN PROGRESS. **Parent:** 003W/Stage 003. **Dependency:** [003W/2b-2h](003w2b2h-failed-native-import-recovery.md) DONE; exact PR and main checks verified in [PR #317](https://github.com/zeter1/ZeTer-Photo-Editor/pull/317).
 
 ## Goal
 
@@ -13,6 +13,14 @@ Test the *other* permitted failure-recovery branch after an actual malformed/uns
 3. Deliberately **do not send Escape or other cancellation**. The original Worker must naturally complete and persist only into its original owner, with selected-only color mutation, unchanged alpha/outside-selection native bytes, exactly one History entry, exact Undo/Redo and no ghost tab. A late import failure must not overwrite successful Worker publication or create a replacement.
 4. Retry a distinct valid high-depth PSD16/PSB32 File Open after the completion; verify new owner bytes/preview/History, then a real dense Worker retry on the new owner with byte-exact Undo/Redo. The old Worker must never publish into the new owner.
 5. Independent fail-closed dual-format receipts + validator-negative Node tests; observational timer/JS-heap limitations stated (no operation-only CPU/RSS peak, verified Worker→PID, or Photoshop provenance). Isolated CI; PR-head tests, genuine-photo checks, merge and exact-main verification before DONE. Keep file:// compatibility, bounded memory, 180-second stage limits.
+
+## 2026-10-22 — Working branch checkpoint (not yet accepted)
+
+- Branch: [test/003w2b2i-natural-failed-import-worker-20261022](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003w2b2i-natural-failed-import-worker-20261022).
+- Added independent genuine Chromium `file://` PSD16 and PSB32 modes: real malformed File Open during first ~1.97M selected native Worker, **no Escape**, natural old-owner completion, selected-only/alpha/History + exact Undo/Redo, distinct native File Open, fresh dense Worker with exact native Undo/Redo and no ghost tab.
+- Added strict dual-format JSON receipts and fail-closed Node negative tests; isolated CI job. Production runtime/bundle unchanged.
+- **Not DONE:** Node/Chromium runs and exact PR-head CI not yet observed. Last pre-existing `main` CI [#39822249513](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39822249513) failed to start Chromium DevTools in two unrelated jobs; other jobs, including `verify`, passed. Treat as infrastructure flake, not proof of regression or success. Inspect new PR results before merging.
+- Keep P0 independent Photoshop-authored PSB32 provenance and operation-exclusive CPU/RSS / exact Worker PID **unresolved**.
 
 ## Starting points
 
