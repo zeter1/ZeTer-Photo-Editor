@@ -198,6 +198,9 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       status:document.querySelector('#statusText')?.textContent||''};
   }
   try {
+    await waitFor('003W/2b-2a original defect preview',()=>evaluate(client,
+      '(() => {const f=window.__nearCapMeta;const p=document.querySelector("#editorCanvas")'+
+      '.getContext("2d").getImageData(f.x,f.y,1,1).data;return p[0]>100&&p[0]>p[1]*2})()'),30_000);
     const baseline=await evaluate(client,snapshot);
     const originalPreview=await evaluate(client,'('+ui.toString()+')()');
     assert(baseline.bits===fixture.bitsPerChannel &&
