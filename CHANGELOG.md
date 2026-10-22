@@ -1,3 +1,9 @@
+### 2026-10-22 — 003W/2b-2h принята: восстановление после ошибочного File Open PSD16/PSB32
+
+- [PR #317 слит](https://github.com/zeter1/ZeTer-Photo-Editor/pull/317) в [main 09a6639f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/09a6639fd1708d32dc4b65c201ccbc755a63aa69). [CI PR-head #39818707919 (attempt 2)](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39818707919), [PR real-photo #39818706912](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39818706912), [exact-main CI #39819777597](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39819777597), [exact-main real-photo #39819777848](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39819777848) — SUCCESS.
+- Обе независимые real `file://` PSD16/PSB32 проверки подтверждают отказ декодера во время плотного native Worker без преждевременной отмены, сохранность исходного документа и исправный повторный импорт и Fill с точным Undo/Redo; исправлен `alert`-контекст браузерного интерфейса.
+- Измерения operation-only CPU/RSS и Worker→PID не заявлены, независимое Photoshop-authored PSB32 происхождение не установлено. Следующая проходка [003W/2b-2i](task/003w2b2i-failed-import-worker-completion.md); весь Stage 003 остаётся OPEN.
+
 ### 2026-10-22 — Проверка восстановления после повреждённого PSD/PSB во время native Worker (003W/2b-2h)
 
 - Добавлен отдельный браузерный сценарий `file://`: повреждённый PSD16/PSB32 открывается через File → Open во время реальной плотной Content-Aware Fill, проверяется сохранение Worker и старого документа, затем явная отмена Escape и побайтовое сохранение старого native source.
