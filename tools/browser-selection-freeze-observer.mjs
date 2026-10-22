@@ -11,6 +11,7 @@ export function installBrowserSelectionFreezeObserver() {
   const LIMITATIONS='Menu-to-Worker handoff includes command overhead; timer pulses miss unsampled gaps. Renderer JS heap samples are not process RSS or an operation peak. Worker OS PID is unknown.';
   if (window.__stage003SelectionFreeze) throw new Error('003W observer already installed');
   const originalPost=Worker.prototype.postMessage;
+  const previousTiming=window.__zpeTiledInpaintTiming;
   const windows=[];
   let active=null;
   let previousPulse=performance.now();
@@ -30,6 +31,13 @@ export function installBrowserSelectionFreezeObserver() {
     if (active.pulseIntervalsMs.length<LIMIT) active.pulseIntervalsMs.push(elapsed);
     else active.pulsesTruncated=true;
   },PULSE_MS);
+  window.__zpeTiledInpaintTiming=function(event) {
+    if (active && active.phaseEvents.length<3 && event && typeof event==='object') {
+      active.phaseEvents.push({
+        phase:event.phase,atMs:event.atMs,selectedPixels:event.selectedPixels,
+      });
+    }
+  };
   Worker.prototype.postMessage=function(value,...rest) {
     if (value?.source?.kind==='zpe-pixel-buffer-source-v2' &&
         value?.selectedIndices instanceof Uint32Array && active) {
@@ -56,6 +64,7 @@ export function installBrowserSelectionFreezeObserver() {
         selectedPixels:null,selectedBytes:null,firstSelectedIndex:null,lastSelectedIndex:null,
         heapBeforeBytes:readHeap(),heapAtHandoffBytes:null,
         pulseIntervalsMs:[],pulsesTruncated:false,duplicateWorkerHandoffs:0,
+        phaseEvents:[],
       };
       windows.push(active);
     },
@@ -67,12 +76,30 @@ export function installBrowserSelectionFreezeObserver() {
         limitations:LIMITATIONS,
         workerPidMapping:'unknown',
         trueOperationPeakKnown:false,
-        windows:windows.map(value=>({
+        windows:windows.map(({phaseEvents,...value})=>({
           ...value,pulseIntervalsMs:[...value.pulseIntervalsMs],
         })),
       };
     },
+    phaseSnapshot() {
+      return {
+        kind:'zpe-browser-selection-phase-observations-v1',
+        observationClass:'opt-in-monotonic-boundaries',
+        limitations:LIMITATIONS,
+        workerPidMapping:'unknown',trueOperationPeakKnown:false,
+        requestedPulseIntervalMs:PULSE_MS,
+        windows:windows.map(value=>({
+          label:value.label,startedAtMs:value.startedAtMs,
+          handoffAtMs:value.handoffAtMs,selectedPixels:value.selectedPixels,
+          phaseEvents:value.phaseEvents.map(event=>({...event})),
+          pulseIntervalsMs:[...value.pulseIntervalsMs],
+          pulsesTruncated:value.pulsesTruncated,
+        })),
+      };
+    },
     restore() {
+      if (previousTiming===undefined) delete window.__zpeTiledInpaintTiming;
+      else window.__zpeTiledInpaintTiming=previousTiming;
       clearInterval(timer);
       Worker.prototype.postMessage=originalPost;
       delete window.__stage003SelectionFreeze;
@@ -174,4 +201,61 @@ export function validateBrowserBroadPreDispatchCancellation(evidence,{format,geo
       evidence.previewUnchanged!==true ||
       evidence.historyUnchanged!==true) throw invalid();
   return true;
+}
+
+/** 003W/3: fail-closed receipt gate; wall-time is NOT CPU time or RSS peak. */
+export function validateBrowserSelectionPhaseEvidence(value,{format,geometryPixels}={}) {
+  const invalid=()=>new TypeError('003W/3: invalid browser selection phase evidence');
+  const keys=['kind','observationClass','limitations','workerPidMapping','trueOperationPeakKnown','requestedPulseIntervalMs','windows'];
+  const rowKeys=['label','startedAtMs','handoffAtMs','selectedPixels','phaseEvents','pulseIntervalsMs','pulsesTruncated'];
+  const phaseKeys=['phase','atMs','selectedPixels'];
+  if(!['PSD16','PSB32'].includes(format)||!Number.isSafeInteger(geometryPixels)||geometryPixels<1900000||
+    !value||typeof value!=='object'||Array.isArray(value)||
+    Object.keys(value).length!==keys.length||Object.keys(value).some(k=>!keys.includes(k))||
+    value.kind!=='zpe-browser-selection-phase-observations-v1'||
+    value.observationClass!=='opt-in-monotonic-boundaries'||value.limitations!==LIMITATIONS||
+    value.workerPidMapping!=='unknown'||value.trueOperationPeakKnown!==false||
+    value.requestedPulseIntervalMs!==PULSE_MS||
+    !Array.isArray(value.windows)||value.windows.length<1||value.windows.length>12)throw invalid();
+  let last=-1;
+  for(const row of value.windows) {
+    if(!row||typeof row!=='object'||Array.isArray(row)||
+      Object.keys(row).length!==rowKeys.length||Object.keys(row).some(k=>!rowKeys.includes(k))||
+      !['first-fill','cancel-fill','retry-fill'].includes(row.label)||
+      !Number.isFinite(row.startedAtMs)||row.startedAtMs<last||
+      !Number.isFinite(row.handoffAtMs)||row.handoffAtMs<row.startedAtMs||
+      !Number.isSafeInteger(row.selectedPixels)||row.selectedPixels<1||
+      row.selectedPixels>Math.min(2000000,geometryPixels)||
+      !Array.isArray(row.phaseEvents)||row.phaseEvents.length!==3||
+      !Array.isArray(row.pulseIntervalsMs)||row.pulseIntervalsMs.length>LIMIT||
+      row.pulseIntervalsMs.some(ms=>!Number.isFinite(ms)||ms<0||ms>120000)||
+      row.pulsesTruncated!==false)throw invalid();
+    let at=row.startedAtMs;
+    for(const [i,name] of ['selection-start','selection-end','worker-run-start'].entries()){
+      const event=row.phaseEvents[i];
+      if(!event||typeof event!=='object'||Array.isArray(event)||
+        Object.keys(event).length!==phaseKeys.length||
+        Object.keys(event).some(k=>!phaseKeys.includes(k))||event.phase!==name||
+        !Number.isFinite(event.atMs)||event.atMs<at||event.atMs>row.handoffAtMs||
+        (i===0?event.selectedPixels!==null:event.selectedPixels!==row.selectedPixels))throw invalid();
+      at=event.atMs;
+    }
+    last=row.handoffAtMs;
+  }
+  return true;
+}
+export function summarizeBrowserSelectionPhaseEvidence(value,options) {
+  validateBrowserSelectionPhaseEvidence(value,options);
+  return value.windows.map(row=>{
+    const a=row.phaseEvents,delays=row.pulseIntervalsMs.map(ms=>Math.max(0,ms-PULSE_MS));
+    return {
+      label:row.label,selectedPixels:row.selectedPixels,
+      menuToScanMs:a[0].atMs-row.startedAtMs,scanWallMs:a[1].atMs-a[0].atMs,
+      scanToWorkerRunMs:a[2].atMs-a[1].atMs,
+      workerRunToPostMs:row.handoffAtMs-a[2].atMs,
+      observedPulseCount:delays.length,maxObservedTimerDelayMs:delays.length?Math.max(...delays):null,
+      sampleGap:delays.length?'timer-sampled':'no-pulse-observed',
+      operationPeakKnown:false,workerPidMapping:'unknown',
+    };
+  });
 }

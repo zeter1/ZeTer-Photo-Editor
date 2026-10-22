@@ -5,6 +5,8 @@ import {
   validateBrowserBroadPreDispatchCancellation,
   summarizeBrowserSelectionFreezeEvidence,
   installBrowserSelectionFreezeObserver,
+  validateBrowserSelectionPhaseEvidence,
+  summarizeBrowserSelectionPhaseEvidence,
 } from '../tools/browser-selection-freeze-observer.mjs';
 
 const labels=['first-fill','cancel-fill','retry-fill'];
@@ -122,4 +124,46 @@ test('003W/2a: genuine PSD16/PSB32 broad owner-cancel evidence cannot claim a di
   assert.throws(()=>validateBrowserBroadPreDispatchCancellation(valid,{
     format:'PSB32',geometryPixels:1025*1025,
   }),/invalid broad pre-Worker cancellation evidence/);
+});
+
+const phaseReceipt=()=>({
+  kind:'zpe-browser-selection-phase-observations-v1',
+  observationClass:'opt-in-monotonic-boundaries',
+  limitations:receipt().limitations,workerPidMapping:'unknown',
+  trueOperationPeakKnown:false,requestedPulseIntervalMs:8,
+  windows:[{label:'first-fill',startedAtMs:10,handoffAtMs:31,
+    selectedPixels:1973400,phaseEvents:[
+      {phase:'selection-start',atMs:12,selectedPixels:null},
+      {phase:'selection-end',atMs:25,selectedPixels:1973400},
+      {phase:'worker-run-start',atMs:27,selectedPixels:1973400}],
+    pulseIntervalsMs:[8,19,12],pulsesTruncated:false}],
+});
+test('003W/3: monotonic native scan is separable from command and Worker handoff',()=>{
+  for(const format of ['PSD16','PSB32']) {
+    const value=phaseReceipt();
+    assert.equal(validateBrowserSelectionPhaseEvidence(value,{format,geometryPixels:2030000}),true);
+    const row=summarizeBrowserSelectionPhaseEvidence(value,{format,geometryPixels:2030000})[0];
+    assert.equal(row.scanWallMs,13);assert.equal(row.menuToScanMs,2);
+    assert.equal(row.scanToWorkerRunMs,2);assert.equal(row.workerRunToPostMs,4);
+    assert.equal(row.maxObservedTimerDelayMs,11);
+  }
+});
+test('003W/3: phase receipt rejects counterfeit counts, chronology, RSS and gaps',()=>{
+  for(const mutate of [
+    r=>r.windows[0].selectedPixels=576,
+    r=>r.windows[0].phaseEvents.pop(),
+    r=>r.windows[0].phaseEvents[1].atMs=11,
+    r=>r.windows[0].phaseEvents[2].atMs=32,
+    r=>r.windows[0].phaseEvents[1].selectedPixels=2000001,
+    r=>r.windows[0].phaseEvents[0].selectedPixels=0,
+    r=>r.windows[0].phaseEvents[2].phase='fake',
+    r=>r.windows[0].pulseIntervalsMs=[-1],
+    r=>r.windows[0].pulseIntervalsMs=Array(257).fill(8),
+    r=>r.windows[0].pulsesTruncated=true,
+    r=>r.operationPeakRssBytes=1000,
+    r=>r.workerPidMapping='verified',
+    r=>r.trueOperationPeakKnown=true,
+  ]){const value=phaseReceipt();mutate(value);
+    assert.throws(()=>validateBrowserSelectionPhaseEvidence(value,{format:'PSD16',geometryPixels:2030000}),/invalid browser selection phase evidence/);
+  }
 });
