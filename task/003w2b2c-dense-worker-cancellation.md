@@ -1,6 +1,6 @@
 # 003W/2b-2c — Genuine dense in-flight Worker cancellation and native retry
 
-**Priority:** P1. **Status:** IN PROGRESS (2026-10-22; implementation committed, real Chromium / PR / exact-main acceptance pending).
+**Priority:** P1. **Status:** DONE (2026-10-22; PR and exact main CI verified).
 **Parent:** [003W real browser responsiveness](003w-browser-selection-freeze-responsiveness.md) / Stage 6.
 **Dependencies:** [003W/2b-2b](003w2b2b-dense-worker-success.md) DONE, [003W/2b-2a](003w2b2a-browser-near-cap-ui.md) DONE.
 
@@ -42,3 +42,15 @@ Prove bounded, safe *in-flight* cancellation while a genuine production Chromium
 **Risks:** Worker may finish before the CDP Escape on some runners, exposing a genuine timing race that must be fixed with evidence rather than accepting an already completed run. Sampling captures discrete renderer pulses and heap observations, not continuous responsiveness, CPU/RSS peaks or proven Worker→OS PID.
 
 **Next action:** open PR, inspect exact PR-head CI. Fix failures on current branch; if both native formats and normal checks pass, merge by standard process, verify exact merged-code main and update this task and `task/NEXT.md` to DONE/next. Keep 003W, 003T and overall Stage 003 OPEN. Independently Photoshop-authored PSB32 provenance [002B/2c](002b2c-photoshop-psb32-provenance.md) remains BLOCKED.
+
+## 2026-10-22 — acceptance, DONE (bounded task only)
+
+**Priority P1; dependencies:** 003W/2b-2b and 003W/2b-2a DONE. **PR:** [#310](https://github.com/zeter1/ZeTer-Photo-Editor/pull/310) merged as exact [main c1487129](https://github.com/zeter1/ZeTer-Photo-Editor/commit/c14871290516459ff2dad02824877f3f7bee3563). PR-head SHA f8b64fd61537cda7dbe507d4fe04038d3596d2f2.
+
+**Tests:** final PR-head [CI #39756483095 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39756483095), [real-photo #39756483092 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39756483092); exact merged-code [main CI #39757415597 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39757415597) and [main real-photo #39757415565 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39757415565). npm run check, generated bundle parity, unit/negative receipts, regular Chromium file:// smoke and independent PSD16/PSB32 dense/near-cap/cancel jobs passed. These are CI measurements, not local execution.
+
+**Genuine production browser evidence:** each fresh Chromium file:// native ZeTer-generated 1450x1400 PSD16 and PSB32 UI selected 1,973,400 actual Uint32 indices (7,893,600 bytes), dispatched a genuine Blob Worker and sent real CDP Escape after dispatch before reply. The first Worker was terminated; PR-head observed dispatch→termination PSD16 44.8 ms, PSB32 74.2 ms, with no cancelled reply. Exact saved native tile bytes, original alpha, preview and History remained intact immediately and after 1,250 ms. User selection was replaced dense→sparse→fresh dense; no stale job. Subsequent genuine Worker Fill changed only selected colors, preserved alpha and outside bytes; PSD16 changed 1,006,908 selected pixels, PSB32 25. Exactly one History commit and exact native Undo/Redo succeeded. Measured retry menu→completion PSD16 4,556.8 ms, PSB32 4,300.4 ms including UI overhead.
+
+**Changed files:** tools/browser-near-cap-ui-smoke.mjs, tools/browser-smoke.mjs, tools/browser-dense-cancel-evidence.mjs, tools/verify-browser-dense-cancel-evidence.mjs, tests/browser-dense-cancel-evidence.test.mjs, .github/workflows/ci.yml, task/NEXT.md, task/README.md and this file. Production algorithm unchanged; suite verifies its real existing cancellation/ownership behavior.
+
+**Limitations and next:** bounded/truncated renderer timer and optional heap observations are not continuous responsiveness, operation-exclusive RSS/CPU peak or an identified Worker PID. Independently Photoshop-authored PSB32 provenance 002B/2c remains BLOCKED. Parent 003W/003T/Stage 003 remains IN PROGRESS. **Next P1:** [003W/2b-2d](003w2b2d-dense-owner-switch.md) real 1.9M–2M Worker cross-document/tab ownership isolation.
