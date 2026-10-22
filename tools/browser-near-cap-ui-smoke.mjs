@@ -341,18 +341,40 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
           }finally{window.confirm=previousConfirm;window.alert=previousAlert;}
         }
         const malformed=await evaluate(client,'('+openMalformed.toString()+')()');
-        const afterMalformed=await evaluate(client,snapshot);
         const afterMalformedUi=await evaluate(client,'('+ui.toString()+')()');
-        const untouched=afterMalformed.baselineEqual && afterMalformed.bits===baseline.bits &&
-          afterMalformed.rawBytes===baseline.rawBytes &&
-          JSON.stringify(afterMalformedUi.pixel)===JSON.stringify(originalPreview.pixel) &&
-          JSON.stringify(afterMalformedUi.history)===JSON.stringify(originalPreview.history);
+        const previewUnchanged=JSON.stringify(afterMalformedUi.pixel)===
+          JSON.stringify(originalPreview.pixel);
+        const historyUnchanged=JSON.stringify(afterMalformedUi.history)===
+          JSON.stringify(originalPreview.history);
         assert(malformed.clicked&&malformed.bytes===12&&malformed.approvedPrompts===1&&
           malformed.status==='Ошибка импорта PSD/PSB' && malformed.tabs===1 &&
           malformed.worker.jobs===1&&malformed.worker.replies===0&&
-          malformed.worker.terminatedJobs===0 && untouched,
+          malformed.worker.terminatedJobs===0 && previewUnchanged && historyUnchanged,
           '003W/2b-2h corrupt high-depth File Open must fail without revoking native Worker',
-          JSON.stringify({malformed,afterMalformed,afterMalformedUi,untouched}));
+          JSON.stringify({malformed,afterMalformedUi,previewUnchanged,historyUnchanged}));
+        // The active Worker may lock Save Project. Explicitly cancel only AFTER
+        // proving failed import retained it, then use the public Save Project
+        // path for exact native-byte verification before any valid replacement.
+        await client.send('Input.dispatchKeyEvent',{
+          type:'keyDown',key:'Escape',code:'Escape',
+          windowsVirtualKeyCode:27,nativeVirtualKeyCode:27,
+        });
+        await client.send('Input.dispatchKeyEvent',{
+          type:'keyUp',key:'Escape',code:'Escape',
+          windowsVirtualKeyCode:27,nativeVirtualKeyCode:27,
+        });
+        await waitFor('003W/2b-2h explicit original Worker cancellation',
+          async()=> (await evaluate(client,workerExpr)).terminatedJobs===1,15_000);
+        const afterCancelWorker=await evaluate(client,workerExpr);
+        const afterMalformed=await evaluate(client,snapshot);
+        const afterCancelUi=await evaluate(client,'('+ui.toString()+')()');
+        assert(afterCancelWorker.jobs===1&&afterCancelWorker.replies===0 &&
+          afterMalformed.baselineEqual&&afterMalformed.bits===baseline.bits &&
+          afterMalformed.rawBytes===baseline.rawBytes &&
+          JSON.stringify(afterCancelUi.pixel)===JSON.stringify(originalPreview.pixel) &&
+          JSON.stringify(afterCancelUi.history)===JSON.stringify(originalPreview.history),
+          '003W/2b-2h explicitly cancelled original retains exact native, preview and History',
+          JSON.stringify({afterCancelWorker,afterMalformed,afterCancelUi}));
         failedImport={
           malformedFilename:malformed.name,malformedBytes:malformed.bytes,
           approvedPrompts:malformed.approvedPrompts,
@@ -360,10 +382,8 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
           oldWorkerRetained:malformed.worker.terminatedJobs===0 &&
             malformed.worker.replies===0&&malformed.worker.jobs===1,
           nativeExact:afterMalformed.baselineEqual,
-          previewUnchanged:JSON.stringify(afterMalformedUi.pixel)===
-            JSON.stringify(originalPreview.pixel),
-          historyUnchanged:JSON.stringify(afterMalformedUi.history)===
-            JSON.stringify(originalPreview.history),
+          previewUnchanged,historyUnchanged,
+          explicitCancelNoReply:afterCancelWorker.terminatedJobs===1&&afterCancelWorker.replies===0,
           tabsAfterFailure:malformed.tabs,
         };
       }
@@ -416,8 +436,8 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         deniedPreviewUnchanged&&deniedHistoryUnchanged &&
         transaction.denied.width===fixture.width&&transaction.denied.tabs===1 &&
         transaction.denied.worker.jobs===1&&transaction.denied.worker.replies===0 &&
-        transaction.denied.worker.terminatedJobs===0 &&
-        transaction.approved.worker.terminatedJobs===0 &&
+        transaction.denied.worker.terminatedJobs===(failedImportDense?1:0) &&
+        transaction.approved.worker.terminatedJobs===(failedImportDense?1:0) &&
         transaction.approved.worker.replies===0,
         '003W/2b-2g dirty denial and authorized pre-decode must retain old Worker',
         JSON.stringify(transaction));
@@ -544,7 +564,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         workerPidMapping:'unknown',operationPeakKnown:false,
         limitations:BROWSER_DENSE_IMPORT_LIMITATIONS,
       };
-      validateBrowserDenseImportEvidence(evidence);
+      if(!failedImportDense)validateBrowserDenseImportEvidence(evidence);
       if(failedImportDense){
         const recovery={
           kind:'zpe-browser-dense-psd-import-failure-recovery-v1',
