@@ -324,6 +324,9 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
           denied={clicked:deniedClicked,worker:window.__nearCapWorkerObservation.summary(),
             width:document.querySelector('#editorCanvas').width,
             tabs:document.querySelectorAll('#docTabs .doc-tab').length,
+            pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(
+              window.__nearCapMeta.x,window.__nearCapMeta.y,1,1).data),
+            history:[...document.querySelectorAll('#historyList .history-row')].map(x=>x.textContent),
             status:document.querySelector('#statusText')?.textContent};
           window.confirm=()=>{approvedPrompts++;return true;};
           const approvedClicked=menu();
@@ -334,8 +337,13 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         return {deniedPrompts,approvedPrompts,denied,approved};
       }
       const transaction=await evaluate(client,'('+openReplacement.toString()+')()');
+      const deniedPreviewUnchanged=
+        JSON.stringify(transaction.denied.pixel)===JSON.stringify(originalPreview.pixel);
+      const deniedHistoryUnchanged=
+        JSON.stringify(transaction.denied.history)===JSON.stringify(originalPreview.history);
       assert(transaction.deniedPrompts===1&&transaction.approvedPrompts===1 &&
         transaction.denied.clicked&&transaction.approved.clicked &&
+        deniedPreviewUnchanged&&deniedHistoryUnchanged &&
         transaction.denied.width===fixture.width&&transaction.denied.tabs===1 &&
         transaction.denied.worker.jobs===1&&transaction.denied.worker.replies===0 &&
         transaction.denied.worker.terminatedJobs===0 &&
@@ -364,13 +372,25 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       const imported=await evaluate(client,snapshot);
       const importedUi=await evaluate(client,'('+ui.toString()+')()');
       const newTile=await evaluate(client,'window.__nearCapBaselineSource.tiles[0].dataUrl');
+      const expectedFirstPixel=Array.from(new Uint8Array(
+        new (fixture.bitsPerChannel===16?Uint16Array:Float32Array)(replacement.normal).buffer));
+      const importedFirstPixel=await evaluate(client,
+        '(() => {const tile=window.__nearCapBaselineSource.tiles[0];'+
+          'const bytes=Uint8Array.from(atob(tile.dataUrl.split(",")[1]),c=>c.charCodeAt(0));'+
+          'return Array.from(bytes.slice(0,'+expectedFirstPixel.length+'))})()');
+      const nativeSampleExpected=
+        JSON.stringify(importedFirstPixel)===JSON.stringify(expectedFirstPixel);
+      const previewDifferent=
+        JSON.stringify(importedUi.pixel)!==JSON.stringify(originalPreview.pixel);
       const clean=importedUi.history.every(x=>!x.includes('Контент-заливка'));
       assert(imported.baselineEqual&&imported.bits===fixture.bitsPerChannel &&
         imported.pixels===fixture.width*fixture.height &&
         imported.rawBytes===baseline.rawBytes && newTile!==previousTile &&
+        nativeSampleExpected&&previewDifferent&&
         clean && await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length')===1,
         '003W/2b-2g new named native source/bytes/preview/History',
-        JSON.stringify({imported,importedUi,clean,differentNativeTile:newTile!==previousTile}));
+        JSON.stringify({imported,importedUi,clean,differentNativeTile:newTile!==previousTile,
+          nativeSampleExpected,previewDifferent,importedFirstPixel,expectedFirstPixel}));
       await new Promise(resolve=>setTimeout(resolve,1_250));
       const settled=await evaluate(client,snapshot);
       const settledUi=await evaluate(client,'('+ui.toString()+')()');
@@ -429,10 +449,14 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         sourcePixels:fixture.width*fixture.height,marqueeBoundingPixels:view.boundingPixels,
         selectedPixels:first.selectedPixels,selectedBytes:first.selectedBytes,
         deniedPrompts:transaction.deniedPrompts,approvedPrompts:transaction.approvedPrompts,
-        denialRetainedOwner:true,preDecodeRetainedWorker:transaction.approved.worker.terminatedJobs===0,
+        denialRetainedOwner:transaction.denied.width===fixture.width &&
+          transaction.denied.tabs===1&&transaction.denied.worker.terminatedJobs===0,
+        deniedPreviewUnchanged,deniedHistoryUnchanged,
+        preDecodeRetainedWorker:transaction.approved.worker.terminatedJobs===0,
         originalName:fixture.filename,replacementName:replacement.filename,
         importedNativeDifferent:newTile!==previousTile,importedHighDepth:imported.bits===fixture.bitsPerChannel,
-        importedNativeExact:imported.baselineEqual,importedHistoryClean:clean,
+        importedNativeExact:imported.baselineEqual&&nativeSampleExpected,
+        importedPreviewDifferent:previewDifferent,importedHistoryClean:clean,
         stableAfterSettle:stable,originalTerminations:cancelled.terminatedJobs,
         oldReplies:cancelled.replies,oldRepliesAfterSettle:settledWorker.replies,
         retrySelectedPixels:second.selectedPixels,retrySelectedBytes:second.selectedBytes,
