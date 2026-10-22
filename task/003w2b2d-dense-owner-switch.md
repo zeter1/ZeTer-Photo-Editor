@@ -1,6 +1,6 @@
 # 003W/2b-2d — Real dense Worker cross-document ownership
 
-**Priority:** P1. **Status:** IN PROGRESS (2026-10-22; PR CI and browser evidence pending).
+**Priority:** P1. **Status:** DONE (2026-10-22; PR #311 merged, exact-main CI and real-photo SUCCESS).
 **Parent:** [003W browser responsiveness](003w-browser-selection-freeze-responsiveness.md) / Stage 6.
 **Dependencies:** [003W/2b-2c](003w2b2c-dense-worker-cancellation.md) DONE and genuine dense success [003W/2b-2b](003w2b2b-dense-worker-success.md) DONE. Prior smaller owner/session regressions 014–017 are already merged; do not repeat them.
 
@@ -30,3 +30,12 @@ Reuse tools/browser-near-cap-ui-smoke.mjs, existing real 014–017 tab-owner tes
 - Checks: **not yet verified**. Local clone and Node/browser test execution unavailable because the local runtime cannot resolve `github.com`; run PR-head `npm run check`, generated parity, real Chromium PSD16 and PSB32 jobs, real-photo CI, and artifact verification. Do NOT mark DONE solely on file writes.
 - Deliberate limits: ZeTer-generated synthetic native fixtures (NOT independently Photoshop-authored PSB32); browser timer/heap observations are not isolated operation RSS or Worker PID; separate close-while-running scenario is still open for further validation.
 - Acceptance gate: inspect actual PR CI and independent receipts, repair failures, merge only on green, then check exact merged-code main CI. Next after this: test close/replace owner while dense Worker is in flight and inspect coverage gaps under parent 003W. Parent 003W/003T/Stage 003 remain OPEN; Photoshop-authored PSB32 002B/2c BLOCKED.
+
+## 2026-10-22 verified acceptance — DONE
+
+- [PR #311](https://github.com/zeter1/ZeTer-Photo-Editor/pull/311) merged with squash commit [main `da40d0ac`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/da40d0acb071533bbd608a3a7c07ef4d3836c089); final PR head `6c4a23fd`.
+- Exact PR-head [CI #39762294594 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39762294594): `verify`, `near-cap-browser`, `dense-near-cap-browser`, `dense-cancel-browser`, `dense-owner-browser` all passed, including separate genuine Chromium file:// native PSD16 and PSB32 receipts. Final-head [real-photo #39762294524 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39762294524).
+- Exact merged-code [main CI #39763030021 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39763030021), all five jobs including two real dense-owner native formats, and [main real-photo #39763030034 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39763030034).
+- No application behavior regression/fix needed in this passage; this is a real-browser acceptance and CI coverage addition. The first two PR iterations found a detached DOM tab assertion and an over-strict successor-Worker termination count; both were corrected before final green PR head.
+- All targeted in-flight tab-switch acceptance criteria are met: production Uint32 near-2M frozen Worker dispatch, termination before reply, exact original/second native tile/preview/History before and after bounded settling, real dense successor with selected-only native changes and unchanged alpha/outside pixels, exact Undo/Redo and no late original reply. Bounded browser heartbeat and heap only; **not** operation-isolated RSS, continuous CPU, Worker PID mapping or Photoshop-authored PSB32 proof.
+- **Not covered by this DONE subtask:** removing/replacing the original owner tab during an already dispatched dense Worker job. Kept separately OPEN as [003W/2b-2e](003w2b2e-dense-owner-close.md) without falsely asserting close-path acceptance. Whole 003W/003T/Stage 003 remain OPEN; Photoshop-authored PSB32 [002B/2c](002b2c-photoshop-psb32-provenance.md) remains BLOCKED.
