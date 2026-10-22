@@ -1,6 +1,6 @@
 # 003W/2b-2b — Real dense ~2M PSD16/PSB32 Chromium Worker success
 
-**Priority:** P1. **Status:** IN PROGRESS (2026-10-22).
+**Priority:** P1. **Status:** DONE (2026-10-22; bounded dense-worker acceptance, not full 003W).
 **Parent:** [003W](003w-browser-selection-freeze-responsiveness.md) / Stage 6.
 **Dependencies:** 003W/2b-1 and [003W/2b-2a](003w2b2a-browser-near-cap-ui.md) merged.
 **Previous:** [PR #308](https://github.com/zeter1/ZeTer-Photo-Editor/pull/308) verified real sparse Worker 576 indices and >2M refusal. That is **not** dense completion.
@@ -46,3 +46,10 @@ Continue 003W with cancellation during a genuinely dense running Worker, measure
 - Candidate bug: generic straight-alpha boundary synthesis and PatchMatch rewrite selected alpha while native tiled Worker result validator requires byte-for-byte unchanged alpha. On Uint16, float average can also truncate an opaque sample to 65534. New explicit `preserveAlpha` option is used only for tiled regions in both paths; legacy generic RGBA blending behavior stays unchanged.
 - Regression extends dense CMYKA32 islands to selected alpha 0.375 vs donor alpha 1; synchronous, cooperative, and Node Worker parity must preserve original native alpha. Canonical bundle, standalone file:// Worker supplier, index build marker and version manifest have been regenerated.
 - **IN PROGRESS until proven:** candidate does not prove the precise reason behind PSD16's invalid result, nor remove 180 s computation concerns. Require fresh PR-head CI including genuine Chromium PSD16 **and** PSB32 dense success with selected-only/alpha/Undo/Redo, saved strict evidence and exact-main CI. If failure persists, inspect result validation and deadline without loosening caps.
+
+## 2026-10-22 — DONE: final PR-head + exact merged-code main acceptance
+
+- [PR #309](https://github.com/zeter1/ZeTer-Photo-Editor/pull/309) merged as [main `288e7b64`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/288e7b64eb165a418b5304c016f369718a43fccc). Final exact-head `456dcc440094fe536cb5972313499ab43cfc7723`: [CI #39752664130 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39752664130), [real-photo #39752664135 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39752664135); exact merged-code main `288e7b64`: [CI #39753548350 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39753548350). Separate [real-photo main run #39753548386](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39753548386) was in progress at this checkpoint (not claimed green).
+- Independent fresh-profile real Chromium `file://` PSD16/PSB32 dense runs each dispatched 1,973,400 frozen Uint32 indices (7,893,600 bytes) to an actual production Blob Worker and completed. PSD16 changed 1,006,908 selected pixels; PSB32 changed 25. Outside-selection native bytes and alpha unchanged in both, exact .zpe save/Undo/Redo proved, strict PSD16+PSB32 JSON receipts verified and uploaded. PSD16 menu→completion 4,261.7 ms, PSB32 3,694.1 ms. Both 8ms pulse samples were capped at 256 and truncated; no continuous responsiveness, operation-exclusive memory peak, Worker→OS PID, or isolated CPU claim.
+- Root cause confirmed at behavioral level: native tiled Worker could rewrite selected alpha via generic Boundary/PatchMatch. Explicit tiled-only `preserveAlpha` fixes the failing PSD16 validation without changing general RGBA compositing. Nonopaque CMYKA32 regression tests native sync/cooperative/Node Worker paths.
+- **Bounded subtask DONE; parent 003W/003T/Stage 003 OPEN.** Next [003W/2b-2c](003w2b2c-dense-worker-cancellation.md) real near-2M in-flight Worker cancellation/late results/renewed completion. 002B/2c independently Photoshop-authored PSB32 provenance remains BLOCKED.
