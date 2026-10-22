@@ -874,6 +874,10 @@ const newDocumentController = createNewDocumentController({
     getActiveSessionId: () => activeSessionId,
     getDocumentChangeSerial: () => documentChangeSerial,
     blockPendingDocumentEdit,
+    canCancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
+    cancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
     replaceHistory: () => { history = new HistoryStack(80); },
     setDocument: setDoc,
     markDirty,

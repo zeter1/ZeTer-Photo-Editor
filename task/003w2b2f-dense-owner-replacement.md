@@ -1,6 +1,6 @@
 # 003W/2b-2f — Real dense Worker original document replacement
 
-**Priority:** P1. **Status:** TODO (2026-10-22).
+**Priority:** P1. **Status:** IN PROGRESS (2026-10-22; branch implementation awaiting PR-head CI).
 **Parent:** [003W Chromium selection-freeze responsiveness](003w-browser-selection-freeze-responsiveness.md), Stage 6.
 **Dependencies:** [003W/2b-2e owner close](003w2b2e-dense-owner-close.md) DONE, [003W/2b-2d switch](003w2b2d-dense-owner-switch.md) DONE, [003W/2b-2c Escape cancel](003w2b2c-dense-worker-cancellation.md) DONE.
 
@@ -24,3 +24,20 @@ Start from `tools/browser-near-cap-ui-smoke.mjs`, `src/document/new-document-con
 
 - **TODO / unimplemented:** No verified replacement-specific native Chromium acceptance yet.
 - **Next action:** implement separate actual UI File→New denial/acceptance and subsequent high-depth native import/retry, strict per-format verification and CI. If production replacement fails to revoke stale Worker, add bounded correction and tests before acceptance.
+
+## Проходка 2026-10-22 — production fix + independent native Chromium tests (IN PROGRESS)
+
+- Branch: [fix/003w2b2f-new-document-worker-replacement-20261022](https://github.com/zeter1/ZeTer-Photo-Editor/tree/fix/003w2b2f-new-document-worker-replacement-20261022).
+- Production root cause: File → New and modal submit used the generic `blockPendingDocumentEdit` guard, which rejects ALL in-flight paint leases, including explicitly cancellable content-aware Fill. Consequently, user-authorized replacement could not run while a native Worker was active.
+- Fix: `src/painting/command-controller.js` exposes whether the in-flight Fill is cancellable; `src/main.js` supplies guarded callable bridges (never while another pointer/drag is held); `src/document/new-document-controller.js` permits the dialog without terminating the old Worker, rechecks owner/session and dirty epoch, validates the new document and only then cancels the original Worker before resetting History. All other active raster operations remain blocked. Existing 2M cap/180s deadline are unchanged.
+- Regression: `tests/new-document-controller.test.mjs` covers denied dirty confirmation, prepublication-only cancellation, factory failure, stale session/document, failed cancellation and noncancellable operations.
+- New independent actual `file://` Chromium `ZPE_DENSE_REPLACE_BROWSER_ONLY` mode for PSD16 and PSB32 with 1.9M–2M real frozen Uint32 selection, no old reply, denied confirmation preserving owner, accepted File New (37×29 blank state), 1.25s stale-result settling, fresh PSD/PSB native import and second genuine dense Worker Fill, byte-exact Undo/Redo and selected-only alpha/History. `tools/browser-dense-replace-evidence.mjs` enforces strict per-format evidence; separate CI job uploads artifacts.
+- Deterministic generated browser bundle, index application-build and version.json stamp updated consistently. No new dependencies.
+- **Verification:** GitHub PR-head CI and real Chromium receipts required before DONE. Local checkout/browser unavailable in this environment because GitHub DNS cannot be resolved. Until final exact PR-head CI and exact merged-main CI succeed, do not claim this task complete or merged.
+- **Known limitations:** JS heap/timer sampled, not operation-only RSS/CPU peak; Worker→OS PID unknown; ZeTer-generated fixtures do not establish independently Photoshop-authored PSB32 provenance. Parent 003W/003T/Stage 003 OPEN; 002B/2c BLOCKED.
+
+## Next gate
+
+1. Open the branch PR. Inspect exact PR-head `CI` (`npm run check`, generated artifacts, both Chromium native replace runs and strict JSON receipts) and independent `real-photo` workflow.
+2. Correct any observed failures with a new verified commit. Only if all required gates pass, merge normally and verify exact merged-code `main` CI and real-photo.
+3. Once accepted, advance `task/NEXT.md` to the next prioritized unfinished 003W/003T verification or independent P0 corpus task. Avoid declaring native operation-exclusive peak/Photoshop PSB32 provenance.
