@@ -1,3 +1,9 @@
+### 2026-10-22 — Проверка восстановления после повреждённого PSD/PSB во время native Worker (003W/2b-2h)
+
+- Добавлен отдельный браузерный сценарий `file://`: повреждённый PSD16/PSB32 открывается через File → Open во время реальной плотной Content-Aware Fill, проверяется сохранение Worker и старого документа, затем явная отмена Escape и побайтовое сохранение старого native source.
+- После сбоя проверяются успешный импорт другого правильного native PSD/PSB, повторная плотная обработка через настоящий Worker, неизменность alpha/области вне выделения и Undo/Redo; отдельные строго проверяемые JSON-отчёты и CI.
+- Изменений production-runtime и версии нет. Браузерные проверки, CI, PR и слияние на момент внесения изменений не подтверждены; Photoshop-authored PSB32 и operation-only RAM/CPU остаются открытыми.
+
 ### 2026-10-19 — External independent RGB32 PSB candidate gates (002B/2b)
 
 - CI candidate: pinned real `psd-tools` PSB v2 RGB32 100×150 / 5×5 and paired PSD32, SHA-256/size/header validation, `decodePsd` native Float32 layer completeness and PSD/PSB parity, negative Node checks. External fixture authorship by Adobe Photoshop has **not** been independently established; no production/format/version changes. PR and CI initially pending.
