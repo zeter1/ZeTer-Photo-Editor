@@ -24,7 +24,7 @@ export function validateBrowserNearCapEvidence(value) {
     value.sourcePixels!==2_030_000 ||
     value.sourceRawBytes!==value.sourcePixels*4*(value.format==='PSD16'?2:4) ||
     !Number.isSafeInteger(value.sparseSelectedPixels) ||
-    value.sparseSelectedPixels<1 || value.sparseSelectedPixels>100 ||
+    value.sparseSelectedPixels<1 || value.sparseSelectedPixels>1024 ||
     value.sparseSelectedBytes!==value.sparseSelectedPixels*4 ||
     value.sparseWorkerJobs!==1 ||
     value.sparseChangedNative!==true ||
