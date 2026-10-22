@@ -342,3 +342,48 @@ jobs:
           path: ${{ runner.temp }}/zpe-dense-cancel/*.json
           if-no-files-found: warn
           retention-days: 14
+
+  # 003W/2b-2d: independent fresh Chromium file:// sessions for dense
+  # post-dispatch tab owner switch + genuine dense survivor retry per native depth.
+  dense-owner-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 dense in-flight tab-switch cross-document owner isolation and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_OWNER_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_OWNER_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-owner
+
+      - name: Chromium PSB32 dense in-flight tab-switch cross-document owner isolation and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_OWNER_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_OWNER_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-owner
+
+      - name: Verify strict independent cross-document owner isolation receipts
+        run: node tools/verify-browser-dense-owner-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_OWNER_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-owner
+
+      - name: Upload real dense cross-document owner switch receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-owner-003w2b2d
+          path: ${{ runner.temp }}/zpe-dense-owner/*.json
+          if-no-files-found: warn
+          retention-days: 14

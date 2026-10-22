@@ -517,7 +517,8 @@ async function runSmoke() {
     // PSD16/PSB32 source. No production runtime instrumentation or mocks.
     if (process.env.ZPE_NEAR_CAP_BROWSER_ONLY === '1' ||
         process.env.ZPE_DENSE_NEAR_CAP_BROWSER_ONLY === '1' ||
-        process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY === '1') {
+        process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_OWNER_BROWSER_ONLY === '1') {
       const fixtureKey=process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSD16'
         ?'rgb16nearcap'
         :process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSB32'
@@ -526,7 +527,8 @@ async function runSmoke() {
       const {verifyBrowserNearCapUi}=await import('./browser-near-cap-ui-smoke.mjs');
       await verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,
         dense:process.env.ZPE_DENSE_NEAR_CAP_BROWSER_ONLY === '1',
-        cancelDense:process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY === '1'});
+        cancelDense:process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY === '1',
+        switchDense:process.env.ZPE_DENSE_OWNER_BROWSER_ONLY === '1'});
       assertNoBrowserErrors(errors,stderrState);
       return;
     }
