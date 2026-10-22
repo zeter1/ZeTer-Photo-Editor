@@ -32,3 +32,10 @@
 ## Next after bounded acceptance
 
 Continue 003W with cancellation during a genuinely dense running Worker, measured UI/operation responsiveness and memory caveats; complete 003W only after evidence supports all acceptance requirements. Stage 003/003T remain OPEN. [002B/2c](002b2c-photoshop-psb32-provenance.md) independent Photoshop-authored PSB32 provenance remains BLOCKED.
+
+## 2026-10-22 first genuine dense PR CI: FAILURE, not accepted
+
+- [PR #309](https://github.com/zeter1/ZeTer-Photo-Editor/pull/309); [initial PR CI #39749406069](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39749406069): **verify SUCCESS** (including `npm run check`, regenerated bundle parity and normal browser smoke), **near-cap-browser SUCCESS** (original sparse + over-cap), **dense-near-cap-browser FAILURE**.
+- Genuine `Chromium PSD16 native dense ~2M Worker Fill` stayed without observed **completion acceptance** for the initial 240,000 ms test wait; `BrowserSmokeError: Timed out waiting for 003W/2b-2b genuine dense production Worker completion`. The second PSB32 dense step was **not run**, and no dense JSON was emitted. Do **not** infer whether Worker dispatched, computed but exceeded the 180,000 ms production watchdog, errored, or succeeded with an unexpected UI status from this first log.
+- Next code revision adds a separate actual-Worker-dispatch census (actual frozen selected pixels and Uint32 bytes), logs status after dispatch, and prints exact observed status, counts and sampled elapsed values on failure. **New CI after this revision pending**. Never increase production timeout/safety cap merely to get a green test without verified performance and memory analysis.
+- Next concrete step: inspect the new dense CI phase evidence. If `jobs===0`, diagnose selection freeze/UI and supplier/bootstrap; if `jobs===1` but no tiled completion, check status and 180 s Worker deadline, CPU kernel cost on near-full mask, no-donor texture case, and safe algorithm optimization. Then rerun PSD16 and PSB32; exact native bytes, alpha, Undo/Redo and JSON must all pass before marking DONE.
