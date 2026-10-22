@@ -199,6 +199,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
   }
   try {
     const baseline=await evaluate(client,snapshot);
+    const originalPreview=await evaluate(client,'('+ui.toString()+')()');
     assert(baseline.bits===fixture.bitsPerChannel &&
       baseline.rawBytes===fixture.width*fixture.height*4*(fixture.bitsPerChannel/8) &&
       baseline.tiles>1 && baseline.baselineEqual,
@@ -217,6 +218,10 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
     assert(sparse.jobs===1 && sparse.selectedPixels>=1 && sparse.selectedPixels<=1024 &&
       sparse.selectedBytes===sparse.selectedPixels*4,
       '003W/2b-2a actual frozen sparse indices from production Worker',JSON.stringify(sparse));
+    const filledPreview=await evaluate(client,'('+ui.toString()+')()');
+    assert(JSON.stringify(filledPreview.pixel)!==JSON.stringify(originalPreview.pixel),
+      '003W/2b-2a browser Worker must actually repaint defect preview',
+      JSON.stringify({original:originalPreview.pixel,filled:filledPreview.pixel}));
     await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
     const success=await evaluate(client,snapshot);
     assert(!success.error && !success.baselineEqual &&
@@ -227,16 +232,12 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       JSON.stringify(success));
     await evaluate(client,"document.querySelector('#undoBtn').click();true");
     await waitFor('003W/2b-2a native Undo preview',()=>evaluate(client,
-      '(() => {const f=window.__nearCapMeta;return '+
-      'document.querySelector("#editorCanvas").getContext("2d")'+
-      '.getImageData(f.x,f.y,1,1).data[0]>150})()'),30_000);
+      '('+ui.toString()+')().pixel.join(",")==='+JSON.stringify(originalPreview.pixel.join(','))),30_000);
     const undo=await evaluate(client,snapshot);
     assert(undo.baselineEqual,'003W/2b-2a Undo must restore exact source tile bytes',JSON.stringify(undo));
     await evaluate(client,"document.querySelector('#redoBtn').click();true");
     await waitFor('003W/2b-2a native Redo preview',()=>evaluate(client,
-      '(() => {const f=window.__nearCapMeta;return '+
-      'document.querySelector("#editorCanvas").getContext("2d")'+
-      '.getImageData(f.x,f.y,1,1).data[0]<150})()'),30_000);
+      '('+ui.toString()+')().pixel.join(",")==='+JSON.stringify(filledPreview.pixel.join(','))),30_000);
     const redo=await evaluate(client,snapshot);
     assert(redo.successEqual && !redo.baselineEqual,
       '003W/2b-2a Redo must reproduce identical native tile payloads',JSON.stringify(redo));
