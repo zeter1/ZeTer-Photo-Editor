@@ -1,6 +1,6 @@
 # 003W/2b-2h — Real failed PSD/PSB File Open rollback during native dense Worker
 
-**Priority:** P1. **Status:** TODO. **Parent:** 003W/Stage 003. **Dependency:** [003W/2b-2g](003w2b2g-dense-import-replacement.md) merged and exact-main checks verified.
+**Priority:** P1. **Status:** IN PROGRESS. **Parent:** 003W/Stage 003. **Dependency:** [003W/2b-2g](003w2b2g-dense-import-replacement.md) merged and exact-main checks verified.
 
 ## Goal
 
@@ -13,6 +13,15 @@ Prove actual file:// Chromium refused/corrupt or unimportable PSD/PSB File Open 
 3. Confirm no new tab, no altered native data/preview/History; original Worker either finishes safely on the original owner or can be explicitly cancelled, with bounded settle and no cross-document writes.
 4. Retry a valid native import and then perform a genuine dense Worker fill on the new owner, with selected-only mutation, alpha unchanged and byte-exact Undo/Redo.
 5. Add strict independent PSD16/PSB32 JSON receipts, fail-closed negative validator tests, observational timing (no unsupported CPU/RSS/Worker→PID claim), CI checks, real-photo when applicable, PR merge and exact-main verification. Respect the 2,000,000 index and 180s limits and preserve file:// operation.
+
+## Current implementation checkpoint (2026-10-22)
+
+- Branch: [test/003w2b2h-failed-psd-import-recovery-20261022](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003w2b2h-failed-psd-import-recovery-20261022).
+- Browser mode `ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY=1` now drives **real malformed PSD/PSB bytes through File → Open** while a genuine ~1.97M native Worker is in flight. It checks the dirty approval, import error, original Worker still running with no reply/termination, original preview and History, then explicitly cancels via Escape.
+- After cancellation it reads the original native tiles through File → Save Project and checks byte-exact original source; then imports an independently different valid native file and checks its data, completed second genuine dense Worker, alpha, outside-selection pixels, exact Undo/Redo, one tab and zero stale Worker replies.
+- New strict dual-format JSON receipts/negative Node tests and isolated Chromium CI job; initial code has been committed but **Node tests, real Chromium PSD16/PSB32, PR-head CI, merge and exact-main CI are NOT YET VERIFIED** at this checkpoint. Do not mark DONE.
+- Files: `tools/browser-near-cap-ui-smoke.mjs`, `tools/browser-smoke.mjs`, `tools/browser-dense-failed-import-evidence.mjs`, `tools/verify-browser-dense-failed-import-evidence.mjs`, `tests/browser-dense-failed-import-evidence.test.mjs`, `.github/workflows/ci.yml`, `task/README.md`, `task/NEXT.md`, `CHANGELOG.md`.
+- Follow-up: inspect real CI and fix observable failures before acceptance; PR and SHA to be recorded after creation. No CPU/RSS peak, Worker→PID, independent Photoshop PSB32 claim.
 
 ## Implementation starting points
 
