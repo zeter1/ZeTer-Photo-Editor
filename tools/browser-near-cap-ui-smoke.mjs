@@ -5,11 +5,15 @@ import {
   saveBrowserDenseNearCapEvidence, validateBrowserDenseNearCapEvidence,
   BROWSER_DENSE_NEAR_CAP_LIMITATIONS,
 } from './browser-dense-near-cap-evidence.mjs';
+import {
+  saveBrowserDenseCancelEvidence, validateBrowserDenseCancelEvidence,
+  BROWSER_DENSE_CANCEL_LIMITATIONS,
+} from './browser-dense-cancel-evidence.mjs';
 
 // 003W/2b-2a: actual Chromium file:// PSD16/PSB32 import, UI marquee,
 // production Blob Worker + History, and >2M refusal. The successful selection
 // is intentionally small in legacy mode. Dense mode independently checks real near-2M Worker completion.
-export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false}={}) {
+export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false,cancelDense=false}={}) {
   const fixture=createBrowserHighDepthFixture(fixtureKey);
   const format=fixture.version===1?'PSD16':'PSB32';
   assert(fixture.width===1450 && fixture.height===1400 &&
@@ -53,11 +57,14 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
 
   function observeWorker() {
     const original=Worker.prototype.postMessage;
+    const originalTerminate=Worker.prototype.terminate;
+    const watched=new WeakSet();
     let priorPulse=performance.now(),active=false;
     const observation={
       jobs:0,selectedPixels:0,selectedBytes:0,selected:null,
       pulseIntervalsMs:[],truncated:false,startedAtMs:0,
       heapBeforeBytes:null,heapAfterBytes:null,
+      replies:0,terminatedJobs:0,firstDispatchAtMs:null,firstTerminatedAtMs:null,
     };
     const heap=()=>Number.isSafeInteger(performance.memory?.usedJSHeapSize)
       ?performance.memory.usedJSHeapSize:null;
@@ -73,11 +80,22 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       if(job?.source?.kind==='zpe-pixel-buffer-source-v2' &&
           job.selectedIndices instanceof Uint32Array) {
         observation.jobs++;
+        if(observation.firstDispatchAtMs===null)observation.firstDispatchAtMs=performance.now();
+        watched.add(this);
+        this.addEventListener('message',()=>{observation.replies++;},{once:true});
         observation.selectedPixels=job.selectedIndices.length;
         observation.selectedBytes=job.selectedIndices.byteLength;
         observation.selected=Uint32Array.from(job.selectedIndices);
       }
       return original.call(this,job,...rest);
+    };
+    Worker.prototype.terminate=function(...args){
+      if(watched.has(this)){
+        observation.terminatedJobs++;
+        if(observation.firstTerminatedAtMs===null)observation.firstTerminatedAtMs=performance.now();
+        watched.delete(this);
+      }
+      return originalTerminate.apply(this,args);
     };
     window.__nearCapWorkerObservation={
       begin(){observation.pulseIntervalsMs=[];observation.truncated=false;
@@ -89,9 +107,13 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
           heapBeforeBytes:observation.heapBeforeBytes,
           heapAfterBytes:observation.heapAfterBytes};},
       summary(){return {jobs:observation.jobs,selectedPixels:observation.selectedPixels,
-        selectedBytes:observation.selectedBytes};},
+        selectedBytes:observation.selectedBytes,replies:observation.replies,
+        terminatedJobs:observation.terminatedJobs,
+        firstDispatchAtMs:observation.firstDispatchAtMs,
+        firstTerminatedAtMs:observation.firstTerminatedAtMs};},
       selected(){return observation.selected;},
       restore(){active=false;clearInterval(interval);Worker.prototype.postMessage=original;
+        Worker.prototype.terminate=originalTerminate;
         delete window.__nearCapWorkerObservation;},
     };
     return true;
@@ -214,6 +236,155 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       baseline.rawBytes===fixture.width*fixture.height*4*(fixture.bitsPerChannel/8) &&
       baseline.tiles>1 && baseline.baselineEqual,
       '003W/2b-2a initial native PSD/PSB source bytes/geometry',JSON.stringify(baseline));
+    // 003W/2b-2c: real near-cap Blob Worker after dispatch, real Escape,
+    // bounded stale-result settling, then a second real dense Worker Fill.
+    if(cancelDense){
+      const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(view.hit==='overlayCanvas' && view.within &&
+        view.boundingPixels>=1_900_000 && view.boundingPixels<=2_000_000,
+        '003W/2b-2c dense UI marquee must be visible and bounded',JSON.stringify(view));
+      await draw(view);
+      const workerExpr='window.__nearCapWorkerObservation.summary()';
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2c first real dense Fill menu must be enabled');
+      await waitFor('003W/2b-2c first real dense Worker postMessage',
+        async()=>(await evaluate(client,workerExpr)).jobs===1,75_000);
+      const first=await evaluate(client,workerExpr);
+      assert(first.selectedPixels>=1_900_000 && first.selectedPixels<=2_000_000 &&
+        first.selectedBytes===first.selectedPixels*4 &&
+        first.replies===0 && first.terminatedJobs===0,
+        '003W/2b-2c Worker must be in flight before Escape',JSON.stringify(first));
+      await client.send('Input.dispatchKeyEvent',{
+        type:'keyDown',key:'Escape',code:'Escape',
+        windowsVirtualKeyCode:27,nativeVirtualKeyCode:27,
+      });
+      await client.send('Input.dispatchKeyEvent',{
+        type:'keyUp',key:'Escape',code:'Escape',
+        windowsVirtualKeyCode:27,nativeVirtualKeyCode:27,
+      });
+      await waitFor('003W/2b-2c genuine owner Escape acknowledgement',
+        ()=>evaluate(client,'document.querySelector("#statusText")?.textContent==='+
+          JSON.stringify('Контент-заливка отменена')),15_000);
+      const stopped=await evaluate(client,workerExpr);
+      const cancelledTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      assert(stopped.jobs===1 && stopped.replies===0 && stopped.terminatedJobs===1 &&
+        stopped.firstTerminatedAtMs>=stopped.firstDispatchAtMs,
+        '003W/2b-2c real Worker terminated before reply',JSON.stringify(stopped));
+      const samePreview=state=>JSON.stringify(state.pixel)===JSON.stringify(originalPreview.pixel);
+      const sameHistory=state=>JSON.stringify(state.history)===JSON.stringify(originalPreview.history);
+      const afterCancel=await evaluate(client,snapshot);
+      const cancelledUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(afterCancel.baselineEqual && samePreview(cancelledUi) && sameHistory(cancelledUi),
+        '003W/2b-2c no partial native/preview/History after Escape',
+        JSON.stringify({afterCancel,cancelledUi,originalPreview}));
+      const settleStarted=Date.now();
+      await new Promise(resolve=>setTimeout(resolve,1_250));
+      const settledMs=Date.now()-settleStarted;
+      const afterSettle=await evaluate(client,snapshot);
+      const settledUi=await evaluate(client,'('+ui.toString()+')()');
+      const beforeRetry=await evaluate(client,workerExpr);
+      assert(afterSettle.baselineEqual && samePreview(settledUi) && sameHistory(settledUi) &&
+        beforeRetry.jobs===1 && beforeRetry.replies===0 && beforeRetry.terminatedJobs===1,
+        '003W/2b-2c cancelled result must remain uncommitted after settling',
+        JSON.stringify({afterSettle,settledUi,beforeRetry}));
+      // Supersede the cancelled job's selection owner before retry:
+      // dense -> sparse -> freshly drawn dense, still no second Worker yet.
+      const newerSparse=await evaluate(client,'('+setupSelection.toString()+')(false)');
+      assert(newerSparse.hit==='overlayCanvas'&&newerSparse.within,
+        '003W/2b-2c new sparse selection must be a real pointer gesture');
+      await draw(newerSparse);
+      const newerDense=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(newerDense.hit==='overlayCanvas'&&newerDense.within &&
+        newerDense.boundingPixels===view.boundingPixels,
+        '003W/2b-2c new dense selection must be independently redrawn');
+      await draw(newerDense);
+      const superseded=await evaluate(client,workerExpr);
+      assert(superseded.jobs===1 && superseded.replies===0,
+        '003W/2b-2c changing selection must not revive cancelled Worker',
+        JSON.stringify(superseded));
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2c retry must be an enabled real menu Fill');
+      await waitFor('003W/2b-2c second real dense Worker postMessage',
+        async()=>(await evaluate(client,workerExpr)).jobs===2,75_000);
+      const second=await evaluate(client,workerExpr);
+      assert(second.selectedPixels===first.selectedPixels &&
+        second.selectedBytes===first.selectedBytes && second.replies===0,
+        '003W/2b-2c retry must dispatch same dense frozen selection',
+        JSON.stringify(second));
+      await waitFor('003W/2b-2c real retry Worker completion',
+        ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===2 && '+
+          'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),205_000);
+      const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      const finished=await evaluate(client,workerExpr);
+      assert(finished.jobs===2 && finished.replies===1,
+        '003W/2b-2c only successor Worker may reply',JSON.stringify(finished));
+      await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+      const success=await evaluate(client,snapshot);
+      const successUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(!success.baselineEqual &&
+        success.quality?.selectedPixels===second.selectedPixels &&
+        success.quality.changedSelectedPixels>0 &&
+        success.quality.changedOutsideSelectionPixels===0 &&
+        success.alphaUnchanged===true,
+        '003W/2b-2c retry changes only selected native colors, not alpha',
+        JSON.stringify(success));
+      const oldFillRows=originalPreview.history.filter(x=>x.includes('Контент-заливка')).length;
+      const newFillRows=successUi.history.filter(x=>x.includes('Контент-заливка')).length;
+      assert(newFillRows===oldFillRows+1,
+        '003W/2b-2c History must contain exactly one retry Fill',JSON.stringify(successUi.history));
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('003W/2b-2c exact native Undo',async()=>
+        (await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+      const undo=await evaluate(client,snapshot);
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('003W/2b-2c exact native Redo',async()=>
+        (await evaluate(client,snapshot))?.successEqual===true,90_000);
+      const redo=await evaluate(client,snapshot);
+      await new Promise(resolve=>setTimeout(resolve,750));
+      const finalWorker=await evaluate(client,workerExpr);
+      assert(finalWorker.jobs===2 && finalWorker.replies===1,
+        '003W/2b-2c no cancelled late reply after Undo/Redo',JSON.stringify(finalWorker));
+      const evidence={
+        kind:'zpe-browser-near-cap-dense-cancel-v1',format,protocol:'file:',
+        sourcePixels:fixture.width*fixture.height,sourceRawBytes:baseline.rawBytes,
+        marqueeBoundingPixels:view.boundingPixels,
+        firstSelectedPixels:first.selectedPixels,firstSelectedBytes:first.selectedBytes,
+        secondSelectedPixels:second.selectedPixels,secondSelectedBytes:second.selectedBytes,
+        workerJobs:finalWorker.jobs,cancelAcknowledged:true,
+        selectionReplacedAfterCancel:true,
+        cancelBeforeReply:stopped.replies===0,
+        terminatedJobsBeforeRetry:beforeRetry.terminatedJobs,
+        repliesBeforeRetry:beforeRetry.replies,
+        cancelNativeExact:afterCancel.baselineEqual,
+        cancelPreviewExact:samePreview(cancelledUi),
+        cancelHistoryExact:sameHistory(cancelledUi),
+        settledNativeExact:afterSettle.baselineEqual,
+        settledPreviewExact:samePreview(settledUi),
+        settledHistoryExact:sameHistory(settledUi),
+        retryChangedSelectedPixels:success.quality.changedSelectedPixels,
+        retryOutsideUnchanged:success.quality.changedOutsideSelectionPixels===0,
+        retryAlphaUnchanged:success.alphaUnchanged,
+        retryUndoExact:undo.baselineEqual,retryRedoExact:redo.successEqual,
+        retryHistoryOnce:newFillRows===oldFillRows+1,finalReplies:finalWorker.replies,
+        firstDispatchToCancelMs:stopped.firstTerminatedAtMs-first.firstDispatchAtMs,
+        cancelSettledMs:settledMs,retryMenuToCompletionMs:retryTimer.elapsedMs,
+        requestedPulseMs:8,cancelPulseIntervalsMs:cancelledTimer.pulseIntervalsMs,
+        retryPulseIntervalsMs:retryTimer.pulseIntervalsMs,
+        cancelPulsesTruncated:cancelledTimer.truncated,
+        retryPulsesTruncated:retryTimer.truncated,
+        heapBeforeBytes:cancelledTimer.heapBeforeBytes,
+        heapAfterBytes:retryTimer.heapAfterBytes,
+        workerPidMapping:'unknown',operationPeakKnown:false,
+        limitations:BROWSER_DENSE_CANCEL_LIMITATIONS,
+      };
+      validateBrowserDenseCancelEvidence(evidence);
+      const saved=await saveBrowserDenseCancelEvidence(evidence,
+        process.env.ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR);
+      console.log('003W/2b-2c real dense Worker cancel and retry:',JSON.stringify({saved,evidence}));
+      return evidence;
+    }
     // A separate fresh-profile scenario: actual ~2M selected indices must
     // complete a production Worker job, not merely pass the UI safety scan.
     if (dense) {
