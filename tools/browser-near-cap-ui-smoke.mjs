@@ -226,10 +226,36 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
       assert(await evaluate(client,'('+runFill.toString()+')()'),
         '003W/2b-2b actual dense Fill menu item must be enabled');
-      await waitFor('003W/2b-2b genuine dense production Worker completion',
-        ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===1 && '+
-          'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),
-        240_000);
+      // Dispatch evidence is independent from completion: a task can exceed
+      // the 180 s production Worker watchdog, fail with an error status or
+      // stall in UI selection freezing before postMessage. Log which phase
+      // actually happened instead of reporting only an opaque 240 s timeout.
+      const denseState='(() => ({worker:window.__nearCapWorkerObservation.summary(),'+
+        'status:document.querySelector("#statusText")?.textContent||""}))()';
+      try {
+        await waitFor('003W/2b-2b dense production Worker dispatch',
+          async()=>(await evaluate(client,denseState)).worker.jobs===1,75_000);
+        const dispatched=await evaluate(client,denseState);
+        console.log('003W/2b-2b '+format+' real dense Worker dispatched:',
+          JSON.stringify(dispatched));
+        assert(dispatched.worker.selectedPixels>=1_900_000 &&
+          dispatched.worker.selectedPixels<=2_000_000 &&
+          dispatched.worker.selectedBytes===dispatched.worker.selectedPixels*4,
+          '003W/2b-2b actual dense frozen selection before kernel completion',
+          JSON.stringify(dispatched));
+        await waitFor('003W/2b-2b genuine dense production Worker completion',
+          ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===1 && '+
+            'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),
+          205_000);
+      } catch(error) {
+        const observed=await evaluate(client,denseState).catch(e=>({readError:String(e)}));
+        const elapsed=await evaluate(client,
+          'window.__nearCapWorkerObservation.end()').catch(()=>null);
+        throw new Error('003W/2b-2b failed genuine dense Worker phase: '+
+          JSON.stringify({format,observed,elapsed,
+            productionWorkerDeadlineMs:180_000,
+            limitations:'No dense success, native output, or Undo/Redo claim'}),{cause:error});
+      }
       const timer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
       const worker=await evaluate(client,'window.__nearCapWorkerObservation.summary()');
       assert(worker.jobs===1 && worker.selectedPixels>=1_900_000 &&
