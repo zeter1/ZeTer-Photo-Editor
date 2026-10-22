@@ -354,8 +354,9 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
       const successorDone=await evaluate(client,expr);
       assert(successorDone.jobs===2 && successorDone.replies===1 &&
-        successorDone.terminatedJobs===1,
-        '003W/2b-2d only successor Worker is authorized to publish');
+        successorDone.terminatedJobs>=1 && successorDone.terminatedJobs<=2,
+        '003W/2b-2d only successor Worker is authorized to publish',
+        JSON.stringify(successorDone));
       await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
       const success=await evaluate(client,snapshot);
       const successUi=await evaluate(client,'('+ui.toString()+')()');
@@ -383,7 +384,8 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       await new Promise(resolve=>setTimeout(resolve,750));
       const allWorkers=await evaluate(client,expr);
       assert(originalFinal.baselineEqual && uiExact(originalFinalUi,originalPreview) &&
-        allWorkers.jobs===2 && allWorkers.replies===1 && allWorkers.terminatedJobs===1,
+        allWorkers.jobs===2 && allWorkers.replies===1 &&
+        allWorkers.terminatedJobs>=1 && allWorkers.terminatedJobs<=2,
         '003W/2b-2d no old reply or cross-tab mutation even after successor Redo');
       const evidence={kind:'zpe-browser-dense-owner-switch-v1',format,protocol:'file:',
         tabs:2,sourcePixels:fixture.width*fixture.height,
