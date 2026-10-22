@@ -917,7 +917,7 @@ const psdImportController = createPsdImportController({
   profiles: { profileBytes: colorProfileBytes },
   rendering: { rgbaPixelsToDataUrl },
   semantics: psdImportSemantics,
-  ui: { setStatus, toast, alert, consoleRef:console },
+  ui: { setStatus, toast, alert: message => window.alert(message), consoleRef:console },
 });
 
 const projectController = createProjectController({
