@@ -1,6 +1,6 @@
 # 003W/2b-2f — Real dense Worker original document replacement
 
-**Priority:** P1. **Status:** IN PROGRESS (2026-10-22; branch implementation awaiting PR-head CI).
+**Priority:** P1. **Status:** DONE (2026-10-22; merged PR #313 and exact-main CI/real-photo verified).
 **Parent:** [003W Chromium selection-freeze responsiveness](003w-browser-selection-freeze-responsiveness.md), Stage 6.
 **Dependencies:** [003W/2b-2e owner close](003w2b2e-dense-owner-close.md) DONE, [003W/2b-2d switch](003w2b2d-dense-owner-switch.md) DONE, [003W/2b-2c Escape cancel](003w2b2c-dense-worker-cancellation.md) DONE.
 
@@ -41,3 +41,13 @@ Start from `tools/browser-near-cap-ui-smoke.mjs`, `src/document/new-document-con
 1. Open the branch PR. Inspect exact PR-head `CI` (`npm run check`, generated artifacts, both Chromium native replace runs and strict JSON receipts) and independent `real-photo` workflow.
 2. Correct any observed failures with a new verified commit. Only if all required gates pass, merge normally and verify exact merged-code `main` CI and real-photo.
 3. Once accepted, advance `task/NEXT.md` to the next prioritized unfinished 003W/003T verification or independent P0 corpus task. Avoid declaring native operation-exclusive peak/Photoshop PSB32 provenance.
+
+## Final acceptance — 2026-10-22 (merged code, strict PR/main gates)
+
+- [PR #313](https://github.com/zeter1/ZeTer-Photo-Editor/pull/313) **MERGED** as [main `5723af2dba78a19b9379e9bfc0ef98ca7a88f702`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/5723af2dba78a19b9379e9bfc0ef98ca7a88f702). Exact PR-head `1b9fde1e5258589ff6fea29b8e3cf5076c331ba6` [CI #39788015792 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39788015792) and [real-photo #39788015607 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39788015607).
+- On exact merged code: [main CI #39789194104 attempt 2 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39789194104), [main real-photo #39789194001 attempt 2 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39789194001). Attempt 1 for each main workflow FAILED due Chromium DevTools endpoint startup timeout **before** the failed application's smoke; only failed jobs were rerun, do not count attempt 1 as success.
+- Genuine independent `file://` PSD16 and PSB32: actual 1,973,400 frozen selection indices (7,893,600 Uint32 bytes) posted to real Blob Worker; denied dirty File → New preserves original owner and Worker. Accepted File → New terminates first Worker before reply, resets to distinct 37×29 blank document with no old native source/history; after bounded settle no old late reply, content or History leakage. A separate real new high-depth PSD/PSB reimport and second genuine dense Worker changes only selected native colors; alpha unaffected and exact Undo/Redo/History hold.
+- Strict per-format receipts validated; `npm run check`, generated browser bundle/index/manifest parity, dedicated native tests and independent real-photo all green on PR and exact merged main. Production cancellation bridge only unlocks a cancellable in-flight Fill after user confirmation, fresh factory validation and owner check; other active operations remain blocked.
+- **003W/2b-2f DONE** for File → New user-authorized replacement only, *not* a claim for approved in-flight PSD/PSB file import. No isolated CPU or RSS operation peak, Worker→PID mapping or independent Photoshop-authored PSB32 provenance. Parent 003W/003T/Stage 003 remain OPEN; independent Photoshop PSB32 P0 [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED.
+- **NEXT P1 [003W/2b-2g](003w2b2g-dense-import-replacement.md) TODO:** separate real in-flight authorized PSD/PSB file import replacement, dirty denial, genuine native new-owner retry and stale-transaction isolation.
+
