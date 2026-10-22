@@ -305,11 +305,18 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
 
       // The two File -> Open actions run synchronously in the page. A denied
       // confirmation must never start decoding or revoke the old Worker.
-      function openReplacement(){
+      async function openReplacement(){
         const input=document.querySelector('#fileInput');
-        const transfer=new DataTransfer();
-        transfer.items.add(window.__nearCapReplacementFile);
         const oldConfirm=window.confirm;
+        // File-picker activity and change handling can settle across browser
+        // tasks. Keep the confirmation spy alive during each entire attempt.
+        const selectReplacement=async()=>{
+          const transfer=new DataTransfer();
+          transfer.items.add(window.__nearCapReplacementFile);
+          input.files=transfer.files;
+          input.dispatchEvent(new Event('change',{bubbles:true}));
+          await new Promise(resolve=>setTimeout(resolve,25));
+        };
         const menu=()=>{document.querySelector('.menu-button[data-menu="file"]').click();
           const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
             x=>x.querySelector('span')?.textContent?.startsWith('Открыть изображение'));
@@ -319,8 +326,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         try{
           window.confirm=()=>{deniedPrompts++;return false;};
           const deniedClicked=menu();
-          input.files=transfer.files;
-          input.dispatchEvent(new Event('change',{bubbles:true}));
+          await selectReplacement();
           denied={clicked:deniedClicked,worker:window.__nearCapWorkerObservation.summary(),
             width:document.querySelector('#editorCanvas').width,
             tabs:document.querySelectorAll('#docTabs .doc-tab').length,
@@ -330,8 +336,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
             status:document.querySelector('#statusText')?.textContent};
           window.confirm=()=>{approvedPrompts++;return true;};
           const approvedClicked=menu();
-          input.files=transfer.files;
-          input.dispatchEvent(new Event('change',{bubbles:true}));
+          await selectReplacement();
           approved={clicked:approvedClicked,worker:window.__nearCapWorkerObservation.summary()};
         }finally{window.confirm=oldConfirm;}
         return {deniedPrompts,approvedPrompts,denied,approved};
