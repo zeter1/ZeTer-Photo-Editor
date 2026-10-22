@@ -7,7 +7,7 @@ const KEYS=[
   'kind','format','sourcePixels','sourceRawBytes','protocol',
   'marqueeBoundingPixels','firstSelectedPixels','firstSelectedBytes',
   'secondSelectedPixels','secondSelectedBytes','workerJobs',
-  'cancelAcknowledged','cancelBeforeReply','terminatedJobsBeforeRetry',
+  'cancelAcknowledged','selectionReplacedAfterCancel','cancelBeforeReply','terminatedJobsBeforeRetry',
   'repliesBeforeRetry','cancelNativeExact','cancelPreviewExact',
   'cancelHistoryExact','settledNativeExact','settledPreviewExact',
   'settledHistoryExact','retryChangedSelectedPixels','retryOutsideUnchanged',
@@ -40,6 +40,7 @@ export function validateBrowserDenseCancelEvidence(value) {
      value.secondSelectedBytes!==value.secondSelectedPixels*4 ||
      value.workerJobs!==2 ||
      value.cancelAcknowledged!==true ||
+     value.selectionReplacedAfterCancel!==true ||
      value.cancelBeforeReply!==true ||
      value.terminatedJobsBeforeRetry!==1 ||
      value.repliesBeforeRetry!==0 ||
