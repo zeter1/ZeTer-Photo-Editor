@@ -329,6 +329,58 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         uiExact(survivorSettledUi,secondaryUi) && finished.replies===0 &&
         finished.terminatedJobs===1,
         '003W/2b-2d no stale native result in either tab after settling',JSON.stringify(finished));
+
+      const retryView=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(retryView.hit==='overlayCanvas' && retryView.within &&
+        retryView.boundingPixels===view.boundingPixels,
+        '003W/2b-2d redraw dense selection in surviving document');
+      await draw(retryView);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2d survivor retry must use actual enabled menu Fill');
+      await waitFor('003W/2b-2d successor real Worker postMessage',
+        async()=>(await evaluate(client,expr)).jobs===2,75_000);
+      const successor=await evaluate(client,expr);
+      assert(successor.selectedPixels===inFlight.selectedPixels &&
+        successor.selectedBytes===inFlight.selectedBytes && successor.replies===0,
+        '003W/2b-2d successor must receive dense frozen native indices');
+      await waitFor('003W/2b-2d second real dense Worker completes',
+        ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===2 && '+
+          'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),205_000);
+      const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      const successorDone=await evaluate(client,expr);
+      assert(successorDone.jobs===2 && successorDone.replies===1 &&
+        successorDone.terminatedJobs===1,
+        '003W/2b-2d only successor Worker is authorized to publish');
+      await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+      const success=await evaluate(client,snapshot);
+      const successUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(!success.baselineEqual &&
+        success.quality?.selectedPixels===successor.selectedPixels &&
+        success.quality.changedSelectedPixels>0 &&
+        success.quality.changedOutsideSelectionPixels===0 &&
+        success.alphaUnchanged===true,
+        '003W/2b-2d success changes selected native colors without alpha');
+      const countFill=rows=>rows.filter(s=>s.includes('Контент-заливка')).length;
+      assert(countFill(successUi.history)===countFill(secondaryUi.history)+1,
+        '003W/2b-2d exactly one successful History entry in survivor');
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('003W/2b-2d exact survivor Undo',
+        async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+      const undo=await evaluate(client,snapshot);
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('003W/2b-2d exact survivor Redo',
+        async()=>(await evaluate(client,snapshot))?.successEqual===true,90_000);
+      const redo=await evaluate(client,snapshot);
+      assert(await evaluate(client,changeTab(0)),
+        '003W/2b-2d revisit original after successful survivor retry');
+      const originalFinal=await evaluate(client,snapshot);
+      const originalFinalUi=await evaluate(client,'('+ui.toString()+')()');
+      await new Promise(resolve=>setTimeout(resolve,750));
+      const allWorkers=await evaluate(client,expr);
+      assert(originalFinal.baselineEqual && uiExact(originalFinalUi,originalPreview) &&
+        allWorkers.jobs===2 && allWorkers.replies===1 && allWorkers.terminatedJobs===1,
+        '003W/2b-2d no old reply or cross-tab mutation even after successor Redo');
       const evidence={format,protocol:'file:',tabs:2,sourcePixels:fixture.width*fixture.height,
         selectedPixels:inFlight.selectedPixels,selectedBytes:inFlight.selectedBytes,
         workerJobs:finished.jobs,repliesBeforeSwitch:inFlight.replies,
@@ -340,7 +392,18 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         dispatchToTerminationMs:switched.firstTerminatedAtMs-inFlight.firstDispatchAtMs,
         pulseIntervalsMs:timer.pulseIntervalsMs,heapBeforeBytes:timer.heapBeforeBytes,
         heapAfterBytes:timer.heapAfterBytes,
-        limitations:'Owner switch and native isolation only; close/retry and CPU/operation RSS/PID attribution unproven.'};
+        successorSelectedPixels:successor.selectedPixels,
+        successorSelectedBytes:successor.selectedBytes,
+        changedSelectedPixels:success.quality.changedSelectedPixels,
+        outsideSelectionUnchanged:success.quality.changedOutsideSelectionPixels===0,
+        alphaUnchanged:success.alphaUnchanged,
+        retryHistoryOnce:countFill(successUi.history)===countFill(secondaryUi.history)+1,
+        undoExact:undo.baselineEqual,redoExact:redo.successEqual,
+        originalFinalExact:originalFinal.baselineEqual&&uiExact(originalFinalUi,originalPreview),
+        retryCompletionMs:retryTimer.elapsedMs,retryPulseIntervalsMs:retryTimer.pulseIntervalsMs,
+        finalWorkerJobs:allWorkers.jobs,finalWorkerReplies:allWorkers.replies,
+        finalWorkerTerminations:allWorkers.terminatedJobs,
+        limitations:'Genuine two-tab dense Worker switch and retry; bounded browser timer/heap only, no isolated CPU, operation RSS peak, Worker PID or Photoshop-authored fixture.'};
       console.log('003W/2b-2d genuine cross-document Worker switch:',JSON.stringify(evidence));
       return evidence;
     }
