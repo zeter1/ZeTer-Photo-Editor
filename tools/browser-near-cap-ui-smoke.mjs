@@ -318,10 +318,28 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
           const malformed=new File([Uint8Array.from([56,66,80,83,0,0,0,99,0,0,0,0])],
             name,{type:'image/vnd.adobe.photoshop'});
           const previousConfirm=window.confirm,previousAlert=window.alert;
-          let approvedPrompts=0,alerts=0;
+          let approvedPrompts=0,alerts=0,errorMessage='',atFailure=null;
+          let notifyFailure;
+          const failed=new Promise(resolve=>{notifyFailure=resolve;});
           try{
             window.confirm=()=>{approvedPrompts++;return true;};
-            window.alert=()=>{alerts++;};
+            window.alert=message=>{
+              alerts++;errorMessage=String(message);
+              // Snapshot synchronously in the decode-error callback. A valid
+              // original Worker is allowed to finish afterwards, so polling
+              // the status text for seconds would incorrectly treat its
+              // legitimate completion as an import mutation.
+              const meta=window.__nearCapMeta;
+              atFailure={
+                worker:window.__nearCapWorkerObservation.summary(),
+                tabs:document.querySelectorAll('#docTabs .doc-tab').length,
+                pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d')
+                  .getImageData(meta.x,meta.y,1,1).data),
+                history:[...document.querySelectorAll('#historyList .history-row')].map(
+                  row=>row.textContent),
+              };
+              notifyFailure();
+            };
             document.querySelector('.menu-button[data-menu="file"]').click();
             const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
               x=>x.querySelector('span')?.textContent?.startsWith('Открыть изображение'));
@@ -330,28 +348,23 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
             const transfer=new DataTransfer();transfer.items.add(malformed);
             input.files=transfer.files;
             input.dispatchEvent(new Event('change',{bubbles:true}));
-            for(let attempt=0;attempt<150;attempt++){
-              if(document.querySelector('#statusText')?.textContent==='Ошибка импорта PSD/PSB')break;
-              await new Promise(resolve=>setTimeout(resolve,20));
-            }
+            await Promise.race([failed,new Promise(resolve=>setTimeout(resolve,1_200))]);
             return {clicked:true,name,bytes:malformed.size,approvedPrompts,alerts,
-              status:document.querySelector('#statusText')?.textContent||'',
-              worker:window.__nearCapWorkerObservation.summary(),
-              tabs:document.querySelectorAll('#docTabs .doc-tab').length};
+              errorMessage,atFailure};
           }finally{window.confirm=previousConfirm;window.alert=previousAlert;}
         }
         const malformed=await evaluate(client,'('+openMalformed.toString()+')()');
-        const afterMalformedUi=await evaluate(client,'('+ui.toString()+')()');
-        const previewUnchanged=JSON.stringify(afterMalformedUi.pixel)===
+        const previewUnchanged=JSON.stringify(malformed.atFailure?.pixel)===
           JSON.stringify(originalPreview.pixel);
-        const historyUnchanged=JSON.stringify(afterMalformedUi.history)===
+        const historyUnchanged=JSON.stringify(malformed.atFailure?.history)===
           JSON.stringify(originalPreview.history);
         assert(malformed.clicked&&malformed.bytes===12&&malformed.approvedPrompts===1&&
-          malformed.status==='Ошибка импорта PSD/PSB' && malformed.tabs===1 &&
-          malformed.worker.jobs===1&&malformed.worker.replies===0&&
-          malformed.worker.terminatedJobs===0 && previewUnchanged && historyUnchanged,
-          '003W/2b-2h corrupt high-depth File Open must fail without revoking native Worker',
-          JSON.stringify({malformed,afterMalformedUi,previewUnchanged,historyUnchanged}));
+          malformed.alerts===1&&malformed.errorMessage.startsWith('Не удалось импортировать PSD/PSB:') &&
+          malformed.atFailure?.tabs===1 &&
+          malformed.atFailure?.worker?.jobs===1&&malformed.atFailure?.worker?.replies===0&&
+          malformed.atFailure?.worker?.terminatedJobs===0 && previewUnchanged && historyUnchanged,
+          '003W/2b-2h corrupt File Open must report real decoder failure with unchanged in-flight native owner',
+          JSON.stringify({malformed,previewUnchanged,historyUnchanged}));
         // The active Worker may lock Save Project. Explicitly cancel only AFTER
         // proving failed import retained it, then use the public Save Project
         // path for exact native-byte verification before any valid replacement.
@@ -378,13 +391,13 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         failedImport={
           malformedFilename:malformed.name,malformedBytes:malformed.bytes,
           approvedPrompts:malformed.approvedPrompts,
-          decodeFailed:malformed.status==='Ошибка импорта PSD/PSB',
-          oldWorkerRetained:malformed.worker.terminatedJobs===0 &&
-            malformed.worker.replies===0&&malformed.worker.jobs===1,
+          decodeFailed:malformed.errorMessage.startsWith('Не удалось импортировать PSD/PSB:'),
+          oldWorkerRetained:malformed.atFailure.worker.terminatedJobs===0 &&
+            malformed.atFailure.worker.replies===0&&malformed.atFailure.worker.jobs===1,
           nativeExact:afterMalformed.baselineEqual,
           previewUnchanged,historyUnchanged,
           explicitCancelNoReply:afterCancelWorker.terminatedJobs===1&&afterCancelWorker.replies===0,
-          tabsAfterFailure:malformed.tabs,
+          tabsAfterFailure:malformed.atFailure.tabs,
         };
       }
 
