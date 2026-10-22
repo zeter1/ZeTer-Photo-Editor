@@ -259,7 +259,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         window.__nearCapBaselineSource=next.source||null;
         window.__nearCapSuccess=next.success||null;
         window.__nearCapTabIndex=index;
-        return targets[index].getAttribute('aria-selected')==='true';
+        return document.querySelectorAll('#docTabs .doc-tab')[index]?.getAttribute('aria-selected')==='true';
       }
       const changeTab=index=>'('+tab.toString()+')('+index+')';
       const uiExact=(a,b)=>JSON.stringify(a.pixel)===JSON.stringify(b.pixel) &&
