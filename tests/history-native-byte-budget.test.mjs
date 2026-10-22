@@ -3,25 +3,25 @@ import assert from 'node:assert/strict';
 import { HistoryStack } from '../src/core/history.js';
 
 test('003W/2b-2a: ASCII native tile snapshots retain one byte per char and allow Undo', () => {
-  const stack = new HistoryStack(80,132);
+  const stack = new HistoryStack(80,128);
   const initial='data:application/x-zeter-pixel-buffer-tile;base64,'+'A'.repeat(14);
   const edited='data:application/x-zeter-pixel-buffer-tile;base64,'+'B'.repeat(14);
-  assert.equal(initial.length,66);
-  assert.equal(stack.snapshotBytes(initial),66);
+  assert.equal(initial.length,64);
+  assert.equal(stack.snapshotBytes(initial),64);
   stack.reset('initial',initial);
   stack.push('tiled Fill',edited);
   assert.equal(stack.entries.length,2);
-  assert.equal(stack.totalBytes(),132);
+  assert.equal(stack.totalBytes(),128);
   assert.equal(stack.canUndo(),true);
 });
 
 test('003W/2b-2a: compact ASCII Undo with an exact bounded history budget', () => {
-  const stack=new HistoryStack(80,132);
+  const stack=new HistoryStack(80,128);
   const source='data:application/x-zeter-pixel-buffer-tile;base64,'+'A'.repeat(14);
   const changed=source.replace(/A/g,'B');
   stack.reset('initial',source);
   stack.push('native Fill',changed);
-  assert.equal(stack.totalBytes(),132);
+  assert.equal(stack.totalBytes(),128);
   assert.equal(stack.canUndo(),true,'two ASCII native snapshots fit the same byte budget');
   assert.equal(stack.undo().snapshot,source);
   assert.equal(stack.redo().snapshot,changed);
