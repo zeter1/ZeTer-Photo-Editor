@@ -42,7 +42,7 @@ export function validateBrowserNearCapEvidence(value) {
     !Array.isArray(value.sampledPulseIntervalsMs) ||
     value.sampledPulseIntervalsMs.length>256 ||
     value.sampledPulseIntervalsMs.some(ms=>!Number.isFinite(ms)||ms<0||ms>120000) ||
-    value.pulsesTruncated!==false ||
+    typeof value.pulsesTruncated!=='boolean' ||
     !Number.isFinite(value.menuToRefusalMs) ||
     value.menuToRefusalMs<0 || value.menuToRefusalMs>120000 ||
     [value.heapBeforeBytes,value.heapAfterBytes].some(
