@@ -514,11 +514,11 @@ jobs:
         env:
           ZPE_BROWSER_DENSE_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-import
 
-      - name: Upload dense original-document PSD/PSB import replacement receipts
+      - name: Upload dense File Open PSD/PSB native replacement receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: zpe-browser-dense-replace-003w2b2f
+          name: zpe-browser-dense-import-003w2b2g
           path: ${{ runner.temp }}/zpe-dense-import/*.json
           if-no-files-found: warn
           retention-days: 14
