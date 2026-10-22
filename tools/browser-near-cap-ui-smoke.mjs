@@ -324,12 +324,14 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         '003W/2b-2d original native/preview/History must remain exact');
       await new Promise(resolve=>setTimeout(resolve,1250));
       const originalSettled=await evaluate(client,snapshot);
+      const originalSettledUi=await evaluate(client,'('+ui.toString()+')()');
       assert(await evaluate(client,changeTab(1)),
         '003W/2b-2d revisit survivor after bounded settling');
       const survivorSettled=await evaluate(client,snapshot);
       const survivorSettledUi=await evaluate(client,'('+ui.toString()+')()');
       const finished=await evaluate(client,expr);
       assert(originalSettled.baselineEqual && survivorSettled.baselineEqual &&
+        uiExact(originalSettledUi,originalPreview) &&
         uiExact(survivorSettledUi,secondaryUi) && finished.replies===0 &&
         finished.terminatedJobs===1,
         '003W/2b-2d no stale native result in either tab after settling',JSON.stringify(finished));
