@@ -1,3 +1,10 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import {
+  installBrowserSelectionFreezeObserver,
+  validateBrowserSelectionPhaseEvidence,
+  summarizeBrowserSelectionPhaseEvidence,
+} from './browser-selection-freeze-observer.mjs';
 import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
 import { inspectNativeSelectedPixelChanges } from './browser-native-selection-integrity.mjs';
 import { saveBrowserNearCapEvidence, validateBrowserNearCapEvidence } from './browser-near-cap-evidence.mjs';
@@ -1554,6 +1561,8 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         '003W/2b-2b dense marquee must be visible and inside the safety cap',
         JSON.stringify(view));
       await draw(view);
+      await evaluate(client,'('+installBrowserSelectionFreezeObserver.toString()+')()');
+      await evaluate(client,'window.__stage003SelectionFreeze.begin("first-fill");true');
       await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
       assert(await evaluate(client,'('+runFill.toString()+')()'),
         '003W/2b-2b actual dense Fill menu item must be enabled');
@@ -1630,9 +1639,29 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         limitations:BROWSER_DENSE_NEAR_CAP_LIMITATIONS,
       };
       validateBrowserDenseNearCapEvidence(evidence);
-      const path=await saveBrowserDenseNearCapEvidence(evidence,
-        process.env.ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR);
-      console.log('003W/2b-2b real dense Chromium native Worker:',JSON.stringify({path,evidence}));
+      const phase=await evaluate(client,'window.__stage003SelectionFreeze.phaseSnapshot()');
+      await evaluate(client,'window.__stage003SelectionFreeze.restore();true');
+      validateBrowserSelectionPhaseEvidence(phase,{
+        format,geometryPixels:fixture.width*fixture.height,selectionClass:'dense',
+      });
+      assert(phase.windows.length===1 &&
+        phase.windows[0].selectedPixels===worker.selectedPixels &&
+        phase.windows[0].selectedPixels===1_973_400,
+        '003W/3 phase boundary must refer to exact genuine dense native Worker',
+        JSON.stringify(phase));
+      const summary=summarizeBrowserSelectionPhaseEvidence(phase,{
+        format,geometryPixels:fixture.width*fixture.height,selectionClass:'dense',
+      });
+      const phaseDirectory=process.env.ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR;
+      let phasePath=null;
+      if(phaseDirectory){
+        await mkdir(phaseDirectory,{recursive:true});
+        phasePath=path.join(phaseDirectory,'stage003-selection-phase-'+format.toLowerCase()+'.json');
+        await writeFile(phasePath,JSON.stringify(phase,null,2)+'\n');
+      }
+      const densePath=await saveBrowserDenseNearCapEvidence(evidence,phaseDirectory);
+      console.log('003W/3 real dense selection freeze:',JSON.stringify({format,phasePath,summary}));
+      console.log('003W/2b-2b real dense Chromium native Worker:',JSON.stringify({path:densePath,evidence}));
       return evidence;
     }
     const sparseView=await evaluate(client,'('+setupSelection.toString()+')(false)');
