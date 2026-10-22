@@ -288,6 +288,21 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         beforeRetry.jobs===1 && beforeRetry.replies===0 && beforeRetry.terminatedJobs===1,
         '003W/2b-2c cancelled result must remain uncommitted after settling',
         JSON.stringify({afterSettle,settledUi,beforeRetry}));
+      // Supersede the cancelled job's selection owner before retry:
+      // dense -> sparse -> freshly drawn dense, still no second Worker yet.
+      const newerSparse=await evaluate(client,'('+setupSelection.toString()+')(false)');
+      assert(newerSparse.hit==='overlayCanvas'&&newerSparse.within,
+        '003W/2b-2c new sparse selection must be a real pointer gesture');
+      await draw(newerSparse);
+      const newerDense=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(newerDense.hit==='overlayCanvas'&&newerDense.within &&
+        newerDense.boundingPixels===view.boundingPixels,
+        '003W/2b-2c new dense selection must be independently redrawn');
+      await draw(newerDense);
+      const superseded=await evaluate(client,workerExpr);
+      assert(superseded.jobs===1 && superseded.replies===0,
+        '003W/2b-2c changing selection must not revive cancelled Worker',
+        JSON.stringify(superseded));
       await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
       assert(await evaluate(client,'('+runFill.toString()+')()'),
         '003W/2b-2c retry must be an enabled real menu Fill');
@@ -338,6 +353,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         firstSelectedPixels:first.selectedPixels,firstSelectedBytes:first.selectedBytes,
         secondSelectedPixels:second.selectedPixels,secondSelectedBytes:second.selectedBytes,
         workerJobs:finalWorker.jobs,cancelAcknowledged:true,
+        selectionReplacedAfterCancel:true,
         cancelBeforeReply:stopped.replies===0,
         terminatedJobsBeforeRetry:beforeRetry.terminatedJobs,
         repliesBeforeRetry:beforeRetry.replies,
