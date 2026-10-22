@@ -383,7 +383,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: zpe-browser-dense-cancel-003w2b2d
+          name: zpe-browser-dense-owner-003w2b2d
           path: ${{ runner.temp }}/zpe-dense-owner/*.json
           if-no-files-found: warn
           retention-days: 14
