@@ -226,12 +226,17 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       '003W/2b-2a real Worker may change only selected native color bytes',
       JSON.stringify(success));
     await evaluate(client,"document.querySelector('#undoBtn').click();true");
-    await waitFor('003W/2b-2a native Undo',()=>evaluate(client,
-      'document.querySelector("#statusText")?.textContent?.includes("Отмен")'),30_000)
-      .catch(()=>{}); // Independent exact serialized native-byte check below.
+    await waitFor('003W/2b-2a native Undo preview',()=>evaluate(client,
+      '(() => {const f=window.__nearCapMeta;return '+
+      'document.querySelector("#editorCanvas").getContext("2d")'+
+      '.getImageData(f.x,f.y,1,1).data[0]>150})()'),30_000);
     const undo=await evaluate(client,snapshot);
     assert(undo.baselineEqual,'003W/2b-2a Undo must restore exact source tile bytes',JSON.stringify(undo));
     await evaluate(client,"document.querySelector('#redoBtn').click();true");
+    await waitFor('003W/2b-2a native Redo preview',()=>evaluate(client,
+      '(() => {const f=window.__nearCapMeta;return '+
+      'document.querySelector("#editorCanvas").getContext("2d")'+
+      '.getImageData(f.x,f.y,1,1).data[0]<150})()'),30_000);
     const redo=await evaluate(client,snapshot);
     assert(redo.successEqual && !redo.baselineEqual,
       '003W/2b-2a Redo must reproduce identical native tile payloads',JSON.stringify(redo));
