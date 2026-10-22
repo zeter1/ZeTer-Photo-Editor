@@ -350,7 +350,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       await waitFor('003W/2b-2g accepted distinct native PSD/PSB import',
         ()=>evaluate(client,'document.querySelector("#statusText")?.textContent?.startsWith('+
           JSON.stringify('PSD/PSB импортирован:')+') && '+
-          'document.querySelector("#docTabs .doc-tab .doc-tab-name")?.textContent?.includes('+
+          'document.querySelector("#docTabs .doc-tab .doc-tab-title")?.textContent?.includes('+
           JSON.stringify(replacement.filename.replace(/\.ps[db]$/i,''))+')'),90_000);
       const cancelled=await evaluate(client,workerExpr);
       const cancelTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
