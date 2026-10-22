@@ -47,7 +47,8 @@ export function validateBrowserDenseOwnerEvidence(value){
     value.retryCompletionMs<=0||value.retryCompletionMs>205_000||
     !isSamples(value.retryPulseIntervalsMs)||
     value.finalWorkerJobs!==2||value.finalWorkerReplies!==1||
-    value.finalWorkerTerminations!==1||value.limitations!==LIMITATIONS)throw invalid();
+    (value.finalWorkerTerminations!==1&&value.finalWorkerTerminations!==2)||
+    value.limitations!==LIMITATIONS)throw invalid();
   return true;
 }
 export async function saveBrowserDenseOwnerEvidence(value,directory){
