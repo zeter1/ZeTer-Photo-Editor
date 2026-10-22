@@ -1,11 +1,15 @@
 import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
 import { inspectNativeSelectedPixelChanges } from './browser-native-selection-integrity.mjs';
 import { saveBrowserNearCapEvidence, validateBrowserNearCapEvidence } from './browser-near-cap-evidence.mjs';
+import {
+  saveBrowserDenseNearCapEvidence, validateBrowserDenseNearCapEvidence,
+  BROWSER_DENSE_NEAR_CAP_LIMITATIONS,
+} from './browser-dense-near-cap-evidence.mjs';
 
 // 003W/2b-2a: actual Chromium file:// PSD16/PSB32 import, UI marquee,
 // production Blob Worker + History, and >2M refusal. The successful selection
-// is intentionally small; near-2M successful dense CPU painting is STILL OPEN.
-export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey}={}) {
+// is intentionally small in legacy mode. Dense mode independently checks real near-2M Worker completion.
+export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false}={}) {
   const fixture=createBrowserHighDepthFixture(fixtureKey);
   const format=fixture.version===1?'PSD16':'PSB32';
   assert(fixture.width===1450 && fixture.height===1400 &&
@@ -166,12 +170,15 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
     viewport.scrollTop=(viewport.scrollHeight-viewport.clientHeight)/2;
     const canvas=document.querySelector('#editorCanvas'),r=canvas.getBoundingClientRect();
     const toClient=(x,y)=>({x:r.left+r.width*x/f.width,y:r.top+r.height*y/f.height});
-    const start=large?toClient(1,1):toClient(f.x-12,f.y-12);
-    const end=large?toClient(f.width-4,f.height-2):toClient(f.x+12,f.y+12);
+    const isWide=large===true||large==='dense',isDense=large==='dense';
+    const start=isWide?toClient(isDense?10:1,isDense?10:1):toClient(f.x-12,f.y-12);
+    const end=isWide?toClient(isDense?f.width-10:f.width-4,
+      isDense?f.height-10:f.height-2):toClient(f.x+12,f.y+12);
     const center=toClient(f.x,f.y);
     return {start,end,hit:document.elementFromPoint(center.x,center.y)?.id,
       within:start.x>0&&start.y>0&&end.x<innerWidth&&end.y<innerHeight,
-      boundingPixels:(f.width-5)*(f.height-3),width:r.width,height:r.height};
+      boundingPixels:large==='dense'?(f.width-20)*(f.height-20):
+        (f.width-5)*(f.height-3),width:r.width,height:r.height};
   }
   async function draw(view) {
     const send=(type,point,buttons)=>client.send('Input.dispatchMouseEvent',{
@@ -207,6 +214,96 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       baseline.rawBytes===fixture.width*fixture.height*4*(fixture.bitsPerChannel/8) &&
       baseline.tiles>1 && baseline.baselineEqual,
       '003W/2b-2a initial native PSD/PSB source bytes/geometry',JSON.stringify(baseline));
+    // A separate fresh-profile scenario: actual ~2M selected indices must
+    // complete a production Worker job, not merely pass the UI safety scan.
+    if (dense) {
+      const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(view.hit==='overlayCanvas' && view.within &&
+        view.boundingPixels>=1_900_000 && view.boundingPixels<=2_000_000,
+        '003W/2b-2b dense marquee must be visible and inside the safety cap',
+        JSON.stringify(view));
+      await draw(view);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2b actual dense Fill menu item must be enabled');
+      // Dispatch evidence is independent from completion: a task can exceed
+      // the 180 s production Worker watchdog, fail with an error status or
+      // stall in UI selection freezing before postMessage. Log which phase
+      // actually happened instead of reporting only an opaque 240 s timeout.
+      const denseState='(() => ({worker:window.__nearCapWorkerObservation.summary(),'+
+        'status:document.querySelector("#statusText")?.textContent||""}))()';
+      try {
+        await waitFor('003W/2b-2b dense production Worker dispatch',
+          async()=>(await evaluate(client,denseState)).worker.jobs===1,75_000);
+        const dispatched=await evaluate(client,denseState);
+        console.log('003W/2b-2b '+format+' real dense Worker dispatched:',
+          JSON.stringify(dispatched));
+        assert(dispatched.worker.selectedPixels>=1_900_000 &&
+          dispatched.worker.selectedPixels<=2_000_000 &&
+          dispatched.worker.selectedBytes===dispatched.worker.selectedPixels*4,
+          '003W/2b-2b actual dense frozen selection before kernel completion',
+          JSON.stringify(dispatched));
+        await waitFor('003W/2b-2b genuine dense production Worker completion',
+          ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===1 && '+
+            'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),
+          205_000);
+      } catch(error) {
+        const observed=await evaluate(client,denseState).catch(e=>({readError:String(e)}));
+        const elapsed=await evaluate(client,
+          'window.__nearCapWorkerObservation.end()').catch(()=>null);
+        throw new Error('003W/2b-2b failed genuine dense Worker phase: '+
+          JSON.stringify({format,observed,elapsed,
+            productionWorkerDeadlineMs:180_000,
+            limitations:'No dense success, native output, or Undo/Redo claim'}),{cause:error});
+      }
+      const timer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      const worker=await evaluate(client,'window.__nearCapWorkerObservation.summary()');
+      assert(worker.jobs===1 && worker.selectedPixels>=1_900_000 &&
+        worker.selectedPixels<=2_000_000 &&
+        worker.selectedBytes===worker.selectedPixels*4,
+        '003W/2b-2b real dense Worker must receive bounded frozen Uint32 indices',
+        JSON.stringify(worker));
+      await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+      const success=await evaluate(client,snapshot);
+      assert(!success.error && !success.baselineEqual &&
+        success.quality?.selectedPixels===worker.selectedPixels &&
+        success.quality.changedSelectedPixels>0 &&
+        success.quality.changedOutsideSelectionPixels===0 &&
+        success.alphaUnchanged===true,
+        '003W/2b-2b native changed pixels must be strictly selected colors',
+        JSON.stringify(success));
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('003W/2b-2b exact dense native Undo',async()=>
+        (await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+      const undo=await evaluate(client,snapshot);
+      assert(undo.baselineEqual,'003W/2b-2b dense Undo must restore native bytes');
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('003W/2b-2b exact dense native Redo',async()=>
+        (await evaluate(client,snapshot))?.successEqual===true,90_000);
+      const redo=await evaluate(client,snapshot);
+      assert(redo.successEqual && !redo.baselineEqual,
+        '003W/2b-2b dense Redo must reproduce native bytes');
+      const evidence={
+        kind:'zpe-browser-near-cap-dense-v1',format,
+        sourcePixels:fixture.width*fixture.height,sourceRawBytes:baseline.rawBytes,
+        protocol:'file:',marqueeBoundingPixels:view.boundingPixels,
+        selectedPixels:worker.selectedPixels,selectedBytes:worker.selectedBytes,
+        workerJobs:worker.jobs,changedSelectedPixels:success.quality.changedSelectedPixels,
+        outsideSelectionUnchanged:success.quality.changedOutsideSelectionPixels===0,
+        alphaUnchanged:success.alphaUnchanged,
+        undoExact:undo.baselineEqual,redoExact:redo.successEqual,
+        sampledPulseIntervalsMs:timer.pulseIntervalsMs,requestedPulseMs:8,
+        pulsesTruncated:timer.truncated,menuToCompletionMs:timer.elapsedMs,
+        heapBeforeBytes:timer.heapBeforeBytes,heapAfterBytes:timer.heapAfterBytes,
+        workerPidMapping:'unknown',operationPeakKnown:false,
+        limitations:BROWSER_DENSE_NEAR_CAP_LIMITATIONS,
+      };
+      validateBrowserDenseNearCapEvidence(evidence);
+      const path=await saveBrowserDenseNearCapEvidence(evidence,
+        process.env.ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR);
+      console.log('003W/2b-2b real dense Chromium native Worker:',JSON.stringify({path,evidence}));
+      return evidence;
+    }
     const sparseView=await evaluate(client,'('+setupSelection.toString()+')(false)');
     assert(sparseView.hit==='overlayCanvas' && sparseView.within,
       '003W/2b-2a sparse UI selection must be visible',JSON.stringify(sparseView));

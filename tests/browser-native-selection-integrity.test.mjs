@@ -76,3 +76,35 @@ test('032: reject forged indices, geometry, or corrupt native payload',()=>{
     {...success,tiles:[{...success.tiles[0],dataUrl:'data:image/png;base64,AA=='},success.tiles[1]]},
     Uint32Array.of(0)),/invalid native tile payload/);
 });
+
+test('003W/2b-2b: ~2M dense indices preserve exact native tile membership with bounded oracle',()=>{
+  // The same native geometry and near-cap marquee area as the real Chromium
+  // 1450x1400 PSD16/PSB32 fixture; unlike the small smoke this forces dense
+  // membership checks. Do not present this Node oracle as Worker success.
+  const width=1450,height=1400,tileSize=256,channels=4,bitsPerChannel=16,stride=8;
+  const tiles=[];
+  for(let y=0;y<height;y+=tileSize)for(let x=0;x<width;x+=tileSize){
+    const w=Math.min(tileSize,width-x),h=Math.min(tileSize,height-y);
+    const bytes=Buffer.alloc(w*h*stride);
+    tiles.push({x,y,width:w,height:h,rawBytes:bytes.length,
+      dataUrl:prefix+bytes.toString('base64')});
+  }
+  const source={kind:'zpe-pixel-buffer-source-v2',width,height,channels,
+    bitsPerChannel,model:'rgb',tileSize,rawBytes:width*height*stride,
+    colorSpace:'srgb',alphaMode:'straight',profileName:'',tiles};
+  const left=5,right=1445,top=5,bottom=1390;
+  const selected=Uint32Array.from({length:(right-left)*(bottom-top)},(_,i)=>
+    (top+Math.floor(i/(right-left)))*width+left+i%(right-left));
+  assert.equal(selected.length,1_994_400);
+  const changed=modify(source,725,700,2);
+  assert.deepEqual(inspectNativeSelectedPixelChanges(source,changed,selected),{
+    selectedPixels:1_994_400,changedSelectedPixels:1,changedTiles:1,
+    changedOutsideSelectionPixels:0,
+  });
+  assert.throws(()=>inspectNativeSelectedPixelChanges(source,
+    modify(source,1,1,2),selected),/outside frozen Worker selection/);
+  // Repeated position must fail even for a 2M-element typed array.
+  selected[selected.length-1]=selected[0];
+  assert.throws(()=>inspectNativeSelectedPixelChanges(source,changed,selected),
+    /invalid or duplicate frozen selection index/);
+});

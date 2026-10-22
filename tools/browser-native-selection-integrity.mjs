@@ -22,13 +22,21 @@ export function inspectNativeSelectedPixelChanges(before, after, selectedIndices
       before.rawBytes !== pixelCount * stride) fail('invalid native byte budget');
   if (!(selectedIndices instanceof Uint32Array) && !Array.isArray(selectedIndices))
     fail('missing frozen Worker selection');
-  const selection = new Set();
+  // A dense near-2M frozen Worker selection used to allocate millions of
+  // boxed Set entries while checking persisted native pixels. One bit per
+  // document pixel keeps the independent oracle bounded (< 1 MiB for the
+  // supported high-depth source budget), without weakening duplicate checks.
+  const selectionBits = new Uint8Array(Math.ceil(pixelCount / 8));
+  let selectedPixels = 0;
   for (const index of selectedIndices) {
-    if (!Number.isSafeInteger(index) || index < 0 || index >= pixelCount || selection.has(index))
+    if (!Number.isSafeInteger(index) || index < 0 || index >= pixelCount)
       fail('invalid or duplicate frozen selection index');
-    selection.add(index);
+    const byte = index >>> 3, flag = 1 << (index & 7);
+    if (selectionBits[byte] & flag) fail('invalid or duplicate frozen selection index');
+    selectionBits[byte] |= flag;
+    selectedPixels++;
   }
-  if (!selection.size) fail('empty frozen Worker selection');
+  if (!selectedPixels) fail('empty frozen Worker selection');
   const prefix = 'data:application/x-zeter-pixel-buffer-tile;base64,';
   function decode(tile, byteLength) {
     if (typeof tile.dataUrl !== 'string' || !tile.dataUrl.startsWith(prefix))
@@ -68,7 +76,8 @@ export function inspectNativeSelectedPixelChanges(before, after, selectedIndices
       const localPixel = offset / stride;
       const x = original.x + localPixel % original.width;
       const y = original.y + Math.floor(localPixel / original.width);
-      if (!selection.has(y * before.width + x)) {
+      const globalIndex = y * before.width + x;
+      if (!(selectionBits[globalIndex >>> 3] & (1 << (globalIndex & 7)))) {
         fail('native byte mutation outside frozen Worker selection at ' + x + ',' + y);
       }
       changedSelectedPixels += 1;
@@ -77,7 +86,7 @@ export function inspectNativeSelectedPixelChanges(before, after, selectedIndices
     if (changedHere) changedTiles += 1;
   }
   return {
-    selectedPixels: selection.size,
+    selectedPixels,
     changedSelectedPixels,
     changedTiles,
     changedOutsideSelectionPixels: 0,

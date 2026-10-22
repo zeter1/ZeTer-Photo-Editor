@@ -2324,7 +2324,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
           const index = (rect.top + y) * width + rect.left + x;
           return (selectionBits[index >> 3] & (1 << (index & 7))) !== 0;
         },
-        maxLayerPixels, maxFillPixels,
+        maxLayerPixels, maxFillPixels, preserveAlpha:true,
       } };
       if (filled !== group.indices.length) {
         throw new RangeError('Контент-заливка: для отдельной области не найдены все доноры');
@@ -2352,7 +2352,7 @@ function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
   const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
     isAllowed:(x, y) => selectionMask[y * regionWidth + x] === 1,
     maxLayerPixels,
-    maxFillPixels,
+    maxFillPixels, preserveAlpha:true,
   } };
   if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
   const changed = yield { kind:'writeRegion', region };
