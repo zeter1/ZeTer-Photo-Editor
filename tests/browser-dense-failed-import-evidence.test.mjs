@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateBrowserDenseFailedImportEvidence } from '../tools/browser-dense-failed-import-evidence.mjs';
+import { BROWSER_DENSE_IMPORT_LIMITATIONS } from '../tools/browser-dense-import-evidence.mjs';
 
 const valid=()=>({
   kind:'zpe-browser-dense-psd-import-replacement-v1',format:'PSD16',protocol:'file:',
