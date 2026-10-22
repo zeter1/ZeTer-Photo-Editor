@@ -522,3 +522,48 @@ jobs:
           path: ${{ runner.temp }}/zpe-dense-import/*.json
           if-no-files-found: warn
           retention-days: 14
+
+  # 003W/2b-2h: malformed native File Open must retain original in-flight Worker;
+  # Escape then proves exact original bytes, valid import and genuine dense retry.
+  dense-failed-import-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 corrupt File Open rollback and valid native retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_FAILED_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-failed-import
+
+      - name: Chromium PSB32 corrupt File Open rollback and valid native retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_FAILED_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-failed-import
+
+      - name: Verify independent failed import recovery receipts
+        run: node tools/verify-browser-dense-failed-import-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_FAILED_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-failed-import
+
+      - name: Upload failed native import recovery receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-failed-import-003w2b2h
+          path: ${{ runner.temp }}/zpe-dense-failed-import/*.json
+          if-no-files-found: warn
+          retention-days: 14

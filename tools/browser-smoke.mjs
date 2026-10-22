@@ -521,20 +521,31 @@ async function runSmoke() {
         process.env.ZPE_DENSE_OWNER_BROWSER_ONLY === '1' ||
         process.env.ZPE_DENSE_CLOSE_BROWSER_ONLY === '1' ||
         process.env.ZPE_DENSE_REPLACE_BROWSER_ONLY === '1' ||
-         process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1') {
+         process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1') {
       const fixtureKey=process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSD16'
         ?'rgb16nearcap'
         :process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSB32'
           ?'rgb32psbnearcap':null;
       if(!fixtureKey) throw new TypeError('003W/2b-2a: invalid near-cap browser format');
       const {verifyBrowserNearCapUi}=await import('./browser-near-cap-ui-smoke.mjs');
-      await verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,
+      const nearCapResult=await verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,
         dense:process.env.ZPE_DENSE_NEAR_CAP_BROWSER_ONLY === '1',
         cancelDense:process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY === '1',
         switchDense:process.env.ZPE_DENSE_OWNER_BROWSER_ONLY === '1',
         closeDense:process.env.ZPE_DENSE_CLOSE_BROWSER_ONLY === '1',
         replaceDense:process.env.ZPE_DENSE_REPLACE_BROWSER_ONLY === '1',
-         importDense:process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1'});
+         importDense:process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1',
+        failedImportDense:process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1'});
+      if(process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1'){
+        // A malformed file is expected to produce exactly one production
+        // import-failure diagnostic. Any additional console errors still fail CI.
+        assert(nearCapResult?.decodeFailed===true,
+          '003W/2b-2h must demonstrate a real PSD/PSB decode failure');
+        const expected=errors.filter(error=>error.startsWith('console.error: PSD/PSB import failed'));
+        assert(expected.length===1,'003W/2b-2h exactly one expected import error',JSON.stringify(errors));
+        errors.splice(errors.indexOf(expected[0]),1);
+      }
       assertNoBrowserErrors(errors,stderrState);
       return;
     }
