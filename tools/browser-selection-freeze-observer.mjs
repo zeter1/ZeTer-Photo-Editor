@@ -88,7 +88,7 @@ export function installBrowserSelectionFreezeObserver() {
         limitations:LIMITATIONS,
         workerPidMapping:'unknown',
         trueOperationPeakKnown:false,
-        windows:windows.map(({phaseEvents,...value})=>({
+        windows:windows.map(({phaseEvents,pulseSamples,clockValid,...value})=>({
           ...value,pulseIntervalsMs:[...value.pulseIntervalsMs],
         })),
       };
