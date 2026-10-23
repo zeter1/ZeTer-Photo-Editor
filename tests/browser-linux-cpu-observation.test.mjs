@@ -49,7 +49,7 @@ test('003T/3a: CDP membership needs all distinct PIDs; permission/ENOENT leaves 
       Error('missing'),{code:'ENOENT'})),
   });
   assert.deepEqual(unknown,{
-    availability:'unknown',reason:'proc-member-unavailable',
+    availability:'unknown',reason:'proc-member-vanished',
     readStartedMs:1,readFinishedMs:2,incarnations:null,
   });
   assert.equal(validateLinuxCpuCensus(unknown),true);

@@ -536,14 +536,27 @@ async function runSmoke() {
         try{browserClient=await CdpClient.connect(browserWs);}
         catch{browserClient=null;}
       }
+      const operationRssTools=cpuTools &&
+        process.env.ZPE_OPERATION_CPU_RSS_COVERAGE==='1'
+        ?await import('./browser-operation-cpu-rss-coverage.mjs'):null;
       const operationCpuCensus=cpuTools?async()=>{
-        if(!browserClient)return cpuTools.unknownLinuxCpuCensus('cdp-unavailable');
+        const unavailable=()=>{
+          const cpu=cpuTools.unknownLinuxCpuCensus('cdp-unavailable');
+          if(!operationRssTools)return cpu;
+          return {cpu,rss:operationRssTools.unknownOperationRssCensus('cdp-unavailable')};
+        };
+        if(!browserClient)return unavailable();
         let info;
         try{info=await browserClient.send('SystemInfo.getProcessInfo');}
-        catch{return cpuTools.unknownLinuxCpuCensus('cdp-unavailable');}
+        catch{return unavailable();}
         if(!Array.isArray(info?.processInfo) || info.processInfo.length===0)
-          return cpuTools.unknownLinuxCpuCensus('cdp-unavailable');
-        return cpuTools.collectLinuxCpuCensus(info.processInfo);
+          return unavailable();
+        const cpu=await cpuTools.collectLinuxCpuCensus(info.processInfo);
+        if(!operationRssTools)return cpu;
+        // One CDP membership list, two sequential non-atomic /proc reads.
+        // Never infer a peak or Worker PID from a matching sample.
+        const rss=await operationRssTools.collectOperationRssCensus(info.processInfo);
+        return {cpu,rss};
       }:null;
       const nearCapResult=await verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,
         operationCpuCensus,
