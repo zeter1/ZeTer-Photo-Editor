@@ -1622,8 +1622,8 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
             dispatch.replies===index-1,
             '003T/4 repeat must dispatch exactly same frozen selected Uint32 indices');
           await waitFor('003T/4 real repeat completion '+index,
-            ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs==='+
-              expectedJobs+' && document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),
+            ()=>evaluate(client,'(() => {const w=window.__nearCapWorkerObservation.summary();return w.jobs==='+
+              expectedJobs+' && w.replies==='+index+' && document.querySelector("#statusText")?.textContent?.includes("tiled ")})()'),
             205_000);
           await evaluate(client,'window.__nearCapWorkerObservation.end()');
           await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
