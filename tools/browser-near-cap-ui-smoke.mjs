@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   installBrowserSelectionFreezeObserver,
   validateBrowserSelectionPhaseEvidence,
+  validateBrowserSelectionRefusalPhaseEvidence,
   summarizeBrowserSelectionPhaseEvidence,
 } from './browser-selection-freeze-observer.mjs';
 import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
@@ -45,6 +46,9 @@ import {
 // production Blob Worker + History, and >2M refusal. The successful selection
 // is intentionally small in legacy mode. Dense mode independently checks real near-2M Worker completion.
 export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false,cancelDense=false,switchDense=false,closeDense=false,replaceDense=false,importDense=false,failedImportDense=false,naturalFailedImportDense=false}={}) {
+  const repeat=process.env.ZPE_NEAR_CAP_REPETITION;
+  if(repeat!==undefined && repeat!=='2') throw new TypeError('003W/3b: invalid repetition');
+  const repeatSuffix=repeat==='2'?'-repeat2':'';
   const fixture=createBrowserHighDepthFixture(fixtureKey);
   const format=fixture.version===1?'PSD16':'PSB32';
   assert(fixture.width===1450 && fixture.height===1400 &&
@@ -1656,7 +1660,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       let phasePath=null;
       if(phaseDirectory){
         await mkdir(phaseDirectory,{recursive:true});
-        phasePath=path.join(phaseDirectory,'stage003-selection-phase-'+format.toLowerCase()+'.json');
+        phasePath=path.join(phaseDirectory,'stage003-selection-phase-'+format.toLowerCase()+repeatSuffix+'.json');
         await writeFile(phasePath,JSON.stringify(phase,null,2)+'\n');
       }
       const densePath=await saveBrowserDenseNearCapEvidence(evidence,phaseDirectory);
@@ -1668,6 +1672,8 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
     assert(sparseView.hit==='overlayCanvas' && sparseView.within,
       '003W/2b-2a sparse UI selection must be visible',JSON.stringify(sparseView));
     await draw(sparseView);
+    await evaluate(client,'('+installBrowserSelectionFreezeObserver.toString()+')()');
+    await evaluate(client,'window.__stage003SelectionFreeze.begin("first-fill");true');
     assert(await evaluate(client,'('+runFill.toString()+')()'),
       '003W/2b-2a actual sparse menu command must be enabled');
     await waitFor('003W/2b-2a real sparse native Worker success',()=>evaluate(client,
@@ -1718,6 +1724,13 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
     assert(redo.successEqual && !redo.baselineEqual,
       '003W/2b-2a Redo must reproduce identical native tile payloads',JSON.stringify(redo));
     const uiBefore=await evaluate(client,'('+ui.toString()+')()');
+    const sparsePhase=await evaluate(client,'window.__stage003SelectionFreeze.phaseSnapshot()');
+    validateBrowserSelectionPhaseEvidence(sparsePhase,{
+      format,geometryPixels:fixture.width*fixture.height,selectionClass:'sparse',
+    });
+    assert(sparsePhase.windows.length===1 &&
+      sparsePhase.windows[0].selectedPixels===sparse.selectedPixels,
+      '003W/3b sparse phase must belong to genuine native Worker');
     const largeView=await evaluate(client,'('+setupSelection.toString()+')(true)');
     assert(largeView.hit==='overlayCanvas' && largeView.within &&
       largeView.boundingPixels>2_000_000,
@@ -1726,6 +1739,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
     const refusalBefore=await evaluate(client,'window.__nearCapWorkerObservation.summary()');
     assert(refusalBefore.jobs===1,'003W/2b-2a over-cap baseline must have only sparse Worker');
     await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+    await evaluate(client,'window.__stage003SelectionFreeze.begin("retry-fill");true');
     assert(await evaluate(client,'('+runFill.toString()+')()'),
       '003W/2b-2a actual over-cap menu command must be enabled');
     await waitFor('003W/2b-2a production >2M safe refusal',()=>evaluate(client,
@@ -1758,11 +1772,35 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       limitations:'Sparse Worker success and >2M refusal only; sampled renderer timer/heap, not continuous CPU, operation memory peak, Worker PID or dense near-2M completion.',
     };
     validateBrowserNearCapEvidence(evidence);
+    const sparseAndRefusalPhase=await evaluate(client,
+      'window.__stage003SelectionFreeze.phaseSnapshot()');
+    validateBrowserSelectionRefusalPhaseEvidence(sparseAndRefusalPhase,{
+      format,geometryPixels:fixture.width*fixture.height,
+      expectedSparsePixels:sparse.selectedPixels,
+    });
+    assert(refusalAfter.jobs===refusalBefore.jobs &&
+      sparseAndRefusalPhase.windows[1].handoffAtMs===null,
+      '003W/3b genuine over-cap scan must not dispatch a Worker');
+    await evaluate(client,'window.__stage003SelectionFreeze.restore();true');
+    const phaseDirectory=process.env.ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR;
+    if(phaseDirectory){
+      await mkdir(phaseDirectory,{recursive:true});
+      const phasePath=path.join(phaseDirectory,
+        'stage003-selection-phase-sparse-'+format.toLowerCase()+repeatSuffix+'.json');
+      await writeFile(phasePath,JSON.stringify(sparseAndRefusalPhase,null,2)+'\n');
+    }
+    console.log('003W/3b actual sparse/refusal scan boundaries:',JSON.stringify({
+      format,repeat:repeat||'1',sparse:summarizeBrowserSelectionPhaseEvidence(sparsePhase,{
+        format,geometryPixels:fixture.width*fixture.height,selectionClass:'sparse',
+      }),refusalScanWallMs:sparseAndRefusalPhase.windows[1].phaseEvents[1].atMs-
+        sparseAndRefusalPhase.windows[1].phaseEvents[0].atMs,
+    }));
     const evidencePath=await saveBrowserNearCapEvidence(evidence,
       process.env.ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR);
     console.log('003W/2b-2a real Chromium near-cap UI:',JSON.stringify({path:evidencePath,evidence}));
     return evidence;
   } finally {
+    await evaluate(client,'window.__stage003SelectionFreeze?.restore();true').catch(()=>{});
     await evaluate(client,'window.__nearCapWorkerObservation?.restore();'+
       'delete window.__nearCapBaseline;delete window.__nearCapBaselineSource;'+
       'delete window.__nearCapSuccess;delete window.__nearCapMeta;true').catch(()=>{});

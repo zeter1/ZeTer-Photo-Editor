@@ -56,7 +56,9 @@ export async function saveBrowserNearCapEvidence(value,directory) {
   validateBrowserNearCapEvidence(value);
   if (!directory) return null;
   await mkdir(directory,{recursive:true});
-  const file=path.join(directory,'stage003-near-cap-'+value.format.toLowerCase()+'.json');
+  const repeat=process.env.ZPE_NEAR_CAP_REPETITION;
+  if(repeat!==undefined && repeat!=='2') throw new TypeError('003W/3b: invalid repetition');
+  const file=path.join(directory,'stage003-near-cap-'+value.format.toLowerCase()+(repeat==='2'?'-repeat2':'')+'.json');
   await writeFile(file,JSON.stringify(value,null,2)+'\n');
   return file;
 }

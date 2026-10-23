@@ -261,3 +261,38 @@ export function summarizeBrowserSelectionPhaseEvidence(value,options) {
     };
   });
 }
+
+// 003W/3b: a refused >2M selection has an actual production scan but no
+// postMessage. Its no-handoff result must never be accepted as Worker success.
+export function validateBrowserSelectionRefusalPhaseEvidence(value,options={}) {
+  const invalid=()=>new TypeError('003W/3b: invalid over-cap selection phase evidence');
+  const {format,geometryPixels,expectedSparsePixels}=options;
+  if(!value||!Array.isArray(value.windows)||value.windows.length!==2)throw invalid();
+  const [sparse,refusal]=value.windows;
+  validateBrowserSelectionPhaseEvidence({...value,windows:[sparse]},{
+    format,geometryPixels,selectionClass:'sparse',
+  });
+  const keys=['label','startedAtMs','handoffAtMs','selectedPixels','phaseEvents','pulseIntervalsMs','pulsesTruncated'];
+  if(!Number.isSafeInteger(expectedSparsePixels)||sparse.selectedPixels!==expectedSparsePixels||
+    !refusal||typeof refusal!=='object'||Array.isArray(refusal)||
+    Object.keys(refusal).length!==keys.length||
+    Object.keys(refusal).some(key=>!keys.includes(key))||
+    refusal.label!=='retry-fill'||refusal.handoffAtMs!==null||
+    refusal.selectedPixels!==null||refusal.pulsesTruncated!==false||
+    !Number.isFinite(refusal.startedAtMs)||refusal.startedAtMs<sparse.handoffAtMs||
+    !Array.isArray(refusal.phaseEvents)||refusal.phaseEvents.length!==2||
+    !Array.isArray(refusal.pulseIntervalsMs)||refusal.pulseIntervalsMs.length>LIMIT||
+    refusal.pulseIntervalsMs.some(ms=>!Number.isFinite(ms)||ms<0||ms>120000))
+    throw invalid();
+  const [begin,end]=refusal.phaseEvents;
+  if(!begin||!end||['phase','atMs','selectedPixels'].some(key=>
+      !Object.hasOwn(begin,key)||!Object.hasOwn(end,key))||
+    Object.keys(begin).length!==3||Object.keys(end).length!==3||
+    begin.phase!=='selection-start'||begin.selectedPixels!==null||
+    end.phase!=='selection-end'||
+    !Number.isFinite(begin.atMs)||begin.atMs<refusal.startedAtMs||
+    !Number.isFinite(end.atMs)||end.atMs<begin.atMs||
+    !Number.isSafeInteger(end.selectedPixels)||end.selectedPixels<=2_000_000||
+    end.selectedPixels>geometryPixels)throw invalid();
+  return true;
+}
