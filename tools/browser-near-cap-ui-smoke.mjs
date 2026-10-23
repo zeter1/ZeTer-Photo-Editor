@@ -1758,9 +1758,9 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       limitations:'Sparse Worker success and >2M refusal only; sampled renderer timer/heap, not continuous CPU, operation memory peak, Worker PID or dense near-2M completion.',
     };
     validateBrowserNearCapEvidence(evidence);
-    const path=await saveBrowserNearCapEvidence(evidence,
+    const evidencePath=await saveBrowserNearCapEvidence(evidence,
       process.env.ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR);
-    console.log('003W/2b-2a real Chromium near-cap UI:',JSON.stringify({path,evidence}));
+    console.log('003W/2b-2a real Chromium near-cap UI:',JSON.stringify({path:evidencePath,evidence}));
     return evidence;
   } finally {
     await evaluate(client,'window.__nearCapWorkerObservation?.restore();'+
