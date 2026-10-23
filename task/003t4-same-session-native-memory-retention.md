@@ -1,6 +1,6 @@
 # 003T/4 — Same-session high-depth native memory retention and causal regression
 
-**Priority:** P1. **Status:** TODO. **Parent:** [003T](003t-operation-memory-evidence.md) IN PROGRESS; Stage 003/6 OPEN.
+**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003T](003t-operation-memory-evidence.md) IN PROGRESS; Stage 003/6 OPEN.
 **Dependencies:** [003T/3d](003t3d-worker-pid-isolation-feasibility.md) bounded DONE; existing PSD16/PSB32 `file://` native dense Fill/cancel/Undo/Redo and sampled CDP CPU/RSS controls.
 
 ## Goal
@@ -20,3 +20,24 @@ Detect reproducible same-session retained-memory growth across multiple actual h
 - P0 independent Photoshop-authored PSB32 [002B/2c](002b2c-photoshop-psb32-provenance.md) remains BLOCKED; do not reclassify synthetic PSB32 as Adobe-authored.
 
 **First step:** inspect existing repeated same-session native Fill/Undo browser sequences and the CPU/RSS sidecar schema. Choose an independently verifiable per-cycle membership/retention comparison; implement only the missing behavior and a real acceptance gate.
+
+## 2026-10-23 implementation checkpoint — IN PROGRESS
+
+**Scope:** observational browser test harness and independent fail-closed evidence verifier; no editor production pixel pipeline or cache ownership changes without a measured cause. Original 003T/3d-2 bounded DONE; parent 003T/Stage 003 OPEN.
+
+### Real changes on candidate branch
+
+- `tools/browser-near-cap-ui-smoke.mjs`: opt-in same fresh `file://` Chromium PSD16/PSB32 tab with three sequential real near-cap dense native Fill → exact Undo → exact Redo cycles, including original Escape/cancel/retry, settlement, Worker message/reply counts, native bytes/alpha/outside-selection and exact one History edit. Per-cycle independent CDP/Linux CPU/RSS samples before Fill and after history/settle; observe window starts/finishes and actual source SHA-256.
+- `tools/browser-smoke.mjs`: refuse same-session instrumentation without real dense-cancel + CPU/RSS census configuration.
+- `tools/browser-same-session-native-retention.mjs`: independently validate literal session identity, format + fixture SHA-256 + original accepted native cancellation receipt digest, three ordered native cycles, read intervals, both Linux CPU and RSS PID+starttime membership per sample. Only compare end-of-cycle sampled RSS when **all observed PIDs and incarnations match across both cycles**, else `unknown`. Never infer peak, Worker PID, leak or continuous process attribution.
+- `tools/verify-browser-same-session-native-retention.mjs`: reconstitute both native fixture source hashes and independently audit the saved PSD16/PSB32 artifact pair and distinct session UUIDs.
+- `tests/browser-same-session-native-retention.test.mjs`: positive/negative Node cases for observed-comparable, missing `/proc`, permission gap, reused PID, forged metadata, pixel/History claims, timing, native mismatch, peak/Worker claims.
+- `.github/workflows/ci.yml`: real `dense-cancel-browser` job gets opt-in third-cycle PSD16 and PSB32, independent JSON verifier, retained artifact `zpe-native-retention-003t4`. Existing dense-cancel and 003T/3b,3c receipts unchanged.
+
+**Priority/dependencies:** P1; 003T/3d-2 accepted, genuine high-depth Worker/file:// fixtures and sampled CPU/RSS support.
+
+**Status / measured results:** all changes committed to working GitHub branch. Real browser, Node `npm run check`, PR exact-head CI, merge and exact-main acceptance remain **PENDING** at this checkpoint. No numerical RSS growth, reproducible leak or causal runtime owner has been measured, so no production memory change is warranted yet. The unprivileged cgroup blocker persists. P0 Photoshop-authored PSB32 provenance 002B/2c remains BLOCKED.
+
+**Acceptance not yet met:** inspect real PSD16 and PSB32 three-cycle CI receipts and failure taxonomy; independently repeat any suspected comparable growth before attributing retained memory to a particular owner; fix and remeasure only if causal; green `npm run check`/browser/PR CI; merge; exact-main CI.
+
+**Next concrete task (003T/4 continuation):** independently verify both real native same-session receipts including unknown windows and matched incarnations; if consistent comparable growth is repeatable, isolate the actual cache/Worker/native array owner and demonstrate targeted before/after genuine Chromium behavior. Otherwise retain unknown/no-leak-proven and keep parent 003T open. Maintain `task/NEXT.md` accordingly.
