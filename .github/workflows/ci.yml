@@ -238,9 +238,31 @@ jobs:
           ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
           ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
 
+      - name: Repeated independent Chromium PSD16 sparse and >2M refusal
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_NEAR_CAP_REPETITION: '2'
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Repeated independent Chromium PSB32 sparse and >2M refusal
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_NEAR_CAP_REPETITION: '2'
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
       - name: Verify real near-cap browser receipts
         run: node tools/verify-browser-near-cap-evidence.mjs
         env:
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Compare repeated native sparse and over-cap phase receipts
+        run: node tools/verify-browser-selection-comparison.mjs
+        env:
+          ZPE_SELECTION_COMPARISON_KIND: sparse
           ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
 
       - name: Upload near-cap browser receipts
@@ -284,6 +306,22 @@ jobs:
           ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
           ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
 
+      - name: Repeated independent Chromium PSD16 dense native Worker and exact Undo/Redo
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_NEAR_CAP_REPETITION: '2'
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Repeated independent Chromium PSB32 dense native Worker and exact Undo/Redo
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_NEAR_CAP_REPETITION: '2'
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
       - name: Verify real dense native Worker receipts
         run: node tools/verify-browser-dense-near-cap-evidence.mjs
         env:
@@ -292,6 +330,12 @@ jobs:
       - name: Verify real PSD16 and PSB32 scan phase boundary receipts
         run: node tools/verify-browser-selection-phase-evidence.mjs
         env:
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Compare repeated genuine native dense phase receipts
+        run: node tools/verify-browser-selection-comparison.mjs
+        env:
+          ZPE_SELECTION_COMPARISON_KIND: dense
           ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
 
       - name: Upload dense native Worker receipts

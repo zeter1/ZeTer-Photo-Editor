@@ -6,6 +6,7 @@ import {
   summarizeBrowserSelectionFreezeEvidence,
   installBrowserSelectionFreezeObserver,
   validateBrowserSelectionPhaseEvidence,
+  validateBrowserSelectionRefusalPhaseEvidence,
   summarizeBrowserSelectionPhaseEvidence,
 } from '../tools/browser-selection-freeze-observer.mjs';
 
@@ -165,5 +166,37 @@ test('003W/3: phase receipt rejects counterfeit counts, chronology, RSS and gaps
     r=>r.trueOperationPeakKnown=true,
   ]){const value=phaseReceipt();mutate(value);
     assert.throws(()=>validateBrowserSelectionPhaseEvidence(value,{format:'PSD16',geometryPixels:2030000}),/invalid browser selection phase evidence/);
+  }
+});
+
+test('003W/3b: genuine sparse Worker followed by over-cap scan with zero handoff',()=>{
+  const value=phaseReceipt();
+  const sparse=value.windows[0];
+  sparse.selectedPixels=576;
+  sparse.phaseEvents[1].selectedPixels=576;
+  sparse.phaseEvents[2].selectedPixels=576;
+  value.windows.push({
+    label:'retry-fill',startedAtMs:40,handoffAtMs:null,selectedPixels:null,
+    phaseEvents:[
+      {phase:'selection-start',atMs:41,selectedPixels:null},
+      {phase:'selection-end',atMs:350,selectedPixels:2018665},
+    ],pulseIntervalsMs:[8,320],pulsesTruncated:false,
+  });
+  const options={format:'PSD16',geometryPixels:2030000,expectedSparsePixels:576};
+  assert.equal(validateBrowserSelectionRefusalPhaseEvidence(value,options),true);
+  for(const mutate of [
+    r=>r.windows[1].handoffAtMs=351,
+    r=>r.windows[1].selectedPixels=2018665,
+    r=>r.windows[1].phaseEvents[1].selectedPixels=2000000,
+    r=>r.windows[1].phaseEvents[1].atMs=39,
+    r=>r.windows[1].phaseEvents.push({phase:'worker-run-start',atMs:351,selectedPixels:2018665}),
+    r=>r.windows[1].phaseEvents[0].selectedPixels=0,
+    r=>r.windows[1].pulsesTruncated=true,
+    r=>r.windows[0].selectedPixels=577,
+    r=>r.trueOperationPeakKnown=true,
+  ]){
+    const attempt=structuredClone(value);mutate(attempt);
+    assert.throws(()=>validateBrowserSelectionRefusalPhaseEvidence(attempt,options),
+      /invalid over-cap selection phase evidence|invalid browser selection phase evidence/);
   }
 });
