@@ -128,6 +128,7 @@ export async function prepareTiledInpaintWithWorker(source, {
   maxFillPixels = 2_000_000,
   scanChunkPixels = 32_768,
   yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  onTiming = null, // opt-in monotonic observer; must not affect compute
 } = {}) {
   // Refuse over-budget sources before the first selection predicate call,
   // cooperative yield or Worker message. Returning null here used to send the
@@ -172,12 +173,20 @@ export async function prepareTiledInpaintWithWorker(source, {
     }
     indices[selected - 1] = index;
   }
+  const emitTiming = (phase, selectedPixels = null) => {
+    if (typeof onTiming !== 'function') return;
+    try {
+      const atMs = globalThis.performance?.now?.();
+      if (Number.isFinite(atMs)) onTiming({ phase, atMs, selectedPixels });
+    } catch { /* instrumentation is strictly observational */ }
+  };
   const chunk = Math.max(1, Math.min(262_144, Math.trunc(Number(scanChunkPixels) || 32_768)));
   const cancelled = () => ({
     source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true,
   });
   const unchanged = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0 });
 
+  emitTiming('selection-start');
   for (let start = 0; start < total; start += chunk) {
     if (isCancelled()) return cancelled();
     if (start > 0) {
@@ -195,6 +204,7 @@ export async function prepareTiledInpaintWithWorker(source, {
       storeSelected(index);
     }
   }
+  emitTiming('selection-end', selected);
   if (isCancelled()) return cancelled();
   // Preserve existing native semantics: empty/full selection is a no-op,
   // even when full selection exceeds the bounded maxFillPixels.
@@ -206,6 +216,7 @@ export async function prepareTiledInpaintWithWorker(source, {
   // capacity; no transient JS Array of pixel indices is ever constructed.
   const selectedIndices = indices.length === selected ? indices : indices.slice(0, selected);
   const job = { source, selectedIndices, maxBytes, maxFillPixels };
+  emitTiming('worker-run-start', selected);
   const result = await worker.run(job, { isCurrent:() => !isCancelled() });
   if (isCancelled() || result?.cancelled) return cancelled();
   if (result?.unavailable) {

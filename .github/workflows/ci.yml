@@ -289,6 +289,11 @@ jobs:
         env:
           ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
 
+      - name: Verify real PSD16 and PSB32 scan phase boundary receipts
+        run: node tools/verify-browser-selection-phase-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
       - name: Upload dense native Worker receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

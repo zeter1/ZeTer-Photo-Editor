@@ -477,6 +477,8 @@ export function createRasterEditController({
       isCancelled:stale,
       worker:tiledInpaintWorker,
       maxBytes:highDepthBudgetForLayer(layer),
+      // Read at command time to support a CDP observer injected after startup.
+      onTiming:globalThis.__zpeTiledInpaintTiming,
     });
     if (stale() || prepared?.cancelled) return { ...prepared, applied:false, stale:true };
     if (!prepared.changed) return { ...prepared, applied:false, stale:false };

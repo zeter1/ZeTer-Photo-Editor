@@ -1,6 +1,6 @@
 # 003W/3 — Comparative real near-cap selection-freeze responsiveness
 
-**Priority:** P1. **Status:** TODO. **Parent:** [003W](003w-browser-selection-freeze-responsiveness.md), Stage 003/Stage 6.
+**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003W](003w-browser-selection-freeze-responsiveness.md), Stage 003/Stage 6.
 **Dependency:** [003W/2b-2i](003w2b2i-failed-import-worker-completion.md) DONE with PR #319 and verified exact-main CI.
 
 ## Goal
@@ -18,3 +18,17 @@ Reconcile the currently successful near-2M genuine Chromium native Worker outcom
 ## Open constraints
 
 P0 independently Photoshop-authored PSB32 [002B/2c](002b2c-photoshop-psb32-provenance.md) remains BLOCKED. [003T](003t-operation-memory-evidence.md) operation-specific RSS/CPU peak and verified Worker→OS PID mapping remain OPEN. Do not infer these from renderer heap/timer observations.
+
+## 2026-10-22 — Промежуточная проходка: измерительные границы UI-сканирования
+
+- **Приоритет:** P1. **Зависимости:** 003W/2b-2i DONE, 003W/3 IN PROGRESS.
+- **Реализовано:** opt-in монотонные production-точки `selection-start`, `selection-end`, `worker-run-start` и существующий реальный `Worker.postMessage` через Chromium observer. Observer доступен после старта браузерного редактора и не влияет на расчёты даже при ошибке наблюдателя.
+- **Код:** `src/painting/tiled-inpaint-dispatch.js`, `src/painting/controller.js`, `tools/browser-selection-freeze-observer.mjs`, `tests/browser-selection-freeze-observer.test.mjs`, `tests/tiled-inpaint-phase-timing.test.mjs`, generated `src/app.bundle.js`, `index.html`, `version.json`.
+- **Тесты:** добавлены Node RGB16/RGB32 timing/cancel/over-cap/observer-failure unit и независимый strict phase-receipt validator с отрицательными проверками. Локальный `npm run check` и Chromium в этой среде не запускались (GitHub-only checkout); PR CI ещё ожидается.
+- **CI/PR:** проверка точного PR-head, реальных браузерных PSD16/PSB32 receipt и exact-main после merge ожидается; до подтверждения ни один этап не отмечать DONE.
+- **Новые ограничения:** точные monotonic wall-time границы сканирования не означают CPU-время; timer pulses sampling не является полной трассой. RSS пик операции, Worker→PID и независимая Photoshop-authored PSB32 provenance неизвестны.
+- **Осталось:** подключить `phaseSnapshot()` к фактическому multi-run near-cap PSD16/PSB32 `file://` dense/sparse/over-cap сценарию, сохранить отдельные проверенные JSON receipts, сопоставить с 003W/1 и 003W/2b-2b на равных размерах, исправлять код только при измеренном bottleneck, получить PR-head и exact-main CI.
+- **Следующая задача:** **003W/3b**, P1, внутри незавершённой **003W/3** — многоразовые браузерные измерения, отрицательные JSON-критерии и регрессии точных native/History после Worker; критерии завершения 1–5 выше ещё открыты.
+
+- **Интеграция реального браузера:** существующий `tools/browser-near-cap-ui-smoke.mjs` для genuine Chromium `file://` PSD16/PSB32 dense Worker Fill теперь запускает временный phase observer, проверяет соответствие настоящим 1 973 400 frozen Uint32 indices и записывает `stage003-selection-phase-psd16.json` / `stage003-selection-phase-psb32.json`. `.github/workflows/ci.yml` проверяет оба файла отдельным `tools/verify-browser-selection-phase-evidence.mjs` после native/Undo/Redo теста. На момент записи новые CI результаты ещё не установлены.
+- **PR:** [#320](https://github.com/zeter1/ZeTer-Photo-Editor/pull/320); ветка `test/003w3-native-selection-phase-timing-20261022`. Не считать статусом DONE до реальных успешных артефактов, повторных сравнений и exact-main.
