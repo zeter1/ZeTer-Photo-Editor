@@ -9,7 +9,7 @@ const fail=message=>new TypeError('003T/3d PID churn: '+message);
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const LIMITATIONS='These are two non-atomic Linux /proc snapshots of CDP process membership, not continuous monitoring. New or missing PID+starttime identities indicate observed membership changes, not proven process starts or exits. Unknown CPU/RSS/mismatched identity snapshots invalidate their adjacent interval, even if another observation succeeds later. This does not identify a Worker OS PID, operation-exclusive CPU, or true operation CPU/RSS peak.';
 const validId=p=>Number.isSafeInteger(p.pid) && p.pid>0 &&
-  typeof p.starttimeTicks==='string' && /^[1-9]\\d*$/.test(p.starttimeTicks);
+  typeof p.starttimeTicks==='string' && /^[1-9]\d*$/.test(p.starttimeTicks);
 
 function members(cpu){
   if(cpu.availability!=='observed')return null;
