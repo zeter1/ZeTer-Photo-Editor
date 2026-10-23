@@ -1414,9 +1414,12 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
     // 003W/2b-2c: real near-cap Blob Worker after dispatch, real Escape,
     // bounded stale-result settling, then a second real dense Worker Fill.
     if(cancelDense){
-      const cpuStages=[];
+      const cpuStages=[],rssStages=[];
       const cpuMark=async phase=>{
-        if(operationCpuCensus)cpuStages.push({phase,census:await operationCpuCensus()});
+        if(!operationCpuCensus)return;
+        const sample=await operationCpuCensus();
+        cpuStages.push({phase,census:sample?.cpu??sample});
+        if(sample?.rss)rssStages.push({phase,rss:sample.rss});
       };
       const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
       assert(view.hit==='overlayCanvas' && view.within &&
@@ -1575,7 +1578,22 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
           process.env.ZPE_OPERATION_CPU_ARTIFACT_DIR);
         console.log('003T/3b genuine native operation-boundary CPU:',JSON.stringify({
           file,format,availability:cpu.intervals.map(x=>x.comparison.availability),
+          unknownReasons:cpu.phases.map(x=>x.census.reason),
           workerPidMapping:cpu.workerPidMapping,operationCpuTotalKnown:false}));
+        if(rssStages.length){
+          const {createOperationCpuRssCoverage,saveOperationCpuRssCoverage}=
+            await import('./browser-operation-cpu-rss-coverage.mjs');
+          const coverage=createOperationCpuRssCoverage({
+            cpuReport:cpu,nativeReceipt:evidence,stages:rssStages});
+          const rssFile=await saveOperationCpuRssCoverage(coverage,cpu,evidence,
+            process.env.ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR);
+          console.log('003T/3c genuine native CPU/RSS milestone coverage:',JSON.stringify({
+            rssFile,format,availability:coverage.comparisons.map(x=>x.availability),
+            reasons:coverage.comparisons.map(x=>x.reason),
+            cpuUnknown:cpu.phases.map(x=>x.census.reason),
+            rssUnknown:coverage.stages.map(x=>x.rss.reason),
+            trueOperationPeakKnown:false,workerPidMapping:'unknown'}));
+        }
       }
       console.log('003W/2b-2c real dense Worker cancel and retry:',JSON.stringify({saved,evidence}));
       return evidence;
