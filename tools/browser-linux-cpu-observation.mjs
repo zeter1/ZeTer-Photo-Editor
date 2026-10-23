@@ -31,7 +31,7 @@ export function validateLinuxCpuCensus(census) {
       !Number.isFinite(census.readFinishedMs) ||
       census.readFinishedMs < census.readStartedMs) throw fail('invalid read window');
   if (census.availability === 'unknown') {
-    if (!['unsupported-platform','proc-member-unavailable','cdp-unavailable'].includes(census.reason) ||
+    if (!['unsupported-platform','proc-member-vanished','proc-access-denied','proc-member-unavailable','cdp-unavailable'].includes(census.reason) ||
         census.incarnations !== null) throw fail('missing census must remain unknown');
   } else {
     if (census.availability !== 'observed' || census.reason !== null ||
@@ -51,7 +51,7 @@ export function validateLinuxCpuCensus(census) {
 }
 
 export function unknownLinuxCpuCensus(reason,{now=()=>performance.now()}={}) {
-  if(!['unsupported-platform','proc-member-unavailable','cdp-unavailable'].includes(reason))
+  if(!['unsupported-platform','proc-member-vanished','proc-access-denied','proc-member-unavailable','cdp-unavailable'].includes(reason))
     throw fail('invalid unknown CPU reason');
   const at=now();
   const census={availability:'unknown',reason,readStartedMs:at,
@@ -76,9 +76,12 @@ export async function collectLinuxCpuCensus(processes,{
         const raw=await readStat('/proc/'+id+'/stat','utf8');
         incarnations.push(parseLinuxProcCpuStat(raw,id));
       }
-    } catch {
-      // Reject the entire partial read, including earlier valid members.
-      reason='proc-member-unavailable';
+    } catch (error) {
+      // A vanished CDP member is often transient; permission denial is not.
+      // Every failure discards the entire partial sample and all counters.
+      reason=['ENOENT','ESRCH'].includes(error?.code)?'proc-member-vanished':
+        ['EACCES','EPERM'].includes(error?.code)?'proc-access-denied':
+          'proc-member-unavailable';
     }
   }
   const readFinishedMs=now();
