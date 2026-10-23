@@ -105,7 +105,7 @@ export function validateChromiumCgroupScopeEvidence(e){
   return true;
 }
 
-async function connectCdp(url){
+export async function connectCdp(url){
   const ws=new WebSocket(url);
   await new Promise((resolve,reject)=>{
     const timer=setTimeout(()=>reject(fail('DevTools connection timeout')),8000);
@@ -135,13 +135,13 @@ async function connectCdp(url){
     close(){ws.close();},
   };
 }
-async function evaluate(client,expression){
+export async function evaluate(client,expression){
   const result=await client.send('Runtime.evaluate',{
     expression,returnByValue:true,awaitPromise:true});
   check(!result.exceptionDetails,'control page execution failed');
   return result.result?.value;
 }
-async function until(label,fn){
+export async function until(label,fn){
   for(let i=0;i<100;i++){
     if(await fn())return;
     await sleep(100);
