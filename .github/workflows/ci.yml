@@ -160,6 +160,22 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # 003T/3d-2: independent file:// Worker targets, sampled CDP Linux
+      # launcher PID and cgroup delegation. No Worker-to-OS-PID/peak claims.
+      - name: Controlled Chromium Worker PID isolation feasibility (003T/3d-2)
+        run: |
+          node tools/browser-controlled-worker-pid-isolation.mjs "$RUNNER_TEMP/zpe-003t3d2-controlled.json"
+          node tools/browser-controlled-worker-pid-isolation.mjs --verify "$RUNNER_TEMP/zpe-003t3d2-controlled.json"
+
+      - name: Upload controlled Worker PID isolation receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-controlled-worker-pid-isolation-003t3d2
+          path: ${{ runner.temp }}/zpe-003t3d2-controlled.json
+          if-no-files-found: warn
+          retention-days: 14
+
       # Independent REAL Linux PID allocation control; calibrates observable
       # /proc RSS/HWM against known held memory without claiming Chromium
       # operation peak, Worker PID, or uninterrupted sampling coverage.
