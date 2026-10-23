@@ -1419,6 +1419,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       // 003T/4 is opt-in in the same real browser session; it does not
       // perturb historical six CPU/RSS milestone receipts.
       const retentionEnabled=process.env.ZPE_SAME_SESSION_RETENTION==='1';
+      const observerControlEnabled=process.env.ZPE_SAME_SESSION_RETENTION_CONTROL==='1';
       const retentionCycles=[];
       const sessionId=retentionEnabled?randomUUID():null;
       const sessionStartedAtUnixMs=retentionEnabled?Date.now():null;
@@ -1596,6 +1597,60 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       };
       validateBrowserDenseCancelEvidence(evidence);
       if(retentionEnabled){
+        if(observerControlEnabled){
+          // Independent control run: the genuine first Fill/Cancel/Undo/Redo
+          // above is shared with treatment. No additional Fill is dispatched.
+          // Repeated Save Project/native snapshot and History readbacks can
+          // themselves allocate/GC substantial memory.
+          const controls=[];
+          for(let index=1;index<=3;index++){
+            const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+            assert(view.hit==='overlayCanvas'&&view.within&&
+              view.boundingPixels===second.selectedPixels,
+              '003T/4b control must redraw same native selection');
+            await draw(view);
+            const startMs=performance.now();
+            const before=await retentionMark();
+            // Mirror the post-operation native project readback in the active
+            // treatment, without doing another Fill or claiming a new edit.
+            const observed=await evaluate(client,snapshot);
+            assert(observed.successEqual,
+              '003T/4b observer-only pre-History readback must keep exact native result');
+            await evaluate(client,"document.querySelector('#undoBtn').click();true");
+            await waitFor('003T/4b native control Undo '+index,
+              async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+            const undone=await evaluate(client,snapshot);
+            await evaluate(client,"document.querySelector('#redoBtn').click();true");
+            await waitFor('003T/4b native control Redo '+index,
+              async()=>(await evaluate(client,snapshot))?.successEqual===true,90_000);
+            const redone=await evaluate(client,snapshot);
+            const afterUi=await evaluate(client,'('+ui.toString()+')()');
+            await new Promise(resolve=>setTimeout(resolve,500));
+            const final=await evaluate(client,workerExpr);
+            const historyUnchanged=afterUi.history.filter(x=>x.includes('Контент-заливка')).length===
+              oldFillRows+1;
+            assert(undone.baselineEqual && redone.successEqual && historyUnchanged &&
+              final.jobs===2 && final.replies===1,
+              '003T/4b control must preserve native pixels, single History edit and zero new Worker dispatches');
+            const after=await retentionMark();
+            controls.push({index,startMs,finishMs:performance.now(),before,after,
+              workerJobs:final.jobs,workerReplies:final.replies,
+              undoNativeExact:undone.baselineEqual,redoNativeExact:redone.successEqual,
+              historyUnchanged,selectionUnchanged:view.boundingPixels===second.selectedPixels,
+              noNewWorker:final.jobs===2&&final.replies===1,projectReadbacks:3});
+          }
+          const {createNativeObserverControl,saveNativeObserverControl}=
+            await import('./browser-native-observer-control.mjs');
+          const fixtureSha256=createHash('sha256').update(Buffer.from(fixture.bytes)).digest('hex');
+          const report=createNativeObserverControl({format,sessionId,sessionStartedAtUnixMs,
+            fixtureSha256,nativeReceipt:evidence,baselineAfterFill:retentionCycles[0].after,
+            controls});
+          const file=await saveNativeObserverControl(report,evidence,fixtureSha256,
+            process.env.ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR);
+          console.log('003T/4b genuine observer-only native control:',
+            JSON.stringify({file,format,sessionId,comparisons:report.comparisons,
+              trueOperationPeakKnown:false,workerPidMapping:'unknown',leakProven:false}));
+        }else{
         // Two additional genuine near-cap Workers. Each cycle starts from
         // exact original native bytes via Undo, then Fill/Undo/Redo in this
         // same tab and browser process. No new imports or profiles.
@@ -1672,6 +1727,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
           JSON.stringify({file,format,sessionId,
             comparisons:report.comparisons,workerPidMapping:'unknown',
             trueOperationPeakKnown:false,leakProven:false}));
+        }
       }
       const saved=await saveBrowserDenseCancelEvidence(evidence,
         process.env.ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR);

@@ -436,6 +436,37 @@ jobs:
           ZPE_SAME_SESSION_RETENTION_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-retention
           ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss
 
+      # 003T/4b: new Chromium process/profile per format. Unlike the real
+      # treatment run, no second/third Fill is dispatched, only repeated
+      # native project serialization and existing History Undo/Redo.
+      - name: Chromium PSD16 independent observer-only native control
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CANCEL_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel-control
+          ZPE_OPERATION_CPU_OBSERVATION: '1'
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-control
+          ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss-control
+          ZPE_SAME_SESSION_RETENTION: '1'
+          ZPE_SAME_SESSION_RETENTION_CONTROL: '1'
+          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-retention-control
+
+      - name: Chromium PSB32 independent observer-only native control
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CANCEL_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel-control
+          ZPE_OPERATION_CPU_OBSERVATION: '1'
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-control
+          ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss-control
+          ZPE_SAME_SESSION_RETENTION: '1'
+          ZPE_SAME_SESSION_RETENTION_CONTROL: '1'
+          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-retention-control
+
       - name: Verify strict independent cancellation receipts
         run: node tools/verify-browser-dense-cancel-evidence.mjs
         env:
@@ -456,6 +487,18 @@ jobs:
 
       - name: Strict PSD16/PSB32 same-session sampled RSS retention (003T/4)
         run: node tools/verify-browser-same-session-native-retention.mjs "$RUNNER_TEMP/zpe-native-retention" "$RUNNER_TEMP/zpe-dense-cancel"
+
+      - name: Independently verify PSD16/PSB32 observer control versus native treatment (003T/4b)
+        run: node tools/verify-browser-native-observer-control.mjs "$RUNNER_TEMP/zpe-native-retention-control" "$RUNNER_TEMP/zpe-dense-cancel-control" "$RUNNER_TEMP/zpe-native-retention" "$RUNNER_TEMP/zpe-dense-cancel"
+
+      - name: Upload native observer-only controls (003T/4b)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-native-observer-control-003t4b
+          path: ${{ runner.temp }}/zpe-native-retention-control/*.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload same-session native retention (003T/4)
         if: always()
