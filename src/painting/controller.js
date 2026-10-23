@@ -6,15 +6,14 @@ import {
   applyPixelBufferStrokeSegment,
   applyCmykPixelBufferBrushDab,
   applyCmykPixelBufferStrokeSegment,
-  clonePixelBuffer,
   createSerializedPixelBufferTileWorkingSet,
   deserializePixelBufferSource,
+  deserializeEditablePixelBufferSource,
   forEachSerializedPixelBufferTile,
   forEachSerializedPixelBufferTileCooperative,
   mutateSerializedPixelBufferTiles,
   pixelBufferByteLength,
   pixelBufferToToneMappedRgba8Preview,
-  pixelBufferWithStraightAlpha,
   serializePixelBufferSourceAdaptive,
   PIXEL_BUFFER_TILED_SOURCE_KIND,
   MAX_PIXEL_BUFFER_SOURCE_BYTES,
@@ -135,9 +134,11 @@ export function createRasterEditController({
 
   function editableHighDepthBuffer(layer, { requireAlpha = false } = {}) {
     if (!layer?.highDepthSource) return null;
-    const decoded = deserializePixelBufferSource(layer.highDepthSource);
+    // The decoder returns an exclusive typed plane. Re-cloning it would cost
+    // one whole extra RGB16/Float32/CMYK allocation on every legacy edit.
+    const decoded = deserializeEditablePixelBufferSource(layer.highDepthSource, { requireAlpha });
     if (decoded.model !== 'rgb' && decoded.model !== 'cmyk') return null;
-    const working = requireAlpha ? pixelBufferWithStraightAlpha(decoded) : clonePixelBuffer(decoded);
+    const working = decoded;
     if (pixelBufferByteLength(working) > highDepthBudgetForLayer(layer)) return null;
     return working;
   }

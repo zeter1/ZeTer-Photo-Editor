@@ -1539,6 +1539,8 @@ export function mutateSerializedPixelBufferTiles(source, visitor, {
 export function createSerializedPixelBufferTileWorkingSet(source, {
   maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
   requireAlpha = false,
+  // Maximum extra typed-array bytes owned by one synchronous tile visit.
+  maxVisitBytes = maxBytes,
 } = {}) {
   const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
   if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
@@ -1550,6 +1552,11 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
   const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
   if (!targetRawBytes || targetRawBytes > limit) {
     throw new RangeError('Tiled PixelBuffer working set требует ' + targetRawBytes + ' байт; лимит ' + limit + ' байт');
+  }
+
+  const visitByteLimit = Number(maxVisitBytes);
+  if (!Number.isSafeInteger(visitByteLimit) || visitByteLimit < 1) {
+    throw new RangeError('Tiled PixelBuffer maxVisitBytes должен быть положительным безопасным целым');
   }
 
   const promoteAlpha = targetChannels !== safe.channels;
@@ -1580,13 +1587,20 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     return right > tile.x && bottom > tile.y && left < tile.x + tile.width && top < tile.y + tile.height;
   }
 
+  // A visitor only owns a private tile copy. Its returned change count is the
+  // commit decision; false/zero, exceptions and budget failures discard all
+  // staged bytes (including changes to earlier tiles in the same visit).
+  // Publish synchronously after every visitor succeeds, never mid-transaction.
   function visit(bounds, visitor) {
     if (typeof visitor !== 'function') throw new TypeError('Tiled PixelBuffer working-set visitor должен быть функцией');
+    const staged = [];
+    let stagedBytes = 0;
     let changed = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!intersects(tile, bounds)) continue;
-      const buffer = load(index);
+      const original = load(index);
+      const buffer = clonePixelBuffer(original);
       const rawResult = visitor({
         index,
         count:safe.tiles.length,
@@ -1601,8 +1615,17 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
         throw new TypeError('Tiled PixelBuffer working-set visitor должен вернуть неотрицательное целое число изменений');
       }
       if (!delta) continue;
+      const nextBytes = stagedBytes + buffer.data.byteLength;
+      if (!Number.isSafeInteger(nextBytes) || nextBytes > visitByteLimit) {
+        throw new RangeError('Tiled PixelBuffer visit превысил private tile byte budget');
+      }
+      stagedBytes = nextBytes;
       changed += delta;
       if (!Number.isSafeInteger(changed)) throw new RangeError('Tiled PixelBuffer working-set change count переполнен');
+      staged.push({ index, buffer });
+    }
+    for (const { index, buffer } of staged) {
+      loaded.set(index, buffer);
       dirty.add(index);
       previewDirty.add(index);
     }
@@ -2583,6 +2606,20 @@ export function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_S
   }
   return createPixelBuffer({width:safe.width,height:safe.height,model:safe.model,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel,
     colorSpace:safe.colorSpace,alphaMode:safe.alphaMode,profileName:safe.profileName,data});
+}
+
+// Serialized sources are immutable envelopes: decoding always allocates fresh
+// typed data. That first decoded plane is already caller-owned and writable;
+// cloning it again would allocate an unnecessary second full native plane.
+export function deserializeEditablePixelBufferSource(source, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  requireAlpha = false,
+} = {}) {
+  const decoded = deserializePixelBufferSource(source, { maxBytes });
+  const alphaChannels = channelRange(decoded.model).max;
+  return requireAlpha && decoded.channels !== alphaChannels
+    ? pixelBufferWithStraightAlpha(decoded)
+    : decoded;
 }
 
 export function pixelBufferByteLength(buffer) {
