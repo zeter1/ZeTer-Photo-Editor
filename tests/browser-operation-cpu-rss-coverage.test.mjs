@@ -154,8 +154,8 @@ test('003T/3c: partial RSS /proc failure and independently recovered census',asy
 
 test('003T/3c: CPU /proc preserves cause and recovers without stale counters',async()=>{
   const pid=91;
-  const stat=(user)=>pid+' (renderer) S '+
-    ['0',...Array(19).fill('0')].map((v,i)=>i===11?String(user):v).join(' ')+'\n';
+  const stat=(user)=>pid+' (renderer) '+
+    ['S',...Array(19).fill('0')].map((v,i)=>i===11?String(user):i===19?'70':v).join(' ')+'\n';
   const members=[{id:pid}];
   let t=0;
   const base={now:()=>++t,platform:'linux'};
