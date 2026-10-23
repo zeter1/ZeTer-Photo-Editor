@@ -536,6 +536,9 @@ async function runSmoke() {
         try{browserClient=await CdpClient.connect(browserWs);}
         catch{browserClient=null;}
       }
+      if(process.env.ZPE_SAME_SESSION_RETENTION_CONTROL==='1' &&
+          process.env.ZPE_SAME_SESSION_RETENTION!=='1')
+        throw new TypeError('003T/4b observer control needs real retention measurements');
       if(process.env.ZPE_SAME_SESSION_RETENTION==='1' &&
           (process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY!=='1' ||
            process.env.ZPE_OPERATION_CPU_OBSERVATION!=='1' ||
