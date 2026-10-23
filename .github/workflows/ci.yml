@@ -265,6 +265,12 @@ jobs:
           ZPE_SELECTION_COMPARISON_KIND: sparse
           ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
 
+      - name: Verify phase-aligned sparse and >2M refusal PSD16/PSB32 samples
+        run: node tools/verify-browser-phase-aligned-evidence.mjs
+        env:
+          ZPE_SELECTION_ALIGNMENT_KIND: sparse-refusal
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
       - name: Upload near-cap browser receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -336,6 +342,12 @@ jobs:
         run: node tools/verify-browser-selection-comparison.mjs
         env:
           ZPE_SELECTION_COMPARISON_KIND: dense
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Verify phase-aligned dense PSD16/PSB32 timer samples
+        run: node tools/verify-browser-phase-aligned-evidence.mjs
+        env:
+          ZPE_SELECTION_ALIGNMENT_KIND: dense
           ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
 
       - name: Upload dense native Worker receipts

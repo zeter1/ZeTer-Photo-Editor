@@ -6,6 +6,10 @@ import {
   validateBrowserSelectionRefusalPhaseEvidence,
   summarizeBrowserSelectionPhaseEvidence,
 } from './browser-selection-freeze-observer.mjs';
+import {
+  validateBrowserPhaseAlignedEvidence,
+  summarizeBrowserPhaseAlignedEvidence,
+} from './browser-selection-phase-alignment.mjs';
 import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
 import { inspectNativeSelectedPixelChanges } from './browser-native-selection-integrity.mjs';
 import { saveBrowserNearCapEvidence, validateBrowserNearCapEvidence } from './browser-near-cap-evidence.mjs';
@@ -1644,7 +1648,12 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       };
       validateBrowserDenseNearCapEvidence(evidence);
       const phase=await evaluate(client,'window.__stage003SelectionFreeze.phaseSnapshot()');
+      const alignedPhase=await evaluate(client,
+        'window.__stage003SelectionFreeze.phaseAlignedSnapshot()');
       await evaluate(client,'window.__stage003SelectionFreeze.restore();true');
+      validateBrowserPhaseAlignedEvidence(alignedPhase,{
+        format,geometryPixels:fixture.width*fixture.height,selectionClass:'dense',
+      });
       validateBrowserSelectionPhaseEvidence(phase,{
         format,geometryPixels:fixture.width*fixture.height,selectionClass:'dense',
       });
@@ -1662,7 +1671,14 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         await mkdir(phaseDirectory,{recursive:true});
         phasePath=path.join(phaseDirectory,'stage003-selection-phase-'+format.toLowerCase()+repeatSuffix+'.json');
         await writeFile(phasePath,JSON.stringify(phase,null,2)+'\n');
+        await writeFile(path.join(phaseDirectory,
+          'stage003-selection-phase-aligned-'+format.toLowerCase()+repeatSuffix+'.json'),
+          JSON.stringify(alignedPhase,null,2)+'\n');
       }
+      console.log('003W/3c dense timer attribution:',JSON.stringify({
+        format,repeat:repeat||'1',summary:summarizeBrowserPhaseAlignedEvidence(
+          alignedPhase,{format,geometryPixels:fixture.width*fixture.height,selectionClass:'dense'}),
+      }));
       const densePath=await saveBrowserDenseNearCapEvidence(evidence,phaseDirectory);
       console.log('003W/3 real dense selection freeze:',JSON.stringify({format,phasePath,summary}));
       console.log('003W/2b-2b real dense Chromium native Worker:',JSON.stringify({path:densePath,evidence}));
@@ -1774,6 +1790,12 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
     validateBrowserNearCapEvidence(evidence);
     const sparseAndRefusalPhase=await evaluate(client,
       'window.__stage003SelectionFreeze.phaseSnapshot()');
+    const alignedSparseAndRefusal=await evaluate(client,
+      'window.__stage003SelectionFreeze.phaseAlignedSnapshot()');
+    validateBrowserPhaseAlignedEvidence(alignedSparseAndRefusal,{
+      format,geometryPixels:fixture.width*fixture.height,selectionClass:'sparse-refusal',
+      expectedSparsePixels:sparse.selectedPixels,
+    });
     validateBrowserSelectionRefusalPhaseEvidence(sparseAndRefusalPhase,{
       format,geometryPixels:fixture.width*fixture.height,
       expectedSparsePixels:sparse.selectedPixels,
@@ -1788,7 +1810,15 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       const phasePath=path.join(phaseDirectory,
         'stage003-selection-phase-sparse-'+format.toLowerCase()+repeatSuffix+'.json');
       await writeFile(phasePath,JSON.stringify(sparseAndRefusalPhase,null,2)+'\n');
+      await writeFile(path.join(phaseDirectory,
+        'stage003-selection-phase-aligned-sparse-'+format.toLowerCase()+repeatSuffix+'.json'),
+        JSON.stringify(alignedSparseAndRefusal,null,2)+'\n');
     }
+    console.log('003W/3c sparse/refusal timer attribution:',JSON.stringify({
+      format,repeat:repeat||'1',summary:summarizeBrowserPhaseAlignedEvidence(
+        alignedSparseAndRefusal,{format,geometryPixels:fixture.width*fixture.height,
+          selectionClass:'sparse-refusal',expectedSparsePixels:sparse.selectedPixels}),
+    }));
     console.log('003W/3b actual sparse/refusal scan boundaries:',JSON.stringify({
       format,repeat:repeat||'1',sparse:summarizeBrowserSelectionPhaseEvidence(sparsePhase,{
         format,geometryPixels:fixture.width*fixture.height,selectionClass:'sparse',

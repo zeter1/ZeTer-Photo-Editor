@@ -24,12 +24,23 @@ export function installBrowserSelectionFreezeObserver() {
     const elapsed=now-previousPulse;
     previousPulse=now;
     if (!active) return;
-    if (active.handoffAtMs!==null && now>active.handoffAtMs+80) {
+    if (!Number.isFinite(now) || !Number.isFinite(elapsed) || elapsed<=0) {
+      active.clockValid=false;
+      return;
+    }
+    const lastPhase=active.phaseEvents.at(-1);
+    // No Worker will follow a >2M selected-pixel refusal. Finish its timer
+    // window explicitly instead of sampling unrelated later UI work forever.
+    if ((active.handoffAtMs!==null && now>active.handoffAtMs+80) ||
+        (active.handoffAtMs===null && lastPhase?.phase==='selection-end' &&
+         lastPhase.selectedPixels>2000000 && now>lastPhase.atMs+80)) {
       active=null;
       return;
     }
-    if (active.pulseIntervalsMs.length<LIMIT) active.pulseIntervalsMs.push(elapsed);
-    else active.pulsesTruncated=true;
+    if (active.pulseIntervalsMs.length<LIMIT) {
+      active.pulseIntervalsMs.push(elapsed);
+      active.pulseSamples.push({atMs:now,elapsedMs:elapsed});
+    } else active.pulsesTruncated=true;
   },PULSE_MS);
   window.__zpeTiledInpaintTiming=function(event) {
     if (active && active.phaseEvents.length<3 && event && typeof event==='object') {
@@ -63,7 +74,8 @@ export function installBrowserSelectionFreezeObserver() {
         label,startedAtMs:beganAtMs,handoffAtMs:null,
         selectedPixels:null,selectedBytes:null,firstSelectedIndex:null,lastSelectedIndex:null,
         heapBeforeBytes:readHeap(),heapAtHandoffBytes:null,
-        pulseIntervalsMs:[],pulsesTruncated:false,duplicateWorkerHandoffs:0,
+        pulseIntervalsMs:[],pulseSamples:[],pulsesTruncated:false,
+        clockValid:true,duplicateWorkerHandoffs:0,
         phaseEvents:[],
       };
       windows.push(active);
@@ -76,7 +88,7 @@ export function installBrowserSelectionFreezeObserver() {
         limitations:LIMITATIONS,
         workerPidMapping:'unknown',
         trueOperationPeakKnown:false,
-        windows:windows.map(({phaseEvents,...value})=>({
+        windows:windows.map(({phaseEvents,pulseSamples,clockValid,...value})=>({
           ...value,pulseIntervalsMs:[...value.pulseIntervalsMs],
         })),
       };
@@ -94,6 +106,24 @@ export function installBrowserSelectionFreezeObserver() {
           phaseEvents:value.phaseEvents.map(event=>({...event})),
           pulseIntervalsMs:[...value.pulseIntervalsMs],
           pulsesTruncated:value.pulsesTruncated,
+        })),
+      };
+    },
+    // Retain v1 for existing comparative tools; v2 adds matching monotonic
+    // timer callback timestamps, including a gap that straddles scan end.
+    phaseAlignedSnapshot() {
+      return {
+        ...control.phaseSnapshot(),
+        kind:'zpe-browser-selection-phase-aligned-v2',
+        observationClass:'monotonic-phase-aligned-event-loop-timer-sampled',
+        windows:windows.map(value=>({
+          label:value.label,startedAtMs:value.startedAtMs,
+          handoffAtMs:value.handoffAtMs,selectedPixels:value.selectedPixels,
+          phaseEvents:value.phaseEvents.map(event=>({...event})),
+          pulseIntervalsMs:[...value.pulseIntervalsMs],
+          pulsesTruncated:value.pulsesTruncated,
+          pulseSamples:value.pulseSamples.map(sample=>({...sample})),
+          clockValid:value.clockValid,
         })),
       };
     },
