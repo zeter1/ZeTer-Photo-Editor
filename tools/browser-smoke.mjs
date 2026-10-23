@@ -530,7 +530,23 @@ async function runSmoke() {
           ?'rgb32psbnearcap':null;
       if(!fixtureKey) throw new TypeError('003W/2b-2a: invalid near-cap browser format');
       const {verifyBrowserNearCapUi}=await import('./browser-near-cap-ui-smoke.mjs');
+      const cpuTools=process.env.ZPE_OPERATION_CPU_OBSERVATION==='1'
+        ?await import('./browser-linux-cpu-observation.mjs'):null;
+      if(cpuTools){
+        try{browserClient=await CdpClient.connect(browserWs);}
+        catch{browserClient=null;}
+      }
+      const operationCpuCensus=cpuTools?async()=>{
+        if(!browserClient)return cpuTools.unknownLinuxCpuCensus('cdp-unavailable');
+        let info;
+        try{info=await browserClient.send('SystemInfo.getProcessInfo');}
+        catch{return cpuTools.unknownLinuxCpuCensus('cdp-unavailable');}
+        if(!Array.isArray(info?.processInfo) || info.processInfo.length===0)
+          return cpuTools.unknownLinuxCpuCensus('cdp-unavailable');
+        return cpuTools.collectLinuxCpuCensus(info.processInfo);
+      }:null;
       const nearCapResult=await verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,
+        operationCpuCensus,
         dense:process.env.ZPE_DENSE_NEAR_CAP_BROWSER_ONLY === '1',
         cancelDense:process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY === '1',
         switchDense:process.env.ZPE_DENSE_OWNER_BROWSER_ONLY === '1',

@@ -31,7 +31,7 @@ export function validateLinuxCpuCensus(census) {
       !Number.isFinite(census.readFinishedMs) ||
       census.readFinishedMs < census.readStartedMs) throw fail('invalid read window');
   if (census.availability === 'unknown') {
-    if (!['unsupported-platform','proc-member-unavailable'].includes(census.reason) ||
+    if (!['unsupported-platform','proc-member-unavailable','cdp-unavailable'].includes(census.reason) ||
         census.incarnations !== null) throw fail('missing census must remain unknown');
   } else {
     if (census.availability !== 'observed' || census.reason !== null ||
@@ -48,6 +48,16 @@ export function validateLinuxCpuCensus(census) {
     }
   }
   return true;
+}
+
+export function unknownLinuxCpuCensus(reason,{now=()=>performance.now()}={}) {
+  if(!['unsupported-platform','proc-member-unavailable','cdp-unavailable'].includes(reason))
+    throw fail('invalid unknown CPU reason');
+  const at=now();
+  const census={availability:'unknown',reason,readStartedMs:at,
+    readFinishedMs:at,incarnations:null};
+  validateLinuxCpuCensus(census);
+  return census;
 }
 
 export async function collectLinuxCpuCensus(processes,{

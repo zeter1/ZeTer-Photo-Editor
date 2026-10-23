@@ -400,6 +400,8 @@ jobs:
           ZPE_DENSE_CANCEL_BROWSER_ONLY: '1'
           ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
           ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+          ZPE_OPERATION_CPU_OBSERVATION: '1'
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
 
       - name: Chromium PSB32 dense in-flight Escape cancellation and retry
         run: node tools/browser-smoke.mjs
@@ -407,11 +409,28 @@ jobs:
           ZPE_DENSE_CANCEL_BROWSER_ONLY: '1'
           ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
           ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+          ZPE_OPERATION_CPU_OBSERVATION: '1'
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
 
       - name: Verify strict independent cancellation receipts
         run: node tools/verify-browser-dense-cancel-evidence.mjs
         env:
           ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+
+      - name: Strict PSD16 and PSB32 operation-boundary Linux CPU receipts (003T/3b)
+        run: node tools/verify-browser-operation-cpu-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
+
+      - name: Upload real native CPU-boundary receipts (003T/3b)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-native-operation-cpu-003t3b
+          path: ${{ runner.temp }}/zpe-native-operation-cpu/*.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload real dense cancellation receipts
         if: always()
