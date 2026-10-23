@@ -254,6 +254,47 @@ test('superseded open read failure stays silent after a newer open claims author
   assert.deepEqual(harness.calls.statuses, ['Проект открыт']);
 });
 
+for (const [failure, failNewer] of [
+  ['read rejection', read => read.reject(new Error('newer read failed'))],
+  ['invalid JSON', read => read.resolve('{invalid')],
+]) {
+  test('failed newer authorized open keeps older completion superseded: ' + failure, async () => {
+    const reads = new Map([
+      ['old.zpe', deferred()],
+      ['new.zpe', deferred()],
+    ]);
+    let sanitized = 0;
+    const harness = makeHarness({
+      readFileAsText: file => reads.get(file.name).promise,
+      sanitizeProject: value => { sanitized += 1; return value; },
+    });
+    const originalDocument = harness.state.doc;
+
+    const older = harness.controller.openProject({ name:'old.zpe' });
+    const newer = harness.controller.openProject({ name:'new.zpe' });
+    failNewer(reads.get('new.zpe'));
+    await newer;
+
+    assertNoOpenPublication(harness.calls);
+    assert.equal(sanitized, 0);
+    assert.deepEqual(harness.calls.statuses, ['Ошибка открытия проекта']);
+    assert.equal(harness.calls.alerts.length, 1);
+    assert.equal(harness.calls.errors.length, 1);
+    assert.deepEqual(harness.calls.toasts, []);
+
+    reads.get('old.zpe').resolve('{"name":"Old","layers":[]}');
+    await older;
+
+    assert.equal(harness.state.doc, originalDocument);
+    assert.equal(sanitized, 0, 'the superseded file must not be sanitized');
+    assertNoOpenPublication(harness.calls);
+    assert.deepEqual(harness.calls.statuses, ['Ошибка открытия проекта']);
+    assert.equal(harness.calls.alerts.length, 1);
+    assert.equal(harness.calls.errors.length, 1);
+    assert.deepEqual(harness.calls.toasts, []);
+  });
+}
+
 test('blocked newer open does not supersede an already-authorized older open', async () => {
   const oldRead = deferred();
   const harness = makeHarness({
