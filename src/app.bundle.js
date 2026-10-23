@@ -17423,8 +17423,9 @@ function createRasterEditController({
     if (!layer?.highDepthSource) return null;
     // The decoder returns an exclusive typed plane. Re-cloning it would cost
     // one whole extra RGB16/Float32/CMYK allocation on every legacy edit.
-    const working = deserializeEditablePixelBufferSource(layer.highDepthSource, { requireAlpha });
-    if (working.model !== 'rgb' && working.model !== 'cmyk') return null;
+    const decoded = deserializeEditablePixelBufferSource(layer.highDepthSource, { requireAlpha });
+    if (decoded.model !== 'rgb' && decoded.model !== 'cmyk') return null;
+    const working = decoded;
     if (pixelBufferByteLength(working) > highDepthBudgetForLayer(layer)) return null;
     return working;
   }
