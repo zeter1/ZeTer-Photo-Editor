@@ -823,10 +823,10 @@ jobs:
       ZPE_OPERATION_CPU_OBSERVATION: '1'
       ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
       ZPE_SAME_SESSION_RETENTION: '1'
-      ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/treatment-native
-      ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/treatment-cpu
-      ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/treatment-cpu-rss
-      ZPE_SAME_SESSION_RETENTION_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/treatment
+      ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: /tmp/zpe-replicated/treatment-native
+      ZPE_OPERATION_CPU_ARTIFACT_DIR: /tmp/zpe-replicated/treatment-cpu
+      ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: /tmp/zpe-replicated/treatment-cpu-rss
+      ZPE_SAME_SESSION_RETENTION_ARTIFACT_DIR: /tmp/zpe-replicated/treatment
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -854,29 +854,29 @@ jobs:
         env:
           ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
           ZPE_SAME_SESSION_RETENTION_CONTROL: '1'
-          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/control-native
-          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/control-cpu
-          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/control-cpu-rss
-          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/control
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: /tmp/zpe-replicated/control-native
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: /tmp/zpe-replicated/control-cpu
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: /tmp/zpe-replicated/control-cpu-rss
+          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: /tmp/zpe-replicated/control
 
       - name: Fresh PSB32 no-extra-Fill observer
         run: node tools/browser-smoke.mjs
         env:
           ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
           ZPE_SAME_SESSION_RETENTION_CONTROL: '1'
-          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/control-native
-          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/control-cpu
-          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/control-cpu-rss
-          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-replicated/control
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: /tmp/zpe-replicated/control-native
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: /tmp/zpe-replicated/control-cpu
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: /tmp/zpe-replicated/control-cpu-rss
+          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: /tmp/zpe-replicated/control
 
       - name: Verify genuine native PSD16/PSB32 treatment and observer sources
-        run: node tools/verify-browser-native-retention-replication.mjs "$RUNNER_TEMP/zpe-replicated"
+        run: node tools/verify-browser-native-retention-replication.mjs "/tmp/zpe-replicated"
 
       - name: Upload independently verifiable replica ${{ matrix.replica }}
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: zpe-native-retention-replica-003t4b2-${{ matrix.replica }}
-          path: ${{ runner.temp }}/zpe-replicated/**/*.json
+          path: /tmp/zpe-replicated/**/*.json
           if-no-files-found: warn
           retention-days: 14
