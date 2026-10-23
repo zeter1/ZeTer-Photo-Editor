@@ -13,7 +13,7 @@ const fail=message=>{throw new TypeError('003T/4b observer control: '+message);}
 const exact=(o,keys)=>o&&typeof o==='object'&&!Array.isArray(o)&&
   Object.keys(o).sort().join(',')===keys.slice().sort().join(',');
 const hash=data=>createHash('sha256').update(data).digest('hex');
-const LIMITATIONS='Independent fresh file:// Chromium observer-only run after one real native Fill. Three subsequent cycles repeat project/native readback and Undo/Redo without additional Fill. Sampled full-browser RSS is not process-exclusive, causal native retention, a leak, a continuous window, or an operation peak. Cross-session/PID RSS deltas must never be subtracted.';
+const LIMITATIONS='Independent fresh file:// Chromium observer-only run after one real native Fill. Three subsequent cycles repeat three explicit project/native readbacks and Undo/Redo without additional Fill. Sampled full-browser RSS is not process-exclusive, causal native retention, a leak, a continuous window, or an operation peak. Cross-session/PID RSS deltas must never be subtracted.';
 
 export function validateNativeObserverControl(report,native,fixtureSha256) {
   validateBrowserDenseCancelEvidence(native);
@@ -47,8 +47,8 @@ export function validateNativeObserverControl(report,native,fixtureSha256) {
         c.workerJobs!==2 || c.workerReplies!==1 ||
         c.undoNativeExact!==true || c.redoNativeExact!==true ||
         c.historyUnchanged!==true || c.selectionUnchanged!==true ||
-        c.noNewWorker!==true || c.projectReadbacks!==2)
-      fail('control requires two exact native project readbacks, stable History and no extra Worker');
+        c.noNewWorker!==true || c.projectReadbacks!==3)
+      fail('control requires three exact native project readbacks, stable History and no extra Worker');
     compareRetainedCycleSamples(c.before,c.before);
     compareRetainedCycleSamples(c.after,c.after);
     if(c.before.cpu.readStartedMs<c.startMs ||
