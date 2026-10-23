@@ -1,6 +1,6 @@
 # 003T/3d — Native CPU/RSS PID churn, independent coverage and isolation feasibility
 
-**Priority:** P1. **Status:** TODO. **Parent:** [003T](003t-operation-memory-evidence.md) IN PROGRESS; Stage 003/6 OPEN.
+**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003T](003t-operation-memory-evidence.md) IN PROGRESS; Stage 003/6 OPEN.
 **Dependencies:** [003T/3c](003t3c-cpu-rss-observation-gaps.md) bounded observation accepted; [003T/2d-3](003t-operation-memory-evidence.md) cgroup delegation remained unavailable in prior runner; independently Photoshop-authored PSB32 [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED.
 
 ## Goal
@@ -14,4 +14,14 @@ Investigate real independent Linux/Chromium process-membership churn and the lim
 5. Strict independent JSON and negative Node tests, genuine Chromium both-depth receipts and, for an accepted implementation, exact PR-final-head CI, merge, exact-main CI. Update `task/NEXT.md`, `task/README.md` and 003T parent.
 
 ## Status / first work item
-**TODO.** Start with controlled CDP process churn and independent Linux /proc identity tests under actual native Fill/cancel/retry; inspect 003T/3c snapshots and existing 003T/2d cgroup delegation evidence before changing code. Do not reimplement 003T/3c same-census CPU/RSS validation or duplicate historical PRs. Parent 003T remains OPEN and P0 Adobe-authored PSB32 provenance is independently BLOCKED.
+**IN PROGRESS.** Start with controlled CDP process churn and independent Linux /proc identity tests under actual native Fill/cancel/retry; inspect 003T/3c snapshots and existing 003T/2d cgroup delegation evidence before changing code. Do not reimplement 003T/3c same-census CPU/RSS validation or duplicate historical PRs. Parent 003T remains OPEN and P0 Adobe-authored PSB32 provenance is independently BLOCKED.
+
+## 2026-10-23 — 003T/3d-1 sampled native PID-incarnation changes (IN PROGRESS)
+
+- **Priority:** P1. **Dependencies:** accepted 003T/3c; existing real PSD16/PSB32 `file://` native CPU/RSS receipts.
+- **Goal:** make genuinely observed, two-boundary process identity changes independently inspectable without inventing lifetime, Worker ownership, operation-exclusivity or continuous monitoring.
+- **Changes in branch `test/003t3d-sampled-pid-churn-20261023`:** `tools/browser-operation-pid-churn.mjs` derives JSON per depth from the already independent CPU and CPU/RSS reports, binding both input SHA-256s and native receipt SHA-256. Per adjacent operation phase it preserves exact PID+Linux /proc starttime on retained, newly observed and no-longer-observed identities, explicitly lists reused PID numbers, and records read clock gap. Any missing CPU sample, missing RSS sample or mismatched CPU/RSS membership gives *unknown* identities, never an empty population. This does **not** verify actual start/exit or Worker-to-PID.
+- **CI integration:** `tools/verify-browser-operation-cpu-rss-coverage.mjs` first verifies existing real native PSD16/PSB32 CPU/RSS evidence, then creates and re-reads two exclusively written `stage003-operation-pid-churn-*.json` sidecars in the already uploaded real Chromium CI artifact folder. Strict result re-derivation rejects any independent JSON forgery.
+- **Tests:** `tests/browser-operation-pid-churn.test.mjs`: five focused Node tests and negative cases for PID reuse, missing membership, inconsistent RSS joins, fictitious exits/peaks, source mismatch, dual-format artifact round-trip and overwrite prevention. **Local targeted Node tests: 5/5 PASS (Node v22.16.0)**. Full `npm run check`, genuine CI browser receipts, PR exact-final-head CI, merge and exact-main CI: **PENDING**.
+- **Known limitations:** previous 003T/3c real Chromium receipts were collected, but fresh 003T/3d evidence is not yet accepted; actual churn may be zero in a given real run. `provenProcessExits:null`, `workerPidMapping:'unknown'`, `operationCpuTotalKnown:false`, `trueOperationPeakKnown:false`. No native pixel or production code changed.
+- **Next acceptance gate:** inspect actual independently verified PR PSD16/PSB32 churn JSON, correct CI/negative failures, obtain successful exact final-head CI, merge, and successful exact-main CI. Only then mark **003T/3d-1 DONE**; continue **003T/3d-2** real independently controlled short-lived Chromium/Worker process and cgroup-isolation feasibility. Whole 003T and Stage 003 remain OPEN; Photoshop-authored PSB32 002B/2c remains BLOCKED.
