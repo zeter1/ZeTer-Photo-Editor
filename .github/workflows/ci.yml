@@ -142,6 +142,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # 003T/3a: real Chromium file:// temporary CPU Worker with CDP complete
+      # PID census and independent Linux /proc utime/stime/starttime reads.
+      # Counts only matched PID incarnations; NOT whole-operation CPU, a
+      # CPU/RSS peak or Worker-target to OS-PID proof.
+      - name: Real Chromium CPU PID incarnation control (003T/3a)
+        run: |
+          node tools/browser-chromium-cpu-control.mjs "$RUNNER_TEMP/zpe-003t-cpu.json"
+          node tools/browser-chromium-cpu-control.mjs --verify "$RUNNER_TEMP/zpe-003t-cpu.json"
+
+      - name: Upload Chromium CPU PID overlap receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-chromium-cpu-003t3a
+          path: ${{ runner.temp }}/zpe-003t-cpu.json
+          if-no-files-found: warn
+          retention-days: 14
+
       # Independent REAL Linux PID allocation control; calibrates observable
       # /proc RSS/HWM against known held memory without claiming Chromium
       # operation peak, Worker PID, or uninterrupted sampling coverage.
