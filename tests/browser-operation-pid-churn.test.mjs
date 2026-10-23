@@ -89,3 +89,48 @@ test('003T/3d: missing CPU snapshot never invents empty membership or bridges ga
   assert.equal(r.observedIntervals,1);
   assert.equal(r.unknownIntervals,4);
 });
+
+test('003T/3d: RSS incarnation uncertainty prevents attributing a churn interval',()=>{
+  const {cpu,coverage}=input();
+  coverage.comparisons[1]={availability:'unknown',reason:'pid-incarnation-mismatch'};
+  const r=deriveOperationPidChurn(cpu,coverage);
+  assert.equal(r.intervals[0].reason,'cpu-rss-membership-unknown');
+  assert.equal(r.intervals[1].reason,'cpu-rss-membership-unknown');
+  assert.equal(r.intervals[0].newlyObserved,null);
+  assert.equal(r.intervals[1].reusedPidNumbers,null);
+  assert.equal(r.intervals[2].availability,'unknown');
+});
+
+test('003T/3d: written independent both-depth artifact readback and exclusive creation',async()=>{
+  const {mkdtemp,mkdir,writeFile,readFile,rm}=await import('node:fs/promises');
+  const {tmpdir}=await import('node:os');
+  const {join}=await import('node:path');
+  const {writeVerifiedPidChurnReceipts}=await import('../tools/browser-operation-pid-churn.mjs');
+  const root=await mkdtemp(join(tmpdir(),'zpe-churn-test-'));
+  const cpuDir=join(root,'cpu'),rssDir=join(root,'rss');
+  try{
+    await Promise.all([mkdir(cpuDir),mkdir(rssDir)]);
+    for(const format of ['PSD16','PSB32']){
+      const {cpu,coverage}=input();
+      cpu.format=format;coverage.format=format;
+      coverage.cpuReportSha256=digest(cpu);
+      const suffix=format.toLowerCase();
+      await Promise.all([
+        writeFile(join(cpuDir,'stage003-operation-cpu-'+suffix+'.json'),JSON.stringify(cpu)),
+        writeFile(join(rssDir,'stage003-operation-cpu-rss-'+suffix+'.json'),JSON.stringify(coverage)),
+      ]);
+    }
+    assert.equal(await writeVerifiedPidChurnReceipts(rssDir,cpuDir),true);
+    for(const format of ['PSD16','PSB32']){
+      const suffix=format.toLowerCase();
+      const receipt=JSON.parse(await readFile(
+        join(rssDir,'stage003-operation-pid-churn-'+suffix+'.json'),'utf8'));
+      assert.equal(receipt.format,format);
+      assert.equal(receipt.provenProcessExits,null);
+      assert.equal(receipt.workerPidMapping,'unknown');
+    }
+    await assert.rejects(writeVerifiedPidChurnReceipts(rssDir,cpuDir),{code:'EEXIST'});
+  }finally{
+    await rm(root,{recursive:true,force:true});
+  }
+});
