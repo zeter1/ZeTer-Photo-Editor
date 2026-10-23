@@ -49,7 +49,7 @@ import {
 // 003W/2b-2a: actual Chromium file:// PSD16/PSB32 import, UI marquee,
 // production Blob Worker + History, and >2M refusal. The successful selection
 // is intentionally small in legacy mode. Dense mode independently checks real near-2M Worker completion.
-export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false,cancelDense=false,switchDense=false,closeDense=false,replaceDense=false,importDense=false,failedImportDense=false,naturalFailedImportDense=false}={}) {
+export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false,cancelDense=false,switchDense=false,closeDense=false,replaceDense=false,importDense=false,failedImportDense=false,naturalFailedImportDense=false,operationCpuCensus=null}={}) {
   const repeat=process.env.ZPE_NEAR_CAP_REPETITION;
   if(repeat!==undefined && repeat!=='2') throw new TypeError('003W/3b: invalid repetition');
   const repeatSuffix=repeat==='2'?'-repeat2':'';
@@ -1414,12 +1414,17 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
     // 003W/2b-2c: real near-cap Blob Worker after dispatch, real Escape,
     // bounded stale-result settling, then a second real dense Worker Fill.
     if(cancelDense){
+      const cpuStages=[];
+      const cpuMark=async phase=>{
+        if(operationCpuCensus)cpuStages.push({phase,census:await operationCpuCensus()});
+      };
       const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
       assert(view.hit==='overlayCanvas' && view.within &&
         view.boundingPixels>=1_900_000 && view.boundingPixels<=2_000_000,
         '003W/2b-2c dense UI marquee must be visible and bounded',JSON.stringify(view));
       await draw(view);
       const workerExpr='window.__nearCapWorkerObservation.summary()';
+      await cpuMark('before-first-fill');
       await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
       assert(await evaluate(client,'('+runFill.toString()+')()'),
         '003W/2b-2c first real dense Fill menu must be enabled');
@@ -1430,6 +1435,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         first.selectedBytes===first.selectedPixels*4 &&
         first.replies===0 && first.terminatedJobs===0,
         '003W/2b-2c Worker must be in flight before Escape',JSON.stringify(first));
+      await cpuMark('first-worker-in-flight');
       await client.send('Input.dispatchKeyEvent',{
         type:'keyDown',key:'Escape',code:'Escape',
         windowsVirtualKeyCode:27,nativeVirtualKeyCode:27,
@@ -1446,6 +1452,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       assert(stopped.jobs===1 && stopped.replies===0 && stopped.terminatedJobs===1 &&
         stopped.firstTerminatedAtMs>=stopped.firstDispatchAtMs,
         '003W/2b-2c real Worker terminated before reply',JSON.stringify(stopped));
+      await cpuMark('after-escape-cancel');
       const samePreview=state=>JSON.stringify(state.pixel)===JSON.stringify(originalPreview.pixel);
       const sameHistory=state=>JSON.stringify(state.history)===JSON.stringify(originalPreview.history);
       const afterCancel=await evaluate(client,snapshot);
@@ -1478,6 +1485,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       assert(superseded.jobs===1 && superseded.replies===0,
         '003W/2b-2c changing selection must not revive cancelled Worker',
         JSON.stringify(superseded));
+      await cpuMark('before-retry-fill');
       await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
       assert(await evaluate(client,'('+runFill.toString()+')()'),
         '003W/2b-2c retry must be an enabled real menu Fill');
@@ -1488,6 +1496,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         second.selectedBytes===first.selectedBytes && second.replies===0,
         '003W/2b-2c retry must dispatch same dense frozen selection',
         JSON.stringify(second));
+      await cpuMark('retry-worker-in-flight');
       await waitFor('003W/2b-2c real retry Worker completion',
         ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===2 && '+
           'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),205_000);
@@ -1495,6 +1504,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       const finished=await evaluate(client,workerExpr);
       assert(finished.jobs===2 && finished.replies===1,
         '003W/2b-2c only successor Worker may reply',JSON.stringify(finished));
+      await cpuMark('after-retry-completed');
       await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
       const success=await evaluate(client,snapshot);
       const successUi=await evaluate(client,'('+ui.toString()+')()');
@@ -1557,6 +1567,16 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       validateBrowserDenseCancelEvidence(evidence);
       const saved=await saveBrowserDenseCancelEvidence(evidence,
         process.env.ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR);
+      if(operationCpuCensus){
+        const {createOperationCpuEvidence,saveOperationCpuEvidence}=
+          await import('./browser-operation-cpu-evidence.mjs');
+        const cpu=createOperationCpuEvidence({format,nativeReceipt:evidence,stages:cpuStages});
+        const file=await saveOperationCpuEvidence(cpu,evidence,
+          process.env.ZPE_OPERATION_CPU_ARTIFACT_DIR);
+        console.log('003T/3b genuine native operation-boundary CPU:',JSON.stringify({
+          file,format,availability:cpu.intervals.map(x=>x.comparison.availability),
+          workerPidMapping:cpu.workerPidMapping,operationCpuTotalKnown:false}));
+      }
       console.log('003W/2b-2c real dense Worker cancel and retry:',JSON.stringify({saved,evidence}));
       return evidence;
     }

@@ -1,6 +1,6 @@
 # 003T/3b — Operation-boundary Linux CPU evidence in native PSD16/PSB32 UI
 
-**Priority:** P1. **Status:** TODO. **Parent:** [003T](003t-operation-memory-evidence.md), Stage 003/6 OPEN.
+**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003T](003t-operation-memory-evidence.md), Stage 003/6 OPEN.
 **Dependencies:** [003T/3a](003t3a-cpu-pid-census.md) DONE in [PR #323](https://github.com/zeter1/ZeTer-Photo-Editor/pull/323), exact PR-head [CI #39921027655](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39921027655) and exact merged-code main [CI #39921787753](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39921787753) SUCCESS.
 
 ## Objective
@@ -18,3 +18,13 @@ Apply the proven conservative PID+starttime CPU tick parser, complete CDP census
 
 ## Current work
 TODO; next concrete implementation. No branch, PR or test result for 003T/3b yet.
+
+
+## 2026-10-23 implementation pass (candidate, CI not yet observed)
+Branch: [test/003t3b-native-cpu-boundaries-20261023](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t3b-native-cpu-boundaries-20261023).
+- Added optional read-only real Linux Chromium CDP + /proc CPU censuses at six genuine native UI operation milestones: before first Fill, first Worker in flight, after Escape cancellation, before second Fill, retry Worker in flight, after native completion. Both PSD16 and PSB32 retain original exact-byte / alpha / outside / History / Undo / Redo assertions.
+- Added standalone strict CPU-boundary receipt parser with per-PID incarnation tick comparisons and SHA-256 binding to the existing separately validated native cancellation receipt. Rejects false totals, peaks, Worker PID mappings, reordered samples, malformed windows and changed receipt content.
+- CDP absence is explicitly unknown (not zero); /proc denial remains entirely unknown. Snapshot windows are not exclusive or continuous and cannot establish true operation CPU/peak/Worker PID.
+- Enabled real fresh file:// browser observations and independent two-format JSON verification in existing dense-cancel CI job. Added negative Node tests.
+- Code files: tools/browser-linux-cpu-observation.mjs, tools/browser-smoke.mjs, tools/browser-near-cap-ui-smoke.mjs, tools/browser-operation-cpu-evidence.mjs, tools/verify-browser-operation-cpu-evidence.mjs, tests/browser-operation-cpu-evidence.test.mjs, .github/workflows/ci.yml.
+- CI/PR/merge: pending. Next: inspect exact head CI and both JSON receipts, fix any failures, confirm source/format/native fidelity, merge only on green CI, verify exact merged main; then update task queue. This is IN PROGRESS, not DONE.
