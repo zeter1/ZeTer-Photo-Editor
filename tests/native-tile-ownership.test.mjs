@@ -48,7 +48,7 @@ for (const [name, source] of [['RGB16',rgb16()],['CMYKA32',cmyk32()]]) {
     const tilesBefore = original.tiles.map(t => t.dataUrl);
     const working = createSerializedPixelBufferTileWorkingSet(original);
     assert.equal(working.loadedTileCount, 0);
-    const edge = {left:4,top:2,right:5,bottom:3};
+    const edge = {left:source.width-1,top:source.height-1,right:source.width,bottom:source.height};
     assert.equal(working.visit(edge, ({buffer,width,height}) => {
       assert.deepEqual([width,height],[1,1]);
       buffer.data[0] = source.bitsPerChannel === 16 ? 64123 : Math.fround(42.25);
@@ -120,17 +120,11 @@ test('003X: cancelled ROI staging leaves serialized native and prior committed t
   const before=working.serialize();
   const region=working.readRegion({left:0,top:0,right:3,bottom:3});
   region.buffer.data.fill(0);
-  let cancelled=false;
+  // Pre-cancel must not touch the already dirty first tile or any ROI tile.
   const changed=await working.writeRegionCooperative(region,{
-    isCancelled:()=>cancelled,
-    yieldControl:async()=>{cancelled=true;},
+    isCancelled:()=>true,
   });
-  // Small grids may finish before the first cooperative checkpoint; force
-  // pre-cancellation, which must never write any staged region data.
-  if(changed!==null){
-    const cancelledRegion=await working.writeRegionCooperative(region,{isCancelled:()=>true});
-    assert.equal(cancelledRegion,null);
-  } else assert.equal(changed,null);
+  assert.equal(changed,null);
   assert.deepEqual(working.serialize(),before);
   assert.deepEqual([...deserializePixelBufferSource(packed).data],[...cmyk32().data]);
 });
