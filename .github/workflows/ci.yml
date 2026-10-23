@@ -402,6 +402,8 @@ jobs:
           ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
           ZPE_OPERATION_CPU_OBSERVATION: '1'
           ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
+          ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss
 
       - name: Chromium PSB32 dense in-flight Escape cancellation and retry
         run: node tools/browser-smoke.mjs
@@ -411,6 +413,8 @@ jobs:
           ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
           ZPE_OPERATION_CPU_OBSERVATION: '1'
           ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
+          ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss
 
       - name: Verify strict independent cancellation receipts
         run: node tools/verify-browser-dense-cancel-evidence.mjs
@@ -422,6 +426,22 @@ jobs:
         env:
           ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
           ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
+
+      - name: Strict PSD16 and PSB32 independent CPU/RSS coverage (003T/3c)
+        run: node tools/verify-browser-operation-cpu-rss-coverage.mjs
+        env:
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss
+
+      - name: Upload real CPU/RSS milestone coverage receipts (003T/3c)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-native-operation-cpu-rss-003t3c
+          path: ${{ runner.temp }}/zpe-native-operation-cpu-rss/*.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload real native CPU-boundary receipts (003T/3b)
         if: always()
