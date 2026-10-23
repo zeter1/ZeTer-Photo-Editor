@@ -1,6 +1,6 @@
 # 003W/3 — Comparative real near-cap selection-freeze responsiveness
 
-**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003W](003w-browser-selection-freeze-responsiveness.md), Stage 003/Stage 6.
+**Priority:** P1. **Status:** DONE. **Parent:** [003W](003w-browser-selection-freeze-responsiveness.md), Stage 003/Stage 6.
 **Dependency:** [003W/2b-2i](003w2b2i-failed-import-worker-completion.md) DONE with PR #319 and verified exact-main CI.
 
 ## Goal
@@ -69,3 +69,7 @@ P0 independently Photoshop-authored PSB32 [002B/2c](002b2c-photoshop-psb32-prove
 ## 2026-10-23 — 003W/3c attribution PR candidate, parent remains IN PROGRESS
 
 Phase-aligned v2 timer samples now track their monotonic callback times and durations, with strictly bounded 256-sample capture and legacy v1 compatibility. The independent verifier tests interval chronology, genuine source selection phases, no-handoff over-cap refusal, and rejects CPU/RSS/PID extrapolation. Existing real Chromium file:// PSD16 and PSB32 dense/sparse/refusal UI suites now emit additional v2 JSON, with per-job repeated receipt CI gates; production raster mutation is unchanged. **No new successful PR CI, exact-main CI or evidenced optimization decision has been claimed** at this checkpoint. Next: observe exact PR-head browser receipts, determine scan-attributable delays conservatively, then targeted optimization only if repeatable and preserve native alpha/outside/Undo/Redo, cap and .zpe invariants. P0 Photoshop-authored PSB32 provenance still BLOCKED; 003T operation-peak metrics still OPEN.
+
+## 2026-10-23 — 003W/3 bounded phase attribution accepted, parent DONE
+
+[003W/3c](003w3c-phase-aligned-timer.md) DONE with [PR #322 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/322), final exact PR [CI #39915300707 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39915300707) and merged-code [main CI #39915691507 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39915691507), all 10 jobs each. Two real fresh Chromium file:// runs per PSD16/PSB32 dense/sparse/>2M refusal class, exact native integrity and Worker cap/History assertions. Highest additional drift on a pulse interval fully contained within scanning was 7.1ms; boundary-overlap extra drift reached 81.8ms but does not prove the scan caused it. No bounded production optimization warranted by the available data; runtime kernel untouched. Whole 003W and 003T/Stage 003 remain OPEN for independent process memory/CPU/Worker PID attribution. P0 Photoshop-authored PSB32 provenance remains BLOCKED.
