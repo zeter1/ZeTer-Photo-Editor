@@ -19,6 +19,7 @@ function makeHarness({
   canReplaceDocument = true,
   pendingChecks = [],
   session = null,
+  downloadText = null,
 } = {}) {
   const original = { name:'Original', layers:[] };
   const state = {
@@ -70,7 +71,9 @@ function makeHarness({
     },
     io: {
       readFileAsText: file => { calls.reads += 1; return readFileAsText(file); },
-      downloadText: (text, name, type) => calls.downloads.push({ text, name, type }),
+      downloadText: (text, name, type) => downloadText
+        ? downloadText(text, name, type)
+        : calls.downloads.push({ text, name, type }),
       safeFilename: value => String(value || 'image').replace(/\s+/g, '_'),
     },
     smartObjects: { saveContent: value => calls.smartSaves.push(value) },
@@ -324,6 +327,40 @@ test('regular save downloads formatted zpe and refreshes recovery without markin
   assert.deepEqual(harness.calls.recoveries, [{ immediate:true }]);
   assert.deepEqual(harness.calls.dirty, []);
   assert.match(harness.calls.statuses[0], /My_Project\.zpe/);
+});
+
+test('zpe save serialization failure keeps the document unsaved and emits no success signal', () => {
+  const harness = makeHarness();
+  const documentValue = { name: 'Unsaved Project', layers: [] };
+  documentValue.self = documentValue;
+  harness.state.doc = documentValue;
+
+  assert.throws(() => harness.controller.saveProject(), TypeError);
+  assert.strictEqual(harness.state.doc, documentValue);
+  assert.deepEqual(harness.calls.downloads, []);
+  assert.deepEqual(harness.calls.dirty, [], 'failed save must not mark a document clean');
+  assert.deepEqual(harness.calls.statuses, [], 'failed serialization must not report a download');
+  assert.deepEqual(harness.calls.smartSaves, []);
+});
+
+test('zpe save propagates download failure without publishing success or changing dirty state', () => {
+  const downloadError = new Error('download unavailable');
+  let attempts = 0;
+  const harness = makeHarness({
+    downloadText: () => {
+      attempts += 1;
+      throw downloadError;
+    },
+  });
+  const documentValue = { name: 'Unsaved Project', layers: [{ id: 'original' }] };
+  harness.state.doc = documentValue;
+
+  assert.throws(() => harness.controller.saveProject(), error => error === downloadError);
+  assert.equal(attempts, 1);
+  assert.strictEqual(harness.state.doc, documentValue);
+  assert.deepEqual(harness.calls.dirty, [], 'failed save must not mark a document clean');
+  assert.deepEqual(harness.calls.statuses, [], 'failed download must not report success');
+  assert.deepEqual(harness.calls.smartSaves, []);
 });
 
 test('Smart Object child save delegates without regular project download', () => {
