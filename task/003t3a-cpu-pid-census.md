@@ -1,6 +1,6 @@
 # 003T/3a — Chromium CPU tick census with OS PID incarnation provenance
 
-**Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003T](003t-operation-memory-evidence.md), Stage 003/6 OPEN.
+**Priority:** P1. **Status:** DONE (bounded scope; parent 003T OPEN). **Parent:** [003T](003t-operation-memory-evidence.md), Stage 003/6 OPEN.
 **Dependencies:** 003T/2f-2 and 003T/2g accepted; 003W/3c DONE [PR #322](https://github.com/zeter1/ZeTer-Photo-Editor/pull/322).
 **Branch:** [test/003t3a-chromium-cpu-pid-census-20261023](https://github.com/zeter1/ZeTer-Photo-Editor/tree/test/003t3a-chromium-cpu-pid-census-20261023).
 
@@ -13,7 +13,7 @@ Independent real Linux Chromium file:// control launches a genuine CPU-consuming
 3. Real Chromium file:// Worker completion and independent saved-artifact verification in Linux CI; negative Node tests and a real /proc self-control.
 4. Exact PR-head CI, PR merge, exact merged-code main CI before marking this bounded subtask DONE.
 
-## Implemented code / tests (pending CI verification)
+## Implemented code / tests (verified in exact PR and main CI)
 
 - tools/browser-linux-cpu-observation.mjs — complete OS census, parsing, comparison and evidence verifier.
 - tools/browser-chromium-cpu-control.mjs — fresh file:// Chromium, real temporary CPU Worker, before/after CDP PID/OS observations and readback.
@@ -28,6 +28,6 @@ Two non-atomic CDP+/proc snapshots cannot establish continuously complete proces
 
 ## Verification and next
 
-**Status: IN PROGRESS** until actual Node/Chromium CI, PR merge and exact-main CI are inspected. Local repository checkout could not be obtained because github.com DNS is unavailable in this environment.
+**Status: DONE**, [PR #323](https://github.com/zeter1/ZeTer-Photo-Editor/pull/323) MERGED to [main 84a58863](https://github.com/zeter1/ZeTer-Photo-Editor/commit/84a588636a188fa9884206a8d56e35992493c046). Exact final PR-head [CI #39921027655 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39921027655), all 10 jobs, including 1485 Node tests, actual Linux Chromium file:// CPU Worker with sampled-overlap-only PID jiffies and standalone JSON verifier PASS. Exact merged-code main [CI #39921787753 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39921787753) on SHA 84a58863, all 10 jobs. No independent local full checkout due to github.com DNS limitation; CI performed real browser and native regressions.
 
-**Next P1 003T/3b (TODO):** attach incarnation-safe CPU observations to real PSD16 and PSB32 high-depth UI Fill/cancel/retry operation boundaries; preserve native data, alpha/outside, history/Undo/Redo, missing-interval uncertainty; verify independent real Chromium receipts. Parent 003T / Stage 003 OPEN, independent licensed Photoshop-authored PSB32 [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED.
+**Next P1 [003T/3b](003t3b-high-depth-cpu-evidence.md) (TODO):** attach incarnation-safe CPU observations to real PSD16 and PSB32 high-depth UI Fill/cancel/retry operation boundaries; preserve native data, alpha/outside, history/Undo/Redo, missing-interval uncertainty; verify independent real Chromium receipts. Parent 003T / Stage 003 OPEN, independent licensed Photoshop-authored PSB32 [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED.
