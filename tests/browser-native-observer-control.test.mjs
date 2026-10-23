@@ -52,7 +52,7 @@ const controls=()=>[1,2,3].map(i=>{
     after:mark(startMs+30,10100+i*700),
     workerJobs:2,workerReplies:1,undoNativeExact:true,redoNativeExact:true,
     historyUnchanged:true,selectionUnchanged:true,noNewWorker:true,
-    projectReadbacks:2};
+    projectReadbacks:3};
 });
 const make=(c=controls(),n=native())=>createNativeObserverControl({
   format:n.format,sessionId:randomUUID(),sessionStartedAtUnixMs:1792750000000,
