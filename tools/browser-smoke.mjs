@@ -536,6 +536,11 @@ async function runSmoke() {
         try{browserClient=await CdpClient.connect(browserWs);}
         catch{browserClient=null;}
       }
+      if(process.env.ZPE_SAME_SESSION_RETENTION==='1' &&
+          (process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY!=='1' ||
+           process.env.ZPE_OPERATION_CPU_OBSERVATION!=='1' ||
+           process.env.ZPE_OPERATION_CPU_RSS_COVERAGE!=='1'))
+        throw new TypeError('003T/4 requires dense cancellation and real CPU/RSS observation');
       const operationRssTools=cpuTools &&
         process.env.ZPE_OPERATION_CPU_RSS_COVERAGE==='1'
         ?await import('./browser-operation-cpu-rss-coverage.mjs'):null;

@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import {createHash,randomUUID} from 'node:crypto';
 import {
   installBrowserSelectionFreezeObserver,
   validateBrowserSelectionPhaseEvidence,
@@ -1415,6 +1416,18 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
     // bounded stale-result settling, then a second real dense Worker Fill.
     if(cancelDense){
       const cpuStages=[],rssStages=[];
+      // 003T/4 is opt-in in the same real browser session; it does not
+      // perturb historical six CPU/RSS milestone receipts.
+      const retentionEnabled=process.env.ZPE_SAME_SESSION_RETENTION==='1';
+      const retentionCycles=[];
+      const sessionId=retentionEnabled?randomUUID():null;
+      const sessionStartedAtUnixMs=retentionEnabled?Date.now():null;
+      const retentionMark=async()=>{
+        const census=await operationCpuCensus?.();
+        if(!census?.cpu || !census.rss)
+          throw new TypeError('003T/4 needs independent CDP Linux CPU/RSS censuses');
+        return {cpu:census.cpu,rss:census.rss};
+      };
       const cpuMark=async phase=>{
         if(!operationCpuCensus)return;
         const sample=await operationCpuCensus();
@@ -1489,6 +1502,8 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         '003W/2b-2c changing selection must not revive cancelled Worker',
         JSON.stringify(superseded));
       await cpuMark('before-retry-fill');
+      const firstCycleStartMs=retentionEnabled?performance.now():null;
+      const firstCycleBefore=retentionEnabled?await retentionMark():null;
       await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
       assert(await evaluate(client,'('+runFill.toString()+')()'),
         '003W/2b-2c retry must be an enabled real menu Fill');
@@ -1534,6 +1549,18 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
       const finalWorker=await evaluate(client,workerExpr);
       assert(finalWorker.jobs===2 && finalWorker.replies===1,
         '003W/2b-2c no cancelled late reply after Undo/Redo',JSON.stringify(finalWorker));
+      if(retentionEnabled){
+        const after=await retentionMark();
+        retentionCycles.push({index:1,startMs:firstCycleStartMs,finishMs:performance.now(),
+          before:firstCycleBefore,after,
+          workerJobs:finalWorker.jobs,workerReplies:finalWorker.replies,
+          selectedPixels:second.selectedPixels,
+          selectedPixelsChanged:success.quality.changedSelectedPixels,
+          nativeExactAfterUndo:undo.baselineEqual,nativeExactAfterRedo:redo.successEqual,
+          outsideUnchanged:success.quality.changedOutsideSelectionPixels===0,
+          alphaUnchanged:success.alphaUnchanged,
+          historyOnce:newFillRows===oldFillRows+1,lateRepliesAbsent:true});
+      }
       const evidence={
         kind:'zpe-browser-near-cap-dense-cancel-v1',format,protocol:'file:',
         sourcePixels:fixture.width*fixture.height,sourceRawBytes:baseline.rawBytes,
@@ -1568,6 +1595,84 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
         limitations:BROWSER_DENSE_CANCEL_LIMITATIONS,
       };
       validateBrowserDenseCancelEvidence(evidence);
+      if(retentionEnabled){
+        // Two additional genuine near-cap Workers. Each cycle starts from
+        // exact original native bytes via Undo, then Fill/Undo/Redo in this
+        // same tab and browser process. No new imports or profiles.
+        for(let index=2;index<=3;index++){
+          await evaluate(client,"document.querySelector('#undoBtn').click();true");
+          await waitFor('003T/4 repeat native reset '+index,
+            async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+          const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+          assert(view.hit==='overlayCanvas'&&view.within&&
+            view.boundingPixels===second.selectedPixels,
+            '003T/4 redraw genuine native dense selection');
+          await draw(view);
+          const startMs=performance.now();
+          const before=await retentionMark();
+          await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+          assert(await evaluate(client,'('+runFill.toString()+')()'),
+            '003T/4 repeat must invoke enabled native Fill');
+          const expectedJobs=index+1;
+          await waitFor('003T/4 real repeat dispatch '+index,
+            async()=>(await evaluate(client,workerExpr)).jobs===expectedJobs,75_000);
+          const dispatch=await evaluate(client,workerExpr);
+          assert(dispatch.selectedPixels===second.selectedPixels &&
+            dispatch.selectedBytes===second.selectedBytes &&
+            dispatch.replies===index-1,
+            '003T/4 repeat must dispatch exactly same frozen selected Uint32 indices');
+          await waitFor('003T/4 real repeat completion '+index,
+            ()=>evaluate(client,'(() => {const w=window.__nearCapWorkerObservation.summary();return w.jobs==='+
+              expectedJobs+' && w.replies==='+index+' && document.querySelector("#statusText")?.textContent?.includes("tiled ")})()'),
+            205_000);
+          await evaluate(client,'window.__nearCapWorkerObservation.end()');
+          await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+          const repeatedSuccess=await evaluate(client,snapshot);
+          const repeatedUi=await evaluate(client,'('+ui.toString()+')()');
+          const historyOnce=repeatedUi.history.filter(x=>x.includes('Контент-заливка')).length===
+            oldFillRows+1;
+          assert(!repeatedSuccess.baselineEqual &&
+            repeatedSuccess.quality?.changedSelectedPixels>0 &&
+            repeatedSuccess.quality.changedOutsideSelectionPixels===0 &&
+            repeatedSuccess.alphaUnchanged===true && historyOnce,
+            '003T/4 selected-only, alpha and one History entry must remain exact',
+            JSON.stringify(repeatedSuccess));
+          await evaluate(client,"document.querySelector('#undoBtn').click();true");
+          await waitFor('003T/4 repeat native Undo '+index,
+            async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+          const undone=await evaluate(client,snapshot);
+          await evaluate(client,"document.querySelector('#redoBtn').click();true");
+          await waitFor('003T/4 repeat native Redo '+index,
+            async()=>(await evaluate(client,snapshot))?.successEqual===true,90_000);
+          const redone=await evaluate(client,snapshot);
+          await new Promise(resolve=>setTimeout(resolve,500));
+          const final=await evaluate(client,workerExpr);
+          assert(final.jobs===expectedJobs && final.replies===index,
+            '003T/4 no stale or extra Worker reply after repeated native History');
+          const after=await retentionMark();
+          retentionCycles.push({index,startMs,finishMs:performance.now(),before,after,
+            workerJobs:final.jobs,workerReplies:final.replies,
+            selectedPixels:dispatch.selectedPixels,
+            selectedPixelsChanged:repeatedSuccess.quality.changedSelectedPixels,
+            nativeExactAfterUndo:undone.baselineEqual,
+            nativeExactAfterRedo:redone.successEqual,
+            outsideUnchanged:repeatedSuccess.quality.changedOutsideSelectionPixels===0,
+            alphaUnchanged:repeatedSuccess.alphaUnchanged,
+            historyOnce,lateRepliesAbsent:final.replies===index});
+        }
+        const {createSameSessionNativeRetention,saveSameSessionNativeRetention}=
+          await import('./browser-same-session-native-retention.mjs');
+        const fixtureSha256=createHash('sha256').update(Buffer.from(fixture.bytes)).digest('hex');
+        const report=createSameSessionNativeRetention({
+          format,sessionId,sessionStartedAtUnixMs,fixtureSha256,
+          nativeReceipt:evidence,cycles:retentionCycles});
+        const file=await saveSameSessionNativeRetention(report,evidence,fixtureSha256,
+          process.env.ZPE_SAME_SESSION_RETENTION_ARTIFACT_DIR);
+        console.log('003T/4 genuine single-session three native Fill/Undo/Redo cycles:',
+          JSON.stringify({file,format,sessionId,
+            comparisons:report.comparisons,workerPidMapping:'unknown',
+            trueOperationPeakKnown:false,leakProven:false}));
+      }
       const saved=await saveBrowserDenseCancelEvidence(evidence,
         process.env.ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR);
       if(operationCpuCensus){
