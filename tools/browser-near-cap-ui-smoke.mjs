@@ -1611,6 +1611,11 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
             await draw(view);
             const startMs=performance.now();
             const before=await retentionMark();
+            // Mirror the post-operation native project readback in the active
+            // treatment, without doing another Fill or claiming a new edit.
+            const observed=await evaluate(client,snapshot);
+            assert(observed.successEqual,
+              '003T/4b observer-only pre-History readback must keep exact native result');
             await evaluate(client,"document.querySelector('#undoBtn').click();true");
             await waitFor('003T/4b native control Undo '+index,
               async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
@@ -1632,7 +1637,7 @@ export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fix
               workerJobs:final.jobs,workerReplies:final.replies,
               undoNativeExact:undone.baselineEqual,redoNativeExact:redone.successEqual,
               historyUnchanged,selectionUnchanged:view.boundingPixels===second.selectedPixels,
-              noNewWorker:final.jobs===2&&final.replies===1,projectReadbacks:2});
+              noNewWorker:final.jobs===2&&final.replies===1,projectReadbacks:3});
           }
           const {createNativeObserverControl,saveNativeObserverControl}=
             await import('./browser-native-observer-control.mjs');
