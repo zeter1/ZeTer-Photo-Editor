@@ -1,5 +1,8 @@
 # 003X — bounded native pixel tile ownership and writeback (Stage 6)
 
+> **Merge/CI checkpoint 2026-10-26 (supersedes pre-merge candidate note below):** PR #346 merged to main at bd1da80d5b866c2496ba73df098c852a1b99f808. Final PR-head b08a35cc3021b96eb679ff82d21fa0f3ff5c4f4a Linux core CI #40358652163 PASS 12/12; separate real-photo #40358652223 PASS. Second-dirty-victim induced failure regression added before green CI. Pending: verify exact-main core AND real-photo workflows, then mark bounded 003X/5 DONE and begin new 003X/6 assessment of remaining raw canonical bytes + Data URL transient allocation. Does not claim whole Stage 6 DONE or Adobe-authored PSB32 provenance.
+
+
 > 003X/5 candidate, 2026-10-26: chunked Base64 conversion in src/core/io.js (0x6000-byte aligned input; removes full binary-string join); src/core/pixel-buffer.js plans and encodes all cache victims before mutating LRU; three focused native/base64 tests PASS, Windows npm run check has existing Linux-only cgroup failures. Browser file:// and GitHub PR/CI are separate gates. Native raw canonical tile byte allocation, URL concatenation, History/Worker and OS peak remain unbounded/unmeasured. Continue 003X/5 until CI, failure-injected cache tests and exact-main acceptance.
 
 **Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003 tiled Content-Aware](003-tiled-content-aware.md) / Stage 6 IN PROGRESS.
