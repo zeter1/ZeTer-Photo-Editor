@@ -1583,8 +1583,16 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     4 * Math.ceil(tile.width * tile.height * targetChannels * sampleBytes / 3);
   const largestEncodedTileBytes = safe.tiles.reduce((largest, tile) =>
     Math.max(largest, encodedTileBytes(tile)), 0);
+  // Default must not reject previously supported dense native edits. The
+  // entire validated source is bounded by maxBytes and the fixed tile count;
+  // callers can opt into a stricter overlay allowance explicitly.
+  const fullSourceEncodedBytes = safe.tiles.reduce((sum, tile) =>
+    sum + encodedTileBytes(tile), 0);
+  if (!Number.isSafeInteger(fullSourceEncodedBytes)) {
+    throw new RangeError('Tiled PixelBuffer encoded dirty tile byte budget overflow');
+  }
   const encodedLimit = maxEncodedDirtyBytes == null
-    ? Math.max(16 * 1024 * 1024, largestEncodedTileBytes)
+    ? fullSourceEncodedBytes
     : Number(maxEncodedDirtyBytes);
   if (!Number.isSafeInteger(encodedLimit) ||
       encodedLimit < largestEncodedTileBytes) {

@@ -169,3 +169,24 @@ test('003X/3: yielded ROI over budget refuses before any native publication',asy
   assert.deepEqual(work.serialize(),source);
 });
 
+
+for (const [name, make, value] of fixtures) {
+  test('003X/3 '+name+': default overlay allowance preserves dense editing compatibility', () => {
+    const original=make();
+    const source=serializeTiledPixelBufferSource(original,{tileSize:1});
+    const work=createSerializedPixelBufferTileWorkingSet(source,{
+      maxResidentBytes:source.tiles[0].rawBytes,
+    });
+    const exactCapacity=source.tiles.reduce((sum,tile)=>sum+tile.dataUrl.length,0);
+    assert.equal(work.maxEncodedDirtyBytes,exactCapacity);
+    assert.equal(work.visit(null,({buffer})=>{
+      buffer.data[0]=value;return 1;
+    }),source.tiles.length);
+    assert.equal(work.dirtyTileCount,source.tiles.length);
+    assert.equal(work.encodedDirtyTileBytes,exactCapacity);
+    assert.ok(work.residentTileBytes<=work.maxResidentBytes);
+    const reopened=deserializePixelBufferSource(JSON.parse(JSON.stringify(work.serialize())));
+    assert.equal(reopened.data[0],value);
+    assert.deepEqual([...deserializePixelBufferSource(source).data],[...original.data]);
+  });
+}
