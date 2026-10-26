@@ -9,13 +9,15 @@ export function bytesToDataUrl(value, mime = 'application/octet-stream') {
         : null;
   if (!bytes) throw new TypeError('Ожидался бинарный буфер');
   if (typeof btoa !== 'function') throw new Error('Base64 encoder недоступен');
+  // A multiple of three keeps Base64 groups aligned. Never join all source
+  // bytes into a second full-size binary string before calling btoa.
   const chunks = [];
-  const chunkSize = 0x8000;
+  const chunkSize = 0x6000;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
     const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
-    chunks.push(String.fromCharCode(...chunk));
+    chunks.push(btoa(String.fromCharCode(...chunk)));
   }
-  return `data:${String(mime || 'application/octet-stream')};base64,${btoa(chunks.join(''))}`;
+  return `data:${String(mime || 'application/octet-stream')};base64,${chunks.join('')}`;
 }
 
 export function dataUrlToBytes(dataUrl, { maxBytes = 4 * 1024 * 1024 } = {}) {
