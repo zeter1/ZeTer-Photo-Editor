@@ -1,5 +1,8 @@
 # 003X/5 — bound canonical native tile encoding transient ownership
 
+> **Merge/CI checkpoint 2026-10-26 (supersedes pre-merge candidate note below):** PR #346 merged to main at bd1da80d5b866c2496ba73df098c852a1b99f808. Final PR-head b08a35cc3021b96eb679ff82d21fa0f3ff5c4f4a Linux core CI #40358652163 PASS 12/12; separate real-photo #40358652223 PASS. Second-dirty-victim induced failure regression added before green CI. Pending: verify exact-main core AND real-photo workflows, then mark bounded 003X/5 DONE and begin new 003X/6 assessment of remaining raw canonical bytes + Data URL transient allocation. Does not claim whole Stage 6 DONE or Adobe-authored PSB32 provenance.
+
+
 > 003X/5 candidate, 2026-10-26: chunked Base64 conversion in src/core/io.js (0x6000-byte aligned input; removes full binary-string join); src/core/pixel-buffer.js plans and encodes all cache victims before mutating LRU; four focused native/Base64 tests PASS locally, including new RGB16 and CMYKA32 Float32 regression: encoding failure on the SECOND dirty LRU victim leaves both earlier tiles, serialized data and Undo snapshot unchanged. Previous PR #346 head cf66d49 passed Linux core 12/12 (run 40355245272) and real-photo CI (40355245213); after this regression commit, fresh PR-head CI must pass again. Windows npm run check has five known Linux-only cgroup failures. Native raw canonical tile byte allocation, URL concatenation, History/Worker and OS peak remain unbounded/unmeasured. Continue 003X/5 until the new PR head passes core and real-photo CI, merge approval and exact-main acceptance.
 
 **ID:** 003X/5. **Priority:** P1. **Status:** IN PROGRESS. **Parent:** 003X / Stage 6 IN PROGRESS.
