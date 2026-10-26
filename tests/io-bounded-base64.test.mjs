@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { bytesToDataUrl, dataUrlToBytes } from '../src/core/io.js';
 import {
   createPixelBuffer, serializeTiledPixelBufferSource, deserializePixelBufferSource,
+  createSerializedPixelBufferTileWorkingSet,
 } from '../src/core/pixel-buffer.js';
 
 test('binary data URL: chunk boundaries preserve exact bytes and bound each btoa input', () => {
@@ -57,5 +58,61 @@ test('an encoder failure after a successful chunk aborts instead of producing a 
     assert.equal(count, 2);
   } finally {
     globalThis.btoa = original;
+  }
+});
+
+test('003X/5: a later dirty LRU eviction encoding failure keeps BOTH earlier tiles live', () => {
+  for (const config of [
+    { model:'rgb', channels:3, bitsPerChannel:16, value:65011 },
+    { model:'cmyk', channels:5, bitsPerChannel:32, value:Math.fround(11.25) },
+  ]) {
+    const samples = 3 * 3 * config.channels;
+    const data = config.bitsPerChannel === 16
+      ? Uint16Array.from({ length:samples }, (_, i) => (i * 107 + 19) & 65535)
+      : Float32Array.from({ length:samples }, (_, i) => Math.fround((i - 23) / 13));
+    const source = serializeTiledPixelBufferSource(createPixelBuffer({
+      ...config, width:3, height:3, data,
+    }), { tileSize:2 });
+    // Tile 0 is 2×2; tiles 1 and 2 are 1×2 and 2×1 respectively.
+    // The two smaller dirty tiles fit together but loading tile 0 must
+    // evict both of them, not just one.
+    const work = createSerializedPixelBufferTileWorkingSet(source, {
+      maxResidentBytes:source.tiles[0].rawBytes,
+    });
+    for (const index of [1, 2]) {
+      const tile=source.tiles[index];
+      assert.equal(work.visit({
+        left:tile.x, top:tile.y, right:tile.x+tile.width, bottom:tile.y+tile.height,
+      }, ({buffer}) => { buffer.data[0]=config.value+index; return 1; }), 1);
+    }
+    assert.equal(work.loadedTileCount,2);
+    assert.equal(work.writtenBackTileCount,0);
+    const before=work.serialize();
+    const originalBtoa=globalThis.btoa;
+    let encodes=0;
+    globalThis.btoa=bytes=>{
+      encodes++;
+      if (encodes===2) throw new Error('second LRU writeback failed');
+      return originalBtoa(bytes);
+    };
+    try {
+      assert.throws(()=>work.readRegion({left:0,top:0,right:2,bottom:2}),
+        /second LRU writeback failed/);
+      assert.equal(encodes,2,'first victim was already encoded when second failed');
+    } finally {
+      globalThis.btoa=originalBtoa;
+    }
+    assert.equal(work.loadedTileCount,2,'failed planning did not remove either dirty tile');
+    assert.equal(work.writtenBackTileCount,0,'no partial writeback was published');
+    assert.equal(work.dirtyTileCount,2);
+    assert.equal(work.residentTileBytes,source.tiles[0].rawBytes);
+    assert.deepEqual(work.serialize(),before,'failed cache load kept exact native edits');
+    const restored=deserializePixelBufferSource(JSON.parse(JSON.stringify(work.serialize())));
+    for (const index of [1,2]) {
+      const tile=source.tiles[index];
+      assert.equal(restored.data[(tile.y*3+tile.x)*config.channels],config.value+index);
+    }
+    assert.deepEqual([...deserializePixelBufferSource(source).data],[...data],
+      'original serialized source remains the exact Undo snapshot');
   }
 });
