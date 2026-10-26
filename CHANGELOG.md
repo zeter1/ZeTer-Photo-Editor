@@ -1,3 +1,9 @@
+### 2026-10-26 — Кандидат 003X/5: ограничение промежуточного Base64-кодирования native-тайлов
+
+- `bytesToDataUrl` кодирует блоками по 24 КиБ, без дополнительной полной бинарной строки перед Base64; данные остаются совместимы побайтово.
+- Вытеснение грязных тайлов из кэша сначала подготавливает весь список, а затем применяет изменения, не оставляя частичных вытеснений при ошибке кодера.
+- Три теста кодирования и точного RGB16/CMYKA32 round-trip прошли локально. Итоговые CI, выпуск и слияние не подтверждены; 003X/5 остаётся IN PROGRESS.
+
 ### 2026-10-22 — 003W/2b-2h принята: восстановление после ошибочного File Open PSD16/PSB32
 
 - [PR #317 слит](https://github.com/zeter1/ZeTer-Photo-Editor/pull/317) в [main 09a6639f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/09a6639fd1708d32dc4b65c201ccbc755a63aa69). [CI PR-head #39818707919 (attempt 2)](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39818707919), [PR real-photo #39818706912](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39818706912), [exact-main CI #39819777597](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39819777597), [exact-main real-photo #39819777848](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39819777848) — SUCCESS.

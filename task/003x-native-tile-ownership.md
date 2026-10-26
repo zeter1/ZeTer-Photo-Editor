@@ -1,5 +1,7 @@
 # 003X — bounded native pixel tile ownership and writeback (Stage 6)
 
+> 003X/5 candidate, 2026-10-26: chunked Base64 conversion in src/core/io.js (0x6000-byte aligned input; removes full binary-string join); src/core/pixel-buffer.js plans and encodes all cache victims before mutating LRU; three focused native/base64 tests PASS, Windows npm run check has existing Linux-only cgroup failures. Browser file:// and GitHub PR/CI are separate gates. Native raw canonical tile byte allocation, URL concatenation, History/Worker and OS peak remain unbounded/unmeasured. Continue 003X/5 until CI, failure-injected cache tests and exact-main acceptance.
+
 **Priority:** P1. **Status:** IN PROGRESS. **Parent:** [003 tiled Content-Aware](003-tiled-content-aware.md) / Stage 6 IN PROGRESS.
 **Dependencies:** existing typed pixel buffers, [003U](003u-bounded-ui-selection-freeze.md) DONE, [003V](003v-ui-selection-scan-cancellation.md) DONE, [003T/4b-2](003t4b-retention-observer-control.md) bounded DONE.
 **Blocker unrelated:** external independent Photoshop-authored PSB32 provenance [002B/2c](002b2c-photoshop-psb32-provenance.md) P0 BLOCKED.

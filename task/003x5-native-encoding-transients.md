@@ -1,6 +1,8 @@
 # 003X/5 — bound canonical native tile encoding transient ownership
 
-**ID:** 003X/5. **Priority:** P1. **Status:** TODO. **Parent:** 003X / Stage 6 IN PROGRESS.
+> 003X/5 candidate, 2026-10-26: chunked Base64 conversion in src/core/io.js (0x6000-byte aligned input; removes full binary-string join); src/core/pixel-buffer.js plans and encodes all cache victims before mutating LRU; three focused native/base64 tests PASS, Windows npm run check has existing Linux-only cgroup failures. Browser file:// and GitHub PR/CI are separate gates. Native raw canonical tile byte allocation, URL concatenation, History/Worker and OS peak remain unbounded/unmeasured. Continue 003X/5 until CI, failure-injected cache tests and exact-main acceptance.
+
+**ID:** 003X/5. **Priority:** P1. **Status:** IN PROGRESS. **Parent:** 003X / Stage 6 IN PROGRESS.
 **Dependencies:** 003X/1, /2, /3, /4 bounded DONE; preserving native v2 source, exact RGB16/CMYKA32 Float32 and cancellation.
 **Independent blocker:** Photoshop-authored PSB32 provenance 002B/2c P0 BLOCKED.
 

@@ -1616,21 +1616,33 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
   let revision = 0;
 
   function makeRoom(extraBytes) {
+    // Prepare every writeback before committing any eviction. If a later
+    // encoder fails, the original live LRU and dirty tiles remain intact.
+    let plannedBytes = residentBytes;
+    const victims = [];
     for (const [index, buffer] of loaded) {
-      if (residentBytes + extraBytes <= residentLimit) break;
+      if (plannedBytes + extraBytes <= residentLimit) break;
+      let writeback = null;
       if (dirty.has(index)) {
         const tile = safe.tiles[index];
         const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
-        // Encode successfully before removing the only live dirty copy.
-        writtenBack.set(index, { ...tile, rawBytes:bytes.byteLength,
-          dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME) });
+        const dataUrl = bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME);
+        if (dataUrl.length !== encodedTileBytes(tile)) {
+          throw new RangeError('Tiled PixelBuffer encoded dirty tile length mismatch');
+        }
+        writeback = { ...tile, rawBytes:bytes.byteLength, dataUrl };
       }
-      loaded.delete(index);
-      residentBytes -= buffer.data.byteLength;
+      victims.push({ index, byteLength:buffer.data.byteLength, writeback });
+      plannedBytes -= buffer.data.byteLength;
     }
-    if (residentBytes + extraBytes > residentLimit) {
+    if (plannedBytes + extraBytes > residentLimit) {
       throw new RangeError('Tiled PixelBuffer resident tile byte budget exceeded');
     }
+    for (const victim of victims) {
+      if (victim.writeback) writtenBack.set(victim.index, victim.writeback);
+      loaded.delete(victim.index);
+    }
+    residentBytes = plannedBytes;
   }
 
   function cacheTile(index, buffer) {

@@ -4225,13 +4225,15 @@ function bytesToDataUrl(value, mime = 'application/octet-stream') {
         : null;
   if (!bytes) throw new TypeError('Ожидался бинарный буфер');
   if (typeof btoa !== 'function') throw new Error('Base64 encoder недоступен');
+  // A multiple of three keeps Base64 groups aligned. Never join all source
+  // bytes into a second full-size binary string before calling btoa.
   const chunks = [];
-  const chunkSize = 0x8000;
+  const chunkSize = 0x6000;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
     const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
-    chunks.push(String.fromCharCode(...chunk));
+    chunks.push(btoa(String.fromCharCode(...chunk)));
   }
-  return `data:${String(mime || 'application/octet-stream')};base64,${btoa(chunks.join(''))}`;
+  return `data:${String(mime || 'application/octet-stream')};base64,${chunks.join('')}`;
 }
 function dataUrlToBytes(dataUrl, { maxBytes = 4 * 1024 * 1024 } = {}) {
   const match = /^data:([^;,]+)?;base64,([a-z\d+/=]*)$/i.exec(String(dataUrl || ''));
@@ -6900,21 +6902,33 @@ function createSerializedPixelBufferTileWorkingSet(source, {
   let revision = 0;
 
   function makeRoom(extraBytes) {
+    // Prepare every writeback before committing any eviction. If a later
+    // encoder fails, the original live LRU and dirty tiles remain intact.
+    let plannedBytes = residentBytes;
+    const victims = [];
     for (const [index, buffer] of loaded) {
-      if (residentBytes + extraBytes <= residentLimit) break;
+      if (plannedBytes + extraBytes <= residentLimit) break;
+      let writeback = null;
       if (dirty.has(index)) {
         const tile = safe.tiles[index];
         const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
-        // Encode successfully before removing the only live dirty copy.
-        writtenBack.set(index, { ...tile, rawBytes:bytes.byteLength,
-          dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME) });
+        const dataUrl = bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME);
+        if (dataUrl.length !== encodedTileBytes(tile)) {
+          throw new RangeError('Tiled PixelBuffer encoded dirty tile length mismatch');
+        }
+        writeback = { ...tile, rawBytes:bytes.byteLength, dataUrl };
       }
-      loaded.delete(index);
-      residentBytes -= buffer.data.byteLength;
+      victims.push({ index, byteLength:buffer.data.byteLength, writeback });
+      plannedBytes -= buffer.data.byteLength;
     }
-    if (residentBytes + extraBytes > residentLimit) {
+    if (plannedBytes + extraBytes > residentLimit) {
       throw new RangeError('Tiled PixelBuffer resident tile byte budget exceeded');
     }
+    for (const victim of victims) {
+      if (victim.writeback) writtenBack.set(victim.index, victim.writeback);
+      loaded.delete(victim.index);
+    }
+    residentBytes = plannedBytes;
   }
 
   function cacheTile(index, buffer) {
