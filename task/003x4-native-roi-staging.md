@@ -1,6 +1,6 @@
 # 003X/4 — bounded native ROI staging and temporary encoding allocations
 
-**ID:** 003X/4. **Priority:** P1. **Status:** TODO. **Parent:** 003X / Stage 6 IN PROGRESS.
+**ID:** 003X/4. **Priority:** P1. **Status:** IN PROGRESS (candidate, final PR-head/browser/main CI pending). **Parent:** 003X / Stage 6 IN PROGRESS.
 **Dependencies:** 003X/1 private tile ownership DONE, 003X/2 resident cache DONE, 003X/3 encoded dirty overlay reservation DONE after verified exact merged-main CI.
 **Independent blocker:** Photoshop-authored PSB32 provenance 002B/2c remains P0 BLOCKED; synthetic / application-generated PSB is not Adobe provenance.
 
@@ -21,5 +21,19 @@
 
 ## Status
 
-TODO — no implementation for 003X/4 yet. The first pass should inspect the exact native ROI and writeback ownership boundaries, select a demonstrably helpful bounded production fix, and test the real edit consumer.
+IN PROGRESS — implementation candidate is ready for real PR CI; do not mark this slice DONE before browser/CI/merge gates.
 
+
+## 003X/4 candidate, 2026-10-26 — bounded ROI reads and private ROI write staging
+
+**Production allocation audit:** `readRegionSteps` allocated one contiguous typed ROI of `width * height * targetChannels * bytesPerSample` before visiting any tile. `writeRegionSteps` held one private `target.data.slice()` for **each changed tile** until `publishStaged`, but unlike `visit` it did **not** check `maxVisitBytes`; the previously declared visit budget could be exceeded by a multi-tile ROI. The resident LRU, encoded dirty overlays and snapshots are additional owners. `makeRoom` / `publishStaged` can hold canonical bytes and encoded data URLs during writeback; those temporaries and browser/OS peak are **not bounded by this patch**.
+
+**Code:** `src/core/pixel-buffer.js` now provides optional `maxRegionBytes` (default: existing validated `maxBytes`, preserving genuine dense operations). Both synchronous and cooperative ROI reads reject before allocating or loading any tile if contiguous native ROI exceeds that limit. `writeRegion` refuses oversized input regions before mutation, and limits the total private changed tile copies to `maxVisitBytes` **before** the next `TypedArray.slice()`. Each native tile is charged its actual typed byte length. Failure at tile N leaves the earlier staged copies unpublished; the existing atomic `publishStaged` and revision/cancellation checks remain in place. Optional strict ceilings are API-level; **no .zpe schema, 8-bit conversion or float clamping** introduced.
+
+**Tests:** `tests/native-roi-staging-budget.test.mjs` adds six Node regressions: RGB16 and CMYKA32 Float32 native/alpha Undo and .zpe JSON precision, exact second-tile allocation avoidance (monitored native `TypedArray.slice`), configured read and write ROI preflight with no lazy load, and mid-32,768-pixel cooperative cancellation after private staging with safe retry. Local Windows focused **6/6 PASS**, baseline tile ownership **10/10 PASS**. `npm run check` built offline assets (hash `095365a0e82df0e5`) and executed 1,538 Node tests: **1,523 PASS, 10 SKIP, 5 FAIL** in pre-existing Linux-only `/proc`/cgroup fixtures when run on Windows. The only conclusion is that Windows all-platform check is not green; Linux CI is mandatory.
+
+**Changed files:** `src/core/pixel-buffer.js`, `tests/native-roi-staging-budget.test.mjs`, rebuilt `src/app.bundle.js`, `src/core/tiled-inpaint-worker-source.js`, `index.html`, `version.json`, `task/003x4-native-roi-staging.md`, `task/003x-native-tile-ownership.md`, `task/NEXT.md`, `task/README.md`.
+
+**Unverified gates:** authentic `file://` Chromium PSD16/PSB32 with full native readback, final-head Linux core CI and separate real-photo CI, merge/exact-main CI. Do not claim a global temporary encoding budget, true OS RAM peak, Worker OS PID ownership or Photoshop-authored PSB32 provenance. Encoder/allocation failure atomicity still relies on the existing `publishStaged` tests; broader temporary encoding ownership remains the next scope after this bounded increment.
+
+**Next if green:** open 003X/5 P1 for the canonical tile encoding transient (`canonicalTileBytes` plus binary/Base64 intermediates) with source-level allocation accounting, bounded batch/eviction conversion, failure injection, native precision and real file:// regression; keep parent 003X and Stage 6 IN PROGRESS.

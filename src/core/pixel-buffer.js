@@ -1541,6 +1541,8 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
   requireAlpha = false,
   // Maximum extra typed-array bytes owned by one synchronous tile visit.
   maxVisitBytes = maxBytes,
+  // Maximum contiguous native ROI owned by readRegion (or accepted for writeRegion).
+  maxRegionBytes = maxBytes,
   // Raw typed tile cache only; encoded dirty writebacks are retained separately.
   maxResidentBytes = null,
   // ASCII data-URL byte reservations for every dirty tile, resident or evicted.
@@ -1561,6 +1563,12 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
   const visitByteLimit = Number(maxVisitBytes);
   if (!Number.isSafeInteger(visitByteLimit) || visitByteLimit < 1) {
     throw new RangeError('Tiled PixelBuffer maxVisitBytes должен быть положительным безопасным целым');
+  }
+  const regionByteLimit = Number(maxRegionBytes);
+  const oneRegionPixelBytes = targetChannels * sourceSampleBytes(safe.bitsPerChannel);
+  if (!Number.isSafeInteger(regionByteLimit) ||
+      regionByteLimit < oneRegionPixelBytes || regionByteLimit > limit) {
+    throw new RangeError('Tiled PixelBuffer maxRegionBytes должен вмещать один пиксель и не превышать maxBytes');
   }
 
   const promoteAlpha = targetChannels !== safe.channels;
@@ -1797,6 +1805,11 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
   function* readRegionSteps(bounds) {
     const area = normalizeRegionBounds(bounds);
     if (!area) return null;
+    const regionBytes = area.width * area.height * targetChannels * sampleBytes;
+    // Refuse before allocating or decoding any ROI tile. No implicit downcast.
+    if (!Number.isSafeInteger(regionBytes) || regionBytes > regionByteLimit) {
+      throw new RangeError('Tiled PixelBuffer region byte budget exceeded');
+    }
     const Expected = expectedArrayConstructor(safe.bitsPerChannel);
     const data = new Expected(area.width * area.height * targetChannels);
     let copiedPixels = 0;
@@ -1879,10 +1892,14 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
       buffer.channels !== targetChannels ||
       buffer.bitsPerChannel !== safe.bitsPerChannel
     ) throw new TypeError('Tiled PixelBuffer writeRegion несовместим с working set');
+    if (buffer.data.byteLength > regionByteLimit) {
+      throw new RangeError('Tiled PixelBuffer region byte budget exceeded');
+    }
 
     const bounds = { left:x, top:y, right:x+buffer.width, bottom:y+buffer.height };
     const startingRevision = revision;
     const staged = [];
+    let stagedBytes = 0; // Private changed tile copies retained until atomic publication.
     let changedPixels = 0;
     let scannedPixels = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
@@ -1906,7 +1923,15 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
             }
           }
           if (pixelChanged) {
-            if (!nextData) nextData = target.data.slice();
+            if (!nextData) {
+              const nextStagedBytes = stagedBytes + target.data.byteLength;
+              // Check before slice(): even the rejected tile must not be allocated.
+              if (!Number.isSafeInteger(nextStagedBytes) || nextStagedBytes > visitByteLimit) {
+                throw new RangeError('Tiled PixelBuffer region write превысил private tile byte budget');
+              }
+              nextData = target.data.slice();
+              stagedBytes = nextStagedBytes;
+            }
             nextData.set(buffer.data.subarray(sourceOffset, sourceOffset + targetChannels), targetOffset);
             changedPixels += 1;
           }
@@ -2047,6 +2072,7 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     get loadedTileCount() { return loaded.size; },
     get residentTileBytes() { return residentBytes; },
     get maxResidentBytes() { return residentLimit; },
+    get maxRegionBytes() { return regionByteLimit; },
     get writtenBackTileCount() { return writtenBack.size; },
     get encodedDirtyTileBytes() { return encodedDirtyBytes; },
     get maxEncodedDirtyBytes() { return encodedLimit; },
