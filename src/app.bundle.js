@@ -6827,6 +6827,8 @@ function createSerializedPixelBufferTileWorkingSet(source, {
   maxVisitBytes = maxBytes,
   // Raw typed tile cache only; encoded dirty writebacks are retained separately.
   maxResidentBytes = null,
+  // ASCII data-URL byte reservations for every dirty tile, resident or evicted.
+  maxEncodedDirtyBytes = null,
 } = {}) {
   const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
   if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
@@ -6858,11 +6860,27 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     throw new RangeError('Tiled PixelBuffer maxResidentBytes должен вмещать один tile и не превышать maxBytes');
   }
 
-  const loaded = new Map(); // LRU: oldest at the front
-  const dirty = new Set();
+  // Charge the exact ASCII data-URL length, not compressed browser string
+  // heap bytes (which vary across JS engines). Include the MIME prefix.
+  const encodedPrefixBytes = `data:${PIXEL_BUFFER_TILE_MIME};base64,`.length;
+  const encodedTileBytes = tile => encodedPrefixBytes +
+    4 * Math.ceil(tile.width * tile.height * targetChannels * sampleBytes / 3);
+  const largestEncodedTileBytes = safe.tiles.reduce((largest, tile) =>
+    Math.max(largest, encodedTileBytes(tile)), 0);
+  const encodedLimit = maxEncodedDirtyBytes == null
+    ? Math.max(16 * 1024 * 1024, largestEncodedTileBytes)
+    : Number(maxEncodedDirtyBytes);
+  if (!Number.isSafeInteger(encodedLimit) ||
+      encodedLimit < largestEncodedTileBytes) {
+    throw new RangeError('Tiled PixelBuffer maxEncodedDirtyBytes должен вмещать один tile');
+  }
+
+  let loaded = new Map(); // LRU: oldest at the front
+  let dirty = new Set();
   const previewDirty = new Set();
-  const writtenBack = new Map(); // canonical encoded dirty tiles, never discarded without replacement
+  let writtenBack = new Map(); // canonical encoded dirty tiles, never discarded without replacement
   let residentBytes = 0;
+  let encodedDirtyBytes = 0; // reserved for dirty resident tiles too
   let revision = 0;
 
   function makeRoom(extraBytes) {
@@ -6928,6 +6946,59 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     return right > tile.x && bottom > tile.y && left < tile.x + tile.width && top < tile.y + tile.height;
   }
 
+  // Plan all resident evictions and encode dirty victims BEFORE publishing a
+  // multi-tile edit. Both a budget refusal and a failing encoder leave the
+  // previous committed source intact (including all dirty tile contents).
+  function publishStaged(staged) {
+    if (!staged.length) return;
+    let reserved = encodedDirtyBytes;
+    for (const { index } of staged) {
+      if (dirty.has(index)) continue;
+      reserved += encodedTileBytes(safe.tiles[index]);
+      if (!Number.isSafeInteger(reserved) || reserved > encodedLimit) {
+        throw new RangeError('Tiled PixelBuffer encoded dirty tile byte budget exceeded');
+      }
+    }
+    const nextLoaded = new Map(loaded);
+    const nextWrittenBack = new Map(writtenBack);
+    const nextDirty = new Set(dirty);
+    let nextResidentBytes = residentBytes;
+    for (const { index, buffer } of staged) {
+      const existing = nextLoaded.get(index);
+      if (existing) {
+        nextLoaded.delete(index);
+        nextResidentBytes -= existing.data.byteLength;
+      }
+      nextWrittenBack.delete(index);
+      nextDirty.add(index);
+      while (nextResidentBytes + buffer.data.byteLength > residentLimit) {
+        const first = nextLoaded.entries().next().value;
+        if (!first) throw new RangeError('Tiled PixelBuffer resident tile byte budget exceeded');
+        const [evictedIndex, evicted] = first;
+        if (nextDirty.has(evictedIndex)) {
+          const tile = safe.tiles[evictedIndex];
+          const bytes = canonicalTileBytes(evicted, 0, 0, tile.width, tile.height);
+          const dataUrl = bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME);
+          if (dataUrl.length !== encodedTileBytes(tile)) {
+            throw new RangeError('Tiled PixelBuffer encoded dirty tile length mismatch');
+          }
+          nextWrittenBack.set(evictedIndex, { ...tile, rawBytes:bytes.byteLength, dataUrl });
+        }
+        nextLoaded.delete(evictedIndex);
+        nextResidentBytes -= evicted.data.byteLength;
+      }
+      nextLoaded.set(index, buffer);
+      nextResidentBytes += buffer.data.byteLength;
+    }
+    loaded = nextLoaded;
+    dirty = nextDirty;
+    writtenBack = nextWrittenBack;
+    residentBytes = nextResidentBytes;
+    encodedDirtyBytes = reserved;
+    for (const { index } of staged) previewDirty.add(index);
+    revision += 1;
+  }
+
   // A visitor only owns a private tile copy. Its returned change count is the
   // commit decision; false/zero, exceptions and budget failures discard all
   // staged bytes (including changes to earlier tiles in the same visit).
@@ -6965,13 +7036,7 @@ function createSerializedPixelBufferTileWorkingSet(source, {
       if (!Number.isSafeInteger(changed)) throw new RangeError('Tiled PixelBuffer working-set change count переполнен');
       staged.push({ index, buffer });
     }
-    for (const { index, buffer } of staged) {
-      dirty.add(index);
-      writtenBack.delete(index);
-      cacheTile(index, buffer);
-      previewDirty.add(index);
-    }
-    if (staged.length) revision += 1;
+    publishStaged(staged);
     return changed;
   }
 
@@ -7128,21 +7193,14 @@ function createSerializedPixelBufferTileWorkingSet(source, {
           }
         }
       }
-      if (nextData) staged.push({ index, target, data:nextData });
+      if (nextData) staged.push({ index, buffer:createPixelBuffer({ ...target, data:nextData }) });
     }
     // A cooperative writer must never overwrite a newer edit after yielding.
     if (revision !== startingRevision) {
       throw new Error('Tiled PixelBuffer stale region write: newer edit committed');
     }
-    // No await or yield during the final commit; preserve data array identity.
-    for (const { index, target, data } of staged) {
-      target.data.set(data);
-      dirty.add(index);
-      writtenBack.delete(index);
-      cacheTile(index, target);
-      previewDirty.add(index);
-    }
-    if (staged.length) revision += 1;
+    // No await/yield during validation, encoding or atomic publication.
+    publishStaged(staged);
     return changedPixels;
   }
 
@@ -7266,6 +7324,8 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     get residentTileBytes() { return residentBytes; },
     get maxResidentBytes() { return residentLimit; },
     get writtenBackTileCount() { return writtenBack.size; },
+    get encodedDirtyTileBytes() { return encodedDirtyBytes; },
+    get maxEncodedDirtyBytes() { return encodedLimit; },
     get dirtyTileCount() { return dirty.size; },
   };
 }
