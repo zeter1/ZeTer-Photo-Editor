@@ -128,3 +128,100 @@ test('003X: cancelled ROI staging leaves serialized native and prior committed t
   assert.deepEqual(working.serialize(),before);
   assert.deepEqual([...deserializePixelBufferSource(packed).data],[...cmyk32().data]);
 });
+
+for (const [name, make] of [['RGB16', rgb16], ['CMYKA32', cmyk32]]) {
+  test('003X/2: '+name+' dirty tile writeback survives LRU eviction, preview, Undo and .zpe', () => {
+    const original = serializeTiledPixelBufferSource(make(), {tileSize:1});
+    const tileBytes = original.tiles[0].rawBytes;
+    const working = createSerializedPixelBufferTileWorkingSet(original, {maxResidentBytes:tileBytes});
+    const before = JSON.stringify(original);
+    const values = new Map([[0, make().bitsPerChannel === 16 ? 60001 : Math.fround(4.25)],
+                            [4, make().bitsPerChannel === 16 ? 60002 : Math.fround(5.5)],
+                            [8, make().bitsPerChannel === 16 ? 60003 : Math.fround(6.75)]]);
+    for (const [index, value] of values) {
+      const tile = original.tiles[index];
+      assert.equal(working.visit({left:tile.x,top:tile.y,right:tile.x+1,bottom:tile.y+1},
+        ({buffer}) => {buffer.data[0] = value; return 1;}), 1);
+      assert.ok(working.residentTileBytes <= tileBytes);
+      assert.ok(working.loadedTileCount <= 1);
+    }
+    assert.equal(working.dirtyTileCount, values.size);
+    assert.ok(working.writtenBackTileCount >= 2);
+    const seen = new Map();
+    working.forEachPreviewDirty(({index,buffer}) => seen.set(index,buffer.data[0]));
+    assert.deepEqual(seen, values, 'evicted dirty preview reloads exact native samples');
+    const changed = working.serialize();
+    const reopened = deserializePixelBufferSource(JSON.parse(JSON.stringify(changed)));
+    const width = make().width, channels = make().channels;
+    for (const [index, value] of values) {
+      const tile = original.tiles[index];
+      assert.equal(reopened.data[(tile.y*width+tile.x)*channels],value);
+    }
+    for (let i=0;i<original.tiles.length;i++) {
+      if (!values.has(i)) assert.equal(changed.tiles[i].dataUrl,original.tiles[i].dataUrl);
+    }
+    assert.equal(JSON.stringify(original),before);
+    assert.deepEqual([...deserializePixelBufferSource(original).data],[...make().data],
+      'original unchanged native bytes remain an exact undo snapshot');
+    assert.ok(working.residentTileBytes <= tileBytes);
+  });
+}
+
+test('003X/2: clean native tiles evict without dirtying; alpha-promotion writebacks retain channels', () => {
+  const source = serializeTiledPixelBufferSource(rgb16(), {tileSize:1});
+  const working = createSerializedPixelBufferTileWorkingSet(source, {requireAlpha:true,maxResidentBytes:8});
+  for (let i=0;i<source.tiles.length;i++) {
+    const tile=source.tiles[i];
+    const region=working.readRegion({left:tile.x,top:tile.y,right:tile.x+1,bottom:tile.y+1});
+    assert.equal(region.buffer.channels,4);
+    assert.equal(region.buffer.data[3],65535);
+    assert.ok(working.residentTileBytes<=8);
+  }
+  assert.equal(working.dirtyTileCount,0);
+  assert.equal(working.writtenBackTileCount,0);
+  working.visit({left:0,top:0,right:1,bottom:1},({buffer})=>{
+    buffer.data[0]=65001;
+    buffer.data[3]=32123;
+    return 1;
+  });
+  working.readRegion({left:4,top:2,right:5,bottom:3});
+  assert.equal(working.writtenBackTileCount,1);
+  const serialized=working.serialize();
+  assert.equal(serialized.channels,4);
+  assert.equal(serialized.alphaMode,'straight');
+  const reopened=deserializePixelBufferSource(serialized);
+  assert.deepEqual([...reopened.data.slice(0,4)],[65001,rgb16().data[1],rgb16().data[2],32123]);
+  assert.equal(working.readRegion({left:0,top:0,right:1,bottom:1}).buffer.data[3],32123);
+  assert.throws(()=>createSerializedPixelBufferTileWorkingSet(source,{requireAlpha:true,maxResidentBytes:7}),/maxResidentBytes/);
+  assert.throws(()=>createSerializedPixelBufferTileWorkingSet(source,{maxBytes:source.rawBytes,maxResidentBytes:source.rawBytes+1}),/maxResidentBytes/);
+});
+
+test('003X/2: cooperative region writer refuses stale commit after a newer native edit', async () => {
+  const sourceBuffer=createPixelBuffer({width:256,height:160,model:'rgb',channels:3,bitsPerChannel:16,
+    data:new Uint16Array(256*160*3).fill(12345)});
+  const source=serializeTiledPixelBufferSource(sourceBuffer,{tileSize:64});
+  const tileBytes=64*64*3*2;
+  const working=createSerializedPixelBufferTileWorkingSet(source,{maxResidentBytes:tileBytes});
+  const region=working.readRegion({left:0,top:0,right:256,bottom:160});
+  region.buffer.data.fill(54321);
+  let yielded=false;
+  await assert.rejects(working.writeRegionCooperative(region,{
+    yieldControl:async()=>{
+      if (!yielded) {
+        yielded=true;
+        working.visit({left:0,top:0,right:1,bottom:1},({buffer})=>{
+          buffer.data[0]=33333;
+          return 1;
+        });
+      }
+    },
+  }),/stale region write/);
+  assert.equal(yielded,true,'interleave at a genuine 32768-pixel yield');
+  assert.equal(working.dirtyTileCount,1);
+  assert.ok(working.residentTileBytes<=tileBytes);
+  const result=deserializePixelBufferSource(working.serialize());
+  assert.equal(result.data[0],33333);
+  assert.equal(result.data[1],12345);
+  assert.equal(result.data.at(-1),12345);
+  assert.deepEqual([...deserializePixelBufferSource(source).data.slice(0,3)],[12345,12345,12345]);
+});
