@@ -1,6 +1,6 @@
 # 003X/4 — bounded native ROI staging and temporary encoding allocations
 
-**ID:** 003X/4. **Priority:** P1. **Status:** IN PROGRESS (candidate, final PR-head/browser/main CI pending). **Parent:** 003X / Stage 6 IN PROGRESS.
+**ID:** 003X/4. **Priority:** P1. **Status:** DONE (bounded native ROI staging increment, final CI verified). **Parent:** 003X / Stage 6 IN PROGRESS.
 **Dependencies:** 003X/1 private tile ownership DONE, 003X/2 resident cache DONE, 003X/3 encoded dirty overlay reservation DONE after verified exact merged-main CI.
 **Independent blocker:** Photoshop-authored PSB32 provenance 002B/2c remains P0 BLOCKED; synthetic / application-generated PSB is not Adobe provenance.
 
@@ -37,3 +37,9 @@ IN PROGRESS — implementation candidate is ready for real PR CI; do not mark th
 **Unverified gates:** authentic `file://` Chromium PSD16/PSB32 with full native readback, final-head Linux core CI and separate real-photo CI, merge/exact-main CI. Do not claim a global temporary encoding budget, true OS RAM peak, Worker OS PID ownership or Photoshop-authored PSB32 provenance. Encoder/allocation failure atomicity still relies on the existing `publishStaged` tests; broader temporary encoding ownership remains the next scope after this bounded increment.
 
 **Next if green:** open 003X/5 P1 for the canonical tile encoding transient (`canonicalTileBytes` plus binary/Base64 intermediates) with source-level allocation accounting, bounded batch/eviction conversion, failure injection, native precision and real file:// regression; keep parent 003X and Stage 6 IN PROGRESS.
+
+## 003X/4 final bounded acceptance (2026-10-26)
+
+**003X/4 bounded DONE (2026-10-26):** [PR #344](https://github.com/zeter1/ZeTer-Photo-Editor/pull/344) merged to [main 92cd61e9f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/92cd61e9fe4f39b10ddb1f70e75168cbf0dfa400), final PR-head [Linux core CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40349386666) SUCCESS 12/12 and [real-photo PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40349387436) SUCCESS; exact merged-code [main core CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40350178186) SUCCESS 12/12 and [main real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40350178197) SUCCESS. Six new native ROI tests (RGB16, CMYKA32 Float32 and alpha, exact Undo/.zpe, configured read/write budget, refusal before second private tile clone, cooperative cancellation/retry), Windows native Chrome `file://` smoke SUCCESS; local Windows all-platform 1523 PASS / 10 SKIP / 5 Linux-only cgroup tests FAIL. Native ROI allocation/preflight and `maxVisitBytes` accumulated private write staging bounded, but encoding temporary bytes/strings, History, Worker and OS peak NOT globally bounded. Parent 003X/Stage 6 IN PROGRESS, independent Adobe-authored PSB32 002B/2c BLOCKED. NEXT **003X/5 P1 TODO:** [bound canonical native tile encoding transients](003x5-native-encoding-transients.md) with exact high-depth native/failure/browser checks.
+
+**Remaining:** task [003X/5](003x5-native-encoding-transients.md) temporary encoding owners; does not close 003X or Stage 6. No operation-exclusive OS peak or Adobe-authored PSB32 claim.
