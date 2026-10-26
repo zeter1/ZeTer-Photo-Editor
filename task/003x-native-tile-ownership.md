@@ -88,3 +88,28 @@ Changed: `src/core/pixel-buffer.js`, `tests/native-tile-ownership.test.mjs`, gen
 ### 003X/2 final merged-code acceptance (2026-10-26)
 
 **Bounded 003X/2: DONE.** [Exact merged-code core main CI #40311410168](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40311410168) **SUCCESS (12/12 jobs)** and [separate main real-photo CI #40311409879](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40311409879) **SUCCESS**, both for exact squash-merge source head [8bd8b6cb](https://github.com/zeter1/ZeTer-Photo-Editor/commit/8bd8b6cb39cba773e581f57b188828ad5270c84e); PR final-head evidence documented above. This closes only native loaded-typed LRU residency, lossless dirty tile eviction/reload and stale cooperative writer refusal, not parent 003X. Next **003X/3 P1 TODO** encoded overlay byte budget and fail-closed atomic refusal; Stage 6 remains IN PROGRESS. Documentation-only acceptance PR CI and merged-main CI remain separate gates.
+
+## 003X/3 candidate — encoded dirty overlay budget and atomic publication (2026-10-26)
+
+**ID:** 003X/3. **Priority:** P1. **Status:** IN PROGRESS pending genuine Linux PR/native browser evidence.
+**Parent:** 003X / Stage 6 IN PROGRESS. **Dependencies:** 003X/1 and 003X/2 DONE, typed native tile v2 source.
+**Goal / bounded acceptance:** stop unbounded *accumulation* of retained Base64 dirty-tile overlays while preserving exact committed 16-bit/float32 native tiles. This is not a whole-operation or browser-RAM ceiling.
+
+### Production implementation
+- `src/core/pixel-buffer.js`: adds configurable `maxEncodedDirtyBytes` (default the exact encoded capacity of every validated source tile; smaller explicit limits are supported). Exact deterministic ASCII `data:<mime>;base64,` byte-length reservation is charged once per distinct dirty tile, including resident tiles which can later be evicted; no budget laundering through cache reads, eviction or repeated edits.
+- A common two-phase `publishStaged` preflights all newly dirty tile reservations, plans resident LRU evictions and encodes any dirty eviction victims **before** replacing the loaded/encoded/dirty maps. `visit` and synchronous/cooperative ROI commits refuse over-budget or encoding-failure transactions without publishing partial pixel changes. Stale cooperative-writer generation checks remain in place.
+- `encodedDirtyTileBytes` / `maxEncodedDirtyBytes` expose deterministic ASCII payload reservations. This measure does **not** include JS engine string representation/heap overhead, concurrent temporary encoding strings, original serialized source, preview/ROI staging, Undo history, Worker buffers or OS memory peaks.
+- Untouched original tile objects remain unchanged; native RGB16, CMYKA32 float32, promoted alpha, serialized .zpe bytes, cancellation and cache reload use existing exact native codecs. No new network/server/runtime dependency or .zpe schema change.
+
+### Changed files / tests
+- Production `src/core/pixel-buffer.js`; new `tests/native-tile-overlay-budget.test.mjs` (8 tests: both native models, synchronous/cooperative refusal, throwing encoder, promoted alpha, 9 sparse dirty LRU writes, actual yielded 256×160 ROI failure); regenerated `src/app.bundle.js`, `src/core/tiled-inpaint-worker-source.js`, `index.html`, `version.json`; this task card, `task/NEXT.md`, `task/README.md`.
+- Local Windows: focused native ownership and new budget tests **18/18 PASS**; expanded native suites previously **52/52 PASS** (before final two added tests). Deterministic `npm run build` PASS, hash `a6ba7bfacdeb647f`, `node --check src/app.bundle.js` PASS.
+- Local Windows `npm run check`: **NOT GREEN**, 1,515 PASS / 5 FAIL out of 1,530 Node tests: existing Linux-only `/proc`/cgroup fixture expectations fail on Windows. Do not call this a Linux CI regression without CI evidence.
+- Real Linux PR CI, real Chromium `file://` PSD16/PSB32, final-head PR, merge, exact-main CI **PENDING**. No independent Adobe Photoshop-authored PSB32 test (`002B/2c` BLOCKED).
+
+### Remaining / following work
+1. Verify actual final PR-head core/real-photo Linux Actions, Node and offline bundle/Worker parity, genuine browser native PSD16/PSB32 and Worker/cancel artifacts.
+2. Only on green, squash-merge and independently check exact merged-main core and real-photo CI, then mark bounded 003X/3 DONE and update NEXT/README with actual URLs, SHAs and counts.
+3. **NEXT conditional P1 003X/4:** characterize/control peak private ROI staging and temporary overlay encoding allocations under repeated large sparse edits with causal owner-level byte accounting and true native/cancel/file:// evidence. Parent 003X/Stage 6 remains IN PROGRESS. P0 independent Photoshop-authored PSB32 provenance 002B/2c remains BLOCKED.
+
+**Initial PR CI correction (2026-10-26):** First PR-head core [run #40314836935](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40314836935) was **FAILED**: multiple genuine dense PSD16 Chromium operations exceeded the proposed default 16 MiB encoded-dirty reservation. This was a regression, not a successful acceptance. Corrected default reserves the exact finite full validated source tile data-URL byte capacity, so dense operations formerly supported are not rejected; smaller explicit `maxEncodedDirtyBytes` still fail atomically. Added dense default compatibility tests for RGB16 and CMYKA32. Final corrected-commit CI is pending; do not mark 003X/3 DONE before success, merge and exact-main CI.
