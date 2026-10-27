@@ -1290,7 +1290,15 @@ function sourceMetadata(buffer) {
   };
 }
 
+// A decoded tile already owns one contiguous native plane. On little-endian
+// runtimes the backing bytes are canonical as-is, including Float32 NaN payload
+// bits. Avoid a second raw tile allocation before synchronous Base64 encoding.
+const NATIVE_LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
 function canonicalTileBytes(buffer, x, y, width, height) {
+  if (NATIVE_LITTLE_ENDIAN && x === 0 && y === 0 && width === buffer.width && height === buffer.height) {
+    return new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
+  }
   const sampleBytes = sourceSampleBytes(buffer.bitsPerChannel);
   const bytes = new Uint8Array(width * height * buffer.channels * sampleBytes);
   if (buffer.bitsPerChannel === 8) {
