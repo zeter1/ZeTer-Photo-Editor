@@ -125,6 +125,42 @@ test('router releases ownership even when a pointerup callback rejects', async (
   assert.deepEqual(target.releases, [11]);
 });
 
+test('failed setPointerCapture clears ownership before a same-ID retry', () => {
+  const target = new FakePointerTarget();
+  const capture = target.setPointerCapture.bind(target);
+  let attempts = 0;
+  let started = 0;
+  target.setPointerCapture = pointerId => {
+    if (++attempts === 1) {
+      const error = new Error('cannot capture a missing pointer');
+      error.name = 'InvalidStateError';
+      throw error;
+    }
+    capture(pointerId);
+  };
+  const router = createPointerLifecycleRouter({
+    target,
+    onPointerDown: () => { started += 1; },
+  });
+
+  assert.throws(
+    () => target.dispatch('pointerdown', { pointerId: 17 }),
+    error => error.name === 'InvalidStateError',
+  );
+  assert.equal(router.hasActivePointer(), false, 'failed capture must not reserve pointer ownership');
+  assert.equal(target.hasPointerCapture(17), false);
+  assert.deepEqual(target.releases, [], 'a pointer never captured must not be released');
+  assert.equal(started, 0, 'the domain handler must not run after capture acquisition fails');
+
+  target.dispatch('pointerdown', { pointerId: 17 });
+  assert.equal(router.isActivePointer(17), true, 'the same pointer ID should be accepted on retry');
+  assert.equal(target.hasPointerCapture(17), true);
+  assert.equal(started, 1);
+  target.dispatch('pointerup', { pointerId: 17 });
+  assert.equal(router.hasActivePointer(), false);
+  assert.deepEqual(target.releases, [17]);
+});
+
 test('synchronous pointerdown failure releases capture and permits a new gesture', () => {
   const target = new FakePointerTarget();
   let attempts = 0;
