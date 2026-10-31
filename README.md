@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml/badge.svg)](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml)
 
-**Онлайн-версия:** https://dkl.do.am/servisi/PhotoEditor/index.html  
+**Онлайн-версия:** https://dkoles.com/servisi/PhotoEditor/index.html
 
 ZeTer Photo Editor — браузерный графический редактор со слоями, историей действий и Canvas 2D-рендером. Он работает как онлайн, так и локально через обычный `index.html`. Редактор вдохновлён рабочим процессом Photopea / Photoshop, но остаётся самостоятельным приложением. Пользовательские изображения обрабатываются в браузере и для обычной работы не требуют загрузки на внешний сервер.
 
@@ -12,7 +12,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 Для обработки фотографий, ретуши, добавления текста и работы с многослойными документами — без установки настольного редактора.
 
-1. [Откройте онлайн-версию](https://dkl.do.am/servisi/PhotoEditor/index.html) или [скачайте исходники ZIP](https://github.com/zeter1/ZeTer-Photo-Editor/archive/refs/heads/main.zip) и распакуйте всю папку.
+1. [Откройте онлайн-версию](https://dkoles.com/servisi/PhotoEditor/index.html) или [скачайте исходники ZIP](https://github.com/zeter1/ZeTer-Photo-Editor/archive/refs/heads/main.zip) и распакуйте всю папку.
 2. Для локального запуска на Windows дважды нажмите `start.bat` или `index.html`. Python и Node.js для обычного использования не нужны.
 3. Откройте изображение, выполните правки и сохраните редактируемый проект в `.zpe`; готовое изображение экспортируйте в нужный формат.
 

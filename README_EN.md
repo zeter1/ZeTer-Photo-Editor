@@ -6,7 +6,7 @@ ZeTer Photo Editor is a browser-based image editor with layers, undo/redo and Ca
 
 ## Get started
 
-1. Open https://dkl.do.am/servisi/PhotoEditor/index.html or download https://github.com/zeter1/ZeTer-Photo-Editor/archive/refs/heads/main.zip and extract the whole folder.
+1. Open https://dkoles.com/servisi/PhotoEditor/index.html or download https://github.com/zeter1/ZeTer-Photo-Editor/archive/refs/heads/main.zip and extract the whole folder.
 2. On Windows, open `start.bat` or `index.html`. Python and Node.js are not required for normal use.
 3. Open an image, edit it, save the editable project as `.zpe`, and export the finished image in the format you need.
 
