@@ -1,6 +1,6 @@
 # 003X/6 — native canonical raw-tile and Data URL transient memory ownership
 
-**ID:** 003X/6. **Priority:** P1. **Status:** TODO. **Parent:** 003X/Stage 6 IN PROGRESS.
+**ID:** 003X/6. **Priority:** P1. **Status:** IN PROGRESS (003X/6a bounded DONE; 003X/6b NEXT). **Parent:** 003X/Stage 6 IN PROGRESS.
 
 **Dependencies:** 003X/1–003X/5 bounded DONE; latest main exact-head CI healthy. **Independent BLOCKED:** 002B/2c actual Photoshop-authored PSB32 reference provenance, not solved by this task.
 
@@ -17,3 +17,19 @@
 
 ## Current baseline / explicit nonclaims
 [PR #346](https://github.com/zeter1/ZeTer-Photo-Editor/pull/346) merged into main bd1da80d after PR-head core success 12/12 [#40358652163](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40358652163) and real-photo success [#40358652223](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40358652223). Exact merged-code [core #40360670815](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40360670815) success 12/12 and [real-photo #40360670863](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40360670863) success. Follow-up docs [PR #347](https://github.com/zeter1/ZeTer-Photo-Editor/pull/347) merged 893dbe1, exact-main [#40363125555](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40363125555) success. These gates close 003X/5 only, not the whole Stage 6. Native temporary buffer sizes, cumulative JS string copies, Worker/History process ownership, browser peak RSS and actual Photoshop-authored PSB32 remain unproven or unbounded.
+
+
+## 2026-11-02 — 003X/6a bounded production acceptance and 003X/6b handoff
+
+**ID:** 003X/6a within 003X/6. **Priority:** P1. **Status:** DONE for bounded full-buffer zero-copy path only; parent 003X/6 **IN PROGRESS**. **Dependencies:** 003X/1–5 bounded DONE; 002B/2c Photoshop-authored PSB32 provenance independently BLOCKED.
+
+**Purpose and acceptance achieved:** eliminate one avoidable canonical raw-buffer allocation when a complete native typed pixel plane is serialized as one contiguous tile on little-endian machines, without degrading native sample bits, alpha or `file://`. The production `src/core/pixel-buffer.js` now creates a byte-offset-aware `Uint8Array` view of its existing typed plane, instead of allocating a second buffer before synchronous `bytesToDataUrl`. Other tiles and big-endian platforms use the existing path; no change to stored .zpe v1/v2 schema or PSD/PSB codec. This is a source-level allocation elimination, **not** a measured RSS peak, memory ceiling or global ownership solution.
+
+**Actual files changed in merged PR #349:** `src/core/pixel-buffer.js`, `tests/003x6-direct-canonical-tile-view.test.mjs`, generated `src/app.bundle.js`, `src/core/tiled-inpaint-worker-source.js`, `index.html`, `version.json`. Three new tests cover RGB16 nonzero typed-array byteOffset, exact CMYKA32 Float32 source bits (quiet-NaN payload and negative zero), and noncontiguous RGB16 right-edge row packing.
+
+**CI gates:** final PR head `4dad2da462ec70d8a14047b3e73ac08bba4098a7` [Linux core #40467001116](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40467001116) SUCCESS, **12/12 jobs**, **1545/1545 Node tests**, browser `file://`, generated build parity and pinned Photoshop PSD-composite checks; separate [real-photo #40467000937](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/40467000937) SUCCESS. PR [#349](https://github.com/zeter1/ZeTer-Photo-Editor/pull/349) ready then squash-merged into [main 20405460](https://github.com/zeter1/ZeTer-Photo-Editor/commit/204054604ef24ce0753b2a0aa1786ddb159bc7c2). The merged-code main [core #41384575450](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41384575450) and separate [real-photo #41384575464](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41384575464) both **SUCCESS** for exact main `204054604ef24ce0753b2a0aa1786ddb159bc7c2`; core 12/12 jobs, independent real-photo succeeded. Local Windows command/browser execution was unavailable: Bridgerator reported `Zeter-PC` offline. Verified CI is not represented as a local run.
+
+**Found concern / next bounded acceptance (003X/6b P1 IN PROGRESS):** noncontiguous Float32 tile packing currently reads individual JS Number samples and rewrites them with `DataView.setFloat32`; signaling-NaN raw bits may quiet/canonicalize under this conversion, unlike contiguous byte-view serialization. Reproduce using byte-level tests with an independently set `Uint32Array` bit pattern; repair native edge copy/endian canonicalization without changing numeric meaning, alpha, .zpe Undo/Redo or default limits. Then investigate one demonstrably retained Base64/data-URL temporary allocation, preserve atomic refusal on second/later encoding failure and cancellation, and run deterministic build, Linux checks, genuine `file://` PSD16/PSB32 and real-photo CI. Do not declare global memory, History/Worker ownership or Adobe Photoshop-authored PSB32 provenance fixed.
+
+**Next task:** 003X/6b — bit-exact partial-tile native serialization and bounded data-URL transient ownership; criteria above, linked in `task/NEXT.md`.
+
