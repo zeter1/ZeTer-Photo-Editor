@@ -1,8 +1,8 @@
 # 003X/6c — bounded retained Base64 / Data URL transient ownership
 
-**ID:** 003X/6c. **Priority:** P1. **Status:** TODO after 003X/6b exact-main acceptance. **Parent:** 003X/6, Stage 6 IN PROGRESS.
+**ID:** 003X/6c. **Priority:** P1. **Status:** TODO; 003X/6b exact-main acceptance DONE. **Parent:** 003X/6, Stage 6 IN PROGRESS.
 
-**Dependencies:** 003X/6a production DONE; 003X/6b PR [#351](https://github.com/zeter1/ZeTer-Photo-Editor/pull/351) merged as [7e9f8b65](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e9f8b65530e44a025d53a9bcb2d89fe12cda36b), exact-main CI still awaiting readback at this checkpoint. 002B/2c independent Photoshop-authored PSB32 provenance remains BLOCKED.
+**Dependencies:** 003X/6a production DONE; 003X/6b PR [#351](https://github.com/zeter1/ZeTer-Photo-Editor/pull/351) merged as [7e9f8b65](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e9f8b65530e44a025d53a9bcb2d89fe12cda36b), exact-main core #41387921346 SUCCESS 12/12 and separate real-photo #41387921307 SUCCESS for merged SHA. 002B/2c independent Photoshop-authored PSB32 provenance remains BLOCKED.
 
 ## Problem / goal
 
@@ -24,3 +24,5 @@ No global transient/data-URL memory bound, OS RSS/Worker PID peak, History owner
 ## Next action
 
 After exact-main CI for `7e9f8b65` is verified: measure the simultaneous Base64 chunk-array, `join` and final URL lifetime for one actual native tiled/legacy serialization path, then implement the smallest safe improvement and independent failure tests.
+
+**003X/6b prerequisite verified:** final-head core #41386830817 and real-photo #41386830807 SUCCESS, exact merged-main core #41387921346 and real-photo #41387921307 SUCCESS. Start 003X/6c directly; do not repeat 003X/6b.
