@@ -1,5 +1,17 @@
 
-export function bytesToDataUrl(value, mime = 'application/octet-stream') {
+// Count retained ASCII data-URL characters before any binary-string/Base64
+// allocation. This is not a JS heap/RSS byte measurement.
+export function encodedDataUrlChars(byteLength, mime = 'application/octet-stream') {
+  if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
+    throw new RangeError('Binary data URL требует корректный размер байтов');
+  }
+  const count = `data:${String(mime || 'application/octet-stream')};base64,`.length
+    + 4 * Math.ceil(byteLength / 3);
+  if (!Number.isSafeInteger(count)) throw new RangeError('Binary data URL length overflow');
+  return count;
+}
+
+export function bytesToDataUrl(value, mime = 'application/octet-stream', { maxDataUrlChars = null } = {}) {
   const bytes = value instanceof Uint8Array
     ? value
     : ArrayBuffer.isView(value)
@@ -8,6 +20,12 @@ export function bytesToDataUrl(value, mime = 'application/octet-stream') {
         ? new Uint8Array(value)
         : null;
   if (!bytes) throw new TypeError('Ожидался бинарный буфер');
+  const mediaType = String(mime || 'application/octet-stream');
+  const requiredChars = encodedDataUrlChars(bytes.byteLength, mediaType);
+  if (maxDataUrlChars !== null &&
+      (!Number.isSafeInteger(maxDataUrlChars) || maxDataUrlChars < requiredChars)) {
+    throw new RangeError('Binary data URL превышает maxDataUrlChars');
+  }
   if (typeof btoa !== 'function') throw new Error('Base64 encoder недоступен');
   // A multiple of three keeps Base64 groups aligned. Never join all source
   // bytes into a second full-size binary string before calling btoa.
@@ -17,7 +35,7 @@ export function bytesToDataUrl(value, mime = 'application/octet-stream') {
     const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
     chunks.push(btoa(String.fromCharCode(...chunk)));
   }
-  return `data:${String(mime || 'application/octet-stream')};base64,${chunks.join('')}`;
+  return `data:${mediaType};base64,${chunks.join('')}`;
 }
 
 export function dataUrlToBytes(dataUrl, { maxBytes = 4 * 1024 * 1024 } = {}) {
