@@ -4,7 +4,7 @@ import { bytesToDataUrl, dataUrlToBytes, encodedDataUrlChars } from '../src/core
 import {
   createPixelBuffer, serializePixelBufferSource, serializeTiledPixelBufferSource,
   serializePixelBufferSourceAdaptive, deserializePixelBufferSource,
-  createSerializedPixelBufferTileWorkingSet,
+  createSerializedPixelBufferTileWorkingSet, PIXEL_BUFFER_TILE_MIME,
 } from '../src/core/pixel-buffer.js';
 
 // Oracle reads native backing bytes, never JS Float32 numbers (which can quiet sNaNs).
@@ -71,11 +71,10 @@ test('003X/6c: native RGB16 and CMYKA32 sparse, edge and dense tiles preflight a
     assert.ok(source.tiles.length >= 12, 'dense multi-tile source');
     assert.ok(source.tiles.some(tile => tile.width < 4 || tile.height < 4), 'noncontiguous edge tiles');
     const count = source.tiles.reduce((sum, tile) => sum + tile.dataUrl.length, 0);
-    const oracleCount = source.tiles.reduce((sum, tile) => sum +
-      ('data:application/x-zeter-pixel-tile;base64,'.length + 4*Math.ceil(tile.rawBytes/3)), 0);
-    // The MIME prefix itself is tested separately by the persisted string readback.
+    const oracleCount = source.tiles.reduce((sum, tile) =>
+      sum + encodedDataUrlChars(tile.rawBytes, PIXEL_BUFFER_TILE_MIME), 0);
     assert.ok(count > source.rawBytes, 'retained URL characters exceed native raw-byte count');
-    assert.ok(count >= oracleCount - source.tiles.length*80);
+    assert.equal(count, oracleCount, 'independent tile byte lengths predict retained URL characters exactly');
     const unchanged = rawBytes(buffer.data);
     const originalBtoa = globalThis.btoa;
     let calls = 0;
@@ -96,7 +95,7 @@ test('003X/6c: native RGB16 and CMYKA32 sparse, edge and dense tiles preflight a
     for (const tile of accepted.tiles) {
       const oracle = tileBytes(buffer.data, buffer.width, buffer.channels, tile);
       assert.deepEqual(Buffer.from(dataUrlToBytes(tile.dataUrl)), oracle, 'native tile bits including alpha');
-      assert.equal(tile.dataUrl, 'data:' + tile.dataUrl.split(';')[0].slice(5) + ';base64,' + oracle.toString('base64'));
+      assert.equal(tile.dataUrl, 'data:' + PIXEL_BUFFER_TILE_MIME + ';base64,' + oracle.toString('base64'));
     }
     const restored = deserializePixelBufferSource(JSON.parse(JSON.stringify(accepted)));
     assert.deepEqual(rawBytes(restored.data), unchanged, '.zpe v2 JSON round-trip is byte-exact');
