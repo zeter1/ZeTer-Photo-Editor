@@ -6553,19 +6553,9 @@ function sourceSampleBytes(bitsPerChannel) {
 
 function pixelBufferCanonicalBytes(buffer) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
-  const bytesPerSample = sourceSampleBytes(buffer.bitsPerChannel);
-  const bytes = new Uint8Array(buffer.data.length * bytesPerSample);
-  if (buffer.bitsPerChannel === 8) {
-    bytes.set(new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength));
-    return bytes;
-  }
-  const view = new DataView(bytes.buffer);
-  if (buffer.bitsPerChannel === 16) {
-    for (let index = 0; index < buffer.data.length; index += 1) view.setUint16(index * 2, buffer.data[index], true);
-  } else {
-    for (let index = 0; index < buffer.data.length; index += 1) view.setFloat32(index * 4, buffer.data[index], true);
-  }
-  return bytes;
+  // Reuse the full-plane native view where possible; preserve original
+  // Float32 payload bits rather than reading through JS Number.
+  return canonicalTileBytes(buffer, 0, 0, buffer.width, buffer.height);
 }
 
 function expectedSourceBytes({ width, height, channels, bitsPerChannel }) {
@@ -6593,26 +6583,29 @@ function canonicalTileBytes(buffer, x, y, width, height) {
     return new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
   }
   const sampleBytes = sourceSampleBytes(buffer.bitsPerChannel);
-  const bytes = new Uint8Array(width * height * buffer.channels * sampleBytes);
-  if (buffer.bitsPerChannel === 8) {
-    let target = 0;
+  const rowBytes = width * buffer.channels * sampleBytes;
+  const bytes = new Uint8Array(rowBytes * height);
+  const sourceBytes = new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
+
+  // A byte-wise row copy preserves Float32 signaling-NaN payloads, signed zero
+  // and alpha. Reading Float32 as a JS Number before setFloat32 can quiet NaNs.
+  if (NATIVE_LITTLE_ENDIAN || sampleBytes === 1) {
     for (let row = 0; row < height; row += 1) {
-      const source = ((y + row) * buffer.width + x) * buffer.channels;
-      const length = width * buffer.channels;
-      bytes.set(buffer.data.subarray(source, source + length), target);
-      target += length;
+      const sourceOffset = ((y + row) * buffer.width + x) * buffer.channels * sampleBytes;
+      bytes.set(sourceBytes.subarray(sourceOffset, sourceOffset + rowBytes), row * rowBytes);
     }
     return bytes;
   }
-  const view = new DataView(bytes.buffer);
-  let targetSample = 0;
+
+  // Big-endian hosts must swap the raw words, not round-trip through Number.
+  const sourceView = new DataView(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
+  const targetView = new DataView(bytes.buffer);
   for (let row = 0; row < height; row += 1) {
-    const source = ((y + row) * buffer.width + x) * buffer.channels;
-    const length = width * buffer.channels;
-    for (let offset = 0; offset < length; offset += 1) {
-      if (buffer.bitsPerChannel === 16) view.setUint16(targetSample * 2, buffer.data[source + offset], true);
-      else view.setFloat32(targetSample * 4, buffer.data[source + offset], true);
-      targetSample += 1;
+    const sourceOffset = ((y + row) * buffer.width + x) * buffer.channels * sampleBytes;
+    const targetOffset = row * rowBytes;
+    for (let offset = 0; offset < rowBytes; offset += sampleBytes) {
+      if (sampleBytes === 2) targetView.setUint16(targetOffset + offset, sourceView.getUint16(sourceOffset + offset, false), true);
+      else targetView.setUint32(targetOffset + offset, sourceView.getUint32(sourceOffset + offset, false), true);
     }
   }
   return bytes;
@@ -6621,9 +6614,14 @@ function canonicalTileBytes(buffer, x, y, width, height) {
 function decodeCanonicalSamples(bytes, bitsPerChannel, samples) {
   if (bitsPerChannel === 8) return new Uint8ClampedArray(bytes);
   const data = bitsPerChannel === 16 ? new Uint16Array(samples) : new Float32Array(samples);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let index = 0; index < samples; index += 1) {
-    data[index] = bitsPerChannel === 16 ? view.getUint16(index * 2, true) : view.getFloat32(index * 4, true);
+  const output = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (NATIVE_LITTLE_ENDIAN) {
+    output.set(bytes);
+  } else {
+    const size = sourceSampleBytes(bitsPerChannel);
+    for (let i = 0; i < bytes.length; i += size) {
+      for (let j = 0; j < size; j += 1) output[i + j] = bytes[i + size - 1 - j];
+    }
   }
   return data;
 }
@@ -6660,10 +6658,12 @@ function isCanonicalPixelBufferBase64(encoded, rawBytes) {
 }
 function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
-  const bytes = pixelBufferCanonicalBytes(buffer);
+  const rawBytes = expectedSourceBytes(buffer);
   const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
-  if (bytes.byteLength > limit) throw new RangeError('PixelBuffer source ' + bytes.byteLength + ' байт превышает лимит ' + limit + ' байт');
-  return {kind:PIXEL_BUFFER_SOURCE_KIND,...sourceMetadata(buffer),rawBytes:bytes.byteLength,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_SOURCE_MIME)};
+  // Refuse before allocating a canonical byte array or starting Base64 work.
+  if (!rawBytes || rawBytes > limit) throw new RangeError('PixelBuffer source ' + rawBytes + ' байт превышает лимит ' + limit + ' байт');
+  const bytes = pixelBufferCanonicalBytes(buffer);
+  return {kind:PIXEL_BUFFER_SOURCE_KIND,...sourceMetadata(buffer),rawBytes,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_SOURCE_MIME)};
 }
 function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
