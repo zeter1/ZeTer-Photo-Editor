@@ -1,4 +1,4 @@
-import { bytesToDataUrl, dataUrlToBytes } from './io.js';
+import { bytesToDataUrl, dataUrlToBytes, encodedDataUrlChars } from './io.js';
 import { inpaintSelectedSamples, inpaintSelectedSamplesCooperative } from './inpaint.js';
 
 export const PIXEL_BUFFER_KIND = 'zpe-pixel-buffer-v1';
@@ -1364,23 +1364,47 @@ export function isCanonicalPixelBufferBase64(encoded, rawBytes) {
   return last >= 0 && (last & ((1 << (2 * padding)) - 1)) === 0;
 }
 
-export function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
+// Optional limit accounts for actual persisted ASCII URL characters, not
+// raw bytes, JS heap copies, History, or Worker allocations.
+function assertEncodedSourceBudget(required, limit) {
+  if (!Number.isSafeInteger(required) || required < 0 ||
+      (limit !== null && (!Number.isSafeInteger(limit) || limit < required))) {
+    throw new RangeError('PixelBuffer encoded data URL превышает maxDataUrlChars');
+  }
+}
+
+export function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const rawBytes = expectedSourceBytes(buffer);
   const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
   // Refuse before allocating a canonical byte array or starting Base64 work.
   if (!rawBytes || rawBytes > limit) throw new RangeError('PixelBuffer source ' + rawBytes + ' байт превышает лимит ' + limit + ' байт');
+  assertEncodedSourceBudget(encodedDataUrlChars(rawBytes, PIXEL_BUFFER_SOURCE_MIME), maxDataUrlChars);
   const bytes = pixelBufferCanonicalBytes(buffer);
   return {kind:PIXEL_BUFFER_SOURCE_KIND,...sourceMetadata(buffer),rawBytes,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_SOURCE_MIME)};
 }
 
-export function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE } = {}) {
+export function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const rawBytes=expectedSourceBytes(buffer), limit=Math.max(1,Math.trunc(Number(maxBytes)||0));
   if(!rawBytes||rawBytes>limit)throw new RangeError('PixelBuffer source '+rawBytes+' байт превышает лимит '+limit+' байт');
   const size=Math.max(1,Math.min(2048,Math.trunc(Number(tileSize)||PIXEL_BUFFER_TILE_SIZE)));
   const columns=Math.ceil(buffer.width/size),rows=Math.ceil(buffer.height/size),count=columns*rows;
   if(!Number.isSafeInteger(count)||count<1||count>MAX_PIXEL_BUFFER_SOURCE_TILES)throw new RangeError('Tiled PixelBuffer требует '+count+' tiles; лимит '+MAX_PIXEL_BUFFER_SOURCE_TILES);
+  // Preflight the aggregate retained URLs, including one prefix per tile,
+  // before allocating even the first edge-tile raw byte array or Base64 chunk.
+  if (maxDataUrlChars !== null) {
+    let required = 0;
+    const pixelBytes = buffer.channels * sourceSampleBytes(buffer.bitsPerChannel);
+    for (let row = 0; row < rows; row += 1) {
+      const height = Math.min(size, buffer.height - row * size);
+      for (let column = 0; column < columns; column += 1) {
+        const width = Math.min(size, buffer.width - column * size);
+        required += encodedDataUrlChars(width * height * pixelBytes, PIXEL_BUFFER_TILE_MIME);
+        assertEncodedSourceBudget(required, maxDataUrlChars);
+      }
+    }
+  }
   const tiles=[]; let total=0;
   for(let row=0;row<rows;row+=1){
     const y=row*size,height=Math.min(size,buffer.height-y);
@@ -1394,10 +1418,10 @@ export function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_B
   return {kind:PIXEL_BUFFER_TILED_SOURCE_KIND,...sourceMetadata(buffer),tileSize:size,rawBytes,tiles};
 }
 
-export function serializePixelBufferSourceAdaptive(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, tiledThresholdBytes = PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES } = {}) {
+export function serializePixelBufferSourceAdaptive(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, tiledThresholdBytes = PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const threshold=Math.max(1,Math.trunc(Number(tiledThresholdBytes)||PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES));
-  return buffer.data.byteLength>=threshold?serializeTiledPixelBufferSource(buffer,{maxBytes,tileSize}):serializePixelBufferSource(buffer,{maxBytes});
+  return buffer.data.byteLength>=threshold?serializeTiledPixelBufferSource(buffer,{maxBytes,tileSize,maxDataUrlChars}):serializePixelBufferSource(buffer,{maxBytes,maxDataUrlChars});
 }
 
 export function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {

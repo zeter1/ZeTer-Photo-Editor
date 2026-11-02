@@ -4215,7 +4215,18 @@ class HistoryStack {
 }
 
 // ---- src/core/io.js ----
-function bytesToDataUrl(value, mime = 'application/octet-stream') {
+// Count retained ASCII data-URL characters before any binary-string/Base64
+// allocation. This is not a JS heap/RSS byte measurement.
+function encodedDataUrlChars(byteLength, mime = 'application/octet-stream') {
+  if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
+    throw new RangeError('Binary data URL требует корректный размер байтов');
+  }
+  const count = `data:${String(mime || 'application/octet-stream')};base64,`.length
+    + 4 * Math.ceil(byteLength / 3);
+  if (!Number.isSafeInteger(count)) throw new RangeError('Binary data URL length overflow');
+  return count;
+}
+function bytesToDataUrl(value, mime = 'application/octet-stream', { maxDataUrlChars = null } = {}) {
   const bytes = value instanceof Uint8Array
     ? value
     : ArrayBuffer.isView(value)
@@ -4224,6 +4235,12 @@ function bytesToDataUrl(value, mime = 'application/octet-stream') {
         ? new Uint8Array(value)
         : null;
   if (!bytes) throw new TypeError('Ожидался бинарный буфер');
+  const mediaType = String(mime || 'application/octet-stream');
+  const requiredChars = encodedDataUrlChars(bytes.byteLength, mediaType);
+  if (maxDataUrlChars !== null &&
+      (!Number.isSafeInteger(maxDataUrlChars) || maxDataUrlChars < requiredChars)) {
+    throw new RangeError('Binary data URL превышает maxDataUrlChars');
+  }
   if (typeof btoa !== 'function') throw new Error('Base64 encoder недоступен');
   // A multiple of three keeps Base64 groups aligned. Never join all source
   // bytes into a second full-size binary string before calling btoa.
@@ -4233,7 +4250,7 @@ function bytesToDataUrl(value, mime = 'application/octet-stream') {
     const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
     chunks.push(btoa(String.fromCharCode(...chunk)));
   }
-  return `data:${String(mime || 'application/octet-stream')};base64,${chunks.join('')}`;
+  return `data:${mediaType};base64,${chunks.join('')}`;
 }
 function dataUrlToBytes(dataUrl, { maxBytes = 4 * 1024 * 1024 } = {}) {
   const match = /^data:([^;,]+)?;base64,([a-z\d+/=]*)$/i.exec(String(dataUrl || ''));
@@ -6656,22 +6673,46 @@ function isCanonicalPixelBufferBase64(encoded, rawBytes) {
     .indexOf(encoded[encoded.length - padding - 1]);
   return last >= 0 && (last & ((1 << (2 * padding)) - 1)) === 0;
 }
-function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
+
+// Optional limit accounts for actual persisted ASCII URL characters, not
+// raw bytes, JS heap copies, History, or Worker allocations.
+function assertEncodedSourceBudget(required, limit) {
+  if (!Number.isSafeInteger(required) || required < 0 ||
+      (limit !== null && (!Number.isSafeInteger(limit) || limit < required))) {
+    throw new RangeError('PixelBuffer encoded data URL превышает maxDataUrlChars');
+  }
+}
+function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const rawBytes = expectedSourceBytes(buffer);
   const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
   // Refuse before allocating a canonical byte array or starting Base64 work.
   if (!rawBytes || rawBytes > limit) throw new RangeError('PixelBuffer source ' + rawBytes + ' байт превышает лимит ' + limit + ' байт');
+  assertEncodedSourceBudget(encodedDataUrlChars(rawBytes, PIXEL_BUFFER_SOURCE_MIME), maxDataUrlChars);
   const bytes = pixelBufferCanonicalBytes(buffer);
   return {kind:PIXEL_BUFFER_SOURCE_KIND,...sourceMetadata(buffer),rawBytes,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_SOURCE_MIME)};
 }
-function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE } = {}) {
+function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const rawBytes=expectedSourceBytes(buffer), limit=Math.max(1,Math.trunc(Number(maxBytes)||0));
   if(!rawBytes||rawBytes>limit)throw new RangeError('PixelBuffer source '+rawBytes+' байт превышает лимит '+limit+' байт');
   const size=Math.max(1,Math.min(2048,Math.trunc(Number(tileSize)||PIXEL_BUFFER_TILE_SIZE)));
   const columns=Math.ceil(buffer.width/size),rows=Math.ceil(buffer.height/size),count=columns*rows;
   if(!Number.isSafeInteger(count)||count<1||count>MAX_PIXEL_BUFFER_SOURCE_TILES)throw new RangeError('Tiled PixelBuffer требует '+count+' tiles; лимит '+MAX_PIXEL_BUFFER_SOURCE_TILES);
+  // Preflight the aggregate retained URLs, including one prefix per tile,
+  // before allocating even the first edge-tile raw byte array or Base64 chunk.
+  if (maxDataUrlChars !== null) {
+    let required = 0;
+    const pixelBytes = buffer.channels * sourceSampleBytes(buffer.bitsPerChannel);
+    for (let row = 0; row < rows; row += 1) {
+      const height = Math.min(size, buffer.height - row * size);
+      for (let column = 0; column < columns; column += 1) {
+        const width = Math.min(size, buffer.width - column * size);
+        required += encodedDataUrlChars(width * height * pixelBytes, PIXEL_BUFFER_TILE_MIME);
+        assertEncodedSourceBudget(required, maxDataUrlChars);
+      }
+    }
+  }
   const tiles=[]; let total=0;
   for(let row=0;row<rows;row+=1){
     const y=row*size,height=Math.min(size,buffer.height-y);
@@ -6684,10 +6725,10 @@ function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_S
   if(total!==rawBytes)throw new RangeError('Tiled PixelBuffer source имеет несогласованный byte budget');
   return {kind:PIXEL_BUFFER_TILED_SOURCE_KIND,...sourceMetadata(buffer),tileSize:size,rawBytes,tiles};
 }
-function serializePixelBufferSourceAdaptive(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, tiledThresholdBytes = PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES } = {}) {
+function serializePixelBufferSourceAdaptive(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, tiledThresholdBytes = PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const threshold=Math.max(1,Math.trunc(Number(tiledThresholdBytes)||PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES));
-  return buffer.data.byteLength>=threshold?serializeTiledPixelBufferSource(buffer,{maxBytes,tileSize}):serializePixelBufferSource(buffer,{maxBytes});
+  return buffer.data.byteLength>=threshold?serializeTiledPixelBufferSource(buffer,{maxBytes,tileSize,maxDataUrlChars}):serializePixelBufferSource(buffer,{maxBytes,maxDataUrlChars});
 }
 function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
   const safe=sanitizeSourceHeader(source,maxBytes); if(!safe)return null;
