@@ -461,7 +461,7 @@ export function createRasterEditController({
   // Keep all ROI tile changes private until the exact document, layer and
   // serialized source are revalidated after the asynchronous preview build.
   async function persistTiledHighDepthInpaint(owner, layer, {
-    isAllowed, isContinuationCurrent,
+    isAllowed, isContinuationCurrent, maxWorkerInputDataUrlChars = null,
   } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
     const originalSource = layer.highDepthSource;
@@ -478,6 +478,7 @@ export function createRasterEditController({
       isCancelled:stale,
       worker:tiledInpaintWorker,
       maxBytes:highDepthBudgetForLayer(layer),
+      maxWorkerInputDataUrlChars,
       // Read at command time to support a CDP observer injected after startup.
       onTiming:globalThis.__zpeTiledInpaintTiming,
     });

@@ -17499,6 +17499,9 @@ async function prepareTiledInpaintWithWorker(source, {
   isCancelled = () => false,
   worker = null,
   maxBytes,
+  // Opt-in ceiling for the full native Data URL payload cloned UI -> Worker.
+  // Count ASCII characters, not measured JS heap / structured-clone bytes.
+  maxWorkerInputDataUrlChars = null,
   maxFillPixels = 2_000_000,
   scanChunkPixels = 32_768,
   yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
@@ -17523,6 +17526,23 @@ async function prepareTiledInpaintWithWorker(source, {
   }
   const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
   if (!working) throw new TypeError('Tiled inpaint: invalid native source');
+  // A Worker must structured-clone every native tile URL on input, even
+  // though 6c-5 eliminated the unchanged URL copies in its *reply*.
+  // Fail before selection scans, Worker creation or source/History mutation
+  // when the caller opts into an aggregate URL-character budget.
+  if (maxWorkerInputDataUrlChars !== null) {
+    if (!Number.isSafeInteger(maxWorkerInputDataUrlChars) ||
+        maxWorkerInputDataUrlChars < 0) {
+      throw new RangeError('Tiled inpaint: invalid maxWorkerInputDataUrlChars');
+    }
+    let inputUrlChars = 0;
+    for (const tile of source.tiles) {
+      if (tile.dataUrl.length > maxWorkerInputDataUrlChars - inputUrlChars) {
+        throw new RangeError('Tiled inpaint: Worker input exceeds maxWorkerInputDataUrlChars');
+      }
+      inputUrlChars += tile.dataUrl.length;
+    }
+  }
   const { width, height } = working;
   const total = width * height;
   // The Worker protocol uses Uint32 indices. Never allocate a huge JS
@@ -18050,7 +18070,7 @@ function createRasterEditController({
   // Keep all ROI tile changes private until the exact document, layer and
   // serialized source are revalidated after the asynchronous preview build.
   async function persistTiledHighDepthInpaint(owner, layer, {
-    isAllowed, isContinuationCurrent,
+    isAllowed, isContinuationCurrent, maxWorkerInputDataUrlChars = null,
   } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
     const originalSource = layer.highDepthSource;
@@ -18067,6 +18087,7 @@ function createRasterEditController({
       isCancelled:stale,
       worker:tiledInpaintWorker,
       maxBytes:highDepthBudgetForLayer(layer),
+      maxWorkerInputDataUrlChars,
       // Read at command time to support a CDP observer injected after startup.
       onTiming:globalThis.__zpeTiledInpaintTiming,
     });

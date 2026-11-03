@@ -1,22 +1,31 @@
 # 003X/6c-6 — quantify Worker input clone and History source ownership
 
-**Priority:** P1. **Status:** TODO. **Dependencies:** 003X/6c-5 DONE ([PR #361](https://github.com/zeter1/ZeTer-Photo-Editor/pull/361)); Stage 6 / parent 003X IN PROGRESS. **Independent blocker:** 002B/2c genuine Photoshop-authored PSB32 fixture BLOCKED.
+**Date:** 2026-11-03. **Priority:** P1. **Status:** IN PROGRESS (PR #363 open, CI/merge/exact-main pending). **Depends on:** 003X/6c-5 BOUNDED DONE, [PR #361](https://github.com/zeter1/ZeTer-Photo-Editor/pull/361); parent 003X / Stage 6 IN PROGRESS. **Independent blocker:** 002B/2c independently Photoshop-authored PSB32 fixture BLOCKED.
 
-## Goal
-Measure live retained native Data URL owners before Worker dispatch and immutable History snapshots independently. Select one actual duplicated source or avoidable temporary ownership, implement a minimal bounded atomic fix, and preserve high-depth bit-exactness, cancellation, stale/owner switch and .zpe compatibility. Do not extrapolate JSON character counts to V8 heap, OS RSS or Worker PID.
+## Goal and acceptance
+Measure the full native input Data URL clone and independent History snapshots. Implement one strictly opt-in pre-dispatch budget with native RGB16/CMYKA32 Float32 byte integrity, no selection/Worker launch on refusal, cancellation/stale/late failure recovery, Undo/Redo, .zpe v1/v2 and offline file:// regression. Do not conflate serialized character counts with actual V8 heap/RSS/Worker PID. Final acceptance requires PR-head Linux core 12 jobs, independent real-photo, merge, and exact merged-main core + real-photo.
 
-## Acceptance criteria
-1. Reproduce one measured production-path input-side / History duplication with labeled owners and a before/after comparison using actual RGB16 and CMYKA32 Float32 tiled data (include sNaN payload, negative zero and alpha).
-2. Implement a specific safe ownership or opt-in budget improvement. Validate failure-before-mutation, late error, cancellation, stale-session takeover, Undo/Redo, .zpe v1/v2 and unchanged file:// startup.
-3. Run focused independent tests; run canonical generated-artifact build if runtime sources change, local Node checks and real Chrome/Chromium file:// smoke; distinguish Windows Linux-only fixture failures.
-4. Create reviewable PR and verify the final PR-head Linux core workflow and independent real-photo workflow; merge only successful compatible changes; confirm exact merged-main core and real-photo workflows.
-5. Record file paths, measurements, tests, CI links, PR/commit/merge state, unresolved ownership, and subsequent task in this file, task/NEXT.md and task/README.md.
+## Measured owner scopes
+Actual native 131×99, tile size 32, one edited pixel (20 tiles) constructed with RGB16 RGBA and CMYKA32 Float32, including alpha signaling NaN payload, negative-zero and last edge-tile alpha payload:
+- RGB16: UI retained tile Data URLs **139,352 ASCII characters**; an actual structuredClone of the input retains **139,352 URL characters**; separately held History JSON snapshot **140,957 characters**.
+- CMYKA32 Float32: UI native URLs **346,856 characters**; independently cloned input URLs **346,856 characters**; independent History JSON snapshot **348,490 characters**.
+- The full input clone remains necessary for one-shot Worker computation; the compact 6c-5 **reply** does not reduce input cloning. These figures describe UTF-16 code-unit counts in immutable ASCII Data URL fields and JSON strings, **not measured physical memory/heap/RSS**. No global residency bound is claimed.
 
-## Known baseline (from 6c-5)
-Changed-tile-only Worker replies avoid cloning unchanged native URLs back to UI, but the Worker input still receives a full source and History snapshots can retain a complete serialized project. 131×99/tile32 one-tile JSON reply: RGB16 141014 → 11072 characters; CMYKA32 Float32 348547 → 27456. This is a message size proxy, not process memory evidence.
+## Production candidate
+- `src/painting/tiled-inpaint-dispatch.js`: new optional `maxWorkerInputDataUrlChars` enforces a strict aggregate count of all native tiled URL characters after source validation but **before the first selection predicate, async yield, Worker request or document mutation**. Short-circuits on overflow with `RangeError`. Null/default leaves existing dense behavior unchanged; Worker-unavailable CPU path is not subject to a Worker-input-only budget.
+- `src/painting/controller.js`: exposes the opt-in bound through `persistTiledHighDepthInpaint`. No default UX changes, schema modifications or new dependencies.
+- `tests/003x6c6-worker-input-budget.test.mjs`: independent native RGB16/CMYKA32 bit-oracles, exact threshold/refusal/acceptance, input structuredClone evidence, independent History Undo/Redo, .zpe v1/v2, invalid cap, controller forwarding, late error/retry and cooperative cancellation/owner stale cases.
+- Deterministic offline generated bundle: `src/app.bundle.js`, `index.html`, `version.json`, build `43f8b4d1cfb6d7b8` (Worker source unchanged).
 
-## Current work
-**TODO — no 6c-6 production change or new local test claimed by this handoff.** Start by examining src/painting/tiled-inpaint-dispatch.js, src/core/tiled-inpaint-worker-client.js, src/core/history.js and existing native retention tests; use actual bounded buffers and complete cancellation contracts.
+## Verification status
+- **Before changes:** 17/17 relevant focused tests PASS.
+- **After changes:** 20/20 focused tests PASS (including existing 6c-5 + tiled dispatch). Initial new test typo was corrected before final focused run.
+- Windows `npm run check`: five previously known Linux-only `/proc`/cgroup fixture tests FAIL on Windows; not a clean cross-platform result. Linux CI authoritative for acceptance.
+- Windows real Chrome `file://` `npm run test:browser`: **PASS (exit 0)**, including actual native Worker, high-depth PSD16/PSB32 synthetic fixture import, cancellation/owner switch, Undo/Redo and recovery. These are ZeTer-authored fixtures, not independently Adobe-authored PSB32.
+- GitHub [PR #363](https://github.com/zeter1/ZeTer-Photo-Editor/pull/363), branch `feat/003x6c6-worker-input-budget-20261103`, initial commit [`21417c8`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/21417c85e70c48ca17d53dd4c7cc213a56bbbe05). Linux PR-head CI, independent real-photo, merge, exact-main: **PENDING**. Never claim DONE from local tests alone.
 
-## Next
-003X/6c-6 P1 IN PROGRESS when evidence and implementation work begin. Preserve parent Stage 6 IN PROGRESS and independent 002B/2c BLOCKED.
+## Scope still open
+The cap is opt-in and bounds *accounted Worker input URL characters*, not live Worker memory, JS heap/RSS, string deduplication, History snapshots or OS-level peaks. History keeps full immutable JSON snapshots. For the next bounded task **003X/6c-7 P1**, investigate incremental/structural sharing for immutable History native URLs with exact reconstruct/Undo/.zpe/failure gates, only if independently measurable and semantics remain intact. Preserve Photoshop-authored PSB32 provenance blocker 002B/2c.
+
+## Handoff
+Current NEXT: complete 003X/6c-6 browser/CI/PR/merge/exact-main gates, update this task with verified links; only then queue 003X/6c-7. Do not mark parent Stage 6 DONE.
