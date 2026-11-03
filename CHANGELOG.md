@@ -1,3 +1,10 @@
+### 2026-11-03 — candidate 003X/6c-8: immutable native URLs shared across History
+
+- Pool byte-exact identical v1/v2 URL payloads across string snapshots, without losing Undo points; preserve public entry.snapshot string and caller writes. Source app/session opt in; external HistoryStack remains backward-compatible by default.
+- Ref-counted cleanup on branch, eviction, reset and clear; collision-safe equality; failed allocation atomic. Legacy limits charge original logical JSON size, not pooled bytes.
+- Three snapshot counts RGB16 logical 418,056 versus unique pooled 139,352 ASCII URL bytes; CMYKA32 Float32 logical 1,040,568 versus pooled 346,856. No claim of heap/RSS/Worker savings.
+- Local 4/4 focused PASS; Windows 1,560 PASS / 10 SKIP / 5 Linux-specific fixture FAIL; real Chrome file:// PASS; build 33644886f38cd40f; PR/CI/merge pending.
+
 ### 2026-11-03 — 003X/6c-7: bounded acceptance опционального лимита native URL в History (PR #365 слит)
 
 - [PR #365](https://github.com/zeter1/ZeTer-Photo-Editor/pull/365) прошёл Linux core [#41623127166](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623127166) **12/12** и независимый [real-photo #41623127060](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623127060) **SUCCESS**; squash-merged [main f44d35b](https://github.com/zeter1/ZeTer-Photo-Editor/commit/f44d35b7cb22364c23e8702de0e1a447a2943312). На точном merged-main: [core #41623966381](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623966381) **12/12** и отдельный [real-photo #41623966385](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623966385) **SUCCESS**. Локальные 10/10 focused и настоящий Chrome `file://` PASS, deterministic build `ca5e3daaeb698e28`; Windows full check 1557 PASS / 10 SKIP / 5 известных Linux-only /proc/cgroup fixture FAIL.
