@@ -1,6 +1,6 @@
 # 003X/6c-8 — shared immutable native URL owner in History
 
-**Приоритет:** P1. **Статус:** IN PROGRESS (код и Windows-проверки готовы; PR, Linux CI и exact-main ещё ожидаются). **Зависимости:** 003X/6c-7 opt-in History URL character budget; parent 003X/Stage 6 IN PROGRESS. **Отдельная блокировка:** реальное Adobe-authored PSB32 002B/2c BLOCKED.
+**Приоритет:** P1. **Статус:** DONE (bounded acceptance, PR #367 и exact-main CI подтверждены). **Зависимости:** 003X/6c-7 opt-in History URL character budget; parent 003X/Stage 6 IN PROGRESS. **Отдельная блокировка:** реальное Adobe-authored PSB32 002B/2c BLOCKED.
 
 ## Цель
 
@@ -33,3 +33,10 @@ Safeguards: collision-checked byte equality, reference counts and deletion on br
 Status remains IN PROGRESS until green GitHub PR-head Linux core 12 jobs plus independent real-photo, successful merge and exact-main gates.
 
 **GitHub candidate:** [PR #367](https://github.com/zeter1/ZeTer-Photo-Editor/pull/367), code head [bb5d0f4](https://github.com/zeter1/ZeTer-Photo-Editor/commit/bb5d0f4a8e45643bb908e554297bf5f26b110249). PR CI core [#41634772654](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41634772654) and independent real-photo [#41634772571](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41634772571) started; final-head verdict pending. Not merged. Exact-main CI pending.
+
+## Verified bounded acceptance — 2026-11-03
+
+- PR [#367](https://github.com/zeter1/ZeTer-Photo-Editor/pull/367), final PR head `860be41d7ecd35c4e11b4ad7a4c6997b7d6b3e35`: [Linux core #41635098512](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635098512) **SUCCESS 12/12** and independent [real-photo #41635098522](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635098522) **SUCCESS**; no blocking reviews, mergeable clean.
+- Squash-merged into main as [e6486e92875b8417f5d6cce4ce9961806bcaa3cf](https://github.com/zeter1/ZeTer-Photo-Editor/commit/e6486e92875b8417f5d6cce4ce9961806bcaa3cf). Verified exact merged-main [Linux core #41635993808](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635993808) **SUCCESS 12/12** and separate [real-photo #41635993793](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635993793) **SUCCESS**.
+- Local Windows new focused tests 4/4 PASS, actual Chrome `file://` browser-smoke PASS; `npm run check`: 1560 PASS / 10 SKIP / 5 known Linux-only `/proc`/cgroup fixture FAIL, not reported as a full Windows green run. Deterministic bundle hash `33644886f38cd40f`. Test set includes bit-exact v1/v2, RGB16/CMYKA32 Float32 sNaN/-0/alpha, Undo/Redo/jump/branch/reset/clear and failed allocation.
+- Three Undo snapshots retained in measurements: RGB16 418056 logical URL chars vs 139352 unique pooled URL bytes; CMYKA32 Float32 1040568 logical vs 346856 pooled. No global JS heap/RSS claim. Next task **003X/6c-9 P1 TODO** [profile true multi-session History pooling memory and latency](003x6c9-history-sharing-profile.md); parent 003X/Stage 6 remains IN PROGRESS, independent Photoshop-authored PSB32 provenance 002B/2c BLOCKED.

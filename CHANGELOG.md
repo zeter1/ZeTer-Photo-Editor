@@ -1,3 +1,8 @@
+### 2026-11-03 — verified acceptance 003X/6c-8 (PR #367 merged; exact-main CI green)
+
+- Final PR-head `860be41`: Linux [core 12/12](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635098512) and [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635098522) SUCCESS; merged as [main `e6486e9`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/e6486e92875b8417f5d6cce4ce9961806bcaa3cf). Exact-main [core 12/12](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635993808) and [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635993793) SUCCESS.
+- Shared immutable native URL owners preserve all Undo slots and exact snapshot JSON. Three RGB16/CMYKA32 Float32 snapshots: logical native URL chars 418056/1040568, unique pooled native URL bytes 139352/346856. Not whole-app heap/RSS or Worker reduction. [Task](task/003x6c8-history-snapshot-sharing.md). Next 003X/6c-9 memory and latency profiling; Stage 6 remains IN PROGRESS.
+
 ### 2026-11-03 — candidate 003X/6c-8: immutable native URLs shared across History
 
 - Pool byte-exact identical v1/v2 URL payloads across string snapshots, without losing Undo points; preserve public entry.snapshot string and caller writes. Source app/session opt in; external HistoryStack remains backward-compatible by default.
