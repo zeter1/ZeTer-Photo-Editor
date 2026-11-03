@@ -1,6 +1,6 @@
 # 003X/6c-6 — quantify Worker input clone and History source ownership
 
-**Date:** 2026-11-03. **Priority:** P1. **Status:** IN PROGRESS (production candidate, PR/CI/merge/exact-main pending). **Depends on:** 003X/6c-5 BOUNDED DONE, [PR #361](https://github.com/zeter1/ZeTer-Photo-Editor/pull/361); parent 003X / Stage 6 IN PROGRESS. **Independent blocker:** 002B/2c independently Photoshop-authored PSB32 fixture BLOCKED.
+**Date:** 2026-11-03. **Priority:** P1. **Status:** IN PROGRESS (PR #363 open, CI/merge/exact-main pending). **Depends on:** 003X/6c-5 BOUNDED DONE, [PR #361](https://github.com/zeter1/ZeTer-Photo-Editor/pull/361); parent 003X / Stage 6 IN PROGRESS. **Independent blocker:** 002B/2c independently Photoshop-authored PSB32 fixture BLOCKED.
 
 ## Goal and acceptance
 Measure the full native input Data URL clone and independent History snapshots. Implement one strictly opt-in pre-dispatch budget with native RGB16/CMYKA32 Float32 byte integrity, no selection/Worker launch on refusal, cancellation/stale/late failure recovery, Undo/Redo, .zpe v1/v2 and offline file:// regression. Do not conflate serialized character counts with actual V8 heap/RSS/Worker PID. Final acceptance requires PR-head Linux core 12 jobs, independent real-photo, merge, and exact merged-main core + real-photo.
@@ -21,8 +21,8 @@ Actual native 131×99, tile size 32, one edited pixel (20 tiles) constructed wit
 - **Before changes:** 17/17 relevant focused tests PASS.
 - **After changes:** 20/20 focused tests PASS (including existing 6c-5 + tiled dispatch). Initial new test typo was corrected before final focused run.
 - Windows `npm run check`: five previously known Linux-only `/proc`/cgroup fixture tests FAIL on Windows; not a clean cross-platform result. Linux CI authoritative for acceptance.
-- Windows real Chrome `file://` `npm run test:browser`: PENDING verification at time of this candidate note.
-- GitHub PR-head CI, independent real-photo, merge, exact-main: **PENDING**. Never claim DONE from local tests alone.
+- Windows real Chrome `file://` `npm run test:browser`: **PASS (exit 0)**, including actual native Worker, high-depth PSD16/PSB32 synthetic fixture import, cancellation/owner switch, Undo/Redo and recovery. These are ZeTer-authored fixtures, not independently Adobe-authored PSB32.
+- GitHub [PR #363](https://github.com/zeter1/ZeTer-Photo-Editor/pull/363), branch `feat/003x6c6-worker-input-budget-20261103`, initial commit [`21417c8`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/21417c85e70c48ca17d53dd4c7cc213a56bbbe05). Linux PR-head CI, independent real-photo, merge, exact-main: **PENDING**. Never claim DONE from local tests alone.
 
 ## Scope still open
 The cap is opt-in and bounds *accounted Worker input URL characters*, not live Worker memory, JS heap/RSS, string deduplication, History snapshots or OS-level peaks. History keeps full immutable JSON snapshots. For the next bounded task **003X/6c-7 P1**, investigate incremental/structural sharing for immutable History native URLs with exact reconstruct/Undo/.zpe/failure gates, only if independently measurable and semantics remain intact. Preserve Photoshop-authored PSB32 provenance blocker 002B/2c.
