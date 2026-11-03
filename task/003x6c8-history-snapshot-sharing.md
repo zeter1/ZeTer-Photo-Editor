@@ -1,6 +1,6 @@
 # 003X/6c-8 — shared immutable native URL owner in History
 
-**Приоритет:** P1. **Статус:** TODO (после bounded acceptance 003X/6c-7). **Зависимости:** 003X/6c-7 opt-in History URL character budget; parent 003X/Stage 6 IN PROGRESS. **Отдельная блокировка:** реальное Adobe-authored PSB32 002B/2c BLOCKED.
+**Приоритет:** P1. **Статус:** IN PROGRESS (код и Windows-проверки готовы; PR, Linux CI и exact-main ещё ожидаются). **Зависимости:** 003X/6c-7 opt-in History URL character budget; parent 003X/Stage 6 IN PROGRESS. **Отдельная блокировка:** реальное Adobe-authored PSB32 002B/2c BLOCKED.
 
 ## Цель
 
@@ -17,3 +17,19 @@
 ## Текущая граница
 
 003X/6c-7 дал отдельный opt-in cap на **количество символов** native URL в удерживаемых History JSON, а не уменьшение объёма единственного snapshot или измерение heap/RSS. Этот этап не закрывает все memory/transient/Worker вопросы. Начинать с актуального main/PR и не повторять завершённый 6c-7.
+
+## Проходка 2026-11-03 — кандидат реализации; PR/CI/merge ещё не приняты
+
+Цель: хранить идентичный native v1/v2 Data URL в нескольких immutable JSON-снимках только одним байтовым owner, не теряя Undo-позиций и исходный JSON. При чтении entries[].snapshot точная строка восстанавливается из отдельных сегментов; external setter сохраняется. Generic HistoryStack без opt-in не меняется.
+
+Изменённые файлы: src/core/history.js, src/main.js, src/workspace/session-controller.js, tests/003x6c8-history-shared-native-urls.test.mjs; rebuild src/app.bundle.js, index.html, version.json; task/NEXT.md, task/README.md, task/003x6c8-history-snapshot-sharing.md, task/003x6c9-history-sharing-profile.md, task/003x-native-tile-ownership.md, CHANGELOG.md.
+
+131×99 tile32: RGB16 — UI native URLs 139352 chars, JSON snapshots 142052/142051/142053 chars; History logical native URLs 418056 chars across three Undo points; unique pooled History native URL bytes 139352. CMYKA32 Float32 — UI URLs 346856 chars, JSON snapshots 349585/349584/349586 chars; History logical native URL chars 1040568, pooled native URL bytes 346856. Distinct tile URLs; payload exactly checked (sNaN, -0, alpha). These are not complete JavaScript heap/RSS, and exclude UI source, non-native UTF-16 segments and temporary reconstructed strings.
+
+Red-before: 0/2 new tests. Green: 4/4 focused new tests; legacy History 12/12 before adding fourth benchmark; first Windows npm run check: 1560 PASS, 10 SKIP, five known Windows-incompatible Linux /proc/cgroup fixtures FAIL. Real Chrome file:// browser-smoke exit 0; genuine Worker cancel/Undo/Redo/multi-session and ZeTer-authored PSD16/PSB32 synthetic format tests, not independent Adobe-authoring evidence. Deterministic source build 33644886f38cd40f. CI on final PR-head, separate real-photo workflow, merge and exact-main PENDING.
+
+Safeguards: collision-checked byte equality, reference counts and deletion on branch/count/byte-budget/cap/reset/clear; failed allocation does not erase redo. Old logical byte and URL char budgets unchanged; generic object snapshots stay mutable. Unresolved: measured total heap/GC/latency/Worker ownership and large-document performance; tracked as 003X/6c-9. Parent Stage 6 IN PROGRESS, independent Photoshop-authored PSB32 002B/2c BLOCKED.
+
+Status remains IN PROGRESS until green GitHub PR-head Linux core 12 jobs plus independent real-photo, successful merge and exact-main gates.
+
+**GitHub candidate:** [PR #367](https://github.com/zeter1/ZeTer-Photo-Editor/pull/367), code head [bb5d0f4](https://github.com/zeter1/ZeTer-Photo-Editor/commit/bb5d0f4a8e45643bb908e554297bf5f26b110249). PR CI core [#41634772654](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41634772654) and independent real-photo [#41634772571](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41634772571) started; final-head verdict pending. Not merged. Exact-main CI pending.

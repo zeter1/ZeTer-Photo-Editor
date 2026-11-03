@@ -103,7 +103,7 @@ const els = {
 };
 
 let doc = createDocument();
-let history = new HistoryStack(80);
+let history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true });
 let zoom = 0.75;
 let documentSessions = [];
 let activeSessionId = '';
@@ -878,7 +878,7 @@ const newDocumentController = createNewDocumentController({
       !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
     cancelPendingContentAwareFill: () => !drag &&
       !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
-    replaceHistory: () => { history = new HistoryStack(80); },
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true }); },
     setDocument: setDoc,
     markDirty,
   },
@@ -907,7 +907,7 @@ const psdImportController = createPsdImportController({
     cancelPendingContentAwareFill: () => !drag &&
       !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
     publishDocument: (next,{label}) => {
-      history=new HistoryStack(80);
+      history=new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true });
       setDoc(next,{resetHistory:true,label});
       markDirty(true);
       queueRecovery({immediate:true});
@@ -929,7 +929,7 @@ const projectController = createProjectController({
     canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
     sanitizeProject,
-    replaceHistory: () => { history = new HistoryStack(80); },
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true }); },
     setDocument: setDoc,
     markDirty,
     getCurrentSession: () => currentSession(),

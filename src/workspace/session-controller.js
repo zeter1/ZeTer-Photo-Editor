@@ -78,7 +78,7 @@ export function createDocumentSessionController({
     dirtyState = false,
     smartObjectLink = null,
   } = {}) {
-    const sessionHistory = new HistoryStack(80);
+    const sessionHistory = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true });
     sessionHistory.reset(label, snapshotDocument(documentValue));
     return {
       id: createSessionId(),
