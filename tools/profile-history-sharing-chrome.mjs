@@ -9,6 +9,7 @@ import { performance } from 'node:perf_hooks';
 import * as pixels from '../src/core/pixel-buffer.js';
 import * as state from '../src/core/state.js';
 import { createHistorySharingFixture, historySourceFingerprint, validateHistoryProfileConfig } from './history-sharing-fixture.mjs';
+import { verifyBrowserHistoryUiRecovery } from './browser-history-ui-recovery-smoke.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const INDEX_URL = pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -192,9 +193,13 @@ async function runCase({ model, shared, repetition, fixturePath, sourceDigest, s
     const afterNavigation=await memory('after-native-navigation');
     await evaluate(client,'globalThis.__zpeProfileHistory=null;true');
     const released=await memory('after-history-release');
+    const uiRecovery = process.env.ZPE_PROFILE_UI === '1' && shared && repetition === 0
+      ? await verifyBrowserHistoryUiRecovery(client, {
+        evaluate, fixturePath, expectedNativeHash:sourceDigest,
+      }) : null;
     return { model, shared, repetition, config, sourceDigest, snapshotLength,
       input:'production zpe snapshot and HistoryStack, Chrome file:// fresh process',
-      setup, navigation, memory:[baseline,retained,afterNavigation,released] };
+      setup, navigation, memory:[baseline,retained,afterNavigation,released], uiRecovery };
   } finally {
     client?.close(); browserClient?.close(); browser.kill();
     await new Promise(resolve=>{if(browser.exitCode!==null||browser.signalCode!==null)return resolve();
@@ -209,7 +214,9 @@ async function runCase({ model, shared, repetition, fixturePath, sourceDigest, s
   const output={ date:new Date().toISOString(), executable:chromium, fileUrl:INDEX_URL,
     config, method:'fresh Chrome process per sample; alternated baseline/pool; CDP forced GC and Runtime.getHeapUsage',
     limitations:['JS heap is not whole Chrome RAM/RSS','CDP collectGarbage round trip is not exclusive GC time',
-      'Node-generated genuine snapshot loaded via real browser File API; UI imported document/Worker/IDB restore not tested',
+      process.env.ZPE_PROFILE_UI === '1'
+        ? 'UI import/Undo/Redo/IndexedDB restore probed only in pooled app History; not UI generic A/B; Worker/RSS peak unmeasured'
+        : 'Node-generated genuine snapshot loaded via real browser File API; UI imported document/Worker/IDB restore not tested',
       'Chromium privateMemory may be unavailable; Windows per-PID private commit is not physical RSS',
       'Chrome CDP process census does not establish Worker PID attribution; sum of working sets double-counts shared pages'],
     cases:[] };
@@ -235,7 +242,10 @@ async function runCase({ model, shared, repetition, fixturePath, sourceDigest, s
       }
     }
     assert.equal(output.cases.length,REPEATS*4);
-    const out=path.join(ROOT,'task/evidence/003x6c9-chrome-history-ab.json');
+    const out=path.join(ROOT,process.env.ZPE_PROFILE_OUTPUT ||
+      (process.env.ZPE_PROFILE_UI === '1'
+        ? 'task/evidence/003x6c9-real-ui-idb.json'
+        : 'task/evidence/003x6c9-chrome-history-ab.json'));
     await writeFile(out,JSON.stringify(output,null,2)+'\n','utf8');
     console.log('CHROME_HISTORY_AB_PASS '+out);
   } finally { await rm(fixtureDir,{recursive:true,force:true,maxRetries:5,retryDelay:250}); }
