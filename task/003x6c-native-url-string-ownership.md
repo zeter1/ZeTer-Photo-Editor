@@ -1,6 +1,15 @@
 # 003X/6c — bounded retained Base64 / Data URL transient ownership
 
-**ID:** 003X/6c. **Priority:** P1. **Status:** TODO; 003X/6b exact-main acceptance DONE. **Parent:** 003X/6, Stage 6 IN PROGRESS.
+**2026-11-03 / 003X/6c-2 — P1 IN PROGRESS, production candidate (CI and main acceptance not yet confirmed).** Previous 6c-1 was merged and accepted; no repeat of that scope. This pass instruments actual `src/core/io.js` `bytesToDataUrl` called by native v1/v2 serializers. Before fix `Array.prototype.join` returned one complete Base64-only string: RGB16 131×99 RGBA16 = **138,336 ASCII chars**, CMYKA32 Float32 131×99 = **345,840 chars**; a later interpolation produced URL lengths **138,381** and **345,877**. The extra joined Base64 intermediate was reproduced by tests failing against baseline. Production code now includes the prefix as first chunk and does exactly one `chunks.join('')` into the final URL (one joined URL per v2 tile), preserving 0x6000-byte Base64 chunk boundaries and opt-in `maxDataUrlChars` refusal before any encoding. This measures concrete joined-string character lengths, not V8's actual transient heap allocation, GC lifetime or process RSS; independent chunk strings and final URL still exist.
+
+**Changed:** `src/core/io.js`; new `tests/003x6c2-final-url-join.test.mjs`; regenerated `src/app.bundle.js`, `src/core/tiled-inpaint-worker-source.js`, `index.html`, `version.json` (deterministic build `c13b55bb37c05209`); `CHANGELOG.md`; `task/NEXT.md`, `task/README.md`, this task and parent `task/003x-native-tile-ownership.md`.
+
+**Local evidence:** red-before/green-after on new join-output test; 11/11 focused legacy budget, native tile/LRU and Base64 tests PASS after fix. RGB16 and CMYKA32 Float32 backing-byte oracles include signaling NaN alpha, negative zero alpha and last edge; dense/sparse/edge tiles; v1/v2 `.zpe` JSON save/reopen exact; btoa failure on the second tile after successful first output yields no partial failed-tile join or native source mutation; optional budget fails before btoa/join. Windows `npm run check`: 1541 PASS, 10 SKIP, five Linux `/proc`/cgroup fixture failures (not a Linux CI result). `file://` full browser, PR-head Linux core + independent real-photo, merge and exact-main CI PENDING.
+
+**Acceptance boundary:** This is a safe reduced intermediate string owner, **not** a claimed global transient memory cap, streaming URL encoder, Worker/History ownership ceiling, OS RSS peak or Adobe-authored PSB32 provenance. Continue Stage 6/003X; 002B/2c remains BLOCKED. **NEXT:** finish 003X/6c-2 CI gates and main verification, then 003X/6c-3 (P1 TODO): investigate `dataUrlToBytes` regex extraction plus `atob` binary string ownership/preflight, preserve native lossless and failure atomicity.
+
+
+**ID:** 003X/6c. **Priority:** P1. **Status:** IN PROGRESS (6c-1 DONE; 6c-2 production PR/CI acceptance PENDING); 003X/6b exact-main acceptance DONE. **Parent:** 003X/6, Stage 6 IN PROGRESS.
 
 **Dependencies:** 003X/6a production DONE; 003X/6b PR [#351](https://github.com/zeter1/ZeTer-Photo-Editor/pull/351) merged as [7e9f8b65](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e9f8b65530e44a025d53a9bcb2d89fe12cda36b), exact-main core #41387921346 SUCCESS 12/12 and separate real-photo #41387921307 SUCCESS for merged SHA. 002B/2c independent Photoshop-authored PSB32 provenance remains BLOCKED.
 

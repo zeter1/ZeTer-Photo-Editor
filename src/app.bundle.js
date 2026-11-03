@@ -4244,13 +4244,16 @@ function bytesToDataUrl(value, mime = 'application/octet-stream', { maxDataUrlCh
   if (typeof btoa !== 'function') throw new Error('Base64 encoder недоступен');
   // A multiple of three keeps Base64 groups aligned. Never join all source
   // bytes into a second full-size binary string before calling btoa.
-  const chunks = [];
+  // Join the prefix and encoded chunks ONCE into the final URL. Joining
+  // Base64 first and then interpolating it retains an unnecessary full-length
+  // intermediate string at this synchronous serialization boundary.
+  const chunks = [`data:${mediaType};base64,`];
   const chunkSize = 0x6000;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
     const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
     chunks.push(btoa(String.fromCharCode(...chunk)));
   }
-  return `data:${mediaType};base64,${chunks.join('')}`;
+  return chunks.join('');
 }
 function dataUrlToBytes(dataUrl, { maxBytes = 4 * 1024 * 1024 } = {}) {
   const match = /^data:([^;,]+)?;base64,([a-z\d+/=]*)$/i.exec(String(dataUrl || ''));
