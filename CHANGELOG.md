@@ -1,3 +1,9 @@
+### 2026-11-03 — кандидат 003X/6c-9: быстрый декодер pooled History native URLs
+
+- После реального профилирования 1025×1025 RGB16/CMYKA32 Float32 в src/core/history.js native ASCII URL реконструируются через TextDecoder, fallback сохраняет прежний код. Ненативные UTF-16 фрагменты (включая lone surrogates), данные .zpe v1/v2, Undo/Redo и логические бюджеты остаются неизменными.
+- Два повтора Node профиля: RGB16 pooled reconstruction mean 305.88→5.03 ms, CMYKA32 Float32 740.39→11.68 ms; main isolate heapUsed post-GC и физическая RAM — разные метрики. Node Worker complete/cancel/stale/session-close, focused 10/10 PASS, Chrome file:// smoke PASS, Windows all tests 1568 PASS/10 SKIP/5 Linux-only fixture FAIL. Полный Chrome baseline/pooled A/B и CI ещё НЕ подтверждены.
+- Подробности и raw before/after reports: [003X/6c-9](task/003x6c9-history-sharing-profile.md), task/evidence/003x6c9-node-profile-before.json и task/evidence/003x6c9-node-profile.json. Stage 6 IN PROGRESS, 002B/2c Adobe-authored PSB32 BLOCKED.
+
 ### 2026-11-03 — verified acceptance 003X/6c-8 (PR #367 merged; exact-main CI green)
 
 - Final PR-head `860be41`: Linux [core 12/12](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635098512) and [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635098522) SUCCESS; merged as [main `e6486e9`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/e6486e92875b8417f5d6cce4ce9961806bcaa3cf). Exact-main [core 12/12](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635993808) and [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635993793) SUCCESS.
