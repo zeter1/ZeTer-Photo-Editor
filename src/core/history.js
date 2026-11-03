@@ -52,6 +52,14 @@ function fromUnits(units) {
   }
   return chunks.join('');
 }
+// Pooled native Data URLs are ASCII by construction (fixed headers + Base64).
+// Decode their Uint8Array directly instead of allocating JS arrays of 8192
+// arguments for each large reconstructed Undo snapshot. Keep the code-unit
+// path for arbitrary JSON text, including unpaired UTF-16 surrogates.
+const nativeUrlDecoder = typeof TextDecoder === 'function' ? new TextDecoder('utf-8', { fatal:true }) : null;
+function fromAsciiUrl(bytes) {
+  return nativeUrlDecoder ? nativeUrlDecoder.decode(bytes) : fromUnits(bytes);
+}
 function urlHash(text, start, end) {
   let hash = 2166136261;
   for (let i = start; i < end; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
@@ -148,7 +156,7 @@ export class HistoryStack {
       Object.defineProperty(entry, 'snapshot', {
         enumerable:true, configurable:true,
         get:() => parts.map(part => part.owner
-          ? fromUnits(part.owner.bytes) : fromUnits(part.units)).join(''),
+          ? fromAsciiUrl(part.owner.bytes) : fromUnits(part.units)).join(''),
         set:(value) => {
           this._releaseEntry(entry);
           Object.defineProperty(entry, 'snapshot', {
