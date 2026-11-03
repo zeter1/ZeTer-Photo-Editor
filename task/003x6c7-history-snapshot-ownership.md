@@ -1,6 +1,6 @@
 # 003X/6c-7 — immutable native History snapshot ownership
 
-**Приоритет:** P1. **Статус:** IN PROGRESS (код и локальная/browser проверки выполнены, Linux PR CI и exact-main ожидаются). **Зависимости:** 003X/6c-6 DONE: PR #363, exact-main Linux core 12/12 и отдельный real-photo SUCCESS. **Независимая блокировка:** 002B/2c: проверяемое Adobe Photoshop-authored PSB32 остаётся BLOCKED.
+**Приоритет:** P1. **Статус:** BOUNDED DONE (PR #365 принят, exact-main core 12/12 и independent real-photo SUCCESS). **Зависимости:** 003X/6c-6 DONE: PR #363, exact-main Linux core 12/12 и отдельный real-photo SUCCESS. **Независимая блокировка:** 002B/2c: проверяемое Adobe Photoshop-authored PSB32 остаётся BLOCKED.
 
 ## Цель и критерии приёмки
 
@@ -39,8 +39,8 @@
 
 - **Red-before:** 0/3 нового теста на `main` (отсутствует `retainedNativeDataUrlChars`, opt-in неизвестен).
 - **Green focused:** новый suite + существующие `history-native-byte-budget` / `history-retention-contract`: 10/10 PASS, 131×99 16/32-bit сохранены.
-- **Локальный Windows `npm run check`:** 1 557 PASS, 10 SKIP, 5 FAIL (известные Linux-only `/proc` / cgroup fixture тесты); остальные тесты прошли. **Настоящий Chrome `file://` smoke:** PASS (exit 0), включая native PSD16/PSB32 Worker, отмену, Undo/Redo и IndexedDB recovery. **Детерминированный build:** `ca5e3daaeb698e28` (повторная сборка совпадает). Linux PR-head 12-job core CI, independent real-photo, merge и exact-main **ещё не проверены**.
-- **GitHub:** рабочая ветка `feat/003x6c7-history-native-url-cap-20261103`; PR/commit ссылки пока не утверждены.
+- **Локальный Windows `npm run check`:** 1 557 PASS, 10 SKIP, 5 FAIL (известные Linux-only `/proc` / cgroup fixture тесты); остальные тесты прошли. **Настоящий Chrome `file://` smoke:** PASS (exit 0), включая native PSD16/PSB32 Worker, отмену, Undo/Redo и IndexedDB recovery. **Детерминированный build:** `ca5e3daaeb698e28` (повторная сборка совпадает). Linux PR-head 12-job core CI, independent real-photo, merge и exact-main **успешно подтверждены** (ссылки ниже).
+- **GitHub:** [PR #365](https://github.com/zeter1/ZeTer-Photo-Editor/pull/365), final head `14ddced`: [core #41623127166](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623127166) **12/12**, [real-photo #41623127060](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623127060) **SUCCESS**; squash-merged [main `f44d35b`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/f44d35b7cb22364c23e8702de0e1a447a2943312). Exact merged-main [core #41623966381](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623966381) **12/12** and independent [real-photo #41623966385](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623966385) **SUCCESS**. No blocking reviews.
 
 ## Ограничения и дальнейшая работа
 
