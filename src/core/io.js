@@ -42,17 +42,48 @@ export function bytesToDataUrl(value, mime = 'application/octet-stream', { maxDa
 }
 
 export function dataUrlToBytes(dataUrl, { maxBytes = 4 * 1024 * 1024 } = {}) {
-  const match = /^data:([^;,]+)?;base64,([a-z\d+/=]*)$/i.exec(String(dataUrl || ''));
-  if (!match) throw new Error('Некорректный binary data URL');
-  const base64 = match[2];
-  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
-  const estimated = Math.max(0, Math.floor(base64.length * 3 / 4) - padding);
+  const source = String(dataUrl || '');
+  // Match only the MIME header; avoid capturing a full-length Base64 substring.
+  const header = /^data:([^;,]+)?;base64,/i.exec(source);
+  if (!header) throw new Error('Некорректный binary data URL');
+  const start = header[0].length;
+  const encodedLength = source.length - start;
+  const padding = source.endsWith('==') ? 2 : source.endsWith('=') ? 1 : 0;
+  const estimated = Math.max(0, Math.floor(encodedLength * 3 / 4) - padding);
   if (estimated > maxBytes) throw new Error(`Binary data URL превышает лимит ${maxBytes} байт`);
+
+  // Validate the full alphabet and padding before allocating the decoded output.
+  // No regexp capture or atob call owns the complete Base64 payload.
+  if (encodedLength % 4 === 1 || (padding && encodedLength % 4 !== 0)) {
+    throw new Error('Некорректный binary data URL');
+  }
+  let firstPadding = -1;
+  for (let index = start; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    if (code === 61) {
+      if (firstPadding === -1) firstPadding = index;
+    } else if (firstPadding !== -1 ||
+      !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) ||
+        (code >= 48 && code <= 57) || code === 43 || code === 47)) {
+      throw new Error('Некорректный binary data URL');
+    }
+  }
+  if (firstPadding !== -1 && source.length - firstPadding !== padding) {
+    throw new Error('Некорректный binary data URL');
+  }
   if (typeof atob !== 'function') throw new Error('Base64 decoder недоступен');
-  const binary = atob(base64);
-  if (binary.length > maxBytes) throw new Error(`Binary data URL превышает лимит ${maxBytes} байт`);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index) & 255;
+
+  const bytes = new Uint8Array(estimated);
+  // Input chunks are 32 KiB Base64 chars (multiple of 4). Each atob result
+  // is at most 24 KiB, rather than a complete native binary string.
+  // This does not imply a global JS heap, Worker or process RSS limit.
+  const chunkChars = 0x8000;
+  let written = 0;
+  for (let index = start; index < source.length; index += chunkChars) {
+    const binary = atob(source.slice(index, Math.min(index + chunkChars, source.length)));
+    for (let i = 0; i < binary.length; i += 1) bytes[written++] = binary.charCodeAt(i);
+  }
+  if (written !== estimated) throw new Error('Некорректный binary data URL');
   return bytes;
 }
 
