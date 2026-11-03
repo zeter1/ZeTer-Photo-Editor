@@ -1,3 +1,9 @@
+### 2026-11-03 — 003X/6c-4: принята оптимизация декодированных native-буферов
+
+- [PR #359](https://github.com/zeter1/ZeTer-Photo-Editor/pull/359) влит в [main 2bea78b](https://github.com/zeter1/ZeTer-Photo-Editor/commit/2bea78bc8e1e0d0d10e276ff4287b1fa7ddcb3dc): без второй полноразмерной аллокации при декодировании выровненных RGB16/CMYKA32 Float32 тайлов и v1.
+- Финальная проверка PR-head: Linux core [#41598105567](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41598105567) SUCCESS 12/12 и independent real-photo [#41598105550](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41598105550) SUCCESS. На точном merged-main core [#41598920812](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41598920812) SUCCESS 12/12 и separate real-photo [#41598920785](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41598920785) SUCCESS.
+- Parent 003X/Stage 6 остаётся IN PROGRESS; следующий шаг 003X/6c-5 — независимый учёт History и Worker. Нет доказанного общего предела RAM/RSS, Photoshop-authored PSB32 002B/2c BLOCKED.
+
 ### 2026-11-03 — Кандидат 003X/6c-4: устранение повторной аллокации native-плоскости при декодировании
 
 - Декодер `.zpe` v1/v2 на little-endian повторно использует собственный точный байтовый буфер в `Uint16Array` или `Float32Array` без второй полной аллокации и копии. Для unaligned/big-endian сохранена прежняя безопасная ветка, 8-bit не изменён. Полный global RSS/heap/History/Worker не ограничен.
