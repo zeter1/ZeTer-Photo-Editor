@@ -17468,6 +17468,29 @@ function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
   return result;
 }
 
+// Rebuild the full native source ONLY on the UI side, reusing the unchanged
+// Data URL owners already retained by the document. Reject duplicate, sparse-
+// invalid or oversized Worker patches before the existing byte-exact validator.
+function expandCompactTiledInpaintWorkerResult(result, source) {
+  if (!result || !Object.hasOwn(result, 'tileUpdates')) return result;
+  const invalid = () => new TypeError('Tiled inpaint: invalid Worker result');
+  if (Object.hasOwn(result, 'source') || !Array.isArray(result.tileUpdates) ||
+      result.tileUpdates.length !== result.changedTiles ||
+      result.tileUpdates.length > source.tiles.length) throw invalid();
+  const tiles = source.tiles.slice();
+  const seen = new Set();
+  for (const update of result.tileUpdates) {
+    if (!update || typeof update !== 'object' || Array.isArray(update) ||
+        !Number.isSafeInteger(update.index) || update.index < 0 ||
+        update.index >= tiles.length || seen.has(update.index) ||
+        typeof update.dataUrl !== 'string') throw invalid();
+    seen.add(update.index);
+    tiles[update.index] = { ...source.tiles[update.index], dataUrl:update.dataUrl };
+  }
+  const { tileUpdates, ...counts } = result;
+  return { ...counts, source:{ ...source, tiles } };
+}
+
 // Stage 003: freeze geometry on the UI thread, then run the bounded native
 // tile kernel in the browser Worker. A missing Worker is the ONLY fallback;
 // compute/protocol failures fail closed rather than silently rerunning work.
@@ -17566,7 +17589,7 @@ async function prepareTiledInpaintWithWorker(source, {
   // Detach a compact, exact-length immutable snapshot from any spare buffer
   // capacity; no transient JS Array of pixel indices is ever constructed.
   const selectedIndices = indices.length === selected ? indices : indices.slice(0, selected);
-  const job = { source, selectedIndices, maxBytes, maxFillPixels };
+  const job = { source, selectedIndices, maxBytes, maxFillPixels, compactResult:true };
   emitTiming('worker-run-start', selected);
   const result = await worker.run(job, { isCurrent:() => !isCancelled() });
   if (isCancelled() || result?.cancelled) return cancelled();
@@ -17581,7 +17604,9 @@ async function prepareTiledInpaintWithWorker(source, {
       ...job, isCancelled, yieldControl,
     });
   }
-  return assertTiledInpaintWorkerResult(result, source, job.selectedIndices);
+  return assertTiledInpaintWorkerResult(
+    expandCompactTiledInpaintWorkerResult(result, source), source, job.selectedIndices,
+  );
 }
 
 // ---- src/painting/controller.js ----

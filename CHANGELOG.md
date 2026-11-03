@@ -1,3 +1,8 @@
+### 2026-11-03 — 003X/6c-5: сокращён обратный native Worker payload (PR / CI ещё в процессе)
+
+- Реальный tiled Content-Aware Fill Worker при запросе `compactResult` возвращает только изменённые тайлы вместо повторной отправки полного v2 source; основной поток собирает результат из неизменённых исходных тайлов и повторно проводит существующую строгую bit-exact проверку.
+- Обратная совместимость старого Worker protocol для не opt-in вызовов, сохранены `.zpe` v1/v2 и Undo/Redo. Новые регрессии покрывают RGB16, CMYKA32 Float32 (sNaN, -0, alpha), sparse/edge/dense tiles, реальные Node Worker threads, отмену и malformed payload. Тестовые символы JSON ≠ измеренный расход RAM.
+
 ### 2026-11-03 — 003X/6c-4: принята оптимизация декодированных native-буферов
 
 - [PR #359](https://github.com/zeter1/ZeTer-Photo-Editor/pull/359) влит в [main 2bea78b](https://github.com/zeter1/ZeTer-Photo-Editor/commit/2bea78bc8e1e0d0d10e276ff4287b1fa7ddcb3dc): без второй полноразмерной аллокации при декодировании выровненных RGB16/CMYKA32 Float32 тайлов и v1.

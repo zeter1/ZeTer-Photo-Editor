@@ -13,11 +13,24 @@ export function runTiledInpaintWorkerJob(job) {
   if (!job || typeof job !== 'object' || Array.isArray(job)) {
     throw new TypeError('Tiled inpaint Worker: job object is required');
   }
-  return inpaintTiledPixelBufferSourceFromIndices(job.source, {
+  const result = inpaintTiledPixelBufferSourceFromIndices(job.source, {
     selectedIndices:job.selectedIndices,
     halo:job.halo,
     maxLayerPixels:job.maxLayerPixels,
     maxFillPixels:job.maxFillPixels,
     maxBytes:job.maxBytes,
   });
+  if (job.compactResult !== true) return result;
+  // The UI still owns every unchanged native Data URL. Returning the full
+  // source structured-clones all of those strings back from the Worker,
+  // although the fill kernel only modified a small subset of tiles.
+  const tileUpdates = [];
+  for (let index = 0; index < result.source.tiles.length; index += 1) {
+    const after = result.source.tiles[index];
+    if (after.dataUrl !== job.source.tiles[index].dataUrl) {
+      tileUpdates.push({ index, dataUrl:after.dataUrl });
+    }
+  }
+  const { source, ...counts } = result;
+  return { ...counts, tileUpdates };
 }
