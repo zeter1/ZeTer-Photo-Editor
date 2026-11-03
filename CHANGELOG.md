@@ -1,3 +1,12 @@
+### 2026-11-03 — verified exact-main 003X/6c-9 bounded History reconstruction fix
+
+- PR [#369](https://github.com/zeter1/ZeTer-Photo-Editor/pull/369) final head 4788a1a: [Linux core #41655989709](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41655989709) SUCCESS 12/12, separate [real-photo #41655989741](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41655989741) SUCCESS; squash-merged [main 0599d98](https://github.com/zeter1/ZeTer-Photo-Editor/commit/0599d98d466b1a25200ad8c8c8bc02caf933f929). Exact-main [core #41657250015](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41657250015) SUCCESS 12/12 on attempt2 (attempt1 startup-only Chrome DevTools timeout) and independent [real-photo #41657249944](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41657249944) SUCCESS. 003X/6c-9 remains open for full Chrome A/B RAM/GC/Worker session profile. No claim of full RAM/RSS bound.
+
+### 2026-11-03 — 003X/6c-9 ограниченное исправление слито; браузерный A/B остаётся
+
+- [PR #369](https://github.com/zeter1/ZeTer-Photo-Editor/pull/369), final head 4788a1a: [core #41655989709](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41655989709) SUCCESS 12/12 + independent [real-photo #41655989741](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41655989741) SUCCESS; merged as [main 0599d98](https://github.com/zeter1/ZeTer-Photo-Editor/commit/0599d98d466b1a25200ad8c8c8bc02caf933f929). Exact-main [core #41657250015](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41657250015) and [real-photo #41657249944](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41657249944) pending at checkpoint.
+- Large Node RGB16/CMYKA32 Float32 pooled History native URL reconstruction accelerated without dropping Undo or changing exact v1/v2 JSON. Do not confuse Node main-isolate heapUsed with whole Chrome RAM/RSS. Real fresh Chrome file:// paired baseline/pooled memory+latency+GC and separate Worker/session restore test still open, hence parent 003X/6c-9 IN PROGRESS. [Task](task/003x6c9-history-sharing-profile.md).
+
 ### 2026-11-03 — кандидат 003X/6c-9: быстрый декодер pooled History native URLs
 
 - После реального профилирования 1025×1025 RGB16/CMYKA32 Float32 в src/core/history.js native ASCII URL реконструируются через TextDecoder, fallback сохраняет прежний код. Ненативные UTF-16 фрагменты (включая lone surrogates), данные .zpe v1/v2, Undo/Redo и логические бюджеты остаются неизменными.
