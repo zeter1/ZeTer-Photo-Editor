@@ -664,6 +664,7 @@ function installMalformedNativeWorkerReply(){
       s.workerRequests++;s.worker=this;s.jobId=job.id;
       s.selectionMatched=job.selectedIndices.length===s.expectedIndices.length &&
         job.selectedIndices.every((v,i)=>v===s.expectedIndices[i]);
+      s.compactRequested=job.compactResult===true;
     }
     return post.call(this,job,...args);
   };
@@ -675,7 +676,12 @@ function installMalformedNativeWorkerReply(){
       if(worker!==s.worker || reply?.id!==s.jobId ||
          reply.ok!==true || s.mutated)return listener.call(this,event);
       const result=reply.result;
-      if(result?.source?.kind!=='zpe-pixel-buffer-source-v2' ||
+      const compact=s.compactRequested===true &&
+        !Object.hasOwn(result||{},'source') &&
+        Array.isArray(result?.tileUpdates) &&
+        result.tileUpdates.length===result.changedTiles &&
+        result.tileUpdates.length>0;
+      if((result?.source?.kind!=='zpe-pixel-buffer-source-v2' && !compact) ||
          result.filled!==8288 || result.changedTiles<2)
         throw Error('037C-3b-3/2a missing genuine native result');
       s.workerReplies++;s.realWorkerNativeResultObserved=true;
@@ -695,12 +701,25 @@ function installMalformedNativeWorkerReply(){
           result:{...result,changed:s.mutatedChangedCount}}});
       }
       const index=s.expectedIndices[0],x=index%1025,y=Math.floor(index/1025);
-      const tiles=result.source.tiles.map(tile=>({...tile}));
+      const tiles=(compact?s.snapshots.before.tiles:result.source.tiles)
+        .map(tile=>({...tile}));
+      if(compact){
+        const seen=new Set();
+        for(const update of result.tileUpdates){
+          if(!Number.isSafeInteger(update?.index)||update.index<0||
+            update.index>=tiles.length||seen.has(update.index)||
+            typeof update.dataUrl!=='string')
+            throw Error('037C-3b-3/2a malformed genuine compact result');
+          seen.add(update.index);
+          tiles[update.index].dataUrl=update.dataUrl;
+        }
+      }
       const ti=tiles.findIndex(tile=>x>=tile.x&&y>=tile.y&&
         x<tile.x+tile.width&&y<tile.y+tile.height);
       if(ti<0 || tiles[ti].dataUrl===s.snapshots.before.tiles[ti].dataUrl)
         throw Error('037C-3b-3/2a selected tile not actually changed by real Worker');
-      const tile=tiles[ti],prefix=tile.dataUrl.slice(0,tile.dataUrl.indexOf('base64,')+7);
+      const tile=tiles[ti],pristineUrl=tile.dataUrl;
+      const prefix=tile.dataUrl.slice(0,tile.dataUrl.indexOf('base64,')+7);
       if(!prefix.startsWith('data:application/x-zeter-pixel-buffer-tile;base64,'))
         throw Error('037C-3b-3/2a invalid native tile envelope');
       const decoded=atob(tile.dataUrl.slice(prefix.length));
@@ -734,9 +753,12 @@ function installMalformedNativeWorkerReply(){
         encoded+=String.fromCharCode(...bytes.subarray(i,i+8192));
       tile.dataUrl=prefix+btoa(encoded);
        s.selectedAlphaByteCorrupted=s.malformedKind==='alpha' &&
-         tile.dataUrl!==result.source.tiles[ti].dataUrl;
+         tile.dataUrl!==pristineUrl;
       s.mutated=true;s.mutatedBeforeUiValidation=true;
-      const changed={...result,source:{...result.source,tiles}};
+      const changed=compact ? {...result,
+        tileUpdates:result.tileUpdates.map(update=>update.index===ti
+          ? {...update,dataUrl:tile.dataUrl} : update)}
+        : {...result,source:{...result.source,tiles}};
       return listener.call(this,{data:{...reply,result:changed}});
     };
     let mapping=wrapped.get(worker);
@@ -797,7 +819,12 @@ function installCompletedWorkerPreviewHold(){
           s.workerReplies++;
           s.workerReplyFilled=event.data.result?.filled;
           s.workerReplyChangedTiles=event.data.result?.changedTiles;
-          s.workerResultNativeSource=event.data.result?.source?.kind==='zpe-pixel-buffer-source-v2';
+          const result=event.data.result;
+          s.workerResultNativeSource=result?.source?.kind==='zpe-pixel-buffer-source-v2' ||
+            (job.compactResult===true && !Object.hasOwn(result||{},'source') &&
+             Array.isArray(result?.tileUpdates) &&
+             result.tileUpdates.length===result.changedTiles &&
+             result.tileUpdates.length>0);
         }
       });
       if(s.successorMode && this===s.successorWorker && s.successorHeld)return;
@@ -1735,6 +1762,7 @@ function installPublicNativeReplyProbe(){
       s.workerRequests++;s.worker=this;s.jobId=job.id;
       s.selectionMatched=job.selectedIndices.length===s.expectedIndices.length &&
         job.selectedIndices.every((v,i)=>v===s.expectedIndices[i]);
+      s.compactRequested=job.compactResult===true;
     }
     return post.call(this,job,...args);
   };
@@ -1745,8 +1773,16 @@ function installPublicNativeReplyProbe(){
     const intercepted=function(event){
       if(worker===s.worker&&event.data?.id===s.jobId&&event.data.ok===true){
         s.workerReplies++;
+        const result=event.data.result;
         s.realWorkerNativeResultObserved=
-          event.data.result?.source?.kind==='zpe-pixel-buffer-source-v2';
+          result?.source?.kind==='zpe-pixel-buffer-source-v2' ||
+          (s.compactRequested===true && !Object.hasOwn(result||{},'source') &&
+            Array.isArray(result?.tileUpdates) &&
+            result.tileUpdates.length===result.changedTiles &&
+            result.tileUpdates.length>0 &&
+            result.tileUpdates.every(tile=>Number.isSafeInteger(tile.index) &&
+              tile.index>=0 && typeof tile.dataUrl==='string' &&
+              tile.dataUrl.startsWith('data:application/x-zeter-pixel-buffer-tile;base64,')));
         s.replyFilled=event.data.result?.filled;
         s.replyChangedTiles=event.data.result?.changedTiles;
       }
