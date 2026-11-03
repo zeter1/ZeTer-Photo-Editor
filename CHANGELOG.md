@@ -1,3 +1,7 @@
+### 2026-11-03 — Кандидат 003X/6c-7: опциональный бюджет native URL в истории (PR/CI/merge ещё не приняты)
+
+- `HistoryStack` поддерживает явный `maxRetainedNativeDataUrlChars` для суммарных native v1/v2 Data URL во всех retained snapshot JSON. Новая функция измеряет символы без Base64-декодирования и копирования огромных строк. При превышении старые Undo entries вытесняются; один текущий snapshot всегда остаётся. При настройке по умолчанию поведение не меняется.
+- RGB16/CMYKA32 Float32, 131×99 tile32: 3 снимка 418 056/1 040 568 URL-символов, при лимите на 2 снимка остаются 278 704/693 712; это **не измеренная экономия RAM/RSS**, а явное сокращение числа удерживаемых Undo entries. Реальные данные `.zpe` и PSD/PSB codec не изменены. Локально red-before 0/3, green focused 10/10; настоящий Chrome file:// PASS, build `ca5e3daaeb698e28`; Windows full check 1557 PASS / 10 SKIP / 5 Linux-only cgroup-fixture FAIL. [Подробности](task/003x6c7-history-snapshot-ownership.md). Следующий инкремент — [003X/6c-8](task/003x6c8-history-snapshot-sharing.md) дедупликация immutable URLs без потери Undo.
 ### 2026-11-03 — 003X/6c-6: ограничение native URL на входе Worker (подтверждено; PR #363 слит в main)
 
 - В tiled Content-Aware Fill добавлен строго опциональный `maxWorkerInputDataUrlChars`: все URL тайлов учитываются до обхода выделения и отправки в Worker. При превышении лимита — атомарный отказ; по умолчанию поведение не меняется.

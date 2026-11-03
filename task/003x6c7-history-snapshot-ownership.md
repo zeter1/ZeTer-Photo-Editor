@@ -1,19 +1,49 @@
 # 003X/6c-7 — immutable native History snapshot ownership
 
-**Priority:** P1. **Status:** TODO, after 003X/6c-6 bounded acceptance. **Dependencies:** 003X/6c-6 PR #363 exact-main CI, Stage 6/parent 003X remain IN PROGRESS. **Independent blocker:** 002B/2c genuinely Adobe Photoshop-authored PSB32 provenance remains BLOCKED.
+**Приоритет:** P1. **Статус:** IN PROGRESS (код и локальная/browser проверки выполнены, Linux PR CI и exact-main ожидаются). **Зависимости:** 003X/6c-6 DONE: PR #363, exact-main Linux core 12/12 и отдельный real-photo SUCCESS. **Независимая блокировка:** 002B/2c: проверяемое Adobe Photoshop-authored PSB32 остаётся BLOCKED.
 
-## Observed production path
-`src/core/state.js:snapshotDocument` serializes the entire current document as a JSON string. `src/main.js:commit` pushes this string into `src/core/history.js:HistoryStack`, which keeps immutable strings subject to item/estimated byte limits. Every complete snapshot therefore contains native source Data URL strings even when a small native tile changed; unchanged native strings are serialized again into each snapshot. The prior 003X/6c-6 measured a single 131×99/tile32 independent pre-edit History JSON source of **140,957 characters** (RGB16) or **348,490 characters** (CMYKA32 Float32), besides UI source URLs of **139,352** or **346,856** characters. These are retained character counts, NOT heap/RSS or whole-process peak.
+## Цель и критерии приёмки
 
-## Objective
-Determine *actual simultaneous* retained source/History string owners over multiple edits, with exact before/after deltas, then eliminate one proven redundant allocation or add one safe opt-in budget without dropping Undo points unexpectedly or changing default dense import behavior. Do not assume V8 substring/string interning or structured clone memory usage.
+- На реальном пути `snapshotDocument -> HistoryStack.reset/push -> undo/redo/jump` измерить **отдельно** исходные URL документа и суммарные URL внутри **каждой** сохранённой JSON-строки History.
+- Не эвристически оценивать heap, а локализовать реально повторяемые URL и ввести безопасный **опциональный** лимит их удержания, не меняя существующий default и формат `.zpe`.
+- Сохранить нативные биты RGB16 / CMYKA32 Float32, including signaling NaN payload, negative zero, alpha, edge/sparse/dense tiles, порядок истории, ветвления, Reset/clear и существующий byte-budget.
+- Показать red-before / green-after, выполнить Node/browser CI, финальное принятие PR и exact-main только после проверок.
 
-## Acceptance
-1. Capture production-path History reset/push/undo/redo with RGB16 and CMYKA32 Float32, native sNaN alpha payload, -0, edge/sparse/dense tiles; report separate original UI URLs, every retained snapshot string, and any temporary serialization owners.
-2. Prove an independently reproducible red-before/green-after failure or measurable excess. Implement the smallest atomic change with exact bounds and explicit opt-in where appropriate; no format changes unless independently documented.
-3. Preserve stable export/import `.zpe` v1/v2, PSD16/PSB32 native source bytes, History branches/jump/limit/eviction, failed later snapshot, stale owner, cancellation, mutation isolation and recovery.
-4. Rebuild deterministic offline `file://` assets only if runtime sources change; run focused Node tests, genuine Chrome/Chromium `file://` smoke, Linux core CI (12 jobs) and independent real-photo PR checks. Merge only green; verify exact merged-main independently.
-5. Record measurements and remaining known unknowns in this task, `task/NEXT.md`, `task/README.md`, parent ownership history and `CHANGELOG.md`.
+## Наблюдения: точные владельцы и счётчики
 
-## Limitations
-The 003X/6c-6 opt-in Worker input URL-character bound and 003X/6c-5 changed-tile-only Worker response are independent of History retention. Do not assert a global JS heap/RSS, per-Worker PID peak, memory cap, or Adobe-authoring provenance. Parent 003X/Stage 6 remain IN PROGRESS.
+В `src/core/state.js` `snapshotDocument` использует `JSON.stringify(doc)`; каждое изменение имени или одного тайла создаёт **новый полный JSON-снимок**, и каждый неизменённый native Data URL записан заново. `HistoryStack` хранил эти полные immutable строки в `entries[].snapshot`; документ UI отдельно хранит исходные URL в `highDepthSource`. Нельзя утверждать, что JS-движок непременно дублирует физическую память: ниже **только длины сохранённых значений строк**. Во время `JSON.stringify` также существует временное формируемое JSON-значение, но его реальный heap peak не измерялся.
+
+Измерение тестом `tests/003x6c7-history-native-retention.test.mjs`: 131 × 99 пикселей, тайл 32, три последовательных snapshots `A/B/C` (B сохраняет прежний source, C меняет один пиксель). Первые две истории сохраняют те же URL байт-в-байт.
+
+| Метрика, символы | RGB16 | CMYKA32 Float32 |
+| --- | ---: | ---: |
+| Источник UI / URL native tiles (каждый уникальный документ) | 139 352 | 346 856 |
+| JSON History A | 142 052 | 349 585 |
+| JSON History B | 142 055 | 349 588 |
+| JSON History C | 142 056 | 349 589 |
+| Native URLs в трёх retained History entries без opt-in | 418 056 | 1 040 568 |
+| Native URLs с явным лимитом в две копии | 278 704 | 693 712 |
+| Удалённый из History native URL объём (по символам, **не** RAM) | 139 352 | 346 856 |
+
+Дополнительно отдельно измерены тайлы 65 и 256 (sparse/edge/dense), точные результаты выводятся диагностикой теста. Все URL исходного документа, оставшихся snapshots и сериализуемого `.zpe` остаются байт-точными; отмена, возврат, переход и создание новой ветки не меняют содержимое источника.
+
+## Реализация
+
+1. `src/core/history.js`: новый **явно включаемый** параметр третьего аргумента `new HistoryStack(limit, byteLimit, { maxRetainedNativeDataUrlChars })`; по умолчанию `null`, действуют только прежние byte/count limits.
+2. `retainedNativeDataUrlChars()` измеряет суммарное число символов `data:application/x-zeter-pixel-buffer[(-tile)];base64,...` внутри всех сохранённых снимков. Линейное сканирование исходного JSON без создания больших Base64-срезов и декодирования пикселей; результаты неизменяемых строк кэшируются по entry, изменяемые object snapshots пересчитываются.
+3. При opt-in превышении лимита `push` удаляет **только старые** entries по существующему правилу вытеснения. **Последняя/текущая запись никогда не удаляется**, даже если одна превышает лимит. Ветви Undo/Redo, byte-limit и count-limit сохраняют прежние semantics; невалидные значения параметра отклоняются.
+4. `tests/003x6c7-history-native-retention.test.mjs`: production snapshot/restore, native v1/v2 `.zpe` bit oracle, tile sizes 32/65/256, отказ сериализации до commit, ветвление/jump/clear/reset, нулевой бюджет, Unicode, stale object mutation и отсутствие эвакуации без opt-in.
+5. Browser `file://` bundle синхронизируется стандартным `npm run build`; нативные PSD/PSB кодеки не изменяются. Никаких новых обязательных зависимостей.
+
+## Тесты и выпуск
+
+- **Red-before:** 0/3 нового теста на `main` (отсутствует `retainedNativeDataUrlChars`, opt-in неизвестен).
+- **Green focused:** новый suite + существующие `history-native-byte-budget` / `history-retention-contract`: 10/10 PASS, 131×99 16/32-bit сохранены.
+- **Локальный Windows `npm run check`:** 1 557 PASS, 10 SKIP, 5 FAIL (известные Linux-only `/proc` / cgroup fixture тесты); остальные тесты прошли. **Настоящий Chrome `file://` smoke:** PASS (exit 0), включая native PSD16/PSB32 Worker, отмену, Undo/Redo и IndexedDB recovery. **Детерминированный build:** `ca5e3daaeb698e28` (повторная сборка совпадает). Linux PR-head 12-job core CI, independent real-photo, merge и exact-main **ещё не проверены**.
+- **GitHub:** рабочая ветка `feat/003x6c7-history-native-url-cap-20261103`; PR/commit ссылки пока не утверждены.
+
+## Ограничения и дальнейшая работа
+
+Бюджет выражен в **символах URL внутри сохранённых immutable JSON**. Это не лимит общей памяти, не доказательство того, какие строки deduplicated в V8, не предельный peak во время сериализации и не потолок памяти Worker или OS RSS. При opt-in старые Undo entries намеренно вытесняются по бюджету (ровно как при прежнем byte-limit); при слишком маленьком лимите остаётся только текущая запись. Маска, recovery и PSD/PSB сериализация не меняются. Итоговый opt-in не включён глобально, чтобы не потерять старые Undo-позиции пользователя без явного решения.
+
+**Следующее P1:** [003X/6c-8 — shared History native URL owner / non-destructive snapshot delta](003x6c8-history-snapshot-sharing.md): измерить удерживаемые значения при полном `snapshotDocument`, оценить обратимо разделяемые immutable URL между snapshots без внезапного вытеснения Undo, доказать устойчивость к eviction/jump/cancellation и exact native bytes; не заявлять heap/RSS без измерения. Parent 003X / Stage 6 остаются IN PROGRESS.
