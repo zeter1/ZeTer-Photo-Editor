@@ -1,7 +1,9 @@
-### 2026-11-03 — 003X/6c-6: ограничение native URL на входе Worker (кандидат; CI/слияние ожидаются)
+### 2026-11-03 — 003X/6c-6: ограничение native URL на входе Worker (подтверждено; PR #363 слит в main)
 
 - В tiled Content-Aware Fill добавлен строго опциональный `maxWorkerInputDataUrlChars`: все URL тайлов учитываются до обхода выделения и отправки в Worker. При превышении лимита — атомарный отказ; по умолчанию поведение не меняется.
 - Для RGB16 и CMYKA32 Float32 (включая sNaN/-0 и alpha) измерены входной structuredClone и независимый History JSON owner; это символы строк, не RAM/RSS. Регрессии проверяют отказ, повторную попытку, точные байты .zpe v1/v2, Undo/Redo, отмену и stale session.
+
+- [PR #363](https://github.com/zeter1/ZeTer-Photo-Editor/pull/363): Linux final-head [core #41613692664](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41613692664) 12/12 и [real-photo #41613692798](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41613692798) SUCCESS; слит в [main d68880c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/d68880c09a3566c230b9b56c15cb3a877270d0ab), exact-main [core #41614822281](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41614822281) 12/12 и [real-photo #41614822175](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41614822175) SUCCESS. Следующая задача — 003X/6c-7 History snapshot ownership; Stage 6 остаётся в работе.
 
 ### 2026-11-03 — 003X/6c-5: сокращён обратный native Worker payload (PR / CI ещё в процессе)
 
