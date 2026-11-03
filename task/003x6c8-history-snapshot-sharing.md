@@ -31,3 +31,5 @@ Red-before: 0/2 new tests. Green: 4/4 focused new tests; legacy History 12/12 be
 Safeguards: collision-checked byte equality, reference counts and deletion on branch/count/byte-budget/cap/reset/clear; failed allocation does not erase redo. Old logical byte and URL char budgets unchanged; generic object snapshots stay mutable. Unresolved: measured total heap/GC/latency/Worker ownership and large-document performance; tracked as 003X/6c-9. Parent Stage 6 IN PROGRESS, independent Photoshop-authored PSB32 002B/2c BLOCKED.
 
 Status remains IN PROGRESS until green GitHub PR-head Linux core 12 jobs plus independent real-photo, successful merge and exact-main gates.
+
+**GitHub candidate:** [PR #367](https://github.com/zeter1/ZeTer-Photo-Editor/pull/367), code head [bb5d0f4](https://github.com/zeter1/ZeTer-Photo-Editor/commit/bb5d0f4a8e45643bb908e554297bf5f26b110249). PR CI core [#41634772654](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41634772654) and independent real-photo [#41634772571](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41634772571) started; final-head verdict pending. Not merged. Exact-main CI pending.
