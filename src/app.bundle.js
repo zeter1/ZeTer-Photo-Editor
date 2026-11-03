@@ -6664,7 +6664,17 @@ function canonicalTileBytes(buffer, x, y, width, height) {
 
 function decodeCanonicalSamples(bytes, bitsPerChannel, samples) {
   if (bitsPerChannel === 8) return new Uint8ClampedArray(bytes);
-  const data = bitsPerChannel === 16 ? new Uint16Array(samples) : new Float32Array(samples);
+  const SampleArray = bitsPerChannel === 16 ? Uint16Array : Float32Array;
+  // dataUrlToBytes has already allocated a private exact-length byte plane.
+  // On little-endian hosts an aligned typed view can own those same bytes;
+  // allocating and copying another full plane only doubles the decoded
+  // transient and can unnecessarily retain both during tile traversal.
+  // The byte view never escapes independently, so writable PixelBuffer
+  // callers retain their existing ownership/isolation guarantees.
+  if (NATIVE_LITTLE_ENDIAN && bytes.byteOffset % SampleArray.BYTES_PER_ELEMENT === 0) {
+    return new SampleArray(bytes.buffer, bytes.byteOffset, samples);
+  }
+  const data = new SampleArray(samples);
   const output = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   if (NATIVE_LITTLE_ENDIAN) {
     output.set(bytes);
