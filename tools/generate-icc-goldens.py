@@ -14,6 +14,9 @@ from pathlib import Path
 
 from PIL import Image, ImageCms, __version__ as PILLOW_VERSION
 
+EXPECTED_PILLOW_VERSION = "12.3.0"
+EXPECTED_LCMS_VERSION = "2.19"
+
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "color-management"
 SOURCE = FIXTURES / "CGATS001Compat-v2-micro.icc"
@@ -64,7 +67,18 @@ def convert(source_profile, destination_profile, mode: str, image: Image.Image):
     return image_pixels(ImageCms.applyTransform(image, transform))
 
 
+def verify_reference_toolchain(pillow_version: str, lcms_version: str) -> None:
+    """Do not replace pinned ICC reference vectors with a different engine build."""
+    if pillow_version != EXPECTED_PILLOW_VERSION or lcms_version != EXPECTED_LCMS_VERSION:
+        raise RuntimeError(
+            f"ICC goldens require Pillow {EXPECTED_PILLOW_VERSION} and "
+            f"LittleCMS {EXPECTED_LCMS_VERSION}; found Pillow {pillow_version}, "
+            f"LittleCMS {lcms_version}. Existing {OUTPUT.name} was not changed."
+        )
+
+
 def main() -> None:
+    verify_reference_toolchain(PILLOW_VERSION, ImageCms.core.littlecms_version)
     source_profile = ImageCms.getOpenProfile(str(SOURCE))
     display_profile = ImageCms.getOpenProfile(str(DISPLAY))
     srgb_profile = ImageCms.createProfile("sRGB")
