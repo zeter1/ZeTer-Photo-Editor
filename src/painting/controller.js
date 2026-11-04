@@ -62,6 +62,14 @@ export function createRasterEditController({
     brushLayer = null;
   }
 
+  // Cancellation can finish after a newer edit has acquired another canvas.
+  // Only discard the cache still owned by the cancelled operation.
+  function discardRasterBuffer(owner, layer, canvas) {
+    if (!canvas || brushCanvas !== canvas || brushOwner !== owner || brushLayer !== layer) return false;
+    clearBrushBuffer();
+    return true;
+  }
+
   function isCurrentRasterTarget(owner, layer) {
     return Boolean(
       owner &&
@@ -689,6 +697,7 @@ export function createRasterEditController({
     get highDepthPaintWorkingSet() { return highDepthPaintWorkingSet; },
     get highDepthPaintLayerId() { return highDepthPaintLayerId; },
     clearBrushBuffer,
+    discardRasterBuffer,
     clearHighDepthPaintState,
     reset,
     cancelTiledInpaint: () => tiledInpaintWorker?.cancel?.(),

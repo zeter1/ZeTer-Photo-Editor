@@ -1,3 +1,8 @@
+### 2026-11-04 — discard cancelled RGBA8 inpaint canvas without evicting newer raster edits
+
+- Fix retained brushCanvas after Escape while async PNG encoding is pending: discard only the exact owner/layer/canvas, so the next paint/fill cannot reuse a cancelled preview and a late old completion cannot evict the new canvas.
+- RED 1/3 → GREEN 9/9 related cancellation tests (including real raster cache identity); Windows `npm run check`: 1577 PASS / 10 SKIP / 5 Linux-only FAIL; Chrome `file://` smoke PASS (exit 0); `git diff --check` PASS. PR-head CI and merge need new SHA verification.
+
 ### 2026-11-04 — RGBA8 Content-Aware Fill cancellation and late canvas publication guard
 
 - Extend PR #375 cancellation semantics to ordinary 8-bit RGBA Canvas layers. Yield during the deterministic inpaint kernel, retain a private ImageData until still-current, check exact document/layer/source and forward the existing continuation guard through async PNG persistence.

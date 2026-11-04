@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { inpaintSelectedSamples } from '../src/core/inpaint.js';
 import { createRasterCommandController } from '../src/painting/command-controller.js';
+import { createRasterEditController } from '../src/painting/controller.js';
 
 function deferred() {
   let resolve;
@@ -18,6 +19,8 @@ function fixture({ width = 7, height = 7, pausePersist = false } = {}) {
   let saved = null;
   let lease = null;
   let writes = 0;
+  let cached = null;
+  let discarded = 0;
   const entered = deferred();
   const resume = deferred();
   const layer = { id: 'rgba8', type: 'raster', highDepthSource: null, dataUrl: 'before', width, height };
@@ -29,9 +32,15 @@ function fixture({ width = 7, height = 7, pausePersist = false } = {}) {
   };
   const commands = createRasterCommandController({
     rasterEdit: {
-      clearBrushBuffer() {},
+      clearBrushBuffer() { cached = null; },
+      discardRasterBuffer(owner, selected, canvas) {
+        if (owner !== doc || selected !== layer || cached?.canvas !== canvas) return false;
+        cached = null;
+        discarded++;
+        return true;
+      },
       cancelTiledInpaint() {},
-      async ensureRasterBuffer() { return { canvas: { width, height }, ctx }; },
+      async ensureRasterBuffer() { return cached ??= { canvas: { width, height }, ctx }; },
       async persistPaintLayer(owner, selected, options) {
         entered.resolve();
         if (pausePersist) await resume.promise;
@@ -68,6 +77,7 @@ function fixture({ width = 7, height = 7, pausePersist = false } = {}) {
   return {
     original, doc, layer, commands, commits, entered, resume,
     get writes() { return writes; }, get saved() { return saved; }, get lease() { return lease; },
+    get cached() { return cached; }, get discarded() { return discarded; },
   };
 }
 
@@ -76,6 +86,8 @@ test('003X/6c-9: cancelled RGBA8 fill cannot publish after delayed canvas encodi
   const pending = f.commands.contentAwareFill({ isAllowed: (x, y) => x === 3 && y === 3 });
   await f.entered.promise;
   assert.equal(f.commands.cancelPendingContentAwareFill(), true);
+  assert.equal(f.cached, null, 'cancel must discard the staged preview before allowing another edit');
+  assert.equal(f.discarded, 1);
   f.resume.resolve();
   assert.equal(await pending, false);
   assert.equal(f.layer.dataUrl, 'before');
@@ -113,4 +125,39 @@ test('003X/6c-9: successful RGBA8 fill retains the deterministic byte result', a
   assert.equal(f.writes, 1);
   assert.deepEqual(f.commits, ['Контент-заливка']);
   assert.equal(f.lease, null);
+});
+
+test('003X/6c-9: stale cancelled publication cannot discard a newer raster cache', async () => {
+  const f = fixture({ pausePersist: true });
+  const old = f.commands.contentAwareFill({ isAllowed: (x, y) => x === 3 && y === 3 });
+  await f.entered.promise;
+  const cancelledCanvas = f.cached.canvas;
+  assert.equal(f.commands.cancelPendingContentAwareFill(), true);
+  const next = f.commands.contentAwareFill({ isAllowed: (x, y) => x === 2 && y === 2 });
+  f.resume.resolve();
+  assert.equal(await old, false);
+  assert.equal(await next, true);
+  assert.notEqual(f.cached.canvas, cancelledCanvas);
+  assert.equal(f.discarded, 1);
+  assert.equal(f.writes, 1);
+  assert.deepEqual(f.commits, ['Контент-заливка']);
+});
+
+test('003X/6c-9: real raster cache discards only its exact canvas identity', async () => {
+  const layer = { id: 'target', type: 'raster', dataUrl: null, width: 4, height: 4 };
+  const doc = { id: 'doc', layers: [layer] };
+  const edit = createRasterEditController({
+    getDocument: () => doc,
+    documentRef: { createElement: () => ({ getContext: () => ({}) }) },
+  });
+  const first = await edit.ensureRasterBuffer(doc, layer);
+  assert.equal(edit.brushCanvas, first.canvas);
+  assert.equal(edit.discardRasterBuffer(doc, layer, {}), false);
+  assert.equal(edit.brushCanvas, first.canvas);
+  assert.equal(edit.discardRasterBuffer(doc, layer, first.canvas), true);
+  assert.equal(edit.brushCanvas, null);
+  const second = await edit.ensureRasterBuffer(doc, layer);
+  assert.notEqual(second.canvas, first.canvas);
+  assert.equal(edit.discardRasterBuffer(doc, layer, first.canvas), false);
+  assert.equal(edit.brushCanvas, second.canvas);
 });

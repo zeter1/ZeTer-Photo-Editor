@@ -17862,6 +17862,14 @@ function createRasterEditController({
     brushLayer = null;
   }
 
+  // Cancellation can finish after a newer edit has acquired another canvas.
+  // Only discard the cache still owned by the cancelled operation.
+  function discardRasterBuffer(owner, layer, canvas) {
+    if (!canvas || brushCanvas !== canvas || brushOwner !== owner || brushLayer !== layer) return false;
+    clearBrushBuffer();
+    return true;
+  }
+
   function isCurrentRasterTarget(owner, layer) {
     return Boolean(
       owner &&
@@ -18489,6 +18497,7 @@ function createRasterEditController({
     get highDepthPaintWorkingSet() { return highDepthPaintWorkingSet; },
     get highDepthPaintLayerId() { return highDepthPaintLayerId; },
     clearBrushBuffer,
+    discardRasterBuffer,
     clearHighDepthPaintState,
     reset,
     cancelTiledInpaint: () => tiledInpaintWorker?.cancel?.(),
@@ -18586,6 +18595,7 @@ function createRasterCommandController({
     // Revoke publication before terminating the CPU-bound Worker. A stale
     // finally must never unlock a newer document's persistence lease.
     state.endPersist(pending.lease);
+    pending.releaseRaster?.();
     rasterEdit.cancelTiledInpaint?.();
     return true;
   }
@@ -18929,10 +18939,17 @@ function createRasterCommandController({
       }
 
       const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
-      if (!isInpaintCurrent()) return false;
+      // A cancelled image decode may finish after a newer raster action started.
+      // Discard only the canvas from this operation, never the newer one's.
+      const releaseRaster = () => prepared && rasterEdit.discardRasterBuffer?.(doc, layer, prepared.canvas);
+      if (!isInpaintCurrent()) {
+        releaseRaster();
+        return false;
+      }
       if (!prepared) return false;
+      pending.releaseRaster = releaseRaster;
       if (state.getDocument() !== doc || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         status('Контент-заливка отменена: документ или слой изменился');
         return false;
       }
@@ -18949,9 +18966,12 @@ function createRasterCommandController({
         imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed },
         { isCancelled: () => !stillOwnsRaster() },
       );
-      if (!stillOwnsRaster() || filled === null) return false;
+      if (!stillOwnsRaster() || filled === null) {
+        releaseRaster();
+        return false;
+      }
       if (!filled) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         status('Контент-заливка: нужны исходные пиксели за пределами выделения');
         return false;
       }
@@ -18960,9 +18980,12 @@ function createRasterCommandController({
         isContinuationCurrent: stillOwnsRaster,
       });
       // A successful publication intentionally replaces layer.dataUrl.
-      if (!isInpaintCurrent()) return false;
+      if (!isInpaintCurrent()) {
+        releaseRaster();
+        return false;
+      }
       if (!published) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         return false;
       }
       ui?.commit?.(historyLabel);

@@ -48,7 +48,7 @@
 
 ## Текущий блокер и следующий вертикальный срез
 
-- **CURRENT P1:** [003X/6c-9](003x6c9-history-sharing-profile.md), real same-action UI+Worker History baseline/pooled, только [NEXT.md](NEXT.md) определяет активную реализацию. [PR #375](https://github.com/zeter1/ZeTer-Photo-Editor/pull/375) high-depth native cancellation (prior head CI SUCCESS); в тестовой ветке дополнительно исправлены реальная обработка RGBA8/Canvas, Escape/tab cancellation до commit и Undo, RED → GREEN regression `tests/003x6c9-rgba8-cancel.test.mjs`. Pending new-head acceptance; Stage 6/10 не DONE.
+- **CURRENT P1:** [003X/6c-9](003x6c9-history-sharing-profile.md), real same-action UI+Worker History baseline/pooled, только [NEXT.md](NEXT.md) определяет активную реализацию. [PR #375](https://github.com/zeter1/ZeTer-Photo-Editor/pull/375), prior head `6d7e98f` core 12/12 + independent real-photo CI PASS, включает native high-depth и RGBA8 cancel. Дополнительно исправлен утекший после Escape raster canvas: owner/layer/canvas guarded discard, чтобы новый fill не наследовал отменённые пиксели и старое завершение не очищало новый canvas. RED → GREEN, профильные 9/9 PASS, Chrome `file://` PASS; CI следующего head требует отдельной проверки. Stage 6/10 не DONE.
 - **Отдельный BLOCKED gate:** [002B/2c Adobe-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md). Синтетические тесты не закрывают этот gate.
 - После приемки 003X/6c-9 выбрать **самый полезный неполный вертикальный срез** из масок/корректирующих слоёв/Bézier/PSD, учитывая текущий код и зависимости. Не назначать заранее новую задачу без повторной проверки.
 
