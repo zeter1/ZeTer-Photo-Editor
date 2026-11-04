@@ -103,7 +103,9 @@ const els = {
 };
 
 let doc = createDocument();
-let history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true });
+// CDP-only A/B bootstrap hook; absent in ordinary user sessions. All History instances share the mode.
+const usePooledHistoryNativeUrls = globalThis.__ZPE_HISTORY_PROFILE_GENERIC__ !== true;
+let history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls });
 let zoom = 0.75;
 let documentSessions = [];
 let activeSessionId = '';
@@ -887,7 +889,7 @@ const newDocumentController = createNewDocumentController({
       !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
     cancelPendingContentAwareFill: () => !drag &&
       !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
-    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true }); },
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls }); },
     setDocument: setDoc,
     markDirty,
   },
@@ -916,7 +918,7 @@ const psdImportController = createPsdImportController({
     cancelPendingContentAwareFill: () => !drag &&
       !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
     publishDocument: (next,{label}) => {
-      history=new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true });
+      history=new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls });
       setDoc(next,{resetHistory:true,label});
       markDirty(true);
       queueRecovery({immediate:true});
@@ -938,7 +940,7 @@ const projectController = createProjectController({
     canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
     sanitizeProject,
-    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true }); },
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls }); },
     setDocument: setDoc,
     markDirty,
     getCurrentSession: () => currentSession(),
