@@ -2,7 +2,12 @@
 
 > **CURRENT TASK:** [003X/6c-9 — real large History pooling memory/latency profile](003x6c9-history-sharing-profile.md)  
 > **PRIORITY:** P1 · **STATUS:** IN PROGRESS · **DEPENDENCY:** 003X/6c-8 DONE  
-> **BASELINE:** main [`8dee7d3`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/8dee7d366601fa2531e89545a4fd76ce0a8d1d23) (2026-11-04; [exact-main core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41801227578); проверить HEAD перед записью)
+> **BASE MAIN SHA:** `8dee7d366601fa2531e89545a4fd76ce0a8d1d23` ([exact-main core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41801227578))
+> **ACTIVE PR:** [#375](https://github.com/zeter1/ZeTer-Photo-Editor/pull/375), verified remote head `7b771d3be7b2e3372a3896af32dc281555f1008d` (before local RGBA8 extension); prior-head [core 12/12 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41804962347), [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41804962391)
+> **LAST VERIFIED:** 2026-11-04 local: RGBA8 RED 2/3 → GREEN 3/3; combined native/RGBA8 7/7; `npm run check` 1575 PASS/10 SKIP/5 Windows Linux-only FAIL; real Chrome `npm run test:browser` PASS
+> **REMAINING ACCEPTANCE:** new PR head CI, permitted merge/exact-main CI; same-action two-tab generic/pooled UI + Worker/IDB and bounded memory evidence
+> **NEXT IMPLEMENTATION ACTION:** publish tested RGBA8 change to existing PR #375, verify exact new-head Linux CI; after eligible merge close bounded profiling by stop criterion and implement Stage 2 functional gap
+> **BLOCKERS:** Adobe-authored PSB32 provenance independently BLOCKED; unavailable Worker PID/true RSS peak must remain UNKNOWN, not an infinite profiling loop
 > **RECENT DOCUMENTATION PR:** [#374](https://github.com/zeter1/ZeTer-Photo-Editor/pull/374) MERGED `8dee7d3`, documentation only.
 > **LAST ACCEPTED INCREMENT:** [#373](https://github.com/zeter1/ZeTer-Photo-Editor/pull/373) `e05763e`, merged `7e37b2f`; PR core [#41792886405](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41792886405) **SUCCESS 12/12**; exact-main [#41795185119](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41795185119) **SUCCESS 12/12 attempt 1**. Separate real-photo workflow **NOT RUN** (path filters).  
 > **LAST SCOPE:** real Chrome `file://` native RGB16/CMYKA32 Float32 Worker byte oracle + bounded History A/B. Production/bundle/schema не менялись. **Parent Stage 6 IN PROGRESS.**

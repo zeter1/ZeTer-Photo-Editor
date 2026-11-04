@@ -1,6 +1,6 @@
 import { addLayer, createRasterLayer } from '../core/state.js';
 import { floodFillPixels, hexToRgb } from '../core/pixels.js';
-import { inpaintSelectedSamples } from '../core/inpaint.js';
+import { inpaintSelectedSamplesCooperative } from '../core/inpaint.js';
 import {
   applyPixelBufferStrokeSegment,
   applyCmykPixelBufferStrokeSegment,
@@ -431,15 +431,29 @@ export function createRasterCommandController({
         return false;
       }
 
+      // Match native/high-depth cancellation semantics for ordinary RGBA8.
+      // The ImageData is a private working copy until the operation is current.
+      const originalRasterSource = layer.dataUrl;
+      const stillOwnsRaster = () => isInpaintCurrent() &&
+        layer.dataUrl === originalRasterSource &&
+        !layer.highDepthSource && doc.layers.includes(layer) &&
+        target.selected?.() === layer && target.isEditableRasterLayer(layer);
       const imageData = prepared.ctx.getImageData(0, 0, prepared.canvas.width, prepared.canvas.height);
-      const filled = inpaintSelectedSamples(imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed });
+      const filled = await inpaintSelectedSamplesCooperative(
+        imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed },
+        { isCancelled: () => !stillOwnsRaster() },
+      );
+      if (!stillOwnsRaster() || filled === null) return false;
       if (!filled) {
         rasterEdit.clearBrushBuffer();
         status('Контент-заливка: нужны исходные пиксели за пределами выделения');
         return false;
       }
       prepared.ctx.putImageData(imageData, 0, 0);
-      const published = await rasterEdit.persistPaintLayer(doc, layer);
+      const published = await rasterEdit.persistPaintLayer(doc, layer, {
+        isContinuationCurrent: stillOwnsRaster,
+      });
+      // A successful publication intentionally replaces layer.dataUrl.
       if (!isInpaintCurrent()) return false;
       if (!published) {
         rasterEdit.clearBrushBuffer();

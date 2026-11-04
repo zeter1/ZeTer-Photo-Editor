@@ -1,3 +1,9 @@
+### 2026-11-04 — RGBA8 Content-Aware Fill cancellation and late canvas publication guard
+
+- Extend PR #375 cancellation semantics to ordinary 8-bit RGBA Canvas layers. Yield during the deterministic inpaint kernel, retain a private ImageData until still-current, check exact document/layer/source and forward the existing continuation guard through async PNG persistence.
+- RED 2/3 → GREEN 3/3 for cancellation during scan and delayed save; combined high-depth/8-bit regression 7/7 PASS. Windows `npm run check` 1590 total / 1575 PASS / 10 SKIP / 5 pre-existing Linux-only cgroup FAIL; real Chrome `file://` smoke exit 0. No format or pixel-output change; prior-head PR CI SUCCESS applies only to `7b771d3`.
+- Stage 6/10 and 003X/6c-9 remain IN PROGRESS; real pooled-vs-generic UI A/B and new-head PR/exact-main gates are separate.
+
 ### 2026-11-04 — candidate: cancellable contiguous RGB16/CMYKA32 Content-Aware Fill
 
 - Replaced synchronous flat native 16/32-bit Content-Aware computation with cooperative kernel checkpoints on a private buffer; cancel, tab switch, layer/source replacement invalidate the old result before publication. Forward the same owner guard through asynchronous high-depth preview serialization to prevent late native source mutation and phantom Undo.
