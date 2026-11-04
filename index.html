@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
-  <meta name="application-version" content="1.43.4" />
-  <meta name="application-build" content="2dfa6ea857185384" />
+  <meta name="application-version" content="1.46.4" />
+  <meta name="application-build" content="383e86be13a7efb7" />
   <title>ZeTer Photo Editor — локальный редактор изображений</title>
   <link rel="stylesheet" href="./src/styles.css" />
 </head>
@@ -351,6 +351,12 @@
     <progress id="backgroundRemovalProgressBar" max="100" value="0" aria-label="Ход удаления фона"></progress>
     <div class="removal-progress-timing"><span id="backgroundRemovalElapsed">Прошло: 0 с</span><span id="backgroundRemovalRemaining">Оставшееся время пока неизвестно</span></div>
     <button id="backgroundRemovalProgressCancel" class="removal-reset" type="button">Отменить удаление</button>
+  </aside>
+  <aside id="contentAwareProgressPanel" class="object-removal-progress" hidden aria-label="Контент-заливка выделения">
+    <strong>Контент-заливка выделения</strong>
+    <p role="status">Восстановление пикселей…</p>
+    <progress aria-label="Контент-заливка выполняется"></progress>
+    <button id="contentAwareProgressCancel" class="removal-reset" type="button">Отменить заливку</button>
   </aside>
   <aside id="objectRemovalProgressPanel" class="object-removal-progress" hidden aria-label="Прогресс удаления объекта">
     <strong>Удаление объекта</strong>

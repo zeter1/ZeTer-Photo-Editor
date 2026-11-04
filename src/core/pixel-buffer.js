@@ -1,5 +1,5 @@
-import { bytesToDataUrl, dataUrlToBytes } from './io.js';
-import { inpaintSelectedSamples } from './inpaint.js';
+import { bytesToDataUrl, dataUrlToBytes, encodedDataUrlChars } from './io.js';
+import { inpaintSelectedSamples, inpaintSelectedSamplesCooperative } from './inpaint.js';
 
 export const PIXEL_BUFFER_KIND = 'zpe-pixel-buffer-v1';
 export const PIXEL_MODELS = Object.freeze(['rgb','cmyk']);
@@ -1235,7 +1235,20 @@ export function clearPixelBufferPixels(buffer, { isAllowed=null } = {}) {
 
 export function inpaintPixelBuffer(buffer, options = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
-  return inpaintSelectedSamples(buffer.data, buffer.width, buffer.height, buffer.channels, options);
+  return inpaintSelectedSamples(buffer.data, buffer.width, buffer.height, buffer.channels, {
+    ...options,
+    // CMYK4 has four opaque ink channels; its K channel is not alpha.
+    alphaChannel: buffer.alphaMode === 'straight' ? buffer.channels - 1 : -1,
+  });
+}
+
+// Private ROI pixels are never published when the cooperative kernel cancels.
+export function inpaintPixelBufferCooperative(buffer, options = {}, controls = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
+  return inpaintSelectedSamplesCooperative(buffer.data, buffer.width, buffer.height, buffer.channels, {
+    ...options,
+    alphaChannel:buffer.alphaMode === 'straight' ? buffer.channels - 1 : -1,
+  }, controls);
 }
 
 function sourceSampleBytes(bitsPerChannel) {
@@ -1247,19 +1260,9 @@ function sourceSampleBytes(bitsPerChannel) {
 
 function pixelBufferCanonicalBytes(buffer) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
-  const bytesPerSample = sourceSampleBytes(buffer.bitsPerChannel);
-  const bytes = new Uint8Array(buffer.data.length * bytesPerSample);
-  if (buffer.bitsPerChannel === 8) {
-    bytes.set(new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength));
-    return bytes;
-  }
-  const view = new DataView(bytes.buffer);
-  if (buffer.bitsPerChannel === 16) {
-    for (let index = 0; index < buffer.data.length; index += 1) view.setUint16(index * 2, buffer.data[index], true);
-  } else {
-    for (let index = 0; index < buffer.data.length; index += 1) view.setFloat32(index * 4, buffer.data[index], true);
-  }
-  return bytes;
+  // Reuse the full-plane native view where possible; preserve original
+  // Float32 payload bits rather than reading through JS Number.
+  return canonicalTileBytes(buffer, 0, 0, buffer.width, buffer.height);
 }
 
 function expectedSourceBytes({ width, height, channels, bitsPerChannel }) {
@@ -1277,28 +1280,39 @@ function sourceMetadata(buffer) {
   };
 }
 
+// A decoded tile already owns one contiguous native plane. On little-endian
+// runtimes the backing bytes are canonical as-is, including Float32 NaN payload
+// bits. Avoid a second raw tile allocation before synchronous Base64 encoding.
+const NATIVE_LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
 function canonicalTileBytes(buffer, x, y, width, height) {
+  if (NATIVE_LITTLE_ENDIAN && x === 0 && y === 0 && width === buffer.width && height === buffer.height) {
+    return new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
+  }
   const sampleBytes = sourceSampleBytes(buffer.bitsPerChannel);
-  const bytes = new Uint8Array(width * height * buffer.channels * sampleBytes);
-  if (buffer.bitsPerChannel === 8) {
-    let target = 0;
+  const rowBytes = width * buffer.channels * sampleBytes;
+  const bytes = new Uint8Array(rowBytes * height);
+  const sourceBytes = new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
+
+  // A byte-wise row copy preserves Float32 signaling-NaN payloads, signed zero
+  // and alpha. Reading Float32 as a JS Number before setFloat32 can quiet NaNs.
+  if (NATIVE_LITTLE_ENDIAN || sampleBytes === 1) {
     for (let row = 0; row < height; row += 1) {
-      const source = ((y + row) * buffer.width + x) * buffer.channels;
-      const length = width * buffer.channels;
-      bytes.set(buffer.data.subarray(source, source + length), target);
-      target += length;
+      const sourceOffset = ((y + row) * buffer.width + x) * buffer.channels * sampleBytes;
+      bytes.set(sourceBytes.subarray(sourceOffset, sourceOffset + rowBytes), row * rowBytes);
     }
     return bytes;
   }
-  const view = new DataView(bytes.buffer);
-  let targetSample = 0;
+
+  // Big-endian hosts must swap the raw words, not round-trip through Number.
+  const sourceView = new DataView(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
+  const targetView = new DataView(bytes.buffer);
   for (let row = 0; row < height; row += 1) {
-    const source = ((y + row) * buffer.width + x) * buffer.channels;
-    const length = width * buffer.channels;
-    for (let offset = 0; offset < length; offset += 1) {
-      if (buffer.bitsPerChannel === 16) view.setUint16(targetSample * 2, buffer.data[source + offset], true);
-      else view.setFloat32(targetSample * 4, buffer.data[source + offset], true);
-      targetSample += 1;
+    const sourceOffset = ((y + row) * buffer.width + x) * buffer.channels * sampleBytes;
+    const targetOffset = row * rowBytes;
+    for (let offset = 0; offset < rowBytes; offset += sampleBytes) {
+      if (sampleBytes === 2) targetView.setUint16(targetOffset + offset, sourceView.getUint16(sourceOffset + offset, false), true);
+      else targetView.setUint32(targetOffset + offset, sourceView.getUint32(sourceOffset + offset, false), true);
     }
   }
   return bytes;
@@ -1306,10 +1320,25 @@ function canonicalTileBytes(buffer, x, y, width, height) {
 
 function decodeCanonicalSamples(bytes, bitsPerChannel, samples) {
   if (bitsPerChannel === 8) return new Uint8ClampedArray(bytes);
-  const data = bitsPerChannel === 16 ? new Uint16Array(samples) : new Float32Array(samples);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let index = 0; index < samples; index += 1) {
-    data[index] = bitsPerChannel === 16 ? view.getUint16(index * 2, true) : view.getFloat32(index * 4, true);
+  const SampleArray = bitsPerChannel === 16 ? Uint16Array : Float32Array;
+  // dataUrlToBytes has already allocated a private exact-length byte plane.
+  // On little-endian hosts an aligned typed view can own those same bytes;
+  // allocating and copying another full plane only doubles the decoded
+  // transient and can unnecessarily retain both during tile traversal.
+  // The byte view never escapes independently, so writable PixelBuffer
+  // callers retain their existing ownership/isolation guarantees.
+  if (NATIVE_LITTLE_ENDIAN && bytes.byteOffset % SampleArray.BYTES_PER_ELEMENT === 0) {
+    return new SampleArray(bytes.buffer, bytes.byteOffset, samples);
+  }
+  const data = new SampleArray(samples);
+  const output = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (NATIVE_LITTLE_ENDIAN) {
+    output.set(bytes);
+  } else {
+    const size = sourceSampleBytes(bitsPerChannel);
+    for (let i = 0; i < bytes.length; i += size) {
+      for (let j = 0; j < size; j += 1) output[i + j] = bytes[i + size - 1 - j];
+    }
   }
   return data;
 }
@@ -1330,21 +1359,62 @@ function sanitizeSourceHeader(source, maxBytes) {
     profileName:String(source.profileName||'').slice(0,240),byteOrder:'little-endian',rawBytes:expected};
 }
 
-export function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
-  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
-  const bytes = pixelBufferCanonicalBytes(buffer);
-  const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
-  if (bytes.byteLength > limit) throw new RangeError('PixelBuffer source ' + bytes.byteLength + ' байт превышает лимит ' + limit + ' байт');
-  return {kind:PIXEL_BUFFER_SOURCE_KIND,...sourceMetadata(buffer),rawBytes:bytes.byteLength,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_SOURCE_MIME)};
+// Keep persisted native sources and detached Worker bytes in one exact
+// representation. atob() accepts several non-canonical spellings whose
+// padding bits differ, so a regex and encoded-length check alone is unsafe.
+export function isCanonicalPixelBufferBase64(encoded, rawBytes) {
+  if (!Number.isSafeInteger(rawBytes) || rawBytes < 1 ||
+      typeof encoded !== 'string' ||
+      encoded.length !== 4 * Math.ceil(rawBytes / 3) ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
+  const padding = (3 - rawBytes % 3) % 3;
+  if (encoded.slice(encoded.length - padding) !== '='.repeat(padding)) return false;
+  const last = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    .indexOf(encoded[encoded.length - padding - 1]);
+  return last >= 0 && (last & ((1 << (2 * padding)) - 1)) === 0;
 }
 
-export function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE } = {}) {
+// Optional limit accounts for actual persisted ASCII URL characters, not
+// raw bytes, JS heap copies, History, or Worker allocations.
+function assertEncodedSourceBudget(required, limit) {
+  if (!Number.isSafeInteger(required) || required < 0 ||
+      (limit !== null && (!Number.isSafeInteger(limit) || limit < required))) {
+    throw new RangeError('PixelBuffer encoded data URL превышает maxDataUrlChars');
+  }
+}
+
+export function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, maxDataUrlChars = null } = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  const rawBytes = expectedSourceBytes(buffer);
+  const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
+  // Refuse before allocating a canonical byte array or starting Base64 work.
+  if (!rawBytes || rawBytes > limit) throw new RangeError('PixelBuffer source ' + rawBytes + ' байт превышает лимит ' + limit + ' байт');
+  assertEncodedSourceBudget(encodedDataUrlChars(rawBytes, PIXEL_BUFFER_SOURCE_MIME), maxDataUrlChars);
+  const bytes = pixelBufferCanonicalBytes(buffer);
+  return {kind:PIXEL_BUFFER_SOURCE_KIND,...sourceMetadata(buffer),rawBytes,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_SOURCE_MIME)};
+}
+
+export function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const rawBytes=expectedSourceBytes(buffer), limit=Math.max(1,Math.trunc(Number(maxBytes)||0));
   if(!rawBytes||rawBytes>limit)throw new RangeError('PixelBuffer source '+rawBytes+' байт превышает лимит '+limit+' байт');
   const size=Math.max(1,Math.min(2048,Math.trunc(Number(tileSize)||PIXEL_BUFFER_TILE_SIZE)));
   const columns=Math.ceil(buffer.width/size),rows=Math.ceil(buffer.height/size),count=columns*rows;
   if(!Number.isSafeInteger(count)||count<1||count>MAX_PIXEL_BUFFER_SOURCE_TILES)throw new RangeError('Tiled PixelBuffer требует '+count+' tiles; лимит '+MAX_PIXEL_BUFFER_SOURCE_TILES);
+  // Preflight the aggregate retained URLs, including one prefix per tile,
+  // before allocating even the first edge-tile raw byte array or Base64 chunk.
+  if (maxDataUrlChars !== null) {
+    let required = 0;
+    const pixelBytes = buffer.channels * sourceSampleBytes(buffer.bitsPerChannel);
+    for (let row = 0; row < rows; row += 1) {
+      const height = Math.min(size, buffer.height - row * size);
+      for (let column = 0; column < columns; column += 1) {
+        const width = Math.min(size, buffer.width - column * size);
+        required += encodedDataUrlChars(width * height * pixelBytes, PIXEL_BUFFER_TILE_MIME);
+        assertEncodedSourceBudget(required, maxDataUrlChars);
+      }
+    }
+  }
   const tiles=[]; let total=0;
   for(let row=0;row<rows;row+=1){
     const y=row*size,height=Math.min(size,buffer.height-y);
@@ -1358,10 +1428,10 @@ export function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_B
   return {kind:PIXEL_BUFFER_TILED_SOURCE_KIND,...sourceMetadata(buffer),tileSize:size,rawBytes,tiles};
 }
 
-export function serializePixelBufferSourceAdaptive(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, tiledThresholdBytes = PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES } = {}) {
+export function serializePixelBufferSourceAdaptive(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, tiledThresholdBytes = PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const threshold=Math.max(1,Math.trunc(Number(tiledThresholdBytes)||PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES));
-  return buffer.data.byteLength>=threshold?serializeTiledPixelBufferSource(buffer,{maxBytes,tileSize}):serializePixelBufferSource(buffer,{maxBytes});
+  return buffer.data.byteLength>=threshold?serializeTiledPixelBufferSource(buffer,{maxBytes,tileSize,maxDataUrlChars}):serializePixelBufferSource(buffer,{maxBytes,maxDataUrlChars});
 }
 
 export function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
@@ -1370,7 +1440,7 @@ export function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIX
     const dataUrl=typeof source.dataUrl==='string'?source.dataUrl:'';
     if(dataUrl.length>MAX_PIXEL_BUFFER_SOURCE_DATA_URL)return null;
     const prefix='data:'+PIXEL_BUFFER_SOURCE_MIME+';base64,'; if(!dataUrl.startsWith(prefix))return null;
-    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(safe.rawBytes/3))return null;
+    const base64=dataUrl.slice(prefix.length); if(!isCanonicalPixelBufferBase64(base64,safe.rawBytes))return null;
     return {kind:PIXEL_BUFFER_SOURCE_KIND,...safe,dataUrl};
   }
   if(source.kind!==PIXEL_BUFFER_TILED_SOURCE_KIND)return null;
@@ -1385,7 +1455,7 @@ export function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIX
     const rawBytes=expectedSourceBytes({width,height,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel});
     if(Number(tile.x)!==x||Number(tile.y)!==y||Number(tile.width)!==width||Number(tile.height)!==height||Number(tile.rawBytes)!==rawBytes)return null;
     const dataUrl=typeof tile.dataUrl==='string'?tile.dataUrl:''; if(!dataUrl.startsWith(prefix))return null;
-    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(rawBytes/3))return null;
+    const base64=dataUrl.slice(prefix.length); if(!isCanonicalPixelBufferBase64(base64,rawBytes))return null;
     total+=rawBytes; tiles.push({x,y,width,height,rawBytes,dataUrl});
   }
   if(total!==safe.rawBytes)return null;
@@ -1413,6 +1483,48 @@ export function forEachSerializedPixelBufferTile(source,visitor,{maxBytes=MAX_PI
     visitor({index,count,x:tile.x,y:tile.y,width:tile.width,height:tile.height,buffer:decodeSerializedTile(safe,tile)});
   }
   return count;
+}
+
+
+/**
+ * Decode/render one native tile at a time and yield between bounded batches.
+ * A cancelled traversal never invokes the remaining visitors. The caller
+ * owns its private preview canvas and must discard it when this returns false.
+ */
+export async function forEachSerializedPixelBufferTileCooperative(source, visitor, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  batchTiles = 2,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof visitor !== 'function' || typeof isCancelled !== 'function' ||
+      typeof yieldControl !== 'function' || !Number.isSafeInteger(batchTiles) || batchTiles < 1) {
+    throw new TypeError('Tiled PixelBuffer cooperative preview: invalid callbacks/batchTiles');
+  }
+  const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
+  if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
+  const tiled = safe.kind === PIXEL_BUFFER_TILED_SOURCE_KIND;
+  const count = tiled ? safe.tiles.length : 1;
+  for (let index = 0; index < count; index += 1) {
+    if (isCancelled()) return false;
+    if (index > 0 && index % batchTiles === 0) {
+      await yieldControl();
+      if (isCancelled()) return false;
+    }
+    if (tiled) {
+      const tile = safe.tiles[index];
+      visitor({
+        index, count, x:tile.x, y:tile.y, width:tile.width, height:tile.height,
+        buffer:decodeSerializedTile(safe, tile),
+      });
+    } else {
+      visitor({
+        index, count, x:0, y:0, width:safe.width, height:safe.height,
+        buffer:deserializePixelBufferSource(safe, { maxBytes }),
+      });
+    }
+  }
+  return !isCancelled();
 }
 
 export function mutateSerializedPixelBufferTiles(source, visitor, {
@@ -1469,6 +1581,14 @@ export function mutateSerializedPixelBufferTiles(source, visitor, {
 export function createSerializedPixelBufferTileWorkingSet(source, {
   maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
   requireAlpha = false,
+  // Maximum extra typed-array bytes owned by one synchronous tile visit.
+  maxVisitBytes = maxBytes,
+  // Maximum contiguous native ROI owned by readRegion (or accepted for writeRegion).
+  maxRegionBytes = maxBytes,
+  // Raw typed tile cache only; encoded dirty writebacks are retained separately.
+  maxResidentBytes = null,
+  // ASCII data-URL byte reservations for every dirty tile, resident or evicted.
+  maxEncodedDirtyBytes = null,
 } = {}) {
   const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
   if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
@@ -1482,19 +1602,121 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     throw new RangeError('Tiled PixelBuffer working set требует ' + targetRawBytes + ' байт; лимит ' + limit + ' байт');
   }
 
+  const visitByteLimit = Number(maxVisitBytes);
+  if (!Number.isSafeInteger(visitByteLimit) || visitByteLimit < 1) {
+    throw new RangeError('Tiled PixelBuffer maxVisitBytes должен быть положительным безопасным целым');
+  }
+  const regionByteLimit = Number(maxRegionBytes);
+  const oneRegionPixelBytes = targetChannels * sourceSampleBytes(safe.bitsPerChannel);
+  if (!Number.isSafeInteger(regionByteLimit) ||
+      regionByteLimit < oneRegionPixelBytes || regionByteLimit > limit) {
+    throw new RangeError('Tiled PixelBuffer maxRegionBytes должен вмещать один пиксель и не превышать maxBytes');
+  }
+
   const promoteAlpha = targetChannels !== safe.channels;
-  const loaded = new Map();
-  const dirty = new Set();
+  const sampleBytes = sourceSampleBytes(safe.bitsPerChannel);
+  const largestTileBytes = safe.tiles.reduce((largest, tile) =>
+    Math.max(largest, tile.width * tile.height * targetChannels * sampleBytes), 0);
+  // Default to a bounded 16 MiB typed working set, except when a single
+  // valid source tile itself requires more space.
+  const residentLimit = maxResidentBytes == null
+    ? Math.min(limit, Math.max(16 * 1024 * 1024, largestTileBytes))
+    : Number(maxResidentBytes);
+  if (!Number.isSafeInteger(residentLimit) || residentLimit < largestTileBytes || residentLimit > limit) {
+    throw new RangeError('Tiled PixelBuffer maxResidentBytes должен вмещать один tile и не превышать maxBytes');
+  }
+
+  // Charge the exact ASCII data-URL length, not compressed browser string
+  // heap bytes (which vary across JS engines). Include the MIME prefix.
+  const encodedPrefixBytes = `data:${PIXEL_BUFFER_TILE_MIME};base64,`.length;
+  const encodedTileBytes = tile => encodedPrefixBytes +
+    4 * Math.ceil(tile.width * tile.height * targetChannels * sampleBytes / 3);
+  const largestEncodedTileBytes = safe.tiles.reduce((largest, tile) =>
+    Math.max(largest, encodedTileBytes(tile)), 0);
+  // Default must not reject previously supported dense native edits. The
+  // entire validated source is bounded by maxBytes and the fixed tile count;
+  // callers can opt into a stricter overlay allowance explicitly.
+  const fullSourceEncodedBytes = safe.tiles.reduce((sum, tile) =>
+    sum + encodedTileBytes(tile), 0);
+  if (!Number.isSafeInteger(fullSourceEncodedBytes)) {
+    throw new RangeError('Tiled PixelBuffer encoded dirty tile byte budget overflow');
+  }
+  const encodedLimit = maxEncodedDirtyBytes == null
+    ? fullSourceEncodedBytes
+    : Number(maxEncodedDirtyBytes);
+  if (!Number.isSafeInteger(encodedLimit) ||
+      encodedLimit < largestEncodedTileBytes) {
+    throw new RangeError('Tiled PixelBuffer maxEncodedDirtyBytes должен вмещать один tile');
+  }
+
+  let loaded = new Map(); // LRU: oldest at the front
+  let dirty = new Set();
   const previewDirty = new Set();
+  let writtenBack = new Map(); // canonical encoded dirty tiles, never discarded without replacement
+  let residentBytes = 0;
+  let encodedDirtyBytes = 0; // reserved for dirty resident tiles too
+  let revision = 0;
+
+  function makeRoom(extraBytes) {
+    // Prepare every writeback before committing any eviction. If a later
+    // encoder fails, the original live LRU and dirty tiles remain intact.
+    let plannedBytes = residentBytes;
+    const victims = [];
+    for (const [index, buffer] of loaded) {
+      if (plannedBytes + extraBytes <= residentLimit) break;
+      let writeback = null;
+      if (dirty.has(index)) {
+        const tile = safe.tiles[index];
+        const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
+        const dataUrl = bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME);
+        if (dataUrl.length !== encodedTileBytes(tile)) {
+          throw new RangeError('Tiled PixelBuffer encoded dirty tile length mismatch');
+        }
+        writeback = { ...tile, rawBytes:bytes.byteLength, dataUrl };
+      }
+      victims.push({ index, byteLength:buffer.data.byteLength, writeback });
+      plannedBytes -= buffer.data.byteLength;
+    }
+    if (plannedBytes + extraBytes > residentLimit) {
+      throw new RangeError('Tiled PixelBuffer resident tile byte budget exceeded');
+    }
+    for (const victim of victims) {
+      if (victim.writeback) writtenBack.set(victim.index, victim.writeback);
+      loaded.delete(victim.index);
+    }
+    residentBytes = plannedBytes;
+  }
+
+  function cacheTile(index, buffer) {
+    const prior = loaded.get(index);
+    if (prior) {
+      loaded.delete(index);
+      residentBytes -= prior.data.byteLength;
+    }
+    makeRoom(buffer.data.byteLength);
+    loaded.set(index, buffer);
+    residentBytes += buffer.data.byteLength;
+  }
 
   function load(index) {
     if (!Number.isSafeInteger(index) || index < 0 || index >= safe.tiles.length) {
       throw new RangeError('Tiled PixelBuffer tile index вне диапазона');
     }
-    if (loaded.has(index)) return loaded.get(index);
-    let buffer = decodeSerializedTile(safe, safe.tiles[index]);
-    if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
-    loaded.set(index, buffer);
+    if (loaded.has(index)) {
+      const buffer = loaded.get(index);
+      loaded.delete(index);
+      loaded.set(index, buffer);
+      return buffer;
+    }
+    const pending = writtenBack.get(index);
+    let buffer = pending
+      ? decodeSerializedTile({ ...safe, channels:targetChannels,
+        alphaMode:promoteAlpha ? 'straight' : safe.alphaMode }, pending)
+      : decodeSerializedTile(safe, safe.tiles[index]);
+    if (promoteAlpha && !pending) buffer = pixelBufferWithStraightAlpha(buffer);
+    cacheTile(index, buffer);
+    // The typed cache now owns this dirty tile. Keep one representation only.
+    if (pending) writtenBack.delete(index);
     return buffer;
   }
 
@@ -1510,13 +1732,73 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     return right > tile.x && bottom > tile.y && left < tile.x + tile.width && top < tile.y + tile.height;
   }
 
+  // Plan all resident evictions and encode dirty victims BEFORE publishing a
+  // multi-tile edit. Both a budget refusal and a failing encoder leave the
+  // previous committed source intact (including all dirty tile contents).
+  function publishStaged(staged) {
+    if (!staged.length) return;
+    let reserved = encodedDirtyBytes;
+    for (const { index } of staged) {
+      if (dirty.has(index)) continue;
+      reserved += encodedTileBytes(safe.tiles[index]);
+      if (!Number.isSafeInteger(reserved) || reserved > encodedLimit) {
+        throw new RangeError('Tiled PixelBuffer encoded dirty tile byte budget exceeded');
+      }
+    }
+    const nextLoaded = new Map(loaded);
+    const nextWrittenBack = new Map(writtenBack);
+    const nextDirty = new Set(dirty);
+    let nextResidentBytes = residentBytes;
+    for (const { index, buffer } of staged) {
+      const existing = nextLoaded.get(index);
+      if (existing) {
+        nextLoaded.delete(index);
+        nextResidentBytes -= existing.data.byteLength;
+      }
+      nextWrittenBack.delete(index);
+      nextDirty.add(index);
+      while (nextResidentBytes + buffer.data.byteLength > residentLimit) {
+        const first = nextLoaded.entries().next().value;
+        if (!first) throw new RangeError('Tiled PixelBuffer resident tile byte budget exceeded');
+        const [evictedIndex, evicted] = first;
+        if (nextDirty.has(evictedIndex)) {
+          const tile = safe.tiles[evictedIndex];
+          const bytes = canonicalTileBytes(evicted, 0, 0, tile.width, tile.height);
+          const dataUrl = bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME);
+          if (dataUrl.length !== encodedTileBytes(tile)) {
+            throw new RangeError('Tiled PixelBuffer encoded dirty tile length mismatch');
+          }
+          nextWrittenBack.set(evictedIndex, { ...tile, rawBytes:bytes.byteLength, dataUrl });
+        }
+        nextLoaded.delete(evictedIndex);
+        nextResidentBytes -= evicted.data.byteLength;
+      }
+      nextLoaded.set(index, buffer);
+      nextResidentBytes += buffer.data.byteLength;
+    }
+    loaded = nextLoaded;
+    dirty = nextDirty;
+    writtenBack = nextWrittenBack;
+    residentBytes = nextResidentBytes;
+    encodedDirtyBytes = reserved;
+    for (const { index } of staged) previewDirty.add(index);
+    revision += 1;
+  }
+
+  // A visitor only owns a private tile copy. Its returned change count is the
+  // commit decision; false/zero, exceptions and budget failures discard all
+  // staged bytes (including changes to earlier tiles in the same visit).
+  // Publish synchronously after every visitor succeeds, never mid-transaction.
   function visit(bounds, visitor) {
     if (typeof visitor !== 'function') throw new TypeError('Tiled PixelBuffer working-set visitor должен быть функцией');
+    const staged = [];
+    let stagedBytes = 0;
     let changed = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!intersects(tile, bounds)) continue;
-      const buffer = load(index);
+      const original = load(index);
+      const buffer = clonePixelBuffer(original);
       const rawResult = visitor({
         index,
         count:safe.tiles.length,
@@ -1531,11 +1813,16 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
         throw new TypeError('Tiled PixelBuffer working-set visitor должен вернуть неотрицательное целое число изменений');
       }
       if (!delta) continue;
+      const nextBytes = stagedBytes + buffer.data.byteLength;
+      if (!Number.isSafeInteger(nextBytes) || nextBytes > visitByteLimit) {
+        throw new RangeError('Tiled PixelBuffer visit превысил private tile byte budget');
+      }
+      stagedBytes = nextBytes;
       changed += delta;
       if (!Number.isSafeInteger(changed)) throw new RangeError('Tiled PixelBuffer working-set change count переполнен');
-      dirty.add(index);
-      previewDirty.add(index);
+      staged.push({ index, buffer });
     }
+    publishStaged(staged);
     return changed;
   }
 
@@ -1569,11 +1856,17 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     return { left, top, right, bottom, width:right-left, height:bottom-top };
   }
 
-  function readRegion(bounds) {
+  function* readRegionSteps(bounds) {
     const area = normalizeRegionBounds(bounds);
     if (!area) return null;
+    const regionBytes = area.width * area.height * targetChannels * sampleBytes;
+    // Refuse before allocating or decoding any ROI tile. No implicit downcast.
+    if (!Number.isSafeInteger(regionBytes) || regionBytes > regionByteLimit) {
+      throw new RangeError('Tiled PixelBuffer region byte budget exceeded');
+    }
     const Expected = expectedArrayConstructor(safe.bitsPerChannel);
     const data = new Expected(area.width * area.height * targetChannels);
+    let copiedPixels = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!intersects(tile, area)) continue;
@@ -1586,6 +1879,12 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
         const sourceOffset = ((y - tile.y) * tile.width + (left - tile.x)) * targetChannels;
         const targetOffset = ((y - area.top) * area.width + (left - area.left)) * targetChannels;
         data.set(buffer.data.subarray(sourceOffset, sourceOffset + (right - left) * targetChannels), targetOffset);
+        copiedPixels += right - left;
+        // Yield within a single large ROI without changing the row-copy order.
+        if (copiedPixels >= 32_768) {
+          copiedPixels = 0;
+          yield;
+        }
       }
     }
     return {
@@ -1605,7 +1904,35 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     };
   }
 
-  function writeRegion(region) {
+  function readRegion(bounds) {
+    const steps = readRegionSteps(bounds);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    return step.value;
+  }
+
+  // A cancelled read drops the private region buffer; dirty tiles stay untouched.
+  async function readRegionCooperative(bounds, {
+    isCancelled = () => false,
+    yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  } = {}) {
+    if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+      throw new TypeError('Tiled PixelBuffer region read: invalid cancellation callbacks');
+    }
+    if (isCancelled()) return null;
+    const steps = readRegionSteps(bounds);
+    let step = steps.next();
+    while (!step.done) {
+      if (isCancelled()) return null;
+      await yieldControl();
+      if (isCancelled()) return null;
+      step = steps.next();
+    }
+    return isCancelled() ? null : step.value;
+  }
+
+  // Stage changes privately; cancellation must not dirty any working tiles.
+  function* writeRegionSteps(region) {
     const x = Math.trunc(Number(region?.x));
     const y = Math.trunc(Number(region?.y));
     const buffer = region?.buffer;
@@ -1619,9 +1946,16 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
       buffer.channels !== targetChannels ||
       buffer.bitsPerChannel !== safe.bitsPerChannel
     ) throw new TypeError('Tiled PixelBuffer writeRegion несовместим с working set');
+    if (buffer.data.byteLength > regionByteLimit) {
+      throw new RangeError('Tiled PixelBuffer region byte budget exceeded');
+    }
 
     const bounds = { left:x, top:y, right:x+buffer.width, bottom:y+buffer.height };
+    const startingRevision = revision;
+    const staged = [];
+    let stagedBytes = 0; // Private changed tile copies retained until atomic publication.
     let changedPixels = 0;
+    let scannedPixels = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!intersects(tile, bounds)) continue;
@@ -1630,7 +1964,7 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
       const top = Math.max(bounds.top, tile.y);
       const right = Math.min(bounds.right, tile.x + tile.width);
       const bottom = Math.min(bounds.bottom, tile.y + tile.height);
-      let tileChanged = false;
+      let nextData = null;
       for (let globalY = top; globalY < bottom; globalY += 1) {
         for (let globalX = left; globalX < right; globalX += 1) {
           const sourceOffset = ((globalY - y) * buffer.width + (globalX - x)) * targetChannels;
@@ -1642,25 +1976,71 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
               break;
             }
           }
-          if (!pixelChanged) continue;
-          for (let channel = 0; channel < targetChannels; channel += 1) {
-            target.data[targetOffset + channel] = buffer.data[sourceOffset + channel];
+          if (pixelChanged) {
+            if (!nextData) {
+              const nextStagedBytes = stagedBytes + target.data.byteLength;
+              // Check before slice(): even the rejected tile must not be allocated.
+              if (!Number.isSafeInteger(nextStagedBytes) || nextStagedBytes > visitByteLimit) {
+                throw new RangeError('Tiled PixelBuffer region write превысил private tile byte budget');
+              }
+              nextData = target.data.slice();
+              stagedBytes = nextStagedBytes;
+            }
+            nextData.set(buffer.data.subarray(sourceOffset, sourceOffset + targetChannels), targetOffset);
+            changedPixels += 1;
           }
-          changedPixels += 1;
-          tileChanged = true;
+          // One large ROI remains cancellable; staged arrays stay invisible here.
+          if (++scannedPixels >= 32_768) {
+            scannedPixels = 0;
+            yield;
+          }
         }
       }
-      if (tileChanged) {
-        dirty.add(index);
-        previewDirty.add(index);
-      }
+      if (nextData) staged.push({ index, buffer:createPixelBuffer({ ...target, data:nextData }) });
     }
+    // A cooperative writer must never overwrite a newer edit after yielding.
+    if (revision !== startingRevision) {
+      throw new Error('Tiled PixelBuffer stale region write: newer edit committed');
+    }
+    // No await/yield during validation, encoding or atomic publication.
+    publishStaged(staged);
     return changedPixels;
   }
 
-  function serialize() {
+  function writeRegion(region) {
+    const steps = writeRegionSteps(region);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    return step.value;
+  }
+
+  // null means cancelled; pending staged arrays are simply discarded.
+  async function writeRegionCooperative(region, {
+    isCancelled = () => false,
+    yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  } = {}) {
+    if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+      throw new TypeError('Tiled PixelBuffer region write: invalid cancellation callbacks');
+    }
+    if (isCancelled()) return null;
+    const steps = writeRegionSteps(region);
+    let step = steps.next();
+    while (!step.done) {
+      if (isCancelled()) return null;
+      await yieldControl();
+      if (isCancelled()) return null;
+      step = steps.next();
+    }
+    return isCancelled() ? null : step.value;
+  }
+
+  // Assemble privately; never expose the partially serialized tile list.
+  // Only modified/promoted tiles need encoding, and groups of four keep the
+  // cooperative fallback responsive without adding yields for tiny jobs.
+  function* serializeSteps() {
     const tiles = [];
     let total = 0;
+    let encodedTiles = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!dirty.has(index) && !promoteAlpha) {
@@ -1668,18 +2048,26 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
         total += tile.rawBytes;
         continue;
       }
+      if (encodedTiles && encodedTiles % 4 === 0) yield;
+      const writeback = writtenBack.get(index);
       let buffer = loaded.get(index);
-      if (!buffer) {
-        buffer = decodeSerializedTile(safe, tile);
-        if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+      if (!buffer && writeback) {
+        total += writeback.rawBytes;
+        tiles.push(writeback);
+      } else {
+        if (!buffer) {
+          buffer = decodeSerializedTile(safe, tile);
+          if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+        }
+        const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
+        total += bytes.byteLength;
+        tiles.push({
+          ...tile,
+          rawBytes:bytes.byteLength,
+          dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME),
+        });
       }
-      const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
-      total += bytes.byteLength;
-      tiles.push({
-        ...tile,
-        rawBytes:bytes.byteLength,
-        dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME),
-      });
+      encodedTiles += 1;
     }
     if (total !== targetRawBytes) throw new RangeError('Tiled PixelBuffer working-set serialization имеет несогласованный byte budget');
     return {
@@ -1689,6 +2077,34 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
       rawBytes:targetRawBytes,
       tiles,
     };
+  }
+
+  function serialize() {
+    const steps = serializeSteps();
+    let next = steps.next();
+    while (!next.done) next = steps.next();
+    return next.value;
+  }
+
+  // null signals cancellation. The original source remains immutable; even
+  // completed private payloads from prior checkpoints are discarded.
+  async function serializeCooperative({
+    isCancelled = () => false,
+    yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  } = {}) {
+    if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+      throw new TypeError('Tiled PixelBuffer serialization: invalid cancellation callbacks');
+    }
+    if (isCancelled()) return null;
+    const steps = serializeSteps();
+    let next = steps.next();
+    while (!next.done) {
+      if (isCancelled()) return null;
+      await yieldControl();
+      if (isCancelled()) return null;
+      next = steps.next();
+    }
+    return isCancelled() ? null : next.value;
   }
 
   return {
@@ -1702,11 +2118,697 @@ export function createSerializedPixelBufferTileWorkingSet(source, {
     visit,
     forEachPreviewDirty,
     readRegion,
+    readRegionCooperative,
     writeRegion,
+    writeRegionCooperative,
     serialize,
+    serializeCooperative,
     get loadedTileCount() { return loaded.size; },
+    get residentTileBytes() { return residentBytes; },
+    get maxResidentBytes() { return residentLimit; },
+    get maxRegionBytes() { return regionByteLimit; },
+    get writtenBackTileCount() { return writtenBack.size; },
+    get encodedDirtyTileBytes() { return encodedDirtyBytes; },
+    get maxEncodedDirtyBytes() { return encodedLimit; },
     get dirtyTileCount() { return dirty.size; },
   };
+}
+
+// A bounded alternative to fixed tile/stripe fragmentation. Sort only small
+// frozen selections, then merge touching horizontal runs across at most eight
+// adjacent scanlines. This deliberately does not chase arbitrarily large
+// connected components (which can recreate an oversized bounding rectangle).
+// Caps bound sort memory, run count and number of private ROI allocations.
+function planAdaptiveTiledInpaintRuns(selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit = () => {}) {
+  const MAX_SORTED_PIXELS = 65_536;
+  const MAX_RUNS = 4_096;
+  const MAX_REGIONS = 256;
+  const MAX_GROUP_ROWS = 8;
+  if (selectedIndices.length > MAX_SORTED_PIXELS) return null;
+  // Reserve a bounded sort allowance before cloning the frozen indices.
+  chargePlanningVisit(selectedIndices.length * 16);
+  // InpaintFromIndices accepts arbitrary input order. Numeric sorting makes
+  // identical frozen masks produce exactly the same regions across paths.
+  const ordered = Uint32Array.from(selectedIndices).sort();
+  const groups = [];
+  let runCount = 0;
+  for (let i = 0; i < ordered.length;) {
+    chargePlanningVisit();
+    const first = ordered[i], y = Math.floor(first / width);
+    const left = first - y * width, start = i++;
+    let right = left + 1;
+    while (i < ordered.length && ordered[i] === ordered[i - 1] + 1 &&
+           Math.floor(ordered[i] / width) === y) {
+      right += 1;
+      i += 1;
+    }
+    if (++runCount > MAX_RUNS) return null;
+    const previous = groups[groups.length - 1];
+    const adjacent = previous && y === previous.lastY + 1 &&
+      y - previous.minY < MAX_GROUP_ROWS &&
+      left <= previous.lastRight + 1 && right >= previous.lastLeft - 1;
+    let group;
+    if (adjacent) {
+      group = previous;
+      group.minX = Math.min(group.minX, left);
+      group.maxX = Math.max(group.maxX, right - 1);
+      group.maxY = y;
+      group.lastY = y;
+      group.lastLeft = left;
+      group.lastRight = right;
+    } else {
+      if (groups.length >= MAX_REGIONS) return null;
+      group = {
+        minX:left, maxX:right - 1, minY:y, maxY:y,
+        lastY:y, lastLeft:left, lastRight:right, indices:[],
+      };
+      groups.push(group);
+    }
+    for (let j = start; j < i; j += 1) {
+      chargePlanningVisit();
+      group.indices.push(ordered[j]);
+    }
+  }
+  if (groups.length < 2) return null;
+  let totalArea = 0;
+  for (const group of groups) {
+    group.bounds = {
+      left:Math.max(0, group.minX - padding),
+      top:Math.max(0, group.minY - padding),
+      right:Math.min(width, group.maxX + 1 + padding),
+      bottom:Math.min(height, group.maxY + 1 + padding),
+    };
+    totalArea += (group.bounds.right - group.bounds.left) *
+      (group.bounds.bottom - group.bounds.top);
+    if (totalArea > maxLayerPixels) return null;
+  }
+  return groups;
+}
+
+// 010E-B2: bounded 8-connected horizontal-run components within eight-row
+// bands. Unlike the greedy previous-run planner, this joins forks, merges and
+// multiple simultaneous components irrespective of original index order.
+// Caps also bound sorting, adjacency checks, and private region allocations.
+function planConnectedTiledInpaintRunBands(selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit = () => {}) {
+  const MAX_SORTED_PIXELS = 65_536;
+  const MAX_RUNS = 4_096;
+  const MAX_LINK_CHECKS = 32_768;
+  const MAX_REGIONS = 256;
+  const BAND_HEIGHT = 8;
+  if (selectedIndices.length > MAX_SORTED_PIXELS) return null;
+  // Reserve a bounded sort allowance before cloning the frozen indices.
+  chargePlanningVisit(selectedIndices.length * 16);
+  const ordered = Uint32Array.from(selectedIndices).sort();
+  const runs = [];
+  for (let i = 0; i < ordered.length;) {
+    chargePlanningVisit();
+    const first = ordered[i], y = Math.floor(first / width);
+    const left = first - y * width, start = i++;
+    let right = left + 1;
+    while (i < ordered.length && ordered[i] === ordered[i - 1] + 1 &&
+           Math.floor(ordered[i] / width) === y) {
+      right++;
+      i++;
+    }
+    if (runs.length >= MAX_RUNS) return null;
+    runs.push({ y, left, right, start, end:i });
+  }
+  const parents = Int32Array.from({ length:runs.length }, (_, i) => i);
+  const root = index => {
+    while (parents[index] !== index) {
+      parents[index] = parents[parents[index]];
+      index = parents[index];
+    }
+    return index;
+  };
+  const join = (left, right) => {
+    const a = root(left), b = root(right);
+    if (a !== b) parents[Math.max(a, b)] = Math.min(a, b);
+  };
+  let lastY = -2, previousRow = [], currentRow = [], cursor = 0, checks = 0;
+  for (let i = 0; i < runs.length; i++) {
+    chargePlanningVisit();
+    const run = runs[i];
+    if (run.y !== lastY) {
+      previousRow = run.y === lastY + 1 ? currentRow : [];
+      currentRow = [];
+      cursor = 0;
+      lastY = run.y;
+    }
+    // Never connect across band boundaries: this bounds each private ROI's
+    // height even if the original connected component spans the whole image.
+    if (run.y % BAND_HEIGHT !== 0) {
+      while (cursor < previousRow.length && runs[previousRow[cursor]].right < run.left) {
+        if (++checks > MAX_LINK_CHECKS) return null;
+        chargePlanningVisit();
+        cursor++;
+      }
+      for (let j = cursor; j < previousRow.length; j++) {
+        const neighbor = runs[previousRow[j]];
+        if (neighbor.left > run.right) break;
+        if (++checks > MAX_LINK_CHECKS) return null;
+        chargePlanningVisit();
+        if (neighbor.right >= run.left) join(i, previousRow[j]);
+      }
+    }
+    currentRow.push(i);
+  }
+  const components = new Map();
+  for (let i = 0; i < runs.length; i++) {
+    chargePlanningVisit();
+    const run = runs[i], id = root(i);
+    let group = components.get(id);
+    if (!group) {
+      if (components.size >= MAX_REGIONS) return null;
+      group = { minX:run.left, maxX:run.right - 1,
+        minY:run.y, maxY:run.y, runs:[] };
+      components.set(id, group);
+    }
+    group.minX = Math.min(group.minX, run.left);
+    group.maxX = Math.max(group.maxX, run.right - 1);
+    group.minY = Math.min(group.minY, run.y);
+    group.maxY = Math.max(group.maxY, run.y);
+    group.runs.push(run);
+  }
+  if (components.size < 2) return null;
+  let area = 0;
+  for (const group of components.values()) {
+    chargePlanningVisit();
+    group.bounds = {
+      left:Math.max(0, group.minX - padding),
+      top:Math.max(0, group.minY - padding),
+      right:Math.min(width, group.maxX + 1 + padding),
+      bottom:Math.min(height, group.maxY + 1 + padding),
+    };
+    area += (group.bounds.right - group.bounds.left) *
+      (group.bounds.bottom - group.bounds.top);
+    if (area > maxLayerPixels) return null;
+  }
+  const groups = [...components.values()];
+  for (const group of groups) {
+    group.indices = [];
+    for (const run of group.runs) {
+      chargePlanningVisit();
+      for (let i = run.start; i < run.end; i++) {
+        chargePlanningVisit();
+        group.indices.push(ordered[i]);
+      }
+    }
+    delete group.runs;
+  }
+  return groups;
+}
+
+// Content-Aware Fill keeps source tiles private until exact-owner publication.
+// A frozen selected-index snapshot (not a full-document alpha plane) is shared
+// by synchronous and cooperative selection scanners.
+function newTiledInpaintSelection(width, height) {
+  return { selected:0, minX:width, minY:height, maxX:-1, maxY:-1, selectedIndices:[] };
+}
+
+function recordTiledInpaintSelection(scan, x, y, width, maxFillPixels) {
+  scan.selected += 1;
+  if (scan.selected <= maxFillPixels) scan.selectedIndices.push(y * width + x);
+  if (x < scan.minX) scan.minX = x;
+  if (y < scan.minY) scan.minY = y;
+  if (x > scan.maxX) scan.maxX = x;
+  if (y > scan.maxY) scan.maxY = y;
+}
+
+function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
+  halo, maxLayerPixels, maxFillPixels,
+}) {
+  const { width, height } = working;
+  const { selected, minX, minY, maxX, maxY, selectedIndices } = scan;
+  const noChange = { source, changed:0, filled:0, changedTiles:0, loadedTiles:0 };
+  if (!selected || selected === width * height) return noChange;
+  if (selected > maxFillPixels) {
+    throw new RangeError('Контент-заливка: выделено больше безопасного лимита ' + maxFillPixels + ' px');
+  }
+
+  const requestedHalo = Math.trunc(Number(halo));
+  const padding = Number.isFinite(requestedHalo) ? Math.max(1, Math.min(128, requestedHalo)) : 24;
+  const bounds = {
+    left:Math.max(0, minX - padding),
+    top:Math.max(0, minY - padding),
+    right:Math.min(width, maxX + 1 + padding),
+    bottom:Math.min(height, maxY + 1 + padding),
+  };
+  const area = (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
+  if (area > maxLayerPixels) {
+    // Planning checkpoints are consumed by the cooperative runner before
+    // any private ROI is decoded. The synchronous/Worker runner simply
+    // resumes these steps; the chosen groups and native bytes stay identical.
+    const PLANNING_CHECKPOINT_PIXELS = 32_768;
+    const MAX_PLANNING_VISITS = 4_194_304;
+    let planningVisits = 0;
+    const chargePlanningVisit = (count = 1) => {
+      planningVisits += count;
+      if (planningVisits > MAX_PLANNING_VISITS) {
+        throw new RangeError('Контент-заливка: превышен лимит планирования ' + MAX_PLANNING_VISITS + ' операций');
+      }
+    };
+    // First try halo-disjoint groups for historical texture-search parity.
+    // When a connected/sparse selection merges into a huge bounding box,
+    // fall back to independent bounded tile fragments. Every fragment uses
+    // the SAME global frozen selection as the donor-exclusion authority.
+    const oversized = () => new RangeError('Контент-заливка: рабочая область ' + area + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
+    const tileSize = source.tileSize, columns = Math.ceil(width / tileSize);
+    const occupied = new Map();
+    for (const index of selectedIndices) {
+      chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+      const x = index % width, y = Math.floor(index / width);
+      const tx = Math.floor(x / tileSize), ty = Math.floor(y / tileSize);
+      const key = ty * columns + tx;
+      const cell = occupied.get(key);
+      if (cell) {
+        cell.left = Math.min(cell.left, x);
+        cell.top = Math.min(cell.top, y);
+        cell.right = Math.max(cell.right, x + 1);
+        cell.bottom = Math.max(cell.bottom, y + 1);
+        continue;
+      }
+      // Source topology is capped by MAX_PIXEL_BUFFER_SOURCE_TILES. For a wide
+      // but sparse selection, a fixed 256-cell cutoff is unnecessarily small:
+      // enforce the actual source-tile cap, then the aggregate ROI pixel budget.
+      if (occupied.size >= MAX_PIXEL_BUFFER_SOURCE_TILES) throw oversized();
+      occupied.set(key, { key, left:x, top:y, right:x + 1, bottom:y + 1 });
+    }
+    const cells = [...occupied.values()];
+    const makeFragments = () => cells.map(cell => ({ ...cell, keys:[cell.key], indices:[] }));
+    // Pairwise halo-group merging is intentionally limited to 256 occupied
+    // cells (quadratic comparisons, repeated merges). Above that threshold,
+    // plan independent bounded cells in a linear pass instead. Each cell still
+    // shares the global frozen selection donor-exclusion bitmap.
+    const groups = cells.length <= 256 ? makeFragments() : null;
+    // Preserve the old disjoint grouping whenever it fits the aggregate cap.
+    for (let i = 0; groups && i < groups.length; i += 1) {
+      let merged = false;
+      for (let j = i + 1; j < groups.length; j += 1) {
+        chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+        const a = groups[i], b = groups[j];
+        if (a.left - padding >= b.right + padding ||
+            b.left - padding >= a.right + padding ||
+            a.top - padding >= b.bottom + padding ||
+            b.top - padding >= a.bottom + padding) continue;
+        a.left = Math.min(a.left, b.left);
+        a.top = Math.min(a.top, b.top);
+        a.right = Math.max(a.right, b.right);
+        a.bottom = Math.max(a.bottom, b.bottom);
+        a.keys.push(...b.keys);
+        groups.splice(j, 1);
+        merged = true;
+        break;
+      }
+      if (merged) i = -1;
+    }
+
+    function* planRegions(candidate) {
+      const byTile = new Map();
+      for (const group of candidate) {
+        group.indices = [];
+        group.minX = width; group.minY = height; group.maxX = -1; group.maxY = -1;
+        for (const key of group.keys) byTile.set(key, group);
+      }
+      for (const index of selectedIndices) {
+        chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+        const x = index % width, y = Math.floor(index / width);
+        const group = byTile.get(Math.floor(y / tileSize) * columns + Math.floor(x / tileSize));
+        group.indices.push(index);
+        group.minX = Math.min(group.minX, x);
+        group.minY = Math.min(group.minY, y);
+        group.maxX = Math.max(group.maxX, x);
+        group.maxY = Math.max(group.maxY, y);
+      }
+      let totalArea = 0;
+      for (const group of candidate) {
+        group.bounds = {
+          left:Math.max(0, group.minX - padding), top:Math.max(0, group.minY - padding),
+          right:Math.min(width, group.maxX + 1 + padding),
+          bottom:Math.min(height, group.maxY + 1 + padding),
+        };
+        totalArea += (group.bounds.right - group.bounds.left) * (group.bounds.bottom - group.bounds.top);
+        if (totalArea > maxLayerPixels) return null;
+      }
+      return candidate;
+    }
+
+    let planned = groups?.length > 1 ? yield* planRegions(groups) : null;
+    if (!planned) planned = yield* planRegions(makeFragments());
+
+    // Dense islands can exceed the aggregate halo budget with per-tile
+    // fragments even though their filled pixels fit comfortably. Try bounded
+    // horizontal strips, optionally split into fixed-width segments. A first
+    // pass computes only group extents (not copies of millions of indices);
+    // allocate the group index lists only for the winning plan.
+    if (!planned) {
+      let best = null;
+      const segmentWidths = [...new Set([128, 256, width].map(value => Math.min(width, value)))];
+      for (const stripHeight of [32, 64, 128, 256]) {
+        for (const segmentWidth of segmentWidths) {
+          const segments = Math.ceil(width / segmentWidth);
+          const candidates = new Map();
+          let tooMany = false;
+          for (const index of selectedIndices) {
+            chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+            const y = Math.floor(index / width), x = index - y * width;
+            const key = Math.floor(y / stripHeight) * segments + Math.floor(x / segmentWidth);
+            let group = candidates.get(key);
+            if (!group) {
+              if (candidates.size >= 256) { tooMany = true; break; }
+              group = { key, minX:x, maxX:x, minY:y, maxY:y };
+              candidates.set(key, group);
+            } else {
+              group.minX = Math.min(group.minX, x);
+              group.maxX = Math.max(group.maxX, x);
+              group.minY = Math.min(group.minY, y);
+              group.maxY = Math.max(group.maxY, y);
+            }
+          }
+          if (tooMany) continue;
+          let totalArea = 0;
+          for (const group of candidates.values()) {
+            group.bounds = {
+              left:Math.max(0, group.minX - padding),
+              top:Math.max(0, group.minY - padding),
+              right:Math.min(width, group.maxX + 1 + padding),
+              bottom:Math.min(height, group.maxY + 1 + padding),
+            };
+            totalArea += (group.bounds.right - group.bounds.left) *
+              (group.bounds.bottom - group.bounds.top);
+            if (totalArea > maxLayerPixels) break;
+          }
+          if (totalArea > maxLayerPixels) continue;
+          if (!best || totalArea < best.area ||
+              (totalArea === best.area && candidates.size < best.groups.size)) {
+            best = { area:totalArea, groups:candidates, stripHeight, segmentWidth, segments };
+          }
+        }
+      }
+      if (best) {
+        // Stripe keys are geometric, so input index ordering cannot affect
+        // region execution order. Original-selection donors remain globally
+        // excluded by selectionBits in the common region executor below.
+        planned = [...best.groups.values()].sort((a, b) => a.key - b.key);
+        for (const group of planned) group.indices = [];
+        for (const index of selectedIndices) {
+          chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+          const y = Math.floor(index / width), x = index - y * width;
+          const key = Math.floor(y / best.stripHeight) * best.segments +
+            Math.floor(x / best.segmentWidth);
+          best.groups.get(key).indices.push(index);
+        }
+      }
+    }
+    // If fixed stripes still exceed the budget, try small touching horizontal
+    // runs. The planner has strict sorting/run/region caps; a pathological
+    // checkerboard falls back to the existing atomic refusal.
+    if (!planned) {
+      planned = planAdaptiveTiledInpaintRuns(
+        selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit);
+    }
+    // A forked/parallel 8-connected mask may have several runs per scanline.
+    // The greedy path cannot associate those runs across rows; use bounded
+    // union-find inside short bands before the existing atomic refusal.
+    if (!planned) {
+      planned = planConnectedTiledInpaintRunBands(
+        selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit);
+    }
+    if (!planned) {
+      if (groups?.length === 1) throw oversized();
+      throw new RangeError('Контент-заливка: сумма рабочих областей превышает безопасный лимит ' + maxLayerPixels + ' px');
+    }
+
+    // A 1-bit global snapshot covers only frozen indices, not the mutable
+    // tile working set. Adjacent fragment halos can overlap; a selected pixel
+    // from ANY fragment is forbidden as a donor or PatchMatch context even
+    // after a previous fragment has filled it.
+    const selectionBits = new Uint8Array(Math.ceil(width * height / 8));
+    for (const index of selectedIndices) {
+      chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+      selectionBits[index >> 3] |= 1 << (index & 7);
+    }
+    let totalFilled = 0, totalChanged = 0;
+    for (const group of planned) {
+      const rect = group.bounds, regionWidth = rect.right - rect.left;
+      const mask = new Uint8Array(regionWidth * (rect.bottom - rect.top));
+      for (const index of group.indices) {
+        chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+        const x = index % width, y = Math.floor(index / width);
+        mask[(y - rect.top) * regionWidth + (x - rect.left)] = 1;
+      }
+      const region = yield { kind:'readRegion', bounds:rect };
+      const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
+        isAllowed:(x, y) => mask[y * regionWidth + x] === 1,
+        isDonorExcluded:(x, y) => {
+          const index = (rect.top + y) * width + rect.left + x;
+          return (selectionBits[index >> 3] & (1 << (index & 7))) !== 0;
+        },
+        maxLayerPixels, maxFillPixels, preserveAlpha:true,
+      } };
+      if (filled !== group.indices.length) {
+        throw new RangeError('Контент-заливка: для отдельной области не найдены все доноры');
+      }
+      totalChanged += yield { kind:'writeRegion', region };
+      totalFilled += filled;
+      // No private tile escapes before the full job finishes.
+      yield;
+    }
+    const serialized = totalChanged ? yield { kind:'serialize' } : source;
+    return {
+      source:serialized, changed:totalChanged,
+      filled:totalFilled, changedTiles:working.dirtyTileCount, loadedTiles:working.loadedTileCount,
+    };
+  }
+  // The per-ROI mask is bounded by maxLayerPixels; no full-document mask or
+  // second call into potentially mutable/expensive selection geometry is needed.
+  const selectionMask = new Uint8Array(area);
+  const regionWidth = bounds.right - bounds.left;
+  for (const index of selectedIndices) {
+    const x = index % width, y = Math.floor(index / width);
+    selectionMask[(y - bounds.top) * regionWidth + (x - bounds.left)] = 1;
+  }
+  const region = yield { kind:'readRegion', bounds };
+  const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
+    isAllowed:(x, y) => selectionMask[y * regionWidth + x] === 1,
+    maxLayerPixels,
+    maxFillPixels, preserveAlpha:true,
+  } };
+  if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
+  const changed = yield { kind:'writeRegion', region };
+  // Yield before serializing the one-ROI result.
+  yield;
+  const serialized = changed ? yield { kind:'serialize' } : source;
+  return {
+    source:serialized,
+    changed,
+    filled,
+    changedTiles:working.dirtyTileCount,
+    loadedTiles:working.loadedTileCount,
+  };
+}
+
+// Synchronous and detached Worker callers exhaust the same deterministic steps.
+function inpaintFrozenTiledSelection(source, working, scan, options) {
+  const steps = inpaintFrozenTiledSelectionSteps(source, working, scan, options);
+  let step = steps.next();
+  while (!step.done) {
+    if (step.value?.kind === 'inpaint') {
+      step = steps.next(inpaintPixelBuffer(step.value.buffer, step.value.options));
+    } else if (step.value?.kind === 'readRegion') {
+      step = steps.next(working.readRegion(step.value.bounds));
+    } else if (step.value?.kind === 'writeRegion') {
+      step = steps.next(working.writeRegion(step.value.region));
+    } else if (step.value?.kind === 'serialize') {
+      step = steps.next(working.serialize());
+    } else {
+      step = steps.next();
+    }
+  }
+  return step.value;
+}
+
+// The asynchronous fallback also yields inside the deterministic single-ROI
+// kernel, without committing its working tiles until the entire job finishes.
+async function inpaintFrozenTiledSelectionCooperative(source, working, scan, options, {
+  isCancelled, yieldControl,
+}) {
+  const cancelled = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true });
+  const steps = inpaintFrozenTiledSelectionSteps(source, working, scan, options);
+  let step = steps.next();
+  while (!step.done) {
+    if (isCancelled()) return cancelled();
+    if (step.value?.kind === 'inpaint') {
+      const filled = await inpaintPixelBufferCooperative(step.value.buffer, step.value.options,
+        { isCancelled, yieldControl });
+      if (filled === null || isCancelled()) return cancelled();
+      step = steps.next(filled);
+      continue;
+    }
+    if (step.value?.kind === 'readRegion') {
+      const region = await working.readRegionCooperative(step.value.bounds, { isCancelled, yieldControl });
+      if (region === null || isCancelled()) return cancelled();
+      step = steps.next(region);
+      continue;
+    }
+    if (step.value?.kind === 'writeRegion') {
+      const changed = await working.writeRegionCooperative(step.value.region, { isCancelled, yieldControl });
+      if (changed === null || isCancelled()) return cancelled();
+      step = steps.next(changed);
+      continue;
+    }
+    if (step.value?.kind === 'serialize') {
+      const serialized = await working.serializeCooperative({ isCancelled, yieldControl });
+      if (serialized === null || isCancelled()) return cancelled();
+      step = steps.next(serialized);
+      continue;
+    }
+    await yieldControl();
+    if (isCancelled()) return cancelled();
+    step = steps.next();
+  }
+  return isCancelled() ? cancelled() : step.value;
+}
+
+// Frozen Worker indices use one validator for synchronous and cooperative paths.
+function prepareTiledInpaintFromIndices(source, selectedIndices, maxBytes, maxFillPixels) {
+  if (!Array.isArray(selectedIndices) && !(selectedIndices instanceof Uint32Array)) {
+    throw new TypeError('Tiled inpaint Worker: frozen selection indices must be an Array or Uint32Array');
+  }
+  const width = Number(source?.width);
+  const height = Number(source?.height);
+  const total = width * height;
+  const maxPixels = Math.floor(MAX_PIXEL_BUFFER_SOURCE_BYTES / 3);
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
+      width < 1 || height < 1 || !Number.isSafeInteger(total) || total > maxPixels) {
+    throw new RangeError('Tiled inpaint Worker: invalid source geometry');
+  }
+  if (selectedIndices.length > total) {
+    throw new RangeError('Tiled inpaint Worker: invalid or duplicate selected index');
+  }
+
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const seen = new Uint8Array(Math.ceil(total / 8));
+  const scan = newTiledInpaintSelection(width, height);
+  for (const index of selectedIndices) {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= total) {
+      throw new RangeError('Tiled inpaint Worker: invalid or duplicate selected index');
+    }
+    const byte = Math.floor(index / 8), bit = 1 << (index % 8);
+    if (seen[byte] & bit) {
+      throw new RangeError('Tiled inpaint Worker: invalid or duplicate selected index');
+    }
+    seen[byte] |= bit;
+    recordTiledInpaintSelection(scan, index % width, Math.floor(index / width), width, maxFillPixels);
+  }
+  return { working, scan };
+}
+
+export function inpaintTiledPixelBufferSourceFromIndices(source, {
+  selectedIndices,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  const prepared = prepareTiledInpaintFromIndices(source, selectedIndices, maxBytes, maxFillPixels);
+  if (!prepared) return null;
+  return inpaintFrozenTiledSelection(source, prepared.working, prepared.scan, { halo, maxLayerPixels, maxFillPixels });
+}
+
+// UI fallback yields before the first ROI, within large kernels, and between
+// private ROIs. No source tile escapes before the complete job commits.
+export async function inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+  selectedIndices,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  const prepared = prepareTiledInpaintFromIndices(source, selectedIndices, maxBytes, maxFillPixels);
+  if (!prepared) return null;
+  const cancelled = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true });
+  if (isCancelled()) return cancelled();
+  await yieldControl();
+  if (isCancelled()) return cancelled();
+  return inpaintFrozenTiledSelectionCooperative(source, prepared.working, prepared.scan,
+    { halo, maxLayerPixels, maxFillPixels }, { isCancelled, yieldControl });
+}
+
+// Historical synchronous API remains deterministic for callers and profiles.
+export function inpaintTiledPixelBufferSource(source, {
+  isAllowed,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen isAllowed predicate');
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const { width, height } = working;
+  const scan = newTiledInpaintSelection(width, height);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (isAllowed(x, y)) recordTiledInpaintSelection(scan, x, y, width, maxFillPixels);
+    }
+  }
+  return inpaintFrozenTiledSelection(source, working, scan, { halo, maxLayerPixels, maxFillPixels });
+}
+
+// Yield through a real macrotask between bounded scan chunks so navigation or
+// document changes can invalidate a pending job before expensive ROI decoding.
+// The fallback also yields inside a large private ROI kernel, while the
+// detached Worker remains the preferred path for expensive selections.
+export async function inpaintTiledPixelBufferSourceCooperative(source, {
+  isAllowed,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  scanChunkPixels = 32_768,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen isAllowed predicate');
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const { width, height } = working;
+  const scan = newTiledInpaintSelection(width, height);
+  const chunk = Math.max(1, Math.min(262_144, Math.trunc(Number(scanChunkPixels) || 32_768)));
+  const cancelled = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true });
+  const total = width * height;
+  for (let start = 0; start < total; start += chunk) {
+    if (isCancelled()) return cancelled();
+    if (start > 0) {
+      await yieldControl();
+      if (isCancelled()) return cancelled();
+    }
+    const end = Math.min(total, start + chunk);
+    for (let index = start; index < end; index += 1) {
+      const y = Math.floor(index / width);
+      const x = index - y * width;
+      if (isAllowed(x, y)) recordTiledInpaintSelection(scan, x, y, width, maxFillPixels);
+    }
+  }
+  if (isCancelled()) return cancelled();
+  return inpaintFrozenTiledSelectionCooperative(source, working, scan, { halo, maxLayerPixels, maxFillPixels }, { isCancelled, yieldControl });
 }
 
 export function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
@@ -1728,6 +2830,20 @@ export function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_S
   }
   return createPixelBuffer({width:safe.width,height:safe.height,model:safe.model,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel,
     colorSpace:safe.colorSpace,alphaMode:safe.alphaMode,profileName:safe.profileName,data});
+}
+
+// Serialized sources are immutable envelopes: decoding always allocates fresh
+// typed data. That first decoded plane is already caller-owned and writable;
+// cloning it again would allocate an unnecessary second full native plane.
+export function deserializeEditablePixelBufferSource(source, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  requireAlpha = false,
+} = {}) {
+  const decoded = deserializePixelBufferSource(source, { maxBytes });
+  const alphaChannels = channelRange(decoded.model).max;
+  return requireAlpha && decoded.channels !== alphaChannels
+    ? pixelBufferWithStraightAlpha(decoded)
+    : decoded;
 }
 
 export function pixelBufferByteLength(buffer) {

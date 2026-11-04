@@ -81,6 +81,7 @@ import { createPsdExportController } from './document/psd-export-controller.js';
 import { createDocumentExportController } from './document/export-controller.js';
 import { psdAdjustmentNativePlan, psdEmbeddedDocumentFingerprint, psdPreviewFingerprint, psdShapeNativePlan, psdTextNativePlan } from './document/psd-native-metadata-plans.js';
 import { createRasterEditController } from './painting/controller.js';
+import { createBrowserTiledInpaintWorkerController } from './core/tiled-inpaint-browser-worker.js';
 import { createRasterCommandController } from './painting/command-controller.js';
 import { createGradientCommandController } from './painting/gradient-command-controller.js';
 import { createPaintGestureController } from './painting/gesture-controller.js';
@@ -102,7 +103,9 @@ const els = {
 };
 
 let doc = createDocument();
-let history = new HistoryStack(80);
+// CDP-only A/B bootstrap hook; absent in ordinary user sessions. All History instances share the mode.
+const usePooledHistoryNativeUrls = globalThis.__ZPE_HISTORY_PROFILE_GENERIC__ !== true;
+let history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls });
 let zoom = 0.75;
 let documentSessions = [];
 let activeSessionId = '';
@@ -124,6 +127,7 @@ let selectionCopyMode = 'merged';
 let dragDepth = 0;
 let pointerLifecycle = null;
 let paintPersisting = false;
+let rasterCommandPersistLease = null;
 let hoverPoint = null;
 let smartSnapEnabled = true;
 let smartGuides = { x:null, y:null };
@@ -360,8 +364,10 @@ const viewportController = createViewportController({
 });
 const { setZoom, setZoomAtClientPoint, fitToView } = viewportController;
 
+const tiledInpaintWorker = createBrowserTiledInpaintWorkerController();
 const rasterEdit = createRasterEditController({
   getDocument: () => doc,
+  tiledInpaintWorker,
   getDrag: () => drag,
   getCmykPreviewTransform: () => currentCmykPreviewTransform(),
   renderPaintPreview: () => render({ paintPreview: true }),
@@ -375,10 +381,16 @@ const rasterCommands = createRasterCommandController({
     isPersisting: () => paintPersisting,
     beginPersist: () => {
       if (paintPersisting) return false;
+      const lease = {};
+      rasterCommandPersistLease = lease;
       paintPersisting = true;
-      return true;
+      return lease;
     },
-    endPersist: () => { paintPersisting = false; },
+    endPersist: lease => {
+      if (!lease || rasterCommandPersistLease !== lease) return;
+      rasterCommandPersistLease = null;
+      paintPersisting = false;
+    },
     resetPaintState: () => {
       rasterEdit.clearHighDepthPaintState();
       retouchController.resetStroke();
@@ -405,7 +417,16 @@ const rasterCommands = createRasterCommandController({
     fillTolerance: () => Number(els.fillTolerance?.value) || 0,
     rgbToCmyk: rgb8ToDocumentCmyk,
   },
-  ui: { setStatus, toast, render, commit },
+  ui: {
+    setStatus, toast, render, commit,
+    onContentAwarePendingChange: active => {
+      const panel = $('#contentAwareProgressPanel');
+      if (panel) panel.hidden = !active;
+    },
+  },
+});
+$('#contentAwareProgressCancel')?.addEventListener('click', () => {
+  if (rasterCommands.cancelPendingContentAwareFill()) setStatus('Контент-заливка отменена');
 });
 const {
   drawLine: drawLineOnCurrentRaster,
@@ -864,7 +885,11 @@ const newDocumentController = createNewDocumentController({
     getActiveSessionId: () => activeSessionId,
     getDocumentChangeSerial: () => documentChangeSerial,
     blockPendingDocumentEdit,
-    replaceHistory: () => { history = new HistoryStack(80); },
+    canCancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
+    cancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls }); },
     setDocument: setDoc,
     markDirty,
   },
@@ -888,8 +913,12 @@ const psdImportController = createPsdImportController({
     getChangeSerial: () => documentChangeSerial,
     canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
+    canCancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
+    cancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
     publishDocument: (next,{label}) => {
-      history=new HistoryStack(80);
+      history=new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls });
       setDoc(next,{resetHistory:true,label});
       markDirty(true);
       queueRecovery({immediate:true});
@@ -899,7 +928,7 @@ const psdImportController = createPsdImportController({
   profiles: { profileBytes: colorProfileBytes },
   rendering: { rgbaPixelsToDataUrl },
   semantics: psdImportSemantics,
-  ui: { setStatus, toast, alert, consoleRef:console },
+  ui: { setStatus, toast, alert: message => window.alert(message), consoleRef:console },
 });
 
 const projectController = createProjectController({
@@ -911,7 +940,7 @@ const projectController = createProjectController({
     canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
     sanitizeProject,
-    replaceHistory: () => { history = new HistoryStack(80); },
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls }); },
     setDocument: setDoc,
     markDirty,
     getCurrentSession: () => currentSession(),
@@ -1269,12 +1298,17 @@ documentSessionController = createDocumentSessionController({
     resetRetouchStroke();
     hoverPoint = null;
     pointerLifecycle?.releaseActivePointer();
-    paintPersisting = false;
+    // No unconditional unlock: only the owner lease may release persistence.
   },
   cloneSelectionShape,
   tabs: els.tabs,
   viewport: els.viewport,
   blockPendingDocumentEdit,
+  cancelPendingContentAwareFill: () => {
+    // Never revoke an active pointer or a non-cancellable raster gesture.
+    if (drag || pointerLifecycle?.hasActivePointer()) return false;
+    return rasterCommands.cancelPendingContentAwareFill();
+  },
   updateAll,
   fitToView,
   setStatus,
@@ -1647,7 +1681,8 @@ function drawOverlay() {
   if(penDraft?.points?.length){
     const points=penDraft.points;
     ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#72a7ff';ctx.fillStyle='#fff';ctx.setLineDash([]);
-    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover);ctx.stroke();
+    const closing=!penDraftGestures.isGesture(drag)&&penDraftGestures.canCloseAt(penDraft.hover);
+    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover,closing);ctx.stroke();
     ctx.lineWidth=1/zoom;ctx.strokeStyle='#8fc0ff';
     for(const point of points){
       for(const handle of [point.handleIn,point.handleOut]){
@@ -1658,6 +1693,7 @@ function drawOverlay() {
     }
     ctx.fillStyle='#fff';ctx.strokeStyle='#3976ea';
     for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,3/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();}
+    if(closing){ctx.beginPath();ctx.arc(points[0].x,points[0].y,6/zoom,0,Math.PI*2);ctx.stroke();}
     ctx.restore();
   } else {
     selectionGestures.drawMagneticDraft(ctx);
@@ -2099,7 +2135,8 @@ async function onOverlayPointerDown(e) {
       return;
     }
     const penResult=penDraftGestures.beginPoint(p,{finish:e.detail>=2});
-    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
+    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.CLOSE_REQUESTED)finishPenPath({forceClosed:true});
+    else if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
     else{
       if(penResult.status)setStatus(penResult.status);
       if(penResult.result===PEN_DRAFT_BEGIN_RESULT.STARTED){drag=penResult.gesture;drawOverlay();}
@@ -2296,7 +2333,7 @@ function previewGradient(start,end) {
   ctx.restore();
 }
 
-function tracePenDraftPath(ctx,points,hover=null){
+function tracePenDraftPath(ctx,points,hover=null,closing=false){
   if(!Array.isArray(points)||!points.length)return false;
   ctx.moveTo(points[0].x,points[0].y);
   const segment=(from,to)=>{
@@ -2308,23 +2345,26 @@ function tracePenDraftPath(ctx,points,hover=null){
   };
   for(let index=1;index<points.length;index+=1)segment(points[index-1],points[index]);
   if(hover){
-    const last=points.at(-1);
-    const cp1=last.handleOut||last;
-    ctx.bezierCurveTo(cp1.x,cp1.y,hover.x,hover.y,hover.x,hover.y);
+    if(closing){segment(points.at(-1),points[0]);ctx.closePath();}
+    else {
+      const last=points.at(-1);
+      const cp1=last.handleOut||last;
+      ctx.bezierCurveTo(cp1.x,cp1.y,hover.x,hover.y,hover.x,hover.y);
+    }
   }
   return true;
 }
-function finishPenPath(){
+function finishPenPath({forceClosed=false}={}){
   const points=penDraftGestures.consumePoints();
   if(penDraftGestures.isGesture(drag))drag=null;
   const outcome=penPathCommands.publish(doc,points,{
-    pathClosed:Boolean(els.penClosed?.checked),
+    pathClosed:Boolean(forceClosed||els.penClosed?.checked),
     stroke:els.primaryColor.value,
     strokeWidth:els.brushSize.value,
     opacity:Number(els.toolOpacity.value)/100,
   });
   if(outcome.result===PEN_PATH_COMMAND_RESULT.COMMITTED){
-    setStatus('Bézier-контур добавлен');drawOverlay();return true;
+    setStatus(forceClosed?'Bézier-контур замкнут':'Bézier-контур добавлен');drawOverlay();return true;
   }
   if(outcome.result===PEN_PATH_COMMAND_RESULT.NOOP&&outcome.reason===PEN_PATH_NOOP_REASON.TOO_SHORT)drawOverlay();
   return false;
@@ -3040,6 +3080,13 @@ window.addEventListener('keydown',e=>{
     if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropGestures.hasDraft()){cropGestures.reset();drawOverlay();setStatus('Кадрирование отменено');return;}
+    // Escape has its usual selection/draft meaning when no Fill is pending.
+    // Do not intercept Escape inside a modal or during an active gesture.
+    if(!drag && !pointerLifecycle?.hasActivePointer() &&
+       !(e.target instanceof Node && els.modalRoot.contains(e.target)) &&
+       rasterCommands.cancelPendingContentAwareFill()){
+      e.preventDefault();setStatus('Контент-заливка отменена');return;
+    }
     if(toolRemoval().hasMask()){
       e.preventDefault();
       if(toolRemoval().reset()){drawOverlay();setStatus('Область удаления сброшена');}

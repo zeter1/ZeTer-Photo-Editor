@@ -39,6 +39,8 @@ function harness({
   importPsdEmbeddedAssetDocument=async()=>null,
   canReplaceDocument=()=>true,
   blockPendingDocumentEdit=()=>false,
+  pendingFill=false,
+  cancelFails=false,
 }={}) {
   const original=createDocument({name:'Original',width:4,height:4});
   original.proofProfile={kind:'untagged',untagged:true};
@@ -47,6 +49,8 @@ function harness({
   let sessionId='session-1';
   let changeSerial=1;
   let replaceChecks=0;
+  const fill={pending:pendingFill,cancelCalls:0};
+  const events=[];
   const published=[];
   const statuses=[];
   const toasts=[];
@@ -61,7 +65,15 @@ function harness({
       getChangeSerial:()=>changeSerial,
       canReplaceDocument:()=>{replaceChecks+=1;return canReplaceDocument();},
       blockPendingDocumentEdit,
-      publishDocument:(next,meta)=>published.push({next,meta}),
+      canCancelPendingContentAwareFill:()=>fill.pending,
+      cancelPendingContentAwareFill:()=>{
+        fill.cancelCalls++;
+        events.push('cancel');
+        if(cancelFails)return false;
+        fill.pending=false;
+        return true;
+      },
+      publishDocument:(next,meta)=>{events.push('publish');published.push({next,meta});},
     },
     profiles:{profileBytes:()=>null},
     rendering:{rgbaPixelsToDataUrl},
@@ -89,6 +101,7 @@ function harness({
     setHistoryEntry:value=>{historyEntry=value;},
     bumpChange:()=>{changeSerial+=1;},
     getReplaceChecks:()=>replaceChecks,
+    fill,events,
   };
 }
 
@@ -325,4 +338,79 @@ test('oversized PSD/PSB is rejected before codec work starts', async () => {
   assert.equal(decodeCalls,0);
   assert.equal(h.published.length,0);
   assert.ok(h.statuses.some(value=>value.includes('512 МБ')));
+});
+
+test('003W/2b-2g rejected dirty PSD import preserves in-flight Fill and native document', async () => {
+  let decoding=0;
+  const h=harness({pendingFill:true,blockPendingDocumentEdit:()=>true,
+    canReplaceDocument:()=>false,decodePsd:async()=>{decoding++;return parsedRgb16();}});
+  await h.controller.open(file('refused.psb'));
+  assert.equal(h.getReplaceChecks(),1);
+  assert.equal(decoding,0);
+  assert.equal(h.fill.pending,true);
+  assert.equal(h.fill.cancelCalls,0);
+  assert.deepEqual(h.events,[]);
+  assert.deepEqual(h.published,[]);
+});
+
+test('003W/2b-2g authorized PSD/PSB import cancels Fill only at publication', async () => {
+  for(const extension of ['psd','psb']){
+    const decoded=deferred();
+    const started=deferred();
+    const h=harness({pendingFill:true,blockPendingDocumentEdit:()=>h.fill.pending,
+      decodePsd:()=>{started.resolve();return decoded.promise;}});
+    const opening=h.controller.open(file('new-owner.'+extension));
+    await started.promise;
+    assert.equal(h.fill.pending,true,'decode cannot cancel old native Worker');
+    assert.equal(h.fill.cancelCalls,0);
+    assert.deepEqual(h.events,[]);
+    decoded.resolve(parsedRgb16());
+    await opening;
+    assert.deepEqual(h.events,['cancel','publish']);
+    assert.equal(h.fill.pending,false);
+    assert.equal(h.published.length,1);
+    assert.equal(h.published[0].next.name,'new-owner');
+    assert.equal(h.published[0].next.layers[0].highDepthSource.bitsPerChannel,16);
+  }
+});
+
+test('003W/2b-2g failed decoding/preview never terminates Fill or publishes', async () => {
+  for(const failure of ['decode','preview']){
+    const h=harness({pendingFill:true,blockPendingDocumentEdit:()=>true,
+      decodePsd:failure==='decode'?async()=>{throw new Error('decode fail');}:async()=>parsedRgb16(),
+      rgbaPixelsToDataUrl:failure==='preview'?async()=>{throw new Error('preview fail');}:async()=> 'data:image/png;base64,AAAA'});
+    await h.controller.open(file('broken.psd'));
+    assert.equal(h.fill.pending,true);
+    assert.equal(h.fill.cancelCalls,0);
+    assert.deepEqual(h.events,[]);
+    assert.equal(h.published.length,0);
+    assert.equal(h.alerts.length,1);
+  }
+});
+
+test('003W/2b-2g stale owner during async decode cannot cancel original Fill', async () => {
+  const decoded=deferred(),started=deferred();
+  const h=harness({pendingFill:true,blockPendingDocumentEdit:()=>true,
+    decodePsd:()=>{started.resolve();return decoded.promise;}});
+  const opening=h.controller.open(file('late.psb'));
+  await started.promise;
+  h.setCurrent(createDocument({name:'Other owner'}));
+  decoded.resolve(parsedRgb16());
+  await opening;
+  assert.equal(h.fill.cancelCalls,0);
+  assert.deepEqual(h.events,[]);
+  assertStaleImport(h);
+});
+
+test('003W/2b-2g failed lease cancellation and non-revocable painting fail closed', async () => {
+  const cancellation=harness({pendingFill:true,cancelFails:true,blockPendingDocumentEdit:()=>true});
+  await cancellation.controller.open(file());
+  assert.equal(cancellation.fill.pending,true);
+  assert.deepEqual(cancellation.events,['cancel']);
+  assert.deepEqual(cancellation.published,[]);
+
+  const blocked=harness({pendingFill:false,blockPendingDocumentEdit:()=>true});
+  await blocked.controller.open(file());
+  assert.equal(blocked.getReplaceChecks(),0);
+  assert.deepEqual(blocked.published,[]);
 });

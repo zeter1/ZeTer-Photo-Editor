@@ -23,6 +23,8 @@ const sources = [
   'src/core/pixels.js',
   'src/core/inpaint.js',
   'src/core/pixel-buffer.js',
+  'src/core/tiled-inpaint-worker-client.js',
+  'src/core/tiled-inpaint-browser-worker.js',
   'src/core/color-management.js',
   'src/core/recovery.js',
   'src/core/layer-styles.js',
@@ -50,6 +52,7 @@ const sources = [
   'src/core/color.js',
   'src/core/pixel-worker.js',
   'src/core/render.js',
+  'src/painting/tiled-inpaint-dispatch.js',
   'src/painting/controller.js',
   'src/painting/command-controller.js',
   'src/ai/lama-assets.js',
@@ -169,3 +172,7 @@ await Promise.all([
   writeFile(resolve(root, 'version.json'), versionManifest, 'utf8'),
 ]);
 console.log(`Built src/app.bundle.js and cache manifest ${buildId}`);
+
+// The detached file://-compatible Worker supplier is a second deterministic
+// generated artifact. Keep its source in sync with the shared pixel kernel.
+await import('./build-tiled-inpaint-worker.mjs');

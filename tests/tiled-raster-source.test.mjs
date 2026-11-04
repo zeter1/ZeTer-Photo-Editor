@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createPixelBuffer, createSerializedPixelBufferTileWorkingSet, deserializePixelBufferSource, forEachSerializedPixelBufferTile, mutateSerializedPixelBufferTiles,
+  createPixelBuffer, createSerializedPixelBufferTileWorkingSet, inpaintTiledPixelBufferSource, deserializePixelBufferSource, forEachSerializedPixelBufferTile, mutateSerializedPixelBufferTiles,
   PIXEL_BUFFER_SOURCE_KIND, PIXEL_BUFFER_TILED_SOURCE_KIND, sanitizeSerializedPixelBufferSource,
   serializePixelBufferSourceAdaptive, serializeTiledPixelBufferSource,
 } from '../src/core/pixel-buffer.js';
@@ -159,4 +159,219 @@ test('Stage 17d working-set regions read halo pixels across tiles without dirtyi
   const serialized=working.serialize();
   assert.equal(serialized.tiles[1].dataUrl,untouchedSecond);
   assert.equal(deserializePixelBufferSource(serialized).data[3],4321);
+});
+
+
+test('Stage 003: RGB16 cooperative write matches sync and cancels staged multi-tile ROI atomically', async () => {
+  const width=256,height=256;
+  const packed=serializeTiledPixelBufferSource(rgb16(width,height),{tileSize:64});
+  const before=JSON.stringify(packed);
+  const bounds={left:0,top:0,right:width,bottom:height};
+  const edit=working=>{
+    const region=working.readRegion(bounds);
+    region.buffer.data[0]=54321;
+    region.buffer.data[(width*height-1)*3]=54321;
+    return region;
+  };
+  const sync=createSerializedPixelBufferTileWorkingSet(packed);
+  assert.equal(sync.writeRegion(edit(sync)),2);
+  assert.equal(sync.dirtyTileCount,2);
+  const oracle=sync.serialize();
+  const working=createSerializedPixelBufferTileWorkingSet(packed);
+  let yields=0;
+  assert.equal(await working.writeRegionCooperative(edit(working),{
+    yieldControl:async()=>{yields++;},
+  }),2);
+  assert.ok(yields>=2,'the large single ROI yields within the write');
+  assert.deepEqual(working.serialize(),oracle);
+  const cancelled=createSerializedPixelBufferTileWorkingSet(packed);
+  let stopped=false;
+  assert.equal(await cancelled.writeRegionCooperative(edit(cancelled),{
+    isCancelled:()=>stopped,
+    yieldControl:async()=>{assert.equal(cancelled.dirtyTileCount,0);stopped=true;},
+  }),null);
+  assert.equal(cancelled.dirtyTileCount,0);
+  let previews=0;
+  cancelled.forEachPreviewDirty(()=>{previews++;});
+  assert.equal(previews,0);
+  assert.deepEqual(cancelled.serialize(),packed);
+  assert.equal(JSON.stringify(packed),before);
+});
+
+test('Stage 003: Float32 CMYKA cooperative write keeps earlier dirty pixels and precision', async () => {
+  const width=256,height=256,channels=5;
+  const data=new Float32Array(width*height*channels);
+  for(let p=0;p<width*height;p++)data.set([0.125,0.25,0.375,0.5,1],p*channels);
+  const packed=serializeTiledPixelBufferSource(createPixelBuffer({
+    width,height,model:'cmyk',channels,bitsPerChannel:32,
+    colorSpace:'device-cmyk',data,
+  }),{tileSize:64});
+  const working=createSerializedPixelBufferTileWorkingSet(packed);
+  const bounds={left:0,top:0,right:width,bottom:height};
+  const first=working.readRegion(bounds);
+  first.buffer.data[0]=0.75;
+  assert.equal(working.writeRegion(first),1);
+  const prior=working.serialize();
+  const region=working.readRegion(bounds);
+  region.buffer.data[(width*height-1)*channels+3]=0.625;
+  let stopped=false;
+  assert.equal(await working.writeRegionCooperative(region,{
+    isCancelled:()=>stopped,yieldControl:async()=>{stopped=true;},
+  }),null);
+  assert.equal(working.dirtyTileCount,1);
+  assert.deepEqual(working.serialize(),prior);
+  assert.equal(await working.writeRegionCooperative(region,{yieldControl:async()=>{}}),1);
+  const restored=deserializePixelBufferSource(working.serialize());
+  assert.equal(restored.data[0],0.75);
+  assert.equal(restored.data[(width*height-1)*channels+3],0.625);
+  assert.equal(restored.data[channels+1],0.25);
+  await assert.rejects(working.writeRegionCooperative(region,{yieldControl:1}),/invalid cancellation callbacks/);
+  assert.equal(await working.writeRegionCooperative(working.readRegion({
+    left:0,top:0,right:1,bottom:1,
+  }),{yieldControl:async()=>{}}),0);
+});
+
+test('Stage 003: localized CMYKA Float32 Content-Aware Fill spans tile boundaries without full-plane decode', () => {
+  const width = 80, height = 16, channels = 5;
+  const data = new Float32Array(width * height * channels);
+  for (let i = 0; i < width * height; i += 1) {
+    data.set([0.1, 0.2, 0.3, 0.4, 1], i * channels);
+  }
+  for (const x of [7, 8]) data.set([5, 5, 5, 5, 1], (7 * width + x) * channels);
+  const native = createPixelBuffer({ width, height, model:'cmyk', channels, bitsPerChannel:32, data });
+  const source = serializeTiledPixelBufferSource(native, { tileSize:8 });
+  const oldPayloads = source.tiles.map(tile => tile.dataUrl);
+  const result = inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => y === 7 && (x === 7 || x === 8),
+    halo:2,
+    maxLayerPixels:64, // whole source is 1,280 px; only the ROI may be in memory
+  });
+  assert.equal(result.filled, 2);
+  assert.equal(result.changed, 2);
+  assert.equal(result.changedTiles, 2);
+  assert.equal(result.loadedTiles, 4);
+  assert.notEqual(result.source, source);
+  for (let i = 0; i < source.tiles.length; i += 1) {
+    if (i === 0 || i === 1) assert.notEqual(result.source.tiles[i].dataUrl, oldPayloads[i]);
+    else assert.equal(result.source.tiles[i].dataUrl, oldPayloads[i]);
+  }
+  const filled = deserializePixelBufferSource(result.source);
+  for (const x of [7, 8]) {
+    const sample = filled.data.subarray((7 * width + x) * channels, (7 * width + x + 1) * channels);
+    assert.deepEqual([...sample], [...data.subarray(0, 5)]);
+  }
+  assert.deepEqual([...filled.data.subarray((7 * width + 9) * channels, (7 * width + 10) * channels)],
+    [...data.subarray((7 * width + 9) * channels, (7 * width + 10) * channels)]);
+});
+
+test('Stage 003: tiled inpaint no-donor, safe ROI budget and aborted selection are non-destructive', () => {
+  const source = serializeTiledPixelBufferSource(rgb16(24, 16), { tileSize:8 });
+  const original = JSON.stringify(source);
+  const none = inpaintTiledPixelBufferSource(source, { isAllowed:() => false });
+  const whole = inpaintTiledPixelBufferSource(source, { isAllowed:() => true });
+  assert.equal(none.changed, 0);
+  assert.equal(whole.filled, 0);
+  assert.equal(whole.loadedTiles, 0);
+  assert.equal(none.source, source);
+  assert.equal(whole.source, source);
+  assert.throws(() => inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => x >= 7 && x <= 8 && y === 7,
+    halo:2, maxLayerPixels:10,
+  }), /рабочая область/);
+  assert.throws(() => inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => x === 7 && y < 3,
+    maxFillPixels:2,
+  }), /безопасного лимита/);
+  assert.throws(() => inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => { if (x === 10 && y === 10) throw Error('cancelled'); return x === 2; },
+  }), /cancelled/);
+  assert.equal(JSON.stringify(source), original);
+});
+
+test('Stage 003: tiled inpaint freezes each selected pixel once and never re-queries the predicate', () => {
+  const width = 12, height = 6;
+  const buffer = rgb16(width, height);
+  // A damaged pixel must be replaced by a donor. A repeat predicate query
+  // fails deliberately: the scan is the only authorized selection snapshot.
+  const damagedIndex = (3 * width + 3) * 3;
+  buffer.data.set([0, 0, 0], damagedIndex);
+  const source = serializeTiledPixelBufferSource(buffer, { tileSize:4 });
+  const before = source.tiles.map(tile => tile.dataUrl);
+  const visited = new Set();
+  const result = inpaintTiledPixelBufferSource(source, {
+    isAllowed(x, y) {
+      const key = y * width + x;
+      assert.equal(visited.has(key), false, 'selection was queried twice at ' + key);
+      visited.add(key);
+      return x === 3 && y === 3;
+    },
+    halo:2,
+    maxLayerPixels:64,
+  });
+  assert.equal(visited.size, width * height);
+  assert.equal(result.filled, 1);
+  assert.equal(result.changed, 1);
+  assert.equal(result.changedTiles, 1);
+  assert.notEqual(result.source.tiles[0].dataUrl, before[0]);
+  assert.deepEqual(result.source.tiles.slice(1).map(tile => tile.dataUrl), before.slice(1));
+  assert.notDeepEqual(
+    [...deserializePixelBufferSource(result.source).data.slice(damagedIndex, damagedIndex + 3)],
+    [0, 0, 0],
+  );
+});
+
+test('Stage 003: full-selection no-donor and over-budget selection remain non-destructive', () => {
+  const source = serializeTiledPixelBufferSource(rgb16(8, 8), { tileSize:4 });
+  const original = JSON.stringify(source);
+  const whole = inpaintTiledPixelBufferSource(source, {
+    isAllowed:() => true, maxFillPixels:1,
+  });
+  assert.equal(whole.source, source);
+  assert.equal(whole.changed, 0);
+  assert.throws(() => inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x, y) => x < 7, maxFillPixels:1,
+  }), /безопасного лимита/);
+  assert.equal(JSON.stringify(source), original);
+});
+
+test('Stage 003: cooperative tile serialization is byte-identical and discardable during a multi-tile encode', async () => {
+  const packed = serializeTiledPixelBufferSource(rgb16(48, 32), { tileSize:8 });
+  const before = JSON.stringify(packed);
+  const working = createSerializedPixelBufferTileWorkingSet(packed);
+  const count = working.visit(null, ({ buffer }) => {
+    buffer.data[0] ^= 1;
+    return 1;
+  });
+  assert.equal(count, 24);
+  const oracle = working.serialize();
+  assert.equal(oracle.tiles.length, 24);
+  let cancelled = false, yields = 0;
+  const stopped = await working.serializeCooperative({
+    isCancelled:() => cancelled,
+    yieldControl:async () => { yields++; cancelled = true; },
+  });
+  assert.equal(yields, 1, 'four changed tiles encoded before the first cooperative checkpoint');
+  assert.equal(stopped, null, 'partial serialized output must never escape');
+  assert.equal(JSON.stringify(packed), before, 'the source stays byte-for-byte immutable');
+  cancelled = false;
+  yields = 0;
+  const completed = await working.serializeCooperative({
+    isCancelled:() => cancelled,
+    yieldControl:async () => { yields++; },
+  });
+  assert.equal(yields, 5, '24 modified tiles yield after each group of four except the last');
+  assert.deepEqual(completed, oracle);
+  assert.equal(completed.tiles.every((tile, index) => tile.dataUrl !== packed.tiles[index].dataUrl), true);
+});
+
+test('Stage 003: alpha-promoted tile serialization uses the same cooperative checkpoints', async () => {
+  const packed = serializeTiledPixelBufferSource(rgb16(48, 32), { tileSize:8 });
+  const working = createSerializedPixelBufferTileWorkingSet(packed, { requireAlpha:true });
+  const expected = working.serialize();
+  let yields = 0;
+  const actual = await working.serializeCooperative({ yieldControl:async () => { yields++; } });
+  assert.equal(yields, 5);
+  assert.deepEqual(actual, expected);
+  assert.equal(actual.channels, 4);
+  assert.equal(deserializePixelBufferSource(actual).data[3], 65535);
 });

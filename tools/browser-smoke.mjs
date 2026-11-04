@@ -4,6 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
+import { createBrowserRendererHeapSampler } from './browser-renderer-heap-sampler.mjs';
+import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
+import { verifyLargeBrowserPsd16Worker } from './browser-large-psd16-smoke.mjs';
+import { verifyBrowserMidKernelCancellation } from './browser-inpaint-mid-kernel-smoke.mjs';
+import { verifyBrowserUiLockMidKernel } from './browser-ui-lock-mid-kernel-smoke.mjs';
+import { verifyBrowserDelayedRecoveryReloads } from './browser-recovery-reload-smoke.mjs';
+import { verifyBrowserWideConnectedNativeUi } from './browser-wide-connected-ui-smoke.mjs';
+import { writeWideConnectedBrowserArtifact } from './browser-wide-connected-operation-artifact.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_URL = process.env.ZPE_SMOKE_URL || pathToFileURL(path.join(ROOT, 'index.html')).href;
@@ -351,6 +359,101 @@ const layerMenuStateExpression = `(() => {
   ]));
 })()`;
 
+// Real file:// UI import, PSD/PSB decoder, native 16/32-bit persistence and
+// rendered canvas preview. These small *ZeTer-generated* files intentionally
+// do not claim Adobe cross-app parity or the tiled >8 MiB import threshold.
+async function verifyBrowserHighDepthPsdPsbImport(client) {
+  for (const key of ['rgb16','rgb32psb']) {
+    const fixture=createBrowserHighDepthFixture(key);
+    const encoded=Buffer.from(fixture.bytes).toString('base64');
+    const documentName=fixture.filename.replace(/\.ps[db]$/i,'');
+    const dispatched=await evaluate(client, `(() => {
+      const binary=atob(${JSON.stringify(encoded)});
+      const bytes=Uint8Array.from(binary,char=>char.charCodeAt(0));
+      const input=document.querySelector('#fileInput');
+      const transfer=new DataTransfer();
+      transfer.items.add(new File([bytes],${JSON.stringify(fixture.filename)},{
+        type:'image/vnd.adobe.photoshop',
+      }));
+      input.files=transfer.files;
+      const receivedName=input.files[0]?.name;
+      const oldConfirm=window.confirm;
+      window.confirm=()=>true;
+      try {input.dispatchEvent(new Event('change',{bubbles:true}));}
+      finally {window.confirm=oldConfirm;}
+      return {name:receivedName,bytes:bytes.byteLength};
+    })()`);
+    assert(dispatched.name===fixture.filename && dispatched.bytes===fixture.bytes.byteLength,
+      'PSD/PSB UI input must receive exact fixture bytes',JSON.stringify(dispatched));
+    await waitFor(`Stage 003 browser import ${fixture.filename}`,async()=>evaluate(client,
+      `document.querySelector('#statusText')?.textContent?.startsWith('PSD/PSB импортирован') &&
+       document.querySelectorAll('.layer-row').length===1 &&
+       document.querySelector('#editorCanvas').width===${fixture.width}`),15_000);
+    await waitFor(`Stage 003 browser preview ${fixture.filename}`,async()=>evaluate(client,
+      `(() => {
+        const canvas=document.querySelector('#editorCanvas');
+        if(canvas.width!==${fixture.width}||canvas.height!==${fixture.height})return false;
+        const pixel=canvas.getContext('2d').getImageData(${fixture.defectX},${fixture.defectY},1,1).data;
+        return pixel[0]>100 && pixel[0]>pixel[1] && pixel[0]>pixel[2];
+      })()`),15_000);
+    // Verify the actual editor's persisted native bytes using its File > Save
+    // Project command. The application bundle is IIFE-scoped: production
+    // internal state is deliberately NOT exposed as a debug global.
+    const native=await evaluate(client,`(async () => {
+      let savedBlob=null;
+      const original=URL.createObjectURL;
+      URL.createObjectURL=function(blob,...args) {
+        if(blob instanceof Blob && blob.type==='application/json')savedBlob=blob;
+        return original.call(URL,blob,...args);
+      };
+      try {
+        document.querySelector('.menu-button[data-menu="file"]').click();
+        const save=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+          button=>button.querySelector('span')?.textContent?.startsWith('Сохранить проект'));
+        if(!save || save.disabled)return {error:'Save Project UI item unavailable'};
+        save.click();
+        if(!savedBlob)return {error:'Save Project did not produce a JSON Blob'};
+        const project=JSON.parse(await savedBlob.text());
+        const layer=project.layers.find(value=>value.name==='Stage 003 native layer');
+        const source=layer?.highDepthSource;
+        if(!source)return {error:'Imported raster layer has no high-depth source',name:project.name,
+          layers:project.layers.map(item=>item.name)};
+        const raw=atob(source.dataUrl.split(',')[1]);
+        const bytes=Uint8Array.from(raw,char=>char.charCodeAt(0));
+        const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+        const sampleAt=pixel=>Array.from({length:${fixture.channels}},(_,ch)=>{
+          const byte=(pixel*${fixture.channels}+ch)*(${fixture.bitsPerChannel}/8);
+          return ${fixture.bitsPerChannel}===16
+            ? view.getUint16(byte,true)
+            : view.getFloat32(byte,true);
+        });
+        return {
+          name:project.name,model:source.model,bits:source.bitsPerChannel,
+          sampleType:source.sampleType,sourceKind:source.kind,rawBytes:source.rawBytes,
+          normal:sampleAt(0),
+          damaged:sampleAt(${fixture.defectY}*${fixture.width}+${fixture.defectX}),
+        };
+      } finally {
+        URL.createObjectURL=original;
+      }
+    })()`);
+    assert(native.name===documentName && native.model==='rgb' &&
+      native.bits===fixture.bitsPerChannel &&
+      native.sampleType===(fixture.bitsPerChannel===16?'uint':'float') &&
+      native.sourceKind==='zpe-pixel-buffer-source-v1' &&
+      native.rawBytes===fixture.width*fixture.height*fixture.channels*(fixture.bitsPerChannel/8) &&
+      JSON.stringify(native.normal)===JSON.stringify(fixture.normal) &&
+      JSON.stringify(native.damaged)===JSON.stringify(fixture.damaged),
+      'File > Save Project must preserve native PSD/PSB samples after UI import and preview',
+      JSON.stringify({file:fixture.filename,native}));
+    console.log('Stage 003 file:// Photoshop-format high-depth import smoke:',JSON.stringify({
+      fixture:fixture.filename,bits:fixture.bitsPerChannel,version:fixture.version,
+      sampleType:native.sampleType,sourceKind:native.sourceKind,
+      provenance:'ZeTer synthetic writer; not an Adobe Photoshop authored golden',
+    }));
+  }
+}
+
 async function runSmoke() {
   const browserExecutable = findBrowser();
   const profileDir = await mkdtemp(path.join(os.tmpdir(), 'zpe-browser-smoke-'));
@@ -376,6 +479,7 @@ async function runSmoke() {
   });
   const errors = [];
   let client = null;
+  let browserClient = null;
 
   try {
     const browserWs = await waitForDevTools(browser, stderrState);
@@ -409,6 +513,175 @@ async function runSmoke() {
     }
     assertNoBrowserErrors(errors, stderrState);
 
+    // 003W/2b-2a: isolated genuine Chromium file:// run with a >2M-pixel
+    // PSD16/PSB32 source. No production runtime instrumentation or mocks.
+    if (process.env.ZPE_NEAR_CAP_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_NEAR_CAP_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_OWNER_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_CLOSE_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_REPLACE_BROWSER_ONLY === '1' ||
+         process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1' ||
+        process.env.ZPE_DENSE_NATURAL_FAILED_IMPORT_BROWSER_ONLY === '1') {
+      const fixtureKey=process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSD16'
+        ?'rgb16nearcap'
+        :process.env.ZPE_NEAR_CAP_BROWSER_FORMAT==='PSB32'
+          ?'rgb32psbnearcap':null;
+      if(!fixtureKey) throw new TypeError('003W/2b-2a: invalid near-cap browser format');
+      const {verifyBrowserNearCapUi}=await import('./browser-near-cap-ui-smoke.mjs');
+      const cpuTools=process.env.ZPE_OPERATION_CPU_OBSERVATION==='1'
+        ?await import('./browser-linux-cpu-observation.mjs'):null;
+      if(cpuTools){
+        try{browserClient=await CdpClient.connect(browserWs);}
+        catch{browserClient=null;}
+      }
+      if(process.env.ZPE_SAME_SESSION_RETENTION_CONTROL==='1' &&
+          process.env.ZPE_SAME_SESSION_RETENTION!=='1')
+        throw new TypeError('003T/4b observer control needs real retention measurements');
+      if(process.env.ZPE_SAME_SESSION_RETENTION==='1' &&
+          (process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY!=='1' ||
+           process.env.ZPE_OPERATION_CPU_OBSERVATION!=='1' ||
+           process.env.ZPE_OPERATION_CPU_RSS_COVERAGE!=='1'))
+        throw new TypeError('003T/4 requires dense cancellation and real CPU/RSS observation');
+      const operationRssTools=cpuTools &&
+        process.env.ZPE_OPERATION_CPU_RSS_COVERAGE==='1'
+        ?await import('./browser-operation-cpu-rss-coverage.mjs'):null;
+      const operationCpuCensus=cpuTools?async()=>{
+        const unavailable=()=>{
+          const cpu=cpuTools.unknownLinuxCpuCensus('cdp-unavailable');
+          if(!operationRssTools)return cpu;
+          return {cpu,rss:operationRssTools.unknownOperationRssCensus('cdp-unavailable')};
+        };
+        if(!browserClient)return unavailable();
+        let info;
+        try{info=await browserClient.send('SystemInfo.getProcessInfo');}
+        catch{return unavailable();}
+        if(!Array.isArray(info?.processInfo) || info.processInfo.length===0)
+          return unavailable();
+        const cpu=await cpuTools.collectLinuxCpuCensus(info.processInfo);
+        if(!operationRssTools)return cpu;
+        // One CDP membership list, two sequential non-atomic /proc reads.
+        // Never infer a peak or Worker PID from a matching sample.
+        const rss=await operationRssTools.collectOperationRssCensus(info.processInfo);
+        return {cpu,rss};
+      }:null;
+      const nearCapResult=await verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,
+        operationCpuCensus,
+        dense:process.env.ZPE_DENSE_NEAR_CAP_BROWSER_ONLY === '1',
+        cancelDense:process.env.ZPE_DENSE_CANCEL_BROWSER_ONLY === '1',
+        switchDense:process.env.ZPE_DENSE_OWNER_BROWSER_ONLY === '1',
+        closeDense:process.env.ZPE_DENSE_CLOSE_BROWSER_ONLY === '1',
+        replaceDense:process.env.ZPE_DENSE_REPLACE_BROWSER_ONLY === '1',
+         importDense:process.env.ZPE_DENSE_IMPORT_BROWSER_ONLY === '1',
+        failedImportDense:process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1',
+        naturalFailedImportDense:process.env.ZPE_DENSE_NATURAL_FAILED_IMPORT_BROWSER_ONLY === '1'});
+      if(process.env.ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY === '1' ||
+         process.env.ZPE_DENSE_NATURAL_FAILED_IMPORT_BROWSER_ONLY === '1'){
+        // A malformed file is expected to produce exactly one production
+        // import-failure diagnostic. Any additional console errors still fail CI.
+        assert(nearCapResult?.decodeFailed===true,
+          '003W/2b-2h/2i must demonstrate a real PSD/PSB decode failure');
+        const expected=errors.filter(error=>error.startsWith('console.error: PSD/PSB import failed'));
+        assert(expected.length===1,'003W/2b-2h/2i exactly one expected import error',JSON.stringify(errors));
+        errors.splice(errors.indexOf(expected[0]),1);
+      }
+      assertNoBrowserErrors(errors,stderrState);
+      return;
+    }
+
+    // 002B/2a: a dedicated, fresh Chromium profile avoids contamination by
+    // the heavy synthetic Worker/Undo/Redo memory stress scenarios below.
+    if(process.env.ZPE_PHOTOCRAFT_BROWSER_ONLY==='1'){
+      if(!process.env.ZPE_PHOTOCRAFT_BROWSER_DIR)
+        throw new Error('002B/2a Photoshop corpus directory is required');
+      const {verifyPhotoshopBrowserImport}=await import('./browser-photocraft-import.mjs');
+      const cases=await verifyPhotoshopBrowserImport(client,{
+        evaluate,waitFor,assert,sourceDir:process.env.ZPE_PHOTOCRAFT_BROWSER_DIR,
+      });
+      assert(cases.length===3,'002B/2a Photoshop corpus UI case count');
+      assertNoBrowserErrors(errors,stderrState);
+      console.log('002B/2a Photoshop Chromium file:// native parity passed');
+      return;
+    }
+
+    // 037C genuine-photo opt-in, fresh Chromium profile per process. Baseline
+    // remains baseline-only; the separate Worker/quality gate needs explicit opt-in.
+    if (process.env.ZPE_REAL_PHOTO_BROWSER_DIR) {
+      const {verifyGenuinePhotoUiImport}=await import('./browser-real-photo-ui-import.mjs');
+      const options={
+        evaluate,waitFor,assert,
+        format:process.env.ZPE_REAL_PHOTO_BROWSER_FORMAT,
+        runIndex:Number(process.env.ZPE_REAL_PHOTO_BROWSER_RUN),
+        sourceDir:process.env.ZPE_REAL_PHOTO_BROWSER_DIR,
+        artifactDir:process.env.ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR,
+      };
+      const observe=process.env.ZPE_REAL_PHOTO_BROWSER_WORKER==='1';
+      const verifySwitchFailure=process.env.ZPE_REAL_PHOTO_BROWSER_FAILURE==='1';
+      const verifyMidKernel=process.env.ZPE_REAL_PHOTO_BROWSER_MID_KERNEL==='1';
+      const verifyClose=process.env.ZPE_REAL_PHOTO_BROWSER_MID_KERNEL_CLOSE==='1';
+      const verifyEscape=process.env.ZPE_REAL_PHOTO_BROWSER_MID_KERNEL_ESCAPE==='1';
+      const verifyCompletedPreview=process.env.ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_ESCAPE==='1';
+      const verifyPreviewSuccess=process.env.ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_SUCCESS==='1';
+      const verifyCancelSuccessor=process.env.ZPE_REAL_PHOTO_BROWSER_CANCEL_SUCCESSOR==='1';
+      const verifyMalformedAlpha=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_ALPHA==='1';
+      const verifyMalformedCounter=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_COUNTER==='1';
+      const malformedExtra=process.env.ZPE_REAL_PHOTO_BROWSER_MALFORMED_EXTRA||'';
+      const verifyMemoryCap=process.env.ZPE_REAL_PHOTO_BROWSER_MEMORY_CAP==='1';
+      if(malformedExtra && !['outside','nonfinite-nan','nonfinite-infinity'].includes(malformedExtra))
+        throw new Error('037C-3b-3/2b-2 invalid malformed extra kind');
+      if(Number(observe)+Number(verifySwitchFailure)+Number(verifyMidKernel)+Number(verifyClose)+Number(verifyEscape)+Number(verifyCompletedPreview)+Number(verifyPreviewSuccess)+Number(verifyCancelSuccessor)+Number(verifyMalformedAlpha)+Number(verifyMalformedCounter)+Number(Boolean(malformedExtra))+Number(verifyMemoryCap)>1)
+        throw new Error('037C-3b real photo modes require independent Chromium sessions');
+      let photoSampler=null,photoReport=null,photoWorker=null;
+      if(observe){
+        browserClient=await CdpClient.connect(browserWs);
+        photoSampler=createBrowserRendererHeapSampler(client,{processClient:browserClient});
+        await photoSampler.start();
+      }
+      try{
+        const baseline=await verifyGenuinePhotoUiImport(client,options);
+        if(verifySwitchFailure || verifyMidKernel || verifyClose || verifyEscape || verifyCompletedPreview || verifyPreviewSuccess || verifyCancelSuccessor || verifyMalformedAlpha || verifyMalformedCounter || malformedExtra){
+          const {verifyGenuinePhotoUiSwitchFailure}=await import('./browser-real-photo-switch-failure.mjs');
+          const errorsBeforeExpectedFailure=errors.length;
+          await verifyGenuinePhotoUiSwitchFailure(client,{...options,baseline,
+            midKernel:verifyMidKernel||verifyClose||verifyEscape,closeDocument:verifyClose,
+            escapeCancel:verifyEscape,completedPreviewEscape:verifyCompletedPreview,
+            completedPreviewSuccess:verifyPreviewSuccess,cancelFirstSuccessor:verifyCancelSuccessor,
+            malformedReply:verifyMalformedAlpha||verifyMalformedCounter||Boolean(malformedExtra),
+            malformedKind:malformedExtra||(verifyMalformedCounter?'counter':'alpha')});
+          if(verifyMalformedAlpha||verifyMalformedCounter||malformedExtra){
+            // Allow exactly the expected caught TypeError, and only after the UI
+            // failure status/native byte parity has been checked independently.
+            const reported=errors.slice(errorsBeforeExpectedFailure);
+            if(reported.length!==1 ||
+              !/^console\.error: TypeError: Tiled inpaint: invalid Worker result(?:\n|$)/.test(reported[0]))
+              fail('037C-3b-3/2a unexpected browser errors',reported.join('\n'));
+            errors.splice(errorsBeforeExpectedFailure,1);
+          }
+        }
+        if(verifyMemoryCap){
+          const {verifyGenuinePhotoUiMemoryCap}=await import('./browser-real-photo-switch-failure.mjs');
+          await verifyGenuinePhotoUiMemoryCap(client,{...options,baseline});
+        }
+        if(observe){
+          await photoSampler.snapshot('after-import');
+          const {verifyGenuinePhotoUiWorker}=await import('./browser-real-photo-ui-worker.mjs');
+          photoWorker=await verifyGenuinePhotoUiWorker(client,{...options,baseline,
+            onStage:phase=>photoSampler.snapshot(phase)});
+        }
+      }finally{
+        if(photoSampler)photoReport=await photoSampler.stop();
+      }
+      if(photoWorker){
+        const {writeRealPhotoMemoryObservation}=await import('./browser-real-photo-memory-evidence.mjs');
+        const observation=await writeRealPhotoMemoryObservation({
+          report:photoReport,worker:photoWorker,artifactDir:options.artifactDir});
+        console.log('037C-3a genuine photo memory observation:',JSON.stringify(observation));
+      }
+      assertNoBrowserErrors(errors,stderrState);
+      return;
+    }
+
     const blobWorkerProbe = await evaluate(client, `(async () => {
       if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL?.createObjectURL !== 'function') {
         return { supported:false, ok:false, error:'Worker/Blob API unavailable' };
@@ -430,6 +703,162 @@ async function runSmoke() {
       }
     })()`);
     assert(blobWorkerProbe.supported && blobWorkerProbe.ok, 'Blob Worker must work from the real file:// editor', JSON.stringify(blobWorkerProbe));
+
+    // Stage 003: verify real detached tiled compute, not only a trivial Blob
+    // Worker. The supplier is a classic file:// script; the Worker itself has
+    // no file:// imports, dynamic fetch or module loader dependency.
+    const tiledWorkerProbe = await evaluate(client, `(async () => {
+      let worker=null, url=null;
+      try {
+        await new Promise((resolve,reject)=>{
+          const script=document.createElement('script');
+          const timer=setTimeout(()=>reject(new Error('Worker supplier script timed out')),5000);
+          script.onload=()=>{clearTimeout(timer);resolve();};
+          script.onerror=()=>{clearTimeout(timer);reject(new Error('Worker supplier script failed to load'));};
+          script.src=new URL('./src/core/tiled-inpaint-worker-source.js',document.baseURI).href;
+          document.head.append(script);
+        });
+        const code=globalThis.__zpeTiledInpaintWorkerSource;
+        if(typeof code!=='string'||code.length<10000)throw new Error('Missing classic Worker source');
+        const w=8,h=8,raw=new Uint8Array(w*h*4);
+        for(let i=0;i<w*h;i++)raw.set([20,40,60,255],i*4);
+        raw.set([250,0,0,255],(4*w+4)*4);
+        const dataUrl='data:application/x-zeter-pixel-buffer-tile;base64,'+btoa(String.fromCharCode(...raw));
+        const source={
+          kind:'zpe-pixel-buffer-source-v2',width:w,height:h,model:'rgb',
+          channels:4,bitsPerChannel:8,colorSpace:'srgb',alphaMode:'straight',
+          profileName:'',rawBytes:raw.byteLength,tileSize:w,
+          tiles:[{x:0,y:0,width:w,height:h,rawBytes:raw.byteLength,dataUrl}],
+        };
+        url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
+        worker=new Worker(url);
+        const reply=await new Promise((resolve,reject)=>{
+          const timer=setTimeout(()=>reject(new Error('Tiled Worker compute timed out')),6000);
+          worker.onmessage=event=>{
+            if(event.data?.ready===true){
+              worker.postMessage({id:17,source,selectedIndices:Uint32Array.of(4*w+4),halo:2,maxLayerPixels:128});
+              return;
+            }
+            if(event.data?.id!==17)return;
+            clearTimeout(timer);
+            resolve(event.data);
+          };
+          worker.onerror=event=>{clearTimeout(timer);reject(new Error(event.message||'Tiled Worker startup error'));};
+          worker.onmessageerror=()=>{clearTimeout(timer);reject(new Error('Tiled Worker messageerror'));};
+        });
+        return {ok:reply.ok===true&&reply.result?.filled===1&&reply.result?.changedTiles===1
+          &&reply.result?.source?.tiles?.[0]?.dataUrl!==dataUrl,
+          filled:reply.result?.filled,changedTiles:reply.result?.changedTiles,
+          error:reply.error};
+      }catch(error){
+        return {ok:false,error:String(error?.message||error)};
+      }finally{
+        worker?.terminate();
+        if(url)URL.revokeObjectURL(url);
+      }
+    })()`);
+    assert(tiledWorkerProbe.ok, 'Real CMYK/RGB tiled compute must work inside file:// Blob Worker', JSON.stringify(tiledWorkerProbe));
+
+
+
+    // Stage 003: exercise the *production* lazy file:// browser controller,
+    // rather than manually constructing the worker as in the protocol probe.
+    // Module bodies are evaluated in an isolated browser scope: the canonical
+    // app.bundle.js must remain unmodified and the real source files are used.
+    const browserWorkerModuleText = await Promise.all([
+      readFile(path.join(ROOT, 'src/core/tiled-inpaint-worker-client.js'), 'utf8'),
+      readFile(path.join(ROOT, 'src/core/tiled-inpaint-browser-worker.js'), 'utf8'),
+    ]);
+    const browserWorkerModules = browserWorkerModuleText.map((source, index) => (
+      (index === 1 ? source.replace(/^import[^\n]*\n/m, '') : source)
+        .replace(/^export /gm, '')
+    )).join('\n');
+
+    async function browserWorkerControllerProbe() {
+      const initialSupplier = globalThis.__zpeTiledInpaintWorkerSource;
+      // Force the actual async <script> loading branch, even though the
+      // independent protocol probe already loaded a supplier earlier.
+      delete globalThis.__zpeTiledInpaintWorkerSource;
+      let created = 0;
+      let terminated = 0;
+      class ObservedWorker extends Worker {
+        constructor(url) { super(url); created += 1; }
+        terminate() { terminated += 1; return super.terminate(); }
+      }
+      const controller = createBrowserTiledInpaintWorkerController({
+        WorkerType:ObservedWorker, loadTimeoutMs:5000,
+      });
+      try {
+        const width = 8, height = 8;
+        const raw = new Uint8Array(width * height * 4);
+        for (let offset = 0; offset < raw.length; offset += 4) raw.set([20, 40, 60, 255], offset);
+        const selectedIndex = 4 * width + 4;
+        raw.set([250, 0, 0, 255], selectedIndex * 4);
+        const dataUrl = 'data:application/x-zeter-pixel-buffer-tile;base64,' + btoa(String.fromCharCode(...raw));
+        const source = {
+          kind:'zpe-pixel-buffer-source-v2', width, height, model:'rgb',
+          channels:4, bitsPerChannel:8, colorSpace:'srgb', alphaMode:'straight',
+          profileName:'', rawBytes:raw.byteLength, tileSize:width,
+          tiles:[{x:0,y:0,width,height,rawBytes:raw.byteLength,dataUrl}],
+        };
+        const original = JSON.stringify(source);
+        const job = {source,selectedIndices:Uint32Array.of(selectedIndex),halo:2,maxLayerPixels:128};
+        const start = performance.now();
+        const first = await controller.run(job);
+        const elapsedMs = performance.now() - start;
+        // Supplier bootstrap now crosses a Promise.race. Drain bounded
+        // microtasks until the second Worker is constructed, then cancel it
+        // *before* browser ready/reply events can run in the next task.
+        const pending = controller.run(job);
+        for (let attempt = 0; attempt < 16 && created < 2; attempt += 1) {
+          await Promise.resolve();
+        }
+        const stopped = controller.cancel();
+        const cancelled = await pending;
+        const third = await controller.run(job);
+        return {
+          initialSupplierWasPresent:typeof initialSupplier === 'string',
+          loaded:typeof globalThis.__zpeTiledInpaintWorkerSource === 'string',
+          firstFilled:first.filled, firstChangedTiles:first.changedTiles,
+          firstSourceChanged:first.source?.tiles?.[0]?.dataUrl !== dataUrl,
+          thirdFilled:third.filled, cancelled:cancelled?.cancelled === true,
+          stopped, created, terminated, originalUnchanged:JSON.stringify(source) === original,
+          elapsedMs,
+        };
+      } finally {
+        controller.cancel();
+        if (initialSupplier) globalThis.__zpeTiledInpaintWorkerSource = initialSupplier;
+      }
+    }
+    const browserControllerResult = await evaluate(client, '(async () => {\n' +
+      browserWorkerModules + '\nreturn (' + browserWorkerControllerProbe.toString() + ')();\n})()');
+    assert(browserControllerResult.initialSupplierWasPresent && browserControllerResult.loaded,
+      'file:// adapter must load the generated supplier again', JSON.stringify(browserControllerResult));
+    assert(browserControllerResult.firstFilled === 1 && browserControllerResult.firstChangedTiles === 1 &&
+      browserControllerResult.firstSourceChanged && browserControllerResult.thirdFilled === 1 &&
+      browserControllerResult.originalUnchanged, 'Production browser Worker adapter must compute without mutating donors',
+      JSON.stringify(browserControllerResult));
+    assert(browserControllerResult.stopped && browserControllerResult.cancelled &&
+      browserControllerResult.created === 3 && browserControllerResult.terminated === 3,
+      'Production adapter must terminate a cancelled Worker and recover on the next job',
+      JSON.stringify(browserControllerResult));
+    console.log('Stage 003 browser Worker controller probe:', JSON.stringify(browserControllerResult));
+
+    // 010B: unlike the delayed-reply PSB32 cancellation, this proves that
+    // Chrome terminates a Worker AFTER a real native kernel pixel write and
+    // BEFORE the CPU-bound kernel can finish. Only the isolated test Blob
+    // contains instrumentation; the production supplier stays unchanged.
+    const midKernel = await verifyBrowserMidKernelCancellation(client, {
+      evaluate, moduleSource:browserWorkerModules,
+    });
+    assert(midKernel.ok && midKernel.protocol === 'file:' &&
+      midKernel.probes === 2 && midKernel.created === 3 &&
+      midKernel.terminated === 3 && midKernel.replies === 1 &&
+      midKernel.directCancelled && midKernel.staleOwnerCancelled &&
+      midKernel.sourceImmutable && midKernel.successorFilled === 1,
+      'Stage 003 Chromium in-kernel Worker cancellation must be atomic',
+      JSON.stringify(midKernel));
+    console.log('Stage 003 Chromium real mid-kernel cancellation:', JSON.stringify(midKernel));
 
     const initial = await evaluate(client, `(() => ({
       title: document.title,
@@ -643,13 +1072,158 @@ async function runSmoke() {
     assert(await evaluate(client, `document.querySelector('#removeObjectApply').hidden`), 'Reset removes only the mask');
     assertNoBrowserErrors(errors, stderrState);
 
+    // Stage 003: exercise the ACTUAL editor UI command on a 16-bit tiled .zpe
+    // document. Earlier probes cover direct Worker/controller APIs; this guards
+    // the menu -> frozen selection -> Worker -> native layer -> History wiring.
+    browserClient = await CdpClient.connect(browserWs);
+    const stage003HeapSampler = createBrowserRendererHeapSampler(client, { processClient:browserClient });
+    await stage003HeapSampler.start();
+    const stage003ImportStartedMs = Date.now();
+    const stage003Fixture = await evaluate(client, "(() => {\n  const width=8,height=8,tileSize=4,channels=4;\n  const canvas=document.createElement('canvas');\n  canvas.width=width;canvas.height=height;\n  const ctx=canvas.getContext('2d'),image=ctx.createImageData(width,height);\n  for(let y=0;y<height;y++)for(let x=0;x<width;x++){\n    const defect=(x===3||x===4)&&(y===3||y===4);\n    image.data.set(defect?[234,0,0,255]:[20,40,60,255],(y*width+x)*4);\n  }\n  ctx.putImageData(image,0,0);\n  const tiles=[];\n  for(let y=0;y<height;y+=tileSize)for(let x=0;x<width;x+=tileSize){\n    const bytes=new Uint8Array(tileSize*tileSize*channels*2);\n    const view=new DataView(bytes.buffer);\n    for(let dy=0;dy<tileSize;dy++)for(let dx=0;dx<tileSize;dx++){\n      const defect=(x+dx===3||x+dx===4)&&(y+dy===3||y+dy===4);\n      const values=defect?[60000,0,0,65535]:[5140,10280,15420,65535];\n      for(let ch=0;ch<channels;ch++)view.setUint16(((dy*tileSize+dx)*channels+ch)*2,values[ch],true);\n    }\n    tiles.push({x,y,width:tileSize,height:tileSize,rawBytes:bytes.length,\n      dataUrl:'data:application/x-zeter-pixel-buffer-tile;base64,'+btoa(String.fromCharCode(...bytes))});\n  }\n  const source={kind:'zpe-pixel-buffer-source-v2',width,height,model:'rgb',channels,\n    bitsPerChannel:16,colorSpace:'srgb',alphaMode:'straight',profileName:'',tileSize,\n    rawBytes:width*height*channels*2,tiles};\n  const layer={id:'stage003-ui-layer',type:'raster',name:'Tiled 16-bit UI',\n    x:0,y:0,width,height,scaleX:1,scaleY:1,rotation:0,visible:true,locked:false,\n    opacity:1,blendMode:'source-over',dataUrl:canvas.toDataURL('image/png'),highDepthSource:source};\n  const project={version:1,name:'Stage003 browser UI fixture',width,height,\n    background:'transparent',selectedLayerId:layer.id,groups:[],layers:[layer]};\n  const input=document.querySelector('#projectInput'),transfer=new DataTransfer();\n  transfer.items.add(new File([JSON.stringify(project)],'stage003-ui.zpe',{type:'application/json'}));\n  const fileName=transfer.files[0].name;\n  input.files=transfer.files;\n  const oldConfirm=window.confirm;\n  window.confirm=()=>true;\n  try {input.dispatchEvent(new Event('change',{bubbles:true}));}\n  finally {window.confirm=oldConfirm;}\n  return {fileName,sourceBytes:source.rawBytes,tiles:tiles.length};\n})()");
+    assert(stage003Fixture.sourceBytes === 512 && stage003Fixture.tiles === 4,
+      'Stage 003 UI fixture must contain real 16-bit serialized tiles', JSON.stringify(stage003Fixture));
+    await waitFor('Stage 003 high-depth project import', async () => evaluate(client,
+      "document.querySelector('#statusText')?.textContent==='Проект открыт' && document.querySelectorAll('.layer-row').length===1"));
+    await waitFor('Stage 003 16-bit layer render',async()=>evaluate(client, "(() => {const c=document.querySelector('#editorCanvas');return c.width===8 && c.height===8 && c.getContext('2d').getImageData(4,4,1,1).data[0]>150;})()"));
+    await stage003HeapSampler.snapshot('after-import-preview');
+    const stage003ImportAndPreviewMs = Date.now() - stage003ImportStartedMs;
+    const stage003FillStartedMs = Date.now();
+    const stage003View = await evaluate(client, "(() => {\n  const zoom=document.querySelector('#zoomRange');\n  zoom.value='400';zoom.dispatchEvent(new Event('input',{bubbles:true}));\n  document.querySelector('[data-tool=\"marquee\"]').click();\n  const type=document.querySelector('#selectionType');\n  type.value='rect';type.dispatchEvent(new Event('change',{bubbles:true}));\n  const viewport=document.querySelector('#stageViewport');\n  viewport.scrollLeft=0;viewport.scrollTop=0;\n  document.querySelector('#canvasShell').scrollIntoView({block:'center',inline:'center'});\n  const canvas=document.querySelector('#editorCanvas'),rect=canvas.getBoundingClientRect();\n  const point=(x,y)=>({x:rect.left+rect.width*x/8,y:rect.top+rect.height*y/8});\n  const ctx=canvas.getContext('2d');\n  const before=Array.from(ctx.getImageData(4,4,1,1).data);\n  return {width:canvas.width,height:canvas.height,rectWidth:rect.width,rectHeight:rect.height,\n    start:point(2.6,2.6),end:point(5.5,5.5),before,hit:document.elementFromPoint(point(2.6,2.6).x,point(2.6,2.6).y)?.id,hitType:document.elementFromPoint(point(2.6,2.6).x,point(2.6,2.6).y)?.outerHTML?.slice(0,180)};\n})()");
+    assert(stage003View.width===8 && stage003View.height===8 && stage003View.rectWidth>16 && stage003View.hit==='overlayCanvas' &&
+      stage003View.before[0]>150 && stage003View.before[1]<40,
+      'Stage 003 UI setup must display the defect at usable zoom', JSON.stringify(stage003View));
+    const stage003Mouse = (type,coords,buttons) => client.send('Input.dispatchMouseEvent',{
+      type,x:coords.x,y:coords.y,button:'left',buttons,clickCount:1,
+    });
+    await stage003Mouse('mouseMoved',stage003View.start,0);
+    await stage003Mouse('mousePressed',stage003View.start,1);
+    await stage003Mouse('mouseMoved',stage003View.end,1);
+    await stage003Mouse('mouseReleased',stage003View.end,0);
+    const stage003Observer = await evaluate(client, "(() => {\n  const post=Worker.prototype.postMessage;\n  window.__stage003UiWorkerJobs=0;\n  window.__stage003RestoreWorkerPost=()=>{Worker.prototype.postMessage=post;delete window.__stage003RestoreWorkerPost;};\n  Worker.prototype.postMessage=function(value,...args){\n    if(value?.selectedIndices instanceof Uint32Array)window.__stage003UiWorkerJobs++;\n    return post.call(this,value,...args);\n  };\n  const panel=document.querySelector('#contentAwareProgressPanel');\n  if(!panel?.hidden || !document.querySelector('#contentAwareProgressCancel'))return false;\n  window.__stage003Progress={shown:0,hidden:0};\n  const observer=new MutationObserver(records=>{\n    for(const change of records){\n      if(change.oldValue===null)window.__stage003Progress.hidden++;\n      else window.__stage003Progress.shown++;\n    }\n  });\n  observer.observe(panel,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});\n  window.__stage003RestoreProgress=()=>{observer.disconnect();delete window.__stage003RestoreProgress;};\n  return true;\n})()");
+    assert(stage003Observer,'Stage 003 Worker dispatch observer must install');
+    const stage003Selection = await evaluate(client, "(() => {\n  document.querySelector('.menu-button[data-menu=\"edit\"]').click();\n  const item=[...document.querySelectorAll('#menuPopover .menu-item')]\n    .find(button=>button.querySelector('span')?.textContent==='Контент-заливка выделения');\n  const enabled=Boolean(item&&!item.disabled);\n  if(enabled)item.click();\n  return {enabled,status:document.querySelector('#statusText')?.textContent,items:[...document.querySelectorAll('#menuPopover .menu-item')].map(el=>({text:el.textContent,disabled:el.disabled}))};\n})()");
+    assert(stage003Selection.enabled,
+      'Real marquee selection must enable Edit > Content-Aware Fill',JSON.stringify(stage003Selection));
+    await waitFor('Stage 003 tiled UI Content-Aware Fill',async()=>evaluate(client,
+      "document.querySelector('#statusText')?.textContent?.includes('tiled ') && window.__stage003UiWorkerJobs===1 && document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data[0]<150"));
+    // The command publishes status/history before requestAnimationFrame paints the new preview.
+    // Wait for visible pixels as well to avoid racing the renderer in headless CI.
+    const stage003Result = await evaluate(client, "(() => ({\n  status:document.querySelector('#statusText')?.textContent||'',\n  jobs:window.__stage003UiWorkerJobs||0,\n  pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data),\n  history:[...document.querySelectorAll('#historyList .history-row')].map(row=>row.textContent)\n}))()");
+    assert(stage003Result.jobs===1 && stage003Result.status.includes('восстановлено') &&
+      stage003Result.history.filter(value=>value.includes('Контент-заливка')).length===1 &&
+      stage003Result.pixel[0]<150,
+      'UI tiled fill must dispatch exactly one real Worker job, repair the defect and commit once',
+      JSON.stringify(stage003Result));
+    const stage003Progress = await evaluate(client, "(() => ({shown:window.__stage003Progress?.shown,hidden:window.__stage003Progress?.hidden,panelHidden:document.querySelector('#contentAwareProgressPanel')?.hidden}))()");
+    assert(stage003Progress.shown===1 && stage003Progress.hidden===1 && stage003Progress.panelHidden===true,
+      'Actual native UI Content-Aware Worker must show and close its cancellable progress panel exactly once',
+      JSON.stringify(stage003Progress));
+    await evaluate(client,"window.__stage003RestoreProgress?.();true");
+    await stage003HeapSampler.snapshot('after-worker-preview');
+    const stage003SelectionWorkerPreviewMs = Date.now() - stage003FillStartedMs;
+    await evaluate(client,"document.querySelector('#undoBtn').click();true");
+    await waitFor('Stage 003 UI undo',async()=>evaluate(client,
+      "document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data[0]>150"));
+    await evaluate(client,"document.querySelector('#redoBtn').click();true");
+    await waitFor('Stage 003 UI redo',async()=>evaluate(client,
+      "document.querySelector('#editorCanvas').getContext('2d').getImageData(4,4,1,1).data[0]<150"));
+    await stage003HeapSampler.snapshot('after-undo-redo');
+    const stage003HeapProfile = await stage003HeapSampler.stop();
+    console.log('Stage 003 browser renderer heap profile:', JSON.stringify({
+      kind:'stage003-file-ui-rgb16-tiled-worker-heap-samples-v1',
+      fixture:'synthetic native .zpe RGB16 8x8 (NOT external PSD/PSB)',
+      importAndPreviewMs:stage003ImportAndPreviewMs,
+      selectionWorkerAndPreviewMs:stage003SelectionWorkerPreviewMs,
+      ...stage003HeapProfile,
+    }));
+    await evaluate(client,"window.__stage003RestoreWorkerPost?.();true");
+    console.log('Stage 003 tiled high-depth UI Worker regression:',JSON.stringify(stage003Result));
+    assertNoBrowserErrors(errors,stderrState);
+
+    await verifyBrowserHighDepthPsdPsbImport(client);
+    assertNoBrowserErrors(errors,stderrState);
+
+    await verifyLargeBrowserPsd16Worker(client,{evaluate,waitFor,assert,browserClient,testCancellation:true});
+    assertNoBrowserErrors(errors,stderrState);
+
+    await verifyLargeBrowserPsd16Worker(client,{
+      evaluate,waitFor,assert,browserClient,fixtureKey:'rgb32psblarge',testCancellation:true,
+    });
+    assertNoBrowserErrors(errors,stderrState);
+
+
+    // 036C: versioned, CI-revalidated stage samples during the actual 036B
+    // Chromium PSD16/PSB32 UI paths. These are NOT native Worker/operation peaks.
+    for (const fixtureKey of ['rgb16wide','rgb32psbwide']) {
+      const wideSampler=createBrowserRendererHeapSampler(client,{processClient:browserClient});
+      await wideSampler.start();
+      const stageSamples=[];
+      let quality;
+      try {
+        quality=await verifyBrowserWideConnectedNativeUi(client,{
+          evaluate,waitFor,assert,fixtureKey,
+          observeStage:async(phase,milestoneMs)=>{
+            const sample=await wideSampler.snapshot(phase);
+            stageSamples.push({
+              phase,milestoneMs,observedAtUnixMs:Date.now(),
+              samplerElapsedMs:sample.elapsedMs,
+              rendererHeapBytes:sample.jsHeapUsedBytes,
+              cdpPrivateMemoryBytes:Number.isSafeInteger(sample.processPrivateMemoryBytes)
+                ? sample.processPrivateMemoryBytes : null,
+              linuxRssBytes:Number.isSafeInteger(sample.chromiumRssBytes)
+                ? sample.chromiumRssBytes : null,
+              pidMembershipObserved:sample.pidMembershipObserved,
+              workerTargetsObserved:sample.workerTargetsObserved,
+              linuxIdentityObserved:sample.linuxIdentityObserved,
+            });
+          },
+        });
+      } finally {
+        await wideSampler.stop();
+      }
+      const artifactPath=await writeWideConnectedBrowserArtifact({fixtureKey,quality,stageSamples});
+      console.log('036C Chromium wide stage sample evidence:',JSON.stringify({
+        fixtureKey,artifactPath,stages:stageSamples.length,
+        disclaimer:'Informational CDP/Linux samples, NOT a Worker RSS or operation peak.',
+      }));
+      assertNoBrowserErrors(errors,stderrState);
+    }
+
     await new Promise(resolve => setTimeout(resolve, 1_800)); // Let editor autosave quiesce.
     await verifyRecoveryIndexedDb(client);
+    assertNoBrowserErrors(errors, stderrState);
+
+    // 035: three real file:// reloads with delayed IndexedDB startup and
+    // public recovery-modal actions. This runs before the native 010D series.
+    await verifyBrowserDelayedRecoveryReloads(client, {
+      evaluate, waitFor, assert,
+      recoveryStorageSource: (await readFile(path.join(ROOT, 'src/core/recovery.js'), 'utf8')).replace(/^export /gm, ''),
+    });
+    assertNoBrowserErrors(errors, stderrState);
+
+    // 010D: last scenario after a clean reload so the application's lazy
+    // Worker controller loads only the test-instrumented source in this phase.
+    await verifyBrowserUiLockMidKernel(client, { evaluate, waitFor, assert, browserClient,
+      cancelViaButton:true });
+    assertNoBrowserErrors(errors, stderrState);
+    // 010D-C: real PSB32 Float32 active switch DURING CPU kernel write,
+    // exact native little-endian word oracle across cancel + Undo/Redo.
+    await verifyBrowserUiLockMidKernel(client, {
+      evaluate, waitFor, assert, browserClient, fixtureKey:'rgb32psblarge',
+    });
+    assertNoBrowserErrors(errors, stderrState);
+    // 010D-D: both document tabs are independently imported PSB32 Float32,
+    // each with distinct native words, Worker Fill, Undo/Redo and History.
+    await verifyBrowserUiLockMidKernel(client, {
+      evaluate, waitFor, assert, browserClient,
+      fixtureKey:'rgb32psblarge', secondNativeFixtureKey:'rgb32psblarge-alt',
+    });
     assertNoBrowserErrors(errors, stderrState);
 
     console.log(`Browser smoke passed: ${browserExecutable}`);
     console.log(`Verified file URL: ${INDEX_URL}`);
   } finally {
+    try { browserClient?.close(); } catch {}
     try { client?.close(); } catch {}
     if (browser.exitCode === null && !browser.killed) browser.kill('SIGTERM');
     await new Promise(resolve => {

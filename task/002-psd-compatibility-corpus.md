@@ -1,0 +1,102 @@
+## 2026-10-19 — 002B/2b independent PSB32 candidate DONE; Adobe PSB32 still BLOCKED
+
+- [PR #274](https://github.com/zeter1/ZeTer-Photo-Editor/pull/274) → [main 7f866dd](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7f866dd0ebe24d5ee73f28006f3da0b14d39322b); [PR CI success #39232035978](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39232035978), [exact-main CI success #39232462970](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39232462970). 3 pinned external psd-tools RGB32 source assets passed SHA-256 and native Float32 tests; PSB/PSD 100×150 share exact 240000-byte raster digest `b39f0ed8bed3c91df753a100123afff6e04628ac4ff8002986a31ffdccdb0cad`; 5×5 PSB yields 3 independently hashed editable raster layers. Full browser smoke green. Source authorship by Photoshop and render semantics **unverified**.
+- Subpass 002B/2b DONE; [next 002B/2c](002b2c-photoshop-psb32-provenance.md) P0 BLOCKED for independently verified licensed Adobe PSB32 with provenance/embedded golden before Photoshop-certified dual Worker/History claims. Whole Stage 002 OPEN.
+
+## 2026-10-19 — 002B/2a DONE; 002B/2b real external PSB32 candidate IN PROGRESS
+
+- [002B/2a](002b2-photoshop-browser-native.md): [PR #273](https://github.com/zeter1/ZeTer-Photo-Editor/pull/273) merged [996fd1c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/996fd1cc7b4b03c7ae0b863d57a7276fa5234ff1), [PR CI success #39230304359](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39230304359), [PR real-photo success #39230304433](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39230304433), [exact-main general CI success #39230928368](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39230928368). PSD16/PSD32 public Chromium `file://` imported layers Save Project native SHA parity; no PSB32 Adobe.
+- [002B/2b](002b2b-external-psb32-candidate.md): separate MIT-published `psd-tools` genuine RGB32 PSB v2 candidate from immutable commit, complete SHA-256 pins for two PSB and pair PSD; proposed real codec/Float32/PSD vs PSB native parity CI. New PR CI pending, **Photoshop authorship/provenance unproven**, so cannot satisfy overall 002B Photoshop PSB acceptance.
+
+## 2026-10-19 — 002B/2a Photoshop PSD16/PSD32 real browser native source acceptance (IN PROGRESS)
+
+- [Карточка 002B/2a](002b2-photoshop-browser-native.md): публичный `file://` File Open PSD → Save Project, полного canonical 16/32-bit raster source SHA-256 против original Photoshop-published raster decoder, v1/v2 tile coverage; три pinned Photoshop PSD, unit tamper cases, CI input reuse. Пока только ветка: PR CI/merge/exact-main НЕ подтверждены. **Это не PSB32 и не Photoshop-render parity**; обязательный original licensed PSB32 всё ещё OPEN.
+
+## 2026-10-19 — 002B/1 DONE after PR and exact-main CI
+
+- [PR #271](https://github.com/zeter1/ZeTer-Photo-Editor/pull/271) → [`bc7f4c7`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/bc7f4c73391ce437e5aa65f34167b00f361040f8). [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39224424706); [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39224795180). 3 genuine independently published pinned Photoshop (upstream claim) PSD16/PSD32 assets: downloaded bytes SHA-256 confirmed in CI, `decodePsd` layered import, every native merged composite RGBA sample against independent reference raw/RLE/ZIP oracle. General Node/browser `file://` smoke green (не specific Photoshop browser test).
+- 002B/1 **DONE** as a narrow native compressed merged-composite *decode* acceptance; Photoshop producer origin still upstream claim, not recreated/reviewed independently. **Full 002 IN PROGRESS; next P0 002B/2**: Photoshop-authored licensed PSB32 and both-kind Worker/Chromium file:// UI/render semantics. [Карточка](002b-photocraft-native-composite-oracle.md).
+
+## 2026-10-19 — 002B/1 pinned independent Photoshop PSD16/PSD32 composite oracle (IN PROGRESS)
+
+- [Полная карточка текущей проходки](002b-photocraft-native-composite-oracle.md). Pinned SHA256 upstream PhotoCraft PSD16 baseline/levels + PSD32 baseline, новая независимая native raw/RLE/ZIP composite sample reference и точный `decodePsd` parity, отрицательные Node cases и настоящий CI real corpus download без silent skip.
+- **Статус:** код в ветке, PR CI / merge / exact-main CI ещё НЕ проверены, не закрывать подзадачу; Photoshop authoring по утверждению upstream, не подтверждённое нами. Runtime codec/bundle/version пока без изменений.
+- **Следующее P0:** проверить/fix реальную несовместимость на pinned Photoshop bytes, добиться green PR/exact-main CI; затем лицензированный Photoshop **PSB32**, dual-kind corpus manifest + Worker/browser tests.
+
+## 2026-10-19 — 002B: independent Adobe-authored corpus candidate (NOT YET ADMITTED)
+
+- **Первоисточник-кандидат:** [PhotoCraft Corpus](https://github.com/storytold/photocraft-corpus) pinned revision [`b2e1dcba8954efa9ad0e7944c258cc0e9a5efc1e`](https://github.com/storytold/photocraft-corpus/tree/b2e1dcba8954efa9ad0e7944c258cc0e9a5efc1e), `SHA256SUMS`, `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE` и доступный исходник `tools/photoshop-oracles/`. README **заявляет**, что файлы созданы Adobe Photoshop 2026 (27.10) с Maximize Compatibility и двойной лицензией MIT/Apache-2.0. Это независимое публичное утверждение производителя корпуса, а не проведённая нами ручная Photoshop review или тест ZeTer.
+- **PSD16 RGB — явные кандидаты:** `photoshop/adjustments/rgb16/baseline-layer-copy.psd` SHA-256 `f31e10d19689df9dba71ebdc60652b28eb364ad8da9040a80bc5aeffcf34228e`; `photoshop/adjustments/rgb16/levels.psd` SHA-256 `fbb18d1cfa5fc74cf1c4777b99acdc2465b2920574bd9069b5a2ac129c8151d9`.
+- **Дополнительный PSD32 HDR reference (не PSB32):** `photoshop/adjustments/rgb32/baseline-layer-copy.psd` SHA-256 `73199414108280d7717cc5c908a76f51c5e3091d7471e21e7d0bac1a75734f32`. В просмотренном pinned tree корпуса **не обнаружено ни одного `.psb`**. Это НЕ удовлетворяет требованию 002 PSB32, и нельзя переименовывать PSD32 в PSB32.
+- **Доказано в этой разведке:** существование публичных путей/имён, содержимого публикации `SHA256SUMS`, текста upstream license/provenance и pinned Git revision. **Не доказано:** фактические bytes на ZeTer runner, совпадение SHA-256 после получения, настоящий Photoshop-authorship независимым воспроизведением, правильный импорт, совпадение render golden, licensing review вне опубликованных утверждений.
+- **Следующее действие P0 002B:** опционально получить точные upstream bytes по закреплённому commit (не брать mutable `main`), сравнить SHA-256 и лицензии, выполнить `decodePsd` + ZeTer layer/preview oracle против Photoshop embedded composite и browser `file://` import; отдельно найти/подготовить разрешённый **Photoshop-authored PSB32** и добавить manifest `psd16+psb32`. До обоих high-depth видов с отдельным proof по-прежнему **IN PROGRESS/BLOCKED** для 002B.
+- **Ограничение:** настоящие PNG/Adobe-reference pixels не были измерены здесь. Публичный PSD embedded composite — лишь candidate Adobe-render oracle, пока ZeTer independently не прочитал и не сверил его.
+
+## 2026-10-19 — 002A: bounded PSD/PSB top-level section preflight (DONE)
+
+- **Приоритет:** P0, подзадача существующей 002; **зависимости:** существующий external high-depth manifest/audit, не требует отсутствующих Adobe-authored fixtures.
+- **Цель:** не допустить запуска native декодирования над SHA-pinned, но структурно повреждённым файлом с выходящими за EOF объявлениями color-mode, image-resources или layer/mask section. Проверка выполняется без чтения всего файла в память и без второго неопознанного файлового дескриптора.
+- **Реализовано в ветке `fix/stage002-psd-section-envelope-20261019`:** `tools/audit-external-high-depth-corpus.mjs` после SHA-256 и header comparison на том же pinned fd проверяет верхнеуровневые length envelopes. Для PSB 64-bit uint64 длина читается BigInt и проверяется до преобразования в Number; PSD использует uint32. Также проверяются наличие двухбайтового кода compression (0..3) и хотя бы одного байта merged-image data. В отчёт добавлен `imageCompression`.
+- **Регрессии:** `tests/audit-external-high-depth-corpus.test.mjs` — PSD16/PSB32 overflow трёх top-level секций, invalid compression, пустой merged payload, nonzero-length valid section-skips, повторный корректный audit. Остальные fixture-тесты остаются синтетическими (не Photoshop-authored).
+- **Проверки:** [PR #269](https://github.com/zeter1/ZeTer-Photo-Editor/pull/269) слит в [`main` `74c2ab5`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/74c2ab568be06c7145cdef18f91e18cc16cba491). [PR CI `39219021154`](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39219021154) — success (сборка/Node tests, реальный Chromium `file://` smoke, отчёты/профили и diff hygiene); [exact-main push CI `39219421992`](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39219421992) — success на том же кодовом main SHA. Локальный `npm run check` не выполнялся: контейнер не мог разрешить GitHub DNS при клонировании. **Подэтап 002A DONE; весь 002 OPEN.**
+- **Изменённые файлы:** `tools/audit-external-high-depth-corpus.mjs`, `tests/audit-external-high-depth-corpus.test.mjs`, `CHANGELOG.md`, `task/002-psd-compatibility-corpus.md`, `task/NEXT.md`, `task/README.md`.
+- **Ограничения:** это НЕ проверка полной валидности всех PSD/PSB секций, payload/row tables, Adobe authorship, лицензии, Photoshop-render parity, ICC/CMYK accuracy или browser/file:// Worker. Независимая ручная provenance verification остаётся обязательной; неполный/compressed payload должен быть отвергнут настоящим decoder.
+- **Следующая конкретная задача:** P0 002B — юридически разрешённая Photoshop-authored PSD16 + PSB32 пара с URL/license/hash/первичным подтверждением авторства и независимыми reference composite/semantics; затем `audit` → `profile` → Chromium `file://` UI import / native Worker / preview / Undo/Redo. Ни один из этих внешних этапов не отмечен DONE.
+
+## 2026-10-11 — P0 external corpus manifest hardening (слито, main CI success)
+
+- Проходка `feat/stage002-bounded-corpus-preflight-20261011`: потоковая ограниченная обработка metadata manifest (до 1 MiB, проверка регулярного файла и идентичности inode до/после чтения), минимум 3 RGB/4 CMYK каналов, минимальная структурная длина PSD/PSB, отрицательные тесты.
+- **Проверено:** [PR #182](https://github.com/zeter1/ZeTer-Photo-Editor/pull/182) merged (`2033a10`), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38128443224), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38128545523).
+- **Без изменений рантайма/codec.** Заголовок+SHA/заявления о происхождении не являются доказательством Photoshop authorship или фактической валидности всего файла. Не закрывать Stage 002 до independently licensed Photoshop-authored PSD16/PSB32 и external golden comparisons.
+- Следующие действия и критерии приёмки: [NEXT.md](NEXT.md).
+
+# 002 — PSD/PSB round-trip compatibility corpus
+
+## Проходка 2026-10-10 — побайтовый oracle для профиля PSD16/PSB32 Worker
+
+- После реального Node Worker профиль строит синхронный результат `inpaintTiledPixelBufferSourceFromIndices` из **тех же frozen indices**, проверяет счётчики, native source metadata, все координаты тайлов и все `dataUrl` bytes. Если Worker вернул несовпадающий результат, CLI теперь не пишет успешный профиль. Дополнительный `oracleMs` и `memory.afterOracle` вынесены отдельно от прежних `workerMs`/snapshots.
+- Отрицательная Node-регрессия проверяет подмену счётчика, битовой глубины и одного payload, в том числе невозможность мутировать исходные serialized tiles.
+- **Остаётся:** получить и независимо подтвердить лицензированные Photoshop-authored PSD16/PSB32 с baseline/goldens и `file://` Chromium UI memory + Undo/Redo. Oracle использует **то же ядро ZeTer** и не служит Photoshop-pixel-golden. Задачи 002/003 продолжаются.
+
+## Проходка 2026-10-10 — подключён полный native Worker pipeline после corpus-аудита
+
+- Инструмент `node tools/profile-external-high-depth-psd-psb.mjs --manifest /abs/path/manifest.json` требует успешный preflight двух pinned PSD16/PSB32, затем повторно читает bytes через открытый дескриптор с фиксированным byte budget и SHA-256, декодирует `decodePsd`, проверяет native `Uint16Array`/`Float32Array`, выполняет tiled selection через настоящий `worker_threads` Worker и проверяет donor tile immutability.
+- Машинный JSON фиксирует `decodeMs/tilesMs/workerMs` и снимки process RSS/heap/arrayBuffers. Эти срезы **не** есть peak RSS или отдельная память Worker. Unit/CLI tests используют **собственные синтетические ZeTer-written** файлы и не подтверждают их Photoshop-authored происхождение.
+- После получения настоящих лицензированных Photoshop PSD16/PSB32 требуется: проверенный `manifest.json` с provenance и hashes → запуск этого CLI → отдельный browser `file://` UI import / preview / Undo/Redo / memory measurement → эталонная сверка Adobe/Photoshop. Этапы 002/003 остаются открытыми; wide connected ROI и прерываемый fallback остаются P1.
+
+
+## Проходка 2026-10-10 — защита pinned PSD/PSB-аудита от замены файла
+
+- Закреплён один file descriptor для проверки identity и последующего потокового SHA-256/заголовка: `O_NOFOLLOW` для последнего symlink-компонента (если поддерживается), сравнение метаданных файла до открытия/после чтения и гарантированное закрытие descriptor. Размер проверяется по фактическому потоку. Это закрывает промежуток `lstat(path) → createReadStream(path)`, когда pathname мог указывать уже на другой объект.
+- Регрессии проверяют symlink с **идентичными хешем и размером** и повторную проверку после повреждённого payload. Нельзя трактовать это как проверку реального Photoshop-документа или доказательство ограничения process RSS.
+- **Открыто P0:** законно распространяемые Photoshop-authored PSD16 и PSB32 с первоисточником/лицензией/хешами, проверка настоящего decode, browser UI Worker, preview/Undo/Redo, sampled RAM/latency; затем Stage 003 wide ROI и interruptible fallback.
+
+
+## Проходка 2026-10-10 — потоковый аудит больших внешних fixtures (Stage 002 P0)
+
+- Исправлена пиковая память preflight: `tools/audit-external-high-depth-corpus.mjs` больше не загружает PSD/PSB (до 512 MiB) целиком ради хеширования, а читает фиксированными 64 KiB блоками. Для проверки заголовка держит только первые 27 байт; сравнивает число прочитанных байт с manifest после чтения, включая возможное изменение файла после `lstat`.
+- Regression: PSD16 и PSB32 header-only mocks с многоблочными payloads, фиксированными SHA-256 и повреждением последнего байта. Это **не** реальные Photoshop PSD/PSB, и тест сам по себе не является измерением пикового RSS.
+- **Дальше:** добыть законно распространяемые независимо Photoshop-authored 16-bit PSD / 32-bit PSB, зафиксировать ссылки/лицензию/hash и проверить настоящий decode → browser file:// UI Worker → preview/Undo/Redo + memory. Задача 002 остаётся открытой; связанная 003 тоже.
+
+
+## P0 handoff: audited external high-depth fixtures (2026-10-10)
+
+- Добавлен проверяющий CLI: `node tools/audit-external-high-depth-corpus.mjs --manifest /path/to/manifest.json`, отдельно от редакторского PSD writer/decoder. Он принимает schema `zpe-external-high-depth-psd-psb-v1` и **ровно два** entries `psd16` и `psb32`.
+- Каждый entry: `id, file, size, sha256, width, height, channels, colorMode, sourceUrl, sourceApplication, license, licenseUrl, provenanceNotes`. `file` — локальный basename PSD/PSB в каталоге manifest; `sourceApplication` должно быть `Adobe Photoshop`. Поля авторства и лицензии — **заявления**, их необходимо доказать по внешнему первоисточнику; тестовый mock не является внешним Photoshop fixture.
+- Аудит проверяет SHA-256 содержимого, размер, symlink/path traversal, сигнатуру `8BPS`, reserved bytes, PSD v1/PSB v2, 16/32-bit, RGB/CMYK, размеры и число каналов. Никакого автоматического скачивания/публикации неизвестно лицензированных файлов.
+- **Не закрыто:** реальная independently authored пара high-depth PSD/PSB; Photoshop/render reference, полноценный decode и browser Worker/preview/memory. После получения валидных files добавить отдельный codec→tiles→browser тест и реальный provenance review. Эта CLI-проверка **только preflight**.
+
+
+- **Goal:** расширить проверяемую Photoshop PSD/PSB round-trip совместимость на маски, группы и корректирующие слои.
+- **Why now / evidence:** PSD import/export в `main` есть, но полное Photoshop-совпадение нельзя заявлять без совместимых реальных fixtures.
+- **Scope:** одна категория независимых byte/semantic/preview fixtures за проходку, tests/docs; **non-scope:** proprietary parity без доказательств.
+- **Inspect first:** `src/formats/psd.js`, `tests/psd-export-integration.test.mjs`, `src/document/psd-native-metadata-plans.js`.
+- **Behavioral contracts:** сохранить native structure, no silent 8-bit/CMYK loss, deterministic fixture generation and attribution.
+- **Progress (2026-10-10, PR candidate):** добавлен memory-generated PSD/PSB fixture с nested-group topology, включёнными/отключёнными raster masks, clipping и реальными MIT adjustment blocks. `tests/psd-masked-group-corpus.test.mjs` сравнивает semantic snapshots после повторного round-trip; provenance/limitations — `tests/fixtures/psd-compatibility/README.md`. Выполнение и CI проверяются отдельно; до merge задачу не закрывать.
+- **Progress (2026-10-10, external preview merged in [PR #130](https://github.com/zeter1/ZeTer-Photo-Editor/pull/130)):** добавлен отдельный независимый decoder-oracle `tests/psd-external-merged-preview.test.mjs` для pinned external PSD Shape Layer (RGBA), PSB with groups (RGB) и PSD Adjustment Layer with mask (RGB). Из реальных image-data bytes напрямую (без ZPE writer) читается PackBits/RLE merged preview; сверяются source SHA-256, зафиксированный FNV-1a RGBA, пиксельный sample и byte-for-byte результат codec composite decode на отдельной копии файла с удалённой layer section. Оригинальный fixture не изменяется, semantic-layer импорт также выполняется. [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38046064138) и [merge/main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38046117059) завершились зелёным на merge commit `39226d48dce3893885ecfecfc926c08389140e8a`.
+- **Progress (2026-10-10, native-mask wire oracle; [PR #132](https://github.com/zeter1/ZeTer-Photo-Editor/pull/132) merged, [main push CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38046682118)):** `tests/psd-masked-group-corpus.test.mjs` directly parses raw PSD v1 / PSB v2 layer records and PackBits `-2` mask channel bytes without invoking `decodePsd` for this oracle. It verifies nested `lsct` folder/boundary markers, adjustment clipping, group opacity/visibility, enabled/disabled mask flags and exact mask alpha samples against fixed fixture expectations. This guards against matching writer+reader mistakes; still generated by ZPE, so Adobe/reference rendering and externally authored cross-group masks remain **open**.
+- **Planned work:** независимые reference composites и semantic snapshots для mask/group/clipping boundaries, blend-mode pixels и adjustment *rendering* (не только Photoshop-embedded merged image); внешняя сверка с Adobe Photoshop остаётся обязательной для full parity. Текущие generated round-trip и embedded-preview oracles не доказывают полную Photoshop compatibility.
+- **Targeted tests:** cross-group masks, blend and adjustments; fail-closed for unsupported features.
+- **Required verification:** `npm run check`, browser smoke if runtime changed, fixture provenance audit.
+- **Done gate:** не закрывать весь 002, пока нет доказанного external Photoshop/reference render + semantic coverage по заявленным cross-group masks/blend/adjustments; для каждого законченного подэтапа отдельно требуются PR merged и green `main` push CI.
+- **Risks / handoff:** отделять codec coverage от проверки Photoshop на внешнем приложении.
