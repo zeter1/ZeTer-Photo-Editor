@@ -14,7 +14,7 @@ import { settleBrowserRecoveryStartup } from './browser-recovery-startup.mjs';
  */
 export async function verifyBrowserUiLockMidKernel(client, {
   evaluate, waitFor, assert, browserClient = null, fixtureKey = 'rgb16large',
-  secondNativeFixtureKey = null,
+  secondNativeFixtureKey = null, cancelViaButton = false,
 } = {}) {
   if (!['rgb16large','rgb32psblarge'].includes(fixtureKey))
     throw new RangeError('Unsupported 010D browser fixture: ' + fixtureKey);
@@ -320,6 +320,41 @@ export async function verifyBrowserUiLockMidKernel(client, {
     const first = await evaluate(client,'({ ...window.__zpe010d })');
     assert(first.firstWriteSample < 59_000 && first.terminations === 0,
       '010D must observe native synthesis before revocation', JSON.stringify(first));
+    // 003X/6c-9: exercise the real DOM cancel button while the native
+    // Worker is blocked after a confirmed kernel pixel write. Unlike a
+    // synthetic controller call this reaches the public UI binding.
+    let uiCancel = null;
+    if (cancelViaButton) {
+      function clickLiveCancel() {
+        const panel = document.querySelector('#contentAwareProgressPanel');
+        const button = document.querySelector('#contentAwareProgressCancel');
+        const wasVisible = panel?.hidden === false;
+        if (!wasVisible || !button || button.hidden || button.disabled) {
+          return { clicked:false, wasVisible, error:'No enabled visible cancel control' };
+        }
+        const activeBefore = [...document.querySelectorAll('#docTabs .doc-tab')]
+          .map(tab => tab.getAttribute('aria-selected')).join(',');
+        button.click();
+        return {
+          clicked:true,wasVisible,panelHidden:panel.hidden,activeBefore,
+          probe:window.__zpe010d?.probes,
+          terminations:window.__zpe010d?.terminations,
+          history:[...document.querySelectorAll('#historyList .history-row')]
+            .map(row => row.textContent),
+        };
+      }
+      uiCancel = await evaluate(client,'(' + clickLiveCancel.toString() + ')()');
+      assert(uiCancel.clicked && uiCancel.wasVisible && uiCancel.panelHidden &&
+        uiCancel.activeBefore === 'true,false' && uiCancel.probe === 1 &&
+        uiCancel.terminations === 1 &&
+        uiCancel.history.every(value => !value.includes('Контент-заливка')),
+        '003X real visible button must cancel in-kernel native Worker without Undo',
+        JSON.stringify(uiCancel));
+      const afterButton = await evaluate(client,'(' + readNativeSave.toString() + ')()');
+      assert(JSON.stringify(afterButton) === JSON.stringify(before),
+        '003X real button-cancel must preserve native source words and tile topology',
+        JSON.stringify({ before, afterButton }));
+    }
     await sampler.snapshot('010d-kernel-write');
 
     // 010D-B: a real click must now activate the second session DURING
@@ -340,8 +375,10 @@ export async function verifyBrowserUiLockMidKernel(client, {
     assert(switched.active.join(',') === 'false,true' &&
       switched.probe === 1 && switched.terminations === 1 &&
       switched.history.every(value=>!value.includes('Контент-заливка')),
-      '010D-B active tab switch must terminate native Worker and preserve History',
-      JSON.stringify(switched));
+      cancelViaButton
+        ? '003X tab switch after real UI cancellation must preserve Worker termination and History'
+        : '010D-B active tab switch must terminate native Worker and preserve History',
+      JSON.stringify({switched,uiCancel}));
     const switchLatencyMs = Date.now() - switchStarted;
     assert(switched.terminations === 1, '010D-B must cancel exactly one Worker');
     await sampler.snapshot('010d-active-mid-kernel-tab-switch');
@@ -503,7 +540,8 @@ export async function verifyBrowserUiLockMidKernel(client, {
       independentSecondNativePsb32:Boolean(secondFixture),secondNativeWorkerWordParity:Boolean(secondAfterRedo),
       realWorkerJobs:recovered.state.jobs, kernelWriteProbes:recovered.state.probes,
       terminations:recovered.state.terminations, switchLatencyMs,
-      unchangedNativeAfterSwitch:true, midKernelTabSwitchActive:true,
+      unchangedNativeAfterSwitch:true, midKernelTabSwitchActive:!cancelViaButton,
+      midKernelButtonCancelActive:cancelViaButton,
       bothTabsPreservedAfterCancel:true, recoveredHistoryEntries:1,
       memory:{type:'sampled renderer JS heap and optional all-process private memory; not peak RSS',...memory},
     }));
