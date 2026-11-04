@@ -1099,7 +1099,7 @@ async function runSmoke() {
     await stage003Mouse('mousePressed',stage003View.start,1);
     await stage003Mouse('mouseMoved',stage003View.end,1);
     await stage003Mouse('mouseReleased',stage003View.end,0);
-    const stage003Observer = await evaluate(client, "(() => {\n  const post=Worker.prototype.postMessage;\n  window.__stage003UiWorkerJobs=0;\n  window.__stage003RestoreWorkerPost=()=>{Worker.prototype.postMessage=post;delete window.__stage003RestoreWorkerPost;};\n  Worker.prototype.postMessage=function(value,...args){\n    if(value?.selectedIndices instanceof Uint32Array)window.__stage003UiWorkerJobs++;\n    return post.call(this,value,...args);\n  };\n  return true;\n})()");
+    const stage003Observer = await evaluate(client, "(() => {\n  const post=Worker.prototype.postMessage;\n  window.__stage003UiWorkerJobs=0;\n  window.__stage003RestoreWorkerPost=()=>{Worker.prototype.postMessage=post;delete window.__stage003RestoreWorkerPost;};\n  Worker.prototype.postMessage=function(value,...args){\n    if(value?.selectedIndices instanceof Uint32Array)window.__stage003UiWorkerJobs++;\n    return post.call(this,value,...args);\n  };\n  const panel=document.querySelector('#contentAwareProgressPanel');\n  if(!panel?.hidden || !document.querySelector('#contentAwareProgressCancel'))return false;\n  window.__stage003Progress={shown:0,hidden:0};\n  const observer=new MutationObserver(records=>{\n    for(const change of records){\n      if(change.oldValue===null)window.__stage003Progress.hidden++;\n      else window.__stage003Progress.shown++;\n    }\n  });\n  observer.observe(panel,{attributes:true,attributeFilter:['hidden'],attributeOldValue:true});\n  window.__stage003RestoreProgress=()=>{observer.disconnect();delete window.__stage003RestoreProgress;};\n  return true;\n})()");
     assert(stage003Observer,'Stage 003 Worker dispatch observer must install');
     const stage003Selection = await evaluate(client, "(() => {\n  document.querySelector('.menu-button[data-menu=\"edit\"]').click();\n  const item=[...document.querySelectorAll('#menuPopover .menu-item')]\n    .find(button=>button.querySelector('span')?.textContent==='Контент-заливка выделения');\n  const enabled=Boolean(item&&!item.disabled);\n  if(enabled)item.click();\n  return {enabled,status:document.querySelector('#statusText')?.textContent,items:[...document.querySelectorAll('#menuPopover .menu-item')].map(el=>({text:el.textContent,disabled:el.disabled}))};\n})()");
     assert(stage003Selection.enabled,
@@ -1114,6 +1114,11 @@ async function runSmoke() {
       stage003Result.pixel[0]<150,
       'UI tiled fill must dispatch exactly one real Worker job, repair the defect and commit once',
       JSON.stringify(stage003Result));
+    const stage003Progress = await evaluate(client, "(() => ({shown:window.__stage003Progress?.shown,hidden:window.__stage003Progress?.hidden,panelHidden:document.querySelector('#contentAwareProgressPanel')?.hidden}))()");
+    assert(stage003Progress.shown===1 && stage003Progress.hidden===1 && stage003Progress.panelHidden===true,
+      'Actual native UI Content-Aware Worker must show and close its cancellable progress panel exactly once',
+      JSON.stringify(stage003Progress));
+    await evaluate(client,"window.__stage003RestoreProgress?.();true");
     await stage003HeapSampler.snapshot('after-worker-preview');
     const stage003SelectionWorkerPreviewMs = Date.now() - stage003FillStartedMs;
     await evaluate(client,"document.querySelector('#undoBtn').click();true");

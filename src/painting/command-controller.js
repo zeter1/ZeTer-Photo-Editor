@@ -77,6 +77,7 @@ export function createRasterCommandController({
     const pending = pendingContentAwareFill;
     if (!pending || pending.cancelled) return false;
     pending.cancelled = true;
+    ui?.onContentAwarePendingChange?.(false);
     // Revoke publication before terminating the CPU-bound Worker. A stale
     // finally must never unlock a newer document's persistence lease.
     state.endPersist(pending.lease);
@@ -356,6 +357,7 @@ export function createRasterCommandController({
     if (!persistLease) return false;
     const pending = { lease:persistLease, cancelled:false };
     pendingContentAwareFill = pending;
+    ui?.onContentAwarePendingChange?.(true);
     const isInpaintCurrent = () => !pending.cancelled &&
       pendingContentAwareFill === pending && state.getDocument() === doc;
     let releaseRasterOnFailure = null;
@@ -500,7 +502,10 @@ export function createRasterCommandController({
       ui?.toast?.('Не удалось выполнить контент-заливку', 'error');
       return false;
     } finally {
-      if (pendingContentAwareFill === pending) pendingContentAwareFill = null;
+      if (pendingContentAwareFill === pending) {
+        pendingContentAwareFill = null;
+        if (!pending.cancelled) ui?.onContentAwarePendingChange?.(false);
+      }
       state.endPersist(persistLease);
     }
   }

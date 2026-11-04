@@ -1,4 +1,4 @@
-import test from 'node:test';
+﻿import test from 'node:test';
 import assert from 'node:assert/strict';
 import { inpaintSelectedSamples } from '../src/core/inpaint.js';
 import { createRasterCommandController } from '../src/painting/command-controller.js';
@@ -28,6 +28,7 @@ function fixture({ width = 7, height = 7, pausePersist = false, rejectPersist = 
   const doc = { id: 'doc', width, height, layers: [layer], selectedLayerId: layer.id };
   let activeDoc = doc;
   const commits = [];
+  const pendingStates = [];
   const ctx = {
     getImageData: () => ({ data: new Uint8ClampedArray(original), width, height }),
     putImageData: image => { staged = new Uint8ClampedArray(image.data); },
@@ -79,10 +80,11 @@ function fixture({ width = 7, height = 7, pausePersist = false, rejectPersist = 
       primaryColor: () => '#000000', brushSize: () => 1, opacity: () => 1,
       fillTolerance: () => 0, rgbToCmyk: () => [0, 0, 0, 0],
     },
-    ui: { commit: label => commits.push(label), setStatus() {}, render() {} },
+    ui: { commit: label => commits.push(label), setStatus() {}, render() {},
+      onContentAwarePendingChange: active => pendingStates.push(active) },
   });
   return {
-    original, doc, layer, commands, commits, entered, resume,
+    original, doc, layer, commands, commits, pendingStates, entered, resume,
     setActiveDoc: value => { activeDoc = value; },
     get writes() { return writes; }, get saved() { return saved; }, get lease() { return lease; },
     get cached() { return cached; }, get discarded() { return discarded; },
@@ -220,4 +222,42 @@ test('003X/6c-9: rejected PNG after a tab switch releases only the old raster ca
   assert.deepEqual(f.commits, []);
   assert.equal(f.lease, null);
   assert.ok(oldCanvas);
+});
+
+
+test('003X/6c-9: visible Content-Aware cancellation follows owner start, Escape and completion', async () => {
+  const f = fixture({ pausePersist:true });
+  const pending = f.commands.contentAwareFill({ isAllowed:(x,y)=>x===3 && y===3 });
+  await f.entered.promise;
+  assert.deepEqual(f.pendingStates,[true], 'progress shown only after a real persist lease');
+  assert.equal(f.commands.cancelPendingContentAwareFill(),true);
+  assert.deepEqual(f.pendingStates,[true,false], 'cancellation hides progress immediately');
+  f.resume.resolve();
+  assert.equal(await pending,false);
+  assert.deepEqual(f.pendingStates,[true,false], 'late finally must not emit another cancellation');
+  assert.equal(f.layer.dataUrl,'before');
+  assert.deepEqual(f.commits,[]);
+});
+
+test('003X/6c-9: stale cancelled fill cannot hide progress owned by successor', async () => {
+  const f = fixture({ pausePersist:true });
+  const old = f.commands.contentAwareFill({ isAllowed:(x,y)=>x===3 && y===3 });
+  await f.entered.promise;
+  assert.equal(f.commands.cancelPendingContentAwareFill(),true);
+  const next = f.commands.contentAwareFill({ isAllowed:(x,y)=>x===2 && y===2 });
+  assert.deepEqual(f.pendingStates,[true,false,true]);
+  f.resume.resolve();
+  assert.equal(await old,false);
+  assert.equal(await next,true);
+  assert.deepEqual(f.pendingStates,[true,false,true,false],
+    'the superseded operation must not toggle the next operation progress');
+  assert.equal(f.writes,1);
+});
+
+test('003X/6c-9: Content-Aware success and rejected calls keep progress truthful', async () => {
+  const f = fixture();
+  assert.equal(await f.commands.contentAwareFill({ isAllowed:(x,y)=>x===3 && y===3 }),true);
+  assert.deepEqual(f.pendingStates,[true,false]);
+  assert.equal(await f.commands.contentAwareFill({ ownerDocument:{ id:'foreign' },isAllowed:()=>true }),false);
+  assert.deepEqual(f.pendingStates,[true,false], 'wrong-owner rejection never starts progress');
 });

@@ -18592,6 +18592,7 @@ function createRasterCommandController({
     const pending = pendingContentAwareFill;
     if (!pending || pending.cancelled) return false;
     pending.cancelled = true;
+    ui?.onContentAwarePendingChange?.(false);
     // Revoke publication before terminating the CPU-bound Worker. A stale
     // finally must never unlock a newer document's persistence lease.
     state.endPersist(pending.lease);
@@ -18871,6 +18872,7 @@ function createRasterCommandController({
     if (!persistLease) return false;
     const pending = { lease:persistLease, cancelled:false };
     pendingContentAwareFill = pending;
+    ui?.onContentAwarePendingChange?.(true);
     const isInpaintCurrent = () => !pending.cancelled &&
       pendingContentAwareFill === pending && state.getDocument() === doc;
     let releaseRasterOnFailure = null;
@@ -19015,7 +19017,10 @@ function createRasterCommandController({
       ui?.toast?.('Не удалось выполнить контент-заливку', 'error');
       return false;
     } finally {
-      if (pendingContentAwareFill === pending) pendingContentAwareFill = null;
+      if (pendingContentAwareFill === pending) {
+        pendingContentAwareFill = null;
+        if (!pending.cancelled) ui?.onContentAwarePendingChange?.(false);
+      }
       state.endPersist(persistLease);
     }
   }
@@ -29066,7 +29071,16 @@ const rasterCommands = createRasterCommandController({
     fillTolerance: () => Number(els.fillTolerance?.value) || 0,
     rgbToCmyk: rgb8ToDocumentCmyk,
   },
-  ui: { setStatus, toast, render, commit },
+  ui: {
+    setStatus, toast, render, commit,
+    onContentAwarePendingChange: active => {
+      const panel = $('#contentAwareProgressPanel');
+      if (panel) panel.hidden = !active;
+    },
+  },
+});
+$('#contentAwareProgressCancel')?.addEventListener('click', () => {
+  if (rasterCommands.cancelPendingContentAwareFill()) setStatus('Контент-заливка отменена');
 });
 const {
   drawLine: drawLineOnCurrentRaster,

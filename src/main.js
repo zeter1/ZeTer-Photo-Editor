@@ -415,7 +415,16 @@ const rasterCommands = createRasterCommandController({
     fillTolerance: () => Number(els.fillTolerance?.value) || 0,
     rgbToCmyk: rgb8ToDocumentCmyk,
   },
-  ui: { setStatus, toast, render, commit },
+  ui: {
+    setStatus, toast, render, commit,
+    onContentAwarePendingChange: active => {
+      const panel = $('#contentAwareProgressPanel');
+      if (panel) panel.hidden = !active;
+    },
+  },
+});
+$('#contentAwareProgressCancel')?.addEventListener('click', () => {
+  if (rasterCommands.cancelPendingContentAwareFill()) setStatus('Контент-заливка отменена');
 });
 const {
   drawLine: drawLineOnCurrentRaster,
