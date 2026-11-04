@@ -1,7 +1,12 @@
 // 003X/6c-9: real file:// UI, history, and IndexedDB restore using public controls.
 // No private app bundle scope or stub HistoryStack.
-export async function verifyBrowserHistoryUiRecovery(client, { evaluate, fixturePath, expectedNativeHash }) {
+export async function verifyBrowserHistoryUiRecovery(client, { evaluate, fixturePaths, expectedNativeHashes, expectedNativeSources }) {
   const assert = (value,label) => { if(!value) throw Error('History UI/IDB: '+label); };
+  assert(Array.isArray(fixturePaths)&&fixturePaths.length===2&&
+    Array.isArray(expectedNativeHashes)&&expectedNativeHashes.length===2&&
+    expectedNativeHashes[0]!==expectedNativeHashes[1]&&
+    Array.isArray(expectedNativeSources)&&expectedNativeSources.length===2,
+  'two distinct RGB16 and CMYKA32 native fixtures required');
   async function waitFor(label,predicate,timeoutMs=45000) {
     const deadline=Date.now()+timeoutMs;
     let lastError=null;
@@ -34,62 +39,73 @@ export async function verifyBrowserHistoryUiRecovery(client, { evaluate, fixture
     'return original(blob);',
     '};return true;})()',
   ].join('\n');
-  function checkDocument(saved,label,expectedLayers) {
+  function checkDocument(saved,label,expectedLayers,tabIndex) {
     assert(saved&&saved.name==='history-profile',label+': wrong saved name');
     const native=saved.layers.find(layer=>layer.highDepthSource)?.highDepthSource;
     assert(native&&Array.isArray(native.tiles),label+': saved native source missing');
     let hash=2166136261;
     for(const tile of native.tiles)for(let i=0;i<tile.dataUrl.length;i++)
       hash=Math.imul(hash^tile.dataUrl.charCodeAt(i),16777619);
-    assert((hash>>>0)===expectedNativeHash,label+': native URL changed');
+    assert((hash>>>0)===expectedNativeHashes[tabIndex],label+': native URL hash changed');
+    const expected=expectedNativeSources[tabIndex];
+    assert(native.bitsPerChannel===expected.bitsPerChannel&&native.model===expected.model&&
+      native.tiles.length===expected.tiles.length&&native.tiles.every((tile,index)=>{
+        const sourceTile=expected.tiles[index];
+        return ['x','y','width','height','dataUrl'].every(key=>tile[key]===sourceTile[key]);
+      }),label+': native exact words or tile topology changed');
     assert(saved.layers.length===expectedLayers,label+': incorrect layer count');
     return {name:saved.name,nativeHash:hash>>>0,layers:saved.layers.length};
   }
-  async function saveAndCheck(label,expectedLayers) {
+  async function saveAndCheck(label,expectedLayers,tabIndex) {
     await evaluate(client,captureHook);
     const before=await evaluate(client,'globalThis.__zpeHistorySaved.length');
     await evaluate(client,'window.dispatchEvent(new KeyboardEvent("keydown",{key:"s",code:"KeyS",ctrlKey:true,bubbles:true,cancelable:true}));true');
     const savedText=await waitFor(label+' UI download',()=>evaluate(client,'globalThis.__zpeHistorySaved['+before+'] || null'));
-    return checkDocument(JSON.parse(savedText),label,expectedLayers);
+    return checkDocument(JSON.parse(savedText),label,expectedLayers,tabIndex);
   }
-  async function importUsingUi() {
+  async function importUsingUi(tabIndex) {
+    await evaluate(client,'(() => {if(!document.querySelector("#zpe-history-oracle-input")){const i=document.createElement("input");i.type="file";i.id="zpe-history-oracle-input";document.body.appendChild(i);}return true;})()');
     const root=await client.send('DOM.getDocument');
+    const oracle=await client.send('DOM.querySelector',{nodeId:root.root.nodeId,selector:'#zpe-history-oracle-input'});
+    assert(oracle.nodeId,'detached source oracle input missing');
+    await client.send('DOM.setFileInputFiles',{nodeId:oracle.nodeId,files:[fixturePaths[tabIndex]]});
+    await evaluate(client,'(async()=>{const input=document.querySelector("#zpe-history-oracle-input");const d=JSON.parse(await input.files[0].text());globalThis.__zpeHistoryExpectedSources ||= [];globalThis.__zpeHistoryExpectedSources['+tabIndex+']=d.layers[0].highDepthSource;return true;})()');
     const input=await client.send('DOM.querySelector',{nodeId:root.root.nodeId,selector:'#projectInput'});
     assert(input.nodeId,'public .zpe input missing');
-    await client.send('DOM.setFileInputFiles',{nodeId:input.nodeId,files:[fixturePath]});
+    await client.send('DOM.setFileInputFiles',{nodeId:input.nodeId,files:[fixturePaths[tabIndex]]});
     await evaluate(client,'document.querySelector("#projectInput").dispatchEvent(new Event("change",{bubbles:true}));true');
     const state=await waitFor('native project UI import',async()=>{
       const value=await inspect();
       return value.name==='history-profile'&&value.layers===1&&value.historyLength===1&&value;
     });
-    return {state,saved:await saveAndCheck('import',1)};
+    return {state,saved:await saveAndCheck('import',1,tabIndex)};
   }
-  async function editAndNavigate() {
+  async function editAndNavigate(tabIndex) {
     const before=await inspect();
     assert(before.layers===1&&before.historyLength===1,'unexpected initial history');
     assert(await evaluate(client,'(() => {const b=document.querySelector("#addRasterBtn");if(!b)return false;b.click();return true;})()'),'Add Raster Layer button missing');
     const edited=await waitFor('real UI commit',async()=>{
       const value=await inspect();return value.layers===2&&value.historyLength===2&&value;
     });
-    const editSaved=await saveAndCheck('edit',2);
+    const editSaved=await saveAndCheck('edit',2,tabIndex);
     await evaluate(client,'document.querySelector("#undoBtn").click();true');
     const undone=await waitFor('real UI Undo',async()=>{
       const value=await inspect();return value.layers===1&&value.historyLength===2&&value;
     });
-    const undoSaved=await saveAndCheck('undo',1);
+    const undoSaved=await saveAndCheck('undo',1,tabIndex);
     await evaluate(client,'document.querySelector("#redoBtn").click();true');
     const redone=await waitFor('real UI Redo',async()=>{
       const value=await inspect();return value.layers===2&&value.historyLength===2&&value;
     });
-    const redoSaved=await saveAndCheck('redo',2);
+    const redoSaved=await saveAndCheck('redo',2,tabIndex);
     return {edited,undone,redone,editSaved,undoSaved,redoSaved};
   }
-  const firstImport=await importUsingUi();
-  const firstHistory=await editAndNavigate();
+  const firstImport=await importUsingUi(0);
+  const firstHistory=await editAndNavigate(0);
   await evaluate(client,'document.querySelector("#addDocTabBtn").click();true');
   await waitFor('second document tab',async()=>(await inspect()).tabs===2);
-  const secondImport=await importUsingUi();
-  const secondHistory=await editAndNavigate();
+  const secondImport=await importUsingUi(1);
+  const secondHistory=await editAndNavigate(1);
   const readIdb=[
     '(async () => {',
     'const key=sessionStorage.getItem("zeter-photo-editor.recovery-window.v1");',
@@ -103,12 +119,16 @@ export async function verifyBrowserHistoryUiRecovery(client, { evaluate, fixture
     'const r=tx.objectStore("recovery").get(key);',
     'r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});',
     'if(!record)return null;',
-    'const docs=record.documents.map(item=>{',
+    'const docs=record.documents.map((item,index)=>{',
     'const d=JSON.parse(item.snapshot),native=d.layers.find(x=>x.highDepthSource)?.highDepthSource;',
+    'const expected=globalThis.__zpeHistoryExpectedSources?.[index];',
+    'const nativeExact=!!expected && native?.bitsPerChannel===expected.bitsPerChannel&&',
+    'native.model===expected.model&&native.tiles?.length===expected.tiles.length&&',
+    'native.tiles.every((tile,j)=>[\'x\',\'y\',\'width\',\'height\',\'dataUrl\'].every(k=>tile[k]===expected.tiles[j][k]));',
     'let hash=2166136261;',
     'if(native?.tiles)for(const tile of native.tiles)',
     'for(let i=0;i<tile.dataUrl.length;i++)hash=Math.imul(hash^tile.dataUrl.charCodeAt(i),16777619);',
-    'return {name:d.name,nativeHash:hash>>>0,layers:d.layers.length};',
+    'return {name:d.name,nativeHash:hash>>>0,nativeExact,layers:d.layers.length};',
     '});return {key,activeIndex:record.activeIndex,version:record.version,docs};',
     '} finally {db.close();}',
     '})()',
@@ -117,8 +137,8 @@ export async function verifyBrowserHistoryUiRecovery(client, { evaluate, fixture
     const value=await evaluate(client,readIdb);
     return value?.docs?.length===2&&value;
   },30000);
-  assert(idb.version===2&&idb.docs.every(item=>
-    item.name==='history-profile'&&item.nativeHash===expectedNativeHash&&item.layers===2),
+  assert(idb.version===2&&idb.docs.every((item,index)=>
+    item.name==='history-profile'&&item.nativeHash===expectedNativeHashes[index]&&item.nativeExact===true&&item.layers===2),
   'IndexedDB two-tab snapshots changed native URLs');
   await client.send('Page.reload',{ignoreCache:true});
   await waitFor('recovery modal after browser reload',()=>
@@ -130,14 +150,14 @@ export async function verifyBrowserHistoryUiRecovery(client, { evaluate, fixture
     const value=await inspect();
     return value.tabs===2&&value.name==='history-profile'&&value.layers===2&&value;
   });
-  const restoredSaved=await saveAndCheck('restored active tab',2);
+  const restoredSaved=await saveAndCheck('restored active tab',2,1);
   await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab")[0].click();true');
   const firstRestored=await waitFor('first restored tab',async()=>{
     const value=await inspect();
     return value.name==='history-profile'&&value.layers===2&&value;
   });
-  const firstSaved=await saveAndCheck('restored first tab',2);
+  const firstSaved=await saveAndCheck('restored first tab',2,0);
   return {firstImport,secondImport,firstHistory,secondHistory,idb,
     restored,restoredSaved,firstRestored,firstSaved,
-    limitations:'App pooled History only; UI generic comparison and Worker peak/RSS not measured'};
+    limitations:'Real two-model UI/IDB History; edited native pixels and Worker PID/RSS/peak not measured'};
 }

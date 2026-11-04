@@ -1,3 +1,9 @@
+### 2026-11-04 — dual-native real UI History A/B and IndexedDB original-bit oracle (candidate 003X/6c-9)
+
+- Two DISTINCT 1025×1025 native RGB16 and CMYKA32 Float32 projects are now imported into two genuine file:// tabs in each generic/pooled History run. Identical user Add Raster Layer, Undo, Redo, Save and IndexedDB v2 reload/restore are compared; exact tile Data URLs and coordinates verified throughout including special Float32 words, not merely FNV hashes.
+- Controlled Chrome bootstrap toggles ONLY History pooling; ordinary startup remains pooled. Dedicated Chrome 65² and 1025² runs PASS in both modes; full Windows browser smoke PASS (exit 0). Paired UI Worker cancellation/close and edited-native-byte parity remain IN PROGRESS. Stage 6/10 NOT DONE.
+- [PR #376](https://github.com/zeter1/ZeTer-Photo-Editor/pull/376) visible cancellation merged `744bcb1`; exact PR-head Linux core 12/12 + independent real-photo SUCCESS. Merged-main real-photo SUCCESS; core first attempt failed only DevTools start on one job before test, targeted rerun requested. New candidate CI not run until publication.
+
 ### 2026-11-04 — visible Content-Aware Fill cancellation (candidate 003X/6c-9)
 
 - Real UI now shows an indeterminate in-progress panel with an accessible **Отменить заливку** button while native 16/32-bit Worker or RGBA8 Fill owns the persist lease; Escape still works. The button revokes the same operation safely, without fabricating percentages. A cancelled/older operation cannot close the next operation's panel.

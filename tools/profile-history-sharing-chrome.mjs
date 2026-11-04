@@ -122,7 +122,7 @@ function windowsProcessSample(processes) {
       workingSetSumBytes:items.reduce((s,r)=>s+r.workingSetBytes,0),processes:items};
   } catch(error) { return {available:false,reason:String(error.message)}; }
 }
-async function runCase({ model, shared, repetition, fixturePath, sourceDigest, snapshotLength, chromium, historySource }) {
+async function runCase({ model, shared, repetition, fixturePath, sourceDigest, snapshotLength, chromium, historySource, pairedFixtures }) {
   const profileDir = await mkdtemp(path.join(ROOT, '.zpe-history-chrome-'));
   const args = ['--headless=new','--remote-debugging-port=0','--user-data-dir='+profileDir,
     '--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-component-update',
@@ -136,6 +136,10 @@ async function runCase({ model, shared, repetition, fixturePath, sourceDigest, s
     browserClient=await Cdp.connect(browserWs);
     client=await Cdp.connect(await pageTarget(browserWs));
     await Promise.all([client.send('Runtime.enable'),client.send('Page.enable'),client.send('HeapProfiler.enable')]);
+    // Both modes execute the actual file:// UI; only the History construction option differs.
+    await client.send('Page.addScriptToEvaluateOnNewDocument',{
+      source:'globalThis.__ZPE_HISTORY_PROFILE_GENERIC__ = '+JSON.stringify(!shared)+';'
+    });
     const nav=await client.send('Page.navigate',{url:INDEX_URL});
     if (nav.errorText) throw new Error('file:// navigation: '+nav.errorText);
     let ready=false;
@@ -199,9 +203,12 @@ async function runCase({ model, shared, repetition, fixturePath, sourceDigest, s
     const nativeWorker = workerBefore
       ? await verifyBrowserHistoryNativeWorker(client, {evaluate,expectedNativeHash:sourceDigest}) : null;
     const workerAfter = workerBefore ? await memory('after-real-native-worker') : null;
-    const uiRecovery = process.env.ZPE_PROFILE_UI === '1' && shared && repetition === 0
+    const uiRecovery = process.env.ZPE_PROFILE_UI === '1' && model === 'rgb' && repetition === 0
       ? await verifyBrowserHistoryUiRecovery(client, {
-        evaluate, fixturePath, expectedNativeHash:sourceDigest,
+        evaluate,
+        fixturePaths:[pairedFixtures.rgb.fixturePath,pairedFixtures.cmyk.fixturePath],
+        expectedNativeHashes:[pairedFixtures.rgb.digest,pairedFixtures.cmyk.digest],
+        expectedNativeSources:[pairedFixtures.rgb.source,pairedFixtures.cmyk.source],
       }) : null;
     return { model, shared, repetition, config, sourceDigest, snapshotLength,
       input:'production zpe snapshot and HistoryStack, Chrome file:// fresh process',
@@ -222,7 +229,7 @@ async function runCase({ model, shared, repetition, fixturePath, sourceDigest, s
     config, method:'fresh Chrome process per sample; alternated baseline/pool; CDP forced GC and Runtime.getHeapUsage',
     limitations:['JS heap is not whole Chrome RAM/RSS','CDP collectGarbage round trip is not exclusive GC time',
       process.env.ZPE_PROFILE_UI === '1'
-        ? 'UI import/Undo/Redo/IndexedDB restore probed only in pooled app History; not UI generic A/B'
+        ? 'Two distinct native RGB16 and CMYKA32 tabs with UI Undo/Redo/IDB v2 tested in both History modes; native edited-byte Worker parity remains open'
         : 'Node-generated genuine snapshot loaded via real browser File API; UI document/IDB restore not tested',
       process.env.ZPE_PROFILE_WORKER === '1'
         ? 'Native original-file source run through actual Blob Worker in pooled sample 0; immediate terminate is not kernel cancel; Worker PID/RSS/peak unmeasured'
@@ -231,6 +238,7 @@ async function runCase({ model, shared, repetition, fixturePath, sourceDigest, s
       'Chrome CDP process census does not establish Worker PID attribution; sum of working sets double-counts shared pages'],
     cases:[] };
   try {
+    const pairedFixtures={};
     for(const model of ['rgb','cmyk']) {
       const fixture=createHistorySharingFixture({...pixels,...state},{model,width:WIDTH,height:HEIGHT});
       const snapshot=state.snapshotDocument(fixture.doc);
@@ -239,11 +247,16 @@ async function runCase({ model, shared, repetition, fixturePath, sourceDigest, s
         historySourceFingerprint({...pixels,...state},fixture.source));
       const fixturePath=path.join(fixtureDir,'history-'+model+'.zpe');
       await writeFile(fixturePath,snapshot,'utf8');
+      pairedFixtures[model]={fixturePath,digest,snapshotLength:snapshot.length,source:parsed.layers[0].highDepthSource};
+    }
+    assert.notEqual(pairedFixtures.rgb.digest,pairedFixtures.cmyk.digest,'two distinct native sources');
+    for(const model of ['rgb','cmyk']) {
+      const {fixturePath,digest,snapshotLength}=pairedFixtures[model];
       for(let repetition=0;repetition<REPEATS;repetition++) {
         const order=repetition%2===0?[false,true]:[true,false];
         for(const shared of order) {
           const item=await runCase({model,shared,repetition,fixturePath,sourceDigest:digest,
-            snapshotLength:snapshot.length,chromium,historySource});
+            snapshotLength,chromium,historySource,pairedFixtures});
           output.cases.push(item);
           console.log(JSON.stringify({model,shared,repetition,
             usedMiB:+(item.memory[1].jsHeapUsedBytes/1048576).toFixed(2),
@@ -252,6 +265,20 @@ async function runCase({ model, shared, repetition, fixturePath, sourceDigest, s
       }
     }
     assert.equal(output.cases.length,REPEATS*4);
+    if(process.env.ZPE_PROFILE_UI === '1') {
+      const samples=output.cases.filter(item=>item.model==='rgb'&&item.repetition===0);
+      assert.equal(samples.length,2,'both UI modes exercised');
+      const normalized=item=>{
+        assert(item.uiRecovery,'UI recovery required for both modes');
+        const u=item.uiRecovery;
+        return {first:u.firstHistory.redoSaved,second:u.secondHistory.redoSaved,
+          persisted:u.idb.docs,restoredFirst:u.firstSaved,restoredSecond:u.restoredSaved};
+      };
+      assert.deepEqual(normalized(samples[0]),normalized(samples[1]),'generic/pooled UI output mismatch');
+      output.uiPairedResult={status:'PASS',modes:samples.map(s=>s.shared?'pooled':'generic'),
+        fixtureModels:['RGB16','CMYKA32 Float32'],nativeHashes:[pairedFixtures.rgb.digest,pairedFixtures.cmyk.digest],
+        method:'same UI Add Raster Layer, Undo, Redo, Save, IndexedDB v2 restore in fresh Chrome processes'};
+    }
     const out=path.join(ROOT,process.env.ZPE_PROFILE_OUTPUT ||
       (process.env.ZPE_PROFILE_WORKER === '1'
         ? 'task/evidence/003x6c9-native-worker-chrome.json'
