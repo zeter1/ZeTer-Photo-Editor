@@ -1,4 +1,9 @@
-### 2026-11-04 — dual-native real UI History A/B and IndexedDB original-bit oracle (candidate 003X/6c-9)
+### 2026-11-04 — Pen click-first-anchor close, current-main port (PR #126 candidate)
+
+- Реальный Pen draft после трёх узлов замыкается кликом по начальной точке в радиусе `6 / zoom`, с preview кубического замыкающего сегмента, без дублированного узла. Команда сохраняет Shape layer и одну запись History; прежние double-click/Enter/checkbox сценарии сохраняются. Форматы `.zpe`/PSD/PSB не меняются.
+- Функциональные тесты Pen+архитектуры 17/17 PASS; build и diff check PASS. Полный Windows npm test имеет пять Linux-only /proc/cgroup failures; Первый полный Chrome `file://` smoke дал DevTools timeout при параллельном запуске тестов; отдельный последовательный `npm run test:browser` **PASS (exit 0, 109.87s)**. Прямой E2E клик Pen и PR-head CI ещё ожидаются. Работа на базе merged main `a0e9fe4`; старый конфликтующий PR #126 будет обновлён, новый PR не создаётся.
+
+### 2026-11-04 — dual-native real UI History A/B and IndexedDB original-bit oracle (PR #377 merged)
 
 - Two DISTINCT 1025×1025 native RGB16 and CMYKA32 Float32 projects are now imported into two genuine file:// tabs in each generic/pooled History run. Identical user Add Raster Layer, Undo, Redo, Save and IndexedDB v2 reload/restore are compared; exact tile Data URLs and coordinates verified throughout including special Float32 words, not merely FNV hashes.
 - Controlled Chrome bootstrap toggles ONLY History pooling; ordinary startup remains pooled. Dedicated Chrome 65² and 1025² runs PASS in both modes; full Windows browser smoke PASS (exit 0). Paired UI Worker cancellation/close and edited-native-byte parity remain IN PROGRESS. Stage 6/10 NOT DONE.

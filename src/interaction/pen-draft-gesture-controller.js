@@ -1,6 +1,7 @@
 export const PEN_DRAFT_BEGIN_RESULT = Object.freeze({
   STARTED: 'started',
   FINISH_REQUESTED: 'finish-requested',
+  CLOSE_REQUESTED: 'close-requested',
   TOO_SHORT: 'too-short',
   INVALID: 'invalid',
 });
@@ -64,11 +65,22 @@ export function createPenDraftGestureController({ runtime } = {}) {
     draft = null;
   }
 
+  // Hit testing uses screen pixels at every zoom; closing never creates a duplicate node.
+  function canCloseAt(point) {
+    if (!draft || draft.points.length < 3) return false;
+    const hover = finitePoint(point);
+    if (!hover) return false;
+    const first = draft.points[0];
+    return Math.hypot(hover.x - first.x, hover.y - first.y) <= 6 / currentZoom();
+  }
+
   function updateIdleHover(point) {
     if (!draft) return false;
     const hover = finitePoint(point);
     if (!hover) return false;
-    draft.hover = hover;
+    draft.hover = canCloseAt(hover)
+      ? { x: draft.points[0].x, y: draft.points[0].y }
+      : hover;
     return true;
   }
 
@@ -87,6 +99,9 @@ export function createPenDraftGestureController({ runtime } = {}) {
     const anchor = finitePoint(point);
     if (!anchor) {
       return { result: PEN_DRAFT_BEGIN_RESULT.INVALID, gesture: null, status: null };
+    }
+    if (canCloseAt(anchor)) {
+      return { result: PEN_DRAFT_BEGIN_RESULT.CLOSE_REQUESTED, gesture: null, status: null };
     }
     if (!draft) draft = { points: [], hover: anchor };
 
@@ -212,6 +227,7 @@ export function createPenDraftGestureController({ runtime } = {}) {
     snapshot,
     reset,
     updateIdleHover,
+    canCloseAt,
     isGesture,
     beginPoint,
     update,

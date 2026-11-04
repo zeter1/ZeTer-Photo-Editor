@@ -1,18 +1,19 @@
-# NEXT — актуальная задача ZeTer Photo Editor
+# NEXT — единая очередь ZeTer Photo Editor
 
-> **CURRENT TASK:** [003X/6c-9 — bounded real Chrome History/Worker/IDB acceptance](003x6c9-history-sharing-profile.md)
-> **PRIORITY:** P1 · **STATUS:** IN PROGRESS · **DEPENDENCY:** 003X/6c-8 DONE
-> **BASE MAIN SHA:** [744bcb17055096a32427ed33ee85d21130be820c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/744bcb17055096a32427ed33ee85d21130be820c) — PR #376 MERGED from final head `9fca579`; PR-head [core 12/12 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41825455853), [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41825455743).
-> **ACTIVE PR:** [#377 — two native tabs generic/pooled UI + IndexedDB parity](https://github.com/zeter1/ZeTer-Photo-Editor/pull/377) **OPEN**, code head [`6250b9e`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/6250b9eb62553ca82a2362f1516e3e8fd536e35a), base `744bcb1`. New final-head PR CI and independent real-photo workflow must be verified separately after this documentation commit.
-> **LAST VERIFIED:** 2026-11-04 Windows real Chrome `file://` 65×65 + 1025×1025 two distinct native projects (RGB16, CMYKA32 Float32), generic and pooled History, identical UI Add Raster Layer → Undo → Redo → Save → IndexedDB v2 reload/restore. Original native tile Data URLs and topology compared for exact equality, including Float32 special word patterns. Four 1025² Chrome process cases PASS; current source build `aeb55adcd2382b46`. Merged main exact-main [core attempts 1/2](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41841115717) FAIL one Chromium DevTools bootstrap timeout before test in each attempt; investigate or rerun exact job before claiming full green, [real-photo main SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41841115559). This is NOT an exact-main core PASS yet.
-> **REMAINING ACCEPTANCE:** full paired UI 1025² Worker cancel/stale/tab close while both native docs are active, exact changed-native-word oracle after real edit/Undo/Redo/IDB, final UI timings, PR-head CI and exact-main after merge. Existing RGB16 real click-to-cancel is bounded PASS under #376. Synthetic files are NOT Photoshop provenance.
-> **NEXT IMPLEMENTATION ACTION:** finish real two-model UI Worker cancellation/stale/tab-close and changed-pixel original/edit/Undo/Redo/IndexedDB equality, with bounded time/memory samples. If Worker PID/RSS/true peak remains UNKNOWN, close only bounded 003X/6c-9 acceptance and switch to Stage 2 mask/adjustment UX instead of repeating profiling.
-> **BLOCKERS:** [002B/2c Adobe-authored PSB32](002b2c-photoshop-psb32-provenance.md) BLOCKED (external provenance); Worker PID/RSS/true operation peak UNKNOWN (not a reason to halt other development).
+> **CURRENT TASK:** Stage 2 / CAP-BEZ — [замыкание нового Bézier-контура кликом по первой точке, PR #126](https://github.com/zeter1/ZeTer-Photo-Editor/pull/126)
+> **PRIORITY:** P1 · **STATUS:** IN PROGRESS · **DEPENDENCY:** 003X/6c-9 dual-native UI/IDB bounded increment DONE via #377 (parent Stage 6 remains IN PROGRESS)
+> **BASE MAIN SHA:** `a0e9fe4816d7385d8e2d8664798caaab6e1037dc` (PR #377 MERGED). Exact-main [core CI #41845793209](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41845793209) SUCCESS; independent [real-photo #41845793202](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41845793202) SUCCESS.
+> **ACTIVE PR:** [#126](https://github.com/zeter1/ZeTer-Photo-Editor/pull/126) OPEN, pre-port head `620183696fa93cd0b56ddbeaf2cb538517813bed` conflicts with main; local worktree `port-pr126-from-main` contains original PR code on updated main. Verify remote head after publication; no force push / new duplicate PR.
+> **LAST VERIFIED:** zoom-aware first-anchor close after ≥3 nodes, cubic preview, no duplicate anchor, persisted Shape/History command; 17/17 focused Pen/architecture tests PASS, build `291e5af38fc2b416`, `git diff --check` PASS. Full Windows `npm test` overall FAIL on five Linux-only /proc/cgroup tests. First `npm run test:browser` timed out in CDP Runtime.evaluate while tests ran concurrently; independent serial rerun **PASS** in actual Chrome `file://` (exit 0, 109.87s), although direct first-anchor-click Chrome E2E remains to be added.
+> **REMAINING ACCEPTANCE:** independent real Chromium file:// smoke, ideally UI first-anchor click/Undo/Redo/save/reopen; publish refreshed PR #126 final head with Linux core and independent real-photo CI; merge only if green and allowed, then exact-main CI. Full Bézier/PSD parity remains IN PROGRESS.
+> **NEXT IMPLEMENTATION ACTION:** port original #126 onto exact current main, review/test it, update *existing* branch without force. Then existing [#125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) smooth-anchor conversion or more valuable mask/adjustment UI gap. No duplicate PR.
+> **BLOCKERS:** Adobe-authored PSB32 provenance [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED; Stage 6 changed-native edit + paired Worker cancel/stale/close still open, Worker PID/RSS/peak UNKNOWN (not reason to extend profiling forever).
 
-## Следующая очередь
+## Краткая очередь
 
-1. **003X/6c-9**, P1: verify [PR #377](https://github.com/zeter1/ZeTer-Photo-Editor/pull/377) final-head Linux CI + independent workflow, review and merge only if green; then bounded Worker cancel/stale/close + changed-bit oracle.
-2. **Stage 2 functional slice**, P1: after bounded acceptance choose incomplete mask/adjustment UX with save, Undo/Redo and browser E2E; check open #125/#126 first, no Bézier duplicates.
-3. **002B/2c**, BLOCKED: genuine Adobe-authored PSB32 provenance.
+1. **Stage 2/CAP-BEZ:** PR #126 closure — CURRENT.
+2. **Stage 2/CAP-BEZ:** [PR #125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) smoothing — OPEN, check conflicts first.
+3. **Stage 6/003X/6c-9:** bounded native Worker/edit/IDB parity when triggered by actionable defect or critical acceptance; parent IN PROGRESS.
+4. **002B/2c:** Adobe-authored PSB32 external provenance BLOCKED.
 
-[Карта](README.md) · [Матрица](CAPABILITY_MATRIX.md) · [Журнал](003x6c9-history-sharing-profile.md) · [Архив очереди](archive/2026-11-04-NEXT-legacy.md).
+[Матрица](CAPABILITY_MATRIX.md) · [Карта этапов](README.md) · [History журнал](003x6c9-history-sharing-profile.md) · [Архив](archive/2026-11-04-NEXT-legacy.md).

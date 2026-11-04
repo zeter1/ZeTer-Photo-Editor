@@ -59,6 +59,50 @@ test('double-click finish intent keeps the 4 / zoom proximity rule without persi
   assert.equal(controller.snapshot().points.length, 3);
 });
 
+
+test('Pen closes by clicking its initial anchor without appending a duplicate node', () => {
+  const {controller,setZoom} = createHarness(2);
+  for(const point of [{x:10,y:10},{x:50,y:10},{x:30,y:45}]){
+    const {gesture}=begin(controller,point);
+    controller.finish(gesture,point);
+  }
+  const before=controller.snapshot().points;
+  assert.equal(controller.canCloseAt({x:12.9,y:10}),true);
+  assert.equal(controller.canCloseAt({x:13.1,y:10}),false);
+  assert.equal(controller.updateIdleHover({x:12,y:11}),true);
+  assert.deepEqual(controller.snapshot().hover,{x:10,y:10});
+  assert.deepEqual(controller.beginPoint({x:12,y:11}),{
+    result:PEN_DRAFT_BEGIN_RESULT.CLOSE_REQUESTED,gesture:null,status:null,
+  });
+  assert.deepEqual(controller.snapshot().points,before);
+  assert.equal(controller.consumePoints().length,3);
+  assert.equal(controller.hasDraft(),false);
+  setZoom(4);
+  assert.equal(controller.canCloseAt({x:10,y:10}),false);
+});
+
+test('Pen closure needs three nodes; double-click finish and invalid points still work', () => {
+  const {controller}=createHarness();
+  const first=begin(controller,{x:5,y:5});
+  controller.finish(first.gesture,{x:5,y:5});
+  const second=begin(controller,{x:35,y:5});
+  controller.finish(second.gesture,{x:35,y:5});
+  assert.equal(controller.canCloseAt({x:5,y:5}),false);
+  assert.equal(controller.beginPoint({x:35,y:5},{finish:true}).result,
+    PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED);
+  assert.equal(controller.snapshot().points.length,2);
+  const third=begin(controller,{x:35,y:25});
+  controller.finish(third.gesture,{x:35,y:25});
+  assert.equal(controller.beginPoint({x:5,y:5},{finish:true}).result,
+    PEN_DRAFT_BEGIN_RESULT.CLOSE_REQUESTED);
+  assert.equal(controller.beginPoint({x:Infinity,y:5}).result,
+    PEN_DRAFT_BEGIN_RESULT.INVALID);
+  assert.equal(controller.canCloseAt({x:Infinity,y:5}),false);
+  assert.equal(controller.snapshot().points.length,3);
+  controller.reset();
+  assert.equal(controller.canCloseAt({x:5,y:5}),false);
+});
+
 test('finish intent reports the existing minimum-point status for a one-point draft', () => {
   const { controller } = createHarness();
   const first = begin(controller, { x: 5, y: 5 });

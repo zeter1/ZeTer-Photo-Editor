@@ -32,7 +32,7 @@
 | --- | --- | --- | --- |
 | CAP-MASK | Raster/vector Layer Masks: preview/link/invert/feather/density | IN PROGRESS | Единый UI + vector/raster сохранение, groups/transform, Undo/Redo, PSD parity. |
 | CAP-ADJ | Adjustment Layers: Levels/Curves/Exposure/Hue-Saturation | IN PROGRESS | Точный stack/group рендер, UI/reopen и редактируемый PSD round-trip. |
-| CAP-BEZ | Полные cubic Bézier paths, anchors, handles | IN PROGRESS | UX редактирования всех ручек, заливки/маски, save/import/export и Undo. |
+| CAP-BEZ | Полные cubic Bézier paths, anchors, handles | IN PROGRESS | [PR #126](https://github.com/zeter1/ZeTer-Photo-Editor/pull/126): bounded first-anchor click-to-close Shape path ported to current main with zoom-aware snap, true cubic closing preview, no duplicate anchor and one persisted Shape/Undo command; focused 17/17 PASS on Windows, isolated real Chrome `file://` full smoke PASS, dedicated click-to-close E2E and final-head CI pending. Remaining: all-handle UX, vector mask + Saved Paths parity, PSD/PSB editable round-trip. [PR #125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) remains independent OPEN. |
 | CAP-PSD-IN | Layered PSD import | IN PROGRESS | Настоящий набор Photoshop-authored файлов; текст, группы, masks, blend, native/ICC. |
 | CAP-PSD-OUT | Layered PSD export | IN PROGRESS | Editable PSD, внешняя проверка и import-edit-export-import. |
 | CAP-PSB | Большие PSB | IN PROGRESS | Streaming/lazy больших реальных файлов; отличать поддержку формата от unrestricted размерности. |
