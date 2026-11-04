@@ -1,3 +1,7 @@
+### 2026-11-04 — PR #375 merged: cancellable native/RGBA8 Content-Aware Fill
+
+- [PR #375](https://github.com/zeter1/ZeTer-Photo-Editor/pull/375), final head `754b9a4`: [Linux core #41818060991](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41818060991) SUCCESS 12/12, independent [real-photo #41818061101](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41818061101) SUCCESS, merged into main [`7b2a0cd`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7b2a0cd581ceab8f5f15ab7c87d928576e010036). Exact-main CI is a distinct gate, not inherited from PR-head. User-visible cancellation, late async PNG rejection and buffer ownership regressions are bounded DONE; larger paired two-tab generic/pooled History + UI Worker/IDB remains 003X/6c-9 IN PROGRESS. No format changes.
+
 ### 2026-11-04 — stale PNG rejection after tab switch cleans up exact RGBA8 canvas
 
 - Fix a second asynchronous failure path: after switching tabs, `persistPaintLayer` can reject while Content-Aware Fill is stale, skipping the exception cleanup and retaining cancelled pixels in the raster cache. Release only the failed operation's canvas before the stale return, never the new owner's canvas; no Undo/dataUrl publication and no format changes.
