@@ -1243,7 +1243,7 @@ export function inpaintPixelBuffer(buffer, options = {}) {
 }
 
 // Private ROI pixels are never published when the cooperative kernel cancels.
-function inpaintPixelBufferCooperative(buffer, options, controls) {
+export function inpaintPixelBufferCooperative(buffer, options = {}, controls = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
   return inpaintSelectedSamplesCooperative(buffer.data, buffer.width, buffer.height, buffer.channels, {
     ...options,

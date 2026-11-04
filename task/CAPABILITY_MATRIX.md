@@ -1,6 +1,6 @@
 # ZeTer Photo Editor — матрица возможностей
 
-**Дата базовой ревизии:** 2026-11-04. **Исходная ветка:** main `7e37b2feb67ff8de66816f8af5a39a2f5d416122`.  
+**Дата базовой ревизии:** 2026-11-04. **Исходная ветка:** main `8dee7d366601fa2531e89545a4fd76ce0a8d1d23`.
 **Назначение:** единый, проверяемый указатель функциональной готовности. **Это НЕ заявление о завершённости Photoshop-совместимости.**
 
 ## Правила обновления
@@ -48,7 +48,7 @@
 
 ## Текущий блокер и следующий вертикальный срез
 
-- **CURRENT P1:** [003X/6c-9](003x6c9-history-sharing-profile.md), real same-action UI+Worker History baseline/pooled, только [NEXT.md](NEXT.md) определяет активную реализацию.
+- **CURRENT P1:** [003X/6c-9](003x6c9-history-sharing-profile.md), real same-action UI+Worker History baseline/pooled, только [NEXT.md](NEXT.md) определяет активную реализацию. 2026-11-04 local candidate: cancellable contiguous 16/32-bit native Content-Aware Fill + late preview guard; RED/GREEN regression, full GitHub acceptance pending; Stage 6/10 не DONE.
 - **Отдельный BLOCKED gate:** [002B/2c Adobe-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md). Синтетические тесты не закрывают этот gate.
 - После приемки 003X/6c-9 выбрать **самый полезный неполный вертикальный срез** из масок/корректирующих слоёв/Bézier/PSD, учитывая текущий код и зависимости. Не назначать заранее новую задачу без повторной проверки.
 

@@ -6778,7 +6778,7 @@ function inpaintPixelBuffer(buffer, options = {}) {
 }
 
 // Private ROI pixels are never published when the cooperative kernel cancels.
-function inpaintPixelBufferCooperative(buffer, options, controls) {
+function inpaintPixelBufferCooperative(buffer, options = {}, controls = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
   return inpaintSelectedSamplesCooperative(buffer.data, buffer.width, buffer.height, buffer.channels, {
     ...options,
@@ -18897,13 +18897,26 @@ function createRasterCommandController({
           status('Контент-заливка: native high-depth buffer недоступен; precision сохранён без raster fallback');
           return false;
         }
-        const filled = inpaintPixelBuffer(buffer, { isAllowed });
+        // The contiguous high-depth path previously blocked the UI and could
+        // publish a late preview after Escape/tab cancellation. Work only on a
+        // privately decoded native plane and yield between kernel checkpoints.
+        const sourceForFill = layer.highDepthSource;
+        const stillOwnsSource = () => isInpaintCurrent() &&
+          layer.highDepthSource === sourceForFill &&
+          doc.layers.includes(layer) && target.selected?.() === layer &&
+          target.isEditableRasterLayer(layer);
+        const filled = await inpaintPixelBufferCooperative(buffer, { isAllowed }, {
+          isCancelled:() => !stillOwnsSource(),
+        });
+        if (!stillOwnsSource() || filled === null) return false;
         if (!filled) {
           resetNativeState();
           status('Контент-заливка: нужны исходные пиксели за пределами выделения');
           return false;
         }
-        const published = await rasterEdit.persistHighDepthMutation(doc, layer, buffer);
+        const published = await rasterEdit.persistHighDepthMutation(doc, layer, buffer, {
+          isContinuationCurrent:stillOwnsSource,
+        });
         if (!isInpaintCurrent()) return false;
         if (!published) {
           resetNativeState();

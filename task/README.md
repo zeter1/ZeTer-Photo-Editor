@@ -8,7 +8,8 @@
 
 - **CURRENT:** [003X/6c-9](003x6c9-history-sharing-profile.md) — P1, **IN PROGRESS**. Это оставшаяся live UI pooled-vs-generic/Worker/cancel/stale/tab-close/IDB связка после ограниченного подтверждения PR #373.
 - **Bounded DONE:** [PR #373](https://github.com/zeter1/ZeTer-Photo-Editor/pull/373) merged [main `7e37b2f`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e37b2feb67ff8de66816f8af5a39a2f5d416122); [PR core CI 12/12](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41792886405), [exact-main core CI 12/12](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41795185119).
-- **Документирование:** [PR #374](https://github.com/zeter1/ZeTer-Photo-Editor/pull/374) (проверять актуальное состояние).
+- **Документирование:** [PR #374](https://github.com/zeter1/ZeTer-Photo-Editor/pull/374) merged `8dee7d3`; exact-main [CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41801227578).
+- **Кодовый инкремент 2026-11-04:** native contiguous 16/32-bit Content-Aware Fill — cooperative cancellation + запрет поздней публикации preview/commit, [подробности](003x6c9-history-sharing-profile.md); local targeted RED 2/4 → GREEN 4/4 и 25/25 related PASS. Пока **candidate**, не принятый main до PR/CI/merge.
 - **Отдельный BLOCKED:** [002B/2c Photoshop-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md). Измерения и synthetic не подменяют авторское происхождение.
 - **Not run:** отдельный real-photo CI для PR #373 не запустился из-за path filters; это не PASS.
 

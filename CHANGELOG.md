@@ -1,3 +1,9 @@
+### 2026-11-04 — candidate: cancellable contiguous RGB16/CMYKA32 Content-Aware Fill
+
+- Replaced synchronous flat native 16/32-bit Content-Aware computation with cooperative kernel checkpoints on a private buffer; cancel, tab switch, layer/source replacement invalidate the old result before publication. Forward the same owner guard through asynchronous high-depth preview serialization to prevent late native source mutation and phantom Undo.
+- RED regression 2/4 before patch → GREEN 4/4, focused related 25/25 PASS; successful RGB16/CMYKA32 Float32 uses byte-exact synchronous oracle including sNaN, -0 and alpha. Local Windows npm check 1572 PASS/10 SKIP/5 preexisting Linux-only /proc/cgroup FAIL. Browser regression, Linux PR-head CI and merge must be verified separately. No .zpe schema changes.
+- Parent 003X/6c-9 remains IN PROGRESS for same-action full UI baseline/pooled A/B and bounded Worker/IDB acceptance.
+
 ### 2026-11-04 — merged real native Chrome Worker bit oracle (003X/6c-9 remains open)
 
 - PR [#373](https://github.com/zeter1/ZeTer-Photo-Editor/pull/373) final head e05763e: [PR core CI #41792886405](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41792886405) SUCCESS 12/12; squash main [7e37b2f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e37b2feb67ff8de66816f8af5a39a2f5d416122), [exact-main CI #41795185119](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41795185119) SUCCESS 12/12 on first attempt. Separate real-photo workflow not triggered by file filters; no success claim. No production behavior or format changes.
