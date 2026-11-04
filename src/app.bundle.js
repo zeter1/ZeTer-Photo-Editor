@@ -18994,11 +18994,12 @@ function createRasterCommandController({
       status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
       return true;
     } catch (error) {
+      // A rejected async PNG encode may arrive after tab replacement without
+      // an explicit Escape. Discard only this operation's canvas even if stale;
+      // never reset the currently selected document's newer raster cache.
+      releaseRasterOnFailure?.();
       if (!isInpaintCurrent()) return false;
-      // Failed encoding must discard only the canvas belonging to this fill.
-      // Global cache clearing may evict a different edit acquired meanwhile.
       if (releaseRasterOnFailure) {
-        releaseRasterOnFailure();
         state.resetPaintState?.();
       } else {
         resetNativeState();

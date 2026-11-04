@@ -1,3 +1,8 @@
+### 2026-11-04 — stale PNG rejection after tab switch cleans up exact RGBA8 canvas
+
+- Fix a second asynchronous failure path: after switching tabs, `persistPaintLayer` can reject while Content-Aware Fill is stale, skipping the exception cleanup and retaining cancelled pixels in the raster cache. Release only the failed operation's canvas before the stale return, never the new owner's canvas; no Undo/dataUrl publication and no format changes.
+- Dedicated delayed-error/tab-switch regression RED 7/8 → GREEN 8/8; native RGB16/CMYKA32 Float32 + RGBA8 focused 12/12 PASS. Windows check 1580 PASS / 10 SKIP / 5 known Linux-only /proc/cgroup FAIL (overall FAIL); Chrome `file://` smoke exit 0. Generated build `ad655b3dffd19fca`. New-head Linux PR CI and exact-main remain separate.
+
 ### 2026-11-04 — owner-safe Content-Aware Fill raster cache cleanup after PNG failure
 
 - On rejected RGBA8 PNG persistence, release only the canvas owned by the failed fill instead of clearing a newer cached canvas from another edit; keep layer URL and Undo unchanged and allow the next edit.

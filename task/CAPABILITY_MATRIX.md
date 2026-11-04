@@ -42,7 +42,7 @@
 | CAP-ICC | ICC, CMYK, soft proof, wide gamut | IN PROGRESS | Эталонное цветовое сравнение и профильные export round-trips. |
 | CAP-RAW | RAW pipeline | TODO | Подтверждённая работа end-to-end от RAW декодера до проекта. |
 | CAP-REFINE | Select & Mask / Refine Edge | IN PROGRESS | Edge-aware качество, feather/decontamination на реальных сложных данных. |
-| CAP-INPAINT | Content-Aware Fill/Heal / PatchMatch | IN PROGRESS | Native/RGBA8 cancellation and identity-safe canvas cleanup bounded to PR #375; still requires full UI Worker cancel/stale/session-close, real large-image quality, History/IDB and PSD/PSB acceptance. |
+| CAP-INPAINT | Content-Aware Fill/Heal / PatchMatch | IN PROGRESS | PR #375 local candidate: native/RGBA8 cooperative cancellation and identity-safe canvas cleanup, including a rejected PNG after tab switch (`tests/003x6c9-rgba8-cancel.test.mjs`, 8/8); still requires full UI Worker cancel/stale/session-close, real large-image quality, History/IDB and PSD/PSB acceptance. |
 | CAP-RET | Другие инструменты ретуши | IN PROGRESS | Functional visual/Undo/Redo/quality gates для инструментария. |
 | CAP-COMPAT | Полная Photoshop compatibility | TODO | Открытая долгосрочная цель без утверждения о полном соответствии. |
 

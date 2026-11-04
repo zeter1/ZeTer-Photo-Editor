@@ -26,6 +26,7 @@ function fixture({ width = 7, height = 7, pausePersist = false, rejectPersist = 
   const resume = deferred();
   const layer = { id: 'rgba8', type: 'raster', highDepthSource: null, dataUrl: 'before', width, height };
   const doc = { id: 'doc', width, height, layers: [layer], selectedLayerId: layer.id };
+  let activeDoc = doc;
   const commits = [];
   const ctx = {
     getImageData: () => ({ data: new Uint8ClampedArray(original), width, height }),
@@ -58,7 +59,7 @@ function fixture({ width = 7, height = 7, pausePersist = false, rejectPersist = 
       },
     },
     state: {
-      getDocument: () => doc,
+      getDocument: () => activeDoc,
       isPersisting: () => lease !== null,
       beginPersist: () => lease ? false : (lease = {}),
       endPersist: token => { if (lease === token) lease = null; },
@@ -82,6 +83,7 @@ function fixture({ width = 7, height = 7, pausePersist = false, rejectPersist = 
   });
   return {
     original, doc, layer, commands, commits, entered, resume,
+    setActiveDoc: value => { activeDoc = value; },
     get writes() { return writes; }, get saved() { return saved; }, get lease() { return lease; },
     get cached() { return cached; }, get discarded() { return discarded; },
   };
@@ -200,4 +202,22 @@ test('003X/6c-9: rejected stale PNG cannot evict another canvas acquired during 
   assert.equal(f.discarded, 0, 'old canvas must not match the replacement');
   assert.equal(f.layer.dataUrl, 'before');
   assert.deepEqual(f.commits, []);
+});
+
+
+test('003X/6c-9: rejected PNG after a tab switch releases only the old raster canvas', async () => {
+  const f = fixture({ pausePersist: true, rejectPersist: true });
+  const old = f.commands.contentAwareFill({ isAllowed: (x, y) => x === 3 && y === 3 });
+  await f.entered.promise;
+  const oldCanvas = f.cached.canvas;
+  f.setActiveDoc({ id: 'another-tab', layers: [] });
+  f.resume.resolve();
+  assert.equal(await old, false);
+  assert.equal(f.cached, null, 'stale rejected encoding must not keep the dirty canvas for future edits');
+  assert.equal(f.discarded, 1);
+  assert.equal(f.layer.dataUrl, 'before');
+  assert.equal(f.writes, 0);
+  assert.deepEqual(f.commits, []);
+  assert.equal(f.lease, null);
+  assert.ok(oldCanvas);
 });
