@@ -1,3 +1,9 @@
+### 2026-11-04 — real native Chrome Worker on full RGB16 / CMYKA32 History fixtures (003X/6c-9 still open)
+
+- Opt-in `ZPE_PROFILE_WORKER=1` executes full original-file native v2 `.zpe` source in a real Chromium `file://` Blob Worker; first Worker terminated after dispatch, independent successor must fill exactly one pixel and one tile without changing input native URLs. 65×65 pilot 2/2 and 1025×1025 full-size RGB16/CMYKA32 Float32 2/2 PASS. Paired History one-repetition 4/4 PASS.
+- New `tools/browser-history-native-worker-smoke.mjs` and optional phase CDP/Windows memory observations in `tools/profile-history-sharing-chrome.mjs`. Raw evidence `task/evidence/003x6c9-native-worker-chrome.json` and `003x6c9-native-worker-pilot.json`. No production source, bundle, schema or dependencies altered.
+- Windows PID **private committed bytes** and CDP main-renderer heap are NOT Worker PID attribution, RSS or true operation peak; immediate `terminate()` is NOT kernel cancellation; direct protocol is NOT full app UI worker. Full 003X/6c-9 IN PROGRESS; main UI generic/pooled comparison and Worker cancel/stale/close + IDB integration remain open. New PR-head/merged-main CI not yet established for this increment.
+
 ### 2026-11-03 — actual two-tab Chrome UI/IndexedDB recovery under large pooled History (003X/6c-9, acceptance remains open)
 
 - Extended `tools/profile-history-sharing-chrome.mjs` with opt-in `ZPE_PROFILE_UI=1` + safe separate `ZPE_PROFILE_OUTPUT`. New `tools/browser-history-ui-recovery-smoke.mjs` acts through real editor `#projectInput`, Add Raster Layer, Undo, Redo, Save Project download Blob, two tab controls, real IndexedDB v2 and reload/Restore dialog; no mock HistoryStack, no changes to production or generated bundle. Saved native tile Data URL hashes checked after each UI action, in both persisted documents and after reload.

@@ -1,0 +1,1710 @@
+{
+  "date": "2026-11-04T06:50:42.259Z",
+  "executable": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "fileUrl": "file:///G:/%D0%9C%D0%9E%D0%AF%20%D0%92%D0%B5%D0%B1-%D1%80%D0%B0%D0%B7%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D0%B0/ZeTer%20Dev%20003X6c9/index.html",
+  "config": {
+    "width": 1025,
+    "height": 1025,
+    "positions": 4,
+    "sessions": 2,
+    "repeats": 1
+  },
+  "method": "fresh Chrome process per sample; alternated baseline/pool; CDP forced GC and Runtime.getHeapUsage",
+  "limitations": [
+    "JS heap is not whole Chrome RAM/RSS",
+    "CDP collectGarbage round trip is not exclusive GC time",
+    "Node-generated genuine snapshot loaded via real browser File API; UI document/IDB restore not tested",
+    "Native original-file source run through actual Blob Worker in pooled sample 0; immediate terminate is not kernel cancel; Worker PID/RSS/peak unmeasured",
+    "Chromium privateMemory may be unavailable; Windows per-PID private commit is not physical RSS",
+    "Chrome CDP process census does not establish Worker PID attribution; sum of working sets double-counts shared pages"
+  ],
+  "cases": [
+    {
+      "model": "rgb",
+      "shared": false,
+      "repetition": 0,
+      "config": {
+        "width": 1025,
+        "height": 1025,
+        "positions": 4,
+        "sessions": 2,
+        "repeats": 1
+      },
+      "sourceDigest": 2765058764,
+      "snapshotLength": 11211131,
+      "input": "production zpe snapshot and HistoryStack, Chrome file:// fresh process",
+      "setup": {
+        "pushMs": [
+          0.19999998807907104,
+          0.2999999523162842,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "owners": [
+          {
+            "positions": 4,
+            "logicalBytes": 44844508,
+            "pooledBytes": 0,
+            "nativeChars": 44831800
+          },
+          {
+            "positions": 4,
+            "logicalBytes": 44844508,
+            "pooledBytes": 0,
+            "nativeChars": 44831800
+          }
+        ]
+      },
+      "navigation": {
+        "getMs": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "parseMs": [
+          5,
+          4.800000011920929,
+          4.300000011920929,
+          4.799999952316284,
+          4.5,
+          3.800000011920929
+        ],
+        "positions": [
+          4,
+          4
+        ]
+      },
+      "memory": [
+        {
+          "phase": "loaded-fixture-before-history",
+          "gcRoundTripMs": 7.6658000000002176,
+          "jsHeapUsedBytes": 1344244,
+          "jsHeapTotalBytes": 2359296,
+          "embedderHeapUsedBytes": 2182112,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 348332032,
+            "workingSetSumBytes": 621465600,
+            "processes": [
+              {
+                "id": 17456,
+                "privateBytes": 21315584,
+                "workingSetBytes": 49049600,
+                "startUtc": "2026-11-04T06:50:43.3568407Z"
+              },
+              {
+                "id": 17584,
+                "privateBytes": 8773632,
+                "workingSetBytes": 22470656,
+                "startUtc": "2026-11-04T06:50:43.2266729Z"
+              },
+              {
+                "id": 31544,
+                "privateBytes": 18251776,
+                "workingSetBytes": 34967552,
+                "startUtc": "2026-11-04T06:50:43.3524757Z"
+              },
+              {
+                "id": 40600,
+                "privateBytes": 44310528,
+                "workingSetBytes": 86519808,
+                "startUtc": "2026-11-04T06:50:43.2814643Z"
+              },
+              {
+                "id": 40704,
+                "privateBytes": 132370432,
+                "workingSetBytes": 116154368,
+                "startUtc": "2026-11-04T06:50:43.2007686Z"
+              },
+              {
+                "id": 42180,
+                "privateBytes": 20701184,
+                "workingSetBytes": 43184128,
+                "startUtc": "2026-11-04T06:50:43.4096929Z"
+              },
+              {
+                "id": 44232,
+                "privateBytes": 44118016,
+                "workingSetBytes": 136171520,
+                "startUtc": "2026-11-04T06:50:43.0595225Z"
+              },
+              {
+                "id": 48516,
+                "privateBytes": 12521472,
+                "workingSetBytes": 36859904,
+                "startUtc": "2026-11-04T06:50:43.2061068Z"
+              },
+              {
+                "id": 58440,
+                "privateBytes": 45969408,
+                "workingSetBytes": 96088064,
+                "startUtc": "2026-11-04T06:50:43.3194625Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "retained-four-undo-two-sessions",
+          "gcRoundTripMs": 8.723799999999756,
+          "jsHeapUsedBytes": 91063820,
+          "jsHeapTotalBytes": 91815936,
+          "embedderHeapUsedBytes": 2175016,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 430366720,
+            "workingSetSumBytes": 709779456,
+            "processes": [
+              {
+                "id": 17456,
+                "privateBytes": 21315584,
+                "workingSetBytes": 49049600,
+                "startUtc": "2026-11-04T06:50:43.3568407Z"
+              },
+              {
+                "id": 17584,
+                "privateBytes": 8773632,
+                "workingSetBytes": 22470656,
+                "startUtc": "2026-11-04T06:50:43.2266729Z"
+              },
+              {
+                "id": 31544,
+                "privateBytes": 18251776,
+                "workingSetBytes": 34967552,
+                "startUtc": "2026-11-04T06:50:43.3524757Z"
+              },
+              {
+                "id": 40600,
+                "privateBytes": 44310528,
+                "workingSetBytes": 86519808,
+                "startUtc": "2026-11-04T06:50:43.2814643Z"
+              },
+              {
+                "id": 40704,
+                "privateBytes": 132370432,
+                "workingSetBytes": 116174848,
+                "startUtc": "2026-11-04T06:50:43.2007686Z"
+              },
+              {
+                "id": 42180,
+                "privateBytes": 20701184,
+                "workingSetBytes": 43184128,
+                "startUtc": "2026-11-04T06:50:43.4096929Z"
+              },
+              {
+                "id": 44232,
+                "privateBytes": 44539904,
+                "workingSetBytes": 136814592,
+                "startUtc": "2026-11-04T06:50:43.0595225Z"
+              },
+              {
+                "id": 48516,
+                "privateBytes": 12521472,
+                "workingSetBytes": 36859904,
+                "startUtc": "2026-11-04T06:50:43.2061068Z"
+              },
+              {
+                "id": 58440,
+                "privateBytes": 127582208,
+                "workingSetBytes": 183738368,
+                "startUtc": "2026-11-04T06:50:43.3194625Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "after-native-navigation",
+          "gcRoundTripMs": 11.047999999999774,
+          "jsHeapUsedBytes": 91067776,
+          "jsHeapTotalBytes": 91815936,
+          "embedderHeapUsedBytes": 2193792,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 430673920,
+            "workingSetSumBytes": 710451200,
+            "processes": [
+              {
+                "id": 17456,
+                "privateBytes": 21315584,
+                "workingSetBytes": 49049600,
+                "startUtc": "2026-11-04T06:50:43.3568407Z"
+              },
+              {
+                "id": 17584,
+                "privateBytes": 8773632,
+                "workingSetBytes": 22470656,
+                "startUtc": "2026-11-04T06:50:43.2266729Z"
+              },
+              {
+                "id": 31544,
+                "privateBytes": 18251776,
+                "workingSetBytes": 34967552,
+                "startUtc": "2026-11-04T06:50:43.3524757Z"
+              },
+              {
+                "id": 40600,
+                "privateBytes": 44310528,
+                "workingSetBytes": 86519808,
+                "startUtc": "2026-11-04T06:50:43.2814643Z"
+              },
+              {
+                "id": 40704,
+                "privateBytes": 132370432,
+                "workingSetBytes": 116174848,
+                "startUtc": "2026-11-04T06:50:43.2007686Z"
+              },
+              {
+                "id": 42180,
+                "privateBytes": 20701184,
+                "workingSetBytes": 43184128,
+                "startUtc": "2026-11-04T06:50:43.4096929Z"
+              },
+              {
+                "id": 44232,
+                "privateBytes": 44539904,
+                "workingSetBytes": 136818688,
+                "startUtc": "2026-11-04T06:50:43.0595225Z"
+              },
+              {
+                "id": 48516,
+                "privateBytes": 12521472,
+                "workingSetBytes": 36859904,
+                "startUtc": "2026-11-04T06:50:43.2061068Z"
+              },
+              {
+                "id": 58440,
+                "privateBytes": 127889408,
+                "workingSetBytes": 184406016,
+                "startUtc": "2026-11-04T06:50:43.3194625Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "after-history-release",
+          "gcRoundTripMs": 8.971199999999953,
+          "jsHeapUsedBytes": 1376148,
+          "jsHeapTotalBytes": 2097152,
+          "embedderHeapUsedBytes": 2193792,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 339763200,
+            "workingSetSumBytes": 620142592,
+            "processes": [
+              {
+                "id": 17456,
+                "privateBytes": 21315584,
+                "workingSetBytes": 49086464,
+                "startUtc": "2026-11-04T06:50:43.3568407Z"
+              },
+              {
+                "id": 17584,
+                "privateBytes": 8773632,
+                "workingSetBytes": 22470656,
+                "startUtc": "2026-11-04T06:50:43.2266729Z"
+              },
+              {
+                "id": 31544,
+                "privateBytes": 18251776,
+                "workingSetBytes": 34967552,
+                "startUtc": "2026-11-04T06:50:43.3524757Z"
+              },
+              {
+                "id": 40600,
+                "privateBytes": 44310528,
+                "workingSetBytes": 86556672,
+                "startUtc": "2026-11-04T06:50:43.2814643Z"
+              },
+              {
+                "id": 40704,
+                "privateBytes": 131813376,
+                "workingSetBytes": 115613696,
+                "startUtc": "2026-11-04T06:50:43.2007686Z"
+              },
+              {
+                "id": 42180,
+                "privateBytes": 20701184,
+                "workingSetBytes": 43184128,
+                "startUtc": "2026-11-04T06:50:43.4096929Z"
+              },
+              {
+                "id": 44232,
+                "privateBytes": 44539904,
+                "workingSetBytes": 136798208,
+                "startUtc": "2026-11-04T06:50:43.0595225Z"
+              },
+              {
+                "id": 48516,
+                "privateBytes": 12521472,
+                "workingSetBytes": 36859904,
+                "startUtc": "2026-11-04T06:50:43.2061068Z"
+              },
+              {
+                "id": 58440,
+                "privateBytes": 37535744,
+                "workingSetBytes": 94605312,
+                "startUtc": "2026-11-04T06:50:43.3194625Z"
+              }
+            ]
+          }
+        }
+      ],
+      "nativeWorker": null,
+      "workerMemory": null,
+      "uiRecovery": null
+    },
+    {
+      "model": "rgb",
+      "shared": true,
+      "repetition": 0,
+      "config": {
+        "width": 1025,
+        "height": 1025,
+        "positions": 4,
+        "sessions": 2,
+        "repeats": 1
+      },
+      "sourceDigest": 2765058764,
+      "snapshotLength": 11211131,
+      "input": "production zpe snapshot and HistoryStack, Chrome file:// fresh process",
+      "setup": {
+        "pushMs": [
+          80.60000002384186,
+          78.30000001192093,
+          72.69999998807907,
+          73.10000002384186,
+          84,
+          78.69999998807907,
+          78.79999995231628,
+          79.79999995231628
+        ],
+        "owners": [
+          {
+            "positions": 4,
+            "logicalBytes": 44844508,
+            "pooledBytes": 11207950,
+            "nativeChars": 44831800
+          },
+          {
+            "positions": 4,
+            "logicalBytes": 44844508,
+            "pooledBytes": 11207950,
+            "nativeChars": 44831800
+          }
+        ]
+      },
+      "navigation": {
+        "getMs": [
+          6.600000023841858,
+          4,
+          4,
+          4.600000023841858,
+          4.699999988079071,
+          5.300000011920929
+        ],
+        "parseMs": [
+          3.300000011920929,
+          3.5,
+          3.099999964237213,
+          4.099999964237213,
+          3.800000011920929,
+          2.800000011920929
+        ],
+        "positions": [
+          4,
+          4
+        ]
+      },
+      "memory": [
+        {
+          "phase": "loaded-fixture-before-history",
+          "gcRoundTripMs": 9.055099999999584,
+          "jsHeapUsedBytes": 1344244,
+          "jsHeapTotalBytes": 2359296,
+          "embedderHeapUsedBytes": 2182112,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 348459008,
+            "workingSetSumBytes": 621490176,
+            "processes": [
+              {
+                "id": 5640,
+                "privateBytes": 18362368,
+                "workingSetBytes": 46145536,
+                "startUtc": "2026-11-04T06:50:46.5251098Z"
+              },
+              {
+                "id": 12728,
+                "privateBytes": 132915200,
+                "workingSetBytes": 115802112,
+                "startUtc": "2026-11-04T06:50:46.4012282Z"
+              },
+              {
+                "id": 23968,
+                "privateBytes": 47439872,
+                "workingSetBytes": 89624576,
+                "startUtc": "2026-11-04T06:50:46.4650142Z"
+              },
+              {
+                "id": 37892,
+                "privateBytes": 43638784,
+                "workingSetBytes": 136409088,
+                "startUtc": "2026-11-04T06:50:46.2709295Z"
+              },
+              {
+                "id": 40124,
+                "privateBytes": 20725760,
+                "workingSetBytes": 43249664,
+                "startUtc": "2026-11-04T06:50:46.6117700Z"
+              },
+              {
+                "id": 43252,
+                "privateBytes": 12263424,
+                "workingSetBytes": 36515840,
+                "startUtc": "2026-11-04T06:50:46.4056392Z"
+              },
+              {
+                "id": 59240,
+                "privateBytes": 18305024,
+                "workingSetBytes": 35061760,
+                "startUtc": "2026-11-04T06:50:46.5234577Z"
+              },
+              {
+                "id": 62560,
+                "privateBytes": 45928448,
+                "workingSetBytes": 96100352,
+                "startUtc": "2026-11-04T06:50:46.4971733Z"
+              },
+              {
+                "id": 63724,
+                "privateBytes": 8880128,
+                "workingSetBytes": 22581248,
+                "startUtc": "2026-11-04T06:50:46.4242843Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "retained-four-undo-two-sessions",
+          "gcRoundTripMs": 10.423400000000584,
+          "jsHeapUsedBytes": 1518488,
+          "jsHeapTotalBytes": 2359296,
+          "embedderHeapUsedBytes": 2193792,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 366411776,
+            "workingSetSumBytes": 644775936,
+            "processes": [
+              {
+                "id": 5640,
+                "privateBytes": 18362368,
+                "workingSetBytes": 46145536,
+                "startUtc": "2026-11-04T06:50:46.5251098Z"
+              },
+              {
+                "id": 12728,
+                "privateBytes": 132915200,
+                "workingSetBytes": 115822592,
+                "startUtc": "2026-11-04T06:50:46.4012282Z"
+              },
+              {
+                "id": 23968,
+                "privateBytes": 47439872,
+                "workingSetBytes": 89624576,
+                "startUtc": "2026-11-04T06:50:46.4650142Z"
+              },
+              {
+                "id": 37892,
+                "privateBytes": 44077056,
+                "workingSetBytes": 137089024,
+                "startUtc": "2026-11-04T06:50:46.2709295Z"
+              },
+              {
+                "id": 40124,
+                "privateBytes": 20725760,
+                "workingSetBytes": 43249664,
+                "startUtc": "2026-11-04T06:50:46.6117700Z"
+              },
+              {
+                "id": 43252,
+                "privateBytes": 12263424,
+                "workingSetBytes": 36515840,
+                "startUtc": "2026-11-04T06:50:46.4056392Z"
+              },
+              {
+                "id": 59240,
+                "privateBytes": 18305024,
+                "workingSetBytes": 35061760,
+                "startUtc": "2026-11-04T06:50:46.5234577Z"
+              },
+              {
+                "id": 62560,
+                "privateBytes": 63442944,
+                "workingSetBytes": 118685696,
+                "startUtc": "2026-11-04T06:50:46.4971733Z"
+              },
+              {
+                "id": 63724,
+                "privateBytes": 8880128,
+                "workingSetBytes": 22581248,
+                "startUtc": "2026-11-04T06:50:46.4242843Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "after-native-navigation",
+          "gcRoundTripMs": 6.970999999999549,
+          "jsHeapUsedBytes": 1525756,
+          "jsHeapTotalBytes": 2359296,
+          "embedderHeapUsedBytes": 2193792,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 366354432,
+            "workingSetSumBytes": 645410816,
+            "processes": [
+              {
+                "id": 5640,
+                "privateBytes": 18366464,
+                "workingSetBytes": 46186496,
+                "startUtc": "2026-11-04T06:50:46.5251098Z"
+              },
+              {
+                "id": 12728,
+                "privateBytes": 132915200,
+                "workingSetBytes": 115822592,
+                "startUtc": "2026-11-04T06:50:46.4012282Z"
+              },
+              {
+                "id": 23968,
+                "privateBytes": 47439872,
+                "workingSetBytes": 89661440,
+                "startUtc": "2026-11-04T06:50:46.4650142Z"
+              },
+              {
+                "id": 37892,
+                "privateBytes": 44077056,
+                "workingSetBytes": 137089024,
+                "startUtc": "2026-11-04T06:50:46.2709295Z"
+              },
+              {
+                "id": 40124,
+                "privateBytes": 20725760,
+                "workingSetBytes": 43249664,
+                "startUtc": "2026-11-04T06:50:46.6117700Z"
+              },
+              {
+                "id": 43252,
+                "privateBytes": 12263424,
+                "workingSetBytes": 36515840,
+                "startUtc": "2026-11-04T06:50:46.4056392Z"
+              },
+              {
+                "id": 59240,
+                "privateBytes": 18305024,
+                "workingSetBytes": 35061760,
+                "startUtc": "2026-11-04T06:50:46.5234577Z"
+              },
+              {
+                "id": 62560,
+                "privateBytes": 63381504,
+                "workingSetBytes": 119242752,
+                "startUtc": "2026-11-04T06:50:46.4971733Z"
+              },
+              {
+                "id": 63724,
+                "privateBytes": 8880128,
+                "workingSetBytes": 22581248,
+                "startUtc": "2026-11-04T06:50:46.4242843Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "after-history-release",
+          "gcRoundTripMs": 6.405499999999847,
+          "jsHeapUsedBytes": 1463152,
+          "jsHeapTotalBytes": 2359296,
+          "embedderHeapUsedBytes": 2193792,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 340307968,
+            "workingSetSumBytes": 621891584,
+            "processes": [
+              {
+                "id": 5640,
+                "privateBytes": 18366464,
+                "workingSetBytes": 46186496,
+                "startUtc": "2026-11-04T06:50:46.5251098Z"
+              },
+              {
+                "id": 12728,
+                "privateBytes": 132345856,
+                "workingSetBytes": 115216384,
+                "startUtc": "2026-11-04T06:50:46.4012282Z"
+              },
+              {
+                "id": 23968,
+                "privateBytes": 47439872,
+                "workingSetBytes": 89661440,
+                "startUtc": "2026-11-04T06:50:46.4650142Z"
+              },
+              {
+                "id": 37892,
+                "privateBytes": 44077056,
+                "workingSetBytes": 137039872,
+                "startUtc": "2026-11-04T06:50:46.2709295Z"
+              },
+              {
+                "id": 40124,
+                "privateBytes": 20725760,
+                "workingSetBytes": 43249664,
+                "startUtc": "2026-11-04T06:50:46.6117700Z"
+              },
+              {
+                "id": 43252,
+                "privateBytes": 12263424,
+                "workingSetBytes": 36515840,
+                "startUtc": "2026-11-04T06:50:46.4056392Z"
+              },
+              {
+                "id": 59240,
+                "privateBytes": 18305024,
+                "workingSetBytes": 35061760,
+                "startUtc": "2026-11-04T06:50:46.5234577Z"
+              },
+              {
+                "id": 62560,
+                "privateBytes": 37904384,
+                "workingSetBytes": 96378880,
+                "startUtc": "2026-11-04T06:50:46.4971733Z"
+              },
+              {
+                "id": 63724,
+                "privateBytes": 8880128,
+                "workingSetBytes": 22581248,
+                "startUtc": "2026-11-04T06:50:46.4242843Z"
+              }
+            ]
+          }
+        }
+      ],
+      "nativeWorker": {
+        "input": "original .zpe File from Chrome file://",
+        "kind": "zpe-pixel-buffer-source-v2",
+        "width": 1025,
+        "height": 1025,
+        "tiles": 25,
+        "nativeHash": 2765058764,
+        "sourceBytes": 11207950,
+        "cancelled": {
+          "terminatedAfterDispatch": true,
+          "lateMessages": 0,
+          "dispatchMs": 105.39999997615814,
+          "startMs": 5.900000035762787
+        },
+        "completed": {
+          "terminatedAfterDispatch": false,
+          "ok": true,
+          "filled": 1,
+          "changedTiles": 1,
+          "sourceChanged": true,
+          "error": null,
+          "roundTripMs": 117.80000001192093
+        },
+        "wholeProbeMs": 273.39999997615814,
+        "limitations": "terminate immediately after postMessage (not in-kernel); direct Blob Worker protocol, not UI session; no isolated Worker RSS/peak"
+      },
+      "workerMemory": [
+        {
+          "phase": "before-real-native-worker",
+          "gcRoundTripMs": 5.164099999999962,
+          "jsHeapUsedBytes": 1463152,
+          "jsHeapTotalBytes": 2359296,
+          "embedderHeapUsedBytes": 2193792,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 340307968,
+            "workingSetSumBytes": 621895680,
+            "processes": [
+              {
+                "id": 5640,
+                "privateBytes": 18366464,
+                "workingSetBytes": 46186496,
+                "startUtc": "2026-11-04T06:50:46.5251098Z"
+              },
+              {
+                "id": 12728,
+                "privateBytes": 132345856,
+                "workingSetBytes": 115216384,
+                "startUtc": "2026-11-04T06:50:46.4012282Z"
+              },
+              {
+                "id": 23968,
+                "privateBytes": 47439872,
+                "workingSetBytes": 89661440,
+                "startUtc": "2026-11-04T06:50:46.4650142Z"
+              },
+              {
+                "id": 37892,
+                "privateBytes": 44077056,
+                "workingSetBytes": 137039872,
+                "startUtc": "2026-11-04T06:50:46.2709295Z"
+              },
+              {
+                "id": 40124,
+                "privateBytes": 20725760,
+                "workingSetBytes": 43249664,
+                "startUtc": "2026-11-04T06:50:46.6117700Z"
+              },
+              {
+                "id": 43252,
+                "privateBytes": 12263424,
+                "workingSetBytes": 36515840,
+                "startUtc": "2026-11-04T06:50:46.4056392Z"
+              },
+              {
+                "id": 59240,
+                "privateBytes": 18305024,
+                "workingSetBytes": 35061760,
+                "startUtc": "2026-11-04T06:50:46.5234577Z"
+              },
+              {
+                "id": 62560,
+                "privateBytes": 37904384,
+                "workingSetBytes": 96382976,
+                "startUtc": "2026-11-04T06:50:46.4971733Z"
+              },
+              {
+                "id": 63724,
+                "privateBytes": 8880128,
+                "workingSetBytes": 22581248,
+                "startUtc": "2026-11-04T06:50:46.4242843Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "after-real-native-worker",
+          "gcRoundTripMs": 9.273000000000138,
+          "jsHeapUsedBytes": 12682332,
+          "jsHeapTotalBytes": 13570048,
+          "embedderHeapUsedBytes": 2198488,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 387993600,
+            "workingSetSumBytes": 676114432,
+            "processes": [
+              {
+                "id": 5640,
+                "privateBytes": 18366464,
+                "workingSetBytes": 46186496,
+                "startUtc": "2026-11-04T06:50:46.5251098Z"
+              },
+              {
+                "id": 12728,
+                "privateBytes": 132345856,
+                "workingSetBytes": 115216384,
+                "startUtc": "2026-11-04T06:50:46.4012282Z"
+              },
+              {
+                "id": 23968,
+                "privateBytes": 47439872,
+                "workingSetBytes": 89661440,
+                "startUtc": "2026-11-04T06:50:46.4650142Z"
+              },
+              {
+                "id": 37892,
+                "privateBytes": 51560448,
+                "workingSetBytes": 151928832,
+                "startUtc": "2026-11-04T06:50:46.2709295Z"
+              },
+              {
+                "id": 40124,
+                "privateBytes": 20725760,
+                "workingSetBytes": 43270144,
+                "startUtc": "2026-11-04T06:50:46.6117700Z"
+              },
+              {
+                "id": 43252,
+                "privateBytes": 12279808,
+                "workingSetBytes": 36556800,
+                "startUtc": "2026-11-04T06:50:46.4056392Z"
+              },
+              {
+                "id": 59240,
+                "privateBytes": 18305024,
+                "workingSetBytes": 35102720,
+                "startUtc": "2026-11-04T06:50:46.5234577Z"
+              },
+              {
+                "id": 62560,
+                "privateBytes": 78090240,
+                "workingSetBytes": 135610368,
+                "startUtc": "2026-11-04T06:50:46.4971733Z"
+              },
+              {
+                "id": 63724,
+                "privateBytes": 8880128,
+                "workingSetBytes": 22581248,
+                "startUtc": "2026-11-04T06:50:46.4242843Z"
+              }
+            ]
+          }
+        }
+      ],
+      "uiRecovery": null
+    },
+    {
+      "model": "cmyk",
+      "shared": false,
+      "repetition": 0,
+      "config": {
+        "width": 1025,
+        "height": 1025,
+        "positions": 4,
+        "sessions": 2,
+        "repeats": 1
+      },
+      "sourceDigest": 906548749,
+      "snapshotLength": 28021158,
+      "input": "production zpe snapshot and HistoryStack, Chrome file:// fresh process",
+      "setup": {
+        "pushMs": [
+          0.19999998807907104,
+          0.30000001192092896,
+          0,
+          0,
+          0,
+          0,
+          0.09999996423721313,
+          0
+        ],
+        "owners": [
+          {
+            "positions": 4,
+            "logicalBytes": 112084616,
+            "pooledBytes": 0,
+            "nativeChars": 112071800
+          },
+          {
+            "positions": 4,
+            "logicalBytes": 112084616,
+            "pooledBytes": 0,
+            "nativeChars": 112071800
+          }
+        ]
+      },
+      "navigation": {
+        "getMs": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "parseMs": [
+          9.900000035762787,
+          9.300000011920929,
+          8.699999988079071,
+          8.700000047683716,
+          9.5,
+          8.700000047683716
+        ],
+        "positions": [
+          4,
+          4
+        ]
+      },
+      "memory": [
+        {
+          "phase": "loaded-fixture-before-history",
+          "gcRoundTripMs": 7.781399999999849,
+          "jsHeapUsedBytes": 1344244,
+          "jsHeapTotalBytes": 2359296,
+          "embedderHeapUsedBytes": 2182112,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 358825984,
+            "workingSetSumBytes": 635813888,
+            "processes": [
+              {
+                "id": 1184,
+                "privateBytes": 43433984,
+                "workingSetBytes": 136364032,
+                "startUtc": "2026-11-04T06:50:51.9196134Z"
+              },
+              {
+                "id": 14628,
+                "privateBytes": 43724800,
+                "workingSetBytes": 87543808,
+                "startUtc": "2026-11-04T06:50:52.1298253Z"
+              },
+              {
+                "id": 19912,
+                "privateBytes": 132820992,
+                "workingSetBytes": 116146176,
+                "startUtc": "2026-11-04T06:50:52.0501815Z"
+              },
+              {
+                "id": 25244,
+                "privateBytes": 15425536,
+                "workingSetBytes": 32665600,
+                "startUtc": "2026-11-04T06:50:52.1995631Z"
+              },
+              {
+                "id": 39480,
+                "privateBytes": 18518016,
+                "workingSetBytes": 46313472,
+                "startUtc": "2026-11-04T06:50:52.2011101Z"
+              },
+              {
+                "id": 45940,
+                "privateBytes": 20733952,
+                "workingSetBytes": 43208704,
+                "startUtc": "2026-11-04T06:50:52.2761748Z"
+              },
+              {
+                "id": 46712,
+                "privateBytes": 62844928,
+                "workingSetBytes": 113569792,
+                "startUtc": "2026-11-04T06:50:52.1643851Z"
+              },
+              {
+                "id": 52304,
+                "privateBytes": 8867840,
+                "workingSetBytes": 23142400,
+                "startUtc": "2026-11-04T06:50:52.0823146Z"
+              },
+              {
+                "id": 61584,
+                "privateBytes": 12455936,
+                "workingSetBytes": 36859904,
+                "startUtc": "2026-11-04T06:50:52.0554448Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "retained-four-undo-two-sessions",
+          "gcRoundTripMs": 14.779500000000553,
+          "jsHeapUsedBytes": 225544044,
+          "jsHeapTotalBytes": 226033664,
+          "embedderHeapUsedBytes": 2193800,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 558317568,
+            "workingSetSumBytes": 841842688,
+            "processes": [
+              {
+                "id": 1184,
+                "privateBytes": 43855872,
+                "workingSetBytes": 137015296,
+                "startUtc": "2026-11-04T06:50:51.9196134Z"
+              },
+              {
+                "id": 14628,
+                "privateBytes": 43724800,
+                "workingSetBytes": 87580672,
+                "startUtc": "2026-11-04T06:50:52.1298253Z"
+              },
+              {
+                "id": 19912,
+                "privateBytes": 132820992,
+                "workingSetBytes": 116166656,
+                "startUtc": "2026-11-04T06:50:52.0501815Z"
+              },
+              {
+                "id": 25244,
+                "privateBytes": 15425536,
+                "workingSetBytes": 32665600,
+                "startUtc": "2026-11-04T06:50:52.1995631Z"
+              },
+              {
+                "id": 39480,
+                "privateBytes": 18518016,
+                "workingSetBytes": 46350336,
+                "startUtc": "2026-11-04T06:50:52.2011101Z"
+              },
+              {
+                "id": 45940,
+                "privateBytes": 20733952,
+                "workingSetBytes": 43208704,
+                "startUtc": "2026-11-04T06:50:52.2761748Z"
+              },
+              {
+                "id": 46712,
+                "privateBytes": 261914624,
+                "workingSetBytes": 318853120,
+                "startUtc": "2026-11-04T06:50:52.1643851Z"
+              },
+              {
+                "id": 52304,
+                "privateBytes": 8867840,
+                "workingSetBytes": 23142400,
+                "startUtc": "2026-11-04T06:50:52.0823146Z"
+              },
+              {
+                "id": 61584,
+                "privateBytes": 12455936,
+                "workingSetBytes": 36859904,
+                "startUtc": "2026-11-04T06:50:52.0554448Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "after-native-navigation",
+          "gcRoundTripMs": 14.088300000001254,
+          "jsHeapUsedBytes": 225548000,
+          "jsHeapTotalBytes": 226033664,
+          "embedderHeapUsedBytes": 2193800,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 557731840,
+            "workingSetSumBytes": 841580544,
+            "processes": [
+              {
+                "id": 1184,
+                "privateBytes": 43864064,
+                "workingSetBytes": 137003008,
+                "startUtc": "2026-11-04T06:50:51.9196134Z"
+              },
+              {
+                "id": 14628,
+                "privateBytes": 43724800,
+                "workingSetBytes": 87580672,
+                "startUtc": "2026-11-04T06:50:52.1298253Z"
+              },
+              {
+                "id": 19912,
+                "privateBytes": 132231168,
+                "workingSetBytes": 115654656,
+                "startUtc": "2026-11-04T06:50:52.0501815Z"
+              },
+              {
+                "id": 25244,
+                "privateBytes": 15425536,
+                "workingSetBytes": 32665600,
+                "startUtc": "2026-11-04T06:50:52.1995631Z"
+              },
+              {
+                "id": 39480,
+                "privateBytes": 18518016,
+                "workingSetBytes": 46350336,
+                "startUtc": "2026-11-04T06:50:52.2011101Z"
+              },
+              {
+                "id": 45940,
+                "privateBytes": 20733952,
+                "workingSetBytes": 43208704,
+                "startUtc": "2026-11-04T06:50:52.2761748Z"
+              },
+              {
+                "id": 46712,
+                "privateBytes": 261910528,
+                "workingSetBytes": 319115264,
+                "startUtc": "2026-11-04T06:50:52.1643851Z"
+              },
+              {
+                "id": 52304,
+                "privateBytes": 8867840,
+                "workingSetBytes": 23142400,
+                "startUtc": "2026-11-04T06:50:52.0823146Z"
+              },
+              {
+                "id": 61584,
+                "privateBytes": 12455936,
+                "workingSetBytes": 36859904,
+                "startUtc": "2026-11-04T06:50:52.0554448Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "after-history-release",
+          "gcRoundTripMs": 20.672500000000582,
+          "jsHeapUsedBytes": 1376148,
+          "jsHeapTotalBytes": 1835008,
+          "embedderHeapUsedBytes": 2193800,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 334872576,
+            "workingSetSumBytes": 625471488,
+            "processes": [
+              {
+                "id": 1184,
+                "privateBytes": 45838336,
+                "workingSetBytes": 145199104,
+                "startUtc": "2026-11-04T06:50:51.9196134Z"
+              },
+              {
+                "id": 14628,
+                "privateBytes": 43724800,
+                "workingSetBytes": 87580672,
+                "startUtc": "2026-11-04T06:50:52.1298253Z"
+              },
+              {
+                "id": 19912,
+                "privateBytes": 132231168,
+                "workingSetBytes": 115564544,
+                "startUtc": "2026-11-04T06:50:52.0501815Z"
+              },
+              {
+                "id": 25244,
+                "privateBytes": 15425536,
+                "workingSetBytes": 32665600,
+                "startUtc": "2026-11-04T06:50:52.1995631Z"
+              },
+              {
+                "id": 39480,
+                "privateBytes": 18518016,
+                "workingSetBytes": 46350336,
+                "startUtc": "2026-11-04T06:50:52.2011101Z"
+              },
+              {
+                "id": 45940,
+                "privateBytes": 20733952,
+                "workingSetBytes": 43208704,
+                "startUtc": "2026-11-04T06:50:52.2761748Z"
+              },
+              {
+                "id": 46712,
+                "privateBytes": 37076992,
+                "workingSetBytes": 94875648,
+                "startUtc": "2026-11-04T06:50:52.1643851Z"
+              },
+              {
+                "id": 52304,
+                "privateBytes": 8867840,
+                "workingSetBytes": 23142400,
+                "startUtc": "2026-11-04T06:50:52.0823146Z"
+              },
+              {
+                "id": 61584,
+                "privateBytes": 12455936,
+                "workingSetBytes": 36884480,
+                "startUtc": "2026-11-04T06:50:52.0554448Z"
+              }
+            ]
+          }
+        }
+      ],
+      "nativeWorker": null,
+      "workerMemory": null,
+      "uiRecovery": null
+    },
+    {
+      "model": "cmyk",
+      "shared": true,
+      "repetition": 0,
+      "config": {
+        "width": 1025,
+        "height": 1025,
+        "positions": 4,
+        "sessions": 2,
+        "repeats": 1
+      },
+      "sourceDigest": 906548749,
+      "snapshotLength": 28021158,
+      "input": "production zpe snapshot and HistoryStack, Chrome file:// fresh process",
+      "setup": {
+        "pushMs": [
+          204,
+          187.0999999642372,
+          175.10000002384186,
+          175,
+          189.5,
+          187.80000001192093,
+          185.19999998807907,
+          180.5
+        ],
+        "owners": [
+          {
+            "positions": 4,
+            "logicalBytes": 112084616,
+            "pooledBytes": 28017950,
+            "nativeChars": 112071800
+          },
+          {
+            "positions": 4,
+            "logicalBytes": 112084616,
+            "pooledBytes": 28017950,
+            "nativeChars": 112071800
+          }
+        ]
+      },
+      "navigation": {
+        "getMs": [
+          13.5,
+          16.69999998807907,
+          17.80000001192093,
+          17.69999998807907,
+          13.899999976158142,
+          15.099999964237213
+        ],
+        "parseMs": [
+          7.300000011920929,
+          6.700000047683716,
+          6.899999976158142,
+          8.700000047683716,
+          9.600000023841858,
+          7.800000011920929
+        ],
+        "positions": [
+          4,
+          4
+        ]
+      },
+      "memory": [
+        {
+          "phase": "loaded-fixture-before-history",
+          "gcRoundTripMs": 8.380400000000009,
+          "jsHeapUsedBytes": 1344244,
+          "jsHeapTotalBytes": 2359296,
+          "embedderHeapUsedBytes": 2182112,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 359731200,
+            "workingSetSumBytes": 636682240,
+            "processes": [
+              {
+                "id": 8616,
+                "privateBytes": 129126400,
+                "workingSetBytes": 115847168,
+                "startUtc": "2026-11-04T06:50:56.1418021Z"
+              },
+              {
+                "id": 12676,
+                "privateBytes": 12423168,
+                "workingSetBytes": 36663296,
+                "startUtc": "2026-11-04T06:50:56.1464197Z"
+              },
+              {
+                "id": 19048,
+                "privateBytes": 15384576,
+                "workingSetBytes": 32108544,
+                "startUtc": "2026-11-04T06:50:56.2766464Z"
+              },
+              {
+                "id": 25532,
+                "privateBytes": 47902720,
+                "workingSetBytes": 89980928,
+                "startUtc": "2026-11-04T06:50:56.2144615Z"
+              },
+              {
+                "id": 29976,
+                "privateBytes": 18477056,
+                "workingSetBytes": 46235648,
+                "startUtc": "2026-11-04T06:50:56.2787073Z"
+              },
+              {
+                "id": 33768,
+                "privateBytes": 21204992,
+                "workingSetBytes": 43827200,
+                "startUtc": "2026-11-04T06:50:56.3513201Z"
+              },
+              {
+                "id": 53912,
+                "privateBytes": 62849024,
+                "workingSetBytes": 112992256,
+                "startUtc": "2026-11-04T06:50:56.2430597Z"
+              },
+              {
+                "id": 59544,
+                "privateBytes": 8785920,
+                "workingSetBytes": 22474752,
+                "startUtc": "2026-11-04T06:50:56.1662577Z"
+              },
+              {
+                "id": 63936,
+                "privateBytes": 43577344,
+                "workingSetBytes": 136552448,
+                "startUtc": "2026-11-04T06:50:55.9549500Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "retained-four-undo-two-sessions",
+          "gcRoundTripMs": 22.436900000000605,
+          "jsHeapUsedBytes": 1518924,
+          "jsHeapTotalBytes": 2097152,
+          "embedderHeapUsedBytes": 2193800,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 391417856,
+            "workingSetSumBytes": 675979264,
+            "processes": [
+              {
+                "id": 8616,
+                "privateBytes": 128557056,
+                "workingSetBytes": 115376128,
+                "startUtc": "2026-11-04T06:50:56.1418021Z"
+              },
+              {
+                "id": 12676,
+                "privateBytes": 12423168,
+                "workingSetBytes": 36663296,
+                "startUtc": "2026-11-04T06:50:56.1464197Z"
+              },
+              {
+                "id": 19048,
+                "privateBytes": 15384576,
+                "workingSetBytes": 32108544,
+                "startUtc": "2026-11-04T06:50:56.2766464Z"
+              },
+              {
+                "id": 25532,
+                "privateBytes": 47902720,
+                "workingSetBytes": 90017792,
+                "startUtc": "2026-11-04T06:50:56.2144615Z"
+              },
+              {
+                "id": 29976,
+                "privateBytes": 18481152,
+                "workingSetBytes": 46276608,
+                "startUtc": "2026-11-04T06:50:56.2787073Z"
+              },
+              {
+                "id": 33768,
+                "privateBytes": 21204992,
+                "workingSetBytes": 43827200,
+                "startUtc": "2026-11-04T06:50:56.3513201Z"
+              },
+              {
+                "id": 53912,
+                "privateBytes": 94691328,
+                "workingSetBytes": 152068096,
+                "startUtc": "2026-11-04T06:50:56.2430597Z"
+              },
+              {
+                "id": 59544,
+                "privateBytes": 8785920,
+                "workingSetBytes": 22474752,
+                "startUtc": "2026-11-04T06:50:56.1662577Z"
+              },
+              {
+                "id": 63936,
+                "privateBytes": 43986944,
+                "workingSetBytes": 137166848,
+                "startUtc": "2026-11-04T06:50:55.9549500Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "after-native-navigation",
+          "gcRoundTripMs": 21.603500000001077,
+          "jsHeapUsedBytes": 1526236,
+          "jsHeapTotalBytes": 2097152,
+          "embedderHeapUsedBytes": 2193800,
+          "processPrivateBytes": null,
+          "processCount": 10,
+          "processError": null,
+          "windowsOs": {
+            "available": false,
+            "reason": "Get-Process : �� 㤠���� ���� ����� � �����䨪��஬ ����� 24684.\r\n��ப�:1 ����:100\r\n+ ... 12,33768,25532,8616,12676,59544,24684);@(Get-Process -Id $ids | ForEa ...\r\n+                                              ~~~~~~~~~~~~~~~~~~~~\r\n    + CategoryInfo          : ObjectNotFound: (24684:Int32) [Get-Process], ProcessCommandException\r\n    + FullyQualifiedErrorId : NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand\r\n \r\n"
+          }
+        },
+        {
+          "phase": "after-history-release",
+          "gcRoundTripMs": 9.548299999998562,
+          "jsHeapUsedBytes": 1463772,
+          "jsHeapTotalBytes": 2097152,
+          "embedderHeapUsedBytes": 2193800,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 343101440,
+            "workingSetSumBytes": 634724352,
+            "processes": [
+              {
+                "id": 8616,
+                "privateBytes": 128557056,
+                "workingSetBytes": 115281920,
+                "startUtc": "2026-11-04T06:50:56.1418021Z"
+              },
+              {
+                "id": 12676,
+                "privateBytes": 12431360,
+                "workingSetBytes": 36696064,
+                "startUtc": "2026-11-04T06:50:56.1464197Z"
+              },
+              {
+                "id": 19048,
+                "privateBytes": 15384576,
+                "workingSetBytes": 32108544,
+                "startUtc": "2026-11-04T06:50:56.2766464Z"
+              },
+              {
+                "id": 25532,
+                "privateBytes": 47902720,
+                "workingSetBytes": 90017792,
+                "startUtc": "2026-11-04T06:50:56.2144615Z"
+              },
+              {
+                "id": 29976,
+                "privateBytes": 18481152,
+                "workingSetBytes": 46276608,
+                "startUtc": "2026-11-04T06:50:56.2787073Z"
+              },
+              {
+                "id": 33768,
+                "privateBytes": 21204992,
+                "workingSetBytes": 43827200,
+                "startUtc": "2026-11-04T06:50:56.3513201Z"
+              },
+              {
+                "id": 53912,
+                "privateBytes": 38928384,
+                "workingSetBytes": 96956416,
+                "startUtc": "2026-11-04T06:50:56.2430597Z"
+              },
+              {
+                "id": 59544,
+                "privateBytes": 8785920,
+                "workingSetBytes": 22474752,
+                "startUtc": "2026-11-04T06:50:56.1662577Z"
+              },
+              {
+                "id": 63936,
+                "privateBytes": 51425280,
+                "workingSetBytes": 151085056,
+                "startUtc": "2026-11-04T06:50:55.9549500Z"
+              }
+            ]
+          }
+        }
+      ],
+      "nativeWorker": {
+        "input": "original .zpe File from Chrome file://",
+        "kind": "zpe-pixel-buffer-source-v2",
+        "width": 1025,
+        "height": 1025,
+        "tiles": 25,
+        "nativeHash": 906548749,
+        "sourceBytes": 28017950,
+        "cancelled": {
+          "terminatedAfterDispatch": true,
+          "lateMessages": 0,
+          "dispatchMs": 109,
+          "startMs": 7
+        },
+        "completed": {
+          "terminatedAfterDispatch": false,
+          "ok": true,
+          "filled": 1,
+          "changedTiles": 1,
+          "sourceChanged": true,
+          "error": null,
+          "roundTripMs": 214
+        },
+        "wholeProbeMs": 422.69999998807907,
+        "limitations": "terminate immediately after postMessage (not in-kernel); direct Blob Worker protocol, not UI session; no isolated Worker RSS/peak"
+      },
+      "workerMemory": [
+        {
+          "phase": "before-real-native-worker",
+          "gcRoundTripMs": 4.890400000000227,
+          "jsHeapUsedBytes": 1463772,
+          "jsHeapTotalBytes": 2097152,
+          "embedderHeapUsedBytes": 2193800,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 343105536,
+            "workingSetSumBytes": 634740736,
+            "processes": [
+              {
+                "id": 8616,
+                "privateBytes": 128557056,
+                "workingSetBytes": 115281920,
+                "startUtc": "2026-11-04T06:50:56.1418021Z"
+              },
+              {
+                "id": 12676,
+                "privateBytes": 12431360,
+                "workingSetBytes": 36696064,
+                "startUtc": "2026-11-04T06:50:56.1464197Z"
+              },
+              {
+                "id": 19048,
+                "privateBytes": 15384576,
+                "workingSetBytes": 32108544,
+                "startUtc": "2026-11-04T06:50:56.2766464Z"
+              },
+              {
+                "id": 25532,
+                "privateBytes": 47902720,
+                "workingSetBytes": 90017792,
+                "startUtc": "2026-11-04T06:50:56.2144615Z"
+              },
+              {
+                "id": 29976,
+                "privateBytes": 18481152,
+                "workingSetBytes": 46280704,
+                "startUtc": "2026-11-04T06:50:56.2787073Z"
+              },
+              {
+                "id": 33768,
+                "privateBytes": 21204992,
+                "workingSetBytes": 43827200,
+                "startUtc": "2026-11-04T06:50:56.3513201Z"
+              },
+              {
+                "id": 53912,
+                "privateBytes": 38932480,
+                "workingSetBytes": 96960512,
+                "startUtc": "2026-11-04T06:50:56.2430597Z"
+              },
+              {
+                "id": 59544,
+                "privateBytes": 8785920,
+                "workingSetBytes": 22474752,
+                "startUtc": "2026-11-04T06:50:56.1662577Z"
+              },
+              {
+                "id": 63936,
+                "privateBytes": 51425280,
+                "workingSetBytes": 151093248,
+                "startUtc": "2026-11-04T06:50:55.9549500Z"
+              }
+            ]
+          }
+        },
+        {
+          "phase": "after-real-native-worker",
+          "gcRoundTripMs": 15.916500000002998,
+          "jsHeapUsedBytes": 29492956,
+          "jsHeapTotalBytes": 30085120,
+          "embedderHeapUsedBytes": 2198496,
+          "processPrivateBytes": null,
+          "processCount": 9,
+          "processError": null,
+          "windowsOs": {
+            "available": true,
+            "privateBytes": 403578880,
+            "workingSetSumBytes": 711454720,
+            "processes": [
+              {
+                "id": 8616,
+                "privateBytes": 107831296,
+                "workingSetBytes": 110608384,
+                "startUtc": "2026-11-04T06:50:56.1418021Z"
+              },
+              {
+                "id": 12676,
+                "privateBytes": 12431360,
+                "workingSetBytes": 36888576,
+                "startUtc": "2026-11-04T06:50:56.1464197Z"
+              },
+              {
+                "id": 19048,
+                "privateBytes": 15384576,
+                "workingSetBytes": 32149504,
+                "startUtc": "2026-11-04T06:50:56.2766464Z"
+              },
+              {
+                "id": 25532,
+                "privateBytes": 47902720,
+                "workingSetBytes": 90021888,
+                "startUtc": "2026-11-04T06:50:56.2144615Z"
+              },
+              {
+                "id": 29976,
+                "privateBytes": 18481152,
+                "workingSetBytes": 46284800,
+                "startUtc": "2026-11-04T06:50:56.2787073Z"
+              },
+              {
+                "id": 33768,
+                "privateBytes": 21204992,
+                "workingSetBytes": 43847680,
+                "startUtc": "2026-11-04T06:50:56.3513201Z"
+              },
+              {
+                "id": 53912,
+                "privateBytes": 119496704,
+                "workingSetBytes": 176635904,
+                "startUtc": "2026-11-04T06:50:56.2430597Z"
+              },
+              {
+                "id": 59544,
+                "privateBytes": 8785920,
+                "workingSetBytes": 22474752,
+                "startUtc": "2026-11-04T06:50:56.1662577Z"
+              },
+              {
+                "id": 63936,
+                "privateBytes": 52060160,
+                "workingSetBytes": 152543232,
+                "startUtc": "2026-11-04T06:50:55.9549500Z"
+              }
+            ]
+          }
+        }
+      ],
+      "uiRecovery": null
+    }
+  ]
+}
