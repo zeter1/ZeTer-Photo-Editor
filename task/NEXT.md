@@ -3,7 +3,7 @@
 > **CURRENT TASK:** [003X/6c-9 — real large History pooling memory/latency profile](003x6c9-history-sharing-profile.md)  
 > **PRIORITY:** P1 · **STATUS:** IN PROGRESS · **DEPENDENCY:** 003X/6c-8 DONE  
 > **BASELINE:** main [`7e37b2f`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e37b2feb67ff8de66816f8af5a39a2f5d416122) (2026-11-04; повторно сверить перед следующей записью)  
-> **ACTIVE DOCUMENTATION PR:** [#374](https://github.com/zeter1/ZeTer-Photo-Editor/pull/374), branch `docs/003x6c9-pr373-acceptance-20261104` (проверить его статус, не считать слитым заранее)  
+> **RECENT DOCUMENTATION PR:** [#374](https://github.com/zeter1/ZeTer-Photo-Editor/pull/374), branch `docs/003x6c9-pr373-acceptance-20261104` (проверяй статус GitHub; после merge это запись истории, а не активная функциональная задача)  
 > **LAST ACCEPTED INCREMENT:** [#373](https://github.com/zeter1/ZeTer-Photo-Editor/pull/373) `e05763e`, merged `7e37b2f`; PR core [#41792886405](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41792886405) **SUCCESS 12/12**; exact-main [#41795185119](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41795185119) **SUCCESS 12/12 attempt 1**. Separate real-photo workflow **NOT RUN** (path filters).  
 > **LAST SCOPE:** real Chrome `file://` native RGB16/CMYKA32 Float32 Worker byte oracle + bounded History A/B. Production/bundle/schema не менялись. **Parent Stage 6 IN PROGRESS.**
 
