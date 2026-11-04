@@ -31,6 +31,49 @@ export async function verifyBrowserHistoryNativeWorker(client, { evaluate, expec
     const selected=Math.floor(source.height/2)*source.width+Math.floor(source.width/2);
     const request=id=>({id,source,selectedIndices:Uint32Array.of(selected),
       halo:2,maxLayerPixels:source.width*source.height});
+    // The Worker must preserve EVERY untouched native byte, including Float32
+    // sNaN payloads, signed zero and selected-pixel alpha. A URL hash of only
+    // the input and a count of changed tiles cannot prove this output contract.
+    function verifyWorkerOutput(edited) {
+      if(!edited || edited.tiles?.length!==source.tiles.length)
+        throw Error('Worker output source/tile count mismatch');
+      const selectedX=selected%source.width,selectedY=Math.floor(selected/source.width);
+      const bytesPerSample=source.bitsPerChannel/8;
+      const pixelBytes=source.channels*bytesPerSample;
+      let changedColorBytes=0,verifiedRawBytes=0,changedTileIndex=-1;
+      for(let index=0;index<source.tiles.length;index++){
+        const before=source.tiles[index],after=edited.tiles[index];
+        if(!after || before.x!==after.x || before.y!==after.y ||
+           before.width!==after.width || before.height!==after.height ||
+           before.rawBytes!==after.rawBytes)
+          throw Error('Worker changed native tile geometry');
+        const containsSelected=selectedX>=before.x && selectedX<before.x+before.width &&
+          selectedY>=before.y && selectedY<before.y+before.height;
+        if(!containsSelected){
+          if(after.dataUrl!==before.dataUrl)throw Error('Worker changed an untouched native tile');
+          continue;
+        }
+        if(changedTileIndex!==-1)throw Error('Selection belongs to multiple tiles');
+        changedTileIndex=index;
+        const original=atob(before.dataUrl.slice(before.dataUrl.indexOf(',')+1));
+        const output=atob(after.dataUrl.slice(after.dataUrl.indexOf(',')+1));
+        if(original.length!==before.rawBytes || output.length!==original.length)
+          throw Error('Worker changed native tile byte length');
+        const pixelStart=((selectedY-before.y)*before.width+selectedX-before.x)*pixelBytes;
+        const colorEnd=pixelStart+(source.channels-1)*bytesPerSample;
+        for(let byte=0;byte<original.length;byte++){
+          if(original.charCodeAt(byte)===output.charCodeAt(byte))continue;
+          if(byte<pixelStart || byte>=colorEnd)
+            throw Error('Worker changed unselected color or alpha native bits');
+          changedColorBytes++;
+        }
+        verifiedRawBytes+=original.length;
+      }
+      if(changedTileIndex<0 || changedColorBytes===0)
+        throw Error('Worker failed to change exactly one selected native pixel');
+      return {changedTileIndex,changedColorBytes,verifiedRawBytes,
+        untouchedTilesVerified:source.tiles.length-1};
+    }
     async function run(id,terminateAfterDispatch){
       const worker=new Worker(blobUrl);
       let sent=false,lateMessages=0;
@@ -59,13 +102,16 @@ export async function verifyBrowserHistoryNativeWorker(client, { evaluate, expec
             if(e.data?.id!==id)return;
             clearTimeout(timer);
             const response=e.data;
+            const roundTripMs=performance.now()-workerStarted;
+            let nativeBitOracle=null;
+            try {
+              if(response.ok===true)nativeBitOracle=verifyWorkerOutput(response.result?.source);
+            } catch(error) { reject(error); return; }
             resolve({terminatedAfterDispatch:false,ok:response.ok===true,
               filled:response.result?.filled??null,
               changedTiles:response.result?.changedTiles??null,
-              sourceChanged:response.result?.source?.tiles?.some((tile,i)=>
-                tile.dataUrl!==source.tiles[i]?.dataUrl)??false,
-              error:response.error??null,
-              roundTripMs:performance.now()-workerStarted});
+              sourceChanged:nativeBitOracle!==null,
+              nativeBitOracle,error:response.error??null,roundTripMs});
           };
         });
       } finally {worker.terminate();}

@@ -1,3 +1,9 @@
+### 2026-11-04 — strengthen genuine Chrome native Worker byte oracle (003X/6c-9 IN PROGRESS)
+
+- Extend the existing opt-in `file://` Worker profile: reject output if any non-selected tile URL changes, or if any native byte outside the selected pixel's color samples changes; alpha, Float32 signaling-NaN and signed-zero payloads remain byte exact. Confirm a color byte changed; verify returned tile geometry and count.
+- Actual Windows Chrome: 65×65 RGB16/CMYKA32 Float32 2/2 Worker PASS, 1025×1025 2/2 Worker PASS (24 untouched tiles each); paired baseline/pooled History runs also 4/4 per size. Focused Node 10/10 PASS and full browser smoke exit 0. Compact evidence: `task/evidence/003x6c9-native-worker-byte-oracle-20261104.json`.
+- No production source, bundle or .zpe schema change. Prior PR #373 head f53613b Linux core CI SUCCESS 12/12; new PR head, independent real-photo CI, merge and exact-main acceptance remain separate and pending. Stage 6 / 003X/6c-9 still IN PROGRESS.
+
 ### 2026-11-04 — real native Chrome Worker on full RGB16 / CMYKA32 History fixtures (003X/6c-9 still open)
 
 - Opt-in `ZPE_PROFILE_WORKER=1` executes full original-file native v2 `.zpe` source in a real Chromium `file://` Blob Worker; first Worker terminated after dispatch, independent successor must fill exactly one pixel and one tile without changing input native URLs. 65×65 pilot 2/2 and 1025×1025 full-size RGB16/CMYKA32 Float32 2/2 PASS. Paired History one-repetition 4/4 PASS.
