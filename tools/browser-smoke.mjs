@@ -1203,7 +1203,8 @@ async function runSmoke() {
 
     // 010D: last scenario after a clean reload so the application's lazy
     // Worker controller loads only the test-instrumented source in this phase.
-    await verifyBrowserUiLockMidKernel(client, { evaluate, waitFor, assert, browserClient });
+    await verifyBrowserUiLockMidKernel(client, { evaluate, waitFor, assert, browserClient,
+      cancelViaButton:true });
     assertNoBrowserErrors(errors, stderrState);
     // 010D-C: real PSB32 Float32 active switch DURING CPU kernel write,
     // exact native little-endian word oracle across cancel + Undo/Redo.
