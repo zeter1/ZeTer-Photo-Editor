@@ -18873,6 +18873,7 @@ function createRasterCommandController({
     pendingContentAwareFill = pending;
     const isInpaintCurrent = () => !pending.cancelled &&
       pendingContentAwareFill === pending && state.getDocument() === doc;
+    let releaseRasterOnFailure = null;
 
     try {
       status('Контент-заливка: анализ окружения…');
@@ -18942,6 +18943,7 @@ function createRasterCommandController({
       // A cancelled image decode may finish after a newer raster action started.
       // Discard only the canvas from this operation, never the newer one's.
       const releaseRaster = () => prepared && rasterEdit.discardRasterBuffer?.(doc, layer, prepared.canvas);
+      releaseRasterOnFailure = releaseRaster;
       if (!isInpaintCurrent()) {
         releaseRaster();
         return false;
@@ -18993,7 +18995,14 @@ function createRasterCommandController({
       return true;
     } catch (error) {
       if (!isInpaintCurrent()) return false;
-      resetNativeState();
+      // Failed encoding must discard only the canvas belonging to this fill.
+      // Global cache clearing may evict a different edit acquired meanwhile.
+      if (releaseRasterOnFailure) {
+        releaseRasterOnFailure();
+        state.resetPaintState?.();
+      } else {
+        resetNativeState();
+      }
       ui?.render?.();
       if (error instanceof RangeError && String(error.message).startsWith('Контент-заливка:')) {
         status(error.message);

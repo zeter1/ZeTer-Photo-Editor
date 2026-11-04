@@ -155,3 +155,17 @@ Current: IN PROGRESS. Bounded production fix merged via PR #369; real Chrome fil
 **Evidence:** RED 1 FAIL → GREEN: native+RGBA8 cancellation tests 9/9 PASS. New tests cover immediate preview discard, a cancelled old job followed by successful new fill, and actual raster cache object identity. Windows npm run check generated bundle and ran 1592 tests: 1577 PASS, 10 SKIP, 5 FAIL in existing Linux-only /proc/cgroup cases (NOT full Windows PASS). Chrome npm run test:browser under real file://: exit 0. git diff --check PASS. Remote old PR-head 6d7e98f CI core 12/12 and independent real-photo PASS; these do not prove this increment until new-head CI runs. No Photoshop-authored provenance claims.
 
 **Remaining:** publish this increment to existing PR #375; verify exact updated head Linux core/independent CI and merge gate. After authorized merge verify exact-main CI. Full 1025×1025 two-tab generic/pooled History + IndexedDB + UI Worker cancel A/B remains OPEN under 003X/6c-9, bounded by documented stop criterion.
+
+## 2026-11-04 — rejected PNG encode owner-safe raster cache cleanup (local candidate)
+
+**Defect:** RGBA8 Content-Aware Fill can fail during asynchronous PNG encoding. Its error handler previously called unscoped `clearBrushBuffer()` via `resetNativeState()`; this would remove a different cached canvas if a newer edit had acquired it before the rejected encoding returned. A failed fill must neither publish new pixels nor append Undo, must discard only its own temporary canvas and preserve another operation.
+
+**Implementation:** `src/painting/command-controller.js` captures `releaseRasterOnFailure` after the raster buffer resolves; on a current failed PNG encode it attempts owner/layer/canvas-scoped release, preserving newer cache identity, and resets the paint-state marker. Native and non-raster error paths retain existing reset logic. No `.zpe`/PSD/PSB schema or native pipeline changes.
+
+**RED/GREEN:** two new `tests/003x6c9-rgba8-cancel.test.mjs` regressions (failed encode followed by a successful edit, and a replaced canvas surviving a rejected old encode) were RED 2/7, then native+RGBA8 GREEN 11/11. These are controller integration/controlled encoding bridge scenarios, not a dedicated browser-injected failing codec.
+
+**Local evidence:** Windows `npm run check` total 1594, 1579 PASS / 10 SKIP / 5 known Linux-only /proc/cgroup FAIL (overall FAIL). Real Windows Chrome `npm run test:browser` with `file://` exit 0; existing Worker/PSD16/PSB32/IndexedDB scenarios exercised, but the two new exception tests are not full browser E2E. Generated artifacts rebuilt with production source. `git diff --check` PASS.
+
+**Remote status at observation:** #375 head `061e7679641e9fa30ad20f77ffebc322f568cf21` core #41813104144 SUCCESS all 12 jobs on attempt 2 (first attempt one Chromium DevTools startup timeout), independent real-photo #41813104296 SUCCESS. This CI **does not cover this new unpublished local change**. PR remains OPEN, not merged, no exact-main claims. Parent 003X/6c-9 and Stage 6/10 remain IN PROGRESS; 002B/2c Adobe-authored PSB32 independently BLOCKED.
+
+**Next concrete step:** publish candidate to existing #375 only when remote write permission is explicit, validate new head Linux CI and independent real-photo, review/merge subject to mandatory gates and authorization, verify exact main. Then complete bounded live 1025x1025 two-tab native History generic/pooled A/B with Undo/Redo, IndexedDB v2 and actual UI Worker cancel/stale/close; do not repeat unproductive PID/RSS profiling.

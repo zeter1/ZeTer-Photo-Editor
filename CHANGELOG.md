@@ -1,3 +1,7 @@
+### 2026-11-04 — owner-safe Content-Aware Fill raster cache cleanup after PNG failure
+
+- On rejected RGBA8 PNG persistence, release only the canvas owned by the failed fill instead of clearing a newer cached canvas from another edit; keep layer URL and Undo unchanged and allow the next edit.
+- Two RED→GREEN regressions; native+RGBA8 focused 11/11 PASS. Windows full `npm run check` 1579 PASS, 10 SKIP, 5 known Linux-only /proc/cgroup FAIL (overall FAIL); Chrome `file://` smoke exit 0. Generated bundle rebuilt, format unchanged. Existing #375 core/real-photo SUCCESS applies to prior remote head `061e767`, not this local candidate.
 ### 2026-11-04 — discard cancelled RGBA8 inpaint canvas without evicting newer raster edits
 
 - Fix retained brushCanvas after Escape while async PNG encoding is pending: discard only the exact owner/layer/canvas, so the next paint/fill cannot reuse a cancelled preview and a late old completion cannot evict the new canvas.

@@ -10,7 +10,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture({ width = 7, height = 7, pausePersist = false } = {}) {
+function fixture({ width = 7, height = 7, pausePersist = false, rejectPersist = false, replaceCacheBeforeError = false } = {}) {
   const original = new Uint8ClampedArray(width * height * 4);
   for (let index = 0; index < width * height; index++) {
     original.set([(index * 47) % 251, (index * 13) % 251, (index * 29) % 251, 255], index * 4);
@@ -21,6 +21,7 @@ function fixture({ width = 7, height = 7, pausePersist = false } = {}) {
   let writes = 0;
   let cached = null;
   let discarded = 0;
+  let failNextPersist = rejectPersist;
   const entered = deferred();
   const resume = deferred();
   const layer = { id: 'rgba8', type: 'raster', highDepthSource: null, dataUrl: 'before', width, height };
@@ -44,6 +45,11 @@ function fixture({ width = 7, height = 7, pausePersist = false } = {}) {
       async persistPaintLayer(owner, selected, options) {
         entered.resolve();
         if (pausePersist) await resume.promise;
+        if (failNextPersist) {
+          failNextPersist = false;
+          if (replaceCacheBeforeError) cached = { canvas: { width, height }, ctx };
+          throw new Error('PNG encode failure');
+        }
         if (options?.isContinuationCurrent && !options.isContinuationCurrent()) return false;
         writes++;
         saved = new Uint8ClampedArray(staged);
@@ -160,4 +166,38 @@ test('003X/6c-9: real raster cache discards only its exact canvas identity', asy
   assert.notEqual(second.canvas, first.canvas);
   assert.equal(edit.discardRasterBuffer(doc, layer, first.canvas), false);
   assert.equal(edit.brushCanvas, second.canvas);
+});
+
+test('003X/6c-9: failed PNG encoding discards staged RGBA8 canvas before next edit', async () => {
+  const f = fixture({ rejectPersist: true });
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(await f.commands.contentAwareFill({ isAllowed: (x, y) => x === 3 && y === 3 }), false);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(f.layer.dataUrl, 'before');
+  assert.equal(f.writes, 0);
+  assert.deepEqual(f.commits, []);
+  assert.equal(f.cached, null, 'failed encoding must not expose the stale modified canvas');
+  assert.equal(f.discarded, 1);
+  assert.equal(f.lease, null);
+  assert.equal(await f.commands.contentAwareFill({ isAllowed: (x, y) => x === 2 && y === 2 }), true);
+  assert.equal(f.writes, 1);
+  assert.deepEqual(f.commits, ['Контент-заливка']);
+});
+test('003X/6c-9: rejected stale PNG cannot evict another canvas acquired during encoding', async () => {
+  const f = fixture({ rejectPersist: true, replaceCacheBeforeError: true });
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(await f.commands.contentAwareFill({ isAllowed: (x, y) => x === 3 && y === 3 }), false);
+  } finally {
+    console.error = originalError;
+  }
+  assert.notEqual(f.cached, null, 'failure cleanup must not clear the newer canvas');
+  assert.equal(f.discarded, 0, 'old canvas must not match the replacement');
+  assert.equal(f.layer.dataUrl, 'before');
+  assert.deepEqual(f.commits, []);
 });
