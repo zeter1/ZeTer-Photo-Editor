@@ -1,0 +1,521 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Worker } from 'node:worker_threads';
+import { EventEmitter } from 'node:events';
+import {
+  createPixelBuffer,
+  inpaintTiledPixelBufferSource,
+  serializeTiledPixelBufferSource,
+} from '../src/core/pixel-buffer.js';
+import { createTiledInpaintWorkerJobController } from '../src/core/tiled-inpaint-worker-client.js';
+
+class FakeBrowserWorker {
+  constructor() {
+    this.handlers = new Map();
+    this.sent = [];
+    this.terminated = 0;
+  }
+  addEventListener(type, handler) {
+    if (!this.handlers.has(type)) this.handlers.set(type, new Set());
+    this.handlers.get(type).add(handler);
+  }
+  removeEventListener(type, handler) {
+    this.handlers.get(type)?.delete(handler);
+  }
+  emit(type, payload) {
+    for (const callback of [...(this.handlers.get(type) || [])]) {
+      callback(type === 'message' ? { data:payload } : payload);
+    }
+  }
+  postMessage(job) { this.sent.push(job); }
+  terminate() { this.terminated += 1; }
+}
+
+function fakeController({ pollIntervalMs = 0, schedulePoll, cancelPoll } = {}) {
+  const workers = [];
+  const client = createTiledInpaintWorkerJobController({
+    pollIntervalMs, schedulePoll, cancelPoll,
+    createWorker:() => {
+      const worker = new FakeBrowserWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  return { workers, client };
+}
+
+test('Stage 003 Worker client: a real Node worker executes detached Float32 CMYKA job with sync parity', async () => {
+  const width = 16, height = 16;
+  const data = new Float32Array(width * height * 5);
+  for (let i = 0; i < width * height; i += 1) {
+    data.set([0.12, 0.23, 0.34, 0.45, 1], i * 5);
+  }
+  data.set([9, 9, 9, 9, 1], (7 * width + 7) * 5);
+  const source = serializeTiledPixelBufferSource(createPixelBuffer({
+    width, height, model:'cmyk', channels:5,
+    bitsPerChannel:32, colorSpace:'device-cmyk', data,
+  }), { tileSize:8 });
+  const original = JSON.stringify(source);
+  const expected = inpaintTiledPixelBufferSource(source, {
+    isAllowed:(x,y) => x === 7 && y === 7,
+    halo:2, maxLayerPixels:100,
+  });
+  const client = createTiledInpaintWorkerJobController({
+    createWorker:() => new Worker(new URL('../tools/tiled-inpaint-worker-thread.mjs', import.meta.url), { type:'module' }),
+  });
+  const result = await client.run({ source, selectedIndices:Uint32Array.of(7 * width + 7), halo:2, maxLayerPixels:100 });
+  assert.deepEqual(result, expected);
+  assert.equal(client.cancel(), false, 'completed job has no live worker');
+  assert.equal(JSON.stringify(source), original, 'worker must not mutate caller source');
+});
+
+test('Stage 003 Worker client: supersession terminates the old job and ignores late reply', async () => {
+  const { client, workers } = fakeController();
+  const first = client.run({ source:'old' });
+  const oldWorker = workers[0];
+  oldWorker.emit('message', { ready:true });
+  assert.equal(oldWorker.sent.length, 1);
+  const second = client.run({ source:'new' });
+  const nextWorker = workers[1];
+  assert.deepEqual(await first, { cancelled:true });
+  assert.equal(oldWorker.terminated, 1);
+  assert.equal(oldWorker.handlers.get('message').size, 0, 'no stale listener');
+  oldWorker.emit('message', { id:oldWorker.sent[0].id, ok:true, result:'obsolete' });
+  nextWorker.emit('message', { ready:true });
+  assert.equal(nextWorker.sent.length, 1);
+  assert.notEqual(nextWorker.sent[0].id, oldWorker.sent[0].id);
+  nextWorker.emit('message', { id:nextWorker.sent[0].id, ok:true, result:'fresh' });
+  assert.equal(await second, 'fresh');
+  assert.equal(nextWorker.terminated, 1);
+});
+
+test('Stage 003 Worker client: explicit cancellation before ready never dispatches', async () => {
+  const { client, workers } = fakeController();
+  const pending = client.run({ source:'before-ready' });
+  assert.equal(client.cancel(), true);
+  assert.deepEqual(await pending, { cancelled:true });
+  workers[0].emit('message', { ready:true });
+  assert.equal(workers[0].sent.length, 0);
+  assert.equal(workers[0].terminated, 1);
+  assert.equal(client.cancel(), false);
+});
+
+test('Stage 003 Worker client: exact-owner guard fails closed before dispatch and on result', async () => {
+  const { client, workers } = fakeController();
+  const staleBefore = await client.run({ source:'stale' }, { isCurrent:() => false });
+  assert.deepEqual(staleBefore, { cancelled:true });
+  assert.equal(workers.length, 0, 'do not allocate Worker for stale owner');
+
+  let current = true;
+  const pending = client.run({ source:'live' }, { isCurrent:() => current });
+  workers[0].emit('message', { ready:true });
+  const id = workers[0].sent[0].id;
+  current = false;
+  workers[0].emit('message', { id, ok:true, result:'must-not-publish' });
+  assert.deepEqual(await pending, { cancelled:true });
+  assert.equal(workers[0].terminated, 1);
+
+  const second = client.run({}, { isCurrent:() => { throw new Error('disposed'); } });
+  assert.deepEqual(await second, { cancelled:true });
+  assert.equal(workers.length, 1);
+});
+
+test('Stage 003 Worker client: malformed reply, compute error and early exit fail closed; later jobs work', async () => {
+  const { client, workers } = fakeController();
+  const bad = client.run({});
+  workers[0].emit('message', { ready:true });
+  workers[0].emit('message', { id:workers[0].sent[0].id, ok:'maybe' });
+  await assert.rejects(bad, /invalid reply/);
+  assert.equal(workers[0].terminated, 1);
+
+  const errored = client.run({});
+  workers[1].emit('message', { ready:true });
+  workers[1].emit('message', {
+    id:workers[1].sent[0].id, ok:false,
+    error:{ name:'RangeError', message:'invalid selected index' },
+  });
+  await assert.rejects(errored, error => error.name === 'RangeError' && /selected index/.test(error.message));
+
+  const recovered = client.run({});
+  workers[2].emit('message', { ready:true });
+  workers[2].emit('message', { id:workers[2].sent[0].id - 1, ok:true, result:'wrong-id' });
+  workers[2].emit('message', { id:workers[2].sent[0].id, ok:true, result:'ok' });
+  assert.equal(await recovered, 'ok');
+
+  assert.equal(client.cancel(), false);
+});
+
+test('Stage 003 Worker client: invalid factory and invalid isCurrent reject instead of publishing', async () => {
+  assert.throws(() => createTiledInpaintWorkerJobController(), /createWorker/);
+  const { client, workers } = fakeController();
+  await assert.rejects(client.run({}, { isCurrent:true }), /isCurrent/);
+  assert.equal(workers.length, 0);
+});
+
+
+test('Stage 003 Worker client: synchronous ready/reply during subscription leaves no active job or handlers', async () => {
+  class ReentrantReadyWorker extends FakeBrowserWorker {
+    addEventListener(type, handler) {
+      super.addEventListener(type, handler);
+      if (type === 'error') this.emit('message', { ready:true });
+    }
+    postMessage(job) {
+      super.postMessage(job);
+      this.emit('message', { id:job.id, ok:true, result:'instant' });
+    }
+  }
+  const workers = [];
+  const client = createTiledInpaintWorkerJobController({
+    createWorker:() => {
+      const worker = new ReentrantReadyWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  assert.equal(await client.run({ source:'example' }), 'instant');
+  assert.equal(workers[0].sent.length, 1);
+  assert.equal(workers[0].terminated, 1);
+  assert.equal(workers[0].handlers.get('message').size, 0);
+  assert.equal(workers[0].handlers.get('error').size, 0);
+  assert.equal(client.cancel(), false, 'already completed worker cannot remain active');
+  assert.equal(await client.run({ source:'next' }), 'instant', 'subsequent work remains available');
+});
+
+test('Stage 003 Worker client: synchronous subscription errors clean up and allow recovery', async () => {
+  class StartupErrorWorker extends FakeBrowserWorker {
+    addEventListener(type, handler) {
+      super.addEventListener(type, handler);
+      if (type === 'error') this.emit('error', { message:'startup failed' });
+    }
+  }
+  const workers = [];
+  const client = createTiledInpaintWorkerJobController({
+    createWorker:() => {
+      const worker = workers.length === 0 ? new StartupErrorWorker() : new FakeBrowserWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  await assert.rejects(client.run({ source:'first' }), /startup failed/);
+  assert.equal(workers[0].terminated, 1);
+  assert.equal(workers[0].handlers.get('message').size, 0);
+  assert.equal(workers[0].handlers.get('error').size, 0);
+  assert.equal(client.cancel(), false);
+  const recovered = client.run({ source:'second' });
+  workers[1].emit('message', { ready:true });
+  workers[1].emit('message', { id:workers[1].sent[0].id, ok:true, result:'recovered' });
+  assert.equal(await recovered, 'recovered');
+});
+
+test('Stage 003 Worker client: exceptions while subscribing terminate a partially attached worker', async () => {
+  class ThrowingSubscribeWorker extends FakeBrowserWorker {
+    addEventListener(type, handler) {
+      super.addEventListener(type, handler);
+      if (type === 'error') throw new Error('listener registration failed');
+    }
+  }
+  const worker = new ThrowingSubscribeWorker();
+  const client = createTiledInpaintWorkerJobController({ createWorker:() => worker });
+  await assert.rejects(client.run({}), /listener registration failed/);
+  assert.equal(worker.terminated, 1);
+  assert.equal(worker.handlers.get('message').size, 0);
+  assert.equal(worker.handlers.get('error').size, 0);
+  assert.equal(client.cancel(), false);
+});
+
+
+test('Stage 003 Worker client: browser messageerror before ready and after dispatch fails closed', async () => {
+  const { client, workers } = fakeController();
+
+  const before = client.run({ source:'first' });
+  workers[0].emit('messageerror', { message:'bad clone' });
+  await assert.rejects(before, /message deserialization failed/);
+  assert.equal(workers[0].sent.length, 0, 'a failed handshake must never dispatch');
+  assert.equal(workers[0].terminated, 1);
+  for (const type of ['message', 'error', 'messageerror']) {
+    assert.equal(workers[0].handlers.get(type).size, 0, type + ' listeners must be detached');
+  }
+  assert.equal(client.cancel(), false);
+
+  const after = client.run({ source:'second' });
+  workers[1].emit('message', { ready:true });
+  assert.equal(workers[1].sent.length, 1);
+  workers[1].emit('messageerror', {});
+  await assert.rejects(after, /message deserialization failed/);
+  assert.equal(workers[1].terminated, 1);
+  workers[1].emit('message', { id:workers[1].sent[0].id, ok:true, result:'stale' });
+  assert.equal(client.cancel(), false);
+
+  const recovered = client.run({ source:'third' });
+  workers[2].emit('message', { ready:true });
+  workers[2].emit('message', { id:workers[2].sent[0].id, ok:true, result:'safe' });
+  assert.equal(await recovered, 'safe', 'error must not poison later jobs');
+});
+
+test('Stage 003 Worker client: node-shaped messageerror stops active job', async () => {
+  class FakeNodeWorker extends EventEmitter {
+    terminated = 0;
+    sent = [];
+    postMessage(job) { this.sent.push(job); }
+    terminate() { this.terminated += 1; return Promise.resolve(0); }
+  }
+  const worker = new FakeNodeWorker();
+  const client = createTiledInpaintWorkerJobController({ createWorker:() => worker });
+  const pending = client.run({ source:'example' });
+  worker.emit('message', { ready:true });
+  worker.emit('messageerror', new Error('could not deserialize'));
+  await assert.rejects(pending, /message deserialization failed/);
+  assert.equal(worker.sent.length, 1);
+  assert.equal(worker.terminated, 1);
+  for (const type of ['message', 'error', 'messageerror', 'exit']) {
+    assert.equal(worker.listenerCount(type), 0);
+  }
+  assert.equal(client.cancel(), false);
+});
+
+test('Stage 003 Worker client: invalid factory return terminates a partially valid Worker', async () => {
+  let terminations = 0;
+  const client = createTiledInpaintWorkerJobController({
+    createWorker:() => ({
+      terminate() {
+        terminations += 1;
+        return Promise.reject(new Error('async termination failure'));
+      },
+      // postMessage is missing, but terminate must still be called.
+    }),
+  });
+  await assert.rejects(client.run({ source:'example' }), /invalid Worker instance/);
+  assert.equal(terminations, 1);
+  assert.equal(client.cancel(), false);
+});
+
+
+test('Stage 003 Worker client: polling terminates stale CPU-bound job before any reply', async () => {
+  const timers = new Set();
+  const scheduler = {
+    schedulePoll(callback, ms) {
+      assert.equal(ms, 25);
+      timers.add(callback);
+      return callback;
+    },
+    cancelPoll(callback) { timers.delete(callback); },
+  };
+  const { client, workers } = fakeController({ pollIntervalMs:25, ...scheduler });
+  let current = true;
+  const pending = client.run({ source:'locked-during-compute' }, { isCurrent:() => current });
+  workers[0].emit('message', { ready:true });
+  const id = workers[0].sent[0].id;
+  assert.equal(timers.size, 1);
+  // Simulate a layer becoming locked while the Worker emits no messages.
+  current = false;
+  for (const tick of [...timers]) tick();
+  assert.deepEqual(await pending, { cancelled:true });
+  assert.equal(workers[0].terminated, 1, 'terminate stops busy computation');
+  assert.equal(timers.size, 0, 'poll timer is released immediately');
+  for (const type of ['message', 'error', 'messageerror']) {
+    assert.equal(workers[0].handlers.get(type).size, 0);
+  }
+  workers[0].emit('message', { id, ok:true, result:'forbidden' });
+  assert.equal(client.cancel(), false);
+
+  current = true;
+  const next = client.run({ source:'fresh' }, { isCurrent:() => current });
+  workers[1].emit('message', { ready:true });
+  workers[1].emit('message', { id:workers[1].sent[0].id, ok:true, result:'safe' });
+  assert.equal(await next, 'safe');
+  assert.equal(timers.size, 0, 'success must clear polling too');
+});
+
+test('Stage 003 Worker client: polling cleans up before ready, explicit cancel and errors', async () => {
+  const timers = new Set();
+  const { client, workers } = fakeController({
+    pollIntervalMs:25,
+    schedulePoll(callback) { timers.add(callback); return callback; },
+    cancelPoll(callback) { timers.delete(callback); },
+  });
+  const beforeReady = client.run({});
+  assert.equal(timers.size, 1);
+  assert.equal(client.cancel(), true);
+  assert.deepEqual(await beforeReady, { cancelled:true });
+  assert.equal(timers.size, 0);
+  assert.equal(workers[0].terminated, 1);
+
+  const error = client.run({});
+  workers[1].emit('messageerror', {});
+  await assert.rejects(error, /message deserialization failed/);
+  assert.equal(timers.size, 0);
+  assert.equal(workers[1].terminated, 1);
+
+  let current = true;
+  const staleBeforeReady = client.run({}, { isCurrent:() => current });
+  current = false;
+  for (const tick of [...timers]) tick();
+  assert.deepEqual(await staleBeforeReady, { cancelled:true });
+  assert.equal(workers[2].sent.length, 0);
+  assert.equal(timers.size, 0);
+});
+
+test('Stage 003 Worker client: reentrant scheduler is removed after immediate stale cancellation', async () => {
+  let clears = 0;
+  let current = true;
+  const { client, workers } = fakeController({
+    pollIntervalMs:10,
+    schedulePoll(tick) { current = false; tick(); return 'timer'; },
+    cancelPoll(timer) { assert.equal(timer, 'timer'); clears++; },
+  });
+  assert.deepEqual(await client.run({}, { isCurrent:() => current }), { cancelled:true });
+  assert.equal(workers[0].terminated, 1);
+  assert.equal(clears, 1);
+});
+
+test('037C-3b-1: stalled Worker times out, drops late replies, and recovers next document', async () => {
+  const timers=new Map(),workers=[];
+  let serial=0;
+  const client=createTiledInpaintWorkerJobController({
+    createWorker:()=>{const w=new FakeBrowserWorker();workers.push(w);return w;},
+    maxRunMs:125,
+    scheduleDeadline(fn,ms){
+      assert.equal(ms,125);
+      const token=++serial;timers.set(token,fn);return token;
+    },
+    cancelDeadline(token){timers.delete(token);},
+  });
+  const pending=client.run({source:'photo-native'});
+  workers[0].emit('message',{ready:true});
+  const id=workers[0].sent[0].id;
+  assert.equal(timers.size,1);
+  [...timers.values()][0]();
+  await assert.rejects(pending,/timed out after 125 ms/);
+  assert.equal(workers[0].terminated,1);
+  assert.equal(timers.size,0);
+  workers[0].emit('message',{id,ok:true,result:'stale tiles'});
+  assert.equal(workers[0].handlers.get('message').size,0);
+  assert.equal(client.cancel(),false);
+  const next=client.run({source:'new session'});
+  workers[1].emit('message',{ready:true});
+  workers[1].emit('message',{id:workers[1].sent[0].id,ok:true,result:'safe'});
+  assert.equal(await next,'safe');
+  assert.equal(timers.size,0);
+});
+
+test('037C-3b-1: closing a tab before Worker ready cancels and clears deadline', async () => {
+  const timers=new Map(),workers=[];
+  let serial=0,current=true;
+  const client=createTiledInpaintWorkerJobController({
+    createWorker:()=>{const w=new FakeBrowserWorker();workers.push(w);return w;},
+    maxRunMs:300,
+    scheduleDeadline(fn){const token=++serial;timers.set(token,fn);return token;},
+    cancelDeadline(token){timers.delete(token);},
+  });
+  const pending=client.run({source:'old-tab'},{isCurrent:()=>current});
+  assert.equal(timers.size,1);
+  current=false;
+  workers[0].emit('message',{ready:true});
+  assert.deepEqual(await pending,{cancelled:true});
+  assert.equal(workers[0].sent.length,0);
+  assert.equal(workers[0].terminated,1);
+  assert.equal(timers.size,0);
+  for(const type of ['message','error','messageerror'])
+    assert.equal(workers[0].handlers.get(type).size,0);
+});
+
+test('037C-3b-1: invalid and reentrant deadline timers fail closed', async () => {
+  const createWorker=()=>new FakeBrowserWorker();
+  assert.throws(()=>createTiledInpaintWorkerJobController({createWorker,maxRunMs:-1}),/deadline/);
+  assert.throws(()=>createTiledInpaintWorkerJobController({createWorker,maxRunMs:1.5}),/deadline/);
+  assert.throws(()=>createTiledInpaintWorkerJobController({createWorker,maxRunMs:10,scheduleDeadline:null}),/deadline timer/);
+  const workers=[];
+  let cleared=0;
+  const client=createTiledInpaintWorkerJobController({
+    createWorker:()=>{const w=createWorker();workers.push(w);return w;},
+    maxRunMs:1,
+    scheduleDeadline(fn){fn();return 'fired';},
+    cancelDeadline(token){assert.equal(token,'fired');cleared++;},
+  });
+  await assert.rejects(client.run({source:'hung'}),/timed out/);
+  assert.equal(cleared,1);
+  assert.equal(workers[0].terminated,1);
+  assert.equal(client.cancel(),false);
+});
+
+test('Stage 003: a reentrant Worker factory cannot steal a newer job owner', async () => {
+  const workers = [];
+  let client, successor;
+  client = createTiledInpaintWorkerJobController({
+    createWorker() {
+      const worker = new FakeBrowserWorker();
+      workers.push(worker);
+      if (workers.length === 1) successor = client.run({ source:'newer' });
+      return worker;
+    },
+  });
+  const superseded = client.run({ source:'older' });
+  assert.deepEqual(await superseded, { cancelled:true });
+  assert.equal(workers.length, 2);
+  assert.equal(workers[0].terminated, 1, 'superseded factory Worker must be terminated');
+  assert.equal(workers[0].sent.length, 0);
+  workers[1].emit('message', { ready:true });
+  const id = workers[1].sent[0].id;
+  assert.equal(workers[1].sent[0].source, 'newer');
+  workers[1].emit('message', { id, ok:true, result:'newer result' });
+  assert.equal(await successor, 'newer result');
+  assert.equal(workers[1].terminated, 1);
+  assert.equal(client.cancel(), false);
+});
+
+test('Stage 003: reentrant owner checks before factory and ready never dispatch stale work', async () => {
+  const workers = [];
+  const client = createTiledInpaintWorkerJobController({
+    createWorker() {
+      const worker = new FakeBrowserWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  let successor, startSuccessor = true;
+  const beforeFactory = client.run({source:'before-factory'}, {
+    isCurrent() {
+      if (startSuccessor) {
+        startSuccessor = false;
+        successor = client.run({source:'valid-factory'});
+      }
+      return true;
+    },
+  });
+  assert.deepEqual(await beforeFactory, {cancelled:true});
+  assert.equal(workers.length, 1, 'stale owner must not create a Worker');
+  workers[0].emit('message',{ready:true});
+  workers[0].emit('message',{id:workers[0].sent[0].id,ok:true,result:'first winner'});
+  assert.equal(await successor,'first winner');
+
+  let replaceOnReady = false;
+  // The callback is evaluated from a Worker message; the new run terminates
+  // the older Worker before its ready handler may send a compute payload.
+  const guarded = createTiledInpaintWorkerJobController({
+    createWorker() {
+      const worker = new FakeBrowserWorker();
+      workers.push(worker);
+      return worker;
+    },
+  });
+  let duringReady;
+  const oldGuarded = guarded.run({source:'must-not-post'}, {
+    isCurrent() {
+      if (replaceOnReady) {
+        replaceOnReady = false;
+        duringReady = guarded.run({source:'successor-after-ready'});
+      }
+      return true;
+    },
+  });
+  assert.equal(workers.length, 2);
+  replaceOnReady = true;
+  workers[1].emit('message',{ready:true});
+  assert.deepEqual(await oldGuarded,{cancelled:true});
+  assert.equal(workers[1].sent.length,0,'no postMessage after reentrant cancel');
+  assert.equal(workers[1].terminated,1);
+  assert.equal(workers.length, 3);
+  workers[2].emit('message',{ready:true});
+  workers[2].emit('message',{id:workers[2].sent[0].id,ok:true,result:'second winner'});
+  assert.equal(await duringReady,'second winner');
+});

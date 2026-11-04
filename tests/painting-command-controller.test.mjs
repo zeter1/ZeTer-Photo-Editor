@@ -449,3 +449,38 @@ test('Stage 17b line and selection clear prefer the tiled mutation bridge over c
   assert.deepEqual(h.commits,['Нарисовать линию','Очистить выделение']);
   assert.equal(h.getPersisting(),false);
 });
+
+test('Stage 003: native tiled Content-Aware Fill uses the ROI owner, never contiguous fallback, and commits once', async () => {
+  const doc = createDocument({ width:4, height:1 });
+  const layer = createRasterLayer({ name:'Tiled', width:4, height:1, dataUrl:null });
+  layer.highDepthSource = { kind:'zpe-pixel-buffer-source-v2', model:'rgb' };
+  addLayer(doc, layer);
+  const h = makeHarness({
+    doc,
+    selectionActive:true,
+    selectionPredicate:()=>x => x === 1,
+  });
+  h.rasterEdit.editableHighDepthBuffer = () => { throw Error('full-plane decode is forbidden'); };
+  const calls = [];
+  h.rasterEdit.persistTiledHighDepthInpaint = async (owner, target, options) => {
+    calls.push([owner, target, options]);
+    return { changed:1, filled:1, changedTiles:1, applied:true, stale:false };
+  };
+  assert.equal(await h.controller.contentAwareFill(), true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], doc);
+  assert.equal(calls[0][1], layer);
+  assert.equal(calls[0][2].isAllowed(1, 0), true);
+  assert.equal(calls[0][2].isAllowed(0, 0), false);
+  assert.deepEqual(h.commits, ['Контент-заливка']);
+  assert.equal(h.getHighDepthPersistCalls(), 0);
+  assert.equal(h.getResetPaintStateCalls(), 1);
+  assert.equal(h.getPersisting(), false);
+
+  h.rasterEdit.persistTiledHighDepthInpaint = async () => ({
+    changed:1, filled:1, changedTiles:1, applied:false, stale:true,
+  });
+  assert.equal(await h.controller.contentAwareFill(), false);
+  assert.deepEqual(h.commits, ['Контент-заливка']);
+  assert.equal(h.getPersisting(), false);
+});

@@ -105,3 +105,41 @@ test('content-aware fill can keep the bounded boundary-only fallback for large s
   assert.equal(pixels[7],255);
   assert.equal(pixels[19],255);
 });
+
+test('Content-Aware Fill mixes RGBA straight-alpha donors without invisible-color halos', () => {
+  const pixels=new Uint8ClampedArray([255,0,0,0, 0,255,0,255, 0,0,255,255]);
+  assert.equal(inpaintSelectedSamples(pixels,3,1,4,{isAllowed:x=>x===1}),1);
+  assert.deepEqual([...pixels.slice(4,8)],[0,0,255,128]);
+  assert.deepEqual([...pixels.slice(0,4)],[255,0,0,0]);
+  assert.deepEqual([...pixels.slice(8,12)],[0,0,255,255]);
+});
+
+test('Content-Aware Fill keeps Float32 CMYKA color independent of transparent donor inks', () => {
+  const buffer=createPixelBuffer({
+    width:3,height:1,model:'cmyk',channels:5,bitsPerChannel:32,
+    data:new Float32Array([.9,.9,.9,.9,0, 5,5,5,5,1, .1,.2,.3,.4,1]),
+  });
+  assert.equal(inpaintPixelBuffer(buffer,{isAllowed:x=>x===1}),1);
+  for(let i=0;i<4;i+=1)assert.ok(Math.abs(buffer.data[5+i]-buffer.data[10+i])<1e-6);
+  assert.ok(Math.abs(buffer.data[9]-.5)<1e-6);
+});
+
+test('Content-Aware Fill compares K when matching native CMYK4 texture', () => {
+  const width=9,height=5;
+  const pristine=new Uint16Array(width*height*4);
+  for(let y=0;y<height;y+=1)for(let x=0;x<width;x+=1){
+    const offset=(y*width+x)*4;
+    pristine[offset]=12000; pristine[offset+1]=24000; pristine[offset+2]=36000;
+    pristine[offset+3]=x%2?56000:5000;
+  }
+  const corrupted=new Uint16Array(pristine);
+  const selected=(x,y)=>x>=3&&x<=5&&y>=1&&y<=3;
+  for(let y=1;y<=3;y+=1)for(let x=3;x<=5;x+=1)corrupted[(y*width+x)*4+3]=32000;
+  const buffer=createPixelBuffer({width,height,model:'cmyk',channels:4,bitsPerChannel:16,data:corrupted});
+  assert.equal(inpaintPixelBuffer(buffer,{isAllowed:selected}),9);
+  for(let y=1;y<=3;y+=1)for(let x=3;x<=5;x+=1){
+    const offset=(y*width+x)*4;
+    assert.deepEqual([...buffer.data.slice(offset,offset+4)],[...pristine.slice(offset,offset+4)]);
+  }
+  assert.equal(buffer.alphaMode,'none');
+});

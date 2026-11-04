@@ -1,13 +1,14 @@
 import { addLayer, createRasterLayer } from '../core/state.js';
 import { floodFillPixels, hexToRgb } from '../core/pixels.js';
-import { inpaintSelectedSamples } from '../core/inpaint.js';
+import { inpaintSelectedSamplesCooperative } from '../core/inpaint.js';
 import {
   applyPixelBufferStrokeSegment,
   applyCmykPixelBufferStrokeSegment,
   floodFillPixelBuffer,
   floodFillCmykPixelBuffer,
   clearPixelBufferPixels,
-  inpaintPixelBuffer,
+  inpaintPixelBufferCooperative,
+  PIXEL_BUFFER_TILED_SOURCE_KIND,
 } from '../core/pixel-buffer.js';
 
 export function createRasterCommandController({
@@ -60,10 +61,29 @@ export function createRasterCommandController({
     return true;
   }
 
+  // Keep the host's identity-checked lease; boolean test bridges also work.
   function beginPersist() {
-    if (state.beginPersist()) return true;
+    const lease = state.beginPersist();
+    if (lease) return lease;
     status('Сохраняется предыдущая растровая операция…');
     return false;
+  }
+
+  let pendingContentAwareFill = null;
+  function hasPendingContentAwareFill() {
+    return Boolean(pendingContentAwareFill && !pendingContentAwareFill.cancelled);
+  }
+  function cancelPendingContentAwareFill() {
+    const pending = pendingContentAwareFill;
+    if (!pending || pending.cancelled) return false;
+    pending.cancelled = true;
+    ui?.onContentAwarePendingChange?.(false);
+    // Revoke publication before terminating the CPU-bound Worker. A stale
+    // finally must never unlock a newer document's persistence lease.
+    state.endPersist(pending.lease);
+    pending.releaseRaster?.();
+    rasterEdit.cancelTiledInpaint?.();
+    return true;
   }
 
   function selectionPredicate(layer, selectionSnapshot) {
@@ -103,7 +123,8 @@ export function createRasterCommandController({
       });
       addLayer(doc, layer);
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
 
     try {
       const from = target.toLocal(start, layer);
@@ -193,7 +214,7 @@ export function createRasterCommandController({
       ui?.toast?.('Не удалось нарисовать линию', 'error');
       return false;
     } finally {
-      state.endPersist();
+      state.endPersist(persistLease);
     }
   }
 
@@ -211,7 +232,8 @@ export function createRasterCommandController({
       ui?.toast?.('Выберите растровый слой или щёлкните по изображению', 'warn');
       return false;
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
 
     try {
       const local = target.toLocal(point, layer);
@@ -300,7 +322,7 @@ export function createRasterCommandController({
       ui?.toast?.('Не удалось выполнить заливку', 'error');
       return false;
     } finally {
-      state.endPersist();
+      state.endPersist(persistLease);
     }
   }
 
@@ -331,25 +353,70 @@ export function createRasterCommandController({
       status('Контент-заливка: не удалось зафиксировать геометрию выделения');
       return false;
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
+    const pending = { lease:persistLease, cancelled:false };
+    pendingContentAwareFill = pending;
+    ui?.onContentAwarePendingChange?.(true);
+    const isInpaintCurrent = () => !pending.cancelled &&
+      pendingContentAwareFill === pending && state.getDocument() === doc;
+    let releaseRasterOnFailure = null;
 
     try {
       status('Контент-заливка: анализ окружения…');
 
       if (layer.highDepthSource) {
+        if (
+          layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND &&
+          typeof rasterEdit.persistTiledHighDepthInpaint === 'function'
+        ) {
+          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, {
+            isAllowed,
+            // Worker completion can precede asynchronous preview publication.
+            // Escape/tab cancellation must revoke that publication too.
+            isContinuationCurrent:isInpaintCurrent,
+          });
+          if (!isInpaintCurrent()) return false;
+          if (result) {
+            resetNativeState();
+            if (result.stale) return false;
+            if (!result.applied) {
+              status('Контент-заливка: нужны исходные пиксели за пределами выделения или результат не изменился');
+              return false;
+            }
+            ui?.commit?.(historyLabel);
+            status(`Контент-заливка: восстановлено ${result.filled.toLocaleString('ru-RU')} px · tiled ${result.changedTiles} tiles`);
+            return true;
+          }
+        }
         const buffer = rasterEdit.editableHighDepthBuffer(layer);
         if (!buffer) {
           resetNativeState();
           status('Контент-заливка: native high-depth buffer недоступен; precision сохранён без raster fallback');
           return false;
         }
-        const filled = inpaintPixelBuffer(buffer, { isAllowed });
+        // The contiguous high-depth path previously blocked the UI and could
+        // publish a late preview after Escape/tab cancellation. Work only on a
+        // privately decoded native plane and yield between kernel checkpoints.
+        const sourceForFill = layer.highDepthSource;
+        const stillOwnsSource = () => isInpaintCurrent() &&
+          layer.highDepthSource === sourceForFill &&
+          doc.layers.includes(layer) && target.selected?.() === layer &&
+          target.isEditableRasterLayer(layer);
+        const filled = await inpaintPixelBufferCooperative(buffer, { isAllowed }, {
+          isCancelled:() => !stillOwnsSource(),
+        });
+        if (!stillOwnsSource() || filled === null) return false;
         if (!filled) {
           resetNativeState();
           status('Контент-заливка: нужны исходные пиксели за пределами выделения');
           return false;
         }
-        if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) {
+        const published = await rasterEdit.persistHighDepthMutation(doc, layer, buffer, {
+          isContinuationCurrent:stillOwnsSource,
+        });
+        if (!isInpaintCurrent()) return false;
+        if (!published) {
           resetNativeState();
           return false;
         }
@@ -360,30 +427,70 @@ export function createRasterCommandController({
       }
 
       const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      // A cancelled image decode may finish after a newer raster action started.
+      // Discard only the canvas from this operation, never the newer one's.
+      const releaseRaster = () => prepared && rasterEdit.discardRasterBuffer?.(doc, layer, prepared.canvas);
+      releaseRasterOnFailure = releaseRaster;
+      if (!isInpaintCurrent()) {
+        releaseRaster();
+        return false;
+      }
       if (!prepared) return false;
+      pending.releaseRaster = releaseRaster;
       if (state.getDocument() !== doc || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         status('Контент-заливка отменена: документ или слой изменился');
         return false;
       }
 
+      // Match native/high-depth cancellation semantics for ordinary RGBA8.
+      // The ImageData is a private working copy until the operation is current.
+      const originalRasterSource = layer.dataUrl;
+      const stillOwnsRaster = () => isInpaintCurrent() &&
+        layer.dataUrl === originalRasterSource &&
+        !layer.highDepthSource && doc.layers.includes(layer) &&
+        target.selected?.() === layer && target.isEditableRasterLayer(layer);
       const imageData = prepared.ctx.getImageData(0, 0, prepared.canvas.width, prepared.canvas.height);
-      const filled = inpaintSelectedSamples(imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed });
+      const filled = await inpaintSelectedSamplesCooperative(
+        imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed },
+        { isCancelled: () => !stillOwnsRaster() },
+      );
+      if (!stillOwnsRaster() || filled === null) {
+        releaseRaster();
+        return false;
+      }
       if (!filled) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         status('Контент-заливка: нужны исходные пиксели за пределами выделения');
         return false;
       }
       prepared.ctx.putImageData(imageData, 0, 0);
-      if (!await rasterEdit.persistPaintLayer(doc, layer)) {
-        rasterEdit.clearBrushBuffer();
+      const published = await rasterEdit.persistPaintLayer(doc, layer, {
+        isContinuationCurrent: stillOwnsRaster,
+      });
+      // A successful publication intentionally replaces layer.dataUrl.
+      if (!isInpaintCurrent()) {
+        releaseRaster();
+        return false;
+      }
+      if (!published) {
+        releaseRaster();
         return false;
       }
       ui?.commit?.(historyLabel);
       status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
       return true;
     } catch (error) {
-      resetNativeState();
+      // A rejected async PNG encode may arrive after tab replacement without
+      // an explicit Escape. Discard only this operation's canvas even if stale;
+      // never reset the currently selected document's newer raster cache.
+      releaseRasterOnFailure?.();
+      if (!isInpaintCurrent()) return false;
+      if (releaseRasterOnFailure) {
+        state.resetPaintState?.();
+      } else {
+        resetNativeState();
+      }
       ui?.render?.();
       if (error instanceof RangeError && String(error.message).startsWith('Контент-заливка:')) {
         status(error.message);
@@ -395,7 +502,11 @@ export function createRasterCommandController({
       ui?.toast?.('Не удалось выполнить контент-заливку', 'error');
       return false;
     } finally {
-      state.endPersist();
+      if (pendingContentAwareFill === pending) {
+        pendingContentAwareFill = null;
+        if (!pending.cancelled) ui?.onContentAwarePendingChange?.(false);
+      }
+      state.endPersist(persistLease);
     }
   }
 
@@ -429,7 +540,8 @@ export function createRasterCommandController({
       status('Выделение не пересекает выбранный слой');
       return false;
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
 
     try {
       if (layer.highDepthSource) {
@@ -506,9 +618,9 @@ export function createRasterCommandController({
       ui?.toast?.('Не удалось очистить выделение', 'error');
       return false;
     } finally {
-      state.endPersist();
+      state.endPersist(persistLease);
     }
   }
 
-  return { drawLine, fillAt, contentAwareFill, clearSelection };
+  return { drawLine, fillAt, contentAwareFill, clearSelection, hasPendingContentAwareFill, cancelPendingContentAwareFill };
 }

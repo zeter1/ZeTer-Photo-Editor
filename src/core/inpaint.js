@@ -55,17 +55,19 @@ function deterministicOffset(seed, radius) {
   return (hash32(seed) % span) - radius;
 }
 
-function patchMatchRefine(data, width, height, channels, selectedMask, donorIndex, bounds, {
+function* patchMatchRefineSteps(data, width, height, channels, selectedMask, donorIndex, bounds, {
   patchRadius,
   passes,
   randomSearchSteps,
+  alphaChannel,
+  preserveAlpha = false,
 } = {}) {
   if (!bounds || bounds.maxX < bounds.minX || bounds.maxY < bounds.minY) return;
   const radius = boundedInteger(patchRadius, 1, 1, 3);
   const passCount = boundedInteger(passes, 2, 1, 4);
   const randomSteps = boundedInteger(randomSearchSteps, 4, 0, 8);
   const scale = sampleScale(data);
-  const comparedChannels = channels === 4 ? 3 : channels === 5 ? 4 : channels;
+  const comparedChannels = alphaChannel < 0 ? channels : alphaChannel;
   const maxDimension = Math.max(width, height);
 
   const validDonor = index => index >= 0 && index < selectedMask.length && selectedMask[index] === 0;
@@ -90,8 +92,11 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
         if (tx < 0 || tx >= width || sx < 0 || sx >= width) continue;
         const targetNeighbor = ty * width + tx;
         const sourceNeighbor = sy * width + sx;
-        if (selectedMask[sourceNeighbor]) continue;
-        const contextWeight = selectedMask[targetNeighbor] ? 0.35 : 1;
+        // Excluded source pixels may belong to a different ROI, whose content
+        // has already changed in the private working set. Neither side of a
+        // patch comparison may use that originally selected content.
+        if (selectedMask[sourceNeighbor] || selectedMask[targetNeighbor] === 2) continue;
+        const contextWeight = selectedMask[targetNeighbor] === 1 ? 0.35 : 1;
         const spatialWeight = contextWeight / (1 + dx * dx + dy * dy);
         const targetOffset = targetNeighbor * channels;
         const sourceOffset = sourceNeighbor * channels;
@@ -115,7 +120,9 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
   const copyDonor = (targetIndex, donor) => {
     const targetOffset = targetIndex * channels;
     const donorOffset = donor * channels;
-    for (let channel = 0; channel < channels; channel += 1) data[targetOffset + channel] = data[donorOffset + channel];
+    for (let channel = 0; channel < channels; channel += 1) {
+      if (!preserveAlpha || channel !== alphaChannel) data[targetOffset + channel] = data[donorOffset + channel];
+    }
   };
 
   const propagatedDonor = (targetIndex, neighborIndex) => {
@@ -133,6 +140,7 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
     return validDonor(candidate) ? candidate : -1;
   };
 
+  let processedRows = 0;
   for (let pass = 0; pass < passCount; pass += 1) {
     const forward = pass % 2 === 0;
     const yStart = forward ? bounds.minY : bounds.maxY;
@@ -145,7 +153,7 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
     for (let y = yStart; forward ? y <= yEnd : y >= yEnd; y += yStep) {
       for (let x = xStart; forward ? x <= xEnd : x >= xEnd; x += xStep) {
         const index = y * width + x;
-        if (!selectedMask[index]) continue;
+        if (selectedMask[index] !== 1) continue;
         let bestDonor = donorIndex[index];
         if (!validDonor(bestDonor)) continue;
         let bestScore = scoreDonor(index, bestDonor);
@@ -186,6 +194,8 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
         donorIndex[index] = bestDonor;
         copyDonor(index, bestDonor);
       }
+      // An async caller can release the UI thread inside PatchMatch too.
+      if (++processedRows % 16 === 0) yield;
     }
   }
 }
@@ -200,8 +210,9 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
  * texture neighborhood. Large fills keep the linear boundary synthesis path so
  * the operation remains memory/time bounded.
  */
-export function inpaintSelectedSamples(data, width, height, channels, {
+export function* inpaintSelectedSamplesSteps(data, width, height, channels, {
   isAllowed,
+  isDonorExcluded = null,
   sampleRadius = 2,
   maxLayerPixels = CONTENT_AWARE_MAX_LAYER_PIXELS,
   maxFillPixels = CONTENT_AWARE_MAX_FILL_PIXELS,
@@ -209,15 +220,23 @@ export function inpaintSelectedSamples(data, width, height, channels, {
   patchRadius = 1,
   patchMatchPasses = 2,
   randomSearchSteps = 4,
+  alphaChannel = channels === 4 ? 3 : channels === 5 ? 4 : -1,
+  preserveAlpha = false,
 } = {}) {
   width = positiveInteger(width, 'width');
   height = positiveInteger(height, 'height');
   channels = positiveInteger(channels, 'channels');
+  if (!Number.isInteger(alphaChannel) || (alphaChannel !== -1 && alphaChannel !== channels - 1)) {
+    throw new RangeError('Контент-заливка: некорректный индекс alpha-канала');
+  }
   if (!isNumericTypedArray(data)) throw new TypeError('Контент-заливка требует typed pixel buffer');
   const total = width * height;
   if (!Number.isSafeInteger(total)) throw new RangeError('Контент-заливка: размер слоя выходит за безопасный диапазон');
   if (data.length !== total * channels) throw new RangeError('Контент-заливка: размер pixel buffer не совпадает с геометрией слоя');
   if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen selection predicate');
+  if (isDonorExcluded != null && typeof isDonorExcluded !== 'function') {
+    throw new TypeError('Контент-заливка: неверный frozen donor-exclusion predicate');
+  }
 
   maxLayerPixels = positiveInteger(maxLayerPixels, 'maxLayerPixels');
   maxFillPixels = positiveInteger(maxFillPixels, 'maxFillPixels');
@@ -238,6 +257,7 @@ export function inpaintSelectedSamples(data, width, height, channels, {
 
   for (let y = 0, index = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1, index += 1) {
+      if (index > 0 && index % 16_384 === 0) yield;
       if (isAllowed(x, y)) {
         pending[index] = 1;
         selectedMask[index] = 1;
@@ -246,6 +266,11 @@ export function inpaintSelectedSamples(data, width, height, channels, {
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
         maxY = Math.max(maxY, y);
+      } else if (isDonorExcluded?.(x, y)) {
+        // 2 denotes a frozen global selection pixel owned by a different ROI.
+        // It must not seed the boundary pass, supply a PatchMatch sample or
+        // become a valid source after an earlier ROI writes to the tile.
+        selectedMask[index] = 2;
       } else {
         donorIndex[index] = index;
       }
@@ -273,13 +298,14 @@ export function inpaintSelectedSamples(data, width, height, channels, {
         if (!dx && !dy) continue;
         const xx = x + dx;
         if (xx < 0 || xx >= width) continue;
-        if (!pending[yy * width + xx]) return true;
+        if (donorIndex[yy * width + xx] >= 0) return true;
       }
     }
     return false;
   };
 
   for (let index = 0; index < total; index += 1) {
+    if (index > 0 && index % 16_384 === 0) yield;
     if (pending[index] && hasKnownNeighbor(index)) {
       queue[tail++] = index;
       queued[index] = 1;
@@ -288,15 +314,18 @@ export function inpaintSelectedSamples(data, width, height, channels, {
 
   const radius = boundedInteger(sampleRadius, 2, 1, 6);
   const sums = new Float64Array(channels);
+  const alphaScale = sampleScale(data) || 1;
   let filled = 0;
 
   while (head < tail) {
     const index = queue[head++];
+    if (head % 1024 === 0) yield;
     if (!pending[index]) continue;
     const x = index % width;
     const y = Math.floor(index / width);
     sums.fill(0);
     let weightTotal = 0;
+    let alphaWeightTotal = 0;
     let bestDonor = -1;
     let bestDistance = Number.POSITIVE_INFINITY;
 
@@ -319,10 +348,15 @@ export function inpaintSelectedSamples(data, width, height, channels, {
         const distanceSquared = ddx * ddx + ddy * ddy;
         const weight = 1 / (1 + distanceSquared);
         const donorOffset = donor * channels;
+        // Straight-alpha donors: invisible RGB/CMYK must not tint the replacement.
+        const donorAlpha = alphaChannel < 0 ? 1 : Math.max(0, Math.min(1,
+          Number(data[donorOffset + alphaChannel]) / alphaScale || 0));
         for (let channel = 0; channel < channels; channel += 1) {
-          sums[channel] += Number(data[donorOffset + channel]) * weight;
+          const channelWeight = channel === alphaChannel ? weight : weight * donorAlpha;
+          sums[channel] += Number(data[donorOffset + channel]) * channelWeight;
         }
         weightTotal += weight;
+        alphaWeightTotal += weight * donorAlpha;
         if (distanceSquared < bestDistance || (distanceSquared === bestDistance && (bestDonor < 0 || donor < bestDonor))) {
           bestDistance = distanceSquared;
           bestDonor = donor;
@@ -333,7 +367,10 @@ export function inpaintSelectedSamples(data, width, height, channels, {
     if (bestDonor < 0 || weightTotal <= 0) continue;
     const targetOffset = index * channels;
     for (let channel = 0; channel < channels; channel += 1) {
-      data[targetOffset + channel] = sums[channel] / weightTotal;
+      // Native tiled Fill changes only colors: avoid rounded alpha writes.
+      if (preserveAlpha && channel === alphaChannel) continue;
+      const denominator = alphaChannel < 0 || channel === alphaChannel ? weightTotal : alphaWeightTotal;
+      data[targetOffset + channel] = denominator > 0 ? sums[channel] / denominator : 0;
     }
     pending[index] = 0;
     donorIndex[index] = bestDonor;
@@ -356,12 +393,45 @@ export function inpaintSelectedSamples(data, width, height, channels, {
   }
 
   if (filled === selected && filled > 1 && selected <= patchMatchMaxFillPixels && width >= 3 && height >= 3) {
-    patchMatchRefine(data, width, height, channels, selectedMask, donorIndex, { minX, minY, maxX, maxY }, {
+    yield* patchMatchRefineSteps(data, width, height, channels, selectedMask, donorIndex, { minX, minY, maxX, maxY }, {
       patchRadius,
       passes:patchMatchPasses,
       randomSearchSteps,
+      alphaChannel,
+      preserveAlpha,
     });
   }
 
   return filled;
+}
+
+
+// The synchronous editor/Worker API exhausts exactly the same deterministic
+// kernel steps. Only the UI fallback awaits between checkpoints.
+export function inpaintSelectedSamples(data, width, height, channels, options = {}) {
+  const steps = inpaintSelectedSamplesSteps(data, width, height, channels, options);
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
+}
+
+// null is an internal cancellation sentinel (0 remains a legitimate no-fill).
+// Callers must discard the private working buffer on cancellation.
+export async function inpaintSelectedSamplesCooperative(data, width, height, channels, options = {}, {
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  if (isCancelled()) return null;
+  const steps = inpaintSelectedSamplesSteps(data, width, height, channels, options);
+  let next = steps.next();
+  while (!next.done) {
+    if (isCancelled()) return null;
+    await yieldControl();
+    if (isCancelled()) return null;
+    next = steps.next();
+  }
+  return isCancelled() ? null : next.value;
 }

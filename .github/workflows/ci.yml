@@ -31,14 +31,852 @@ jobs:
           node --version
           npm --version
 
+      - name: Pin offline JPEG and external PSD/PSB decoders (test-only)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zpe-photo-python"
+          "$RUNNER_TEMP/zpe-photo-python/bin/python" -m pip install --disable-pip-version-check Pillow==12.0.0 psd-tools==1.19.0
+          echo "$RUNNER_TEMP/zpe-photo-python/bin" >> "$GITHUB_PATH"
+
       - name: Build and test
         run: npm run check
+        env:
+          ZPE_REQUIRE_PHOTO_DECODER_TESTS: '1'
+          ZPE_REQUIRE_EXTERNAL_PSD_TESTS: '1'
 
       - name: Verify generated browser artifacts are current
         run: git diff --exit-code -- src/app.bundle.js index.html version.json
 
+      # Only the three small PSDs used here are downloaded. Each URL is pinned to
+      # the published corpus commit, and every byte is independently SHA-256 checked.
+      # Source authorship is a published upstream claim, not our certification.
+      - name: Verify pinned Photoshop-authored PSD16 and PSD32 merged composites
+        run: |
+          set -euo pipefail
+          corpus="$RUNNER_TEMP/zpe-photocraft-corpus"
+          mkdir -p "$corpus/rgb16" "$corpus/rgb32"
+          rev="b2e1dcba8954efa9ad0e7944c258cc0e9a5efc1e"
+          root="https://raw.githubusercontent.com/storytold/photocraft-corpus/$rev/photoshop/adjustments"
+          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \
+            "$root/rgb16/baseline-layer-copy.psd" -o "$corpus/rgb16/baseline-layer-copy.psd"
+          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \
+            "$root/rgb16/levels.psd" -o "$corpus/rgb16/levels.psd"
+          curl -fsSL --retry 3 --max-time 45 -A "ZeTer-Photo-Editor-corpus-check" \
+            "$root/rgb32/baseline-layer-copy.psd" -o "$corpus/rgb32/baseline-layer-copy.psd"
+          echo "f31e10d19689df9dba71ebdc60652b28eb364ad8da9040a80bc5aeffcf34228e  $corpus/rgb16/baseline-layer-copy.psd" | sha256sum -c -
+          echo "fbb18d1cfa5fc74cf1c4777b99acdc2465b2920574bd9069b5a2ac129c8151d9  $corpus/rgb16/levels.psd" | sha256sum -c -
+          echo "73199414108280d7717cc5c908a76f51c5e3091d7471e21e7d0bac1a75734f32  $corpus/rgb32/baseline-layer-copy.psd" | sha256sum -c -
+          node tools/verify-photocraft-candidates.mjs --dir "$corpus"
+
+      # An independent PSB32 test corpus, not verified to have been authored
+      # in Photoshop. Immutable upstream commit + exact SHA-256, never main.
+      - name: Verify independently published psd-tools RGB32 PSB candidates
+        run: |
+          set -euo pipefail
+          corpus="$RUNNER_TEMP/zpe-psdtools-psb32"
+          mkdir -p "$corpus"
+          rev="c49b17525254d84c89ab42d1cb0316402ddb89b8"
+          root="https://raw.githubusercontent.com/psd-tools/psd-tools/$rev/tests/psd_files"
+          curl -fsSL --retry 3 --max-time 45 "$root/32bit.psb" -o "$corpus/32bit.psb"
+          curl -fsSL --retry 3 --max-time 45 "$root/32bit.psd" -o "$corpus/32bit.psd"
+          curl -fsSL --retry 3 --max-time 45 "$root/32bit5x5.psb" -o "$corpus/32bit5x5.psb"
+          echo "232bde4537492a671d22b7ff7025a786bc8110677ce5add180103f977be4f5ee  $corpus/32bit.psb" | sha256sum -c -
+          echo "78dd96ec74960a392db0a3bf4193478d62adfa5d93634ab7ce8a40e4468df5e1  $corpus/32bit.psd" | sha256sum -c -
+          echo "cd506872a4b1dc48bf7f64e10d321b99ea950c557cd3a83e303288e8ef6bf481  $corpus/32bit5x5.psb" | sha256sum -c -
+          node tools/verify-psdtools-psb32-candidates.mjs --dir "$corpus"
+
       - name: Browser smoke (file://)
         run: npm run test:browser
+        env:
+          ZPE_BROWSER_OPERATION_ARTIFACT_DIR: ${{ runner.temp }}/zpe-browser-operation-reports
+
+      - name: Photoshop PSD native layers in fresh Chromium file:// (002B/2a)
+        run: npm run test:browser
+        env:
+          ZPE_PHOTOCRAFT_BROWSER_ONLY: '1'
+          ZPE_PHOTOCRAFT_BROWSER_DIR: ${{ runner.temp }}/zpe-photocraft-corpus
+
+      - name: Verify browser operation JSON (informational, not peak RAM)
+        run: node tools/verify-browser-operation-artifacts.mjs
+        env:
+          ZPE_BROWSER_OPERATION_ARTIFACT_DIR: ${{ runner.temp }}/zpe-browser-operation-reports
+
+      - name: Upload browser operation JSON
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-operation-profiles
+          path: ${{ runner.temp }}/zpe-browser-operation-reports/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # An isolated real Chromium file:// control establishes observed Worker
+      # target lifetime and an injected missing-CDP-read gap. No Worker->PID
+      # join, operation RSS peak, or process-exit inference is permitted.
+      - name: Chromium file Worker lifecycle control (003T/2b-2)
+        run: |
+          node tools/browser-worker-control-smoke.mjs "$RUNNER_TEMP/zpe-003t-worker-control.json"
+          node tools/browser-worker-control-smoke.mjs --verify "$RUNNER_TEMP/zpe-003t-worker-control.json"
+
+      - name: Upload independent Chromium Worker control receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-chromium-worker-control-003t2b2
+          path: ${{ runner.temp }}/zpe-003t-worker-control.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Independent Linux /proc PID+starttime control of the spawned real
+      # Chromium file:// launcher, not a Worker PID join or operation RAM peak.
+      - name: Real Chromium Linux PID lifetime and /proc gap control (003T/2c)
+        run: |
+          node tools/browser-chromium-pid-lifetime-control.mjs "$RUNNER_TEMP/zpe-003t-pid-lifetime.json"
+          node tools/browser-chromium-pid-lifetime-control.mjs --verify "$RUNNER_TEMP/zpe-003t-pid-lifetime.json"
+
+      - name: Upload Chromium OS PID lifetime receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-chromium-pid-lifetime-003t2c
+          path: ${{ runner.temp }}/zpe-003t-pid-lifetime.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # 003T/3a: real Chromium file:// temporary CPU Worker with CDP complete
+      # PID census and independent Linux /proc utime/stime/starttime reads.
+      # Counts only matched PID incarnations; NOT whole-operation CPU, a
+      # CPU/RSS peak or Worker-target to OS-PID proof.
+      - name: Real Chromium CPU PID incarnation control (003T/3a)
+        run: |
+          node tools/browser-chromium-cpu-control.mjs "$RUNNER_TEMP/zpe-003t-cpu.json"
+          node tools/browser-chromium-cpu-control.mjs --verify "$RUNNER_TEMP/zpe-003t-cpu.json"
+
+      - name: Upload Chromium CPU PID overlap receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-chromium-cpu-003t3a
+          path: ${{ runner.temp }}/zpe-003t-cpu.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # 003T/3d-2: independent file:// Worker targets, sampled CDP Linux
+      # launcher PID and cgroup delegation. No Worker-to-OS-PID/peak claims.
+      - name: Controlled Chromium Worker PID isolation feasibility (003T/3d-2)
+        run: |
+          node tools/browser-controlled-worker-pid-isolation.mjs "$RUNNER_TEMP/zpe-003t3d2-controlled.json"
+          node tools/browser-controlled-worker-pid-isolation.mjs --verify "$RUNNER_TEMP/zpe-003t3d2-controlled.json"
+
+      - name: Upload controlled Worker PID isolation receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-controlled-worker-pid-isolation-003t3d2
+          path: ${{ runner.temp }}/zpe-003t3d2-controlled.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Independent REAL Linux PID allocation control; calibrates observable
+      # /proc RSS/HWM against known held memory without claiming Chromium
+      # operation peak, Worker PID, or uninterrupted sampling coverage.
+      - name: Independent Linux memory peak calibration control (003T/2d-1)
+        run: |
+          node tools/browser-memory-peak-calibration.mjs "$RUNNER_TEMP/zpe-003t-memory-calibration.json"
+          node tools/browser-memory-peak-calibration.mjs --verify "$RUNNER_TEMP/zpe-003t-memory-calibration.json"
+
+      - name: Upload independent Linux memory calibration receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-linux-memory-calibration-003t2d1
+          path: ${{ runner.temp }}/zpe-003t-memory-calibration.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Real Chromium file:// Worker 64 MiB held allocation, sampled cgroup v2
+      # memory.current and runner membership. Not a proven operation peak or
+      # a complete renderer/Worker descendant census; unavailable stays unknown.
+      - name: Real Chromium cgroup feasibility control (003T/2d-2)
+        run: |
+          node tools/browser-chromium-cgroup-control.mjs "$RUNNER_TEMP/zpe-003t-cgroup-scope.json"
+          node tools/browser-chromium-cgroup-control.mjs --verify "$RUNNER_TEMP/zpe-003t-cgroup-scope.json"
+
+      - name: Upload Chromium cgroup feasibility receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-chromium-cgroup-scope-003t2d2
+          path: ${{ runner.temp }}/zpe-003t-cgroup-scope.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Non-privileged cgroup-v2 delegation control. This may be BLOCKED by
+      # CI's read-only parent; no operation peak or browser descendant claim.
+      - name: Real Linux cgroup delegation capability (003T/2d-3)
+        run: |
+          node tools/browser-cgroup-delegation-probe.mjs "$RUNNER_TEMP/zpe-003t-cgroup-delegation.json"
+          node tools/browser-cgroup-delegation-probe.mjs --verify "$RUNNER_TEMP/zpe-003t-cgroup-delegation.json"
+
+      - name: Upload cgroup delegation capability receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-cgroup-delegation-003t2d3
+          path: ${{ runner.temp }}/zpe-003t-cgroup-delegation.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Profile tiled Content-Aware Fill (informational)
+        run: node tools/profile-tiled-inpaint.mjs --sizes 8,24,48
+
+      - name: Profile external PSD/PSB tiled Content-Aware Fill (informational)
+        run: node tools/profile-real-psd-inpaint.mjs
+
+      - name: Profile native Worker byte integrity (informational)
+        run: node tools/profile-native-worker-integrity.mjs --sizes 8
+
+      - name: Profile complex connected ROI native Worker (informational)
+        run: node tools/profile-complex-roi.mjs --models rgb16,cmyka32
 
       - name: Diff hygiene
         run: git diff --check
+
+  # 003W/2b-2a runs in a separate fresh Chromium process/profile and budget.
+  # ZeTer-authored PSD16/PSB32; sparse successful, >2M refusal, NOT dense success.
+  near-cap-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 2.03M UI sparse Fill and >2M refusal
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Chromium PSB32 2.03M UI sparse Fill and >2M refusal
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Repeated independent Chromium PSD16 sparse and >2M refusal
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_NEAR_CAP_REPETITION: '2'
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Repeated independent Chromium PSB32 sparse and >2M refusal
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_NEAR_CAP_REPETITION: '2'
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Verify real near-cap browser receipts
+        run: node tools/verify-browser-near-cap-evidence.mjs
+        env:
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Compare repeated native sparse and over-cap phase receipts
+        run: node tools/verify-browser-selection-comparison.mjs
+        env:
+          ZPE_SELECTION_COMPARISON_KIND: sparse
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Verify phase-aligned sparse and >2M refusal PSD16/PSB32 samples
+        run: node tools/verify-browser-phase-aligned-evidence.mjs
+        env:
+          ZPE_SELECTION_ALIGNMENT_KIND: sparse-refusal
+          ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-near-cap
+
+      - name: Upload near-cap browser receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-near-cap-003w2b2a
+          path: ${{ runner.temp }}/zpe-near-cap/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 003W/2b-2b: true ~2M-pixel successful Worker Fill in an independent fresh
+  # Chromium file:// process per native depth. Separate from sparse/refusal
+  # to avoid confusing a successful 576-pixel job with dense acceptance.
+  dense-near-cap-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 native dense ~2M Worker Fill and exact Undo/Redo
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Chromium PSB32 native dense ~2M Worker Fill and exact Undo/Redo
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Repeated independent Chromium PSD16 dense native Worker and exact Undo/Redo
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_NEAR_CAP_REPETITION: '2'
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Repeated independent Chromium PSB32 dense native Worker and exact Undo/Redo
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_NEAR_CAP_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_NEAR_CAP_REPETITION: '2'
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Verify real dense native Worker receipts
+        run: node tools/verify-browser-dense-near-cap-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Verify real PSD16 and PSB32 scan phase boundary receipts
+        run: node tools/verify-browser-selection-phase-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Compare repeated genuine native dense phase receipts
+        run: node tools/verify-browser-selection-comparison.mjs
+        env:
+          ZPE_SELECTION_COMPARISON_KIND: dense
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Verify phase-aligned dense PSD16/PSB32 timer samples
+        run: node tools/verify-browser-phase-aligned-evidence.mjs
+        env:
+          ZPE_SELECTION_ALIGNMENT_KIND: dense
+          ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-near-cap
+
+      - name: Upload dense native Worker receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-near-cap-003w2b2b
+          path: ${{ runner.temp }}/zpe-dense-near-cap/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 003W/2b-2c: independent fresh Chromium file:// sessions for dense
+  # post-dispatch Escape termination + genuine dense retry per native depth.
+  dense-cancel-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 dense in-flight Escape cancellation and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CANCEL_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+          ZPE_OPERATION_CPU_OBSERVATION: '1'
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
+          ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
+          ZPE_SAME_SESSION_RETENTION: '1'
+          ZPE_SAME_SESSION_RETENTION_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-retention
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss
+
+      - name: Chromium PSB32 dense in-flight Escape cancellation and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CANCEL_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+          ZPE_OPERATION_CPU_OBSERVATION: '1'
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
+          ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
+          ZPE_SAME_SESSION_RETENTION: '1'
+          ZPE_SAME_SESSION_RETENTION_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-retention
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss
+
+      # 003T/4b: new Chromium process/profile per format. Unlike the real
+      # treatment run, no second/third Fill is dispatched, only repeated
+      # native project serialization and existing History Undo/Redo.
+      - name: Chromium PSD16 independent observer-only native control
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CANCEL_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel-control
+          ZPE_OPERATION_CPU_OBSERVATION: '1'
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-control
+          ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss-control
+          ZPE_SAME_SESSION_RETENTION: '1'
+          ZPE_SAME_SESSION_RETENTION_CONTROL: '1'
+          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-retention-control
+
+      - name: Chromium PSB32 independent observer-only native control
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CANCEL_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel-control
+          ZPE_OPERATION_CPU_OBSERVATION: '1'
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-control
+          ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss-control
+          ZPE_SAME_SESSION_RETENTION: '1'
+          ZPE_SAME_SESSION_RETENTION_CONTROL: '1'
+          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-retention-control
+
+      - name: Verify strict independent cancellation receipts
+        run: node tools/verify-browser-dense-cancel-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+
+      - name: Strict PSD16 and PSB32 operation-boundary Linux CPU receipts (003T/3b)
+        run: node tools/verify-browser-operation-cpu-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
+
+      - name: Strict PSD16 and PSB32 independent CPU/RSS coverage (003T/3c)
+        run: node tools/verify-browser-operation-cpu-rss-coverage.mjs
+        env:
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-cancel
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: ${{ runner.temp }}/zpe-native-operation-cpu-rss
+
+      - name: Strict PSD16/PSB32 same-session sampled RSS retention (003T/4)
+        run: node tools/verify-browser-same-session-native-retention.mjs "$RUNNER_TEMP/zpe-native-retention" "$RUNNER_TEMP/zpe-dense-cancel"
+
+      - name: Independently verify PSD16/PSB32 observer control versus native treatment (003T/4b)
+        run: node tools/verify-browser-native-observer-control.mjs "$RUNNER_TEMP/zpe-native-retention-control" "$RUNNER_TEMP/zpe-dense-cancel-control" "$RUNNER_TEMP/zpe-native-retention" "$RUNNER_TEMP/zpe-dense-cancel"
+
+      - name: Upload native observer-only controls (003T/4b)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-native-observer-control-003t4b
+          path: ${{ runner.temp }}/zpe-native-retention-control/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload same-session native retention (003T/4)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-native-retention-003t4
+          path: ${{ runner.temp }}/zpe-native-retention/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload real CPU/RSS milestone coverage receipts (003T/3c)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-native-operation-cpu-rss-003t3c
+          path: ${{ runner.temp }}/zpe-native-operation-cpu-rss/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload real native CPU-boundary receipts (003T/3b)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-native-operation-cpu-003t3b
+          path: ${{ runner.temp }}/zpe-native-operation-cpu/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload real dense cancellation receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-cancel-003w2b2c
+          path: ${{ runner.temp }}/zpe-dense-cancel/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 003W/2b-2d: independent fresh Chromium file:// sessions for dense
+  # post-dispatch tab owner switch + genuine dense survivor retry per native depth.
+  dense-owner-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 dense in-flight tab-switch cross-document owner isolation and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_OWNER_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_OWNER_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-owner
+
+      - name: Chromium PSB32 dense in-flight tab-switch cross-document owner isolation and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_OWNER_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_OWNER_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-owner
+
+      - name: Verify strict independent cross-document owner isolation receipts
+        run: node tools/verify-browser-dense-owner-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_OWNER_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-owner
+
+      - name: Upload real dense cross-document owner switch receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-owner-003w2b2d
+          path: ${{ runner.temp }}/zpe-dense-owner/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 003W/2b-2e: independent fresh Chromium file:// sessions for dense
+  # post-dispatch dirty-close refusal + confirmed removal and dense survivor retry per native depth.
+  dense-close-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 dense in-flight dirty close refusal, owner removal and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CLOSE_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_CLOSE_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-close
+
+      - name: Chromium PSB32 dense in-flight dirty close refusal, owner removal and retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_CLOSE_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_CLOSE_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-close
+
+      - name: Verify strict independent dirty close and survivor native receipts
+        run: node tools/verify-browser-dense-close-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_CLOSE_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-close
+
+      - name: Upload real dense owner close receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-close-003w2b2e
+          path: ${{ runner.temp }}/zpe-dense-close/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 003W/2b-2f: File -> New dirty refusal and approved owner replacement,
+  # then a separate genuine native PSD/PSB import and ~2M Worker retry.
+  dense-replace-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 approved File New, Worker cancellation and genuine native retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_REPLACE_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_REPLACE_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-replace
+
+      - name: Chromium PSB32 approved File New, Worker cancellation and genuine native retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_REPLACE_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_REPLACE_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-replace
+
+      - name: Verify independent replacement receipts
+        run: node tools/verify-browser-dense-replace-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_REPLACE_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-replace
+
+      - name: Upload dense original-document replacement receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-replace-003w2b2f
+          path: ${{ runner.temp }}/zpe-dense-replace/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 003W/2b-2g: File -> Open distinct native PSD/PSB while old dense Worker runs,
+  # authorized decode/preview and then genuine new-owner dense retry.
+  dense-import-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 File Open native replacement, old Worker cancellation and genuine native retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_IMPORT_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-import
+
+      - name: Chromium PSB32 File Open native replacement, old Worker cancellation and genuine native retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_IMPORT_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-import
+
+      - name: Verify independent PSD/PSB import replacement receipts
+        run: node tools/verify-browser-dense-import-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-import
+
+      - name: Upload dense File Open PSD/PSB native replacement receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-import-003w2b2g
+          path: ${{ runner.temp }}/zpe-dense-import/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 003W/2b-2h: malformed native File Open must retain original in-flight Worker;
+  # Escape then proves exact original bytes, valid import and genuine dense retry.
+  dense-failed-import-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 corrupt File Open rollback and valid native retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_FAILED_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-failed-import
+
+      - name: Chromium PSB32 corrupt File Open rollback and valid native retry
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_FAILED_IMPORT_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_FAILED_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-failed-import
+
+      - name: Verify independent failed import recovery receipts
+        run: node tools/verify-browser-dense-failed-import-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_FAILED_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-failed-import
+
+      - name: Upload failed native import recovery receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-failed-import-003w2b2h
+          path: ${{ runner.temp }}/zpe-dense-failed-import/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # 003W/2b-2i: after a genuine malformed File Open do NOT cancel.
+  # Original high-depth dense Worker must publish only to original owner,
+  # then a separate valid native import and dense retry must remain isolated.
+  dense-natural-failed-import-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file:// editor
+        run: npm run build
+
+      - name: Chromium PSD16 failed File Open then natural original Worker completion
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_NATURAL_FAILED_IMPORT_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_BROWSER_DENSE_NATURAL_FAILED_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-natural-failed-import
+
+      - name: Chromium PSB32 failed File Open then natural original Worker completion
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_DENSE_NATURAL_FAILED_IMPORT_BROWSER_ONLY: '1'
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_BROWSER_DENSE_NATURAL_FAILED_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-natural-failed-import
+
+      - name: Verify distinct format evidence and native retry
+        run: node tools/verify-browser-dense-natural-failed-import-evidence.mjs
+        env:
+          ZPE_BROWSER_DENSE_NATURAL_FAILED_IMPORT_ARTIFACT_DIR: ${{ runner.temp }}/zpe-dense-natural-failed-import
+
+      - name: Upload natural-completion evidence receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-browser-dense-natural-failed-import-003w2b2i
+          path: ${{ runner.temp }}/zpe-dense-natural-failed-import/*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+
+  # 003T/4b-2: TWO additional independent matched replicas, each a separate
+  # runner with four fresh Chromium file:// processes (treatment/control × depth).
+  # These retain sampled-only RSS and do not infer leaks or operation peaks.
+  replicated-native-retention:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: [2, 3]
+    env:
+      ZPE_DENSE_CANCEL_BROWSER_ONLY: '1'
+      ZPE_OPERATION_CPU_OBSERVATION: '1'
+      ZPE_OPERATION_CPU_RSS_COVERAGE: '1'
+      ZPE_SAME_SESSION_RETENTION: '1'
+      ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: /tmp/zpe-replicated/treatment-native
+      ZPE_OPERATION_CPU_ARTIFACT_DIR: /tmp/zpe-replicated/treatment-cpu
+      ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: /tmp/zpe-replicated/treatment-cpu-rss
+      ZPE_SAME_SESSION_RETENTION_ARTIFACT_DIR: /tmp/zpe-replicated/treatment
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Build local file editor
+        run: npm run build
+
+      - name: Fresh PSD16 native Fill treatment
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+
+      - name: Fresh PSB32 native Fill treatment
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+
+      - name: Fresh PSD16 no-extra-Fill observer
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSD16
+          ZPE_SAME_SESSION_RETENTION_CONTROL: '1'
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: /tmp/zpe-replicated/control-native
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: /tmp/zpe-replicated/control-cpu
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: /tmp/zpe-replicated/control-cpu-rss
+          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: /tmp/zpe-replicated/control
+
+      - name: Fresh PSB32 no-extra-Fill observer
+        run: node tools/browser-smoke.mjs
+        env:
+          ZPE_NEAR_CAP_BROWSER_FORMAT: PSB32
+          ZPE_SAME_SESSION_RETENTION_CONTROL: '1'
+          ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR: /tmp/zpe-replicated/control-native
+          ZPE_OPERATION_CPU_ARTIFACT_DIR: /tmp/zpe-replicated/control-cpu
+          ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR: /tmp/zpe-replicated/control-cpu-rss
+          ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR: /tmp/zpe-replicated/control
+
+      - name: Verify genuine native PSD16/PSB32 treatment and observer sources
+        run: node tools/verify-browser-native-retention-replication.mjs "/tmp/zpe-replicated"
+
+      - name: Upload independently verifiable replica ${{ matrix.replica }}
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-native-retention-replica-003t4b2-${{ matrix.replica }}
+          path: /tmp/zpe-replicated/**/*.json
+          if-no-files-found: warn
+          retention-days: 14

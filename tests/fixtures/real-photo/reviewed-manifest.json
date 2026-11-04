@@ -1,0 +1,35 @@
+{
+  "kind": "zpe-real-photo-bundle-manifest-v1",
+  "sourceSha256": "dd01cf047c9b2b7a635e29c68a52c5585d7b346f4f99713f79968ea1ea4348b8",
+  "decoded": {
+    "sha256": "d1aa01e37ee9944099db871be53f9d30fd00bdd12ead94ba4e09f1dd765b1641",
+    "width": 2560,
+    "height": 1920,
+    "pixelFormat": "RGBA8"
+  },
+  "decoder": {
+    "tool": "Pillow Image/ImageOps/ImageCms",
+    "version": "12.0.0; LittleCMS 2.17",
+    "command": "python3 tools/decode-real-photo.py ORIGINAL.jpg NEW-decoded.rgba NEW-decoder.json",
+    "exifOrientation": 1,
+    "orientationApplied": false,
+    "iccPolicy": "assumed-sRGB",
+    "colorEvidence": "Pillow container=MPO, primaryFrame=0. No Pillow-assembled embedded ICC; RGB samples assumed sRGB. Human color review required."
+  },
+  "crop": {
+    "x": 0,
+    "y": 0,
+    "width": 1025,
+    "height": 1025
+  },
+  "native": {
+    "rgb16": {
+      "cleanSha256": "b1eee911c356a3815dd548d3a3d708fd8457b16e35e0eff19dc80a48429fec0a",
+      "damagedSha256": "70816f5177ad5008ee164513931e5cf3866c0134ce1a27362df430a4594a7228"
+    },
+    "float32": {
+      "cleanSha256": "48ea38caae87ac76673bd5432f04e42408ab9d032feac8677b0d025de0794f15",
+      "damagedSha256": "5ca57278cc7e28fd440435248667ec14236b527be3609ca5f3083e0b1fb63735"
+    }
+  }
+}

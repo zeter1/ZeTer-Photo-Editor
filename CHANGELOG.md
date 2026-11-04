@@ -1,17 +1,762 @@
+### 2026-11-04 — Pen click-first-anchor close, current-main port (PR #126 candidate)
+
+- Реальный Pen draft после трёх узлов замыкается кликом по начальной точке в радиусе `6 / zoom`, с preview кубического замыкающего сегмента, без дублированного узла. Команда сохраняет Shape layer и одну запись History; прежние double-click/Enter/checkbox сценарии сохраняются. Форматы `.zpe`/PSD/PSB не меняются.
+- Функциональные тесты Pen+архитектуры 17/17 PASS; build и diff check PASS. Полный Windows npm test имеет пять Linux-only /proc/cgroup failures; Первый полный Chrome `file://` smoke дал DevTools timeout при параллельном запуске тестов; отдельный последовательный `npm run test:browser` **PASS (exit 0, 109.87s)**. Прямой E2E клик Pen и PR-head CI ещё ожидаются. Работа на базе merged main `a0e9fe4`; старый конфликтующий PR #126 будет обновлён, новый PR не создаётся.
+
+### 2026-11-04 — dual-native real UI History A/B and IndexedDB original-bit oracle (PR #377 merged)
+
+- Two DISTINCT 1025×1025 native RGB16 and CMYKA32 Float32 projects are now imported into two genuine file:// tabs in each generic/pooled History run. Identical user Add Raster Layer, Undo, Redo, Save and IndexedDB v2 reload/restore are compared; exact tile Data URLs and coordinates verified throughout including special Float32 words, not merely FNV hashes.
+- Controlled Chrome bootstrap toggles ONLY History pooling; ordinary startup remains pooled. Dedicated Chrome 65² and 1025² runs PASS in both modes; full Windows browser smoke PASS (exit 0). Paired UI Worker cancellation/close and edited-native-byte parity remain IN PROGRESS. Stage 6/10 NOT DONE.
+- [PR #376](https://github.com/zeter1/ZeTer-Photo-Editor/pull/376) visible cancellation merged `744bcb1`; exact PR-head Linux core 12/12 + independent real-photo SUCCESS. Merged-main real-photo SUCCESS; core first attempt failed only DevTools start on one job before test, targeted rerun requested. New candidate CI not run until publication.
+
+### 2026-11-04 — visible Content-Aware Fill cancellation (candidate 003X/6c-9)
+
+- Real UI now shows an indeterminate in-progress panel with an accessible **Отменить заливку** button while native 16/32-bit Worker or RGBA8 Fill owns the persist lease; Escape still works. The button revokes the same operation safely, without fabricating percentages. A cancelled/older operation cannot close the next operation's panel.
+- Three new RED→GREEN tests for start/cancel/completion, stale-owner successor and invalid-owner rejection. Paired native/RGBA8 15/15 PASS; Windows `npm run check` 1583 PASS / 10 SKIP / 5 Linux-only `/proc`/cgroup FAIL (**overall FAIL**). Real Chrome `file://` smoke PASS (exit 0), including actual tiled RGB16 UI Worker Fill panel hidden→shown→hidden and existing pixel/Undo/Redo checks; additional genuine Chrome `file://` PSD16 mid-kernel **real button click** PASS: terminated one live Worker after pixel write, immediately hid the panel, retained native bytes/no Undo, and succeeded on next Fill; independent Float32 tab-switch cases remain green. Paired 1025² generic/pooled IDB is still open. PR-head CI must be recorded only after publication. No `.zpe`, PSD/PSB or native pixel format changes.
+
+### 2026-11-04 — PR #375 merged: cancellable native/RGBA8 Content-Aware Fill
+
+- [PR #375](https://github.com/zeter1/ZeTer-Photo-Editor/pull/375), final head `754b9a4`: [Linux core #41818060991](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41818060991) SUCCESS 12/12, independent [real-photo #41818061101](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41818061101) SUCCESS, merged into main [`7b2a0cd`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7b2a0cd581ceab8f5f15ab7c87d928576e010036). Exact-main CI is a distinct gate, not inherited from PR-head. User-visible cancellation, late async PNG rejection and buffer ownership regressions are bounded DONE; larger paired two-tab generic/pooled History + UI Worker/IDB remains 003X/6c-9 IN PROGRESS. No format changes.
+
+### 2026-11-04 — stale PNG rejection after tab switch cleans up exact RGBA8 canvas
+
+- Fix a second asynchronous failure path: after switching tabs, `persistPaintLayer` can reject while Content-Aware Fill is stale, skipping the exception cleanup and retaining cancelled pixels in the raster cache. Release only the failed operation's canvas before the stale return, never the new owner's canvas; no Undo/dataUrl publication and no format changes.
+- Dedicated delayed-error/tab-switch regression RED 7/8 → GREEN 8/8; native RGB16/CMYKA32 Float32 + RGBA8 focused 12/12 PASS. Windows check 1580 PASS / 10 SKIP / 5 known Linux-only /proc/cgroup FAIL (overall FAIL); Chrome `file://` smoke exit 0. Generated build `ad655b3dffd19fca`. New-head Linux PR CI and exact-main remain separate.
+
+### 2026-11-04 — owner-safe Content-Aware Fill raster cache cleanup after PNG failure
+
+- On rejected RGBA8 PNG persistence, release only the canvas owned by the failed fill instead of clearing a newer cached canvas from another edit; keep layer URL and Undo unchanged and allow the next edit.
+- Two RED→GREEN regressions; native+RGBA8 focused 11/11 PASS. Windows full `npm run check` 1579 PASS, 10 SKIP, 5 known Linux-only /proc/cgroup FAIL (overall FAIL); Chrome `file://` smoke exit 0. Generated bundle rebuilt, format unchanged. Existing #375 core/real-photo SUCCESS applies to prior remote head `061e767`, not this local candidate.
+### 2026-11-04 — discard cancelled RGBA8 inpaint canvas without evicting newer raster edits
+
+- Fix retained brushCanvas after Escape while async PNG encoding is pending: discard only the exact owner/layer/canvas, so the next paint/fill cannot reuse a cancelled preview and a late old completion cannot evict the new canvas.
+- RED 1/3 → GREEN 9/9 related cancellation tests (including real raster cache identity); Windows `npm run check`: 1577 PASS / 10 SKIP / 5 Linux-only FAIL; Chrome `file://` smoke PASS (exit 0); `git diff --check` PASS. PR-head CI and merge need new SHA verification.
+
+### 2026-11-04 — RGBA8 Content-Aware Fill cancellation and late canvas publication guard
+
+- Extend PR #375 cancellation semantics to ordinary 8-bit RGBA Canvas layers. Yield during the deterministic inpaint kernel, retain a private ImageData until still-current, check exact document/layer/source and forward the existing continuation guard through async PNG persistence.
+- RED 2/3 → GREEN 3/3 for cancellation during scan and delayed save; combined high-depth/8-bit regression 7/7 PASS. Windows `npm run check` 1590 total / 1575 PASS / 10 SKIP / 5 pre-existing Linux-only cgroup FAIL; real Chrome `file://` smoke exit 0. No format or pixel-output change; prior-head PR CI SUCCESS applies only to `7b771d3`.
+- Stage 6/10 and 003X/6c-9 remain IN PROGRESS; real pooled-vs-generic UI A/B and new-head PR/exact-main gates are separate.
+
+### 2026-11-04 — candidate: cancellable contiguous RGB16/CMYKA32 Content-Aware Fill
+
+- Replaced synchronous flat native 16/32-bit Content-Aware computation with cooperative kernel checkpoints on a private buffer; cancel, tab switch, layer/source replacement invalidate the old result before publication. Forward the same owner guard through asynchronous high-depth preview serialization to prevent late native source mutation and phantom Undo.
+- RED regression 2/4 before patch → GREEN 4/4, focused related 25/25 PASS; successful RGB16/CMYKA32 Float32 uses byte-exact synchronous oracle including sNaN, -0 and alpha. Local Windows npm check 1572 PASS/10 SKIP/5 preexisting Linux-only /proc/cgroup FAIL. Browser regression, Linux PR-head CI and merge must be verified separately. No .zpe schema changes.
+- Parent 003X/6c-9 remains IN PROGRESS for same-action full UI baseline/pooled A/B and bounded Worker/IDB acceptance.
+
+### 2026-11-04 — merged real native Chrome Worker bit oracle (003X/6c-9 remains open)
+
+- PR [#373](https://github.com/zeter1/ZeTer-Photo-Editor/pull/373) final head e05763e: [PR core CI #41792886405](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41792886405) SUCCESS 12/12; squash main [7e37b2f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e37b2feb67ff8de66816f8af5a39a2f5d416122), [exact-main CI #41795185119](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41795185119) SUCCESS 12/12 on first attempt. Separate real-photo workflow not triggered by file filters; no success claim. No production behavior or format changes.
+- Full P1 003X/6c-9 remains IN PROGRESS: real UI same-action baseline/pooled Worker cancel/stale/close + IndexedDB, defensible OS memory peak and Worker PID remain to prove; Adobe-authored PSB32 provenance separately blocked. See task/NEXT.md.
+
+### 2026-11-04 — strengthen genuine Chrome native Worker byte oracle (003X/6c-9 IN PROGRESS)
+
+- Extend the existing opt-in `file://` Worker profile: reject output if any non-selected tile URL changes, or if any native byte outside the selected pixel's color samples changes; alpha, Float32 signaling-NaN and signed-zero payloads remain byte exact. Confirm a color byte changed; verify returned tile geometry and count.
+- Actual Windows Chrome: 65×65 RGB16/CMYKA32 Float32 2/2 Worker PASS, 1025×1025 2/2 Worker PASS (24 untouched tiles each); paired baseline/pooled History runs also 4/4 per size. Focused Node 10/10 PASS and full browser smoke exit 0. Compact evidence: `task/evidence/003x6c9-native-worker-byte-oracle-20261104.json`.
+- No production source, bundle or .zpe schema change. Prior PR #373 head f53613b Linux core CI SUCCESS 12/12; new PR head, independent real-photo CI, merge and exact-main acceptance remain separate and pending. Stage 6 / 003X/6c-9 still IN PROGRESS.
+
+### 2026-11-04 — real native Chrome Worker on full RGB16 / CMYKA32 History fixtures (003X/6c-9 still open)
+
+- Opt-in `ZPE_PROFILE_WORKER=1` executes full original-file native v2 `.zpe` source in a real Chromium `file://` Blob Worker; first Worker terminated after dispatch, independent successor must fill exactly one pixel and one tile without changing input native URLs. 65×65 pilot 2/2 and 1025×1025 full-size RGB16/CMYKA32 Float32 2/2 PASS. Paired History one-repetition 4/4 PASS.
+- New `tools/browser-history-native-worker-smoke.mjs` and optional phase CDP/Windows memory observations in `tools/profile-history-sharing-chrome.mjs`. Raw evidence `task/evidence/003x6c9-native-worker-chrome.json` and `003x6c9-native-worker-pilot.json`. No production source, bundle, schema or dependencies altered.
+- Windows PID **private committed bytes** and CDP main-renderer heap are NOT Worker PID attribution, RSS or true operation peak; immediate `terminate()` is NOT kernel cancellation; direct protocol is NOT full app UI worker. Full 003X/6c-9 IN PROGRESS; main UI generic/pooled comparison and Worker cancel/stale/close + IDB integration remain open. New PR-head/merged-main CI not yet established for this increment.
+
+### 2026-11-03 — actual two-tab Chrome UI/IndexedDB recovery under large pooled History (003X/6c-9, acceptance remains open)
+
+- Extended `tools/profile-history-sharing-chrome.mjs` with opt-in `ZPE_PROFILE_UI=1` + safe separate `ZPE_PROFILE_OUTPUT`. New `tools/browser-history-ui-recovery-smoke.mjs` acts through real editor `#projectInput`, Add Raster Layer, Undo, Redo, Save Project download Blob, two tab controls, real IndexedDB v2 and reload/Restore dialog; no mock HistoryStack, no changes to production or generated bundle. Saved native tile Data URL hashes checked after each UI action, in both persisted documents and after reload.
+- Fresh Chrome `file://` 1025×1025 RGB16 and CMYKA32 Float32: baseline/pooled History 8/8 PASS, two full-size **pooled UI + IndexedDB recovery** cases 2/2 PASS; separate 65×65 pilot 2/2 PASS. Evidence in `task/evidence/003x6c9-real-ui-idb.json` and `003x6c9-ui-idb-pilot.json`. 2 actual UI tabs × 2 History entries, while standalone profiler still covers 2 logical History sessions × 4 positions; do NOT conflate the counts. Source is ZeTer-generated synthetic v2 .zpe, not Adobe-authored PSB32.
+- Exact prior merged-main PR #371 SHA `e611144` Linux core [#41676849547](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41676849547) 12/12 SUCCESS attempt 2; attempt 1 Chrome was missing from one runner before test. This entry does not establish new PR-head or new exact-main CI.
+- Remaining within 003X/6c-9: real generic-vs-pooled **UI** A/B under identical actions; live Content-Aware Fill Worker transient CPU/process/PID and peak/memory with cancel/stale/close combined with large two-tab recovery, complete GC/latency envelopes, Adobe provenance separately BLOCKED. Windows private commit != OS RSS; CDP JS heap != Worker or whole application RAM. Status 003X/6c-9 and parent Stage6 IN PROGRESS.
+
+### 2026-11-03 — actual Chrome file:// pooled History A/B profiler (003X/6c-9, acceptance pending)
+
+- New `tools/profile-history-sharing-chrome.mjs` runs fresh-process native Chrome `file://` A/B on production `.zpe` snapshots and `HistoryStack`, two sessions with four Undo positions, RGB16/CMYKA32 Float32 1025×1025 and two order-alternated repeats. Native Data URL identity, Undo/Redo/jump and positions verified; 8/8 browser cases passed. Raw per-phase JS heap/GC round-trip and Windows CDP-PID private committed memory stored in `task/evidence/003x6c9-chrome-history-ab.json`.
+- Chrome after-GC retained JS heap baseline/pooled: RGB16 86.85/1.45 MiB, CMYKA32 215.10/1.45 MiB; Windows aggregate private commit RGB16 409.88–411.13/346.06–351.50 MiB, CMYKA32 531.04–537.23/374.55–376.36 MiB. Private committed bytes are not physical RSS/peak or a general memory bound. Pooled push and reconstruction cost CPU; no production code changed.
+- Actual editor UI import, Worker transient/PID, IndexedDB recovery, GC tracing, peak and Adobe-authored PSB32 proof remain open. Task 003X/6c-9 IN PROGRESS; PR/CI/merge and exact-main gates are separate.
+
+### 2026-11-03 — verified exact-main 003X/6c-9 bounded History reconstruction fix
+
+- PR [#369](https://github.com/zeter1/ZeTer-Photo-Editor/pull/369) final head 4788a1a: [Linux core #41655989709](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41655989709) SUCCESS 12/12, separate [real-photo #41655989741](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41655989741) SUCCESS; squash-merged [main 0599d98](https://github.com/zeter1/ZeTer-Photo-Editor/commit/0599d98d466b1a25200ad8c8c8bc02caf933f929). Exact-main [core #41657250015](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41657250015) SUCCESS 12/12 on attempt2 (attempt1 startup-only Chrome DevTools timeout) and independent [real-photo #41657249944](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41657249944) SUCCESS. 003X/6c-9 remains open for full Chrome A/B RAM/GC/Worker session profile. No claim of full RAM/RSS bound.
+
+### 2026-11-03 — 003X/6c-9 ограниченное исправление слито; браузерный A/B остаётся
+
+- [PR #369](https://github.com/zeter1/ZeTer-Photo-Editor/pull/369), final head 4788a1a: [core #41655989709](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41655989709) SUCCESS 12/12 + independent [real-photo #41655989741](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41655989741) SUCCESS; merged as [main 0599d98](https://github.com/zeter1/ZeTer-Photo-Editor/commit/0599d98d466b1a25200ad8c8c8bc02caf933f929). Exact-main [core #41657250015](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41657250015) and [real-photo #41657249944](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41657249944) pending at checkpoint.
+- Large Node RGB16/CMYKA32 Float32 pooled History native URL reconstruction accelerated without dropping Undo or changing exact v1/v2 JSON. Do not confuse Node main-isolate heapUsed with whole Chrome RAM/RSS. Real fresh Chrome file:// paired baseline/pooled memory+latency+GC and separate Worker/session restore test still open, hence parent 003X/6c-9 IN PROGRESS. [Task](task/003x6c9-history-sharing-profile.md).
+
+### 2026-11-03 — кандидат 003X/6c-9: быстрый декодер pooled History native URLs
+
+- После реального профилирования 1025×1025 RGB16/CMYKA32 Float32 в src/core/history.js native ASCII URL реконструируются через TextDecoder, fallback сохраняет прежний код. Ненативные UTF-16 фрагменты (включая lone surrogates), данные .zpe v1/v2, Undo/Redo и логические бюджеты остаются неизменными.
+- Два повтора Node профиля: RGB16 pooled reconstruction mean 305.88→5.03 ms, CMYKA32 Float32 740.39→11.68 ms; main isolate heapUsed post-GC и физическая RAM — разные метрики. Node Worker complete/cancel/stale/session-close, focused 10/10 PASS, Chrome file:// smoke PASS, Windows all tests 1568 PASS/10 SKIP/5 Linux-only fixture FAIL. Полный Chrome baseline/pooled A/B и CI ещё НЕ подтверждены.
+- Подробности и raw before/after reports: [003X/6c-9](task/003x6c9-history-sharing-profile.md), task/evidence/003x6c9-node-profile-before.json и task/evidence/003x6c9-node-profile.json. Stage 6 IN PROGRESS, 002B/2c Adobe-authored PSB32 BLOCKED.
+
+### 2026-11-03 — verified acceptance 003X/6c-8 (PR #367 merged; exact-main CI green)
+
+- Final PR-head `860be41`: Linux [core 12/12](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635098512) and [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635098522) SUCCESS; merged as [main `e6486e9`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/e6486e92875b8417f5d6cce4ce9961806bcaa3cf). Exact-main [core 12/12](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635993808) and [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41635993793) SUCCESS.
+- Shared immutable native URL owners preserve all Undo slots and exact snapshot JSON. Three RGB16/CMYKA32 Float32 snapshots: logical native URL chars 418056/1040568, unique pooled native URL bytes 139352/346856. Not whole-app heap/RSS or Worker reduction. [Task](task/003x6c8-history-snapshot-sharing.md). Next 003X/6c-9 memory and latency profiling; Stage 6 remains IN PROGRESS.
+
+### 2026-11-03 — candidate 003X/6c-8: immutable native URLs shared across History
+
+- Pool byte-exact identical v1/v2 URL payloads across string snapshots, without losing Undo points; preserve public entry.snapshot string and caller writes. Source app/session opt in; external HistoryStack remains backward-compatible by default.
+- Ref-counted cleanup on branch, eviction, reset and clear; collision-safe equality; failed allocation atomic. Legacy limits charge original logical JSON size, not pooled bytes.
+- Three snapshot counts RGB16 logical 418,056 versus unique pooled 139,352 ASCII URL bytes; CMYKA32 Float32 logical 1,040,568 versus pooled 346,856. No claim of heap/RSS/Worker savings.
+- Local 4/4 focused PASS; Windows 1,560 PASS / 10 SKIP / 5 Linux-specific fixture FAIL; real Chrome file:// PASS; build 33644886f38cd40f; PR/CI/merge pending.
+
+### 2026-11-03 — 003X/6c-7: bounded acceptance опционального лимита native URL в History (PR #365 слит)
+
+- [PR #365](https://github.com/zeter1/ZeTer-Photo-Editor/pull/365) прошёл Linux core [#41623127166](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623127166) **12/12** и независимый [real-photo #41623127060](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623127060) **SUCCESS**; squash-merged [main f44d35b](https://github.com/zeter1/ZeTer-Photo-Editor/commit/f44d35b7cb22364c23e8702de0e1a447a2943312). На точном merged-main: [core #41623966381](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623966381) **12/12** и отдельный [real-photo #41623966385](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41623966385) **SUCCESS**. Локальные 10/10 focused и настоящий Chrome `file://` PASS, deterministic build `ca5e3daaeb698e28`; Windows full check 1557 PASS / 10 SKIP / 5 известных Linux-only /proc/cgroup fixture FAIL.
+- Добавлен явный `maxRetainedNativeDataUrlChars`: нативные URL внутри иммутабельных History JSON считаются по символам; при opt-in удаляются старые Undo entries, но текущий snapshot остаётся. По умолчанию прежнее поведение и формат `.zpe` не изменены. RGB16/CMYKA32 Float32 3 snapshots **418 056/1 040 568 → 278 704/693 712** URL-символов после opt-in eviction. Это **не** измеренный предел JS heap/RSS, Worker и не deduplication. [Task](task/003x6c7-history-snapshot-ownership.md); далее [003X/6c-8](task/003x6c8-history-snapshot-sharing.md). Parent 003X/Stage 6 остаётся IN PROGRESS.
+
+### 2026-11-03 — Кандидат 003X/6c-7: опциональный бюджет native URL в истории (PR/CI/merge ещё не приняты)
+
+- `HistoryStack` поддерживает явный `maxRetainedNativeDataUrlChars` для суммарных native v1/v2 Data URL во всех retained snapshot JSON. Новая функция измеряет символы без Base64-декодирования и копирования огромных строк. При превышении старые Undo entries вытесняются; один текущий snapshot всегда остаётся. При настройке по умолчанию поведение не меняется.
+- RGB16/CMYKA32 Float32, 131×99 tile32: 3 снимка 418 056/1 040 568 URL-символов, при лимите на 2 снимка остаются 278 704/693 712; это **не измеренная экономия RAM/RSS**, а явное сокращение числа удерживаемых Undo entries. Реальные данные `.zpe` и PSD/PSB codec не изменены. Локально red-before 0/3, green focused 10/10; настоящий Chrome file:// PASS, build `ca5e3daaeb698e28`; Windows full check 1557 PASS / 10 SKIP / 5 Linux-only cgroup-fixture FAIL. [Подробности](task/003x6c7-history-snapshot-ownership.md). Следующий инкремент — [003X/6c-8](task/003x6c8-history-snapshot-sharing.md) дедупликация immutable URLs без потери Undo.
+### 2026-11-03 — 003X/6c-6: ограничение native URL на входе Worker (подтверждено; PR #363 слит в main)
+
+- В tiled Content-Aware Fill добавлен строго опциональный `maxWorkerInputDataUrlChars`: все URL тайлов учитываются до обхода выделения и отправки в Worker. При превышении лимита — атомарный отказ; по умолчанию поведение не меняется.
+- Для RGB16 и CMYKA32 Float32 (включая sNaN/-0 и alpha) измерены входной structuredClone и независимый History JSON owner; это символы строк, не RAM/RSS. Регрессии проверяют отказ, повторную попытку, точные байты .zpe v1/v2, Undo/Redo, отмену и stale session.
+
+- [PR #363](https://github.com/zeter1/ZeTer-Photo-Editor/pull/363): Linux final-head [core #41613692664](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41613692664) 12/12 и [real-photo #41613692798](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41613692798) SUCCESS; слит в [main d68880c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/d68880c09a3566c230b9b56c15cb3a877270d0ab), exact-main [core #41614822281](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41614822281) 12/12 и [real-photo #41614822175](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41614822175) SUCCESS. Следующая задача — 003X/6c-7 History snapshot ownership; Stage 6 остаётся в работе.
+
+### 2026-11-03 — 003X/6c-5: сокращён обратный native Worker payload (PR / CI ещё в процессе)
+
+- Реальный tiled Content-Aware Fill Worker при запросе `compactResult` возвращает только изменённые тайлы вместо повторной отправки полного v2 source; основной поток собирает результат из неизменённых исходных тайлов и повторно проводит существующую строгую bit-exact проверку.
+- Обратная совместимость старого Worker protocol для не opt-in вызовов, сохранены `.zpe` v1/v2 и Undo/Redo. Новые регрессии покрывают RGB16, CMYKA32 Float32 (sNaN, -0, alpha), sparse/edge/dense tiles, реальные Node Worker threads, отмену и malformed payload. Тестовые символы JSON ≠ измеренный расход RAM.
+
+### 2026-11-03 — 003X/6c-4: принята оптимизация декодированных native-буферов
+
+- [PR #359](https://github.com/zeter1/ZeTer-Photo-Editor/pull/359) влит в [main 2bea78b](https://github.com/zeter1/ZeTer-Photo-Editor/commit/2bea78bc8e1e0d0d10e276ff4287b1fa7ddcb3dc): без второй полноразмерной аллокации при декодировании выровненных RGB16/CMYKA32 Float32 тайлов и v1.
+- Финальная проверка PR-head: Linux core [#41598105567](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41598105567) SUCCESS 12/12 и independent real-photo [#41598105550](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41598105550) SUCCESS. На точном merged-main core [#41598920812](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41598920812) SUCCESS 12/12 и separate real-photo [#41598920785](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41598920785) SUCCESS.
+- Parent 003X/Stage 6 остаётся IN PROGRESS; следующий шаг 003X/6c-5 — независимый учёт History и Worker. Нет доказанного общего предела RAM/RSS, Photoshop-authored PSB32 002B/2c BLOCKED.
+
+### 2026-11-03 — Кандидат 003X/6c-4: устранение повторной аллокации native-плоскости при декодировании
+
+- Декодер `.zpe` v1/v2 на little-endian повторно использует собственный точный байтовый буфер в `Uint16Array` или `Float32Array` без второй полной аллокации и копии. Для unaligned/big-endian сохранена прежняя безопасная ветка, 8-bit не изменён. Полный global RSS/heap/History/Worker не ограничен.
+- Реальная instrumented baseline: одна лишняя полная копия 103752 байт RGB16 или 259380 байт CMYKA32 Float32 на 131×99 v1; для v2 — отдельная копия на каждый тайл. Новые native-битовые тесты (sNaN/-0/alpha) и отказ/отмена/повтор, .zpe и dense/edge/sparse проверены; 11/11 focused PASS.
+- Windows `npm run check`: 1548 PASS, 10 SKIP, пять прежних Linux-only cgroup fixture FAIL; реальный Chrome `file://` PASS, bundle hash `57156beeb6c99262`. Linux PR-head / real-photo / exact-main проверки и merge — отдельно, пока PENDING.
+
+### 2026-11-03 — Кандидат 003X/6c-3: порционное декодирование нативных Data URL
+
+- `dataUrlToBytes` больше не выделяет полный Base64-фрагмент через regexp и не передаёт весь нативный источник в `atob`: сначала проверяет заголовок, размер и корректность Base64, затем декодирует чанки по 32 КиБ символов (до 24 КиБ бинарной строки на вызов).
+- Сохранены `.zpe` v1/v2, RGB16 и CMYKA32 Float32 биты альфа-канала, NaN и отрицательного нуля, края тайлов, ограничения размера и возможность повторной загрузки после ошибки. Добавлены тесты на отказы и границы чанков.
+- Windows: профильные тесты 15/15 PASS, `npm run check`: 1545 PASS, 10 SKIP, пять Linux-only cgroup тестов FAIL; PR/Linux/реальный браузер и exact-main проверяются отдельно. Общий предел использования RAM не заявляется.
+### 2026-11-03 — Кандидат 003X/6c-2: один финальный join при кодировании native Data URL
+
+- В `bytesToDataUrl` теперь соединяются префикс Data URL и Base64-чанки одним `join`, без отдельной промежуточной склейки полного Base64 с последующей подстановкой в URL. Форматы .zpe/PSD/PSB и лимиты по умолчанию не менялись.
+- Независимый регрессионный тест зафиксировал прежние полные промежуточные Base64-строки (RGB16: 138 336 символов, CMYKA32 Float32: 345 840) и проверяет native-биты, NaN/-0, краевые тайлы, сохранение и повторное открытие, поздний сбой кодировщика и предварительный лимит. Это наблюдение по длине строк, не обещание уменьшения пика RSS.
+- Локальные профильные тесты 11/11 успешны; Windows `npm run check`: 1541 PASS, 10 SKIP, пять Linux-only cgroup тестов FAIL. PR/Linux CI/слияние и exact-main проверяются отдельно.
+
+### 2026-11-02 — Кандидат 003X/6c: предварительный лимит строк native Data URL
+
+- Для исходных высокоточных PixelBuffer добавлен необязательный параметр `maxDataUrlChars`: до кодирования рассчитываются все символы Data URL, включая Base64 и префиксы тайлов. Отказ по лимиту происходит до выделения новых сырых байтов тайлов и запуска кодера.
+- Форматы проектов .zpe v1/v2, PSD/PSB и поведение по умолчанию не изменены. Добавлены регрессионные проверки RGB16/CMYKA32 Float32, альфа-канала, NaN-битов, границ тайлов и точного повторного открытия.
+- Это ограничение числа символов сериализованных URL, а не предел общего использования RAM. Сборка синхронизирована; проверка PR CI, слияние и exact-main ещё не подтверждены.
+
+### 2026-10-31T15:38:25+03:00 — Новый домен сайта
+
+- Изменено: действующие ссылки сайта и онлайн-приложений переведены на https://dkoles.com/ с сохранением путей страниц.
+
+### 2026-10-26 — Кандидат 003X/5: ограничение промежуточного Base64-кодирования native-тайлов
+
+- `bytesToDataUrl` кодирует блоками по 24 КиБ, без дополнительной полной бинарной строки перед Base64; данные остаются совместимы побайтово.
+- Вытеснение грязных тайлов из кэша сначала подготавливает весь список, а затем применяет изменения, не оставляя частичных вытеснений при ошибке кодера.
+- Три теста кодирования и точного RGB16/CMYKA32 round-trip прошли локально. Итоговые CI, выпуск и слияние не подтверждены; 003X/5 остаётся IN PROGRESS.
+
+### 2026-10-22 — 003W/2b-2h принята: восстановление после ошибочного File Open PSD16/PSB32
+
+- [PR #317 слит](https://github.com/zeter1/ZeTer-Photo-Editor/pull/317) в [main 09a6639f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/09a6639fd1708d32dc4b65c201ccbc755a63aa69). [CI PR-head #39818707919 (attempt 2)](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39818707919), [PR real-photo #39818706912](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39818706912), [exact-main CI #39819777597](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39819777597), [exact-main real-photo #39819777848](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39819777848) — SUCCESS.
+- Обе независимые real `file://` PSD16/PSB32 проверки подтверждают отказ декодера во время плотного native Worker без преждевременной отмены, сохранность исходного документа и исправный повторный импорт и Fill с точным Undo/Redo; исправлен `alert`-контекст браузерного интерфейса.
+- Измерения operation-only CPU/RSS и Worker→PID не заявлены, независимое Photoshop-authored PSB32 происхождение не установлено. Следующая проходка [003W/2b-2i](task/003w2b2i-failed-import-worker-completion.md); весь Stage 003 остаётся OPEN.
+
+### 2026-10-22 — Проверка восстановления после повреждённого PSD/PSB во время native Worker (003W/2b-2h)
+
+- Добавлен отдельный браузерный сценарий `file://`: повреждённый PSD16/PSB32 открывается через File → Open во время реальной плотной Content-Aware Fill, проверяется сохранение Worker и старого документа, затем явная отмена Escape и побайтовое сохранение старого native source.
+- После сбоя проверяются успешный импорт другого правильного native PSD/PSB, повторная плотная обработка через настоящий Worker, неизменность alpha/области вне выделения и Undo/Redo; отдельные строго проверяемые JSON-отчёты и CI.
+- Исправлена production-ошибка открытия повреждённого PSD/PSB: системный диалог импорта вызывается с правильным контекстом `window`, поэтому исходная ошибка декодера больше не подменяется сообщением `Illegal invocation`; обновлены детерминированный file:// bundle и метаданные сборки. Версия не менялась.
+- Первый прогон PR CI #39817238849 обнаружил дефект тестовой фикстуры и гонку наблюдения статуса Worker; исправления внесены. Финальный PR-head CI, слияние и exact-main пока не подтверждены; Photoshop-authored PSB32 и operation-only RAM/CPU остаются открытыми.
+
+### 2026-10-19 — External independent RGB32 PSB candidate gates (002B/2b)
+
+- CI candidate: pinned real `psd-tools` PSB v2 RGB32 100×150 / 5×5 and paired PSD32, SHA-256/size/header validation, `decodePsd` native Float32 layer completeness and PSD/PSB parity, negative Node checks. External fixture authorship by Adobe Photoshop has **not** been independently established; no production/format/version changes. PR and CI initially pending.
+
 # История изменений
+
+## 1.46.4 — текущая версия
+
+### 2026-10-22 — Начато раздельное измерение времени заморозки выделения (003W/3)
+
+- Добавлены opt-in monotonic timestamps начала/окончания UI-сканирования выделения, начала Worker.run и реальной отправки postMessage через браузерный наблюдатель. Исключения наблюдателя не меняют результат, лимит 2 млн пикселей или отмену.
+- Добавлены native RGB16/RGB32 unit-регрессии и строгая валидация браузерных отчётов времени PSD16/PSB32. Существующие настоящие Chromium PSD16/PSB32 near-cap сценарии теперь фиксируют отдельный timing JSON и проверяют обе формы через CI, но новые результаты, сравнение нескольких прогонов и exact-main ещё не подтверждены; статус IN PROGRESS.
+- Wall-time, timer samples и heap не объявляются CPU временем, RAM peak или Worker→PID. Пользовательская версия приложения без изменений.
+
+
+### 2026-10-22 — Начата независимая проверка плотного Content-Aware Worker (003W/2b-2b)
+
+- Добавлено: отдельный реальный Chromium `file://` сценарий PSD16/PSB32 для почти двух миллионов выбранных пикселей с проверкой точных native-байтов, alpha и Undo/Redo через сохранённый .zpe.
+- Улучшено: тестовый оракул сравнения native-тайлов использует битовую маску выбора вместо крупного `Set`; появились плотная регрессия и отрицательные тесты достоверности JSON-отчёта, а также изолированная CI-задача.
+- Ограничения проверки: локальный запуск недоступен; реальное завершение плотного Worker, PR CI, слияние и exact-main CI до результатов GitHub Actions не подтверждены. Это не изменяет production/runtime и версию приложения.
+
+
+### 2026-10-19 — Добавлена браузерная проверка точности Photoshop PSD16/PSD32 (002B/2a)
+
+- Добавлена тестовая проверка реального открытия трёх SHA-pinned внешних Photoshop PSD через публичный Chromium `file://` интерфейс и сохранения .zpe через меню: полное сравнение native 16/32-bit raster SHA-256 с независимым чтением исходных PSD, поддержка обоих форматов сериализации v1 и v2.
+- Добавлены отрицательные тесты достоверности проверки; CI использует ранее скачанный и проверенный корпус. Пользовательская логика, bundle и номер версии не менялись. PSB32, корректность композиции Photoshop layers/adjustments и цветовые профили остаются открытыми.
+
+### 2026-10-19 — Ограничена структура внешнего PSD/PSB перед native профилированием (002A)
+
+- Исправлено: CLI-аудитор внешних high-depth PSD/PSB после SHA-256 проверяет, что длины top-level color-mode, image-resources и layer/mask sections не выходят за файл; PSB 64-bit значения читаются точно через BigInt без больших выделений памяти.
+- Добавлено: проверки допустимого merged-image compression marker и непустого payload; диагностическое поле `imageCompression`, отрицательные PSD16/PSB32 тесты и положительный сценарий переходов по секциям.
+- Ограничения: тестовые fixtures синтетические; это только предварительная проверка envelopes, а не полный PSD/PSB decode, Adobe-authorship, лицензии или reference-rendering. Production/runtime и версия приложения не менялись. CI-проверки фиксируются отдельно в `task/002-psd-compatibility-corpus.md`.
+
+### 2026-10-18 — Запрещена публикация повреждённых native Worker результатов (037C-3b-3/1)
+
+- Исправлено: Content-Aware Fill теперь отвергает изменение alpha-канала даже у выбранных native RGB/CMYK пикселей и не допускает NaN/Infinity в изменённых Float32 цветовых каналах. Конечные HDR-сэмплы выше 1 по-прежнему разрешены.
+- Исправлено: смешанный ответ Worker `unavailable` вместе с native payload больше не запускает тихий CPU fallback; это ошибка протокола.
+- Добавлено: отрицательные регрессии CMYKA32 alpha/NaN/Infinity и RGB16/CMYKA32 maxBytes-before-dispatch, а также повторное успешное выполнение после отказа; пересобран browser bundle и cache manifest.
+- Ограничения: реальная Chromium `file://` проверка injected malformed/photo PSD16+PSB32 и UI memory-cap остаётся задачей [037C-3b-3/2](task/037c3b-3-native-result-memory-cap.md), затем финальная 037C-3c; Photoshop-authored goldens, глобальный tiled budget, ICC/CMYK/RAW и весь Photoshop roadmap открыты.
+
+## 1.46.3 — 2026-10-18
+
+- Escape в редакторе отменяет ожидающую Content-Aware Fill, не сбрасывая выделение; другие Escape-жесты и открытые модальные окна сохраняют прежнее поведение.
+- Поколение команды проверяется до записи high-depth тайлов/preview, включая отмену после успешного ответа Worker, но до завершения async preview.
+- Регрессии отмены, перезапуска, позднего результата и гонки preview; настоящая фото-Chromium приёмка остаётся незакрытой задачей 037C-3b-2b/3.\n- Подтверждён test-only Chromium `file://` gate 037C-3b-2b/3a: pinned photo-derived PSD16/PSB32 и 8288 ROI, публичный Escape после native first-write, byte-exact Save Project/History до и после искусственного late-result; strict offline receipts/негативные тесты. [PR #256](https://github.com/zeter1/ZeTer-Photo-Editor/pull/256) → [main 3bb9b50](https://github.com/zeter1/ZeTer-Photo-Editor/commit/3bb9b509a0c4c9d641592563865137e4735414d3); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399943), [PR genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120399916), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673676), [exact-main genuine-photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39120673650). Production и версия не менялись; completed Worker/preview race и полная 037C ещё OPEN. [План](task/037c3b-2b-3a-photo-escape-mid-kernel.md).
+
+
+## 1.46.2 — 2026-10-18
+
+### 2026-10-18 — Исправлено закрытие документа при ожидающем native Content-Aware Fill (037C-3b-2b/2)
+
+- Исправлено: `closeDocumentTab` отзывает незавершённую native Content-Aware Fill до удаления активной сессии, освобождая raster persistence lease, и затем продолжает обычную проверку неотменяемых операций. Отказ пользователя от закрытия не отменяет заливку.
+- Добавлено: регрессионные Node-проверки жизненного цикла close/cancel/dirty-confirm/inactive tab/non-cancellable edit; отдельный Chromium `file://` photo gate для PSD16/PSB32 после подтверждённой реальной записи пикселя внутри Worker, публичный крестик вкладки и проверка проигнорированного синтетического позднего ответа.
+- Проверено: generated bundle/version parity, Node unit tests, Chromium `file://`, `git diff --check`, genuine-photo PSD16/PSB32 post-write close в [PR #253](https://github.com/zeter1/ZeTer-Photo-Editor/pull/253); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39116653877), [PR photo success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39116653964). PR слит в [main 4117247](https://github.com/zeter1/ZeTer-Photo-Editor/commit/411724794082df2f34f5d066fd3cd55828b1646d); [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39116891608), [exact-main photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39116891506).
+- Ограничение: оригинал после закрытия не существует для повторного byte-exact сравнения; сохранение оставшейся вкладки и её History проверяются через публичный Save Project. Photoshop-authored parity, memory peak и полная 037C остаются OPEN. [План](task/037c3b-2b-2-photo-close-mid-kernel.md).
+
+## 1.46.1 — 2026-10-18
+
+### 2026-10-18 — Проверена отмена real-photo Worker после записи пикселя внутри native ядра (037C-3b-2b/1)
+
+- Добавлено: отдельная opt-in test-only Chromium `file://` проверка двух independently pinned photo-derived PSD16/PSB32, где реальный native Worker записывает как минимум один пиксель, затем удерживается тестовым kernel probe до публичного переключения вкладки и принудительного `terminate()`.
+- Проверено: через публичный File → Save Project полные native tiles и две History не меняются; искусственный поздний ответ после отмены игнорируется. Strict JSON verifier отклоняет поддельный pre-kernel/metadata/no-publication receipt. Production Worker, bundle, runtime и версия не изменены.
+- Проверено: [PR #252](https://github.com/zeter1/ZeTer-Photo-Editor/pull/252) → [15721fe](https://github.com/zeter1/ZeTer-Photo-Editor/commit/15721fe5e87b6ab63aa67d5d5de25575badf7670), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284685), [PR genuine-photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113284680), [exact-main photo CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113526445), [exact-main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39113593888).
+- Ограничения: этот gate доказывает начало native вычисления до отмены, а не завершение всего ядра; поздний ответ инъецирован искусственно. `close`, explicit cancel, stale-generation/real late-completion и memory-cap, Photoshop-authored PSD/ICC/RAW/Stage 003 остаются OPEN. [Остаток](task/037c3b-2b-real-photo-mid-kernel.md).
+
+### 2026-10-18 — Проверена отмена real-photo native Worker на переключении вкладки (037C-3b-2a)
+
+- Добавлено: opt-in test-only Chromium `file://` сценарий с настоящими frozen PSD16/PSB32: публичное переключение вкладки после handshake и перехвата native job (8288 ROI), остановка Worker и инъекция позднего сообщения.
+- Проверено: сохранённые через публичный Save Project native tiles byte-exact неизменны, History двух вкладок не содержит старую заливку; отдельные fail-closed JSON receipts и unit-test отрицательные случаи.
+- Проверено: [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111656278), [PR photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111656280), [точный main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111881316), [точный main photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/39111881348) — success; [PR #251](https://github.com/zeter1/ZeTer-Photo-Editor/pull/251) слит как [1d4d376](https://github.com/zeter1/ZeTer-Photo-Editor/commit/1d4d37664905f7bd3d25523d18d7c251e11fb4fb).
+- Ограничения проверки: отправка Worker намеренно задержана **перед** выполнением ядра. Это не реальный mid-kernel photo cancel и не доказательство memory cap/Adobe parity. Production/runtime и версия 1.46.1 без изменений. [Следующая задача](task/037c3b-2a-real-photo-switch-late.md).
+
+### 2026-10-15 — Зафиксированы независимые real-photo byte pins и двойная CI-проверка (037B2b-2i)
+
+- Добавлено: постоянный reviewed manifest с SHA-256 оригинального CC0 JPEG, RGBA8 и четырёх native RGB16/Float32 clean/damaged references, независимо пересчитанных по реальным пикселям.
+- Добавлено: отдельная test-only Python/Pillow проверка исходного MPO frame 0, EXIF Orientation=1, EXIF Photo ColorSpace=sRGB, отсутствия embedded ICC, точного RGBA8 и native LE words без JS-кодека.
+- Изменено: `real-photo-intake` GitHub Actions отклоняет изменённый исходник/decoder/native pin по двум независимым проверкам и публикует read-only JSON evidence; генерация кандидата больше не считается достаточной.
+- Проверено: локальная независимая сверка exact main photo artifact #11990253339, Pillow/OpenCV 0 расхождений по RGB, 6 совпавших SHA-256, connected ROI 8288. [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38771493344), [PR real-photo intake success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38771494329), [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38771946582), [main real-photo intake success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38771945835); [PR #243](https://github.com/zeter1/ZeTer-Photo-Editor/pull/243) слит в [531b384c](https://github.com/zeter1/ZeTer-Photo-Editor/commit/531b384c23e4137ed39bad5c94204dead2d03a29).
+- Ограничения проверки: профиль не встроен (режим assumed-sRGB согласно EXIF), 16/32-bit derived from 8-bit, не проверены Adobe parity, настоящий browser photo benchmark, ICC-калибровка и реальная память Worker. Production/runtime и версия 1.46.1 без изменений. [Задачи](task/037b2b-2i-reviewed-real-photo-pins.md).
+
+### 2026-10-15 — Получен подлинный CC0 original и проверены native fixture candidate SHA-256 (037B2b-2h)
+
+- Исправлено: test-only JPEG admission допускает 434-байтовый MPO trailer **только** у SHA-1-pinned Commons original с фиксированным размером/позицией EOI; произвольные дополнительные байты отклоняются. Pillow-декодер читает primary frame 0 у подлинного MPO, не изменяя запрет на неподтверждённые источники.
+- Добавлено: отдельный GitHub Actions PR/manual/main workflow для HTTPS/JPEG/SHA-1 acquisition → Pillow 12.0.0 RGBA8 → независимая Python SHA-256 сверка → временный artifact с JSON и оригинальными байтами, плюс offline регрессии на поддельный JPEG trailer.
+- Проверено: [реальный CI intake success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38767164287), artifact `11989382184`; source SHA-256 candidate `dd01cf047c9b2b7a635e29c68a52c5585d7b346f4f99713f79968ea1ea4348b8`, RGBA8 candidate `d1aa01e37ee9944099db871be53f9d30fd00bdd12ead94ba4e09f1dd765b1641`. Независимый локальный OpenCV 4.13.0/контейнер Pillow 12.3.0 подтвердил 0 отличий RGB и тот же RGBA8 хеш после скачивания artifact. [Подробный handoff](task/037b2b-2h-github-real-photo-intake.md).
+- Ограничения проверки: оригинальный MPO имеет EXIF Orientation=1 без встроенного ICC, цвет рассматривается как assumed sRGB согласно карточке Commons; внешнее долговечное pinned review и Photoshop/Chromium photo benchmark ещё не выполнены. [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38767842768), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38768459017) и [main genuine CC0 intake success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38768459211); [PR #242](https://github.com/zeter1/ZeTer-Photo-Editor/pull/242) слит в `75da6c86`.  Production/runtime и версия не менялись.
+
+### 2026-10-15 — Целостность записи оригинального CC0 JPEG при сбое I/O (037B2b-2g)
+
+- Исправлено: test-only загрузчик JPEG использует эксклюзивную запись со сбросом на диск и откатом собственного нового inode при partial write/fsync failure; не удаляет чужой заменивший файл.
+- Добавлено: 5 offline-регрессий на точность байтов, существующий путь/symlink, обрыв записи, ошибку синхронизации и подмену имени во время отката.
+- Проверено: локально 5/5 Node; [PR #241](https://github.com/zeter1/ZeTer-Photo-Editor/pull/241) → [61247d0](https://github.com/zeter1/ZeTer-Photo-Editor/commit/61247d0ee49f706ef9308ac953ec7b1da16e487d); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38759811494) (attempt 2) — 1288 Node, сборка, настоящий Chromium file://, JSON/профили, diff hygiene. Первая попытка имела DevTools launch timeout; на второй smoke успешен. [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38760636543) для 8ca8378 — все 18 шагов. Подлинный CC0 JPEG не получен; независимые ICC/EXIF/лицензия и качество не подтверждены. Production/runtime и номер версии не менялись.
+
+### 2026-10-15 — Откат неполной пары RGBA8/JSON при ошибке Pillow-декодирования (037B2b-2f)
+
+- Исправлено: test-only декодер удаляет собственные новые RGBA8 и JSON при исключении публикации; удерживает дескрипторы до конца отката и проверяет идентичность файлов (device/inode), чтобы не удалить чужую замену.
+- Исправлено: CLI не разыменовывает конечную символьную ссылку при выборе нового выходного файла; занятый путь и dangling symlink отвергаются.
+- Добавлено: регрессии partial JSON write, late collision, inode replacement, исходно занятого результата и dangling symlink.
+- Проверено: [PR #240](https://github.com/zeter1/ZeTer-Photo-Editor/pull/240) слит в [b807ff9](https://github.com/zeter1/ZeTer-Photo-Editor/commit/b807ff9e7333564133f7ad81d53b68aa5fde3c88); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38756842339) — сборка/Node/Pillow, Chromium `file://`, diff hygiene. Exact-main CI проверяется отдельно. Подлинный JPEG и внешняя Photoshop-проверка отсутствуют; production runtime и версия не менялись.
+
+### 2026-10-15 — Независимое стороннее чтение native PSD16/PSB32 (037B2b-3h)
+
+- Добавлено: test-only `tools/verify-real-photo-psd-external.py` с закреплённым `psd-tools==1.19.0`; отдельно проверяются исходные 16/32-битные RGBA-слова одного слоя и merged composite без 8-bit preview, с обязательными native/file SHA-256.
+- Добавлено: отрицательные Node-тесты на неверные хеши, размеры, формат и переподписанный повреждённый merged-канал; CI устанавливает сторонний decoder и требует успешной проверки.
+- Проверено: [PR #238](https://github.com/zeter1/ZeTer-Photo-Editor/pull/238) → [3571c03](https://github.com/zeter1/ZeTer-Photo-Editor/commit/3571c030e2728ced97d652c7521570b7bc83b72a); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38742025006) — сборка/Node, настоящий Chromium `file://`, JSON, профили, diff hygiene. [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38742595798) для коммита [b3923e6](https://github.com/zeter1/ZeTer-Photo-Editor/commit/b3923e6a15ce7fd5af7379bfa1de9ca8526bea70).
+- Ограничения проверки: только синтетический суррогат; подлинный CC0 JPEG, независимая ICC/EXIF review, PSD/PSB real-photo parity, Adobe-authored goldens и Chromium photo benchmark ещё открыты. Production и версия 1.46.1 не менялись.
+
+### 2026-10-15 — Ужесточена JS-проверка метаданных слоя сохранённых PSD16/PSB32 (037B2b-3g)
+
+- Добавлено: test-only бинарная проверка native one-layer envelope до `decodePsd`, включая флаги, маску, режим смешивания, Pascal/Unicode имена и дополнительные tagged blocks.
+- Добавлено: отрицательные проверки PSD16 и PSB32 для metadata-only подмены с новым file SHA-256 при сохранённых native RGBA пикселях.
+- Проверено: [PR #237](https://github.com/zeter1/ZeTer-Photo-Editor/pull/237) → [7522747](https://github.com/zeter1/ZeTer-Photo-Editor/commit/75227473498a79b411b71eb8407b6e87202025d3); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38737045824) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38737509166) — сборка, Node, Chromium `file://`, JSON-профили и diff hygiene.
+- Ограничения: настоящий CC0 фотоисточник, сторонняя Adobe/PSD проверка и Chromium real-photo benchmark по-прежнему открыты. Production/runtime и версия 1.46.1 не изменены.
+
+### 2026-10-15 — Усилена JS-проверка сохранённых PSD16/PSB32 на скрытые Color Mode/ICC (037B2b-3f)
+
+- Исправлено: test-only `verifyPhotoDefectDocument` и `verifyPhotoDefectArtifactSet` не допускают непустые секции Color Mode Data или Image Resources; native RGBA word hashes сами по себе не гарантируют одинаковой цветовой интерпретации.
+- Добавлено: отрицательные тесты двух форматов с внедрением Color Mode/8BIM ICC resource и переподписью file SHA-256 при неизменённых native пикселях.
+- Проверено: [PR #236](https://github.com/zeter1/ZeTer-Photo-Editor/pull/236) → [51e87e2](https://github.com/zeter1/ZeTer-Photo-Editor/commit/51e87e2e47c29c54406c50d1f662125188d5b54c); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38731725562) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38732120517). Сборка, Node и Chromium `file://`, JSON/профили, diff hygiene.
+- Ограничения: без нового настоящего JPEG/ICC review, Photoshop goldens, Chromium photo quality и без изменений production runtime/версии.
+
+### 2026-10-15 — Защита pinned PSD16/PSB32 от скрытых цветовых ресурсов (037B2b-3e)
+
+- Исправлено: test-only Python/std-lib native reader проверяет пустоту Color Mode Data и Image Resources для строго определённых однослойных ZeTer PSD16/PSB32; ICC-подмена не должна считаться эквивалентной при тех же RGBA hashes.
+- Добавлено: отрицательные PSD16/PSB32 тесты с дополнительным color-mode payload и 8BIM/1039 ICC resource, без изменений native layer/merged pixels.
+- Проверено: [PR #235](https://github.com/zeter1/ZeTer-Photo-Editor/pull/235) → [ce2e029](https://github.com/zeter1/ZeTer-Photo-Editor/commit/ce2e02931c08f58c6dae70dfa5bc669a041d5e85); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38729586823) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38730012860). Полная сборка/Node/Python, Chromium `file://`, JSON-профили, diff hygiene.
+- Ограничения: это не внешний PSD/PSB decoder, не реальный JPEG/ICC review и не Photoshop goldens. Production runtime и версия 1.46.1 без изменений.
+
+### 2026-10-15 — Независимая Python-проверка сохранённых native PSD16/PSB32 (проходка 037B2b-3c)
+
+- Добавлено: test-only Python/std-lib разбор сохранённого PSD16/PSB32 с отдельной проверкой полного native RGBA слоя и merged-композита относительно независимо закреплённого SHA-256, без вызова ZeTer JavaScript-кодека.
+- Добавлено: отрицательные Node-регрессии на подмену layer/merged bytes, неверные hashes, размеры, формат, сжатие и повреждение длины файла; строгое ограничение размера входа.
+- Проверено: [PR #233](https://github.com/zeter1/ZeTer-Photo-Editor/pull/233) → [7cc4459](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7cc4459b787f66a2590ae82d2ab4edb76f685867); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38724278629), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38724736301) — полная сборка/Node/Python, Chromium `file://`, JSON/profiles, diff hygiene.
+- Ограничения: синтетический источник; это не полноценный внешний Photoshop decoder, не реальная фотография, не ICC/EXIF review и не браузерное измерение качества. Production runtime и версия 1.46.1 не изменены.
+
+### 2026-10-15 — Ужесточена проверка EXIF исходного JPEG перед офлайн-декодированием
+
+- Исправлено: test-only декодер Pillow теперь самостоятельно читает исходный EXIF APP1/TIFF IFD0 Orientation и отклоняет расхождение с `Image.getexif()` до записи RGBA8 и JSON evidence.
+- Добавлено: bounded-разбор little/big endian TIFF, проверка дублирующихся APP1/Orientation, повреждённых IFD0, неверных типов и значений; отдельные негативные тесты с синтетическими JPEG.
+- Проверено: [PR #232](https://github.com/zeter1/ZeTer-Photo-Editor/pull/232) → [`6d58f6b`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/6d58f6b8eb5280d5ece6b5f88415146319b1139e); [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38708933494), [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38709327930) — сборка, Node/Python, Chromium `file://`, JSON/profiles, diff hygiene.
+- Ограничения проверки: эта проходка не получает настоящие CC0 байты и не подтверждает ICC/color fidelity, Adobe-совместимость либо Chromium photo quality. Production runtime и версия 1.46.1 не изменены.
+
+### 2026-10-15 — Подготовлено офлайн-декодирование реального JPEG с EXIF и ICC для проверки Content-Aware Fill
+
+- Добавлено: test-only Python/Pillow декодирование строго документированного CC0 JPEG в непрозрачный RGBA8 с проверкой исходного SHA-1, размеров, EXIF orientation и явной embedded ICC → sRGB конверсией через ImageCms; метаданные decoder/LCMS и кандидатные SHA-256 выводятся отдельно, не объявляются независимо закреплёнными.
+- Проверено: синтетические EXIF/ICC, мутация исходного SHA-1, защита от перезаписи, неверная геометрия; [PR #229 CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38700917933) — сборка, Node/Python tests (Pillow 12.0.0), Chromium `file://`, JSON artifacts, профили и diff hygiene.
+- Документация: следующая задача 037B2b-2b — настоящие JPEG-байты и независимая ICC/EXIF/asset/decoded/native hash-рецензия; далее PSD16/PSB32 и Chromium 037C.
+- Ограничения проверки: в репозитории пока нет genuine JPEG или reviewed pins; внешняя Photoshop-совместимость, true 16/32-bit исходник и photo quality не доказаны. Production runtime и версия 1.46.1 не менялись.
+
+
+### 2026-10-14 — Добавлен строгий входной контроль JPEG для будущего real-photo benchmark
+
+- Добавлено: test-only `tools/real-photo-source-integrity.mjs` с JPEG SOF/scan header geometry, сверкой исторического SHA-1 источника и fail-closed pinned SHA-256 исходных JPEG bytes. Локальный CLI печатает SHA-256 только после предварительных структурных проверок.
+- Добавлено: независимая проверка SHA-256 декодированных RGBA8 пикселей с геометрией и opacity; negative matrix в `tests/real-photo-source-integrity.test.mjs`.
+- Документация: в `task/037`, `task/NEXT.md` и `tests/fixtures/real-photo/README.md` оставлены точные условия для 037B2/037C.
+- Проверено: [PR #224](https://github.com/zeter1/ZeTer-Photo-Editor/pull/224) → [8fa7b12](https://github.com/zeter1/ZeTer-Photo-Editor/commit/8fa7b12719a07ac92fd5af533c799a91fa0696c0), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38593642014). Полный `npm run check`, Chromium `file://`, JSON artifacts, профили и diff hygiene — success. Exact-code main CI после handoff ожидается.
+- Ограничения проверки: JPEG энтропия/ICC/EXIF и реальная фотография этим scanner не проверяются. Source asset SHA-256 ещё не pinned, native reference/PSD/PSB и Chromium real-photo benchmark не созданы. Production runtime и версия не менялись.
+
+
+### 2026-10-14 — Подготовлен независимый попиксельный native эталон качества для реальной фотографии
+
+- Добавлено: test-only `tools/real-photo-native-quality.mjs` с отдельным per-pixel known-clean reference для Uint16/Float32, контроль SHA-256 канонических native LE words и MAE/RMSE без 8-битного Canvas.
+- Проверяется: неизменность alpha/outside-selection на уровне native words, независимость reference/snapshots, корректность frozen selection и защита от недостоверных данных; отдельные негативные unit-тесты.
+- Документация: CC0 кандидат реальной фотографии и невыполненные подготовительные шаги в `task/037` и `tests/fixtures/real-photo/`.
+- Проверено: локально 5/5 `node --test tests/real-photo-native-quality.test.mjs`; [PR #223](https://github.com/zeter1/ZeTer-Photo-Editor/pull/223) → [27a6adb](https://github.com/zeter1/ZeTer-Photo-Editor/commit/27a6adb830797d3258bc640ffe09dd89c3ef92b8), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38586323259), [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38586743806). `npm run check`, Chromium `file://` smoke, profiles/artifacts, generated parity, diff hygiene — success. Это не браузерный benchmark на фотографии.
+- Ограничения проверки: оригинальные байты фотографии и SHA-256 ещё не закреплены; реальное Chromium/Photoshop сравнение не проводилось; production runtime и версия 1.46.1 не менялись. 037 и P0 002 открыты.
+
+### 2026-10-14 — Устранена гонка модального окна восстановления в Chromium smoke
+
+- Исправлено: после последовательных `Page.reload` UI-тест ждёт завершения асинхронного IndexedDB recovery scan по `data-app-ready=true` вместо фиксированных 400 мс. Реальную recovery-modal обрабатывает штатной кнопкой «Начать новый проект» и закрывает только соответствующий draft «Новый документ».
+- Добавлено: реальный `file://` Chromium smoke с тремя перезагрузками, задержкой IndexedDB success callback на 550 мс, проверкой восстановления и удалением только тестового ключа; отдельные Node-регрессии задержанного/пустого скана, ошибки bootstrap и посторонней модалки.
+- Проверено: [PR #219](https://github.com/zeter1/ZeTer-Photo-Editor/pull/219) → squash `66f41e6`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38563696598) и [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38564063538). `npm run check`, generated parity, настоящий Chromium `file://`, JSON/profiles и diff hygiene — success.
+- Ограничения: только тестовый harness, production recovery/controller, пиксельное ядро редактора и версия `1.46.1` не менялись; [002](task/002-psd-compatibility-corpus.md) и [003](task/003-tiled-content-aware.md) остаются открытыми.
+
+### 2026-10-14 — Измерено native качество на сложном связанном выделении
+
+- Добавлено: отдельный тестовый oracle для оценки MAE/RMSE и максимальной абсолютной ошибки RGB16 и CMYKA Float32 относительно известного чистого фона на 8288 выбранных пикселях двух островов, соединённых диагональным коридором. Оценка делается по исходным native каналам без 8-битного предпросмотра или повторного использования inpaint-алгоритма.
+- Изменено: `tools/profile-complex-roi.mjs` теперь фиксирует baseline/repaired quality и требует улучшения, сохраняя проверку точного результата настоящего Node Worker. Запрещены скрытая правка невыделенных пикселей/alpha, некорректные индексы и нечисловые значения; добавлены новые регрессионные тесты.
+- Проверено: [PR #218](https://github.com/zeter1/ZeTer-Photo-Editor/pull/218), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38545340603), squash `8208ab9`.
+- Ограничения: изменения только в диагностике/tests/task; пользовательский runtime и версия `1.46.1` не менялись. Это синтетический Node reference, не Chromium wide ROI, не Adobe-authored golden и не peak RSS измерение.
+
+### 2026-10-14 — Добавлен браузерный эталон качества native Content-Aware Fill на синтетическом дефекте
+
+- В действующем Chromium `file://` сценарии PSD16/PSB32 теперь измеряется ошибка восстановления заданного дефекта 5×5 относительно известного чистого фона: native Uint16/Float32 MAE и RMSE по сохранённым тайлам, а не 8-битному Canvas preview.
+- Для первой Fill, Redo, отмены посреди Worker-ядра, повтора Fill, Undo и финального Redo фиксируются и сверяются метрики; вложенные quality values валидируются при создании JSON-артефакта и независимом CI-чтении. Добавлены тесты повреждённых native-байтов, перекрытых тайлов, nonfinite Float32 и ложных CI scores.
+- Проверено: [PR #217](https://github.com/zeter1/ZeTer-Photo-Editor/pull/217) → squash `685d178`, [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38542625807) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38543002186).
+- Ограничения: тестовый harness, **без** изменения пользовательского runtime и номера приложения. Эталон создан ZeTer и касается только постоянного фона, не Photoshop-authored PSD/PSB, естественной текстуры или настоящего operation-wide пика памяти.
+
+
+### 2026-10-14 — Усилена проверка точности 16/32-битного заполнения в Chromium
+
+- Добавлен тестовый oracle для послойного сравнения native-байтов всех изменённых тайлов с фактическими frozen индексами выделения, переданными реальному Worker. Невыделенные пиксели нельзя незаметно менять даже внутри изменённого тайла.
+- Браузерный `file://` сценарий PSD16/PSB32 проверяет Fill/Redo, прерванную операцию, повторную Fill и Undo/Redo на точность native words. Добавлены отрицательные unit-регрессии на повреждения данных и геометрии тайлов.
+- Проверено: [PR #216](https://github.com/zeter1/ZeTer-Photo-Editor/pull/216), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538156947) и [точный main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38538532002), squash `f3d1336`.
+- Ограничение: тестовый harness, без изменения production runtime и без повышения версии приложения; контроль допустимой области записи не подтверждает Photoshop-качество восстановления и не заменяет внешний high-depth corpus.
+
+### 2026-10-14 — Проверка длительности браузерных диагностических сценариев
+
+- Исправлено: проверка тестового Chromium PSD16/PSB32 отчёта сверяет все итоговые `durationsMs` с наблюдаемыми отметками milestone; неверный JSON не может выдавать произвольную длительность отмены, повтора, Preview или Undo/Redo.
+- Добавлены регрессии подменённых значений, неверных типов, недостающих/лишних длительностей и нулевых интервалов. Отсутствующая пара событий обязана иметь `null`.
+- Проверено: [PR #214](https://github.com/zeter1/ZeTer-Photo-Editor/pull/214), [PR CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38531032892) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38531246576) для squash `98ea308`; Node tests, browser `file://` PSD16/PSB32, JSON verifier, профили и diff hygiene — success.
+- Ограничения: изменение затрагивает только тестовую диагностику, не production runtime. Измерения времени ядра Worker, Worker→PID и точного operation RAM peak не заявляются; внешние Photoshop-authored PSD/PSB остаются отдельной незавершённой задачей.
+
+### 2026-10-14 — Уточнены пропуски наблюдения CDP Worker targets
+
+- Исправлено: тестовый browser Worker census больше не выдаёт последний успешный `Target.getTargets` за подтверждённую видимость на финише при последующих отказах. После пропущенного снимка переходы появления/пропажи targets остаются неизвестными, а не ошибочно вычисляются между несоседними снимками.
+- Добавлено: `snapshotCoverage` для Worker target IDs, отдельные флаги успешных Target polls и безопасный `invalid-phase` fallback, не прерывающий независимый мониторинг PID/`/proc` и renderer heap; четыре новые Node-регрессии.
+- Проверено: `npm run check`, generated parity, настоящий Chromium `file://` PSD16/PSB32, JSON artifacts, профили и diff hygiene — [PR #212 CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38527401333) и [exact-code main CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38527667389) после squash `88ede195`.
+- Ограничения: изменения только в тестовой диагностике; ни Worker→PID mapping, ни exit, ни настоящий operation-wide RAM peak не доказаны. Независимые Adobe Photoshop high-depth golden по-прежнему требуются.
+
+
+### 2026-10-14 — Уточнена наблюдаемость PID при browser Worker cancel→retry
+
+- Исправлено: тестовый Chromium memory-профайлер больше не принимает прежнюю Linux PID+starttime видимость за факт последнего снимка, если финальный `/proc` недоступен; неопределённое состояние явно равно `null`.
+- Добавлено: независимый per-snapshot coverage для CDP PID membership и Linux identity, в том числе разрывы, пропущенные milestone и соседние подтверждённые переходы. PID churn не вычисляется сквозь неизвестный интервал.
+- Проверено: unit-регрессии, `npm run check`, реальный Chromium `file://` PSD16/PSB32, JSON и профили в [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38525012524) и [exact-code main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38525286762) — success. Это не делает RSS настоящим operation peak и не привязывает Worker к PID.
+
+
+### 2026-10-11 — Ограничено общее число обходов больших выделений при Content-Aware Fill
+
+- Исправлено: oversized ROI planner считает общий бюджет до 4 194 304 посещений/probes для повторных tile/stripe и bounded runs plans; при исчерпании выдаёт безопасный RangeError до чтения тайлов и без публикации результата.
+- Сохранено: native RGB16/CMYKA32 точность, исходные private tile payloads, отмена кооперативной задачи и независимость Node Worker. Обычный single-ROI путь не затронут.
+- Проверки: новые adversarial sync/cooperative/Worker тесты и существующий набор native parity; CI и релизный gate отслеживаются в `task/023-planner-total-budget.md`.
+- Ограничения: это лимит счётных операций, не гарантия wall-clock времени или true browser peak RSS. Сложные выделения могут теперь отвергаться раньше; Adobe Photoshop high-depth corpus и общие Stage 002/003 остаются открытыми.
+
+## 1.46.0 — предыдущая версия (2026-10-11)
+
+### 2026-10-11 — Диагностика памяти Chromium RSS в тестовом сценарии
+
+- Добавлено: информационные Linux `/proc/PID/status` VmRSS и VmHWM для CDP-списка процессов при реальном `file://` Content-Aware Fill/Undo/Redo; метрики отделены от renderer JS heap и CDP privateMemory.
+- Проверка: unit-тесты отказа при неполных/исчезнувших PID, правильных значений и сохранения доступных CDP метрик. CI/merge отслеживаются в `task/019-browser-linux-rss.md`.
+- Ограничения: sampled aggregate RSS и per-PID HWM — не атомарный peak всей операции, не GPU и не отдельный Worker. Production source и версия приложения не меняются.
+
+
+### 2026-10-11 — Регрессии большого PSB32 и отмены ожидающего Worker (тестовая проходка 009)
+
+- Добавлена синтетическая 1025×1025 PSB32 Float32 фикстура и Node-проверка точности little-endian каналов после декодирования и адаптивного tiled v2.
+- Дополнен сценарий Chromium `file://`: импорт PSB32 через UI, Save Project, Content-Aware Fill в реальном Worker, canvas preview, Undo/Redo; отдельная гонка отмены задержанного ответа после реальной обработки Worker и блокировки слоя, без второго commit и изменения native samples.
+- Ограничения: синтетический ZeTer writer — не независимый Adobe golden, delayed reply — не CPU-bound kernel cancellation, CDP samples — не peak RAM. Выполнение CI/merge отслеживается в `task/009-large-psb32-worker-cancellation.md`.
+
+
+### 2026-10-11T15:05:24+03:00 — Переключатель языка только в начале README
+
+- Исправлено: в русском и английском README оставлен один переключатель языка перед заголовком; повтор из контактов удалён.
+- Сохранено: все контакты и остальной текст README, код и поведение приложения.
+- Проверено: точное сравнение с исходным текстом после удаления повтора и переноса верхнего переключателя; `git diff --check`.
+
+### 2026-10-11 — Разреженные native Content-Aware выделения на более чем 256 тайлах
+
+- Реализовано: ранее искусственный предел 256 занятых tiles заменён безопасным per-cell fragment plan для больших разреженных выделений, с контролем числа tiles источника и суммарного `maxLayerPixels` перед чтением.
+- Сохранено: глобальный запрет selected donors, native byte precision, атомарная запись и cancellation; group-merge исторического алгоритма остаётся только для не более 256 cells.
+- Регрессии: 512 occupied cells, RGB16 sync/cooperative/Node Worker, Float32 CMYKA, budget rejection, отмена и неизменность входа. [PR #186](https://github.com/zeter1/ZeTer-Photo-Editor/pull/186), [точный main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38136526958).
+- Не закрыто: плотные connected ROI, production Photoshop PSD16/PSB32 golden и browser peak RAM; общая Stage 003 продолжается.
+
+### 2026-10-11T14:07:44+03:00 — Все контакты разработчика в README
+
+- Добавлено: Facebook, VK, Instagram, TenChat, X, Threads, OK и Telegram-группа «обо мне, проекты и чат».
+- Документация: русский README и отдельный английский README_EN.md; адреса видны целиком; сохранены Email, личный Telegram и LinkedIn.
+
+### 2026-10-11 — Широкие связные области Content-Aware Fill
+
+- Добавлено: при превышении бюджета общего прямоугольника широкие разреженные связные выделения разбиваются на ограниченные native ROI по занятым tiles; общий бюджет площади остаётся жёстким.
+- Исправлено: все пиксели исходного выделения исключены из доноров и PatchMatch-контекста соседних областей, даже если предыдущий фрагмент уже обработан.
+- Сохранено: точность RGB16/Float32 CMYK, неизменность исходных tiles, атомарная публикация и отмена в cooperative fallback.
+- Регрессии: связная диагональ через tiles, exact sync / Node Worker / cooperative parity, исчерпание бюджета и отмена.
+- Ограничения проверки: разбивка не гарантирует успех всех широких выделений; при превышении суммарного ROI лимита выполняется безопасный отказ (порог 256 для разреженных tiles снят последующей проходкой). Adobe-authored corpus, browser peak RAM и полная Photoshop-совместимость остаются открытыми.
+
+## 1.45.10 — предыдущая версия (2026-10-11)
+
+### 2026-10-11 — Диагностика точности native Content-Aware Worker (инструменты и тесты)
+
+- Добавлено: самостоятельное профилирование synthetic RGB16 и CMYKA Float32 с реальным Node Worker, immutable native tile bytes и точной синхронной сверкой.
+- Проверяется: одноразовая фиксация выделения, ровно один изменённый пиксель, JSON-время и process-wide memory snapshots, изолированные процессы, тестирование CLI; CI печатает 8 MiB baseline.
+- Ограничение: это не лицензированные Photoshop-authored PSD/PSB, не браузерный `file://` Undo/Redo или пиковой памяти Worker; поддержка широких связных ROI всё ещё не завершена.
+
+### 2026-10-11T12:14:05+03:00 — Понятный вход в проект для пользователей и разработчиков
+
+- Изменено: в README добавлены назначение, скачивание исходников, первые шаги, требования и ссылки на техническую документацию.
+- Уточнено: локальный запуск, установка AI-моделей, сохранение проектов и ограничения сложных Photoshop-документов.
+
+### 2026-10-11 — ZeTer 1.45.10: проверка целостности ответа tiled Worker
+
+- Исправлено: результат отдельного Content-Aware Worker проверяется до создания high-depth preview и публикации истории. Неверные счётчики, геометрия tile, модель, глубина, alpha metadata и изменения donor tiles вне выделения отклоняются без повторной заливки.
+- Добавлено: негативные регрессии для некорректных сообщений Worker и подтверждение неизменности исходного CMYKA Float32 source.
+- Ограничения проверки: контроль не доказывает пиксельную корректность внутри выбранного tile; широкий связный ROI, внешний лицензированный Adobe PSD16/PSB32 corpus и полноценный браузерный profiling ещё не завершены.
+
+## 1.45.9 — предыдущая версия
+
+### 2026-10-11 — ZeTer 1.45.9: защита асинхронного tiled-превью от устаревшего источника
+
+- Native tiled mutations проверяют exact identity highDepthSource во время построения RGBA8 preview и после PNG-кодирования; более старая операция не перезаписывает новый source того же слоя.
+- Отмена из caller continuation или замена source прерывает преобразование тайлов до PNG-кодирования. Три регрессии покрывают обе фазы и отмену.
+- Stage 003 и 002 остаются открыты: широкий связный ROI, независимый лицензированный Photoshop PSD16/PSB32 corpus и реальные браузерные memory/Undo проверки.
+
+## 1.45.8 — предыдущая версия
+
+### 2026-10-11 — ZeTer 1.45.8: прерываемое RGBA8-превью native tiled слоёв
+
+- Исправлено: построение RGBA8-превью после tiled high-depth/CMYK обработки отдаёт управление между парами тайлов, не удерживая главный поток до завершения всех tile conversions.
+- Безопасность: для Content-Aware Fill отмена или потеря владельца во время преобразования отбрасывает приватный canvas и не публикует частичный PNG, source или историю.
+- Добавлено: детерминированные тесты RGB16 / Float32 CMYKA, порядка обработки тайлов, отмены, смены документа и успешной публикации.
+- Ограничения проверки: PNG-кодирование по-прежнему синхронно в браузере; очень широкие connected ROI, лицензированный Photoshop PSD16/PSB32 corpus и реальный браузерный RAM/Undo профиль остаются в очереди.
+
+
+### 2026-10-11 — ZeTer 1.45.7: отменяемая запись native tiled ROI
+
+- Исправлено: native Content-Aware fallback отдаёт управление при записи большого ROI; изменения остаются приватными до commit. Отмена не меняет уже загруженные tiles, dirty flags и preview.
+- Совместимость: синхронный Worker/Node и cooperative fallback используют общий алгоритм и сохраняют native RGB16 / Float32 CMYKA samples.
+- Добавлено: регрессии прямого working set и отмены внутри ROI write.
+- Ограничения: wide connected ROI, chunked RGBA8 preview, независимые Photoshop-authored PSD16/PSB32 и реальные Chromium file:// memory/Undo замеры остаются открытыми.
+
+### 2026-10-11 — Stage 003: прерываемое чтение native tiled ROI
+
+- Добавлено: общий row-copy iterator для синхронного `readRegion` и отменяемого `readRegionCooperative`. При недоступном Worker main-thread fallback отдаёт управление через каждые 32 768 пикселей большого ROI и отбрасывает частный буфер при отмене без изменения исходных tiles.
+- Добавлено: регрессии RGB16 и Float32 CMYKA на byte-exact sync/cooperative parity и отмену в середине чтения, плюс проверка отмены внутри inpaint kernel после read checkpoints.
+- Ограничения: `writeRegion`, oversized connected ROI, chunked RGBA8 preview и независимый лицензированный Photoshop-authored PSD/PSB corpus с browser memory/Undo всё ещё открыты.
+- Проверено: [PR #177](https://github.com/zeter1/ZeTer-Photo-Editor/pull/177) слит в `main` (`bff5a5ac609733a32e93513672bd21c6064b8fa1`); [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38122773381) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38122815550) — **success**.
+
+
+### 2026-10-11 — Диагностический профиль native tiled readRegion/writeRegion
+
+- Добавлено: автономный Node-профилировщик `tools/profile-tiled-region-io.mjs` с отдельными процессами RGB16 и CMYKA Float32 и замерами фаз `readRegion`, `writeRegion`, `serialize`, текущей памяти и общего process high-water RSS.
+- Добавлено: регрессия `tests/tiled-region-io-profile.test.mjs` проверяет точность samples в ROI на границах tiles, единичное изменение, исходные неизменные payloads и запрет некорректных CLI-параметров.
+- Проверено: [PR #176](https://github.com/zeter1/ZeTer-Photo-Editor/pull/176) слит (squash `b56ad540e5f7876230db0fa47bc532583a960aea`), [точный `main` push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38122037274) завершился **success**: Node tests, generated-bundle parity, Chromium `file://` smoke и diff hygiene.
+- Ограничения проверки: метрики информационные; синтетические native tiles и Node не заменяют реальные Adobe PSD16/PSB32, Chromium `file://`, Worker memory или прерываемые tiled операции. Runtime/версия 1.45.6 не меняются.
+
+### 2026-10-11 — ZeTer 1.45.6: прерываемая сериализация native Content-Aware tiles
+
+- Исправлено: при недоступном браузерном Worker cooperative fallback теперь делает checkpoint между группами изменённых high-depth/CMYK tiles на этапе кодирования перед окончательной публикацией. Отмена отбрасывает даже уже подготовленные приватные tile payloads и возвращает исходный документ без частичной записи.
+- Совместимость: синхронный Node/Worker путь использует тот же порядок сериализации, unchanged tiles сохраняются byte-for-byte, новые regression tests проверяют Uint16 parity, alpha promotion и отмену при многотайловой сериализации.
+- Проверено: [PR #175](https://github.com/zeter1/ZeTer-Photo-Editor/pull/175) (squash `11aec98b5958dacbca97d7e7ca47096fc2301823`), [PR CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38121282434) и [exact main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38121334792) — **success**. Node tests, generated artifacts, browser `file://` smoke, informational profiles и diff hygiene прошли.
+- Ограничения: decode/writeRegion, широкий связный ROI и полный RGBA8 preview ещё выполняются синхронно. Независимые Photoshop-authored PSD16/PSB32 и реальный браузерный memory benchmark остаются открытыми.
+
+
+### 2026-10-11 — ZeTer 1.45.5: cooperative cancellation inside one Content-Aware ROI
+
+- Main-thread high-depth fallback now yields while its private native inpaint kernel scans pixels, fills boundary pixels, and refines PatchMatch (not merely between tiled ROIs); synchronous Worker and fallback reuse the same deterministic algorithm.
+- A cancelled single ROI cannot publish partially changed tiles. Added regression tests for Uint16 byte-exact parity and Float32 CMYKA cancellation after entering a large ROI.
+- Rebuilt browser bundle, file:// Worker supplier, HTML build stamp, and version manifest. [PR #174](https://github.com/zeter1/ZeTer-Photo-Editor/pull/174) and exact [main CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38120614660) passed; long connected ROI, RGBA8 preview, independent Photoshop-authored PSD16/PSB32 and memory benchmarks remain open.
+
+
+### 2026-10-10 — Проверка high-depth PSD/PSB в native tiled Worker
+
+- Добавлено: тест для RGB16 PSD и HDR Float32 PSB, которые проходят бинарный round-trip, native tiled serialization и вычисления настоящим Node Worker. Результат сравнивается с эталонным frozen-index вычислением; проверяется сохранение точных samples, исходных tiles и неизменённых доноров.
+- Изменения ограничены тестами и инженерной очередью: production runtime, generated bundle и версия 1.45.1 не меняются.
+- Ограничения: входные файлы сгенерированы собственным writer, поэтому остаются необходимыми независимые Photoshop-authored 16/32-bit fixtures, Chromium `file://` UI и реальный memory/latency профиль.
 
 > Канонические правила ведения журнала: [docs/development/CHANGELOG_GUIDE.md](docs/development/CHANGELOG_GUIDE.md).
 >
 > Изменения, уже слитые в `main`, считаются актуальным опубликованным состоянием репозитория и записываются в раздел текущей версии. Раздел `Unreleased` для уже интегрированных изменений не используется. Это правило не означает автоматический deploy внешнего сайта — deployment проверяется отдельно.
 
-## 1.43.3 — текущая версия
+## 1.45.7 — предыдущая версия
 
-### 2026-10-10 — Замыкание Bézier-контура нажатием на начальную точку
+## 1.45.6 — предыдущая версия
 
-- Добавлено: при построении нового контура «Пером» клик в пределах 6 экранных пикселей от первой точки после трёх узлов завершает замкнутый path без повторного узла.
-- Добавлено: визуальный preview замыкающего cubic-сегмента с использованием входящей Bézier-ручки первой точки и подсветка anchor. Enter и двойной клик у последней точки сохраняют прежнее поведение.
-- Добавлено: регрессии zoom-порога, снапа, минимального числа узлов, недублирования anchor и безопасного сброса draft.
-- Ограничения: только создание нового Pen path; существующие маски/контуры и PSD/PSB-декодер не изменяются.
+## 1.45.5 — предыдущая версия
+
+### 2026-10-10 — Прерываемая заливка при недоступном Worker
+
+- Исправлено: при `{ unavailable:true }` от браузерного Worker UI использует cooperative fallback на заранее зафиксированном выделении вместо полностью синхронного пути. Отмена до первой ROI и между непересекающимися ROI не публикует частичные tiles.
+- Добавлено: регрессии отмены Float32 CMYKA, точного совпадения Uint16 RGB, проверки неизменности исходного source и отклонения повторных frozen indices.
+- Ограничения: один ROI и полный preview остаются синхронными; независимые Photoshop-authored PSD16/PSB32, browser `file://` memory и длинные connected ROI ещё требуют работы.
+
+## 1.45.3 — предыдущая версия
+
+### 2026-10-10 — Прерывание tiled Content-Aware Fill между ROI
+
+- Main-thread fallback отдаёт управление после каждого непересекающегося ROI и перед сериализацией одиночной области, сохраняя исходные tiles при отмене. Синхронный и detached Worker варианты используют то же детерминированное ядро.
+- Добавлены регрессии exact Uint16 parity и отмены без публикации частичных данных. Вычисление внутри одного ROI всё ещё синхронно. P0 независимых Photoshop-authored PSD/PSB fixture и browser memory validation остаётся открытым.
+
+## 1.45.2 — предыдущая версия
+
+### 2026-10-10 — Усилена проверка пиксельной точности high-depth Worker
+
+- Добавлено: инструмент `profile-external-high-depth-psd-psb.mjs` сравнивает все native tile payloads и метаданные Worker с синхронным frozen-index результатом. Любая разница блокирует успешный отчёт; в JSON появились `workerParity`, `oracleMs` и `memory.afterOracle`.
+- Добавлено в регрессии: отказ при подмене счётчиков, битовой глубины и одного тайла; синтетический PSD16 и PSB32 используют реальный Node Worker. Изменения ограничены тестовым tooling/документацией, без изменения production runtime и версии 1.45.2.
+- Ограничения проверки: синхронный oracle использует то же ядро ZeTer и не заменяет независимый Photoshop golden; отсутствуют лицензированные высокобитные Photoshop fixtures и browser `file://` profile. Замеры памяти — snapshots, не пик RSS.
+
+### 2026-10-10 — Добавлена проверка внешнего PSD16/PSB32 через native Worker
+
+- Добавлено: CLI после SHA-256 preflight повторно закрепляет PSD/PSB bytes, проверяет настоящий decode в Uint16/Float32, tiled serialization и результат отдельного Node Worker. JSON включает измеренное время и снимки памяти.
+- Добавлено: регрессии на явно синтетических PSD16/PSB32, подмену SHA/глубины и командный интерфейс. Production runtime, generated bundles и версия 1.45.2 не меняются.
+- Ограничения: необходимы лицензированные независимо Photoshop-authored 16/32-bit файлы и Chromium `file://` проверка с preview/Undo. Выборочные RSS-снимки не являются peak памятью.
+
+
+### 2026-10-10 — Закреплён открытый файл при аудите внешних PSD/PSB
+
+- Исправлено: независимый high-depth preflight проверяет и хеширует тот же открытый file descriptor, отклоняя замену pathname или symlink и закрывая дескриптор также при ошибках.
+- Добавлены регрессии для symlink с правильным SHA-256 и повторной успешной проверки после повреждения данных. Производственный код редактора, generated bundles и версия 1.45.2 не меняются.
+- Ограничения: по-прежнему нет подтверждённых Photoshop-authored PSD16/PSB32 и реального Chromium end-to-end memory профиля.
+
+### 2026-10-10 — Ограничена память аудита внешних высокобитных PSD/PSB
+
+- Исправлено: инструмент проверки SHA-256 для внешнего PSD16/PSB32 corpus читает файл блоками до 64 KiB вместо полной загрузки файла размером до 512 MiB. Он также проверяет общее количество фактически прочитанных байт и сохраняет независимую проверку заголовка и SHA-256.
+- Добавлено: регрессия для многоблочных PSD/PSB header-only mocks, включая подмену последнего байта. Редактор, версия и generated assets не меняются.
+- Ограничения: без реальных независимых Photoshop-authored 16/32-bit fixtures и браузерного memory/Worker прогона утверждать полную совместимость нельзя.
+
+
+### 2026-10-10 — Точные границы halo для соседних tiled выделений
+
+- Исправлено: при oversized Content-Aware Fill группировка соседних занятых tiles использует прямоугольники реально выделенных пикселей, а не весь tile. Независимые области с непересекающимися donor halo обрабатываются в безопасных bounded ROI вместо ложного отказа по общему bounding rectangle.
+- Проверяется: Uint16 cross-tile regression, parity frozen Worker indices / synchronous selection, неизменные исходные tile payloads, только действительно изменённые tiles и запрет разбиения при пересекающихся halo.
+- Ограничения: связанные и очень широкие области, суммарный ROI budget, main-thread fallback cancellation и независимые high-depth Photoshop PSD/PSB остаются открытыми в task/003.
+
+## 1.45.1 — закрыта 2026-10-10
+
+### 2026-10-10 — Проверка независимых PSD/PSB через реальный tiled Worker
+
+- Добавлена сквозная Node-регрессия для внешних 8-bit CMYK PSD и RGB PSB: decode → native tiled source → однократный снимок выделения → настоящий detached Worker → сравнение с native frozen-index kernel.
+- Проверяется отсутствие повторного чтения выделения и мутаций входных tile payloads, завершение Worker и заполнение выбранного пикселя. Это тестовый подэтап без production/runtime изменения и повышения версии.
+- Ограничения: не проверяет `file://` Chromium, Undo/Redo, peak RAM или реальные 16/32-bit Photoshop-authored файлы.
+
+
+### 2026-10-10 — Упорядочены измерения памяти в Chromium
+
+- Исправлено: периодические CDP-выборки, промежуточные контрольные точки и финальное измерение браузерного профилировщика теперь выполняются последовательно, поэтому задержанные ответы не переставляют записи местами и не меняют смысл финального замера.
+- Добавлены регрессии на одновременный poll/marker/stop и возобновление замеров после ошибки одной контрольной точки. Никаких новых требований к доступности метрик Chromium, порогов памяти/времени и изменений пользовательского редактора; версия и generated bundle не меняются.
+
+
+### 2026-10-10 — Расширены измерения памяти Chromium в browser smoke
+
+- Добавлено: информационная попытка прочитать CDP `SystemInfo.getProcessInfo` через отдельное browser-level соединение и собрать точные значения `privateMemory` для полного списка доступных процессов. В JSON профиля сохраняются baseline, sampled maximum, end, число процессов и явная причина недоступности метрик; неполные выборки отвергаются.
+- Проверка: unit-регрессии на фактические числовые счётчики, частичную выдачу и недоступный CDP-метод. Main renderer JS heap sampling остаётся рабочим независимо от наличия process metric.
+- Интерпретация: это **сэмплированная сумма private memory Chromium**, не независимая память Worker, процессный RSS/high-water и не реальный пик. Не добавлены CI RAM/latency thresholds. Production/runtime, версия и generated bundle не меняются.
+
+
+### 2026-10-10 — Добавлены контрольные browser-измерения памяти 16-bit tiled-заливки
+
+- Добавлено: `tools/browser-renderer-heap-sampler.mjs` собирает через Chromium DevTools Protocol периодические численные значения renderer `JSHeapUsedSize` с baseline, sampled maximum и контрольными точками.
+- Проверка: существующий `file://` Chromium smoke теперь печатает информационный JSON профиль после реальной 16-bit tiled .zpe UI-команды с Worker, preview и Undo/Redo. Три unit-теста покрывают корректность sampled maximum, отказ при отсутствующих метриках и освобождение таймера после ошибки.
+- Ограничения проверки: нет CI-порогов latency/RAM; выборочный максимум JS heap **не является** peak RSS/Worker/native/GPU memory; benchmark внешних 16/32-bit PSD/PSB ещё предстоит. Пользовательский runtime, версия и generated bundle не меняются.
+
+### 2026-10-10 — Прерывание устаревшей tiled Content-Aware Fill в активном Worker
+
+- Исправлено: браузерный Worker теперь периодически проверяет актуальность исходного документа, слоя, блокировки и high-depth source. Если владелец устарел, активное вычисление прерывается через `terminate()` без ожидания нового сообщения от занятого потока.
+- Добавлено: детерминированные регрессии на устаревание после dispatch и до `ready`, очистку таймеров при успешном завершении, ошибке и ручной отмене, а также синхронное срабатывание тестового планировщика.
+- Совместимость: неизменны данные PSD/PSB, precision, fallback, истории и native `.zpe`; проверка выполняется только во время активного Worker. Полная отмена синхронного main-thread fallback и профили реальных high-depth PSD/PSB остаются в Stage 003.
+
+## 1.45.0 — закрыта 2026-10-10
+
+### 2026-10-10 — Сквозная проверка 16-bit tiled Content-Aware Fill в Chromium
+
+- Добавлена browser-регрессия реальной пользовательской команды для импортированного `.zpe`: marquee → меню Edit → native 16-bit tiled Worker → history → undo/redo. Проверяется реальный Worker dispatch и отсутствие повторной history-публикации.
+- Только тестовая инфраструктура; код пользовательского runtime, версия и generated bundle не меняются. Остаток Stage 003 — профили больших реальных PSD/PSB, широкие ROI и дополнительные отмены.
+
+### 2026-10-10 — Tiled Content-Aware Fill запускает вычисления в browser Worker
+
+- Добавлено: команда tiled native Content-Aware Fill фиксирует выделение один раз с yield между блоками и передаёт frozen indices в существующий file:// Blob Worker.
+- Исправлено: при недоступном Worker повторно не опрашивается геометрия выделения — fallback потребляет тот же snapshot. При смене документа, слоя, source или lock результат не публикуется.
+- Сохранено: no-op для пустого/полного выделения, bounded ROI/precision, исходные tiles и единичная history-публикация. Ошибки Worker compute не скрываются fallback'ом.
+- Проверка: `tests/tiled-inpaint-ui-dispatch.test.mjs` и штатный CI; численный browser RAM/latency benchmark и отмена во время синхронного preview остаются открытыми.
+
+## 1.44.3 — закрыта 2026-10-10
+
+### 2026-10-10 — Подготовлен адаптер ленивой загрузки браузерного Worker (Stage 003)
+
+- Новый `src/core/tiled-inpaint-browser-worker.js` загружает generated classic supplier по требованию при `file://` и HTTP, запускает Blob Worker, освобождает Blob URL и защищает стартующие задачи от supersession.
+- Состояния `cancelled` (устаревший владелец) и `unavailable` (недоступен Worker, скрипт или CSP) различаются. Ошибки вычислений Worker не маскируются fallback'ом. Добавлены детерминированные тесты загрузки, отмены и отказов.
+- На этом этапе адаптер не подключён к UI Content-Aware Fill; пользовательское поведение и версия не меняются.
+
+### 2026-10-10 — Ускорен изолированный Worker Content-Aware Fill (Stage 003)
+
+- Устранён повторный полный обход source pixels в detached Worker: новое API потребляет заранее зафиксированные индексы выделения, сохраняет bounded bitmap validation и передаёт их прямо в общий ROI kernel.
+- Добавлены регрессии для разрозненных CMYKA выделений, перестановки индексов, некорректных индексов, immutable source и zero selection. Синхронизированы генераторы браузерного bundle/Worker.
+- В основной UI Worker пока не подключён; доступный пользователю функционал и версия приложения не изменились.
+
+
+### 2026-10-10 — Подготовлен самодостаточный браузерный Worker для tiled Content-Aware Fill
+
+- Добавлено: детерминированная сборка отдельного classic Worker из канонического вычислительного ядра и протокола. Полученный source supplier можно загрузить как обычный скрипт из `file://` и выполнить через Blob Worker без импорта файлов из потока.
+- Добавлено: regression на соответствие generated source исходникам и на CMYKA parity/error recovery; browser smoke исполняет реальную заливку в Blob Worker, открыв сам редактор по `file://`.
+- Ограничения: Worker пока используется только в тестовом сценарии, пользовательская заливка не переключена на него. Нет fallback, exact-owner UI cancellation и подтверждённого улучшения RAM/latency. Версия не повышается, потому что пользовательское поведение не менялось.
+
+### 2026-10-10 — Снижена служебная память выбора пикселей в изолированном Worker
+
+- Изменено: замороженные индексы выделения на стороне протокола tiled Content-Aware Fill проверяются с битовой маской вместо `Set` из чисел. Дополнительный bitmap не превышает 2 MiB при лимите источника 48 MiB; некорректная геометрия отклоняется до выделения маски.
+- Проверено тестами: порядок индексов, переходы через границу байта, ошибки дубликатов/диапазона, cross-tile parity и неизменность входного источника.
+- Ограничения: изолированный Worker пока не подключён к UI, повторный полный scan в общем tiled kernel остаётся. Пользовательское поведение и версия приложения не изменяются.
+
+### 2026-10-10 — Защита Worker-клиента tiled заливки от зависания при ошибке сообщений
+
+- Исправлено: `messageerror` при недоступном для десериализации Worker-ответе теперь завершает ожидающее задание ошибкой, прекращает вычисление через `terminate()` и очищает подписки у браузерных и Node-подобных Worker.
+- Исправлено: частично пригодный Worker, возвращённый ошибочной фабрикой, освобождается перед отказом; ошибка асинхронного `terminate()` не становится необработанным отклонением Promise.
+- Добавлены регрессии на ошибки до `ready` и после dispatch, late reply, повторный запуск задания и отсутствие утечек. Изолированный Worker пока не используется UI/`file://`; пользовательское поведение и версия приложения не меняются.
+
+
+### 2026-10-10 — Исправлена повторная активация завершённого Worker-задания
+
+- Исправлено: синхронный `ready` → ответ, `error` или исключение во время подписки больше не оставляют Worker «активным» после завершения и не сохраняют лишние обработчики.
+- Проверено: регрессии на reentrant browser-shaped события, очистку подписок, `terminate()` и возможность запуска следующего задания. UI/runtime-путь `file://` не менялся; номер версии остаётся 1.44.3.
+
+
+### 2026-10-10 — Управление жизненным циклом изолированного Worker-задания tiled Content-Aware Fill
+
+- Добавлен независимый от UI клиент Worker-протокола: новое задание отменяет предыдущее через `terminate()`; ответ принимается только для актуального задания и владельца, устаревший ответ не публикуется.
+- Проверены ошибки, неверные ответы, отмена до запуска, восстановление после ошибки, совместимость событий Node Worker и browser-подобного Worker, а также пиксельная эквивалентность Float32 CMYKA.
+- Это инфраструктурная проходка без подключения к браузерному `file://` runtime, изменения пользовательского поведения или версии. Реальная интеграция в редактор, memory budget и широкий ROI ещё открыты.
+
+
+### 2026-10-10 — Подготовлен исполняемый Worker-протокол для tiled заливки
+
+- Добавлено: изолированный Node `worker_threads` entrypoint для вычисления tiled Content-Aware Fill по зафиксированному списку индексов выделения, с использованием существующего неизменённого ядра.
+- Регрессии: сравнение результата Worker и синхронного расчёта на разрозненных Float32 CMYKA-областях, проверка ошибочных индексов и неизменности исходных tiles.
+- Ограничения проверки: production/UI и canonical `file://` bundle не меняются; browser Worker и прерывание внутри вычислительного ядра остаются открытыми. Версия остаётся 1.44.3.
+
+### 2026-10-10 — Проверка tiled Content-Aware Fill после реального PSD/PSB decode
+
+- Тесты/CI: добавлен информационный изолированный профилировщик внешних pinned PSD CMYK и layered PSB файлов для стадий decode, преобразования native PixelBuffer в tiles и bounded Content-Aware Fill; source bytes сверяются с независимыми manifest SHA-256.
+- Регрессии: PSD sync/cooperative pixel parity, однократное вычисление selection predicate, PSB cancellation до декодирования ROI tiles, иммутабельность source payload и отсутствие изменений за пределами выбранного пикселя.
+- Границы: upstream файлы небольшие и 8-bit; тест не подтверждает peak RAM больших 16/32-bit PSD/PSB, browser preview и Worker-kernel cancellation. Production/runtime не менялся; версия остаётся 1.44.3.
+
+
+### 2026-10-10 — Кооперативное сканирование tiled Content-Aware Fill
+
+- Улучшено: при native tiled Content-Aware Fill сканирование замороженного выделения отдаёт управление интерфейсу между блоками по 32 768 пикселей; после каждого yield заново проверяется исходный документ, слой, блокировка и identity исходного high-depth source. Устаревшая операция завершается без preview, history и записи.
+- Сохранено: синхронный API для профилировщика/тестов, однократное вычисление geometry predicate, исходные доноры, лимиты ROI и атомарная публикация изменённых tiles.
+- Тесты: сравнение синхронных и асинхронных пикселей CMYKA Float32, проверка количества вызовов predicate, отмена до decode и смена документа во время yield.
+- Граница: собственно inpaint/ROI kernel пока синхронный и не выполняется в Worker; сканирование лишь более отзывчиво и отменяемо. Полностью interruptible worker и большие связанные выделения остаются открытыми.
+
+## 1.44.2 — 2026-10-10
+
+### 2026-10-10 — Инструмент измерения tiled Content-Aware Fill
+
+- Добавлено: отдельный JSON-профилировщик 8/24/48 MiB synthetic CMYKA Float32 tiled источников с измерением времени подготовки/операции и process-wide high-water RSS; в CI информационный отчёт и минимальная регрессия для проверяемости инструмента.
+- Совместимость: production logic, file:// bundle и версия 1.44.2 не изменены.
+- Ограничения: baseline не является измерением самого PSD/PSB декодирования, пиков RAM лишь самого inpaint или responsiveness UI; [PR CI на Linux x64 / Node 24](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38051881786) зафиксировал 113.92/133.50/186.92 мс и process-wide high-water RSS 188/328/427 MiB для 8/24/48 MiB соответственно; [main push CI green](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38052035982), exact merge `11932992f3213447b8cae9c183eaf80cb2ec6f06`.
+
+
+### 2026-10-10 — Далёкие островки Content-Aware Fill в tiled слоях
+
+- Добавлено: halo-disjoint ROI для удалённых выделенных островков, когда общий bounding rectangle превышает 8 МП. Сумма площадей всех ROI всё ещё ограничена прежним лимитом 8 МП.
+- Сохранено: однократное frozen selection, исходные immutable доноры, RGB/CMYK 8/16/32-bit precision, неизменность untouched tiles и единая guarded history-публикация.
+- Защита: cap 256 занятых tiles, консервативное объединение halo с пересечениями и полный отказ без частичной публикации при недостатке доноров или превышении бюджета.
+- Проверка: добавлены регрессии на Float32 CMYKA, суммарный лимит и близкие halos; выполнение CI проверяется отдельно.
+- Осталось: профилирование peak RAM/latency, worker/cancellation и широкие связные области.
+
+## 1.44.1 — 2026-10-10
+
+### 2026-10-10 — Согласованная маска выделения при tiled Content-Aware Fill
+
+- Исправлено: для tiled high-depth Content-Aware Fill геометрия выделения вычисляется ровно один раз для каждого пикселя. Внутренняя заливка использует сохранённую ROI-маску, поэтому повторные вызовы нестабильного предиката не могут поменять выбранную область во время одного действия.
+- Сохранено: лимиты ROI/выделения, доноры исходного источника, неизменность нетронутых tiles, отсутствие публикации при превышении лимита.
+- Добавлено: регрессии однократного обращения к предикату, отсутствия грязных посторонних tiles и безопасного отказа.
+- Ограничения проверки: worker/cancellation и независимая обработка широких/разрозненных областей в эту проходку не входят; CI проверяется отдельно.
+
+## 1.44.0 — 2026-10-10
+
+### 2026-10-10 — Локальная tiled Content-Aware Fill для high-depth слоёв
+
+- Добавлено: выделение на tiled v2 RGB/CMYK native source обрабатывается в единой bounded ROI с 24 px donor halo, без полной материализации high-depth PixelBuffer; рабочая область может пересекать границы tiles.
+- Сохранено: исходные доноры остаются неизменяемыми, native 8/16/32-bit precision, атомарная публикация только изменённых tiles после повторной проверки документа/слоя/source, один Undo entry.
+- Защита: прежние границы 8 МП рабочего региона и 2 МП выделения; разбросанные/большие выделения за лимитом корректно отклоняются без частичного сохранения.
+- Добавлено: независимые регрессии для Float32 CMYKA, cross-tile halo, нетронутых payloads, no-donor/limits/aborted masks и command owner guard.
+- Ограничения: это ROI-путь, а не глобально эквивалентный Adobe Content-Aware результат; для больших/disconnected областей может потребоваться worker/streaming algorithm. Full RGBA8 compositor preview по-прежнему создаётся.
+
+## 1.43.4 — 2026-10-10
+
+### 2026-10-10 — Независимая проверка бинарных масок и маркеров групп PSD/PSB
+
+- Добавлено: отдельный тестовый парсер исходных PSD/PSB layer records, флагов видимости и масок, marker `lsct`, clipping и PackBits-каналов `-2`; пиксели трёх масок сверяются с явно заданными эталонами, без повторного декодирования кодеком ZPE.
+- Документация: уточнены границы внутреннего byte-oracle в `task/002-psd-compatibility-corpus.md`, fixture provenance и test matrix.
+- Ограничения проверки: независимость от decoder не означает проверку Photoshop renderer или подтверждение pixel-perfect совместимости; production-код и версия 1.43.4 не меняются. Проверку CI записать после фактического завершения.
+
+### 2026-10-10 — Внешний эталон merged preview PSD/PSB (только тесты)
+
+- Добавлено: независимое чтение PackBits/RLE merged preview из закреплённых сторонних PSD/PSB fixtures (прозрачный Photoshop Shape Layer, PSB-группы и Adjustment Layer с маской). Пиксели сверяются с PSD decoder через отдельную in-memory копию файла без layer-section, не через ZPE writer.
+- Проверки: source SHA-256, фиксированный RGBA checksum, пиксельные samples и полное byte-level сравнение каналов RGB/A, включая 4-байтовую PSD и 8-байтовую PSB длину секции.
+- Ограничения: это oracle для embedded composite, не независимый renderer Adobe Photoshop, не pixel-perfect проверка ZPE layer compositing. Production-код и SemVer 1.43.4 не изменяются.
+
+### 2026-10-10 — Регрессия вложенных PSD/PSB групп с масками и adjustment metadata
+
+- Добавлено: детерминированный generated PSD/PSB corpus для вложенных групп, raster masks, clipping и неизменности исходных Photoshop adjustment blocks после повторного экспорта.
+- Документация: зафиксированы fixture provenance, пределы внутреннего round-trip и незакрытый этап независимой Photoshop compatibility проверки в `task/002-psd-compatibility-corpus.md`.
+- Совместимость: production/runtime код и версия 1.43.4 не изменяются; результаты CI/браузерных проверок фиксируются после выполнения, не предполагаются заранее.
+
+### 2026-10-10 — Корректная контент-заливка CMYK и прозрачных границ
+
+- Исправлено: у CMYK PixelBuffer без alpha в подборе текстуры теперь учитывается четвёртый канал K.
+- Исправлено: граничная Content-Aware Fill учитывает straight alpha при смешивании доноров, не перенося скрытые цвета полностью прозрачного пикселя.
+- Добавлено: регрессионные сценарии RGBA8, Float32 CMYKA и Uint16 CMYK4 по одному алгоритмическому контракту.
+- Документация: описана модель каналов и добавлена приоритизированная очередь `task/`.
+
+## 1.43.3 — 2026-10-10
 
 ### 2026-10-08 — Защита отложенной геометрии масштабирования холста
 

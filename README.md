@@ -1,10 +1,26 @@
+**Язык / Language:** **Русский** · [English](README_EN.md)
+
 # ZeTer Photo Editor
 
 [![CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml/badge.svg)](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml)
 
-**Онлайн-версия:** https://dkl.do.am/servisi/PhotoEditor/index.html  
+**Онлайн-версия:** https://dkoles.com/servisi/PhotoEditor/index.html
 
 ZeTer Photo Editor — браузерный графический редактор со слоями, историей действий и Canvas 2D-рендером. Он работает как онлайн, так и локально через обычный `index.html`. Редактор вдохновлён рабочим процессом Photopea / Photoshop, но остаётся самостоятельным приложением. Пользовательские изображения обрабатываются в браузере и для обычной работы не требуют загрузки на внешний сервер.
+
+## Попробовать редактор
+
+Для обработки фотографий, ретуши, добавления текста и работы с многослойными документами — без установки настольного редактора.
+
+1. [Откройте онлайн-версию](https://dkoles.com/servisi/PhotoEditor/index.html) или [скачайте исходники ZIP](https://github.com/zeter1/ZeTer-Photo-Editor/archive/refs/heads/main.zip) и распакуйте всю папку.
+2. Для локального запуска на Windows дважды нажмите `start.bat` или `index.html`. Python и Node.js для обычного использования не нужны.
+3. Откройте изображение, выполните правки и сохраните редактируемый проект в `.zpe`; готовое изображение экспортируйте в нужный формат.
+
+Изображения обрабатываются в браузере. Нейросетевые инструменты требуют отдельной установки моделей; совместимость со сложными Photoshop-документами имеет [ограничения](#ограничения-относительно-photopea). Для важных файлов сохраняйте исходники и проект отдельно от браузерного восстановления.
+
+**Для разработчиков:** [карта проекта](docs/PROJECT.md), [архитектура](#архитектура), [тесты](#тесты).
+
+## Работа с текстом
 
 Для текста доступны встроенные шрифты с поддержкой кириллицы, загрузка своего файла шрифта и кнопка показа шрифтов компьютера (если браузер предоставит доступ). В окне текста параметры сразу видны на холсте и в предпросмотре фрагмента изображения; окно можно переместить за заголовок и изменить его размер за угол. Размер малого предпросмотра меняется за его нижний угол. «Отмена» убирает временный результат.
 
@@ -12,7 +28,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Возможности
 
-**Текущая версия:** 1.43.3
+**Текущая версия:** 1.46.4
 
 ### Ключевые возможности
 
@@ -74,7 +90,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - кисть размытия работает локально по текущему растровому слою: размер кисти задаёт область, «Сила размытия» — интенсивность одного штриха в процентах; повторные отпечатки внутри одного штриха не усиливают размытие;
 - ретушь текущего растрового слоя: **Штамп (`S`)**, **Лечебная кисть (`J`)** и **Палец (`N`)** используют мягкие края, **Осветлитель (`O`)** и **Затемнитель (`Shift+O`)** меняют только RGB существующих пикселей и сохраняют прозрачность; сила осветления и затемнения регулируется отдельно для каждого инструмента и не накапливается от соседних отпечатков одного штриха; источник штампа и лечебной кисти задаётся через `Alt+клик`;
 - **Градиент (`Shift+G`)** создаёт линейный или радиальный переход между двумя цветами на отдельном слое и показывает сам переход до отпускания кнопки мыши;
-- **Перо (`P`)**, Stage 2b: клик создаёт corner-узел, click+drag — smooth Bézier-узел; у выбранного path-слоя видны anchors/handles, anchor можно перетаскивать вместе с ручками, handle — менять отдельно, `Alt+drag` разрывает симметрию, `Shift+drag` по anchor создаёт smooth handles, `Alt+click` по anchor сбрасывает его в corner; cubic-контуры сохраняются в `.zpe`, старые прямолинейные pathPoints остаются совместимыми; клик по первой опорной точке после трёх узлов замыкает контур (радиус 6 экранных px), `Enter` завершает его с выбранным режимом; **Магнитное лассо (`A`)** прослеживает границу промежуточными точками между кликами, а **Волшебная палочка (`W`)** выделяет связанную область похожего цвета;
+- **Перо (`P`)**, Stage 2b: клик создаёт corner-узел, click+drag — smooth Bézier-узел; у выбранного path-слоя видны anchors/handles, anchor можно перетаскивать вместе с ручками, handle — менять отдельно, `Alt+drag` разрывает симметрию, `Shift+drag` по anchor создаёт smooth handles, `Alt+click` по anchor сбрасывает его в corner; при создании нового контура клик по первой точке после третьего узла замыкает cubic-контур без дублирования anchor и сохраняет его в Shape-слое с Undo/Redo; cubic-контуры сохраняются в `.zpe`, старые прямолинейные pathPoints остаются совместимыми; **Магнитное лассо (`A`)** прослеживает границу промежуточными точками между кликами, а **Волшебная палочка (`W`)** выделяет связанную область похожего цвета;
 - панель инструментов на широком экране имеет две колонки; у каждого инструмента есть развёрнутая подсказка с назначением и горячей клавишей;
 - заливка (`G`) связной области с регулируемым допуском цвета и непрозрачностью;
 - **Правка → Контент-заливка выделения** восстанавливает выбранную область детерминированным boundary-inpainting по исходным пикселям вокруг выделения; Canvas8 и native 16/32-bit RGB/CMYK проходят через один sample-domain алгоритм без скрытой 8-bit rasterization. Для предсказуемой памяти один запуск ограничен слоем до 8 МП и выделением до 2 МП;
@@ -216,7 +232,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Запуск на Windows
 
-Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.43.3 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
+Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.46.4 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
 
 Если браузер показывает старую версию после обновления архива, закройте старую вкладку и откройте `index.html` из новой распакованной папки.
 
@@ -279,3 +295,17 @@ npm test
 PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip, Stage 12e–12g сохраняют native RGB 16/32-bit typed channels и compatible high-depth composite, Stage 13a–13e закрывают native CMYK/color-management и real-world ICC corpus, Stage 14a–14c закрывают основную embedded Smart Object цепочку, Stage 15a–15d дают editable Photoshop Text/solid Shape mapping, а Stage 16a–16c дают native basic Adjustment Layers с raster masks, clipping, channel-specific Levels и editable point Curves. Ограничения здесь теперь точечные: clipping base внутри сложных isolated/pass-through group chains и Photoshop blend-if ещё не моделируются полностью; Gradient/Pattern Fill renderer, multi-subpath boolean geometry, полная isolated-group/vector-mask parity и tiled/streaming pipeline ещё впереди. Content-Aware Fill уже выполняет реальное bounded inpainting и сохраняет native sample precision, но это пока детерминированный donor-propagation v1, а не полноценный PatchMatch/ML synthesis для больших текстурных удалений.
 
 Следующий imaging-этап: **Stage 17a — Isolated Groups / Vector Mask Composite Parity**: приблизить Photoshop group compositing для pass-through/isolated stacks, clipping chains и mask interactions, добавить real PSD/PSB group fixtures и pixel-reference regressions; после этого — editable Gradient/Pattern Fill renderer и tiled/worker/GPU pipeline.
+
+## Контакты для связи с разработчиком
+
+- [zeter11@gmail.com](mailto:zeter11@gmail.com)
+- [https://t.me/zeter1](https://t.me/zeter1)
+- [https://www.linkedin.com/in/zeter/](https://www.linkedin.com/in/zeter/)
+- [https://www.facebook.com/zeter1](https://www.facebook.com/zeter1)
+- [https://vk.ru/zeter1](https://vk.ru/zeter1)
+- [https://www.instagram.com/zeter1992/](https://www.instagram.com/zeter1992/)
+- [https://tenchat.ru/zeter](https://tenchat.ru/zeter)
+- [https://x.com/zeter1](https://x.com/zeter1)
+- [https://www.threads.com/@zeter1992](https://www.threads.com/@zeter1992)
+- [https://ok.ru/zeter1](https://ok.ru/zeter1)
+- [https://t.me/zeterchat](https://t.me/zeterchat) — Telegram-группа: обо мне, проекты и чат

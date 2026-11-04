@@ -11,6 +11,7 @@ export function createDocumentSessionController({
   tabs = null,
   viewport = null,
   blockPendingDocumentEdit = () => false,
+  cancelPendingContentAwareFill = () => false,
   updateAll = () => {},
   fitToView = () => {},
   setStatus = () => {},
@@ -77,7 +78,7 @@ export function createDocumentSessionController({
     dirtyState = false,
     smartObjectLink = null,
   } = {}) {
-    const sessionHistory = new HistoryStack(80);
+    const sessionHistory = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true });
     sessionHistory.reset(label, snapshotDocument(documentValue));
     return {
       id: createSessionId(),
@@ -148,10 +149,12 @@ export function createDocumentSessionController({
       if (focusViewport) requestAnimationFrame(() => viewport?.focus());
       return;
     }
-    if (blockPendingDocumentEdit()) return;
-    syncCurrentSession();
     const session = sessions().find(item => item.id === id);
     if (!session) return;
+    // Activate only: other tab commands retain the ordinary pending-edit guard.
+    cancelPendingContentAwareFill();
+    if (blockPendingDocumentEdit()) return;
+    syncCurrentSession();
     setActiveSessionId(session.id);
     loadSession(session);
     updateAll();
@@ -179,7 +182,6 @@ export function createDocumentSessionController({
   }
 
   function closeDocumentTab(id) {
-    if (blockPendingDocumentEdit()) return;
     const allSessions = sessions();
     const index = allSessions.findIndex(session => session.id === id);
     if (index === -1) return;
@@ -193,6 +195,15 @@ export function createDocumentSessionController({
       return;
     }
     if (session.dirty && !window.confirm(`Во вкладке «${session.doc?.name || 'Без имени'}» есть несохранённые изменения. Закрыть её?`)) return;
+    // A successful close can change the active document just like tab activation.
+    // Revoke a pending native Content-Aware Fill BEFORE dropping its owner.
+    // Rejected confirmations and closes that keep the active tab must not cancel it.
+    const remaining = allSessions.filter(item => item.id !== session.id);
+    const nextSession = remaining[Math.max(0, Math.min(index, remaining.length - 1))];
+    if (!nextSession || nextSession.id !== activeId()) cancelPendingContentAwareFill();
+    // A cancellable Fill releases its persistence lease above. Non-cancellable
+    // paint/gesture transactions must still prevent the close.
+    if (blockPendingDocumentEdit()) return;
     allSessions.splice(index, 1);
     if (!allSessions.length) allSessions.push(buildSession(createDocument({ name:'Без имени' })));
     const nextIndex = Math.max(0, Math.min(index, allSessions.length - 1));
