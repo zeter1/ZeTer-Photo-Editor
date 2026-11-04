@@ -1,3 +1,8 @@
+### 2026-11-04 — merged real native Chrome Worker bit oracle (003X/6c-9 remains open)
+
+- PR [#373](https://github.com/zeter1/ZeTer-Photo-Editor/pull/373) final head e05763e: [PR core CI #41792886405](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41792886405) SUCCESS 12/12; squash main [7e37b2f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e37b2feb67ff8de66816f8af5a39a2f5d416122), [exact-main CI #41795185119](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41795185119) SUCCESS 12/12 on first attempt. Separate real-photo workflow not triggered by file filters; no success claim. No production behavior or format changes.
+- Full P1 003X/6c-9 remains IN PROGRESS: real UI same-action baseline/pooled Worker cancel/stale/close + IndexedDB, defensible OS memory peak and Worker PID remain to prove; Adobe-authored PSB32 provenance separately blocked. See task/NEXT.md.
+
 ### 2026-11-04 — strengthen genuine Chrome native Worker byte oracle (003X/6c-9 IN PROGRESS)
 
 - Extend the existing opt-in `file://` Worker profile: reject output if any non-selected tile URL changes, or if any native byte outside the selected pixel's color samples changes; alpha, Float32 signaling-NaN and signed-zero payloads remain byte exact. Confirm a color byte changed; verify returned tile geometry and count.
