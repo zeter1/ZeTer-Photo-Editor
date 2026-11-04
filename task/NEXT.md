@@ -2,10 +2,19 @@
 
 > **CURRENT TASK:** [003X/6c-9 — real large History pooling memory/latency profile](003x6c9-history-sharing-profile.md)  
 > **PRIORITY:** P1 · **STATUS:** IN PROGRESS · **DEPENDENCY:** 003X/6c-8 DONE  
-> **BASELINE:** main [`7e37b2f`](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e37b2feb67ff8de66816f8af5a39a2f5d416122) (2026-11-04; повторно сверить перед следующей записью)  
-> **RECENT DOCUMENTATION PR:** [#374](https://github.com/zeter1/ZeTer-Photo-Editor/pull/374), branch `docs/003x6c9-pr373-acceptance-20261104` (проверяй статус GitHub; после merge это запись истории, а не активная функциональная задача)  
+> **BASE MAIN SHA:** `8dee7d366601fa2531e89545a4fd76ce0a8d1d23` ([exact-main core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41801227578))
+> **ACTIVE PR:** [#375](https://github.com/zeter1/ZeTer-Photo-Editor/pull/375), OPEN. Before local new commit last verified remote head `061e7679641e9fa30ad20f77ffebc322f568cf21`: [core CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41813104144) SUCCESS 12/12 (attempt 2); [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41813104296) SUCCESS. These checks do **not** verify the newer local PNG exception fixes; check current remote SHA and new-head CI after publication.
+> **LAST VERIFIED:** 2026-11-04 Windows: PNG rejection/replaced-canvas RED 2/7→GREEN 11/11; delayed PNG reject after tab switch RED 7/8→GREEN 8/8, combined RGB16/CMYKA32 Float32 + RGBA8 12/12 PASS. `npm run check`: 1595 tests / 1580 PASS / 10 SKIP / 5 known Linux-only `/proc`/cgroup FAIL (overall FAIL). Real Chrome `file://` smoke PASS (exit 0); no injected browser PNG-failure scenario. Generated build `ad655b3dffd19fca`.
+> **REMAINING ACCEPTANCE:** publish both PNG rejection identity guards (including stale tab-switch rejection) to existing PR #375; verify exact final-head CI, permitted review/merge and exact-main CI. Full same-action two-tab generic/pooled native UI, Worker cancel/stale/close, IndexedDB and bounded memory evidence still open.
+> **NEXT IMPLEMENTATION ACTION:** publish the tested RGBA8 late-error canvas-ownership patch to existing PR #375 through authorized GitHub workflow; verify Linux core 12 jobs + independent real-photo on final head, resolve reviews/merge subject to gates, verify exact-main. Next implement bounded two-tab 1025×1025 native History generic/pooled A/B with Undo/Redo, IndexedDB v2 and live UI Worker cancel/stale/close; stop once bit-level functional oracle and measurement limits are documented, then advance Stage 2 functionality.
+> **BLOCKERS:** Adobe-authored PSB32 provenance independently BLOCKED; unavailable Worker PID/true RSS peak must remain UNKNOWN, not an infinite profiling loop
+> **RECENT DOCUMENTATION PR:** [#374](https://github.com/zeter1/ZeTer-Photo-Editor/pull/374) MERGED `8dee7d3`, documentation only.
 > **LAST ACCEPTED INCREMENT:** [#373](https://github.com/zeter1/ZeTer-Photo-Editor/pull/373) `e05763e`, merged `7e37b2f`; PR core [#41792886405](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41792886405) **SUCCESS 12/12**; exact-main [#41795185119](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41795185119) **SUCCESS 12/12 attempt 1**. Separate real-photo workflow **NOT RUN** (path filters).  
 > **LAST SCOPE:** real Chrome `file://` native RGB16/CMYKA32 Float32 Worker byte oracle + bounded History A/B. Production/bundle/schema не менялись. **Parent Stage 6 IN PROGRESS.**
+
+## Активный кодовый инкремент 2026-11-04
+
+Обнаружен RED дефект в нетайловой native 16/32-bit Content-Aware Fill: отменённый fill мог опубликовать поздний результат после асинхронного preview; синхронная обработка могла сохранить результат после отмены во время сканирования. На ветке `feat/003x6c9-flat-native-inpaint-cancel-20261104` внедрён cooperative native kernel и continuation guard на preview/persist, без смены формата `.zpe`. RED 2/4 → GREEN 4/4; связанные тесты 25/25; Windows `npm run check` 1572 PASS/10 SKIP/5 известных Linux-only `/proc`/cgroup FAIL. **GitHub PR/CI/merge оцениваются отдельно; в main это не считать до фактического merge.** Полные реальные UI pooled-vs-generic A/B остаются открыты.
 
 ## Следующее конкретное действие — продолжить 003X/6c-9
 

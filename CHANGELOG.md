@@ -1,3 +1,29 @@
+### 2026-11-04 — stale PNG rejection after tab switch cleans up exact RGBA8 canvas
+
+- Fix a second asynchronous failure path: after switching tabs, `persistPaintLayer` can reject while Content-Aware Fill is stale, skipping the exception cleanup and retaining cancelled pixels in the raster cache. Release only the failed operation's canvas before the stale return, never the new owner's canvas; no Undo/dataUrl publication and no format changes.
+- Dedicated delayed-error/tab-switch regression RED 7/8 → GREEN 8/8; native RGB16/CMYKA32 Float32 + RGBA8 focused 12/12 PASS. Windows check 1580 PASS / 10 SKIP / 5 known Linux-only /proc/cgroup FAIL (overall FAIL); Chrome `file://` smoke exit 0. Generated build `ad655b3dffd19fca`. New-head Linux PR CI and exact-main remain separate.
+
+### 2026-11-04 — owner-safe Content-Aware Fill raster cache cleanup after PNG failure
+
+- On rejected RGBA8 PNG persistence, release only the canvas owned by the failed fill instead of clearing a newer cached canvas from another edit; keep layer URL and Undo unchanged and allow the next edit.
+- Two RED→GREEN regressions; native+RGBA8 focused 11/11 PASS. Windows full `npm run check` 1579 PASS, 10 SKIP, 5 known Linux-only /proc/cgroup FAIL (overall FAIL); Chrome `file://` smoke exit 0. Generated bundle rebuilt, format unchanged. Existing #375 core/real-photo SUCCESS applies to prior remote head `061e767`, not this local candidate.
+### 2026-11-04 — discard cancelled RGBA8 inpaint canvas without evicting newer raster edits
+
+- Fix retained brushCanvas after Escape while async PNG encoding is pending: discard only the exact owner/layer/canvas, so the next paint/fill cannot reuse a cancelled preview and a late old completion cannot evict the new canvas.
+- RED 1/3 → GREEN 9/9 related cancellation tests (including real raster cache identity); Windows `npm run check`: 1577 PASS / 10 SKIP / 5 Linux-only FAIL; Chrome `file://` smoke PASS (exit 0); `git diff --check` PASS. PR-head CI and merge need new SHA verification.
+
+### 2026-11-04 — RGBA8 Content-Aware Fill cancellation and late canvas publication guard
+
+- Extend PR #375 cancellation semantics to ordinary 8-bit RGBA Canvas layers. Yield during the deterministic inpaint kernel, retain a private ImageData until still-current, check exact document/layer/source and forward the existing continuation guard through async PNG persistence.
+- RED 2/3 → GREEN 3/3 for cancellation during scan and delayed save; combined high-depth/8-bit regression 7/7 PASS. Windows `npm run check` 1590 total / 1575 PASS / 10 SKIP / 5 pre-existing Linux-only cgroup FAIL; real Chrome `file://` smoke exit 0. No format or pixel-output change; prior-head PR CI SUCCESS applies only to `7b771d3`.
+- Stage 6/10 and 003X/6c-9 remain IN PROGRESS; real pooled-vs-generic UI A/B and new-head PR/exact-main gates are separate.
+
+### 2026-11-04 — candidate: cancellable contiguous RGB16/CMYKA32 Content-Aware Fill
+
+- Replaced synchronous flat native 16/32-bit Content-Aware computation with cooperative kernel checkpoints on a private buffer; cancel, tab switch, layer/source replacement invalidate the old result before publication. Forward the same owner guard through asynchronous high-depth preview serialization to prevent late native source mutation and phantom Undo.
+- RED regression 2/4 before patch → GREEN 4/4, focused related 25/25 PASS; successful RGB16/CMYKA32 Float32 uses byte-exact synchronous oracle including sNaN, -0 and alpha. Local Windows npm check 1572 PASS/10 SKIP/5 preexisting Linux-only /proc/cgroup FAIL. Browser regression, Linux PR-head CI and merge must be verified separately. No .zpe schema changes.
+- Parent 003X/6c-9 remains IN PROGRESS for same-action full UI baseline/pooled A/B and bounded Worker/IDB acceptance.
+
 ### 2026-11-04 — merged real native Chrome Worker bit oracle (003X/6c-9 remains open)
 
 - PR [#373](https://github.com/zeter1/ZeTer-Photo-Editor/pull/373) final head e05763e: [PR core CI #41792886405](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41792886405) SUCCESS 12/12; squash main [7e37b2f](https://github.com/zeter1/ZeTer-Photo-Editor/commit/7e37b2feb67ff8de66816f8af5a39a2f5d416122), [exact-main CI #41795185119](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41795185119) SUCCESS 12/12 on first attempt. Separate real-photo workflow not triggered by file filters; no success claim. No production behavior or format changes.

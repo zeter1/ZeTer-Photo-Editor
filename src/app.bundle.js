@@ -6778,7 +6778,7 @@ function inpaintPixelBuffer(buffer, options = {}) {
 }
 
 // Private ROI pixels are never published when the cooperative kernel cancels.
-function inpaintPixelBufferCooperative(buffer, options, controls) {
+function inpaintPixelBufferCooperative(buffer, options = {}, controls = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
   return inpaintSelectedSamplesCooperative(buffer.data, buffer.width, buffer.height, buffer.channels, {
     ...options,
@@ -17862,6 +17862,14 @@ function createRasterEditController({
     brushLayer = null;
   }
 
+  // Cancellation can finish after a newer edit has acquired another canvas.
+  // Only discard the cache still owned by the cancelled operation.
+  function discardRasterBuffer(owner, layer, canvas) {
+    if (!canvas || brushCanvas !== canvas || brushOwner !== owner || brushLayer !== layer) return false;
+    clearBrushBuffer();
+    return true;
+  }
+
   function isCurrentRasterTarget(owner, layer) {
     return Boolean(
       owner &&
@@ -18489,6 +18497,7 @@ function createRasterEditController({
     get highDepthPaintWorkingSet() { return highDepthPaintWorkingSet; },
     get highDepthPaintLayerId() { return highDepthPaintLayerId; },
     clearBrushBuffer,
+    discardRasterBuffer,
     clearHighDepthPaintState,
     reset,
     cancelTiledInpaint: () => tiledInpaintWorker?.cancel?.(),
@@ -18586,6 +18595,7 @@ function createRasterCommandController({
     // Revoke publication before terminating the CPU-bound Worker. A stale
     // finally must never unlock a newer document's persistence lease.
     state.endPersist(pending.lease);
+    pending.releaseRaster?.();
     rasterEdit.cancelTiledInpaint?.();
     return true;
   }
@@ -18863,6 +18873,7 @@ function createRasterCommandController({
     pendingContentAwareFill = pending;
     const isInpaintCurrent = () => !pending.cancelled &&
       pendingContentAwareFill === pending && state.getDocument() === doc;
+    let releaseRasterOnFailure = null;
 
     try {
       status('Контент-заливка: анализ окружения…');
@@ -18897,13 +18908,26 @@ function createRasterCommandController({
           status('Контент-заливка: native high-depth buffer недоступен; precision сохранён без raster fallback');
           return false;
         }
-        const filled = inpaintPixelBuffer(buffer, { isAllowed });
+        // The contiguous high-depth path previously blocked the UI and could
+        // publish a late preview after Escape/tab cancellation. Work only on a
+        // privately decoded native plane and yield between kernel checkpoints.
+        const sourceForFill = layer.highDepthSource;
+        const stillOwnsSource = () => isInpaintCurrent() &&
+          layer.highDepthSource === sourceForFill &&
+          doc.layers.includes(layer) && target.selected?.() === layer &&
+          target.isEditableRasterLayer(layer);
+        const filled = await inpaintPixelBufferCooperative(buffer, { isAllowed }, {
+          isCancelled:() => !stillOwnsSource(),
+        });
+        if (!stillOwnsSource() || filled === null) return false;
         if (!filled) {
           resetNativeState();
           status('Контент-заливка: нужны исходные пиксели за пределами выделения');
           return false;
         }
-        const published = await rasterEdit.persistHighDepthMutation(doc, layer, buffer);
+        const published = await rasterEdit.persistHighDepthMutation(doc, layer, buffer, {
+          isContinuationCurrent:stillOwnsSource,
+        });
         if (!isInpaintCurrent()) return false;
         if (!published) {
           resetNativeState();
@@ -18916,34 +18940,70 @@ function createRasterCommandController({
       }
 
       const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
-      if (!isInpaintCurrent()) return false;
+      // A cancelled image decode may finish after a newer raster action started.
+      // Discard only the canvas from this operation, never the newer one's.
+      const releaseRaster = () => prepared && rasterEdit.discardRasterBuffer?.(doc, layer, prepared.canvas);
+      releaseRasterOnFailure = releaseRaster;
+      if (!isInpaintCurrent()) {
+        releaseRaster();
+        return false;
+      }
       if (!prepared) return false;
+      pending.releaseRaster = releaseRaster;
       if (state.getDocument() !== doc || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         status('Контент-заливка отменена: документ или слой изменился');
         return false;
       }
 
+      // Match native/high-depth cancellation semantics for ordinary RGBA8.
+      // The ImageData is a private working copy until the operation is current.
+      const originalRasterSource = layer.dataUrl;
+      const stillOwnsRaster = () => isInpaintCurrent() &&
+        layer.dataUrl === originalRasterSource &&
+        !layer.highDepthSource && doc.layers.includes(layer) &&
+        target.selected?.() === layer && target.isEditableRasterLayer(layer);
       const imageData = prepared.ctx.getImageData(0, 0, prepared.canvas.width, prepared.canvas.height);
-      const filled = inpaintSelectedSamples(imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed });
+      const filled = await inpaintSelectedSamplesCooperative(
+        imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed },
+        { isCancelled: () => !stillOwnsRaster() },
+      );
+      if (!stillOwnsRaster() || filled === null) {
+        releaseRaster();
+        return false;
+      }
       if (!filled) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         status('Контент-заливка: нужны исходные пиксели за пределами выделения');
         return false;
       }
       prepared.ctx.putImageData(imageData, 0, 0);
-      const published = await rasterEdit.persistPaintLayer(doc, layer);
-      if (!isInpaintCurrent()) return false;
+      const published = await rasterEdit.persistPaintLayer(doc, layer, {
+        isContinuationCurrent: stillOwnsRaster,
+      });
+      // A successful publication intentionally replaces layer.dataUrl.
+      if (!isInpaintCurrent()) {
+        releaseRaster();
+        return false;
+      }
       if (!published) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         return false;
       }
       ui?.commit?.(historyLabel);
       status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
       return true;
     } catch (error) {
+      // A rejected async PNG encode may arrive after tab replacement without
+      // an explicit Escape. Discard only this operation's canvas even if stale;
+      // never reset the currently selected document's newer raster cache.
+      releaseRasterOnFailure?.();
       if (!isInpaintCurrent()) return false;
-      resetNativeState();
+      if (releaseRasterOnFailure) {
+        state.resetPaintState?.();
+      } else {
+        resetNativeState();
+      }
       ui?.render?.();
       if (error instanceof RangeError && String(error.message).startsWith('Контент-заливка:')) {
         status(error.message);
