@@ -1,19 +1,19 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 2 / CAP-MASK-VD — density/feather векторной маски.
-> **PRIORITY:** P1 · **STATUS:** IN PROGRESS — реализация и локальный Chromium приняты; PR-head CI/merge ещё предстоят.
-> **BASE MAIN SHA:** `9fa6a7d90477bc4c36534daeaec3a7e71153c6ec` (после CAP-BEZ #125).
-> **ACTIVE PR:** [#378](https://github.com/zeter1/ZeTer-Photo-Editor/pull/378) OPEN, ветка `feat/vector-mask-density-feather-20261107`; PR-head core [CI #42353719132](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42353719132) и independent [real-photo #42353719134](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42353719134) запущены для первого head `5aee288` (дальнейший task-only commit требует новых exact-head runs).
-> **LAST VERIFIED (2026-11-07):** 25/25 focused Windows unit PASS; `npm run build`, `git diff --check` PASS; Chromium `file://` `npm run test:browser:vector-mask` PASS (alpha density/feather, UI Layer menu, History, Undo/Redo, real Ctrl+S .zpe Blob/reopen); полный `npm run test:browser` также PASS на Windows Chrome. Полный Windows `npm run check`: 1609 tests, 1594 PASS, 10 SKIP, **5 FAIL** (известные Linux-only /proc/cgroup fixtures). Остальные тесты, включая исправленный контекст меню и версию, PASS. Remote PR-head CI NOT RUN, candidate exact-main CI NOT RUN.
-> **REMAINING ACCEPTANCE:** Linux PR-head `npm run check`, browser file://, generated parity; independent real-photo CI, review/merge по gates, exact-merged-main CI. PSD/PSB editable vector-mask density/feather **не** входит в bounded increment.
-> **NEXT IMPLEMENTATION ACTION:** пройти head CI и интеграцию CAP-MASK-VD; затем CAP-ADJ editable Levels/Curves end-to-end, без профилирования ради профилирования.
-> **BLOCKERS:** внешний Photoshop-authored PSB32 provenance [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED, не блокирует этот срез; Stage 6 native Worker RSS UNKNOWN.
+> **CURRENT TASK/ID:** Stage 2 / CAP-ADJ-CREATE — типизированные корректирующие слои, интерактивные Curves и Hue/Saturation Colorize.
+> **PRIORITY:** P1 · **STATUS:** IN PROGRESS — реальный код и локальные acceptance PASS, PR-head CI / merge текущего среза предстоят.
+> **BASE MAIN SHA:** `8522b22f8ad87d88257063b202e42c1cae9dca86` — [PR #378 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/378).
+> **ACTIVE PR:** [#379](https://github.com/zeter1/ZeTer-Photo-Editor/pull/379) OPEN, ветка `feat/adjustment-layers-editable-20261107`. Сверять фактический latest head при проверке CI; doc-only commits изменяют SHA.
+> **LAST VERIFIED (2026-11-07):** CAP-MASK-VD #378 head [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42353796878), [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42353796954), merge `8522b22`, exact-main [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42363763495), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42363763521). CAP-ADJ Git-blob-for-blob transferred from local worktree: `npm run build`, **48/48 focused unit PASS**, real Chrome `file://` `npm run test:browser:adjustment-create` PASS (Levels / interactive Curves / Colorize visible RGB, History, Undo/Redo, Ctrl+S `.zpe` Blob/reopen), `git diff --check` PASS. Full Windows `npm run check` previously FAIL on 5 Linux-only `/proc/cgroup` cases; not full Windows green. PR #379 exact-head Linux CI pending until verified.
+> **REMAINING ACCEPTANCE:** latest-head PR #379 core (full Linux npm check, bundle parity, real file:// browser), independent real-photo CI, review/merge, exact-merged-main CI. CAP-ADJ parent remains IN PROGRESS: masks/groups/clipping and Photoshop-authored editable PSD/PSB round-trip unverified.
+> **NEXT IMPLEMENTATION ACTION:** принять #379 только по latest-head gates; затем CAP-ADJ-STACK: Levels/Curves compositing в вложенных группах, clipping и масках с негативными тестами, Undo/Redo, native `.zpe`, PSD editable round-trip для подтверждённого формата. Не заменять редактируемые модели flatten.
+> **BLOCKERS:** Photoshop-authored PSB32 provenance [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED отдельно; Windows `/proc/cgroup` fixtures заведомо Linux-only, CI проверяет их на Linux.
 
 ## Краткая очередь
 
-1. **CAP-MASK-VD:** довести текущий PR до head CI/review/exact-main verification; bounded DONE лишь после gates.
-2. **CAP-ADJ:** Levels/Curves edit, compositing, Undo/Redo, .zpe и PSD editable round-trip по подтверждённым типам.
-3. **CAP-BEZ:** Vector Mask / Saved Paths direct UI E2E и Photoshop-authored PSD/PSB paths parity; bounded smooth anchors #125 MERGED.
-4. **Stage 6 / 003X/6c-9:** native Worker stale/close/edit parity; Adobe PSB32 provenance отдельно BLOCKED.
+1. **CAP-ADJ-CREATE / Curves / Colorize:** [PR #379](https://github.com/zeter1/ZeTer-Photo-Editor/pull/379) — verify exact head + independent CI, review/merge, exact-main CI; код и Chrome приемка есть.
+2. **CAP-ADJ-STACK:** клиппинг, маски, вложенные группы, editable PSD/PSB, Levels/Curves точность — следующий пользовательский вертикальный срез.
+3. **CAP-MASK/CAP-BEZ:** vector mask PSD controls и Photoshop-authored paths; CAP-MASK-VD bounded DONE через #378, родители IN PROGRESS.
+4. **Stage 6 / 003X/6c-9:** Worker stale/close/edit parity и native bit oracle; Adobe PSB32 provenance отдельно BLOCKED.
 
-[Карта](README.md) · [Матрица](CAPABILITY_MATRIX.md) · [CAP-MASK-VD](002-vector-mask-density-feather.md) · [CAP-BEZ](002-bezier-smooth-anchor.md) · [Stage 6](003x6c9-history-sharing-profile.md) · [Архив](archive/2026-11-04-NEXT-legacy.md).
+[Карта](README.md) · [Матрица](CAPABILITY_MATRIX.md) · [CAP-ADJ](002-adjustment-layer-creation.md) · [CAP-MASK-VD](002-vector-mask-density-feather.md) · [Архив](archive/2026-11-04-NEXT-legacy.md).

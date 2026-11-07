@@ -1,8 +1,23 @@
+### 2026-11-07 — CAP-ADJ-CURVES: интерактивные точки кривой (локальный кандидат, не релиз)
+
+- В инспекторе Curves для Master и RGB появились SVG-графики: клик добавляет точку, перетаскивание меняет её, Alt+клик удаляет внутреннюю; числовой формат сохранён. RGB-графики свёрнуты по умолчанию. Изменения используют существующую редактируемую adjustment model и одну History-запись на законченный жест, без изменения исходных слоёв.
+- В настоящем Chromium file:// автоматизированы CDP pointer click+drag, проверка изменений реальных RGB пикселей, Undo/Redo, Ctrl+S .zpe Blob и reopen. Local 47/47 combined focused tests и оба адресных Chrome smoke PASS на итоговой сборке; полный Windows Chrome `npm run test:browser` ранее PASS (108.43s), до последнего точечного исправления endpoint X. **Не main/PR, без remote CI.**
+
+### 2026-11-07 — CAP-ADJ Colorize: управление тонированием Hue/Saturation (локальный кандидат)
+
+- Инспектор получил действующий Colorize switch: нормализованная модель Hue/Saturation, реальная цветовая коррекция пикселей, одно изменение History на commit, no-op/stale/lock guards. Добавлены unit RED→GREEN и живой Chrome file:// с пиксельным цветовым oracle, Undo/Redo, Ctrl+S Blob и reopen `.zpe`.
+- Combined focused 51/51 PASS, адресные Chrome adjustment/vector-mask smoke и полный настоящий Chrome `file://` smoke PASS (111.46s). Изменение только в локальной `feat/adjustment-layer-after-vector-mask-20261107`, не опубликовано, нет PR-head CI для этого кода. Текущий открытый PR #378 не менялся. PSD/PSB editable compatibility не заявлена.
+
 ### 2026-11-07 — CAP-MASK-VD: неразрушающая плотность и растушёвка векторной маски (1.46.5)
 
 - Векторная маска получила сохраняемые density [0..1] и feather [0..250 px] с совместимыми defaults в старых .zpe. Оба compositor-пути используют тот же alpha helper, что и растровые маски, без растрирования геометрии; замена контура сохраняет controls.
 - В меню «Слой» и контекстном меню слоя добавлен диалог параметров. Commit — одна запись History; no-op не добавляет запись; отложенный submit не применяет данные к закрытому/заменённому/заблокированному объекту. Сводка масок показывает значения.
 - Фокусные unit: 25/25 PASS, реальный Chromium file://: pixel alpha (density/feather), меню, History, Undo/Redo, реальный Ctrl+S Blob и reopen .zpe PASS. PSD/PSB editable metadata и Photoshop-authored compatibility пока НЕ приняты; full Windows check может падать на Linux-only /proc/cgroup tests. PR-head CI и exact-main CI требуют отдельного подтверждения.
+
+### 2026-11-07 — CAP-ADJ-CREATE: выбор редактируемой корректировки при создании (локальный кандидат, не релиз)
+
+- Вместо пустой модели `adjustment:null` меню «Новый корректирующий слой» теперь предлагает восемь действительных видов обработки. Новый слой сразу имеет редактируемую модель, корректный исходный документ, одну запись History, сохраняется в `.zpe` и не изменяет растровый источник.
+- Локально 26/26 focused Node PASS, real Chrome `file://` Levels Gamma pixel composite/Undo/Redo/Ctrl+S `.zpe` Blob/reopen PASS. CI-шаг подготовлен, но **не запускался удалённо**, push/PR/merge **не выполнялись**. Версия пока не повышалась; требуется интеграция после открытого PR #378. Журнал: [task/002-adjustment-layer-creation.md](task/002-adjustment-layer-creation.md).
 
 ### 2026-11-07 — Chromium file:// E2E Bézier Alt+Shift, Undo и .zpe reopen (существующий PR #125)
 

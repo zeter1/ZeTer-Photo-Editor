@@ -96,6 +96,26 @@ test('Curves commands canonicalize points, suppress semantic no-op and reject ma
   assert.deepEqual(h.commits, ['Изменить точки Photoshop Curves']);
 });
 
+test('Hue/Saturation Colorize is a typed persisted command with no-op and stale/locked safety', () => {
+  const doc=createDocument();
+  const layer=addAdjustment(doc,{kind:'hue-saturation',hue:120,saturation:100,lightness:0,colorize:false});
+  const h=createHarness(doc);
+  assert.equal(h.controller.setColorize(doc,layer.id,true),ADJUSTMENT_COMMAND_RESULT.COMMITTED);
+  assert.equal(layer.adjustment.colorize,true);
+  assert.deepEqual(h.commits,['Изменить режим тонирования Hue/Saturation']);
+  assert.equal(h.controller.setColorize(doc,layer.id,true),ADJUSTMENT_COMMAND_RESULT.NOOP);
+  assert.equal(h.controller.setColorize(doc,layer.id,'false'),ADJUSTMENT_COMMAND_RESULT.INVALID);
+  const snapshot=structuredClone(layer.adjustment);
+  h.setDocument(createDocument());
+  assert.equal(h.controller.setColorize(doc,layer.id,false),ADJUSTMENT_COMMAND_RESULT.REJECTED);
+  assert.deepEqual(layer.adjustment,snapshot);
+  h.setDocument(doc);
+  layer.locked=true;
+  assert.equal(h.controller.setColorize(doc,layer.id,false),ADJUSTMENT_COMMAND_RESULT.REJECTED);
+  assert.deepEqual(h.commits,['Изменить режим тонирования Hue/Saturation']);
+  assert.deepEqual(layer.adjustment,snapshot);
+});
+
 test('clipping command commits once and suppresses same-value history', () => {
   const doc = createDocument();
   const layer = addAdjustment(doc, { kind: 'invert' }, { clipping: false });
@@ -166,6 +186,8 @@ test('main binds Adjustment controls to originating owner plus stable ID and con
   assert.match(main, /function bindAdjustmentControls\(root,owner,layerId\)/);
   assert.match(main, /adjustmentLayerCommandController\.updateProperty\(owner,layerId/);
   assert.match(main, /adjustmentLayerCommandController\.updateCurveChannel\(owner,layerId/);
+  assert.match(main, /adjustmentLayerCommandController\.setColorize\(owner,layerId/);
+  assert.match(main, /data-adjustment-colorize/);
   assert.match(main, /adjustmentLayerCommandController\.setClipping\(owner,layerId/);
   assert.doesNotMatch(main, /function updateAdjustmentProperty\(/);
   assert.doesNotMatch(main, /function updateAdjustmentCurveChannel\(/);
