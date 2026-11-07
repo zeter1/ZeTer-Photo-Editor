@@ -631,6 +631,14 @@ async function runSmoke() {
       return;
     }
 
+    // CAP-ADJ: genuine file:// typed Adjustment creation and editable Levels.
+    if (process.env.ZPE_ADJUSTMENT_CREATE_BROWSER_ONLY === '1') {
+      const { verifyBrowserAdjustmentCreation } = await import('./browser-adjustment-create-check.mjs');
+      await verifyBrowserAdjustmentCreation({ client, evaluate, waitFor, assert });
+      assertNoBrowserErrors(errors, stderrState);
+      return;
+    }
+
     // CAP-BEZ: genuine file:// pointer input, editable Shape, History and Undo/Redo.
     // The focused mode avoids rerunning unrelated long-running photo/Worker probes.
     if (process.env.ZPE_PEN_SMOOTH_BROWSER_ONLY === '1') {

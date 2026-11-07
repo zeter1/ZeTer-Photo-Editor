@@ -14302,6 +14302,29 @@ const ADJUSTMENT_COMMAND_RESULT = Object.freeze({
   REJECTED: 'rejected',
 });
 
+// Only these kinds can be created by the editor; native PSD-only metadata is not fabricated.
+const NEW_ADJUSTMENT_KINDS = Object.freeze([
+  ['brightness-contrast', 'Яркость / контраст'],
+  ['levels', 'Уровни (Levels)'],
+  ['curves', 'Кривые (Curves)'],
+  ['exposure', 'Экспозиция'],
+  ['hue-saturation', 'Цветовой тон / насыщенность'],
+  ['invert', 'Инверсия'],
+  ['posterize', 'Постеризация'],
+  ['threshold', 'Порог'],
+]);
+
+const ADJUSTMENT_INITIAL_MODELS = Object.freeze({
+  'brightness-contrast': { kind:'brightness-contrast', brightness:0, contrast:0 },
+  levels: { kind:'levels', master:{ inputBlack:0, inputWhite:255, gamma:1, outputBlack:0, outputWhite:255 }, channels:[] },
+  curves: { kind:'curves', channels:[{ id:0, points:[{ input:0, output:0 }, { input:255, output:255 }] }] },
+  exposure: { kind:'exposure', exposure:0, offset:0, gamma:1 },
+  'hue-saturation': { kind:'hue-saturation', hue:0, saturation:0, lightness:0, colorize:false },
+  invert: { kind:'invert' },
+  posterize: { kind:'posterize', levels:4 },
+  threshold: { kind:'threshold', level:128 },
+});
+
 const ADJUSTMENT_LEVEL_KEYS = new Set([
   'inputBlack', 'inputWhite', 'gamma', 'outputBlack', 'outputWhite',
 ]);
@@ -14339,6 +14362,26 @@ function createAdjustmentLayerCommandController({ state, transaction } = {}) {
     if (!activeDocument(owner)) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
     transaction.commit(label);
     return ADJUSTMENT_COMMAND_RESULT.COMMITTED;
+  }
+
+  function createLayer(owner, kind) {
+    if (!activeDocument(owner) || !Array.isArray(owner.layers) || owner.layers.length >= 500) {
+      return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    }
+    const preset = Object.hasOwn(ADJUSTMENT_INITIAL_MODELS, kind)
+      ? ADJUSTMENT_INITIAL_MODELS[kind] : null;
+    if (!preset) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const adjustment = sanitizeAdjustmentModel(preset);
+    if (!adjustment) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const label = NEW_ADJUSTMENT_KINDS.find(([id]) => id === kind)?.[1] || kind;
+    const layer = createAdjustmentLayer({
+      name: label,
+      width: owner.width,
+      height: owner.height,
+      adjustment,
+    });
+    addLayer(owner, layer);
+    return publish(owner, `Создать корректирующий слой: ${label}`);
   }
 
   function parseCurvePointsInput(raw) {
@@ -14421,6 +14464,20 @@ function createAdjustmentLayerCommandController({ state, transaction } = {}) {
     return publish(owner, 'Изменить точки Photoshop Curves');
   }
 
+  // Hue/Saturation's colorization flag changes the actual color transform.
+  // Persist a normalized model and one history entry, never a view-only checkbox.
+  function setColorize(owner, layerId, enabled) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    const current = sanitizeAdjustmentModel(layer.adjustment);
+    if (current?.kind !== 'hue-saturation') return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    if (typeof enabled !== 'boolean') return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const next = sanitizeAdjustmentModel({ ...current, colorize: enabled });
+    if (adjustmentModelEqual(layer.adjustment, next)) return ADJUSTMENT_COMMAND_RESULT.NOOP;
+    layer.adjustment = next;
+    return publish(owner, 'Изменить режим тонирования Hue/Saturation');
+  }
+
   function setClipping(owner, layerId, checked) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
@@ -14430,7 +14487,7 @@ function createAdjustmentLayerCommandController({ state, transaction } = {}) {
     return publish(owner, 'Изменить clipping adjustment layer');
   }
 
-  return { updateProperty, updateCurveChannel, setClipping };
+  return { createLayer, updateProperty, updateCurveChannel, setColorize, setClipping };
 }
 
 // ---- src/layers/transform-command-controller.js ----
@@ -31380,7 +31437,18 @@ function curvePointsInputValue(points) {
 
 function adjustmentCurveField(label,id,points) {
   const value=points?.length?points:[{input:0,output:0},{input:255,output:255}];
-  return '<label>'+escapeHtml(label)+'</label><input type="text" value="'+escapeAttr(curvePointsInputValue(value))+'" data-adjustment-curve-channel="'+id+'" title="Формат: input:output, например 0:0, 128:160, 255:255">';
+  const color=['#e5e7eb','#f87171','#4ade80','#60a5fa'][id]||'#e5e7eb';
+  const curve=value.map(point=>point.input+','+(255-point.output)).join(' ');
+  const handles=value.map((point,index)=>
+    '<circle data-curve-handle="'+index+'" cx="'+point.input+'" cy="'+(255-point.output)+'" r="6" fill="'+color+'" stroke="#111827" stroke-width="2"/>'
+  ).join('');
+  return '<label>'+escapeHtml(label)+'</label>'+
+    '<input type="text" value="'+escapeAttr(curvePointsInputValue(value))+'" data-adjustment-curve-channel="'+id+'" title="Формат: input:output, например 0:0, 128:160, 255:255">'+
+    '<details '+(id===0?'open':'')+'><summary>График: добавить — клик, сдвинуть — перетащить, удалить — Alt+клик</summary>'+
+    '<svg data-adjustment-curve-graph="'+id+'" viewBox="0 0 255 255" width="200" height="200" role="img" aria-label="Кривая '+escapeAttr(label)+' — перетащите точку или нажмите для добавления" style="display:block;max-width:100%;background:#111827;border:1px solid #475569;touch-action:none;cursor:crosshair">'+
+    '<path d="M63.75 0V255 M127.5 0V255 M191.25 0V255 M0 63.75H255 M0 127.5H255 M0 191.25H255" stroke="#334155" stroke-width="1" fill="none"/>'+
+    '<path d="M0 255L255 0" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4" fill="none"/>'+
+    '<polyline data-curve-line points="'+curve+'" stroke="'+color+'" stroke-width="2" fill="none"/>'+handles+'</svg></details>';
 }
 
 function adjustmentPropertiesMarkup(layer) {
@@ -31391,7 +31459,8 @@ function adjustmentPropertiesMarkup(layer) {
   const clipping='<label>Clipping</label><label><input type="checkbox" data-adjustment-clipping '+(layer.clipping?'checked':'')+'> к alpha нижележащего base layer</label>';
   if(value.kind==='brightness-contrast')return adjustmentNumberField('Яркость','brightness',value.brightness,-150,150)+adjustmentNumberField('Контраст','contrast',value.contrast,-100,100)+clipping+nativeInfo;
   if(value.kind==='exposure')return adjustmentNumberField('Exposure','exposure',value.exposure,-20,20,'0.05')+adjustmentNumberField('Offset','offset',value.offset,-2,2,'0.005')+adjustmentNumberField('Gamma','gamma',value.gamma,.1,10,'0.01')+clipping+nativeInfo;
-  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+clipping+nativeInfo;
+  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,value.colorize?0:-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+
+    '<label>Тонирование</label><label><input type="checkbox" data-adjustment-colorize '+(value.colorize?'checked':'')+'> Colorize (Hue/Saturation)</label>'+clipping+nativeInfo;
   if(value.kind==='invert')return '<label>Инверсия</label><span>Параметров нет</span>'+clipping+nativeInfo;
   if(value.kind==='posterize')return adjustmentNumberField('Уровни','levels',value.levels,2,255)+clipping+nativeInfo;
   if(value.kind==='threshold')return adjustmentNumberField('Порог','level',value.level,1,255)+clipping+nativeInfo;
@@ -31422,7 +31491,105 @@ function handleAdjustmentCommandResult(result,invalidMessage='') {
   return false;
 }
 
+// Curves graph edits the same persisted points as the numeric field. One pointer
+// gesture publishes exactly one History step; text input remains the precise fallback.
+function bindAdjustmentCurveGraphs(root,owner,layerId) {
+  root?.querySelectorAll('[data-adjustment-curve-graph]').forEach(graph=>{
+    const channelId=graph.dataset.adjustmentCurveGraph;
+    const input=root.querySelector('[data-adjustment-curve-channel="'+channelId+'"]');
+    if(!input)return;
+    graph.addEventListener('pointerdown',event=>{
+      if(event.button!==0 || doc!==owner || owner.selectedLayerId!==layerId)return;
+      const layer=owner.layers.find(item=>item.id===layerId);
+      if(!layer||layer.type!=='adjustment'||layer.locked)return;
+      const originalModel=JSON.stringify(layer.adjustment);
+      const originalText=input.value;
+      const points=originalText.split(',').map(token=>{
+        const match=token.trim().match(/^([0-9]{1,3}):([0-9]{1,3})$/);
+        return match?{input:Number(match[1]),output:Number(match[2])}:null;
+      });
+      if(points.length<2||points.some(point=>!point))return;
+      const bounds=graph.getBoundingClientRect();
+      const position=ev=>({
+        input:Math.max(0,Math.min(255,Math.round((ev.clientX-bounds.left)/bounds.width*255))),
+        output:Math.max(0,Math.min(255,Math.round((1-(ev.clientY-bounds.top)/bounds.height)*255))),
+      });
+      const handle=event.target.closest('[data-curve-handle]');
+      let index=handle?Number(handle.dataset.curveHandle):-1;
+      if(index<0){
+        if(points.length>=19)return;
+        const p=position(event);
+        if(p.input===0||p.input===255||points.some(item=>item.input===p.input))return;
+        index=points.findIndex(item=>item.input>p.input);
+        if(index<0)index=points.length;
+        points.splice(index,0,p);
+      }else if(event.altKey){
+        if(index===0||index===points.length-1)return;
+        points.splice(index,1);
+        index=-1;
+      }
+      const fixedEndpointX=(index===0||index===points.length-1)?points[index]?.input:null;
+      const color=['#e5e7eb','#f87171','#4ade80','#60a5fa'][Number(channelId)]||'#e5e7eb';
+      const paint=()=>{
+        input.value=curvePointsInputValue(points);
+        graph.querySelector('[data-curve-line]').setAttribute('points',
+          points.map(item=>item.input+','+(255-item.output)).join(' '));
+        graph.querySelectorAll('[data-curve-handle]').forEach(node=>node.remove());
+        points.forEach((point,pointIndex)=>{
+          const node=document.createElementNS('http://www.w3.org/2000/svg','circle');
+          for(const [name,value] of Object.entries({
+            'data-curve-handle':pointIndex,cx:point.input,cy:255-point.output,
+            r:6,fill:color,stroke:'#111827','stroke-width':2,
+          }))node.setAttribute(name,String(value));
+          graph.appendChild(node);
+        });
+      };
+      paint();
+      const move=ev=>{
+        if(ev.pointerId!==event.pointerId||index<0)return;
+        const value=position(ev);
+        const previous=points[index-1],next=points[index+1];
+        const low=previous?previous.input+1:0,high=next?next.input-1:255;
+        points[index]={
+          input:fixedEndpointX===null?Math.max(low,Math.min(high,value.input)):fixedEndpointX,
+          output:value.output,
+        };
+        paint();
+      };
+      const release=ev=>{
+        if(ev.pointerId!==event.pointerId)return;
+        window.removeEventListener('pointermove',move);
+        window.removeEventListener('pointerup',release);
+        window.removeEventListener('pointercancel',cancel);
+        if(doc!==owner||owner.selectedLayerId!==layerId||
+           owner.layers.find(item=>item.id===layerId)!==layer||
+           JSON.stringify(layer.adjustment)!==originalModel){
+          refreshInspectorPanels();
+          return;
+        }
+        if(input.value===originalText)return;
+        handleAdjustmentCommandResult(
+          adjustmentLayerCommandController.updateCurveChannel(owner,layerId,channelId,input.value),
+          'Curves: недопустимые точки кривой',
+        );
+      };
+      const cancel=ev=>{
+        if(ev.pointerId!==event.pointerId)return;
+        window.removeEventListener('pointermove',move);
+        window.removeEventListener('pointerup',release);
+        window.removeEventListener('pointercancel',cancel);
+        refreshInspectorPanels();
+      };
+      window.addEventListener('pointermove',move);
+      window.addEventListener('pointerup',release);
+      window.addEventListener('pointercancel',cancel);
+      event.preventDefault();
+    });
+  });
+}
+
 function bindAdjustmentControls(root,owner,layerId) {
+  bindAdjustmentCurveGraphs(root,owner,layerId);
   root?.querySelectorAll('[data-adjustment-prop]').forEach(input=>input.addEventListener('change',()=>{
     handleAdjustmentCommandResult(
       adjustmentLayerCommandController.updateProperty(owner,layerId,input.dataset.adjustmentProp,input.value),
@@ -31435,6 +31602,12 @@ function bindAdjustmentControls(root,owner,layerId) {
       'Curves: используйте 2–19 точек в формате input:output, 0..255',
     );
   }));
+  const colorizeInput=root?.querySelector('[data-adjustment-colorize]');
+  colorizeInput?.addEventListener('change',()=>{
+    handleAdjustmentCommandResult(
+      adjustmentLayerCommandController.setColorize(owner,layerId,colorizeInput.checked),
+    );
+  });
   const clippingInput=root?.querySelector('[data-adjustment-clipping]');
   clippingInput?.addEventListener('change',()=>{
     handleAdjustmentCommandResult(adjustmentLayerCommandController.setClipping(owner,layerId,clippingInput.checked));
@@ -31582,9 +31755,23 @@ function groupContextMenu(id) {
 function addBlankLayer(){addLayer(doc,createRasterLayer({name:'Новый слой',width:doc.width,height:doc.height,dataUrl:null}));rasterEdit.clearBrushBuffer();commit('Новый растровый слой');}
 
 function addAdjustmentLayer(){
-  const layer=createAdjustmentLayer({name:'Корректирующий слой',width:doc.width,height:doc.height});
-  addLayer(doc,layer);commit('Новый корректирующий слой');
-  setStatus('Корректирующий слой применяет цвет и эффекты ко всему нижележащему стеку');
+  const owner=doc;
+  showModal({
+    title:'Новый корректирующий слой',
+    fields:[{name:'kind',label:'Тип коррекции',type:'select',value:'levels',options:NEW_ADJUSTMENT_KINDS}],
+    submitLabel:'Создать слой',
+    onSubmit:values=>{
+      const result=adjustmentLayerCommandController.createLayer(owner,values.kind);
+      if(result===ADJUSTMENT_COMMAND_RESULT.COMMITTED){
+        setStatus('Неразрушающая коррекция создана. Настройки доступны в панели свойств слоя.');
+        return true;
+      }
+      setStatus(result===ADJUSTMENT_COMMAND_RESULT.INVALID
+        ? 'Неизвестный тип корректирующего слоя'
+        : 'Документ изменился или достигнут предел в 500 слоёв');
+      return false;
+    },
+  });
 }
 
 function layerMaskSummary(layer){

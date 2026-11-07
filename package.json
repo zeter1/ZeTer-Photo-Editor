@@ -10,6 +10,7 @@
     "test:browser": "node tools/browser-smoke.mjs",
     "test:browser:pen-smooth": "node tools/browser-pen-smooth-smoke.mjs",
     "test:browser:vector-mask": "node tools/browser-vector-mask-controls-smoke.mjs",
+    "test:browser:adjustment-create": "node tools/browser-adjustment-create-smoke.mjs",
     "check": "npm run build && node --check src/app.bundle.js && node --check tools/browser-smoke.mjs && npm test",
     "serve": "python3 -m http.server 4173 --directory ."
   }
