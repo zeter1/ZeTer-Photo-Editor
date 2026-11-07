@@ -32,7 +32,7 @@
 | --- | --- | --- | --- |
 | CAP-MASK | Raster/vector Layer Masks: preview/link/invert/feather/density | IN PROGRESS | Единый UI + vector/raster сохранение, groups/transform, Undo/Redo, PSD parity. |
 | CAP-ADJ | Adjustment Layers: Levels/Curves/Exposure/Hue-Saturation | IN PROGRESS | Точный stack/group рендер, UI/reopen и редактируемый PSD round-trip. |
-| CAP-BEZ | Полные cubic Bézier paths, anchors, handles | IN PROGRESS | [PR #126](https://github.com/zeter1/ZeTer-Photo-Editor/pull/126): bounded first-anchor click-to-close Shape path ported to current main with zoom-aware snap, true cubic closing preview, no duplicate anchor and one persisted Shape/Undo command; focused 17/17 PASS on Windows, isolated real Chrome `file://` full smoke PASS, dedicated click-to-close E2E and final-head CI pending. Remaining: all-handle UX, vector mask + Saved Paths parity, PSD/PSB editable round-trip. [PR #125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) remains independent OPEN. |
+| CAP-BEZ | Полные cubic Bézier paths, anchors, handles | IN PROGRESS | [PR #126](https://github.com/zeter1/ZeTer-Photo-Editor/pull/126) MERGED main 2d02391. [PR #125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) OPEN head 9a547f2, [Linux core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41851946246) and [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41851946082) for old head. Новый реальный Chrome file:// Alt+Shift Shape + Undo/Redo + .zpe save/reopen E2E LOCAL PASS; CI нового head NOT RUN до публикации. Vector Mask/Saved Paths direct UI gesture E2E, PSD/PSB editability и полный handle UX ещё открыты. |
 | CAP-PSD-IN | Layered PSD import | IN PROGRESS | Настоящий набор Photoshop-authored файлов; текст, группы, masks, blend, native/ICC. |
 | CAP-PSD-OUT | Layered PSD export | IN PROGRESS | Editable PSD, внешняя проверка и import-edit-export-import. |
 | CAP-PSB | Большие PSB | IN PROGRESS | Streaming/lazy больших реальных файлов; отличать поддержку формата от unrestricted размерности. |
@@ -48,7 +48,7 @@
 
 ## Текущий блокер и следующий вертикальный срез
 
-- **CURRENT P1:** [003X/6c-9](003x6c9-history-sharing-profile.md): #376 merged `744bcb1`, dual-native UI generic/pooled History and IDB v2 exact original tile oracle passed on Windows Chrome 1025² in local branch, next code+CI gate open. Merged-main real-photo SUCCESS; merged-main core first run one DevTools bootstrap timeout before test, failed-job rerun requested. Stage 6/10 still IN PROGRESS.
+- **CURRENT P1:** [CAP-BEZ PR #125](002-bezier-smooth-anchor.md): существующая функция Shape/Vector Mask/Saved Paths + новая реальная Chrome file:// Shape E2E и .zpe save/reopen LOCAL PASS. Старый remote head 9a547f2 core/real-photo CI SUCCESS; новая CI и merge ещё не приняты. Stage 2 parent IN PROGRESS. Stage 6 / 003X/6c-9 остаётся IN PROGRESS как отдельная задача, не текущая.
 - **Отдельный BLOCKED gate:** [002B/2c Adobe-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md). Синтетические тесты не закрывают этот gate.
 - После приемки 003X/6c-9 выбрать **самый полезный неполный вертикальный срез** из масок/корректирующих слоёв/Bézier/PSD, учитывая текущий код и зависимости. Не назначать заранее новую задачу без повторной проверки.
 

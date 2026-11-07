@@ -1,4 +1,13 @@
-### 2026-11-04 — Pen click-first-anchor close, current-main port (PR #126 candidate)
+### 2026-11-07 — Chromium file:// E2E Bézier Alt+Shift, Undo и .zpe reopen (существующий PR #125)
+
+- В CI добавлен отдельный npm run test:browser:pen-smooth: фактический Alt+Shift mouse по Shape anchor в Chrome, повторный no-op, Undo/Redo, Ctrl+S исходного .zpe Blob с проверкой ручек, reopen того же .zpe и Alt→corner. Локально PASS, 37/37 path unit PASS, build/diff PASS. Runtime-код/форматы не изменены, новая PR-head CI ещё NOT RUN; Vector Mask/Saved Paths direct UI E2E и Adobe PSD/PSB parity остаются открытыми.
+
+### 2026-11-04 — Alt+Shift сглаживание существующих Bézier-узлов (PR #125 current-main candidate)
+
+- Команда Alt+Shift+click преобразует существующий corner anchor в smooth с касательными ручками по хорде соседей; открытые концы используют одну ручку, closed subpaths — циклических соседей. Поддерживаются Shape, Vector Mask, Saved Paths; один History checkpoint, lock/stale/no-op проверки, старый Alt+click в corner сохраняется. Нет изменения `.zpe`/PSD/PSB schemas.
+- Перенесено из ранее существовавшего открытого [PR #125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) на merged main `2d02391`. Целевые path command/surface/gesture регрессии 37/37 PASS, build `383e86be13a7efb7`, diff check PASS; общий Windows `npm test` FAIL на пяти Linux-only `/proc`/cgroup tests; отдельный последовательный genuine Chrome `file://` smoke PASS (exit 0, 103.12s). Exact PR-head CI pending.
+
+### 2026-11-04 — Pen click-first-anchor close, PR #126 MERGED (`2d02391`)
 
 - Реальный Pen draft после трёх узлов замыкается кликом по начальной точке в радиусе `6 / zoom`, с preview кубического замыкающего сегмента, без дублированного узла. Команда сохраняет Shape layer и одну запись History; прежние double-click/Enter/checkbox сценарии сохраняются. Форматы `.zpe`/PSD/PSB не меняются.
 - Функциональные тесты Pen+архитектуры 17/17 PASS; build и diff check PASS. Полный Windows npm test имеет пять Linux-only /proc/cgroup failures; Первый полный Chrome `file://` smoke дал DevTools timeout при параллельном запуске тестов; отдельный последовательный `npm run test:browser` **PASS (exit 0, 109.87s)**. Прямой E2E клик Pen и PR-head CI ещё ожидаются. Работа на базе merged main `a0e9fe4`; старый конфликтующий PR #126 будет обновлён, новый PR не создаётся.

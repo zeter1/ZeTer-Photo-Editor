@@ -89,6 +89,9 @@ jobs:
         env:
           ZPE_BROWSER_OPERATION_ARTIFACT_DIR: ${{ runner.temp }}/zpe-browser-operation-reports
 
+      - name: Bézier Alt+Shift real pointer / Undo / .zpe save and reopen (file://)
+        run: npm run test:browser:pen-smooth
+
       - name: Photoshop PSD native layers in fresh Chromium file:// (002B/2a)
         run: npm run test:browser
         env:

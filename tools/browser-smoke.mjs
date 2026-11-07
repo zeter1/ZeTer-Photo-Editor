@@ -513,6 +513,136 @@ async function runSmoke() {
     }
     assertNoBrowserErrors(errors, stderrState);
 
+    // CAP-BEZ: genuine file:// pointer input, editable Shape, History and Undo/Redo.
+    // The focused mode avoids rerunning unrelated long-running photo/Worker probes.
+    if (process.env.ZPE_PEN_SMOOTH_BROWSER_ONLY === '1') {
+      const fixture = await evaluate(client, `(() => {
+        const layer = {
+          id:'pen-smooth-shape',type:'shape',name:'Pen smooth E2E',shape:'path',
+          x:0,y:0,width:200,height:200,scaleX:1,scaleY:1,rotation:0,
+          pathClosed:false,fill:'transparent',stroke:'#ffffff',strokeWidth:2,
+          visible:true,locked:false,opacity:1,blendMode:'source-over',
+          pathPoints:[
+            {x:20,y:20,kind:'corner',handleIn:null,handleOut:null},
+            {x:80,y:60,kind:'corner',handleIn:null,handleOut:null},
+            {x:140,y:30,kind:'corner',handleIn:null,handleOut:null},
+          ],
+        };
+        const project = {version:1,name:'Pen smooth E2E',width:200,height:200,
+          background:'transparent',selectedLayerId:layer.id,groups:[],layers:[layer]};
+        const input=document.querySelector('#projectInput');
+        const transfer=new DataTransfer();
+        transfer.items.add(new File([JSON.stringify(project)],'pen-smooth.zpe',{type:'application/json'}));
+        input.files=transfer.files;
+        input.dispatchEvent(new Event('change',{bubbles:true}));
+        return {layers:project.layers.length,points:layer.pathPoints.length};
+      })()`);
+      assert(fixture.layers === 1 && fixture.points === 3,
+        'Pen smooth fixture should be a real editable Shape project', JSON.stringify(fixture));
+      await waitFor('Pen smooth shape import', async () => evaluate(client,
+        "Boolean(document.querySelector('.layer-row.selected')?.textContent.includes('Pen smooth E2E'))"));
+      const coords = await evaluate(client, `(() => {
+        document.querySelector('[data-tool="pen"]').click();
+        const overlay=document.querySelector('#overlayCanvas');
+        const r=overlay.getBoundingClientRect();
+        return {x:r.left+80*r.width/200,y:r.top+60*r.height/200,
+          width:overlay.width,rectWidth:r.width,visible:r.width>0&&r.height>0};
+      })()`);
+      assert(coords.visible && Number.isFinite(coords.x) && Number.isFinite(coords.y),
+        'Pen overlay should be visible and have a usable anchor coordinate', JSON.stringify(coords));
+      const penClick = async (modifiers) => {
+        await client.send('Input.dispatchMouseEvent',{
+          type:'mousePressed',x:coords.x,y:coords.y,button:'left',buttons:1,clickCount:1,modifiers,
+        });
+        await client.send('Input.dispatchMouseEvent',{
+          type:'mouseReleased',x:coords.x,y:coords.y,button:'left',buttons:0,clickCount:1,modifiers,
+        });
+      };
+      await penClick(9); // Chromium: Alt (1) | Shift (8)
+      const historyState = () => evaluate(client, `(() => ({
+        rows:[...document.querySelectorAll('#historyList .history-row')].map(row=>row.textContent),
+        current:document.querySelector('#historyList .history-row.current')?.textContent||'',
+        undoDisabled:document.querySelector('#undoBtn').disabled,
+        redoDisabled:document.querySelector('#redoBtn').disabled,
+        status:document.querySelector('#statusText')?.textContent||'',
+      }))()`);
+      await waitFor('Pen smooth History checkpoint', async () => {
+        const state=await historyState();
+        return state.rows.length===2 && state.current.includes('Сгладить Bézier-узел');
+      });
+      await penClick(9);
+      const repeated=await historyState();
+      assert(repeated.rows.length===2 && repeated.status.includes('уже сглажен'),
+        'Repeated Alt+Shift-click should not add History', JSON.stringify(repeated));
+      await evaluate(client, "document.querySelector('#undoBtn').click(); true");
+      await waitFor('Pen smooth Undo', async () => {
+        const state=await historyState();
+        return state.rows.length===2 && !state.current.includes('Сгладить') && !state.redoDisabled;
+      });
+      await evaluate(client, "document.querySelector('#redoBtn').click(); true");
+      await waitFor('Pen smooth Redo', async () => {
+        const state=await historyState();
+        return state.rows.length===2 && state.current.includes('Сгладить Bézier-узел');
+      });
+      // Capture the real .zpe download Blob at its transport boundary, without
+      // changing the production serializer or the downloaded content.
+      await evaluate(client, `(() => {
+        const original=URL.createObjectURL;
+        window.__penSmoothOriginalCreateUrl=original;
+        URL.createObjectURL=function(blob) {
+          window.__penSmoothSavedBlob=blob;
+          return original.call(this,blob);
+        };
+        return true;
+      })()`);
+      await client.send('Input.dispatchKeyEvent',{
+        type:'keyDown',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2,
+      });
+      await client.send('Input.dispatchKeyEvent',{
+        type:'keyUp',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2,
+      });
+      const saved=await evaluate(client, `(async () => {
+        URL.createObjectURL=window.__penSmoothOriginalCreateUrl;
+        const blob=window.__penSmoothSavedBlob;
+        if(!blob)return null;
+        const project=JSON.parse(await blob.text());
+        const points=project.layers.find(layer=>layer.id==='pen-smooth-shape')?.pathPoints;
+        const node=points?.[1];
+        return {filename:project.name,pointCount:points?.length,kind:node?.kind,
+          handleIn:node?.handleIn,handleOut:node?.handleOut};
+      })()`);
+      assert(saved?.pointCount===3 && saved.kind==='smooth' &&
+          Number.isFinite(saved.handleIn?.x) && Number.isFinite(saved.handleOut?.x),
+        'The actual .zpe download must retain smooth handles',JSON.stringify(saved));
+      await evaluate(client, `(() => {
+        const input=document.querySelector('#projectInput'),transfer=new DataTransfer();
+        transfer.items.add(new File([window.__penSmoothSavedBlob],'pen-smooth-reopened.zpe',
+          {type:'application/json'}));
+        input.files=transfer.files;
+        const previous=window.confirm;
+        window.confirm=()=>true;
+        try{input.dispatchEvent(new Event('change',{bubbles:true}));}
+        finally{window.confirm=previous;}
+        return true;
+      })()`);
+      await waitFor('Pen smooth .zpe reopen', async () => {
+        const state=await historyState();
+        return state.rows.length===1 && state.current.includes('Открыть проект');
+      });
+      await penClick(9);
+      const reopened=await historyState();
+      assert(reopened.rows.length===1 && reopened.status.includes('уже сглажен'),
+        'Reopened .zpe smooth node should be a no-op',JSON.stringify(reopened));
+      await penClick(1); // Alt converts the reopened smooth anchor back to corner.
+      await waitFor('Pen smooth reverse command', async () => {
+        const state=await historyState();
+        return state.rows.length===2 && state.current.includes('Преобразовать Bézier-узел');
+      });
+      assertNoBrowserErrors(errors, stderrState);
+      console.log('CAP-BEZ Chromium file:// Alt+Shift smooth / Undo / Redo / .zpe save+reopen / Alt corner PASS');
+      return;
+    }
+
     // 003W/2b-2a: isolated genuine Chromium file:// run with a >2M-pixel
     // PSD16/PSB32 source. No production runtime instrumentation or mocks.
     if (process.env.ZPE_NEAR_CAP_BROWSER_ONLY === '1' ||
