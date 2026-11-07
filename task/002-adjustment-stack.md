@@ -1,6 +1,6 @@
 # CAP-ADJ-STACK — ограниченный, проверяемый compositor-этап (2026-11-07)
 
-**Задача:** Stage 2 / CAP-ADJ-STACK. **Основа:** exact `main` `30590285bb7e5eb547854dd1fa21cacc589db3d2`. **Ветка:** `feat/adjustment-stack-compositor-20261107`.
+**Задача:** Stage 2 / CAP-ADJ-STACK. **Основа:** exact `main` `30590285bb7e5eb547854dd1fa21cacc589db3d2`. **Ветка:** `feat/adjustment-stack-compositor-20261107`. **GitHub:** [PR #380 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/380). Первый опубликованный функциональный head `604998ab680ae7cc509b260078dff065149a42c5`, exact-head [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42369768509), независимый [real-photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42369768500) проверять до merge. Новый docs-only head также требует отдельного exact-head CI.
 
 ## Пиксельный дефект и исправление
 
