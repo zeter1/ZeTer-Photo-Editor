@@ -1,6 +1,6 @@
 # Stage 2 / CAP-BEZ — реальное Alt+Shift-сглаживание существующего Bézier-узла
 
-**Статус:** IN PROGRESS · **Приоритет:** P1 · **PR:** [#125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) (старый PR, без дублей) · **База:** main `2d02391c572c895b5640b0aaa33b767f5da7d5e1`.
+**Статус:** bounded increment DONE (PR #125 merged); parent CAP-BEZ IN PROGRESS · **Приоритет:** P1 · **PR:** [#125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) (старый PR, без дублей) · **База:** main `2d02391c572c895b5640b0aaa33b767f5da7d5e1`.
 
 ## Пользовательская функция
 
@@ -21,3 +21,7 @@
 ## Следующий точный шаг
 
 Опубликовать новый Chrome E2E в **существующий** #125 без force push, проверить точные new-head Linux core 12 jobs и independent real-photo CI, после review принять PR если разрешено, затем exact-main CI. После ограниченного приёма — отдельный Stage 2/CAP-MASK UI vertical slice.
+## Merge gate, 2026-11-07
+
+- **PR #125 MERGED:** [merge b3ff1d1449a7215274d322a2788c11c6496b0cd1](https://github.com/zeter1/ZeTer-Photo-Editor/commit/b3ff1d1449a7215274d322a2788c11c6496b0cd1), exact PR head da75a8788862fae1447ad2a78d27e6bfef92d979. [Core #42351522449](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351522449) SUCCESS, [independent real-photo #42351522536](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351522536) SUCCESS. Exact-main [core #42351915017](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351915017), [real-photo #42351915024](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351915024) PENDING на момент записи.
+- Bounded Alt+Shift Shape + Undo/Redo + .zpe save/reopen accepted; полное CAP-BEZ / PSD/PSB parity остаётся IN PROGRESS. Следующая [CAP-MASK-VD](NEXT.md).

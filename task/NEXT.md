@@ -1,19 +1,19 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK:** [Stage 2 / CAP-BEZ — Alt+Shift сглаживание узла Shape, Vector Mask и Saved Paths (PR #125)](002-bezier-smooth-anchor.md)
-> **PRIORITY:** P1 · **STATUS:** IN PROGRESS · **DEPENDENCY:** PR #126 (Pen first-anchor closure) MERGED
-> **BASE MAIN SHA:** `2d02391c572c895b5640b0aaa33b767f5da7d5e1` — [PR #126](https://github.com/zeter1/ZeTer-Photo-Editor/pull/126) merged exact head `b51bc0b`; PR-head [Linux core #41848991620](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41848991620) SUCCESS 12/12 and [real-photo #41848991037](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41848991037) SUCCESS. Exact-merged-main [core #41850289039](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41850289039), [real-photo #41850289066](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41850289066) PENDING at current observation.
-> **ACTIVE PR:** [#125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) OPEN, head 9a547f2fc26337782d4f71aa7978d0040e0e1d2b (mergeable, no reviews). [Linux core #41851946246](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41851946246) SUCCESS and [independent real-photo #41851946082](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41851946082) SUCCESS **for this original head only**. Новые E2E изменения локальные, CI нового head NOT RUN.
-> **LAST VERIFIED (2026-11-07):** focused path tests 37/37 PASS, npm run build PASS (383e86be13a7efb7), git diff --check PASS. Настоящий Chrome file:// npm run test:browser:pen-smooth PASS: UI Alt+Shift click Shape, no-op повторного клика, Undo/Redo, реальный Ctrl+S .zpe Blob + проверка handles + reopen и обратный Alt→corner. Старый полный Chrome smoke PASS (103.12s); полный Windows npm test ранее FAIL на пяти Linux-only /proc/cgroup тестах.
-> **REMAINING ACCEPTANCE:** опубликовать новый E2E+CI в существующий #125 без force; проверить новый head Linux core и independent real-photo CI, review/merge и exact-main CI после merge. Настоящий UI E2E Vector Mask/Saved Paths и editable PSD/PSB round-trip открыты; не объявлять CAP-BEZ полностью DONE.
-> **NEXT IMPLEMENTATION ACTION:** завершить существующий #125 с новыми CI checks, затем выбрать Stage 2/CAP-MASK — первый реальный недостающий UI edit workflow для векторной маски с Undo/Redo, .zpe и применимой PSD/PSB приёмкой.
-> **BLOCKERS:** Adobe-authored PSB32 provenance 002B/2c BLOCKED; full Stage 6 native Worker editing/cancel stale/close still IN PROGRESS, Worker PID/RSS/peak UNKNOWN and not a reason to delay independent Stage 2 work.
+> **CURRENT TASK/ID:** Stage 2 / CAP-MASK-VD — неразрушающие плотность и растушёвка для векторной маски (следующий профессиональный вертикальный срез).
+> **PRIORITY:** P1 · **STATUS:** IN PROGRESS (CAP-MASK родитель частично реализован; плотность/растушёвка vector mask — TODO, реализация ещё не начата).
+> **BASE MAIN SHA:** b3ff1d1449a7215274d322a2788c11c6496b0cd1 — [PR #125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) MERGED.
+> **ACTIVE PR:** нет для CAP-MASK-VD; новый PR создавать только после реализации реального кода/тестов. Предыдущий #125 MERGED, exact head da75a8788862fae1447ad2a78d27e6bfef92d979.
+> **LAST VERIFIED (2026-11-07):** #125 — 37/37 focused Windows unit PASS, реальный Chromium file:// Alt+Shift Shape, Undo/Redo, Ctrl+S .zpe Blob, reopen PASS; Linux [core CI #42351522449](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351522449) SUCCESS, [independent real-photo #42351522536](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351522536) SUCCESS; [merge b3ff1d1](https://github.com/zeter1/ZeTer-Photo-Editor/commit/b3ff1d1449a7215274d322a2788c11c6496b0cd1). Exact merged-main [core #42351915017](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351915017), [real-photo #42351915024](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351915024) PENDING на момент записи. Полный Windows npm test FAIL на Linux-only /proc/cgroup проверках; не считать общим green.
+> **REMAINING ACCEPTANCE:** для CAP-MASK-VD нет реализации. Model createVectorMask/sanitizeVectorMask не хранят density/feather, renderVectorMaskBitmap не применяет их, векторная маска имеет edit/invert/toggle, но не эти controls. Нужны изменения visible composite alpha, доступные UI controls/preview, ровно одна History-запись на commit, Undo/Redo, сохранение/reopen .zpe и тесты на реальных Shape/Vector Mask в Chrome file://. PSD/PSB совместимость проверять отдельно; full Photoshop parity не заявлять.
+> **NEXT IMPLEMENTATION ACTION:** создать bounded CAP-MASK-VD код: src/core/state.js createVectorMask/sanitizeVectorMask density[0..1], feather[0..250]; src/core/render.js применить alpha controls к vector bitmap в обоих путях compositing; src/selection/vector-mask-controller.js и inspector UI для редактирования; tests unit + реальный Chromium file:// edit/render/Undo/.zpe. После green открыть отдельный PR и проверить CI.
+> **BLOCKERS:** внешний Photoshop-authored PSB32 provenance [002B/2c](002b2c-photoshop-psb32-provenance.md) BLOCKED, не блокирует .zpe/vector-mask feature. Stage 6 native Worker peak RSS UNKNOWN и самостоятельная задача.
 
-## Дальнейшая очередь
+## Краткая очередь
 
-1. **Stage 2 / CAP-BEZ**, existing #125 smooth-anchor integration — CURRENT.
-2. **Stage 2 / CAP-MASK or CAP-ADJ**, new real user workflow after current PR is accepted; prioritize render + Undo/Redo + .zpe over planning.
-3. **Stage 6 / 003X/6c-9**, bounded changed-native edit/Worker UI cancel/stale/close parity only when actionable and testable; parent stage incomplete.
-4. **002B/2c**, Photoshop-authored PSB32 provenance BLOCKED externally.
+1. **CAP-MASK-VD:** векторная маска — плотность/растушёвка, UI + render + Undo + .zpe — CURRENT.
+2. **CAP-ADJ:** редактируемые корректирующие слои, композитинг и PSD editability.
+3. **CAP-BEZ:** полный UI E2E Vector Mask / Saved Paths, Photoshop-authored PSD/PSB round-trip — родитель IN PROGRESS, сглаживание bounded DONE via #125.
+4. **Stage 6 / 003X/6c-9:** targeted native worker stale/close/edit parity; Adobe PSB32 provenance отдельно BLOCKED.
 
-[Карта](README.md) · [Матрица](CAPABILITY_MATRIX.md) · [Детальная задача](002-bezier-smooth-anchor.md) · [История Stage 6](003x6c9-history-sharing-profile.md) · [Архив NEXT](archive/2026-11-04-NEXT-legacy.md).
+[Карта](README.md) · [Матрица](CAPABILITY_MATRIX.md) · [Принятый CAP-BEZ](002-bezier-smooth-anchor.md) · [Stage 6](003x6c9-history-sharing-profile.md) · [Архив](archive/2026-11-04-NEXT-legacy.md).

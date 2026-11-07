@@ -30,9 +30,9 @@
 
 | ID | Возможность | Статус | Какой пробел до DONE |
 | --- | --- | --- | --- |
-| CAP-MASK | Raster/vector Layer Masks: preview/link/invert/feather/density | IN PROGRESS | Единый UI + vector/raster сохранение, groups/transform, Undo/Redo, PSD parity. |
+| CAP-MASK | Raster/vector Layer Masks: preview/link/invert/feather/density | IN PROGRESS | Растровая mask density/feather работает через mask-controller/render. Векторная createVectorMask/sanitizeVectorMask пока без density/feather; renderVectorMaskBitmap игнорирует такие controls. [NEXT CAP-MASK-VD](NEXT.md) — реализовать модель, render, inspector, Undo/Redo, .zpe и Chromium E2E. Полная PSD parity позже. |
 | CAP-ADJ | Adjustment Layers: Levels/Curves/Exposure/Hue-Saturation | IN PROGRESS | Точный stack/group рендер, UI/reopen и редактируемый PSD round-trip. |
-| CAP-BEZ | Полные cubic Bézier paths, anchors, handles | IN PROGRESS | [PR #126](https://github.com/zeter1/ZeTer-Photo-Editor/pull/126) MERGED main 2d02391. [PR #125](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) OPEN head 9a547f2, [Linux core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41851946246) and [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41851946082) for old head. Новый реальный Chrome file:// Alt+Shift Shape + Undo/Redo + .zpe save/reopen E2E LOCAL PASS; CI нового head NOT RUN до публикации. Vector Mask/Saved Paths direct UI gesture E2E, PSD/PSB editability и полный handle UX ещё открыты. |
+| CAP-BEZ | Полные cubic Bézier paths, anchors, handles | IN PROGRESS | **Bounded DONE:** Alt+Shift corner→smooth Shape, Vector Mask, Saved Paths: [PR #125 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) [main b3ff1d1](https://github.com/zeter1/ZeTer-Photo-Editor/commit/b3ff1d1449a7215274d322a2788c11c6496b0cd1), exact head da75a878 [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351522449), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351522536); real Chromium file:// Shape gesture + .zpe save/reopen + Undo/Redo PASS. [#126 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/126) click-to-close. Parent IN PROGRESS: Vector Mask/Saved Path direct UI E2E, editable PSD/PSB full parity. |
 | CAP-PSD-IN | Layered PSD import | IN PROGRESS | Настоящий набор Photoshop-authored файлов; текст, группы, masks, blend, native/ICC. |
 | CAP-PSD-OUT | Layered PSD export | IN PROGRESS | Editable PSD, внешняя проверка и import-edit-export-import. |
 | CAP-PSB | Большие PSB | IN PROGRESS | Streaming/lazy больших реальных файлов; отличать поддержку формата от unrestricted размерности. |
@@ -48,9 +48,9 @@
 
 ## Текущий блокер и следующий вертикальный срез
 
-- **CURRENT P1:** [CAP-BEZ PR #125](002-bezier-smooth-anchor.md): существующая функция Shape/Vector Mask/Saved Paths + новая реальная Chrome file:// Shape E2E и .zpe save/reopen LOCAL PASS. Старый remote head 9a547f2 core/real-photo CI SUCCESS; новая CI и merge ещё не приняты. Stage 2 parent IN PROGRESS. Stage 6 / 003X/6c-9 остаётся IN PROGRESS как отдельная задача, не текущая.
+- **CURRENT P1:** [CAP-MASK-VD](NEXT.md) — новый реальный UI/render/Undo/.zpe срез: vector mask density/feather. [CAP-BEZ #125](002-bezier-smooth-anchor.md) bounded MERGED b3ff1d1, head core/real-photo SUCCESS, exact-main CI ещё PENDING на момент записи. Stage 6 / 003X/6c-9 IN PROGRESS отдельно.
 - **Отдельный BLOCKED gate:** [002B/2c Adobe-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md). Синтетические тесты не закрывают этот gate.
-- После приемки 003X/6c-9 выбрать **самый полезный неполный вертикальный срез** из масок/корректирующих слоёв/Bézier/PSD, учитывая текущий код и зависимости. Не назначать заранее новую задачу без повторной проверки.
+- После завершения CAP-MASK-VD выбрать следующий конкретный незакрытый CAP-ADJ или Vector Mask UI gate по реальному коду; не ограничиваться профилированием.
 
 ## Условия изменения статуса
 
