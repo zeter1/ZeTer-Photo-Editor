@@ -49,6 +49,13 @@ test('render pipeline treats adjustment layers as cumulative stack operations an
   assert.match(render, /sourceCtx\.drawImage\(clippingMask,0,0,width,height\)/);
 });
 
+test('clipped adjustments fail closed when their base is invisible, and group bases use local alpha', () => {
+  assert.match(render, /if \(layer\.clipping === true && !clippingMask\) return/);
+  assert.match(render, /const needsClippingBase = next\?\.type === 'layer' && next\.layer\?\.clipping === true/);
+  assert.match(render, /await renderEntries\(groupCanvas, groupCtx, group\.id\)/);
+  assert.match(render, /coverageCtx\.globalAlpha = opacity/);
+});
+
 test('layer masks isolate content and route professional controls through the canonical alpha pipeline', () => {
   assert.match(render, /const hasRasterMask=Boolean\(layer\.mask && layer\.mask\.enabled !== false/);
   assert.match(render, /applyLayerMaskToContext/);

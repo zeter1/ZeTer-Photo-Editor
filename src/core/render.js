@@ -510,6 +510,8 @@ function buildGroupRenderPlan(doc) {
 async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides, clippingMask = null) {
   if (!isLayerVisible(doc, layer) || layer.opacity <= 0) return;
   if (layer.type === 'adjustment') {
+    // A clipped adjustment without a visible base must never become global.
+    if (layer.clipping === true && !clippingMask) return;
     await applyAdjustmentLayer(canvas, ctx, layer, { clippingMask });
     return;
   }
@@ -550,23 +552,36 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
       clippingBase=null;
       const group = entry.group;
       if (!group || group.visible === false || Number(group.opacity ?? 1) <= 0 || activeGroups.has(group.id)) continue;
+      const next = entries[entryIndex + 1];
+      const needsClippingBase = next?.type === 'layer' && next.layer?.clipping === true;
       activeGroups.add(group.id);
       try {
         const opacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1)));
         const blendMode = group.blendMode || 'pass-through';
         const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9;
+        const newGroupCanvas = () => {
+          const groupCanvas = document.createElement('canvas');
+          groupCanvas.width = doc.width;
+          groupCanvas.height = doc.height;
+          const groupCtx = groupCanvas.getContext('2d', { alpha:true });
+          groupCtx.imageSmoothingEnabled = true;
+          if ('imageSmoothingQuality' in groupCtx) groupCtx.imageSmoothingQuality = 'high';
+          return { groupCanvas, groupCtx };
+        };
 
         if (!isolated) {
+          // Pass-through renders against its parent backdrop; compute clipping
+          // coverage separately so the group's own alpha is not the parent's.
           await renderEntries(targetCanvas, targetCtx, group.id);
+          if (needsClippingBase) {
+            const { groupCanvas, groupCtx } = newGroupCanvas();
+            await renderEntries(groupCanvas, groupCtx, group.id);
+            clippingBase = groupCanvas;
+          }
           continue;
         }
 
-        const groupCanvas = document.createElement('canvas');
-        groupCanvas.width = doc.width;
-        groupCanvas.height = doc.height;
-        const groupCtx = groupCanvas.getContext('2d', { alpha:true });
-        groupCtx.imageSmoothingEnabled = true;
-        if ('imageSmoothingQuality' in groupCtx) groupCtx.imageSmoothingQuality = 'high';
+        const { groupCanvas, groupCtx } = newGroupCanvas();
         await renderEntries(groupCanvas, groupCtx, group.id);
 
         targetCtx.save();
@@ -575,6 +590,13 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         targetCtx.filter = 'none';
         targetCtx.drawImage(groupCanvas, 0, 0);
         targetCtx.restore();
+        if (needsClippingBase) {
+          // Clipping follows visible group coverage, including group opacity.
+          const { groupCanvas: coverage, groupCtx: coverageCtx } = newGroupCanvas();
+          coverageCtx.globalAlpha = opacity;
+          coverageCtx.drawImage(groupCanvas, 0, 0);
+          clippingBase = coverage;
+        }
       } finally {
         activeGroups.delete(group.id);
       }

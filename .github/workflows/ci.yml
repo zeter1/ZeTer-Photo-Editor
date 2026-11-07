@@ -96,6 +96,8 @@ jobs:
         run: npm run test:browser:vector-mask
       - name: Adjustment creation / Levels visible pixels / Undo / .zpe reopen (file://)
         run: npm run test:browser:adjustment-create
+      - name: Adjustment stack / nested groups / clipping / raster+vector masks / History (file://)
+        run: npm run test:browser:adjustment-stack
 
       - name: Photoshop PSD native layers in fresh Chromium file:// (002B/2a)
         run: npm run test:browser
