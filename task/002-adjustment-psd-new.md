@@ -1,7 +1,7 @@
 # CAP-ADJ-PSD-NEW — новые редактируемые Levels/Curves в PSD/PSB
 
-**Дата:** 2026-11-07 · **Приоритет:** P1 · **Статус:** IN PROGRESS до PR CI/merge/exact-main.
-**Base:** main `59fa89773556cd9a81448937bdb9309033afd582`. **Ветка:** `feat/adjustment-psd-roundtrip-20261107`. **Связанный merged PR:** [#380](https://github.com/zeter1/ZeTer-Photo-Editor/pull/380).
+**Дата:** 2026-11-07 · **Приоритет:** P1 · **Статус:** bounded DONE (native writer only), PR/head/exact-main CI приняты; CAP-ADJ-PSD parent остаётся IN PROGRESS.
+**Base:** main `59fa89773556cd9a81448937bdb9309033afd582`. **Ветка:** `feat/adjustment-psd-roundtrip-20261107`. **Связанные merged PR:** [#380](https://github.com/zeter1/ZeTer-Photo-Editor/pull/380), [#381](https://github.com/zeter1/ZeTer-Photo-Editor/pull/381) (head `0a882859e0fa66b9046a17be4979cfbe06ca8a4a`, exact merged-main `b103b8b401dc9a6c27b3969831093486e83899f6`).
 
 ## Дефект и минимальная реализация
 
@@ -31,3 +31,10 @@
 ## Следующий пункт после PR
 
 **CAP-ADJ-PSD-UI** — в настоящем Chromium `file://` создать Levels/Curves через Layers UI, поменять Master/RGB points и clipping/mask, экспортировать PSD и PSB через UI, снова импортировать и проверить native editability, видимый пиксель и History. Отдельно добавить Adobe-authored native fixture + внешний Adobe GUI readback, не заменять его synthetic round-trip. После CI merge основного среза и exact-main обновить NEXT.
+
+## GitHub — итог bounded CAP-ADJ-PSD-NEW
+
+- [PR #381](https://github.com/zeter1/ZeTer-Photo-Editor/pull/381) **MERGED** через squash, base `59fa897`, functional head `0a882859`, merged-main `b103b8b4`.
+- PR exact-head [Linux CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42382488376), [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42382488467).
+- Exact merged-main `b103b8b4`: [Linux CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42383100366), [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42383100375).
+- Следующая задача уже переадресована в [CAP-ADJ-PSD-UI](NEXT.md). Отдельный docs-only commit по синхронизации NEXT после `b103b8b4` требует собственного exact-main status check. Photoshop-authored / Adobe GUI parity ещё NOT VERIFIED.
