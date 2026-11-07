@@ -28,6 +28,27 @@ test('vector mask state survives .zpe sanitization with Bezier handles and boole
   assert.equal(mask.subpaths[0].points[1].kind,'smooth');
 });
 
+test('vector mask density/feather survive .zpe save/reopen and clamp unsupported inputs',()=>{
+  const document=createDocument({width:120,height:100});
+  addLayer(document,createShapeLayer({width:100,height:80,vectorMask:createVectorMask({
+    density:.38, feather:7.5, subpaths:[{operation:'add',points:[{x:2,y:3},{x:80,y:3},{x:80,y:70}]}],
+  })}));
+  const saved=JSON.parse(snapshotDocument(document));
+  const restored=sanitizeProject(saved);
+  assert.equal(restored.layers[0].vectorMask.density,.38);
+  assert.equal(restored.layers[0].vectorMask.feather,7.5);
+  const legacy=sanitizeProject({...saved,layers:saved.layers.map(layer=>({
+    ...layer, vectorMask:{...layer.vectorMask,density:undefined,feather:undefined},
+  }))});
+  assert.equal(legacy.layers[0].vectorMask.density,1);
+  assert.equal(legacy.layers[0].vectorMask.feather,0);
+  const bounded=sanitizeProject({...saved,layers:saved.layers.map(layer=>({
+    ...layer,vectorMask:{...layer.vectorMask,density:-2,feather:9999},
+  }))});
+  assert.equal(bounded.layers[0].vectorMask.density,0);
+  assert.equal(bounded.layers[0].vectorMask.feather,250);
+});
+
 test('vector mask sanitizer drops invalid paths and normalizes unknown operations',()=>{
   const safe=sanitizeProject({version:1,name:'vm',width:100,height:100,background:'transparent',layers:[{id:'a',type:'shape',name:'a',width:50,height:50,vectorMask:{enabled:false,subpaths:[
     {operation:'mystery',points:[{x:0,y:0},{x:50,y:0},{x:50,y:50}]},{operation:'subtract',points:[{x:1,y:1},{x:2,y:2}]},
@@ -47,7 +68,8 @@ test('Stage 10 UI exposes vector masks through the canonical selection owner',()
   assert.match(main,/applySelectionToVectorMask\('exclude'\)/);
   assert.match(selectionVectorMaskController,/function selectionVectorMaskDocumentNodes\(/);
   assert.match(selectionVectorMaskController,/function selectionVectorMaskSubpath\(/);
-  assert.match(selectionVectorMaskController,/createVectorMask\(\{ enabled:true, invert:false, subpaths:\[subpath\] \}\)/);
+  assert.match(selectionVectorMaskController,/density:previous\?\.density \?\? 1/);
+  assert.match(main,/Параметры векторной маски/);
   assert.match(selectionVectorMaskController,/const k = \.5522847498307936/);
   assert.match(build,/src\/selection\/vector-mask-controller\.js/);
   assert.match(main,/function importPsdVectorMask\(/);

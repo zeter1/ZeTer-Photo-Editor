@@ -30,7 +30,7 @@
 
 | ID | Возможность | Статус | Какой пробел до DONE |
 | --- | --- | --- | --- |
-| CAP-MASK | Raster/vector Layer Masks: preview/link/invert/feather/density | IN PROGRESS | Растровая mask density/feather работает через mask-controller/render. Векторная createVectorMask/sanitizeVectorMask пока без density/feather; renderVectorMaskBitmap игнорирует такие controls. [NEXT CAP-MASK-VD](NEXT.md) — реализовать модель, render, inspector, Undo/Redo, .zpe и Chromium E2E. Полная PSD parity позже. |
+| CAP-MASK | Raster/vector Layer Masks: preview/link/invert/feather/density | IN PROGRESS | Raster density/feather уже работает. **CAP-MASK-VD candidate 1.46.5:** vector mask create/sanitize bounded [0..1]/[0..250], alpha render, Layer/Context inspector, single History, Undo/Redo, .zpe Ctrl+S + reopen в реальном Chrome file:// (локально 25/25 focused + Chrome PASS). [Журнал](002-vector-mask-density-feather.md). PR-head и exact-main CI ожидаются; PSD/PSB editable controls и полная Photoshop parity отдельно IN PROGRESS. |
 | CAP-ADJ | Adjustment Layers: Levels/Curves/Exposure/Hue-Saturation | IN PROGRESS | Точный stack/group рендер, UI/reopen и редактируемый PSD round-trip. |
 | CAP-BEZ | Полные cubic Bézier paths, anchors, handles | IN PROGRESS | **Bounded DONE:** Alt+Shift corner→smooth Shape, Vector Mask, Saved Paths: [PR #125 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/125) [main b3ff1d1](https://github.com/zeter1/ZeTer-Photo-Editor/commit/b3ff1d1449a7215274d322a2788c11c6496b0cd1), exact head da75a878 [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351522449), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42351522536); real Chromium file:// Shape gesture + .zpe save/reopen + Undo/Redo PASS. [#126 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/126) click-to-close. Parent IN PROGRESS: Vector Mask/Saved Path direct UI E2E, editable PSD/PSB full parity. |
 | CAP-PSD-IN | Layered PSD import | IN PROGRESS | Настоящий набор Photoshop-authored файлов; текст, группы, masks, blend, native/ICC. |
@@ -48,7 +48,7 @@
 
 ## Текущий блокер и следующий вертикальный срез
 
-- **CURRENT P1:** [CAP-MASK-VD](NEXT.md) — новый реальный UI/render/Undo/.zpe срез: vector mask density/feather. [CAP-BEZ #125](002-bezier-smooth-anchor.md) bounded MERGED b3ff1d1, head core/real-photo SUCCESS, exact-main CI ещё PENDING на момент записи. Stage 6 / 003X/6c-9 IN PROGRESS отдельно.
+- **CURRENT P1:** [CAP-MASK-VD](NEXT.md) — реальный vector mask density/feather UI/render/Undo/.zpe Chrome slice локально PASS (candidate branch, not merged), [журнал](002-vector-mask-density-feather.md). [CAP-BEZ #125](002-bezier-smooth-anchor.md) bounded MERGED b3ff1d1, main task revision 9fa6a7d. Stage 6/003X/6c-9 отдельно IN PROGRESS.
 - **Отдельный BLOCKED gate:** [002B/2c Adobe-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md). Синтетические тесты не закрывают этот gate.
 - После завершения CAP-MASK-VD выбрать следующий конкретный незакрытый CAP-ADJ или Vector Mask UI gate по реальному коду; не ограничиваться профилированием.
 

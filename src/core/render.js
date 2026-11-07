@@ -668,8 +668,23 @@ function renderVectorMaskBitmap(vectorMask, width, height) {
     initialized=true;
   }
 
-  if(vectorMask?.invert===true){
-    ctx.save();ctx.globalCompositeOperation='xor';ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+  const density=Number(vectorMask?.density ?? 1);
+  const feather=Number(vectorMask?.feather ?? 0);
+  if(vectorMask?.invert===true || density<1 || feather>0){
+    const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
+    const alpha=new Uint8ClampedArray(canvas.width*canvas.height);
+    for(let index=0;index<alpha.length;index++)alpha[index]=pixels.data[index*4+3];
+    const controlled=applyMaskControlsAlpha(alpha,canvas.width,canvas.height,{
+      invert:vectorMask?.invert===true,
+      density:Number.isFinite(density)?density:1,
+      feather:Number.isFinite(feather)?feather:0,
+    });
+    for(let index=0;index<controlled.length;index++){
+      const offset=index*4;
+      pixels.data[offset]=255;pixels.data[offset+1]=255;pixels.data[offset+2]=255;
+      pixels.data[offset+3]=controlled[index];
+    }
+    ctx.putImageData(pixels,0,0);
   }
   return canvas;
 }

@@ -19,6 +19,8 @@ function harness({
   let selectedLayer = layer;
   let selectionShape = shape;
   const documentValue = { groups:[], layers:[layer], selectedLayerId:layer.id };
+  let activeDocument = documentValue;
+  const modals = [];
   const commits = [];
   const statuses = [];
   const toasts = [];
@@ -27,7 +29,7 @@ function harness({
 
   const controller = createSelectionVectorMaskController({
     state:{
-      getDocument:() => documentValue,
+      getDocument:() => activeDocument,
       getSelectedLayer:() => selectedLayer,
       commit:label => commits.push(label),
     },
@@ -40,11 +42,13 @@ function harness({
     ui:{
       setStatus:message => statuses.push(message),
       toast:(message, tone) => toasts.push([message, tone]),
+      showModal:options => modals.push(options),
     },
   });
 
   return {
-    controller, documentValue, layer, commits, statuses, toasts, beginEditCalls, clearEditCalls,
+    controller, documentValue, layer, commits, statuses, toasts, modals, beginEditCalls, clearEditCalls,
+    setDocument:value => { activeDocument = value; },
     setSelectedLayer:value => { selectedLayer = value; },
     setSelectionShape:value => { selectionShape = value; },
   };
@@ -216,6 +220,65 @@ test('edit command enters the narrow Pen port exactly once with exact layer iden
   assert.equal(h.controller.editSelectedVectorMask(), false);
   assert.deepEqual(h.beginEditCalls, [h.layer.id]);
   assert.equal(h.statuses.at(-1), 'Слой или его группа заблокированы');
+});
+
+test('vector-mask inspector commits density/feather exactly once and no-ops on unchanged values', () => {
+  const h = harness();
+  h.layer.vectorMask = createVectorMask({
+    subpaths:[{operation:'add', points:[{x:0,y:0},{x:50,y:0},{x:0,y:50}]}],
+  });
+  assert.equal(h.controller.editSelectedVectorMaskProperties(), true);
+  assert.equal(h.modals.length, 1);
+  const modal = h.modals[0];
+  assert.equal(modal.title, 'Параметры векторной маски');
+  assert.deepEqual(modal.fields.map(field => [field.name, field.min, field.max]),
+    [['density',0,100],['feather',0,250]]);
+  assert.equal(modal.onSubmit({density:'100',feather:'0'}), true);
+  assert.deepEqual(h.commits, []);
+  assert.equal(modal.onSubmit({density:'35',feather:'4.5'}), true);
+  assert.equal(h.layer.vectorMask.density, .35);
+  assert.equal(h.layer.vectorMask.feather, 4.5);
+  assert.deepEqual(h.commits, ['Параметры векторной маски']);
+  assert.equal(modal.onSubmit({density:'35',feather:'4.5'}), true);
+  assert.equal(h.commits.length, 1);
+  assert.equal(modal.onSubmit({density:'-10',feather:'300'}), true);
+  assert.equal(h.layer.vectorMask.density, 0);
+  assert.equal(h.layer.vectorMask.feather, 250);
+  assert.equal(h.commits.length, 2);
+});
+
+test('vector-mask inspector refuses stale owner, replaced mask, selection and locks', () => {
+  for (const invalidate of [
+    h => h.setDocument({groups:[],layers:[h.layer]}),
+    h => { h.layer.vectorMask = createVectorMask({subpaths:[{points:[{x:0,y:0},{x:1,y:0},{x:0,y:1}]}]}); },
+    h => h.setSelectedLayer({...h.layer}),
+    h => { h.layer.locked = true; },
+    h => { h.layer.groupId = 'locked'; h.documentValue.groups.push({id:'locked',locked:true}); },
+  ]) {
+    const h = harness();
+    h.layer.vectorMask = createVectorMask({
+      subpaths:[{points:[{x:0,y:0},{x:20,y:0},{x:0,y:20}]}],
+    });
+    assert.equal(h.controller.editSelectedVectorMaskProperties(), true);
+    const original = h.layer.vectorMask;
+    invalidate(h);
+    assert.equal(h.modals[0].onSubmit({density:'50',feather:'6'}), false);
+    assert.equal(original.density, 1);
+    assert.equal(original.feather, 0);
+    assert.deepEqual(h.commits, []);
+  }
+});
+
+test('replacing selected vector-mask contour retains its nondestructive controls', () => {
+  const h = harness();
+  h.layer.vectorMask = createVectorMask({
+    density:.42, feather:3,
+    subpaths:[{points:[{x:0,y:0},{x:20,y:0},{x:0,y:20}]}],
+  });
+  assert.equal(h.controller.applySelectionToVectorMask('replace'), true);
+  assert.equal(h.layer.vectorMask.density, .42);
+  assert.equal(h.layer.vectorMask.feather, 3);
+  assert.deepEqual(h.commits, ['Создать векторную маску']);
 });
 
 test('toggle, invert and remove preserve exact state/history semantics and clear edit target', () => {

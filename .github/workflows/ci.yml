@@ -92,6 +92,9 @@ jobs:
       - name: Bézier Alt+Shift real pointer / Undo / .zpe save and reopen (file://)
         run: npm run test:browser:pen-smooth
 
+      - name: Vector-mask density feather / Undo / .zpe save and reopen (file://)
+        run: npm run test:browser:vector-mask
+
       - name: Photoshop PSD native layers in fresh Chromium file:// (002B/2a)
         run: npm run test:browser
         env:
