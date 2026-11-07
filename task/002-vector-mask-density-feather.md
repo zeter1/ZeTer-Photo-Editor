@@ -24,7 +24,7 @@ UI — «Параметры векторной маски…» в меню «С�
 
 ## Acceptance (exact SHA to be recorded after publication)
 
-Base main: `9fa6a7d90477bc4c36534daeaec3a7e71153c6ec`.
+Base main: `9fa6a7d90477bc4c36534daeaec3a7e71153c6ec`. [PR #378 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/378), implementation head `5aee2881db25cf5feffcdbcef3602f5a21efad22`; exact final head CI after this task-update commit must be checked separately.
 LOCAL PASS: 25/25 focused unit, `npm run build`, `git diff --check`.
 Real Chrome `file://` `npm run test:browser:vector-mask` PASS:
 shape alpha before/after density + feather, menu/form,
