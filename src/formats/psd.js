@@ -1391,6 +1391,31 @@ function encodeCurvesAdjustmentBlock(sourceBlock,adjustment) {
   return writer.concat();
 }
 
+/**
+ * Build genuine PSD adjustment records for ZPE-created Levels/Curves layers.
+ * Native records are emitted only for these known layouts; unsupported kinds
+ * must fall back rather than claiming editable Photoshop metadata.
+ */
+export function createPsdAdjustmentBlocks(adjustment) {
+  const kind=String(adjustment?.kind||'');
+  if(kind==='levels'){
+    // Photoshop Levels v2 contains 29 ten-byte channel records.
+    const bytes=new Uint8Array(2+29*10);
+    const view=new DataView(bytes.buffer);
+    view.setUint16(0,2,false);
+    for(let index=0;index<29;index+=1)patchLevelRecordAt(view,2+index*10,null);
+    return rewritePsdAdjustmentBlocks([{signature:'8BIM',key:'levl',data:bytes}],adjustment).blocks;
+  }
+  if(kind==='curves'){
+    // Point-based Curves v1: map flag, version, empty channel mask.
+    // The existing encoder writes the channel records and Crv extension.
+    return rewritePsdAdjustmentBlocks([
+      {signature:'8BIM',key:'curv',data:new Uint8Array([0,0,1,0,0,0,0])},
+    ],adjustment).blocks;
+  }
+  throw new PsdImportError('Нативное создание adjustment '+kind+' пока не поддерживается','PSD_ADJUSTMENT_CREATE');
+}
+
 export function rewritePsdAdjustmentBlocks(blocks,adjustment) {
   if(!Array.isArray(blocks)||!blocks.length)throw new PsdImportError('Adjustment rewrite: blocks отсутствуют','PSD_ADJUSTMENT_BLOCKS');
   const kind=String(adjustment?.kind||'');

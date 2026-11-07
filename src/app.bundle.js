@@ -24408,14 +24408,22 @@ function psdTextNativePlan(layer) {
 }
 function psdAdjustmentNativePlan(layer) {
   const source=layer?.psdAdjustment, adjustment=sanitizeAdjustmentModel(layer?.adjustment);
-  if(layer?.type!=='adjustment'||!source||!adjustment)return{eligible:false,reason:'нет imported Photoshop adjustment metadata',metadata:null};
-  if(source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
+  if(layer?.type!=='adjustment'||!adjustment)return{eligible:false,reason:'нет корректной модели adjustment layer',metadata:null};
+  if(source&&source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
   if(layer.styles)return{eligible:false,reason:'layer styles на adjustment layer требуют composite fallback',metadata:null};
   if(hasNonDefaultFilters(layer.filters))return{eligible:false,reason:'дополнительные ZPE filters не кодируются в Photoshop adjustment record',metadata:null};
+  if(!source&&!['levels','curves'].includes(adjustment.kind)){
+    return{eligible:false,reason:'нет imported Photoshop adjustment metadata для '+adjustment.kind,metadata:null};
+  }
   try {
-    const blocks=(source.blocks||[]).map(block=>psdOpaqueBlockFromState(block,{maxBytes:MAX_ADJUSTMENT_BLOCK_BYTES})).filter(Boolean);
-    const rewritten=rewritePsdAdjustmentBlocks(blocks,adjustment);
-    return{eligible:true,reason:null,metadata:{kind:adjustment.kind,blocks:rewritten.blocks,channelIds:Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[]}};
+    const blocks=source
+      ? (source.blocks||[]).map(block=>psdOpaqueBlockFromState(block,{maxBytes:MAX_ADJUSTMENT_BLOCK_BYTES})).filter(Boolean)
+      : createPsdAdjustmentBlocks(adjustment);
+    const rewritten=source?rewritePsdAdjustmentBlocks(blocks,adjustment).blocks:blocks;
+    return{eligible:true,reason:null,metadata:{
+      kind:adjustment.kind,blocks:rewritten,
+      channelIds:source&&Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[-1,0,1,2,-2],
+    }};
   } catch(error) {
     return{eligible:false,reason:error?.message||String(error),metadata:null};
   }
@@ -26998,6 +27006,31 @@ function encodeCurvesAdjustmentBlock(sourceBlock,adjustment) {
   }
   while(writer.length%4)writer.u8(0);
   return writer.concat();
+}
+
+/**
+ * Build genuine PSD adjustment records for ZPE-created Levels/Curves layers.
+ * Native records are emitted only for these known layouts; unsupported kinds
+ * must fall back rather than claiming editable Photoshop metadata.
+ */
+function createPsdAdjustmentBlocks(adjustment) {
+  const kind=String(adjustment?.kind||'');
+  if(kind==='levels'){
+    // Photoshop Levels v2 contains 29 ten-byte channel records.
+    const bytes=new Uint8Array(2+29*10);
+    const view=new DataView(bytes.buffer);
+    view.setUint16(0,2,false);
+    for(let index=0;index<29;index+=1)patchLevelRecordAt(view,2+index*10,null);
+    return rewritePsdAdjustmentBlocks([{signature:'8BIM',key:'levl',data:bytes}],adjustment).blocks;
+  }
+  if(kind==='curves'){
+    // Point-based Curves v1: map flag, version, empty channel mask.
+    // The existing encoder writes the channel records and Crv extension.
+    return rewritePsdAdjustmentBlocks([
+      {signature:'8BIM',key:'curv',data:new Uint8Array([0,0,1,0,0,0,0])},
+    ],adjustment).blocks;
+  }
+  throw new PsdImportError('Нативное создание adjustment '+kind+' пока не поддерживается','PSD_ADJUSTMENT_CREATE');
 }
 function rewritePsdAdjustmentBlocks(blocks,adjustment) {
   if(!Array.isArray(blocks)||!blocks.length)throw new PsdImportError('Adjustment rewrite: blocks отсутствуют','PSD_ADJUSTMENT_BLOCKS');
