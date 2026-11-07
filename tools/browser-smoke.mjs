@@ -513,6 +513,124 @@ async function runSmoke() {
     }
     assertNoBrowserErrors(errors, stderrState);
 
+    // CAP-MASK-VD: real file:// mask rendering, inspector, History and project IO.
+    if (process.env.ZPE_VECTOR_MASK_BROWSER_ONLY === '1') {
+      const maskFixture = await evaluate(client, `(() => {
+        const layer={id:'vm-density-shape',type:'shape',name:'Vector density E2E',
+          shape:'rect',fill:'#ff0000',stroke:'transparent',strokeWidth:0,
+          x:0,y:0,width:100,height:100,visible:true,locked:false,
+          scaleX:1,scaleY:1,rotation:0,opacity:1,blendMode:'source-over',
+          vectorMask:{enabled:true,invert:false,linked:true,subpaths:[{
+            operation:'add',closed:true,points:[
+              {x:30,y:30},{x:70,y:30},{x:70,y:70},{x:30,y:70},
+            ],
+          }]},
+        };
+        const project={version:1,name:'Vector mask controls E2E',width:100,height:100,
+          background:'transparent',selectedLayerId:layer.id,groups:[],layers:[layer]};
+        const input=document.querySelector('#projectInput'),transfer=new DataTransfer();
+        transfer.items.add(new File([JSON.stringify(project)],'vector-mask.zpe',{type:'application/json'}));
+        input.files=transfer.files;
+        input.dispatchEvent(new Event('change',{bubbles:true}));
+        return true;
+      })()`);
+      assert(maskFixture,'CAP-MASK-VD fixture created');
+      await waitFor('Vector-mask project import', async()=>evaluate(client,
+        "Boolean(document.querySelector('.layer-row.selected')?.textContent.includes('Vector density E2E'))"));
+      const maskPixels=()=>evaluate(client,`(() => {
+        const canvas=document.querySelector('#editorCanvas'),ctx=canvas.getContext('2d');
+        const alpha=(x,y)=>ctx.getImageData(x,y,1,1).data[3];
+        return {w:canvas.width,h:canvas.height,outside:alpha(10,50),
+          edge:alpha(30,50),inside:alpha(50,50)};
+      })()`);
+      await waitFor('Vector mask initial composite',async()=>{
+        const p=await maskPixels();
+        return p.w===100&&p.h===100&&p.inside>240&&p.outside<20;
+      });
+      const baseline=await maskPixels();
+      const openInspector=()=>evaluate(client,`(() => {
+        document.querySelector('[data-menu="layer"]').click();
+        const button=[...document.querySelectorAll('.menu-item')].find(
+          item=>item.textContent.includes('Параметры векторной маски'));
+        if(!button||button.disabled)return false;
+        button.click();
+        return Boolean(document.querySelector('[role="dialog"][aria-label="Параметры векторной маски"]'));
+      })()`);
+      assert(await openInspector(),'Vector mask inspector opens from actual Layer menu');
+      const modalValues=await evaluate(client,`(() => {
+        const modal=document.querySelector('[role="dialog"][aria-label="Параметры векторной маски"]');
+        const values={density:modal.elements.density.value,feather:modal.elements.feather.value};
+        modal.elements.density.value='50';
+        modal.elements.feather.value='8';
+        modal.requestSubmit();
+        return values;
+      })()`);
+      assert(modalValues.density==='100'&&modalValues.feather==='0',
+        'Legacy vector mask uses default inspector controls',JSON.stringify(modalValues));
+      await waitFor('Vector mask density+feather committed',async()=>{
+        const p=await maskPixels();
+        const history=await evaluate(client,
+          "document.querySelector('#historyList .history-row.current')?.textContent||''");
+        return p.outside>90&&p.outside<165&&p.inside>240&&p.edge>p.outside&&p.edge<240&&
+          history.includes('Параметры векторной маски');
+      });
+      const edited=await maskPixels();
+      const historyState=()=>evaluate(client,`(() => ({
+        rows:document.querySelectorAll('#historyList .history-row').length,
+        current:document.querySelector('#historyList .history-row.current')?.textContent||'',
+      }))()`);
+      assert((await historyState()).rows===2,'One inspector submit adds one History entry');
+      await evaluate(client,"document.querySelector('#undoBtn').click(); true");
+      await waitFor('Vector Mask Undo',async()=>{
+        const p=await maskPixels();return Math.abs(p.outside-baseline.outside)<5&&p.inside>240;
+      });
+      await evaluate(client,"document.querySelector('#redoBtn').click(); true");
+      await waitFor('Vector Mask Redo',async()=>{
+        const p=await maskPixels();return Math.abs(p.outside-edited.outside)<5&&Math.abs(p.edge-edited.edge)<5;
+      });
+      await evaluate(client,`(() => {
+        const original=URL.createObjectURL;
+        window.__vmOriginalCreateUrl=original;
+        URL.createObjectURL=function(blob){window.__vmSavedBlob=blob;return original.call(this,blob);};
+        return true;
+      })()`);
+      await client.send('Input.dispatchKeyEvent',{type:'keyDown',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+      await client.send('Input.dispatchKeyEvent',{type:'keyUp',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+      const saved=await evaluate(client,`(async()=>{
+        URL.createObjectURL=window.__vmOriginalCreateUrl;
+        const blob=window.__vmSavedBlob;if(!blob)return null;
+        const project=JSON.parse(await blob.text());
+        return project.layers.find(layer=>layer.id==='vm-density-shape')?.vectorMask;
+      })()`);
+      assert(saved?.density===.5&&saved?.feather===8&&saved.subpaths?.length===1,
+        'Actual downloaded .zpe stores vector controls and geometry',JSON.stringify(saved));
+      await evaluate(client,`(() => {
+        const input=document.querySelector('#projectInput'),transfer=new DataTransfer();
+        transfer.items.add(new File([window.__vmSavedBlob],'vm-reopened.zpe',{type:'application/json'}));
+        input.files=transfer.files;
+        const before=window.confirm;window.confirm=()=>true;
+        try{input.dispatchEvent(new Event('change',{bubbles:true}));}
+        finally{window.confirm=before;}
+        return true;
+      })()`);
+      await waitFor('Vector Mask reopen composite',async()=>{
+        const h=await historyState(),p=await maskPixels();
+        return h.rows===1&&h.current.includes('Открыть проект')&&
+          Math.abs(p.outside-edited.outside)<5&&Math.abs(p.edge-edited.edge)<5;
+      });
+      assert(await openInspector(),'Reopened vector mask inspector opens');
+      const reopened=await evaluate(client,`(() => {
+        const modal=document.querySelector('[role="dialog"][aria-label="Параметры векторной маски"]');
+        const values=[modal.elements.density.value,modal.elements.feather.value];
+        modal.querySelector('[data-cancel]').click();return values;
+      })()`);
+      assert(reopened[0]==='50'&&reopened[1]==='8',
+        'Reopened .zpe restores editable inspector values',JSON.stringify(reopened));
+      assertNoBrowserErrors(errors,stderrState);
+      console.log('CAP-MASK-VD Chromium file:// alpha render / inspector / History / Undo / Redo / .zpe save+reopen PASS');
+      return;
+    }
+
     // CAP-BEZ: genuine file:// pointer input, editable Shape, History and Undo/Redo.
     // The focused mode avoids rerunning unrelated long-running photo/Worker probes.
     if (process.env.ZPE_PEN_SMOOTH_BROWSER_ONLY === '1') {

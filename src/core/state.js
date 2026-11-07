@@ -193,6 +193,8 @@ export function createVectorMask(overrides = {}) {
     enabled: true,
     invert: false,
     linked: true,
+    density: 1,
+    feather: 0,
     fillStartsWithAllPixels: false,
     subpaths: [],
     ...overrides,
@@ -697,6 +699,8 @@ export function sanitizeVectorMask(mask) {
     enabled: mask.enabled !== false,
     invert: mask.invert === true,
     linked: mask.linked !== false,
+    density: bounded(mask.density, 1, 0, 1),
+    feather: bounded(mask.feather, 0, 0, 250),
     fillStartsWithAllPixels: mask.fillStartsWithAllPixels === true,
     subpaths,
   });

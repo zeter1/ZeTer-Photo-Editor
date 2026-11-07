@@ -762,12 +762,13 @@ const selectionVectorMaskController = createSelectionVectorMaskController({
       if (layerId == null || vectorMaskEditLayerId === layerId) vectorMaskEditLayerId = null;
     },
   },
-  ui: { setStatus, toast },
+  ui: { setStatus, toast, showModal },
 });
 const {
   selectionVectorMaskDocumentNodes,
   applySelectionToVectorMask,
   editSelectedVectorMask,
+  editSelectedVectorMaskProperties,
   toggleSelectedVectorMask,
   invertSelectedVectorMask,
   removeSelectedVectorMask,
@@ -2741,6 +2742,7 @@ function layerContextMenu(id) {
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
+    ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
@@ -2787,7 +2789,9 @@ function layerMaskSummary(layer){
   }
   if(layer?.vectorMask){
     const count=layer.vectorMask.subpaths?.length||0,state=layer.vectorMask.enabled===false?'отключена':layer.vectorMask.invert?'инвертирована':'включена';
-    parts.push(`векторная: ${count} контур(ов), ${state}`);
+    const density=Math.round((layer.vectorMask.density??1)*100);
+    const feather=Number(layer.vectorMask.feather)||0;
+    parts.push(`векторная: ${count} контур(ов), ${state}, плотность ${density}%, растушёвка ${feather}px`);
   }
   if(layer?.smartFilterMask){
     const state=layer.smartFilterMask.enabled===false?'отключена':layer.smartFilterMask.invert?'инвертирована':'включена';
@@ -2859,6 +2863,7 @@ const menus={
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
+    ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],

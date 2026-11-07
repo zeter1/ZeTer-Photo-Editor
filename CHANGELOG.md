@@ -1,3 +1,9 @@
+### 2026-11-07 — CAP-MASK-VD: неразрушающая плотность и растушёвка векторной маски (1.46.5)
+
+- Векторная маска получила сохраняемые density [0..1] и feather [0..250 px] с совместимыми defaults в старых .zpe. Оба compositor-пути используют тот же alpha helper, что и растровые маски, без растрирования геометрии; замена контура сохраняет controls.
+- В меню «Слой» и контекстном меню слоя добавлен диалог параметров. Commit — одна запись History; no-op не добавляет запись; отложенный submit не применяет данные к закрытому/заменённому/заблокированному объекту. Сводка масок показывает значения.
+- Фокусные unit: 25/25 PASS, реальный Chromium file://: pixel alpha (density/feather), меню, History, Undo/Redo, реальный Ctrl+S Blob и reopen .zpe PASS. PSD/PSB editable metadata и Photoshop-authored compatibility пока НЕ приняты; full Windows check может падать на Linux-only /proc/cgroup tests. PR-head CI и exact-main CI требуют отдельного подтверждения.
+
 ### 2026-11-07 — Chromium file:// E2E Bézier Alt+Shift, Undo и .zpe reopen (существующий PR #125)
 
 - В CI добавлен отдельный npm run test:browser:pen-smooth: фактический Alt+Shift mouse по Shape anchor в Chrome, повторный no-op, Undo/Redo, Ctrl+S исходного .zpe Blob с проверкой ручек, reopen того же .zpe и Alt→corner. Локально PASS, 37/37 path unit PASS, build/diff PASS. Runtime-код/форматы не изменены, новая PR-head CI ещё NOT RUN; Vector Mask/Saved Paths direct UI E2E и Adobe PSD/PSB parity остаются открытыми.
@@ -189,7 +195,7 @@
 
 # История изменений
 
-## 1.46.4 — текущая версия
+## 1.46.5 — текущая версия
 
 ### 2026-10-22 — Начато раздельное измерение времени заморозки выделения (003W/3)
 

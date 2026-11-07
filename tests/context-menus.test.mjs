@@ -69,7 +69,7 @@ test('layer blending menu targets the clicked layer and disables edits when lock
     openBlendingOptions:item=>{opened=item;},
     toggleSelectedVisibility:()=>{}, toggleSelectedLock:()=>{}, rasterizeSelectedLayer:()=>{},
     addSelectedLayerMask:()=>{}, editSelectedLayerMaskProperties:()=>{}, invertSelectedLayerMask:()=>{}, toggleSelectedLayerMask:()=>{}, toggleSelectedLayerMaskLink:()=>{}, removeSelectedLayerMask:()=>{},
-    applySelectionToVectorMask:()=>{}, editSelectedVectorMask:()=>{}, invertSelectedVectorMask:()=>{}, toggleSelectedVectorMask:()=>{}, removeSelectedVectorMask:()=>{},
+    applySelectionToVectorMask:()=>{}, editSelectedVectorMask:()=>{}, editSelectedVectorMaskProperties:()=>{}, invertSelectedVectorMask:()=>{}, toggleSelectedVectorMask:()=>{}, removeSelectedVectorMask:()=>{},
     openSmartObjectContents:()=>{}, convertSelectedToSmartObject:()=>{}, openSmartFilterDialog:()=>{}, clearSmartFilters:()=>{},
     selectionShape:null,
   };

@@ -10416,6 +10416,8 @@ function createVectorMask(overrides = {}) {
     enabled: true,
     invert: false,
     linked: true,
+    density: 1,
+    feather: 0,
     fillStartsWithAllPixels: false,
     subpaths: [],
     ...overrides,
@@ -10884,6 +10886,8 @@ function sanitizeVectorMask(mask) {
     enabled: mask.enabled !== false,
     invert: mask.invert === true,
     linked: mask.linked !== false,
+    density: bounded(mask.density, 1, 0, 1),
+    feather: bounded(mask.feather, 0, 0, 250),
     fillStartsWithAllPixels: mask.fillStartsWithAllPixels === true,
     subpaths,
   });
@@ -17436,8 +17440,23 @@ function renderVectorMaskBitmap(vectorMask, width, height) {
     initialized=true;
   }
 
-  if(vectorMask?.invert===true){
-    ctx.save();ctx.globalCompositeOperation='xor';ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+  const density=Number(vectorMask?.density ?? 1);
+  const feather=Number(vectorMask?.feather ?? 0);
+  if(vectorMask?.invert===true || density<1 || feather>0){
+    const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
+    const alpha=new Uint8ClampedArray(canvas.width*canvas.height);
+    for(let index=0;index<alpha.length;index++)alpha[index]=pixels.data[index*4+3];
+    const controlled=applyMaskControlsAlpha(alpha,canvas.width,canvas.height,{
+      invert:vectorMask?.invert===true,
+      density:Number.isFinite(density)?density:1,
+      feather:Number.isFinite(feather)?feather:0,
+    });
+    for(let index=0;index<controlled.length;index++){
+      const offset=index*4;
+      pixels.data[offset]=255;pixels.data[offset+1]=255;pixels.data[offset+2]=255;
+      pixels.data[offset+3]=controlled[index];
+    }
+    ctx.putImageData(pixels,0,0);
   }
   return canvas;
 }
@@ -22335,6 +22354,7 @@ function createSelectionVectorMaskController({
   const {
     setStatus = () => {},
     toast = () => {},
+    showModal = () => {},
   } = ui;
 
   function selectionVectorMaskDocumentNodes(shape = getSelectionShape()) {
@@ -22409,7 +22429,12 @@ function createSelectionVectorMaskController({
       return false;
     }
     if (operation === 'replace' || !layer.vectorMask) {
-      layer.vectorMask = createVectorMask({ enabled:true, invert:false, subpaths:[subpath] });
+      const previous = layer.vectorMask;
+      layer.vectorMask = createVectorMask({
+        enabled:true, invert:false,
+        density:previous?.density ?? 1, feather:previous?.feather ?? 0,
+        subpaths:[subpath],
+      });
     } else {
       if (layer.vectorMask.subpaths.length >= 128) {
         const message = 'Векторная маска ограничена 128 контурами';
@@ -22448,6 +22473,43 @@ function createSelectionVectorMaskController({
     return true;
   }
 
+  function editSelectedVectorMaskProperties() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.vectorMask;
+    const isCurrentTarget = () => ownerDocument === getDocument()
+      && getSelectedLayer() === layer
+      && ownerDocument?.layers?.includes(layer)
+      && layer.vectorMask === mask
+      && !isLayerLocked(ownerDocument, layer);
+    if (!mask || !isCurrentTarget()) return false;
+    showModal({
+      title:'Параметры векторной маски',
+      fields:[
+        { name:'density', label:'Плотность, %', type:'number', value:Math.round((mask.density ?? 1)*100), min:0, max:100, step:1 },
+        { name:'feather', label:'Растушёвка, px', type:'number', value:mask.feather ?? 0, min:0, max:250, step:.5 },
+      ],
+      submitLabel:'Применить',
+      onSubmit:values => {
+        if (!isCurrentTarget()) return false;
+        const percent = Number(values?.density);
+        const featherValue = Number(values?.feather);
+        const density = Number.isFinite(percent) ? Math.max(0,Math.min(100,percent))/100 : (mask.density ?? 1);
+        const feather = Number.isFinite(featherValue) ? Math.max(0,Math.min(250,featherValue)) : (mask.feather ?? 0);
+        if (Math.abs((mask.density ?? 1)-density)<1e-9 && Math.abs((mask.feather ?? 0)-feather)<1e-9) {
+          setStatus('Параметры векторной маски не изменились');
+          return true;
+        }
+        mask.density=density;
+        mask.feather=feather;
+        commit('Параметры векторной маски');
+        setStatus(`Векторная маска: плотность ${Math.round(density*100)}%, растушёвка ${feather}px`);
+        return true;
+      },
+    });
+    return true;
+  }
+
   function toggleSelectedVectorMask() {
     const documentValue = getDocument();
     const layer = getSelectedLayer();
@@ -22479,6 +22541,7 @@ function createSelectionVectorMaskController({
     selectionVectorMaskSubpath,
     applySelectionToVectorMask,
     editSelectedVectorMask,
+    editSelectedVectorMaskProperties,
     toggleSelectedVectorMask,
     invertSelectedVectorMask,
     removeSelectedVectorMask,
@@ -29509,12 +29572,13 @@ const selectionVectorMaskController = createSelectionVectorMaskController({
       if (layerId == null || vectorMaskEditLayerId === layerId) vectorMaskEditLayerId = null;
     },
   },
-  ui: { setStatus, toast },
+  ui: { setStatus, toast, showModal },
 });
 const {
   selectionVectorMaskDocumentNodes,
   applySelectionToVectorMask,
   editSelectedVectorMask,
+  editSelectedVectorMaskProperties,
   toggleSelectedVectorMask,
   invertSelectedVectorMask,
   removeSelectedVectorMask,
@@ -31488,6 +31552,7 @@ function layerContextMenu(id) {
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
+    ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
@@ -31534,7 +31599,9 @@ function layerMaskSummary(layer){
   }
   if(layer?.vectorMask){
     const count=layer.vectorMask.subpaths?.length||0,state=layer.vectorMask.enabled===false?'отключена':layer.vectorMask.invert?'инвертирована':'включена';
-    parts.push(`векторная: ${count} контур(ов), ${state}`);
+    const density=Math.round((layer.vectorMask.density??1)*100);
+    const feather=Number(layer.vectorMask.feather)||0;
+    parts.push(`векторная: ${count} контур(ов), ${state}, плотность ${density}%, растушёвка ${feather}px`);
   }
   if(layer?.smartFilterMask){
     const state=layer.smartFilterMask.enabled===false?'отключена':layer.smartFilterMask.invert?'инвертирована':'включена';
@@ -31606,6 +31673,7 @@ const menus={
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
+    ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
