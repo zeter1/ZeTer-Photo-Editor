@@ -1,3 +1,7 @@
+### 2026-11-07 — Chromium file:// E2E Bézier Alt+Shift, Undo и .zpe reopen (существующий PR #125)
+
+- В CI добавлен отдельный npm run test:browser:pen-smooth: фактический Alt+Shift mouse по Shape anchor в Chrome, повторный no-op, Undo/Redo, Ctrl+S исходного .zpe Blob с проверкой ручек, reopen того же .zpe и Alt→corner. Локально PASS, 37/37 path unit PASS, build/diff PASS. Runtime-код/форматы не изменены, новая PR-head CI ещё NOT RUN; Vector Mask/Saved Paths direct UI E2E и Adobe PSD/PSB parity остаются открытыми.
+
 ### 2026-11-04 — Alt+Shift сглаживание существующих Bézier-узлов (PR #125 current-main candidate)
 
 - Команда Alt+Shift+click преобразует существующий corner anchor в smooth с касательными ручками по хорде соседей; открытые концы используют одну ручку, closed subpaths — циклических соседей. Поддерживаются Shape, Vector Mask, Saved Paths; один History checkpoint, lock/stale/no-op проверки, старый Alt+click в corner сохраняется. Нет изменения `.zpe`/PSD/PSB schemas.
