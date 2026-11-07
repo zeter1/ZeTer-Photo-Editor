@@ -2,7 +2,7 @@ import { layerPixelToDocumentPoint } from '../core/geometry.js';
 import { dataUrlToBytes } from '../core/io.js';
 import { DEFAULT_LAYER_FILTERS, sanitizeFilters } from '../core/state.js';
 import { sanitizeAdjustmentModel } from '../core/adjustments.js';
-import { rewriteTypeToolText, rewritePsdShapeStyle, rewritePsdAdjustmentBlocks } from '../formats/psd.js';
+import { rewriteTypeToolText, rewritePsdShapeStyle, rewritePsdAdjustmentBlocks, createPsdAdjustmentBlocks } from '../formats/psd.js';
 
 const MAX_SHAPE_BLOCK_BYTES = 4 * 1024 * 1024;
 const MAX_ADJUSTMENT_BLOCK_BYTES = 4 * 1024 * 1024;
@@ -118,14 +118,22 @@ export function psdTextNativePlan(layer) {
 
 export function psdAdjustmentNativePlan(layer) {
   const source=layer?.psdAdjustment, adjustment=sanitizeAdjustmentModel(layer?.adjustment);
-  if(layer?.type!=='adjustment'||!source||!adjustment)return{eligible:false,reason:'нет imported Photoshop adjustment metadata',metadata:null};
-  if(source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
+  if(layer?.type!=='adjustment'||!adjustment)return{eligible:false,reason:'нет корректной модели adjustment layer',metadata:null};
+  if(source&&source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
   if(layer.styles)return{eligible:false,reason:'layer styles на adjustment layer требуют composite fallback',metadata:null};
   if(hasNonDefaultFilters(layer.filters))return{eligible:false,reason:'дополнительные ZPE filters не кодируются в Photoshop adjustment record',metadata:null};
+  if(!source&&!['levels','curves'].includes(adjustment.kind)){
+    return{eligible:false,reason:'нет imported Photoshop adjustment metadata для '+adjustment.kind,metadata:null};
+  }
   try {
-    const blocks=(source.blocks||[]).map(block=>psdOpaqueBlockFromState(block,{maxBytes:MAX_ADJUSTMENT_BLOCK_BYTES})).filter(Boolean);
-    const rewritten=rewritePsdAdjustmentBlocks(blocks,adjustment);
-    return{eligible:true,reason:null,metadata:{kind:adjustment.kind,blocks:rewritten.blocks,channelIds:Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[]}};
+    const blocks=source
+      ? (source.blocks||[]).map(block=>psdOpaqueBlockFromState(block,{maxBytes:MAX_ADJUSTMENT_BLOCK_BYTES})).filter(Boolean)
+      : createPsdAdjustmentBlocks(adjustment);
+    const rewritten=source?rewritePsdAdjustmentBlocks(blocks,adjustment).blocks:blocks;
+    return{eligible:true,reason:null,metadata:{
+      kind:adjustment.kind,blocks:rewritten,
+      channelIds:source&&Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[-1,0,1,2,-2],
+    }};
   } catch(error) {
     return{eligible:false,reason:error?.message||String(error),metadata:null};
   }

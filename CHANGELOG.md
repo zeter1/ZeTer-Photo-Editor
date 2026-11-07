@@ -1,4 +1,12 @@
-## 1.46.6 — текущая версия
+## 1.46.7 — текущая версия
+
+### 2026-11-07 — CAP-ADJ-PSD-NEW: нативный экспорт созданных Levels/Curves
+
+- **Реализовано:** новые Levels/Curves без импортированных Photoshop metadata сохраняются как редактируемые `levl` v2 / `curv` point v1 native adjustment layers в PSD/PSB, вместо flatten с `Composite Preview`. Сохраняются Master/RGB параметры, Curves points, clipping и порядок слоёв. Imported Photoshop records продолжают rewrite исходного блока.
+- **Проверено локально:** RED→GREEN, 18/18 focused Node, native PSD+PSB encode/decode readback, `npm run build`, generated bundle/index/version parity и `git diff --check`. Сценарий настоящего Adobe Photoshop GUI, полный browser UI export/reopen, PR CI и exact-main CI проверяются отдельно.
+- **Граница:** остальные новые adjustment kinds без подтверждённого native writer остаются на честном fallback. Synthetic/self-readback — не доказательство внешней Photoshop совместимости. [Журнал](task/002-adjustment-psd-new.md).
+
+## 1.46.6 — 2026-11-07
 
 ### 2026-11-07 — CAP-ADJ-STACK: безопасный clipping корректирующих слоёв и групп
 
