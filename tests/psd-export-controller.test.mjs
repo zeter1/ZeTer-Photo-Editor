@@ -77,3 +77,47 @@ test('PSD export controller keeps newly created Levels and Curves editable inste
     assert.equal(decoded.adjustmentLayers.find(layer=>layer.psdAdjustment.kind==='curves').clipping,true);
   }
 });
+
+test('adjustment raster mask renders in document coordinates, not the canonical 1x1 layer space', async () => {
+  const maskRenders=[];
+  const transforms=[];
+  const rendering={
+    createCanvas:()=>{
+      const canvas={width:0,height:0};
+      canvas.getContext=()=>({
+        setTransform:(...values)=>transforms.push(values),
+        drawImage:()=>{},
+        getImageData:()=>({data:new Uint8ClampedArray(canvas.width*canvas.height*4)}),
+      });
+      return canvas;
+    },
+    renderLayer:async(_ctx,layer)=>{
+      maskRenders.push({width:layer.width,height:layer.height,x:layer.x,y:layer.y});
+    },
+    renderDocument:async canvas=>{canvas.width=4;canvas.height=4;},
+  };
+  const levels={
+    id:'adj',type:'adjustment',name:'Masked Levels',visible:true,locked:false,
+    x:10,y:20,width:1,height:1,scaleX:2,scaleY:2,rotation:0,
+    opacity:1,blendMode:'source-over',groupId:null,clipping:false,
+    adjustment:{kind:'levels',master:{inputBlack:0,inputWhite:255,gamma:2,outputBlack:0,outputWhite:255},channels:[]},
+    mask:{
+      enabled:true,dataUrl:'data:image/png;base64,AA==',
+      density:1,feather:0,invert:false,
+      transform:{a:1,b:0,c:0,d:1,e:1,f:2},
+    },
+  };
+  const source={
+    width:4,height:4,background:'transparent',colorManagement:{},colorProfile:null,
+    paths:[],groups:[],layers:[levels],
+  };
+  const prepared=await createPsdExportController({vectors:vectors(),rendering}).prepareDocument(source);
+  assert.equal(prepared.layers.length,1);
+  assert.equal(prepared.layers[0].width,0,'native Levels must remain zero-bounds');
+  assert.equal(prepared.layers[0].mask.width,4,'exported adjustment mask spans the document');
+  assert.equal(prepared.layers[0].mask.height,4);
+  assert.deepEqual(maskRenders,[{width:4,height:4,x:0,y:0}],
+    'source mask rendering must not use adjustment canonical layer 1x1 geometry');
+  assert.deepEqual(transforms[0],[1,0,0,1,1,2],
+    'document-space raster mask transform must not inherit adjustment layer transform');
+});

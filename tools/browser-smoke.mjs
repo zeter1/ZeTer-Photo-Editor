@@ -646,6 +646,13 @@ async function runSmoke() {
       return;
     }
 
+    if (process.env.ZPE_ADJUSTMENT_PSD_UI_BROWSER_ONLY === '1') {
+      const { verifyBrowserAdjustmentPsdUi } = await import('./browser-adjustment-psd-ui-check.mjs');
+      await verifyBrowserAdjustmentPsdUi({ client, evaluate, waitFor, assert });
+      assertNoBrowserErrors(errors, stderrState);
+      return;
+    }
+
     // CAP-BEZ: genuine file:// pointer input, editable Shape, History and Undo/Redo.
     // The focused mode avoids rerunning unrelated long-running photo/Worker probes.
     if (process.env.ZPE_PEN_SMOOTH_BROWSER_ONLY === '1') {

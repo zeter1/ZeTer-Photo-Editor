@@ -1,4 +1,12 @@
-## 1.46.7 — текущая версия
+## 1.46.8 — текущая версия
+
+### 2026-11-07 — Исправлен PSD/PSB экспорт растровых масок корректирующих слоёв
+
+- Исправлено: растровые маски native Levels/Curves сохраняются в координатах и размере всего документа, а не сжимаются до геометрии `1×1` корректирующего слоя; обычные маски растровых/фигурных слоёв сохраняют прежнюю трансформацию.
+- Добавлено: настоящий Chrome `file://` E2E экспорт/импорт PSD и PSB через UI, editable Levels/Curves, RGB-кривая, History/Undo/Redo и отдельный grouped/clipped Levels с пересечением raster/vector masks и бинарной проверкой channel alpha.
+- Проверено: локальный `npm run test:browser:adjustment-psd-ui` PASS после воспроизведённого RED; полный `npm run test:browser` PASS (Chrome file://, 103.31 s), предыдущие adjustment-create/adjustment-stack PASS, 19/19 focused Node PASS (дополнительно 2026-11-11: документная геометрия raster mask на canonical 1×1 adjustment). Полный Windows `npm run check`: 1603 PASS, 10 SKIP, 5 FAIL в Linux-only `/proc/cgroup` тестах; внешний Adobe Photoshop GUI не проверен.
+
+## 1.46.7 — 2026-11-07
 
 ### 2026-11-07 — CAP-ADJ-PSD-NEW: нативный экспорт созданных Levels/Curves
 

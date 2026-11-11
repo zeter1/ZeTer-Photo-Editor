@@ -25103,8 +25103,12 @@ function createPsdExportController({
     const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
     let maskScale=1;
     if(layer.mask.dataUrl){
-      const localWidth=Math.max(1,Number(layer.width)||1);
-      const localHeight=Math.max(1,Number(layer.height)||1);
+      // Adjustment masks are document-scoped, even when their canonical layer
+      // has the default 1x1 geometry. Exporting through layerLocalTransform
+      // otherwise collapses a full-document raster mask into one pixel.
+      const documentMask=layer.type==='adjustment';
+      const localWidth=documentMask?bounds.width:Math.max(1,Number(layer.width)||1);
+      const localHeight=documentMask?bounds.height:Math.max(1,Number(layer.height)||1);
       const source=createCanvas();
       source.width=Math.max(1,Math.ceil(localWidth));
       source.height=Math.max(1,Math.ceil(localHeight));
@@ -25119,7 +25123,7 @@ function createPsdExportController({
       });
       await renderLayer(sourceCtx,maskLayer);
       const relative=normalizeAffineTransform(layer.mask.transform);
-      const world=multiplyAffineTransforms(layerLocalTransform(layer),relative);
+      const world=documentMask?relative:multiplyAffineTransforms(layerLocalTransform(layer),relative);
       maskScale=affineTransformMaxScale(world);
       ctx.setTransform(world.a,world.b,world.c,world.d,world.e-bounds.x,world.f-bounds.y);
       ctx.drawImage(source,0,0,source.width,source.height,0,0,localWidth,localHeight);
