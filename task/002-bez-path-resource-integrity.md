@@ -1,6 +1,6 @@
 # CAP-BEZ-PSD-PATH-LIMIT — целостность Saved Paths при экспорте PSD/PSB
 
-**Дата:** 2026-11-08 · **Приоритет:** P1/P2 (data integrity) · **Статус:** bounded local PASS; remote PR/CI PENDING.
+**Дата:** 2026-11-08 · **Приоритет:** P1/P2 (data integrity) · **Статус:** bounded local PASS; [PR #383 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/383), CI PENDING.
 
 **База:** main `70a17f1b2a56e0fa370c92b12efc480c3dd32701`; stacked dependency `feat/adjustment-psd-ui-20261107` (локальный head `6bb2b39`). Изолированная ветка `fix/psd-saved-path-integrity-20261108`.
 
@@ -25,3 +25,8 @@
 Этот bounded fix предотвращает потерю на границе **writer API**. Нормализация проекта `src/core/state.js` уже ограничивает `doc.paths` до 998; отдельное улучшение UX для явно сообщаемого превышения при входном файле возможно в будущем и не следует выдавать за реализованное.
 
 **NEXT:** довести локальную `feat/adjustment-psd-ui-20261107` до разрешённых GitHub PR-head CI/merge/exact-main gates, затем публикация и CI этой stacked ветки. Далее приоритетная **CAP-BEZ-MASK-PSD-UI**: настоящий Chrome `file://` Saved Path (Pen) → Vector Mask application → anchor/handle and boolean edit → PSD/PSB UI export → reopen, сверить alpha/geometry/History/Undo/Redo/`.zpe` и исправить первый RED owner.
+
+## Публикация — 2026-11-11
+
+- [PR #383](https://github.com/zeter1/ZeTer-Photo-Editor/pull/383) открыт как stacked PR на ветку CAP-ADJ-PSD-UI (#382); code commit `035c4aa713545f1ef1b4718e9306507bc82e0854`. Девять Git blobs идентичны локальным по SHA, текущий parent #382 не менялся.
+- Свежий Windows `node --test tests/psd-saved-path-integrity.test.mjs` — 2/2 PASS, `npm run test:browser:vector-mask` Chrome `file://` PASS. Linux PR-head CI пока не подтверждён. После merge родителя #382 PR #383 необходимо retarget на main, проверить полные Linux gates перед merge.
