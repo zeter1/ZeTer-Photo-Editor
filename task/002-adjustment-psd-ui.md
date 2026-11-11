@@ -43,3 +43,5 @@ Production: `src/document/psd-export-controller.js`; focused CDP: `tools/browser
 - [PR #382](https://github.com/zeter1/ZeTer-Photo-Editor/pull/382) **MERGED** в `main` commit `b94eeb5b3903dba10af34682fd8db6e582efa31a`, head `6964b09f6b136dede4a7050a55b90b7442d70eef`.
 - Linux exact PR-head: [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42978011167), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42978011176).
 - Exact merged-main проверки [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986464917) и [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986465028) запущены — итог нужен отдельным readback. Bounded реализация завершена; Adobe GUI parity остаётся IN PROGRESS.
+
+- **Final exact-main CI readback (2026-11-11):** merge `b94eeb5`, [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986465028), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986464917); correct run identities (not reversed).

@@ -36,3 +36,10 @@
 - Родительский [PR #382](https://github.com/zeter1/ZeTer-Photo-Editor/pull/382) принят и MERGED в `main` `b94eeb5b3903dba10af34682fd8db6e582efa31a` после core/real-photo SUCCESS на точном `6964b09` ([core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42978011167), [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42978011176)). Exact-main gates [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986464917) и [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986465028) ещё проверяются; не объявлять PASS до результата.
 - PR #383 теперь основан на `main` и mergeable; до этого documentation update отдельные Linux проверки #383 не запускались. Fresh latest-head CI и дальнейшее слияние остаются IN PROGRESS.
 - После merge #383 следующая **функциональная** реализация: CAP-BEZ-MASK-PSD-UI с реальным Chrome `file://` и binary PSD/PSB readback; Adobe Photoshop-authored provenance — отдельно.
+
+## Bounded merge acceptance — 2026-11-11
+
+- PR-head `a40b88b65960d2f51201854391187267c53fa366`: Linux [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986777354), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986777358).
+- [PR #383 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/383) main `e0298721249eceff7a942571918d56921fa1bda2`; exact-main [core CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42987757832) и [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42987757817) запущены, final state не заявляется без readback.
+- Fresh clean Windows: 11/11 focused, vector-mask Chrome `file://` PASS, CAP-ADJ-PSD-UI Chrome PSD+PSB PASS, полный `npm run test:browser` PASS (exit 0, 118.58 s). Существующая корневая рабочая копия оставлена без изменений.
+- Следующий P1 code slice — [CAP-BEZ-MASK-PSD-UI](002-bez-mask-psd-ui.md). Само наличие paths-controller и PSD codec не закрывает genuine editable UI acceptance.
