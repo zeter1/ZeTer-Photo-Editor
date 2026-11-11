@@ -37,3 +37,9 @@ Production: `src/document/psd-export-controller.js`; focused CDP: `tools/browser
 - Опубликованы 17 файлов с проверкой `git blob` SHA каждого; фактический GitHub commit `f9e7c2739fdfa2308c32b35d82106b11a167c328` и [PR #382](https://github.com/zeter1/ZeTer-Photo-Editor/pull/382) на `main` `70a17f1b2a56e0fa370c92b12efc480c3dd32701`.
 - [Core CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42977607666) и [real-photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42977607523) стартовали; финальный результат нужно читать по latest head, не выдавать запуск за PASS.
 - Обновление `task/` изменяет PR head; после него нужен новый exact-head CI readback. Merge в `main` и exact-main CI на момент записи не выполнены.
+
+## Merge acceptance — 2026-11-11
+
+- [PR #382](https://github.com/zeter1/ZeTer-Photo-Editor/pull/382) **MERGED** в `main` commit `b94eeb5b3903dba10af34682fd8db6e582efa31a`, head `6964b09f6b136dede4a7050a55b90b7442d70eef`.
+- Linux exact PR-head: [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42978011167), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42978011176).
+- Exact merged-main проверки [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986464917) и [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986465028) запущены — итог нужен отдельным readback. Bounded реализация завершена; Adobe GUI parity остаётся IN PROGRESS.

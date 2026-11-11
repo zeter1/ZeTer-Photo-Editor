@@ -30,3 +30,9 @@
 
 - [PR #383](https://github.com/zeter1/ZeTer-Photo-Editor/pull/383) открыт как stacked PR на ветку CAP-ADJ-PSD-UI (#382); code commit `035c4aa713545f1ef1b4718e9306507bc82e0854`. Девять Git blobs идентичны локальным по SHA, текущий parent #382 не менялся.
 - Свежий Windows `node --test tests/psd-saved-path-integrity.test.mjs` — 2/2 PASS, `npm run test:browser:vector-mask` Chrome `file://` PASS. Linux PR-head CI пока не подтверждён. После merge родителя #382 PR #383 необходимо retarget на main, проверить полные Linux gates перед merge.
+
+## Приёмка зависимости и ретаргет — 2026-11-11
+
+- Родительский [PR #382](https://github.com/zeter1/ZeTer-Photo-Editor/pull/382) принят и MERGED в `main` `b94eeb5b3903dba10af34682fd8db6e582efa31a` после core/real-photo SUCCESS на точном `6964b09` ([core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42978011167), [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42978011176)). Exact-main gates [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986464917) и [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42986465028) ещё проверяются; не объявлять PASS до результата.
+- PR #383 теперь основан на `main` и mergeable; до этого documentation update отдельные Linux проверки #383 не запускались. Fresh latest-head CI и дальнейшее слияние остаются IN PROGRESS.
+- После merge #383 следующая **функциональная** реализация: CAP-BEZ-MASK-PSD-UI с реальным Chrome `file://` и binary PSD/PSB readback; Adobe Photoshop-authored provenance — отдельно.
