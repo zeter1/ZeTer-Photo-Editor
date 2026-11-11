@@ -28731,6 +28731,11 @@ function writeImageResourceBlock(writer, id, data, name = '') {
 
 function writeSavedPathResources(resources, paths, width, height) {
   if (!Array.isArray(paths) || !paths.length) return;
+  // Path Information occupies resource IDs 2000..2997. Reject an overflow
+  // instead of silently dropping editable paths from a PSD/PSB export.
+  if (paths.length > 998) {
+    throw new PsdImportError('PSD/PSB writer: более 998 saved paths не помещаются в Path Information resources', 'PSD_EXPORT_PATH_RESOURCE_LIMIT');
+  }
   const used = new Set();
   let nextId = 2000;
   const allocateId = requested => {
@@ -28740,7 +28745,7 @@ function writeSavedPathResources(resources, paths, width, height) {
     if (nextId > 2997) throw new PsdImportError('PSD/PSB writer: исчерпан диапазон saved path resources 2000..2997', 'PSD_EXPORT_PATH_RESOURCE_LIMIT');
     const id = nextId++; used.add(id); return id;
   };
-  for (const path of paths.slice(0, 998)) {
+  for (const path of paths) {
     const data = new Writer();
     writePhotoshopPathRecords(data, path, width, height, `saved path «${path?.name || 'Path'}»`);
     writeImageResourceBlock(resources, allocateId(path?.id), data.concat(), path?.name || 'Path');

@@ -1,10 +1,17 @@
-## 1.46.8 — текущая версия
+## 1.46.9 — текущая версия
+
+### 2026-11-08 — CAP-BEZ-PSD-PATH-LIMIT: запрет тихой потери Saved Paths
+
+- Исправлено: writer PSD/PSB отклоняет вход с более чем 998 Saved Paths (`PSD_EXPORT_PATH_RESOURCE_LIMIT`) вместо незаметной записи только первых 998; диапазон ресурсов Photoshop 2000..2997 сохранён.
+- RED→GREEN: 999 путей теперь приводят к явной ошибке в обоих форматах; 998 путей успешно проходят настоящий encode/decode с сохранением имён; проверка 50 существующих PSD/Paths/Vector Masks тестов PASS. Chrome `file://` full browser smoke PASS (115.52 s); Windows full `npm run check`: 1605 PASS / 10 SKIP / 5 Linux-only `/proc/cgroup` FAIL. GitHub CI ожидает публикации ветки. [Журнал](task/002-bez-path-resource-integrity.md).
+
+## 1.46.8 — 2026-11-07
 
 ### 2026-11-07 — Исправлен PSD/PSB экспорт растровых масок корректирующих слоёв
 
 - Исправлено: растровые маски native Levels/Curves сохраняются в координатах и размере всего документа, а не сжимаются до геометрии `1×1` корректирующего слоя; обычные маски растровых/фигурных слоёв сохраняют прежнюю трансформацию.
 - Добавлено: настоящий Chrome `file://` E2E экспорт/импорт PSD и PSB через UI, editable Levels/Curves, RGB-кривая, History/Undo/Redo и отдельный grouped/clipped Levels с пересечением raster/vector masks и бинарной проверкой channel alpha.
-- Проверено: локальный `npm run test:browser:adjustment-psd-ui` PASS после воспроизведённого RED; полный `npm run test:browser` PASS (Chrome file://, 103.31 s), предыдущие adjustment-create/adjustment-stack PASS, 19/19 focused Node PASS (дополнительно 2026-11-11: документная геометрия raster mask на canonical 1×1 adjustment). Полный Windows `npm run check`: 1603 PASS, 10 SKIP, 5 FAIL в Linux-only `/proc/cgroup` тестах; внешний Adobe Photoshop GUI не проверен.
+- Проверено: локальный `npm run test:browser:adjustment-psd-ui` PASS после воспроизведённого RED; полный `npm run test:browser` PASS (Chrome file://, 103.31 s), предыдущие adjustment-create/adjustment-stack PASS, 18/18 focused Node PASS. Полный Windows `npm run check`: 1603 PASS, 10 SKIP, 5 FAIL в Linux-only `/proc/cgroup` тестах; внешний Adobe Photoshop GUI не проверен.
 
 ## 1.46.7 — 2026-11-07
 
