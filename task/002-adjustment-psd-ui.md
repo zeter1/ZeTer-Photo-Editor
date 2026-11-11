@@ -31,3 +31,9 @@ Production: `src/document/psd-export-controller.js`; focused CDP: `tools/browser
 
 - Добавлен `tests/psd-export-controller.test.mjs`: canonical adjustment 1×1 и смещённый/масштабированный слой не должны уменьшать документную raster mask (4×4); относительная `mask.transform` должна оставаться в координатах документа. Отдельный unit test PASS (4/4), все профильные вместе 19/19.
 - Повторный production Chrome `file://` `test:browser:adjustment-psd-ui` PASS (PSD/PSB, Layers UI, binary mask, History, .zpe), `git diff --check` PASS. GitHub PR-head/exact-main PENDING, Adobe GUI не проверен.
+
+## GitHub publication — 2026-11-11
+
+- Опубликованы 17 файлов с проверкой `git blob` SHA каждого; фактический GitHub commit `f9e7c2739fdfa2308c32b35d82106b11a167c328` и [PR #382](https://github.com/zeter1/ZeTer-Photo-Editor/pull/382) на `main` `70a17f1b2a56e0fa370c92b12efc480c3dd32701`.
+- [Core CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42977607666) и [real-photo CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/42977607523) стартовали; финальный результат нужно читать по latest head, не выдавать запуск за PASS.
+- Обновление `task/` изменяет PR head; после него нужен новый exact-head CI readback. Merge в `main` и exact-main CI на момент записи не выполнены.
