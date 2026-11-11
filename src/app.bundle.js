@@ -1714,6 +1714,45 @@ function createPathsController({
     return true;
   }
 
+  function appendPenSubpath(points, { index = getSelectedIndex(), expectedDocument = null, closed = false, operation = 'add' } = {}) {
+    const owner = documentValue();
+    const path = selectedPath();
+    if (!owner || (expectedDocument && expectedDocument !== owner) || index !== selectedIndex
+      || owner.paths?.[index] !== path || !Array.isArray(path?.subpaths)) return false;
+    if (!['add', 'subtract', 'intersect', 'exclude'].includes(operation)) {
+      setStatus('Недопустимая операция векторного контура');
+      return false;
+    }
+    if (!closed || !Array.isArray(points) || points.length < 3 || points.length > 16384) {
+      setStatus('Для векторной маски нужен замкнутый контур из трёх или более узлов');
+      return false;
+    }
+    if (path.subpaths.length >= 65535 || points.some(point => {
+      const valid = value => value && Number.isFinite(value.x) && Number.isFinite(value.y);
+      return !valid(point) || (point.handleIn != null && !valid(point.handleIn))
+        || (point.handleOut != null && !valid(point.handleOut));
+    })) {
+      setStatus('Недопустимая геометрия подпути');
+      return false;
+    }
+    const xs = points.map(point => point.x);
+    const ys = points.map(point => point.y);
+    if (Math.max(...xs) - Math.min(...xs) < 1 && Math.max(...ys) - Math.min(...ys) < 1) {
+      setStatus('Контур слишком мал');
+      return false;
+    }
+    const nodes = points.map(point => ({
+      x: point.x, y: point.y,
+      handleIn: point.handleIn ? { x: point.handleIn.x, y: point.handleIn.y } : null,
+      handleOut: point.handleOut ? { x: point.handleOut.x, y: point.handleOut.y } : null,
+      kind: point.kind === 'smooth' ? 'smooth' : 'corner',
+    }));
+    path.subpaths.push({ operation, closed: true, fillRule: 'non-zero', points: nodes });
+    commit('Добавить подпуть сохранённого контура');
+    setStatus(`Подпуть (${operation}) добавлен в «${path.name || 'Контур'}»`);
+    return true;
+  }
+
   function selectForAction(index) {
     setSelectedIndex(index);
     return selectedIndex;
@@ -1842,6 +1881,7 @@ function createPathsController({
     deleteSelectedDocumentPath,
     editSelectedDocumentPath,
     applySelectedDocumentPathAsVectorMask,
+    appendPenSubpath,
     pathContextMenu,
     updatePathsPanel,
     bindControls,
@@ -31054,10 +31094,6 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'pen') {
     const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
     if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
-    if(documentPathEditIndex>=0){
-      setStatus('Сохранённый контур: перетаскивайте существующие anchors/handles; новые subpaths добавляются через маску/выделение и сохранение');
-      return;
-    }
     if(vectorMaskEditLayerId===selected()?.id){
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
       return;
@@ -31285,6 +31321,16 @@ function tracePenDraftPath(ctx,points,hover=null,closing=false){
 function finishPenPath({forceClosed=false}={}){
   const points=penDraftGestures.consumePoints();
   if(penDraftGestures.isGesture(drag))drag=null;
+  if(documentPathEditIndex>=0){
+    const applied=pathsController.appendPenSubpath(points,{
+      index:documentPathEditIndex,
+      expectedDocument:doc,
+      closed:Boolean(forceClosed||els.penClosed?.checked),
+      operation:$('#penPathOperation')?.value||'add',
+    });
+    if(applied){updatePathsPanel();drawOverlay();}
+    return applied;
+  }
   const outcome=penPathCommands.publish(doc,points,{
     pathClosed:Boolean(forceClosed||els.penClosed?.checked),
     stroke:els.primaryColor.value,
