@@ -67,7 +67,7 @@ test('saved path limit is enforced before mutation',()=>{
   assert.equal(toasts.at(-1)?.[1],'warn');
 });
 
-test('applying a saved path preserves adjustment and lock guards before vector-mask publication',()=>{
+test('applying a saved path to adjustment and raster layers keeps owner and lock safeguards',()=>{
   const doc={paths:[savedPath('Mask',2000)]};
   let layer={type:'adjustment',vectorMask:null},locked=false,cleared=0;
   const statuses=[],commits=[];
@@ -83,18 +83,18 @@ test('applying a saved path preserves adjustment and lock guards before vector-m
     ui:{setStatus:value=>statuses.push(value)},
   });
   controller.setSelectedIndex(0);
-  assert.equal(controller.applySelectedDocumentPathAsVectorMask(),false);
-  assert.match(statuses.at(-1),/adjustment layer/);
-
+  assert.equal(controller.applySelectedDocumentPathAsVectorMask(),true);
+  assert.equal(layer.vectorMask.imported,true);
+  assert.equal(layer.vectorMask.subpaths.length,1);
+  assert.equal(cleared,1);
   layer={type:'raster',vectorMask:null};locked=true;
   assert.equal(controller.applySelectedDocumentPathAsVectorMask(),false);
-  assert.match(statuses.at(-1),/заблокированы/);
-
+  assert.equal(layer.vectorMask,null);
   locked=false;
   assert.equal(controller.applySelectedDocumentPathAsVectorMask(),true);
   assert.equal(layer.vectorMask.imported,true);
-  assert.equal(cleared,1);
-  assert.deepEqual(commits,['Применить контур как векторную маску']);
+  assert.equal(cleared,2);
+  assert.equal(commits.length,2);
 });
 
 test('panel rendering keeps option semantics, keyboard selection, context menu and controls accessible',()=>{

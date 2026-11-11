@@ -1678,7 +1678,7 @@ function createPathsController({
   }
 
   function canApplyPath(path = selectedPath(), layer = getSelectedLayer?.()) {
-    return Boolean(path && layer && layer.type !== 'adjustment' && !isLayerLocked(layer, documentValue()));
+    return Boolean(path && layer && !isLayerLocked(layer, documentValue()));
   }
 
   function applySelectedDocumentPathAsVectorMask() {
@@ -1690,10 +1690,6 @@ function createPathsController({
     }
     if (!layer) {
       setStatus('Выберите слой для векторной маски');
-      return false;
-    }
-    if (layer.type === 'adjustment') {
-      setStatus('Сохранённый контур как vector mask пока применяется к обычным слоям, не к adjustment layer');
       return false;
     }
     if (isLayerLocked(layer, documentValue())) {

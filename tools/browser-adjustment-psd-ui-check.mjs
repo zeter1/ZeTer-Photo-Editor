@@ -267,13 +267,13 @@ export async function verifyBrowserAdjustmentPsdUi({ client, evaluate, waitFor, 
       adjustment:{kind:'levels',master:{inputBlack:0,inputWhite:255,gamma:2,
         outputBlack:0,outputWhite:255},channels:[]},
       mask:{enabled:true,density:1,feather:0,invert:false,dataUrl:mask.toDataURL('image/png')},
-      vectorMask:{enabled:true,invert:false,subpaths:[{
-        operation:'add',closed:true,
-        points:[{x:0,y:0},{x:32,y:0},{x:32,y:64},{x:0,y:64}]
-      }]},
+      vectorMask:null,
     };
     const source={version:1,name:'UI masked group',width:64,height:64,
       background:'transparent',selectedLayerId:adjustment.id,
+      paths:[{id:2000,name:'UI saved alpha path',fillStartsWithAllPixels:false,
+        subpaths:[{operation:'add',closed:true,fillRule:'non-zero',
+          points:[{x:0,y:0},{x:32,y:0},{x:32,y:64},{x:0,y:64}]}]}],
       groups:[{id:'ui-masked-group',name:'UI masked group',
         visible:true,opacity:1,blendMode:'pass-through'}],
       layers:[shape('ui-bottom-gray','#808080'),
@@ -321,6 +321,30 @@ export async function verifyBrowserAdjustmentPsdUi({ client, evaluate, waitFor, 
       const s=await run(inspect);
       return s.selected.includes('UI masked Levels')&&s.gamma==='2';
     });
+    const pathApplied=await run(() => {
+      const row=document.querySelector('#pathsList .path-row');
+      const apply=document.querySelector('#applyPathMaskBtn');
+      if(!row || !apply) return 'missing Paths UI';
+      row.click();
+      if(apply.disabled) return 'disabled';
+      apply.click();
+      return 'applied';
+    });
+    assert(pathApplied==='applied',format+' apply Saved Path to adjustment via actual Paths UI',pathApplied);
+    await waitFor(format+' Paths mask visible',async()=>{
+      const p=await run(maskedPixels);
+      return p?.topRight[0]===64 && p?.topLeft[0]>=122;
+    });
+    await evaluate(client,"document.querySelector('#undoBtn').click();true");
+    await waitFor(format+' Paths mask Undo',async()=>{
+      const p=await run(maskedPixels);
+      return p?.topRight[0]>=122 && p?.topRight[0]<=135;
+    });
+    await evaluate(client,"document.querySelector('#redoBtn').click();true");
+    await waitFor(format+' Paths mask Redo',async()=>{
+      const p=await run(maskedPixels);
+      return p?.topRight[0]===64 && p?.topLeft[0]>=122;
+    });
     await waitFor(format+' masked baseline',async()=>{
       const p=await run(maskedPixels);
       return p?.topLeft[0]>=122&&p.topLeft[0]<=135
@@ -338,6 +362,9 @@ export async function verifyBrowserAdjustmentPsdUi({ client, evaluate, waitFor, 
     const parsed=await decodePsd(Uint8Array.from(exportedBytes),{maxPixels:5000,maxLayers:20});
     const native=parsed.adjustmentLayers?.[0];
     const nativeMask=native?.mask?.pixels;
+    assert(parsed.paths?.some(path=>path.name==='UI saved alpha path' &&
+      path.subpaths?.length===1),format+' binary must retain editable Saved Path',
+      JSON.stringify({names:parsed.paths?.map(path=>path.name)}));
     assert(parsed.adjustmentLayers?.length===1 && parsed.groups?.length===1 &&
       native.psdAdjustment?.blocks?.some(block=>block.key==='levl') &&
       native.psdAdjustment?.parsed?.kind==='levels' && native.clipping &&
