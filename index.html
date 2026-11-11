@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
-  <meta name="application-version" content="1.46.10" />
-  <meta name="application-build" content="2d5f0c9a9a96deb2" />
+  <meta name="application-version" content="1.46.11" />
+  <meta name="application-build" content="2064fcc2f970cba6" />
   <title>ZeTer Photo Editor — локальный редактор изображений</title>
   <link rel="stylesheet" href="./src/styles.css" />
 </head>
@@ -127,6 +127,7 @@
       <label class="option-group gradient-only">Второй цвет <input id="secondaryColor" type="color" value="#ffffff" /></label>
       <label class="option-group gradient-only">Тип <select id="gradientType"><option value="linear">Линейный</option><option value="radial">Радиальный</option></select></label>
       <label class="option-group pen-only"><input id="penClosed" type="checkbox" /> Замкнуть контур</label>
+      <label class="option-group pen-only">Подпуть Saved Path <select id="penPathOperation" aria-label="Операция нового подпути сохранённого контура"><option value="add">Добавить</option><option value="subtract">Вычесть</option><option value="intersect">Пересечение</option><option value="exclude">Исключение</option></select></label>
       <label class="option-group text-only">Шрифт
         <select id="fontFamily">
           <option value="Inter, Arial, sans-serif">Inter / Arial</option>

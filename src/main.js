@@ -2127,10 +2127,6 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'pen') {
     const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
     if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
-    if(documentPathEditIndex>=0){
-      setStatus('Сохранённый контур: перетаскивайте существующие anchors/handles; новые subpaths добавляются через маску/выделение и сохранение');
-      return;
-    }
     if(vectorMaskEditLayerId===selected()?.id){
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
       return;
@@ -2358,6 +2354,16 @@ function tracePenDraftPath(ctx,points,hover=null,closing=false){
 function finishPenPath({forceClosed=false}={}){
   const points=penDraftGestures.consumePoints();
   if(penDraftGestures.isGesture(drag))drag=null;
+  if(documentPathEditIndex>=0){
+    const applied=pathsController.appendPenSubpath(points,{
+      index:documentPathEditIndex,
+      expectedDocument:doc,
+      closed:Boolean(forceClosed||els.penClosed?.checked),
+      operation:$('#penPathOperation')?.value||'add',
+    });
+    if(applied){updatePathsPanel();drawOverlay();}
+    return applied;
+  }
   const outcome=penPathCommands.publish(doc,points,{
     pathClosed:Boolean(forceClosed||els.penClosed?.checked),
     stroke:els.primaryColor.value,
