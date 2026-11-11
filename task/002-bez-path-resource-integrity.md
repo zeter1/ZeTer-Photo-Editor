@@ -1,0 +1,27 @@
+# CAP-BEZ-PSD-PATH-LIMIT — целостность Saved Paths при экспорте PSD/PSB
+
+**Дата:** 2026-11-08 · **Приоритет:** P1/P2 (data integrity) · **Статус:** bounded local PASS; remote PR/CI PENDING.
+
+**База:** main `70a17f1b2a56e0fa370c92b12efc480c3dd32701`; stacked dependency `feat/adjustment-psd-ui-20261107` (локальный head `6bb2b39`). Изолированная ветка `fix/psd-saved-path-integrity-20261108`.
+
+## RED → GREEN
+
+- **RED:** writer `src/formats/psd.js:writeSavedPathResources` и PSD, и PSB молча экспортировали `paths.slice(0, 998)`; 999-й и последующие редактируемые контуры терялись без ошибки. Новый настоящий binary writer test падал `Missing expected exception` на старом коде.
+- **GREEN:** writer заранее отвергает число Saved Paths > 998 через `PsdImportError.code === 'PSD_EXPORT_PATH_RESOURCE_LIMIT'`, прежде чем создавать truncated output; защищён диапазон Photoshop Path Information resource ID 2000..2997. Используется исходный массив без `slice`.
+- **Positive boundary:** все 998 уникальных контуров реально кодируются в PSD и PSB и заново декодируются, включая первый и последний имена.
+
+## Изменённый код и проверки
+
+- `src/formats/psd.js`: fail-closed guard вместо тихого обрезания.
+- `tests/psd-saved-path-integrity.test.mjs`: две регрессии на overflow и полную границу 998 для PSD + PSB.
+- Локально: RED 1 FAIL/1 PASS → GREEN 2/2 PASS; дополнительные 50/50 PSD/Vector Mask/Saved Paths тестов PASS.
+- Production Chrome `file://`: `npm run test:browser:vector-mask` PASS, `npm run test:browser:adjustment-psd-ui` PASS и полный `npm run test:browser` PASS (115.52 s, exit 0).
+- `npm run check`: build 1.46.9 PASS, 1605 Node PASS / 10 SKIP / 5 FAIL (пять Linux-only `/proc/cgroup` tests на Windows); общий check не объявляется успешным. `node --test tests/version-consistency.test.mjs` PASS, `git diff --check` PASS.
+- Внешняя Adobe Photoshop GUI проверка не выполнялась; writer self-readback ≠ Adobe parity.
+- PR-head Linux CI и exact-main CI не запускались для этой ветки (ветка ещё не опубликована).
+
+## Ограничения / следующая задача
+
+Этот bounded fix предотвращает потерю на границе **writer API**. Нормализация проекта `src/core/state.js` уже ограничивает `doc.paths` до 998; отдельное улучшение UX для явно сообщаемого превышения при входном файле возможно в будущем и не следует выдавать за реализованное.
+
+**NEXT:** довести локальную `feat/adjustment-psd-ui-20261107` до разрешённых GitHub PR-head CI/merge/exact-main gates, затем публикация и CI этой stacked ветки. Далее приоритетная **CAP-BEZ-MASK-PSD-UI**: настоящий Chrome `file://` Saved Path (Pen) → Vector Mask application → anchor/handle and boolean edit → PSD/PSB UI export → reopen, сверить alpha/geometry/History/Undo/Redo/`.zpe` и исправить первый RED owner.
