@@ -98,6 +98,8 @@ jobs:
         run: npm run test:browser:adjustment-create
       - name: Adjustment stack / nested groups / clipping / raster+vector masks / History (file://)
         run: npm run test:browser:adjustment-stack
+      - name: Adjustment PSD/PSB GUI export-import / native masks / History (file://)
+        run: npm run test:browser:adjustment-psd-ui
 
       - name: Photoshop PSD native layers in fresh Chromium file:// (002B/2a)
         run: npm run test:browser
