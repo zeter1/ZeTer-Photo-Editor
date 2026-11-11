@@ -1,4 +1,12 @@
-## 1.46.9 — текущая версия
+## 1.46.10 — текущая версия
+
+### 2026-11-11 — CAP-BEZ-MASK-ADJ-APPLY: Saved Path как Vector Mask корректирующего слоя
+
+- В панели Paths теперь можно применить сохранённый контур к разблокированному Levels/Curves adjustment layer: исправлен недоступный UI action; защита заблокированных слоёв сохранена.
+- Реальный Chrome `file://`: Paths row + Apply, History Undo/Redo, raster/vector intersection и alpha, настоящий UI export/import PSD **и** PSB, native Saved Path + editable adjustment/vector metadata, повторное открытие `.zpe`; RED (disabled) → GREEN. Не является Adobe Photoshop GUI parity.
+- Node regression покрывает adjustment и raster layers, блокировки; задача родительской полной Pen/anchors/boolean/PSD UI parity остаётся IN PROGRESS.
+
+## 1.46.9 — 2026-11-08
 
 ### 2026-11-08 — CAP-BEZ-PSD-PATH-LIMIT: запрет тихой потери Saved Paths
 
