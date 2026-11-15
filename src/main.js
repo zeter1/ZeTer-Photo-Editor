@@ -816,6 +816,7 @@ const pathsController = createPathsController({
     openContextMenu,
     pathList: els.paths,
     controls: {
+      new: $('#newPathBtn'),
       add: $('#addPathBtn'),
       edit: $('#editPathBtn'),
       applyMask: $('#applyPathMaskBtn'),

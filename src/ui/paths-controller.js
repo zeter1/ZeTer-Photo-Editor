@@ -176,6 +176,34 @@ export function createPathsController({
     return true;
   }
 
+  function createEmptyDocumentPath() {
+    const owner = documentValue();
+    if (!owner) return false;
+    if (paths().length >= SAVED_PATH_LIMIT) {
+      setStatus('Достигнут лимит 998 сохранённых контуров');
+      return false;
+    }
+    const id = allocateResourceId();
+    if (id === null) {
+      setStatus('Исчерпан диапазон Photoshop Path Resource ID 2000..2997');
+      return false;
+    }
+    if (!Array.isArray(owner.paths)) owner.paths = [];
+    const path = {
+      id,
+      name: uniqueName('Контур'),
+      fillStartsWithAllPixels: false,
+      subpaths: [],
+    };
+    owner.paths.push(path);
+    selectedIndex = owner.paths.length - 1;
+    commit('Создать контур');
+    beginPathEdit(selectedIndex);
+    updatePathsPanel();
+    setStatus(`Создан «${path.name}»: нарисуйте замкнутый контур пером`);
+    return true;
+  }
+
   function renameSelectedDocumentPath() {
     const owner = documentValue();
     const path = selectedPath();
@@ -251,7 +279,8 @@ export function createPathsController({
   }
 
   function canApplyPath(path = selectedPath(), layer = getSelectedLayer?.()) {
-    return Boolean(path && layer && !isLayerLocked(layer, documentValue()));
+    return Boolean(path?.subpaths?.some(subpath => subpath?.closed && subpath.points?.length >= 3)
+      && layer && !isLayerLocked(layer, documentValue()));
   }
 
   function applySelectedDocumentPathAsVectorMask() {
@@ -267,6 +296,10 @@ export function createPathsController({
     }
     if (isLayerLocked(layer, documentValue())) {
       setStatus('Слой или его группа заблокированы');
+      return false;
+    }
+    if (!canApplyPath(path, layer)) {
+      setStatus('Нарисуйте замкнутый контур перед созданием маски');
       return false;
     }
     const mask = importVectorMask({
@@ -352,6 +385,7 @@ export function createPathsController({
       || (layer?.type === 'shape' && layer.shape === 'path' && layer.pathPoints?.length >= 2)
     ) && list.length < SAVED_PATH_LIMIT;
     const enabled = {
+      new: Boolean(documentValue() && list.length < SAVED_PATH_LIMIT),
       add: canSave,
       edit: Boolean(path),
       applyMask: canApplyPath(path, layer),
@@ -426,6 +460,7 @@ export function createPathsController({
 
   function bindControls() {
     const bindings = {
+      new: createEmptyDocumentPath,
       add: addDocumentPathFromCurrent,
       edit: editSelectedDocumentPath,
       applyMask: applySelectedDocumentPathAsVectorMask,
@@ -449,6 +484,7 @@ export function createPathsController({
     selectedPath,
     pathFromCurrentSource,
     addDocumentPathFromCurrent,
+    createEmptyDocumentPath,
     renameSelectedDocumentPath,
     duplicateSelectedDocumentPath,
     deleteSelectedDocumentPath,

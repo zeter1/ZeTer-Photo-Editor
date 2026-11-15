@@ -20,11 +20,9 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
     const rect={id:'pen-mask-shape',type:'shape',name:'Pen boolean raster target',shape:'rect',
       x:0,y:0,width:96,height:96,scaleX:1,scaleY:1,rotation:0,fill:'#ff0000',
       stroke:'transparent',strokeWidth:0,visible:true,locked:false,opacity:1,blendMode:'source-over'};
-    const path={id:2000,name:'Editable Pen boolean',fillStartsWithAllPixels:false,
-      subpaths:[{operation:'add',closed:true,fillRule:'non-zero',points:[
-        {x:0,y:0},{x:96,y:0},{x:96,y:96},{x:0,y:96}]}]};
+    // A real target layer is loaded, but no Saved Path is preinstalled: the Paths UI must create it.
     const project={version:1,name:'Pen boolean E2E',width:96,height:96,background:'transparent',
-      selectedLayerId:rect.id,groups:[],paths:[path],layers:[rect]};
+      selectedLayerId:rect.id,groups:[],paths:[],layers:[rect]};
     const input=document.querySelector('#projectInput'),transfer=new DataTransfer();
     transfer.items.add(new File([JSON.stringify(project)],'pen-boolean.zpe',{type:'application/json'}));
     input.files=transfer.files;
@@ -35,30 +33,41 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
   };
   assert(await run(fixture),'real project import input');
   await waitFor('Pen boolean project loaded',async()=> {
-    const s=await state();return s.rows===1&&s.selected.includes('Pen boolean raster target');
+    const s=await state();return s.rows===0&&s.selected.includes('Pen boolean raster target');
   });
   const start = await evaluate(client,`(() => {
-    const row=document.querySelector('#pathsList .path-row');
-    row.click(); const edit=document.querySelector('#editPathBtn');
-    if(edit.disabled)return {error:'edit disabled'};
-    edit.click();
+    const create=document.querySelector('#newPathBtn');
+    if(!create||create.disabled)return {error:'new path disabled'};
+    create.click();
     document.querySelector('#penClosed').checked=true;
-    document.querySelector('#penPathOperation').value='subtract';
+    document.querySelector('#penPathOperation').value='add';
     const el=document.querySelector('#overlayCanvas'),r=el.getBoundingClientRect();
     return {tool:document.querySelector('[data-tool="pen"]')?.classList.contains('active'),
+      rows:document.querySelectorAll('#pathsList .path-row').length,
+      applyDisabled:document.querySelector('#applyPathMaskBtn')?.disabled,
       x:r.left,y:r.top,width:r.width,height:r.height};
   })()`);
-  assert(start.tool===true && start.width>0 && start.height>0,'Pen edit path via real Paths controls',JSON.stringify(start));
+  assert(start.tool===true && start.rows===1 && start.applyDisabled
+    && start.width>0 && start.height>0,'New Saved Path and Pen via real Paths UI',JSON.stringify(start));
   const clickPoint=async(x,y)=>{
     const point={x:start.x+x*start.width/96,y:start.y+y*start.height/96};
     await client.send('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
     await client.send('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',buttons:0,clickCount:1});
   };
-  for(const [x,y] of [[30,30],[70,30],[70,70],[30,70]])await clickPoint(x,y);
-  await client.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-  await client.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-  await waitFor('Pen subpath committed to History',async()=>{
+  const finishPath = async () => {
+    await client.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    await client.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  };
+  for(const [x,y] of [[8,8],[88,8],[88,88],[8,88]])await clickPoint(x,y);
+  await finishPath();
+  await waitFor('first Pen subpath committed to History',async()=>{
     const s=await state();return s.history.some(row=>row.includes('Добавить подпуть'));
+  });
+  await evaluate(client,"document.querySelector('#penPathOperation').value='subtract';true");
+  for(const [x,y] of [[30,30],[70,30],[70,70],[30,70]])await clickPoint(x,y);
+  await finishPath();
+  await waitFor('second Pen subpath committed',async()=>{
+    const s=await state();return s.history.filter(row=>row.includes('Добавить подпуть')).length===2;
   });
   assert(await evaluate(client,`(() => {
     const row=document.querySelector('#pathsList .path-row');row.click();
@@ -128,8 +137,9 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
     const bytes=await evaluate(client,`(async()=>Array.from(new Uint8Array(
       await window.__penBooleanExports.at(-1).arrayBuffer())))()`);
     const parsed=await decodePsd(Uint8Array.from(bytes),{maxPixels:20000,maxLayers:20});
-    assert(parsed.paths?.some(path=>path.name==='Editable Pen boolean'
-      && path.subpaths?.length===2 && path.subpaths[1].operation==='subtract'),
+    assert(parsed.paths?.some(path=>path.subpaths?.length===2
+      && path.subpaths[0].operation==='add' && path.subpaths[1].operation==='subtract'
+      && path.subpaths.every(subpath => subpath.points?.length===4)),
       format+' must keep native Saved Path boolean and cubic geometry',
       JSON.stringify(parsed.paths?.map(path=>path.subpaths?.map(sub=>sub.operation))));
     const imported=await evaluate(client,`(() => {
@@ -150,5 +160,5 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
     });
   }
   await evaluate(client,'URL.createObjectURL=window.__penBooleanOriginalCreateUrl;true');
-  console.log('CAP-BEZ Pen->Saved Path subtract->Vector Mask->Undo/Redo/.zpe/PSD/PSB Chrome PASS');
+  console.log('CAP-BEZ UI New Saved Path->Pen add/subtract->Vector Mask->Undo/Redo/.zpe/PSD/PSB Chrome PASS');
 }

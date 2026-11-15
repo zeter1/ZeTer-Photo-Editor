@@ -51,7 +51,8 @@ export function createPathControlSurfaceController({
     const documentPathEditIndex = state.getDocumentPathEditIndex();
     if (documentPathEditIndex >= 0) {
       const path = owner.paths?.[documentPathEditIndex];
-      if (path?.subpaths?.length) {
+      // An empty Saved Path is a valid Pen edit target until its first subpath is drawn.
+      if (Array.isArray(path?.subpaths)) {
         return path.subpaths
           .map((subpath, subpathIndex) => ({
             layer: null,

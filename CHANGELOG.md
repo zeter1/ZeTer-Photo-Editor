@@ -1,4 +1,13 @@
-## 1.46.11 — текущая версия
+## 1.46.12 — текущая версия
+
+### 2026-11-15 — CAP-BEZ-PEN-NEW: Saved Path создаётся прямо в Paths, без исходного контура
+
+- В панели Paths доступна «Новый»: создаёт пустой Saved Path с уникальным PSD resource ID 2000..2997, одним History commit и переключением в Pen editing. Существующий «Сохранить контур» для выбранной фигуры/маски/выделения не изменён.
+- Исправлен жизненный цикл пустого Saved Path: `path-control-surface` больше не сбрасывает его edit target до первого рисования; после удаления/замены несуществующая цель остаётся защищена.
+- Пустой path нельзя применять к Vector Mask; после замкнутого Pen subpath становится доступен настоящий Apply. ID-limit 998 и lock safeguards сохранены.
+- RED→GREEN Node regression + настоящий Chrome `file://` от UI New → Pen add/subtract → mask alpha → Undo/Redo → `.zpe` save/reopen → PSD/PSB native editable geometry, UI import/export. Это внутренний round-trip, не Photoshop-authored parity. Linux CI указать по фактическому SHA после публикации.
+
+## 1.46.11 — 2026-11-11
 
 ### 2026-11-11 — CAP-BEZ-MASK-PEN-SUBPATH: Pen boolean подконтура Saved Path
 
