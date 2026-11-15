@@ -125,12 +125,56 @@ export async function verifyBrowserAdjustmentMaskDirect({ client, evaluate, wait
         curves:doc.layers.find(l=>l.adjustment?.kind==='curves')};
     })()`);
   };
+  const click=async(point,modifiers)=>{
+    const x=rect.x+point[0]*rect.width/64;
+    const y=rect.y+point[1]*rect.height/64;
+    await client.send('Input.dispatchMouseEvent',{type:'mousePressed',x,y,
+      button:'left',buttons:1,clickCount:1,modifiers});
+    await client.send('Input.dispatchMouseEvent',{type:'mouseReleased',x,y,
+      button:'left',buttons:0,clickCount:1,modifiers});
+  };
+  // Real pointer insertion does not alter cubic alpha. Delete preserves the
+  // neighbouring cubic controls; Undo/Redo must restore *editable* nodes.
+  await evaluate(client,"window.__nodeBefore=Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(0,0,64,64).data);true");
+  await click([49,16],2); // Ctrl+click on the transformed Curves cubic segment.
+  await waitFor('Curves cubic insert history',async()=>
+    (await run(inspect))?.history.some(h=>h.includes('Добавить узел векторной маски')));
+  const inserted=await save();
+  assert(inserted.curves.vectorMask.subpaths[0].points.length===5,
+    'Ctrl+click inserts a native Curves mask node');
+  const nodeDiff=await evaluate(client,`(() => {const a=window.__nodeBefore,b=Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(0,0,64,64).data);let changed=0,max=0,total=0;for(let i=0;i<a.length;i++){const d=Math.abs(a[i]-b[i]);if(d){changed++;max=Math.max(max,d);total+=d;}}return {changed,max,total};})()`);
+  // The mathematical cubic is exact (unit oracle); Chromium's per-segment
+  // antialias tessellation may differ by a few boundary-channel values.
+  assert(nodeDiff.max<=8 && nodeDiff.changed<=4,
+    'splitting the cubic changes at most four antialiased channel samples');
+  const afterInsertion=await run(inspect);
+  assert(afterInsertion.unmasked.every((v,i)=>v===afterBoth.unmasked[i]),
+    'inserting a Vector Mask node never changes unmasked lower pixels');
+  const newNode=inserted.curves.vectorMask.subpaths[0].points[1];
+  await click([newNode.x,newNode.y],3); // Ctrl+Alt+click existing anchor.
+  const deleted=await save();
+  assert(deleted.curves.vectorMask.subpaths[0].points.length===4,
+    'Ctrl+Alt deletes the inserted node without flattening');
+  await evaluate(client,"document.querySelector('#undoBtn').click();true");
+  const undoDelete=await save();
+  assert(undoDelete.curves.vectorMask.subpaths[0].points.length===5,
+    'Undo restores the exact editable inserted node');
+  await evaluate(client,"document.querySelector('#redoBtn').click();true");
+  const redoDelete=await save();
+  assert(redoDelete.curves.vectorMask.subpaths[0].points.length===4,
+    'Redo restores the node deletion');
+  await evaluate(client,"document.querySelector('#undoBtn').click();true");
+  const restoredInsert=await save();
+  assert(restoredInsert.curves.vectorMask.subpaths[0].points.length===5 &&
+    (await run(inspect)).hash===afterInsertion.hash,
+    'Undo restores inserted cubic and matching RGBA before PSD/PSB export');
   const saved=await save();
   const near=(a,b)=>Number.isFinite(a)&&Math.abs(a-b)<2;
   assert(saved.levels?.vectorMask?.subpaths?.length===1 &&
     saved.curves?.vectorMask?.subpaths?.length===1 &&
     near(saved.levels.vectorMask.subpaths[0].points[0].x,19) &&
-    near(saved.curves.vectorMask.subpaths[0].points[0].handleOut.y,28) &&
+    saved.curves.vectorMask.subpaths[0].points.length===5 &&
+    saved.curves.vectorMask.subpaths[0].points[1].kind==='smooth' &&
     saved.doc.groups.length===2,'real .zpe keeps grouped editable Levels/Curves masks',
     JSON.stringify({levels:saved.levels?.vectorMask,curves:saved.curves?.vectorMask}));
   assert(await evaluate(client,`(() => {
@@ -141,7 +185,7 @@ export async function verifyBrowserAdjustmentMaskDirect({ client, evaluate, wait
     try{input.dispatchEvent(new Event('change',{bubbles:true}));}finally{window.confirm=old;}
     return true;
   })()`),'reopen actual saved .zpe');
-  await waitFor('.zpe round-trip matches composite',async()=>(await run(inspect))?.hash===afterBoth.hash);
+  await waitFor('.zpe round-trip matches composite',async()=>(await run(inspect))?.hash===afterInsertion.hash);
   for (const format of ['image/vnd.adobe.photoshop','psb']) {
     const before=await evaluate(client,'window.__adjMaskBlobs.length');
     assert(await evaluate(client,`(() => {
@@ -173,7 +217,7 @@ export async function verifyBrowserAdjustmentMaskDirect({ client, evaluate, wait
       return true;
     })()`),'PSD/PSB real fileInput import');
     await waitFor('PSD/PSB group composite reimport '+format,async()=>{
-      const s=await run(inspect);return s?.hash===afterBoth.hash;
+      const s=await run(inspect);return s?.hash===afterInsertion.hash;
     });
     const imported=await save();
     assert(imported.levels?.vectorMask?.subpaths?.length===1 &&

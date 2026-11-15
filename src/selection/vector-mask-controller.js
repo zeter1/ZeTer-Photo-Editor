@@ -139,7 +139,7 @@ export function createSelectionVectorMaskController({
       return false;
     }
     beginVectorMaskEdit(layer.id);
-    setStatus('Перо: редактирование векторной маски — перетаскивайте anchors и Bézier-handles');
+    setStatus('Перо: перетаскивайте узлы и ручки; Ctrl+клик по контуру — вставить узел, Ctrl+Alt+клик по узлу — удалить');
     return true;
   }
 

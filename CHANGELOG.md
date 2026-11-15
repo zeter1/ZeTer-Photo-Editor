@@ -1,4 +1,14 @@
-## 1.46.15 — текущая версия
+## 1.46.16 — текущая версия
+
+### 2026-11-15 — CAP-BEZ-MASK-NODE-INSERT-DELETE: прямое добавление и удаление узлов векторной маски
+
+- **Ctrl+click** по видимому сегменту применённой Vector Mask в режиме Pen вставляет узел; **Ctrl+Alt+click** по anchor удаляет, не разрушая замкнутый трёхузловой контур. Статусная подсказка отображает сочетания.
+- Вставка разбивает настоящий cubic Bézier методом De Casteljau без изменения математической формы, включая замыкающий сегмент. Удаление сохраняет кубические ручки соседних точек и native editable shape; точную форму двух кубиков после удаления одной точкой гарантировать невозможно.
+- Запись атомарно запрещена при изменении документа, выбранного слоя, исходного mask/subpath/points, замене концов сегмента, inherited group lock; History создаётся только при действительной правке.
+- **49/49 focused Node PASS**, реальный Chrome file:// на nested Levels+Curves: Ctrl-insert/delete, Undo/Redo, .zpe reopen, PSD+PSB UI export/import editable mask/adjustment PASS. Строгое побитовое равенство RGBA после математически точного split — НЕ PASS: Chrome антиалиасинг изменил 3 канальных значения (max 8/255) на границе контура. External Adobe-authored Photoshop GUI NOT VERIFIED.
+- PR-head/exact-main CI этой версии необходимо проверять отдельно, Windows Linux-only /proc/cgroup не объявлять PASS.
+
+## 1.46.15 — 2026-11-15
 
 ### 2026-11-15 — CAP-BEZ-MASK-ADJUSTMENT-DIRECT-EDIT: защищённое Pen-редактирование маски внутри корректирующей группы
 

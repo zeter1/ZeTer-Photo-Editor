@@ -1,20 +1,19 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 2–4 / **CAP-BEZ-MASK-ADJUSTMENT-DIRECT-EDIT** — прямое редактирование применённой Vector Mask сгруппированных Levels/Curves; следующий gate — GitHub PR-head CI, review, merge и exact-main CI.
-> **PRIORITY:** P1 · **STATUS:** IN PROGRESS (production fix и Windows локальная приёмка выполнены, Linux PR-head/exact-main ещё NOT RUN на новом коде). Родители CAP-BEZ / CAP-MASK / CAP-PSD остаются IN PROGRESS.
-> **BASE MAIN SHA:** `d76d0c66ba8ee83d2ff0dca1652b8db0890c1a0d` — актуальный docs-only HEAD после #389, проверен 2026-11-15.
-> **BRANCH:** `feat/adjustment-mask-direct-edit-20261115`; версия `1.46.15`; PR/commit заполнять только после реальной публикации.
-> **PREVIOUS GATES:** #389 [MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/389) в `553e74715c79d97d83a456fa8f33612e43ab58a6`; exact-main `d76d0c6` [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43729982189). Старый main `553e747`: [core CANCELLED](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43729734006), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43729733879).
-> **LOCAL EVIDENCE:** Node RED — 2 FAIL (orphaned preview при inherited group lock и stale document) → GREEN 51/51 focused PASS, плюс selected layer/group change и external writer no-clobber; реальный Chrome `file://` `npm run test:browser:adjustment-mask-direct` PASS: nested Levels+Curves, clipping, actual pointer anchor/handle, full RGBA composite, History Undo/Redo, `.zpe` reopen, editable native PSD+PSB self-round-trip. `npm run build` PASS. Windows `npm run check`: **1626 PASS / 10 SKIP / 5 Linux-only `/proc/cgroup` FAIL**, не полный PASS. Full Chrome `npm run test:browser` **PASS, exit 0 (181.69 s)** через Windows Chrome `file://`.
-> **REMAINING ACCEPTANCE:** GitHub exact PR-head core+real-photo CI, review/merge, exact-main core+real-photo; внешнее Photoshop-authored acceptance отдельно BLOCKED (self-round-trip не доказывает Adobe GUI parity).
-> **NEXT IMPLEMENTATION AFTER MERGE:** **CAP-BEZ-MASK-NODE-INSERT-DELETE (P1 TODO)** — настоящие Pen insert/delete узлов существующей применённой Vector Mask (raster, shape, grouped Levels/Curves) с сохранением кубических сегментов; exact owner/group-lock/stale guards, Undo/Redo, `.zpe`, PSD/PSB editable geometry, реальные Chrome `file://` pointer tests. Не повторять уже сделанный anchor/handle drag.
-> **OTHER BLOCKERS:** внешний Adobe-authored Saved Path/Vector Mask corpus и [Photoshop-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md) BLOCKED.
+> **CURRENT TASK/ID:** Stage 2–4 / **CAP-BEZ-MASK-NODE-INSERT-DELETE** — вставка/удаление узлов уже применённой Vector Mask через Pen.
+> **PRIORITY:** P1 · **STATUS:** IN PROGRESS — локальная production UI/Chrome приёмка PASS, PR-head/exact-main CI новой функции NOT RUN. Родители CAP-BEZ, CAP-MASK и CAP-PSD IN PROGRESS.
+> **BASE MAIN SHA:** 00018bc51e00d856b41ab0389eba12948bb72d56 — [#390 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/390) из head ab871f7b854d12b9ff610c7f48a7ce73ac419efe.
+> **ACTIVE BRANCH/PR:** [#391 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/391), feat/vector-mask-node-edit-20261115, опубликованный код head 4729663a8c7afb1f85fd600fd2b00e031fce05db; версия 1.46.16. Exact PR-head [core run #43734306460](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43734306460) и [real-photo run #43734306477](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43734306477) начались; не считать SUCCESS до readback.
+> **LAST VERIFIED:** #390 [core PR-head SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43732059900) и [real-photo PR-head SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43732059904); exact-main [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43732711258), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43732711269) на момент записи. Новый срез: focused Node 49/49 PASS, настоящий Chrome file:// grouped Levels/Curves Ctrl-insert/Ctrl+Alt-delete, History Undo/Redo, .zpe reopen, native editable PSD/PSB UI round-trip PASS. Математически exact cubic subdivision меняет из-за Chromium anti-aliasing 3 RGBA channel samples, max 8/255 (не битовое равенство).
+> **REMAINING ACCEPTANCE:** полный Windows browser, Linux PR-head core+real-photo CI, review, merge, exact-main CI. Отдельно raster/shape variants и Photoshop-authored compatibility.
+> **NEXT IMPLEMENTATION ACTION:** полный regression+CI, затем merge при успешных gates. Следующая функция: **CAP-BEZ-PATH-NODE-EDIT** — Pen insert/delete на Shape Path и Saved Paths с cubic/owner/lock, History/.zpe и PSD/PSB acceptance.
+> **BLOCKERS:** внешний Adobe-authored Saved Path/Vector Mask corpus и [Photoshop-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md).
 
 ## Краткая очередь
 
-1. **CAP-BEZ-MASK-ADJUSTMENT-DIRECT-EDIT:** P1 IN PROGRESS — локальная реализация/приёмка готовы; PR CI → review → merge → exact-main gates остаются.
-2. **CAP-BEZ-MASK-NODE-INSERT-DELETE:** P1 TODO — новый функциональный Pen-срез после завершения CI/merge текущего.
-3. **CAP-BEZ-MASK-PSD-UI:** IN PROGRESS — настоящий Photoshop-authored interop/Adobe GUI и high-depth editable PSD/PSB.
-4. **Stage 6 / 003X/6c-9:** IN PROGRESS — Worker stale/close/edit parity. **Stage 9 / CAP-RAW:** TODO — рабочий RAW pipeline.
+1. **CAP-BEZ-MASK-NODE-INSERT-DELETE:** P1 IN PROGRESS — PR-head → merge → exact-main.
+2. **CAP-BEZ-PATH-NODE-EDIT:** P1 TODO — Pen insert/delete для Saved Paths и Shape Path.
+3. **CAP-BEZ-MASK-PSD-UI:** IN PROGRESS — Adobe-authored interop, native high depth.
+4. **Stage 6 / 003X/6c-9:** IN PROGRESS — Worker stale/close/edit parity; **Stage 9 CAP-RAW:** TODO — RAW pipeline.
 
-**История:** [матрица](CAPABILITY_MATRIX.md) · [карта](README.md) · [журнал](002-bez-mask-psd-ui.md).
+**История:** [матрица](CAPABILITY_MATRIX.md) · [карта](README.md) · [журнал](002-bez-mask-node-insert-delete.md) · [родительская задача](002-bez-mask-psd-ui.md).

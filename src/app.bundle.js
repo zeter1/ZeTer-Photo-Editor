@@ -12270,9 +12270,72 @@ function createPathControlSurfaceController({
             Math.abs(distance - nearestDistance) <= 1e-9
             && control === 'anchor' && nearest?.control !== 'anchor'
           )) {
-            nearest = { ...target, nodeIndex, control };
+            nearest = { ...target, nodeIndex, node, control,
+              groupId:target.layer?.groupId ?? null,
+              subpath:target.source==='vector-mask' ? target.layer.vectorMask.subpaths[target.subpathIndex] : null,
+              vectorMask:target.layer?.vectorMask ?? null };
             nearestDistance = distance;
           }
+        }
+      }
+    }
+    return nearest;
+  }
+
+  function hitSegment(point, radius = null) {
+    const px = Number(point?.x);
+    const py = Number(point?.y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+    const candidateRadius = radius === null ? 7 / currentZoom() : Number(radius);
+    if (!Number.isFinite(candidateRadius) || candidateRadius < 0) return null;
+    const owner = state.getDocument();
+    let nearest = null;
+    let nearestDistance = candidateRadius;
+    const evaluate = (p0, p1, p2, p3, t) => {
+      const q = 1 - t;
+      return {
+        x:q*q*q*p0.x + 3*q*q*t*p1.x + 3*q*t*t*p2.x + t*t*t*p3.x,
+        y:q*q*q*p0.y + 3*q*q*t*p1.y + 3*q*t*t*p2.y + t*t*t*p3.y,
+      };
+    };
+    for (const target of selectedTargets()) {
+      if (target.source !== 'vector-mask' || isLayerLocked(owner, target.layer)) continue;
+      const count = target.points.length;
+      const segments = target.closed ? count : count - 1;
+      for (let index = 0; index < segments; index += 1) {
+        const fromNode = target.points[index];
+        const toNode = target.points[(index + 1) % count];
+        const p0 = documentPoint(target, fromNode);
+        const p1 = documentPoint(target, fromNode, 'handleOut') ?? p0;
+        const p3 = documentPoint(target, toNode);
+        const p2 = documentPoint(target, toNode, 'handleIn') ?? p3;
+        if (![p0, p1, p2, p3].every(p => p &&
+          Number.isFinite(p.x) && Number.isFinite(p.y))) continue;
+        let previous = p0;
+        const steps = 48;
+        for (let step = 1; step <= steps; step += 1) {
+          const current = evaluate(p0, p1, p2, p3, step / steps);
+          const dx = current.x - previous.x;
+          const dy = current.y - previous.y;
+          const squared = dx * dx + dy * dy;
+          const projection = squared > 1e-12
+            ? Math.max(0, Math.min(1, ((px-previous.x)*dx+(py-previous.y)*dy)/squared))
+            : 0;
+          const distance = Math.hypot(
+            px - previous.x - dx * projection,
+            py - previous.y - dy * projection,
+          );
+          const t = (step - 1 + projection) / steps;
+          if (distance < nearestDistance && t > 0.0001 && t < 0.9999) {
+            nearestDistance = distance;
+            nearest = {
+              ...target, segmentIndex:index, t, fromNode, toNode,
+              groupId:target.layer?.groupId ?? null,
+              subpath:target.layer.vectorMask.subpaths[target.subpathIndex],
+              vectorMask:target.layer.vectorMask,
+            };
+          }
+          previous = current;
         }
       }
     }
@@ -12389,6 +12452,7 @@ function createPathControlSurfaceController({
     targetPoints,
     resolveTarget,
     hit,
+    hitSegment,
     trace,
     draw,
     updateCursor,
@@ -12535,7 +12599,93 @@ function createPathControlCommandController({
     return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
   }
 
-  return { convertAnchorToCorner, convertAnchorToSmooth };
+  function writableMaskTarget(owner, target) {
+    if (target?.source !== 'vector-mask' || !owner || state.getDocument() !== owner) return null;
+    const resolved = targets.resolve(target);
+    const layer = resolved?.layer;
+    if (!layer || !owner.layers?.includes(layer) || owner.selectedLayerId !== layer.id
+      || isLayerLocked(owner, layer) || target.layer !== layer
+      || (layer.groupId ?? null) !== (target.groupId ?? null)
+      || resolved.source !== 'vector-mask' || resolved.points !== target.points
+      || !Array.isArray(resolved.points) || resolved.points.length < 2) return null;
+    const mask = layer.vectorMask;
+    if (!mask || mask !== target.vectorMask ||
+      mask.subpaths?.[target.subpathIndex] !== target.subpath ||
+      mask.subpaths?.[target.subpathIndex]?.points !== resolved.points) return null;
+    return resolved;
+  }
+
+  function lerpPoint(a, b, t) {
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  }
+
+  // De Casteljau splits the *existing* cubic exactly. A new anchor must not
+  // subtly alter the mask alpha merely by being inserted.
+  function insertMaskNode(owner, target) {
+    if (!Number.isInteger(target?.segmentIndex) || !Number.isFinite(target?.t)
+      || target.t <= 0.0001 || target.t >= 0.9999) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const resolved = writableMaskTarget(owner, { ...target, nodeIndex:target.segmentIndex });
+    if (!resolved || resolved.nodeIndex !== target.segmentIndex) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const points = resolved.points;
+    const from = points[target.segmentIndex];
+    const subpath = resolved.layer.vectorMask.subpaths[target.subpathIndex];
+    const nextIndex = (target.segmentIndex + 1) % points.length;
+    if (nextIndex === 0 && subpath.closed === false) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const to = points[nextIndex];
+    if (!from || !to || from !== target.fromNode || to !== target.toNode
+      || points.length >= 1000) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const finite = point => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+    if (!finite(from) || !finite(to) ||
+      (from.handleOut && !finite(from.handleOut)) ||
+      (to.handleIn && !finite(to.handleIn))) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const t = target.t;
+    let node;
+    if (from.handleOut || to.handleIn) {
+      const a = lerpPoint(from, from.handleOut ?? from, t);
+      const b = lerpPoint(from.handleOut ?? from, to.handleIn ?? to, t);
+      const c = lerpPoint(to.handleIn ?? to, to, t);
+      const d = lerpPoint(a, b, t);
+      const e = lerpPoint(b, c, t);
+      const f = lerpPoint(d, e, t);
+      if (![a, c, d, e, f].every(finite)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      from.handleOut = a;
+      to.handleIn = c;
+      node = { x:f.x, y:f.y, handleIn:d, handleOut:e, kind:'smooth' };
+    } else {
+      const f = lerpPoint(from, to, t);
+      if (!finite(f)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      node = { x:f.x, y:f.y, handleIn:null, handleOut:null, kind:'corner' };
+    }
+    points.splice(target.segmentIndex + 1, 0, node);
+    transaction.commit('Добавить узел векторной маски');
+    ui.setStatus('Узел добавлен без изменения кривой');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  function deleteMaskNode(owner, target) {
+    if (target?.control !== 'anchor') return PATH_CONTROL_COMMAND_RESULT.IGNORED;
+    const resolved = writableMaskTarget(owner, target);
+    if (!resolved || resolved.nodeIndex !== target.nodeIndex || resolved.node !== target.node)
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const subpath = resolved.layer.vectorMask.subpaths[target.subpathIndex];
+    const points = resolved.points;
+    // Removing a point from a closed path with three anchors destroys the
+    // rasterizable polygon. Keep the user's current mask intact instead.
+    const minimum = subpath.closed === false ? 2 : 3;
+    if (points.length <= minimum) {
+      ui.setStatus('Недостаточно узлов для удаления');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    points.splice(resolved.nodeIndex, 1);
+    // The surviving neighbours keep their cubic handles and exact endpoint
+    // tangents. A general two-cubic arc cannot be represented exactly by one
+    // cubic after deletion; do not silently flatten it to a straight line.
+    transaction.commit('Удалить узел векторной маски');
+    ui.setStatus('Узел удалён; соседние Bézier-ручки сохранены');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  return { convertAnchorToCorner, convertAnchorToSmooth, insertMaskNode, deleteMaskNode };
 }
 
 // ---- src/interaction/path-control-gesture-controller.js ----
@@ -22715,7 +22865,7 @@ function createSelectionVectorMaskController({
       return false;
     }
     beginVectorMaskEdit(layer.id);
-    setStatus('Перо: редактирование векторной маски — перетаскивайте anchors и Bézier-handles');
+    setStatus('Перо: перетаскивайте узлы и ручки; Ctrl+клик по контуру — вставить узел, Ctrl+Alt+клик по узлу — удалить');
     return true;
   }
 
@@ -31290,7 +31440,18 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'wand') { magicWandSelect(p);return; }
   if (currentTool === 'pen') {
     const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
-    if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
+    if(hit){
+      if(e.ctrlKey && e.altKey && hit.source==='vector-mask' && hit.control==='anchor'){
+        pathControlCommands.deleteMaskNode(doc,hit);
+      }else{
+        beginPathControlDrag(hit,p,e);
+      }
+      drawOverlay();return;
+    }
+    if(e.ctrlKey && !e.altKey && !penDraftGestures.hasDraft()){
+      const segment=pathControlSurface.hitSegment(p);
+      if(segment){pathControlCommands.insertMaskNode(doc,segment);drawOverlay();return;}
+    }
     if(vectorMaskEditLayerId===selected()?.id){
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
       return;

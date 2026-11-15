@@ -174,9 +174,72 @@ export function createPathControlSurfaceController({
             Math.abs(distance - nearestDistance) <= 1e-9
             && control === 'anchor' && nearest?.control !== 'anchor'
           )) {
-            nearest = { ...target, nodeIndex, control };
+            nearest = { ...target, nodeIndex, node, control,
+              groupId:target.layer?.groupId ?? null,
+              subpath:target.source==='vector-mask' ? target.layer.vectorMask.subpaths[target.subpathIndex] : null,
+              vectorMask:target.layer?.vectorMask ?? null };
             nearestDistance = distance;
           }
+        }
+      }
+    }
+    return nearest;
+  }
+
+  function hitSegment(point, radius = null) {
+    const px = Number(point?.x);
+    const py = Number(point?.y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+    const candidateRadius = radius === null ? 7 / currentZoom() : Number(radius);
+    if (!Number.isFinite(candidateRadius) || candidateRadius < 0) return null;
+    const owner = state.getDocument();
+    let nearest = null;
+    let nearestDistance = candidateRadius;
+    const evaluate = (p0, p1, p2, p3, t) => {
+      const q = 1 - t;
+      return {
+        x:q*q*q*p0.x + 3*q*q*t*p1.x + 3*q*t*t*p2.x + t*t*t*p3.x,
+        y:q*q*q*p0.y + 3*q*q*t*p1.y + 3*q*t*t*p2.y + t*t*t*p3.y,
+      };
+    };
+    for (const target of selectedTargets()) {
+      if (target.source !== 'vector-mask' || isLayerLocked(owner, target.layer)) continue;
+      const count = target.points.length;
+      const segments = target.closed ? count : count - 1;
+      for (let index = 0; index < segments; index += 1) {
+        const fromNode = target.points[index];
+        const toNode = target.points[(index + 1) % count];
+        const p0 = documentPoint(target, fromNode);
+        const p1 = documentPoint(target, fromNode, 'handleOut') ?? p0;
+        const p3 = documentPoint(target, toNode);
+        const p2 = documentPoint(target, toNode, 'handleIn') ?? p3;
+        if (![p0, p1, p2, p3].every(p => p &&
+          Number.isFinite(p.x) && Number.isFinite(p.y))) continue;
+        let previous = p0;
+        const steps = 48;
+        for (let step = 1; step <= steps; step += 1) {
+          const current = evaluate(p0, p1, p2, p3, step / steps);
+          const dx = current.x - previous.x;
+          const dy = current.y - previous.y;
+          const squared = dx * dx + dy * dy;
+          const projection = squared > 1e-12
+            ? Math.max(0, Math.min(1, ((px-previous.x)*dx+(py-previous.y)*dy)/squared))
+            : 0;
+          const distance = Math.hypot(
+            px - previous.x - dx * projection,
+            py - previous.y - dy * projection,
+          );
+          const t = (step - 1 + projection) / steps;
+          if (distance < nearestDistance && t > 0.0001 && t < 0.9999) {
+            nearestDistance = distance;
+            nearest = {
+              ...target, segmentIndex:index, t, fromNode, toNode,
+              groupId:target.layer?.groupId ?? null,
+              subpath:target.layer.vectorMask.subpaths[target.subpathIndex],
+              vectorMask:target.layer.vectorMask,
+            };
+          }
+          previous = current;
         }
       }
     }
@@ -293,6 +356,7 @@ export function createPathControlSurfaceController({
     targetPoints,
     resolveTarget,
     hit,
+    hitSegment,
     trace,
     draw,
     updateCursor,
