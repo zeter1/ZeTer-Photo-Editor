@@ -1,6 +1,6 @@
 # CAP-BEZ-MASK-NODE-INSERT-DELETE — редактирование узлов применённой Vector Mask
 
-**Приоритет:** P1. **Статус:** IN PROGRESS до PR-head/merge/exact-main. **База:** main 00018bc51e00d856b41ab0389eba12948bb72d56 (#390 merged). **Ветка:** feat/vector-mask-node-edit-20261115. **Версия:** 1.46.16.
+**Приоритет:** P1. **Статус:** IN PROGRESS до PR-head/merge/exact-main. **База:** main 00018bc51e00d856b41ab0389eba12948bb72d56 (#390 merged). **Ветка:** feat/vector-mask-node-edit-20261115. **Версия:** 1.46.16. **PR:** [#391 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/391), code head 4729663a8c7afb1f85fd600fd2b00e031fce05db; CI [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43734306460) / [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43734306477) PENDING readback.
 
 ## Реализовано
 
