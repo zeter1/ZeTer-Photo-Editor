@@ -287,6 +287,45 @@ export function createPathsController({
     return true;
   }
 
+  function appendPenSubpath(points, { index = getSelectedIndex(), expectedDocument = null, closed = false, operation = 'add' } = {}) {
+    const owner = documentValue();
+    const path = selectedPath();
+    if (!owner || (expectedDocument && expectedDocument !== owner) || index !== selectedIndex
+      || owner.paths?.[index] !== path || !Array.isArray(path?.subpaths)) return false;
+    if (!['add', 'subtract', 'intersect', 'exclude'].includes(operation)) {
+      setStatus('Недопустимая операция векторного контура');
+      return false;
+    }
+    if (!closed || !Array.isArray(points) || points.length < 3 || points.length > 16384) {
+      setStatus('Для векторной маски нужен замкнутый контур из трёх или более узлов');
+      return false;
+    }
+    if (path.subpaths.length >= 65535 || points.some(point => {
+      const valid = value => value && Number.isFinite(value.x) && Number.isFinite(value.y);
+      return !valid(point) || (point.handleIn != null && !valid(point.handleIn))
+        || (point.handleOut != null && !valid(point.handleOut));
+    })) {
+      setStatus('Недопустимая геометрия подпути');
+      return false;
+    }
+    const xs = points.map(point => point.x);
+    const ys = points.map(point => point.y);
+    if (Math.max(...xs) - Math.min(...xs) < 1 && Math.max(...ys) - Math.min(...ys) < 1) {
+      setStatus('Контур слишком мал');
+      return false;
+    }
+    const nodes = points.map(point => ({
+      x: point.x, y: point.y,
+      handleIn: point.handleIn ? { x: point.handleIn.x, y: point.handleIn.y } : null,
+      handleOut: point.handleOut ? { x: point.handleOut.x, y: point.handleOut.y } : null,
+      kind: point.kind === 'smooth' ? 'smooth' : 'corner',
+    }));
+    path.subpaths.push({ operation, closed: true, fillRule: 'non-zero', points: nodes });
+    commit('Добавить подпуть сохранённого контура');
+    setStatus(`Подпуть (${operation}) добавлен в «${path.name || 'Контур'}»`);
+    return true;
+  }
+
   function selectForAction(index) {
     setSelectedIndex(index);
     return selectedIndex;
@@ -415,6 +454,7 @@ export function createPathsController({
     deleteSelectedDocumentPath,
     editSelectedDocumentPath,
     applySelectedDocumentPathAsVectorMask,
+    appendPenSubpath,
     pathContextMenu,
     updatePathsPanel,
     bindControls,

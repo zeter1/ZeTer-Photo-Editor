@@ -653,6 +653,14 @@ async function runSmoke() {
       return;
     }
 
+    // CAP-BEZ: real Pen Saved Path boolean, Vector Mask and PSD/PSB UI round-trip.
+    if (process.env.ZPE_PEN_BOOLEAN_BROWSER_ONLY === '1') {
+      const { verifyBrowserPenBoolean } = await import('./browser-pen-boolean-check.mjs');
+      await verifyBrowserPenBoolean({ client, evaluate, waitFor, assert });
+      assertNoBrowserErrors(errors, stderrState);
+      return;
+    }
+
     // CAP-BEZ: genuine file:// pointer input, editable Shape, History and Undo/Redo.
     // The focused mode avoids rerunning unrelated long-running photo/Worker probes.
     if (process.env.ZPE_PEN_SMOOTH_BROWSER_ONLY === '1') {

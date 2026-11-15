@@ -1,4 +1,12 @@
-## 1.46.10 — текущая версия
+## 1.46.11 — текущая версия
+
+### 2026-11-11 — CAP-BEZ-MASK-PEN-SUBPATH: Pen boolean подконтура Saved Path
+
+- В режиме редактирования Saved Path инструмент Pen теперь добавляет новые замкнутые кубические подконтура вместо прежнего запрета. Панель инструмента содержит реальные операции Add / Subtract / Intersect / Exclude; geometry anchors/handles остаётся в документе и PSD/PSB, история корректно фиксирует операцию.
+- Chrome `file://`: реальные клики Pen/Paths/Apply → вычитание площади Vector Mask на обычном Shape, измерение пикселей alpha, Undo/Redo, сохранение + повторное открытие `.zpe`, экспорт/импорт через диалог PSD и PSB, native Saved Path boolean readback — PASS. Это self-round-trip, не Photoshop-authored interoperability.
+- RED→GREEN: две Node-регрессии, после фикса вместе с существующими Paths 11/11 PASS; Windows `npm run check` 1608 PASS / 10 SKIP / 5 Linux-only `/proc/cgroup` FAIL. Полный `npm run test:browser` Chrome file:// PASS. Новый код в Linux PR-head CI ещё требует отдельного подтверждения. CAP-BEZ/PSD parent IN PROGRESS.
+
+## 1.46.10 — 2026-11-11
 
 ### 2026-11-11 — CAP-BEZ-MASK-ADJ-APPLY: Saved Path как Vector Mask корректирующего слоя
 
