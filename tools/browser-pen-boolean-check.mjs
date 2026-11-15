@@ -261,6 +261,8 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
     const form=document.querySelector('form.modal');
     if(!form?.elements.subpath||!form?.elements.operation)return {error:'operation dialog unavailable'};
     form.elements.subpath.value='1';
+    form.elements.subpath.dispatchEvent(new Event('change',{bubbles:true}));
+    if(form.elements.operation.value!=='subtract')return {error:'subpath operation was not synchronized'};
     form.elements.operation.value='add';
     form.requestSubmit();
     return {submitted:true};
@@ -283,6 +285,57 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
     && nativeMaskState?.path?.subpaths?.[1]?.operation==='subtract',
     'zpe keeps independent editable Vector Mask operation + cubic geometry',
     JSON.stringify(nativeMaskState?.mask?.subpaths?.[1]));
+  // Edit BOTH cubic handles of the already-applied mask through real Pen pointer gestures.
+  // Compare the full rendered alpha plane rather than a synthetic geometry-only assertion.
+  const originalHandleNode=nativeMaskState?.mask?.subpaths?.[0]?.points?.[0];
+  assert(originalHandleNode?.handleIn && originalHandleNode?.handleOut,
+    'reopened PSD/PSB mask retains both editable cubic handles');
+  const maskLayer=nativeMaskState.maskLayer;
+  const atDocument=point=>layerPixelToDocumentPoint(point,maskLayer);
+  const alphaDigest=()=>evaluate(client,`(() => {
+    const canvas=document.querySelector('#editorCanvas');
+    const pixels=canvas.getContext('2d').getImageData(0,0,96,96).data;
+    let hash=2166136261;
+    for(let i=3;i<pixels.length;i+=4)hash=Math.imul(hash^pixels[i],16777619);
+    return hash>>>0;
+  })()`);
+  const beforeHandlesAlpha=await alphaDigest();
+  assert(await evaluate(client,`(() => {
+    document.querySelector('[data-menu="layer"]').click();
+    const edit=[...document.querySelectorAll('.menu-item')]
+      .find(item=>item.textContent.includes('Редактировать векторную маску пером'));
+    if(!edit||edit.disabled)return false;
+    edit.click();
+    return document.querySelector('[data-tool="pen"]')?.classList.contains('active');
+  })()`),'re-enter applied Vector Mask Pen mode for handle edits');
+  const outFrom=atDocument(originalHandleNode.handleOut);
+  const outDestination=atDocument({x:originalHandleNode.x+28,y:originalHandleNode.y+35});
+  await dragPoint([outFrom.x,outFrom.y],[outDestination.x,outDestination.y],1); // Alt keeps opposite handle independent
+  await waitFor('direct applied-mask handle commit',async()=>
+    (await state()).history.some(row=>row.includes('Изменить ручку векторной маски')));
+  const afterOutAlpha=await alphaDigest();
+  assert(afterOutAlpha!==beforeHandlesAlpha,'handleOut drag changes real rendered alpha');
+  await evaluate(client,"document.querySelector('#undoBtn').click();true");
+  await waitFor('Undo handleOut restores exact alpha plane',async()=>await alphaDigest()===beforeHandlesAlpha);
+  await evaluate(client,"document.querySelector('#redoBtn').click();true");
+  await waitFor('Redo handleOut restores edited alpha plane',async()=>await alphaDigest()===afterOutAlpha);
+  const inFrom=atDocument(originalHandleNode.handleIn);
+  const inDestination=atDocument({x:originalHandleNode.x+33,y:originalHandleNode.y+45});
+  await dragPoint([inFrom.x,inFrom.y],[inDestination.x,inDestination.y],1);
+  const afterInAlpha=await alphaDigest();
+  assert(afterInAlpha!==afterOutAlpha,'handleIn drag changes rendered alpha independently');
+  await evaluate(client,"document.querySelector('#undoBtn').click();true");
+  await waitFor('Undo handleIn restores previous alpha',async()=>await alphaDigest()===afterOutAlpha);
+  await evaluate(client,"document.querySelector('#redoBtn').click();true");
+  await waitFor('Redo handleIn restores its alpha',async()=>await alphaDigest()===afterInAlpha);
+  const editedHandlesState=await captureProject();
+  const editedHandleNode=editedHandlesState?.mask?.subpaths?.[0]?.points?.[0];
+  const closePoint=(a,b)=>a && b && Math.abs(a.x-b.x)<2.1 && Math.abs(a.y-b.y)<2.1;
+  assert(closePoint(editedHandleNode?.handleOut,{x:originalHandleNode.x+28,y:originalHandleNode.y+35})
+    && closePoint(editedHandleNode?.handleIn,{x:originalHandleNode.x+33,y:originalHandleNode.y+45})
+    && editedHandlesState.path.subpaths[0].points[0].handleOut.x===saved.path.subpaths[0].points[0].handleOut.x,
+    'both applied-mask handles persist in .zpe without mutating the independent Saved Path',
+    JSON.stringify({before:originalHandleNode,after:editedHandleNode}));
   const documentMaskNode=layerPixelToDocumentPoint(finalMaskNode,nativeMaskState.maskLayer);
   for(const format of ['image/vnd.adobe.photoshop','psb']){
     const before=await evaluate(client,'window.__penBooleanExports.length');
@@ -304,6 +357,15 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
       && node && near(node.x,documentMaskNode.x) && near(node.y,documentMaskNode.y),
       format+' native editable Vector Mask geometry + operation',
       JSON.stringify({node,expected:documentMaskNode,operation:imported?.subpaths?.[1]?.operation}));
+    const nativeFirst=imported?.subpaths?.[0]?.points?.[0];
+    const nativeExpectedIn=atDocument(editedHandleNode.handleIn);
+    const nativeExpectedOut=atDocument(editedHandleNode.handleOut);
+    assert(nativeFirst && near(nativeFirst.handleIn?.x,nativeExpectedIn.x)
+      && near(nativeFirst.handleIn?.y,nativeExpectedIn.y)
+      && near(nativeFirst.handleOut?.x,nativeExpectedOut.x)
+      && near(nativeFirst.handleOut?.y,nativeExpectedOut.y),
+      format+' persists both independently dragged applied-mask Bézier handles as native geometry',
+      JSON.stringify({nativeFirst,nativeExpectedIn,nativeExpectedOut}));
   }
   await evaluate(client,'URL.createObjectURL=window.__penBooleanOriginalCreateUrl;true');
   console.log('CAP-BEZ UI Saved Path->Pen->edit existing boolean op->mask alpha->Undo/Redo/.zpe/PSD+PSB Chrome PASS');

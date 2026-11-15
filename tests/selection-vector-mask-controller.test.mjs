@@ -421,3 +421,23 @@ test('context-target vector mask operation edits clicked layer rather than unrel
   assert.deepEqual(h.commits,['Изменить операцию контура векторной маски']);
   assert.equal(h.modals[0].onSubmit({subpath:'',operation:'add'}),false);
 });
+
+
+test('operation dialog tracks the selected applied-mask subpath instead of retaining the first operation', () => {
+  const h=harness();
+  const triangle=[{x:0,y:0},{x:80,y:0},{x:40,y:70}];
+  h.layer.vectorMask=createVectorMask({subpaths:[
+    {operation:'add',closed:true,points:structuredClone(triangle)},
+    {operation:'subtract',closed:true,points:structuredClone(triangle)},
+  ]});
+  assert.equal(h.controller.editSelectedVectorMaskSubpathOperation(),true);
+  const dialog=h.modals[0];
+  const subpath={value:'0',addEventListener(type,fn){if(type==='change')this.notify=fn;}};
+  const operation={value:'add',disabled:false};
+  dialog.onMount({modal:{elements:{subpath,operation}}});
+  subpath.value='1';subpath.notify();
+  assert.equal(operation.value,'subtract','switching subpaths must show its actual operation');
+  subpath.value='0';subpath.notify();
+  assert.equal(operation.value,'add','returning must restore the first operation');
+  assert.deepEqual(h.commits,[],'a selection change is not an edit');
+});

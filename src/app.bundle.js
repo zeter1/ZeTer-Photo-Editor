@@ -22712,6 +22712,19 @@ function createSelectionVectorMaskController({
           value:subpaths[initialIndex]?.operation || 'add', options:operations },
       ],
       submitLabel:'Применить',
+      onMount:({modal}) => {
+        const subpathSelect=modal.elements.subpath;
+        const operationSelect=modal.elements.operation;
+        subpathSelect?.addEventListener('change',()=>{
+          const value=subpathSelect.value;
+          const index=/^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : -1;
+          const current=subpaths[index];
+          if (!operationSelect) return;
+          operationSelect.disabled=!current || current.closed===false
+            || !Array.isArray(current.points) || current.points.length<3;
+          if (!operationSelect.disabled) operationSelect.value=current.operation || 'add';
+        });
+      },
       onSubmit:values => {
         if (getDocument() !== owner || getSelectedLayer() !== selectionAtOpen
           || !owner.layers?.includes(layer) || layer.vectorMask !== mask
