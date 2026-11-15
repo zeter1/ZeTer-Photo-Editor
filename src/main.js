@@ -2130,7 +2130,18 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'wand') { magicWandSelect(p);return; }
   if (currentTool === 'pen') {
     const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
-    if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
+    if(hit){
+      if(e.ctrlKey && e.altKey && hit.source==='vector-mask' && hit.control==='anchor'){
+        pathControlCommands.deleteMaskNode(doc,hit);
+      }else{
+        beginPathControlDrag(hit,p,e);
+      }
+      drawOverlay();return;
+    }
+    if(e.ctrlKey && !e.altKey && !penDraftGestures.hasDraft()){
+      const segment=pathControlSurface.hitSegment(p);
+      if(segment){pathControlCommands.insertMaskNode(doc,segment);drawOverlay();return;}
+    }
     if(vectorMaskEditLayerId===selected()?.id){
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
       return;

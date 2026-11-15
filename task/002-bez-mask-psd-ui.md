@@ -1,5 +1,8 @@
 # CAP-BEZ-MASK-PSD-UI — Saved Paths и Vector Masks: настоящий PSD/PSB UI round-trip
 
+> **Актуальная bounded проходка (2026-11-15):** [CAP-BEZ-MASK-NODE-INSERT-DELETE](002-bez-mask-node-insert-delete.md): production Pen Ctrl+click cubic segment insert и Ctrl+Alt+click anchor delete существующей Vector Mask; local Node/Chrome file:///.zpe/PSD/PSB PASS, Linux PR CI ещё требует readback. Предыдущий [#390 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/390), main `00018bc51e00d856b41ab0389eba12948bb72d56`. Внешний Adobe-authored Photoshop GUI interop остаётся BLOCKED.
+
+
 **Статус:** IN PROGRESS — [#385 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/385), [#386 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/386), [#387 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/387) (Pen Saved Path create, v1.46.12, core+real-photo PR-head SUCCESS). Новый CAP-BEZ-PATH-OP-EDIT v1.46.13 локально RED→GREEN Chrome PASS, не опубликован. Anchor drag/Adobe-authored interoperability остаются TODO. **Приоритет:** P1 · **Актуальная база:** main `8eb755dc512a835146a2812402e67997d75499ee`.
 
 ## Функциональная цель

@@ -214,7 +214,7 @@ test('edit command enters the narrow Pen port exactly once with exact layer iden
   });
   assert.equal(h.controller.editSelectedVectorMask(), true);
   assert.deepEqual(h.beginEditCalls, [h.layer.id]);
-  assert.equal(h.statuses.at(-1), 'Перо: редактирование векторной маски — перетаскивайте anchors и Bézier-handles');
+  assert.equal(h.statuses.at(-1), 'Перо: перетаскивайте узлы и ручки; Ctrl+клик по контуру — вставить узел, Ctrl+Alt+клик по узлу — удалить');
 
   h.layer.locked = true;
   assert.equal(h.controller.editSelectedVectorMask(), false);
