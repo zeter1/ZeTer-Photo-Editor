@@ -12640,6 +12640,10 @@ function createPathControlGestureController({
     return Boolean(owner && state.getDocument() === owner);
   }
 
+  function ownsLiveGeometry(gesture, node) {
+    return sameNodeGeometry(node, gesture.preview ?? gesture.baseline);
+  }
+
   function captureLayerTarget(owner, target) {
     const layerId = target?.layer?.id ?? null;
     if (!layerId || !Array.isArray(owner.layers)) return null;
@@ -12711,8 +12715,8 @@ function createPathControlGestureController({
     return gesture.owner.paths.find(item => item === gesture.pathTarget) ?? null;
   }
 
-  function resolveExactTarget(gesture) {
-    if (!activeOwner(gesture.owner)) return null;
+  function resolveExactTarget(gesture, { requireWritable = true } = {}) {
+    if (requireWritable && !activeOwner(gesture.owner)) return null;
 
     if (gesture.source === 'document-path') {
       const path = resolveSavedPath(gesture);
@@ -12726,7 +12730,10 @@ function createPathControlGestureController({
 
     if (!Array.isArray(gesture.owner.layers)) return null;
     const layer = gesture.owner.layers.find(item => item.id === gesture.layerId) ?? null;
-    if (!layer || layer !== gesture.layerTarget || isLayerLocked(gesture.owner, layer)) return null;
+    if (!layer || layer !== gesture.layerTarget ||
+      (requireWritable && (isLayerLocked(gesture.owner, layer)
+        || (gesture.selectedLayerId !== null && gesture.owner.selectedLayerId !== gesture.selectedLayerId)
+        || (layer.groupId ?? null) !== gesture.groupId))) return null;
 
     let points = null;
     let subpath = null;
@@ -12772,6 +12779,8 @@ function createPathControlGestureController({
       control,
       layerId: captured.layerId,
       layerTarget: captured.layer,
+      selectedLayerId: owner.selectedLayerId ?? null,
+      groupId: captured.layer?.groupId ?? null,
       vectorMaskTarget: captured.vectorMask,
       pathId: captured.pathId,
       pathTarget: captured.path,
@@ -12782,6 +12791,7 @@ function createPathControlGestureController({
       startLocal,
       lastPointer: startDocument,
       baseline: structuredClone(captured.node),
+      preview: null,
       moved: false,
     };
   }
@@ -12814,12 +12824,37 @@ function createPathControlGestureController({
     };
   }
 
+  // Roll back only our own transient geometry. A rejected gesture must never
+  // overwrite a replacement mask/node or a newer independent edit. Rollback is
+  // allowed on the original identity even if a parent was locked or its tab is
+  // no longer active; it restores a preview, not a new user edit.
+  function restoreOwnedPreview(gesture) {
+    if (!gesture.preview) return false;
+    const resolved = resolveExactTarget(gesture, { requireWritable:false });
+    if (!resolved || !sameNodeGeometry(resolved.node, gesture.preview)) return false;
+    const changed = !sameNodeGeometry(resolved.node, gesture.baseline);
+    if (changed) restoreNode(resolved.node, gesture.baseline);
+    gesture.preview = null;
+    gesture.moved = false;
+    if (activeOwner(gesture.owner)) {
+      if (changed) runtime.refreshPreview(resolved);
+      else runtime.redrawOverlay();
+    }
+    return true;
+  }
+
+  function rejectGesture(gesture) {
+    gesture.active = false;
+    restoreOwnedPreview(gesture);
+    return PATH_CONTROL_GESTURE_RESULT.REJECTED;
+  }
+
   function update(gesture, point, modifiers = {}) {
     if (!isGesture(gesture) || !gesture.active) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
     const documentPoint = finitePoint(point);
     if (!documentPoint) return PATH_CONTROL_GESTURE_RESULT.INVALID;
     const resolved = resolveExactTarget(gesture);
-    if (!resolved) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
+    if (!resolved || !ownsLiveGeometry(gesture, resolved.node)) return rejectGesture(gesture);
 
     const local = resolved.layer
       ? finitePoint(geometry.documentPointToLayer(documentPoint, resolved.layer))
@@ -12838,6 +12873,7 @@ function createPathControlGestureController({
         runtime.redrawOverlay();
       }
       gesture.moved = false;
+      gesture.preview = null;
       return PATH_CONTROL_GESTURE_RESULT.NOOP;
     }
 
@@ -12845,6 +12881,7 @@ function createPathControlGestureController({
     else applyHandle(gesture, resolved.node, local, modifiers);
 
     gesture.moved = !sameNodeGeometry(resolved.node, gesture.baseline);
+    gesture.preview = gesture.moved ? structuredClone(resolved.node) : null;
     if (gesture.moved) runtime.refreshPreview(resolved);
     else runtime.redrawOverlay();
     return gesture.moved ? PATH_CONTROL_GESTURE_RESULT.UPDATED : PATH_CONTROL_GESTURE_RESULT.NOOP;
@@ -12860,6 +12897,7 @@ function createPathControlGestureController({
     const finalPoint = finitePoint(point);
     if (!finalPoint) {
       gesture.active = false;
+      restoreOwnedPreview(gesture);
       return PATH_CONTROL_GESTURE_RESULT.INVALID;
     }
 
@@ -12875,8 +12913,8 @@ function createPathControlGestureController({
     }
 
     const resolved = resolveExactTarget(gesture);
+    if (!resolved || !ownsLiveGeometry(gesture, resolved.node)) return rejectGesture(gesture);
     gesture.active = false;
-    if (!resolved) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
     gesture.moved = !sameNodeGeometry(resolved.node, gesture.baseline);
     if (!gesture.moved) {
       runtime.redrawOverlay();
@@ -12890,16 +12928,9 @@ function createPathControlGestureController({
   function cancel(gesture) {
     if (!isGesture(gesture) || !gesture.active) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
     const resolved = resolveExactTarget(gesture);
+    if (!resolved) return rejectGesture(gesture);
     gesture.active = false;
-    if (!resolved) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
-
-    const changed = !sameNodeGeometry(resolved.node, gesture.baseline);
-    if (changed) {
-      restoreNode(resolved.node, gesture.baseline);
-      runtime.refreshPreview(resolved);
-    } else {
-      runtime.redrawOverlay();
-    }
+    if (!restoreOwnedPreview(gesture)) runtime.redrawOverlay();
     gesture.moved = false;
     return PATH_CONTROL_GESTURE_RESULT.CANCELED;
   }
