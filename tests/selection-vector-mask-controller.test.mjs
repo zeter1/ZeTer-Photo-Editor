@@ -362,3 +362,82 @@ test('selection Vector Mask commands have one owner while Pen surface and PSD br
     assert.equal(pathControlSurface.includes(surfaceOwner), true, surfaceOwner + ' must stay in the path-control surface controller');
   }
 });
+
+test('applied Vector Mask boolean operation edits subpath without changing its cubic nodes', () => {
+  const h=harness();
+  const points=[{x:10,y:10,handleOut:{x:16,y:9}}, {x:50,y:10}, {x:30,y:45}];
+  h.layer.vectorMask=createVectorMask({subpaths:[
+    {operation:'add',closed:true,points:[{x:0,y:0},{x:80,y:0},{x:0,y:70}]},
+    {operation:'subtract',closed:true,points},
+  ]});
+  const original=structuredClone(h.layer.vectorMask.subpaths[1].points);
+  assert.equal(h.controller.editSelectedVectorMaskSubpathOperation(),true);
+  const modal=h.modals[0];
+  assert.deepEqual(modal.fields.map(field=>field.name),['subpath','operation']);
+  assert.equal(modal.onSubmit({subpath:'1',operation:'add'}),true);
+  assert.equal(h.layer.vectorMask.subpaths[1].operation,'add');
+  assert.deepEqual(h.layer.vectorMask.subpaths[1].points,original);
+  assert.deepEqual(h.commits,['Изменить операцию контура векторной маски']);
+  assert.equal(modal.onSubmit({subpath:'1',operation:'add'}),false);
+  assert.equal(modal.onSubmit({subpath:'1',operation:'invalid'}),false);
+  assert.equal(modal.onSubmit({subpath:'9',operation:'subtract'}),false);
+  assert.equal(h.commits.length,1);
+});
+
+test('delayed Vector Mask operation modal rejects stale document, layer, mask and group lock', () => {
+  const make=()=>{const h=harness();h.layer.vectorMask=createVectorMask({subpaths:[
+    {operation:'add',closed:true,points:[{x:0,y:0},{x:90,y:0},{x:0,y:70}]},
+  ]});return h;};
+  for(const change of [
+    h=>h.setDocument({groups:[],layers:[h.layer]}),
+    h=>h.setSelectedLayer({...h.layer}),
+    h=>{h.layer.vectorMask=createVectorMask({subpaths:[{operation:'subtract',closed:true,points:[{x:0,y:0},{x:50,y:0},{x:0,y:40}]}]});},
+    h=>{h.layer.locked=true;},
+    h=>{h.layer.groupId='g';h.documentValue.groups=[{id:'g',locked:true}];},
+    h=>{h.layer.vectorMask.subpaths[0]={operation:'add',closed:true,points:[{x:0,y:0},{x:80,y:0},{x:0,y:60}]};},
+  ]){
+    const h=make();
+    assert.equal(h.controller.editSelectedVectorMaskSubpathOperation(),true);
+    const captured=h.layer.vectorMask;
+    change(h);
+    assert.equal(h.modals[0].onSubmit({subpath:'0',operation:'subtract'}),false);
+    assert.equal(captured.subpaths[0].operation,'add');
+    assert.deepEqual(h.commits,[]);
+  }
+});
+
+test('context-target vector mask operation edits clicked layer rather than unrelated selected layer', () => {
+  const h=harness();
+  const another={...defaultLayer(),id:'another'};
+  h.documentValue.layers.push(another);
+  h.setSelectedLayer(another);
+  h.layer.vectorMask=createVectorMask({subpaths:[
+    {operation:'add',closed:true,points:[{x:0,y:0},{x:20,y:0},{x:0,y:20}]},
+  ]});
+  assert.equal(h.controller.editSelectedVectorMaskSubpathOperation(h.layer),true);
+  assert.equal(h.modals[0].onSubmit({subpath:'0',operation:'subtract'}),true);
+  assert.equal(h.layer.vectorMask.subpaths[0].operation,'subtract');
+  assert.equal(another.vectorMask,null);
+  assert.deepEqual(h.commits,['Изменить операцию контура векторной маски']);
+  assert.equal(h.modals[0].onSubmit({subpath:'',operation:'add'}),false);
+});
+
+
+test('operation dialog tracks the selected applied-mask subpath instead of retaining the first operation', () => {
+  const h=harness();
+  const triangle=[{x:0,y:0},{x:80,y:0},{x:40,y:70}];
+  h.layer.vectorMask=createVectorMask({subpaths:[
+    {operation:'add',closed:true,points:structuredClone(triangle)},
+    {operation:'subtract',closed:true,points:structuredClone(triangle)},
+  ]});
+  assert.equal(h.controller.editSelectedVectorMaskSubpathOperation(),true);
+  const dialog=h.modals[0];
+  const subpath={value:'0',addEventListener(type,fn){if(type==='change')this.notify=fn;}};
+  const operation={value:'add',disabled:false};
+  dialog.onMount({modal:{elements:{subpath,operation}}});
+  subpath.value='1';subpath.notify();
+  assert.equal(operation.value,'subtract','switching subpaths must show its actual operation');
+  subpath.value='0';subpath.notify();
+  assert.equal(operation.value,'add','returning must restore the first operation');
+  assert.deepEqual(h.commits,[],'a selection change is not an edit');
+});

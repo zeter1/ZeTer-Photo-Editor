@@ -22688,6 +22688,67 @@ function createSelectionVectorMaskController({
     return true;
   }
 
+  function editSelectedVectorMaskSubpathOperation(layer = getSelectedLayer()) {
+    const owner = getDocument();
+    const selectionAtOpen = getSelectedLayer();
+    const mask = layer?.vectorMask;
+    if (!owner || !layer || !mask || isLayerLocked(owner, layer)
+      || !Array.isArray(mask.subpaths) || !mask.subpaths.length) return false;
+    const subpaths = mask.subpaths.slice();
+    const initialIndex = subpaths.findIndex(subpath =>
+      subpath?.closed !== false && Array.isArray(subpath.points) && subpath.points.length >= 3);
+    if (initialIndex < 0) return false;
+    const operations = [
+      ['add','Добавить'], ['subtract','Вычесть'],
+      ['intersect','Пересечение'], ['exclude','Исключение'],
+    ];
+    showModal({
+      title:'Операция контура векторной маски',
+      fields:[
+        { name:'subpath', label:'Подпуть', type:'select', value:String(initialIndex),
+          options:subpaths.map((subpath, index) =>
+            [String(index), `${index + 1}: ${subpath?.points?.length || 0} узлов (${subpath?.operation || 'add'})`]) },
+        { name:'operation', label:'Операция', type:'select',
+          value:subpaths[initialIndex]?.operation || 'add', options:operations },
+      ],
+      submitLabel:'Применить',
+      onMount:({modal}) => {
+        const subpathSelect=modal.elements.subpath;
+        const operationSelect=modal.elements.operation;
+        subpathSelect?.addEventListener('change',()=>{
+          const value=subpathSelect.value;
+          const index=/^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : -1;
+          const current=subpaths[index];
+          if (!operationSelect) return;
+          operationSelect.disabled=!current || current.closed===false
+            || !Array.isArray(current.points) || current.points.length<3;
+          if (!operationSelect.disabled) operationSelect.value=current.operation || 'add';
+        });
+      },
+      onSubmit:values => {
+        if (getDocument() !== owner || getSelectedLayer() !== selectionAtOpen
+          || !owner.layers?.includes(layer) || layer.vectorMask !== mask
+          || isLayerLocked(owner, layer)) return false;
+        const selectedValue = values?.subpath;
+        if (typeof selectedValue !== 'string' || !/^(?:0|[1-9]\d*)$/.test(selectedValue)) return false;
+        const index = Number(selectedValue);
+        const operation = values?.operation;
+        if (!Number.isSafeInteger(index) || index < 0 || index >= subpaths.length
+          || !operations.some(([name]) => name === operation)
+          || mask.subpaths?.length !== subpaths.length) return false;
+        const subpath = mask.subpaths[index];
+        if (subpath !== subpaths[index] || subpath?.closed === false
+          || !Array.isArray(subpath?.points) || subpath.points.length < 3
+          || subpath.operation === operation) return false;
+        subpath.operation = operation;
+        commit('Изменить операцию контура векторной маски');
+        setStatus(`Векторная маска: операция подпути ${index + 1} — ${operation}`);
+        return true;
+      },
+    });
+    return true;
+  }
+
   function editSelectedVectorMaskProperties() {
     const ownerDocument = getDocument();
     const layer = getSelectedLayer();
@@ -22756,6 +22817,7 @@ function createSelectionVectorMaskController({
     selectionVectorMaskSubpath,
     applySelectionToVectorMask,
     editSelectedVectorMask,
+    editSelectedVectorMaskSubpathOperation,
     editSelectedVectorMaskProperties,
     toggleSelectedVectorMask,
     invertSelectedVectorMask,
@@ -29835,6 +29897,7 @@ const {
   selectionVectorMaskDocumentNodes,
   applySelectionToVectorMask,
   editSelectedVectorMask,
+  editSelectedVectorMaskSubpathOperation,
   editSelectedVectorMaskProperties,
   toggleSelectedVectorMask,
   invertSelectedVectorMask,
@@ -31934,6 +31997,7 @@ function layerContextMenu(id) {
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
+    ['Операция контура векторной маски…','',()=>editSelectedVectorMaskSubpathOperation(target()),()=>selectedTarget()&&editable()&&Boolean(target().vectorMask?.subpaths?.length)],
     ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
@@ -32069,6 +32133,7 @@ const menus={
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
+    ['Операция контура векторной маски…','',editSelectedVectorMaskSubpathOperation,()=>Boolean(selected()?.vectorMask?.subpaths?.length)&&!isLayerLocked(doc,selected())],
     ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
