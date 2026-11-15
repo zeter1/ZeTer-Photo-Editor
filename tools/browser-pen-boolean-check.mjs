@@ -69,6 +69,20 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
   await waitFor('second Pen subpath committed',async()=>{
     const s=await state();return s.history.filter(row=>row.includes('Добавить подпуть')).length===2;
   });
+  // Real pointer gestures: create a short cubic handle, then drag the same anchor.
+  // Before the nearest-control fix, the handle stole the second pointerdown.
+  const dragPoint=async(from,to,modifiers=0)=>{
+    const map=([x,y])=>({x:start.x+x*start.width/96,y:start.y+y*start.height/96});
+    await client.send('Input.dispatchMouseEvent',{type:'mousePressed',...map(from),button:'left',buttons:1,clickCount:1,modifiers});
+    await client.send('Input.dispatchMouseEvent',{type:'mouseMoved',...map(to),button:'left',buttons:1,modifiers});
+    await client.send('Input.dispatchMouseEvent',{type:'mouseReleased',...map(to),button:'left',buttons:0,clickCount:1,modifiers});
+  };
+  await dragPoint([8,8],[12,8],8); // Shift+anchor creates smooth handleOut at x=12.
+  await waitFor('Saved Path cubic handle drag committed',async()=>
+    (await state()).history.some(row=>row.includes('Изменить ручку сохранённого контура')));
+  await dragPoint([8,8],[8,3]); // Anchor must win over its nearby handles.
+  await waitFor('Saved Path anchor drag committed',async()=>
+    (await state()).history.some(row=>row.includes('Переместить узел сохранённого контура')));
   assert(await evaluate(client,`(() => {
     const row=document.querySelector('#pathsList .path-row');row.click();
     const apply=document.querySelector('#applyPathMaskBtn');
@@ -77,9 +91,33 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
   await waitFor('real mask subtract alpha',async()=>{
     const p=await sample();return p?.outside[3]===255&&p?.inside[3]===0;
   });
+  assert(await evaluate(client,`(() => {
+    const sub=document.querySelector('#pathSubpathSelect');
+    const op=document.querySelector('#pathSubpathOperation');
+    if(sub.disabled||op.disabled||sub.options.length!==2)return false;
+    sub.value='1';sub.dispatchEvent(new Event('change',{bubbles:true}));
+    if(op.value!=='subtract')return false;
+    op.value='add';op.dispatchEvent(new Event('change',{bubbles:true}));
+    if(op.value!=='add')return false;
+    document.querySelector('#applyPathMaskBtn').click();
+    return true;
+  })()`),'Change existing second subpath operation and reapply real mask');
+  await waitFor('existing subpath changed from subtract to add in rendered alpha',async()=>{
+    const p=await sample();return p?.outside[3]===255&&p?.inside[3]===255;
+  });
+  assert(await evaluate(client,`(() => {
+    const op=document.querySelector('#pathSubpathOperation');
+    if(op.disabled||op.value!=='add')return false;
+    op.value='subtract';op.dispatchEvent(new Event('change',{bubbles:true}));
+    document.querySelector('#applyPathMaskBtn').click();
+    return true;
+  })()`),'Restore subtract operation with real Paths UI control');
+  await waitFor('restored subtract operation in mask alpha',async()=>{
+    const p=await sample();return p?.outside[3]===255&&p?.inside[3]===0;
+  });
   await evaluate(client,"document.querySelector('#undoBtn').click();true");
-  await waitFor('Undo remove vector mask',async()=>{
-    const p=await sample();return p?.inside[3]===255;
+  await waitFor('Undo restores previous add mask pixels',async()=>{
+    const p=await sample();return p?.inside[3]===255&&p?.outside[3]===255;
   });
   await evaluate(client,"document.querySelector('#redoBtn').click();true");
   await waitFor('Redo restore vector mask',async()=>{
@@ -106,6 +144,12 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
     saved.path.subpaths[1].operation==='subtract' &&
     saved.mask?.subpaths?.[1]?.operation==='subtract','genuine .zpe retains editable boolean subpath and mask',
     JSON.stringify(saved?.path?.subpaths?.map(s=>s.operation)));
+  const near=(value,expected)=>Number.isFinite(value)&&Math.abs(value-expected)<0.2;
+  const moved=saved?.path?.subpaths?.[0]?.points?.[0];
+  assert(moved && near(moved.x,8) && near(moved.y,3)
+    && near(moved.handleOut?.x,12) && near(moved.handleOut?.y,3)
+    && near(moved.handleIn?.x,4) && near(moved.handleIn?.y,3),
+    'real pointer anchor/handle drag persists exact editable cubic geometry in .zpe',JSON.stringify(moved));
   assert(await evaluate(client,`(() => {
     const blob=window.__penBooleanExports.at(-1);
     if(!blob)return false;
@@ -137,11 +181,18 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
     const bytes=await evaluate(client,`(async()=>Array.from(new Uint8Array(
       await window.__penBooleanExports.at(-1).arrayBuffer())))()`);
     const parsed=await decodePsd(Uint8Array.from(bytes),{maxPixels:20000,maxLayers:20});
-    assert(parsed.paths?.some(path=>path.subpaths?.length===2
+    const nativePath=parsed.paths?.find(path=>path.subpaths?.length===2
       && path.subpaths[0].operation==='add' && path.subpaths[1].operation==='subtract'
-      && path.subpaths.every(subpath => subpath.points?.length===4)),
+      && path.subpaths.every(subpath=>subpath.points?.length===4));
+    assert(nativePath,
       format+' must keep native Saved Path boolean and cubic geometry',
       JSON.stringify(parsed.paths?.map(path=>path.subpaths?.map(sub=>sub.operation))));
+    const nativeNode=nativePath.subpaths[0].points[0];
+    assert(near(nativeNode.x,8) && near(nativeNode.y,3)
+      && near(nativeNode.handleOut?.x,12) && near(nativeNode.handleOut?.y,3)
+      && near(nativeNode.handleIn?.x,4) && near(nativeNode.handleIn?.y,3),
+      format+' native editable cubic geometry must match genuine UI anchor/handle drag',
+      JSON.stringify(nativeNode));
     const imported=await evaluate(client,`(() => {
       const blob=window.__penBooleanExports.at(-1);
       const file=new File([blob],'boolean.${format==='psb'?'psb':'psd'}',
@@ -160,5 +211,5 @@ export async function verifyBrowserPenBoolean({ client, evaluate, waitFor, asser
     });
   }
   await evaluate(client,'URL.createObjectURL=window.__penBooleanOriginalCreateUrl;true');
-  console.log('CAP-BEZ UI New Saved Path->Pen add/subtract->Vector Mask->Undo/Redo/.zpe/PSD/PSB Chrome PASS');
+  console.log('CAP-BEZ UI Saved Path->Pen->edit existing boolean op->mask alpha->Undo/Redo/.zpe/PSD+PSB Chrome PASS');
 }

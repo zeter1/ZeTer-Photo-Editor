@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
-  <meta name="application-version" content="1.46.12" />
-  <meta name="application-build" content="6d8200c994382b09" />
+  <meta name="application-version" content="1.46.13" />
+  <meta name="application-build" content="20546096e38394e1" />
   <title>ZeTer Photo Editor — локальный редактор изображений</title>
   <link rel="stylesheet" href="./src/styles.css" />
 </head>
@@ -292,6 +292,17 @@
           </div>
           <div id="pathsList" class="paths-list" role="listbox" aria-label="Сохранённые контуры">
             <div class="paths-empty">Нет сохранённых контуров</div>
+          </div>
+          <div class="paths-toolbar paths-subpath-toolbar">
+            <label for="pathSubpathSelect">Подпуть</label>
+            <select id="pathSubpathSelect" aria-label="Подпуть выбранного сохранённого контура" disabled></select>
+            <label for="pathSubpathOperation">Операция</label>
+            <select id="pathSubpathOperation" aria-label="Операция существующего подпути" disabled>
+              <option value="add">Добавить</option>
+              <option value="subtract">Вычесть</option>
+              <option value="intersect">Пересечение</option>
+              <option value="exclude">Исключение</option>
+            </select>
           </div>
         </section>
 

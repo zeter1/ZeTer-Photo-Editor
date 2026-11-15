@@ -1469,6 +1469,7 @@ function createPathsController({
   } = ui;
 
   let selectedIndex = -1;
+  let selectedSubpathIndex = 0;
 
   const documentValue = () => getDocument?.() || null;
   const paths = () => {
@@ -1493,6 +1494,7 @@ function createPathsController({
   }
 
   function setSelectedIndex(index, { syncEdit = false, render = false, draw = false } = {}) {
+    if (selectedIndex !== index) selectedSubpathIndex = 0;
     selectedIndex = Number.isInteger(index) ? index : -1;
     const normalized = normalizeSelectedIndex();
     if (syncEdit && normalized >= 0) syncPathEditSelection(normalized);
@@ -1786,6 +1788,29 @@ function createPathsController({
     return true;
   }
 
+  function changeSubpathOperation(pathIndex, subpathIndex, operation, {
+    expectedDocument = null, expectedPath = null, expectedSubpath = null,
+  } = {}) {
+    const owner = documentValue();
+    if (!owner || (expectedDocument && owner !== expectedDocument)
+      || !Number.isInteger(pathIndex) || pathIndex !== selectedIndex
+      || !Number.isInteger(subpathIndex) || subpathIndex < 0
+      || !['add', 'subtract', 'intersect', 'exclude'].includes(operation)) return false;
+    const path = owner.paths?.[pathIndex];
+    const subpath = path?.subpaths?.[subpathIndex];
+    if (!subpath || (expectedPath && path !== expectedPath)
+      || (expectedSubpath && subpath !== expectedSubpath)
+      || !subpath.closed || !Array.isArray(subpath.points) || subpath.points.length < 3
+      || subpath.operation === operation) return false;
+    subpath.operation = operation;
+    selectedSubpathIndex = subpathIndex;
+    commit('Изменить операцию подпути');
+    updatePathsPanel();
+    drawOverlay();
+    setStatus('Операция подпути изменена; повторно примените Saved Path к векторной маске');
+    return true;
+  }
+
   function selectForAction(index) {
     setSelectedIndex(index);
     return selectedIndex;
@@ -1822,6 +1847,41 @@ function createPathsController({
     };
     for (const [key, value] of Object.entries(enabled)) {
       if (controls[key]) controls[key].disabled = !value;
+    }
+    const owner = documentValue();
+    const subpaths = Array.isArray(path?.subpaths) ? path.subpaths : [];
+    if (!Number.isInteger(selectedSubpathIndex) || selectedSubpathIndex >= subpaths.length) {
+      selectedSubpathIndex = 0;
+    }
+    if (controls.subpath && documentRef?.createElement) {
+      const options = subpaths.map((subpath, index) => {
+        const option = documentRef.createElement('option');
+        option.value = String(index);
+        option.textContent = `${index + 1}: ${subpath.points?.length || 0} узлов`;
+        return option;
+      });
+      controls.subpath.replaceChildren(...options);
+      controls.subpath.disabled = !subpaths.length;
+      controls.subpath.value = subpaths.length ? String(selectedSubpathIndex) : '';
+      controls.subpath.onchange = () => {
+        if (documentValue() !== owner || owner?.paths?.[selectedIndex] !== path) return;
+        const next = Number(controls.subpath.value);
+        if (!Number.isInteger(next) || next < 0 || next >= subpaths.length) return;
+        selectedSubpathIndex = next;
+        updateControls(paths());
+      };
+    }
+    if (controls.subpathOperation) {
+      const current = subpaths[selectedSubpathIndex];
+      controls.subpathOperation.disabled = !current;
+      controls.subpathOperation.value = current?.operation || 'add';
+      const pathIndex = selectedIndex;
+      const subpathIndex = selectedSubpathIndex;
+      controls.subpathOperation.onchange = () => {
+        changeSubpathOperation(pathIndex, subpathIndex, controls.subpathOperation.value, {
+          expectedDocument: owner, expectedPath: path, expectedSubpath: current,
+        });
+      };
     }
     return enabled;
   }
@@ -1918,6 +1978,7 @@ function createPathsController({
     editSelectedDocumentPath,
     applySelectedDocumentPathAsVectorMask,
     appendPenSubpath,
+    changeSubpathOperation,
     pathContextMenu,
     updatePathsPanel,
     bindControls,
@@ -12191,29 +12252,31 @@ function createPathControlSurfaceController({
       : 8 / currentZoom();
     const owner = state.getDocument();
 
+    // Prefer the nearest visible control, rather than every handle before every anchor.
+    // Short Bézier handles may sit inside an anchor's hit radius; otherwise their
+    // priority makes the actual anchor impossible to drag. Ties favor anchors.
+    let nearest = null;
+    let nearestDistance = Infinity;
     for (const target of selectedTargets()) {
       if (target.layer && isLayerLocked(owner, target.layer)) continue;
       for (let nodeIndex = 0; nodeIndex < target.points.length; nodeIndex += 1) {
         const node = target.points[nodeIndex];
-        for (const control of PATH_CONTROL_HANDLE_NAMES) {
+        for (const control of ['anchor', ...PATH_CONTROL_HANDLE_NAMES]) {
           const controlPoint = documentPoint(target, node, control);
-          if (
-            controlPoint &&
-            Math.hypot(px - controlPoint.x, py - controlPoint.y) <= hitRadius
-          ) {
-            return { ...target, nodeIndex, control };
+          if (!controlPoint) continue;
+          const distance = Math.hypot(px - controlPoint.x, py - controlPoint.y);
+          if (!Number.isFinite(distance) || distance > hitRadius) continue;
+          if (distance < nearestDistance - 1e-9 || (
+            Math.abs(distance - nearestDistance) <= 1e-9
+            && control === 'anchor' && nearest?.control !== 'anchor'
+          )) {
+            nearest = { ...target, nodeIndex, control };
+            nearestDistance = distance;
           }
         }
       }
-      for (let nodeIndex = 0; nodeIndex < target.points.length; nodeIndex += 1) {
-        const node = target.points[nodeIndex];
-        const anchor = documentPoint(target, node, 'anchor');
-        if (anchor && Math.hypot(px - anchor.x, py - anchor.y) <= hitRadius) {
-          return { ...target, nodeIndex, control: 'anchor' };
-        }
-      }
     }
-    return null;
+    return nearest;
   }
 
   function trace(context, target) {
@@ -29827,6 +29890,8 @@ const pathsController = createPathsController({
       rename: $('#renamePathBtn'),
       duplicate: $('#duplicatePathBtn'),
       delete: $('#deletePathBtn'),
+      subpath: $('#pathSubpathSelect'),
+      subpathOperation: $('#pathSubpathOperation'),
     },
     documentRef: document,
   },

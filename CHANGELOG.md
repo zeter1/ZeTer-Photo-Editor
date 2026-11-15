@@ -1,4 +1,13 @@
-## 1.46.12 — текущая версия
+## 1.46.13 — текущая версия
+
+### 2026-11-15 — CAP-BEZ-PATH-OP-EDIT: изменяем operation существующего подпути Saved Path
+
+- Панель Paths позволяет выбрать конкретный уже нарисованный Bézier subpath и сменить его операцию Add/Subtract/Intersect/Exclude без изменения узлов и ручек. Повторное Paths → маска пересчитывает реальную альфу; изменение сохраняется в History и нативных PSD/PSB ресурсах, а также в .zpe.
+- Контроллер проверяет точное совпадение документа, Saved Path и подпути при запоздалом UI-событии, отбрасывает invalid/no-op. В Chrome file:// подтверждены пиксели Subtract → Add → Subtract, Undo/Redo, .zpe reopen, PSD+PSB UI export/import; Node 14/14 focused PASS, полный Windows Chrome browser smoke PASS; Windows `npm run check` 1615 PASS / 10 SKIP / 5 Linux-only FAIL. Это self-round-trip, не Photoshop-authored parity.
+- Дополнительный production RED→GREEN в том же локальном срезе: короткие Bézier handles перехватывали hit-testing даже в точке anchor; теперь выбирается ближайший control, при равенстве — anchor. 2 новых/обновлённых Node assertions изначально FAIL; после patch 29/29 focused PASS, build PASS. Настоящий Chrome pointer Shift+handle + anchor drag подтверждает координаты обеих ручек в .zpe и native PSD/PSB UI round-trip, сохраняя реальную маску alpha и Undo/Redo. Полный Windows Chrome `npm run test:browser` PASS, exit 0 (115.28 s).
+- Работа выполнена в локальной зависимой ветке поверх PR #387, ещё не опубликована на GitHub. Linux PR-head CI, review и merge — NOT VERIFIED до публикации.
+
+## 1.46.12 — 2026-11-15
 
 ### 2026-11-15 — CAP-BEZ-PEN-NEW: Saved Path создаётся прямо в Paths, без исходного контура
 
