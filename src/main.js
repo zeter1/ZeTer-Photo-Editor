@@ -823,6 +823,8 @@ const pathsController = createPathsController({
       rename: $('#renamePathBtn'),
       duplicate: $('#duplicatePathBtn'),
       delete: $('#deletePathBtn'),
+      subpath: $('#pathSubpathSelect'),
+      subpathOperation: $('#pathSubpathOperation'),
     },
     documentRef: document,
   },

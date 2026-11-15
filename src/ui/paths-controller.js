@@ -42,6 +42,7 @@ export function createPathsController({
   } = ui;
 
   let selectedIndex = -1;
+  let selectedSubpathIndex = 0;
 
   const documentValue = () => getDocument?.() || null;
   const paths = () => {
@@ -66,6 +67,7 @@ export function createPathsController({
   }
 
   function setSelectedIndex(index, { syncEdit = false, render = false, draw = false } = {}) {
+    if (selectedIndex !== index) selectedSubpathIndex = 0;
     selectedIndex = Number.isInteger(index) ? index : -1;
     const normalized = normalizeSelectedIndex();
     if (syncEdit && normalized >= 0) syncPathEditSelection(normalized);
@@ -359,6 +361,29 @@ export function createPathsController({
     return true;
   }
 
+  function changeSubpathOperation(pathIndex, subpathIndex, operation, {
+    expectedDocument = null, expectedPath = null, expectedSubpath = null,
+  } = {}) {
+    const owner = documentValue();
+    if (!owner || (expectedDocument && owner !== expectedDocument)
+      || !Number.isInteger(pathIndex) || pathIndex !== selectedIndex
+      || !Number.isInteger(subpathIndex) || subpathIndex < 0
+      || !['add', 'subtract', 'intersect', 'exclude'].includes(operation)) return false;
+    const path = owner.paths?.[pathIndex];
+    const subpath = path?.subpaths?.[subpathIndex];
+    if (!subpath || (expectedPath && path !== expectedPath)
+      || (expectedSubpath && subpath !== expectedSubpath)
+      || !subpath.closed || !Array.isArray(subpath.points) || subpath.points.length < 3
+      || subpath.operation === operation) return false;
+    subpath.operation = operation;
+    selectedSubpathIndex = subpathIndex;
+    commit('Изменить операцию подпути');
+    updatePathsPanel();
+    drawOverlay();
+    setStatus('Операция подпути изменена; повторно примените Saved Path к векторной маске');
+    return true;
+  }
+
   function selectForAction(index) {
     setSelectedIndex(index);
     return selectedIndex;
@@ -395,6 +420,41 @@ export function createPathsController({
     };
     for (const [key, value] of Object.entries(enabled)) {
       if (controls[key]) controls[key].disabled = !value;
+    }
+    const owner = documentValue();
+    const subpaths = Array.isArray(path?.subpaths) ? path.subpaths : [];
+    if (!Number.isInteger(selectedSubpathIndex) || selectedSubpathIndex >= subpaths.length) {
+      selectedSubpathIndex = 0;
+    }
+    if (controls.subpath && documentRef?.createElement) {
+      const options = subpaths.map((subpath, index) => {
+        const option = documentRef.createElement('option');
+        option.value = String(index);
+        option.textContent = `${index + 1}: ${subpath.points?.length || 0} узлов`;
+        return option;
+      });
+      controls.subpath.replaceChildren(...options);
+      controls.subpath.disabled = !subpaths.length;
+      controls.subpath.value = subpaths.length ? String(selectedSubpathIndex) : '';
+      controls.subpath.onchange = () => {
+        if (documentValue() !== owner || owner?.paths?.[selectedIndex] !== path) return;
+        const next = Number(controls.subpath.value);
+        if (!Number.isInteger(next) || next < 0 || next >= subpaths.length) return;
+        selectedSubpathIndex = next;
+        updateControls(paths());
+      };
+    }
+    if (controls.subpathOperation) {
+      const current = subpaths[selectedSubpathIndex];
+      controls.subpathOperation.disabled = !current;
+      controls.subpathOperation.value = current?.operation || 'add';
+      const pathIndex = selectedIndex;
+      const subpathIndex = selectedSubpathIndex;
+      controls.subpathOperation.onchange = () => {
+        changeSubpathOperation(pathIndex, subpathIndex, controls.subpathOperation.value, {
+          expectedDocument: owner, expectedPath: path, expectedSubpath: current,
+        });
+      };
     }
     return enabled;
   }
@@ -491,6 +551,7 @@ export function createPathsController({
     editSelectedDocumentPath,
     applySelectedDocumentPathAsVectorMask,
     appendPenSubpath,
+    changeSubpathOperation,
     pathContextMenu,
     updatePathsPanel,
     bindControls,

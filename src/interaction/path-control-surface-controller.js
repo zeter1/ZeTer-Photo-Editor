@@ -156,29 +156,31 @@ export function createPathControlSurfaceController({
       : 8 / currentZoom();
     const owner = state.getDocument();
 
+    // Prefer the nearest visible control, rather than every handle before every anchor.
+    // Short Bézier handles may sit inside an anchor's hit radius; otherwise their
+    // priority makes the actual anchor impossible to drag. Ties favor anchors.
+    let nearest = null;
+    let nearestDistance = Infinity;
     for (const target of selectedTargets()) {
       if (target.layer && isLayerLocked(owner, target.layer)) continue;
       for (let nodeIndex = 0; nodeIndex < target.points.length; nodeIndex += 1) {
         const node = target.points[nodeIndex];
-        for (const control of PATH_CONTROL_HANDLE_NAMES) {
+        for (const control of ['anchor', ...PATH_CONTROL_HANDLE_NAMES]) {
           const controlPoint = documentPoint(target, node, control);
-          if (
-            controlPoint &&
-            Math.hypot(px - controlPoint.x, py - controlPoint.y) <= hitRadius
-          ) {
-            return { ...target, nodeIndex, control };
+          if (!controlPoint) continue;
+          const distance = Math.hypot(px - controlPoint.x, py - controlPoint.y);
+          if (!Number.isFinite(distance) || distance > hitRadius) continue;
+          if (distance < nearestDistance - 1e-9 || (
+            Math.abs(distance - nearestDistance) <= 1e-9
+            && control === 'anchor' && nearest?.control !== 'anchor'
+          )) {
+            nearest = { ...target, nodeIndex, control };
+            nearestDistance = distance;
           }
         }
       }
-      for (let nodeIndex = 0; nodeIndex < target.points.length; nodeIndex += 1) {
-        const node = target.points[nodeIndex];
-        const anchor = documentPoint(target, node, 'anchor');
-        if (anchor && Math.hypot(px - anchor.x, py - anchor.y) <= hitRadius) {
-          return { ...target, nodeIndex, control: 'anchor' };
-        }
-      }
     }
-    return null;
+    return nearest;
   }
 
   function trace(context, target) {
