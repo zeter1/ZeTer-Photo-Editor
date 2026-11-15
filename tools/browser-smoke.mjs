@@ -653,6 +653,14 @@ async function runSmoke() {
       return;
     }
 
+    // CAP-BEZ: direct grouped adjustment Vector Mask editing through real Chrome file://.
+    if (process.env.ZPE_ADJUSTMENT_MASK_DIRECT_BROWSER_ONLY === '1') {
+      const { verifyBrowserAdjustmentMaskDirect } = await import('./browser-adjustment-mask-direct-check.mjs');
+      await verifyBrowserAdjustmentMaskDirect({ client, evaluate, waitFor, assert });
+      assertNoBrowserErrors(errors, stderrState);
+      return;
+    }
+
     // CAP-BEZ: real Pen Saved Path boolean, Vector Mask and PSD/PSB UI round-trip.
     if (process.env.ZPE_PEN_BOOLEAN_BROWSER_ONLY === '1') {
       const { verifyBrowserPenBoolean } = await import('./browser-pen-boolean-check.mjs');
