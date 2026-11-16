@@ -1937,7 +1937,11 @@ function updateProperties() {
   }
   if (l.type === 'raster' && l.rawDng) {
     const d=l.rawDng.development;
+    const colorLabel=l.rawDng.colorPipeline==='matrix-d50-bradford-v1'?
+      'ColorMatrix → XYZ D50 → sRGB (приближённая калибровка; без camera oracle)':
+      'Без ColorMatrix: некалиброванный Bayer preview';
     extra += '<label>RAW источник</label><span>DNG Bayer · сохранён в .zpe; экспорт PSD/PSB — проявленные пиксели</span>' +
+      '<label>Цвет RAW</label><span>'+colorLabel+'</span>' +
       '<label>Экспозиция (EV)</label><input aria-label="RAW экспозиция" data-raw-exposure type="number" min="-5" max="5" step="0.1" value="' + d.exposure + '">' +
       '<label>WB красный</label><input aria-label="RAW баланс красного" data-raw-wb-red type="number" min="0.25" max="4" step="0.05" value="' + d.wbRed + '">' +
       '<label>WB синий</label><input aria-label="RAW баланс синего" data-raw-wb-blue type="number" min="0.25" max="4" step="0.05" value="' + d.wbBlue + '">' +

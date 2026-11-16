@@ -97,3 +97,16 @@ test('DNG ActiveArea/Orientation preview dimensions differ from immutable sensor
   assert.deepEqual([layer.rawDng.width,layer.rawDng.height],[6,4]);
   assert.deepEqual(sanitizeProject(JSON.parse(snapshotDocument(h.doc))).layers[0].rawDng,layer.rawDng);
 });
+
+
+test('calibrated RAW import stores rendering provenance and survives .zpe serialization',async()=>{
+  const h=harness();
+  const original=fixture({matrix1:[0.9,0.1,0,0.1,1,0,0,0.1,1],illuminant1:21});
+  assert.equal(await h.c.importImages([dngFile(original)]),1);
+  const layer=h.doc.layers[0];
+  assert.equal(layer.rawDng.colorPipeline,'matrix-d50-bradford-v1');
+  const reopened=sanitizeProject(JSON.parse(snapshotDocument(h.doc)));
+  assert.equal(reopened.layers[0].rawDng.colorPipeline,'matrix-d50-bradford-v1');
+  assert.equal(reopened.layers[0].rawDng.dataUrl,layer.rawDng.dataUrl);
+  assert.deepEqual(reopened.layers[0].rawDng.development,{exposure:0,wbRed:1,wbBlue:1});
+});

@@ -1016,7 +1016,11 @@ function sanitizeRawDng(value, width, height) {
   if (!Number.isFinite(exposure) || exposure < -5 || exposure > 5 ||
       !Number.isFinite(wbRed) || wbRed < 0.25 || wbRed > 4 ||
       !Number.isFinite(wbBlue) || wbBlue < 0.25 || wbBlue > 4) return null;
-  return {dataUrl:value.dataUrl,width:value.width,height:value.height,development:{exposure,wbRed,wbBlue}};
+  // Preserve only a known rendering provenance marker; the original DNG bytes are authoritative.
+  const colorPipeline=value.colorPipeline==='matrix-d50-bradford-v1'?
+    'matrix-d50-bradford-v1':'uncalibrated-bayer-preview';
+  return {dataUrl:value.dataUrl,width:value.width,height:value.height,
+    colorPipeline,development:{exposure,wbRed,wbBlue}};
 }
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {

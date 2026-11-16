@@ -1,6 +1,7 @@
-// Synthetic classic TIFF/DNG fixture with real IFD tags, strip bytes and R/G/B CFA.
+// Synthetic *TIFF-formatted* DNG fixture, not camera-authored RAW provenance.
 export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncated=false,
-  width=4,height=4,orientation=null,activeArea=null}={}) {
+  width=4,height=4,orientation=null,activeArea=null,matrix1=null,matrix2=null,
+  illuminant1=21,illuminant2=17,neutral=[1,1,1],samples=null}={}){
   const entries=[
     [256,4,1,width],[257,4,1,height],[258,3,1,bits],
     [259,3,1,compression],[262,3,1,32803],[273,4,1,0],
@@ -11,11 +12,24 @@ export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncate
   ];
   if(orientation!==null)entries.push([274,3,1,orientation]);
   if(activeArea!==null)entries.push([50829,4,4,0]);
-  const ifdSize=2+entries.length*12+4, neutralOffset=8+ifdSize;
-  const activeOffset=neutralOffset+24, stripOffset=activeOffset+(activeArea===null?0:16);
+  if(matrix1!==null)entries.push([50721,10,9,0],[50778,3,1,illuminant1]);
+  if(matrix2!==null)entries.push([50722,10,9,0],[50779,3,1,illuminant2]);
+  const ifdSize=2+entries.length*12+4;
+  let next=8+ifdSize;
+  const allocate=(tag,size)=>{
+    const entry=entries.find(e=>e[0]===tag);
+    if(!entry)return null;
+    const offset=next;
+    entry[3]=offset;
+    next+=size;
+    return offset;
+  };
+  const neutralOffset=allocate(50728,24);
+  const activeOffset=activeArea===null?null:allocate(50829,16);
+  const matrix1Offset=matrix1===null?null:allocate(50721,72);
+  const matrix2Offset=matrix2===null?null:allocate(50722,72);
+  const stripOffset=next;
   entries.find(e=>e[0]===273)[3]=stripOffset;
-  entries.find(e=>e[0]===50728)[3]=neutralOffset;
-  if(activeArea!==null)entries.find(e=>e[0]===50829)[3]=activeOffset;
   const b=new ArrayBuffer(stripOffset+width*height*(bits/8)-(truncated?1:0));
   const v=new DataView(b);
   const set16=(p,n)=>v.setUint16(p,n,le);
@@ -31,11 +45,23 @@ export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncate
     else set32(p+8,value);
   });
   set32(8+2+entries.length*12,0);
-  for(let i=0;i<3;i++){set32(neutralOffset+i*8,1);set32(neutralOffset+i*8+4,1);}
-  if(activeArea!==null)for(let i=0;i<4;i++)set32(activeOffset+i*4,activeArea[i]);
+  for(let i=0;i<3;i++){
+    set32(neutralOffset+i*8,Math.round(neutral[i]*100000));
+    set32(neutralOffset+i*8+4,100000);
+  }
+  if(activeOffset!==null)for(let i=0;i<4;i++)set32(activeOffset+i*4,activeArea[i]);
+  function writeMatrix(offset,m){
+    if(offset===null)return;
+    for(let i=0;i<9;i++){
+      v.setInt32(offset+i*8,Math.round(m[i]*100000),le);
+      v.setInt32(offset+i*8+4,100000,le);
+    }
+  }
+  writeMatrix(matrix1Offset,matrix1);
+  writeMatrix(matrix2Offset,matrix2);
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
     const channel=pattern[(y&1)*2+(x&1)];
-    const sample=(bits===8 ? [100,50,25]:[25000,12000,5000])[channel];
+    const sample=(samples||(bits===8?[100,50,25]:[25000,12000,5000]))[channel];
     const p=stripOffset+(y*width+x)*(bits/8);
     if(p+bits/8<=b.byteLength){if(bits===8)v.setUint8(p,sample);else set16(p,sample);}
   }

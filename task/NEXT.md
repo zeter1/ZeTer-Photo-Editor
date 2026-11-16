@@ -1,19 +1,20 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 9 / **CAP-RAW-DNG-CAMERA-COLOR** — реальная калиброванная RAW-проявка, ColorMatrix и независимый camera-authored corpus.
-> **PRIORITY:** P1 · **STATUS:** TODO (следующая реализация). Калиброванный camera-to-sRGB pipeline в коде ещё отсутствует. Не повторять готовые DNG import, WB/exposure, ActiveArea/Orientation.
-> **CURRENT MAIN:** `f45d3336db3d629447da482937391eeebd0ddfe3` — [#395 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/395), версия `1.46.19`. Exact-main [core CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43823529880) / [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43823529920) **PENDING** на момент обновления; сверять по точному SHA.
-> **LAST PR EVIDENCE:** #395 final head `611682a9904dc4dbc171ffbc6b21bb53e61335eb`, [Linux core CI attempt 2 SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43822770396) после точечного rerun Chromium DevTools endpoint timeout, [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43822770443), 13/13 checks SUCCESS. `verify` включает новый ориентированный DNG Chromium `file://` PASS; первая попытка старого E2E ожидания имела race и исправлена коммитом `611682a`.
-> **LOCAL EVIDENCE:** Windows 11 focused Node PASS; `npm run test:browser:raw-dng` повторно PASS 2×; `npm run check`: **1657 PASS / 10 SKIP / 5 FAIL** (все 5 Linux-only cgroup/proc); полный Windows `npm run test:browser` FAIL по CDP `Runtime.evaluate` timeout после Stage 036C, причинность к DNG не доказана. Не выдавать общие Windows тесты за PASS.
-> **BOUNDARY:** camera-authored licensed DNG и independent LibRaw/RawTherapee pixel oracle отсутствуют. ColorMatrix1/2 / ICC / DefaultCrop, packed/lossless JPEG RAW и точный HDR pipeline — НЕ поддерживаются полностью; synthetic TIFF fixture не является камерным RAW.
-> **NEXT IMPLEMENTATION ACTION:** реализовать **реальное преобразование camera RGB → XYZ D50 → linear sRGB** с безопасным разбором DNG `ColorMatrix1/2`, `AsShotNeutral`, `CalibrationIlluminant1/2`; строго валидировать типы/размерности матриц, вырожденность и отсутствие калибровки, не называть приблизительное изображение camera-accurate. Добавить эталонные матричные unit-тесты, `.zpe` provenance, WB/exposure/Undo/Redo и реальный Chrome `file://` acceptance. Параллельно найти законно распространяемый **camera-authored uncompressed Bayer DNG** с документированным provenance и получить независимые reference pixels; до этого полный Stage 9 IN PROGRESS.
-> **ACCEPTANCE GATE:** PR head Linux core+independent real-photo CI, camera reference LibRaw/RawTherapee и pixel error thresholds, ориентированный RAW UI/History/.zpe acceptance, затем exact-main CI. Сжатый DNG — отдельный следующий срез.
+> **CURRENT TASK/ID:** Stage 9 / **CAP-RAW-DNG-CAMERA-COLOR** — последний непубликованный bounded matrix pipeline; завершить проверку diff, PR-head Linux core+independent real-photo CI и интеграцию.
+> **PRIORITY:** P1 · **STATUS:** IN PROGRESS (локальный код готов и прошёл targeted acceptance, ещё НЕ в main).
+> **BASE MAIN SHA:** `a81bec7cafabff90b685c41fe4b8242dc8fa1566` — [#396 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/396), версия 1.46.19. Exact-main [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43824536034) для старого main, не для нового diff.
+> **ACTIVE PR:** none (на момент локальной проверки). **LAST VERIFIED:** 2026-11-16 — чистый исходный Windows `ZeTer-Photo-Editor-raw` + bounded v1.46.20 edits.
+> **LOCAL EVIDENCE:** 18/18 focused Node PASS, `npm run build` PASS, настоящий Chromium `npm run test:browser:raw-dng` PASS (calibrated ColorMatrix pixel oracle, Properties, exposure/WB, Undo/Redo, .zpe save/reopen и PNG/PSD/PSB self-export). Full Windows `npm run check`: **1664 PASS / 10 SKIP / 5 FAIL** (Linux-only /proc/cgroup probes на Windows); `git diff --check` PASS. Linux PR CI пока NOT RUN.
+> **REMAINING ACCEPTANCE:** GitHub PR-head Linux CI core/independent; exact-main после merge. Camera-authored lawful Bayer DNG + независимый LibRaw/RawTherapee pixel oracle и точные пороги остаются **BLOCKED (external evidence)** — не препятствие независимому DefaultCrop. Двухисточниковый CCT, Photoshop/ICC/ForwardMatrix не full parity.
+> **NEXT IMPLEMENTATION ACTION:** после code/CI приемки переходить к **CAP-RAW-DNG-DEFAULT-CROP** — читать DefaultCropOrigin/Size относительно ActiveArea, валидировать sensor-phase, дробные координаты/Orientation/Undo/Redo/.zpe и Chrome file:// raster pixels; больше не реализовывать ColorMatrix заново.
+> **BLOCKERS:** нет независимого подтверждённого camera-authored reference и oracle; текущая матричная реализация пока локальная, не CI-verified.
 
-## Очередь (не дублировать сделанное)
+## Короткая очередь
 
-1. **CAP-RAW-DNG-CAMERA-COLOR:** P1 TODO — код калиброванного цветового конвертера и внешний корпус/сравнение.
-2. **CAP-BEZ-MASK-PSD-UI:** external Adobe-authored interoperability corpus BLOCKED, не повторять #392.
-3. **Stage 6 / 003X/6c-9:** IN PROGRESS, Worker stale/close/edit native RGB16/CMYKA32 acceptance.
-4. **RAW lossless-JPEG, ICC, HDR, расширенная Photoshop-совместимость:** TODO / IN PROGRESS по [матрице](CAPABILITY_MATRIX.md).
+1. **CAP-RAW-DNG-DEFAULT-CROP:** P1 TODO — следующий пользовательский RAW срез после приёмки текущего PR.
+2. **CAP-RAW-CAMERA-ORACLE:** BLOCKED — licensed camera-authored DNG, LibRaw/RawTherapee calibrated pixel comparisons.
+3. **CAP-BEZ-MASK-PSD-UI:** BLOCKED external Adobe-authored corpus; не повторять уже merged bounded.
+4. **Stage 6 / 003X/6c-9:** IN PROGRESS — Worker stale/close/edit native RGB16/CMYKA32.
+5. **RAW lossless-JPEG/packed, ICC/ForwardMatrix, HDR:** TODO/IN PROGRESS по [матрице](CAPABILITY_MATRIX.md).
 
-[Журнал RAW 1.46.19](002-raw-dng-orientation-activearea.md) · [RAW foundation](002-raw-dng-foundation.md) · [матрица](CAPABILITY_MATRIX.md) · [карта](README.md).
+[ColorMatrix journal](002-raw-dng-camera-color.md) · [Orientation journal](002-raw-dng-orientation-activearea.md) · [матрица](CAPABILITY_MATRIX.md) · [карта](README.md).
