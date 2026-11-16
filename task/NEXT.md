@@ -1,19 +1,19 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 2–4 / **CAP-BEZ-PATH-NODE-EDIT** — Shape Path + Saved Paths node insert/delete.
-> **PRIORITY:** P1 · **STATUS:** IN PROGRESS (реализация опубликована в PR #392, локальная Chrome приёмка PASS; Linux PR-head/merge/exact-main pending).
-> **BASE MAIN SHA:** 70b70693bff620f08b89785c4e2f31a40b25d138 (2026-11-16; baseline [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43735921273)).
-> **ACTIVE PR:** [#392 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392), ветка `feat/path-node-edit-20261116`, worktree `ZeTer-Photo-Editor-path-node`; код вне `main`. Новые head-workflows: [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810071983) и [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810071910), статус проверять по актуальному SHA.
-> **LAST VERIFIED:** v1.46.17. Source-aware Pen Ctrl+click сегмента / Ctrl+Alt+click anchor для Shape Path и Saved Paths, точный De Casteljau включая closing cubic, open/closed minimum, owner/target/ID/lock checks. Target Node **42/42 PASS**; реальный Chrome `file://` Shape + Saved Path, RGBA, History Undo/Redo, `.zpe` reopen и native PSD/PSB self-round-trip **PASS**, полный `npm run test:browser` **PASS** (exit 0). Windows `npm run check` после исправления версии: 1646 PASS / 10 SKIP / 5 FAIL (все 5 Linux-only `/proc/cgroup`, НЕ full Windows PASS); focused version+paths 21/21 PASS. `git diff --check` PASS.
-> **REMAINING ACCEPTANCE:** локальные version/Shape/Saved Chrome проверки PASS → [#392 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392) → Linux PR-head core+real-photo CI, review/merge без обхода gates → exact-main обе CI. Настоящий Photoshop-authored Saved Path / Vector Mask corpus отсутствует: внешняя Adobe GUI interoperability NOT VERIFIED.
-> **NEXT IMPLEMENTATION ACTION:** довести `CAP-BEZ-PATH-NODE-EDIT` до PR-head Linux CI и merge/exact-main без повторной реализации Vector Mask; после принятия выбрать следующий независимый P1 по матрице.
-> **BLOCKERS:** Photoshop-authored Saved Path / mask corpus и [Photoshop-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md). Не использовать synthetic self-round-trip как доказательство Adobe interoperability.
+> **CURRENT TASK/ID:** Stage 9 / **CAP-RAW-DNG-FOUNDATION** — первый рабочий браузерный RAW-import с неразрушающей проявкой; не возвращаться к уже принятому Shape/Saved Path node editing.
+> **PRIORITY:** P1 · **STATUS:** TODO (новый независимый функциональный срез; для кода ещё нет PR).
+> **BASE MAIN SHA:** 39ae073a7c3daa12ae607663423ff767ed10f4d1 — [#392 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392), ZeTer 1.46.17.
+> **ACTIVE PR:** для CAP-RAW-DNG-FOUNDATION отсутствует; [#392 CLOSED/MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392) и не требует повторной реализации.
+> **LAST VERIFIED:** CAP-BEZ-PATH-NODE-EDIT: точный PR-head 81fc4bf981ec37290a3ba453b7747ad0888144d9 — [Linux core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810434572), [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810434570), все 13 checks SUCCESS; реальный Windows Chrome file:// Shape/Saved RGBA, Undo/Redo, .zpe reopen, editable native PSD/PSB self-round-trip PASS. [Exact merge-main core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43811572358) / [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43811572311): **PENDING**, проверить результат для main SHA 39ae073a. Windows full npm run check: 1646 PASS / 10 SKIP / 5 Linux-only /proc/cgroup FAIL; не полный PASS.
+> **REMAINING ACCEPTANCE:** перед следующей работой проверить exact-main #392 core+real-photo; для нового CAP-RAW-DNG-FOUNDATION реализовать реальный DNG subset → RGBA/native raster, корректное CFA/black-white/white-balance, экспозицию в неразрушающем workflow с неизменяемым RAW-источником, безопасные ограничения на размер/данные, честное отклонение unsupported compression/photometric, Chrome file:// import/edit/UI → History Undo/Redo → .zpe reopen → PNG/PSD/PSB export. Начать с RED→GREEN Node decoder/tag tests; без Adobe compatibility обещаний.
+> **NEXT IMPLEMENTATION ACTION:** добавить узкий валидируемый DNG TIFF/IFD Bayer reader и demosaic в core; интегрировать выбор .dng в существующий import-controller, осмысленные WB/exposure параметры и проверенную persistence. Не ломать обычный PNG/JPEG/PSD/PSB import. Не считать RAW реализованным до настоящего браузерного E2E.
+> **BLOCKERS:** внешний Adobe-authored Saved Path/Vector Mask corpus и [Photoshop-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md); не подменять ими самопроверку. CAP-RAW-DNG-FOUNDATION не зависит от Adobe-authored PSD corpus.
 
 ## Краткая очередь
 
-1. **CAP-BEZ-PATH-NODE-EDIT:** текущая P1, реализация опубликована в [PR #392](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392); Linux core/real-photo и review/merge/exact-main gates pending.
-2. **CAP-BEZ-MASK-PSD-UI:** IN PROGRESS — независимый Adobe-authored corpus, native high-depth.
-3. **Stage 6 / 003X/6c-9:** IN PROGRESS — Worker stale/close/edit parity.
-4. **Stage 9 / CAP-RAW:** TODO — RAW decode + non-destructive development.
+1. **CAP-RAW-DNG-FOUNDATION:** P1 TODO — реальный минимальный RAW импорт и неразрушающая проявка (новая пользовательская функция).
+2. **CAP-BEZ-MASK-PSD-UI:** IN PROGRESS / external Adobe-authored interoperability BLOCKED; не повторять bounded Pen masks/paths из #389–#392.
+3. **Stage 6 / 003X/6c-9:** IN PROGRESS — конкретный Worker stale/close/edit parity для native RGB16/CMYKA32, без бесконечного профилирования.
+4. **CAP-RAW broader formats, ICC/native HDR, full Photoshop interoperability:** IN PROGRESS/TODO по [матрице](CAPABILITY_MATRIX.md); не объявлять DONE.
 
-**Документы:** [матрица](CAPABILITY_MATRIX.md) · [карта](README.md) · [новый журнал](002-bez-path-node-edit.md) · [предыдущий завершённый срез](002-bez-mask-node-insert-delete.md) · [родительская задача](002-bez-mask-psd-ui.md).
+**Закрытый bounded срез:** [#392 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392) · [журнал](002-bez-path-node-edit.md) · [матрица](CAPABILITY_MATRIX.md) · [карта](README.md).
