@@ -653,6 +653,14 @@ async function runSmoke() {
       return;
     }
 
+    // CAP-RAW-DNG: real file:// sensor bytes, controls, History and native project.
+    if (process.env.ZPE_RAW_DNG_BROWSER_ONLY === '1') {
+      const {verifyBrowserRawDng}=await import('./browser-raw-dng-check.mjs');
+      await verifyBrowserRawDng({client,evaluate,waitFor,assert});
+      assertNoBrowserErrors(errors,stderrState);
+      return;
+    }
+
     // CAP-BEZ: Shape and Saved Path node insertion/deletion via real Chrome file://.
     if (process.env.ZPE_PATH_NODE_EDIT_BROWSER_ONLY === '1') {
       const { verifyBrowserPathNodeEdit } = await import('./browser-path-node-edit-check.mjs');

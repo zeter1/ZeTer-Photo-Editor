@@ -1002,6 +1002,23 @@ function sanitizePsdAdjustment(value) {
 
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
+// Keep the original Bayer bytes separate from the disposable 8-bit display preview.
+// RAW source survives .zpe Undo/Redo and re-open; never silently claim full DNG parity.
+function sanitizeRawDng(value, width, height) {
+  if (!value || typeof value !== 'object' || typeof value.dataUrl !== 'string' ||
+      value.dataUrl.length > 67_110_000 ||
+      !value.dataUrl.startsWith('data:application/x-adobe-dng;base64,') ||
+      !Number.isInteger(value.width) || !Number.isInteger(value.height) ||
+      value.width < 2 || value.height < 2 || value.width > 12000 || value.height > 12000 ||
+      value.width * value.height > 16_000_000) return null;
+  const d=value.development;
+  const exposure=Number(d?.exposure), wbRed=Number(d?.wbRed), wbBlue=Number(d?.wbBlue);
+  if (!Number.isFinite(exposure) || exposure < -5 || exposure > 5 ||
+      !Number.isFinite(wbRed) || wbRed < 0.25 || wbRed > 4 ||
+      !Number.isFinite(wbBlue) || wbBlue < 0.25 || wbBlue > 4) return null;
+  return {dataUrl:value.dataUrl,width:value.width,height:value.height,development:{exposure,wbRed,wbBlue}};
+}
+
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
   const type = ['raster', 'text', 'shape', 'adjustment', 'smart-object'].includes(layer?.type) ? layer.type : 'shape';
   const defaults = baseLayer(type);
@@ -1036,6 +1053,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     checkedCanvasSize(result.width, result.height, `Растровый слой «${result.name || 'Без имени'}»`);
     const dataUrl = typeof layer?.dataUrl === 'string' && /^data:image\//i.test(layer.dataUrl) ? layer.dataUrl : null;
     result.dataUrl = dataUrl;
+    result.rawDng = sanitizeRawDng(layer?.rawDng,result.width,result.height);
     result.highDepthSource = sanitizeSerializedPixelBufferSource(layer?.highDepthSource);
     const hasRgbHighDepthPreview = result.highDepthSource?.model === 'rgb' && Number(result.highDepthSource.bitsPerChannel) > 8;
     result.highDepthPreview = hasRgbHighDepthPreview ? sanitizeHighDepthPreview(layer?.highDepthPreview) : null;
