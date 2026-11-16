@@ -28,7 +28,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Возможности
 
-**Текущая версия:** 1.46.16
+**Текущая версия:** 1.46.17
 
 ### Ключевые возможности
 
@@ -119,6 +119,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **Select & Mask Edge Detection Stage 9c**: добавлены Radius, Strength и Smart Radius. В полосе вокруг грубой границы маски алгоритм ищет уверенные foreground/background samples и переносит край по сходству RGBA, поэтому тонкие контрастные детали рядом с исходной границей могут возвращаться в маску. Smart Radius уменьшает влияние там, где цветовые классы неразличимы; preview и финальное применение используют один pipeline. Это собственная bounded эвристика ZPE, а не заявление о pixel-identical Photoshop Refine Edge;
 - **Select & Mask View Modes Stage 9d**: live preview переключается между «Чёрно-белая маска», «Наложение», «На чёрном» и «На белом». Режим просмотра влияет только на визуализацию preview и не меняет параметры/результат маски; compositor вынесен в pure `composeMaskPreviewRgba()` и покрыт regression tests;
 - **Vector Masks Stage 10a + Path Operations Stage 10b**: любой слой может хранить `.zpe` vector mask как набор cubic Bézier subpaths в локальных координатах слоя. Текущее выделение можно превратить в маску, заменить ею маску или добавить как `Add / Subtract / Intersect / Exclude`; прямоугольник остаётся 4 узлами, эллипс сохраняется четырьмя cubic Bézier-сегментами. Vector mask можно включать/выключать, инвертировать и удалять; raster mask и vector mask пересекаются в одном isolated render pipeline;
+- **Pen Shape/Saved Path node editing v1.46.17:** Ctrl+click по Bézier-сегменту вставляет математически точный узел Shape Path или Saved Paths, Ctrl+Alt+click по anchor удаляет узел (минимумы для open/closed paths). Работают History Undo/Redo, .zpe и native PSD/PSB Saved Paths; source identity/lock guards исключают запись в чужой путь. Adobe-authored совместимость отдельно не заявлена;
 - **Vector Mask Direct Edit Stage 10c**: команда «Редактировать векторную маску пером» включает отдельный Pen edit mode для всех subpaths выбранной маски. На холсте виден пунктирный контур, anchors и Bézier handles; anchors/handles двигаются теми же gesture-контрактами, что shape path, а история различает изменения mask/path. Клик мимо существующего узла в mask edit mode не создаёт случайный shape-layer;
 - **Native PSD/PSB Vector Masks Stage 10d**: adapter читает и пишет Photoshop Additional Layer Info `vmsk`/`vsms` по 26-byte Path Resource records: invert/disable/not-link flags, initial fill, closed/open subpaths, linked/unlinked Bézier knots и `Add / Subtract / Intersect / Exclude`. При экспорте vector mask больше не запекается в layer pixels; source bitmap и native mask сохраняются раздельно;
 - **PSD/PSB Saved Paths Stage 10e**: Image Resources `2000..2997` читаются в `document.paths`, сохраняются в `.zpe` и записываются обратно в PSD/PSB. Поддерживаются open/closed cubic paths, fill rule и исходный resource id/name;
@@ -232,7 +233,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Запуск на Windows
 
-Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.46.16 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
+Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.46.17 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
 
 Если браузер показывает старую версию после обновления архива, закройте старую вкладку и откройте `index.html` из новой распакованной папки.
 
