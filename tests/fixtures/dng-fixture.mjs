@@ -1,6 +1,6 @@
 // Synthetic classic TIFF/DNG fixture with real IFD tags, strip bytes and R/G/B CFA.
-export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncated=false}={}) {
-  const width=4,height=4;
+export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncated=false,
+  width=4,height=4,orientation=null,activeArea=null}={}) {
   const entries=[
     [256,4,1,width],[257,4,1,height],[258,3,1,bits],
     [259,3,1,compression],[262,3,1,32803],[273,4,1,0],
@@ -9,10 +9,13 @@ export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncate
     [50706,1,4,[1,4,0,0]],[50714,3,1,0],[50717,3,1,bits===8?200:50000],
     [50728,5,3,0]
   ];
+  if(orientation!==null)entries.push([274,3,1,orientation]);
+  if(activeArea!==null)entries.push([50829,4,4,0]);
   const ifdSize=2+entries.length*12+4, neutralOffset=8+ifdSize;
-  const stripOffset=neutralOffset+24;
+  const activeOffset=neutralOffset+24, stripOffset=activeOffset+(activeArea===null?0:16);
   entries.find(e=>e[0]===273)[3]=stripOffset;
   entries.find(e=>e[0]===50728)[3]=neutralOffset;
+  if(activeArea!==null)entries.find(e=>e[0]===50829)[3]=activeOffset;
   const b=new ArrayBuffer(stripOffset+width*height*(bits/8)-(truncated?1:0));
   const v=new DataView(b);
   const set16=(p,n)=>v.setUint16(p,n,le);
@@ -29,6 +32,7 @@ export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncate
   });
   set32(8+2+entries.length*12,0);
   for(let i=0;i<3;i++){set32(neutralOffset+i*8,1);set32(neutralOffset+i*8+4,1);}
+  if(activeArea!==null)for(let i=0;i<4;i++)set32(activeOffset+i*4,activeArea[i]);
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
     const channel=pattern[(y&1)*2+(x&1)];
     const sample=(bits===8 ? [100,50,25]:[25000,12000,5000])[channel];

@@ -50,10 +50,10 @@ export function createDocumentImportController({
           const source=inspectDng(raw);
           checkedCanvasSize(source.width,source.height,`RAW «${file.name || 'Без имени'}»`);
           const pixels=developDng(source);
-          const dataUrl=await rgbaPixelsToDataUrl(source.width,source.height,pixels.rgba,'DNG RAW');
+          const dataUrl=await rgbaPixelsToDataUrl(pixels.width,pixels.height,pixels.rgba,'DNG RAW');
           const rawDng={dataUrl:bytesToDataUrl(raw,'application/x-adobe-dng'),
             development:pixels.development,width:source.width,height:source.height};
-          prepared.push({file,dataUrl,width:source.width,height:source.height,rawDng});
+          prepared.push({file,dataUrl,width:pixels.width,height:pixels.height,rawDng});
         } catch(error) {
           setStatus('Ошибка DNG: ' + error.message);
           toast('DNG не импортирован: ' + error.message,'error');

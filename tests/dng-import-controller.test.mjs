@@ -86,3 +86,14 @@ test('RAW bytes and camera dimensions survive separate raster transform and proj
   assert.equal(reopened.layers[0].rawDng.height,4);
   assert.equal(reopened.layers[0].rawDng.dataUrl,layer.rawDng.dataUrl);
 });
+
+test('DNG ActiveArea/Orientation preview dimensions differ from immutable sensor dimensions',async()=>{
+  const h=harness();
+  const source=fixture({width:6,height:4,activeArea:[1,1,4,5],orientation:6});
+  assert.equal(await h.c.importImages([dngFile(source)]),1);
+  assert.deepEqual([h.previews[0].width,h.previews[0].height],[3,4]);
+  const layer=h.doc.layers[0];
+  assert.deepEqual([layer.width,layer.height],[3,4]);
+  assert.deepEqual([layer.rawDng.width,layer.rawDng.height],[6,4]);
+  assert.deepEqual(sanitizeProject(JSON.parse(snapshotDocument(h.doc))).layers[0].rawDng,layer.rawDng);
+});
