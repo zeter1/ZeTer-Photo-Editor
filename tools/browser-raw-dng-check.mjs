@@ -90,9 +90,13 @@ export async function verifyBrowserRawDng({client,evaluate,waitFor,assert}) {
   assert(preview.width===expected.width&&preview.height===expected.height &&
     preview.pixel.join(',')===Array.from(expected.rgba.slice(0,4)).join(','),
     'actual browser PNG raster matches oriented Bayer output');
+  // Wait for a NEW history commit: the first RAW import already produced a matching
+  // history label, while the input value changes before the async PNG preview is saved.
+  const orientedHistoryBefore=(await getState()).history.length;
   await evaluate(client,"(() => {const input=document.querySelector('[data-raw-exposure]');input.value='1';input.dispatchEvent(new Event('change',{bubbles:true}));return true;})()");
-  await waitFor('re-development of oriented RAW preserves selected layer',async()=>{
-    const state=await getState();return state?.exposure==='1'&&state.history.some(h=>h.includes('RAW: экспозиция'));
+  await waitFor('re-development of oriented RAW commits fresh History',async()=>{
+    const state=await getState();
+    return state?.exposure==='1' && state.history.length>orientedHistoryBefore;
   },15000);
   const beforeSave2=await evaluate(client,'window.__rawOutputBlobs.length');
   await client.send('Input.dispatchKeyEvent',{type:'keyDown',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
