@@ -1864,9 +1864,12 @@ function bindRawDevelopmentControls(root,owner,layerId){
       const bytes=dataUrlToBytes(original.dataUrl,{maxBytes:48*1024*1024});
       const buffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);
       const source=inspectDng(buffer);
-      if(source.width!==target.width || source.height!==target.height)throw new Error('Размер RAW-слоя изменился');
-      const {rgba}=developDng(source,next);
-      const newPreview=await rgbaPixelsToDataUrl(source.width,source.height,rgba,'RAW-проявка');
+      // Sensor provenance and the oriented preview have independent dimensions.
+      if(source.width!==original.width || source.height!==original.height ||
+        source.displayWidth!==target.width || source.displayHeight!==target.height)
+        throw new Error('Размер RAW-слоя изменился');
+      const {rgba,width,height}=developDng(source,next);
+      const newPreview=await rgbaPixelsToDataUrl(width,height,rgba,'RAW-проявка');
       if(generation!==rawDevelopCommandGeneration || doc!==owner || session!==activeSessionId ||
         selected()?.id!==layerId || !owner.layers.includes(target) || target.rawDng!==original ||
         target.dataUrl!==oldPreview || isLayerLocked(owner,target) || blockPendingDocumentEdit())return;

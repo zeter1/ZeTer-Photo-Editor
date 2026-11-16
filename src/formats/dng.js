@@ -6,10 +6,10 @@ const dng_MAX_PIXELS = 16_000_000;
 const dng_TYPE_SIZE = { 1:1, 2:1, 3:2, 4:4, 5:8, 6:1, 7:1, 8:2, 9:4, 10:8, 11:4, 12:8 };
 const dng_TAG = {
   width:256, height:257, bits:258, compression:259, photometric:262,
-  stripOffsets:273, samples:277, rowsPerStrip:278, stripBytes:279, planar:284,
+  stripOffsets:273, orientation:274, samples:277, rowsPerStrip:278, stripBytes:279, planar:284,
   subIfds:330, cfaDims:33421, cfaPattern:33422,
   dngVersion:50706, linearization:50712, blackRepeat:50713,
-  black:50714, white:50717, neutral:50728,
+  black:50714, white:50717, neutral:50728, activeArea:50829,
 };
 function dng_invalid(message) { throw new Error('DNG: ' + message); }
 function dng_requireThat(ok, message) { if (!ok) dng_invalid(message); }
@@ -111,6 +111,18 @@ export function inspectDng(buffer) {
     'WhiteLevel/BlackLevel вне диапазона');
   const neutral=values(ifds[0],dng_TAG.neutral,3) || values(tags,dng_TAG.neutral,3) || [1,1,1];
   dng_requireThat(neutral.length===3 && neutral.every(v=>v>0 && dng_finite(v)), 'ошибочный AsShotNeutral');
+  // ActiveArea uses sensor coordinates [top, left, bottom, right]; CFA phase remains sensor-relative.
+  const activeArea=values(tags,dng_TAG.activeArea,4) ?? values(ifds[0],dng_TAG.activeArea,4) ?? [0,0,height,width];
+  dng_requireThat(activeArea.length===4 && activeArea.every(Number.isInteger) &&
+    activeArea[0]>=0 && activeArea[1]>=0 && activeArea[2]<=height && activeArea[3]<=width &&
+    activeArea[2]-activeArea[0]>=2 && activeArea[3]-activeArea[1]>=2,
+    'некорректная ActiveArea DNG');
+  const orientation=single(ifds[0],dng_TAG.orientation,single(tags,dng_TAG.orientation,1));
+  dng_requireThat(Number.isInteger(orientation) && orientation>=1 && orientation<=8,
+    'неподдерживаемая Orientation DNG');
+  const cropWidth=activeArea[3]-activeArea[1], cropHeight=activeArea[2]-activeArea[0];
+  const displayWidth=orientation>=5?cropHeight:cropWidth;
+  const displayHeight=orientation>=5?cropWidth:cropHeight;
   const rowsPerStrip=single(tags,dng_TAG.rowsPerStrip,height);
   dng_requireThat(Number.isInteger(rowsPerStrip) && rowsPerStrip>=1, 'неверный RowsPerStrip');
   const strips=Math.ceil(height/rowsPerStrip);
@@ -124,7 +136,8 @@ export function inspectDng(buffer) {
       offsets[i]>=8 && byteCounts[i]>=expected && offsets[i]+byteCounts[i]<=buffer.byteLength,
       'усечённая или некорректная Bayer-полоса');
   }
-  return {width,height,bits:bits[0],pattern,black,blackRepeat,white:white[0],neutral,
+  return {width,height,displayWidth,displayHeight,orientation,activeArea,
+    bits:bits[0],pattern,black,blackRepeat,white:white[0],neutral,
     offsets,rowsPerStrip,rowBytes,le,buffer};
 }
 export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
@@ -132,7 +145,8 @@ export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
   dng_requireThat(dng_finite(exposure) && exposure>=-5 && exposure<=5 &&
     dng_finite(wbRed) && wbRed>=0.25 && wbRed<=4 &&
     dng_finite(wbBlue) && wbBlue>=0.25 && wbBlue<=4, 'неверные параметры RAW-проявки');
-  const {width,height,bits,pattern,black,blackRepeat,white,neutral,offsets,rowsPerStrip,rowBytes,le,buffer}=source;
+  const {width,height,displayWidth,displayHeight,orientation,activeArea,
+    bits,pattern,black,blackRepeat,white,neutral,offsets,rowsPerStrip,rowBytes,le,buffer}=source;
   const view=new DataView(buffer);
   const normalized=new Float32Array(width*height), channels=new Uint8Array(width*height);
   const exposureScale=2**exposure;
@@ -149,7 +163,7 @@ export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
     }
   }
   const multipliers=[(neutral[1]/neutral[0])*wbRed,1,(neutral[1]/neutral[2])*wbBlue];
-  const rgba=new Uint8ClampedArray(width*height*4);
+  const rgba=new Uint8ClampedArray(displayWidth*displayHeight*4);
   function sampleChannel(x,y,c){
     const index=y*width+x;
     if(channels[index]===c)return normalized[index];
@@ -171,12 +185,26 @@ export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
     const v=dng_clamp(linear,0,1);
     return Math.round(255*(v<=0.0031308?12.92*v:1.055*v**(1/2.4)-0.055));
   }
-  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
-    const index=(y*width+x)*4;
+  // Demosaic with uncropped sensor neighbors, then crop and orient the developed preview.
+  // EXIF/TIFF orientation 1..8 is applied to pixels, not just to a display flag.
+  const cropWidth=activeArea[3]-activeArea[1],cropHeight=activeArea[2]-activeArea[0];
+  for(let y=activeArea[0];y<activeArea[2];y++)for(let x=activeArea[1];x<activeArea[3];x++){
+    const cx=x-activeArea[1],cy=y-activeArea[0];
+    let dx=cx,dy=cy;
+    switch(orientation){
+      case 2: dx=cropWidth-1-cx; break;
+      case 3: dx=cropWidth-1-cx;dy=cropHeight-1-cy;break;
+      case 4: dy=cropHeight-1-cy;break;
+      case 5: dx=cy;dy=cx;break;
+      case 6: dx=cropHeight-1-cy;dy=cx;break;
+      case 7: dx=cropHeight-1-cy;dy=cropWidth-1-cx;break;
+      case 8: dx=cy;dy=cropWidth-1-cx;break;
+    }
+    const index=(dy*displayWidth+dx)*4;
     for(let c=0;c<3;c++)rgba[index+c]=srgb(sampleChannel(x,y,c)*multipliers[c]*exposureScale);
     rgba[index+3]=255;
   }
-  return {width,height,rgba,development:{exposure,wbRed,wbBlue}};
+  return {width:displayWidth,height:displayHeight,rgba,development:{exposure,wbRed,wbBlue}};
 }
 export function decodeDng(buffer, development) {
   return developDng(inspectDng(buffer),development);

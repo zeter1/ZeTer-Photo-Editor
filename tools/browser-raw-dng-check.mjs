@@ -1,4 +1,5 @@
 import {fixture} from '../tests/fixtures/dng-fixture.mjs';
+import {decodeDng} from '../src/formats/dng.js';
 import {decodePsd} from '../src/formats/psd.js';
 
 export async function verifyBrowserRawDng({client,evaluate,waitFor,assert}) {
@@ -66,5 +67,45 @@ export async function verifyBrowserRawDng({client,evaluate,waitFor,assert}) {
         format+' contains developed 4x4 raster layer');
     }
   }
-  console.log('CAP-RAW-DNG Chrome file:// import, exposure, Undo/Redo, .zpe source/reopen and PNG/PSD/PSB UI export PASS');
+  // A second real FileInput exercises sensor-coordinate ActiveArea and a 90° pixel rotation.
+  // The native sensor is 6x4, but the cropped + oriented rendered raster is 3x4.
+  const orientedRaw=fixture({width:6,height:4,activeArea:[1,1,4,5],orientation:6});
+  const orientedEncoded=Buffer.from(orientedRaw).toString('base64');
+  const expected=decodeDng(orientedRaw);
+  const historyBefore=(await getState()).history.length;
+  await evaluate(client,'(() => {const bytes=Uint8Array.from(atob('+JSON.stringify(orientedEncoded)+'),c=>c.charCodeAt(0));const input=document.querySelector("#fileInput"),transfer=new DataTransfer();transfer.items.add(new File([bytes],"oriented-sensor.dng",{type:"image/x-adobe-dng"}));input.files=transfer.files;input.dispatchEvent(new Event("change",{bubbles:true}));return true;})()');
+  await waitFor('oriented DNG imported as new layer',async()=>{
+    const state=await getState();return state?.history.length>historyBefore;
+  },15000);
+  const beforeOrientedSave=await evaluate(client,'window.__rawOutputBlobs.length');
+  await client.send('Input.dispatchKeyEvent',{type:'keyDown',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+  await client.send('Input.dispatchKeyEvent',{type:'keyUp',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+  await waitFor('oriented DNG .zpe Blob',async()=>await evaluate(client,'window.__rawOutputBlobs.length')>beforeOrientedSave,15000);
+  const orientedProject=await evaluate(client,'(async()=>JSON.parse(await window.__rawOutputBlobs.at(-1).text()))()');
+  const orientedLayer=orientedProject.layers.find(l=>l.rawDng?.dataUrl.split(',')[1]===orientedEncoded);
+  assert(orientedLayer&&orientedLayer.width===3&&orientedLayer.height===4,'real UI uses cropped/rotated dimensions');
+  assert(orientedLayer.rawDng.width===6&&orientedLayer.rawDng.height===4,
+    'original unrotated sensor dimensions survive .zpe');
+  const preview=await evaluate(client,'(async()=>{const image=new Image();image.src='+JSON.stringify(orientedLayer.dataUrl)+';await image.decode();const c=document.createElement("canvas");c.width=image.naturalWidth;c.height=image.naturalHeight;const ctx=c.getContext("2d");ctx.drawImage(image,0,0);return {width:c.width,height:c.height,pixel:Array.from(ctx.getImageData(0,0,1,1).data)};})()');
+  assert(preview.width===expected.width&&preview.height===expected.height &&
+    preview.pixel.join(',')===Array.from(expected.rgba.slice(0,4)).join(','),
+    'actual browser PNG raster matches oriented Bayer output');
+  // Wait for a NEW history commit: the first RAW import already produced a matching
+  // history label, while the input value changes before the async PNG preview is saved.
+  const orientedHistoryBefore=(await getState()).history.length;
+  await evaluate(client,"(() => {const input=document.querySelector('[data-raw-exposure]');input.value='1';input.dispatchEvent(new Event('change',{bubbles:true}));return true;})()");
+  await waitFor('re-development of oriented RAW commits fresh History',async()=>{
+    const state=await getState();
+    return state?.exposure==='1' && state.history.length>orientedHistoryBefore;
+  },15000);
+  const beforeSave2=await evaluate(client,'window.__rawOutputBlobs.length');
+  await client.send('Input.dispatchKeyEvent',{type:'keyDown',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+  await client.send('Input.dispatchKeyEvent',{type:'keyUp',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+  await waitFor('re-developed oriented .zpe',async()=>await evaluate(client,'window.__rawOutputBlobs.length')>beforeSave2,15000);
+  const developedProject=await evaluate(client,'(async()=>JSON.parse(await window.__rawOutputBlobs.at(-1).text()))()');
+  const developedLayer=developedProject.layers.find(l=>l.rawDng?.dataUrl.split(',')[1]===orientedEncoded);
+  assert(developedLayer?.rawDng.development.exposure===1 && developedLayer.width===3 &&
+    developedLayer.height===4 && developedLayer.dataUrl!==orientedLayer.dataUrl,
+    'oriented RAW re-development changes pixels, retains native source and preview geometry');
+  console.log('CAP-RAW-DNG Chrome file:// RAW import/develop/Undo-Redo/.zpe/PNG-PSD-PSB plus ActiveArea/Orientation pixel oracle PASS');
 }

@@ -1,4 +1,13 @@
-## 1.46.18 — текущая версия
+## 1.46.19 — текущая версия
+
+### 2026-11-16 — CAP-RAW-DNG-ACTIVE-ORIENTATION
+
+- Пиксельная обработка `ActiveArea` и TIFF `Orientation` 1–8 в ограниченном Bayer DNG: CFA demosaic по абсолютным сенсорным координатам, затем crop/rotate/mirror, корректные выходные размеры.
+- Неизменные DNG-байты и сенсорные размеры остаются в `.zpe`; ориентированная растровая проявка отдельно поддерживает WB/exposure, History Undo/Redo и повторное редактирование без слома размерностей.
+- Node 11/11 PASS; реальный Chromium `file://` FileInput → oriented Bayer preview pixel oracle → .zpe/source preservation → exposure re-develop PASS, существующий PNG/PSD/PSB workflow PASS. GitHub Linux CI для новой ветки проверяется отдельно; синтетический fixture не подтверждает camera color fidelity.
+- Ограничение: пока без внешнего camera-authored reference, ColorMatrix/ICC/DefaultCrop, compressed DNG и полного RAW pipe.
+
+## 1.46.18 — предыдущая версия
 
 ### 2026-11-16 — Stage 9 / CAP-RAW-DNG-FOUNDATION
 
