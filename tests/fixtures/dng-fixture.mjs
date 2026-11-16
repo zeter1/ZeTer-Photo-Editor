@@ -1,7 +1,8 @@
 // Synthetic *TIFF-formatted* DNG fixture, not camera-authored RAW provenance.
 export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncated=false,
   width=4,height=4,orientation=null,activeArea=null,matrix1=null,matrix2=null,
-  illuminant1=21,illuminant2=17,neutral=[1,1,1],samples=null}={}){
+  illuminant1=21,illuminant2=17,neutral=[1,1,1],samples=null,
+  defaultCropOrigin=null,defaultCropSize=null,cropOriginType=5,cropSizeType=5,defaultScale=null}={}){
   const entries=[
     [256,4,1,width],[257,4,1,height],[258,3,1,bits],
     [259,3,1,compression],[262,3,1,32803],[273,4,1,0],
@@ -12,6 +13,9 @@ export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncate
   ];
   if(orientation!==null)entries.push([274,3,1,orientation]);
   if(activeArea!==null)entries.push([50829,4,4,0]);
+  if(defaultScale!==null)entries.push([50718,5,2,0]);
+  if(defaultCropOrigin!==null)entries.push([50719,cropOriginType,2,cropOriginType===3?defaultCropOrigin:0]);
+  if(defaultCropSize!==null)entries.push([50720,cropSizeType,2,cropSizeType===3?defaultCropSize:0]);
   if(matrix1!==null)entries.push([50721,10,9,0],[50778,3,1,illuminant1]);
   if(matrix2!==null)entries.push([50722,10,9,0],[50779,3,1,illuminant2]);
   const ifdSize=2+entries.length*12+4;
@@ -26,6 +30,9 @@ export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncate
   };
   const neutralOffset=allocate(50728,24);
   const activeOffset=activeArea===null?null:allocate(50829,16);
+  const scaleOffset=defaultScale===null?null:allocate(50718,16);
+  const cropOriginOffset=defaultCropOrigin===null||cropOriginType===3?null:allocate(50719,cropOriginType===5?16:8);
+  const cropSizeOffset=defaultCropSize===null||cropSizeType===3?null:allocate(50720,cropSizeType===5?16:8);
   const matrix1Offset=matrix1===null?null:allocate(50721,72);
   const matrix2Offset=matrix2===null?null:allocate(50722,72);
   const stripOffset=next;
@@ -50,6 +57,19 @@ export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncate
     set32(neutralOffset+i*8+4,100000);
   }
   if(activeOffset!==null)for(let i=0;i<4;i++)set32(activeOffset+i*4,activeArea[i]);
+  function writeCrop(offset,values,type){
+    if(offset===null)return;
+    for(let i=0;i<2;i++){
+      if(type===4)set32(offset+i*4,values[i]);
+      else if(type===5){
+        set32(offset+i*8,Math.round(values[i]*1000));
+        set32(offset+i*8+4,1000);
+      }
+    }
+  }
+  writeCrop(scaleOffset,defaultScale,5);
+  writeCrop(cropOriginOffset,defaultCropOrigin,cropOriginType);
+  writeCrop(cropSizeOffset,defaultCropSize,cropSizeType);
   function writeMatrix(offset,m){
     if(offset===null)return;
     for(let i=0;i<9;i++){
@@ -61,7 +81,8 @@ export function fixture({le=true,bits=8,compression=1,pattern=[0,1,1,2],truncate
   writeMatrix(matrix2Offset,matrix2);
   for(let y=0;y<height;y++)for(let x=0;x<width;x++){
     const channel=pattern[(y&1)*2+(x&1)];
-    const sample=(samples||(bits===8?[100,50,25]:[25000,12000,5000]))[channel];
+    const sample=typeof samples==='function'?samples(x,y,channel):
+      (samples||(bits===8?[100,50,25]:[25000,12000,5000]))[channel];
     const p=stripOffset+(y*width+x)*(bits/8);
     if(p+bits/8<=b.byteLength){if(bits===8)v.setUint8(p,sample);else set16(p,sample);}
   }

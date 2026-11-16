@@ -116,5 +116,55 @@ export async function verifyBrowserRawDng({client,evaluate,waitFor,assert}) {
   assert(developedLayer?.rawDng.development.exposure===1 && developedLayer.width===3 &&
     developedLayer.height===4 && developedLayer.dataUrl!==orientedLayer.dataUrl,
     'oriented RAW re-development changes pixels, retains native source and preview geometry');
-  console.log('CAP-RAW-DNG Chrome file:// RAW import/develop/Undo-Redo/.zpe/PNG-PSD-PSB plus ActiveArea/Orientation pixel oracle PASS');
+  // DNG DefaultCropOrigin/Size are relative to ActiveArea, including fractional
+  // sensor coordinates; verify actual FileInput -> raster -> .zpe -> History.
+  const croppedRaw=fixture({width:8,height:6,activeArea:[1,1,6,7],
+    defaultCropOrigin:[1.5,1],defaultCropSize:[4,3],orientation:6,
+    matrix1:[0.9,0.1,0,0.1,1,0,0,0.1,1],illuminant1:21,
+    samples:(x,y,c)=>25+x*9+y*5+c*20});
+  const croppedEncoded=Buffer.from(croppedRaw).toString('base64');
+  const cropOracle=decodeDng(croppedRaw);
+  const beforeCropHistory=(await getState()).history.length;
+  await evaluate(client,'(() => {const bytes=Uint8Array.from(atob('+JSON.stringify(croppedEncoded)+'),c=>c.charCodeAt(0));const input=document.querySelector("#fileInput"),transfer=new DataTransfer();transfer.items.add(new File([bytes],"fractional-crop.dng",{type:"image/x-adobe-dng"}));input.files=transfer.files;input.dispatchEvent(new Event("change",{bubbles:true}));return true;})()');
+  await waitFor('fractional DefaultCrop import commits History',async()=>{
+    const s=await getState();
+    return s?.exposure==='0'&&s.history.length>beforeCropHistory;
+  },15000);
+  assert(await evaluate(client,"document.querySelector('[data-raw-exposure]')?.closest('.prop-grid')?.textContent?.includes('DefaultCrop')"),
+    'real RAW Properties explains sensor vs cropped/oriented preview geometry');
+  const beforeCropSave=await evaluate(client,'window.__rawOutputBlobs.length');
+  await client.send('Input.dispatchKeyEvent',{type:'keyDown',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+  await client.send('Input.dispatchKeyEvent',{type:'keyUp',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+  await waitFor('fractionally cropped .zpe',async()=>await evaluate(client,'window.__rawOutputBlobs.length')>beforeCropSave,15000);
+  const cropProject=await evaluate(client,'(async()=>JSON.parse(await window.__rawOutputBlobs.at(-1).text()))()');
+  const cropLayer=cropProject.layers.find(l=>l.rawDng?.dataUrl.split(',')[1]===croppedEncoded);
+  assert(cropLayer?.width===3&&cropLayer?.height===4&&cropLayer.rawDng.width===8&&cropLayer.rawDng.height===6,
+    'fractionally cropped + oriented real DNG preserves sensor dimensions but renders 3x4');
+  const cropRendered=await evaluate(client,'(async()=>{const src='+JSON.stringify(cropLayer.dataUrl)+';const image=new Image();image.src=src;await image.decode();const canvas=document.createElement("canvas");canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;const ctx=canvas.getContext("2d");ctx.drawImage(image,0,0);return {width:canvas.width,height:canvas.height,rgba:[...ctx.getImageData(0,0,canvas.width,canvas.height).data]};})()');
+  assert(cropRendered.width===cropOracle.width&&cropRendered.height===cropOracle.height &&
+    cropRendered.rgba.join(',')===Array.from(cropOracle.rgba).join(','),
+    'actual Chromium DNG crop pixels match independent Node TIFF/CFA oracle');
+  await evaluate(client,'(() => {const input=document.querySelector("#projectInput"),transfer=new DataTransfer();transfer.items.add(new File(['+JSON.stringify(JSON.stringify(cropProject))+'],"crop-reopen.zpe",{type:"application/json"}));input.files=transfer.files;const original=window.confirm;window.confirm=()=>true;try{input.dispatchEvent(new Event("change",{bubbles:true}));}finally{window.confirm=original;}return true;})()');
+  await waitFor('fractional crop .zpe reopen restores RAW controls',async()=>{
+    const s=await getState();return s?.exposure==='0';
+  },15000);
+  const beforeCropEditHistory=(await getState()).history.length;
+  await evaluate(client,"(() => {const input=document.querySelector('[data-raw-exposure]');input.value='1';input.dispatchEvent(new Event('change',{bubbles:true}));return true;})()");
+  await waitFor('fractional crop redevelop history',async()=>{
+    const s=await getState();return s?.exposure==='1'&&s.history.length>beforeCropEditHistory;
+  },15000);
+  await evaluate(client,"document.querySelector('#undoBtn').click();true");
+  await waitFor('fractional crop Undo',async()=> (await getState())?.exposure==='0');
+  await evaluate(client,"document.querySelector('#redoBtn').click();true");
+  await waitFor('fractional crop Redo',async()=> (await getState())?.exposure==='1');
+  const beforeEditedCropSave=await evaluate(client,'window.__rawOutputBlobs.length');
+  await client.send('Input.dispatchKeyEvent',{type:'keyDown',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+  await client.send('Input.dispatchKeyEvent',{type:'keyUp',key:'s',code:'KeyS',windowsVirtualKeyCode:83,modifiers:2});
+  await waitFor('fractional crop re-developed save',async()=>await evaluate(client,'window.__rawOutputBlobs.length')>beforeEditedCropSave,15000);
+  const editedCropProject=await evaluate(client,'(async()=>JSON.parse(await window.__rawOutputBlobs.at(-1).text()))()');
+  const editedCrop=editedCropProject.layers.find(l=>l.rawDng?.dataUrl.split(',')[1]===croppedEncoded);
+  assert(editedCrop?.width===3&&editedCrop?.height===4&&
+    editedCrop.rawDng.development.exposure===1&&editedCrop.dataUrl!==cropLayer.dataUrl,
+    'crop RAW Undo/Redo and .zpe export retain native DNG while regenerating actual pixels');
+  console.log('CAP-RAW-DNG Chrome file:// RAW ColorMatrix, fractional DefaultCrop, Orientation, Undo/Redo, .zpe, PNG/PSD/PSB PASS');
 }
