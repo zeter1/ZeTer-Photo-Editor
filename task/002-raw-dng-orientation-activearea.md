@@ -23,3 +23,5 @@
 **CAP-RAW-DNG-CAMERA-COLOR, P1:** найти подлинный легально распространяемый uncompressed Bayer DNG (с provenance); добавить корректную интерпретацию ColorMatrix1/2/AsShotNeutral в linear XYZ/D50 и display sRGB, с отказом для невозможной/вырожденной калибровки, сравнением с LibRaw/RawTherapee и реальным браузерным импортом. Статус Stage 9 остаётся IN PROGRESS.
 
 **Общий Windows Chromium regression (отдельно от целевого RAW E2E): FAIL.** `npm run test:browser` после успешных этапов Stage 003/036B/036C завершился через 83.68s с `Timed out waiting for DevTools response: Runtime.evaluate` (`tools/browser-smoke.mjs:192`). Связь с DNG изменениями НЕ УСТАНОВЛЕНА; нет baseline reproduction, поэтому не маркировать ни PASS, ни подтверждённым регрессом. Linux PR-head CI — обязательный gate. Не профилировать эту отдельную трассу бесконечно вместо продолжения RAW.
+
+**Публикация:** [PR #395](https://github.com/zeter1/ZeTer-Photo-Editor/pull/395) OPEN, первая версия head `886e2450dac36cec41ca8ab9f6ec95cf0f6f917c`; проверить финальный head/CI после документационного обновления. Не объявлять SUCCESS до GitHub readback.
