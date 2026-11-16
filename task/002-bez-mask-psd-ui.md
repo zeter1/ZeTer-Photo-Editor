@@ -101,3 +101,9 @@
 - **GitHub CI:** точный PR head, approvals, merge, exact-main по новой ветке — NOT VERIFIED до публикации. Текущий до проходки main `d76d0c6` core CI [SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43729982189). Не выдавать старые #389 CI за новые.
 - **Статус:** IN PROGRESS, pending PR-head gates и exact-main. Остатки: внешние Photoshop-authored mask/path/PSB32 и GUI provenance BLOCKED, high-depth interop IN PROGRESS.
 - **Следующая точная реализация:** `CAP-BEZ-MASK-NODE-INSERT-DELETE` (P1): вставка/удаление Bézier anchors уже применённой маски на raster/shape/adjustment Levels/Curves с сохранением кубической геометрии, History, no-write stale/lock, `.zpe`+PSD/PSB и Chrome `file://` проверкой. Обязательная текущая операция перед ней — PR-head CI/review/merge/exact-main.
+
+
+## 2026-11-16 — CAP-BEZ-PATH-NODE-EDIT: Shape/Saved Paths source-aware узлы (v1.46.17)
+
+- После merged [#391](https://github.com/zeter1/ZeTer-Photo-Editor/pull/391) выбран следующий независимый bounded increment: Pen Ctrl+click существующего cubic сегмента Shape или Saved Path и Ctrl+Alt+click anchor; applied Vector Mask повторно не меняется. De Casteljau с closing arc, open/closed минимум, exact doc/path/layer/group/node guards, History. Реальный Chrome file:// Shape/Saved, RGBA, Undo/Redo, .zpe reopen, native PSD/PSB editable Saved Paths self-round-trip PASS; 42/42 focused Node PASS, полный Windows browser PASS. Подробности в [журнале](002-bez-path-node-edit.md).
+- Эта локальная версия находится в `feat/path-node-edit-20261116` от exact main `70b70693`. [#392 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392), Linux PR-head core+real-photo in progress, review/merge/exact-main pending; внешнее Adobe-authored interoperability остаётся BLOCKED без корпуса.

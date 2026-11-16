@@ -2131,8 +2131,9 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'pen') {
     const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
     if(hit){
-      if(e.ctrlKey && e.altKey && hit.source==='vector-mask' && hit.control==='anchor'){
-        pathControlCommands.deleteMaskNode(doc,hit);
+      if(e.ctrlKey && e.altKey && hit.control==='anchor'){
+        if(hit.source==='vector-mask')pathControlCommands.deleteMaskNode(doc,hit);
+        else pathControlCommands.deletePathNode(doc,hit);
       }else{
         beginPathControlDrag(hit,p,e);
       }
@@ -2140,7 +2141,11 @@ async function onOverlayPointerDown(e) {
     }
     if(e.ctrlKey && !e.altKey && !penDraftGestures.hasDraft()){
       const segment=pathControlSurface.hitSegment(p);
-      if(segment){pathControlCommands.insertMaskNode(doc,segment);drawOverlay();return;}
+      if(segment){
+        if(segment.source==='vector-mask')pathControlCommands.insertMaskNode(doc,segment);
+        else pathControlCommands.insertPathNode(doc,segment);
+        drawOverlay();return;
+      }
     }
     if(vectorMaskEditLayerId===selected()?.id){
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');

@@ -58,6 +58,9 @@ export function createPathControlSurfaceController({
             layer: null,
             points: Array.isArray(subpath?.points) ? subpath.points : [],
             source: 'document-path',
+            pathTarget: path,
+            pathId: path.id ?? null,
+            subpath,
             documentPathIndex: documentPathEditIndex,
             subpathIndex,
             closed: subpath?.closed !== false,
@@ -80,6 +83,7 @@ export function createPathControlSurfaceController({
           layer,
           points: Array.isArray(subpath?.points) ? subpath.points : [],
           source: 'vector-mask',
+          subpath,
           documentPathIndex: null,
           subpathIndex,
           closed: subpath?.closed !== false,
@@ -121,7 +125,10 @@ export function createPathControlSurfaceController({
     if (candidate.source === 'document-path') {
       return (
         candidate.documentPathIndex === target.documentPathIndex &&
-        candidate.subpathIndex === target.subpathIndex
+        candidate.subpathIndex === target.subpathIndex &&
+        candidate.pathTarget === target.pathTarget &&
+        candidate.pathId === target.pathId &&
+        candidate.subpath === target.subpath
       );
     }
     if (candidate.layer !== target.layer) return false;
@@ -176,7 +183,7 @@ export function createPathControlSurfaceController({
           )) {
             nearest = { ...target, nodeIndex, node, control,
               groupId:target.layer?.groupId ?? null,
-              subpath:target.source==='vector-mask' ? target.layer.vectorMask.subpaths[target.subpathIndex] : null,
+              subpath:target.subpath ?? null,
               vectorMask:target.layer?.vectorMask ?? null };
             nearestDistance = distance;
           }
@@ -203,7 +210,7 @@ export function createPathControlSurfaceController({
       };
     };
     for (const target of selectedTargets()) {
-      if (target.source !== 'vector-mask' || isLayerLocked(owner, target.layer)) continue;
+      if (target.layer && isLayerLocked(owner, target.layer)) continue;
       const count = target.points.length;
       const segments = target.closed ? count : count - 1;
       for (let index = 0; index < segments; index += 1) {
@@ -235,8 +242,8 @@ export function createPathControlSurfaceController({
             nearest = {
               ...target, segmentIndex:index, t, fromNode, toNode,
               groupId:target.layer?.groupId ?? null,
-              subpath:target.layer.vectorMask.subpaths[target.subpathIndex],
-              vectorMask:target.layer.vectorMask,
+              subpath:target.subpath ?? null,
+              vectorMask:target.source==='vector-mask' ? target.layer.vectorMask : null,
             };
           }
           previous = current;

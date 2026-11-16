@@ -12154,6 +12154,9 @@ function createPathControlSurfaceController({
             layer: null,
             points: Array.isArray(subpath?.points) ? subpath.points : [],
             source: 'document-path',
+            pathTarget: path,
+            pathId: path.id ?? null,
+            subpath,
             documentPathIndex: documentPathEditIndex,
             subpathIndex,
             closed: subpath?.closed !== false,
@@ -12176,6 +12179,7 @@ function createPathControlSurfaceController({
           layer,
           points: Array.isArray(subpath?.points) ? subpath.points : [],
           source: 'vector-mask',
+          subpath,
           documentPathIndex: null,
           subpathIndex,
           closed: subpath?.closed !== false,
@@ -12217,7 +12221,10 @@ function createPathControlSurfaceController({
     if (candidate.source === 'document-path') {
       return (
         candidate.documentPathIndex === target.documentPathIndex &&
-        candidate.subpathIndex === target.subpathIndex
+        candidate.subpathIndex === target.subpathIndex &&
+        candidate.pathTarget === target.pathTarget &&
+        candidate.pathId === target.pathId &&
+        candidate.subpath === target.subpath
       );
     }
     if (candidate.layer !== target.layer) return false;
@@ -12272,7 +12279,7 @@ function createPathControlSurfaceController({
           )) {
             nearest = { ...target, nodeIndex, node, control,
               groupId:target.layer?.groupId ?? null,
-              subpath:target.source==='vector-mask' ? target.layer.vectorMask.subpaths[target.subpathIndex] : null,
+              subpath:target.subpath ?? null,
               vectorMask:target.layer?.vectorMask ?? null };
             nearestDistance = distance;
           }
@@ -12299,7 +12306,7 @@ function createPathControlSurfaceController({
       };
     };
     for (const target of selectedTargets()) {
-      if (target.source !== 'vector-mask' || isLayerLocked(owner, target.layer)) continue;
+      if (target.layer && isLayerLocked(owner, target.layer)) continue;
       const count = target.points.length;
       const segments = target.closed ? count : count - 1;
       for (let index = 0; index < segments; index += 1) {
@@ -12331,8 +12338,8 @@ function createPathControlSurfaceController({
             nearest = {
               ...target, segmentIndex:index, t, fromNode, toNode,
               groupId:target.layer?.groupId ?? null,
-              subpath:target.layer.vectorMask.subpaths[target.subpathIndex],
-              vectorMask:target.layer.vectorMask,
+              subpath:target.subpath ?? null,
+              vectorMask:target.source==='vector-mask' ? target.layer.vectorMask : null,
             };
           }
           previous = current;
@@ -12685,7 +12692,100 @@ function createPathControlCommandController({
     return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
   }
 
-  return { convertAnchorToCorner, convertAnchorToSmooth, insertMaskNode, deleteMaskNode };
+  // Shape nodes are layer-local; Saved Path nodes are document-space. The
+  // surface supplies both through the same exact geometry/identity contract.
+  function writableEditablePathTarget(owner, target) {
+    if (!owner || state.getDocument() !== owner ||
+      !['shape', 'document-path'].includes(target?.source)) return null;
+    const resolved = targets.resolve(target);
+    if (!resolved || resolved.source !== target.source ||
+      resolved.points !== target.points || !Array.isArray(resolved.points) ||
+      resolved.points.length < 2 || resolved.closed !== target.closed) return null;
+
+    if (target.source === 'shape') {
+      const layer = resolved.layer;
+      if (!layer || !owner.layers?.includes(layer) || layer !== target.layer ||
+        owner.selectedLayerId !== layer.id || isLayerLocked(owner, layer) ||
+        (layer.groupId ?? null) !== (target.groupId ?? null) ||
+        layer.type !== 'shape' || layer.shape !== 'path' ||
+        layer.pathPoints !== target.points || Boolean(layer.pathClosed) !== target.closed) return null;
+    } else {
+      const path = owner.paths?.[target.documentPathIndex];
+      const subpath = path?.subpaths?.[target.subpathIndex];
+      if (!path || path !== target.pathTarget || path.id !== target.pathId ||
+        resolved.pathTarget !== path || resolved.pathId !== target.pathId ||
+        !subpath || subpath !== target.subpath ||
+        resolved.subpath !== subpath || subpath.points !== target.points ||
+        (subpath.closed !== false) !== target.closed) return null;
+    }
+    return resolved;
+  }
+
+  function insertPathNode(owner, target) {
+    if (!Number.isInteger(target?.segmentIndex) || !Number.isFinite(target?.t) ||
+      target.t <= 0.0001 || target.t >= 0.9999) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const resolved = writableEditablePathTarget(owner, { ...target, nodeIndex: target.segmentIndex });
+    if (!resolved || resolved.nodeIndex !== target.segmentIndex) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const points = resolved.points;
+    const index = target.segmentIndex;
+    if (points.length >= 1000 || index < 0 || index >= (target.closed ? points.length : points.length - 1))
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    if (!from || !to || from !== target.fromNode || to !== target.toNode)
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const finite = point => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+    if (!finite(from) || !finite(to) ||
+      (from.handleOut && !finite(from.handleOut)) ||
+      (to.handleIn && !finite(to.handleIn))) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+
+    const t = target.t;
+    let node;
+    if (from.handleOut || to.handleIn) {
+      const a = lerpPoint(from, from.handleOut ?? from, t);
+      const b = lerpPoint(from.handleOut ?? from, to.handleIn ?? to, t);
+      const c = lerpPoint(to.handleIn ?? to, to, t);
+      const d = lerpPoint(a, b, t);
+      const e = lerpPoint(b, c, t);
+      const f = lerpPoint(d, e, t);
+      if (![a, b, c, d, e, f].every(finite)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      from.handleOut = a;
+      to.handleIn = c;
+      node = { x:f.x, y:f.y, handleIn:d, handleOut:e, kind:'smooth' };
+    } else {
+      const f = lerpPoint(from, to, t);
+      if (!finite(f)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      node = { x:f.x, y:f.y, handleIn:null, handleOut:null, kind:'corner' };
+    }
+    points.splice(index + 1, 0, node);
+    transaction.commit(target.source === 'shape' ? 'Добавить Bézier-узел' : 'Добавить узел сохранённого контура');
+    ui.setStatus('Узел добавлен без изменения кривой');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  function deletePathNode(owner, target) {
+    if (target?.control !== 'anchor') return PATH_CONTROL_COMMAND_RESULT.IGNORED;
+    const resolved = writableEditablePathTarget(owner, target);
+    if (!resolved || resolved.nodeIndex !== target.nodeIndex ||
+      resolved.node !== target.node) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const points = resolved.points;
+    const minimum = target.closed ? 3 : 2;
+    if (points.length <= minimum) {
+      ui.setStatus('Недостаточно узлов для удаления');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    // Surviving neighbours retain their handles; merging arbitrary two cubics
+    // into one cannot preserve the full original geometry exactly.
+    points.splice(resolved.nodeIndex, 1);
+    transaction.commit(target.source === 'shape' ? 'Удалить Bézier-узел' : 'Удалить узел сохранённого контура');
+    ui.setStatus('Узел удалён; соседние Bézier-ручки сохранены');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  return {
+    convertAnchorToCorner, convertAnchorToSmooth,
+    insertMaskNode, deleteMaskNode, insertPathNode, deletePathNode,
+  };
 }
 
 // ---- src/interaction/path-control-gesture-controller.js ----
@@ -31441,8 +31541,9 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'pen') {
     const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
     if(hit){
-      if(e.ctrlKey && e.altKey && hit.source==='vector-mask' && hit.control==='anchor'){
-        pathControlCommands.deleteMaskNode(doc,hit);
+      if(e.ctrlKey && e.altKey && hit.control==='anchor'){
+        if(hit.source==='vector-mask')pathControlCommands.deleteMaskNode(doc,hit);
+        else pathControlCommands.deletePathNode(doc,hit);
       }else{
         beginPathControlDrag(hit,p,e);
       }
@@ -31450,7 +31551,11 @@ async function onOverlayPointerDown(e) {
     }
     if(e.ctrlKey && !e.altKey && !penDraftGestures.hasDraft()){
       const segment=pathControlSurface.hitSegment(p);
-      if(segment){pathControlCommands.insertMaskNode(doc,segment);drawOverlay();return;}
+      if(segment){
+        if(segment.source==='vector-mask')pathControlCommands.insertMaskNode(doc,segment);
+        else pathControlCommands.insertPathNode(doc,segment);
+        drawOverlay();return;
+      }
     }
     if(vectorMaskEditLayerId===selected()?.id){
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');

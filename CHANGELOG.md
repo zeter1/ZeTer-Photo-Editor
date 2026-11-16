@@ -1,4 +1,14 @@
-## 1.46.16 — текущая версия
+## 1.46.17 — текущая версия
+
+### 2026-11-16 — CAP-BEZ-PATH-NODE-EDIT: Pen insert/delete для Shape Path и Saved Paths
+
+- **Ctrl+click** по существующему сегменту Shape Path или Saved Path создаёт редактируемый узел; **Ctrl+Alt+click** по anchor удаляет. Applied Vector Mask остаётся отдельным ранее принятым контрактом.
+- Hit-test работает в document coordinates с преобразованием Shape и точно разбивает cubic по De Casteljau, включая замкнутую последнюю дугу; линейные сегменты остаются линейными. Для открытого path нет closing segment; минимум 2 (open) / 3 (closed); максимум 1000 узлов.
+- Stale document, selected layer, group lock, shape path arrays, saved path ID/object, subpath/points/node identity и original segment endpoints блокируют запись без History. Каждый реальный edit — один Undo/Redo commit.
+- Node 42/42 focused PASS, реальный Chrome `file://` Pen Shape/Saved Path Ctrl-pointer, RGBA, History/Undo/Redo, .zpe save/reopen, native PSD/PSB 5-node Saved Path self-round-trip **PASS**; полный Chrome `npm run test:browser` PASS. Windows `npm run check` 1646 PASS / 10 SKIP / 5 FAIL (Linux-only `/proc/cgroup`), не считать Windows full PASS.
+- Версия 1.46.17; [PR #392 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392), Linux PR-head core/real-photo и review/merge/exact-main CI отдельно; внешний Photoshop-authored GUI/corpus NOT VERIFIED.
+
+## 1.46.16 — 2026-11-15
 
 ### 2026-11-15 — CAP-BEZ-MASK-NODE-INSERT-DELETE: прямое добавление и удаление узлов векторной маски
 

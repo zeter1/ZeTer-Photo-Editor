@@ -653,6 +653,14 @@ async function runSmoke() {
       return;
     }
 
+    // CAP-BEZ: Shape and Saved Path node insertion/deletion via real Chrome file://.
+    if (process.env.ZPE_PATH_NODE_EDIT_BROWSER_ONLY === '1') {
+      const { verifyBrowserPathNodeEdit } = await import('./browser-path-node-edit-check.mjs');
+      await verifyBrowserPathNodeEdit({ client, evaluate, waitFor, assert });
+      assertNoBrowserErrors(errors, stderrState);
+      return;
+    }
+
     // CAP-BEZ: direct grouped adjustment Vector Mask editing through real Chrome file://.
     if (process.env.ZPE_ADJUSTMENT_MASK_DIRECT_BROWSER_ONLY === '1') {
       const { verifyBrowserAdjustmentMaskDirect } = await import('./browser-adjustment-mask-direct-check.mjs');

@@ -1,19 +1,19 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 2–4 / **CAP-BEZ-PATH-NODE-EDIT** — прямые Pen insert/delete существующих узлов **Shape Path и Saved Paths**; реализацию applied Vector Mask НЕ повторять.
-> **PRIORITY:** P1 · **STATUS:** TODO, первая ещё не выполненная реализация. Родительские CAP-BEZ, CAP-MASK, CAP-PSD IN PROGRESS (полная Photoshop compatibility не заявлена).
-> **BASE MAIN SHA:** adfa66db3bf7d29d7079c1221e35380d0fb00e11 — [#391 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/391) на 2026-11-15; версия 1.46.16.
-> **PREVIOUS BOUNDED DONE:** CAP-BEZ-MASK-NODE-INSERT-DELETE [#391 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/391), exact PR-head 43e81e0f68bb6c7279a68ec31df9e12127aa021e, [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43734378771), [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43734378774), 13/13 checks; exact-merge main [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43735160771) и [real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43735160712), проверены на adfa66db3bf7d29d7079c1221e35380d0fb00e11. Предыдущий [#390 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/390) main 00018bc, exact-main core+real-photo SUCCESS.
-> **LOCAL EVIDENCE:** 49/49 focused Node PASS; полный Windows Chrome file:// PASS и отдельный повторный реальный grouped Levels+Curves Ctrl-insert/delete, Undo/Redo, .zpe reopen, PSD/PSB editable self-round-trip PASS. Windows npm run check: 1632 PASS, 10 SKIP, 5 FAIL на Linux-only /proc/cgroup; НЕ полный PASS. Chromium Canvas mathematical exact-split отразил 3 изменённых RGBA channel bytes (max 8/255), НЕ byte-identical render.
-> **NEXT IMPLEMENTATION:** в чистой ветке от актуального main использовать существующие path-control-surface/command, Pen pointer dispatch; добавить source-aware Ctrl+click сегмента для shape и document-path, Ctrl+Alt+click anchor, корректные open/closed ограничения и exact document/path/layer/subpath/node identity+lock guards. Не ломать существующую Vector Mask и Alt/Shift drag.
-> **REQUIRED ACCEPTANCE:** отдельные RED→GREEN Node тесты (cubic split exact, closing segment, deletion minimum, saved-path stale ID/owner, shape recursive lock), реальный Chrome file:// Pen Shape + Saved Paths, RGBA/overlay, History Undo/Redo, .zpe reopen, editable native PSD/PSB Paths. Затем Linux PR-head core/real-photo, review/merge, exact-main. Существующий self-round-trip не заменяет Adobe-authored Photoshop GUI.
-> **OTHER BLOCKERS:** внешний Photoshop-authored Saved Path/Vector Mask corpus и [Photoshop-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md).
+> **CURRENT TASK/ID:** Stage 2–4 / **CAP-BEZ-PATH-NODE-EDIT** — Shape Path + Saved Paths node insert/delete.
+> **PRIORITY:** P1 · **STATUS:** IN PROGRESS (реализация опубликована в PR #392, локальная Chrome приёмка PASS; Linux PR-head/merge/exact-main pending).
+> **BASE MAIN SHA:** 70b70693bff620f08b89785c4e2f31a40b25d138 (2026-11-16; baseline [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43735921273)).
+> **ACTIVE PR:** [#392 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392), ветка `feat/path-node-edit-20261116`, worktree `ZeTer-Photo-Editor-path-node`; код вне `main`. Новые head-workflows: [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810071983) и [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810071910), статус проверять по актуальному SHA.
+> **LAST VERIFIED:** v1.46.17. Source-aware Pen Ctrl+click сегмента / Ctrl+Alt+click anchor для Shape Path и Saved Paths, точный De Casteljau включая closing cubic, open/closed minimum, owner/target/ID/lock checks. Target Node **42/42 PASS**; реальный Chrome `file://` Shape + Saved Path, RGBA, History Undo/Redo, `.zpe` reopen и native PSD/PSB self-round-trip **PASS**, полный `npm run test:browser` **PASS** (exit 0). Windows `npm run check` после исправления версии: 1646 PASS / 10 SKIP / 5 FAIL (все 5 Linux-only `/proc/cgroup`, НЕ full Windows PASS); focused version+paths 21/21 PASS. `git diff --check` PASS.
+> **REMAINING ACCEPTANCE:** локальные version/Shape/Saved Chrome проверки PASS → [#392 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392) → Linux PR-head core+real-photo CI, review/merge без обхода gates → exact-main обе CI. Настоящий Photoshop-authored Saved Path / Vector Mask corpus отсутствует: внешняя Adobe GUI interoperability NOT VERIFIED.
+> **NEXT IMPLEMENTATION ACTION:** довести `CAP-BEZ-PATH-NODE-EDIT` до PR-head Linux CI и merge/exact-main без повторной реализации Vector Mask; после принятия выбрать следующий независимый P1 по матрице.
+> **BLOCKERS:** Photoshop-authored Saved Path / mask corpus и [Photoshop-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md). Не использовать synthetic self-round-trip как доказательство Adobe interoperability.
 
 ## Краткая очередь
 
-1. **CAP-BEZ-PATH-NODE-EDIT:** P1 TODO — следующая настоящая реализация: Shape Path и Saved Paths node insert/delete, без повторения применённой маски.
-2. **CAP-BEZ-MASK-PSD-UI:** IN PROGRESS — Adobe-authored interoperability, native high depth.
+1. **CAP-BEZ-PATH-NODE-EDIT:** текущая P1, реализация опубликована в [PR #392](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392); Linux core/real-photo и review/merge/exact-main gates pending.
+2. **CAP-BEZ-MASK-PSD-UI:** IN PROGRESS — независимый Adobe-authored corpus, native high-depth.
 3. **Stage 6 / 003X/6c-9:** IN PROGRESS — Worker stale/close/edit parity.
-4. **Stage 9 / CAP-RAW:** TODO — end-to-end RAW decode + non-destructive development.
+4. **Stage 9 / CAP-RAW:** TODO — RAW decode + non-destructive development.
 
-**Документы:** [матрица](CAPABILITY_MATRIX.md) · [карта](README.md) · [закрытый bounded журнал](002-bez-mask-node-insert-delete.md) · [родительская задача](002-bez-mask-psd-ui.md).
+**Документы:** [матрица](CAPABILITY_MATRIX.md) · [карта](README.md) · [новый журнал](002-bez-path-node-edit.md) · [предыдущий завершённый срез](002-bez-mask-node-insert-delete.md) · [родительская задача](002-bez-mask-psd-ui.md).
