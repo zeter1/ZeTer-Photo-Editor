@@ -298,7 +298,7 @@ PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip,
 
 Следующий imaging-этап: **Stage 17a — Isolated Groups / Vector Mask Composite Parity**: приблизить Photoshop group compositing для pass-through/isolated stacks, clipping chains и mask interactions, добавить real PSD/PSB group fixtures и pixel-reference regressions; после этого — editable Gradient/Pattern Fill renderer и tiled/worker/GPU pipeline.
 
-## Контакты для связи с разработчиком
+## Контакты для связи:
 
 - [zeter11@gmail.com](mailto:zeter11@gmail.com)
 - [https://t.me/zeter1](https://t.me/zeter1)
@@ -310,4 +310,5 @@ PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip,
 - [https://x.com/zeter1](https://x.com/zeter1)
 - [https://www.threads.com/@zeter1992](https://www.threads.com/@zeter1992)
 - [https://ok.ru/zeter1](https://ok.ru/zeter1)
-- [https://t.me/zeterchat](https://t.me/zeterchat) — Telegram-группа: обо мне, проекты и чат
+- [https://t.me/zeterchat](https://t.me/zeterchat) - Telegram-группа для общения
+- [https://dkoles.com/](https://dkoles.com/) - сайт.
