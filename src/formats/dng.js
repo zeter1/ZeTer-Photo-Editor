@@ -12,6 +12,7 @@ const dng_TAG = {
   subIfds:330, cfaDims:33421, cfaPattern:33422,
   dngVersion:50706, linearization:50712, blackRepeat:50713,
   black:50714, white:50717, neutral:50728, activeArea:50829,
+  defaultScale:50718, defaultCropOrigin:50719, defaultCropSize:50720,
   colorMatrix1:50721, colorMatrix2:50722, cameraCalibration1:50723,
   cameraCalibration2:50724, analogBalance:50727,
   illuminant1:50778, illuminant2:50779, forwardMatrix1:50964, forwardMatrix2:50965,
@@ -41,6 +42,9 @@ export function inspectDng(buffer) {
       const tag=u16(pos), type=u16(pos+2), count=u32(pos+4);
       const size=dng_TYPE_SIZE[type];
       if(!size || count > dng_MAX_PIXELS){
+        // An invalid crop/scale tag must never silently become an uncropped preview.
+        if([dng_TAG.defaultScale,dng_TAG.defaultCropOrigin,dng_TAG.defaultCropSize].includes(tag))
+          dng_invalid('invalid DefaultCrop/DefaultScale TIFF tag '+tag);
         // Never interpret a malformed calibration tag as an uncalibrated image.
         if([50721,50722,50723,50724,50727,50728,50778,50779,50964,50965].includes(tag))
           dng_invalid('неподдерживаемый тип или count цветового TIFF tag '+tag);
@@ -154,10 +158,39 @@ export function inspectDng(buffer) {
     activeArea[0]>=0 && activeArea[1]>=0 && activeArea[2]<=height && activeArea[3]<=width &&
     activeArea[2]-activeArea[0]>=2 && activeArea[3]-activeArea[1]>=2,
     'некорректная ActiveArea DNG');
+  // DefaultScale changes displayed geometry; reject unimplemented non-identity
+  // scaling rather than silently producing a wrong aspect ratio.
+  if(tags.has(dng_TAG.defaultScale)){
+    const entry=tags.get(dng_TAG.defaultScale);
+    dng_requireThat(entry.type===5&&entry.count===2,'DefaultScale должен быть RATIONAL[2]');
+    const scale=values(tags,dng_TAG.defaultScale,2);
+    dng_requireThat(scale[0]===1&&scale[1]===1,'DefaultScale не равен 1: масштабирование пока не поддерживается');
+  }
+  // DNG 1.6: DefaultCropOrigin [H,V] is relative to ActiveArea's top-left.
+  // SHORT/LONG/RATIONAL are legal. Read from the raw CFA IFD, not a thumbnail.
+  const defaultCropValues=(tag,label)=>{
+    const entry=tags.get(tag);
+    if(!entry)return null;
+    dng_requireThat([3,4,5].includes(entry.type) && entry.count===2,
+      label+' должен быть SHORT/LONG/RATIONAL[2]');
+    return values(tags,tag,2);
+  };
+  const activeWidth=activeArea[3]-activeArea[1], activeHeight=activeArea[2]-activeArea[0];
+  const cropOrigin=defaultCropValues(dng_TAG.defaultCropOrigin,'DefaultCropOrigin') || [0,0];
+  const cropSize=defaultCropValues(dng_TAG.defaultCropSize,'DefaultCropSize') || [activeWidth,activeHeight];
+  dng_requireThat(cropOrigin.every(v=>dng_finite(v)&&v>=0) &&
+    cropSize.every(v=>dng_finite(v)&&v>=2) &&
+    cropOrigin[0]+cropSize[0]<=activeWidth && cropOrigin[1]+cropSize[1]<=activeHeight,
+    'DefaultCrop выходит за ActiveArea или имеет неверные размеры');
+  // DNG fractional coordinates remain fractional until sampling. The preview
+  // has an integral pixel grid, rounded once; never shift the Bayer sensor phase.
+  const cropWindow=[activeArea[1]+cropOrigin[0],activeArea[0]+cropOrigin[1],cropSize[0],cropSize[1]];
+  const cropWidth=Math.round(cropSize[0]),cropHeight=Math.round(cropSize[1]);
+  dng_requireThat(cropWidth>=2&&cropHeight>=2&&cropWidth*cropHeight<=dng_MAX_PIXELS,
+    'DefaultCrop имеет небезопасные размеры');
   const orientation=single(ifds[0],dng_TAG.orientation,single(tags,dng_TAG.orientation,1));
   dng_requireThat(Number.isInteger(orientation) && orientation>=1 && orientation<=8,
     'неподдерживаемая Orientation DNG');
-  const cropWidth=activeArea[3]-activeArea[1], cropHeight=activeArea[2]-activeArea[0];
   const displayWidth=orientation>=5?cropHeight:cropWidth;
   const displayHeight=orientation>=5?cropWidth:cropHeight;
   const rowsPerStrip=single(tags,dng_TAG.rowsPerStrip,height);
@@ -173,7 +206,7 @@ export function inspectDng(buffer) {
       offsets[i]>=8 && byteCounts[i]>=expected && offsets[i]+byteCounts[i]<=buffer.byteLength,
       'усечённая или некорректная Bayer-полоса');
   }
-  return {width,height,displayWidth,displayHeight,orientation,activeArea,
+  return {width,height,displayWidth,displayHeight,orientation,activeArea,cropWindow,
     bits:bits[0],pattern,black,blackRepeat,white:white[0],neutral,color,
     offsets,rowsPerStrip,rowBytes,le,buffer};
 }
@@ -182,7 +215,7 @@ export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
   dng_requireThat(dng_finite(exposure) && exposure>=-5 && exposure<=5 &&
     dng_finite(wbRed) && wbRed>=0.25 && wbRed<=4 &&
     dng_finite(wbBlue) && wbBlue>=0.25 && wbBlue<=4, 'неверные параметры RAW-проявки');
-  const {width,height,displayWidth,displayHeight,orientation,activeArea,
+  const {width,height,displayWidth,displayHeight,orientation,cropWindow,
     bits,pattern,black,blackRepeat,white,neutral,color,offsets,rowsPerStrip,rowBytes,le,buffer}=source;
   const view=new DataView(buffer);
   const normalized=new Float32Array(width*height), channels=new Uint8Array(width*height);
@@ -223,11 +256,23 @@ export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
     const v=dng_clamp(linear,0,1);
     return Math.round(255*(v<=0.0031308?12.92*v:1.055*v**(1/2.4)-0.055));
   }
-  // Demosaic with uncropped sensor neighbors, then crop and orient the developed preview.
-  // EXIF/TIFF orientation 1..8 is applied to pixels, not just to a display flag.
-  const cropWidth=activeArea[3]-activeArea[1],cropHeight=activeArea[2]-activeArea[0];
-  for(let y=activeArea[0];y<activeArea[2];y++)for(let x=activeArea[1];x<activeArea[3];x++){
-    const cx=x-activeArea[1],cy=y-activeArea[0];
+  // Demosaic in original sensor space (including margin neighbors), then sample
+  // the exact fractional crop rectangle on its integer output pixel grid.
+  // This interpolates *linear camera channels*, before ColorMatrix and sRGB OETF.
+  const [left,top,sensorCropWidth,sensorCropHeight]=cropWindow;
+  const cropWidth=Math.round(sensorCropWidth),cropHeight=Math.round(sensorCropHeight);
+  const resampleChannel=(x,y,c)=>{
+    if(Number.isInteger(x)&&Number.isInteger(y))return sampleChannel(x,y,c);
+    const x0=Math.floor(x),y0=Math.floor(y),tx=x-x0,ty=y-y0;
+    const a=dng_clamp(x0,0,width-1),b=dng_clamp(x0+1,0,width-1);
+    const d=dng_clamp(y0,0,height-1),e=dng_clamp(y0+1,0,height-1);
+    return (1-ty)*((1-tx)*sampleChannel(a,d,c)+tx*sampleChannel(b,d,c))+
+      ty*((1-tx)*sampleChannel(a,e,c)+tx*sampleChannel(b,e,c));
+  };
+  // EXIF/TIFF orientation 1..8 is applied to developed pixels, not a CSS flag.
+  for(let cy=0;cy<cropHeight;cy++)for(let cx=0;cx<cropWidth;cx++){
+    const x=left+(cx+0.5)*(sensorCropWidth/cropWidth)-0.5;
+    const y=top+(cy+0.5)*(sensorCropHeight/cropHeight)-0.5;
     let dx=cx,dy=cy;
     switch(orientation){
       case 2: dx=cropWidth-1-cx; break;
@@ -239,7 +284,7 @@ export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
       case 8: dx=cy;dy=cropWidth-1-cx;break;
     }
     const index=(dy*displayWidth+dx)*4;
-    const camera=[sampleChannel(x,y,0),sampleChannel(x,y,1),sampleChannel(x,y,2)];
+    const camera=[resampleChannel(x,y,0),resampleChannel(x,y,1),resampleChannel(x,y,2)];
     const linear=colorTransform ? applyDngColorMatrix(colorTransform,...camera) :
       camera.map((value,c)=>value*multipliers[c]);
     for(let c=0;c<3;c++)rgba[index+c]=srgb(linear[c]*exposureScale);

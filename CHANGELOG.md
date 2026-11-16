@@ -1,4 +1,17 @@
-## 1.46.20 — текущая версия
+## 1.46.21 — текущая версия
+
+> Кандидат локальной ветки, пока не принят в `main`.
+
+### 2026-11-16 — CAP-RAW-DNG-DEFAULT-CROP (ограниченный реальный RAW-срез)
+
+- Декодер TIFF/DNG теперь использует DefaultCropOrigin [H,V] относительно ActiveArea и DefaultCropSize (SHORT/LONG/RATIONAL), сохраняя правильную абсолютную CFA-фазу сенсора, затем применяет Orientation 1–8.
+- Дробный origin/size ресэмплируется в линейном пространстве камеры до ColorMatrix/sRGB transfer; выходная пиксельная сетка округляется один раз по каждой оси. Целочисленные crops используют быстрый путь без интерполяции. Sensor native bytes остаются неизменными.
+- Отвергаются недопустимые теги, нулевые знаменатели, выход за ActiveArea и неподдерживаемый неединичный DefaultScale — без молчаливого изменения геометрии. Properties показывает исходные размеры сенсора и размеры проявленного кадра.
+- Дополнительно закрыт fail-open для неизвестного TIFF-типа или oversized count у DefaultScale/DefaultCropOrigin/DefaultCropSize: шесть негативных случаев RED→GREEN без молчаливого fallback.
+- LOCAL: Windows full `npm run check` — **1672 PASS / 10 SKIP / 5 FAIL** (пять Linux-only cgroup/proc тестов); 26/26 focused Node PASS; настоящий Chromium file:// импорт/пиксели fractional crop+ColorMatrix+Orientation, UI, Undo/Redo, .zpe save/reopen, существующий экспорт PNG/PSD/PSB PASS. Linux CI нового кода пока NOT RUN; независимый camera-authored DNG/LibRaw oracle отсутствует.
+- Ограничения: DNG без JPEG/packed compression, полный DefaultScale/BestQualityScale, ICC/ForwardMatrix и профессиональная camera color parity остаются будущими задачами.
+
+## 1.46.20 — предыдущая версия
 
 ### 2026-11-16 — CAP-RAW-DNG-CAMERA-COLOR (bounded matrix pipeline)
 
