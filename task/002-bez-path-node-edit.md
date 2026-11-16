@@ -1,7 +1,7 @@
 # CAP-BEZ-PATH-NODE-EDIT — Shape Path и Saved Paths, прямое Pen-редактирование узлов
 
 **Дата:** 2026-11-16 · **Приоритет:** P1 · **Статус:** IN PROGRESS только до публикации/PR-head gates/merge/exact-main; bounded local acceptance PASS.
-**База:** exact main `70b70693bff620f08b89785c4e2f31a40b25d138` (main core CI SUCCESS). **Ветка:** `feat/path-node-edit-20261116`, **версия:** 1.46.17.
+**База:** exact main `70b70693bff620f08b89785c4e2f31a40b25d138` (main core CI SUCCESS). **Ветка:** `feat/path-node-edit-20261116`, **PR:** [#392 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392), **версия:** 1.46.17.
 **Ограничение:** native PSD/PSB ZeTer self-round-trip не удостоверяет Adobe-authored Photoshop GUI; отсутствие внешнего corpus отдельно BLOCKED.
 
 ## Реализация (пользовательская, не декоративная)
@@ -19,7 +19,7 @@
 - `npm run test:browser:path-node-edit`: **PASS** (real Chromium file://, exit 0), Shape/Saved pointer Ctrl-insert/delete, RGBA composite, History Undo/Redo, actual `.zpe` save/reopen; real export modal PSD/PSB native Saved Paths 5 nodes, binary parser и re-import.
 - Полный Windows Chrome `npm run test:browser`: **PASS**, exit 0 (133.80s combined command runtime; не выдавать за чистое browser elapsed).
 - Итоговый Windows `npm run check`: **1646 PASS / 10 SKIP / 5 FAIL** — ровно пять Linux-only `/proc/cgroup`, не полный Windows PASS. После синхронизации README/CHANGELOG/version повторный `tests/version-consistency.test.mjs` PASS, 21/21 focused (версия + paths) PASS.
-- `git diff --check`: **PASS**. Linux PR-head core/real-photo, review/merge и exact-main для нового кода **NOT RUN / PENDING** до публикации.
+- `git diff --check`: **PASS**. Linux PR-head [core run 43809833484](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43809833484) и [real-photo run 43809833528](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43809833528) запущены для первоначального опубликованного PR head; статус и проверку на последнем head сверить отдельно; review/merge/exact-main PENDING.
 
 ## Изменения
 
