@@ -1,6 +1,6 @@
 # CAP-BEZ-PATH-NODE-EDIT — Shape Path и Saved Paths, прямое Pen-редактирование узлов
 
-**Дата:** 2026-11-16 · **Приоритет:** P1 · **Статус:** IN PROGRESS только до публикации/PR-head gates/merge/exact-main; bounded local acceptance PASS.
+**Дата:** 2026-11-16 · **Приоритет:** P1 · **Статус:** DONE (bounded code + merge, exact-main CI ожидает readback); локальная Chrome приёмка PASS.
 **База:** exact main `70b70693bff620f08b89785c4e2f31a40b25d138` (main core CI SUCCESS). **Ветка:** `feat/path-node-edit-20261116`, **PR:** [#392 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392), **версия:** 1.46.17.
 **Ограничение:** native PSD/PSB ZeTer self-round-trip не удостоверяет Adobe-authored Photoshop GUI; отсутствие внешнего corpus отдельно BLOCKED.
 
@@ -29,3 +29,9 @@
 ## Следующий обязательный шаг
 
 Довести именно этот проверенный локальный срез до PR-head Linux CI (core + independent real-photo), review и стандартного merge при наличии требуемого разрешения, затем exact-main CI; не переписывать работающую applied Vector Mask. После bounded DONE выбрать независимый P1 по матрице. Внешний Photoshop-authored Saved Path/PSB32 corpus остаётся BLOCKED/UNKNOWN.
+
+## 2026-11-16 — фактическое завершение PR-gates и merge
+
+- Exact PR head `81fc4bf981ec37290a3ba453b7747ad0888144d9`: [Linux core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810434572), [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810434570), 13/13 SUCCESS, review threads 0, submitted reviews 0, конфликтов нет.
+- [PR #392 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392) в main `39ae073a7c3daa12ae607663423ff767ed10f4d1` (отдельно проверено). Exact merged-main [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43811572358) и [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43811572311) **PENDING** на момент записи: успех пока не заявлен.
+- Новый independent P1 — [CAP-RAW-DNG-FOUNDATION](NEXT.md): DNG Bayer decode + non-destructive WB/exposure, браузерный import/History/.zpe/export. Parent CAP-BEZ/PSD IN PROGRESS; Photoshop-authored corpus BLOCKED.
