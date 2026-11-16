@@ -67,6 +67,7 @@ import { createSelectionClipboardController } from './selection/clipboard-contro
 import { createSelectionRasterMutationController } from './selection/raster-mutation-controller.js';
 import { createSelectionMaskController } from './selection/mask-controller.js';
 import { createSelectionVectorMaskController } from './selection/vector-mask-controller.js';
+import { inspectDng, developDng } from './formats/dng.js';
 import { createDocumentImportController } from './document/import-controller.js';
 import { createNewDocumentController } from './document/new-document-controller.js';
 import { createProjectController } from './document/project-controller.js';
@@ -963,6 +964,10 @@ const documentImportController = createDocumentImportController({
   isPsdFile,
   readFileAsDataURL,
   dimensionsFromDataUrl,
+  inspectDng,
+  developDng,
+  rgbaPixelsToDataUrl,
+  bytesToDataUrl,
   checkedCanvasSize,
   createRasterLayer,
   addLayer,
@@ -1838,6 +1843,48 @@ function formatDisplayExposure(value){
   return `${ev>=0?'+':''}${ev.toFixed(1)} EV`;
 }
 
+let rawDevelopCommandGeneration=0;
+function bindRawDevelopmentControls(root,owner,layerId){
+  const fields=['exposure','wbRed','wbBlue'];
+  const selectors=['[data-raw-exposure]','[data-raw-wb-red]','[data-raw-wb-blue]'];
+  const controls=selectors.map(s=>root.querySelector(s));
+  if(controls.some(c=>!c))return;
+  async function applyRawDevelopment(reset=false){
+    const target=owner.layers.find(layer=>layer.id===layerId);
+    if(doc!==owner || selected()?.id!==layerId || !target?.rawDng ||
+      target.type!=='raster' || isLayerLocked(owner,target) || blockPendingDocumentEdit())return;
+    const next=reset ? {exposure:0,wbRed:1,wbBlue:1} :
+      Object.fromEntries(fields.map((key,i)=>[key,Number(controls[i].value)]));
+    if(fields.some(key=>!Number.isFinite(next[key])))return;
+    const original=target.rawDng;
+    if(fields.every(key=>original.development[key]===next[key]))return;
+    const oldPreview=target.dataUrl, session=activeSessionId, generation=++rawDevelopCommandGeneration;
+    controls.forEach(c=>{c.disabled=true;});
+    try{
+      const bytes=dataUrlToBytes(original.dataUrl,{maxBytes:48*1024*1024});
+      const buffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);
+      const source=inspectDng(buffer);
+      if(source.width!==target.width || source.height!==target.height)throw new Error('Размер RAW-слоя изменился');
+      const {rgba}=developDng(source,next);
+      const newPreview=await rgbaPixelsToDataUrl(source.width,source.height,rgba,'RAW-проявка');
+      if(generation!==rawDevelopCommandGeneration || doc!==owner || session!==activeSessionId ||
+        selected()?.id!==layerId || !owner.layers.includes(target) || target.rawDng!==original ||
+        target.dataUrl!==oldPreview || isLayerLocked(owner,target) || blockPendingDocumentEdit())return;
+      target.rawDng={...original,development:next};
+      target.dataUrl=newPreview;
+      invalidateImageCache(oldPreview);
+      commit('RAW: экспозиция и баланс белого');
+      setStatus('RAW-проявка обновлена · исходный DNG не изменён');
+    }catch(error){
+      toast('RAW-проявка: '+error.message,'error');
+      setStatus('RAW-проявка не выполнена');
+    }finally{
+      controls.forEach(c=>{if(c.isConnected)c.disabled=false;});
+    }
+  }
+  controls.forEach(control=>control.addEventListener('change',()=>{void applyRawDevelopment();}));
+  root.querySelector('[data-raw-reset]')?.addEventListener('click',()=>{void applyRawDevelopment(true);});
+}
 function bindHighDepthPreviewControls(root, owner, layerId){
   const toneMap=root?.querySelector('[data-high-depth-tone-map]');
   if(toneMap)toneMap.addEventListener('change',()=>layerPropertyCommandController.updateHighDepthPreview(owner,layerId,'toneMap',toneMap.value,{commit:true}));
@@ -1885,6 +1932,14 @@ function updateProperties() {
       ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
       : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`) + nativeInfo;
   }
+  if (l.type === 'raster' && l.rawDng) {
+    const d=l.rawDng.development;
+    extra += '<label>RAW источник</label><span>DNG Bayer · сохранён в .zpe; экспорт PSD/PSB — проявленные пиксели</span>' +
+      '<label>Экспозиция (EV)</label><input aria-label="RAW экспозиция" data-raw-exposure type="number" min="-5" max="5" step="0.1" value="' + d.exposure + '">' +
+      '<label>WB красный</label><input aria-label="RAW баланс красного" data-raw-wb-red type="number" min="0.25" max="4" step="0.05" value="' + d.wbRed + '">' +
+      '<label>WB синий</label><input aria-label="RAW баланс синего" data-raw-wb-blue type="number" min="0.25" max="4" step="0.05" value="' + d.wbBlue + '">' +
+      '<div class="wide"><button type="button" class="mini-button" data-raw-reset>Сбросить RAW-проявку</button></div>';
+  }
   if (l.type === 'raster' && l.highDepthSource) {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
@@ -1930,6 +1985,7 @@ function updateProperties() {
   </div>`;
   const propertyOwner=doc, propertyLayerId=l.id;
   bindPropertyInputs(els.props,propertyOwner,propertyLayerId);
+  if(l.type==='raster'&&l.rawDng)bindRawDevelopmentControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='cmyk')bindColorManagementControls(els.props);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');

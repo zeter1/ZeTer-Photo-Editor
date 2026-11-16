@@ -1,4 +1,14 @@
-## 1.46.17 — текущая версия
+## 1.46.18 — текущая версия
+
+### 2026-11-16 — Stage 9 / CAP-RAW-DNG-FOUNDATION
+
+- Первый настоящий локальный browser `file://` импорт ограниченного TIFF/DNG Bayer RAW: 8/16-bit несжатые strips, II/MM, 2×2 RGGB/BGGR/GRBG/GBRG, DNGVersion/AsShotNeutral/BlackLevel/WhiteLevel; явный отказ для сжатия, packed и неподдерживаемых CFA.
+- Неразрушающая проявка экспозиции (±5 EV) и коэффициентов R/B WB, исходные DNG-байты сохраняются отдельно от отображаемого PNG-превью в raster layer и `.zpe`; изменение через свойства с Undo/Redo и защитой от чужой вкладки.
+- Node decoder/import/persistence regressions и реальный Windows Chromium `file://`: import → RGBA → WB/exposure → History Undo/Redo → `.zpe` save/reopen → экспорт PNG/PSD/PSB (самопроверка) PASS. Это не подтверждение цветовой точности камеры/Adobe compatibility.
+- Текущее ограничение: Bayer bilinear, приблизительный sRGB preview без ColorMatrix/ICC; нет lossless-JPEG-compressed DNG, alternate active area, camera-calibrated colors, highlights/shadows. Для профессиональной цветовой точности нужен внешний RAW corpus и опорный decoder.
+- PR/head Linux CI и exact-main — проверить отдельно после публикации; отсутствие независимых camera-authored DNG не объявлять завершённым полным Stage 9.
+
+## 1.46.17 — предыдущая версия
 
 ### 2026-11-16 — CAP-BEZ-PATH-NODE-EDIT: Pen insert/delete для Shape Path и Saved Paths
 

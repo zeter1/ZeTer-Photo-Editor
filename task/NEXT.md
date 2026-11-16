@@ -1,19 +1,18 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 9 / **CAP-RAW-DNG-FOUNDATION** — первый рабочий браузерный RAW-import с неразрушающей проявкой; не возвращаться к уже принятому Shape/Saved Path node editing.
-> **PRIORITY:** P1 · **STATUS:** TODO (новый независимый функциональный срез; для кода ещё нет PR).
-> **BASE MAIN SHA:** 39ae073a7c3daa12ae607663423ff767ed10f4d1 — [#392 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392), ZeTer 1.46.17.
-> **ACTIVE PR:** для CAP-RAW-DNG-FOUNDATION отсутствует; [#392 CLOSED/MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392) и не требует повторной реализации.
-> **LAST VERIFIED:** CAP-BEZ-PATH-NODE-EDIT: точный PR-head 81fc4bf981ec37290a3ba453b7747ad0888144d9 — [Linux core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810434572), [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43810434570), все 13 checks SUCCESS; реальный Windows Chrome file:// Shape/Saved RGBA, Undo/Redo, .zpe reopen, editable native PSD/PSB self-round-trip PASS. [Exact merge-main core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43811572358) / [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43811572311): **SUCCESS оба** для exact-main SHA 39ae073a (проверено отдельно). Windows full npm run check: 1646 PASS / 10 SKIP / 5 Linux-only /proc/cgroup FAIL; не полный PASS.
-> **REMAINING ACCEPTANCE:** перед следующей работой проверить exact-main #392 core+real-photo; для нового CAP-RAW-DNG-FOUNDATION реализовать реальный DNG subset → RGBA/native raster, корректное CFA/black-white/white-balance, экспозицию в неразрушающем workflow с неизменяемым RAW-источником, безопасные ограничения на размер/данные, честное отклонение unsupported compression/photometric, Chrome file:// import/edit/UI → History Undo/Redo → .zpe reopen → PNG/PSD/PSB export. Начать с RED→GREEN Node decoder/tag tests; без Adobe compatibility обещаний.
-> **NEXT IMPLEMENTATION ACTION:** добавить узкий валидируемый DNG TIFF/IFD Bayer reader и demosaic в core; интегрировать выбор .dng в существующий import-controller, осмысленные WB/exposure параметры и проверенную persistence. Не ломать обычный PNG/JPEG/PSD/PSB import. Не считать RAW реализованным до настоящего браузерного E2E.
-> **BLOCKERS:** внешний Adobe-authored Saved Path/Vector Mask corpus и [Photoshop-authored PSB32 provenance](002b2c-photoshop-psb32-provenance.md); не подменять ими самопроверку. CAP-RAW-DNG-FOUNDATION не зависит от Adobe-authored PSD corpus.
+> **CURRENT TASK/ID:** Stage 9 / **CAP-RAW-DNG-FOUNDATION — независимая проверка camera-authored DNG + калиброванная проявка**.
+> **PRIORITY:** P1 · **STATUS:** IN PROGRESS. Базовый рабочий срез `1.46.18` реализован локально в `feat/raw-dng-foundation-20261116`, но ещё нет внешней camera-authored RAW acceptance и PR-head Linux CI.
+> **BASE MAIN SHA:** `7ab905fb5640d0e99b14c25c198cc6ff5207deb3` — [#393 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/393), [CI main SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43813016042).
+> **ACTIVE PR:** публикация локальной ветки запланирована; URL и статус после GitHub readback.
+> **LOCAL VERIFIED:** 8 focused Node tests PASS; реальный Windows Chromium `file://` DNG input → Bayer RGBA → WB/exposure controls → History Undo/Redo → оригинальные DNG bytes в `.zpe` → reopen → PNG/PSD/PSB UI self-export PASS. Это синтетический, но валидный TIFF/DNG binary fixture; **не** camera-authored корпус. Linux-only Windows `/proc/cgroup` не трактовать как полный PASS.
+> **KNOWN LIMITS:** classic TIFF, несжатые 8/16-bit Bayer strips, 2×2 CFA, 48 МиБ/16 MP; bilinear camera RGB лишь приближённый sRGB без ColorMatrix/ICC. Не поддерживаются packed RAW, lossless-JPEG DNG, highlights/shadows, ActiveArea, calibrated color, полная Adobe совместимость.
+> **NEXT IMPLEMENTATION ACTION:** получить проверяемый легально распространяемый **camera-authored uncompressed Bayer DNG** с CFA/black-white/AsShotNeutral/ColorMatrix, сравнить матрицу пикселей и orientation/active-area с независимым RAW-декодером (LibRaw/RawTherapee). Исправить реальные отклонения и добавить camera-to-sRGB ColorMatrix + orientation/active-area в Chrome E2E. Сжатый DNG — отдельный следующий срез.
 
-## Краткая очередь
+## Приоритетная очередь
 
-1. **CAP-RAW-DNG-FOUNDATION:** P1 TODO — реальный минимальный RAW импорт и неразрушающая проявка (новая пользовательская функция).
-2. **CAP-BEZ-MASK-PSD-UI:** IN PROGRESS / external Adobe-authored interoperability BLOCKED; не повторять bounded Pen masks/paths из #389–#392.
-3. **Stage 6 / 003X/6c-9:** IN PROGRESS — конкретный Worker stale/close/edit parity для native RGB16/CMYKA32, без бесконечного профилирования.
-4. **CAP-RAW broader formats, ICC/native HDR, full Photoshop interoperability:** IN PROGRESS/TODO по [матрице](CAPABILITY_MATRIX.md); не объявлять DONE.
+1. **CAP-RAW-DNG-FOUNDATION:** IN PROGRESS — независимый camera-authored DNG/ColorMatrix/ActiveArea acceptance; 1.46.18 уже поддерживает ограниченный synthetic + Chrome вертикальный срез.
+2. **CAP-BEZ-MASK-PSD-UI:** BLOCKED только внешний Adobe-authored interoperability corpus; не повторять принятый bounded node edit [#392](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392).
+3. **Stage 6 / 003X/6c-9:** IN PROGRESS — Worker stale/close/edit native RGB16/CMYKA32 acceptance.
+4. **Более широкие RAW форматы / ICC / native HDR / full Photoshop interoperability:** TODO/IN PROGRESS по [матрице](CAPABILITY_MATRIX.md).
 
-**Закрытый bounded срез:** [#392 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/392) · [журнал](002-bez-path-node-edit.md) · [матрица](CAPABILITY_MATRIX.md) · [карта](README.md).
+**Технический журнал:** [002-raw-dng-foundation.md](002-raw-dng-foundation.md) · [матрица](CAPABILITY_MATRIX.md) · [карта](README.md). Статус PR/CI и точного head сверять с GitHub.
