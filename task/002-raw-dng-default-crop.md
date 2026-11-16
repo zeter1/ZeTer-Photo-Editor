@@ -1,6 +1,6 @@
 # CAP-RAW-DNG-DEFAULT-CROP — нативная геометрия DNG (bounded)
 
-**Дата:** 2026-11-16 · **Stage:** 9 / P1 · **Версия-кандидат:** 1.46.21 · **База:** main `a81bec7` + PR #397 head `bf6dd662` · **Ветка:** `feat/raw-dng-default-crop-20261116` (локальная). Родитель RAW pipeline остаётся IN PROGRESS.
+**Дата:** 2026-11-16 · **Stage:** 9 / P1 · **Версия-кандидат:** 1.46.21 · **База:** main `a81bec7` + PR #397 head `bf6dd662` · **Ветка:** `feat/raw-dng-default-crop-20261116` ([PR #398 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/398), stacked на #397). Родитель RAW pipeline остаётся IN PROGRESS.
 
 ## Реальный код
 
@@ -14,7 +14,7 @@
 - `node --test tests/dng-default-crop.test.mjs tests/dng.test.mjs tests/dng-color.test.mjs tests/dng-import-controller.test.mjs` — **26/26 PASS**: II/MM, SHORT/LONG/RATIONAL, ActiveArea, CFA phase, целочисленные pixel oracle, fractional origin и size, Orientation 1–8, corrupt type/arity/zero denominator/out-of-bounds, DefaultScale, ColorMatrix и native-byte immutability.
 - Дополнительный RED→GREEN: неизвестный TIFF type и oversized count в DefaultScale/DefaultCropOrigin/DefaultCropSize раньше тихо пропускались при чтении IFD, теперь импорт отвергает испорченные теги; 6 негативных вариантов.
 - `npm run build` — PASS; `npm run test:browser:raw-dng` — **PASS настоящий Chromium file://**: FileInput → fractional DefaultCrop+ColorMatrix+Orientation → реальные RGBA, Properties, Undo/Redo, `.zpe` save/reopen/redevelop, native bytes, PNG/PSD/PSB rendered export regression. Это synthetic TIFF, а не независимый camera-authored oracle.
-- Полный Windows `npm run check`: **1672 PASS / 10 SKIP / 5 FAIL** (все пять FAIL — Linux-only `/proc`/cgroup probes на Windows); generated bundle/version parity и `git diff --check` PASS. Новый Linux PR-head, independent real-photo и exact-main CI — NOT RUN для версии 1.46.21. Предыдущий #397 exact-head `bf6dd662` core+real-photo SUCCESS, но эти статусы не относятся к новому diff.
+- Полный Windows `npm run check`: **1672 PASS / 10 SKIP / 5 FAIL** (все пять FAIL — Linux-only `/proc`/cgroup probes на Windows); generated bundle/version parity и `git diff --check` PASS. Linux PR-head и independent real-photo CI #398 — NOT RUN: workflow `pull_request.branches` принимает только `main`, а stacked PR #398 пока на #397; exact-main CI — NOT RUN для версии 1.46.21. Предыдущий #397 exact-head `bf6dd662` core+real-photo SUCCESS, но эти статусы не относятся к новому diff.
 
 ## Ограничения и дальнейшая реализация
 
