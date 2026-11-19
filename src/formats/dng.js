@@ -1,3 +1,5 @@
+import {dngCameraToLinearSrgb,applyDngColorMatrix} from './dng-color.js';
+
 // Bounded, dependency-free TIFF/DNG Bayer reader for offline file:// imports.
 // Only classic TIFF (II/MM), uncompressed 8/16-bit single-plane CFA strips.
 // Unsupported RAW layouts fail explicitly instead of falling back to browser image decoders.
@@ -10,6 +12,9 @@ const dng_TAG = {
   subIfds:330, cfaDims:33421, cfaPattern:33422,
   dngVersion:50706, linearization:50712, blackRepeat:50713,
   black:50714, white:50717, neutral:50728, activeArea:50829,
+  colorMatrix1:50721, colorMatrix2:50722, cameraCalibration1:50723,
+  cameraCalibration2:50724, analogBalance:50727,
+  illuminant1:50778, illuminant2:50779, forwardMatrix1:50964, forwardMatrix2:50965,
 };
 function dng_invalid(message) { throw new Error('DNG: ' + message); }
 function dng_requireThat(ok, message) { if (!ok) dng_invalid(message); }
@@ -35,7 +40,12 @@ export function inspectDng(buffer) {
       const pos=offset+2+i*12;
       const tag=u16(pos), type=u16(pos+2), count=u32(pos+4);
       const size=dng_TYPE_SIZE[type];
-      if(!size || count > dng_MAX_PIXELS) continue;
+      if(!size || count > dng_MAX_PIXELS){
+        // Never interpret a malformed calibration tag as an uncalibrated image.
+        if([50721,50722,50723,50724,50727,50728,50778,50779,50964,50965].includes(tag))
+          dng_invalid('неподдерживаемый тип или count цветового TIFF tag '+tag);
+        continue;
+      }
       const byteLength=count*size;
       dng_requireThat(Number.isSafeInteger(byteLength) && byteLength <= dng_MAX_FILE_BYTES, 'недопустимый TIFF tag');
       const start=byteLength <= 4 ? pos+8 : u32(pos+8);
@@ -111,6 +121,33 @@ export function inspectDng(buffer) {
     'WhiteLevel/BlackLevel вне диапазона');
   const neutral=values(ifds[0],dng_TAG.neutral,3) || values(tags,dng_TAG.neutral,3) || [1,1,1];
   dng_requireThat(neutral.length===3 && neutral.every(v=>v>0 && dng_finite(v)), 'ошибочный AsShotNeutral');
+  // Colour tags live in IFD 0 or the CFA IFD, never rely on a thumbnail IFD.
+  const colorTag = tag => ifds[0].has(tag) ? ifds[0] : tags;
+  const matrix = tag => {
+    const owner=colorTag(tag),entry=owner.get(tag);
+    if(!entry)return null;
+    dng_requireThat(entry.type===10 && entry.count===9,
+      'ColorMatrix должна быть SRATIONAL[9] (3×3)');
+    return values(owner,tag,9);
+  };
+  const matrix1=matrix(dng_TAG.colorMatrix1),matrix2=matrix(dng_TAG.colorMatrix2);
+  dng_requireThat(!matrix2 || matrix1,'ColorMatrix2 без ColorMatrix1');
+  const illuminant = tag => {
+    const owner=colorTag(tag),entry=owner.get(tag);
+    if(!entry)return null;
+    dng_requireThat(entry.type===3 && entry.count===1,'CalibrationIlluminant должен быть SHORT');
+    return values(owner,tag,1)[0];
+  };
+  const illuminant1=illuminant(dng_TAG.illuminant1);
+  const illuminant2=illuminant(dng_TAG.illuminant2);
+  // Avoid silently misapplying a profile with unimplemented transforms.
+  if(matrix1)for(const tag of [dng_TAG.cameraCalibration1,dng_TAG.cameraCalibration2,
+    dng_TAG.analogBalance,dng_TAG.forwardMatrix1,dng_TAG.forwardMatrix2])
+    dng_requireThat(!colorTag(tag).has(tag),'CameraCalibration/AnalogBalance/ForwardMatrix пока не поддерживается');
+  dng_requireThat(!matrix1 || Boolean(ifds[0].has(dng_TAG.neutral)||tags.has(dng_TAG.neutral)),
+    'нет AsShotNeutral для ColorMatrix (AsShotWhiteXY пока не поддерживается)');
+  const color=matrix1 ? {matrix1,matrix2,illuminant1,illuminant2,neutral} : null;
+  if(color)dngCameraToLinearSrgb(color); // Reject malformed/singular profiles before import.
   // ActiveArea uses sensor coordinates [top, left, bottom, right]; CFA phase remains sensor-relative.
   const activeArea=values(tags,dng_TAG.activeArea,4) ?? values(ifds[0],dng_TAG.activeArea,4) ?? [0,0,height,width];
   dng_requireThat(activeArea.length===4 && activeArea.every(Number.isInteger) &&
@@ -137,7 +174,7 @@ export function inspectDng(buffer) {
       'усечённая или некорректная Bayer-полоса');
   }
   return {width,height,displayWidth,displayHeight,orientation,activeArea,
-    bits:bits[0],pattern,black,blackRepeat,white:white[0],neutral,
+    bits:bits[0],pattern,black,blackRepeat,white:white[0],neutral,color,
     offsets,rowsPerStrip,rowBytes,le,buffer};
 }
 export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
@@ -146,7 +183,7 @@ export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
     dng_finite(wbRed) && wbRed>=0.25 && wbRed<=4 &&
     dng_finite(wbBlue) && wbBlue>=0.25 && wbBlue<=4, 'неверные параметры RAW-проявки');
   const {width,height,displayWidth,displayHeight,orientation,activeArea,
-    bits,pattern,black,blackRepeat,white,neutral,offsets,rowsPerStrip,rowBytes,le,buffer}=source;
+    bits,pattern,black,blackRepeat,white,neutral,color,offsets,rowsPerStrip,rowBytes,le,buffer}=source;
   const view=new DataView(buffer);
   const normalized=new Float32Array(width*height), channels=new Uint8Array(width*height);
   const exposureScale=2**exposure;
@@ -163,6 +200,7 @@ export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
     }
   }
   const multipliers=[(neutral[1]/neutral[0])*wbRed,1,(neutral[1]/neutral[2])*wbBlue];
+  const colorTransform=dngCameraToLinearSrgb(color,{wbRed,wbBlue});
   const rgba=new Uint8ClampedArray(displayWidth*displayHeight*4);
   function sampleChannel(x,y,c){
     const index=y*width+x;
@@ -201,10 +239,15 @@ export function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
       case 8: dx=cy;dy=cropWidth-1-cx;break;
     }
     const index=(dy*displayWidth+dx)*4;
-    for(let c=0;c<3;c++)rgba[index+c]=srgb(sampleChannel(x,y,c)*multipliers[c]*exposureScale);
+    const camera=[sampleChannel(x,y,0),sampleChannel(x,y,1),sampleChannel(x,y,2)];
+    const linear=colorTransform ? applyDngColorMatrix(colorTransform,...camera) :
+      camera.map((value,c)=>value*multipliers[c]);
+    for(let c=0;c<3;c++)rgba[index+c]=srgb(linear[c]*exposureScale);
     rgba[index+3]=255;
   }
-  return {width:displayWidth,height:displayHeight,rgba,development:{exposure,wbRed,wbBlue}};
+  return {width:displayWidth,height:displayHeight,rgba,
+    colorPipeline:color?'matrix-d50-bradford-v1':'uncalibrated-bayer-preview',
+    development:{exposure,wbRed,wbBlue}};
 }
 export function decodeDng(buffer, development) {
   return developDng(inspectDng(buffer),development);

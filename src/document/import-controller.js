@@ -52,7 +52,8 @@ export function createDocumentImportController({
           const pixels=developDng(source);
           const dataUrl=await rgbaPixelsToDataUrl(pixels.width,pixels.height,pixels.rgba,'DNG RAW');
           const rawDng={dataUrl:bytesToDataUrl(raw,'application/x-adobe-dng'),
-            development:pixels.development,width:source.width,height:source.height};
+            development:pixels.development,colorPipeline:pixels.colorPipeline,
+            width:source.width,height:source.height};
           prepared.push({file,dataUrl,width:pixels.width,height:pixels.height,rawDng});
         } catch(error) {
           setStatus('Ошибка DNG: ' + error.message);
