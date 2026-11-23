@@ -12,7 +12,7 @@ import { verifyBrowserUiLockMidKernel } from './browser-ui-lock-mid-kernel-smoke
 import { verifyBrowserDelayedRecoveryReloads } from './browser-recovery-reload-smoke.mjs';
 import { verifyBrowserWideConnectedNativeUi } from './browser-wide-connected-ui-smoke.mjs';
 import { verifyIsolatedRasterClipping } from './browser-isolated-raster-clipping-smoke.mjs';
-import { verifyGroupRasterMask } from './browser-group-raster-mask-smoke.mjs';
+import { verifyGroupRasterMask, verifyMaskedPassThroughBackdrop } from './browser-group-raster-mask-smoke.mjs';
 import { writeWideConnectedBrowserArtifact } from './browser-wide-connected-operation-artifact.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -517,6 +517,7 @@ async function runSmoke() {
 
     if (process.env.ZPE_PSD_GROUP_MASK_BROWSER_ONLY === '1') {
       await verifyGroupRasterMask(client, { evaluate, waitFor, assert });
+      await verifyMaskedPassThroughBackdrop(client, { evaluate, waitFor, assert });
       assertNoBrowserErrors(errors, stderrState);
       return;
     }

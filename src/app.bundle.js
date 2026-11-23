@@ -17876,6 +17876,48 @@ async function renderClippingBase(doc, layer, rasterOverrides) {
   return canvas;
 }
 
+// A masked Pass Through folder modifies its parent's backdrop. Blend between
+// that exact backdrop and the rendered result; masking an isolated group would
+// apply child multiply/adjustments to transparent pixels instead. Tile reads
+// bound transient ImageData allocations even on very large documents.
+function compositeMaskedPassThrough(targetCtx, renderedCtx, maskCtx, width, height, opacity) {
+  const tile = 256;
+  for (let y = 0; y < height; y += tile) {
+    for (let x = 0; x < width; x += tile) {
+      const w = Math.min(tile, width - x);
+      const h = Math.min(tile, height - y);
+      const backdrop = targetCtx.getImageData(x, y, w, h);
+      const rendered = renderedCtx.getImageData(x, y, w, h).data;
+      const coverage = maskCtx.getImageData(x, y, w, h).data;
+      const result = backdrop.data;
+      for (let offset = 0; offset < result.length; offset += 4) {
+        const amount = (coverage[offset + 3] / 255) * opacity;
+        if (amount <= 0) continue;
+        if (amount >= 1) {
+          result.set(rendered.subarray(offset, offset + 4), offset);
+          continue;
+        }
+        const beforeAlpha = result[offset + 3] / 255;
+        const afterAlpha = rendered[offset + 3] / 255;
+        const beforeWeight = beforeAlpha * (1 - amount);
+        const afterWeight = afterAlpha * amount;
+        const alpha = beforeWeight + afterWeight;
+        if (alpha <= 0) {
+          result.fill(0, offset, offset + 4);
+          continue;
+        }
+        for (let channel = 0; channel < 3; channel += 1) {
+          result[offset + channel] = Math.round(
+            (result[offset + channel] * beforeWeight + rendered[offset + channel] * afterWeight) / alpha
+          );
+        }
+        result[offset + 3] = Math.round(alpha * 255);
+      }
+      targetCtx.putImageData(backdrop, x, y);
+    }
+  }
+}
+
 async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
   const plan = buildGroupRenderPlan(doc);
   const activeGroups = new Set();
@@ -17905,9 +17947,9 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
       try {
         const opacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1)));
         const blendMode = group.blendMode || 'pass-through';
-        // A folder raster mask must cover the group's entire offscreen result,
-        // not each child. Masked pass-through groups use isolated source-over
-        // approximation; backdrop-sensitive adjustment semantics remain unsupported.
+        // A folder raster mask affects the group as a unit. Pass Through
+        // children first modify the actual parent backdrop; their masked
+        // result is interpolated below instead of composited as an isolated layer.
         const groupMasked = Boolean(group.mask?.enabled !== false && (group.mask?.dataUrl || group.mask?.invert));
         const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9 || groupMasked;
         const newGroupCanvas = () => {
@@ -17928,6 +17970,30 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
             const { groupCanvas, groupCtx } = newGroupCanvas();
             await renderEntries(groupCanvas, groupCtx, group.id);
             clippingBase = groupCanvas;
+          }
+          continue;
+        }
+
+        if (blendMode === 'pass-through' && groupMasked) {
+          const coverage = await layerMaskCoverageCanvas(group.mask, doc.width, doc.height);
+          // Invalid mask data must not unexpectedly reveal masked descendants.
+          if (!coverage) continue;
+          const positioned = positionLayerMaskCoverage(coverage, group.mask, doc.width, doc.height);
+          const { groupCanvas: backdropCanvas, groupCtx: backdropCtx } = newGroupCanvas();
+          backdropCtx.drawImage(targetCanvas, 0, 0);
+          await renderEntries(backdropCanvas, backdropCtx, group.id);
+          compositeMaskedPassThrough(
+            targetCtx, backdropCtx, positioned.getContext('2d'),
+            doc.width, doc.height, opacity
+          );
+          if (needsClippingBase) {
+            const { groupCanvas: source, groupCtx: sourceCtx } = newGroupCanvas();
+            await renderEntries(source, sourceCtx, group.id);
+            await applyLayerMaskToContext(sourceCtx, group.mask, doc.width, doc.height);
+            const { groupCanvas: clippedCoverage, groupCtx: coverageCtx } = newGroupCanvas();
+            coverageCtx.globalAlpha = opacity;
+            coverageCtx.drawImage(source, 0, 0);
+            clippingBase = clippedCoverage;
           }
           continue;
         }
