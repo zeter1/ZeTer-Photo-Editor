@@ -45,8 +45,9 @@ test('resize interaction calculates every pointer move from the captured transfo
 test('render pipeline treats adjustment layers as cumulative stack operations and supports clipping masks', () => {
   assert.match(render, /layer\.type === 'adjustment'/);
   assert.match(render, /applyAdjustmentLayer\(canvas, ctx, layer, \{ clippingMask \}\)/);
-  assert.match(render, /sourceCtx\.drawImage\(canvas, 0, 0, width, height\)/);
-  assert.match(render, /sourceCtx\.drawImage\(clippingMask,0,0,width,height\)/);
+  assert.match(render, /sourceCtx\.drawImage\(clippingMask \|\| canvas, 0, 0, width, height\)/);
+  assert.match(render, /const clippingSource = clippingMask \? sourceCtx\.getImageData/);
+  assert.match(render, /compositeClippedAdjustmentPixels\(basePixels, clippingSource, effectPixels, settings\)/);
 });
 
 test('clipped adjustments fail closed when their base is invisible, and group bases use local alpha', () => {
@@ -81,7 +82,8 @@ test('smart objects render from preview data without mutating embedded document 
 
 
 test('adjustment rendering preserves alpha through the pixel compositor', () => {
-  assert.match(render, /compositeAdjustmentPixels\(basePixels,effectPixels/);
+  assert.match(render, /else compositeAdjustmentPixels\(basePixels, effectPixels, settings\)/);
+  assert.match(render, /if \(clippingSource\) compositeClippedAdjustmentPixels/);
   assert.match(render, /ctx\.putImageData\(basePixels,0,0\)/);
   assert.doesNotMatch(render, /ctx\.globalAlpha = layer\.opacity \?\? 1;[\s\S]{0,180}ctx\.drawImage\(source, 0, 0, width, height\)/);
 });

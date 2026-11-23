@@ -220,6 +220,39 @@ export function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity
   return baseImageData;
 }
 
+// Clipping adjustments operate on the raster base, not on the already
+// composited backdrop. Transfer only the base's premultiplied RGB change back
+// into the destination: this preserves destination alpha and the pixels below
+// a translucent base. The effect's alpha includes adjustment mask coverage.
+export function compositeClippedAdjustmentPixels(targetImageData, baseImageData, effectImageData,
+  { opacity = 1, blendMode = 'source-over' } = {}) {
+  const target = targetImageData?.data;
+  const base = baseImageData?.data;
+  const effect = effectImageData?.data;
+  if (!target || !base || !effect || target.length !== base.length || base.length !== effect.length)
+    return targetImageData;
+  const layerOpacity = clampAdjustment(opacity, 0, 1, 1);
+  if (layerOpacity <= 0) return targetImageData;
+  for (let index = 0; index < target.length; index += 4) {
+    const baseAlpha = base[index + 3];
+    const targetAlpha = target[index + 3];
+    const effectAlpha = effect[index + 3];
+    if (baseAlpha <= 0 || targetAlpha <= 0 || effectAlpha <= 0) continue;
+    const amount = (baseAlpha / targetAlpha) *
+      Math.min(1, effectAlpha / baseAlpha) * layerOpacity;
+    if (amount <= 0) continue;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const original = base[index + channel] / 255;
+      const adjusted = effect[index + channel] / 255;
+      const blended = blendAdjustmentChannel(original, adjusted, blendMode);
+      target[index + channel] = Math.round(Math.max(0, Math.min(255,
+        target[index + channel] + (blended * 255 - base[index + channel]) * amount
+      )));
+    }
+  }
+  return targetImageData;
+}
+
 export function adjustmentModelEqual(left,right) {
   return JSON.stringify(sanitizeAdjustmentModel(left))===JSON.stringify(sanitizeAdjustmentModel(right));
 }

@@ -10370,6 +10370,39 @@ function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity=1,blen
   }
   return baseImageData;
 }
+
+// Clipping adjustments operate on the raster base, not on the already
+// composited backdrop. Transfer only the base's premultiplied RGB change back
+// into the destination: this preserves destination alpha and the pixels below
+// a translucent base. The effect's alpha includes adjustment mask coverage.
+function compositeClippedAdjustmentPixels(targetImageData, baseImageData, effectImageData,
+  { opacity = 1, blendMode = 'source-over' } = {}) {
+  const target = targetImageData?.data;
+  const base = baseImageData?.data;
+  const effect = effectImageData?.data;
+  if (!target || !base || !effect || target.length !== base.length || base.length !== effect.length)
+    return targetImageData;
+  const layerOpacity = clampAdjustment(opacity, 0, 1, 1);
+  if (layerOpacity <= 0) return targetImageData;
+  for (let index = 0; index < target.length; index += 4) {
+    const baseAlpha = base[index + 3];
+    const targetAlpha = target[index + 3];
+    const effectAlpha = effect[index + 3];
+    if (baseAlpha <= 0 || targetAlpha <= 0 || effectAlpha <= 0) continue;
+    const amount = (baseAlpha / targetAlpha) *
+      Math.min(1, effectAlpha / baseAlpha) * layerOpacity;
+    if (amount <= 0) continue;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const original = base[index + channel] / 255;
+      const adjusted = effect[index + channel] / 255;
+      const blended = blendAdjustmentChannel(original, adjusted, blendMode);
+      target[index + channel] = Math.round(Math.max(0, Math.min(255,
+        target[index + channel] + (blended * 255 - base[index + channel]) * amount
+      )));
+    }
+  }
+  return targetImageData;
+}
 function adjustmentModelEqual(left,right) {
   return JSON.stringify(sanitizeAdjustmentModel(left))===JSON.stringify(sanitizeAdjustmentModel(right));
 }
@@ -17722,7 +17755,9 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
   const source = document.createElement('canvas');
   source.width = width; source.height = height;
   const sourceCtx = source.getContext('2d', { alpha: true, willReadFrequently: true });
-  sourceCtx.drawImage(canvas, 0, 0, width, height);
+  // A clipped adjustment changes its source raster, not the flattened parent.
+  sourceCtx.drawImage(clippingMask || canvas, 0, 0, width, height);
+  const clippingSource = clippingMask ? sourceCtx.getImageData(0, 0, width, height) : null;
   if(layer.adjustment){
     try{
       const pixels=sourceCtx.getImageData(0,0,width,height);
@@ -17753,14 +17788,8 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
     sourceCtx.drawImage(vectorMask,0,0,width,height);
     sourceCtx.restore();
   }
-  if(clippingMask){
-    sourceCtx.save();
-    sourceCtx.globalCompositeOperation='destination-in';
-    sourceCtx.globalAlpha=1;
-    sourceCtx.filter='none';
-    sourceCtx.drawImage(clippingMask,0,0,width,height);
-    sourceCtx.restore();
-  }
+  // Clipping is already present in source alpha; applying it again would
+  // square the base coverage on semitransparent pixels.
   const effect=document.createElement('canvas');
   effect.width=width;effect.height=height;
   const effectCtx=effect.getContext('2d',{alpha:true,willReadFrequently:true});
@@ -17769,10 +17798,10 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
   try{
     const basePixels=ctx.getImageData(0,0,width,height);
     const effectPixels=effectCtx.getImageData(0,0,width,height);
-    compositeAdjustmentPixels(basePixels,effectPixels,{
-      opacity:layer.opacity??1,
-      blendMode:layer.blendMode||'source-over',
-    });
+    const settings = { opacity: layer.opacity ?? 1,
+      blendMode: layer.blendMode || 'source-over' };
+    if (clippingSource) compositeClippedAdjustmentPixels(basePixels, clippingSource, effectPixels, settings);
+    else compositeAdjustmentPixels(basePixels, effectPixels, settings);
     ctx.putImageData(basePixels,0,0);
   }catch(error){
     console.warn('Adjustment layer compositing failed; previous composite preserved',error);

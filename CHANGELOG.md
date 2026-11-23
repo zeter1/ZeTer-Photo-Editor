@@ -1,4 +1,10 @@
-## 1.47.20 — текущая версия: masked Pass Through folder backdrop-aware composition (Stage 17a, 2026-11-23)
+## 1.47.21 — текущая версия: clipped adjustment inside nested masked Pass Through on translucent backdrop (Stage 17a, 2026-11-23)
+
+- Fix: a clipped adjustment no longer processes already-flattened parent backdrop. It adjusts its own raster clipping base, then transfers the premultiplied RGB delta without changing destination alpha; overlapping translucent base/background retain their independent colors. Adjustment opacity, raster/vector masks and blend math retain existing controls.
+- Real production Chromium `file://`: nested pass-through folder, clipped Invert over 50%-alpha raster, blue 50%-alpha backdrop, group mask 100/50/0% → exact RGBA [0,170,255,192] / [0,102,255,160] / [0,0,255,128]. Real Group Properties toggle, Undo/Redo, native .zpe Save/reopen PASS. New Node RGBA/negative and PSD/PSB nested editable codec regressions. Existing Photoshop-authored adjustment fixture suites remain active.
+- **Boundary:** first clipped-adjustment-over-base increment only; chained clipped raster overlays, non-source-over base blend, knockout and licensed Photoshop-authored pixel oracle are NOT accepted. Parent Stage 17a IN PROGRESS. [Journal](task/002-psd-folder-group-mask.md).
+
+## 1.47.20 — предыдущая версия: masked Pass Through folder backdrop-aware composition (Stage 17a, 2026-11-23)
 
 - Raster mask on a Pass Through folder now attenuates the **difference** between the actual parent backdrop and the group-rendered composite (including inner multiply/adjustments), rather than compositing a pre-isolated source-over group. Group opacity is included; tile-sized premultiplied RGBA interpolation avoids full-frame transient ImageData and alpha inflation.
 - Real Chromium file:// RED→GREEN exact [0,0,0,255] / [0,0,127,255] / [0,0,255,255] over blue with a red Multiply child. Group Properties disable/enable, History Undo/Redo, native .zpe save and reopen PASS. Existing native PSD/PSB folder masks preserved without flatten.
