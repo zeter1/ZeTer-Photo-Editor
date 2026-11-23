@@ -47,6 +47,7 @@ test('037B2b-2e: fixed immutable source identity and no test policy in public do
         assert.equal(options.method,'GET');
         assert.equal(options.redirect,'error');
         assert.equal(options.headers.Accept,'image/jpeg');
+        assert.match(options.headers['User-Agent'],/^ZeTerPhotoEditor\/1\.47 \(https:\/\/github\.com\/zeter1\/ZeTer-Photo-Editor; /);
         assert.equal(options.signal.aborted,false);
         return response(bytes);
       },
@@ -79,7 +80,7 @@ test('037B2b-2e: hostile HTTP status, redirect, MIME, length and bytes fail clos
   const bytes=syntheticJpeg(),opts=policy(bytes);
   const altered=bytes.slice();altered[altered.length-3]^=1;
   const errors=[
-    [new Response(bytes,{status:404,headers:{'content-type':'image/jpeg'}}),/direct HTTP 200/],
+    [new Response(bytes,{status:404,headers:{'content-type':'image/jpeg'}}),/direct HTTP 200.*HTTP 404/],
     [Response.redirect('https://example.invalid/photo.jpg',302),/direct HTTP 200/],
     [{status:200,redirected:true,headers:new Headers({'content-type':'image/jpeg'}),
       body:response(bytes).body},/direct HTTP 200/],
