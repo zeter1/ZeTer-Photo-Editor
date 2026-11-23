@@ -133,13 +133,13 @@ button:disabled { opacity: .45; cursor: default; }
 .properties-panel { flex: 0 0 auto; }
 .effects-panel { flex: 0 0 auto; }
 .layers-panel { min-height: 260px; flex: 1 1 auto; display: flex; flex-direction: column; }
-.paths-panel { flex: 0 0 176px; min-height: 116px; display: flex; flex-direction: column; }
+.paths-panel { flex: 0 0 auto; min-height: 0; display: flex; flex-direction: column; }
 .history-panel { flex: 0 0 160px; min-height: 110px; }
 .layers-toolbar { display: flex; gap: 7px; align-items: center; padding: 7px; font-size: 11px; border-bottom: 1px solid var(--line); }
 .layers-toolbar select { min-width: 100px; max-width: 130px; }
 .layers-toolbar input { width: 78px; }
 .layers-list, .history-list, .paths-list { overflow: auto; }
-.paths-list { min-height: 72px; flex: 1; }
+.paths-list { min-height: 72px; max-height: 192px; flex: 0 1 auto; }
 .paths-toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 6px; border-bottom: 1px solid var(--line); }
 .paths-toolbar button { min-height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 4px 7px; border-radius: 6px; background: #2b3038; color: #d7deea; font-size: 11px; }
 .paths-toolbar button:hover:not(:disabled) { background: #ffffff12; }
@@ -148,7 +148,6 @@ button:disabled { opacity: .45; cursor: default; }
 .paths-subpath-toolbar label { color: var(--muted); font-size: 11px; }
 .paths-subpath-toolbar select { min-width: 0; width: 100%; background: #111318; border: 1px solid var(--line); border-radius: 5px; padding: 4px; font-size: 11px; }
 .paths-subpath-toolbar select:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 1px; }
-.paths-panel { flex-basis: 234px; min-height: 204px; }
 .path-row { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 7px 9px; border-bottom: 1px solid #2d323b; background: transparent; color: #dce4ef; text-align: left; }
 .path-row:hover { background: #ffffff09; }
 .path-row.selected { background: #3f72d62c; outline: 1px solid #4f8cff55; outline-offset: -1px; }
