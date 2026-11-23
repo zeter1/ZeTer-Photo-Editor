@@ -95,6 +95,9 @@ export function createPointerLifecycleRouter({
 
   function handleLostPointerCapture(event) {
     if (!isActivePointer(event.pointerId)) return;
+    // The old gesture's lost-capture event can arrive after a new pointerdown
+    // recaptures the same mouse pointerId. Do not cancel the newer gesture.
+    if (typeof target.hasPointerCapture === 'function' && target.hasPointerCapture(event.pointerId)) return;
     activePointerId = null;
     activeStartToken = null;
     return onPointerCancel(event, { reason:'lostpointercapture' });

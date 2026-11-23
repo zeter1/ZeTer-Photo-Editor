@@ -53,7 +53,12 @@ export function createDocumentImportController({
           const dataUrl=await rgbaPixelsToDataUrl(pixels.width,pixels.height,pixels.rgba,'DNG RAW');
           const rawDng={dataUrl:bytesToDataUrl(raw,'application/x-adobe-dng'),
             development:pixels.development,colorPipeline:pixels.colorPipeline,
-            width:source.width,height:source.height};
+            whiteBalanceSource:source.whiteBalanceSource,baselineExposure:source.baselineExposure,
+             baselineExposureOffset:source.baselineExposureOffset,
+            bits:source.bits,width:source.width,height:source.height,defaultScale:[...source.defaultScale],
+            blackRepeatDim:[...source.blackRepeat],
+            blackDeltaH:Boolean(source.blackDeltaH),blackDeltaV:Boolean(source.blackDeltaV),
+            linearizationTable:Boolean(source.linearization),compression:source.compression};
           prepared.push({file,dataUrl,width:pixels.width,height:pixels.height,rawDng});
         } catch(error) {
           setStatus('Ошибка DNG: ' + error.message);

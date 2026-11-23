@@ -24,8 +24,8 @@ test('16-bit big-endian CFA and distinct WB/exposure produce new pixels without 
   assert.ok(warmer.rgba[2]<decoded.rgba[2]*2);
   assert.equal(warmer.rgba[3],255);
 });
-test('rejects compressed, truncated, TIFF without DNG version and unsupported CFA',()=>{
-  assert.throws(()=>inspectDng(fixture({compression:7})),/сжатые DNG/);
+test('rejects malformed JPEG-compressed RAW, truncated TIFF, missing DNG version and unsupported CFA',()=>{
+  assert.throws(()=>inspectDng(fixture({compression:7})),/lossless JPEG/);
   assert.throws(()=>inspectDng(fixture({truncated:true})),/усечённая|некорректная/);
   const notDng=fixture();
   new DataView(notDng).setUint16(10+12*12,50705,true);

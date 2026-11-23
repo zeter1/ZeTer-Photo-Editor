@@ -75,16 +75,66 @@ test('Fractional DefaultCropSize rounds preview grid once, orientation 1-8 maps 
   }
 });
 
-test('Identity DefaultScale is accepted; non-unit/malformed scale fails explicitly',()=>{
+test('DefaultScale resamples in linear sensor space, with non-square pixel aspect and Orientation 6',()=>{
+  for(const le of [true,false]){
+    const params={le,width:8,height:6,activeArea:[1,1,6,7],
+      defaultCropOrigin:[1,1],defaultCropSize:[4,3],samples:sample};
+    const input=fixture({...params,defaultScale:[2,1]});
+    const before=new Uint8Array(input).slice();
+    const source=inspectDng(input);
+    assert.deepEqual(source.cropWindow,[2,2,4,3]);
+    assert.deepEqual(source.defaultScale,[2,1]);
+    assert.deepEqual([source.displayWidth,source.displayHeight],[8,3]);
+    const scaled=decodeDng(input),full=decodeDng(fixture({le,width:8,height:6,samples:sample}));
+    for(let y=0;y<3;y++)for(let x=0;x<8;x++){
+      const sensorX=2+(x+0.5)*0.5-0.5;
+      const x0=Math.floor(sensorX),fraction=sensorX-x0;
+      const actual=pixel(scaled,x,y);
+      for(let c=0;c<3;c++){
+        const expected=encode((1-fraction)*linear(pixel(full,x0,y+2)[c])+
+          fraction*linear(pixel(full,x0+1,y+2)[c]));
+        assert.ok(Math.abs(actual[c]-expected)<=2,`linear DefaultScale sample ${x},${y},${c}: ${actual[c]} vs ${expected}`);
+      }
+      assert.equal(actual[3],255);
+    }
+    const oriented=decodeDng(fixture({...params,defaultScale:[2,1],orientation:6}));
+    assert.deepEqual([oriented.width,oriented.height],[3,8]);
+    for(let y=0;y<3;y++)for(let x=0;x<8;x++)
+      assert.deepEqual(pixel(oriented,2-y,x),pixel(scaled,x,y),'orientation after scale');
+    assert.deepEqual(new Uint8Array(input),before,'native DNG unchanged');
+  }
+});
+
+test('DefaultScale supports downsample on vertical axis, preserving crop metadata',()=>{
+  const params={width:8,height:6,defaultCropOrigin:[2,1],defaultCropSize:[4,4],samples:sample};
+  const data=fixture({...params,defaultScale:[1,0.5]});
+  const source=inspectDng(data);
+  assert.deepEqual(source.defaultScale,[1,0.5]);
+  assert.deepEqual([source.displayWidth,source.displayHeight],[4,2]);
+  const image=decodeDng(data),full=decodeDng(fixture({width:8,height:6,samples:sample}));
+  for(let y=0;y<2;y++)for(let x=0;x<4;x++){
+    const sy=1+(y+0.5)*2-0.5, y0=Math.floor(sy);
+    const actual=pixel(image,x,y);
+    for(let c=0;c<3;c++){
+      const expected=encode((linear(pixel(full,x+2,y0)[c])+linear(pixel(full,x+2,y0+1)[c]))/2);
+      assert.ok(Math.abs(actual[c]-expected)<=2,`vertical DefaultScale linear sample ${x},${y},${c}`);
+    }
+  }
+});
+
+test('DefaultScale invalid type, denominator, zero and unsafe output size fail closed',()=>{
   const params={width:8,height:6,activeArea:[1,1,6,7],
     defaultCropOrigin:[1,1],defaultCropSize:[4,3]};
-  assert.deepEqual(inspectDng(fixture({...params,defaultScale:[1,1]})).cropWindow,[2,2,4,3]);
-  assert.throws(()=>inspectDng(fixture({...params,defaultScale:[2,1]})),/DefaultScale/);
-  assert.throws(()=>inspectDng(fixture({...params,defaultScale:[1,0.5]})),/DefaultScale/);
+  assert.deepEqual(inspectDng(fixture({...params,defaultScale:[1,1]})).defaultScale,[1,1]);
+  for(const scale of [[0,1],[1,0],[1000,1],[1,1000],[0.01,1]])
+    assert.throws(()=>inspectDng(fixture({...params,defaultScale:scale})),/DefaultScale/);
   const malformed=fixture({...params,defaultScale:[1,1]});
-  const {view,le,p}=tagOffset(malformed,50718);
+  const {view,le,p,offset}=tagOffset(malformed,50718);
   view.setUint16(p+2,3,le);
   assert.throws(()=>inspectDng(malformed),/DefaultScale/);
+  view.setUint16(p+2,5,le);
+  view.setUint32(offset+4,0,le);
+  assert.throws(()=>inspectDng(malformed),/знаменатель/);
 });
 
 test('Size-only crop uses default origin; absent crop preserves full ActiveArea',()=>{

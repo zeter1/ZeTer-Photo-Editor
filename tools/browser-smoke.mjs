@@ -1346,21 +1346,44 @@ async function runSmoke() {
 
     // Exercise the new tool through real mouse input on a known-color raster.
     const removalPoint = await evaluate(client, `(() => {
-      const c=document.querySelector('#editorCanvas'), r=c.getBoundingClientRect();
-      return {x:r.left+r.width/2,y:r.top+r.height/2,px:Math.floor(c.width/2),py:Math.floor(c.height/2)};
+      const c=document.querySelector('#editorCanvas');
+      return {px:Math.floor(c.width/2),py:Math.floor(c.height/2)};
     })()`);
     const removalPixelExpression = `Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(${removalPoint.px},${removalPoint.py},1,1).data)`;
-    const mouse = (type) => client.send('Input.dispatchMouseEvent', {
-      type, x:removalPoint.x, y:removalPoint.y, button:'left', buttons:type==='mousePressed'?1:0, clickCount:1,
-    });
+    const mouse = async (type,dx=0,dy=0,buttons=type==='mousePressed'?1:0) => {
+      // Toolbar and Properties change the canvas layout between gestures.
+      // Re-resolve the DOM pixel into current client coordinates for EVERY event.
+      const position=await evaluate(client, `(() => {
+        const canvas=document.querySelector('#overlayCanvas'),r=canvas.getBoundingClientRect();
+        return {x:r.left+(${removalPoint.px+0.5+dx}/canvas.width)*r.width,
+                y:r.top+(${removalPoint.py+0.5+dy}/canvas.height)*r.height};
+      })()`);
+      return client.send('Input.dispatchMouseEvent',{
+        type,x:position.x,y:position.y,
+        button:type==='mouseMoved'&&buttons===0?'none':'left',
+        buttons,clickCount:type==='mouseMoved'?0:1,
+      });
+    };
     await evaluate(client, `document.querySelector('#primaryColor').value='#285078'; document.querySelector('[data-tool="fill"]').click(); true`);
     await mouse('mousePressed'); await mouse('mouseReleased');
-    await waitFor('solid raster fill', async () => evaluate(client, `${removalPixelExpression}.join(',')==='40,80,120,255'`));
+    // The pixel preview may render before the previous raster command has released
+    // its persistence lease. A brush gesture begun during that lease is blocked.
+    await waitFor('solid raster fill committed', async () => evaluate(client, `${removalPixelExpression}.join(',')==='40,80,120,255' && document.querySelector('#statusText')?.textContent?.startsWith('Заливка:')`));
+    await waitFor('fill pointer capture released', async () => evaluate(client, `!document.querySelector('#overlayCanvas').hasPointerCapture(1)`));
     await evaluate(client, `document.querySelector('#primaryColor').value='#ed2828'; document.querySelector('#brushSize').value='24'; document.querySelector('[data-tool="brush"]').click(); true`);
+    // A real user moves the pointer back to the canvas after choosing a tool.
+    await mouse('mouseMoved',10,0,0);
+    await mouse('mouseMoved',0,0,0);
     await mouse('mousePressed');
+    // Exercise an actual held brush stroke, not only the initial pointer-down dab.
+    await mouse('mouseMoved',2,0,1);
     await waitFor('red object brush preview', async () => evaluate(client, `${removalPixelExpression}.join(',')==='237,40,40,255'`));
     await mouse('mouseReleased');
     await waitFor('object stroke committed', async () => evaluate(client, `document.querySelector('#statusText').textContent==='Готово'`));
+    if(process.env.ZPE_BRUSH_BROWSER_ONLY==='1'){
+      console.log('Browser isolated fill → brush pointer lifecycle passed:',browserExecutable);
+      return; // The existing finally block still closes Chromium/profile.
+    }
     await evaluate(client, `document.querySelector('#brushSize').value='48'; document.querySelector('[data-tool="remove-object"]').click(); true`);
     assert(await evaluate(client, `document.querySelector('#removeObjectApply').hidden`), 'Removal action stays hidden before a mask is painted');
     await mouse('mousePressed'); await mouse('mouseReleased');

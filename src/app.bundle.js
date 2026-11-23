@@ -4047,6 +4047,9 @@ function createPointerLifecycleRouter({
 
   function handleLostPointerCapture(event) {
     if (!isActivePointer(event.pointerId)) return;
+    // The old gesture's lost-capture event can arrive after a new pointerdown
+    // recaptures the same mouse pointerId. Do not cancel the newer gesture.
+    if (typeof target.hasPointerCapture === 'function' && target.hasPointerCapture(event.pointerId)) return;
     activePointerId = null;
     activeStartToken = null;
     return onPointerCancel(event, { reason:'lostpointercapture' });
@@ -11331,14 +11334,46 @@ function sanitizeRawDng(value, width, height) {
       value.width * value.height > 16_000_000) return null;
   const d=value.development;
   const exposure=Number(d?.exposure), wbRed=Number(d?.wbRed), wbBlue=Number(d?.wbBlue);
+  // Legacy .zpe projects default to neutral tone; invalid explicit tone fails closed.
+  const highlights=d?.highlights === undefined ? 0 : d.highlights;
+  const shadows=d?.shadows === undefined ? 0 : d.shadows;
+  const contrast=d?.contrast === undefined ? 0 : d.contrast;
+  const demosaic=d?.demosaic;
+  // Legacy RAW projects default to 0 EV. Invalid explicit metadata fails closed;
+  // actual future development always re-reads BaselineExposure from native bytes.
+  const baselineExposure=value.baselineExposure === undefined ? 0 : value.baselineExposure;
+  const baselineExposureOffset=value.baselineExposureOffset === undefined ? 0 : value.baselineExposureOffset;
   if (!Number.isFinite(exposure) || exposure < -5 || exposure > 5 ||
       !Number.isFinite(wbRed) || wbRed < 0.25 || wbRed > 4 ||
-      !Number.isFinite(wbBlue) || wbBlue < 0.25 || wbBlue > 4) return null;
-  // Preserve only a known rendering provenance marker; the original DNG bytes are authoritative.
-  const colorPipeline=value.colorPipeline==='matrix-d50-bradford-v1'?
+      !Number.isFinite(wbBlue) || wbBlue < 0.25 || wbBlue > 4 ||
+      typeof highlights !== 'number' || !Number.isFinite(highlights) || highlights < -1 || highlights > 1 ||
+      typeof shadows !== 'number' || !Number.isFinite(shadows) || shadows < -1 || shadows > 1 ||
+      typeof contrast !== 'number' || !Number.isFinite(contrast) || contrast < -1 || contrast > 1 ||
+      (demosaic!==undefined && demosaic!=='bilinear' && demosaic!=='edge-aware-green' && demosaic!=='edge-aware-rgb') ||
+      typeof baselineExposure !== 'number' || !Number.isFinite(baselineExposure) ||
+      baselineExposure < -16 || baselineExposure > 16 ||
+       typeof baselineExposureOffset !== 'number' || !Number.isFinite(baselineExposureOffset) ||
+       baselineExposureOffset < -16 || baselineExposureOffset > 16) return null;
+  // Preserve only known provenance; the original DNG bytes remain authoritative.
+  const colorPipeline=value.colorPipeline==='forward-d50-v1'?'forward-d50-v1':
+    value.colorPipeline==='matrix-d50-bradford-v1'?
     'matrix-d50-bradford-v1':'uncalibrated-bayer-preview';
+  const whiteBalanceSource=['as-shot-neutral','as-shot-white-xy','legacy-unspecified']
+    .includes(value.whiteBalanceSource)?value.whiteBalanceSource:'legacy-unspecified';
+  const defaultScale=Array.isArray(value.defaultScale)&&value.defaultScale.length===2&&
+    value.defaultScale.every(n=>Number.isFinite(n)&&n>=0.125&&n<=8)
+    ? [...value.defaultScale] : [1,1]; // Old .zpe v1/v2 RAW sources used implicit identity.
+  const blackRepeatDim=Array.isArray(value.blackRepeatDim)&&value.blackRepeatDim.length===2&&
+    value.blackRepeatDim.every(n=>Number.isInteger(n)&&n>=1&&n<=8)
+    ? [...value.blackRepeatDim] : [1,1]; // Legacy .zpe RAW has scalar BlackLevel.
   return {dataUrl:value.dataUrl,width:value.width,height:value.height,
-    colorPipeline,development:{exposure,wbRed,wbBlue}};
+    bits:[8,10,12,14,16].includes(value.bits)?value.bits:null,
+    colorPipeline,whiteBalanceSource,defaultScale,blackRepeatDim,baselineExposure,baselineExposureOffset,
+    blackDeltaH:value.blackDeltaH===true,blackDeltaV:value.blackDeltaV===true,
+    linearizationTable:value.linearizationTable===true,
+    compression:value.compression===7?7:1, // Old .zpe RAW defaults to uncompressed.
+    development:{exposure,wbRed,wbBlue,highlights,shadows,contrast,
+      ...(['edge-aware-green','edge-aware-rgb'].includes(demosaic)?{demosaic}: {})}};
 }
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -23702,12 +23737,222 @@ function createProjectController({
   return { openProject, saveProject };
 }
 
+// ---- src/formats/dng-clipping-warning.js ----
+// Display-only RAW clipping warning. Mutates a caller-owned ImageData buffer;
+// do not pass native sensor samples, layer previews or export buffers here.
+function markDisplayClippingWarning(rgba) {
+  if (!(rgba instanceof Uint8ClampedArray) || rgba.length % 4 !== 0)
+    throw new TypeError('Expected Uint8ClampedArray RGBA display pixels');
+  let highlights=0,shadows=0,eligible=0;
+  for(let i=0;i<rgba.length;i+=4){
+    const r=rgba[i],g=rgba[i+1],b=rgba[i+2];
+    // Transparent / antialiased edge pixels are not reliable clipping evidence.
+    if(rgba[i+3]<128)continue;
+    eligible++;
+    const high=r>=254||g>=254||b>=254;
+    const low=r<=1&&g<=1&&b<=1;
+    if(!high&&!low)continue;
+    if(high)highlights++;
+    else shadows++;
+    // Magenta indicates at least one clipped output channel; cyan marks black.
+    // A warning is NOT camera sensor saturation or highlight reconstruction.
+    const marker=high?[255,0,255]:[0,255,255];
+    rgba[i]=Math.round((r+marker[0])/2);
+    rgba[i+1]=Math.round((g+marker[1])/2);
+    rgba[i+2]=Math.round((b+marker[2])/2);
+  }
+  return {highlights,shadows,eligible};
+}
+
+/**
+ * Mark only the visible Canvas, in bounded readback tiles. This never edits
+ * RAW samples or the document render buffer; a newer render cancels the scan.
+ * A tile is at most 1 MiB of RGBA regardless of image aspect ratio.
+ */
+async function markDisplayClippingWarningOnCanvas(context,{
+  width,height,maxTilePixels=262144,
+  shouldContinue=()=>true,
+  yieldFrame=()=>new Promise(resolve=>setTimeout(resolve,0)),
+}={}) {
+  if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||
+     width<=0||height<=0||!Number.isSafeInteger(width*height))
+    throw new RangeError('Invalid display canvas dimensions');
+  if(typeof context?.getImageData!=='function'||typeof context?.putImageData!=='function')
+    throw new TypeError('Display canvas context must provide getImageData and putImageData');
+  if(!Number.isSafeInteger(maxTilePixels)||maxTilePixels<2||maxTilePixels>262144)
+    throw new RangeError('Invalid bounded RGBA tile size');
+  if(typeof shouldContinue!=='function'||typeof yieldFrame!=='function')
+    throw new TypeError('Display scan callbacks must be functions');
+  const tileWidth=Math.min(width,maxTilePixels);
+  const tileHeight=Math.max(1,Math.floor(maxTilePixels/tileWidth));
+  const summary={highlights:0,shadows:0,eligible:0};
+  for(let y=0;y<height;y+=tileHeight){
+    const h=Math.min(tileHeight,height-y);
+    for(let x=0;x<width;x+=tileWidth){
+      if(!shouldContinue())return null;
+      const w=Math.min(tileWidth,width-x);
+      const image=context.getImageData(x,y,w,h);
+      const result=markDisplayClippingWarning(image.data);
+      if(!shouldContinue())return null;
+      if(result.highlights||result.shadows)context.putImageData(image,x,y);
+      summary.highlights+=result.highlights;
+      summary.shadows+=result.shadows;
+      summary.eligible+=result.eligible;
+      if(y+h<height||x+w<width){
+        await yieldFrame();
+      }
+    }
+  }
+  return shouldContinue()?summary:null;
+}
+
+// ---- src/formats/dng-presets.js ----
+// User-scoped RAW developing recipes. They never contain sensor bytes or raster previews.
+const RAW_PRESET_STORAGE_KEY='zeter.rawDevelopmentPresets.v1';
+const MAX_PRESETS=16;
+const MAX_STORAGE_BYTES=24000;
+const LIMITS={exposure:[-5,5],wbRed:[0.25,4],wbBlue:[0.25,4],highlights:[-1,1],shadows:[-1,1],contrast:[-1,1]};
+const DEMOSAIC=['bilinear','edge-aware-green','edge-aware-rgb'];
+function normalizeRawPresetDevelopment(source){
+  if(!source||typeof source!=='object'||Array.isArray(source))return null;
+  const result={};
+  for(const [key,[min,max]] of Object.entries(LIMITS)){
+    const value=key==='contrast' && source[key]===undefined ? 0 : source[key];
+    if(typeof value!=='number'||!Number.isFinite(value))return null;
+    result[key]=Math.max(min,Math.min(max,value));
+  }
+  const mode=source.demosaic??'bilinear';
+  if(!DEMOSAIC.includes(mode))return null;
+  result.demosaic=mode;
+  return result;
+}
+function normalizeRawPresetName(value){
+  if(typeof value!=='string')return '';
+  const name=value.replace(/[\u0000-\u001f\u007f]/g,' ').trim().replace(/\s+/g,' ');
+  return name.length<=48?name:'';
+}
+function readRawPresets(storage){
+  try{
+    const raw=storage?.getItem(RAW_PRESET_STORAGE_KEY);
+    if(!raw||raw.length>MAX_STORAGE_BYTES)return [];
+    const parsed=JSON.parse(raw);
+    if(parsed?.schema!==1||!Array.isArray(parsed.presets)||parsed.presets.length>MAX_PRESETS)return [];
+    const presets=[],names=new Set();
+    for(const entry of parsed.presets){
+      const name=normalizeRawPresetName(entry?.name);
+      const development=normalizeRawPresetDevelopment(entry?.development);
+      if(!name||!development||names.has(name.toLocaleLowerCase()))continue;
+      names.add(name.toLocaleLowerCase());
+      presets.push({name,development});
+    }
+    return presets;
+  }catch{return [];} // Privacy mode, corrupt storage or disabled localStorage.
+}
+function saveRawPreset(storage,name,development){
+  const normalizedName=normalizeRawPresetName(name);
+  const normalized=normalizeRawPresetDevelopment(development);
+  if(!normalizedName||!normalized)return {ok:false,reason:'invalid'};
+  const previous=readRawPresets(storage);
+  const index=previous.findIndex(p=>p.name.toLocaleLowerCase()===normalizedName.toLocaleLowerCase());
+  if(index<0&&previous.length>=MAX_PRESETS)return {ok:false,reason:'limit'};
+  const presets=previous.slice();
+  if(index>=0)presets[index]={name:normalizedName,development:normalized};
+  else presets.push({name:normalizedName,development:normalized});
+  try{
+    if(typeof storage?.setItem!=='function')return {ok:false,reason:'storage'};
+    storage.setItem(RAW_PRESET_STORAGE_KEY,JSON.stringify({schema:1,presets}));
+    return {ok:true,presets};
+  }catch{return {ok:false,reason:'storage'};}
+}
+function deleteRawPreset(storage,name){
+  const previous=readRawPresets(storage);
+  const presets=previous.filter(p=>p.name!==name);
+  if(previous.length===presets.length)return false;
+  try{
+    if(typeof storage?.setItem!=='function')return false;
+    storage.setItem(RAW_PRESET_STORAGE_KEY,JSON.stringify({schema:1,presets}));
+    return true;
+  }catch{return false;}
+}
+const RAW_PRESET_FILE_FORMAT='zeter-raw-development-presets';
+const PORTABLE_KEYS=['format','schema','presets'];
+const PRESET_KEYS=['name','development'];
+const DEVELOPMENT_KEYS=[...Object.keys(LIMITS),'demosaic'];
+const onlyKeys=(value,keys)=>value && typeof value==='object' && !Array.isArray(value) &&
+  Object.keys(value).every(key=>keys.includes(key));
+
+/** Portable v1 interchange: strict, small, named recipes only; never image or document bytes. */
+function parseRawPresetFile(text){
+  if(typeof text!=='string' || new TextEncoder().encode(text).byteLength>MAX_STORAGE_BYTES)
+    return {ok:false,reason:'size'};
+  let source;
+  try{source=JSON.parse(text);}catch{return {ok:false,reason:'invalid'};}
+  if(!onlyKeys(source,PORTABLE_KEYS) || source.format!==RAW_PRESET_FILE_FORMAT ||
+    source.schema!==1 || !Array.isArray(source.presets) ||
+    source.presets.length===0 || source.presets.length>MAX_PRESETS)
+    return {ok:false,reason:'invalid'};
+  const names=new Set(),presets=[];
+  for(const entry of source.presets){
+    if(!onlyKeys(entry,PRESET_KEYS) || !onlyKeys(entry.development,DEVELOPMENT_KEYS))
+      return {ok:false,reason:'invalid'};
+    const name=normalizeRawPresetName(entry.name);
+    const development=normalizeRawPresetDevelopment(entry.development);
+    if(!name || name!==entry.name || !development || names.has(name.toLocaleLowerCase()))
+      return {ok:false,reason:'invalid'};
+    // Imported recipes must not be silently clamped: reject unsupported bounds.
+    if(Object.entries(LIMITS).some(([key,[min,max]])=>
+      (entry.development[key]!==undefined &&
+        (entry.development[key]<min || entry.development[key]>max))))
+      return {ok:false,reason:'invalid'};
+    names.add(name.toLocaleLowerCase());
+    presets.push({name,development});
+  }
+  return {ok:true,presets};
+}
+function exportRawPresetFile(storage){
+  const presets=readRawPresets(storage);
+  if(!presets.length)return {ok:false,reason:'empty'};
+  return {ok:true,filename:'ZeTer-RAW-presets.json',
+    content:JSON.stringify({format:RAW_PRESET_FILE_FORMAT,schema:1,presets},null,2)+'\n'};
+}
+/** Atomic merge; existing names retain their slot, matching names are replaced only on confirmation in UI. */
+function importRawPresetFile(storage,text){
+  const parsed=parseRawPresetFile(text);
+  if(!parsed.ok)return parsed;
+  try{
+    if(typeof storage?.getItem!=='function'||typeof storage?.setItem!=='function')
+      return {ok:false,reason:'storage'};
+    const raw=storage.getItem(RAW_PRESET_STORAGE_KEY);
+    const previous=readRawPresets(storage);
+    // Do not erase corrupt local data when a migration is attempted.
+    if(raw!==null && raw!==undefined){
+      if(raw.length>MAX_STORAGE_BYTES)return {ok:false,reason:'storage'};
+      const existing=JSON.parse(raw);
+      if(existing?.schema!==1 || !Array.isArray(existing.presets) ||
+        existing.presets.length!==previous.length)return {ok:false,reason:'storage'};
+    }
+    const presets=previous.slice();
+    let added=0,overwritten=0;
+    for(const entry of parsed.presets){
+      const index=presets.findIndex(p=>p.name.toLocaleLowerCase()===entry.name.toLocaleLowerCase());
+      if(index>=0){presets[index]=entry;overwritten++;}
+      else{presets.push(entry);added++;}
+    }
+    if(presets.length>MAX_PRESETS)return {ok:false,reason:'limit'};
+    const encoded=JSON.stringify({schema:1,presets});
+    if(encoded.length>MAX_STORAGE_BYTES)return {ok:false,reason:'size'};
+    storage.setItem(RAW_PRESET_STORAGE_KEY,encoded);
+    return {ok:true,presets,added,overwritten};
+  }catch{return {ok:false,reason:'storage'};}
+}
+
 // ---- src/formats/dng-color.js ----
-// Bounded DNG ColorMatrix workflow (3-colour Bayer, without ForwardMatrix).
-// DNG ColorMatrix maps D50 XYZ -> unbalanced camera. White balance is a
-// Bradford chromatic adaptation of the recovered camera-neutral illuminant.
-// Not an ICC/ForwardMatrix or camera-accuracy guarantee.
+// Bounded three-channel DNG colour pipeline. ForwardMatrix maps white-balanced
+// reference-camera RGB directly to D50 PCS; ColorMatrix is the legacy fallback.
+// Adobe DNG SDK's AB*CC mapping and FM*diag(1/referenceNeutral)*inverse(AB*CC)
+// are used, but this remains a limited colour workflow, not camera parity.
 const D50=[0.96422,1,0.82521], D65=[0.95047,1,1.08883];
+const ID=[1,0,0,0,1,0,0,0,1];
 const BRADFORD=[0.8951,0.2664,-0.1614,-0.7502,1.7135,0.0367,0.0389,-0.0685,1.0296];
 const XYZ_D65_TO_RGB=[3.2404542,-1.5371385,-0.4985314,-0.969266,1.8760108,0.041556,0.0556434,-0.2040259,1.0572252];
 const ILLUMINANT_KELVIN={1:5500,3:2856,17:2856,18:4874,19:6774,20:5503,21:6504,22:7504,23:5003,24:3200};
@@ -23719,14 +23964,15 @@ function multiply(a,b){
     out.push(a[r*3]*b[c]+a[r*3+1]*b[c+3]+a[r*3+2]*b[c+6]);
   return out;
 }
-function invert(m){
-  if(!Array.isArray(m)||m.length!==9||m.some(v=>!Number.isFinite(v)))invalid('некорректная ColorMatrix');
+function invert(m,label='ColorMatrix'){
+  if(!Array.isArray(m)||m.length!==9||m.some(v=>!Number.isFinite(v)))
+    invalid('некорректная '+label);
   const [a,b,c,d,e,f,g,h,i]=m;
   const cof=[e*i-f*h,c*h-b*i,b*f-c*e,f*g-d*i,a*i-c*g,c*d-a*f,d*h-e*g,b*g-a*h,a*e-b*d];
   const det=a*cof[0]+b*cof[3]+c*cof[6];
   const scale=Math.max(...m.map(Math.abs));
   if(!Number.isFinite(det)||scale===0||Math.abs(det)<=1e-8*scale**3)
-    invalid('вырожденная ColorMatrix');
+    invalid('вырожденная '+label);
   return cof.map(v=>v/det);
 }
 function adapt(src,dst){
@@ -23744,64 +23990,359 @@ function temperature(xyz){
   if(!Number.isFinite(t))invalid('неверная цветовая температура DNG');
   return Math.max(1667,Math.min(25000,t));
 }
+function normalizedForward(m){
+  invert(m,'ForwardMatrix'); // A singular three-channel profile must not silently lose gamut.
+  const out=[...m];
+  for(let row=0;row<3;row++){
+    const start=row*3,white=m[start]+m[start+1]+m[start+2];
+    if(!Number.isFinite(white)||white<=1e-8)invalid('ForwardMatrix не отображает единичный белый в D50');
+    for(let col=0;col<3;col++)out[start+col]*=D50[row]/white;
+  }
+  return out;
+}
+function lerp(a,b,weight){
+  return a.map((v,i)=>v*weight+b[i]*(1-weight));
+}
 function dngCameraToLinearSrgb(color,{wbRed=1,wbBlue=1}={}){
-  if(!color)return null; // Legacy files without a calibration retain explicit preview fallback.
-  const {matrix1,matrix2,illuminant1,illuminant2,neutral}=color;
+  if(!color)return null;
+  const {matrix1,matrix2,illuminant1,illuminant2,neutral,whiteXY,
+    forward1,forward2,calibration1,calibration2,analogBalance,calibrationMatches}=color;
   if(!ILLUMINANT_KELVIN[illuminant1])invalid('неподдерживаемый CalibrationIlluminant1');
-  invert(matrix1); if(matrix2)invert(matrix2); // Validate each profile, not just its blend.
+  invert(matrix1); if(matrix2)invert(matrix2);
   if(!Number.isFinite(wbRed)||wbRed<=0||!Number.isFinite(wbBlue)||wbBlue<=0)
     invalid('неверные пользовательские WB gains');
-  if(Boolean(matrix2)!==Boolean(illuminant2)|| (matrix2&&!ILLUMINANT_KELVIN[illuminant2]))
+  if(Boolean(matrix2)!==Boolean(illuminant2)||(matrix2&&!ILLUMINANT_KELVIN[illuminant2]))
     invalid('неполная или неподдерживаемая двойная CalibrationIlluminant/ColorMatrix');
   if(matrix2&&illuminant1===illuminant2)invalid('совпадающие CalibrationIlluminant');
-  // AsShotNeutral determines the capture illuminant. UI R/B gains are applied
-  // in the camera domain *after* choosing the profile; recomputing a whitepoint
-  // from arbitrary UI gains can yield non-physical Bradford cone responses.
-  const white=[...neutral];
-  if(white.some(v=>!Number.isFinite(v)||v<=0))invalid('неверный баланс белого DNG');
-  let matrix=matrix1;
-  if(matrix2){
-    // Dual-illuminant reciprocal-K interpolation; iterative neutral -> xy -> CCT.
-    // McCamy CCT is an approximation, not a colour-critical camera profile.
-    let weight=0.5;
+  if(forward2&&!matrix2)invalid('ForwardMatrix2 без ColorMatrix2');
+  if(calibration2&&!matrix2)invalid('CameraCalibration2 без ColorMatrix2');
+  if(forward1)normalizedForward(forward1);
+  if(forward2)normalizedForward(forward2);
+  if(calibration1)invert(calibration1,'CameraCalibration');
+  if(calibration2)invert(calibration2,'CameraCalibration');
+  if(analogBalance&&(!Array.isArray(analogBalance)||analogBalance.length!==3||
+     analogBalance.some(v=>!Number.isFinite(v)||v<=0||v>1024)))
+    invalid('неверный AnalogBalance');
+  if(whiteXY){
+    if(neutral!==null||!Array.isArray(whiteXY)||whiteXY.length!==2||
+      whiteXY.some(v=>!Number.isFinite(v)||v<=0||v>=1)||
+      whiteXY[0]+whiteXY[1]>=1)invalid('неверный AsShotWhiteXY');
+  }else if(!Array.isArray(neutral)||neutral.length!==3||
+    neutral.some(v=>!Number.isFinite(v)||v<=0))invalid('неверный баланс белого DNG');
+  const xyXyz=whiteXY ? [whiteXY[0]/whiteXY[1],1,
+    (1-whiteXY[0]-whiteXY[1])/whiteXY[1]] : null;
+  const ab=analogBalance||[1,1,1];
+  const balance=[ab[0],0,0,0,ab[1],0,0,0,ab[2]];
+  const hasCalibration=Boolean(calibrationMatches);
+  const adjusted=(m,cc)=>multiply(balance,multiply(hasCalibration?(cc||ID):ID,m));
+  const select=(weight)=>{
+    const matrix=matrix2?lerp(matrix1,matrix2,weight):matrix1;
+    const calibration=matrix2&&hasCalibration?
+      lerp(calibration1||ID,calibration2||ID,weight):(hasCalibration?(calibration1||ID):ID);
+    return {matrix,calibration,abcc:multiply(balance,calibration)};
+  };
+  let weight=1;
+  if(matrix2&&xyXyz){
+    // AsShotWhiteXY gives the white point directly, avoiding a circular
+    // camera-neutral estimate. The two-light interpolation is approximate.
+    const kelvin=temperature(xyXyz);
+    const t1=ILLUMINANT_KELVIN[illuminant1],t2=ILLUMINANT_KELVIN[illuminant2];
+    weight=Math.max(0,Math.min(1,(1/kelvin-1/t2)/(1/t1-1/t2)));
+  }else if(matrix2){
+    // Approximate reciprocal-Kelvin selection, iterating the calibrated XYZ to camera transform.
+    weight=0.5;
     for(let j=0;j<5;j++){
-      matrix=matrix1.map((v,i)=>v*weight+matrix2[i]*(1-weight));
-      const xyz=dot(invert(matrix),white);
+      const {matrix,calibration}=select(weight);
+      const xyz=dot(invert(adjusted(matrix,calibration)),neutral);
       const kelvin=temperature(xyz);
       const t1=ILLUMINANT_KELVIN[illuminant1],t2=ILLUMINANT_KELVIN[illuminant2];
       weight=Math.max(0,Math.min(1,(1/kelvin-1/t2)/(1/t1-1/t2)));
     }
-    matrix=matrix1.map((v,i)=>v*weight+matrix2[i]*(1-weight));
   }
-  const cameraToXyz=invert(matrix);
-  const illuminantXyz=dot(cameraToXyz,white);
-  const xyzToD50=adapt(illuminantXyz,D50);
+  const {matrix,abcc}=select(weight);
+  // DNG: CameraNeutral = AB * CC * ColorMatrix * XYZ(xy,Y=1).
+  // Resolve the interpolated calibration first, including signature gating.
+  const cameraNeutral=xyXyz ? dot(multiply(abcc,matrix),xyXyz) : neutral;
+  if(cameraNeutral.some(v=>!Number.isFinite(v)||v<=1e-7))
+    invalid('AsShotWhiteXY: некорректная camera neutral');
+  let cameraToD50;
+  if(forward1){
+    const forward=forward2?lerp(normalizedForward(forward1),normalizedForward(forward2),weight):
+      normalizedForward(forward1);
+    const individualToReference=invert(abcc,'AnalogBalance/CameraCalibration');
+    const maxNeutral=Math.max(...cameraNeutral);
+    const cameraWhite=cameraNeutral.map(v=>v/maxNeutral);
+    const referenceNeutral=dot(individualToReference,cameraWhite);
+    if(referenceNeutral.some(v=>!Number.isFinite(v)||v<=1e-7))
+      invalid('ForwardMatrix: некорректная reference camera neutral');
+    const invNeutral=[1/referenceNeutral[0],0,0,0,1/referenceNeutral[1],0,0,0,1/referenceNeutral[2]];
+    cameraToD50=multiply(forward,multiply(invNeutral,individualToReference));
+  }else{
+    const cameraToXyz=invert(multiply(abcc,matrix));
+    const illuminantXyz=dot(cameraToXyz,cameraNeutral);
+    cameraToD50=multiply(adapt(illuminantXyz,D50),cameraToXyz);
+  }
   const d50ToD65=adapt(D50,D65);
-  const transform=multiply(XYZ_D65_TO_RGB,multiply(d50ToD65,multiply(xyzToD50,cameraToXyz)));
+  const transform=multiply(XYZ_D65_TO_RGB,multiply(d50ToD65,cameraToD50));
   if(transform.some(v=>!Number.isFinite(v)))invalid('неверное цветовое преобразование DNG');
   return multiply(transform,[wbRed,0,0,0,1,0,0,0,wbBlue]);
+}
+// Luminance-selective, hue-preserving tonal controls applied to scene-linear
+// RGB after colour calibration/exposure, *before* display sRGB transfer.
+// Shadows affect darker pixels; highlights affect brighter ones. Contrast
+// is a luminance S-curve. All preserve black and unit white, are monotonic
+// for [-1, 1] amounts, and preserve RGB ratios.
+// This is not raw highlight reconstruction from clipped sensor channels.
+function applyDngTonalControls(rgb,{highlights=0,shadows=0,contrast=0}={}){
+  if(!Array.isArray(rgb)||rgb.length!==3||rgb.some(v=>!Number.isFinite(v))||
+     !Number.isFinite(highlights)||highlights < -1||highlights > 1||
+     !Number.isFinite(shadows)||shadows < -1||shadows > 1||
+     typeof contrast!=='number'||!Number.isFinite(contrast)||contrast < -1||contrast > 1)
+    invalid('неверные параметры RAW тональной коррекции');
+  if(highlights===0&&shadows===0&&contrast===0)return rgb;
+  const luminance=0.2126*rgb[0]+0.7152*rgb[1]+0.0722*rgb[2];
+  const y=Math.max(0,Math.min(1,luminance));
+  if(y<=1e-8 || y>=1)return rgb;
+  const lift=shadows*y*(1-y)*(1-y);
+  const shoulder=highlights*y*y*(1-y);
+  const tonal=y+lift+shoulder;
+  // f(v)=v+c*v*(1-v)*(2*v-1) fixes 0, middle gray and 1, and stays monotonic.
+  const contrasted=tonal+contrast*tonal*(1-tonal)*(2*tonal-1);
+  const scale=Math.max(0,contrasted/y);
+  return rgb.map(v=>v*scale);
 }
 function applyDngColorMatrix(transform,r,g,b){
   return dot(transform,[r,g,b]);
 }
 
+// ---- src/formats/dng-lossless-jpeg.js ----
+// Bounded ISO/IEC 10918-1 SOF3 decoder for DNG CFA strips/tiles.
+// Supports full interleaved or disjoint 1/2-component SOS partitions
+// (including mixed 1+2+1) for four-component CFA streams; each SOS carries
+// its own entropy/predictor/restart sequence and writes native Bayer positions.
+// No subsampling or camera-specific JPEG slices.
+function requireJpeg(condition, reason) {
+  if (!condition) throw new Error('DNG: lossless JPEG ' + reason);
+}
+function decodeDngLosslessJpeg(bytes, {width, height, bits}) {
+  requireJpeg(bytes instanceof Uint8Array && bytes.length >= 16, 'усечённый поток');
+  requireJpeg(Number.isInteger(width) && Number.isInteger(height) &&
+    width >= 1 && height >= 1 && width * height <= 16_000_000, 'небезопасные размеры');
+  requireJpeg(bytes[0] === 0xff && bytes[1] === 0xd8, 'нет SOI');
+  let position = 2, frame = null, scanMode = null, restartInterval = 0, driSeen = false;
+  const tables = new Map(), seen = new Set();
+  const result = new Uint16Array(width * height);
+
+  function segment() {
+    requireJpeg(position + 2 <= bytes.length, 'усечённая длина сегмента');
+    const length = bytes[position] * 256 + bytes[position + 1];
+    requireJpeg(length >= 2 && position + length <= bytes.length, 'усечённый сегмент');
+    const data = bytes.subarray(position + 2, position + length);
+    position += length;
+    return data;
+  }
+
+  function marker() {
+    requireJpeg(position < bytes.length && bytes[position++] === 0xff, 'ожидался маркер');
+    while (position < bytes.length && bytes[position] === 0xff) position++;
+    requireJpeg(position < bytes.length, 'усечённый маркер');
+    const id = bytes[position++];
+    requireJpeg(id !== 0 && id !== 0xd8 && !(id >= 0xd0 && id <= 0xd7),
+      frame && seen.size === frame.components ? 'нет конечного EOI' : 'неожиданный JPEG маркер');
+    return id;
+  }
+
+  function decodeScan(scan) {
+    let current = 0, available = 0;
+    function readBit() {
+      if (!available) {
+        requireJpeg(position < bytes.length, 'усечённый entropy scan');
+        current = bytes[position++];
+        if (current === 0xff) {
+          requireJpeg(position < bytes.length && bytes[position++] === 0x00,
+            'маркер или неверное byte stuffing внутри entropy scan');
+        }
+        available = 8;
+      }
+      available--;
+      return (current >> available) & 1;
+    }
+    function readBits(n) {
+      let value = 0;
+      for (let i = 0; i < n; i++) value = (value << 1) | readBit();
+      return value;
+    }
+    function category(table) {
+      let code = 0;
+      for (let length = 1; length <= 16; length++) {
+        code = (code << 1) | readBit();
+        const value = table[length].get(code);
+        if (value !== undefined) return value;
+      }
+      requireJpeg(false, 'неверный код Huffman');
+    }
+    const shift = scan.pointTransform, frameWidth = frame.width;
+    const initial = 1 << (bits - shift - 1), mask = (1 << (bits - shift)) - 1;
+    for (let y = 0; y < height; y++) for (let x = 0; x < frameWidth; x++) {
+      const mcu = y * frameWidth + x;
+      if (restartInterval && mcu > 0 && mcu % restartInterval === 0) {
+        requireJpeg(!available || (current & ((1 << available) - 1)) ===
+          (1 << available) - 1, 'неверные padding bits перед restart');
+        available = 0;
+        requireJpeg(position + 2 <= bytes.length && bytes[position] === 0xff &&
+          bytes[position + 1] === 0xd0 + ((mcu / restartInterval - 1) % 8),
+          'отсутствует или нарушен порядок restart RSTn маркеров');
+        position += 2;
+      }
+      for (let s = 0; s < scan.indices.length; s++) {
+        const c = scan.indices[s];
+        const index = mcu * frame.components + c;
+        const left = x ? result[index - frame.components] >> shift : 0;
+        const above = y ? result[index - width] >> shift : 0;
+        const upperLeft = x && y ? result[index - width - frame.components] >> shift : 0;
+        let predictor;
+        if ((restartInterval && mcu % restartInterval === 0) || (x === 0 && y === 0))
+          predictor = initial;
+        else if (y === 0) predictor = left;
+        else if (x === 0) predictor = above;
+        else switch (scan.predictor) {
+          case 1: predictor = left; break;
+          case 2: predictor = above; break;
+          case 3: predictor = upperLeft; break;
+          case 4: predictor = left + above - upperLeft; break;
+          case 5: predictor = left + ((above - upperLeft) >> 1); break;
+          case 6: predictor = above + ((left - upperLeft) >> 1); break;
+          case 7: predictor = (left + above) >> 1; break;
+        }
+        const size = category(scan.tables[s]);
+        const magnitude = size === 16 ? 0 : readBits(size);
+        const difference = size === 16 ? -32768 :
+          (size && magnitude < 2 ** (size - 1) ? magnitude - (2 ** size - 1) : magnitude);
+        result[index] = ((predictor + difference) & mask) << shift;
+      }
+    }
+    // Each SOS contains exactly its own component samples. Only padding may
+    // precede the next marker; a marker appearing inside entropy is an error.
+    requireJpeg(!available || (current & ((1 << available) - 1)) ===
+      (1 << available) - 1, 'неверные padding bits');
+  }
+
+  while (true) {
+    const id = marker();
+    if (id === 0xd9) {
+      requireJpeg(frame && seen.size === frame.components, 'неполный набор SOS scan-компонентов');
+      requireJpeg(position === bytes.length, 'нет конечного EOI или лишние данные');
+      return result;
+    }
+    requireJpeg(!frame || seen.size !== frame.components, 'ожидался EOI после всех scan');
+    if (id === 0xc3) {
+      const d = segment(), components = d[5];
+      requireJpeg(!frame && [1, 2, 4].includes(components) &&
+        d.length === 6 + components * 3, 'неподдерживаемое число компонентов SOF3');
+      const precision = d[0], rows = d[1] * 256 + d[2], cols = d[3] * 256 + d[4];
+      requireJpeg(precision === bits && precision >= 8 && precision <= 16 &&
+        rows === height && cols * components === width,
+        'SOF3 precision/размеры не совпадают с DNG');
+      const ids = [];
+      for (let c = 0; c < components; c++) {
+        const component = d[6 + c * 3], sampling = d[7 + c * 3], quant = d[8 + c * 3];
+        requireJpeg(!ids.includes(component) && sampling === 0x11 && quant === 0,
+          'повторный SOF3 ID, subsampling или quantization');
+        ids.push(component);
+      }
+      frame = {ids, components, width: cols};
+    } else if (id === 0xc4) {
+      const d = segment();
+      let i = 0;
+      while (i < d.length) {
+        requireJpeg(i + 17 <= d.length, 'усечённая таблица Huffman');
+        const selector = d[i++], counts = d.subarray(i, i + 16);
+        i += 16;
+        const count = counts.reduce((sum, n) => sum + n, 0);
+        requireJpeg((selector >> 4) === 0 && count > 0 && count <= 17 &&
+          i + count <= d.length, 'неподдерживаемая таблица Huffman');
+        const lookup = Array.from({length: 17}, () => new Map());
+        let code = 0, index = i;
+        for (let length = 1; length <= 16; length++) {
+          code <<= 1;
+          requireJpeg(code + counts[length - 1] <= 2 ** length, 'переполненная таблица Huffman');
+          for (let j = 0; j < counts[length - 1]; j++) {
+            const value = d[index++];
+            requireJpeg(value <= 16 && !lookup[length].has(code), 'неверная Huffman категория');
+            lookup[length].set(code++, value);
+          }
+        }
+        tables.set(selector & 15, lookup);
+        i += count;
+      }
+    } else if (id === 0xdd) {
+      const d = segment();
+      requireJpeg(!driSeen && d.length === 2 && seen.size === 0,
+        'неверный или повторный DRI');
+      restartInterval = d[0] * 256 + d[1];
+      driSeen = true;
+      requireJpeg(restartInterval > 0, 'нулевой restart interval в DRI');
+    } else if (id === 0xda) {
+      const d = segment();
+      requireJpeg(frame && d.length >= 6, 'неподдерживаемая структура SOS');
+      const count = d[0];
+      requireJpeg(count >= 1 && d.length === 1 + 2 * count + 3,
+        'неподдерживаемая структура SOS');
+      // A four-channel CFA may be partitioned into 1- or 2-component
+      // disjoint SOS groups, e.g. 1+2+1. Each SOS walks its own MCU grid;
+      // component IDs map into the original frame, not scan order. Reject
+      // switching from a full-frame scan to partitioned scans (or vice versa).
+      const mode = count === frame.components ? 'interleaved' :
+        (count === 1 || (frame.components === 4 && count === 2))
+          ? 'partitioned' : null;
+      requireJpeg(mode && (!scanMode || mode === scanMode),
+        'неподдерживаемая смесь SOS scan-компонентов');
+      if (!scanMode) scanMode = mode;
+      const indices = [], scanTables = [];
+      for (let s = 0; s < count; s++) {
+        const componentId = d[1 + 2 * s], selector = d[2 + 2 * s];
+        const index = frame.ids.indexOf(componentId);
+        requireJpeg(index !== -1 && !seen.has(index) && !indices.includes(index) &&
+          (selector & 15) === 0 && tables.has(selector >> 4),
+          'неизвестный/повторный SOS компонент или таблица Huffman');
+        indices.push(index);
+        scanTables.push(tables.get(selector >> 4));
+      }
+      const predictor = d[1 + count * 2], transformByte = d[3 + count * 2];
+      const pointTransform = transformByte & 15;
+      requireJpeg(d[2 + count * 2] === 0 && (transformByte >> 4) === 0 &&
+        predictor >= 1 && predictor <= 7 && pointTransform < bits &&
+        bits - pointTransform >= 2, 'неподдерживаемый predictor/point transform/SOS');
+      decodeScan({indices, tables: scanTables, predictor, pointTransform});
+      for (const index of indices) seen.add(index);
+    } else if (id === 0xe0 || (id >= 0xe1 && id <= 0xef) || id === 0xfe) {
+      segment(); // APPn / COM only. No implicit colour calibration or slice geometry.
+    } else {
+      requireJpeg(false, 'неподдерживаемый JPEG сегмент 0x' + id.toString(16));
+    }
+  }
+}
+
 // ---- src/formats/dng.js ----
 // Bounded, dependency-free TIFF/DNG Bayer reader for offline file:// imports.
-// Only classic TIFF (II/MM), uncompressed 8/16-bit single-plane CFA strips.
+// Classic TIFF (II/MM), uncompressed 8/10/12/14/16-bit or bounded lossless JPEG SOF3 CFA strips/tiles.
 // Unsupported RAW layouts fail explicitly instead of falling back to browser image decoders.
 const dng_MAX_FILE_BYTES = 48 * 1024 * 1024;
 const dng_MAX_PIXELS = 16_000_000;
 const dng_TYPE_SIZE = { 1:1, 2:1, 3:2, 4:4, 5:8, 6:1, 7:1, 8:2, 9:4, 10:8, 11:4, 12:8 };
 const dng_TAG = {
   width:256, height:257, bits:258, compression:259, photometric:262,
-  stripOffsets:273, orientation:274, samples:277, rowsPerStrip:278, stripBytes:279, planar:284,
+  stripOffsets:273, orientation:274, fillOrder:266, samples:277, rowsPerStrip:278, stripBytes:279, planar:284,
   subIfds:330, cfaDims:33421, cfaPattern:33422,
+  tileWidth:322, tileLength:323, tileOffsets:324, tileBytes:325,
   dngVersion:50706, linearization:50712, blackRepeat:50713,
-  black:50714, white:50717, neutral:50728, activeArea:50829,
-  defaultScale:50718, defaultCropOrigin:50719, defaultCropSize:50720,
+  black:50714, blackDeltaH:50715, blackDeltaV:50716, white:50717, neutral:50728, whiteXY:50729, activeArea:50829,
+  defaultScale:50718, defaultCropOrigin:50719, defaultCropSize:50720, baselineExposure:50730,
+  baselineExposureOffset:51109,
   colorMatrix1:50721, colorMatrix2:50722, cameraCalibration1:50723,
   cameraCalibration2:50724, analogBalance:50727,
   illuminant1:50778, illuminant2:50779, forwardMatrix1:50964, forwardMatrix2:50965,
+  cameraCalibrationSignature:50931, profileCalibrationSignature:50932,
 };
 function dng_invalid(message) { throw new Error('DNG: ' + message); }
 function dng_requireThat(ok, message) { if (!ok) dng_invalid(message); }
@@ -23826,12 +24367,37 @@ function inspectDng(buffer) {
       const pos=offset+2+i*12;
       const tag=u16(pos), type=u16(pos+2), count=u32(pos+4);
       const size=dng_TYPE_SIZE[type];
+      // TIFF tile metadata is structural: invalid types/counts cannot fall back to strip mode.
+      if([dng_TAG.tileWidth,dng_TAG.tileLength,dng_TAG.tileOffsets,dng_TAG.tileBytes].includes(tag) &&
+        (type!==3&&type!==4 || count===0 || count>1024))
+        dng_invalid('неверный TIFF Tile tag '+tag);
+      // Unknown/oversized FillOrder must not silently use a different packed bit order.
+      if(tag===dng_TAG.fillOrder && (type!==3 || count!==1))
+        dng_invalid('FillOrder должен быть SHORT[1]');
+      // Invalid LUT metadata must not be silently interpreted as identity.
+      if(tag===dng_TAG.linearization && (type!==3 || count<2 || count>65536))
+        dng_invalid('LinearizationTable должен быть SHORT[2..65536]');
+      if(tag===dng_TAG.blackRepeat && (type!==3 || count!==2))
+        dng_invalid('BlackLevelRepeatDim должен быть SHORT[2]');
+      if(tag===dng_TAG.black && (![3,4,5].includes(type) || count<1 || count>64))
+        dng_invalid('BlackLevel должен быть SHORT/LONG/RATIONAL[1..64]');
+      // A bad BaselineExposure cannot be silently ignored as 0 EV.
+      if(tag===dng_TAG.baselineExposure && (type!==10 || count!==1))
+        dng_invalid('BaselineExposure должен быть SRATIONAL[1]');
+      // A profile-authored EV offset is not interchangeable with user Exposure.
+      if(tag===dng_TAG.baselineExposureOffset && (type!==10 || count!==1))
+        dng_invalid('BaselineExposureOffset должен быть SRATIONAL[1]');
+      // DNG BlackLevelDeltaH/V are signed rational offsets, one per ActiveArea
+      // column/row. Even an unknown TIFF type/count must be rejected here.
+      if((tag===dng_TAG.blackDeltaH||tag===dng_TAG.blackDeltaV) &&
+        (type!==10 || count<1 || count>12000))
+        dng_invalid('BlackLevelDeltaH/V должен быть SRATIONAL с допустимым count');
       if(!size || count > dng_MAX_PIXELS){
         // An invalid crop/scale tag must never silently become an uncropped preview.
         if([dng_TAG.defaultScale,dng_TAG.defaultCropOrigin,dng_TAG.defaultCropSize].includes(tag))
           dng_invalid('invalid DefaultCrop/DefaultScale TIFF tag '+tag);
         // Never interpret a malformed calibration tag as an uncalibrated image.
-        if([50721,50722,50723,50724,50727,50728,50778,50779,50964,50965].includes(tag))
+        if([50721,50722,50723,50724,50727,50728,50729,50778,50779,50964,50965,50931,50932].includes(tag))
           dng_invalid('неподдерживаемый тип или count цветового TIFF tag '+tag);
         continue;
       }
@@ -23889,8 +24455,15 @@ function inspectDng(buffer) {
   dng_requireThat(Number.isInteger(width) && Number.isInteger(height) && width >= 2 && height >= 2 &&
     width <= 12000 && height <= 12000 && width*height <= dng_MAX_PIXELS, 'небезопасные размеры Bayer изображения');
   const bits=values(tags,dng_TAG.bits,3);
-  dng_requireThat(bits?.length===1 && (bits[0]===8 || bits[0]===16), 'поддерживаются только 8/16-bit uncompressed Bayer (не packed RAW)');
-  dng_requireThat(single(tags,dng_TAG.compression,1)===1, 'сжатые DNG не поддерживаются');
+  const compression=single(tags,dng_TAG.compression,1);
+  dng_requireThat(compression===1 || compression===7,
+    'поддерживается только uncompressed CFA или lossless JPEG SOF3 (Compression=7)');
+  dng_requireThat(bits?.length===1 && (compression===1 ?
+    [8,10,12,14,16].includes(bits[0]) : [8,10,12,14,16].includes(bits[0])),
+    'неподдерживаемый BitsPerSample для uncompressed/JPEG Bayer');
+  if(compression===1 && tags.has(dng_TAG.fillOrder))
+    dng_requireThat(single(tags,dng_TAG.fillOrder,1)===1,
+      'uncompressed Bayer поддерживает только FillOrder=1 (MSB-first)');
   dng_requireThat(single(tags,dng_TAG.samples,1)===1 && single(tags,dng_TAG.planar,1)===1, 'многоканальный CFA не поддерживается');
   const patternDims=values(tags,dng_TAG.cfaDims,2);
   const pattern=values(tags,dng_TAG.cfaPattern,16);
@@ -23898,25 +24471,102 @@ function inspectDng(buffer) {
     pattern?.length===4 && pattern.filter(c=>c===0).length===1 &&
     pattern.filter(c=>c===1).length===2 && pattern.filter(c=>c===2).length===1,
     'поддерживается только 2×2 Bayer RGGB/BGGR/GRBG/GBRG');
-  dng_requireThat(!tags.has(dng_TAG.linearization), 'DNG LinearizationTable пока не поддерживается');
+  // DNG stored sample code -> linear reference, before BlackLevel subtraction.
+  // Table entries are unsigned 16-bit even for 8-bit stored Bayer samples.
+  let linearization=null;
+  if(tags.has(dng_TAG.linearization)){
+    const entry=tags.get(dng_TAG.linearization);
+    dng_requireThat(entry.type===3 && entry.count>=2 && entry.count<=2**bits[0],
+      'LinearizationTable имеет неверный SHORT count для Bayer bits');
+    linearization=new Uint16Array(entry.count);
+    for(let i=0;i<entry.count;i++)linearization[i]=view.getUint16(entry.start+i*2,le);
+  }
+  // Deltas and BlackLevelRepeatDim both refer to original sensor coordinates.
+  // Resolve ActiveArea before reading the per-column/per-row signed deltas.
+  const activeArea=values(tags,dng_TAG.activeArea,4) ?? values(ifds[0],dng_TAG.activeArea,4) ?? [0,0,height,width];
+  dng_requireThat(activeArea.length===4 && activeArea.every(Number.isInteger) &&
+    activeArea[0]>=0 && activeArea[1]>=0 && activeArea[2]<=height && activeArea[3]<=width &&
+    activeArea[2]-activeArea[0]>=2 && activeArea[3]-activeArea[1]>=2,
+    'некорректная ActiveArea DNG');
+  const activeWidth=activeArea[3]-activeArea[1], activeHeight=activeArea[2]-activeArea[0];
+  // DNG BlackLevelRepeatDim is [rows,columns]. The repeating pattern starts
+  // at ActiveArea top-left (in original sensor coordinates), not at (0,0)
+  // or the rotated/cropped preview origin.
   const blackRepeat=values(tags,dng_TAG.blackRepeat,2) || [1,1];
-  dng_requireThat((blackRepeat[0]===1&&blackRepeat[1]===1)||
-    (blackRepeat[0]===2&&blackRepeat[1]===2), 'неподдерживаемая сетка BlackLevel');
-  const black=values(tags,dng_TAG.black,4) || [0];
-  dng_requireThat(black.length===blackRepeat[0]*blackRepeat[1], 'неподдерживаемый BlackLevel');
+  dng_requireThat(blackRepeat.length===2 && blackRepeat.every(v=>Number.isInteger(v)&&v>=1&&v<=8) &&
+    blackRepeat[0]*blackRepeat[1]<=64, 'BlackLevelRepeatDim вне поддерживаемой сетки 1..8');
+  const black=values(tags,dng_TAG.black,64) || [0];
+  dng_requireThat(black.length===blackRepeat[0]*blackRepeat[1],
+    'BlackLevel count не совпадает с BlackLevelRepeatDim');
+  const blackDeltaH=values(tags,dng_TAG.blackDeltaH,activeWidth);
+  const blackDeltaV=values(tags,dng_TAG.blackDeltaV,activeHeight);
+  dng_requireThat(!blackDeltaH || blackDeltaH.length===activeWidth,
+    'BlackLevelDeltaH count должен совпадать с шириной ActiveArea');
+  dng_requireThat(!blackDeltaV || blackDeltaV.length===activeHeight,
+    'BlackLevelDeltaV count должен совпадать с высотой ActiveArea');
   const white=values(tags,dng_TAG.white,4) || [2**bits[0]-1];
   dng_requireThat(white.length===1, 'неподдерживаемый WhiteLevel');
-  dng_requireThat(white[0]>0 && white[0]<=2**bits[0]-1 && black.every(v=>v>=0 && v<white[0]),
+  // LinearizationTable produces 16-bit linear reference values even when the
+  // stored CFA uses 8 bits. WhiteLevel/BlackLevel are in that *output* domain.
+  const whiteLimit=linearization ? 65535 : 2**bits[0]-1;
+  dng_requireThat(white[0]>0 && white[0]<=whiteLimit && black.every(v=>v>=0 && v<white[0]),
     'WhiteLevel/BlackLevel вне диапазона');
-  const neutral=values(ifds[0],dng_TAG.neutral,3) || values(tags,dng_TAG.neutral,3) || [1,1,1];
-  dng_requireThat(neutral.length===3 && neutral.every(v=>v>0 && dng_finite(v)), 'ошибочный AsShotNeutral');
+  // Validate the combined signed offset for every ActiveArea sensor site.
+  // A negative delta is legal, but the resulting black must remain below
+  // white and nonnegative for this bounded CFA normalizer.
+  if(blackDeltaH||blackDeltaV){
+    for(let y=activeArea[0];y<activeArea[2];y++)for(let x=activeArea[1];x<activeArea[3];x++){
+      const row=(y-activeArea[0])%blackRepeat[0],col=(x-activeArea[1])%blackRepeat[1];
+      const level=black[row*blackRepeat[1]+col]+(blackDeltaH?.[x-activeArea[1]]??0)+
+        (blackDeltaV?.[y-activeArea[0]]??0);
+      dng_requireThat(dng_finite(level)&&level>=0&&level<white[0],
+        'WhiteLevel/BlackLevelDeltaH/V дают недопустимый BlackLevel');
+    }
+  }
+  // The DNG spec permits AsShotNeutral OR AsShotWhiteXY, never both. The
+  // latter is CIE xy and must be converted through AB*CC*CM, not used as
+  // three direct camera multipliers.
+  const hasNeutral=ifds[0].has(dng_TAG.neutral)||tags.has(dng_TAG.neutral);
+  const hasWhiteXY=ifds[0].has(dng_TAG.whiteXY)||tags.has(dng_TAG.whiteXY);
+  dng_requireThat(!(hasNeutral&&hasWhiteXY),
+    'AsShotWhiteXY и AsShotNeutral взаимоисключающие');
+  const neutralOwner=ifds[0].has(dng_TAG.neutral)?ifds[0]:tags;
+  const whiteOwner=ifds[0].has(dng_TAG.whiteXY)?ifds[0]:tags;
+  const neutral=hasNeutral?values(neutralOwner,dng_TAG.neutral,3):hasWhiteXY?null:[1,1,1];
+  if(neutral)dng_requireThat(neutral.length===3 && neutral.every(v=>v>0 && dng_finite(v)),
+    'ошибочный AsShotNeutral');
+  const xyEntry=whiteOwner.get(dng_TAG.whiteXY);
+  dng_requireThat(!xyEntry || (xyEntry.type===5 && xyEntry.count===2),
+    'AsShotWhiteXY должен быть RATIONAL[2]');
+  const whiteXY=xyEntry?values(whiteOwner,dng_TAG.whiteXY,2):null;
+  if(whiteXY)dng_requireThat(whiteXY.every(v=>dng_finite(v)&&v>0&&v<1) &&
+    whiteXY[0]+whiteXY[1]<1, 'некорректный AsShotWhiteXY');
+  // DNG BaselineExposure is a signed camera default in EV, separate from the user's
+  // editable Exposure. Accept it in IFD0 or the raw CFA IFD, never a thumbnail.
+  const baselineOwner=ifds[0].has(dng_TAG.baselineExposure)?ifds[0]:tags;
+  const baselineExposure=single(baselineOwner,dng_TAG.baselineExposure,0);
+  dng_requireThat(dng_finite(baselineExposure) && baselineExposure>=-16 && baselineExposure<=16,
+    'BaselineExposure вне безопасного диапазона ±16 EV');
+  if(ifds[0]!==tags && ifds[0].has(dng_TAG.baselineExposure) && tags.has(dng_TAG.baselineExposure))
+    dng_requireThat(single(tags,dng_TAG.baselineExposure)===baselineExposure,
+      'конфликтующая BaselineExposure между IFD0 и CFA');
+  // Bounded inline-camera-profile support: IFD0 (with CFA IFD fallback),
+  // not external .dcp or ExtraCameraProfiles IFD selection.
+  const offsetOwner=ifds[0].has(dng_TAG.baselineExposureOffset)?ifds[0]:tags;
+  const baselineExposureOffset=single(offsetOwner,dng_TAG.baselineExposureOffset,0);
+  dng_requireThat(dng_finite(baselineExposureOffset) &&
+    baselineExposureOffset>=-16 && baselineExposureOffset<=16,
+    'BaselineExposureOffset вне безопасного диапазона ±16 EV');
+  if(ifds[0]!==tags && ifds[0].has(dng_TAG.baselineExposureOffset) && tags.has(dng_TAG.baselineExposureOffset))
+    dng_requireThat(single(tags,dng_TAG.baselineExposureOffset)===baselineExposureOffset,
+      'конфликтующая BaselineExposureOffset между IFD0 и CFA');
   // Colour tags live in IFD 0 or the CFA IFD, never rely on a thumbnail IFD.
   const colorTag = tag => ifds[0].has(tag) ? ifds[0] : tags;
-  const matrix = tag => {
+  const matrix = (tag,label='ColorMatrix') => {
     const owner=colorTag(tag),entry=owner.get(tag);
     if(!entry)return null;
     dng_requireThat(entry.type===10 && entry.count===9,
-      'ColorMatrix должна быть SRATIONAL[9] (3×3)');
+      label+' должна быть SRATIONAL[9] (3×3)');
     return values(owner,tag,9);
   };
   const matrix1=matrix(dng_TAG.colorMatrix1),matrix2=matrix(dng_TAG.colorMatrix2);
@@ -23929,27 +24579,50 @@ function inspectDng(buffer) {
   };
   const illuminant1=illuminant(dng_TAG.illuminant1);
   const illuminant2=illuminant(dng_TAG.illuminant2);
-  // Avoid silently misapplying a profile with unimplemented transforms.
-  if(matrix1)for(const tag of [dng_TAG.cameraCalibration1,dng_TAG.cameraCalibration2,
-    dng_TAG.analogBalance,dng_TAG.forwardMatrix1,dng_TAG.forwardMatrix2])
-    dng_requireThat(!colorTag(tag).has(tag),'CameraCalibration/AnalogBalance/ForwardMatrix пока не поддерживается');
-  dng_requireThat(!matrix1 || Boolean(ifds[0].has(dng_TAG.neutral)||tags.has(dng_TAG.neutral)),
-    'нет AsShotNeutral для ColorMatrix (AsShotWhiteXY пока не поддерживается)');
-  const color=matrix1 ? {matrix1,matrix2,illuminant1,illuminant2,neutral} : null;
+  // DNG profile matrices are signed rationals, camera analogue gain is unsigned rational.
+  // Invalid profiles fail closed before publication of a document/layer.
+  const forward1=matrix(dng_TAG.forwardMatrix1,'ForwardMatrix1');
+  const forward2=matrix(dng_TAG.forwardMatrix2,'ForwardMatrix2');
+  const calibration1=matrix(dng_TAG.cameraCalibration1,'CameraCalibration1');
+  const calibration2=matrix(dng_TAG.cameraCalibration2,'CameraCalibration2');
+  const analogEntry=colorTag(dng_TAG.analogBalance).get(dng_TAG.analogBalance);
+  dng_requireThat(!analogEntry || (analogEntry.type===5 && analogEntry.count===3),
+    'AnalogBalance должен быть RATIONAL[3]');
+  const analogBalance=analogEntry?values(colorTag(dng_TAG.analogBalance),dng_TAG.analogBalance,3):null;
+  // CameraCalibration is only authoritative if the UTF-8 signatures match.
+  // Both absent means both default to empty (and therefore match), per DNG.
+  const signature=tag=>{
+    const owner=colorTag(tag),entry=owner.get(tag);
+    if(!entry)return '';
+    dng_requireThat([1,2].includes(entry.type)&&entry.count>=1&&entry.count<=256,
+      'Camera/ProfileCalibrationSignature должен быть ASCII/BYTE[1..256]');
+    const bytes=new Uint8Array(buffer,entry.start,entry.count);
+    dng_requireThat(bytes[bytes.length-1]===0 && !bytes.subarray(0,-1).includes(0),
+      'CalibrationSignature должен заканчиваться нулевым байтом');
+    try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(0,-1));}
+    catch{dng_invalid('неверная UTF-8 CalibrationSignature');}
+  };
+  const cameraSignature=signature(dng_TAG.cameraCalibrationSignature);
+  const profileSignature=signature(dng_TAG.profileCalibrationSignature);
+  dng_requireThat(matrix1 || ![forward1,forward2,calibration1,calibration2,analogBalance].some(Boolean),
+    'ForwardMatrix/CameraCalibration/AnalogBalance без ColorMatrix1');
+  dng_requireThat(!forward2 || forward1,'ForwardMatrix2 без ForwardMatrix1');
+  dng_requireThat(!matrix1 || hasNeutral || hasWhiteXY,
+    'нет AsShotNeutral или AsShotWhiteXY для ColorMatrix');
+  dng_requireThat(matrix1 || !hasWhiteXY, 'AsShotWhiteXY требует ColorMatrix');
+  const color=matrix1 ? {matrix1,matrix2,illuminant1,illuminant2,neutral,whiteXY,
+    forward1,forward2,calibration1,calibration2,analogBalance,
+    calibrationMatches:cameraSignature===profileSignature} : null;
   if(color)dngCameraToLinearSrgb(color); // Reject malformed/singular profiles before import.
-  // ActiveArea uses sensor coordinates [top, left, bottom, right]; CFA phase remains sensor-relative.
-  const activeArea=values(tags,dng_TAG.activeArea,4) ?? values(ifds[0],dng_TAG.activeArea,4) ?? [0,0,height,width];
-  dng_requireThat(activeArea.length===4 && activeArea.every(Number.isInteger) &&
-    activeArea[0]>=0 && activeArea[1]>=0 && activeArea[2]<=height && activeArea[3]<=width &&
-    activeArea[2]-activeArea[0]>=2 && activeArea[3]-activeArea[1]>=2,
-    'некорректная ActiveArea DNG');
-  // DefaultScale changes displayed geometry; reject unimplemented non-identity
-  // scaling rather than silently producing a wrong aspect ratio.
+  // DefaultScale defines output pixel aspect / dimensions, not a sensor crop.
+  // Resample linear camera channels before ColorMatrix and the sRGB transfer.
+  let defaultScale=[1,1];
   if(tags.has(dng_TAG.defaultScale)){
     const entry=tags.get(dng_TAG.defaultScale);
     dng_requireThat(entry.type===5&&entry.count===2,'DefaultScale должен быть RATIONAL[2]');
-    const scale=values(tags,dng_TAG.defaultScale,2);
-    dng_requireThat(scale[0]===1&&scale[1]===1,'DefaultScale не равен 1: масштабирование пока не поддерживается');
+    defaultScale=values(tags,dng_TAG.defaultScale,2);
+    dng_requireThat(defaultScale.every(v=>dng_finite(v)&&v>=0.125&&v<=8),
+      'DefaultScale вне безопасного диапазона 1/8..8');
   }
   // DNG 1.6: DefaultCropOrigin [H,V] is relative to ActiveArea's top-left.
   // SHORT/LONG/RATIONAL are legal. Read from the raw CFA IFD, not a thumbnail.
@@ -23960,69 +24633,202 @@ function inspectDng(buffer) {
       label+' должен быть SHORT/LONG/RATIONAL[2]');
     return values(tags,tag,2);
   };
-  const activeWidth=activeArea[3]-activeArea[1], activeHeight=activeArea[2]-activeArea[0];
   const cropOrigin=defaultCropValues(dng_TAG.defaultCropOrigin,'DefaultCropOrigin') || [0,0];
   const cropSize=defaultCropValues(dng_TAG.defaultCropSize,'DefaultCropSize') || [activeWidth,activeHeight];
   dng_requireThat(cropOrigin.every(v=>dng_finite(v)&&v>=0) &&
     cropSize.every(v=>dng_finite(v)&&v>=2) &&
     cropOrigin[0]+cropSize[0]<=activeWidth && cropOrigin[1]+cropSize[1]<=activeHeight,
     'DefaultCrop выходит за ActiveArea или имеет неверные размеры');
-  // DNG fractional coordinates remain fractional until sampling. The preview
-  // has an integral pixel grid, rounded once; never shift the Bayer sensor phase.
+  // Fractional crop/scale are evaluated once in original sensor coordinates.
+  // The output pixel grid is rounded only after applying each scale component.
   const cropWindow=[activeArea[1]+cropOrigin[0],activeArea[0]+cropOrigin[1],cropSize[0],cropSize[1]];
-  const cropWidth=Math.round(cropSize[0]),cropHeight=Math.round(cropSize[1]);
-  dng_requireThat(cropWidth>=2&&cropHeight>=2&&cropWidth*cropHeight<=dng_MAX_PIXELS,
-    'DefaultCrop имеет небезопасные размеры');
+  const cropWidth=Math.round(cropSize[0]*defaultScale[0]);
+  const cropHeight=Math.round(cropSize[1]*defaultScale[1]);
+  dng_requireThat(cropWidth>=2&&cropHeight>=2&&cropWidth<=12000&&cropHeight<=12000&&
+    cropWidth*cropHeight<=dng_MAX_PIXELS,
+    'DefaultCrop/DefaultScale имеют небезопасные выходные размеры');
   const orientation=single(ifds[0],dng_TAG.orientation,single(tags,dng_TAG.orientation,1));
   dng_requireThat(Number.isInteger(orientation) && orientation>=1 && orientation<=8,
     'неподдерживаемая Orientation DNG');
   const displayWidth=orientation>=5?cropHeight:cropWidth;
   const displayHeight=orientation>=5?cropWidth:cropHeight;
-  const rowsPerStrip=single(tags,dng_TAG.rowsPerStrip,height);
+  // TIFF tiles and strips are mutually exclusive sensor layouts. Edge tiles
+  // carry a full padded JPEG frame; padding never enters the Bayer pixel grid.
+  const tileTags=[dng_TAG.tileWidth,dng_TAG.tileLength,dng_TAG.tileOffsets,dng_TAG.tileBytes];
+  const tiled=tileTags.some(tag=>tags.has(tag));
+  dng_requireThat(!tiled || (tileTags.every(tag=>tags.has(tag)) &&
+    !tags.has(dng_TAG.stripOffsets) && !tags.has(dng_TAG.stripBytes) &&
+    !tags.has(dng_TAG.rowsPerStrip)), 'неполный или смешанный TIFF Tile layout');
+  const rowsPerStrip=tiled ? height : single(tags,dng_TAG.rowsPerStrip,height);
   dng_requireThat(Number.isInteger(rowsPerStrip) && rowsPerStrip>=1, 'неверный RowsPerStrip');
-  const strips=Math.ceil(height/rowsPerStrip);
-  dng_requireThat(strips<=height && strips<=1024, 'слишком много RAW-полос');
-  const offsets=values(tags,dng_TAG.stripOffsets,1024), byteCounts=values(tags,dng_TAG.stripBytes,1024);
-  dng_requireThat(offsets?.length===strips && byteCounts?.length===strips, 'неверные StripOffsets/StripByteCounts');
-  const rowBytes=width*(bits[0]/8);
-  for(let i=0;i<strips;i++){
-    const expected=Math.min(rowsPerStrip,height-i*rowsPerStrip)*rowBytes;
+  const rowBytes=compression===1 ? Math.ceil(width*bits[0]/8) : 0;
+  const compressedSamples=compression===7 ? new Uint16Array(width*height) : null;
+  const tileWidth=tiled ? single(tags,dng_TAG.tileWidth,0) : 0;
+  const tileHeight=tiled ? single(tags,dng_TAG.tileLength,0) : 0;
+  // Each TIFF tile/strip row starts on a byte boundary. Edge tiles keep their
+  // full padded physical width, although only useful pixels enter the sensor.
+  const blockWidth=tiled?tileWidth:width;
+  const blockRowBytes=compression===1 ? Math.ceil(blockWidth*bits[0]/8) : 0;
+  dng_requireThat(!tiled || (Number.isInteger(tileWidth) && Number.isInteger(tileHeight) &&
+    tileWidth>=2 && tileHeight>=1 && tileWidth<=12000 && tileHeight<=12000),
+    'неверные TIFF TileWidth/TileLength');
+  const chunks=tiled ? Math.ceil(width/tileWidth)*Math.ceil(height/tileHeight) :
+    Math.ceil(height/rowsPerStrip);
+  dng_requireThat(Number.isSafeInteger(chunks) && chunks>=1 && chunks<=1024,
+    'слишком много TIFF Tile/Strip частей');
+  const offsets=values(tags,tiled?dng_TAG.tileOffsets:dng_TAG.stripOffsets,1024);
+  const byteCounts=values(tags,tiled?dng_TAG.tileBytes:dng_TAG.stripBytes,1024);
+  dng_requireThat(offsets?.length===chunks && byteCounts?.length===chunks,
+    tiled?'неверные TileOffsets/TileByteCounts':'неверные StripOffsets/StripByteCounts');
+  for(let i=0;i<chunks;i++){
+    const stripHeight=tiled?tileHeight:Math.min(rowsPerStrip,height-i*rowsPerStrip);
+    const expected=compression===1 ? stripHeight*blockRowBytes : 16;
     dng_requireThat(Number.isInteger(offsets[i]) && Number.isInteger(byteCounts[i]) &&
-      offsets[i]>=8 && byteCounts[i]>=expected && offsets[i]+byteCounts[i]<=buffer.byteLength,
-      'усечённая или некорректная Bayer-полоса');
+      offsets[i]>=8 && (compression===1?byteCounts[i]===expected:byteCounts[i]>=expected) &&
+      offsets[i]+byteCounts[i]<=buffer.byteLength,
+      tiled?'усечённый или неверный TIFF Tile':'усечённая или некорректная Bayer-полоса');
+    if(compressedSamples){
+      const scanWidth=tiled?tileWidth:width;
+      const scan=decodeDngLosslessJpeg(new Uint8Array(buffer,offsets[i],byteCounts[i]),
+        {width:scanWidth,height:stripHeight,bits:bits[0]});
+      if(tiled){
+        const left=(i%Math.ceil(width/tileWidth))*tileWidth;
+        const top=Math.floor(i/Math.ceil(width/tileWidth))*tileHeight;
+        const usefulWidth=Math.min(tileWidth,width-left);
+        const usefulHeight=Math.min(tileHeight,height-top);
+        for(let y=0;y<usefulHeight;y++)
+          compressedSamples.set(scan.subarray(y*tileWidth,y*tileWidth+usefulWidth),
+            (top+y)*width+left);
+      } else {
+        compressedSamples.set(scan,i*rowsPerStrip*width);
+      }
+    }
   }
-  return {width,height,displayWidth,displayHeight,orientation,activeArea,cropWindow,
-    bits:bits[0],pattern,black,blackRepeat,white:white[0],neutral,color,
-    offsets,rowsPerStrip,rowBytes,le,buffer};
+  return {width,height,displayWidth,displayHeight,orientation,activeArea,cropWindow,defaultScale,
+    whiteBalanceSource:hasWhiteXY?'as-shot-white-xy':hasNeutral?'as-shot-neutral':'legacy-unspecified',
+    bits:bits[0],compression,compressedSamples,pattern,black,blackRepeat,blackDeltaH,blackDeltaV,white:white[0],neutral,color,linearization,baselineExposure,baselineExposureOffset,
+    tiled,tileWidth,tileHeight,offsets,rowsPerStrip,rowBytes,blockRowBytes,le,buffer};
 }
-function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
+function developDng(source, {exposure=0, wbRed=1, wbBlue=1, highlights=0, shadows=0, contrast=0, demosaic='bilinear'}={}) {
   dng_requireThat(source && source.buffer instanceof ArrayBuffer, 'нет DNG-источника');
+  dng_requireThat(dng_finite(source.baselineExposure) &&
+    source.baselineExposure>=-16 && source.baselineExposure<=16,
+    'неверная BaselineExposure DNG');
+  dng_requireThat(dng_finite(source.baselineExposureOffset) &&
+    source.baselineExposureOffset>=-16 && source.baselineExposureOffset<=16,
+    'неверная BaselineExposureOffset DNG');
   dng_requireThat(dng_finite(exposure) && exposure>=-5 && exposure<=5 &&
     dng_finite(wbRed) && wbRed>=0.25 && wbRed<=4 &&
-    dng_finite(wbBlue) && wbBlue>=0.25 && wbBlue<=4, 'неверные параметры RAW-проявки');
-  const {width,height,displayWidth,displayHeight,orientation,cropWindow,
-    bits,pattern,black,blackRepeat,white,neutral,color,offsets,rowsPerStrip,rowBytes,le,buffer}=source;
+    dng_finite(wbBlue) && wbBlue>=0.25 && wbBlue<=4 &&
+    dng_finite(highlights) && highlights>=-1 && highlights<=1 &&
+    dng_finite(shadows) && shadows>=-1 && shadows<=1 &&
+    typeof contrast==='number' && dng_finite(contrast) && contrast>=-1 && contrast<=1 &&
+    (demosaic==='bilinear'||demosaic==='edge-aware-green'||demosaic==='edge-aware-rgb'), 'неверные параметры RAW-проявки');
+  const {width,height,displayWidth,displayHeight,orientation,activeArea,cropWindow,defaultScale,
+    bits,pattern,black,blackRepeat,blackDeltaH,blackDeltaV,white,neutral,color,linearization,baselineExposure,baselineExposureOffset,
+    offsets,rowsPerStrip,rowBytes,blockRowBytes,le,buffer,compressedSamples,tiled,tileWidth,tileHeight}=source;
   const view=new DataView(buffer);
   const normalized=new Float32Array(width*height), channels=new Uint8Array(width*height);
-  const exposureScale=2**exposure;
+  // Apply the camera's EV zero-point as a scene-linear gain, BEFORE tonal
+  // adjustments and sRGB. The manual slider stays relative to this baseline.
+  const exposureScale=2**(baselineExposure+baselineExposureOffset+exposure);
   for(let y=0;y<height;y++){
-    const strip=Math.floor(y/rowsPerStrip);
-    const stripRow=y-strip*rowsPerStrip;
+    const blockY=tiled?Math.floor(y/tileHeight):Math.floor(y/rowsPerStrip);
+    const localRow=tiled?y%tileHeight:y-blockY*rowsPerStrip;
     for(let x=0;x<width;x++){
       const index=y*width+x,phase=(y&1)*2+(x&1);
-      const pos=offsets[strip]+stripRow*rowBytes+x*(bits/8);
-      const sample=bits===8?view.getUint8(pos):view.getUint16(pos,le);
-      const level=black.length===1?black[0]:black[(y%blackRepeat[1])*blackRepeat[0]+(x%blackRepeat[0])];
+      const block=tiled?blockY*Math.ceil(width/tileWidth)+Math.floor(x/tileWidth):blockY;
+      const col=tiled?x%tileWidth:x;
+      const byteOffset=offsets[block]+localRow*blockRowBytes;
+      let stored;
+      if(compressedSamples) stored=compressedSamples[index];
+      else if(bits===8) stored=view.getUint8(byteOffset+col);
+      else if(bits===16) stored=view.getUint16(byteOffset+col*2,le);
+      else {
+        // TIFF FillOrder=1: MSB-first packed 10/12/14-bit CFA samples.
+        // Reset bit position on every scanline (and at tile boundaries).
+        const startBit=col*bits,bitShift=startBit&7;
+        const nbytes=Math.ceil((bitShift+bits)/8);
+        const first=byteOffset+(startBit>>3);
+        let word=0;
+        for(let n=0;n<nbytes;n++)word=(word<<8)|view.getUint8(first+n);
+        stored=(word>>>(nbytes*8-bitShift-bits))&((1<<bits)-1);
+      }
+      // Adobe DNG LUT semantics clamp sample indexes beyond the final entry.
+      const sample=linearization ? linearization[Math.min(stored,linearization.length-1)] : stored;
+      // Positive modulo also maps masked margins outside ActiveArea safely.
+      const repeatY=((y-activeArea[0])%blackRepeat[0]+blackRepeat[0])%blackRepeat[0];
+      const repeatX=((x-activeArea[1])%blackRepeat[1]+blackRepeat[1])%blackRepeat[1];
+      const siteBlack=black[repeatY*blackRepeat[1]+repeatX];
+      // Deltas are indexed by original ActiveArea columns/rows, never by
+      // cropped, rescaled or rotated preview coordinates. Clamp the marginal
+      // demosaic halo to the nearest active calibration column/row.
+      const hx=blackDeltaH?.[dng_clamp(x-activeArea[1],0,blackDeltaH.length-1)]??0;
+      const vy=blackDeltaV?.[dng_clamp(y-activeArea[0],0,blackDeltaV.length-1)]??0;
+      const level=siteBlack+hx+vy;
+      dng_requireThat(level>=0&&level<white,'WhiteLevel/BlackLevelDelta вне диапазона');
       normalized[index]=dng_clamp((sample-level)/(white-level),0,1);
       channels[index]=pattern[phase];
     }
   }
-  const multipliers=[(neutral[1]/neutral[0])*wbRed,1,(neutral[1]/neutral[2])*wbBlue];
+  const multipliers=color ? null : [(neutral[1]/neutral[0])*wbRed,1,(neutral[1]/neutral[2])*wbBlue];
   const colorTransform=dngCameraToLinearSrgb(color,{wbRed,wbBlue});
   const rgba=new Uint8ClampedArray(displayWidth*displayHeight*4);
   function sampleChannel(x,y,c){
     const index=y*width+x;
     if(channels[index]===c)return normalized[index];
+    // In the opt-in RGB mode, interpolate camera-space R-G/B-G differences
+    // rather than independent color intensities. This avoids luminance-edge
+    // false colors while leaving original CFA samples untouched. All reads
+    // are sensor-space, before fractional crop, white balance and color OETF.
+    if(demosaic==='edge-aware-rgb' && c!==1 &&
+       x>=2 && x<width-2 && y>=2 && y<height-2){
+      const green=sampleChannel(x,y,1);
+      if(channels[index]===1){
+        // At green sites, the required color occupies exactly one CFA axis.
+        const horizontal=channels[index-1]===c && channels[index+1]===c;
+        const a=horizontal?index-1:index-width;
+        const b=horizontal?index+1:index+width;
+        if(channels[a]===c && channels[b]===c){
+          const da=normalized[a]-sampleChannel(x-(horizontal?1:0),y-(horizontal?0:1),1);
+          const db=normalized[b]-sampleChannel(x+(horizontal?1:0),y+(horizontal?0:1),1);
+          return dng_clamp(green+(da+db)/2,0,1);
+        }
+      } else {
+        // At the opposite CFA color, four diagonal same-color neighbors
+        // have measured chroma; use their differences to interpolated G.
+        const a=index-width-1,b=index-width+1,d=index+width-1,e=index+width+1;
+        if(channels[a]===c && channels[b]===c &&
+           channels[d]===c && channels[e]===c){
+          const delta=(normalized[a]-sampleChannel(x-1,y-1,1)+
+            normalized[b]-sampleChannel(x+1,y-1,1)+
+            normalized[d]-sampleChannel(x-1,y+1,1)+
+            normalized[e]-sampleChannel(x+1,y+1,1))/4;
+          return dng_clamp(green+delta,0,1);
+        }
+      }
+    }
+    // An opt-in directional interpolation for green at red/blue Bayer sites.
+    // Compare sensor-space directional differences and same-color second
+    // neighbors; do not apply this correction after crop/rotation or OETF.
+    // At a missing halo, retain the legacy bilinear boundary behavior.
+    if((demosaic==='edge-aware-green'||demosaic==='edge-aware-rgb') && c===1 &&
+       x>=2 && x<width-2 && y>=2 && y<height-2){
+      const site=channels[index];
+      const l=index-1,r=index+1,t=index-width,b=index+width;
+      if(channels[l]===1 && channels[r]===1 && channels[t]===1 && channels[b]===1 &&
+         channels[index-2]===site && channels[index+2]===site &&
+         channels[index-2*width]===site && channels[index+2*width]===site){
+        const correctionH=2*normalized[index]-normalized[index-2]-normalized[index+2];
+        const correctionV=2*normalized[index]-normalized[index-2*width]-normalized[index+2*width];
+        const horizontal=(normalized[l]+normalized[r])/2+correctionH/4;
+        const vertical=(normalized[t]+normalized[b])/2+correctionV/4;
+        const gradientH=Math.abs(normalized[l]-normalized[r])+Math.abs(correctionH);
+        const gradientV=Math.abs(normalized[t]-normalized[b])+Math.abs(correctionV);
+        return dng_clamp(gradientH<gradientV?horizontal:
+          gradientV<gradientH?vertical:(horizontal+vertical)/2,0,1);
+      }
+    }
     // Bilinear same-channel neighbors; widen only at edges/corners.
     for(let radius=1;radius<=2;radius++){
       let sum=0,n=0;
@@ -24045,7 +24851,8 @@ function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
   // the exact fractional crop rectangle on its integer output pixel grid.
   // This interpolates *linear camera channels*, before ColorMatrix and sRGB OETF.
   const [left,top,sensorCropWidth,sensorCropHeight]=cropWindow;
-  const cropWidth=Math.round(sensorCropWidth),cropHeight=Math.round(sensorCropHeight);
+  const cropWidth=Math.round(sensorCropWidth*defaultScale[0]);
+  const cropHeight=Math.round(sensorCropHeight*defaultScale[1]);
   const resampleChannel=(x,y,c)=>{
     if(Number.isInteger(x)&&Number.isInteger(y))return sampleChannel(x,y,c);
     const x0=Math.floor(x),y0=Math.floor(y),tx=x-x0,ty=y-y0;
@@ -24072,12 +24879,16 @@ function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
     const camera=[resampleChannel(x,y,0),resampleChannel(x,y,1),resampleChannel(x,y,2)];
     const linear=colorTransform ? applyDngColorMatrix(colorTransform,...camera) :
       camera.map((value,c)=>value*multipliers[c]);
-    for(let c=0;c<3;c++)rgba[index+c]=srgb(linear[c]*exposureScale);
+    const exposed=linear.map(v=>v*exposureScale);
+    const toned=applyDngTonalControls(exposed,{highlights,shadows,contrast});
+    for(let c=0;c<3;c++)rgba[index+c]=srgb(toned[c]);
     rgba[index+3]=255;
   }
   return {width:displayWidth,height:displayHeight,rgba,
-    colorPipeline:color?'matrix-d50-bradford-v1':'uncalibrated-bayer-preview',
-    development:{exposure,wbRed,wbBlue}};
+    whiteBalanceSource:source.whiteBalanceSource,
+    colorPipeline:color?.forward1?'forward-d50-v1':color?'matrix-d50-bradford-v1':'uncalibrated-bayer-preview',
+    baselineExposure,baselineExposureOffset,development:{exposure,wbRed,wbBlue,highlights,shadows,contrast,
+      ...(['edge-aware-green','edge-aware-rgb'].includes(demosaic)?{demosaic}: {})}};
 }
 function decodeDng(buffer, development) {
   return developDng(inspectDng(buffer),development);
@@ -24139,7 +24950,12 @@ function createDocumentImportController({
           const dataUrl=await rgbaPixelsToDataUrl(pixels.width,pixels.height,pixels.rgba,'DNG RAW');
           const rawDng={dataUrl:bytesToDataUrl(raw,'application/x-adobe-dng'),
             development:pixels.development,colorPipeline:pixels.colorPipeline,
-            width:source.width,height:source.height};
+            whiteBalanceSource:source.whiteBalanceSource,baselineExposure:source.baselineExposure,
+             baselineExposureOffset:source.baselineExposureOffset,
+            bits:source.bits,width:source.width,height:source.height,defaultScale:[...source.defaultScale],
+            blackRepeatDim:[...source.blackRepeat],
+            blackDeltaH:Boolean(source.blackDeltaH),blackDeltaV:Boolean(source.blackDeltaV),
+            linearizationTable:Boolean(source.linearization),compression:source.compression};
           prepared.push({file,dataUrl,width:pixels.width,height:pixels.height,rawDng});
         } catch(error) {
           setStatus('Ошибка DNG: ' + error.message);
@@ -31487,6 +32303,32 @@ async function drainRenderQueue() {
     const visibleCtx = els.canvas.getContext('2d', { alpha: true });
     visibleCtx.clearRect(0, 0, doc.width, doc.height);
     visibleCtx.drawImage(renderBuffer, 0, 0);
+    // Display-only diagnostic: never touch renderBuffer, layer previews or exports.
+    if (rawClippingWarningEnabled && selected()?.rawDng && !request.paintPreview) {
+      const summaryOutput=els.props.querySelector('[data-raw-clipping-summary]');
+      try {
+        let summary;
+        if(doc.width*doc.height>8_000_000){
+          // Bounded display-only readback; yield between tiles and cancel for a newer render.
+          if(summaryOutput)summaryOutput.textContent='Анализ большого RGB кадра…';
+          summary=await markDisplayClippingWarningOnCanvas(visibleCtx,{
+            width:doc.width,height:doc.height,
+            shouldContinue:()=>request.version===renderVersion,
+            yieldFrame:()=>new Promise(resolve=>requestAnimationFrame(resolve)),
+          });
+        }else{
+          const pixels=visibleCtx.getImageData(0,0,doc.width,doc.height);
+          summary=markDisplayClippingWarning(pixels.data);
+          visibleCtx.putImageData(pixels,0,0);
+        }
+        if(summary&&request.version===renderVersion&&summaryOutput)summaryOutput.textContent=
+          'Света: '+summary.highlights+' · тени: '+summary.shadows+
+          ' из '+summary.eligible+' видимых пикселей';
+      }catch(error){
+        if(request.version===renderVersion&&summaryOutput)
+          summaryOutput.textContent='Анализ RGB недоступен: '+error.message;
+      }
+    }
     textEditController.syncPreviewCanvas();
     layerBlendingController.syncPreviewCanvas();
     if (!request.paintPreview) {
@@ -31683,20 +32525,28 @@ function formatDisplayExposure(value){
 }
 
 let rawDevelopCommandGeneration=0;
+let rawClippingWarningEnabled=false;
 function bindRawDevelopmentControls(root,owner,layerId){
-  const fields=['exposure','wbRed','wbBlue'];
-  const selectors=['[data-raw-exposure]','[data-raw-wb-red]','[data-raw-wb-blue]'];
+  const fields=['exposure','wbRed','wbBlue','highlights','shadows','contrast'];
+  const selectors=['[data-raw-exposure]','[data-raw-wb-red]','[data-raw-wb-blue]',
+    '[data-raw-highlights]','[data-raw-shadows]','[data-raw-contrast]','[data-raw-demosaic]'];
   const controls=selectors.map(s=>root.querySelector(s));
   if(controls.some(c=>!c))return;
-  async function applyRawDevelopment(reset=false){
+  async function applyRawDevelopment(reset=false,override=null){
     const target=owner.layers.find(layer=>layer.id===layerId);
     if(doc!==owner || selected()?.id!==layerId || !target?.rawDng ||
       target.type!=='raster' || isLayerLocked(owner,target) || blockPendingDocumentEdit())return;
-    const next=reset ? {exposure:0,wbRed:1,wbBlue:1} :
-      Object.fromEntries(fields.map((key,i)=>[key,Number(controls[i].value)]));
+    const chosen=override===null ? null : normalizeRawPresetDevelopment(override);
+    if(override!==null&&!chosen)return;
+    const next=reset ? {exposure:0,wbRed:1,wbBlue:1,highlights:0,shadows:0,contrast:0} :
+      chosen ? {...Object.fromEntries(fields.map(key=>[key,chosen[key]])),
+        ...(['edge-aware-green','edge-aware-rgb'].includes(chosen.demosaic)?{demosaic:chosen.demosaic}:{})} :
+      {...Object.fromEntries(fields.map((key,i)=>[key,Number(controls[i].value)])),
+       ...(['edge-aware-green','edge-aware-rgb'].includes(controls[6].value)?{demosaic:controls[6].value}:{})};
     if(fields.some(key=>!Number.isFinite(next[key])))return;
     const original=target.rawDng;
-    if(fields.every(key=>original.development[key]===next[key]))return;
+    if(fields.every(key=>original.development[key]===next[key]) &&
+      (original.development.demosaic||'bilinear')===(next.demosaic||'bilinear'))return;
     const oldPreview=target.dataUrl, session=activeSessionId, generation=++rawDevelopCommandGeneration;
     controls.forEach(c=>{c.disabled=true;});
     try{
@@ -31715,7 +32565,7 @@ function bindRawDevelopmentControls(root,owner,layerId){
       target.rawDng={...original,development:next};
       target.dataUrl=newPreview;
       invalidateImageCache(oldPreview);
-      commit('RAW: экспозиция и баланс белого');
+      commit('RAW: экспозиция, баланс белого, контраст, тон и демозаика');
       setStatus('RAW-проявка обновлена · исходный DNG не изменён');
     }catch(error){
       toast('RAW-проявка: '+error.message,'error');
@@ -31726,6 +32576,81 @@ function bindRawDevelopmentControls(root,owner,layerId){
   }
   controls.forEach(control=>control.addEventListener('change',()=>{void applyRawDevelopment();}));
   root.querySelector('[data-raw-reset]')?.addEventListener('click',()=>{void applyRawDevelopment(true);});
+  const presetSelect=root.querySelector('[data-raw-preset-select]');
+  const presetName=root.querySelector('[data-raw-preset-name]');
+  const presetApply=root.querySelector('[data-raw-preset-apply]');
+  const presetDelete=root.querySelector('[data-raw-preset-delete]');
+  const presetStorage=()=>{try{return window.localStorage;}catch{return null;}};
+  function refreshPresets(selectedName=''){
+    if(!presetSelect)return;
+    const previous=selectedName||presetSelect.value;
+    presetSelect.replaceChildren(new Option('— Выберите пресет —',''));
+    for(const preset of readRawPresets(presetStorage())){
+      presetSelect.add(new Option(preset.name,preset.name));
+    }
+    presetSelect.value=[...presetSelect.options].some(opt=>opt.value===previous)?previous:'';
+    presetApply.disabled=presetDelete.disabled=!presetSelect.value;
+  }
+  refreshPresets();
+  presetSelect?.addEventListener('change',()=>{
+    if(presetSelect.value)presetName.value=presetSelect.value;
+    refreshPresets(presetSelect.value);
+  });
+  root.querySelector('[data-raw-preset-save]')?.addEventListener('click',()=>{
+    const target=owner.layers.find(layer=>layer.id===layerId);
+    if(doc!==owner||selected()?.id!==layerId||!target?.rawDng||
+      isLayerLocked(owner,target)||blockPendingDocumentEdit())return;
+    const result=saveRawPreset(presetStorage(),presetName.value,target.rawDng.development);
+    if(!result.ok){toast('RAW-пресет: неверное имя, лимит или недоступно хранилище','error');return;}
+    refreshPresets(presetName.value.trim().replace(/\s+/g,' '));
+    setStatus('RAW-пресет сохранён локально; исходный DNG не изменён');
+  });
+  presetApply?.addEventListener('click',()=>{
+    const preset=readRawPresets(presetStorage()).find(p=>p.name===presetSelect.value);
+    if(!preset)return;
+    void applyRawDevelopment(false,preset.development);
+  });
+  presetDelete?.addEventListener('click',()=>{
+    if(!deleteRawPreset(presetStorage(),presetSelect.value))return;
+    presetName.value='';
+    refreshPresets('');
+    setStatus('Локальный RAW-пресет удалён');
+  });
+  root.querySelector('[data-raw-preset-export]')?.addEventListener('click',()=>{
+    const result=exportRawPresetFile(presetStorage());
+    if(!result.ok){toast('Нет сохранённых RAW-пресетов для экспорта','error');return;}
+    const url=URL.createObjectURL(new Blob([result.content],{type:'application/json;charset=utf-8'}));
+    const link=document.createElement('a');
+    link.href=url;link.download=result.filename;document.body.append(link);
+    try{link.click();}finally{link.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);}
+    setStatus('RAW-пресеты экспортированы в JSON; данные DNG не включены');
+  });
+  const presetFile=root.querySelector('[data-raw-preset-file]');
+  root.querySelector('[data-raw-preset-import]')?.addEventListener('click',()=>presetFile?.click());
+  presetFile?.addEventListener('change',async()=>{
+    const file=presetFile.files?.[0];
+    presetFile.value='';
+    if(!file)return;
+    try{
+      if(file.size>24000)throw new Error('Файл RAW-пресетов слишком большой');
+      const text=await file.text();
+      const parsed=parseRawPresetFile(text);
+      if(!parsed.ok)throw new Error('Неверный формат, параметры или версия RAW-пресетов');
+      const local=readRawPresets(presetStorage());
+      const collisions=parsed.presets.filter(item=>local.some(p=>p.name.toLocaleLowerCase()===item.name.toLocaleLowerCase())).length;
+      if(!window.confirm('Импортировать '+parsed.presets.length+' RAW-пресетов? Совпадающие имена ('+
+        collisions+') будут заменены. Другие локальные пресеты сохранятся.'))return;
+      const result=importRawPresetFile(presetStorage(),text);
+      if(!result.ok)throw new Error(result.reason==='limit'?'Лимит 16 RAW-пресетов превышен':
+        'Импорт RAW-пресетов отклонён или хранилище недоступно');
+      if(root.isConnected)refreshPresets();
+      setStatus('RAW-пресеты импортированы: '+result.added+' новых, '+result.overwritten+' заменено');
+    }catch(error){toast('RAW-пресеты: '+error.message,'error');}
+  });
+  root.querySelector('[data-raw-clipping-warning]')?.addEventListener('change',event=>{
+    rawClippingWarningEnabled=event.target.checked;
+    render(); // View-only toggle: no History commit, no .zpe or export mutation.
+  });
 }
 function bindHighDepthPreviewControls(root, owner, layerId){
   const toneMap=root?.querySelector('[data-high-depth-tone-map]');
@@ -31776,15 +32701,58 @@ function updateProperties() {
   }
   if (l.type === 'raster' && l.rawDng) {
     const d=l.rawDng.development;
-    const colorLabel=l.rawDng.colorPipeline==='matrix-d50-bradford-v1'?
+    const colorLabel=l.rawDng.colorPipeline==='forward-d50-v1'?
+      'ForwardMatrix + AnalogBalance / CameraCalibration → XYZ D50 → sRGB (ограниченный профиль; без camera oracle)':
+      l.rawDng.colorPipeline==='matrix-d50-bradford-v1'?
       'ColorMatrix → XYZ D50 → sRGB (приближённая калибровка; без camera oracle)':
       'Без ColorMatrix: некалиброванный Bayer preview';
+    const scale=Array.isArray(l.rawDng.defaultScale)?l.rawDng.defaultScale:[1,1];
     extra += '<label>RAW источник</label><span>DNG Bayer · сохранён в .zpe; экспорт PSD/PSB — проявленные пиксели</span>' +
+      '<label>Сжатие RAW</label><span>'+(l.rawDng.compression===7?'Lossless JPEG SOF3 (Compression=7)':'Без сжатия')+'</span>' +
+      '<label>Кодирование Bayer</label><span>'+(l.rawDng.bits??'не указано')+' бит · '+
+        (l.rawDng.compression===7?'Lossless JPEG SOF3':'TIFF uncompressed')+'</span>' +
       '<label>Цвет RAW</label><span>'+colorLabel+'</span>' +
-      '<label>Геометрия RAW</label><span>'+l.rawDng.width+'×'+l.rawDng.height+' сенсор → '+l.width+'×'+l.height+' кадр (ActiveArea / DefaultCrop / Orientation)</span>' +
+      '<label>RAW баланс при съёмке</label><span>'+
+        (l.rawDng.whiteBalanceSource==='as-shot-white-xy'?
+          'AsShotWhiteXY (CIE xy → camera neutral через цветовую матрицу)':
+          l.rawDng.whiteBalanceSource==='as-shot-neutral'?'AsShotNeutral (camera neutral)':
+          'Не определено (legacy .zpe)')+'</span>' +
+      '<label>RAW linearization</label><span>'+(l.rawDng.linearizationTable?'LinearizationTable (до BlackLevel)':'Без LinearizationTable')+'</span>' +
+      '<label>RAW BlackLevel</label><span>Sensor grid '+[...(l.rawDng.blackRepeatDim||[1,1])].reverse().join('×')+' (cols×rows; от ActiveArea, до demosaic / crop)</span>' +
+      '<label>RAW BlackLevelDelta</label><span>' +
+      (l.rawDng.blackDeltaH?'H: sensor columns':'H: нет')+' · '+
+      (l.rawDng.blackDeltaV?'V: sensor rows':'V: нет')+' (SRATIONAL, до demosaic)</span>' +
+      '<label>Геометрия RAW</label><span>'+l.rawDng.width+'×'+l.rawDng.height+' сенсор → '+l.width+'×'+l.height+' кадр (ActiveArea / DefaultCrop / DefaultScale '+scale[0]+'×'+scale[1]+' / Orientation)</span>' +
+      '<label>RAW BaselineExposure</label><span>'+
+        ((l.rawDng.baselineExposure??0)>=0?'+':'')+(l.rawDng.baselineExposure??0).toFixed(2)+' EV · камера (в дополнение к ручной экспозиции)</span>' +
+       '<label>RAW BaselineExposureOffset</label><span>'+
+         ((l.rawDng.baselineExposureOffset??0)>=0?'+':'')+(l.rawDng.baselineExposureOffset??0).toFixed(2)+
+         ' EV · встроенный профиль (сценолинейная экспозиция)</span>' +
       '<label>Экспозиция (EV)</label><input aria-label="RAW экспозиция" data-raw-exposure type="number" min="-5" max="5" step="0.1" value="' + d.exposure + '">' +
       '<label>WB красный</label><input aria-label="RAW баланс красного" data-raw-wb-red type="number" min="0.25" max="4" step="0.05" value="' + d.wbRed + '">' +
       '<label>WB синий</label><input aria-label="RAW баланс синего" data-raw-wb-blue type="number" min="0.25" max="4" step="0.05" value="' + d.wbBlue + '">' +
+      '<label>Света</label><input aria-label="RAW света" data-raw-highlights type="number" min="-1" max="1" step="0.05" value="' + (d.highlights??0) + '">' +
+      '<label>Тени</label><input aria-label="RAW тени" data-raw-shadows type="number" min="-1" max="1" step="0.05" value="' + (d.shadows??0) + '">' +
+      '<label>Контраст RAW</label><input aria-label="RAW контраст" data-raw-contrast type="number" min="-1" max="1" step="0.05" value="' + (d.contrast??0) + '">' +
+      '<label>Демозаика Bayer</label><select aria-label="RAW демозаика" data-raw-demosaic>' +
+      '<option value="bilinear"'+(!d.demosaic||d.demosaic==='bilinear'?' selected':'')+'>Билинейная (совместимость)</option>' +
+      '<option value="edge-aware-green"'+(d.demosaic==='edge-aware-green'?' selected':'')+'>Направленная интерполяция зелёного</option>' +
+      '<option value="edge-aware-rgb"'+(d.demosaic==='edge-aware-rgb'?' selected':'')+'>Зелёно-ориентированная цветовая демозаика (R/G/B)</option></select>' +
+      '<label>RAW-пресет</label><select aria-label="RAW выбор пресета" data-raw-preset-select></select>' +
+      '<div class="wide"><input type="text" maxlength="48" aria-label="RAW имя пресета" data-raw-preset-name placeholder="Название пресета">' +
+      ' <button type="button" class="mini-button" data-raw-preset-save>Сохранить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-apply>Применить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-delete>Удалить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-export>Экспорт JSON</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-import>Импорт JSON</button>' +
+      ' <input type="file" hidden accept=".json,application/json" aria-label="RAW файл пресетов" data-raw-preset-file></div>' +
+      '<div class="wide">Библиотека пресетов хранится в браузере. JSON переносит только параметры RAW (до 16 пресетов); в .zpe сохраняются применённые параметры, а не библиотека.</div>' +
+      '<div class="wide">Линейная коррекция до sRGB. Света: − затемнить / + осветлить; тени: − углубить / + поднять; контраст: − смягчить / + усилить без сдвига среднего серого. Не восстанавливает клиппинг сенсора.</div>' +
+      '<div class="wide"><label><input type="checkbox" data-raw-clipping-warning aria-label="RAW индикация клиппинга"'+
+        (rawClippingWarningEnabled?' checked':'')+'> Подсветить клиппинг отображаемого RGB</label></div>' +
+      '<div class="wide" data-raw-clipping-summary aria-live="polite">'+
+        (rawClippingWarningEnabled?'Расчёт после рендера…':'Выключено')+'</div>' +
+      '<div class="wide">Пурпурный — хотя бы один канал ≥ 254; голубой — все каналы ≤ 1. Это диагностика финального 8-bit RGB кадра, не насыщения RAW-сенсора; в .zpe и экспорт не записывается.</div>' +
       '<div class="wide"><button type="button" class="mini-button" data-raw-reset>Сбросить RAW-проявку</button></div>';
   }
   if (l.type === 'raster' && l.highDepthSource) {
