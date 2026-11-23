@@ -11334,7 +11334,11 @@ function sanitizeRawDng(value, width, height) {
   if (!Number.isFinite(exposure) || exposure < -5 || exposure > 5 ||
       !Number.isFinite(wbRed) || wbRed < 0.25 || wbRed > 4 ||
       !Number.isFinite(wbBlue) || wbBlue < 0.25 || wbBlue > 4) return null;
-  return {dataUrl:value.dataUrl,width:value.width,height:value.height,development:{exposure,wbRed,wbBlue}};
+  // Preserve only a known rendering provenance marker; the original DNG bytes are authoritative.
+  const colorPipeline=value.colorPipeline==='matrix-d50-bradford-v1'?
+    'matrix-d50-bradford-v1':'uncalibrated-bayer-preview';
+  return {dataUrl:value.dataUrl,width:value.width,height:value.height,
+    colorPipeline,development:{exposure,wbRed,wbBlue}};
 }
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
@@ -23698,6 +23702,89 @@ function createProjectController({
   return { openProject, saveProject };
 }
 
+// ---- src/formats/dng-color.js ----
+// Bounded DNG ColorMatrix workflow (3-colour Bayer, without ForwardMatrix).
+// DNG ColorMatrix maps D50 XYZ -> unbalanced camera. White balance is a
+// Bradford chromatic adaptation of the recovered camera-neutral illuminant.
+// Not an ICC/ForwardMatrix or camera-accuracy guarantee.
+const D50=[0.96422,1,0.82521], D65=[0.95047,1,1.08883];
+const BRADFORD=[0.8951,0.2664,-0.1614,-0.7502,1.7135,0.0367,0.0389,-0.0685,1.0296];
+const XYZ_D65_TO_RGB=[3.2404542,-1.5371385,-0.4985314,-0.969266,1.8760108,0.041556,0.0556434,-0.2040259,1.0572252];
+const ILLUMINANT_KELVIN={1:5500,3:2856,17:2856,18:4874,19:6774,20:5503,21:6504,22:7504,23:5003,24:3200};
+function invalid(message){throw new Error('DNG: '+message);}
+function dot(a,b){return [0,1,2].map(r=>a[r*3]*b[0]+a[r*3+1]*b[1]+a[r*3+2]*b[2]);}
+function multiply(a,b){
+  const out=[];
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++)
+    out.push(a[r*3]*b[c]+a[r*3+1]*b[c+3]+a[r*3+2]*b[c+6]);
+  return out;
+}
+function invert(m){
+  if(!Array.isArray(m)||m.length!==9||m.some(v=>!Number.isFinite(v)))invalid('некорректная ColorMatrix');
+  const [a,b,c,d,e,f,g,h,i]=m;
+  const cof=[e*i-f*h,c*h-b*i,b*f-c*e,f*g-d*i,a*i-c*g,c*d-a*f,d*h-e*g,b*g-a*h,a*e-b*d];
+  const det=a*cof[0]+b*cof[3]+c*cof[6];
+  const scale=Math.max(...m.map(Math.abs));
+  if(!Number.isFinite(det)||scale===0||Math.abs(det)<=1e-8*scale**3)
+    invalid('вырожденная ColorMatrix');
+  return cof.map(v=>v/det);
+}
+function adapt(src,dst){
+  const from=dot(BRADFORD,src),to=dot(BRADFORD,dst);
+  if(from.some(v=>v<=1e-7)||to.some(v=>v<=0))invalid('неверная точка белого DNG');
+  const diag=[to[0]/from[0],to[1]/from[1],to[2]/from[2]];
+  return multiply(invert(BRADFORD),BRADFORD.map((v,i)=>v*diag[Math.floor(i/3)]));
+}
+function temperature(xyz){
+  const sum=xyz.reduce((a,b)=>a+b,0);
+  if(sum<=1e-9)invalid('неверная точка белого DNG');
+  const x=xyz[0]/sum,y=xyz[1]/sum;
+  const n=(x-0.332)/(0.1858-y);
+  const t=-449*n**3+3525*n**2-6823.3*n+5520.33;
+  if(!Number.isFinite(t))invalid('неверная цветовая температура DNG');
+  return Math.max(1667,Math.min(25000,t));
+}
+function dngCameraToLinearSrgb(color,{wbRed=1,wbBlue=1}={}){
+  if(!color)return null; // Legacy files without a calibration retain explicit preview fallback.
+  const {matrix1,matrix2,illuminant1,illuminant2,neutral}=color;
+  if(!ILLUMINANT_KELVIN[illuminant1])invalid('неподдерживаемый CalibrationIlluminant1');
+  invert(matrix1); if(matrix2)invert(matrix2); // Validate each profile, not just its blend.
+  if(!Number.isFinite(wbRed)||wbRed<=0||!Number.isFinite(wbBlue)||wbBlue<=0)
+    invalid('неверные пользовательские WB gains');
+  if(Boolean(matrix2)!==Boolean(illuminant2)|| (matrix2&&!ILLUMINANT_KELVIN[illuminant2]))
+    invalid('неполная или неподдерживаемая двойная CalibrationIlluminant/ColorMatrix');
+  if(matrix2&&illuminant1===illuminant2)invalid('совпадающие CalibrationIlluminant');
+  // AsShotNeutral determines the capture illuminant. UI R/B gains are applied
+  // in the camera domain *after* choosing the profile; recomputing a whitepoint
+  // from arbitrary UI gains can yield non-physical Bradford cone responses.
+  const white=[...neutral];
+  if(white.some(v=>!Number.isFinite(v)||v<=0))invalid('неверный баланс белого DNG');
+  let matrix=matrix1;
+  if(matrix2){
+    // Dual-illuminant reciprocal-K interpolation; iterative neutral -> xy -> CCT.
+    // McCamy CCT is an approximation, not a colour-critical camera profile.
+    let weight=0.5;
+    for(let j=0;j<5;j++){
+      matrix=matrix1.map((v,i)=>v*weight+matrix2[i]*(1-weight));
+      const xyz=dot(invert(matrix),white);
+      const kelvin=temperature(xyz);
+      const t1=ILLUMINANT_KELVIN[illuminant1],t2=ILLUMINANT_KELVIN[illuminant2];
+      weight=Math.max(0,Math.min(1,(1/kelvin-1/t2)/(1/t1-1/t2)));
+    }
+    matrix=matrix1.map((v,i)=>v*weight+matrix2[i]*(1-weight));
+  }
+  const cameraToXyz=invert(matrix);
+  const illuminantXyz=dot(cameraToXyz,white);
+  const xyzToD50=adapt(illuminantXyz,D50);
+  const d50ToD65=adapt(D50,D65);
+  const transform=multiply(XYZ_D65_TO_RGB,multiply(d50ToD65,multiply(xyzToD50,cameraToXyz)));
+  if(transform.some(v=>!Number.isFinite(v)))invalid('неверное цветовое преобразование DNG');
+  return multiply(transform,[wbRed,0,0,0,1,0,0,0,wbBlue]);
+}
+function applyDngColorMatrix(transform,r,g,b){
+  return dot(transform,[r,g,b]);
+}
+
 // ---- src/formats/dng.js ----
 // Bounded, dependency-free TIFF/DNG Bayer reader for offline file:// imports.
 // Only classic TIFF (II/MM), uncompressed 8/16-bit single-plane CFA strips.
@@ -23711,6 +23798,9 @@ const dng_TAG = {
   subIfds:330, cfaDims:33421, cfaPattern:33422,
   dngVersion:50706, linearization:50712, blackRepeat:50713,
   black:50714, white:50717, neutral:50728, activeArea:50829,
+  colorMatrix1:50721, colorMatrix2:50722, cameraCalibration1:50723,
+  cameraCalibration2:50724, analogBalance:50727,
+  illuminant1:50778, illuminant2:50779, forwardMatrix1:50964, forwardMatrix2:50965,
 };
 function dng_invalid(message) { throw new Error('DNG: ' + message); }
 function dng_requireThat(ok, message) { if (!ok) dng_invalid(message); }
@@ -23735,7 +23825,12 @@ function inspectDng(buffer) {
       const pos=offset+2+i*12;
       const tag=u16(pos), type=u16(pos+2), count=u32(pos+4);
       const size=dng_TYPE_SIZE[type];
-      if(!size || count > dng_MAX_PIXELS) continue;
+      if(!size || count > dng_MAX_PIXELS){
+        // Never interpret a malformed calibration tag as an uncalibrated image.
+        if([50721,50722,50723,50724,50727,50728,50778,50779,50964,50965].includes(tag))
+          dng_invalid('неподдерживаемый тип или count цветового TIFF tag '+tag);
+        continue;
+      }
       const byteLength=count*size;
       dng_requireThat(Number.isSafeInteger(byteLength) && byteLength <= dng_MAX_FILE_BYTES, 'недопустимый TIFF tag');
       const start=byteLength <= 4 ? pos+8 : u32(pos+8);
@@ -23811,6 +23906,33 @@ function inspectDng(buffer) {
     'WhiteLevel/BlackLevel вне диапазона');
   const neutral=values(ifds[0],dng_TAG.neutral,3) || values(tags,dng_TAG.neutral,3) || [1,1,1];
   dng_requireThat(neutral.length===3 && neutral.every(v=>v>0 && dng_finite(v)), 'ошибочный AsShotNeutral');
+  // Colour tags live in IFD 0 or the CFA IFD, never rely on a thumbnail IFD.
+  const colorTag = tag => ifds[0].has(tag) ? ifds[0] : tags;
+  const matrix = tag => {
+    const owner=colorTag(tag),entry=owner.get(tag);
+    if(!entry)return null;
+    dng_requireThat(entry.type===10 && entry.count===9,
+      'ColorMatrix должна быть SRATIONAL[9] (3×3)');
+    return values(owner,tag,9);
+  };
+  const matrix1=matrix(dng_TAG.colorMatrix1),matrix2=matrix(dng_TAG.colorMatrix2);
+  dng_requireThat(!matrix2 || matrix1,'ColorMatrix2 без ColorMatrix1');
+  const illuminant = tag => {
+    const owner=colorTag(tag),entry=owner.get(tag);
+    if(!entry)return null;
+    dng_requireThat(entry.type===3 && entry.count===1,'CalibrationIlluminant должен быть SHORT');
+    return values(owner,tag,1)[0];
+  };
+  const illuminant1=illuminant(dng_TAG.illuminant1);
+  const illuminant2=illuminant(dng_TAG.illuminant2);
+  // Avoid silently misapplying a profile with unimplemented transforms.
+  if(matrix1)for(const tag of [dng_TAG.cameraCalibration1,dng_TAG.cameraCalibration2,
+    dng_TAG.analogBalance,dng_TAG.forwardMatrix1,dng_TAG.forwardMatrix2])
+    dng_requireThat(!colorTag(tag).has(tag),'CameraCalibration/AnalogBalance/ForwardMatrix пока не поддерживается');
+  dng_requireThat(!matrix1 || Boolean(ifds[0].has(dng_TAG.neutral)||tags.has(dng_TAG.neutral)),
+    'нет AsShotNeutral для ColorMatrix (AsShotWhiteXY пока не поддерживается)');
+  const color=matrix1 ? {matrix1,matrix2,illuminant1,illuminant2,neutral} : null;
+  if(color)dngCameraToLinearSrgb(color); // Reject malformed/singular profiles before import.
   // ActiveArea uses sensor coordinates [top, left, bottom, right]; CFA phase remains sensor-relative.
   const activeArea=values(tags,dng_TAG.activeArea,4) ?? values(ifds[0],dng_TAG.activeArea,4) ?? [0,0,height,width];
   dng_requireThat(activeArea.length===4 && activeArea.every(Number.isInteger) &&
@@ -23837,7 +23959,7 @@ function inspectDng(buffer) {
       'усечённая или некорректная Bayer-полоса');
   }
   return {width,height,displayWidth,displayHeight,orientation,activeArea,
-    bits:bits[0],pattern,black,blackRepeat,white:white[0],neutral,
+    bits:bits[0],pattern,black,blackRepeat,white:white[0],neutral,color,
     offsets,rowsPerStrip,rowBytes,le,buffer};
 }
 function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
@@ -23846,7 +23968,7 @@ function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
     dng_finite(wbRed) && wbRed>=0.25 && wbRed<=4 &&
     dng_finite(wbBlue) && wbBlue>=0.25 && wbBlue<=4, 'неверные параметры RAW-проявки');
   const {width,height,displayWidth,displayHeight,orientation,activeArea,
-    bits,pattern,black,blackRepeat,white,neutral,offsets,rowsPerStrip,rowBytes,le,buffer}=source;
+    bits,pattern,black,blackRepeat,white,neutral,color,offsets,rowsPerStrip,rowBytes,le,buffer}=source;
   const view=new DataView(buffer);
   const normalized=new Float32Array(width*height), channels=new Uint8Array(width*height);
   const exposureScale=2**exposure;
@@ -23863,6 +23985,7 @@ function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
     }
   }
   const multipliers=[(neutral[1]/neutral[0])*wbRed,1,(neutral[1]/neutral[2])*wbBlue];
+  const colorTransform=dngCameraToLinearSrgb(color,{wbRed,wbBlue});
   const rgba=new Uint8ClampedArray(displayWidth*displayHeight*4);
   function sampleChannel(x,y,c){
     const index=y*width+x;
@@ -23901,10 +24024,15 @@ function developDng(source, {exposure=0, wbRed=1, wbBlue=1}={}) {
       case 8: dx=cy;dy=cropWidth-1-cx;break;
     }
     const index=(dy*displayWidth+dx)*4;
-    for(let c=0;c<3;c++)rgba[index+c]=srgb(sampleChannel(x,y,c)*multipliers[c]*exposureScale);
+    const camera=[sampleChannel(x,y,0),sampleChannel(x,y,1),sampleChannel(x,y,2)];
+    const linear=colorTransform ? applyDngColorMatrix(colorTransform,...camera) :
+      camera.map((value,c)=>value*multipliers[c]);
+    for(let c=0;c<3;c++)rgba[index+c]=srgb(linear[c]*exposureScale);
     rgba[index+3]=255;
   }
-  return {width:displayWidth,height:displayHeight,rgba,development:{exposure,wbRed,wbBlue}};
+  return {width:displayWidth,height:displayHeight,rgba,
+    colorPipeline:color?'matrix-d50-bradford-v1':'uncalibrated-bayer-preview',
+    development:{exposure,wbRed,wbBlue}};
 }
 function decodeDng(buffer, development) {
   return developDng(inspectDng(buffer),development);
@@ -23965,7 +24093,8 @@ function createDocumentImportController({
           const pixels=developDng(source);
           const dataUrl=await rgbaPixelsToDataUrl(pixels.width,pixels.height,pixels.rgba,'DNG RAW');
           const rawDng={dataUrl:bytesToDataUrl(raw,'application/x-adobe-dng'),
-            development:pixels.development,width:source.width,height:source.height};
+            development:pixels.development,colorPipeline:pixels.colorPipeline,
+            width:source.width,height:source.height};
           prepared.push({file,dataUrl,width:pixels.width,height:pixels.height,rawDng});
         } catch(error) {
           setStatus('Ошибка DNG: ' + error.message);
@@ -31602,7 +31731,11 @@ function updateProperties() {
   }
   if (l.type === 'raster' && l.rawDng) {
     const d=l.rawDng.development;
+    const colorLabel=l.rawDng.colorPipeline==='matrix-d50-bradford-v1'?
+      'ColorMatrix → XYZ D50 → sRGB (приближённая калибровка; без camera oracle)':
+      'Без ColorMatrix: некалиброванный Bayer preview';
     extra += '<label>RAW источник</label><span>DNG Bayer · сохранён в .zpe; экспорт PSD/PSB — проявленные пиксели</span>' +
+      '<label>Цвет RAW</label><span>'+colorLabel+'</span>' +
       '<label>Экспозиция (EV)</label><input aria-label="RAW экспозиция" data-raw-exposure type="number" min="-5" max="5" step="0.1" value="' + d.exposure + '">' +
       '<label>WB красный</label><input aria-label="RAW баланс красного" data-raw-wb-red type="number" min="0.25" max="4" step="0.05" value="' + d.wbRed + '">' +
       '<label>WB синий</label><input aria-label="RAW баланс синего" data-raw-wb-blue type="number" min="0.25" max="4" step="0.05" value="' + d.wbBlue + '">' +

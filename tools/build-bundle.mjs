@@ -80,6 +80,7 @@ const sources = [
   'src/selection/clipboard-controller.js',
   'src/document/new-document-controller.js',
   'src/document/project-controller.js',
+  'src/formats/dng-color.js',
   'src/formats/dng.js',
   'src/document/import-controller.js',
   'src/document/background-command-controller.js',

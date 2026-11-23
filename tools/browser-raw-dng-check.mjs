@@ -3,16 +3,23 @@ import {decodeDng} from '../src/formats/dng.js';
 import {decodePsd} from '../src/formats/psd.js';
 
 export async function verifyBrowserRawDng({client,evaluate,waitFor,assert}) {
-  const encoded=Buffer.from(fixture()).toString('base64');
+  // Synthetic TIFF/DNG with a real signed-rational ColorMatrix IFD.
+  const calibratedBytes=fixture({matrix1:[0.9,0.1,0,0.1,1,0,0,0.1,1],illuminant1:21,
+    samples:[40,30,20]});
+  const encoded=Buffer.from(calibratedBytes).toString('base64');
   const getState=()=>evaluate(client,"(() => {const canvas=document.querySelector('#editorCanvas');if(!canvas||canvas.width!==4||canvas.height!==4)return null;const rgba=[...canvas.getContext('2d').getImageData(0,0,1,1).data];return {rgba,exposure:document.querySelector('[data-raw-exposure]')?.value,wbRed:document.querySelector('[data-raw-wb-red]')?.value,history:[...document.querySelectorAll('#historyList .history-row')].map(r=>r.textContent)};})()");
   const incoming=await evaluate(client,'(() => {const binary=atob('+JSON.stringify(encoded)+');const bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));const input=document.querySelector("#fileInput");const transfer=new DataTransfer();transfer.items.add(new File([bytes],"camera-sensor.dng",{type:"image/x-adobe-dng"}));input.files=transfer.files;const received={name:input.files[0]?.name,length:input.files[0]?.size};input.dispatchEvent(new Event("change",{bubbles:true}));return received;})()');
   console.log('DNG browser: dispatched',JSON.stringify(incoming));
-  assert(incoming.name==='camera-sensor.dng'&&incoming.length===Buffer.from(fixture()).length,'Chrome file:// receives DNG bytes',JSON.stringify(incoming));
+  assert(incoming.name==='camera-sensor.dng'&&incoming.length===calibratedBytes.byteLength,'Chrome file:// receives calibrated DNG bytes',JSON.stringify(incoming));
   await waitFor('DNG imported to canvas and inspector',async()=>{
     const s=await getState();return s?.exposure==='0'&&s.rgba[3]===255&&s.rgba[0]>s.rgba[2];
   },15000);
   console.log('DNG browser: imported');
   const original=await getState();
+  assert(original.rgba.join(',')===Array.from(decodeDng(calibratedBytes).rgba.slice(0,4)).join(','),
+    'Chrome file:// renders ColorMatrix-calibrated pixels, not old uncalibrated fallback');
+  assert(await evaluate(client,"document.querySelector('[data-raw-exposure]')?.closest('.prop-grid')?.textContent?.includes('ColorMatrix')"),
+    'RAW Properties distinguishes calibrated matrix pipeline from uncalibrated preview');
   await evaluate(client,"(() => {const input=document.querySelector('[data-raw-exposure]');input.value='1';input.dispatchEvent(new Event('change',{bubbles:true}));return true;})()");
   await waitFor('RAW exposure changes real canvas',async()=>{
     const s=await getState();return s?.exposure==='1'&&s.rgba[0]>original.rgba[0]&&s.history.some(h=>h.includes('RAW: экспозиция'));
@@ -38,7 +45,9 @@ export async function verifyBrowserRawDng({client,evaluate,waitFor,assert}) {
   const saved=await evaluate(client,"(async()=>JSON.parse(await window.__rawOutputBlobs.at(-1).text()))()");
   console.log('DNG browser: parsed JSON',saved?.layers?.length);
   const layer=saved.layers?.find(l=>l.rawDng);
-  assert(layer?.rawDng?.dataUrl?.startsWith('data:application/x-adobe-dng;base64,') && layer.rawDng.development.exposure===1,'actual .zpe retains source and exposure');
+  assert(layer?.rawDng?.dataUrl?.startsWith('data:application/x-adobe-dng;base64,') &&
+    layer.rawDng.development.exposure===1 && layer.rawDng.colorPipeline==='matrix-d50-bradford-v1',
+    'actual .zpe retains RAW source, exposure and calibrated pipeline provenance');
   assert(layer.rawDng.dataUrl.split(',')[1]===encoded,'source DNG is byte-for-byte unchanged');
   await evaluate(client,'(() => {const data='+JSON.stringify(saved)+';const input=document.querySelector("#projectInput"),transfer=new DataTransfer();transfer.items.add(new File([JSON.stringify(data)],"raw-reopen.zpe",{type:"application/json"}));input.files=transfer.files;const oldConfirm=window.confirm;window.confirm=()=>true;try{input.dispatchEvent(new Event("change",{bubbles:true}));}finally{window.confirm=oldConfirm;}return true;})()');
   console.log('DNG browser: reopen dispatched');

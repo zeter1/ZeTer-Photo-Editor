@@ -1,4 +1,14 @@
-## 1.46.19 — текущая версия
+## 1.46.20 — текущая версия
+
+### 2026-11-16 — CAP-RAW-DNG-CAMERA-COLOR (bounded matrix pipeline)
+
+- Реальное преобразование 3-channel Bayer в линейный sRGB через DNG ColorMatrix1/2 (SRATIONAL[9]), инверсию XYZ D50 ↔ camera, Bradford white adaptation, D50 → D65 и sRGB encoding; двухисточниковый интерполированный вариант приближённый. Применение к pixels ДО гаммы, экспозиция/WB в исходном pipeline.
+- TIFF II/MM и IFD validation: отбрасываем вырожденные, повреждённые, нечисловые и неверно типизированные ColorMatrix, отсутствующие CalibrationIlluminant/AsShotNeutral, unsupported AnalogBalance/ForwardMatrix/CameraCalibration. Для старых DNG без матрицы остаётся маркированный некалиброванный preview (не заявляется camera-accurate).
+- Свойства слоя явно показывают режим цвета; `.zpe` сохраняет исходные DNG-байты, параметры проявки и whitelisted colorPipeline provenance, Undo/Redo сохраняет pixels и source; PSD/PSB содержит проявленный raster, не native RAW.
+- Локальная проверка: 18/18 focused Node PASS, Chrome Chromium `file://` с фактическим ColorMatrix pixel oracle, exposure/WB, Undo/Redo, .zpe reopen и PNG/PSD/PSB self-round-trip PASS. Linux PR-head и exact-main CI — отдельно, до публикации НЕ ПРОВЕРЕНЫ для этого кода.
+- Ограничения: только uncompressed Bayer 8/16-bit CFA; нет camera-authored reference и независимого LibRaw/RawTherapee pixel oracle, нет ICC/ForwardMatrix/DefaultCrop, DNG compression и полного camera-grade цветоуправления.
+
+## 1.46.19 — предыдущая версия
 
 ### 2026-11-16T20:53:17+03:00 - Контакты для связи в README
 
