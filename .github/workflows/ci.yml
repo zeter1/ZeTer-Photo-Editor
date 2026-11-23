@@ -92,6 +92,9 @@ jobs:
       - name: Bézier Alt+Shift real pointer / Undo / .zpe save and reopen (file://)
         run: npm run test:browser:pen-smooth
 
+      - name: Saved Paths panel controls / sidebar scrolling / History boundary (file://)
+        run: npm run test:browser:paths-layout
+
       - name: Vector-mask density feather / Undo / .zpe save and reopen (file://)
         run: npm run test:browser:vector-mask
       - name: Adjustment creation / Levels visible pixels / Undo / .zpe reopen (file://)
