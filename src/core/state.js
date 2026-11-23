@@ -1013,14 +1013,46 @@ function sanitizeRawDng(value, width, height) {
       value.width * value.height > 16_000_000) return null;
   const d=value.development;
   const exposure=Number(d?.exposure), wbRed=Number(d?.wbRed), wbBlue=Number(d?.wbBlue);
+  // Legacy .zpe projects default to neutral tone; invalid explicit tone fails closed.
+  const highlights=d?.highlights === undefined ? 0 : d.highlights;
+  const shadows=d?.shadows === undefined ? 0 : d.shadows;
+  const contrast=d?.contrast === undefined ? 0 : d.contrast;
+  const demosaic=d?.demosaic;
+  // Legacy RAW projects default to 0 EV. Invalid explicit metadata fails closed;
+  // actual future development always re-reads BaselineExposure from native bytes.
+  const baselineExposure=value.baselineExposure === undefined ? 0 : value.baselineExposure;
+  const baselineExposureOffset=value.baselineExposureOffset === undefined ? 0 : value.baselineExposureOffset;
   if (!Number.isFinite(exposure) || exposure < -5 || exposure > 5 ||
       !Number.isFinite(wbRed) || wbRed < 0.25 || wbRed > 4 ||
-      !Number.isFinite(wbBlue) || wbBlue < 0.25 || wbBlue > 4) return null;
-  // Preserve only a known rendering provenance marker; the original DNG bytes are authoritative.
-  const colorPipeline=value.colorPipeline==='matrix-d50-bradford-v1'?
+      !Number.isFinite(wbBlue) || wbBlue < 0.25 || wbBlue > 4 ||
+      typeof highlights !== 'number' || !Number.isFinite(highlights) || highlights < -1 || highlights > 1 ||
+      typeof shadows !== 'number' || !Number.isFinite(shadows) || shadows < -1 || shadows > 1 ||
+      typeof contrast !== 'number' || !Number.isFinite(contrast) || contrast < -1 || contrast > 1 ||
+      (demosaic!==undefined && demosaic!=='bilinear' && demosaic!=='edge-aware-green' && demosaic!=='edge-aware-rgb') ||
+      typeof baselineExposure !== 'number' || !Number.isFinite(baselineExposure) ||
+      baselineExposure < -16 || baselineExposure > 16 ||
+       typeof baselineExposureOffset !== 'number' || !Number.isFinite(baselineExposureOffset) ||
+       baselineExposureOffset < -16 || baselineExposureOffset > 16) return null;
+  // Preserve only known provenance; the original DNG bytes remain authoritative.
+  const colorPipeline=value.colorPipeline==='forward-d50-v1'?'forward-d50-v1':
+    value.colorPipeline==='matrix-d50-bradford-v1'?
     'matrix-d50-bradford-v1':'uncalibrated-bayer-preview';
+  const whiteBalanceSource=['as-shot-neutral','as-shot-white-xy','legacy-unspecified']
+    .includes(value.whiteBalanceSource)?value.whiteBalanceSource:'legacy-unspecified';
+  const defaultScale=Array.isArray(value.defaultScale)&&value.defaultScale.length===2&&
+    value.defaultScale.every(n=>Number.isFinite(n)&&n>=0.125&&n<=8)
+    ? [...value.defaultScale] : [1,1]; // Old .zpe v1/v2 RAW sources used implicit identity.
+  const blackRepeatDim=Array.isArray(value.blackRepeatDim)&&value.blackRepeatDim.length===2&&
+    value.blackRepeatDim.every(n=>Number.isInteger(n)&&n>=1&&n<=8)
+    ? [...value.blackRepeatDim] : [1,1]; // Legacy .zpe RAW has scalar BlackLevel.
   return {dataUrl:value.dataUrl,width:value.width,height:value.height,
-    colorPipeline,development:{exposure,wbRed,wbBlue}};
+    bits:[8,10,12,14,16].includes(value.bits)?value.bits:null,
+    colorPipeline,whiteBalanceSource,defaultScale,blackRepeatDim,baselineExposure,baselineExposureOffset,
+    blackDeltaH:value.blackDeltaH===true,blackDeltaV:value.blackDeltaV===true,
+    linearizationTable:value.linearizationTable===true,
+    compression:value.compression===7?7:1, // Old .zpe RAW defaults to uncompressed.
+    development:{exposure,wbRed,wbBlue,highlights,shadows,contrast,
+      ...(['edge-aware-green','edge-aware-rgb'].includes(demosaic)?{demosaic}: {})}};
 }
 
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {

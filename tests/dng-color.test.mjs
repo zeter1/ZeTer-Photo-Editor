@@ -42,7 +42,7 @@ test('dual-illuminant ColorMatrix interpolates boundedly and responds to WB with
   const baseline=developDng(source);
   const warm=developDng(source,{wbRed:1.6,wbBlue:0.7});
   assert.notDeepEqual(pixel(warm),pixel(baseline));
-  assert.deepEqual(warm.development,{exposure:0,wbRed:1.6,wbBlue:0.7});
+  assert.deepEqual(warm.development,{exposure:0,wbRed:1.6,wbBlue:0.7,highlights:0,shadows:0,contrast:0});
   assert.deepEqual(new Uint8Array(raw),new Uint8Array(original));
 });
 test('invalid ColorMatrix shape/type, singular determinant, illegal illuminant and rational denominator fail closed',()=>{

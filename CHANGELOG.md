@@ -1,4 +1,203 @@
-## 1.46.21 — текущая версия
+## 1.47.17 — RAW-стек, кандидат интеграции (2026-11-23, PR проверяется)
+
+### 2026-11-23 — интеграция локального RAW-стека и сохранение документации main
+- Цветовая матрица PR #397 и DefaultCrop PR #398 уже приняты в main; этот кандидат переносит 37 локальных коммитов, не дублируя их реализации.
+- Сохранены контактный раздел README из main (включая dkoles.com) и строгая загрузка контрольного Wikimedia JPEG из #398. Записи ниже «локально / НЕ main» описывают исторический статус до этого PR; Linux CI и внешняя камера требуют отдельной приёмки.
+
+### Stage 9 / CAP-RAW-DNG-LINEAR-CONTRAST
+- RAW Properties: реальная scene-linear luminance S-кривая контраста −1..+1 после camera calibration/exposure/Highlights/Shadows и до sRGB transfer, без подмены CSS и без изменений native DNG. Монотонность, black/midgray/white fixed, RGB ratio preservation; UI re-develop, History Undo/Redo, .zpe save/reopen и переносимые пресеты schema 1 с legacy default 0 и strict rejection неверных полей.
+- RED→GREEN 4 новых сценария, **15/15** focused Node PASS; реальный Chromium file:// сырой DNG input / contrast Properties / exact PNG pixels / History Undo/Redo / .zpe reopen PASS. Windows full check **1787 / 1772 PASS / 10 SKIP / 5 FAIL** (только прежние Linux-only cgroup/proc; общий результат FAIL). Полный Windows Chromium `npm run test:browser` v1.47.17 PASS exit 0 с PSD16/PSB32/Worker/IndexedDB и RAW regression. Не опубликовано в GitHub PR/main, PR-head Linux NOT RUN, camera-authored LibRaw oracle BLOCKED. [Журнал](task/002-raw-dng-linear-contrast.md).
+
+## 1.47.16 — предыдущая локальная версия (локальный кандидат 2026-11-23, НЕ main)
+
+### Stage 9 / CAP-RAW-DNG-PRESET-EXPORT-IMPORT
+- Реальный RAW Properties экспортирует именную библиотеку проявки как ограниченный JSON (schema 1), импортирует файл через browser File input после подтверждения, объединяет имена без удаления остальных; отмена и неверный файл ничего не меняют. Strict whitelist параметров, версий и полей, лимит 16, контроль дубликатов, конечных чисел, диапазонов и размера до атомарной записи. Ни DNG bytes, ни слой, ни пиксели в JSON не записываются; сам перенос пресетов не создаёт History, применение использует прежний History/Undo/Redo/.zpe.
+- RED: отсутствующие exports в dng-presets-transfer.test.mjs; GREEN: 6/6 combined unit PASS. Настоящий Chromium file:// RAW smoke PASS для Blob JSON → удаление → негативный файл → импорт и применение с точными RGBA/History oracle; финальный Windows `npm run check` 1783 / 1768 PASS / 10 SKIP / 5 FAIL (те же Linux-only `/proc`/cgroup), version-consistency PASS; полный Chromium `npm run test:browser` PASS exit 0, включая PSD/PSB и Worker/IndexedDB. Код локальный stacked после #398, НЕ GitHub main/PR. Независимый camera-authored LibRaw oracle BLOCKED.
+
+## 1.47.15 — предыдущая локальная версия (2026-11-23, НЕ main)
+
+### Stage 9 / CAP-RAW-DNG-DEVELOP-PRESETS
+- В Properties RAW появились сохраняемые по имени пресеты Exposure, WB R/B, Highlights/Shadows и режима демозаики. Локальная библиотека `localStorage` содержит только числовые настройки, не DNG bytes; JSON versioned schema, конечные значения, clamp [-5,5]/[0.25,4]/[-1,1], режимы строго whitelisted, лимит 16 имен, graceful failure при недоступном storage. Применение делается существующим camera RAW re-develop с одним History commit, Undo/Redo и .zpe native source round-trip.
+- Node `tests/dng-presets.test.mjs` **3/3 PASS**, вместе с `tests/dng-tonal-controls.test.mjs` **8/8 PASS**; настоящий Chromium `file://` RAW smoke **PASS** (save/select/apply, точный RGBA oracle, Undo/Redo, .zpe reopen, локальная delete, RAW/PNG/PSD/PSB регрессия). Независимого camera-authored LibRaw pixel oracle нет. Локальный код stacked поверх #398, пока НЕ PR/main; Linux core/independent CI NOT RUN. Windows `npm run check` **FAIL**: 1780 total / 1765 PASS / 10 SKIP / 5 Linux-only `/proc`/cgroup FAIL; version consistency PASS; **полный Windows Chromium `npm run test:browser` PASS exit 0** (PSD16/PSB32 native Worker/IndexedDB).
+
+## 1.47.14 — предыдущая локальная версия (локальный кандидат 2026-11-23, НЕ main)
+
+### Stage 9 / CAP-RAW-DNG-DISPLAY-CLIPPING-LARGE
+- Убрано ограничение 8 Мп для экранной диагностики финального RAW RGB: кадры большего размера читаются и маркируются отдельными тайлами с пределом **262144 пикселя / 1 МиБ RGBA** на один readback. Между тайлами управление возвращается Chromium, устаревшая обработка отменяется при новом renderVersion; проверяются типы/размеры и корректность суммарных счётчиков. RAW bytes, renderBuffer, History, .zpe и экспорт не меняются.
+- Новые Node RED 3/6 → GREEN **6/6**, все RAW Node **115/115 PASS**, реальный Chromium file:// на **синтетическом 3001×3001 (9 Мп) preview**: пурпурный/голубой маркер, точные пиксели, on/off без History PASS. Это НЕ camera-authored DNG и не независимая LibRaw проверка.
+
+### Stage 2 / CAP-POINTER-CAPTURE-LATE-EVENT
+- Исправлена реальная гонка в `src/interaction/pointer-lifecycle-router.js`: поздний `lostpointercapture` старого жеста при уже захваченном том же `pointerId` больше не отменяет новый жест. Новая детерминированная проверка `tests/pointer-lifecycle-router.test.mjs` **RED 9/10 → GREEN 10/10**, совместные pointer+brush+clipping **26/26 PASS**. Внешний Chromium broad smoke остаётся требующим повторной стабилизации: единичный успешный проход и повторные failures на том же раннем сценарии не эквивалентны стабильному PASS.
+
+### P2 / CAP-RAW-DNG-BRUSH-SMOKE-ISOLATION
+- Локализована CDP-причина флаки `red object brush preview`: клики по toolbar/Properties меняют геометрию overlay, но smoke использовал старые screen x/y, поэтому рисовал красный buffer в соседней document точке. Координаты теперь рассчитываются **заново по фактическому DOM rect overlay** для каждого mousePressed/moved/released; pixel/History assertions не ослаблены. Добавлен быстрый реальный Chromium `npm run test:browser:brush` (старая геометрия 3/6 FAIL, новая **6/6 с трассировкой + 6/6 чистых PASS**). Full browser до исправления геометрии был флаки; **финальный полный Chromium `npm run test:browser` PASS exit 0** на v1.47.14. `npm run test:browser:raw-dng` PASS, RAW Node 115/115 PASS, targeted pointer/brush/clipping 26/26 PASS, version consistency 1/1 PASS. **Полный Windows `npm run check` FAIL:** 1777 total, 1762 PASS, 10 SKIP, 5 Linux-only `/proc`/cgroup FAIL. Linux PR-head CI локального кода NOT RUN.
+- Существующие локальные RAW возможности остаются ещё НЕ в GitHub main/PR: обязательная очередь #397 → #398 → объединённый стек, ревью и exact-head Linux CI; внешний camera pixel oracle BLOCKED. [Журнал](task/002-raw-dng-large-display-clipping.md).
+
+## 1.47.13 — предыдущая локальная версия (2026-11-23, НЕ main)
+
+### Stage 9 / CAP-RAW-DNG-DISPLAY-CLIPPING
+- Добавлена настоящая **экранная** индикация клиппинга RAW-превью: переключатель в Properties, пурпурная метка при ≥254 хотя бы в одном канале итогового 8-bit RGB и голубая метка при ≤1 во всех каналах, счётчики пикселей. Прозрачная/полупрозрачная кромка (alpha < 128) не учитывается; ограничение 8 Мп защищает память.
+- Подсветка применяется **после** `renderDocument` только к видимому `#editorCanvas`: `renderBuffer`, `layer.dataUrl`, исходный DNG, Undo/Redo, `.zpe`, PNG/PSD/PSB экспорт не меняются. Отсутствие внешнего camera-authored/LibRaw oracle не выдаётся за sensor clipping или восстановление светов.
+- Новые 3 unit-теста `tests/dng-clipping-warning.test.mjs` сначала RED (нет модуля), затем GREEN; RAW 112/112 Node PASS, version consistency 1/1 PASS, `npm run build` и `node --check` PASS. Настоящий Chromium `file://`: exposure +5 → подсветка Canvas → History неизменна → сохранённый `.zpe` и PNG export содержат исходный растр → выключение возвращает пиксели — PASS в полном RAW browser smoke. Windows full `npm run check` **FAIL** 1773 tests / 1758 PASS / 10 SKIP / 5 Linux-only `/proc`/cgroup FAIL; широкий `npm run test:browser` **FAIL** на ранее существовавшем `red object brush preview` timeout. PR-head Linux core/real-photo для новой локальной версии NOT RUN.
+- Исходная интеграционная очередь #397 → #398 → `35bead7` остаётся открытой; этот срез живёт в локальной ветке `feat/raw-display-clipping-20261123` поверх локального `9becf71`. [Журнал](task/002-raw-dng-display-clipping.md).
+
+## 1.47.12 — предыдущая локальная версия (2026-11-20)
+
+### Stage 9 / CAP-RAW-DNG-STACK-RECONCILIATION — локальный integration merge (без новой версии)
+- Уже реализованный и отдельно протестированный RAW stack до v1.47.12 объединён с точным head stacked PR #398 (`05c48eb`) в новом локальном merge-коммите `35bead7` (второй родитель `0e7eba9`). Ветка сохранена отдельно; никакого повторного декодера, GitHub merge или заявлений об интеграции в main. Код/RAW UI/Undo/Redo/.zpe/сборка образуют единое тестируемое дерево.
+- Повторно проверено на объединённом дереве: `npm run build` PASS; RAW Node **109/109 PASS**; Chromium `file://` RAW import, пиксели, History, .zpe reopen, PNG/PSD/PSB raster regression PASS. Windows `npm run check` **FAIL**: 1755 PASS/10 SKIP/5 Linux-only `/proc`/cgroup FAIL; широкий `npm run test:browser` **FAIL** на `red object brush preview` timeout — воспроизведён также на неизменённом #398 baseline (причина UNKNOWN). Для нового кода Linux PR-head CI NOT RUN, #397/#398 всё ещё OPEN. [Журнал](task/002-raw-dng-stack-integration.md).
+
+### Stage 9 / CAP-RAW-DNG-CHROMA-DEMOSAIC
+- В RAW Properties добавлен третий **опциональный** режим Bayer `edge-aware-rgb`: направленное восстановление G и интерполяция цветоразностных R−G / B−G вместо независимого размытия R/B. Вычисления выполняются по исходным CFA координатам до DefaultCrop/Scale/Orientation, Camera→sRGB и экспозиции, на периферии сохраняется bilinear fallback. Исходный DNG не изменяется.
+- Старые bilinear и `edge-aware-green` остаются пиксельно совместимыми; режим сохраняется в native `.zpe`, поддерживает History/Undo/Redo/reset, валидация enum fail-closed. Исправлена логика выбранного значения bilinear в RAW Inspector для третьего режима.
+- Новые `tests/dng-edge-aware-chroma.test.mjs`: 2 RED→GREEN, оба TIFF endian, 4 Bayer CFA фазы, точные RGB pixels на границе яркости с постоянным chroma, неизменность source и `.zpe` сохранение. Расширена настоящая Chromium `file://` проверка выбора режима, полного RGBA, Undo/Redo и повторного открытия проекта. Не заявляются camera-authored / LibRaw pixel parity и GPU/производительность. [Журнал](task/002-raw-dng-chroma-demosaic.md).
+
+## 1.47.11 — предыдущая локальная версия (2026-11-20)
+
+### Stage 9 / CAP-RAW-DNG-EDGE-GREEN
+- Добавлен настоящий опциональный режим «Направленная интерполяция зелёного» в RAW Properties. Градиент и коррекция по исходным Bayer-отсчётам выбирают горизонтальное/вертикальное направление для зелёного в красных/синих узлах до fractional DefaultCrop, ColorMatrix, Exposure и sRGB; на границах сенсора — прежний bilinear fallback. Это не полная современная демозаика и не Adobe/LibRaw parity.
+- Legacy bilinear остался по умолчанию; выбранный режим меняет real pixel preview, проходит Undo/Redo, сброс и `.zpe` save/reopen, исходные DNG bytes не изменяются. Неподдерживаемый режим отклоняется; старые `.zpe` остаются работоспособными.
+- Новая RED→GREEN регрессия `tests/dng-edge-aware-green.test.mjs`, настоящий Chromium `file://` FileInput/pixel oracle/History/.zpe через `tools/browser-raw-demosaic-check.mjs` и старый RAW browser suite PASS. Linux CI и camera-authored/independent oracle для этого локального кода NOT RUN; #397/#398 ещё не интегрированы. [Журнал](task/002-raw-dng-edge-green.md).
+
+## 1.47.10 — предыдущая локальная версия (2026-11-20)
+
+### Stage 9 / CAP-RAW-DNG-BASELINE-EXPOSURE-OFFSET
+- Реально поддержан встроенный DNG профильный `BaselineExposureOffset` (TIFF 51109, signed SRATIONAL[1], II/MM): в линейной проявке применяется сумма `BaselineExposure + BaselineExposureOffset + user Exposure` до Highlights/Shadows и sRGB.
+- Прямой импорт через FileInput и RAW Properties показывают отдельно авторское camera EV и профильную поправку; без изменения исходного DNG, с RAW History/Undo/Redo, исходными байтами, корректным `.zpe` reopen/legacy fallback.
+- Неверные type/count, zero denominator, pointer, EV за ±16 и конфликтующие дубликаты IFD0/CFA отклоняются явно. Функция ограничена встроенными метаданными DNG: выбор стороннего .dcp/ExtraCameraProfiles и camera-authored LibRaw pixel parity не заявляются.
+- Локальная реализация поверх v1.47.9; зависимые #397/#398 ещё OPEN, удалённая публикация/merge не выполнены. Подробная проверка и границы: [журнал](task/002-raw-dng-baseline-exposure-offset.md).
+
+## 1.47.9 — предыдущая локальная версия (локальный кандидат, 2026-11-20)
+
+### Stage 9 / CAP-RAW-DNG-ASSHOT-WHITE-XY
+- Импорт DNG с TIFF 50729 AsShotWhiteXY `RATIONAL[2]` вместо AsShotNeutral: CIE xy → XYZ(Y=1) → согласованная `AnalogBalance * CameraCalibration * ColorMatrix` camera-neutral, затем ForwardMatrix/Bradford в linear sRGB. Dual-illuminant interpolation по цветовой температуре остаётся приближением; нет claims о camera-authored colour parity.
+- Отклоняются неверные тип/count/zero denominator/xy вне цветового треугольника/недопустимые pointers, одновременное AsShotNeutral+AsShotWhiteXY и отсутствие ColorMatrix при xy. II/MM поддержаны; оригинал DNG не изменяется.
+- RAW Properties показывает источник WB, `.zpe` v1/v2 хранит проверенный `whiteBalanceSource` и исходные байты, старые проекты принимают legacy fallback. Реальный Chrome `file://`: FileInput, RGBA pixel oracle, History Undo/Redo, exposure и `.zpe` сохранение/reopen; regression SOF3/packed/ForwardMatrix/PNG/PSD/PSB.
+- Локальная ветка `feat/raw-dng-asshot-white-xy-20261120`; Windows full `npm run check` 1761 tests / 1746 PASS / 10 SKIP / 5 Linux-only cgroup FAIL (overall FAIL); GitHub PR/CI для этой версии NOT RUN. Данные — synthetic TIFF, licensed camera DNG + внешний LibRaw oracle BLOCKED.
+
+## 1.47.8 — предыдущая локальная версия (2026-11-20)
+
+### Stage 9 / CAP-RAW-DNG-BASELINE-EXPOSURE
+- Поддержан реальный DNG TIFF BaselineExposure (50730, signed SRATIONAL[1], II/MM) из IFD0/CFA, с проверкой конфликтов, корректной компенсацией в linear RGB до tonal/sRGB. Ручная RAW экспозиция остаётся относительной к camera baseline, Reset не удаляет поправку камеры.
+- RAW Properties показывает camera EV; `.zpe` содержит whitelisted baseline provenance и исходные DNG bytes без изменений, старые проекты получают 0 EV. Тег с неверными типами/count/denominator/range отклоняется без неявного fallback.
+- Тесты: [tests/dng-baseline-exposure.test.mjs](tests/dng-baseline-exposure.test.mjs), импорт, реальный Chromium `file://` RAW input/пиксели/History/.zpe. Функция локальная, не опубликована; ни camera-authored/LibRaw oracle, ни удалённый PR-head Linux CI для неё пока не подтверждены.
+
+## 1.47.7 — предыдущая локальная версия (2026-11-20)
+
+### Stage 9 / CAP-RAW-DNG-TONAL-CONTROLS-PORT
+- Портированы Highlights/Shadows из ранее готовой локальной ветки в актуальную RAW цепочку: scene-linear яркостные кривые после ForwardMatrix/ColorMatrix и EV, до sRGB. RAW Properties, reset, History Undo/Redo и неизменные DNG-байты с .zpe provenance.
+- До правки тест RED (нет экспорта), после 50/50 focused Node PASS и реальный Chromium file:// pixel oracle/History/Undo/Redo/.zpe reopen PASS, включая предыдущие packed/SOF3/BlackLevel/ForwardMatrix regressions и PNG/PSD/PSB rendered raster.
+- Windows full check FAIL (5 Linux-only /proc/cgroup), удалённый Linux CI/PR/merge для v1.47.7 NOT RUN. Camera-authored LibRaw and Adobe parity не подтверждены. [Журнал](task/002-raw-dng-tonal-controls-port.md).
+
+## 1.47.6 — предыдущая локальная версия (2026-11-20)
+
+> Stage 9 / CAP-RAW-DNG-FORWARD-MATRIX-PORT: перенесена существующая локальная реализация 8bfcd0e поверх Packed Bayer/BlackLevelDelta/SOF3; **не опубликовано в GitHub**.
+
+- Реальные DNG ForwardMatrix1/2 (SRATIONAL 3×3) теперь используются для camera RGB → XYZ D50 → linear sRGB; поддержаны AnalogBalance, CameraCalibration1/2 и UTF-8 CameraCalibrationSignature/ProfileCalibrationSignature (совпадение signatures). Для DNG без ForwardMatrix сохраняется старый ColorMatrix путь и явно некалиброванный fallback.
+- Сохранена sensor-space цепочка LinearizationTable → BlackLevelRepeatDim + signed BlackLevelDelta → demosaic/DefaultCrop/Scale → WB/экспозиция → цвет; поддерживаются packed TIFF 10/12/14-bit и JPEG lossless SOF3 mixed SOS, Orientation 1–8. Неверные/вырожденные профили и TIFF metadata отклоняются до импорта.
+- RAW Properties различает ForwardMatrix; оригинальные байты DNG и маркер colorPipeline `forward-d50-v1` хранятся в `.zpe`, History Undo/Redo повторно проявляет исходный RAW. PNG/PSD/PSB сохраняют только проявленные raster pixels.
+- 55/55 адресных Node PASS, build PASS, реальный Chromium file:// FileInput/ForwardMatrix pixels/History/.zpe PASS. Полный Windows `npm run check` FAIL (1733 PASS / 10 SKIP / 5 Linux-only cgroup FAIL), remote CI NOT RUN; [журнал](task/002-raw-dng-forward-matrix-port.md). Нет independent camera-authored/LibRaw pixel oracle; Dual-illuminant CCT остаётся приближением.
+
+## 1.47.5 — предыдущая версия (локальный кандидат, 2026-11-20)
+
+> CAP-RAW-DNG-PACKED-BAYER-PORT: перенос ранее реализованного packed Bayer в новейшую локальную RAW-цепочку. Код НЕ опубликован в GitHub; PR #397/#398 открыты.
+
+- Распаковка несжатых DNG TIFF Bayer 10/12/14-bit с FillOrder=1, II/MM TIFF, byte-aligned scanlines, отдельными strips и полными padded tiles; исходные RAW bytes остаются неизменными.
+- В новых DNG одновременно работают LinearizationTable, сенсорные BlackLevelRepeatDim и signed BlackLevelDeltaH/V, ColorMatrix, DefaultCrop/DefaultScale, Orientation, WB и Exposure. В инспекторе указывается родная разрядность, .zpe хранит bits и compression, History Undo/Redo повторно проявляет исходный Bayer.
+- Проверка формата fail-closed: неизвестный FillOrder/type/count, нестандартная глубина, усечённые и избыточные uncompressed блоки. JPEG SOF3 и существующие DNG потоки сохраняются.
+- Synthetic 16-bit oracle / Chrome file:// acceptance не заменяют licensed camera-authored DNG / независимый LibRaw reference. Linux CI для этого локального кода NOT RUN.
+
+## 1.47.4 — предыдущая локальная версия (локальный кандидат, 2026-11-20)
+
+> Stage 9 / CAP-RAW-DNG-BLACKLEVEL-DELTA: локальная реализация на базе v1.47.3. CI и merge нового кода на GitHub не выполнялись.
+
+- Реальная обработка BlackLevelDeltaH/V `SRATIONAL`: знаковые смещения по столбцам и строкам ActiveArea, до demosaic и после LinearizationTable, с BlackLevelRepeatDim и WhiteLevel normalization; sensor-space фаза не меняется от DefaultCrop, DefaultScale и Orientation.
+- TIFF fail-closed: неверный тип/count, unsafe IFD offset, нулевой знаменатель, effective black вне [0,white); исходный DNG не меняется. `.zpe` сохраняет флаги provenance, Properties отображает H/V, Exposure/History/Undo/Redo перепроявляют исходный RAW.
+- Camera-authored DNG и независимый LibRaw/RawTherapee pixel oracle всё ещё отсутствуют. GitHub #397 и #398 остаются открытыми, локальная RAW chain не опубликована.
+
+## 1.47.3 — предыдущая локальная версия (2026-11-20)
+
+> Stage 9 / CAP-RAW-DNG-BLACKLEVEL-REPEAT: код **только локально** в ветке `feat/raw-dng-blacklevel-repeat-20261120`, поверх непубликованной RAW цепочки. GitHub PR-head Linux CI / merge / exact-main для этого кода НЕ выполнялись.
+
+- **Реальное изменение:** DNG BlackLevelRepeatDim (SHORT[2]) и BlackLevel (SHORT/LONG/RATIONAL) с повторяющейся сеткой до 8×8 вычитаются в исходных sensor x/y перед Bayer demosaic, применением ActiveArea/DefaultCrop/DefaultScale/Orientation и sRGB transfer. Сохраняются scalar и 2×2 старые файлы, 8/16-bit LinearizationTable output-domain, ColorMatrix / exposure.
+- **Данные/UI:** исходный DNG неизменен; `blackRepeatDim` сохраняется в .zpe snapshot/reopen, RAW Properties показывает сенсорную сетку; повторная проявка, History/Undo/Redo работают. PSD/PSB/PNG остаются экспортом проявленных растровых пикселей, не editable RAW.
+- **Безопасность:** fail-closed неправильные TIFF type/count, вне диапазона сетка, несовпадение count, zero denominator, уровни ≥ WhiteLevel и неподдерживаемые BlackLevelDeltaH/V; зависимых от координат поправок Delta пока нет.
+- **Проверка:** 5 новых Node RED→GREEN, focused DNG suite 42/42 PASS, реальный Chrome `file://` RAW FileInput→RGBA→Properties→.zpe save/reopen→exposure/History/Undo/Redo PASS, прежний JPEG SOF3, PNG/PSD/PSB raster regression PASS. Full Windows npm run check: Linux-only /proc/cgroup failures (общий статус FAIL; см. [журнал](task/002-raw-dng-blacklevel-repeat.md)).
+- **Не заявлено:** camera-authored DNG / LibRaw/RawTherapee независимый pixel oracle, произвольные JPEG slices, ICC/HDR, Linux PR-head CI. [Очередь](task/NEXT.md).
+
+## 1.47.2 — предыдущая локальная версия (2026-11-20)
+
+> Stage 9 / CAP-RAW-DNG-JPEG-MIXED-SCANS: код только в локальной ветке, НЕ в main/PR. GitHub Linux PR-head/independent real-photo CI NOT RUN; #397/#398 остаются OPEN.
+
+- **Реализация:** lossless JPEG SOF3 с непересекающимися SOS-группами по одному или двум из четырёх CFA компонентов, включая 1+2+1. Каждый scan декодируется в frame component ID с собственными Huffman DC selectors, predictor, Pt и restart interval DRI/RSTn, без потери Bayer порядка. Full interleaved остаётся отдельным допустимым режимом; неизвестные/повторные/неполные SOS, неверные RST и лишние данные отклоняются.
+- **Интеграция:** TIFF II/MM strips/padded tiles, исходный compressed DNG в .zpe, RAW Exposure и History Undo/Redo, real Chromium `file://` FileInput/пиксели/.zpe reopen. PNG/PSD/PSB экспорт по-прежнему использует проявленный растровый RGB, без фальшивого PSD RAW layer.
+- **Доказательства:** новые Node 3/4 RED (production не принимал 1+2+1) → 4/4 GREEN, 16/16 смешанных и соседних SOF3 тестов PASS; npm run build и настоящий Chrome file:// RAW E2E PASS. Общий Windows npm run check: 5 неприменимых Linux /proc/cgroup падений; ограничения и точные результаты — [журнал](task/002-raw-dng-jpeg-mixed-scans.md).
+- **Не заявлено:** external camera-authored DNG/LibRaw pixel parity, JPEG slices/subsampling, CI/merge.
+
+## 1.47.1 — предыдущая локальная версия (2026-11-20)
+
+> Stage 9 / CAP-RAW-DNG-JPEG-PARTIAL-SCANS: **только локальная ветка**, НЕ в main, GitHub PR/CI новой версии NOT RUN. Зависимости #397 и #398 остаются OPEN. Нет внешнего camera-authored DNG/LibRaw эталона.
+
+- **Реализация:** JPEG lossless SOF3 DNG Compression=7 декодирует две независимые SOS-группы по 2 из 4 CFA-компонентов, учитывая произвольный порядок component IDs и отдельные Huffman selectors, predictor 1–7, point transform и DRI/RSTn, без смешивания Bayer samples.
+- **Границы:** двойные либо одиночные SOS-группы принимаются только как однородное разбиение всех frame-компонентов; неизвестные, повторённые, пропущенные, повреждённые и смешанные группы отклоняются. Неподдерживаемые 1+2+1, JPEG slices, subsampling и внешний camera accuracy не заявлены.
+- **Проверка:** новые RED→GREEN Node negative/positive/II-MM TIFF strip+tile/precision tests; реальный Chromium `file://` FileInput 2+2 JPEG CFA, PNG-layer RGBA vs Node decode, неизменный compressed RAW в `.zpe`, reopen, exposure/History Undo/Redo и прежний PNG/PSD/PSB rendered-raster regression PASS. Точный итог Windows check/CI см. [журнал](task/002-raw-dng-jpeg-partial-scans.md).
+
+## 1.47.0 — предыдущая локальная версия (2026-11-20)
+
+> Stage 9 / CAP-RAW-DNG-JPEG-MULTISCAN. Новый форматный срез **только локальный**, цепочка #397/#398 по-прежнему OPEN; проверки Linux CI exact PR-head и merged-main этой версии NOT RUN. Полная camera-authored DNG/LibRaw pixel parity BLOCKED.
+
+- **Добавлено:** декодирование нескольких неинтерливинговых SOS-сканов JPEG lossless SOF3 (1 скан на 1 компонент из 2/4), независимо от порядка component IDs; отдельное восстановление predictor/Huffman для каждого компонента без повреждения CFA sensor pixels. Сохранены restart interval DRI/RSTn, point transform, TIFF strips/tiles и исходные DNG bytes.
+- **Безопасность:** fail-closed для пропущенных, повторных, неизвестных, смешанных SOS и повреждённых Huffman selectors/EOI; поддержка намеренно ограничена полным interleaved scan либо полным набором одиночных component scans (без произвольных частичных групп/срезов).
+- **Проверка:** RED→GREEN новые Node regression tests, точные sample-пиксели против несжатых Bayer fixtures; Chromium `file://` multi-SOS tiled DNG импорт, RGBA oracle, .zpe save/reopen, exposure/History/Undo/Redo и ранее принятый PNG/PSD/PSB rendered-raster путь PASS. Windows полный `npm run check` отдельно: Linux-only cgroup/proc-тесты остаются ожидаемым ограничением, GitHub CI для нового кода пока NOT RUN.
+- **Следующий срез:** составные частично interleaved SOS (например, 2+2), после независимой валидации JPEG-порядка MCU; sliced camera DNG и LibRaw oracle — отдельно.
+
+## 1.46.26 — предыдущая локальная версия (2026-11-19)
+
+> Stage 9 / CAP-RAW-DNG-JPEG-RESTART-TILED. Код **не в main**; Linux PR-head/independent/exact-main CI новой версии NOT RUN. Full Windows check НЕ PASS.
+
+- Реализован JPEG lossless SOF3 restart: DRI interval, строгие маркеры RST0–RST7, битовое выравнивание/проверка padding, сброс предиктора первого MCU каждого интервала; повреждённые/некорректные DRI/RST отклоняются.
+- Добавлена безопасная TIFF tiled CFA раскладка Compression=7 (tags 322–325), полное декодирование tile и корректное сшивание неполных краёв с исходной Bayer фазой; strip/uncompressed путь сохранён. Новые RED→GREEN unit, вместе 54/54 focused RAW PASS.
+- Реальный Chromium `file://` импорт tiled 4-компонентного SOF3 с restart, pixel oracle vs Node, `.zpe` native bytes/reopen, exposure/History Undo/Redo и прежний PNG/PSD/PSB rendered raster regression PASS. Windows full `npm run check`: **1700 PASS/10 SKIP/5 Linux-only /proc/cgroup FAIL**; общий check FAIL. Камерный RAW/LibRaw independent oracle BLOCKED, TIFF/JPEG slices/multi-scan не заявлены. [Журнал](task/002-raw-dng-jpeg-restart-tiled.md).
+
+## 1.46.25 — предыдущая локальная версия
+
+> Stage 9, bounded CAP-RAW-DNG-JPEG-MULTICOMPONENT — исходный compressed DNG не изменяется; Linux PR-head/exact-main для этого среза NOT RUN.
+
+- Реализован декодер DNG SOF3 TIFF Compression=7 с 2/4 чередующимися по строке компонентами CFA, отдельными Huffman DC tables и состоянием предикторов; строгая валидация SOF3/SOS/неподдерживаемых JPEG layouts вместо неверной картинки. Сохранены прежние 1-компонентные SOF3 и uncompressed DNG.
+- Реальный Chromium `file://` FileInput 4-channel SOF3 → полноцветный RGBA пиксельный oracle, сохранение/открытие `.zpe` с байтово неизменным RAW, exposure/History/Undo/Redo и предыдущие PNG/PSD/PSB raster export regression PASS. RED 3 новых теста → GREEN, focused RAW 46/46 Node PASS. Реальный camera-authored reference DNG/LibRaw пока BLOCKED, restart/slices/tiles NOT SUPPORTED. [Журнал](task/002-raw-dng-jpeg-multicomponent.md).
+
+## 1.46.24 — предыдущая локальная версия
+
+> Stage 9, локальный кандидат **НЕ в main**; Linux PR-head/exact-main CI этого среза НЕ запускались.
+
+### 2026-11-19 — CAP-RAW-DNG-LOSSLESS-JPEG-SOF3
+
+- Добавлен реальный bounded SOF3 Huffman decoder и импорт одноканальных Compression=7 DNG CFA strips 8/10/12/14/16-bit; II/MM, предикторы 1–7 и point transform. Неподдержанные restart, sliced и multi-component JPEG отвергаются явно.
+- Декомпрессия выполняется **до** LinearizationTable/BlackLevel, Bayer CFA, DefaultCrop/Scale и ColorMatrix; исходный DNG сохраняется, `.zpe` пишет `compression: 7`, UI Properties сообщает режим, WB/exposure и History Undo/Redo сохранены. PSD/PSB/PNG экспорты — только проявленные raster-пиксели.
+- Исправлена обязательная синхронизация нового модуля с собственным browser-bundler для `file://`: диагностированный RED `decodeDngLosslessJpeg is not defined` → GREEN. Focused RAW Node **43/43 PASS**, реальный Chrome `file://` FileInput/pixel oracle/.zpe reopen/exposure/Undo/Redo/PNG/PSD/PSB regression PASS; Windows full `npm run check`: **1689 PASS / 10 SKIP / 5 FAIL** (5 Linux-only `/proc`/cgroup tests). Synthetic fixtures не подтверждают camera-authored/LibRaw parity; новый PR-head CI NOT RUN, #397/#398 OPEN. [Журнал](task/002-raw-dng-lossless-jpeg.md).
+
+## 1.46.23 — предыдущая версия
+
+> Локальная версия-кандидат, НЕ в main; GitHub PR-head CI NOT RUN.
+
+### 2026-11-19 — CAP-RAW-DNG-LINEARIZATION (реальная проявка DNG SHORT LUT)
+
+- Добавлен разбор DNG LinearizationTable (50712, SHORT[2..256] для 8-bit, [2..65536] для 16-bit), включая inline SHORT[2], II/MM, короткие LUT с clamp индекса. Невалидные типы, count/границы TIFF отвергаются, вместо молчаливой неверной картинки.
+- Значения Bayer по исходным кодам проходят LUT до BlackLevel/WhiteLevel, демозаики, fractional DefaultCrop/DefaultScale и ColorMatrix/sRGB. Исходные DNG bytes, .zpe provenance и редактируемая RAW-проявка сохранены; Properties сообщает об активной таблице.
+- RED 3/3 → GREEN 36/36 RAW Node focused, включая 65 536-элементную 16-bit таблицу, ненулевой BlackLevel и дополнительную RED→GREEN регрессию: 8-bit CFA → 16-bit LUT WhiteLevel=40000/BlackLevel=2000 (II/MM); без LUT 8-битное ограничение сохраняется. Chrome file:// native input → actual layer pixels/Inspector/.zpe save/reopen/LUT Undo+Redo PNG pixel oracle PASS. Windows full check: 1681 PASS / 10 SKIP / 5 Linux-only cgroup/proc FAIL (общий Windows check не PASS). Synthetic TIFF не camera-authored pixel oracle. PR-head Linux CI NOT RUN; #397/#398 всё ещё OPEN.
+- Compression=7, packed RAW, ForwardMatrix, ICC и camera-authored LibRaw/RawTherapee accuracy не приняты.
+
+## 1.46.22 — предыдущая версия
+
+> CAP-RAW-DNG-DEFAULT-SCALE: локальный кандидат, не в main; PR-head CI NOT RUN.
+
+- DNG DefaultScale RATIONAL[2] теперь реально задаёт выходные размеры пиксельного кадра после DefaultCrop, до Orientation. Билинейная выборка исходного Bayer в линейном camera RGB, затем ColorMatrix/экспозиция и sRGB OETF; non-square pixel aspect не игнорируется.
+- Ограничены входные коэффициенты масштабирования (1/8…8), размеры осей/количество выходных пикселей, неверный TIFF тип/арность, нулевой знаменатель; ошибочные DNG отвергаются без неверного preview.
+- Properties показывает масштаб, `.zpe` хранит исходные RAW bytes + нормализованный scale provenance (старые документы получают 1×1), re-develop WB/exposure и History Undo/Redo не теряются. PSD/PSB содержат только проявленную raster-картинку.
+- Три новых RED→GREEN набора RAW unit, endianness II/MM, horizontal upscale, vertical downsample, Orientation 6, линейный channel oracle и ошибки; **29/29 focused Node PASS**, `npm run build` PASS, реальный Chrome `file://` импорт→RGBA→UI→.zpe→Undo/Redo→PNG/PSD/PSB PASS. Windows full `npm run check`: 1675 PASS / 10 SKIP / 5 Linux-only `/proc`/cgroup FAIL; generated bundle/version markers PASS; Linux PR-head CI и external camera-authored LibRaw golden **NOT RUN**.
+- Ветка `feat/raw-next-20261116` основана на опубликованном SHA #398 `05c48eb`, а тот — на #397 `bf6dd662`; до слияния двух предшественников нельзя выдавать новый код за main. [Журнал](task/002-raw-dng-default-scale.md).
+
+## 1.46.21 — предыдущая версия
 
 > Кандидат локальной ветки, пока не принят в `main`.
 

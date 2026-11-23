@@ -68,6 +68,9 @@ import { createSelectionRasterMutationController } from './selection/raster-muta
 import { createSelectionMaskController } from './selection/mask-controller.js';
 import { createSelectionVectorMaskController } from './selection/vector-mask-controller.js';
 import { inspectDng, developDng } from './formats/dng.js';
+import { readRawPresets, saveRawPreset, deleteRawPreset, normalizeRawPresetDevelopment,
+  exportRawPresetFile, parseRawPresetFile, importRawPresetFile } from './formats/dng-presets.js';
+import { markDisplayClippingWarning, markDisplayClippingWarningOnCanvas } from './formats/dng-clipping-warning.js';
 import { createDocumentImportController } from './document/import-controller.js';
 import { createNewDocumentController } from './document/new-document-controller.js';
 import { createProjectController } from './document/project-controller.js';
@@ -1648,6 +1651,32 @@ async function drainRenderQueue() {
     const visibleCtx = els.canvas.getContext('2d', { alpha: true });
     visibleCtx.clearRect(0, 0, doc.width, doc.height);
     visibleCtx.drawImage(renderBuffer, 0, 0);
+    // Display-only diagnostic: never touch renderBuffer, layer previews or exports.
+    if (rawClippingWarningEnabled && selected()?.rawDng && !request.paintPreview) {
+      const summaryOutput=els.props.querySelector('[data-raw-clipping-summary]');
+      try {
+        let summary;
+        if(doc.width*doc.height>8_000_000){
+          // Bounded display-only readback; yield between tiles and cancel for a newer render.
+          if(summaryOutput)summaryOutput.textContent='Анализ большого RGB кадра…';
+          summary=await markDisplayClippingWarningOnCanvas(visibleCtx,{
+            width:doc.width,height:doc.height,
+            shouldContinue:()=>request.version===renderVersion,
+            yieldFrame:()=>new Promise(resolve=>requestAnimationFrame(resolve)),
+          });
+        }else{
+          const pixels=visibleCtx.getImageData(0,0,doc.width,doc.height);
+          summary=markDisplayClippingWarning(pixels.data);
+          visibleCtx.putImageData(pixels,0,0);
+        }
+        if(summary&&request.version===renderVersion&&summaryOutput)summaryOutput.textContent=
+          'Света: '+summary.highlights+' · тени: '+summary.shadows+
+          ' из '+summary.eligible+' видимых пикселей';
+      }catch(error){
+        if(request.version===renderVersion&&summaryOutput)
+          summaryOutput.textContent='Анализ RGB недоступен: '+error.message;
+      }
+    }
     textEditController.syncPreviewCanvas();
     layerBlendingController.syncPreviewCanvas();
     if (!request.paintPreview) {
@@ -1844,20 +1873,28 @@ function formatDisplayExposure(value){
 }
 
 let rawDevelopCommandGeneration=0;
+let rawClippingWarningEnabled=false;
 function bindRawDevelopmentControls(root,owner,layerId){
-  const fields=['exposure','wbRed','wbBlue'];
-  const selectors=['[data-raw-exposure]','[data-raw-wb-red]','[data-raw-wb-blue]'];
+  const fields=['exposure','wbRed','wbBlue','highlights','shadows','contrast'];
+  const selectors=['[data-raw-exposure]','[data-raw-wb-red]','[data-raw-wb-blue]',
+    '[data-raw-highlights]','[data-raw-shadows]','[data-raw-contrast]','[data-raw-demosaic]'];
   const controls=selectors.map(s=>root.querySelector(s));
   if(controls.some(c=>!c))return;
-  async function applyRawDevelopment(reset=false){
+  async function applyRawDevelopment(reset=false,override=null){
     const target=owner.layers.find(layer=>layer.id===layerId);
     if(doc!==owner || selected()?.id!==layerId || !target?.rawDng ||
       target.type!=='raster' || isLayerLocked(owner,target) || blockPendingDocumentEdit())return;
-    const next=reset ? {exposure:0,wbRed:1,wbBlue:1} :
-      Object.fromEntries(fields.map((key,i)=>[key,Number(controls[i].value)]));
+    const chosen=override===null ? null : normalizeRawPresetDevelopment(override);
+    if(override!==null&&!chosen)return;
+    const next=reset ? {exposure:0,wbRed:1,wbBlue:1,highlights:0,shadows:0,contrast:0} :
+      chosen ? {...Object.fromEntries(fields.map(key=>[key,chosen[key]])),
+        ...(['edge-aware-green','edge-aware-rgb'].includes(chosen.demosaic)?{demosaic:chosen.demosaic}:{})} :
+      {...Object.fromEntries(fields.map((key,i)=>[key,Number(controls[i].value)])),
+       ...(['edge-aware-green','edge-aware-rgb'].includes(controls[6].value)?{demosaic:controls[6].value}:{})};
     if(fields.some(key=>!Number.isFinite(next[key])))return;
     const original=target.rawDng;
-    if(fields.every(key=>original.development[key]===next[key]))return;
+    if(fields.every(key=>original.development[key]===next[key]) &&
+      (original.development.demosaic||'bilinear')===(next.demosaic||'bilinear'))return;
     const oldPreview=target.dataUrl, session=activeSessionId, generation=++rawDevelopCommandGeneration;
     controls.forEach(c=>{c.disabled=true;});
     try{
@@ -1876,7 +1913,7 @@ function bindRawDevelopmentControls(root,owner,layerId){
       target.rawDng={...original,development:next};
       target.dataUrl=newPreview;
       invalidateImageCache(oldPreview);
-      commit('RAW: экспозиция и баланс белого');
+      commit('RAW: экспозиция, баланс белого, контраст, тон и демозаика');
       setStatus('RAW-проявка обновлена · исходный DNG не изменён');
     }catch(error){
       toast('RAW-проявка: '+error.message,'error');
@@ -1887,6 +1924,81 @@ function bindRawDevelopmentControls(root,owner,layerId){
   }
   controls.forEach(control=>control.addEventListener('change',()=>{void applyRawDevelopment();}));
   root.querySelector('[data-raw-reset]')?.addEventListener('click',()=>{void applyRawDevelopment(true);});
+  const presetSelect=root.querySelector('[data-raw-preset-select]');
+  const presetName=root.querySelector('[data-raw-preset-name]');
+  const presetApply=root.querySelector('[data-raw-preset-apply]');
+  const presetDelete=root.querySelector('[data-raw-preset-delete]');
+  const presetStorage=()=>{try{return window.localStorage;}catch{return null;}};
+  function refreshPresets(selectedName=''){
+    if(!presetSelect)return;
+    const previous=selectedName||presetSelect.value;
+    presetSelect.replaceChildren(new Option('— Выберите пресет —',''));
+    for(const preset of readRawPresets(presetStorage())){
+      presetSelect.add(new Option(preset.name,preset.name));
+    }
+    presetSelect.value=[...presetSelect.options].some(opt=>opt.value===previous)?previous:'';
+    presetApply.disabled=presetDelete.disabled=!presetSelect.value;
+  }
+  refreshPresets();
+  presetSelect?.addEventListener('change',()=>{
+    if(presetSelect.value)presetName.value=presetSelect.value;
+    refreshPresets(presetSelect.value);
+  });
+  root.querySelector('[data-raw-preset-save]')?.addEventListener('click',()=>{
+    const target=owner.layers.find(layer=>layer.id===layerId);
+    if(doc!==owner||selected()?.id!==layerId||!target?.rawDng||
+      isLayerLocked(owner,target)||blockPendingDocumentEdit())return;
+    const result=saveRawPreset(presetStorage(),presetName.value,target.rawDng.development);
+    if(!result.ok){toast('RAW-пресет: неверное имя, лимит или недоступно хранилище','error');return;}
+    refreshPresets(presetName.value.trim().replace(/\s+/g,' '));
+    setStatus('RAW-пресет сохранён локально; исходный DNG не изменён');
+  });
+  presetApply?.addEventListener('click',()=>{
+    const preset=readRawPresets(presetStorage()).find(p=>p.name===presetSelect.value);
+    if(!preset)return;
+    void applyRawDevelopment(false,preset.development);
+  });
+  presetDelete?.addEventListener('click',()=>{
+    if(!deleteRawPreset(presetStorage(),presetSelect.value))return;
+    presetName.value='';
+    refreshPresets('');
+    setStatus('Локальный RAW-пресет удалён');
+  });
+  root.querySelector('[data-raw-preset-export]')?.addEventListener('click',()=>{
+    const result=exportRawPresetFile(presetStorage());
+    if(!result.ok){toast('Нет сохранённых RAW-пресетов для экспорта','error');return;}
+    const url=URL.createObjectURL(new Blob([result.content],{type:'application/json;charset=utf-8'}));
+    const link=document.createElement('a');
+    link.href=url;link.download=result.filename;document.body.append(link);
+    try{link.click();}finally{link.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);}
+    setStatus('RAW-пресеты экспортированы в JSON; данные DNG не включены');
+  });
+  const presetFile=root.querySelector('[data-raw-preset-file]');
+  root.querySelector('[data-raw-preset-import]')?.addEventListener('click',()=>presetFile?.click());
+  presetFile?.addEventListener('change',async()=>{
+    const file=presetFile.files?.[0];
+    presetFile.value='';
+    if(!file)return;
+    try{
+      if(file.size>24000)throw new Error('Файл RAW-пресетов слишком большой');
+      const text=await file.text();
+      const parsed=parseRawPresetFile(text);
+      if(!parsed.ok)throw new Error('Неверный формат, параметры или версия RAW-пресетов');
+      const local=readRawPresets(presetStorage());
+      const collisions=parsed.presets.filter(item=>local.some(p=>p.name.toLocaleLowerCase()===item.name.toLocaleLowerCase())).length;
+      if(!window.confirm('Импортировать '+parsed.presets.length+' RAW-пресетов? Совпадающие имена ('+
+        collisions+') будут заменены. Другие локальные пресеты сохранятся.'))return;
+      const result=importRawPresetFile(presetStorage(),text);
+      if(!result.ok)throw new Error(result.reason==='limit'?'Лимит 16 RAW-пресетов превышен':
+        'Импорт RAW-пресетов отклонён или хранилище недоступно');
+      if(root.isConnected)refreshPresets();
+      setStatus('RAW-пресеты импортированы: '+result.added+' новых, '+result.overwritten+' заменено');
+    }catch(error){toast('RAW-пресеты: '+error.message,'error');}
+  });
+  root.querySelector('[data-raw-clipping-warning]')?.addEventListener('change',event=>{
+    rawClippingWarningEnabled=event.target.checked;
+    render(); // View-only toggle: no History commit, no .zpe or export mutation.
+  });
 }
 function bindHighDepthPreviewControls(root, owner, layerId){
   const toneMap=root?.querySelector('[data-high-depth-tone-map]');
@@ -1937,15 +2049,58 @@ function updateProperties() {
   }
   if (l.type === 'raster' && l.rawDng) {
     const d=l.rawDng.development;
-    const colorLabel=l.rawDng.colorPipeline==='matrix-d50-bradford-v1'?
+    const colorLabel=l.rawDng.colorPipeline==='forward-d50-v1'?
+      'ForwardMatrix + AnalogBalance / CameraCalibration → XYZ D50 → sRGB (ограниченный профиль; без camera oracle)':
+      l.rawDng.colorPipeline==='matrix-d50-bradford-v1'?
       'ColorMatrix → XYZ D50 → sRGB (приближённая калибровка; без camera oracle)':
       'Без ColorMatrix: некалиброванный Bayer preview';
+    const scale=Array.isArray(l.rawDng.defaultScale)?l.rawDng.defaultScale:[1,1];
     extra += '<label>RAW источник</label><span>DNG Bayer · сохранён в .zpe; экспорт PSD/PSB — проявленные пиксели</span>' +
+      '<label>Сжатие RAW</label><span>'+(l.rawDng.compression===7?'Lossless JPEG SOF3 (Compression=7)':'Без сжатия')+'</span>' +
+      '<label>Кодирование Bayer</label><span>'+(l.rawDng.bits??'не указано')+' бит · '+
+        (l.rawDng.compression===7?'Lossless JPEG SOF3':'TIFF uncompressed')+'</span>' +
       '<label>Цвет RAW</label><span>'+colorLabel+'</span>' +
-      '<label>Геометрия RAW</label><span>'+l.rawDng.width+'×'+l.rawDng.height+' сенсор → '+l.width+'×'+l.height+' кадр (ActiveArea / DefaultCrop / Orientation)</span>' +
+      '<label>RAW баланс при съёмке</label><span>'+
+        (l.rawDng.whiteBalanceSource==='as-shot-white-xy'?
+          'AsShotWhiteXY (CIE xy → camera neutral через цветовую матрицу)':
+          l.rawDng.whiteBalanceSource==='as-shot-neutral'?'AsShotNeutral (camera neutral)':
+          'Не определено (legacy .zpe)')+'</span>' +
+      '<label>RAW linearization</label><span>'+(l.rawDng.linearizationTable?'LinearizationTable (до BlackLevel)':'Без LinearizationTable')+'</span>' +
+      '<label>RAW BlackLevel</label><span>Sensor grid '+[...(l.rawDng.blackRepeatDim||[1,1])].reverse().join('×')+' (cols×rows; от ActiveArea, до demosaic / crop)</span>' +
+      '<label>RAW BlackLevelDelta</label><span>' +
+      (l.rawDng.blackDeltaH?'H: sensor columns':'H: нет')+' · '+
+      (l.rawDng.blackDeltaV?'V: sensor rows':'V: нет')+' (SRATIONAL, до demosaic)</span>' +
+      '<label>Геометрия RAW</label><span>'+l.rawDng.width+'×'+l.rawDng.height+' сенсор → '+l.width+'×'+l.height+' кадр (ActiveArea / DefaultCrop / DefaultScale '+scale[0]+'×'+scale[1]+' / Orientation)</span>' +
+      '<label>RAW BaselineExposure</label><span>'+
+        ((l.rawDng.baselineExposure??0)>=0?'+':'')+(l.rawDng.baselineExposure??0).toFixed(2)+' EV · камера (в дополнение к ручной экспозиции)</span>' +
+       '<label>RAW BaselineExposureOffset</label><span>'+
+         ((l.rawDng.baselineExposureOffset??0)>=0?'+':'')+(l.rawDng.baselineExposureOffset??0).toFixed(2)+
+         ' EV · встроенный профиль (сценолинейная экспозиция)</span>' +
       '<label>Экспозиция (EV)</label><input aria-label="RAW экспозиция" data-raw-exposure type="number" min="-5" max="5" step="0.1" value="' + d.exposure + '">' +
       '<label>WB красный</label><input aria-label="RAW баланс красного" data-raw-wb-red type="number" min="0.25" max="4" step="0.05" value="' + d.wbRed + '">' +
       '<label>WB синий</label><input aria-label="RAW баланс синего" data-raw-wb-blue type="number" min="0.25" max="4" step="0.05" value="' + d.wbBlue + '">' +
+      '<label>Света</label><input aria-label="RAW света" data-raw-highlights type="number" min="-1" max="1" step="0.05" value="' + (d.highlights??0) + '">' +
+      '<label>Тени</label><input aria-label="RAW тени" data-raw-shadows type="number" min="-1" max="1" step="0.05" value="' + (d.shadows??0) + '">' +
+      '<label>Контраст RAW</label><input aria-label="RAW контраст" data-raw-contrast type="number" min="-1" max="1" step="0.05" value="' + (d.contrast??0) + '">' +
+      '<label>Демозаика Bayer</label><select aria-label="RAW демозаика" data-raw-demosaic>' +
+      '<option value="bilinear"'+(!d.demosaic||d.demosaic==='bilinear'?' selected':'')+'>Билинейная (совместимость)</option>' +
+      '<option value="edge-aware-green"'+(d.demosaic==='edge-aware-green'?' selected':'')+'>Направленная интерполяция зелёного</option>' +
+      '<option value="edge-aware-rgb"'+(d.demosaic==='edge-aware-rgb'?' selected':'')+'>Зелёно-ориентированная цветовая демозаика (R/G/B)</option></select>' +
+      '<label>RAW-пресет</label><select aria-label="RAW выбор пресета" data-raw-preset-select></select>' +
+      '<div class="wide"><input type="text" maxlength="48" aria-label="RAW имя пресета" data-raw-preset-name placeholder="Название пресета">' +
+      ' <button type="button" class="mini-button" data-raw-preset-save>Сохранить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-apply>Применить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-delete>Удалить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-export>Экспорт JSON</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-import>Импорт JSON</button>' +
+      ' <input type="file" hidden accept=".json,application/json" aria-label="RAW файл пресетов" data-raw-preset-file></div>' +
+      '<div class="wide">Библиотека пресетов хранится в браузере. JSON переносит только параметры RAW (до 16 пресетов); в .zpe сохраняются применённые параметры, а не библиотека.</div>' +
+      '<div class="wide">Линейная коррекция до sRGB. Света: − затемнить / + осветлить; тени: − углубить / + поднять; контраст: − смягчить / + усилить без сдвига среднего серого. Не восстанавливает клиппинг сенсора.</div>' +
+      '<div class="wide"><label><input type="checkbox" data-raw-clipping-warning aria-label="RAW индикация клиппинга"'+
+        (rawClippingWarningEnabled?' checked':'')+'> Подсветить клиппинг отображаемого RGB</label></div>' +
+      '<div class="wide" data-raw-clipping-summary aria-live="polite">'+
+        (rawClippingWarningEnabled?'Расчёт после рендера…':'Выключено')+'</div>' +
+      '<div class="wide">Пурпурный — хотя бы один канал ≥ 254; голубой — все каналы ≤ 1. Это диагностика финального 8-bit RGB кадра, не насыщения RAW-сенсора; в .zpe и экспорт не записывается.</div>' +
       '<div class="wide"><button type="button" class="mini-button" data-raw-reset>Сбросить RAW-проявку</button></div>';
   }
   if (l.type === 'raster' && l.highDepthSource) {

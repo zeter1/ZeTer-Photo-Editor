@@ -1,6 +1,6 @@
 {
   "name": "zeter-photo-editor",
-  "version": "1.46.21",
+  "version": "1.47.17",
   "private": true,
   "type": "module",
   "description": "Local browser-based layered image editor inspired by professional raster editors.",
@@ -8,6 +8,7 @@
     "build": "node tools/build-bundle.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:browser": "node tools/browser-smoke.mjs",
+    "test:browser:brush": "node tools/browser-brush-smoke.mjs",
     "test:browser:pen-smooth": "node tools/browser-pen-smooth-smoke.mjs",
     "test:browser:pen-boolean": "node tools/browser-pen-boolean-smoke.mjs",
     "test:browser:path-node-edit": "node tools/browser-path-node-edit-smoke.mjs",

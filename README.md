@@ -8,6 +8,8 @@
 
 ZeTer Photo Editor — браузерный графический редактор со слоями, историей действий и Canvas 2D-рендером. Он работает как онлайн, так и локально через обычный `index.html`. Редактор вдохновлён рабочим процессом Photopea / Photoshop, но остаётся самостоятельным приложением. Пользовательские изображения обрабатываются в браузере и для обычной работы не требуют загрузки на внешний сервер.
 
+**Локальный кандидат 1.47.17 (ещё не опубликован в main):** RAW Properties дополнены настоящей сценолинейной S-кривой контраста с сохранением в History, .zpe и переносимых RAW-пресетах. Встроенные экспозиция/WB/Highlights/Shadows/Demosaic, экспорт/импорт JSON библиотеки и нетронутые DNG sensor bytes остаются совместимыми. [Журнал контраста](task/002-raw-dng-linear-contrast.md) · [журнал переносимых пресетов](task/002-raw-dng-presets-transfer.md).
+
 ## Попробовать редактор
 
 Для обработки фотографий, ретуши, добавления текста и работы с многослойными документами — без установки настольного редактора.
@@ -28,7 +30,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Возможности
 
-**Текущая версия:** 1.46.21
+**Текущая версия:** 1.47.17
 
 > Кандидат локальной ветки, не опубликован в `main`.
 
@@ -36,7 +38,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 - **Полноценная работа со слоями:** растровые, текстовые, фигурные, корректирующие слои и Smart Objects; группы, вложенные группы, блокировка, видимость, непрозрачность и режимы наложения.
 - **PSD/PSB-совместимость:** импорт и экспорт многослойных Photoshop-документов с сохранением поддерживаемой структуры, групп, масок, blend modes, ICC-метаданных и совместимых native-данных.
-- **DNG RAW (первый ограниченный срез):** импорт несжатого 8/16-bit Bayer DNG, экспозиция и баланс белого в свойствах слоя, сохранение исходных DNG-байтов и настроек в `.zpe`, Undo/Redo, экспорт проявленных PNG/PSD/PSB. ActiveArea (обрезка маскированной области сенсора) и ориентация TIFF 1–8 применяются к пикселям; пока без калиброванной camera ColorMatrix, JPEG-compressed DNG и независимого camera-authored соответствия — см. [ограничения](task/002-raw-dng-foundation.md).
+- **DNG RAW (ограниченный локальный срез v1.47.14, ещё не GitHub main):** импорт CFA Bayer TIFF без сжатия 8/10/12/14/16-bit и JPEG lossless SOF3 с отдельными/смешанными SOS-сканами (включая 2+2 и 1+2+1), strips, tiles и restart markers; sensor LinearizationTable, BlackLevelRepeatDim + signed BlackLevelDeltaH/V, DefaultCrop/Scale, Orientation 1–8 и профили ColorMatrix либо ForwardMatrix1/2 (AnalogBalance/CameraCalibration). RAW Properties с тремя выбираемыми режимами Bayer (bilinear, направленный G, зелёно-ориентированный RGB), неразрушающие Exposure/WB/Highlights/Shadows, переключаемая подсветка display-RGB клиппинга (пурпурный/голубой, в том числе >8 Мп через ограниченные 1 МиБ RGBA тайлы, без записи в экспорт/.zpe) и History Undo/Redo, сохранение неизменных RAW bytes/provenance в `.zpe`, экспорт только проявленных PNG/PSD/PSB raster. Синтетические TIFF-тесты и Chromium `file://` подтверждены, но camera-authored DNG/LibRaw pixel oracle и Linux PR-head CI этой локальной ветки отсутствуют; не заявляется Photoshop/Adobe camera parity. [Журнал](task/002-raw-dng-forward-matrix-port.md).
 - **16-bit и 32-bit HDR pipeline:** импорт, хранение, редактирование и экспорт высокоточных RGB-данных без обязательного сведения всего документа к 8-bit.
 - **CMYK и ICC color management:** поддержка CMYK PSD/PSB, встроенных ICC-профилей, преобразований CMYK↔RGB, display-profile policy и soft proofing.
 - **Неразрушающее редактирование:** Adjustment Layers, маски слоёв, векторные маски, эффекты, цветокоррекция и редактируемые параметры без изменения исходных пикселей.
@@ -236,7 +238,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Запуск на Windows
 
-Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.46.21 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
+Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.47.17 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
 
 Если браузер показывает старую версию после обновления архива, закройте старую вкладку и откройте `index.html` из новой распакованной папки.
 
@@ -300,7 +302,7 @@ PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip,
 
 Следующий imaging-этап: **Stage 17a — Isolated Groups / Vector Mask Composite Parity**: приблизить Photoshop group compositing для pass-through/isolated stacks, clipping chains и mask interactions, добавить real PSD/PSB group fixtures и pixel-reference regressions; после этого — editable Gradient/Pattern Fill renderer и tiled/worker/GPU pipeline.
 
-## Контакты для связи с разработчиком
+## Контакты для связи:
 
 - [zeter11@gmail.com](mailto:zeter11@gmail.com)
 - [https://t.me/zeter1](https://t.me/zeter1)
@@ -312,4 +314,5 @@ PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip,
 - [https://x.com/zeter1](https://x.com/zeter1)
 - [https://www.threads.com/@zeter1992](https://www.threads.com/@zeter1992)
 - [https://ok.ru/zeter1](https://ok.ru/zeter1)
-- [https://t.me/zeterchat](https://t.me/zeterchat) — Telegram-группа: обо мне, проекты и чат
+- [https://t.me/zeterchat](https://t.me/zeterchat) - Telegram-группа для общения
+- [https://dkoles.com/](https://dkoles.com/) - сайт.
