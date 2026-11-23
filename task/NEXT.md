@@ -1,20 +1,21 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 9 / **CAP-RAW-DNG-CAMERA-COLOR** — последний непубликованный bounded matrix pipeline; завершить проверку diff, PR-head Linux core+independent real-photo CI и интеграцию.
-> **PRIORITY:** P1 · **STATUS:** IN PROGRESS (локальный код готов и прошёл targeted acceptance, ещё НЕ в main).
-> **BASE MAIN SHA:** `a81bec7cafabff90b685c41fe4b8242dc8fa1566` — [#396 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/396), версия 1.46.19. Exact-main [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/43824536034) для старого main, не для нового diff.
-> **ACTIVE PR:** [#397 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/397) — `feat/raw-dng-color-matrix-20261116`; exact PR-head SHA проверять после последнего commit. **LAST VERIFIED:** 2026-11-16, Windows `ZeTer-Photo-Editor-raw`, v1.46.20.
-> **LOCAL EVIDENCE:** 18/18 focused Node PASS, `npm run build` PASS, настоящий Chromium `npm run test:browser:raw-dng` PASS (calibrated ColorMatrix pixel oracle, Properties, exposure/WB, Undo/Redo, .zpe save/reopen и PNG/PSD/PSB self-export). Full Windows `npm run check`: **1664 PASS / 10 SKIP / 5 FAIL** (Linux-only /proc/cgroup probes на Windows); `git diff --check` PASS. Linux PR CI пока NOT RUN.
-> **REMAINING ACCEPTANCE:** [#397](https://github.com/zeter1/ZeTer-Photo-Editor/pull/397) latest-head Linux core / independent real-photo CI (оба workflow стартовали 2026-11-16); exact-main после merge. Camera-authored lawful Bayer DNG + независимый LibRaw/RawTherapee pixel oracle и точные пороги остаются **BLOCKED (external evidence)** — не препятствие независимому DefaultCrop. Двухисточниковый CCT, Photoshop/ICC/ForwardMatrix не full parity.
-> **NEXT IMPLEMENTATION ACTION:** после code/CI приемки переходить к **CAP-RAW-DNG-DEFAULT-CROP** — читать DefaultCropOrigin/Size относительно ActiveArea, валидировать sensor-phase, дробные координаты/Orientation/Undo/Redo/.zpe и Chrome file:// raster pixels; больше не реализовывать ColorMatrix заново.
-> **BLOCKERS:** нет независимого подтверждённого camera-authored reference и oracle; текущая матричная реализация пока локальная, не CI-verified.
+> **CURRENT TASK/ID:** Stage 9 / **CAP-RAW-DNG-DEFAULT-CROP** — обработка DefaultCropOrigin/Size для несжатых Bayer DNG.
+> **PRIORITY:** P1 · **STATUS:** IN PROGRESS (локальные Node/Chromium PASS; НЕ в main).
+> **BASE MAIN SHA:** `6a0a2d12ab8f279491eb7357e98d1ad7eab207da` — #397 merged 2026-11-23; exact-main core and independent real-photo CI are being rechecked.
+> **ACTIVE PR:** [#397 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/397) at `6a0a2d12ab8f279491eb7357e98d1ad7eab207da`, [#398 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/398) retargeted to `main` with code already implemented; this task-doc synchronization triggers current PR-head Linux CI.
+> **LAST VERIFIED:** 2026-11-16 · Windows `ZeTer-Photo-Editor-raw` · v1.46.21 candidate.
+> **LOCAL EVIDENCE:** full Windows `npm run check`: **1672 PASS / 10 SKIP / 5 FAIL** (все 5 — Linux-only `/proc`/cgroup tests на Windows), `git diff --check` PASS; 26/26 focused Node PASS (включая RED→GREEN fail-closed неизвестных TIFF type/count для crop/scale) (`dng-default-crop`, `dng`, `dng-color`, `dng-import-controller`); `npm run build` PASS; **Chromium `npm run test:browser:raw-dng` PASS**: FileInput → fractional crop+ColorMatrix+Orientation → пиксели, Properties, Undo/Redo, `.zpe` reopen/native bytes; PNG/PSD/PSB rendered raster в регрессии. Linux PR-head для нового кода ещё не подтверждён.
+> **REMAINING ACCEPTANCE:** #397 has merged. Validate latest #398 head's Linux core and independent real-photo CI, review final diff, merge if gates pass, then exact-main checks. Following #398, reconcile the already implemented local RAW stack (SOF3, packed Bayer, ForwardMatrix, highlights/shadows, demosaic, presets, linear contrast) in one clean PR; do not rewrite it. Independent camera-authored LibRaw corpus remains BLOCKED.
+> **NEXT IMPLEMENTATION ACTION:** complete #398 exact-head CI/review/merge, then publish the verified local RAW stack through GitHub with its own exact-head CI and preserve upstream contact documentation. No duplicate ColorMatrix/DefaultCrop implementation.
+> **BLOCKERS:** real-photo CI source acquisition currently has an external Commons response failure (not a RAW test result); investigate and rerun without waiving hash/provenance checks. Camera-authored license/oracle remains unavailable.
 
 ## Короткая очередь
 
-1. **CAP-RAW-DNG-DEFAULT-CROP:** P1 TODO — следующий пользовательский RAW срез после приёмки текущего PR.
-2. **CAP-RAW-CAMERA-ORACLE:** BLOCKED — licensed camera-authored DNG, LibRaw/RawTherapee calibrated pixel comparisons.
-3. **CAP-BEZ-MASK-PSD-UI:** BLOCKED external Adobe-authored corpus; не повторять уже merged bounded.
-4. **Stage 6 / 003X/6c-9:** IN PROGRESS — Worker stale/close/edit native RGB16/CMYKA32.
-5. **RAW lossless-JPEG/packed, ICC/ForwardMatrix, HDR:** TODO/IN PROGRESS по [матрице](CAPABILITY_MATRIX.md).
+1. **CAP-RAW-DNG-DEFAULT-CROP:** IN PROGRESS — [#398 OPEN](https://github.com/zeter1/ZeTer-Photo-Editor/pull/398), code published; CI NOT RUN до retarget `main`, затем review/integration.
+2. **CAP-RAW-DNG-STACK-RECONCILIATION:** P1 IN PROGRESS — local verified RAW SOF3/packed/ForwardMatrix/demosaic/presets/contrast stack, not yet published; use a separate GitHub PR after #398.
+3. **CAP-RAW-CAMERA-ORACLE:** BLOCKED — provenance и независимые LibRaw/RawTherapee pixel comparisons.
+4. **CAP-BEZ-MASK-PSD-UI:** BLOCKED external Adobe-authored corpus; ранее принятые bounded не повторять.
+5. **Stage 6 / 003X/6c-9, ICC/ForwardMatrix, HDR:** IN PROGRESS / TODO по [матрице](CAPABILITY_MATRIX.md).
 
-[ColorMatrix journal](002-raw-dng-camera-color.md) · [Orientation journal](002-raw-dng-orientation-activearea.md) · [матрица](CAPABILITY_MATRIX.md) · [карта](README.md).
+[DefaultCrop journal](002-raw-dng-default-crop.md) · [ColorMatrix journal](002-raw-dng-camera-color.md) · [матрица](CAPABILITY_MATRIX.md) · [карта](README.md).

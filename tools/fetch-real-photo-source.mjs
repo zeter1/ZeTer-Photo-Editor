@@ -13,13 +13,19 @@ export const ORIGINAL_PHOTO_POLICY=Object.freeze({
   expectedHeight:1920,
 });
 const MAX_BYTES=32*1024*1024;
+// Wikimedia requires a descriptive client identity for automated downloads.
+// Keep the original URL, no-redirect policy and byte/metadata pins unchanged.
+const PHOTO_USER_AGENT='ZeTerPhotoEditor/1.47 (https://github.com/zeter1/ZeTer-Photo-Editor; zeter11@gmail.com)';
 const fail=reason=>{throw new TypeError('037 photo acquisition: '+reason);};
 
 // Narrow transport boundary. Tests can inject a synthetic source policy, but
 // the user-facing CLI and downloadPhotoSourceCandidate ALWAYS use the pinned one.
 export async function readPhotoSourceResponse(response,policy=ORIGINAL_PHOTO_POLICY) {
   if(!response || response.status!==200 || response.redirected ||
-      !response.headers || !response.body) fail('expected direct HTTP 200 JPEG without redirects');
+      !response.headers || !response.body) {
+    const status=Number.isInteger(response?.status)?String(response.status):'unknown';
+    fail('expected direct HTTP 200 JPEG without redirects (received HTTP '+status+')');
+  }
   const type=response.headers.get('content-type');
   if(typeof type!=='string' || !/^image\/jpeg(?:\s*;|$)/i.test(type))
     fail('unexpected content type');
@@ -50,7 +56,7 @@ export async function downloadPhotoSourceCandidate(path,{fetcher=globalThis.fetc
     method:'GET',
     redirect:'error',
     signal:AbortSignal.timeout(30000),
-    headers:{Accept:'image/jpeg'},
+    headers:{Accept:'image/jpeg','User-Agent':PHOTO_USER_AGENT},
   });
   const {bytes,inspection}=await readPhotoSourceResponse(response);
   // Exclusive creation and fd-pinned write rollback: collisions or failed
