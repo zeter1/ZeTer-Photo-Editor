@@ -1,7 +1,11 @@
-## 1.47.17 — текущая версия (RAW-стек принят в main, 2026-11-23)
+## 1.47.18 — текущая версия (Stage 17a, PSD/PSB raster clipping, 2026-11-23)
 
-### 2026-11-23 — #399 RAW v1.47.17 MERGED; 13/13 exact-head GitHub checks SUCCESS, exact-main отдельно
-- [PR #399](https://github.com/zeter1/ZeTer-Photo-Editor/pull/399) объединён с main коммитом `4d480bc5d1993ff14a0242384a383a7b55003839`. Лицензированный camera-authored Bayer DNG и независимые LibRaw pixels по-прежнему BLOCKED. Дополнительная новая Stage 17a задача внесена в [NEXT](task/NEXT.md).
+- Canvas compositor: обычный растровый clipping больше не игнорирует alpha нижележащего base. Отдельная masked offscreen поверхность накладывается с исходным blend mode на parent backdrop, не стирая нижние слои; orphan clipping fail-closed.
+- Raster Properties: живой переключатель clipping с exact owner/lock/no-op guards, сохранением через History Undo/Redo, .zpe и native PSD/PSB layer clipping bit.
+- RED→GREEN node tests; Chromium file:// проверяет exact RGBA isolated multiply .5 с masked base, UI toggle, Undo/Redo, .zpe save/reopen; PSD/PSB codec structural round-trip отдельно. Синтетический oracle **не** заявлен как Photoshop-authored pixel parity.
+- Статус: bounded increment реализован, parent CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY остаётся IN PROGRESS; native Photoshop group raster mask и независимый Adobe-authored reference требуют отдельного прохода.
+
+## 1.47.17 — предыдущая версия (RAW-стек, #399 MERGED)
 
 ### 2026-11-23 — интеграция локального RAW-стека и сохранение документации main
 - Цветовая матрица PR #397 и DefaultCrop PR #398 уже приняты в main; этот кандидат переносит 37 локальных коммитов, не дублируя их реализации.
@@ -224,10 +228,6 @@
 - Ограничения: только uncompressed Bayer 8/16-bit CFA; нет camera-authored reference и независимого LibRaw/RawTherapee pixel oracle, нет ICC/ForwardMatrix/DefaultCrop, DNG compression и полного camera-grade цветоуправления.
 
 ## 1.46.19 — предыдущая версия
-
-### 2026-11-16T20:53:17+03:00 - Контакты для связи в README
-
-- Документация: контактный раздел внизу README оформлен единым списком из 12 адресов; добавлены недостающие ссылки, включая https://dkoles.com/, и уточнена подпись Telegram-группы.
 
 ### 2026-11-16 — CAP-RAW-DNG-ACTIVE-ORIENTATION
 

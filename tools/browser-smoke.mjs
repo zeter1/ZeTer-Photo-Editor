@@ -11,6 +11,7 @@ import { verifyBrowserMidKernelCancellation } from './browser-inpaint-mid-kernel
 import { verifyBrowserUiLockMidKernel } from './browser-ui-lock-mid-kernel-smoke.mjs';
 import { verifyBrowserDelayedRecoveryReloads } from './browser-recovery-reload-smoke.mjs';
 import { verifyBrowserWideConnectedNativeUi } from './browser-wide-connected-ui-smoke.mjs';
+import { verifyIsolatedRasterClipping } from './browser-isolated-raster-clipping-smoke.mjs';
 import { writeWideConnectedBrowserArtifact } from './browser-wide-connected-operation-artifact.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -512,6 +513,12 @@ async function runSmoke() {
       fail('Editor bootstrap failed', `${fatalText}\n${errors.join('\n')}\n\nBrowser stderr tail:\n${stderrState.text.slice(-3_000)}`);
     }
     assertNoBrowserErrors(errors, stderrState);
+
+    if (process.env.ZPE_PSD_ISOLATED_CLIPPING_BROWSER_ONLY === '1') {
+      await verifyIsolatedRasterClipping(client, { evaluate, waitFor, assert });
+      assertNoBrowserErrors(errors, stderrState);
+      return;
+    }
 
     // CAP-MASK-VD: real file:// mask rendering, inspector, History and project IO.
     if (process.env.ZPE_VECTOR_MASK_BROWSER_ONLY === '1') {

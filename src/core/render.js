@@ -509,13 +509,37 @@ function buildGroupRenderPlan(doc) {
 
 async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides, clippingMask = null) {
   if (!isLayerVisible(doc, layer) || layer.opacity <= 0) return;
+  // An orphaned clipped layer (raster or adjustment) must never escape its base.
+  if (layer.clipping === true && !clippingMask) return;
   if (layer.type === 'adjustment') {
-    // A clipped adjustment without a visible base must never become global.
-    if (layer.clipping === true && !clippingMask) return;
     await applyAdjustmentLayer(canvas, ctx, layer, { clippingMask });
     return;
   }
-  await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
+  const rasterOverride = rasterOverrides?.get?.(layer.id) || null;
+  if (layer.clipping !== true) {
+    await renderLayer(ctx, layer, { rasterOverride });
+    return;
+  }
+  // Isolate the clipped layer BEFORE compositing its blend mode against the
+  // actual group backdrop. Clipping an already-blended target would also erase
+  // lower siblings and make isolated PSD groups incorrectly transparent.
+  const clippedCanvas = document.createElement('canvas');
+  clippedCanvas.width = doc.width;
+  clippedCanvas.height = doc.height;
+  const clippedCtx = clippedCanvas.getContext('2d', { alpha: true });
+  await renderLayer(clippedCtx, { ...layer, blendMode: 'source-over' }, { rasterOverride });
+  clippedCtx.save();
+  clippedCtx.globalCompositeOperation = 'destination-in';
+  clippedCtx.globalAlpha = 1;
+  clippedCtx.filter = 'none';
+  clippedCtx.drawImage(clippingMask, 0, 0);
+  clippedCtx.restore();
+  ctx.save();
+  ctx.globalCompositeOperation = layer.blendMode || 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.filter = 'none';
+  ctx.drawImage(clippedCanvas, 0, 0);
+  ctx.restore();
 }
 
 async function renderClippingBase(doc, layer, rasterOverrides) {
