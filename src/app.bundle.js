@@ -10403,6 +10403,37 @@ function compositeClippedAdjustmentPixels(targetImageData, baseImageData, effect
   }
   return targetImageData;
 }
+
+// A clipped raster overlay changes the *source stack colors*, not its matte.
+// The render caller already applied raster opacity and pixel masks to overlay
+// alpha. Do not multiply that alpha by the base a second time: the base alpha
+// is used only to transfer the RGB delta into the visible parent composite.
+function compositeClippedRasterPixels(targetImageData, baseImageData, overlayImageData,
+  { blendMode = 'source-over' } = {}) {
+  const target = targetImageData?.data;
+  const base = baseImageData?.data;
+  const overlay = overlayImageData?.data;
+  if (!target || !base || !overlay || target.length !== base.length || base.length !== overlay.length)
+    return targetImageData;
+  for (let index = 0; index < target.length; index += 4) {
+    const baseAlpha = base[index + 3];
+    const targetAlpha = target[index + 3];
+    const overlayAlpha = overlay[index + 3];
+    if (baseAlpha <= 0 || targetAlpha <= 0 || overlayAlpha <= 0) continue;
+    const overlayCoverage = overlayAlpha / 255;
+    const contribution = Math.min(1, baseAlpha / targetAlpha);
+    for (let channel = 0; channel < 3; channel += 1) {
+      const original = base[index + channel];
+      const blended = blendAdjustmentChannel(original / 255, overlay[index + channel] / 255, blendMode);
+      const corrected = Math.round(Math.max(0, Math.min(255,
+        original + (blended * 255 - original) * overlayCoverage)));
+      base[index + channel] = corrected;
+      target[index + channel] = Math.round(Math.max(0, Math.min(255,
+        target[index + channel] + (corrected - original) * contribution)));
+    }
+  }
+  return targetImageData;
+}
 function adjustmentModelEqual(left,right) {
   return JSON.stringify(sanitizeAdjustmentModel(left))===JSON.stringify(sanitizeAdjustmentModel(right));
 }
@@ -17878,26 +17909,26 @@ async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides, clippi
     await renderLayer(ctx, layer, { rasterOverride });
     return;
   }
-  // Isolate the clipped layer BEFORE compositing its blend mode against the
-  // actual group backdrop. Clipping an already-blended target would also erase
-  // lower siblings and make isolated PSD groups incorrectly transparent.
-  const clippedCanvas = document.createElement('canvas');
-  clippedCanvas.width = doc.width;
-  clippedCanvas.height = doc.height;
-  const clippedCtx = clippedCanvas.getContext('2d', { alpha: true });
-  await renderLayer(clippedCtx, { ...layer, blendMode: 'source-over' }, { rasterOverride });
-  clippedCtx.save();
-  clippedCtx.globalCompositeOperation = 'destination-in';
-  clippedCtx.globalAlpha = 1;
-  clippedCtx.filter = 'none';
-  clippedCtx.drawImage(clippingMask, 0, 0);
-  clippedCtx.restore();
-  ctx.save();
-  ctx.globalCompositeOperation = layer.blendMode || 'source-over';
-  ctx.globalAlpha = 1;
-  ctx.filter = 'none';
-  ctx.drawImage(clippedCanvas, 0, 0);
-  ctx.restore();
+  // Clipped raster overlays modify the same reusable source stack as subsequent
+  // clipped adjustments. Render opacity/masks once, then blend the raster into
+  // the source RGB. Transfer only that RGB delta to the parent; a clipped
+  // overlay cannot increase the base matte or repaint the lower backdrop.
+  const overlay = document.createElement('canvas');
+  overlay.width = doc.width;
+  overlay.height = doc.height;
+  const overlayCtx = overlay.getContext('2d', { alpha: true, willReadFrequently: true });
+  await renderLayer(overlayCtx, { ...layer, blendMode: 'source-over' }, { rasterOverride });
+  try {
+    const sourceCtx = clippingMask.getContext('2d', { willReadFrequently: true });
+    const source = sourceCtx.getImageData(0, 0, doc.width, doc.height);
+    const target = ctx.getImageData(0, 0, doc.width, doc.height);
+    const pixels = overlayCtx.getImageData(0, 0, doc.width, doc.height);
+    compositeClippedRasterPixels(target, source, pixels, { blendMode: layer.blendMode || 'source-over' });
+    ctx.putImageData(target, 0, 0);
+    sourceCtx.putImageData(source, 0, 0);
+  } catch (error) {
+    console.warn('Clipped raster compositing failed; previous composite preserved', error);
+  }
 }
 
 async function renderClippingBase(doc, layer, rasterOverrides) {

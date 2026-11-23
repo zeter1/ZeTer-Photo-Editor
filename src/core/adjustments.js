@@ -253,6 +253,37 @@ export function compositeClippedAdjustmentPixels(targetImageData, baseImageData,
   return targetImageData;
 }
 
+// A clipped raster overlay changes the *source stack colors*, not its matte.
+// The render caller already applied raster opacity and pixel masks to overlay
+// alpha. Do not multiply that alpha by the base a second time: the base alpha
+// is used only to transfer the RGB delta into the visible parent composite.
+export function compositeClippedRasterPixels(targetImageData, baseImageData, overlayImageData,
+  { blendMode = 'source-over' } = {}) {
+  const target = targetImageData?.data;
+  const base = baseImageData?.data;
+  const overlay = overlayImageData?.data;
+  if (!target || !base || !overlay || target.length !== base.length || base.length !== overlay.length)
+    return targetImageData;
+  for (let index = 0; index < target.length; index += 4) {
+    const baseAlpha = base[index + 3];
+    const targetAlpha = target[index + 3];
+    const overlayAlpha = overlay[index + 3];
+    if (baseAlpha <= 0 || targetAlpha <= 0 || overlayAlpha <= 0) continue;
+    const overlayCoverage = overlayAlpha / 255;
+    const contribution = Math.min(1, baseAlpha / targetAlpha);
+    for (let channel = 0; channel < 3; channel += 1) {
+      const original = base[index + channel];
+      const blended = blendAdjustmentChannel(original / 255, overlay[index + channel] / 255, blendMode);
+      const corrected = Math.round(Math.max(0, Math.min(255,
+        original + (blended * 255 - original) * overlayCoverage)));
+      base[index + channel] = corrected;
+      target[index + channel] = Math.round(Math.max(0, Math.min(255,
+        target[index + channel] + (corrected - original) * contribution)));
+    }
+  }
+  return targetImageData;
+}
+
 export function adjustmentModelEqual(left,right) {
   return JSON.stringify(sanitizeAdjustmentModel(left))===JSON.stringify(sanitizeAdjustmentModel(right));
 }

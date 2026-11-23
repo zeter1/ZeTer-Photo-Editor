@@ -110,6 +110,8 @@ jobs:
         run: npm run test:browser:psd-group-mask
       - name: PSD nested clipped adjustments on translucent backdrop / History / .zpe (file://)
         run: npm run test:browser:psd-nested-alpha
+      - name: PSD nested clipped raster + adjustment / translucent RGBA / History / ZPE (file://)
+        run: npm run test:browser:psd-clipped-raster
 
       - name: Photoshop PSD native layers in fresh Chromium file:// (002B/2a)
         run: npm run test:browser

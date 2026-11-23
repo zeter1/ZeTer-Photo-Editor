@@ -50,13 +50,12 @@ test('raster clipping is editable, history-backed, .zpe persistent and no-op-saf
   ]);
 });
 
-test('clipped raster has its own alpha isolation against the base mask and preserves blend mode', () => {
+test('clipped raster isolates overlay and updates source stack without changing backdrop alpha', () => {
   const render = readFileSync(new URL('../src/core/render.js', import.meta.url), 'utf8');
   assert.match(render, /if \(layer\.clipping === true && !clippingMask\) return/);
-  assert.match(render, /const clippedCanvas = document\.createElement\('canvas'\)/);
-  assert.match(render, /clippedCtx\.globalCompositeOperation = 'destination-in'/);
-  assert.match(render, /clippedCtx\.drawImage\(clippingMask, 0, 0\)/);
-  assert.match(render, /ctx\.globalCompositeOperation = layer\.blendMode \|\| 'source-over'/);
+  assert.match(render, /const overlay = document\.createElement\('canvas'\)/);
+  assert.match(render, /compositeClippedRasterPixels\(target, source, pixels/);
+  assert.match(render, /sourceCtx\.putImageData\(source, 0, 0\)/);
 });
 
 test('native PSD and PSB retain clipped raster, base mask and isolated multiply group across re-encode', async () => {
