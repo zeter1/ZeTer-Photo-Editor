@@ -1916,7 +1916,7 @@ function groupBlendModeFor(key, warnings, groupName) {
 }
 
 
-function reconstructPsdGroups(records, warnings) {
+function reconstructPsdGroups(records, warnings, documentWidth, documentHeight) {
   const stack = [];
   const groups = [];
   let sequence = 0;
@@ -1932,6 +1932,7 @@ function reconstructPsdGroups(records, warnings) {
         visible: true,
         opacity: 1,
         blendKey: 'pass',
+        mask: null,
       };
       groups.push(group);
       stack.push(group);
@@ -1949,6 +1950,9 @@ function reconstructPsdGroups(records, warnings) {
       group.visible = !(record.flags & 0x02);
       group.opacity = record.opacity / 255;
       group.blendKey = record.sectionBlendKey || record.blendKey || 'pass';
+      const maskPixels = buildMaskRgba(record, record.decodedChannels?.get(-2), documentWidth, documentHeight, {targetLeft:0,targetTop:0});
+      if (maskPixels) group.mask = { pixels:maskPixels, disabled:Boolean(record.mask?.disabled) };
+      else if (record.mask) warnings.push(`Группа «${group.name}»: raster mask channel не декодирован; группа импортирована без маски`);
       continue;
     }
 
@@ -1981,6 +1985,7 @@ function reconstructPsdGroups(records, warnings) {
       effectiveVisible: visible,
       opacity: group.opacity,
       blendMode: groupBlendModeFor(group.blendKey || 'pass', warnings, path.join(' / ')),
+      mask: group.mask,
     };
   });
 
@@ -2240,7 +2245,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
     }
   }
 
-  const groups = reconstructPsdGroups(records, warnings);
+  const groups = reconstructPsdGroups(records, warnings, header.width, header.height);
 
   const layers = [];
   const fillLayers = [];
@@ -2923,13 +2928,25 @@ function normalizeExportGroups(groups = []) {
       collapsed: Boolean(group?.collapsed),
       opacity: Math.max(0, Math.min(1, Number(group?.opacity ?? 1))),
       blendMode: group?.blendMode === 'pass-through' || group?.blendMode in PSD_BLEND_KEYS ? group.blendMode : 'pass-through',
+      mask: group?.mask?.pixels ? group.mask : null,
     });
   }
   return normalized;
 }
 
-function makeExportGroupMarker(group, sectionDivider) {
+function makeExportGroupMarker(group, sectionDivider, version, bitsPerChannel, documentWidth, documentHeight) {
   const folder = sectionDivider !== 3;
+  let mask = null;
+  const channels = [];
+  if (folder && group.mask?.pixels) {
+    const width = Math.trunc(Number(group.mask.width ?? documentWidth));
+    const height = Math.trunc(Number(group.mask.height ?? documentHeight));
+    const x = Math.trunc(Number(group.mask.x ?? 0));
+    const y = Math.trunc(Number(group.mask.y ?? 0));
+    const source = exportPixelSource({pixels:group.mask.pixels}, width, height, `маска группы «${group.name}»`, 'PSD_EXPORT_MASK', 'rgb');
+    channels.push({id:-2, data:encodeExportChannel(source, 0, width, height, version, bitsPerChannel, {alpha:true})});
+    mask = {pixels:true,x,y,width,height,defaultColor:group.mask.defaultColor===0?0:255,disabled:Boolean(group.mask.disabled)};
+  }
   const sectionBlendKey = group.blendMode === 'pass-through' ? 'pass' : (PSD_BLEND_KEYS[group.blendMode] || 'norm');
   return {
     recordType: sectionDivider === 3 ? 'group-boundary' : 'group-folder',
@@ -2944,8 +2961,8 @@ function makeExportGroupMarker(group, sectionDivider) {
     blendMode: 'source-over',
     visible: folder ? group.visible : false,
     transparencyProtected: false,
-    mask: null,
-    channels: [],
+    mask,
+    channels,
   };
 }
 
@@ -2974,7 +2991,7 @@ function exportGroupLineage(groupMap, key) {
   return lineage;
 }
 
-function expandExportLayerGroups(layers, groups) {
+function expandExportLayerGroups(layers, groups, version, bitsPerChannel, documentWidth, documentHeight) {
   const groupMap = new Map(normalizeExportGroups(groups).map(group => [group.key, group]));
   if (!groupMap.size) return layers;
   const records = [];
@@ -2984,7 +3001,7 @@ function expandExportLayerGroups(layers, groups) {
   const closeTo = common => {
     while (open.length > common) {
       const group = open.pop();
-      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1));
+      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1, version, bitsPerChannel, documentWidth, documentHeight));
       closed.add(group.key);
     }
   };
@@ -3002,7 +3019,7 @@ function expandExportLayerGroups(layers, groups) {
           'PSD_EXPORT_GROUP_SPLIT',
         );
       }
-      records.push(makeExportGroupMarker(group, 3));
+      records.push(makeExportGroupMarker(group, 3, version, bitsPerChannel, documentWidth, documentHeight));
       open.push(group);
     }
     records.push(layer);
@@ -3216,7 +3233,7 @@ function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], c
   if (!layers.length) throw new PsdImportError('PSD/PSB writer: нужен хотя бы один слой', 'PSD_EXPORT_EMPTY');
 
   const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version, depth, mode));
-  const records = expandExportLayerGroups(normalized, groups);
+  const records = expandExportLayerGroups(normalized, groups, version, depth, documentWidth, documentHeight);
   if (records.length > 32767) {
     throw new PsdImportError(`PSD/PSB writer: слишком много layer records после добавления групп: ${records.length}`, 'PSD_EXPORT_LAYER_RECORD_LIMIT');
   }

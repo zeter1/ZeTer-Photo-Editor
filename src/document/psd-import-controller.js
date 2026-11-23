@@ -108,7 +108,11 @@ export function createPsdImportController({
       const groupIdByKey=new Map();
       for(const sourceGroup of parsed.groups||[]){
         if(!usedGroupKeys.has(sourceGroup.key))continue;
+        const groupMaskDataUrl=sourceGroup.mask?.pixels
+          ? await rendering.rgbaPixelsToDataUrl(parsed.width,parsed.height,sourceGroup.mask.pixels,`PSD group mask «${sourceGroup.name}»`)
+          : null;
         const group=createLayerGroup({
+          mask:groupMaskDataUrl?createLayerMask({enabled:sourceGroup.mask.disabled!==true,dataUrl:groupMaskDataUrl}):null,
           name:sourceGroup.name||'PSD Group',
           visible:sourceGroup.visible!==false,
           collapsed:Boolean(sourceGroup.collapsed),

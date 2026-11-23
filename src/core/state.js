@@ -240,6 +240,7 @@ export function createLayerGroup(overrides = {}) {
     opacity: 1,
     blendMode: 'pass-through',
     parentGroupId: null,
+    mask: null,
     ...overrides,
   };
 }
@@ -1161,6 +1162,7 @@ function sanitizeGroup(group, usedIds) {
     opacity: bounded(group?.opacity, 1, 0, 1),
     blendMode: GROUP_BLEND_MODES.has(group?.blendMode) ? group.blendMode : 'pass-through',
     parentGroupId: typeof group?.parentGroupId === 'string' ? shortText(group.parentGroupId, '', 160).trim() || null : null,
+    mask: sanitizeLayerMask(group?.mask),
   };
 }
 

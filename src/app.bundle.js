@@ -10594,6 +10594,7 @@ function createLayerGroup(overrides = {}) {
     opacity: 1,
     blendMode: 'pass-through',
     parentGroupId: null,
+    mask: null,
     ...overrides,
   };
 }
@@ -11482,6 +11483,7 @@ function sanitizeGroup(group, usedIds) {
     opacity: bounded(group?.opacity, 1, 0, 1),
     blendMode: GROUP_BLEND_MODES.has(group?.blendMode) ? group.blendMode : 'pass-through',
     parentGroupId: typeof group?.parentGroupId === 'string' ? shortText(group.parentGroupId, '', 160).trim() || null : null,
+    mask: sanitizeLayerMask(group?.mask),
   };
 }
 
@@ -14185,6 +14187,11 @@ function createLayerGroupCommandController({
           step: 1,
           required: true,
         },
+        ...(group.mask ? [{
+          name: 'maskEnabled', label: 'Растровая маска папки', type: 'select',
+          value: group.mask.enabled === false ? 'disabled' : 'enabled',
+          options: [['enabled', 'Включена'], ['disabled', 'Отключена']],
+        }] : []),
       ],
       submitLabel: 'Применить',
       onSubmit: values => {
@@ -14204,8 +14211,10 @@ function createLayerGroupCommandController({
           0,
           1,
         );
+        const maskEnabled = values?.maskEnabled !== 'disabled';
+        const changedMask = Boolean(liveGroup.mask) && (liveGroup.mask.enabled !== false) !== maskEnabled;
         if (
-          liveGroup.blendMode === blendMode &&
+          !changedMask && liveGroup.blendMode === blendMode &&
           Math.abs(Number(liveGroup.opacity ?? 1) - opacity) < 1e-9
         ) {
           return true;
@@ -14213,6 +14222,7 @@ function createLayerGroupCommandController({
 
         liveGroup.blendMode = blendMode;
         liveGroup.opacity = opacity;
+        if (liveGroup.mask) liveGroup.mask.enabled = maskEnabled;
         publish(owner, 'Параметры группы');
         return true;
       },
@@ -17895,7 +17905,11 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
       try {
         const opacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1)));
         const blendMode = group.blendMode || 'pass-through';
-        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9;
+        // A folder raster mask must cover the group's entire offscreen result,
+        // not each child. Masked pass-through groups use isolated source-over
+        // approximation; backdrop-sensitive adjustment semantics remain unsupported.
+        const groupMasked = Boolean(group.mask?.enabled !== false && (group.mask?.dataUrl || group.mask?.invert));
+        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9 || groupMasked;
         const newGroupCanvas = () => {
           const groupCanvas = document.createElement('canvas');
           groupCanvas.width = doc.width;
@@ -17920,6 +17934,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
 
         const { groupCanvas, groupCtx } = newGroupCanvas();
         await renderEntries(groupCanvas, groupCtx, group.id);
+        if (groupMasked) await applyLayerMaskToContext(groupCtx, group.mask, doc.width, doc.height);
 
         targetCtx.save();
         targetCtx.globalAlpha = opacity;
@@ -26369,14 +26384,17 @@ function createPsdImportSemantics({
     const transform=isCmyk?createCmykToSrgbTransform(parsed.iccProfile?.bytes||null,{intent:'perceptual'}):null;
     const previewFor=buffer=>buffer?.model==='cmyk'?cmykPixelBufferToRgba8Preview(buffer,transform):pixelBufferToRgba8Preview(buffer);
     const groupMap=new Map();
-    nested.groups=(parsed.groups||[]).map(sourceGroup=>{
+    nested.groups=await Promise.all((parsed.groups||[]).map(async sourceGroup=>{
+      const groupMaskDataUrl=sourceGroup.mask?.pixels
+        ? await encodePreview(parsed.width,parsed.height,sourceGroup.mask.pixels,'Embedded PSD group mask') : null;
       const group=createLayerGroup({
+        mask:groupMaskDataUrl?createLayerMask({enabled:sourceGroup.mask.disabled!==true,dataUrl:groupMaskDataUrl}):null,
         name:sourceGroup.name||'PSD Group',visible:sourceGroup.visible!==false,collapsed:Boolean(sourceGroup.collapsed),
         opacity:clamp(Number(sourceGroup.opacity??1),0,1),blendMode:sourceGroup.blendMode||'pass-through',
       });
       groupMap.set(sourceGroup.key,group.id);
       return group;
-    });
+    }));
     for(const sourceGroup of parsed.groups||[]){
       const target=nested.groups.find(group=>group.id===groupMap.get(sourceGroup.key));
       if(target)target.parentGroupId=sourceGroup.parentKey?(groupMap.get(sourceGroup.parentKey)??null):null;
@@ -26574,7 +26592,11 @@ function createPsdImportController({
       const groupIdByKey=new Map();
       for(const sourceGroup of parsed.groups||[]){
         if(!usedGroupKeys.has(sourceGroup.key))continue;
+        const groupMaskDataUrl=sourceGroup.mask?.pixels
+          ? await rendering.rgbaPixelsToDataUrl(parsed.width,parsed.height,sourceGroup.mask.pixels,`PSD group mask «${sourceGroup.name}»`)
+          : null;
         const group=createLayerGroup({
+          mask:groupMaskDataUrl?createLayerMask({enabled:sourceGroup.mask.disabled!==true,dataUrl:groupMaskDataUrl}):null,
           name:sourceGroup.name||'PSD Group',
           visible:sourceGroup.visible!==false,
           collapsed:Boolean(sourceGroup.collapsed),
@@ -26864,7 +26886,7 @@ function createPsdExportController({
       // Adjustment masks are document-scoped, even when their canonical layer
       // has the default 1x1 geometry. Exporting through layerLocalTransform
       // otherwise collapses a full-document raster mask into one pixel.
-      const documentMask=layer.type==='adjustment';
+      const documentMask=layer.type==='adjustment'||layer.type==='group';
       const localWidth=documentMask?bounds.width:Math.max(1,Number(layer.width)||1);
       const localHeight=documentMask?bounds.height:Math.max(1,Number(layer.height)||1);
       const source=createCanvas();
@@ -27121,9 +27143,9 @@ function createPsdExportController({
         current=groupsById.get(current.parentGroupId);
       }
     }
-    const exportGroups=(exportDoc.groups||[])
+    const exportGroups=await Promise.all((exportDoc.groups||[])
       .filter(group=>sourceGroupIds.has(group.id))
-      .map(group=>({
+      .map(async group=>({
         key:group.id,
         parentKey:group.parentGroupId&&sourceGroupIds.has(group.parentGroupId)?group.parentGroupId:null,
         name:group.name||'Group',
@@ -27131,7 +27153,12 @@ function createPsdExportController({
         collapsed:Boolean(group.collapsed),
         opacity:clamp(Number(group.opacity??1),0,1),
         blendMode:group.blendMode||'pass-through',
-      }));
+        ...(group.mask?{mask:{
+          pixels:await renderPsdMaskPixels({...group,type:'group'},{x:0,y:0,width:exportDoc.width,height:exportDoc.height}),
+          disabled:group.mask.enabled===false,
+          x:0,y:0,width:exportDoc.width,height:exportDoc.height,defaultColor:255,
+        }}:{}),
+      })));
     if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&!item.nativeShape?.eligible&&!item.nativeAdjustment?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
     const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
     const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
@@ -29294,7 +29321,7 @@ function groupBlendModeFor(key, warnings, groupName) {
 }
 
 
-function reconstructPsdGroups(records, warnings) {
+function reconstructPsdGroups(records, warnings, documentWidth, documentHeight) {
   const stack = [];
   const groups = [];
   let sequence = 0;
@@ -29310,6 +29337,7 @@ function reconstructPsdGroups(records, warnings) {
         visible: true,
         opacity: 1,
         blendKey: 'pass',
+        mask: null,
       };
       groups.push(group);
       stack.push(group);
@@ -29327,6 +29355,9 @@ function reconstructPsdGroups(records, warnings) {
       group.visible = !(record.flags & 0x02);
       group.opacity = record.opacity / 255;
       group.blendKey = record.sectionBlendKey || record.blendKey || 'pass';
+      const maskPixels = buildMaskRgba(record, record.decodedChannels?.get(-2), documentWidth, documentHeight, {targetLeft:0,targetTop:0});
+      if (maskPixels) group.mask = { pixels:maskPixels, disabled:Boolean(record.mask?.disabled) };
+      else if (record.mask) warnings.push(`Группа «${group.name}»: raster mask channel не декодирован; группа импортирована без маски`);
       continue;
     }
 
@@ -29359,6 +29390,7 @@ function reconstructPsdGroups(records, warnings) {
       effectiveVisible: visible,
       opacity: group.opacity,
       blendMode: groupBlendModeFor(group.blendKey || 'pass', warnings, path.join(' / ')),
+      mask: group.mask,
     };
   });
 
@@ -29617,7 +29649,7 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
     }
   }
 
-  const groups = reconstructPsdGroups(records, warnings);
+  const groups = reconstructPsdGroups(records, warnings, header.width, header.height);
 
   const layers = [];
   const fillLayers = [];
@@ -30299,13 +30331,25 @@ function normalizeExportGroups(groups = []) {
       collapsed: Boolean(group?.collapsed),
       opacity: Math.max(0, Math.min(1, Number(group?.opacity ?? 1))),
       blendMode: group?.blendMode === 'pass-through' || group?.blendMode in PSD_BLEND_KEYS ? group.blendMode : 'pass-through',
+      mask: group?.mask?.pixels ? group.mask : null,
     });
   }
   return normalized;
 }
 
-function makeExportGroupMarker(group, sectionDivider) {
+function makeExportGroupMarker(group, sectionDivider, version, bitsPerChannel, documentWidth, documentHeight) {
   const folder = sectionDivider !== 3;
+  let mask = null;
+  const channels = [];
+  if (folder && group.mask?.pixels) {
+    const width = Math.trunc(Number(group.mask.width ?? documentWidth));
+    const height = Math.trunc(Number(group.mask.height ?? documentHeight));
+    const x = Math.trunc(Number(group.mask.x ?? 0));
+    const y = Math.trunc(Number(group.mask.y ?? 0));
+    const source = exportPixelSource({pixels:group.mask.pixels}, width, height, `маска группы «${group.name}»`, 'PSD_EXPORT_MASK', 'rgb');
+    channels.push({id:-2, data:encodeExportChannel(source, 0, width, height, version, bitsPerChannel, {alpha:true})});
+    mask = {pixels:true,x,y,width,height,defaultColor:group.mask.defaultColor===0?0:255,disabled:Boolean(group.mask.disabled)};
+  }
   const sectionBlendKey = group.blendMode === 'pass-through' ? 'pass' : (PSD_BLEND_KEYS[group.blendMode] || 'norm');
   return {
     recordType: sectionDivider === 3 ? 'group-boundary' : 'group-folder',
@@ -30320,8 +30364,8 @@ function makeExportGroupMarker(group, sectionDivider) {
     blendMode: 'source-over',
     visible: folder ? group.visible : false,
     transparencyProtected: false,
-    mask: null,
-    channels: [],
+    mask,
+    channels,
   };
 }
 
@@ -30350,7 +30394,7 @@ function exportGroupLineage(groupMap, key) {
   return lineage;
 }
 
-function expandExportLayerGroups(layers, groups) {
+function expandExportLayerGroups(layers, groups, version, bitsPerChannel, documentWidth, documentHeight) {
   const groupMap = new Map(normalizeExportGroups(groups).map(group => [group.key, group]));
   if (!groupMap.size) return layers;
   const records = [];
@@ -30360,7 +30404,7 @@ function expandExportLayerGroups(layers, groups) {
   const closeTo = common => {
     while (open.length > common) {
       const group = open.pop();
-      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1));
+      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1, version, bitsPerChannel, documentWidth, documentHeight));
       closed.add(group.key);
     }
   };
@@ -30378,7 +30422,7 @@ function expandExportLayerGroups(layers, groups) {
           'PSD_EXPORT_GROUP_SPLIT',
         );
       }
-      records.push(makeExportGroupMarker(group, 3));
+      records.push(makeExportGroupMarker(group, 3, version, bitsPerChannel, documentWidth, documentHeight));
       open.push(group);
     }
     records.push(layer);
@@ -30592,7 +30636,7 @@ function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], c
   if (!layers.length) throw new PsdImportError('PSD/PSB writer: нужен хотя бы один слой', 'PSD_EXPORT_EMPTY');
 
   const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version, depth, mode));
-  const records = expandExportLayerGroups(normalized, groups);
+  const records = expandExportLayerGroups(normalized, groups, version, depth, documentWidth, documentHeight);
   if (records.length > 32767) {
     throw new PsdImportError(`PSD/PSB writer: слишком много layer records после добавления групп: ${records.length}`, 'PSD_EXPORT_LAYER_RECORD_LIMIT');
   }

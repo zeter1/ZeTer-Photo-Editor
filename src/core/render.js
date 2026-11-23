@@ -582,7 +582,11 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
       try {
         const opacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1)));
         const blendMode = group.blendMode || 'pass-through';
-        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9;
+        // A folder raster mask must cover the group's entire offscreen result,
+        // not each child. Masked pass-through groups use isolated source-over
+        // approximation; backdrop-sensitive adjustment semantics remain unsupported.
+        const groupMasked = Boolean(group.mask?.enabled !== false && (group.mask?.dataUrl || group.mask?.invert));
+        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9 || groupMasked;
         const newGroupCanvas = () => {
           const groupCanvas = document.createElement('canvas');
           groupCanvas.width = doc.width;
@@ -607,6 +611,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
 
         const { groupCanvas, groupCtx } = newGroupCanvas();
         await renderEntries(groupCanvas, groupCtx, group.id);
+        if (groupMasked) await applyLayerMaskToContext(groupCtx, group.mask, doc.width, doc.height);
 
         targetCtx.save();
         targetCtx.globalAlpha = opacity;

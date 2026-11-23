@@ -1,3 +1,10 @@
+## 1.47.19 — текущая версия: native Photoshop folder raster group mask (Stage 17a, 2026-11-23)
+
+- Native folder divider (-2) raster mask import/export in PSD/PSB, nested groups, disabled flag, mask bounds/default alpha; mask is preserved separately from editable child layer masks, not flattened.
+- Document group.mask with .zpe persistence; isolated Canvas group compositing; Group Properties mask enable/disable, one History/Undo/Redo action, import including embedded PSD.
+- RED 3/3 -> GREEN; nested PSD/PSB fixtures 5/5; production Chromium file:// pixel [255,127,127,255] inside and [255,255,255,255] outside plus UI/History/.zpe reopen. Synthetic oracle, **not Photoshop-authored**; masked pass-through background-aware parity still incomplete.
+- Stage17a remains IN PROGRESS. [Технический журнал](task/002-psd-folder-group-mask.md).
+
 ## 1.47.18 — текущая версия (Stage 17a, PSD/PSB raster clipping, 2026-11-23)
 
 - Canvas compositor: обычный растровый clipping больше не игнорирует alpha нижележащего base. Отдельная masked offscreen поверхность накладывается с исходным blend mode на parent backdrop, не стирая нижние слои; orphan clipping fail-closed.
