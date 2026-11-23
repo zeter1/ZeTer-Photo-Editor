@@ -168,3 +168,32 @@ for (const [format, encode] of [['PSD', encodePsd], ['PSB', encodePsb]]) {
     });
   }
 }
+
+import { psdAdjustmentNativePlan } from '../src/document/psd-native-metadata-plans.js';
+
+test('ZPE-created clipped Invert exports editable native Photoshop nvrt in PSD and PSB', async () => {
+  const plan=psdAdjustmentNativePlan({
+    type:'adjustment',adjustment:{kind:'invert'},styles:null,filters:{},
+  });
+  assert.equal(plan.eligible,true,plan.reason);
+  assert.equal(plan.metadata.blocks.length,1);
+  assert.equal(plan.metadata.blocks[0].key,'nvrt');
+  assert.equal(plan.metadata.blocks[0].data.byteLength,0);
+  const color=rgba=>Uint8Array.from([rgba[0],rgba[1],rgba[2],rgba[3]]);
+  for(const [format,encode] of [['PSD',encodePsd],['PSB',encodePsb]]) {
+    const binary=encode({
+      width:1,height:1,composite:color([0,255,255,255]),
+      groups:[],layers:[
+        {name:'Base',x:0,y:0,width:1,height:1,pixels:color([255,0,0,255]),
+          blendMode:'source-over',visible:true},
+        {name:'Editable Invert',x:0,y:0,width:0,height:0,
+          clipping:true,visible:true,psdAdjustment:plan.metadata},
+      ],
+    });
+    const decoded=await decodePsd(binary,{maxPixels:16,maxLayers:8});
+    const invert=decoded.adjustmentLayers.find(layer=>layer.name==='Editable Invert');
+    assert.equal(invert?.clipping,true,format+' keeps clipping');
+    assert.equal(invert?.psdAdjustment?.kind,'invert',format+' keeps editable type');
+    assert.deepEqual(invert?.psdAdjustment?.parsed,{kind:'invert'});
+  }
+});
