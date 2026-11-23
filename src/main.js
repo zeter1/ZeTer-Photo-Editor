@@ -2144,10 +2144,18 @@ function updateProperties() {
     ${propField('Масштаб Y','scaleY',Number(l.scaleY ?? 1).toFixed(2),'number','step="0.01" min="0.01" max="100"')}
     ${propField('Поворот','rotation',Math.round(l.rotation ?? 0),'number','step="1"')}
     <label>Маски</label><span>${escapeHtml(layerMaskSummary(l))}</span>
+    ${l.type==='raster'?'<label for="rasterLayerClipping">Clipping</label><label><input id="rasterLayerClipping" type="checkbox" data-raster-clipping '+(l.clipping?'checked':'')+'> Ограничить alpha нижележащего слоя</label>':''}
     ${extra}
   </div>`;
   const propertyOwner=doc, propertyLayerId=l.id;
   bindPropertyInputs(els.props,propertyOwner,propertyLayerId);
+  els.props.querySelector('[data-raster-clipping]')?.addEventListener('change',event=>{
+    const enabled=event.currentTarget.checked;
+    if(!layerPropertyCommandController.setClipping(propertyOwner,propertyLayerId,enabled)) {
+      const live=propertyOwner.layers.find(layer=>layer.id===propertyLayerId);
+      event.currentTarget.checked=Boolean(live?.clipping);
+    }
+  });
   if(l.type==='raster'&&l.rawDng)bindRawDevelopmentControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='cmyk')bindColorManagementControls(els.props);

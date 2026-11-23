@@ -14619,6 +14619,14 @@ function createLayerPropertyCommandController({
     return publishCommit(owner, 'Режим наложения');
   }
 
+  function commandSetClipping(owner, layerId, enabled) {
+    const layer = exactLayer(owner, layerId);
+    if (!layer || layer.type !== 'raster' || isLayerLocked(owner, layer) || typeof enabled !== 'boolean') return false;
+    if (Boolean(layer.clipping) === enabled) return false;
+    layer.clipping = enabled;
+    return publishCommit(owner, 'Изменить clipping растрового слоя');
+  }
+
   function commandSetOpacity(owner, layerId, rawPercent, { commit = true } = {}) {
     const previewKey = `opacity:${layerId}`;
     const layer = exactLayer(owner, layerId);
@@ -14741,6 +14749,7 @@ function createLayerPropertyCommandController({
     resetColorCorrection: commandResetColorCorrection,
     resetFilters: commandResetFilters,
     setBlendMode: commandSetBlendMode,
+    setClipping: commandSetClipping,
     setOpacity: commandSetOpacity,
     updateHighDepthPreview: commandUpdateHighDepthPreview,
     resetHighDepthPreview: commandResetHighDepthPreview,
@@ -17813,13 +17822,37 @@ function buildGroupRenderPlan(doc) {
 
 async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides, clippingMask = null) {
   if (!isLayerVisible(doc, layer) || layer.opacity <= 0) return;
+  // An orphaned clipped layer (raster or adjustment) must never escape its base.
+  if (layer.clipping === true && !clippingMask) return;
   if (layer.type === 'adjustment') {
-    // A clipped adjustment without a visible base must never become global.
-    if (layer.clipping === true && !clippingMask) return;
     await applyAdjustmentLayer(canvas, ctx, layer, { clippingMask });
     return;
   }
-  await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
+  const rasterOverride = rasterOverrides?.get?.(layer.id) || null;
+  if (layer.clipping !== true) {
+    await renderLayer(ctx, layer, { rasterOverride });
+    return;
+  }
+  // Isolate the clipped layer BEFORE compositing its blend mode against the
+  // actual group backdrop. Clipping an already-blended target would also erase
+  // lower siblings and make isolated PSD groups incorrectly transparent.
+  const clippedCanvas = document.createElement('canvas');
+  clippedCanvas.width = doc.width;
+  clippedCanvas.height = doc.height;
+  const clippedCtx = clippedCanvas.getContext('2d', { alpha: true });
+  await renderLayer(clippedCtx, { ...layer, blendMode: 'source-over' }, { rasterOverride });
+  clippedCtx.save();
+  clippedCtx.globalCompositeOperation = 'destination-in';
+  clippedCtx.globalAlpha = 1;
+  clippedCtx.filter = 'none';
+  clippedCtx.drawImage(clippingMask, 0, 0);
+  clippedCtx.restore();
+  ctx.save();
+  ctx.globalCompositeOperation = layer.blendMode || 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.filter = 'none';
+  ctx.drawImage(clippedCanvas, 0, 0);
+  ctx.restore();
 }
 
 async function renderClippingBase(doc, layer, rasterOverrides) {
@@ -32796,10 +32829,18 @@ function updateProperties() {
     ${propField('Масштаб Y','scaleY',Number(l.scaleY ?? 1).toFixed(2),'number','step="0.01" min="0.01" max="100"')}
     ${propField('Поворот','rotation',Math.round(l.rotation ?? 0),'number','step="1"')}
     <label>Маски</label><span>${escapeHtml(layerMaskSummary(l))}</span>
+    ${l.type==='raster'?'<label for="rasterLayerClipping">Clipping</label><label><input id="rasterLayerClipping" type="checkbox" data-raster-clipping '+(l.clipping?'checked':'')+'> Ограничить alpha нижележащего слоя</label>':''}
     ${extra}
   </div>`;
   const propertyOwner=doc, propertyLayerId=l.id;
   bindPropertyInputs(els.props,propertyOwner,propertyLayerId);
+  els.props.querySelector('[data-raster-clipping]')?.addEventListener('change',event=>{
+    const enabled=event.currentTarget.checked;
+    if(!layerPropertyCommandController.setClipping(propertyOwner,propertyLayerId,enabled)) {
+      const live=propertyOwner.layers.find(layer=>layer.id===propertyLayerId);
+      event.currentTarget.checked=Boolean(live?.clipping);
+    }
+  });
   if(l.type==='raster'&&l.rawDng)bindRawDevelopmentControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='cmyk')bindColorManagementControls(els.props);

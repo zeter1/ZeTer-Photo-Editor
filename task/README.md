@@ -4,6 +4,11 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
+## Текущая реализация (2026-11-23, Stage 17a)
+
+- **1.47.18 / CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY — IN PROGRESS:** реальный masked raster clipping внутри изолированной PSD/PSB group `multiply`/opacity, отдельный masked composite без повреждения нижнего backdrop, UI Properties/History Undo-Redo/.zpe и native PSD/PSB codec bit/group/mask round-trip. Chromium file:// точные пиксели и UI/Save/Reopen PASS. Windows `npm run check`: 1775 PASS / 10 SKIP / 5 Linux-only `/proc`/cgroup FAIL. Adobe-authored pixel oracle и нативная folder mask остаются открытыми. [Журнал](002-psd-isolated-clipping.md) · [NEXT](NEXT.md).
+- **RAW #397/#398/#399 MERGED:** основной RAW-код принят; exact-main `ae42c07` CI SUCCESS. Следующие ниже строки `LOCAL` описывают исторические этапы и не являются текущей очередью.
+
 ## Сейчас (2026-11-23)
 
 - **LOCAL 1.47.17 / CAP-RAW-DNG-LINEAR-CONTRAST:** сценолинейный контраст RAW с работающим Properties input, exact RGBA, History Undo/Redo, .zpe и переносимыми JSON-пресетами; RED→GREEN 4 new cases, 15/15 focused Node PASS и реальный RAW Chromium `file://` PASS и полный Chrome `npm run test:browser` PASS exit 0. Windows full check 1772 PASS/10 SKIP/5 Linux-only FAIL; remote PR-head CI NOT RUN; не опубликовано в main. [Журнал](002-raw-dng-linear-contrast.md) · [NEXT](NEXT.md).

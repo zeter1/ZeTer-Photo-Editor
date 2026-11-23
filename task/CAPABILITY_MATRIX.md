@@ -5,6 +5,8 @@
 
 **Текущая интеграция (2026-11-23):** [#397](https://github.com/zeter1/ZeTer-Photo-Editor/pull/397), [#398](https://github.com/zeter1/ZeTer-Photo-Editor/pull/398) и [#399 RAW v1.47.17](https://github.com/zeter1/ZeTer-Photo-Editor/pull/399) **MERGED**. #399 final head `abe925447f67e99715ce39016b82acb6e89bce34` Linux 13/13 SUCCESS, Windows full browser PASS; exact-main после RAW merge остаётся отдельной проверкой. Ниже исторические записи «только локально» датированы прежними кандидатами; они не описывают актуальное расположение принятого кода.
 
+**Stage 17a / CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY (1.47.18 candidate, 2026-11-23) — IN PROGRESS:** реальный raster clipping теперь ограничен alpha masked base и компонуется перед group blend/opacity; Properties/History Undo-Redo/.zpe real Chromium `file://` точные RGBA 2×4; PSD/PSB structural native group/clip/mask round-trip 2 формата, без flatten layer records. Первые RED→GREEN Node 2/2; focused 26/26; extended PSD/PSB 5/5 PASS. Windows full check 1775 PASS / 10 SKIP / 5 прежних Linux-only harness FAIL, Linux CI на кандидате ещё требуется. Photoshop-authored independent pixel golden и native folder group mask **НЕ DONE**. [Журнал](002-psd-isolated-clipping.md) · [NEXT](NEXT.md).
+
 ## Правила обновления
 
 - Статусы: **TODO** (не подтверждена реализация), **IN PROGRESS** (имеется часть реализации или проверки), **BLOCKED** (названная внешняя зависимость), **DONE** (все явно указанные критерии приняты). Отдельно ведём *покрытие*: код / UI / Undo-Redo / `.zpe` / PSD-PSB / реальная интеграция.
