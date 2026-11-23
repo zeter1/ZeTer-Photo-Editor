@@ -140,14 +140,17 @@ export function createPsdImportSemantics({
     const transform=isCmyk?createCmykToSrgbTransform(parsed.iccProfile?.bytes||null,{intent:'perceptual'}):null;
     const previewFor=buffer=>buffer?.model==='cmyk'?cmykPixelBufferToRgba8Preview(buffer,transform):pixelBufferToRgba8Preview(buffer);
     const groupMap=new Map();
-    nested.groups=(parsed.groups||[]).map(sourceGroup=>{
+    nested.groups=await Promise.all((parsed.groups||[]).map(async sourceGroup=>{
+      const groupMaskDataUrl=sourceGroup.mask?.pixels
+        ? await encodePreview(parsed.width,parsed.height,sourceGroup.mask.pixels,'Embedded PSD group mask') : null;
       const group=createLayerGroup({
+        mask:groupMaskDataUrl?createLayerMask({enabled:sourceGroup.mask.disabled!==true,dataUrl:groupMaskDataUrl}):null,
         name:sourceGroup.name||'PSD Group',visible:sourceGroup.visible!==false,collapsed:Boolean(sourceGroup.collapsed),
         opacity:clamp(Number(sourceGroup.opacity??1),0,1),blendMode:sourceGroup.blendMode||'pass-through',
       });
       groupMap.set(sourceGroup.key,group.id);
       return group;
-    });
+    }));
     for(const sourceGroup of parsed.groups||[]){
       const target=nested.groups.find(group=>group.id===groupMap.get(sourceGroup.key));
       if(target)target.parentGroupId=sourceGroup.parentKey?(groupMap.get(sourceGroup.parentKey)??null):null;

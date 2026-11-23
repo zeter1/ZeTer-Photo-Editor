@@ -106,6 +106,9 @@ jobs:
       - name: PSD isolated raster clipping / real pixel oracle / History / .zpe (file://)
         run: npm run test:browser:psd-isolated
 
+      - name: PSD folder raster masks / real pixel oracle / History / .zpe (file://)
+        run: npm run test:browser:psd-group-mask
+
       - name: Photoshop PSD native layers in fresh Chromium file:// (002B/2a)
         run: npm run test:browser
         env:

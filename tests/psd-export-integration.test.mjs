@@ -86,7 +86,7 @@ test('PSD Group Export Stage 8b wires ZPE flat groups into the PSD/PSB writer',(
   assert.match(adapter,/function expandExportLayerGroups\(/);
   assert.match(adapter,/writeSectionDividerExtra\(extra, layer\)/);
   assert.match(adapter,/groups = \[\]/);
-  assert.match(psdExportController,/const exportGroups=\(exportDoc\.groups\|\|\[\]\)/);
+  assert.match(psdExportController,/const exportGroups=await Promise\.all\(\(exportDoc\.groups\|\|\[\]\)/);
   assert.match(psdExportController,/groupKey:layer\.groupId/);
   assert.match(psdExportController,/return\{layers:\[\.\.\.prepared\]\.reverse\(\),groups:exportGroups,paths:structuredClone\(exportDoc\.paths\|\|\[\]\),linkedLayerBlocks:/);
   assert.match(documentExportController,/layers:\s*prepared\.layers/);

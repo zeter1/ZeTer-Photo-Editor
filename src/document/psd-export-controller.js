@@ -69,7 +69,7 @@ export function createPsdExportController({
       // Adjustment masks are document-scoped, even when their canonical layer
       // has the default 1x1 geometry. Exporting through layerLocalTransform
       // otherwise collapses a full-document raster mask into one pixel.
-      const documentMask=layer.type==='adjustment';
+      const documentMask=layer.type==='adjustment'||layer.type==='group';
       const localWidth=documentMask?bounds.width:Math.max(1,Number(layer.width)||1);
       const localHeight=documentMask?bounds.height:Math.max(1,Number(layer.height)||1);
       const source=createCanvas();
@@ -326,9 +326,9 @@ export function createPsdExportController({
         current=groupsById.get(current.parentGroupId);
       }
     }
-    const exportGroups=(exportDoc.groups||[])
+    const exportGroups=await Promise.all((exportDoc.groups||[])
       .filter(group=>sourceGroupIds.has(group.id))
-      .map(group=>({
+      .map(async group=>({
         key:group.id,
         parentKey:group.parentGroupId&&sourceGroupIds.has(group.parentGroupId)?group.parentGroupId:null,
         name:group.name||'Group',
@@ -336,7 +336,12 @@ export function createPsdExportController({
         collapsed:Boolean(group.collapsed),
         opacity:clamp(Number(group.opacity??1),0,1),
         blendMode:group.blendMode||'pass-through',
-      }));
+        ...(group.mask?{mask:{
+          pixels:await renderPsdMaskPixels({...group,type:'group'},{x:0,y:0,width:exportDoc.width,height:exportDoc.height}),
+          disabled:group.mask.enabled===false,
+          x:0,y:0,width:exportDoc.width,height:exportDoc.height,defaultColor:255,
+        }}:{}),
+      })));
     if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&!item.nativeShape?.eligible&&!item.nativeAdjustment?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
     const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
     const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
