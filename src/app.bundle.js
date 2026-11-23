@@ -17800,8 +17800,14 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
     const effectPixels=effectCtx.getImageData(0,0,width,height);
     const settings = { opacity: layer.opacity ?? 1,
       blendMode: layer.blendMode || 'source-over' };
-    if (clippingSource) compositeClippedAdjustmentPixels(basePixels, clippingSource, effectPixels, settings);
-    else compositeAdjustmentPixels(basePixels, effectPixels, settings);
+    if (clippingSource) {
+      compositeClippedAdjustmentPixels(basePixels, clippingSource, effectPixels, settings);
+      // Subsequent clipped adjustments must see the preceding adjustment's
+      // pixels, not the original base. Keep the base's alpha unchanged so
+      // clipping coverage remains stable throughout the adjustment chain.
+      compositeAdjustmentPixels(clippingSource, effectPixels, settings);
+      clippingMask.getContext('2d').putImageData(clippingSource, 0, 0);
+    } else compositeAdjustmentPixels(basePixels, effectPixels, settings);
     ctx.putImageData(basePixels,0,0);
   }catch(error){
     console.warn('Adjustment layer compositing failed; previous composite preserved',error);

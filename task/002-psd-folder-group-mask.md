@@ -45,3 +45,10 @@
 - **Scope limit:** a clipped raster between the base and adjustment still needs independent composite-stack semantics; non-source-over blend of the clipping base, advanced knockout and exact Photoshop-authored parity are **NOT VERIFIED**. No flatten of PSD/PSB native group/adjustment records.
 
 **Remote gates:** to be filled only after published exact-head GitHub CI and merge checks. Do not treat these local green tests as remote success.
+
+### PR #403 exact-head Linux regression and cumulative clipping fix (2026-11-23)
+
+- Initial PR head `7d980e63d83b674c671c7a2f8187ec54f9dcad3c`: Linux `verify` **FAILED** on real Chromium `test:browser:adjustment-stack`, exact step `Isolated group opacity controls adjustment coverage`; not a flaky infrastructure claim. The first clipped adjustment corrected the translucent backdrop, but a second clipped adjustment still read the original base, not the first correction. Baseline 1.47.20 used an inflated isolated-opacity output 96 over gray128 (now semantically corrected to 64 for black base with 50% folder opacity).
+- Fixed production `applyAdjustmentLayer` to transfer the RGB delta into the parent **and** apply adjustment color to the reusable clipped base canvas without changing alpha. The next clipped adjustment uses the accumulated base; raster mask, vector mask and clipping coverage remain stable. Updated real Chromium isolated opacity expected 64/128 and added two-adjustment progressive RGBA Node test.
+- Local real Chromium `npm run test:browser:adjustment-stack` **PASS**, including Levels → Curves, nested folder, raster/vector adjustment masks, inspector, History Undo/Redo and ZPE reopen. Nested translucent dedicated smoke **PASS**. Focused Node suites **33/33 PASS**. Added dedicated PR Linux CI step `test:browser:psd-nested-alpha`. Exact corrected PR head and remote statuses must be verified after publication.
+- **Limit:** clipped raster layer inserted between adjustments has not been independently accepted; remains next task. Independent Photoshop-authored golden unavailable.

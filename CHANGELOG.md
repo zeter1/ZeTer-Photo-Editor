@@ -2,7 +2,8 @@
 
 - Fix: a clipped adjustment no longer processes already-flattened parent backdrop. It adjusts its own raster clipping base, then transfers the premultiplied RGB delta without changing destination alpha; overlapping translucent base/background retain their independent colors. Adjustment opacity, raster/vector masks and blend math retain existing controls.
 - Real production Chromium `file://`: nested pass-through folder, clipped Invert over 50%-alpha raster, blue 50%-alpha backdrop, group mask 100/50/0% → exact RGBA [0,170,255,192] / [0,102,255,160] / [0,0,255,128]. Real Group Properties toggle, Undo/Redo, native .zpe Save/reopen PASS. New Node RGBA/negative and PSD/PSB nested editable codec regressions. Existing Photoshop-authored adjustment fixture suites remain active.
-- **Boundary:** first clipped-adjustment-over-base increment only; chained clipped raster overlays, non-source-over base blend, knockout and licensed Photoshop-authored pixel oracle are NOT accepted. Parent Stage 17a IN PROGRESS. [Journal](task/002-psd-folder-group-mask.md).
+- Linux PR verification exposed a real follow-up regression: subsequent clipped adjustment layers did not see the previous adjusted clipping base. Now the local base's cumulative color is updated without changing its alpha; existing Levels → Curves browser stack PASS. Isolated 50%-opacity folder over opaque gray now correctly gives exact gray 64 (not the former twice-attenuated 96). The adjusted regression oracle is explicitly pinned in the test. Dedicated translucent Photoshop nesting smoke is now part of core CI.
+- **Boundary:** clipped raster overlays *between* adjustment layers, non-source-over base blend, knockout and licensed Photoshop-authored pixel oracle are NOT accepted. Parent Stage 17a IN PROGRESS. [Journal](task/002-psd-folder-group-mask.md).
 
 ## 1.47.20 — предыдущая версия: masked Pass Through folder backdrop-aware composition (Stage 17a, 2026-11-23)
 

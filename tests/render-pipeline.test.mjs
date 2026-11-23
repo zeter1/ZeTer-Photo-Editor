@@ -83,7 +83,10 @@ test('smart objects render from preview data without mutating embedded document 
 
 test('adjustment rendering preserves alpha through the pixel compositor', () => {
   assert.match(render, /else compositeAdjustmentPixels\(basePixels, effectPixels, settings\)/);
-  assert.match(render, /if \(clippingSource\) compositeClippedAdjustmentPixels/);
+  assert.match(render, /if \(clippingSource\) \{/);
+  assert.match(render, /compositeClippedAdjustmentPixels\(basePixels, clippingSource, effectPixels, settings\)/);
+  assert.match(render, /compositeAdjustmentPixels\(clippingSource, effectPixels, settings\)/);
+  assert.match(render, /clippingMask\.getContext\('2d'\)\.putImageData\(clippingSource, 0, 0\)/);
   assert.match(render, /ctx\.putImageData\(basePixels,0,0\)/);
   assert.doesNotMatch(render, /ctx\.globalAlpha = layer\.opacity \?\? 1;[\s\S]{0,180}ctx\.drawImage\(source, 0, 0, width, height\)/);
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compositeClippedAdjustmentPixels } from '../src/core/adjustments.js';
+import { compositeClippedAdjustmentPixels, compositeAdjustmentPixels } from '../src/core/adjustments.js';
 
 function rgba(...values) {
   return {data: Uint8ClampedArray.from(values)};
@@ -76,3 +76,19 @@ for (const [format, encode] of [['PSD', encodePsd], ['PSB', encodePsb]]) {
       Array(8).fill(128));
   });
 }
+
+test('successive clipped adjustments share their corrected base colors without leaking backdrop', () => {
+  const parent = rgba(170, 0, 85, 192);
+  const stack = rgba(255, 0, 0, 128);
+  const first = rgba(0, 255, 255, 128);
+  compositeClippedAdjustmentPixels(parent, stack, first);
+  compositeAdjustmentPixels(stack, first);
+  assert.deepEqual(Array.from(parent.data), [0, 170, 255, 192]);
+  assert.deepEqual(Array.from(stack.data), [0, 255, 255, 128]);
+
+  const second = rgba(255, 0, 255, 128);
+  compositeClippedAdjustmentPixels(parent, stack, second);
+  compositeAdjustmentPixels(stack, second);
+  assert.deepEqual(Array.from(parent.data), [170, 0, 255, 192]);
+  assert.deepEqual(Array.from(stack.data), [255, 0, 255, 128]);
+});

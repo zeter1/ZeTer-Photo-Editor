@@ -1,18 +1,18 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** — nested clipped adjustment over translucent backdrop; next: chained raster/adjustment clipping and non-source-over base blend.
-> **PRIORITY:** P1.
-> **STATUS:** **IN PROGRESS** — bounded candidate 1.47.21 implemented locally; remote PR-head checks/merge pending. Parent Adobe Photoshop parity NOT DONE.
-> **EXACT BASE MAIN (2026-11-23):** `ef6070090907b45904da6bda81f793f73f298ffd`, queue update after merged #401 and #402. Last main [CI success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45186923745); prior post-merge real-photo [success](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45186730512); cancelled older core run is NOT PASS.
-> **LATEST BOUNDED IMPLEMENTATION:** clipped adjustment inside nested Pass Through masked folder now modifies its translucent base instead of already-flattened parent backdrop; delta uses premultiplied alpha and preserves underlying destination alpha. Real Chromium `file://` exact RGBA [0,170,255,192] fully open, [0,102,255,160] half, [0,0,255,128] closed; real Group Properties toggle, Undo/Redo, native .zpe save/reopen PASS. Node focused RGB/alpha negative and PSD/PSB native group/clipping/adjustment structure PASS.
-> **NEXT REMOTE ACTION:** publish candidate on `feat/psd-nested-translucent-20261123` and run required Linux CI on exact PR head; verify code review and required checks, merge only if gates PASS, then exact-main independent core/real-photo readback. Do not mark merged until confirmed.
-> **NEXT IMPLEMENTATION ACTION AFTER GATES:** introduce a RED fixture with a 50%-alpha clipping base, a clipped raster overlay (multiply/screen), then a clipped adjustment in a nested masked Pass Through group over a semitransparent backdrop; correct clip-stack semantics without backdrop modification or flattening. Assert exact RGBA/Undo/Redo/.zpe plus PSD/PSB native editable structure.
-> **BLOCKED EXTERNAL ACCEPTANCE:** licensed Photoshop-authored PSD/PSB pixel golden, knockout, broader blend parity/large-project memory; camera DNG external oracle unrelated and independently blocked. **Do not claim Adobe parity.**
+> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** — nested clipped adjustments / translucent backdrop.
+> **PRIORITY:** P1; **STATUS:** **IN PROGRESS** (bounded v1.47.21 candidate, not merged).
+> **ACTIVE PR:** [#403 — nested clipped adjustments](https://github.com/zeter1/ZeTer-Photo-Editor/pull/403); branch `feat/psd-nested-translucent-20261123`, exact base main `ef6070090907b45904da6bda81f793f73f298ffd`. Do not repeat #401/#402 (already MERGED).
+> **IMPLEMENTED:** clipped Invert runs against its translucent clipping base, not the flattened backdrop; premultiplied RGB delta preserves parent alpha. Consecutive clipped adjustments maintain cumulative adjusted base colors with unchanged clipping alpha. Nested masked Pass Through over semitransparent backdrop and group opacity covered by exact RGBA Chromium.
+> **LOCAL GREEN:** new translucent nested Chrome file:// `[0,170,255,192]`, `[0,102,255,160]`, `[0,0,255,128]`; Group Properties mask, Undo/Redo and native .zpe reopen PASS. Existing real Chrome Levels → Curves clipped stack PASS after correcting isolated half-opacity gray expected 64 (previous 96 reflected old incorrect compositing). PSD/PSB native editable records verified by codec tests. Windows full browser PASS before the stacking fix; targeted browser both PASS after fix. Windows full Node 1800 / 1785 PASS / 10 SKIP / 5 pre-existing Linux-only harness FAIL before follow-up.
+> **REMOTE GATE:** first PR head `7d980e63d83b674c671c7a2f8187ec54f9dcad3c` Linux `verify` FAILED at `Adjustment stack / nested groups / clipping...` (not ignored). Reproduced locally and fixed cumulative adjustment stack; dedicated translucent nested browser smoke added as CI step. Publish corrected follow-up head, require exact-head core CI + independent real-photo SUCCESS before merge; re-read resulting main SHA and queues. Do NOT claim first head green.
+> **NEXT IMPLEMENTATION AFTER GATES:** RED→GREEN 50%-alpha clipping base + **clipped raster overlay** in Multiply/Screen + subsequent clipped adjustment, nested masked Pass Through over semitransparent background. Preserve clipping-base alpha, stack order, parent backdrop, and editable PSD/PSB records. Real RGBA, mask/History and .zpe re-open. Do not merely re-profile.
+> **BLOCKED INDEPENDENT ACCEPTANCE:** licensed Photoshop-authored pixel golden, knockout and complex blend parity; unrelated genuine camera DNG/LibRaw oracle blocked. No claim of full Adobe parity.
 
 ## Короткая очередь
 
-1. **P1 IN PROGRESS — Stage 17a:** integrate 1.47.21 when PR-head gates pass; next chained clipped raster/adjustment in nested groups over translucent backdrop.
-2. **P1 BLOCKED — CAP-RAW-CAMERA-ORACLE:** licensed camera-original DNG + independent RAW ground truth.
-3. **P2 IN PROGRESS:** Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks — select independent vertical slice only after higher-priority work.
+1. **P1 Stage 17a IN PROGRESS:** gate + integrate [#403](https://github.com/zeter1/ZeTer-Photo-Editor/pull/403); then clipped **raster** + adjusted chain.
+2. **P1 CAP-RAW-CAMERA-ORACLE BLOCKED:** licensed camera original DNG and independent LibRaw/RawTherapee reference.
+3. **P2:** Tiled Worker, ICC and vector mask professional slices only after higher-priority unblocked work.
 
-[Stage 17a journal](002-psd-folder-group-mask.md) · [capability matrix](CAPABILITY_MATRIX.md) · [task map](README.md).
+[Stage17a journal](002-psd-folder-group-mask.md) · [capability matrix](CAPABILITY_MATRIX.md) · [task map](README.md).

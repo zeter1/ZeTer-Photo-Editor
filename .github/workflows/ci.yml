@@ -108,6 +108,8 @@ jobs:
 
       - name: PSD folder raster masks / real pixel oracle / History / .zpe (file://)
         run: npm run test:browser:psd-group-mask
+      - name: PSD nested clipped adjustments on translucent backdrop / History / .zpe (file://)
+        run: npm run test:browser:psd-nested-alpha
 
       - name: Photoshop PSD native layers in fresh Chromium file:// (002B/2a)
         run: npm run test:browser
