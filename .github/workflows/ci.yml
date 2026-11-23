@@ -103,6 +103,9 @@ jobs:
       - name: DNG RAW Bayer import / develop / Undo-Redo / .zpe / PNG-PSD-PSB (file://)
         run: npm run test:browser:raw-dng
 
+      - name: PSD isolated raster clipping / real pixel oracle / History / .zpe (file://)
+        run: npm run test:browser:psd-isolated
+
       - name: Photoshop PSD native layers in fresh Chromium file:// (002B/2a)
         run: npm run test:browser
         env:
