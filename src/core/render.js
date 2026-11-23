@@ -6,7 +6,7 @@ import {
   deserializePixelBufferSource, forEachSerializedPixelBufferTile,
   pixelBufferToToneMappedRgba8Preview, PIXEL_BUFFER_TILED_SOURCE_KIND,
 } from './pixel-buffer.js';
-import { applyAdjustmentPixels, compositeAdjustmentPixels } from './adjustments.js';
+import { applyAdjustmentPixels, compositeAdjustmentPixels, compositeClippedAdjustmentPixels } from './adjustments.js';
 import { applyMaskControlsAlpha } from './pixels.js';
 import { normalizeAffineTransform } from './geometry.js';
 
@@ -399,7 +399,9 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
   const source = document.createElement('canvas');
   source.width = width; source.height = height;
   const sourceCtx = source.getContext('2d', { alpha: true, willReadFrequently: true });
-  sourceCtx.drawImage(canvas, 0, 0, width, height);
+  // A clipped adjustment changes its source raster, not the flattened parent.
+  sourceCtx.drawImage(clippingMask || canvas, 0, 0, width, height);
+  const clippingSource = clippingMask ? sourceCtx.getImageData(0, 0, width, height) : null;
   if(layer.adjustment){
     try{
       const pixels=sourceCtx.getImageData(0,0,width,height);
@@ -430,14 +432,8 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
     sourceCtx.drawImage(vectorMask,0,0,width,height);
     sourceCtx.restore();
   }
-  if(clippingMask){
-    sourceCtx.save();
-    sourceCtx.globalCompositeOperation='destination-in';
-    sourceCtx.globalAlpha=1;
-    sourceCtx.filter='none';
-    sourceCtx.drawImage(clippingMask,0,0,width,height);
-    sourceCtx.restore();
-  }
+  // Clipping is already present in source alpha; applying it again would
+  // square the base coverage on semitransparent pixels.
   const effect=document.createElement('canvas');
   effect.width=width;effect.height=height;
   const effectCtx=effect.getContext('2d',{alpha:true,willReadFrequently:true});
@@ -446,10 +442,16 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
   try{
     const basePixels=ctx.getImageData(0,0,width,height);
     const effectPixels=effectCtx.getImageData(0,0,width,height);
-    compositeAdjustmentPixels(basePixels,effectPixels,{
-      opacity:layer.opacity??1,
-      blendMode:layer.blendMode||'source-over',
-    });
+    const settings = { opacity: layer.opacity ?? 1,
+      blendMode: layer.blendMode || 'source-over' };
+    if (clippingSource) {
+      compositeClippedAdjustmentPixels(basePixels, clippingSource, effectPixels, settings);
+      // Subsequent clipped adjustments must see the preceding adjustment's
+      // pixels, not the original base. Keep the base's alpha unchanged so
+      // clipping coverage remains stable throughout the adjustment chain.
+      compositeAdjustmentPixels(clippingSource, effectPixels, settings);
+      clippingMask.getContext('2d').putImageData(clippingSource, 0, 0);
+    } else compositeAdjustmentPixels(basePixels, effectPixels, settings);
     ctx.putImageData(basePixels,0,0);
   }catch(error){
     console.warn('Adjustment layer compositing failed; previous composite preserved',error);

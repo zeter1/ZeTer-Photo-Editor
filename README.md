@@ -8,7 +8,9 @@
 
 ZeTer Photo Editor — браузерный графический редактор со слоями, историей действий и Canvas 2D-рендером. Он работает как онлайн, так и локально через обычный `index.html`. Редактор вдохновлён рабочим процессом Photopea / Photoshop, но остаётся самостоятельным приложением. Пользовательские изображения обрабатываются в браузере и для обычной работы не требуют загрузки на внешний сервер.
 
-**Current candidate 1.47.20 (Stage 17a):** Masked Pass Through groups now blend raster/adjustment children against the actual parent backdrop before the group mask attenuates the result; real Chromium file:// exact RGBA, Group Properties, Undo/Redo and .zpe reopen verified. Independent Photoshop-authored pixel parity and advanced knockout remain open. [Implementation journal](task/002-psd-folder-group-mask.md).
+**Current candidate 1.47.21 (Stage 17a):** Nested clipped Invert adjustment now uses its translucent raster clipping base instead of modifying the flattened backdrop; masked Pass Through folder uses correct premultiplied RGBA over transparent blue. Real Chromium `file://` pixels, Group Properties, Undo/Redo and native `.zpe` reopen PASS; PSD/PSB editable structure verified with codec regressions. Clipped raster-overlays followed by adjustments and Adobe-authored pixel parity remain IN PROGRESS. Consecutive clipped adjustments retain their own cumulative RGB stack and correct group opacity. [Journal](task/002-psd-folder-group-mask.md).
+
+**Previous 1.47.20 (Stage 17a):** Masked Pass Through groups now blend raster/adjustment children against the actual parent backdrop before the group mask attenuates the result; real Chromium file:// exact RGBA, Group Properties, Undo/Redo and .zpe reopen verified. Independent Photoshop-authored pixel parity and advanced knockout remain open. [Implementation journal](task/002-psd-folder-group-mask.md).
 
 **Previous increment 1.47.19 (Stage 17a):** native Photoshop folder raster mask в PSD/PSB: групповая маска, вложенные папки, .zpe и Group Properties (enable/disable), History Undo/Redo, точные RGBA в Chromium file://. Маска дочернего слоя не подменяется маской группы. Полный Photoshop-authored pixel golden и backdrop-sensitive masked Pass Through пока не реализованы. [Журнал](task/002-psd-folder-group-mask.md).
 
@@ -34,7 +36,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Возможности
 
-**Текущая версия:** 1.47.20
+**Текущая версия:** 1.47.21
 
 > Кандидат локальной ветки, не опубликован в `main`.
 
@@ -242,7 +244,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Запуск на Windows
 
-Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.47.20 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
+Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.47.21 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
 
 Если браузер показывает старую версию после обновления архива, закройте старую вкладку и откройте `index.html` из новой распакованной папки.
 

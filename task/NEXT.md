@@ -1,19 +1,18 @@
 # NEXT — единая актуальная очередь ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** — next: nested adjustment/clipping + translucent backdrop parity.
-> **PRIORITY:** P1.
-> **STATUS:** **IN PROGRESS** — v1.47.20 masked Pass Through increment **MERGED in #402**; parent Photoshop-authored parity NOT DONE.
-> **LATEST IMPLEMENTATION MAIN (2026-11-23):** `f36321d1a0ca6f02c98726a12841b920eed49ea3`, #401 and #402 **MERGED**. #402 exact final PR-head `75b0ce3b8d3c3c8931117c7868716d1d6b9d360a` [core CI SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45185645762) + [independent real-photo SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45185645656). Post-merge exact-main [core CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45186730498) and [real-photo](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45186730512) initially IN PROGRESS; check completion separately.
-> **LAST INTEGRATED:** [#402 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/402), merge `f36321d1a0ca6f02c98726a12841b920eed49ea3`. **ACTIVE CODE PR:** none for the next adjustment/clipping increment; do not repeat #401/#402.
-> **LAST VERIFIED (2026-11-23):** baseline Chromium `file://` oracle RED timeout; after implementation GREEN: masked pass-through Multiply over blue pixel [0,0,0,255] fully open / [0,0,127,255] half / [0,0,255,255] closed. Real Group Properties disable, Undo/Redo, File > Save Project and native `.zpe` reopen PASS; full Windows browser suite PASS. Windows `npm run check` 1795 total / 1780 PASS / 10 SKIP / 5 Linux-only harness FAIL. PSD/PSB structure retained. Synthetic pixel oracle, not Photoshop-authored.
-> **REMAINING ACCEPTANCE:** independent Photoshop-authored PSD/PSB raster pixel golden (licensed provenance), nested adjustment/clipping, alpha/translucent backdrop and knockout semantics, large-project memory behavior, and exact post-merge main CI result. Do not claim full Adobe parity.
-> **NEXT IMPLEMENTATION ACTION:** independently exercise masked Pass Through with nested adjustment layer + clipping chain and a transparent/partially-transparent backdrop using known RGBA oracle; correct any unsupported group coverage handling without flattening. Then verify PSD/PSB native export/reopen + Undo/Redo + `.zpe` and independently authored Photoshop reference when licensed fixture becomes available.
-> **BLOCKERS:** genuine licensed Photoshop-authored PSD/PSB pixel reference unavailable; CAP-RAW-CAMERA-ORACLE needs genuine licensed camera DNG and independent LibRaw/RawTherapee renderer. Neither blocks independent implementation.
+> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** — nested clipped adjustments / translucent backdrop.
+> **PRIORITY:** P1; **STATUS:** **IN PROGRESS** (bounded v1.47.21 candidate, not merged).
+> **ACTIVE PR:** [#403 — nested clipped adjustments](https://github.com/zeter1/ZeTer-Photo-Editor/pull/403); branch `feat/psd-nested-translucent-20261123`, exact base main `ef6070090907b45904da6bda81f793f73f298ffd`. Do not repeat #401/#402 (already MERGED).
+> **IMPLEMENTED:** clipped Invert runs against its translucent clipping base, not the flattened backdrop; premultiplied RGB delta preserves parent alpha. Consecutive clipped adjustments maintain cumulative adjusted base colors with unchanged clipping alpha. Nested masked Pass Through over semitransparent backdrop and group opacity covered by exact RGBA Chromium.
+> **LOCAL GREEN:** new translucent nested Chrome file:// `[0,170,255,192]`, `[0,102,255,160]`, `[0,0,255,128]`; Group Properties mask, Undo/Redo and native .zpe reopen PASS. Existing real Chrome Levels → Curves clipped stack PASS after correcting isolated half-opacity gray expected 64 (previous 96 reflected old incorrect compositing). PSD/PSB native editable records verified by codec tests. Windows full browser PASS before the stacking fix; targeted browser both PASS after fix. Windows full Node 1800 / 1785 PASS / 10 SKIP / 5 pre-existing Linux-only harness FAIL before follow-up.
+> **REMOTE GATE:** first PR head `7d980e63d83b674c671c7a2f8187ec54f9dcad3c` Linux `verify` FAILED at `Adjustment stack / nested groups / clipping...` (not ignored). Reproduced locally and fixed cumulative adjustment stack; dedicated translucent nested browser smoke added as CI step. Publish corrected follow-up head, require exact-head core CI + independent real-photo SUCCESS before merge; re-read resulting main SHA and queues. Do NOT claim first head green.
+> **NEXT IMPLEMENTATION AFTER GATES:** RED→GREEN 50%-alpha clipping base + **clipped raster overlay** in Multiply/Screen + subsequent clipped adjustment, nested masked Pass Through over semitransparent background. Preserve clipping-base alpha, stack order, parent backdrop, and editable PSD/PSB records. Real RGBA, mask/History and .zpe re-open. Do not merely re-profile.
+> **BLOCKED INDEPENDENT ACCEPTANCE:** licensed Photoshop-authored pixel golden, knockout and complex blend parity; unrelated genuine camera DNG/LibRaw oracle blocked. No claim of full Adobe parity.
 
 ## Короткая очередь
 
-1. **P1 IN PROGRESS — Stage 17a:** nested clipped/adjustment masked Pass Through and transparent alpha semantics, real Chromium and format round-trips; Photoshop-authored oracle external BLOCKED.
-2. **P1 BLOCKED — CAP-RAW-CAMERA-ORACLE:** licensed camera-original DNG + independent RAW ground truth.
-3. **P2 IN PROGRESS — Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks:** choose independent professional vertical slice by [matrix](CAPABILITY_MATRIX.md).
+1. **P1 Stage 17a IN PROGRESS:** gate + integrate [#403](https://github.com/zeter1/ZeTer-Photo-Editor/pull/403); then clipped **raster** + adjusted chain.
+2. **P1 CAP-RAW-CAMERA-ORACLE BLOCKED:** licensed camera original DNG and independent LibRaw/RawTherapee reference.
+3. **P2:** Tiled Worker, ICC and vector mask professional slices only after higher-priority unblocked work.
 
-[Stage 17a journal](002-psd-folder-group-mask.md) · [capability matrix](CAPABILITY_MATRIX.md) · [task map](README.md).
+[Stage17a journal](002-psd-folder-group-mask.md) · [capability matrix](CAPABILITY_MATRIX.md) · [task map](README.md).

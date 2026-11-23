@@ -91,7 +91,8 @@ export async function verifyBrowserAdjustmentStack({ client, evaluate, waitFor, 
   await ready('isolated');
   await waitFor('Isolated group opacity controls adjustment coverage',async()=>{
     const p=await pixels();
-    return p.topLeft[0]>=91&&p.topLeft[0]<=101
+    // Black opaque base in a 50%-opacity isolated folder over gray 128: 64.
+    return approx(p.topLeft[0],64)
       &&approx(p.topRight[0],128)&&p.topLeft[3]===255;
   });
 
