@@ -8,7 +8,9 @@
 
 ZeTer Photo Editor — браузерный графический редактор со слоями, историей действий и Canvas 2D-рендером. Он работает как онлайн, так и локально через обычный `index.html`. Редактор вдохновлён рабочим процессом Photopea / Photoshop, но остаётся самостоятельным приложением. Пользовательские изображения обрабатываются в браузере и для обычной работы не требуют загрузки на внешний сервер.
 
-**Текущий кандидат 1.47.19 (Stage 17a):** native Photoshop folder raster mask в PSD/PSB: групповая маска, вложенные папки, .zpe и Group Properties (enable/disable), History Undo/Redo, точные RGBA в Chromium file://. Маска дочернего слоя не подменяется маской группы. Полный Photoshop-authored pixel golden и backdrop-sensitive masked Pass Through пока не реализованы. [Журнал](task/002-psd-folder-group-mask.md).
+**Current candidate 1.47.20 (Stage 17a):** Masked Pass Through groups now blend raster/adjustment children against the actual parent backdrop before the group mask attenuates the result; real Chromium file:// exact RGBA, Group Properties, Undo/Redo and .zpe reopen verified. Independent Photoshop-authored pixel parity and advanced knockout remain open. [Implementation journal](task/002-psd-folder-group-mask.md).
+
+**Previous increment 1.47.19 (Stage 17a):** native Photoshop folder raster mask в PSD/PSB: групповая маска, вложенные папки, .zpe и Group Properties (enable/disable), History Undo/Redo, точные RGBA в Chromium file://. Маска дочернего слоя не подменяется маской группы. Полный Photoshop-authored pixel golden и backdrop-sensitive masked Pass Through пока не реализованы. [Журнал](task/002-psd-folder-group-mask.md).
 
 **Предыдущий срез 1.47.18 (Stage 17a):** raster clipping корректно ограничивается альфой нижележащего слоя внутри изолированных PSD/PSB-групп (в том числе с mask/opacity/blend). В Properties добавлен переключатель с History Undo/Redo; сохраняются `.zpe` и native PSD/PSB layer records. Независимое соответствие Photoshop-authored pixel golden остаётся открытым. [Журнал Stage 17a](task/002-psd-isolated-clipping.md). RAW-контраст 1.47.17 уже объединён в main через #399.
 
@@ -32,7 +34,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Возможности
 
-**Текущая версия:** 1.47.19
+**Текущая версия:** 1.47.20
 
 > Кандидат локальной ветки, не опубликован в `main`.
 
@@ -240,7 +242,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Запуск на Windows
 
-Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.47.19 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
+Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.47.20 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
 
 Если браузер показывает старую версию после обновления архива, закройте старую вкладку и откройте `index.html` из новой распакованной папки.
 

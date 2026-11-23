@@ -1,3 +1,9 @@
+## 1.47.20 — текущая версия: masked Pass Through folder backdrop-aware composition (Stage 17a, 2026-11-23)
+
+- Raster mask on a Pass Through folder now attenuates the **difference** between the actual parent backdrop and the group-rendered composite (including inner multiply/adjustments), rather than compositing a pre-isolated source-over group. Group opacity is included; tile-sized premultiplied RGBA interpolation avoids full-frame transient ImageData and alpha inflation.
+- Real Chromium file:// RED→GREEN exact [0,0,0,255] / [0,0,127,255] / [0,0,255,255] over blue with a red Multiply child. Group Properties disable/enable, History Undo/Redo, native .zpe save and reopen PASS. Existing native PSD/PSB folder masks preserved without flatten.
+- **Bounded increment:** synthetic browser oracle, not licensed Photoshop-authored parity. Knockout, complex nested clipping and full Adobe pixel parity remain IN PROGRESS. [Stage17a journal](task/002-psd-folder-group-mask.md).
+
 ## 1.47.19 — текущая версия: native Photoshop folder raster group mask (Stage 17a, 2026-11-23)
 
 - Native folder divider (-2) raster mask import/export in PSD/PSB, nested groups, disabled flag, mask bounds/default alpha; mask is preserved separately from editable child layer masks, not flattened.
