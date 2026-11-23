@@ -14,6 +14,7 @@ import { verifyBrowserWideConnectedNativeUi } from './browser-wide-connected-ui-
 import { verifyIsolatedRasterClipping } from './browser-isolated-raster-clipping-smoke.mjs';
 import { verifyGroupRasterMask, verifyMaskedPassThroughBackdrop } from './browser-group-raster-mask-smoke.mjs';
 import { verifyNestedClippedAdjustmentAlpha } from './browser-psd-nested-alpha-smoke.mjs';
+import { verifyClippedRasterStack } from './browser-psd-clipped-raster-smoke.mjs';
 import { writeWideConnectedBrowserArtifact } from './browser-wide-connected-operation-artifact.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -516,6 +517,11 @@ async function runSmoke() {
     }
     assertNoBrowserErrors(errors, stderrState);
 
+    if (process.env.ZPE_PSD_CLIPPED_RASTER_BROWSER_ONLY === '1') {
+      await verifyClippedRasterStack(client, { evaluate, waitFor, assert });
+      assertNoBrowserErrors(errors, stderrState);
+      return;
+    }
     if (process.env.ZPE_PSD_NESTED_ALPHA_BROWSER_ONLY === '1') {
       await verifyNestedClippedAdjustmentAlpha(client, { evaluate, waitFor, assert });
       assertNoBrowserErrors(errors, stderrState);

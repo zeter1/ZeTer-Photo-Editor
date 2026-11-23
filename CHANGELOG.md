@@ -1,3 +1,10 @@
+## 1.47.22 — текущая версия: Stage 17a clipped raster + adjustment chain (2026-11-23)
+
+- Fixed raster clipping stack semantics: a clipped Multiply/Screen overlay now changes the source RGB consumed by following clipped adjustments; the base alpha and translucent lower backdrop stay unchanged instead of inflating opacity or adjusting stale colors.
+- Reproduced RED in a missing compositing export, then GREEN exact pixel math for Multiply, partial-opacity Screen, masked zero-alpha, and cumulative raster → Invert. Native PSD/PSB codec checks retain nested group masks, editable clipped raster modes, and adjustment records (synthetic fixtures, not Photoshop-authored).
+- Real Chromium file:// 4×2 nested Pass Through/group mask alpha 100/50/0%: Multiply → Invert [170,170,255,192] / [102,102,255,160] / [0,0,255,128], Screen 50% → Invert [0,170,170,192] / [0,102,204,160] / [0,0,255,128]. Group Properties, Undo/Redo, .zpe save/reopen PASS for both. Dedicated browser CI gate.
+- **Still open:** independently Photoshop-authored PSD/PSB pixel oracle, complex knockout, native browser PSD/PSB export/import UI proof for this exact combined fixture, clipped overlay with partial raster-mask coverage.
+
 ## 1.47.21 — текущая версия: clipped adjustment inside nested masked Pass Through on translucent backdrop (Stage 17a, 2026-11-23)
 
 - Fix: a clipped adjustment no longer processes already-flattened parent backdrop. It adjusts its own raster clipping base, then transfers the premultiplied RGB delta without changing destination alpha; overlapping translucent base/background retain their independent colors. Adjustment opacity, raster/vector masks and blend math retain existing controls.
