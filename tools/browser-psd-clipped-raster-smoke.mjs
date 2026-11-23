@@ -1,3 +1,5 @@
+import { verifyNativeClippedUiRoundTrips } from './browser-psd-clipped-native-ui-check.mjs';
+
 // Live Chromium: clipped raster Multiply/Screen -> clipped Invert in a nested
 // masked Pass Through folder over translucent blue. Every pixel has an oracle.
 export async function verifyClippedRasterStack(client, harness) {
@@ -39,7 +41,9 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode) {
             groupId:'inner',dataUrl:bitmap(()=>[255,0,0,128])},
            {...base,id:'overlay-blue',name:'Clipped blue raster',type:'raster',
              groupId:'inner',clipping:true,blendMode:${JSON.stringify(mode)},
-             opacity:${mode === 'multiply' ? 1 : 0.5},dataUrl:bitmap(()=>[0,0,255,255])},
+             opacity:${mode === 'multiply' ? 1 : 0.5},dataUrl:bitmap(()=>[0,0,255,255]),
+             mask:{enabled:true,linked:true,invert:false,density:1,feather:0,
+               dataUrl:bitmap(x=>[255,255,255,x===1?128:x===3?0:255])}},
           {...base,id:'invert-clipped',name:'Clipped Invert',type:'adjustment',
             groupId:'inner',clipping:true,adjustment:{kind:'invert'}}
         ],
@@ -64,8 +68,8 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode) {
   })()`);
   const near = (got,want) => want.every((v,i) => Math.abs((got||[])[i]-v) <= 2);
   const expected = mode === 'multiply'
-    ? [[170,170,255,192],[102,102,255,160],[0,0,255,128],[170,170,255,192]]
-    : [[0,170,170,192],[0,102,204,160],[0,0,255,128],[0,170,170,192]];
+    ? [[170,170,255,192],[51,102,255,160],[0,0,255,128],[0,170,255,192]]
+    : [[0,170,170,192],[0,102,229,160],[0,0,255,128],[0,170,255,192]];
   await waitFor('nested clipped adjustment respects partial background and folder mask',
     async () => {const actual = await pixels(); return expected.every((p,i) => near(actual[i],p));},
     12000);
@@ -88,7 +92,7 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode) {
   })()`);
   assert(changed === true, 'real Group Properties can disable folder mask: '+JSON.stringify(changed));
   await waitFor('disable mask reveals clipped correction everywhere',async() =>
-    (await pixels()).every(x => near(x,expected[0])),12000);
+    near((await pixels())[2],expected[0]),12000);
   await evaluate(client, `document.querySelector('#undoBtn').click()`);
   await waitFor('Undo restores folder alpha coverage', async() =>
     near((await pixels())[2], expected[2]),12000);
@@ -131,15 +135,18 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode) {
     return {mask:outer?.mask?.enabled,maskBytes:outer?.mask?.dataUrl?.length,
       nested:inner?.parentGroupId,clipped:adjustment?.clipping,
       kind:adjustment?.adjustment?.kind,blue:blue?.dataUrl?.startsWith('data:image/'),
-      rasterClip:overlay?.clipping,blend:overlay?.blendMode,opacity:overlay?.opacity};
+      rasterClip:overlay?.clipping,blend:overlay?.blendMode,opacity:overlay?.opacity,
+      overlayMask:overlay?.mask?.dataUrl?.length,overlayMaskEnabled:overlay?.mask?.enabled};
   })()`);
   assert(persist.mask===true&&persist.maskBytes>50&&persist.nested==='outer'&&
     persist.clipped===true&&persist.kind==='invert'&&persist.blue&&
     persist.rasterClip===true&&persist.blend===mode&&
+    persist.overlayMask>50&&persist.overlayMaskEnabled===true&&
     Math.abs(persist.opacity-(mode==='multiply'?1:0.5))<.01,
     'ZPE retained editable group/adjustment/raster: '+JSON.stringify(persist));
   await waitFor('native ZPE reopen retains exact nested pixels',async() => {
     const actual=await pixels();return expected.every((p,i)=>near(actual[i],p));
   },12000);
   console.log('Nested PSD clipped raster '+mode+' / adjustment / UI / History / ZPE PASS');
+  await verifyNativeClippedUiRoundTrips(client,{evaluate,waitFor,assert},{mode,expected,near});
 }

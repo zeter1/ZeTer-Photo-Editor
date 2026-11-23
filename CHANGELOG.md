@@ -1,4 +1,10 @@
-## 1.47.22 — текущая версия: Stage 17a clipped raster + adjustment chain (2026-11-23)
+## 1.47.23 — текущая версия: PSD/PSB native clipped Invert UI roundtrip (Stage 17a, 2026-11-23)
+
+- Fix real loss of editability: freshly created clipped `Invert` previously forced PSD/PSB export into a flattened composite-preview fallback that hid source layers. Export native editable zero-byte Photoshop `nvrt` block directly, retaining nested masked folder, clipped raster and clipped adjustment layers.
+- Real headless Chromium `file://` Export modal → downloaded Photoshop binary → File input → Group Properties/Undo-Redo → `.zpe` save/reopen: PSD and PSB × Multiply and Screen; independent per-overlay raster mask partial alpha and group mask 100/50/0%, exact translucent RGBA maintained. New focused Node regression for `nvrt` and native PSD/PSB codec. Existing `test:browser:psd-clipped-raster` CI step now exercises the real native UI roundtrip.
+- Remaining: licensed Photoshop-authored independent golden, advanced knockout and richer cumulative Levels→Invert UI export chain; Stage17a remains IN PROGRESS. [Stage journal](task/002-psd-folder-group-mask.md).
+
+## 1.47.22 — предыдущая версия: Stage 17a clipped raster + adjustment chain (2026-11-23)
 
 - Fixed raster clipping stack semantics: a clipped Multiply/Screen overlay now changes the source RGB consumed by following clipped adjustments; the base alpha and translucent lower backdrop stay unchanged instead of inflating opacity or adjusting stale colors.
 - Reproduced RED in a missing compositing export, then GREEN exact pixel math for Multiply, partial-opacity Screen, masked zero-alpha, and cumulative raster → Invert. Native PSD/PSB codec checks retain nested group masks, editable clipped raster modes, and adjustment records (synthetic fixtures, not Photoshop-authored).

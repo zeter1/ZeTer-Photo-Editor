@@ -26317,7 +26317,7 @@ function psdAdjustmentNativePlan(layer) {
   if(source&&source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
   if(layer.styles)return{eligible:false,reason:'layer styles на adjustment layer требуют composite fallback',metadata:null};
   if(hasNonDefaultFilters(layer.filters))return{eligible:false,reason:'дополнительные ZPE filters не кодируются в Photoshop adjustment record',metadata:null};
-  if(!source&&!['levels','curves'].includes(adjustment.kind)){
+  if(!source&&!['levels','curves','invert'].includes(adjustment.kind)){
     return{eligible:false,reason:'нет imported Photoshop adjustment metadata для '+adjustment.kind,metadata:null};
   }
   try {
@@ -28930,12 +28930,14 @@ function encodeCurvesAdjustmentBlock(sourceBlock,adjustment) {
 }
 
 /**
- * Build genuine PSD adjustment records for ZPE-created Levels/Curves layers.
+ * Build genuine PSD adjustment records for ZPE-created Levels/Curves/Invert layers.
  * Native records are emitted only for these known layouts; unsupported kinds
  * must fall back rather than claiming editable Photoshop metadata.
  */
 function createPsdAdjustmentBlocks(adjustment) {
   const kind=String(adjustment?.kind||'');
+  // Photoshop Invert is an editable native adjustment with an empty nvrt body.
+  if(kind==='invert')return[{signature:'8BIM',key:'nvrt',data:new Uint8Array(0)}];
   if(kind==='levels'){
     // Photoshop Levels v2 contains 29 ten-byte channel records.
     const bytes=new Uint8Array(2+29*10);
