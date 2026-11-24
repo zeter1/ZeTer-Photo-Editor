@@ -1,4 +1,9 @@
-## 1.47.33 — текущая версия: Hue (2026-11-24)
+## 1.47.34 — текущая версия: Saturation blend mode (2026-11-24)
+
+- RGB8 non-separable Saturation for raster, groups, clipping and adjustments; native PSD/PSB `sat ` mapping and fail-closed native high-depth/CMYK export.
+- Local focused Node 14/14, version consistency 1/1 and full dedicated Chromium 184 editable native roundtrips PASS; exact remote gates pending.
+
+## 1.47.33 — предыдущая версия: Hue (2026-11-24)
 
 - RGB8 Hue: цветовой тон источника, насыщенность и яркость фона; реальные слои, папки, clipping и корректировки; редактируемый PSD/PSB `hue `.
 - Нативный RGB16/32 и CMYK экспорт с Hue отклоняется без потери исходных данных.

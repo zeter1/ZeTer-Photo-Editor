@@ -179,7 +179,7 @@ export function applyAdjustmentPixels(imageData,adjustment) {
   return imageData;
 }
 
-// Non-separable Color: transfer source chroma while retaining backdrop luminance.
+// Non-separable Color, Hue and Saturation: preserve backdrop luminance.
 function colorBlendPixel(base, source, index, mode = 'color') {
   const lum = (r,g,b) => .3*r + .59*g + .11*b;
   const l = lum(base[index],base[index+1],base[index+2]) / 255;
@@ -189,6 +189,13 @@ function colorBlendPixel(base, source, index, mode = 'color') {
     const lo = Math.min(...rgb), span = Math.max(...rgb) - lo;
     const sat = (Math.max(base[index],base[index+1],base[index+2]) - Math.min(base[index],base[index+1],base[index+2])) / 255;
     for (let c=0;c<3;c++) rgb[c] = span > 0 ? (rgb[c]-lo)*sat/span : 0;
+  }
+  // Saturation = SetLum(SetSat(Cb, Sat(Cs)), Lum(Cb)).
+  if (mode === 'saturation') {
+    const sat = Math.max(...rgb) - Math.min(...rgb);
+    const backdrop = [base[index]/255, base[index+1]/255, base[index+2]/255];
+    const lo = Math.min(...backdrop), span = Math.max(...backdrop) - lo;
+    for (let c=0;c<3;c++) rgb[c] = span > 0 ? (backdrop[c]-lo)*sat/span : 0;
   }
   const delta = l - lum(...rgb);
   for (let c=0;c<3;c++) rgb[c] += delta;
@@ -232,7 +239,7 @@ export function compositeClippingStackPixels(targetImageData, sourceImageData, m
       continue;
     }
     const alpha = a + b * (1 - a);
-    const color = (mode === 'color' || mode === 'hue') ? colorBlendPixel(target,source,i,mode) : null;
+    const color = (mode === 'color' || mode === 'hue' || mode === 'saturation') ? colorBlendPixel(target,source,i,mode) : null;
     for (let c = 0; c < 3; c++) {
       const cb = target[i + c] / 255;
       const cs = source[i + c] / 255;
@@ -255,7 +262,7 @@ export function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity
     if(baseAlpha<=0||effectAlpha<=0)continue;
     const coverage=Math.min(1,effectAlpha/baseAlpha)*layerOpacity;
     if(coverage<=0)continue;
-    const color = (blendMode === 'color' || blendMode === 'hue') ? colorBlendPixel(base,effect,index,blendMode) : null;
+    const color = (blendMode === 'color' || blendMode === 'hue' || blendMode === 'saturation') ? colorBlendPixel(base,effect,index,blendMode) : null;
     for(let channel=0;channel<3;channel+=1){
       const original=base[index+channel]/255;
       const adjusted=effect[index+channel]/255;
@@ -287,7 +294,7 @@ export function compositeClippedAdjustmentPixels(targetImageData, baseImageData,
     const amount = (baseAlpha / targetAlpha) *
       Math.min(1, effectAlpha / baseAlpha) * layerOpacity;
     if (amount <= 0) continue;
-    const color = (blendMode === 'color' || blendMode === 'hue') ? colorBlendPixel(base,effect,index,blendMode) : null;
+    const color = (blendMode === 'color' || blendMode === 'hue' || blendMode === 'saturation') ? colorBlendPixel(base,effect,index,blendMode) : null;
     for (let channel = 0; channel < 3; channel += 1) {
       const original = base[index + channel] / 255;
       const adjusted = effect[index + channel] / 255;
@@ -318,7 +325,7 @@ export function compositeClippedRasterPixels(targetImageData, baseImageData, ove
     if (baseAlpha <= 0 || targetAlpha <= 0 || overlayAlpha <= 0) continue;
     const overlayCoverage = overlayAlpha / 255;
     const contribution = Math.min(1, baseAlpha / targetAlpha);
-    const color = (blendMode === 'color' || blendMode === 'hue') ? colorBlendPixel(base,overlay,index,blendMode) : null;
+    const color = (blendMode === 'color' || blendMode === 'hue' || blendMode === 'saturation') ? colorBlendPixel(base,overlay,index,blendMode) : null;
     for (let channel = 0; channel < 3; channel += 1) {
       const original = base[index + channel];
       const blended = color ? color[channel] : blendAdjustmentChannel(original / 255, overlay[index + channel] / 255, blendMode);
