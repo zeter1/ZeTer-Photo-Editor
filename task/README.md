@@ -4,6 +4,11 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
+## Current bounded v1.47.26 (2026-11-24)
+
+- **P1 Stage 17a IN PROGRESS:** isolated Multiply/Screen folder clipping base, actual Chromium RED to GREEN, 12 new/40 total native PSD/PSB editable roundtrips, Group Properties/History/.zpe; focused Node 20/20. Local code; remote acceptance pending. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md).
+- **#408 MERGED** main 801c03a, exact PR-head core and independent SUCCESS, exact merged-main queued. #407 exact-main both SUCCESS.
+
 ## Current bounded increment (2026-11-24)
 
 - **v1.47.25 / Stage 17a IN PROGRESS:** Multiply/Screen clipping-base source stack before backdrop blend; real Chromium 12 new/28 total native PSD/PSB roundtrips PASS. v1.47.24 [#407](https://github.com/zeter1/ZeTer-Photo-Editor/pull/407) MERGED; PR-head core/independent SUCCESS; exact-main b80bb64 workflows PENDING at readback. See [NEXT](NEXT.md), [journal](002-psd-folder-group-mask.md), [matrix](CAPABILITY_MATRIX.md).

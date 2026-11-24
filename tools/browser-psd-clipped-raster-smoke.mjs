@@ -3,6 +3,10 @@ import { verifyNativeClippedUiRoundTrips } from './browser-psd-clipped-native-ui
 // Live Chromium: clipped raster Multiply/Screen -> clipped Invert in a nested
 // masked Pass Through folder over translucent blue. Every pixel has an oracle.
 export async function verifyClippedRasterStack(client, harness) {
+  for (const groupMode of ['multiply','screen']) {
+    for (const alpha of [128,255,0]) await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over',groupMode);
+  }
+  if (process.env.ZPE_GROUP_CLIPPING_BASE_ONLY === '1') return;
   for (const baseMode of ['multiply','screen']) {
     for (const alpha of [0,128,255]) await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},baseMode);
   }
@@ -15,7 +19,7 @@ export async function verifyClippedRasterStack(client, harness) {
   }
 }
 
-async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropAlpha = 128, chained = false, effect = {kind:'invert'}, baseMode = 'source-over') {
+async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropAlpha = 128, chained = false, effect = {kind:'invert'}, baseMode = 'source-over', groupMode = null) {
   const effectName='Clipped '+effect.kind[0].toUpperCase()+effect.kind.slice(1);
   const opened = await evaluate(client, `(() => {
     try {
@@ -42,7 +46,9 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
             mask:{enabled:true,linked:true,invert:false,density:1,feather:0,
               dataUrl:bitmap(x=>[255,255,255,x===0||x===3?255:x===1?128:0])}},
           {id:'inner',name:'Nested Pass Through',parentGroupId:'outer',
-            visible:true,locked:false,collapsed:false,opacity:1,blendMode:'pass-through'}
+            visible:true,locked:false,collapsed:false,opacity:${groupMode ? 0.5 : 1},blendMode:${JSON.stringify(groupMode || 'pass-through')},
+            ...(${Boolean(groupMode)} ? {mask:{enabled:true,linked:true,invert:false,density:1,feather:0,
+              dataUrl:bitmap(x=>[255,255,255,x===1?128:255])}} : {})}
         ],
         layers:[
           {...base,id:'blue-backdrop',name:'Translucent blue',type:'raster',
@@ -50,15 +56,15 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
           {...base,id:'red-base',name:'Translucent red',type:'raster',
             groupId:'inner',blendMode:${JSON.stringify(baseMode)},dataUrl:bitmap(()=>[255,0,0,128])},
            {...base,id:'overlay-blue',name:'Clipped blue raster',type:'raster',
-             groupId:'inner',clipping:true,blendMode:${JSON.stringify(mode)},
+             groupId:${JSON.stringify(groupMode?'outer':'inner')},clipping:true,blendMode:${JSON.stringify(mode)},
              opacity:${mode === 'multiply' ? 1 : 0.5},dataUrl:bitmap(()=>[0,0,255,255]),
              mask:{enabled:true,linked:true,invert:false,density:1,feather:0,
                dataUrl:bitmap(x=>[255,255,255,x===1?128:x===3?0:255])}},
           ...(${chained} ? [{...base,id:'levels-clipped',name:'Clipped Levels',type:'adjustment',
-            groupId:'inner',clipping:true,adjustment:{kind:'levels',
+            groupId:${JSON.stringify(groupMode?'outer':'inner')},clipping:true,adjustment:{kind:'levels',
               master:{inputBlack:0,inputWhite:255,gamma:1,outputBlack:32,outputWhite:224}}}] : []),
           {...base,id:'invert-clipped',name:${JSON.stringify(effectName)},type:'adjustment',
-            groupId:'inner',clipping:true,adjustment:${JSON.stringify(effect)}}
+            groupId:${JSON.stringify(groupMode?'outer':'inner')},clipping:true,adjustment:${JSON.stringify(effect)}}
         ],
         selectedLayerId:'invert-clipped'
       };
@@ -80,13 +86,13 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
       Array.from(ctx.getImageData(x,0,1,1).data));
   })()`);
   const near = (got,want) => want.every((v,i) => Math.abs((got||[])[i]-v) <= 2);
-  const expected = chained ? chainedOracle(mode, backdropAlpha, effect, baseMode) : mode === 'multiply'
+  const expected = chained ? chainedOracle(mode, backdropAlpha, effect, groupMode || baseMode, groupMode) : mode === 'multiply'
     ? [[170,170,255,192],[51,102,255,160],[0,0,255,128],[0,170,255,192]]
     : [[0,170,170,192],[0,102,229,160],[0,0,255,128],[0,170,255,192]];
   try { await waitFor('nested clipped adjustment respects partial background and folder mask',
     async () => {const actual = await pixels(); return expected.every((p,i) => near(actual[i],p));},
     12000); } catch (error) { console.error('expected',expected,'actual',await pixels()); throw error; }
-  console.log('Nested PSD clipped '+effect.kind+' / backdrop '+backdropAlpha+' / chained '+chained+' RGBA:', JSON.stringify(await pixels()));
+  console.log('Nested PSD '+(groupMode ? groupMode+' folder base / ' : '')+'clipped '+effect.kind+' / backdrop '+backdropAlpha+' / chained '+chained+' RGBA:', JSON.stringify(await pixels()));
 
   const changed = await evaluate(client, `(() => {
     const row = document.querySelector('[data-group-id="outer"]');
@@ -150,13 +156,13 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
     return {mask:outer?.mask?.enabled,maskBytes:outer?.mask?.dataUrl?.length,
       nested:inner?.parentGroupId,clipped:adjustment?.clipping,
       kind:adjustment?.adjustment?.kind,effectModel:adjustment?.adjustment,levels:levels?.adjustment?.master,levelsClip:levels?.clipping,blue:blue?.dataUrl?.startsWith('data:image/'),
-      baseBlend:base?.blendMode,rasterClip:overlay?.clipping,blend:overlay?.blendMode,opacity:overlay?.opacity,
+      innerBlend:inner?.blendMode,innerOpacity:inner?.opacity,innerMask:!!inner?.mask?.dataUrl,groupScope:overlay?.groupId===outer?.id&&adjustment?.groupId===outer?.id&&levels?.groupId===outer?.id,baseBlend:base?.blendMode,rasterClip:overlay?.clipping,blend:overlay?.blendMode,opacity:overlay?.opacity,
       overlayMask:overlay?.mask?.dataUrl?.length,overlayMaskEnabled:overlay?.mask?.enabled};
   })()`);
   assert(persist.mask===true&&persist.maskBytes>50&&persist.nested==='outer'&&
     persist.clipped===true&&persist.kind===effect.kind&&Object.entries(effect).every(([k,v])=>persist.effectModel?.[k]===v)&&persist.blue&&
     (!chained || (persist.levelsClip===true&&persist.levels?.outputBlack===32&&persist.levels?.outputWhite===224))&&
-    persist.baseBlend===baseMode&&persist.rasterClip===true&&persist.blend===mode&&
+    (!groupMode||(persist.innerBlend===groupMode&&Math.abs(persist.innerOpacity-.5)<.01&&persist.innerMask&&persist.groupScope))&&persist.baseBlend===baseMode&&persist.rasterClip===true&&persist.blend===mode&&
     persist.overlayMask>50&&persist.overlayMaskEnabled===true&&
     Math.abs(persist.opacity-(mode==='multiply'?1:0.5))<.01,
     'ZPE retained editable group/adjustment/raster: '+JSON.stringify(persist));
@@ -164,12 +170,12 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
     const actual=await pixels();return expected.every((p,i)=>near(actual[i],p));
   },12000);
   console.log('Nested PSD clipped raster '+mode+' / adjustment / UI / History / ZPE PASS');
-  await verifyNativeClippedUiRoundTrips(client,{evaluate,waitFor,assert},{mode,expected,near,chained,effect,effectName,baseMode});
+  await verifyNativeClippedUiRoundTrips(client,{evaluate,waitFor,assert},{mode,expected,near,chained,effect,effectName,baseMode,groupMode});
 }
 
 // Independent scalar oracle: clipped overlay RGB, Levels output mapping,
 // Invert, then premultiplied source-over with folder coverage.
-function chainedOracle(mode, backdropAlpha, effect, baseMode) {
+function chainedOracle(mode, backdropAlpha, effect, baseMode, groupMode) {
   return [255,128,255,0].map((mask,x) => {
     const coverage=[1,128/255,0,1][x];
     const rgb=mode==='multiply' ? [255-mask,0,0] : [255,0,Math.round(mask/2)];
@@ -177,7 +183,7 @@ function chainedOracle(mode, backdropAlpha, effect, baseMode) {
     const corrected=effect.kind==='posterize' ? leveled.map(v=>Math.round(Math.floor(v*effect.levels/256)*255/(effect.levels-1)))
       : effect.kind==='threshold' ? Array(3).fill(Math.round(.3*leveled[0]+.59*leveled[1]+.11*leveled[2])>=effect.level?255:0)
       : leveled.map(v=>255-v);
-    const a=128/255*coverage, b=backdropAlpha/255;
+    const a=128/255*coverage*(groupMode ? .5*(x===1?128/255:1) : 1), b=backdropAlpha/255;
     const alpha=a+b*(1-a);
     if (!alpha) return [0,0,0,0];
     return [...corrected.map((v,c)=>{
