@@ -1,20 +1,20 @@
-# NEXT — единая очередь ZeTer Photo Editor
+# NEXT - ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** / bounded v1.47.24 cumulative Levels→Invert + native Posterize/Threshold.
+> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** / v1.47.25 clipping-base Multiply/Screen.
 > **PRIORITY:** P1.
-> **STATUS:** **IN PROGRESS** — local implementation + targeted acceptance PASS; remote acceptance not yet confirmed. Parent full Photoshop parity remains IN PROGRESS.
-> **BASE MAIN SHA:** `c7007f4c07afe669be4961bf1749667f8a0616f6` (#406 merged Paths visibility fix; [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45223048593), [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45223048729)).
-> **ACTIVE PR:** branch `feat/psd-levels-invert-20261124`; PR publication/CI readback pending.
-> **LAST VERIFIED:** 2026-11-24 local RED 2→GREEN 2 native post/thrs eligibility; 26/26 focused Node PASS, actual Chromium file:// 16 native PSD/PSB UI roundtrips PASS (4 prior, 8 Levels→Invert, 4 Posterize/Threshold). Independent scalar RGBA ±2 byte quantization, group/raster masks, editable native layer order/parameters, History Undo/Redo and .zpe Save/reopen. Prior #405 merge-main core FAIL on 5d95ef0 is not relabeled; latest exact-main #406 both workflows SUCCESS.
-> **REMAINING ACCEPTANCE:** new candidate exact PR-head core + independent workflow; inspect diff/reviews/branch requirements, merge only when all gates pass, verify exact merged-main CI. Licensed Photoshop-authored pixel golden and advanced knockout remain open.
-> **NEXT IMPLEMENTATION ACTION:** after v1.47.24 PR acceptance, reproduce and fix non-source-over clipping-base blend (Multiply/Screen base over opaque and translucent backdrop, then clipped adjustment) against independent premultiplied RGBA; verify native PSD/PSB editable structure, Undo/Redo and .zpe.
-> **BLOCKERS:** licensed Adobe-authored PSD/PSB pixel golden for independent parity, advanced knockout reference; genuine camera DNG+LibRaw independent reference for separate RAW task.
+> **STATUS:** IN PROGRESS - local code + Chromium acceptance PASS; remote acceptance pending.
+> **BASE MAIN SHA:** b80bb643e9104339913751e3578acf01d0ac8300 (#407 MERGED; exact-main [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45336494040) and [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45336494127) PENDING at readback).
+> **ACTIVE PR:** [#407 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/407) v1.47.24 exact head 5a4181a377975c065d9902a62be9b8fc5f9ada1b [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45335771338) + [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45335771357); v1.47.25 branch feat/psd-clipping-base-blend-20261124 (publication pending at authoring).
+> **LAST VERIFIED:** v1.47.25 Chromium file:// RED exit 1 on old code -> GREEN exit 0, 6 new base-mode/backdrop cases, 12 new/28 total editable PSD/PSB roundtrips with group and raster masks, scalar RGBA +/-2, History Undo/Redo and .zpe save/reopen; build PASS; focused Node 24/24 PASS; Windows npm run check 1811 tests / 1796 PASS / 10 SKIP / 5 known Linux-only cgroup FAIL; diff check PASS.
+> **REMAINING ACCEPTANCE:** exact #407 merged-main CI and v1.47.25 PR-head core + independent workflows, guarded merge and exact merged-main CI; independent Adobe-authored parity and advanced knockout not accepted.
+> **NEXT IMPLEMENTATION ACTION:** after remote gates, reproduce and fix isolated non-normal folder as clipping base with subsequent clipped adjustment, independent premultiplied RGBA on translucent/opaque backdrop and partial folder opacity/mask; verify editable native PSD/PSB, Undo/Redo and .zpe.
+> **BLOCKERS:** licensed Photoshop-authored golden/advanced knockout reference, genuine camera DNG+LibRaw independent reference.
 
-## Короткая очередь
+## Short queue
 
-1. P1 v1.47.24 remote acceptance: exact PR-head CI and independent real-photo workflow, review and guarded merge.
-2. P1 Stage 17a — non-source-over clipping-base blend with clipped adjustment in nested groups.
-3. P1 CAP-RAW-CAMERA-ORACLE — BLOCKED: original licensed camera DNG + LibRaw/RawTherapee reference.
-4. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks — next independent unblocked user-visible slice.
+1. P1 verify #407 exact-main CI, then v1.47.25 PR-head and merged-main acceptance.
+2. P1 Stage 17a - non-normal isolated group as clipping base with clipped adjustment.
+3. P1 CAP-RAW-CAMERA-ORACLE - BLOCKED (licensed original DNG + LibRaw reference).
+4. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 
-[Stage 17a journal](002-psd-folder-group-mask.md) · [Capability matrix](CAPABILITY_MATRIX.md) · [task map](README.md).
+[Stage 17a journal](002-psd-folder-group-mask.md) | [Capability matrix](CAPABILITY_MATRIX.md) | [task map](README.md).

@@ -17995,6 +17995,32 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
       const entry=entries[entryIndex];
       if (entry.type === 'layer') {
         const clipped=entry.layer?.clipping===true;
+        const baseMode=entry.layer?.blendMode;
+        const next=entries[entryIndex+1];
+        // A Multiply/Screen clipping base must blend its corrected source
+        // against the backdrop, not add an RGB delta to an already blended
+        // destination. Compose the contiguous clipped stack on its own matte,
+        // then blend the resulting stack exactly once with the parent.
+        if(!clipped && entry.layer.type!=='adjustment' &&
+          (baseMode==='multiply'||baseMode==='screen') &&
+          next?.type==='layer' && next.layer?.clipping===true){
+          const stack=await renderClippingBase(doc,{...entry.layer,blendMode:'source-over'},rasterOverrides);
+          while(entries[entryIndex+1]?.type==='layer' && entries[entryIndex+1].layer?.clipping===true){
+            const child=entries[++entryIndex].layer;
+            if(stack)await renderLayerEntry(stack,stack.getContext('2d'),doc,child,rasterOverrides,stack);
+          }
+          if(stack){
+            targetCtx.save();
+            try {
+              targetCtx.globalAlpha=1;
+              targetCtx.globalCompositeOperation=baseMode;
+              targetCtx.filter='none';
+              targetCtx.drawImage(stack,0,0);
+            } finally { targetCtx.restore(); }
+          }
+          clippingBase=null;
+          continue;
+        }
         await renderLayerEntry(targetCanvas,targetCtx,doc,entry.layer,rasterOverrides,clipped?clippingBase:null);
         if(!clipped){
           const next=entries[entryIndex+1];
