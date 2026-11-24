@@ -4,12 +4,15 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
-## Current bounded v1.47.30 (2026-11-24)
+## Current integrated v1.47.30 (2026-11-24)
 
-- **P1 Stage 17a IN PROGRESS:** Soft Light raster and isolated folder clipping bases, real Chromium RED to GREEN, 6 new scalar RGBA cases, 12 new / 124 total editable native PSD/PSB UI roundtrips; mask/opacity, History/.zpe, focused Node 25/25, build 1d030a35e0bf5cbb. Stacked candidate; not in main.
-- **#411 MERGED**, exact-main both workflows SUCCESS. **#412 core FAIL** Exclusion folder alpha 128 blue delta 3 > 2; independent SUCCESS. [#413 DRAFT](https://github.com/zeter1/ZeTer-Photo-Editor/pull/413), stacked, remote workflows NOT RUN at readback. Fix exact-pixel discrepancy before merging either candidate. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
+- **P1 Stage 17a IN PROGRESS:** Integrated v1.47.30 on the exact #412 precision head edb1dfd30332b1666efc72494fee9afb64312478: build 6f5ed8c3df7ce0ce, four precision unit tests PASS, full dedicated Windows Chromium file:// exit 0 (124 native editable PSD/PSB UI roundtrips including Soft Light and Difference/Exclusion; masks, History, .zpe, unchanged +/-2 oracle). Full Windows check running at authoring; Linux PR-head and merged-main gates NOT ACCEPTED. Synthetic, not Adobe-authored. [#413 draft](https://github.com/zeter1/ZeTer-Photo-Editor/pull/413) depends on #412 acceptance. [NEXT](NEXT.md).
 
-## Current bounded v1.47.29 (2026-11-24)
+## Current acceptance correction v1.47.29 (2026-11-24)
+
+- **P1 Stage 17a IN PROGRESS:** Linux core on old head `7b4cd3fad894c530632c27d8a606997ae8de1cd8` [FAIL](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45341076229) (Exclusion folder, alpha 128, x3 blue expected 188, actual 185); [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45341076234). Corrected raster and isolated folder final blend uses tiled straight RGBA source-over with Difference/Exclusion, no tolerance change. Windows actual x3 [61,171,188,160], targeted and full dedicated Chromium PASS (24/112 native editable PSD/PSB roundtrips, History, .zpe), 4 new Node RED→GREEN, 23/23 focused PASS, build df2b499a58c712be. New head Linux core + independent acceptance pending; full Windows check FAIL: 1815 tests / 1800 PASS / 10 SKIP / 5 known Linux-only cgroup failures (same two suites as before). Local code commit ea20f81; staged diff hygiene PASS after removing trailing test blank line. Synthetic, not Adobe-authored. #413 remains stacked draft. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
+
+## Previous bounded v1.47.29 (2026-11-24)
 
 - **P1 Stage 17a IN PROGRESS:** Difference/Exclusion raster and isolated folder clipping bases, Chromium RED to GREEN, 24 new / 112 total native editable PSD/PSB roundtrips; focused Node 25/25, History/.zpe; build 07791979a015ed83. Remote gates pending; #411 MERGED, exact PR-head core and independent SUCCESS; exact-main CI pending. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
 

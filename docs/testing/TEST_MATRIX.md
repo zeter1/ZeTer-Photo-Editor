@@ -4,7 +4,8 @@ Use the smallest relevant set while developing; finish source changes with the r
 
 | Change area | Targeted tests / checks | Extra runtime gate |
 |---|---|---|
-| Stage 17a 1.47.30 Soft Light clipping bases | Clipped adjustment/raster, group mask, version Node suites (25/25) | npm run test:browser:psd-clipped-raster: 6 new raster/folder x alpha cases, 12 new / 124 total native PSD/PSB UI roundtrips, independent piecewise RGBA +/-2, mask/opacity, History/.zpe; synthetic. |
+| Stage 17a 1.47.30 integrated Soft Light + precision | Four clipping precision Node tests PASS | Full dedicated Chromium file:// 124 native editable PSD/PSB roundtrips PASS, unchanged +/-2; exact Linux CI pending. |
+| Stage 17a 1.47.29 clipping precision | `node --test tests/clipping-base-composite.test.mjs` (4 cases, translucent/transparent/opaque boundaries, immutable source) | Same full native UI browser suite with unchanged ±2 oracle; exact Linux CI required |
 | Stage 17a 1.47.29 Difference/Exclusion clipping bases | Clipped adjustment/raster, group mask, version Node suites (25/25) | npm run test:browser:psd-clipped-raster: 12 new raster/folder x mode x alpha cases, 24 new / 112 total native PSD/PSB UI roundtrips, independent scalar RGBA +/-2, mask/opacity, History/.zpe; synthetic. |
 | Stage 17a 1.47.28 Darken/Lighten clipping bases | Clipped adjustment/raster, group mask, version Node suites (25/25) | npm run test:browser:psd-clipped-raster: 12 new raster/folder x mode x alpha cases, 24 new / 88 total native PSD/PSB UI roundtrips, min/max RGBA +/-2, mask/opacity, History/.zpe; synthetic. |
 | Stage 17a 1.47.27 Overlay/Hard Light clipping bases | Clipped adjustment/raster, group masks and version Node suites (25/25) | npm run test:browser:psd-clipped-raster: 64 native PSD/PSB UI roundtrips, 12 new raster/folder x mode x mixed backdrop alpha cases, independent scalar RGBA +/-2, editable structure, mask/opacity, History/.zpe. Synthetic, not Adobe-authored. |

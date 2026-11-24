@@ -3,8 +3,11 @@
 - Correct Soft Light raster and isolated folder clipping stacks before parent blending; preserve the source matte.
 - Chromium file://: 6 synthetic scalar RGBA cases, 12 native editable PSD/PSB UI roundtrips, mask/opacity, History and .zpe.
 
+- Integrated the tiled Difference/Exclusion precision correction; full dedicated Chromium regression PASS on build 6f5ed8c3df7ce0ce.
+
 ## 1.47.29 — предыдущая версия: Difference/Exclusion clipping bases (2026-11-24)
 
+- Correct backend-dependent intermediate rounding for Difference/Exclusion clipping stacks with a tiled RGBA blend; keep the original browser oracle tolerance and source alpha.
 - Correct Difference/Exclusion raster and isolated folder clipping stacks before parent blending; preserve source matte.
 - Chromium file://: 12 new raster/folder x blend x alpha cases, 24 new native editable PSD/PSB UI roundtrips, independent scalar RGBA +/-2, mask/opacity, History and .zpe. Synthetic, not Adobe-authored.
 
