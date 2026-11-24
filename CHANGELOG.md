@@ -2,7 +2,8 @@
 
 - RGB8 non-separable Color for raster, folders and adjustments; native PSD/PSB `colr` mapping, editable masks and clipping.
 - Explicit rejection of unsupported native RGB16/32/CMYK Color export; preserve source ZPE.
-- Local 35/35 focused Node PASS, Chromium 6 cases / 12 editable native roundtrips PASS; Linux CI pending.
+- Correct isolated Normal folder clipping stack precision without widening pixel tolerance; direct Color/Normal UI and Undo/Redo PASS.
+- Local 35/35 focused Node PASS before final precision fix; final Color 4/4 and full dedicated Chromium 160 editable native roundtrips PASS; Linux CI pending.
 
 ## 1.47.31 — предыдущая версия: Color Dodge / Color Burn clipping bases (2026-11-24)
 

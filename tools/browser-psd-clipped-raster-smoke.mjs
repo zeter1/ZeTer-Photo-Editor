@@ -133,6 +133,44 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
     12000); } catch (error) { console.error('expected',expected,'actual',await pixels()); throw error; }
   console.log('Nested PSD '+(groupMode ? groupMode+' folder base / ' : '')+'clipped '+effect.kind+' / backdrop '+backdropAlpha+' / chained '+chained+' RGBA:', JSON.stringify(await pixels()));
 
+  // Exercise the real mode controls as well as the imported document state.
+  if ((groupMode || baseMode) === 'color' && backdropAlpha > 0) {
+    const changeMode = async value => evaluate(client, `(() => {
+      if (${Boolean(groupMode)}) {
+        const row=document.querySelector('[data-group-id="inner"]');
+        if(!row) return false;
+        row.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:30,clientY:30}));
+        const item=[...document.querySelectorAll('#menuPopover .menu-item')]
+          .find(x=>x.textContent.includes('Параметры группы'));
+        if(!item) return false;
+        item.click();
+        const modal=document.querySelector('.modal[aria-label="Параметры группы"]');
+        const select=modal?.querySelector('select[name="blendMode"]');
+        if(!select||![...select.options].some(o=>o.value==='color')) return false;
+        select.value=${JSON.stringify(value)};
+        select.dispatchEvent(new Event('change',{bubbles:true}));
+        modal.requestSubmit();return true;
+      }
+      document.querySelector('[data-id="red-base"]')?.click();
+      const select=document.querySelector('#blendMode');
+      if(!select||![...select.options].some(o=>o.value==='color')||select.disabled) return false;
+      select.value=${JSON.stringify(value)};
+      select.dispatchEvent(new Event('change',{bubbles:true}));return true;
+    })()`);
+    const normal=chainedOracle(mode,backdropAlpha,effect,'source-over',groupMode,backdrop);
+    const matches=async oracle=>{const actual=await pixels();return oracle.every((p,i)=>near(actual[i],p));};
+    assert(await changeMode('source-over'),'Color UI can select Normal');
+    try { await waitFor('Normal mode updates pixels',()=>matches(normal),12000); }
+    catch(error) { console.error('Normal oracle',normal,'actual',await pixels()); throw error; }
+    assert(await changeMode('color'),'Color UI can select Color');
+    await waitFor('Color UI restores oracle',()=>matches(expected),12000);
+    await evaluate(client,`document.querySelector('#undoBtn').click()`);
+    await waitFor('Undo Color mode',()=>matches(normal),12000);
+    await evaluate(client,`document.querySelector('#redoBtn').click()`);
+    await waitFor('Redo Color mode',()=>matches(expected),12000);
+    console.log('Color blend UI Normal/Color + Undo/Redo PASS');
+  }
+
   const changed = await evaluate(client, `(() => {
     const row = document.querySelector('[data-group-id="outer"]');
     if (!row) return {error:'group row missing'};

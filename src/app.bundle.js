@@ -18028,11 +18028,11 @@ function compositeMaskedPassThrough(targetCtx, renderedCtx, maskCtx, width, heig
   }
 }
 
-// Chromium backends can quantize Difference/Exclusion at intermediate
-// premultiplied stages. Use a tiled straight-RGBA blend for these clipping
-// stacks, avoiding backend-specific intermediate rounding.
+// Chromium can quantize clipping stacks at intermediate premultiplied
+// stages. Use a tiled straight-RGBA blend for Normal isolated folders,
+// Difference, Exclusion and Color, avoiding intermediate rounding.
 function drawClippingStack(targetCtx, stack, mode) {
-  if (mode === 'difference' || mode === 'exclusion' || mode === 'color') {
+  if (mode === 'source-over' || mode === 'difference' || mode === 'exclusion' || mode === 'color') {
     const sourceCtx = stack.getContext('2d');
     const tile = 256;
     for (let y = 0; y < stack.height; y += tile) {
@@ -18158,10 +18158,10 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         await renderEntries(groupCanvas, groupCtx, group.id);
         if (groupMasked) await applyLayerMaskToContext(groupCtx, group.mask, doc.width, doc.height);
 
-        // A non-normal isolated folder used as a clipping base follows the
+        // An isolated folder used as a clipping base follows the
         // same source-stack rule as a raster base. Apply folder mask/opacity
         // once, edit the resulting matte, and blend once against the parent.
-        if (needsClippingBase && ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color'].includes(blendMode)) {
+        if (needsClippingBase && ['source-over','multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color'].includes(blendMode)) {
           const { groupCanvas: stack, groupCtx: stackCtx } = newGroupCanvas();
           stackCtx.globalAlpha = opacity;
           stackCtx.drawImage(groupCanvas, 0, 0);
