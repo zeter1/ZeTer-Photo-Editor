@@ -43,6 +43,7 @@ const PSD_BLEND_MODES = Object.freeze({
   idiv: 'color-burn',
   diff: 'difference',
   smud: 'exclusion',
+  colr: 'color',
 });
 
 export class PsdImportError extends Error {
@@ -2368,6 +2369,7 @@ const PSD_BLEND_KEYS = Object.freeze({
   'color-burn': 'idiv',
   difference: 'diff',
   exclusion: 'smud',
+  color: 'colr',
 });
 
 class Writer {

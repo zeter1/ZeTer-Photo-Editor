@@ -486,6 +486,7 @@ export function compositePixelBufferLayers(width, height, layers = [], {
     if (!isPixelBuffer(source)||source.model!=='rgb'||![3,4].includes(source.channels)) {
       throw new TypeError('High-depth composite layer требует RGB PixelBuffer');
     }
+    if (entry?.blendMode === 'color') throw new TypeError('Color blend is not supported by the native pixel compositor');
     const mode=HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
     const opacity=clampPreview01(entry?.opacity ?? 1);
     if (opacity<=0) continue;
@@ -567,6 +568,7 @@ export function compositeCmykPixelBufferLayers(width, height, layers = [], {
     if(!isPixelBuffer(source)||source.model!=='cmyk'||![4,5].includes(source.channels)){
       throw new TypeError('CMYK composite layer требует CMYK PixelBuffer');
     }
+    if (entry?.blendMode === 'color') throw new TypeError('Color blend is not supported by the native pixel compositor');
     const mode=HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
     const opacity=clampPreview01(entry?.opacity??1);
     if(opacity<=0)continue;

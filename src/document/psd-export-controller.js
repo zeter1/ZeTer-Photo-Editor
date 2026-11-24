@@ -284,6 +284,14 @@ export function createPsdExportController({
   }
   
   async function preparePsdExport(exportDoc){
+    // Preserve native channels: Color is currently RGB Canvas8 only.
+    const hasNativePrecision = exportDoc.layers.some(layer => layer.highDepthSource &&
+      (layer.highDepthSource.bitsPerChannel > 8 || layer.highDepthSource.model === 'cmyk'));
+    const hasColor = exportDoc.layers.some(layer => layer.blendMode === 'color') ||
+      (exportDoc.groups || []).some(group => group.blendMode === 'color');
+    if (hasNativePrecision && hasColor) {
+      throw new Error('Color blend: native high-depth/CMYK PSD/PSB export is not supported; save the editable ZPE project');
+    }
     const warnings=[];
     const psdSmartPlan=psdSmartObjectRoundTripPlan(exportDoc);
     const visibleAdjustmentLayers=exportDoc.layers.filter(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
