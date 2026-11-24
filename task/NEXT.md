@@ -1,23 +1,22 @@
 # NEXT - ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-BLEND-MODES / bounded native RGB16 Overlay and Hard Light v1.47.44.
+> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-BLEND-MODES / five remaining bounded separable RGB16 folder modes v1.47.45.
 > **PRIORITY:** P1 HIGH native precision.
-> **STATUS:** IN PROGRESS — functional candidate; RED→GREEN, targeted and full dedicated Chromium PASS; remote acceptance pending.
-> **BASE MAIN SHA:** d2e449cd6e834e9c922a46ce806e6949e31f29f4 (tree fbb50b671382b655b67172b0435ff747acdba85d).
-> **LAST VERIFIED MAIN:** #124 MERGED 0c7aef4c5fc490a52144b4bb803937cb22f3d020, [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45389420787), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45389421025). Issue [#115 CLOSED](https://github.com/zeter1/ZeTer-Photo-Editor/issues/115).
-> **MERGED CANDIDATE:** [#425](https://github.com/zeter1/ZeTer-Photo-Editor/pull/425) v1.47.43, head b593ab108ceb352a5246286c763a97e1d29c50dd, 13/13 checks, [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45389832066), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45389832045). Squash merged as d2e449cd6e834e9c922a46ce806e6949e31f29f4, tree equal to verified head; separate [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45391479624) and [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45391479743) pending at readback.
-> **ACTIVE CANDIDATE:** feat/psd-rgb16-isolated-overlay-hardlight-20261124, base above; not main.
-> **IMPLEMENTATION:** One root isolated contiguous RGB16 encoded sRGB raster folder; Overlay branches on parent backdrop, Hard Light on finished folder source. Shared typed compositor, straight alpha, opacity and prepared raster mask once. Native PSD/PSB editable group/layer and exact merged words. Explicit fail-closed outside bounded topology/precision; no Canvas8 fallback for these requested native folder modes.
-> **EVIDENCE:** RED 11/14 → GREEN 14/14; focused 58/58 including recovery/version; build 7ee854ac29f8e3f0. Live Chromium file:// actual Group Properties, preview, Undo/Redo, .zpe, PSD/PSB exact merged words and editable reimport PASS (three mode sets); synthetic independent arithmetic, not Adobe-authored parity. Full dedicated Chromium exit 0 (68.03s). Windows npm run check FAIL: 1869 total / 1854 PASS / 10 SKIP / 5 existing Linux-only proc/cgroup FAIL; no gate weakened.
-> **NEXT ACTION:** Verify separate #425 exact-main core and independent; new candidate exact-head core/independent and all review/protection gates, then guarded merge and separate exact-main verification. Never merge red/pending. Ordinary revert if needed.
-> **NEXT IMPLEMENTATION ACTION:** Extend bounded native RGB16 isolated folder support to remaining typed separable modes (Darken/Lighten, Difference/Exclusion, Soft Light, Color Dodge/Burn), with independently verified branches and endpoint cases, partial alpha, mask, negative topology, Group Properties/History/.zpe and PSD/PSB roundtrip; split only if evidence or risk requires.
-> **BLOCKERS:** Adobe-authored clipping/knockout oracle; genuine camera DNG/LibRaw; nested/pass-through/clipping/adjustments/Float32/CMYK outside bounded native contract.
+> **STATUS:** IN PROGRESS — #427 candidate reconciled with accepted main; fresh exact-head acceptance required.
+> **LAST VERIFIED MAIN:** [#426](https://github.com/zeter1/ZeTer-Photo-Editor/pull/426) ACCEPTED at f5354164bbcc239f10d3987f09efd229b42e4b6e, tree 8c3b13e6d7da99ac8f00bc3ff83c6cac7b49824c; [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45396060659), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45396060528).
+> **BASE MAIN SHA:** f5354164bbcc239f10d3987f09efd229b42e4b6e (tree identical to original #426 head).
+> **ACTIVE CANDIDATE:** [#427](https://github.com/zeter1/ZeTer-Photo-Editor/pull/427), feat/psd-rgb16-isolated-five-separable-20261124; original tested runtime tree 6c6ca9211a1a92e7b317f65779752dbd96ac2b1f. Only queue/journal metadata changed during integration.
+> **IMPLEMENTATION:** Darken/Lighten/Difference/Exclusion/Soft Light routed through shared typed compositor in the same bounded single root isolated contiguous encoded sRGB16 raster folder. Exact merged PSD/PSB words and editable native layers/groups; straight alpha, opacity and prepared raster mask once. Unsupported topology/precision fails closed.
+> **EVIDENCE:** RED 14/17 -> GREEN 17/17; build d3f13fff0b7d3776. Targeted Chromium file:// four mode sets, actual Properties/preview, History, .zpe, exact PSD/PSB Soft Light composite and editable reimport PASS exit 0; word-domain synthetic oracle covers all five modes. Windows npm run check FAIL: 1872 total / 1857 PASS / 10 SKIP / 5 existing Linux-only proc/cgroup FAIL; no gate weakened. Full dedicated Chromium PASS exit 0 (78.42s).
+> **NEXT ACTION:** Fresh exact-head core + independent CI for #427 against main; verify all checks, reviews and current head/base, guarded merge, separate exact-main CI. Main branch readback: protected=false, protection.enabled=false; rulesets empty. Never merge red/pending.
+> **NEXT IMPLEMENTATION ACTION:** Existing [#428](https://github.com/zeter1/ZeTer-Photo-Editor/pull/428) Color Dodge/Burn candidate, head 566ec2ce9c0ebcd81f739c29e9811359c9a805a0, depends on #427. After #427 exact-main acceptance, reconcile without force and retarget #428; fresh exact-head gates. Do not duplicate its implementation.
+> **BLOCKERS:** Adobe-authored clipping/knockout oracle; genuine camera DNG/LibRaw; nested/pass-through/clipping/adjustments/ICC/Float32/CMYK outside bounded native contract.
 
 ## Short queue
 
-1. P1 #425 exact merged-main core and independent.
-2. P1 Overlay/Hard Light candidate exact head/main acceptance.
-3. P1 Remaining bounded native RGB16 isolated separable folder modes.
+1. P1 #427 exact-head/main acceptance on accepted #426 main.
+2. P1 #428 forward integration and exact-head/main acceptance; no duplicate implementation.
+3. P1 Native RGB16 Normal-only isolated raster folder: local v1.47.47 candidate, not published; original #428 base tree ab3476adf3987475ec66de36e4a13a50c684b5bf. Reproduced Canvas8 fallback without special blend trigger (RED 0/1); eligible native routing GREEN 20/20, adjacent precision/version 14/14, build 5dcfd7485de2c0cd. Browser and wide gates remain required. Integrate after #428 acceptance; preserve existing explicit fallback outside eligible scope.
 4. P1 CAP-RAW-CAMERA-ORACLE (external reference blocked).
 5. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 

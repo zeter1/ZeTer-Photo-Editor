@@ -199,13 +199,14 @@ export function createPsdExportController({
     }
   }
   
+  const exactSeparableFolderModes = ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light'];
   // Bounded topology: one root isolated folder with contiguous raster children.
   // Keep pass-through, nested and unsupported group modes outside this native contract.
   function nativeRgb16IsolatedGroup(exportDoc){
     const groups=exportDoc.groups||[];
     if(groups.length!==1)return null;
     const group=groups[0];
-    const modes=['source-over','multiply','screen','overlay','hard-light','color','hue','saturation','luminosity'];
+    const modes=['source-over',...exactSeparableFolderModes,'color','hue','saturation','luminosity'];
     if(!group.id||group.parentGroupId||!modes.includes(group.blendMode)||group.clipping||
       (group.vectorMask?.enabled!==false&&group.vectorMask?.subpaths?.length))return null;
     const members=exportDoc.layers.map((layer,index)=>layer.groupId===group.id?index:-1).filter(index=>index>=0);
@@ -338,7 +339,7 @@ export function createPsdExportController({
     const nonSeparable = [...exportDoc.layers, ...(exportDoc.groups || [])].filter(entry =>
       ['color','hue','saturation','luminosity'].includes(entry.blendMode));
     const nativeExactBuffers=new Map();
-    const separableFolderRequested=(exportDoc.groups||[]).some(group=>['multiply','screen','overlay','hard-light'].includes(group.blendMode));
+    const separableFolderRequested=(exportDoc.groups||[]).some(group=>exactSeparableFolderModes.includes(group.blendMode));
     const requiresExactNative=hasNativePrecision && (nonSeparable.length>0 || separableFolderRequested);
     const isolatedRgb16Group=nativeRgb16IsolatedGroup(exportDoc);
     const nativeExactRgb16 = requiresExactNative && (!(exportDoc.groups||[]).length || isolatedRgb16Group) &&

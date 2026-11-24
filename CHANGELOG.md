@@ -1,4 +1,8 @@
-## 1.47.44 — текущая версия: Native RGB16 isolated Overlay/Hard Light (2026-11-24)
+## 1.47.45 — текущая версия: Native RGB16 isolated Darken/Lighten/Difference/Exclusion/Soft Light (2026-11-24)
+
+- Native PSD/PSB export of a bounded RGB16 isolated raster folder with five additional separable blend modes; exact composite and editable native samples, alpha and prepared mask, explicit rejection of unsupported combinations.
+
+## 1.47.44 — предыдущая версия: Native RGB16 isolated Overlay/Hard Light (2026-11-24)
 
 - Native PSD/PSB export of isolated RGB16 Overlay and Hard Light folders using the shared typed compositor; distinct backdrop/source branch, straight alpha, opacity, prepared mask, editable native channels and fail-closed unsupported combinations.
 
