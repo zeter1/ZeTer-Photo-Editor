@@ -1,19 +1,19 @@
 # NEXT - ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY / Saturation v1.47.34 acceptance → Luminosity v1.47.35 acceptance.
+> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY / Luminosity v1.47.35 acceptance.
 > **PRIORITY:** P1.
-> **STATUS:** IN PROGRESS — Hue #416 MERGED; Saturation #417 OPEN on main; Luminosity stacked candidate.
-> **BASE MAIN SHA:** a0f1b488a96f68fbc30242b7460216ffb7cf040d.
-> **ACTIVE PR:** [#417 Saturation](https://github.com/zeter1/ZeTer-Photo-Editor/pull/417); stacked Luminosity branch `feat/psd-luminosity-blend-20261124`.
-> **LAST VERIFIED:** 2026-11-24 — **v1.47.35 Luminosity bounded RGB8 candidate IN PROGRESS.** SetLum(Cb, Lum(Cs)), actual layer/group controls and clipping/adjustment composition, native PSD/PSB `lum `; RGB16/32/CMYK fail closed. Windows fresh RED 0/3 → GREEN, focused 17/17 PASS, version 1/1 PASS; build `d6f439c79f3198a9`, real Chromium file:// six raster/folder × alpha 0/128/255 cases, 12 editable native PSD/PSB export/reimports, 4 mode-control changes, masks, History Undo/Redo, .zpe PASS. Full dedicated/full npm check NOT RUN in this pass; synthetic, not Adobe-authored. All 16 runtime/test/build/public-version blob SHAs matched the tested local files. Stacked on #417 `d17b891f86114c5944f078ee504822b6a4cd0aa1`, [core IN PROGRESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45354828671), [independent IN PROGRESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45354828649). Hue #416 main `a0f1b488a96f68fbc30242b7460216ffb7cf040d` [core IN PROGRESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45354421590), [independent IN PROGRESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45354421602). Parent CAP IN PROGRESS.
-> **REMAINING ACCEPTANCE:** Hue exact-main gates; Saturation exact-head checks, review/merge, exact-main CI; reconcile Luminosity with accepted main without force, retarget and run fresh core + independent gates; merge and exact-main CI. Full dedicated Luminosity browser regression and full Linux check required.
-> **NEXT IMPLEMENTATION ACTION:** Finish #417 and Luminosity in dependency order, then choose next unimplemented professional feature per matrix; high-depth non-separable remains unaccepted.
-> **BLOCKERS:** licensed Adobe-authored clipping/knockout oracle; genuine camera DNG and LibRaw reference; native RGB16/32/CMYK non-separable math unimplemented.
+> **STATUS:** IN PROGRESS — Saturation #417 MERGED; Luminosity #418 existing candidate, no duplicate implementation.
+> **BASE MAIN SHA:** 4a776ac085faaeabb6400a5fe71a331bbae79b11.
+> **ACTIVE PR:** [#418 Luminosity](https://github.com/zeter1/ZeTer-Photo-Editor/pull/418).
+> **LAST VERIFIED:** **Saturation v1.47.34 #417 MERGED; Luminosity v1.47.35 #418 IN PROGRESS.** Saturation exact PR-head `d17b891f86114c5944f078ee504822b6a4cd0aa1`: [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45354828671), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45354828649), 13/13 checks, clean PR, protected=false, no rulesets. Squash main `4a776ac085faaeabb6400a5fe71a331bbae79b11` tree equals tested Saturation head; exact-main [core PENDING](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45355907087), [independent PENDING](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45355907082). Hue exact-main [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45354421590) and [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45354421602). Fresh Windows tests on Luminosity candidate `c649d5eca2c03366a652a1ea66e735fa08e4ea93`: 14/14 focused (Color/Hue/Saturation/Luminosity + version) PASS; full dedicated Chromium file:// **196 native editable PSD/PSB roundtrips**, 12 Luminosity, 16 mode switches + Undo/Redo, mask, .zpe PASS (77.74s, exit 0). Full Windows npm run check **FAIL: 1828 tests / 1813 PASS / 10 SKIP / 5 Linux-only cgroup/proc FAIL**, no other failing tests. Rebuilt app bundle hash matches candidate. Reconcile #418 with accepted Saturation tree without force; runtime/test/build unchanged; fresh exact-head Linux core and independent workflow required before merge. Parent CAP IN PROGRESS; no Adobe-authored parity or native RGB16/32/CMYK non-separable math accepted.
+> **REMAINING ACCEPTANCE:** Saturation exact-main [core PENDING](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45355907087), [independent PENDING](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45355907082); #418 reconciled exact-head core and independent CI, review/merge gates, then exact merged-main CI. Windows full check is FAIL, not PASS.
+> **NEXT IMPLEMENTATION ACTION:** Accept #418 without duplicating it. Then implement bounded native RGB16 Color blend for eligible flat raster layers (native composite words, opacity/mask, UI/History/.zpe, editable PSD/PSB, independent numerical oracle); keep unsupported group/adjustment/Float32/CMYK paths fail-closed until verified.
+> **BLOCKERS:** licensed Adobe-authored clipping/knockout oracle; genuine camera DNG and LibRaw reference; native high-depth non-separable modes not yet implemented.
 
 ## Short queue
 
-1. P1 Saturation #417 exact-head and exact-main gates.
-2. P1 Luminosity stacked candidate exact-head and exact-main gates.
+1. P1 Luminosity #418 exact-head and exact-main gates.
+2. P1 Native RGB16 Color bounded flat-layer composite + PSD/PSB native words.
 3. P1 CAP-RAW-CAMERA-ORACLE (external reference blocked).
 4. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 
