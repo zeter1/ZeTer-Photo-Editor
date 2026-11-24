@@ -20,8 +20,8 @@ test('Saturation handles neutral source/backdrop, transparent edges and partial 
   compositeClippingStackPixels(target,source,'saturation');
   assert.deepEqual([...target.data],[109,109,109,255,128,128,128,255,100,150,50,128,60,120,180,255,10,20,30,255]);
 });
-test('native RGB16/32 and CMYK Saturation cannot silently downgrade to Normal',async()=>{
-  for(const [model,channels,depth,fn] of [['rgb',4,16,compositePixelBufferLayers],['rgb',4,32,compositePixelBufferLayers],['cmyk',5,8,compositeCmykPixelBufferLayers]]) {
+test('native RGB32 and CMYK Saturation cannot silently downgrade to Normal',async()=>{
+  for(const [model,channels,depth,fn] of [['rgb',4,32,compositePixelBufferLayers],['cmyk',5,8,compositeCmykPixelBufferLayers]]) {
     const buffer=createPixelBuffer({width:1,height:1,model,channels,bitsPerChannel:depth});
     assert.throws(()=>fn(1,1,[{buffer,blendMode:'saturation'}],{bitsPerChannel:depth}),/Saturation/);
     const controller=createPsdExportController({rendering:{createCanvas:()=>{throw Error('unexpected fallback');}}});
