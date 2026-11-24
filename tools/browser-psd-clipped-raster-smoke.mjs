@@ -3,6 +3,13 @@ import { verifyNativeClippedUiRoundTrips } from './browser-psd-clipped-native-ui
 // Live Chromium: clipped raster Multiply/Screen -> clipped Invert in a nested
 // masked Pass Through folder over translucent blue. Every pixel has an oracle.
 export async function verifyClippedRasterStack(client, harness) {
+  for (const blend of ['difference','exclusion']) {
+    for (const alpha of [128,255,0]) {
+      await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over',blend);
+      await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},blend);
+    }
+  }
+  if (process.env.ZPE_DIFFERENCE_EXCLUSION_CLIPPING_BASE_ONLY === '1') return;
   for (const blend of ['darken','lighten']) {
     for (const alpha of [128,255,0]) {
       await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over',blend);
@@ -34,7 +41,7 @@ export async function verifyClippedRasterStack(client, harness) {
 }
 
 async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropAlpha = 128, chained = false, effect = {kind:'invert'}, baseMode = 'source-over', groupMode = null) {
-  const backdrop = ['overlay','hard-light','darken','lighten'].includes(groupMode || baseMode) ? [64,180,220] : [0,0,255];
+  const backdrop = ['overlay','hard-light','darken','lighten','difference','exclusion'].includes(groupMode || baseMode) ? [64,180,220] : [0,0,255];
   const effectName='Clipped '+effect.kind[0].toUpperCase()+effect.kind.slice(1);
   const opened = await evaluate(client, `(() => {
     try {
@@ -206,7 +213,8 @@ function chainedOracle(mode, backdropAlpha, effect, baseMode, groupMode, backdro
       const blended=baseMode==='multiply'?v*back/255:baseMode==='screen'?255-(255-v)*(255-back)/255:
         baseMode==='overlay'?(back<=127.5?2*back*v/255:255-2*(255-back)*(255-v)/255):
         baseMode==='hard-light'?(v<=127.5?2*back*v/255:255-2*(255-back)*(255-v)/255):
-        baseMode==='darken'?Math.min(v,back):baseMode==='lighten'?Math.max(v,back):v;
+        baseMode==='darken'?Math.min(v,back):baseMode==='lighten'?Math.max(v,back):
+        baseMode==='difference'?Math.abs(back-v):baseMode==='exclusion'?back+v-2*back*v/255:v;
       return Math.round((a*((1-b)*v+b*blended)+back*b*(1-a))/alpha);
     }),Math.round(alpha*255)];
   });

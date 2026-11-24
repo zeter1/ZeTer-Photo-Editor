@@ -4,6 +4,10 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
+## Current bounded v1.47.29 (2026-11-24)
+
+- **P1 Stage 17a IN PROGRESS:** Difference/Exclusion raster and isolated folder clipping bases, Chromium RED to GREEN, 24 new / 112 total native editable PSD/PSB roundtrips; focused Node 25/25, History/.zpe; build 07791979a015ed83. Remote gates pending; #411 predecessor PR. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
+
 ## Current bounded v1.47.28 (2026-11-24)
 
 - **P1 Stage 17a IN PROGRESS:** Darken/Lighten raster and isolated folder clipping bases, Chromium RED to GREEN, 24 new / 88 total native editable PSD/PSB roundtrips; focused Node 25/25, mask/opacity, History/.zpe; build 369f205141483866. Local candidate, #410 merged; remote acceptance pending.
