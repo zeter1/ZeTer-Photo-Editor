@@ -1392,7 +1392,7 @@ function encodeCurvesAdjustmentBlock(sourceBlock,adjustment) {
 }
 
 /**
- * Build genuine PSD adjustment records for ZPE-created Levels/Curves/Invert layers.
+ * Build genuine PSD adjustment records for ZPE-created Levels/Curves/Invert/Posterize/Threshold layers.
  * Native records are emitted only for these known layouts; unsupported kinds
  * must fall back rather than claiming editable Photoshop metadata.
  */
@@ -1400,6 +1400,11 @@ export function createPsdAdjustmentBlocks(adjustment) {
   const kind=String(adjustment?.kind||'');
   // Photoshop Invert is an editable native adjustment with an empty nvrt body.
   if(kind==='invert')return[{signature:'8BIM',key:'nvrt',data:new Uint8Array(0)}];
+  // Native post/thrs: unsigned big-endian parameter followed by two reserved bytes.
+  if(kind==='posterize'||kind==='threshold'){
+    const key=kind==='posterize'?'post':'thrs';
+    return rewritePsdAdjustmentBlocks([{signature:'8BIM',key,data:new Uint8Array(4)}],adjustment).blocks;
+  }
   if(kind==='levels'){
     // Photoshop Levels v2 contains 29 ten-byte channel records.
     const bytes=new Uint8Array(2+29*10);

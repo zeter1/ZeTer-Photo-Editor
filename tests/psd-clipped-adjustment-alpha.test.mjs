@@ -197,3 +197,26 @@ test('ZPE-created clipped Invert exports editable native Photoshop nvrt in PSD a
     assert.deepEqual(invert?.psdAdjustment?.parsed,{kind:'invert'});
   }
 });
+
+
+// ZPE-created native simple adjustments have a big-endian u16 and two reserved bytes.
+for (const [model,key,value] of [
+  [{kind:'posterize',levels:7},'post',7],
+  [{kind:'threshold',level:173},'thrs',173],
+]) {
+  test('new editable '+model.kind+' writes native PSD and PSB',async()=>{
+    const plan=psdAdjustmentNativePlan({type:'adjustment',adjustment:model,styles:null,filters:{}});
+    assert.equal(plan.eligible,true,plan.reason);
+    assert.equal(plan.metadata.blocks[0].key,key);
+    assert.deepEqual([...plan.metadata.blocks[0].data],[0,value,0,0]);
+    for (const encode of [encodePsd,encodePsb]) {
+      const decoded=await decodePsd(encode({width:1,height:1,composite:new Uint8Array([0,0,0,255]),
+        layers:[{name:'base',x:0,y:0,width:1,height:1,pixels:new Uint8Array([127,127,127,255]),visible:true},
+          {name:model.kind,x:0,y:0,width:0,height:0,clipping:true,visible:true,psdAdjustment:plan.metadata}]}),
+        {maxPixels:16,maxLayers:8});
+      assert.equal(decoded.adjustmentLayers.length,1);
+      assert.equal(decoded.adjustmentLayers[0].clipping,true);
+      assert.deepEqual(decoded.adjustmentLayers[0].psdAdjustment.parsed,model);
+    }
+  });
+}
