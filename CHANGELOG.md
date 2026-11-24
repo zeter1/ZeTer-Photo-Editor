@@ -1,4 +1,8 @@
-## 1.47.39 — текущая версия: Native RGB16 Luminosity (2026-11-24)
+## 1.47.40 — текущая версия: Native RGB16 isolated group (2026-11-24)
+
+- Нативная композиция одной изолированной группы Normal с непрерывным набором растровых sRGB16-слоёв и режимами Color/Hue/Saturation/Luminosity, непрозрачностью и растровой маской группы. Редактируемый PSD/PSB без Canvas8 fallback. Остальные топологии остаются вне контракта.
+
+## 1.47.39 — предыдущая версия: Native RGB16 Luminosity (2026-11-24)
 
 - Native encoded sRGB16 Luminosity for flat raster layers, exact native PSD/PSB composite and editable layer words, alpha, opacity and raster mask. All four non-separable modes coexist; unsupported topology and precision remain fail-closed.
 
