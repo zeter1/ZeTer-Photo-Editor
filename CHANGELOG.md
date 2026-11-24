@@ -1,4 +1,9 @@
-## 1.47.34 — текущая версия: Saturation blend mode (2026-11-24)
+## 1.47.35 — текущая версия: Luminosity (2026-11-24)
+
+- RGB8 Luminosity for raster/group clipping stacks and adjustments; editable native PSD/PSB `lum `; fail-closed native RGB16/32 and CMYK export.
+- Local RED→GREEN, focused 17/17, version 1/1, targeted real Chromium file:// 12 editable native roundtrips, mask, History and ZPE PASS; full suite NOT RUN; remote gates pending.
+
+## 1.47.34 — предыдущая версия: Saturation blend mode (2026-11-24)
 
 - RGB8 non-separable Saturation for raster, groups, clipping and adjustments; native PSD/PSB `sat ` mapping and fail-closed native high-depth/CMYK export.
 - Local focused Node 14/14, version consistency 1/1 and full dedicated Chromium 184 editable native roundtrips PASS; exact remote gates pending.
