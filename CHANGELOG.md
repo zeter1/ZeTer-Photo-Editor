@@ -1,4 +1,8 @@
-## 1.47.41 — текущая версия: Native RGB16 isolated group blend modes (2026-11-24)
+## 1.47.42 — текущая версия: Recovery snapshot preparation (2026-11-24)
+
+- Preserve the previous recovery record when snapshot preparation throws; contain immediate and debounced failures, notify once, and prevent late writes from re-enabling retry. Transient IndexedDB retry remains bounded. Issue #115 / PR #124.
+
+## 1.47.41 — предыдущая версия: Native RGB16 isolated group blend modes (2026-11-24)
 
 - Native PSD/PSB export of a bounded isolated RGB16 group using Color, Hue, Saturation or Luminosity against the parent backdrop. Native layer words and editable folder metadata retained. Unsupported topology and precision remain fail-closed.
 
