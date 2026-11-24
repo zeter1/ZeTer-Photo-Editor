@@ -1,4 +1,9 @@
-## 1.47.35 — текущая версия: Luminosity (2026-11-24)
+## 1.47.36 — текущая версия: Native RGB16 Color (2026-11-24)
+
+- Native encoded sRGB16 Color for flat raster documents: SetLum, gamut clipping, opacity and raster mask, native PSD/PSB merged and editable layer words. Unsupported groups, adjustments, clipping, vector masks, Float32, CMYK and ICC remain fail-closed.
+- Local RED 1/4 → GREEN; focused 59/59 including version; build `1316667161393a2e`; targeted Chromium file:// PSD and PSB exact native merged/layer words, actual Color dropdown, History Undo/Redo, .zpe save/reopen PASS. Full dedicated Chromium 198 native editable export/reimport paths PASS (65.05 s). Synthetic, not Adobe-authored. Full Windows check NOT RUN in this pass; fresh remote gates required.
+
+## 1.47.35 — предыдущая версия: Luminosity (2026-11-24)
 
 - RGB8 Luminosity for raster/group clipping stacks and adjustments; editable native PSD/PSB `lum `; fail-closed native RGB16/32 and CMYK export.
 - Local RED→GREEN, focused 17/17, version 1/1, targeted real Chromium file:// 12 editable native roundtrips, mask, History and ZPE PASS; full suite NOT RUN; remote gates pending.
