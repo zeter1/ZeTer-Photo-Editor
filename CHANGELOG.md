@@ -1,4 +1,9 @@
-## 1.47.29 — текущая версия: Difference/Exclusion clipping bases (2026-11-24)
+## 1.47.30 — текущая версия: Soft Light clipping bases (2026-11-24)
+
+- Correct Soft Light raster and isolated folder clipping stacks before parent blending; preserve the source matte.
+- Chromium file://: 6 synthetic scalar RGBA cases, 12 native editable PSD/PSB UI roundtrips, mask/opacity, History and .zpe.
+
+## 1.47.29 — предыдущая версия: Difference/Exclusion clipping bases (2026-11-24)
 
 - Correct Difference/Exclusion raster and isolated folder clipping stacks before parent blending; preserve source matte.
 - Chromium file://: 12 new raster/folder x blend x alpha cases, 24 new native editable PSD/PSB UI roundtrips, independent scalar RGBA +/-2, mask/opacity, History and .zpe. Synthetic, not Adobe-authored.

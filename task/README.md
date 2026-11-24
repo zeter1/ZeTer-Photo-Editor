@@ -4,6 +4,11 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
+## Current bounded v1.47.30 (2026-11-24)
+
+- **P1 Stage 17a IN PROGRESS:** Soft Light raster and isolated folder clipping bases, real Chromium RED to GREEN, 6 new scalar RGBA cases, 12 new / 124 total editable native PSD/PSB UI roundtrips; mask/opacity, History/.zpe, focused Node 25/25, build 1d030a35e0bf5cbb. Stacked candidate; not in main.
+- **#411 MERGED**, exact-main both workflows SUCCESS. **#412 core FAIL** Exclusion folder alpha 128 blue delta 3 > 2; independent pending at readback. Fix exact-pixel discrepancy before merging either candidate. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
+
 ## Current bounded v1.47.29 (2026-11-24)
 
 - **P1 Stage 17a IN PROGRESS:** Difference/Exclusion raster and isolated folder clipping bases, Chromium RED to GREEN, 24 new / 112 total native editable PSD/PSB roundtrips; focused Node 25/25, History/.zpe; build 07791979a015ed83. Remote gates pending; #411 MERGED, exact PR-head core and independent SUCCESS; exact-main CI pending. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
