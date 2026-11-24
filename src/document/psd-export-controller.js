@@ -284,12 +284,12 @@ export function createPsdExportController({
   }
   
   async function preparePsdExport(exportDoc){
-    // Preserve native channels: Color is currently RGB Canvas8 only.
+    // Preserve native channels: Non-separable blend modes are currently RGB Canvas8 only.
     const hasNativePrecision = exportDoc.layers.some(layer => layer.highDepthSource &&
       (layer.highDepthSource.bitsPerChannel > 8 || layer.highDepthSource.model === 'cmyk'));
-    const unsupportedMode = [...exportDoc.layers, ...(exportDoc.groups || [])].find(entry => entry.blendMode === 'color' || entry.blendMode === 'hue')?.blendMode;
+    const unsupportedMode = [...exportDoc.layers, ...(exportDoc.groups || [])].find(entry => entry.blendMode === 'color' || entry.blendMode === 'hue' || entry.blendMode === 'saturation')?.blendMode;
     if (hasNativePrecision && unsupportedMode) {
-      throw new Error((unsupportedMode === 'hue' ? 'Hue' : 'Color') + ' blend: native high-depth/CMYK PSD/PSB export is not supported; save the editable ZPE project');
+      throw new Error((unsupportedMode === 'saturation' ? 'Saturation' : unsupportedMode === 'hue' ? 'Hue' : 'Color') + ' blend: native high-depth/CMYK PSD/PSB export is not supported; save the editable ZPE project');
     }
     const warnings=[];
     const psdSmartPlan=psdSmartObjectRoundTripPlan(exportDoc);

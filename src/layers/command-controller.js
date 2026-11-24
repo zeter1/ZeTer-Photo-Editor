@@ -44,6 +44,7 @@ export function createLayerGroupCommandController({
     ['color-burn', 'Затемнение основы'],
     ['difference', 'Разница'],
     ['color', 'Цветность (Color)'],
+    ['saturation', 'Насыщенность (Saturation)'],
     ['hue', 'Цветовой тон (Hue)'],
     ['exclusion', 'Исключение'],
   ];

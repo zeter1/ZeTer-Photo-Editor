@@ -45,6 +45,7 @@ const PSD_BLEND_MODES = Object.freeze({
   smud: 'exclusion',
   colr: 'color',
   'hue ': 'hue',
+  'sat ': 'saturation',
 });
 
 export class PsdImportError extends Error {
@@ -2372,6 +2373,7 @@ const PSD_BLEND_KEYS = Object.freeze({
   exclusion: 'smud',
   color: 'colr',
   hue: 'hue ',
+  saturation: 'sat ',
 });
 
 class Writer {

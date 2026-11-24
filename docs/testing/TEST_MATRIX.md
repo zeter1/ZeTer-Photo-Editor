@@ -1,5 +1,8 @@
 # Test matrix
 
+2026-11-24 — **v1.47.34 Saturation bounded RGB8 candidate IN PROGRESS.** Source saturation with backdrop hue/luma (SetLum(SetSat(Cb, Sat(Cs)), Lum(Cb))), raster/group state and UI, clipping stack and adjustment compositors, native editable PSD/PSB `sat `; explicit native RGB16/32/CMYK rejection, preserving document and ZPE. Fresh Windows Node RED 0/3 → GREEN; focused 14/14 PASS incl. Hue, Color, Difference/Exclusion, final version 1/1 PASS. Build `bba27fc7b1fe5b77`. Real Chromium file:// targeted 12/12 native editable roundtrips PASS (11.60 s); full dedicated 184 native editable roundtrips, 12 direct layer/folder mode switches plus Undo/Redo, masks and .zpe PASS (75.48 s). Full npm check NOT RUN in this pass. All 16 changed source/test/build/public-version blobs match exact local SHA after LF normalization and deterministic rebuild. Synthetic, not Adobe-authored. #415 merged main `eeacad5e9475b56dcabf0ca3bf84ca4d289c7d2d`, exact-main workflows pending at readback; #416 Hue retargeted to main, exact head `b60811da92f0056c1693985ce2a411b2181bace4` core and independent in progress. Saturation is stacked on Hue and requires fresh remote gates after integration. Parent CAP remains IN PROGRESS.
+
+
 Use the smallest relevant set while developing; finish source changes with the repository gate.
 
 | Change area | Targeted tests / checks | Extra runtime gate |
