@@ -38,7 +38,7 @@ test('isolated group opacity zero and hidden group exclude children',async()=>{
   }
 });
 test('unsupported RGB16 group topology fails closed',async()=>{
-  for(const change of [d=>d.groups[0].blendMode='pass-through',d=>d.groups[0].blendMode='luminosity',d=>d.groups[0].parentGroupId='g',d=>d.layers.push(layer('other',[1,2,3,65535],'unknown')),d=>d.layers.splice(2,0,layer('interleaved',[1,2,3,65535])),d=>d.layers[1].clipping=true]){
+  for(const change of [d=>d.groups[0].blendMode='pass-through',d=>d.groups[0].blendMode='multiply',d=>d.groups[0].parentGroupId='g',d=>d.layers.push(layer('other',[1,2,3,65535],'unknown')),d=>d.layers.splice(2,0,layer('interleaved',[1,2,3,65535])),d=>d.layers[1].clipping=true]){
     const doc=make();change(doc);const before=JSON.stringify(doc);
     await assert.rejects(controller().prepareDocument(doc),/native high-depth/);
     assert.equal(JSON.stringify(doc),before);
@@ -65,4 +65,55 @@ test('isolated RGB16 group remains behind the following root raster',async()=>{
   const doc=make();doc.layers.push(layer('above',[12345,23456,34567,65535]));
   const out=await controller().prepareDocument(doc);
   assert.deepEqual([...out.compositePixelBuffer.data],[12345,23456,34567,65535]);
+});
+
+test('RGB16 isolated group modes blend the finished group against the parent, not each child',async()=>{
+  const cases=[
+    ['color',[26950,11950,26950,65535]],
+    ['hue',[20500,15500,25500,65535]],
+    ['saturation',[5950,20950,35950,65535]],
+    ['luminosity',[13050,23050,33050,65535]],
+  ];
+  for(const [mode,expected] of cases){
+    const doc=make();
+    doc.groups[0].blendMode=mode;
+    doc.layers=[layer('outer',[10000,20000,30000,65535]),layer('inner',[1000,2000,3000,65535],'g'),layer('top',[50000,10000,30000,65535],'g')];
+    const before=JSON.stringify(doc);
+    const out=await controller().prepareDocument(doc);
+    assert.equal(out.composite,null,mode);
+    assert.deepEqual([...out.compositePixelBuffer.data],expected,mode);
+    assert.equal(out.groups[0].blendMode,mode);
+    for(const encode of [encodePsd,encodePsb]){
+      const bytes=new Uint8Array(encode({width:1,height:1,bitsPerChannel:16,colorMode:3,layers:out.layers,groups:out.groups,compositePixelBuffer:out.compositePixelBuffer}));
+      const raw=new DataView(bytes.buffer,bytes.byteOffset+bytes.byteLength-10,10);
+      assert.deepEqual([0,2,4,6,8].map(i=>raw.getUint16(i,false)),[0,...expected],mode);
+      const parsed=await decodePsd(bytes,{maxPixels:16,maxLayers:16});
+      assert.equal(parsed.bitsPerChannel,16);
+      assert.equal(parsed.groups[0].blendMode,mode);
+      assert.equal(parsed.layers.find(l=>l.name==='top').groupKey,parsed.groups[0].key);
+      assert.deepEqual([...parsed.layers.find(l=>l.name==='top').pixelBuffer.data],[50000,10000,30000,65535]);
+    }
+    assert.equal(JSON.stringify(doc),before);
+  }
+});
+test('non-separable group opacity and prepared mask multiply coverage exactly once',async()=>{
+  const maskController=createPsdExportController({vectors:{exportPsdVectorMask:()=>null},rendering:{
+    createCanvas(){return {getContext(){return {fillRect(){},getImageData(){return {data:Uint8ClampedArray.of(255,255,255,255)};}};}};},
+    renderLayer(){throw Error('unexpected rasterization');},renderDocument(){throw Error('unexpected display composite');}
+  }});
+  for(const [enabled,density,expected] of [[true,1,[10000,20000,30000,65535]],[false,1,[13050,23050,33050,65535]],[true,.5,[11531,21531,31531,65535]]]){
+    const doc=make();
+    doc.groups[0].blendMode='luminosity';doc.groups[0].mask={enabled,invert:true,density};
+    doc.layers=[layer('outer',[10000,20000,30000,65535]),layer('top',[50000,10000,30000,65535],'g')];
+    const before=JSON.stringify(doc);
+    const out=await maskController.prepareDocument(doc);
+    assert.deepEqual([...out.compositePixelBuffer.data],expected);
+    assert.equal(JSON.stringify(doc),before);
+  }
+});
+test('isolated group with partial source alpha and transparent parent preserves native straight alpha',async()=>{
+  const doc=make();doc.groups[0].blendMode='hue';
+  doc.layers=[layer('top',[50000,10000,30000,32768],'g')];
+  const out=await controller().prepareDocument(doc);
+  assert.deepEqual([...out.compositePixelBuffer.data],[50000,10000,30000,16384]);
 });

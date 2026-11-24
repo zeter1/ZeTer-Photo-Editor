@@ -1,4 +1,8 @@
-## 1.47.40 — текущая версия: Native RGB16 isolated group (2026-11-24)
+## 1.47.41 — текущая версия: Native RGB16 isolated group blend modes (2026-11-24)
+
+- Native PSD/PSB export of a bounded isolated RGB16 group using Color, Hue, Saturation or Luminosity against the parent backdrop. Native layer words and editable folder metadata retained. Unsupported topology and precision remain fail-closed.
+
+## 1.47.40 — предыдущая версия: Native RGB16 isolated group (2026-11-24)
 
 - Нативная композиция одной изолированной группы Normal с непрерывным набором растровых sRGB16-слоёв и режимами Color/Hue/Saturation/Luminosity, непрозрачностью и растровой маской группы. Редактируемый PSD/PSB без Canvas8 fallback. Остальные топологии остаются вне контракта.
 
