@@ -1,4 +1,10 @@
-## 1.47.25 — текущая версия: clipping-base Multiply/Screen (2026-11-24)
+## 1.47.26 — текущая версия: isolated Multiply/Screen folder clipping base (2026-11-24)
+
+- Composite the isolated folder's masked, opacity-adjusted source with consecutive clipped raster/Levels/Invert before blending once against the parent backdrop.
+- Add six real Chromium file:// synthetic RGBA cases (Multiply/Screen folder, backdrop alpha 0/128/255, partial folder mask and opacity), native editable PSD/PSB export/import, Group Properties, Undo/Redo and .zpe.
+- Stage 17a remains IN PROGRESS; independent Photoshop-authored parity is not claimed.
+
+## 1.47.25 — предыдущая версия: clipping-base Multiply/Screen (2026-11-24)
 
 - Correct compositing: a Multiply/Screen base with contiguous clipped layers is rendered on its own alpha matte, corrected cumulatively, then blended once with the actual backdrop. The source-over path is unchanged.
 - Chromium file://: six new nested masked-group cases (Multiply/Screen base x transparent/translucent/opaque background), clipped Screen raster, Levels and Invert; independent premultiplied RGBA oracle, Group Properties, History Undo/Redo and .zpe reopen. 12 new native editable PSD/PSB roundtrips, 28 total; no flatten. Synthetic reference, not Adobe-authored parity.

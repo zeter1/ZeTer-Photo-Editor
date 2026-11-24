@@ -18094,6 +18094,28 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         await renderEntries(groupCanvas, groupCtx, group.id);
         if (groupMasked) await applyLayerMaskToContext(groupCtx, group.mask, doc.width, doc.height);
 
+        // A non-normal isolated folder used as a clipping base follows the
+        // same source-stack rule as a raster base. Apply folder mask/opacity
+        // once, edit the resulting matte, and blend once against the parent.
+        if (needsClippingBase && (blendMode === 'multiply' || blendMode === 'screen')) {
+          const { groupCanvas: stack, groupCtx: stackCtx } = newGroupCanvas();
+          stackCtx.globalAlpha = opacity;
+          stackCtx.drawImage(groupCanvas, 0, 0);
+          stackCtx.globalAlpha = 1;
+          while (entries[entryIndex + 1]?.type === 'layer' && entries[entryIndex + 1].layer?.clipping === true) {
+            const child = entries[++entryIndex].layer;
+            await renderLayerEntry(stack, stackCtx, doc, child, rasterOverrides, stack);
+          }
+          targetCtx.save();
+          try {
+            targetCtx.globalAlpha = 1;
+            targetCtx.globalCompositeOperation = blendMode;
+            targetCtx.filter = 'none';
+            targetCtx.drawImage(stack, 0, 0);
+          } finally { targetCtx.restore(); }
+          continue;
+        }
+
         targetCtx.save();
         targetCtx.globalAlpha = opacity;
         targetCtx.globalCompositeOperation = blendMode === 'pass-through' ? 'source-over' : blendMode;
