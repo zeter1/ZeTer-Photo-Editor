@@ -2,21 +2,21 @@
 
 > **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-BLEND-MODES / five remaining bounded separable RGB16 folder modes v1.47.45.
 > **PRIORITY:** P1 HIGH native precision.
-> **STATUS:** IN PROGRESS - dependent candidate, not accepted.
-> **LAST VERIFIED MAIN:** [#425](https://github.com/zeter1/ZeTer-Photo-Editor/pull/425) MERGED d2e449cd6e834e9c922a46ce806e6949e31f29f4, tree fbb50b671382b655b67172b0435ff747acdba85d; [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45391479624), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45391479743). Recovery #124 accepted, [#115 CLOSED](https://github.com/zeter1/ZeTer-Photo-Editor/issues/115).
-> **PREDECESSOR:** [#426](https://github.com/zeter1/ZeTer-Photo-Editor/pull/426) OPEN Overlay/Hard Light, base d2e449cd6e834e9c922a46ce806e6949e31f29f4, head c17314f7e5aef027651a46e1adf2ca27bf62ef96, tree 8c3b13e6d7da99ac8f00bc3ff83c6cac7b49824c; [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45392483434) and [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45392483196) PENDING at readback. Classic branch protection read 403; no merge until gates known and satisfied.
-> **ACTIVE CANDIDATE:** feat/psd-rgb16-isolated-five-separable-20261124, dependent base #426 exact head above (not main).
+> **STATUS:** IN PROGRESS — #427 candidate reconciled with accepted main; fresh exact-head acceptance required.
+> **LAST VERIFIED MAIN:** [#426](https://github.com/zeter1/ZeTer-Photo-Editor/pull/426) ACCEPTED at f5354164bbcc239f10d3987f09efd229b42e4b6e, tree 8c3b13e6d7da99ac8f00bc3ff83c6cac7b49824c; [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45396060659), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45396060528).
+> **BASE MAIN SHA:** f5354164bbcc239f10d3987f09efd229b42e4b6e (tree identical to original #426 head).
+> **ACTIVE CANDIDATE:** [#427](https://github.com/zeter1/ZeTer-Photo-Editor/pull/427), feat/psd-rgb16-isolated-five-separable-20261124; original tested runtime tree 6c6ca9211a1a92e7b317f65779752dbd96ac2b1f. Only queue/journal metadata changed during integration.
 > **IMPLEMENTATION:** Darken/Lighten/Difference/Exclusion/Soft Light routed through shared typed compositor in the same bounded single root isolated contiguous encoded sRGB16 raster folder. Exact merged PSD/PSB words and editable native layers/groups; straight alpha, opacity and prepared raster mask once. Unsupported topology/precision fails closed.
 > **EVIDENCE:** RED 14/17 -> GREEN 17/17; build d3f13fff0b7d3776. Targeted Chromium file:// four mode sets, actual Properties/preview, History, .zpe, exact PSD/PSB Soft Light composite and editable reimport PASS exit 0; word-domain synthetic oracle covers all five modes. Windows npm run check FAIL: 1872 total / 1857 PASS / 10 SKIP / 5 existing Linux-only proc/cgroup FAIL; no gate weakened. Full dedicated Chromium PASS exit 0 (78.42s).
-> **NEXT ACTION:** Verify #426 exact-head core/independent and review/protection gates, merge only when satisfied, then verify exact-main. Rebase/forward-port dependent candidate onto accepted main without overwriting concurrent work; fresh exact-head core/independent, required checks and guarded merge, exact-main verification. Never merge the dependent candidate into unaccepted predecessor.
-> **NEXT IMPLEMENTATION ACTION:** Color Dodge/Burn bounded native RGB16 folder; explicitly verify existing compositor endpoint precedence (black backdrop/white source, white backdrop/black source), clipping and denominators against an independent reference before enabling; partial alpha, prepared mask, topology/precision refusal, Group Properties/History/.zpe/PSD/PSB raw words. Split only for demonstrated risk.
+> **NEXT ACTION:** Fresh exact-head core + independent CI for #427 against main; verify all checks, reviews and current head/base, guarded merge, separate exact-main CI. Main branch readback: protected=false, protection.enabled=false; rulesets empty. Never merge red/pending.
+> **NEXT IMPLEMENTATION ACTION:** Existing [#428](https://github.com/zeter1/ZeTer-Photo-Editor/pull/428) Color Dodge/Burn candidate, head 566ec2ce9c0ebcd81f739c29e9811359c9a805a0, depends on #427. After #427 exact-main acceptance, reconcile without force and retarget #428; fresh exact-head gates. Do not duplicate its implementation.
 > **BLOCKERS:** Adobe-authored clipping/knockout oracle; genuine camera DNG/LibRaw; nested/pass-through/clipping/adjustments/ICC/Float32/CMYK outside bounded native contract.
 
 ## Short queue
 
-1. P1 #426 exact head/main acceptance; verify branch protection and review gates.
-2. P1 Five separable modes dependent candidate exact head/main acceptance after #426.
-3. P1 Color Dodge/Burn independent endpoint validation and bounded native folder support.
+1. P1 #427 exact-head/main acceptance on accepted #426 main.
+2. P1 #428 forward integration and exact-head/main acceptance; no duplicate implementation.
+3. P1 Assess next bounded native group topology after #428 acceptance.
 4. P1 CAP-RAW-CAMERA-ORACLE (external reference blocked).
 5. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 
