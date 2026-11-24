@@ -4,6 +4,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 
 | Change area | Targeted tests / checks | Extra runtime gate |
 |---|---|---|
+| Stage 17a 1.47.31 Color Dodge/Burn | Focused Node 24/24 PASS | Windows Chromium file:// 12 synthetic cases / 24 new native PSD/PSB editable roundtrips PASS; full dedicated exit 0; exact Linux CI pending. |
 | Stage 17a 1.47.30 integrated Soft Light + precision | Four clipping precision Node tests PASS; Windows full check 1815 / 1800 PASS / 10 SKIP / 5 Linux-only cgroup FAIL | Full dedicated Chromium file:// 124 native editable PSD/PSB roundtrips PASS, unchanged +/-2; exact Linux CI pending. |
 | Stage 17a 1.47.29 clipping precision | `node --test tests/clipping-base-composite.test.mjs` (4 cases, translucent/transparent/opaque boundaries, immutable source) | Same full native UI browser suite with unchanged ±2 oracle; exact Linux CI required |
 | Stage 17a 1.47.29 Difference/Exclusion clipping bases | Clipped adjustment/raster, group mask, version Node suites (25/25) | npm run test:browser:psd-clipped-raster: 12 new raster/folder x mode x alpha cases, 24 new / 112 total native PSD/PSB UI roundtrips, independent scalar RGBA +/-2, mask/opacity, History/.zpe; synthetic. |
