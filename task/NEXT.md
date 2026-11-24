@@ -16,7 +16,7 @@
 
 1. P1 #427 exact-head/main acceptance on accepted #426 main.
 2. P1 #428 forward integration and exact-head/main acceptance; no duplicate implementation.
-3. P1 Assess next bounded native group topology after #428 acceptance.
+3. P1 Native RGB16 Normal-only isolated raster folder: local v1.47.47 candidate, not published; original #428 base tree ab3476adf3987475ec66de36e4a13a50c684b5bf. Reproduced Canvas8 fallback without special blend trigger (RED 0/1); eligible native routing GREEN 20/20, adjacent precision/version 14/14, build 5dcfd7485de2c0cd. Browser and wide gates remain required. Integrate after #428 acceptance; preserve existing explicit fallback outside eligible scope.
 4. P1 CAP-RAW-CAMERA-ORACLE (external reference blocked).
 5. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 
