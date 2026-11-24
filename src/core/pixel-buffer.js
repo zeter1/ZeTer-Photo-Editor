@@ -436,10 +436,10 @@ function compositeBlendChannel(mode, backdrop, source) {
 
 // Native non-separable blend in normalized encoded sRGB16.
 // Hue: SetLum(SetSat(Cs, Sat(Cb)), Lum(Cb)); Saturation swaps Cs/Cb in SetSat.
-// Color: SetLum(Cs, Lum(Cb)).
+// Color: SetLum(Cs, Lum(Cb)); Luminosity: SetLum(Cb, Lum(Cs)).
 function compositeRgb16NonSeparable(mode, source, backdrop, out) {
   const luminance = (r,g,b) => .3*r + .59*g + .11*b;
-  const l = luminance(...backdrop);
+  const l = luminance(...(mode==='luminosity'?source:backdrop));
   if (mode==='hue' || mode==='saturation') {
     const hueColor=mode==='hue'?source:backdrop;
     const saturationColor=mode==='hue'?backdrop:source;
@@ -448,7 +448,7 @@ function compositeRgb16NonSeparable(mode, source, backdrop, out) {
     // Scaling relative to the minimum is equivalent to SetSat, including ties.
     for(let c=0;c<3;c++) out[c]=span>0?(hueColor[c]-low)*saturation/span:0;
   } else {
-    for(let c=0;c<3;c++) out[c]=source[c];
+    for(let c=0;c<3;c++) out[c]=(mode==='luminosity'?backdrop:source)[c];
   }
   const delta=l-luminance(...out);
   for(let c=0;c<3;c++) out[c]+=delta;
@@ -513,9 +513,9 @@ export function compositePixelBufferLayers(width, height, layers = [], {
     if (!isPixelBuffer(source)||source.model!=='rgb'||![3,4].includes(source.channels)) {
       throw new TypeError('High-depth composite layer требует RGB PixelBuffer');
     }
-    const nativeNonSeparable=['color','hue','saturation'].includes(entry?.blendMode) && depth===16 && source.bitsPerChannel===16 &&
+    const nativeNonSeparable=['color','hue','saturation','luminosity'].includes(entry?.blendMode) && depth===16 && source.bitsPerChannel===16 &&
       String(source.colorSpace).toLowerCase()==='srgb' && String(output.colorSpace).toLowerCase()==='srgb';
-    if ((!nativeNonSeparable && ['color','hue','saturation'].includes(entry?.blendMode)) || entry?.blendMode === 'luminosity') throw new TypeError((entry.blendMode === 'luminosity' ? 'Luminosity' : entry.blendMode === 'saturation' ? 'Saturation' : entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
+    if (!nativeNonSeparable && ['color','hue','saturation','luminosity'].includes(entry?.blendMode)) throw new TypeError((entry.blendMode === 'luminosity' ? 'Luminosity' : entry.blendMode === 'saturation' ? 'Saturation' : entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
     const mode=nativeNonSeparable?entry.blendMode:HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
     const sourceRgb=nativeNonSeparable?[0,0,0]:null, backdropRgb=nativeNonSeparable?[0,0,0]:null, blendRgb=nativeNonSeparable?[0,0,0]:null;
     const opacity=clampPreview01(entry?.opacity ?? 1);

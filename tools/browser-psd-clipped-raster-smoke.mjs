@@ -2,16 +2,19 @@ import { verifyNativeClippedUiRoundTrips } from './browser-psd-clipped-native-ui
 import { verifyRgb16ColorUi } from './browser-rgb16-color-smoke.mjs';
 import { verifyRgb16HueUi } from './browser-rgb16-hue-smoke.mjs';
 import { verifyRgb16SaturationUi } from './browser-rgb16-saturation-smoke.mjs';
+import { verifyRgb16LuminosityUi } from './browser-rgb16-luminosity-smoke.mjs';
 
 // Live Chromium: clipped raster Multiply/Screen -> clipped Invert in a nested
 // masked Pass Through folder over translucent blue. Every pixel has an oracle.
 export async function verifyClippedRasterStack(client, harness) {
+  if(process.env.ZPE_RGB16_LUMINOSITY_ONLY==='1'){await verifyRgb16LuminosityUi(client,harness);return;}
   if(process.env.ZPE_RGB16_SATURATION_ONLY==='1'){await verifyRgb16SaturationUi(client,harness);return;}
   if(process.env.ZPE_RGB16_HUE_ONLY==='1'){await verifyRgb16HueUi(client,harness);return;}
   await verifyRgb16ColorUi(client,harness);
   if(process.env.ZPE_RGB16_COLOR_ONLY==='1')return;
   await verifyRgb16HueUi(client,harness);
   await verifyRgb16SaturationUi(client,harness);
+  await verifyRgb16LuminosityUi(client,harness);
   for (const alpha of [128,255,0]) {
     await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over','luminosity');
     await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'luminosity');

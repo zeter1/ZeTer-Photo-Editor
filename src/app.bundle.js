@@ -6128,10 +6128,10 @@ function compositeBlendChannel(mode, backdrop, source) {
 
 // Native non-separable blend in normalized encoded sRGB16.
 // Hue: SetLum(SetSat(Cs, Sat(Cb)), Lum(Cb)); Saturation swaps Cs/Cb in SetSat.
-// Color: SetLum(Cs, Lum(Cb)).
+// Color: SetLum(Cs, Lum(Cb)); Luminosity: SetLum(Cb, Lum(Cs)).
 function compositeRgb16NonSeparable(mode, source, backdrop, out) {
   const luminance = (r,g,b) => .3*r + .59*g + .11*b;
-  const l = luminance(...backdrop);
+  const l = luminance(...(mode==='luminosity'?source:backdrop));
   if (mode==='hue' || mode==='saturation') {
     const hueColor=mode==='hue'?source:backdrop;
     const saturationColor=mode==='hue'?backdrop:source;
@@ -6140,7 +6140,7 @@ function compositeRgb16NonSeparable(mode, source, backdrop, out) {
     // Scaling relative to the minimum is equivalent to SetSat, including ties.
     for(let c=0;c<3;c++) out[c]=span>0?(hueColor[c]-low)*saturation/span:0;
   } else {
-    for(let c=0;c<3;c++) out[c]=source[c];
+    for(let c=0;c<3;c++) out[c]=(mode==='luminosity'?backdrop:source)[c];
   }
   const delta=l-luminance(...out);
   for(let c=0;c<3;c++) out[c]+=delta;
@@ -6204,9 +6204,9 @@ function compositePixelBufferLayers(width, height, layers = [], {
     if (!isPixelBuffer(source)||source.model!=='rgb'||![3,4].includes(source.channels)) {
       throw new TypeError('High-depth composite layer требует RGB PixelBuffer');
     }
-    const nativeNonSeparable=['color','hue','saturation'].includes(entry?.blendMode) && depth===16 && source.bitsPerChannel===16 &&
+    const nativeNonSeparable=['color','hue','saturation','luminosity'].includes(entry?.blendMode) && depth===16 && source.bitsPerChannel===16 &&
       String(source.colorSpace).toLowerCase()==='srgb' && String(output.colorSpace).toLowerCase()==='srgb';
-    if ((!nativeNonSeparable && ['color','hue','saturation'].includes(entry?.blendMode)) || entry?.blendMode === 'luminosity') throw new TypeError((entry.blendMode === 'luminosity' ? 'Luminosity' : entry.blendMode === 'saturation' ? 'Saturation' : entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
+    if (!nativeNonSeparable && ['color','hue','saturation','luminosity'].includes(entry?.blendMode)) throw new TypeError((entry.blendMode === 'luminosity' ? 'Luminosity' : entry.blendMode === 'saturation' ? 'Saturation' : entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
     const mode=nativeNonSeparable?entry.blendMode:HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
     const sourceRgb=nativeNonSeparable?[0,0,0]:null, backdropRgb=nativeNonSeparable?[0,0,0]:null, blendRgb=nativeNonSeparable?[0,0,0]:null;
     const opacity=clampPreview01(entry?.opacity ?? 1);
@@ -27395,7 +27395,7 @@ function createPsdExportController({
   }
   
   async function preparePsdExport(exportDoc){
-    // Color, Hue and Saturation have a bounded native RGB16 path for flat, untransformed sRGB rasters.
+    // Color, Hue, Saturation and Luminosity have a bounded native RGB16 path for flat, untransformed sRGB rasters.
     // Do not let a non-separable native document silently use Canvas8 fallback.
     const hasNativePrecision = exportDoc.layers.some(layer => layer.highDepthSource &&
       (layer.highDepthSource.bitsPerChannel > 8 || layer.highDepthSource.model === 'cmyk'));
@@ -27403,7 +27403,7 @@ function createPsdExportController({
       ['color','hue','saturation','luminosity'].includes(entry.blendMode));
     const nativeNonSeparableBuffers=new Map();
     const nativeNonSeparable = hasNativePrecision && nonSeparable.length>0 &&
-      nonSeparable.every(entry=>['color','hue','saturation'].includes(entry.blendMode)) && !(exportDoc.groups||[]).length &&
+      nonSeparable.every(entry=>['color','hue','saturation','luminosity'].includes(entry.blendMode)) && !(exportDoc.groups||[]).length &&
       exportDoc.colorProfile?.kind!=='icc' && exportDoc.layers.every(layer=>{
         if(layer.groupId || layer.clipping || (layer.vectorMask?.enabled!==false && layer.vectorMask?.subpaths?.length)) return false;
         const source=nativeHighDepthPsdSource(layer);
@@ -27412,7 +27412,7 @@ function createPsdExportController({
         return true;
       });
     if (hasNativePrecision && nonSeparable.length && !nativeNonSeparable) {
-      const unsupportedMode=nonSeparable.find(entry=>!['color','hue','saturation'].includes(entry.blendMode))?.blendMode || nonSeparable[0].blendMode;
+      const unsupportedMode=nonSeparable.find(entry=>!['color','hue','saturation','luminosity'].includes(entry.blendMode))?.blendMode || nonSeparable[0].blendMode;
       throw new Error((unsupportedMode === 'luminosity' ? 'Luminosity' : unsupportedMode === 'saturation' ? 'Saturation' : unsupportedMode === 'hue' ? 'Hue' : 'Color') + ' blend: native high-depth/CMYK PSD/PSB export is not supported; save the editable ZPE project');
     }
     const warnings=[];
@@ -27550,7 +27550,7 @@ function createPsdExportController({
     }else{
       compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
       if(!compositePixelBuffer){
-        if(nativeNonSeparable)throw new Error((nonSeparable.some(entry=>entry.blendMode==='saturation')?'Saturation':nonSeparable.some(entry=>entry.blendMode==='hue')?'Hue':'Color')+' blend: native high-depth PSD/PSB composite unavailable; save the editable ZPE project');
+        if(nativeNonSeparable)throw new Error((nonSeparable.some(entry=>entry.blendMode==='luminosity')?'Luminosity':nonSeparable.some(entry=>entry.blendMode==='saturation')?'Saturation':nonSeparable.some(entry=>entry.blendMode==='hue')?'Hue':'Color')+' blend: native high-depth PSD/PSB composite unavailable; save the editable ZPE project');
         const compositeCanvas=createCanvas();
         await renderDocument(compositeCanvas,exportDoc,{checker:false});
         composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');

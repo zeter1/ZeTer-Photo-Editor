@@ -53,7 +53,7 @@ test('RGB16 flat Saturation preserves native layer words, composite and editable
 });
 
 test('unsupported RGB16 Saturation topology fails closed before Canvas or mutation',async()=>{
-  for(const mutate of [v=>{v.groups=[{id:'g',blendMode:'pass-through'}];v.layers[1].groupId='g';},v=>{v.groups=[{id:'g',blendMode:'saturation'}];v.layers[1].groupId='g';v.layers[1].blendMode='source-over';},v=>{v.layers[1].clipping=true;},v=>{v.layers[0].rotation=5;},v=>{v.layers[0].vectorMask={enabled:true,subpaths:[{}]};},v=>{delete v.layers[0].highDepthSource;},v=>{v.layers[0].blendMode='luminosity';},v=>{v.colorProfile={kind:'icc'};}]){
+  for(const mutate of [v=>{v.groups=[{id:'g',blendMode:'pass-through'}];v.layers[1].groupId='g';},v=>{v.groups=[{id:'g',blendMode:'saturation'}];v.layers[1].groupId='g';v.layers[1].blendMode='source-over';},v=>{v.layers[1].clipping=true;},v=>{v.layers[0].rotation=5;},v=>{v.layers[0].vectorMask={enabled:true,subpaths:[{}]};},v=>{delete v.layers[0].highDepthSource;},v=>{v.layers[0].scaleX=2;},v=>{v.colorProfile={kind:'icc'};}]){
     const value=doc();mutate(value);const before=JSON.stringify(value);
     await assert.rejects(controller().prepareDocument(value),/native high-depth/);
     assert.equal(JSON.stringify(value),before);

@@ -1,4 +1,8 @@
-## 1.47.38 — текущая версия: Native RGB16 Saturation (2026-11-24)
+## 1.47.39 — текущая версия: Native RGB16 Luminosity (2026-11-24)
+
+- Native encoded sRGB16 Luminosity for flat raster layers, exact native PSD/PSB composite and editable layer words, alpha, opacity and raster mask. All four non-separable modes coexist; unsupported topology and precision remain fail-closed.
+
+## 1.47.38 — предыдущая версия: Native RGB16 Saturation (2026-11-24)
 
 - Нативный режим Saturation для плоских растровых sRGB16: перенос насыщенности источника с сохранением оттенка и яркости фона, маски, прозрачность, непрозрачность и ограничение цветового охвата. Редактируемый экспорт PSD/PSB без понижения глубины. Color/Hue совместимы; неподдерживаемые сочетания отклоняются.
 
