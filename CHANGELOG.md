@@ -1,4 +1,10 @@
-## 1.47.31 — текущая версия: Color Dodge / Color Burn clipping bases (2026-11-24)
+## 1.47.32 — Color blend mode (2026-11-24)
+
+- RGB8 non-separable Color for raster, folders and adjustments; native PSD/PSB `colr` mapping, editable masks and clipping.
+- Explicit rejection of unsupported native RGB16/32/CMYK Color export; preserve source ZPE.
+- Local 35/35 focused Node PASS, Chromium 6 cases / 12 editable native roundtrips PASS; Linux CI pending.
+
+## 1.47.31 — предыдущая версия: Color Dodge / Color Burn clipping bases (2026-11-24)
 
 - Correct raster and isolated folder Color Dodge / Color Burn clipping source stacks before backdrop blending.
 - Windows Chromium file://: 12 synthetic RGBA cases, 24 native editable PSD/PSB UI roundtrips, masks, History and .zpe PASS; Linux CI pending.

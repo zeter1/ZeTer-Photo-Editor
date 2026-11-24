@@ -3,6 +3,11 @@ import { verifyNativeClippedUiRoundTrips } from './browser-psd-clipped-native-ui
 // Live Chromium: clipped raster Multiply/Screen -> clipped Invert in a nested
 // masked Pass Through folder over translucent blue. Every pixel has an oracle.
 export async function verifyClippedRasterStack(client, harness) {
+  for (const alpha of [128,255,0]) {
+    await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over','color');
+    await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'color');
+  }
+  if (process.env.ZPE_COLOR_CLIPPING_BASE_ONLY === '1') return;
   for (const blend of ['color-dodge','color-burn']) {
     for (const alpha of [128,255,0]) {
       await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over',blend);
@@ -53,7 +58,7 @@ export async function verifyClippedRasterStack(client, harness) {
 }
 
 async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropAlpha = 128, chained = false, effect = {kind:'invert'}, baseMode = 'source-over', groupMode = null) {
-  const backdrop = (groupMode || baseMode) === 'soft-light' ? [180,48,220] : ['overlay','hard-light','darken','lighten','difference','exclusion','color-dodge','color-burn'].includes(groupMode || baseMode) ? [64,180,220] : [0,0,255];
+  const backdrop = (groupMode || baseMode) === 'soft-light' ? [180,48,220] : ['overlay','hard-light','darken','lighten','difference','exclusion','color-dodge','color-burn','color'].includes(groupMode || baseMode) ? [64,180,220] : [0,0,255];
   const effectName='Clipped '+effect.kind[0].toUpperCase()+effect.kind.slice(1);
   const opened = await evaluate(client, `(() => {
     try {
@@ -220,6 +225,13 @@ function chainedOracle(mode, backdropAlpha, effect, baseMode, groupMode, backdro
     const a=128/255*coverage*(groupMode ? .5*(x===1?128/255:1) : 1), b=backdropAlpha/255;
     const alpha=a+b*(1-a);
     if (!alpha) return [0,0,0,0];
+    // Independent byte-scale oracle: retain luma and scale chroma around it
+    // to fit the RGB cube, rather than applying per-channel clamping.
+    const luminance = rgb => rgb[0]*.3+rgb[1]*.59+rgb[2]*.11;
+    const l=luminance(backdrop), sl=luminance(corrected);
+    const chroma=corrected.map(v=>v-sl);
+    const factor=Math.min(1,...chroma.map(v=>v<0?-l/v:v>0?(255-l)/v:Infinity));
+    const color=chroma.map(v=>l+v*factor);
     return [...corrected.map((v,c)=>{
       const back=backdrop[c];
       const blended=baseMode==='multiply'?v*back/255:baseMode==='screen'?255-(255-v)*(255-back)/255:
@@ -229,7 +241,8 @@ function chainedOracle(mode, backdropAlpha, effect, baseMode, groupMode, backdro
         baseMode==='difference'?Math.abs(back-v):baseMode==='exclusion'?back+v-2*back*v/255:
         baseMode==='soft-light'?softLightOracle(back/255,v/255)*255:
         baseMode==='color-dodge'?(back===0?0:v===255?255:Math.min(255,back*255/(255-v))):
-        baseMode==='color-burn'?(back===255?255:v===0?0:255-Math.min(255,(255-back)*255/v)):v;
+        baseMode==='color-burn'?(back===255?255:v===0?0:255-Math.min(255,(255-back)*255/v)):
+        baseMode==='color'?color[c]:v;
       return Math.round((a*((1-b)*v+b*blended)+back*b*(1-a))/alpha);
     }),Math.round(alpha*255)];
   });

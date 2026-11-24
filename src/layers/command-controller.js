@@ -43,6 +43,7 @@ export function createLayerGroupCommandController({
     ['color-dodge', 'Осветление основы'],
     ['color-burn', 'Затемнение основы'],
     ['difference', 'Разница'],
+    ['color', 'Цветность (Color)'],
     ['exclusion', 'Исключение'],
   ];
 

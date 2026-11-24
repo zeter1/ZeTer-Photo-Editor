@@ -601,7 +601,7 @@ function compositeMaskedPassThrough(targetCtx, renderedCtx, maskCtx, width, heig
 // premultiplied stages. Use a tiled straight-RGBA blend for these clipping
 // stacks, avoiding backend-specific intermediate rounding.
 function drawClippingStack(targetCtx, stack, mode) {
-  if (mode === 'difference' || mode === 'exclusion') {
+  if (mode === 'difference' || mode === 'exclusion' || mode === 'color') {
     const sourceCtx = stack.getContext('2d');
     const tile = 256;
     for (let y = 0; y < stack.height; y += tile) {
@@ -643,7 +643,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         // destination. Compose the contiguous clipped stack on its own matte,
         // then blend the resulting stack exactly once with the parent.
         if(!clipped && entry.layer.type!=='adjustment' &&
-          ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn'].includes(baseMode) &&
+          ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color'].includes(baseMode) &&
           next?.type==='layer' && next.layer?.clipping===true){
           const stack=await renderClippingBase(doc,{...entry.layer,blendMode:'source-over'},rasterOverrides);
           while(entries[entryIndex+1]?.type==='layer' && entries[entryIndex+1].layer?.clipping===true){
@@ -730,7 +730,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         // A non-normal isolated folder used as a clipping base follows the
         // same source-stack rule as a raster base. Apply folder mask/opacity
         // once, edit the resulting matte, and blend once against the parent.
-        if (needsClippingBase && ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn'].includes(blendMode)) {
+        if (needsClippingBase && ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color'].includes(blendMode)) {
           const { groupCanvas: stack, groupCtx: stackCtx } = newGroupCanvas();
           stackCtx.globalAlpha = opacity;
           stackCtx.drawImage(groupCanvas, 0, 0);

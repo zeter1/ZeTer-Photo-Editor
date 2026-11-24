@@ -1,5 +1,7 @@
 # ZeTer Photo Editor — матрица возможностей
 
+2026-11-24: [#414 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/414) exact PR head `0cf81ccb27ddebb27f6e84c862c247a0f43976fb`, 13/13 checks, [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45348821001), [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45348821037); squash main `a3a5a5804b8b3d00e80c72e93699e7c4ef61fb04` tree exactly equals the tested head. Exact-main CI pending readback. **v1.47.32 Color candidate IN PROGRESS**: native RGB8 non-separable Color across state/UI, raster and folder clipping stacks, adjustment and clipped raster compositors; editable PSD/PSB `colr`; reject native RGB16/32 or CMYK export before downconversion, preserve document. Initial 3 RED; 35/35 focused Node PASS, build `5f03e37ad8614c70`, genuine Chromium file:// 6 synthetic raster/folder alpha 0/128/255 cases, 12 editable PSD/PSB UI export/reimport paths, mask History and ZPE PASS. All 15 runtime/test/build blobs match local candidate. Full suite and direct Color mode selection UI regression NOT RUN; exact-head Linux CI and independent workflow required. Not Adobe-authored.
+
 **Дата базовой ревизии:** 2026-11-04. **Исходная ветка:** main `8dee7d366601fa2531e89545a4fd76ce0a8d1d23`.
 **Назначение:** единый, проверяемый указатель функциональной готовности. **Это НЕ заявление о завершённости Photoshop-совместимости.**
 
