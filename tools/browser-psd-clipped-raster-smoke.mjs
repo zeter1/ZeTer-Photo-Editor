@@ -3,6 +3,9 @@ import { verifyNativeClippedUiRoundTrips } from './browser-psd-clipped-native-ui
 // Live Chromium: clipped raster Multiply/Screen -> clipped Invert in a nested
 // masked Pass Through folder over translucent blue. Every pixel has an oracle.
 export async function verifyClippedRasterStack(client, harness) {
+  for (const baseMode of ['multiply','screen']) {
+    for (const alpha of [0,128,255]) await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},baseMode);
+  }
   for (const mode of ['multiply', 'screen']) {
     await verifyCase(client, harness, mode);
     for (const backdropAlpha of [0, 255]) await verifyCase(client, harness, mode, backdropAlpha, true);
@@ -12,7 +15,7 @@ export async function verifyClippedRasterStack(client, harness) {
   }
 }
 
-async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropAlpha = 128, chained = false, effect = {kind:'invert'}) {
+async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropAlpha = 128, chained = false, effect = {kind:'invert'}, baseMode = 'source-over') {
   const effectName='Clipped '+effect.kind[0].toUpperCase()+effect.kind.slice(1);
   const opened = await evaluate(client, `(() => {
     try {
@@ -45,7 +48,7 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
           {...base,id:'blue-backdrop',name:'Translucent blue',type:'raster',
             groupId:null,dataUrl:bitmap(()=>[0,0,255,${backdropAlpha}])},
           {...base,id:'red-base',name:'Translucent red',type:'raster',
-            groupId:'inner',dataUrl:bitmap(()=>[255,0,0,128])},
+            groupId:'inner',blendMode:${JSON.stringify(baseMode)},dataUrl:bitmap(()=>[255,0,0,128])},
            {...base,id:'overlay-blue',name:'Clipped blue raster',type:'raster',
              groupId:'inner',clipping:true,blendMode:${JSON.stringify(mode)},
              opacity:${mode === 'multiply' ? 1 : 0.5},dataUrl:bitmap(()=>[0,0,255,255]),
@@ -77,7 +80,7 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
       Array.from(ctx.getImageData(x,0,1,1).data));
   })()`);
   const near = (got,want) => want.every((v,i) => Math.abs((got||[])[i]-v) <= 2);
-  const expected = chained ? chainedOracle(mode, backdropAlpha, effect) : mode === 'multiply'
+  const expected = chained ? chainedOracle(mode, backdropAlpha, effect, baseMode) : mode === 'multiply'
     ? [[170,170,255,192],[51,102,255,160],[0,0,255,128],[0,170,255,192]]
     : [[0,170,170,192],[0,102,229,160],[0,0,255,128],[0,170,255,192]];
   try { await waitFor('nested clipped adjustment respects partial background and folder mask',
@@ -139,6 +142,7 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
     const levels = data.layers.find(l=>l.id==='levels-clipped');
     const overlay = data.layers.find(l=>l.id==='overlay-blue');
     const blue = data.layers.find(l=>l.id==='blue-backdrop');
+    const base = data.layers.find(l=>l.id==='red-base');
     const transfer = new DataTransfer();
     transfer.items.add(new File([text],'nested-alpha-reopen.zpe',{type:'application/json'}));
     const input = document.querySelector('#projectInput');
@@ -146,13 +150,13 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
     return {mask:outer?.mask?.enabled,maskBytes:outer?.mask?.dataUrl?.length,
       nested:inner?.parentGroupId,clipped:adjustment?.clipping,
       kind:adjustment?.adjustment?.kind,effectModel:adjustment?.adjustment,levels:levels?.adjustment?.master,levelsClip:levels?.clipping,blue:blue?.dataUrl?.startsWith('data:image/'),
-      rasterClip:overlay?.clipping,blend:overlay?.blendMode,opacity:overlay?.opacity,
+      baseBlend:base?.blendMode,rasterClip:overlay?.clipping,blend:overlay?.blendMode,opacity:overlay?.opacity,
       overlayMask:overlay?.mask?.dataUrl?.length,overlayMaskEnabled:overlay?.mask?.enabled};
   })()`);
   assert(persist.mask===true&&persist.maskBytes>50&&persist.nested==='outer'&&
     persist.clipped===true&&persist.kind===effect.kind&&Object.entries(effect).every(([k,v])=>persist.effectModel?.[k]===v)&&persist.blue&&
     (!chained || (persist.levelsClip===true&&persist.levels?.outputBlack===32&&persist.levels?.outputWhite===224))&&
-    persist.rasterClip===true&&persist.blend===mode&&
+    persist.baseBlend===baseMode&&persist.rasterClip===true&&persist.blend===mode&&
     persist.overlayMask>50&&persist.overlayMaskEnabled===true&&
     Math.abs(persist.opacity-(mode==='multiply'?1:0.5))<.01,
     'ZPE retained editable group/adjustment/raster: '+JSON.stringify(persist));
@@ -160,12 +164,12 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
     const actual=await pixels();return expected.every((p,i)=>near(actual[i],p));
   },12000);
   console.log('Nested PSD clipped raster '+mode+' / adjustment / UI / History / ZPE PASS');
-  await verifyNativeClippedUiRoundTrips(client,{evaluate,waitFor,assert},{mode,expected,near,chained,effect,effectName});
+  await verifyNativeClippedUiRoundTrips(client,{evaluate,waitFor,assert},{mode,expected,near,chained,effect,effectName,baseMode});
 }
 
 // Independent scalar oracle: clipped overlay RGB, Levels output mapping,
 // Invert, then premultiplied source-over with folder coverage.
-function chainedOracle(mode, backdropAlpha, effect) {
+function chainedOracle(mode, backdropAlpha, effect, baseMode) {
   return [255,128,255,0].map((mask,x) => {
     const coverage=[1,128/255,0,1][x];
     const rgb=mode==='multiply' ? [255-mask,0,0] : [255,0,Math.round(mask/2)];
@@ -176,6 +180,10 @@ function chainedOracle(mode, backdropAlpha, effect) {
     const a=128/255*coverage, b=backdropAlpha/255;
     const alpha=a+b*(1-a);
     if (!alpha) return [0,0,0,0];
-    return [...corrected.map((v,c)=>Math.round((v*a+(c===2?255:0)*b*(1-a))/alpha)),Math.round(alpha*255)];
+    return [...corrected.map((v,c)=>{
+      const back=c===2?255:0;
+      const blended=baseMode==='multiply'?v*back/255:baseMode==='screen'?255-(255-v)*(255-back)/255:v;
+      return Math.round((a*((1-b)*v+b*blended)+back*b*(1-a))/alpha);
+    }),Math.round(alpha*255)];
   });
 }

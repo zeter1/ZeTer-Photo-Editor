@@ -4,6 +4,10 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
+## Current bounded increment (2026-11-24)
+
+- **v1.47.25 / Stage 17a IN PROGRESS:** Multiply/Screen clipping-base source stack before backdrop blend; real Chromium 12 new/28 total native PSD/PSB roundtrips PASS. v1.47.24 [#407](https://github.com/zeter1/ZeTer-Photo-Editor/pull/407) MERGED; PR-head core/independent SUCCESS; exact-main b80bb64 workflows PENDING at readback. See [NEXT](NEXT.md), [journal](002-psd-folder-group-mask.md), [matrix](CAPABILITY_MATRIX.md).
+
 ## Текущая реализация (2026-11-24, Stage 17a)
 
 - **1.47.24 bounded local candidate IN PROGRESS:** native `post`/`thrs` export for newly created Posterize/Threshold, real Chromium file:// 16 PSD/PSB UI roundtrips (including 8 cumulative Levels→Invert over transparent/opaque blue), group/raster masks, exact scalar RGBA within ±2, History and .zpe. 26/26 focused Node PASS. PR-head/merged-main CI for candidate not yet confirmed. [NEXT](NEXT.md) · [Journal](002-psd-folder-group-mask.md).

@@ -1,4 +1,10 @@
-## 1.47.24 — текущая версия: editable Posterize/Threshold PSD/PSB (2026-11-24)
+## 1.47.25 — текущая версия: clipping-base Multiply/Screen (2026-11-24)
+
+- Correct compositing: a Multiply/Screen base with contiguous clipped layers is rendered on its own alpha matte, corrected cumulatively, then blended once with the actual backdrop. The source-over path is unchanged.
+- Chromium file://: six new nested masked-group cases (Multiply/Screen base x transparent/translucent/opaque background), clipped Screen raster, Levels and Invert; independent premultiplied RGBA oracle, Group Properties, History Undo/Redo and .zpe reopen. 12 new native editable PSD/PSB roundtrips, 28 total; no flatten. Synthetic reference, not Adobe-authored parity.
+- Parent Stage 17a remains IN PROGRESS; remote acceptance and licensed Adobe-authored oracle remain separate.
+
+## 1.47.24 — предыдущая версия: editable Posterize/Threshold PSD/PSB (2026-11-24)
 
 - Native export: ZPE-created Posterize and Threshold now emit editable Photoshop `8BIM/post` and `8BIM/thrs` blocks (big-endian unsigned 16-bit parameter, two reserved zero bytes) instead of forcing the composite-preview fallback. Imported adjustment rewrite and style/filter guards are unchanged.
 - Cumulative clipped Levels → Invert verified on transparent and opaque blue backdrops, both Multiply and Screen, partial raster and group masks. Added four native Posterize/Threshold PSD/PSB roundtrips in the masked Multiply → Levels chain; independent scalar RGBA oracle, native layer order and parameters, Group Properties, History Undo/Redo and .zpe reopen.

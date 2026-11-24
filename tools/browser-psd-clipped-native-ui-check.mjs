@@ -1,6 +1,6 @@
 // Production Chromium file://: actual Export modal -> binary download -> File input.
 // A separately masked clipped raster and nested folder must survive PSD and PSB.
-export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, expected, near, chained = false, effect = {kind:'invert'}, effectName = 'Clipped Invert'}) {
+export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, expected, near, chained = false, effect = {kind:'invert'}, effectName = 'Clipped Invert', baseMode = 'source-over'}) {
   const {evaluate, waitFor, assert}=harness;
   const run=fn=>evaluate(client,'('+fn.toString()+')()');
   function captureDownloads() {
@@ -108,7 +108,7 @@ export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, ex
     const effect=doc.layers.find(l=>l.name===window.__clipNativeEffectName);
     return {groups:doc.groups.length,layers:doc.layers.length,outer:!!outer,
       outerMask:!!outer?.mask?.dataUrl,inner:!!inner,
-      parent:inner?.parentGroupId===outer?.id,base:base?.type,
+      parent:inner?.parentGroupId===outer?.id,base:base?.type,baseBlend:base?.blendMode,
       clipped:overlay?.clipping,blend:overlay?.blendMode,opacity:overlay?.opacity,
       overlayMask:!!overlay?.mask?.dataUrl,maskEnabled:overlay?.mask?.enabled,
       effect:effect?.adjustment?.kind,effectModel:effect?.adjustment,effectClipped:effect?.clipping,
@@ -167,7 +167,7 @@ export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, ex
     await waitFor(format+' .zpe JSON Blob',async()=>Boolean(await run(savedStructure)),12000);
     const saved=await run(savedStructure);
     assert(saved?.groups===2&&saved.layers===(chained?5:4)&&saved.outer&&saved.outerMask&&
-      saved.inner&&saved.parent&&saved.base==='raster'&&saved.clipped===true&&
+      saved.inner&&saved.parent&&saved.base==='raster'&&saved.baseBlend===baseMode&&saved.clipped===true&&
       saved.blend===mode&&saved.overlayMask&&saved.maskEnabled!==false&&
       saved.effect===effect.kind&&Object.entries(effect).every(([k,v])=>saved.effectModel?.[k]===v)&&saved.effectClipped===true&&
       (!chained||(saved.levels==='levels'&&saved.levelsClip===true&&saved.ordered&&
@@ -179,6 +179,6 @@ export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, ex
       const pixels=await run(currentPixels);
       return pixels&&expected.every((want,i)=>near(pixels[i],want));
     },16000);
-    console.log(format+' '+mode+' '+effect.kind+' native UI export/reimport, mask, History, ZPE PASS');
+    console.log(format+' '+baseMode+' base / '+mode+' '+effect.kind+' native UI export/reimport, mask, History, ZPE PASS');
   }
 }
