@@ -4,6 +4,11 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
+## Current bounded v1.47.28 (2026-11-24)
+
+- **P1 Stage 17a IN PROGRESS:** Darken/Lighten raster and isolated folder clipping bases, Chromium RED to GREEN, 24 new / 88 total native editable PSD/PSB roundtrips; focused Node 25/25, mask/opacity, History/.zpe; build 369f205141483866. Local candidate, #410 merged; remote acceptance pending.
+- **#409 MERGED** main d7ce091, exact-main core and independent SUCCESS. [#410 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/410) main 0cfe486, exact PR-head core and independent SUCCESS, exact-main pending. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
+
 ## Current bounded v1.47.27 (2026-11-24)
 
 - **P1 Stage 17a IN PROGRESS:** Overlay/Hard Light raster and isolated folder clipping bases, RED to GREEN real Chromium, 24 new/64 total native editable PSD/PSB roundtrips, mixed backdrop, masks/opacity, History/.zpe, focused Node 25/25; Windows full check 1796 PASS / 10 SKIP / 5 known Linux-only cgroup FAIL. Remote acceptance pending. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md).
