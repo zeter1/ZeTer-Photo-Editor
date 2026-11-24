@@ -4,6 +4,10 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
+## Fresh acceptance evidence
+
+Fresh Windows verification (2026-11-24): six runtime/test/build blob hashes (`src/core/render.js`, browser smoke, bundle, package, version, index) match reconciled PR head `4704ef7a4f31fbef783743e65b5bfc25962d075c`; `node --test tests/clipping-base-composite.test.mjs` 4/4 PASS (prior Difference/Exclusion precision regression); `ZPE_DODGE_BURN_CLIPPING_BASE_ONLY=1 npm run test:browser:psd-clipped-raster` exited 0 (10.75 s), all 12 live raster/folder × mode × backdrop-alpha cases and 24 native editable PSD/PSB UI roundtrips PASS, masks, History, .zpe. Dodge folder alpha 128 x0 [59,202,207,160]; Burn [45,185,193,160]. Full Windows check NOT RUN. PR #414 now targets main, ready, mergeable, zero behind; no workflows/checks observed on the reconciliation head. Publish this evidence on the retargeted branch to request synchronize-event CI; do not merge without both exact-head gates.
+
 ## Current acceptance handoff
 
 2026-11-24: #413 bounded Soft Light accepted: exact main `fd88c6cef05d0c94f4d25ec5559a8f7ad8a996e6` [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45347436833), [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45347436841). Main tree exactly equals #413 head `5e7fca96b931e38cbba3bcb8a56e09a29518b893` tree. #414 candidate `f65691963e97fbd55eea430e37e59d211d694879` reviewed against that identical tree; reconcile main as a second parent (no force), retain runtime/test/build blobs, retarget to main and request exact-head core/independent gates. Prior Windows test results are historical, not a fresh run. Parent CAP IN PROGRESS; Adobe-authored oracle BLOCKED.
