@@ -6,7 +6,7 @@
 
 ## Current bounded v1.47.29 (2026-11-24)
 
-- **P1 Stage 17a IN PROGRESS:** Difference/Exclusion raster and isolated folder clipping bases, Chromium RED to GREEN, 24 new / 112 total native editable PSD/PSB roundtrips; focused Node 25/25, History/.zpe; build 07791979a015ed83. Remote gates pending; #411 predecessor PR. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
+- **P1 Stage 17a IN PROGRESS:** Difference/Exclusion raster and isolated folder clipping bases, Chromium RED to GREEN, 24 new / 112 total native editable PSD/PSB roundtrips; focused Node 25/25, History/.zpe; build 07791979a015ed83. Remote gates pending; #411 MERGED, exact PR-head core and independent SUCCESS; exact-main CI pending. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
 
 ## Current bounded v1.47.28 (2026-11-24)
 
