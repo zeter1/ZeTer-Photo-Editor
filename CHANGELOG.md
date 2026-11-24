@@ -1,4 +1,8 @@
-## 1.47.45 — текущая версия: Native RGB16 isolated Darken/Lighten/Difference/Exclusion/Soft Light (2026-11-24)
+## 1.47.46 — текущая версия: Native RGB16 isolated Color Dodge/Burn (2026-11-24)
+
+- Исправлены граничные значения Color Dodge/Burn; нативный RGB16 экспорт изолированных групп PSD/PSB без Canvas8 fallback.
+
+## 1.47.45 — предыдущая версия: Native RGB16 isolated Darken/Lighten/Difference/Exclusion/Soft Light (2026-11-24)
 
 - Native PSD/PSB export of a bounded RGB16 isolated raster folder with five additional separable blend modes; exact composite and editable native samples, alpha and prepared mask, explicit rejection of unsupported combinations.
 

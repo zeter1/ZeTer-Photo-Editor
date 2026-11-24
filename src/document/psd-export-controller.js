@@ -199,7 +199,7 @@ export function createPsdExportController({
     }
   }
   
-  const exactSeparableFolderModes = ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light'];
+  const exactSeparableFolderModes = ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn'];
   // Bounded topology: one root isolated folder with contiguous raster children.
   // Keep pass-through, nested and unsupported group modes outside this native contract.
   function nativeRgb16IsolatedGroup(exportDoc){
