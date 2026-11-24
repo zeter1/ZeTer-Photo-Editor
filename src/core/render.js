@@ -6,7 +6,7 @@ import {
   deserializePixelBufferSource, forEachSerializedPixelBufferTile,
   pixelBufferToToneMappedRgba8Preview, PIXEL_BUFFER_TILED_SOURCE_KIND,
 } from './pixel-buffer.js';
-import { applyAdjustmentPixels, compositeAdjustmentPixels, compositeClippedAdjustmentPixels, compositeClippedRasterPixels } from './adjustments.js';
+import { applyAdjustmentPixels, compositeAdjustmentPixels, compositeClippedAdjustmentPixels, compositeClippedRasterPixels, compositeClippingStackPixels } from './adjustments.js';
 import { applyMaskControlsAlpha } from './pixels.js';
 import { normalizeAffineTransform } from './geometry.js';
 
@@ -597,6 +597,34 @@ function compositeMaskedPassThrough(targetCtx, renderedCtx, maskCtx, width, heig
   }
 }
 
+// Chromium backends can quantize Difference/Exclusion at intermediate
+// premultiplied stages. Use a tiled straight-RGBA blend for these clipping
+// stacks, avoiding backend-specific intermediate rounding.
+function drawClippingStack(targetCtx, stack, mode) {
+  if (mode === 'difference' || mode === 'exclusion') {
+    const sourceCtx = stack.getContext('2d');
+    const tile = 256;
+    for (let y = 0; y < stack.height; y += tile) {
+      for (let x = 0; x < stack.width; x += tile) {
+        const w = Math.min(tile, stack.width - x);
+        const h = Math.min(tile, stack.height - y);
+        const target = targetCtx.getImageData(x, y, w, h);
+        const source = sourceCtx.getImageData(x, y, w, h);
+        compositeClippingStackPixels(target, source, mode);
+        targetCtx.putImageData(target, x, y);
+      }
+    }
+    return;
+  }
+  targetCtx.save();
+  try {
+    targetCtx.globalAlpha = 1;
+    targetCtx.globalCompositeOperation = mode;
+    targetCtx.filter = 'none';
+    targetCtx.drawImage(stack, 0, 0);
+  } finally { targetCtx.restore(); }
+}
+
 async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
   const plan = buildGroupRenderPlan(doc);
   const activeGroups = new Set();
@@ -622,15 +650,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
             const child=entries[++entryIndex].layer;
             if(stack)await renderLayerEntry(stack,stack.getContext('2d'),doc,child,rasterOverrides,stack);
           }
-          if(stack){
-            targetCtx.save();
-            try {
-              targetCtx.globalAlpha=1;
-              targetCtx.globalCompositeOperation=baseMode;
-              targetCtx.filter='none';
-              targetCtx.drawImage(stack,0,0);
-            } finally { targetCtx.restore(); }
-          }
+          if(stack) drawClippingStack(targetCtx, stack, baseMode);
           clippingBase=null;
           continue;
         }
@@ -719,13 +739,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
             const child = entries[++entryIndex].layer;
             await renderLayerEntry(stack, stackCtx, doc, child, rasterOverrides, stack);
           }
-          targetCtx.save();
-          try {
-            targetCtx.globalAlpha = 1;
-            targetCtx.globalCompositeOperation = blendMode;
-            targetCtx.filter = 'none';
-            targetCtx.drawImage(stack, 0, 0);
-          } finally { targetCtx.restore(); }
+          drawClippingStack(targetCtx, stack, blendMode);
           continue;
         }
 

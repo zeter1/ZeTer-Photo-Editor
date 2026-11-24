@@ -1,5 +1,6 @@
 ## 1.47.29 — текущая версия: Difference/Exclusion clipping bases (2026-11-24)
 
+- Correct backend-dependent intermediate rounding for Difference/Exclusion clipping stacks with a tiled RGBA blend; keep the original browser oracle tolerance and source alpha.
 - Correct Difference/Exclusion raster and isolated folder clipping stacks before parent blending; preserve source matte.
 - Chromium file://: 12 new raster/folder x blend x alpha cases, 24 new native editable PSD/PSB UI roundtrips, independent scalar RGBA +/-2, mask/opacity, History and .zpe. Synthetic, not Adobe-authored.
 

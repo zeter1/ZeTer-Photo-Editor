@@ -4,7 +4,11 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
-## Current bounded v1.47.29 (2026-11-24)
+## Current acceptance correction v1.47.29 (2026-11-24)
+
+- **P1 Stage 17a IN PROGRESS:** Linux core on old head `7b4cd3fad894c530632c27d8a606997ae8de1cd8` [FAIL](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45341076229) (Exclusion folder, alpha 128, x3 blue expected 188, actual 185); [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45341076234). Corrected raster and isolated folder final blend uses tiled straight RGBA source-over with Difference/Exclusion, no tolerance change. Windows actual x3 [61,171,188,160], targeted and full dedicated Chromium PASS (24/112 native editable PSD/PSB roundtrips, History, .zpe), 4 new Node RED→GREEN, 23/23 focused PASS, build df2b499a58c712be. New head Linux core + independent acceptance pending; full Windows check not yet recorded. Synthetic, not Adobe-authored. #413 remains stacked draft. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
+
+## Previous bounded v1.47.29 (2026-11-24)
 
 - **P1 Stage 17a IN PROGRESS:** Difference/Exclusion raster and isolated folder clipping bases, Chromium RED to GREEN, 24 new / 112 total native editable PSD/PSB roundtrips; focused Node 25/25, History/.zpe; build 07791979a015ed83. Remote gates pending; #411 MERGED, exact PR-head core and independent SUCCESS; exact-main CI pending. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md) | [Matrix](CAPABILITY_MATRIX.md).
 

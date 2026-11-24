@@ -199,6 +199,31 @@ function blendAdjustmentChannel(base,effect,mode) {
   return effect;
 }
 
+// Blend a finished clipping stack once over the actual backdrop. Keep the
+// source immutable; round only the final straight RGBA values.
+export function compositeClippingStackPixels(targetImageData, sourceImageData, mode) {
+  const target = targetImageData.data;
+  const source = sourceImageData.data;
+  for (let i = 0; i < target.length; i += 4) {
+    const a = source[i + 3] / 255;
+    if (a === 0) continue;
+    const b = target[i + 3] / 255;
+    if (b === 0) {
+      target.set(source.subarray(i, i + 4), i);
+      continue;
+    }
+    const alpha = a + b * (1 - a);
+    for (let c = 0; c < 3; c++) {
+      const cb = target[i + c] / 255;
+      const cs = source[i + c] / 255;
+      const blended = blendAdjustmentChannel(cb, cs, mode);
+      target[i + c] = Math.round(255 * (a * (1 - b) * cs + a * b * blended + (1 - a) * b * cb) / alpha);
+    }
+    target[i + 3] = Math.round(alpha * 255);
+  }
+  return targetImageData;
+}
+
 export function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity=1,blendMode='source-over'}={}) {
   if(!baseImageData?.data||!effectImageData?.data||baseImageData.data.length!==effectImageData.data.length)return baseImageData;
   const layerOpacity=clampAdjustment(opacity,0,1,1);
