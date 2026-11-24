@@ -1,22 +1,23 @@
 # NEXT - ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY / bounded native RGB16 isolated Normal group v1.47.40.
+> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-BLEND-MODES / native RGB16 group modes v1.47.41.
 > **PRIORITY:** P1.
-> **STATUS:** IN PROGRESS - Luminosity #422 MERGED; isolated group candidate implemented.
-> **BASE MAIN SHA:** 14fc1e7daa7ec842d867929d2a2cc8f684effe3a.
-> **ACTIVE CANDIDATE:** feat/psd-rgb16-isolated-group-20261124 (v1.47.40).
-> **LAST VERIFIED MAIN:** Saturation #421 `89af68eb8c356bc67cf4899bd4a01d428f066b6f` [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45367670316), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45367670673).
-> **LAST VERIFIED:** Luminosity [#422](https://github.com/zeter1/ZeTer-Photo-Editor/pull/422) MERGED at `14fc1e7daa7ec842d867929d2a2cc8f684effe3a`, identical tree `8e4f6ac68718ddcf171bac8eb68656695760eb93` to head `9df50c90fb0dde760025c2f4d45519a206e8a040`, 13/13 [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45368594941), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45368594993). Exact-main [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45371666623) and [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45371667034) in progress at readback. New v1.47.40 candidate: single root Normal isolated group with contiguous RGB16 sRGB raster children, one or more non-separable modes (Color/Hue/Saturation/Luminosity), group opacity and prepared raster mask applied once. Native Uint16 composite and editable PSD/PSB channels; bounded surfaces; unsupported nested/pass-through/non-Normal group, interleaving, clipping, adjustment, vector mask, transforms, mixed precision, ICC/Float32/CMYK remain fail-closed in the non-separable path. RED 1/3 -> GREEN 3/3; 25/25 initial focused, 5/5 group tests + version PASS; build `e97b063ab0706481`; real Chromium file:// PSD/PSB exact merged and editable native words, dropdown, Undo/Redo, .zpe save/reopen PASS. Windows full npm run check FAIL (1856 tests / 1841 PASS / 10 SKIP / 5 existing Linux-only proc/cgroup FAIL; version regression fixed and rerun). Synthetic, not Adobe-authored.
-> **REMAINING ACCEPTANCE:** Verify #422 exact-main core/independent; candidate exact-head core/independent, full dedicated Chromium and all review/protection/check gates; merge only after PASS then separate exact-main CI. Do not claim full Windows PASS or Adobe provenance.
-> **NEXT IMPLEMENTATION ACTION:** After acceptance, extend bounded native RGB16 composition to isolated group blend modes (Color/Hue/Saturation/Luminosity on the group against the parent backdrop) with independent exact native words, opacity/mask, UI/History/.zpe and PSD/PSB roundtrip; do not expand nested/pass-through/clipping/adjustment until independently verified.
-> **BLOCKERS:** Adobe-authored clipping/knockout oracle; genuine camera DNG/LibRaw; native non-Normal group/nesting/clipping/adjustments/Float32/CMYK not accepted.
+> **STATUS:** IN PROGRESS — bounded implementation, local focused and targeted browser PASS; acceptance pending.
+> **BASE MAIN SHA:** 42b0afe49a69a444b5e008da7d9a48801620a20d.
+> **ACTIVE CANDIDATE:** feat/psd-rgb16-group-modes-20261124 (v1.47.41).
+> **LAST VERIFIED MAIN:** [PR #423](https://github.com/zeter1/ZeTer-Photo-Editor/pull/423) MERGED: exact main 42b0afe49a69a444b5e008da7d9a48801620a20d, tree 7ff5a220bcac5228f36da507ee69116dcb9a0b67; [main core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45373971603), [main independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45373971594), [head core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45372462430), [head independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45372462342).
+> **IMPLEMENTATION:** Single root isolated group, contiguous encoded sRGB16 native raster children, group Color/Hue/Saturation/Luminosity against parent backdrop; opacity, prepared mask and straight alpha applied once. Nested/pass-through/unsupported group blends, clipping, adjustment, vector mask, transforms, mixed precision, ICC/Float32/CMYK remain fail-closed for non-separable export. Synthetic native oracle, not Adobe-authored.
+> **EVIDENCE:** RED 5/6 -> GREEN 6/6, expanded native RGB16 and version suite 31/31 PASS; build f67082805a7f916e. Targeted Chromium file://: all four group Properties modes, pixels, Undo/Redo, .zpe save/reopen, PSD/PSB exact merged words and editable group/layers PASS. PSB after PSD reimport explicitly uses 128/255 folder opacity. Full dedicated Chromium regression PASS (exit 0); Windows full check: 1859 total, 1844 PASS / 10 SKIP / 5 FAIL (existing Linux cgroup/proc checks); GitHub candidate CI NOT RUN.
+> **NEXT ACTION:** Publish exact candidate tree via GitHub PR, verify exact head core/independent + review/protection gates; only then merge and verify exact-main workflows.
+> **NEXT IMPLEMENTATION ACTION:** Check independent recovery candidate/PR #124 against actual main (serialization failure, preserve previous snapshot) before any new P1 work; do not duplicate local concurrent recovery work. After acceptance, extend native RGB16 isolated groups to supported separable group blend modes with independent exact-word alpha/mask/topology tests.
+> **BLOCKERS:** Adobe-authored clipping/knockout oracle; genuine camera DNG/LibRaw; native nesting/pass-through/clipping/adjustments/Float32/CMYK not accepted.
 
 ## Short queue
 
-1. P1 Luminosity v1.47.39 exact-main acceptance.
-2. P1 Isolated Normal RGB16 group v1.47.40 exact-head and exact-main acceptance.
-3. P1 Native RGB16 non-separable blend on isolated group against parent backdrop.
+1. P1 Accept isolated RGB16 non-separable group modes v1.47.41 on exact head/main.
+2. P0/P1 Recovery serialization failure (#124 / separate local candidate; reconcile actual PR, baseline and preserve prior snapshot).
+3. P1 Bounded native RGB16 isolated separable group modes.
 4. P1 CAP-RAW-CAMERA-ORACLE (external reference blocked).
-5. P2 Recovery serialization #115/#124 (old PR conflicts; reproduce on current main before porting), Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
+5. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 
 [Stage 17a journal](002-psd-folder-group-mask.md) | [Capability matrix](CAPABILITY_MATRIX.md) | [task map](README.md).
