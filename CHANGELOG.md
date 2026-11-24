@@ -1,4 +1,8 @@
-## 1.47.42 — текущая версия: Recovery snapshot preparation (2026-11-24)
+## 1.47.43 — текущая версия: Native RGB16 isolated Multiply/Screen (2026-11-24)
+
+- Native PSD/PSB export of a single isolated sRGB16 raster folder using Multiply or Screen; exact straight-alpha composite, editable layer and folder channels, fail-closed unsupported native topology.
+
+## 1.47.42 — предыдущая версия: Recovery snapshot preparation (2026-11-24)
 
 - Preserve the previous recovery record when snapshot preparation throws; contain immediate and debounced failures, notify once, and prevent late writes from re-enabling retry. Transient IndexedDB retry remains bounded. Issue #115 / PR #124.
 
