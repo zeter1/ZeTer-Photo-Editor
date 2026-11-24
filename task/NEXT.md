@@ -1,19 +1,19 @@
 # NEXT - ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** / v1.47.29 Difference/Exclusion clipping-base precision.
+> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** / v1.47.30 Soft Light raster and isolated folder clipping bases.
 > **PRIORITY:** P1.
-> **STATUS:** IN PROGRESS - precision fix implemented, local focused Node and full dedicated Chromium PASS; exact new PR-head CI required.
-> **BASE MAIN SHA:** f19acac380fda7e753bba441b799b0ba6926bed3 (#411 MERGED; [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45340962101), [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45340962140)).
-> **ACTIVE PR:** [#412](https://github.com/zeter1/ZeTer-Photo-Editor/pull/412); dependent [#413 DRAFT](https://github.com/zeter1/ZeTer-Photo-Editor/pull/413).
-> **LAST VERIFIED:** Linux core on old head `7b4cd3fad894c530632c27d8a606997ae8de1cd8` [FAIL](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45341076229) (Exclusion folder, alpha 128, x3 blue expected 188, actual 185); [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45341076234). Corrected raster and isolated folder final blend uses tiled straight RGBA source-over with Difference/Exclusion, no tolerance change. Windows actual x3 [61,171,188,160], targeted and full dedicated Chromium PASS (24/112 native editable PSD/PSB roundtrips, History, .zpe), 4 new Node RED→GREEN, 23/23 focused PASS, build df2b499a58c712be. New head Linux core + independent acceptance pending; full Windows check FAIL: 1815 tests / 1800 PASS / 10 SKIP / 5 known Linux-only cgroup failures (same two suites as before). Local code commit ea20f81; staged diff hygiene PASS after removing trailing test blank line. Synthetic, not Adobe-authored. #413 remains stacked draft.
-> **REMAINING ACCEPTANCE:** verify new #412 exact-head core and independent CI, review/merge gates, exact merged-main CI. Do not merge on old checks. Reconcile #413 with corrected base and repeat gates.
-> **NEXT IMPLEMENTATION ACTION:** finish #412 Linux exact-head acceptance (original failing Exclusion pixel must pass ±2 unchanged); then integrate existing Soft Light #413 without duplicating implementation.
+> **STATUS:** IN PROGRESS - #412 merged-main core/independent PASS; #413 ready, exact new head CI required.
+> **BASE MAIN SHA:** 72e49f9f8b244aded1ffa5ff435cc8664691ef8c (#412 merged; core and independent PASS).
+> **ACTIVE PR:** [#413 OPEN / ready](https://github.com/zeter1/ZeTer-Photo-Editor/pull/413), retargeted to main.
+> **LAST VERIFIED:** #412 MERGED into main `72e49f9f8b244aded1ffa5ff435cc8664691ef8c` (squash tree identical to exact tested head `edb1dfd30332b1666efc72494fee9afb64312478`); all 13 PR-head checks SUCCESS ([core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45343740305), [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45343740464)). Exact merged-main core and independent SUCCESS (runs 45344816968 / 45344816918). #413 v1.47.30 candidate `9c8bb6e9210189b5a6605bba9e9e2c031b81aeae`: eight runtime/test/build blob SHAs match local commit `6168589515576432f6ee4abb5e5905f8e542453d`; fresh Windows Node precision 4/4 PASS and targeted real Chromium file:// Soft Light 6 raster/folder x alpha cases, 12 editable native PSD/PSB export/reimport paths, masks, History and .zpe PASS (exit 0). Prior full dedicated 124 roundtrips PASS; prior full Windows check FAIL (1800 PASS / 10 SKIP / 5 Linux-only cgroup FAIL). No runtime changes in this handoff. Synthetic, not Adobe-authored.
+> **REMAINING ACCEPTANCE:** exact new PR-head core/independent CI, required checks/review and mergeability; guarded merge and exact merged-main CI. Adobe-authored oracle and knockout remain open.
+> **NEXT IMPLEMENTATION ACTION:** accept #413 exact-head gates; independently develop Color Dodge / Color Burn with raster/folder alpha 0/128/255, editable PSD/PSB, History and .zpe.
 > **BLOCKERS:** licensed Photoshop-authored group clipping golden/knockout reference; genuine camera DNG + LibRaw independent reference.
 
 ## Short queue
 
-1. P1 #412 precision fix acceptance, guarded merge and exact-main CI.
-2. P1 #413 Soft Light - reconcile dependent branch with corrected main, repeat Node/Chromium/native gates and CI.
+1. P1 #412 exact-main acceptance; #413 Soft Light retarget, exact-head and merged-main gates.
+2. P1 Color Dodge / Color Burn clipping bases (raster and isolated folders).
 3. P1 CAP-RAW-CAMERA-ORACLE - BLOCKED (licensed original DNG + LibRaw reference).
 4. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 
