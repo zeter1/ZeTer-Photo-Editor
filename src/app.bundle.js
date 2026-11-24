@@ -10350,6 +10350,31 @@ function blendAdjustmentChannel(base,effect,mode) {
   if(mode==='exclusion')return base+effect-2*base*effect;
   return effect;
 }
+
+// Blend a finished clipping stack once over the actual backdrop. Keep the
+// source immutable; round only the final straight RGBA values.
+function compositeClippingStackPixels(targetImageData, sourceImageData, mode) {
+  const target = targetImageData.data;
+  const source = sourceImageData.data;
+  for (let i = 0; i < target.length; i += 4) {
+    const a = source[i + 3] / 255;
+    if (a === 0) continue;
+    const b = target[i + 3] / 255;
+    if (b === 0) {
+      target.set(source.subarray(i, i + 4), i);
+      continue;
+    }
+    const alpha = a + b * (1 - a);
+    for (let c = 0; c < 3; c++) {
+      const cb = target[i + c] / 255;
+      const cs = source[i + c] / 255;
+      const blended = blendAdjustmentChannel(cb, cs, mode);
+      target[i + c] = Math.round(255 * (a * (1 - b) * cs + a * b * blended + (1 - a) * b * cb) / alpha);
+    }
+    target[i + 3] = Math.round(alpha * 255);
+  }
+  return targetImageData;
+}
 function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity=1,blendMode='source-over'}={}) {
   if(!baseImageData?.data||!effectImageData?.data||baseImageData.data.length!==effectImageData.data.length)return baseImageData;
   const layerOpacity=clampAdjustment(opacity,0,1,1);
@@ -17984,6 +18009,34 @@ function compositeMaskedPassThrough(targetCtx, renderedCtx, maskCtx, width, heig
   }
 }
 
+// Chromium backends can quantize Difference/Exclusion at intermediate
+// premultiplied stages. Use a tiled straight-RGBA blend for these clipping
+// stacks, avoiding backend-specific intermediate rounding.
+function drawClippingStack(targetCtx, stack, mode) {
+  if (mode === 'difference' || mode === 'exclusion') {
+    const sourceCtx = stack.getContext('2d');
+    const tile = 256;
+    for (let y = 0; y < stack.height; y += tile) {
+      for (let x = 0; x < stack.width; x += tile) {
+        const w = Math.min(tile, stack.width - x);
+        const h = Math.min(tile, stack.height - y);
+        const target = targetCtx.getImageData(x, y, w, h);
+        const source = sourceCtx.getImageData(x, y, w, h);
+        compositeClippingStackPixels(target, source, mode);
+        targetCtx.putImageData(target, x, y);
+      }
+    }
+    return;
+  }
+  targetCtx.save();
+  try {
+    targetCtx.globalAlpha = 1;
+    targetCtx.globalCompositeOperation = mode;
+    targetCtx.filter = 'none';
+    targetCtx.drawImage(stack, 0, 0);
+  } finally { targetCtx.restore(); }
+}
+
 async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
   const plan = buildGroupRenderPlan(doc);
   const activeGroups = new Set();
@@ -18002,22 +18055,14 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         // destination. Compose the contiguous clipped stack on its own matte,
         // then blend the resulting stack exactly once with the parent.
         if(!clipped && entry.layer.type!=='adjustment' &&
-          ['multiply','screen','overlay','hard-light','darken','lighten'].includes(baseMode) &&
+          ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion'].includes(baseMode) &&
           next?.type==='layer' && next.layer?.clipping===true){
           const stack=await renderClippingBase(doc,{...entry.layer,blendMode:'source-over'},rasterOverrides);
           while(entries[entryIndex+1]?.type==='layer' && entries[entryIndex+1].layer?.clipping===true){
             const child=entries[++entryIndex].layer;
             if(stack)await renderLayerEntry(stack,stack.getContext('2d'),doc,child,rasterOverrides,stack);
           }
-          if(stack){
-            targetCtx.save();
-            try {
-              targetCtx.globalAlpha=1;
-              targetCtx.globalCompositeOperation=baseMode;
-              targetCtx.filter='none';
-              targetCtx.drawImage(stack,0,0);
-            } finally { targetCtx.restore(); }
-          }
+          if(stack) drawClippingStack(targetCtx, stack, baseMode);
           clippingBase=null;
           continue;
         }
@@ -18097,7 +18142,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         // A non-normal isolated folder used as a clipping base follows the
         // same source-stack rule as a raster base. Apply folder mask/opacity
         // once, edit the resulting matte, and blend once against the parent.
-        if (needsClippingBase && ['multiply','screen','overlay','hard-light','darken','lighten'].includes(blendMode)) {
+        if (needsClippingBase && ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion'].includes(blendMode)) {
           const { groupCanvas: stack, groupCtx: stackCtx } = newGroupCanvas();
           stackCtx.globalAlpha = opacity;
           stackCtx.drawImage(groupCanvas, 0, 0);
@@ -18106,13 +18151,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
             const child = entries[++entryIndex].layer;
             await renderLayerEntry(stack, stackCtx, doc, child, rasterOverrides, stack);
           }
-          targetCtx.save();
-          try {
-            targetCtx.globalAlpha = 1;
-            targetCtx.globalCompositeOperation = blendMode;
-            targetCtx.filter = 'none';
-            targetCtx.drawImage(stack, 0, 0);
-          } finally { targetCtx.restore(); }
+          drawClippingStack(targetCtx, stack, blendMode);
           continue;
         }
 

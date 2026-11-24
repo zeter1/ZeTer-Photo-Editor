@@ -1,19 +1,19 @@
 # NEXT - ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** / v1.47.28 Darken/Lighten raster and isolated folder clipping bases.
+> **CURRENT TASK/ID:** Stage 17a / **CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY** / v1.47.29 Difference/Exclusion clipping-base precision.
 > **PRIORITY:** P1.
-> **STATUS:** IN PROGRESS - local production code, targeted and full dedicated Chromium PASS; remote candidate gates pending.
-> **BASE MAIN SHA:** 0cfe486b5df92f570e29e1acf3d765bd96efb81c (#410 MERGED; exact-main [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45339921642), [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45339921631) pending at readback).
-> **ACTIVE PR:** [#410 MERGED](https://github.com/zeter1/ZeTer-Photo-Editor/pull/410) head e778218a307deb3c586a46cf935760c3b891fc1e, [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45339057940) and [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45339057939); v1.47.28 branch feat/psd-darken-lighten-clipping-base-20261124, publication at authoring.
-> **LAST VERIFIED:** v1.47.28 RED expected [51,189,183,160] vs [13,196,182,160]; GREEN first pixel [51,188,182,160]; targeted and full dedicated Chromium exit 0, 12 new raster/folder x Darken/Lighten x alpha 0/128/255, 24 new / 88 total editable native PSD/PSB UI roundtrips, independent scalar premultiplied RGBA +/-2, mask/opacity, History Undo/Redo and .zpe; build 369f205141483866; focused Node 25/25 PASS; Windows full check 1811 / 1796 PASS / 10 SKIP / 5 known Linux-only cgroup FAIL.
-> **REMAINING ACCEPTANCE:** #410 exact merged-main CI; v1.47.28 exact PR-head core + independent, guarded merge and exact merged-main CI. Adobe-authored group clipping parity and advanced knockout unaccepted.
-> **NEXT IMPLEMENTATION ACTION:** after v1.47.28 remote gates, Stage 17a Difference/Exclusion raster and isolated folder clipping bases with cumulative clipped raster/Levels/Invert; independent abs/difference and exclusion scalar premultiplied RGBA, alpha 0/128/255, masks/opacity, native PSD/PSB, History and .zpe.
+> **STATUS:** IN PROGRESS - precision fix implemented, local focused Node and full dedicated Chromium PASS; exact new PR-head CI required.
+> **BASE MAIN SHA:** f19acac380fda7e753bba441b799b0ba6926bed3 (#411 MERGED; [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45340962101), [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45340962140)).
+> **ACTIVE PR:** [#412](https://github.com/zeter1/ZeTer-Photo-Editor/pull/412); dependent [#413 DRAFT](https://github.com/zeter1/ZeTer-Photo-Editor/pull/413).
+> **LAST VERIFIED:** Linux core on old head `7b4cd3fad894c530632c27d8a606997ae8de1cd8` [FAIL](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45341076229) (Exclusion folder, alpha 128, x3 blue expected 188, actual 185); [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45341076234). Corrected raster and isolated folder final blend uses tiled straight RGBA source-over with Difference/Exclusion, no tolerance change. Windows actual x3 [61,171,188,160], targeted and full dedicated Chromium PASS (24/112 native editable PSD/PSB roundtrips, History, .zpe), 4 new Node RED→GREEN, 23/23 focused PASS, build df2b499a58c712be. New head Linux core + independent acceptance pending; full Windows check FAIL: 1815 tests / 1800 PASS / 10 SKIP / 5 known Linux-only cgroup failures (same two suites as before). Local code commit ea20f81; staged diff hygiene PASS after removing trailing test blank line. Synthetic, not Adobe-authored. #413 remains stacked draft.
+> **REMAINING ACCEPTANCE:** verify new #412 exact-head core and independent CI, review/merge gates, exact merged-main CI. Do not merge on old checks. Reconcile #413 with corrected base and repeat gates.
+> **NEXT IMPLEMENTATION ACTION:** finish #412 Linux exact-head acceptance (original failing Exclusion pixel must pass ±2 unchanged); then integrate existing Soft Light #413 without duplicating implementation.
 > **BLOCKERS:** licensed Photoshop-authored group clipping golden/knockout reference; genuine camera DNG + LibRaw independent reference.
 
 ## Short queue
 
-1. P1 verify #410 exact-main acceptance, then v1.47.28 Darken/Lighten PR-head and merged-main gates.
-2. P1 Stage 17a - Difference/Exclusion clipping bases (raster and isolated folder).
+1. P1 #412 precision fix acceptance, guarded merge and exact-main CI.
+2. P1 #413 Soft Light - reconcile dependent branch with corrected main, repeat Node/Chromium/native gates and CI.
 3. P1 CAP-RAW-CAMERA-ORACLE - BLOCKED (licensed original DNG + LibRaw reference).
 4. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 
