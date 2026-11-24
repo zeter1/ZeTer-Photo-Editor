@@ -4,6 +4,10 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
+## Current remote status (2026-11-24)
+
+2026-11-24: #412 exact merged-main `72e49f9f8b244aded1ffa5ff435cc8664691ef8c` [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45344816968), [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45344816918). #413 retargeted to main, ready for review; previous head `c6106f3fc6d865e701827b7528b362e0dd7b8096` compared to exact main: 0 behind, 13 files, no conflict at readback. No exact-head workflows/check-runs found at readback; this documentation-only sync requires fresh core and independent gates. No merge until PASS. Next functional slice: Color Dodge / Color Burn on raster and isolated-folder clipping bases.
+
 ## Current remote handoff (2026-11-24)
 
 - #412 MERGED into main `72e49f9f8b244aded1ffa5ff435cc8664691ef8c` (squash tree identical to exact tested head `edb1dfd30332b1666efc72494fee9afb64312478`); all 13 PR-head checks SUCCESS ([core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45343740305), [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45343740464)). Exact merged-main [core PENDING](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45344816968), [independent PENDING](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45344816918) at readback. #413 v1.47.30 candidate `9c8bb6e9210189b5a6605bba9e9e2c031b81aeae`: eight runtime/test/build blob SHAs match local commit `6168589515576432f6ee4abb5e5905f8e542453d`; fresh Windows Node precision 4/4 PASS and targeted real Chromium file:// Soft Light 6 raster/folder x alpha cases, 12 editable native PSD/PSB export/reimport paths, masks, History and .zpe PASS (exit 0). Prior full dedicated 124 roundtrips PASS; prior full Windows check FAIL (1800 PASS / 10 SKIP / 5 Linux-only cgroup FAIL). No runtime changes in this handoff. Synthetic, not Adobe-authored. [NEXT](NEXT.md).
