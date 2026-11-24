@@ -33,3 +33,19 @@ test('native RGB16/32 and CMYK Luminosity cannot silently downgrade to Normal',a
     }
   }
 });
+
+test('Luminosity clips extreme source luminance without independently clipping RGB channels',()=>{
+  // Backdrop luma is 81. Scaling its chroma toward the target luma gives
+  // [0, 6, 12] at luma 5 and [247, 251, 255] at luma 250, after byte rounding.
+  for(const [level,expected] of [[5,[0,6,12,255]],[250,[247,251,255,255]],[0,[0,0,0,255]],[255,[255,255,255,255]]]) {
+    for(const fn of [compositeClippingStackPixels,compositeAdjustmentPixels,compositeClippedAdjustmentPixels,compositeClippedRasterPixels]) {
+      const target=rgba(0,100,200,255), base=rgba(0,100,200,255), source=rgba(level,level,level,255);
+      if(fn===compositeClippingStackPixels) fn(target,source,'luminosity');
+      else if(fn===compositeAdjustmentPixels) fn(target,source,{blendMode:'luminosity'});
+      else fn(target,base,source,{blendMode:'luminosity'});
+      assert.deepEqual([...target.data],expected,fn.name+' at luma '+level);
+      assert.deepEqual([...source.data],[level,level,level,255]);
+      assert.deepEqual([...base.data],fn===compositeClippedRasterPixels?expected:[0,100,200,255]);
+    }
+  }
+});
