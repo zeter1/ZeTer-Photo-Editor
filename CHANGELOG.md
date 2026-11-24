@@ -1,4 +1,9 @@
-## 1.47.26 — текущая версия: isolated Multiply/Screen folder clipping base (2026-11-24)
+## 1.47.27 — текущая версия: Overlay/Hard Light clipping bases (2026-11-24)
+
+- Correct raster and isolated folder Overlay/Hard Light clipping bases before the parent blend, retaining the source alpha matte.
+- Chromium file://: 12 new cases with mixed-color backdrop and alpha 0/128/255; 24 new / 64 total editable native PSD/PSB roundtrips, independent scalar RGBA +/-2, History and .zpe. Synthetic reference, not Adobe-authored.
+
+## 1.47.26 — предыдущая версия: isolated Multiply/Screen folder clipping base (2026-11-24)
 
 - Composite the isolated folder's masked, opacity-adjusted source with consecutive clipped raster/Levels/Invert before blending once against the parent backdrop.
 - Add six real Chromium file:// synthetic RGBA cases (Multiply/Screen folder, backdrop alpha 0/128/255, partial folder mask and opacity), native editable PSD/PSB export/import, Group Properties, Undo/Redo and .zpe.

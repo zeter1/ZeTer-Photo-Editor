@@ -4,6 +4,11 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
+## Current bounded v1.47.27 (2026-11-24)
+
+- **P1 Stage 17a IN PROGRESS:** Overlay/Hard Light raster and isolated folder clipping bases, RED to GREEN real Chromium, 24 new/64 total native editable PSD/PSB roundtrips, mixed backdrop, masks/opacity, History/.zpe, focused Node 25/25; Windows full check 1796 PASS / 10 SKIP / 5 known Linux-only cgroup FAIL. Remote acceptance pending. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md).
+- **#409 MERGED** main d7ce091, exact PR-head core and independent SUCCESS; exact-main CI in progress at readback. #408 exact-main both SUCCESS.
+
 ## Current bounded v1.47.26 (2026-11-24)
 
 - **P1 Stage 17a IN PROGRESS:** isolated Multiply/Screen folder clipping base, actual Chromium RED to GREEN, 12 new/40 total native PSD/PSB editable roundtrips, Group Properties/History/.zpe; focused Node 20/20. Local code; remote acceptance pending. [NEXT](NEXT.md) | [Journal](002-psd-folder-group-mask.md).

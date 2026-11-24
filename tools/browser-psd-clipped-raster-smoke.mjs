@@ -3,6 +3,13 @@ import { verifyNativeClippedUiRoundTrips } from './browser-psd-clipped-native-ui
 // Live Chromium: clipped raster Multiply/Screen -> clipped Invert in a nested
 // masked Pass Through folder over translucent blue. Every pixel has an oracle.
 export async function verifyClippedRasterStack(client, harness) {
+  for (const blend of ['overlay','hard-light']) {
+    for (const alpha of [128,255,0]) {
+      await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over',blend);
+      await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},blend);
+    }
+  }
+  if (process.env.ZPE_CONTRAST_CLIPPING_BASE_ONLY === '1') return;
   for (const groupMode of ['multiply','screen']) {
     for (const alpha of [128,255,0]) await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over',groupMode);
   }
@@ -20,6 +27,7 @@ export async function verifyClippedRasterStack(client, harness) {
 }
 
 async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropAlpha = 128, chained = false, effect = {kind:'invert'}, baseMode = 'source-over', groupMode = null) {
+  const backdrop = ['overlay','hard-light'].includes(groupMode || baseMode) ? [64,180,220] : [0,0,255];
   const effectName='Clipped '+effect.kind[0].toUpperCase()+effect.kind.slice(1);
   const opened = await evaluate(client, `(() => {
     try {
@@ -52,7 +60,7 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
         ],
         layers:[
           {...base,id:'blue-backdrop',name:'Translucent blue',type:'raster',
-            groupId:null,dataUrl:bitmap(()=>[0,0,255,${backdropAlpha}])},
+            groupId:null,dataUrl:bitmap(()=>[${backdrop.join(',')},${backdropAlpha}])},
           {...base,id:'red-base',name:'Translucent red',type:'raster',
             groupId:'inner',blendMode:${JSON.stringify(baseMode)},dataUrl:bitmap(()=>[255,0,0,128])},
            {...base,id:'overlay-blue',name:'Clipped blue raster',type:'raster',
@@ -86,7 +94,7 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
       Array.from(ctx.getImageData(x,0,1,1).data));
   })()`);
   const near = (got,want) => want.every((v,i) => Math.abs((got||[])[i]-v) <= 2);
-  const expected = chained ? chainedOracle(mode, backdropAlpha, effect, groupMode || baseMode, groupMode) : mode === 'multiply'
+  const expected = chained ? chainedOracle(mode, backdropAlpha, effect, groupMode || baseMode, groupMode, backdrop) : mode === 'multiply'
     ? [[170,170,255,192],[51,102,255,160],[0,0,255,128],[0,170,255,192]]
     : [[0,170,170,192],[0,102,229,160],[0,0,255,128],[0,170,255,192]];
   try { await waitFor('nested clipped adjustment respects partial background and folder mask',
@@ -175,7 +183,7 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
 
 // Independent scalar oracle: clipped overlay RGB, Levels output mapping,
 // Invert, then premultiplied source-over with folder coverage.
-function chainedOracle(mode, backdropAlpha, effect, baseMode, groupMode) {
+function chainedOracle(mode, backdropAlpha, effect, baseMode, groupMode, backdrop) {
   return [255,128,255,0].map((mask,x) => {
     const coverage=[1,128/255,0,1][x];
     const rgb=mode==='multiply' ? [255-mask,0,0] : [255,0,Math.round(mask/2)];
@@ -187,8 +195,10 @@ function chainedOracle(mode, backdropAlpha, effect, baseMode, groupMode) {
     const alpha=a+b*(1-a);
     if (!alpha) return [0,0,0,0];
     return [...corrected.map((v,c)=>{
-      const back=c===2?255:0;
-      const blended=baseMode==='multiply'?v*back/255:baseMode==='screen'?255-(255-v)*(255-back)/255:v;
+      const back=backdrop[c];
+      const blended=baseMode==='multiply'?v*back/255:baseMode==='screen'?255-(255-v)*(255-back)/255:
+        baseMode==='overlay'?(back<=127.5?2*back*v/255:255-2*(255-back)*(255-v)/255):
+        baseMode==='hard-light'?(v<=127.5?2*back*v/255:255-2*(255-back)*(255-v)/255):v;
       return Math.round((a*((1-b)*v+b*blended)+back*b*(1-a))/alpha);
     }),Math.round(alpha*255)];
   });
