@@ -1,4 +1,9 @@
-## 1.47.27 — текущая версия: Overlay/Hard Light clipping bases (2026-11-24)
+## 1.47.28 — текущая версия: Darken/Lighten clipping bases (2026-11-24)
+
+- Correct Darken/Lighten raster and isolated folder source-stack composition before blending with the parent backdrop.
+- 12 new Chromium file:// cases, 24 new / 88 total editable native PSD/PSB UI roundtrips, independent min/max RGBA, masks/opacity, History and .zpe. Synthetic, not Adobe-authored.
+
+## 1.47.27 — предыдущая версия: Overlay/Hard Light clipping bases (2026-11-24)
 
 - Correct raster and isolated folder Overlay/Hard Light clipping bases before the parent blend, retaining the source alpha matte.
 - Chromium file://: 12 new cases with mixed-color backdrop and alpha 0/128/255; 24 new / 64 total editable native PSD/PSB roundtrips, independent scalar RGBA +/-2, History and .zpe. Synthetic reference, not Adobe-authored.
