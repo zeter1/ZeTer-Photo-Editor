@@ -23,4 +23,3 @@ for (const [mode, expected] of [
     assert.deepEqual([...target.data], [64,179,219,128, 32,223,223,64, 245,20,225,255]);
   });
 }
-
