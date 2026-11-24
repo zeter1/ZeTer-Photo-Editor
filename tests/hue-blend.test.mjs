@@ -20,8 +20,8 @@ test('Hue handles neutral source/backdrop, transparent edges and partial alpha',
   compositeClippingStackPixels(target,source,'hue');
   assert.deepEqual([...target.data],[109,109,109,255,128,128,128,255,100,150,50,128,127,96,126,255,10,20,30,255]);
 });
-test('native RGB16/32 and CMYK Hue cannot silently downgrade to Normal',async()=>{
-  for(const [model,channels,depth,fn] of [['rgb',4,16,compositePixelBufferLayers],['rgb',4,32,compositePixelBufferLayers],['cmyk',5,8,compositeCmykPixelBufferLayers]]) {
+test('native RGB32 and CMYK Hue cannot silently downgrade to Normal',async()=>{
+  for(const [model,channels,depth,fn] of [['rgb',4,32,compositePixelBufferLayers],['cmyk',5,8,compositeCmykPixelBufferLayers]]) {
     const buffer=createPixelBuffer({width:1,height:1,model,channels,bitsPerChannel:depth});
     assert.throws(()=>fn(1,1,[{buffer,blendMode:'hue'}],{bitsPerChannel:depth}),/Hue/);
     const controller=createPsdExportController({rendering:{createCanvas:()=>{throw Error('unexpected fallback');}}});

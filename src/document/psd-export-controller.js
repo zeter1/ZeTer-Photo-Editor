@@ -284,24 +284,24 @@ export function createPsdExportController({
   }
   
   async function preparePsdExport(exportDoc){
-    // Color has a bounded native RGB16 path for flat, untransformed sRGB rasters.
+    // Color and Hue have a bounded native RGB16 path for flat, untransformed sRGB rasters.
     // Do not let a non-separable native document silently use Canvas8 fallback.
     const hasNativePrecision = exportDoc.layers.some(layer => layer.highDepthSource &&
       (layer.highDepthSource.bitsPerChannel > 8 || layer.highDepthSource.model === 'cmyk'));
     const nonSeparable = [...exportDoc.layers, ...(exportDoc.groups || [])].filter(entry =>
       ['color','hue','saturation','luminosity'].includes(entry.blendMode));
-    const nativeColorBuffers=new Map();
-    const nativeColor = hasNativePrecision && nonSeparable.length>0 &&
-      nonSeparable.every(entry=>entry.blendMode==='color') && !(exportDoc.groups||[]).length &&
+    const nativeNonSeparableBuffers=new Map();
+    const nativeNonSeparable = hasNativePrecision && nonSeparable.length>0 &&
+      nonSeparable.every(entry=>['color','hue'].includes(entry.blendMode)) && !(exportDoc.groups||[]).length &&
       exportDoc.colorProfile?.kind!=='icc' && exportDoc.layers.every(layer=>{
         if(layer.groupId || layer.clipping || (layer.vectorMask?.enabled!==false && layer.vectorMask?.subpaths?.length)) return false;
         const source=nativeHighDepthPsdSource(layer);
         if(!(source?.model==='rgb' && source.bitsPerChannel===16 && String(source.colorSpace).toLowerCase()==='srgb'))return false;
-        nativeColorBuffers.set(layer,source);
+        nativeNonSeparableBuffers.set(layer,source);
         return true;
       });
-    if (hasNativePrecision && nonSeparable.length && !nativeColor) {
-      const unsupportedMode=nonSeparable.find(entry=>entry.blendMode!=='color')?.blendMode || 'color';
+    if (hasNativePrecision && nonSeparable.length && !nativeNonSeparable) {
+      const unsupportedMode=nonSeparable.find(entry=>!['color','hue'].includes(entry.blendMode))?.blendMode || nonSeparable[0].blendMode;
       throw new Error((unsupportedMode === 'luminosity' ? 'Luminosity' : unsupportedMode === 'saturation' ? 'Saturation' : unsupportedMode === 'hue' ? 'Hue' : 'Color') + ' blend: native high-depth/CMYK PSD/PSB export is not supported; save the editable ZPE project');
     }
     const warnings=[];
@@ -313,7 +313,7 @@ export function createPsdExportController({
     const hasAdjustmentLayers=visibleAdjustmentLayers.length>0;
     const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment'||(!needsAdjustmentRasterFallback&&adjustmentPlans.get(layer.id)?.eligible));
     const planned=sourceLayers.map(layer=>{
-      const nativePixelBuffer=nativeColor?nativeColorBuffers.get(layer):nativeHighDepthPsdSource(layer);
+      const nativePixelBuffer=nativeNonSeparable?nativeNonSeparableBuffers.get(layer):nativeHighDepthPsdSource(layer);
       const nativeText=layer.psdText?psdTextNativePlan(layer):null;
       const nativeShape=layer.psdShape?psdShapeNativePlan(layer):null;
       const nativeAdjustment=layer.type==='adjustment'?adjustmentPlans.get(layer.id):null;
@@ -439,7 +439,7 @@ export function createPsdExportController({
     }else{
       compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
       if(!compositePixelBuffer){
-        if(nativeColor)throw new Error('Color blend: native high-depth PSD/PSB composite unavailable; save the editable ZPE project');
+        if(nativeNonSeparable)throw new Error((nonSeparable.some(entry=>entry.blendMode==='hue')?'Hue':'Color')+' blend: native high-depth PSD/PSB composite unavailable; save the editable ZPE project');
         const compositeCanvas=createCanvas();
         await renderDocument(compositeCanvas,exportDoc,{checker:false});
         composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');

@@ -434,12 +434,21 @@ function compositeBlendChannel(mode, backdrop, source) {
   return cs;
 }
 
-// RGB16 Color: SetLum(Cs, Lum(Cb)), with normalized encoded sRGB samples.
-function compositeRgb16Color(source, backdrop, out) {
+// Native non-separable blend in normalized encoded sRGB16.
+// Hue: SetLum(SetSat(Cs, Sat(Cb)), Lum(Cb)); Color: SetLum(Cs, Lum(Cb)).
+function compositeRgb16NonSeparable(mode, source, backdrop, out) {
   const luminance = (r,g,b) => .3*r + .59*g + .11*b;
   const l = luminance(...backdrop);
-  const delta = l - luminance(...source);
-  for (let c=0;c<3;c++) out[c]=source[c]+delta;
+  if (mode==='hue') {
+    const low=Math.min(...source), span=Math.max(...source)-low;
+    const saturation=Math.max(...backdrop)-Math.min(...backdrop);
+    // Scaling relative to the minimum is equivalent to SetSat, including ties.
+    for(let c=0;c<3;c++) out[c]=span>0?(source[c]-low)*saturation/span:0;
+  } else {
+    for(let c=0;c<3;c++) out[c]=source[c];
+  }
+  const delta=l-luminance(...out);
+  for(let c=0;c<3;c++) out[c]+=delta;
   const low=Math.min(...out), high=Math.max(...out);
   if (low<0) for(let c=0;c<3;c++) out[c]=l+(out[c]-l)*l/(l-low);
   if (high>1) {
@@ -501,11 +510,11 @@ export function compositePixelBufferLayers(width, height, layers = [], {
     if (!isPixelBuffer(source)||source.model!=='rgb'||![3,4].includes(source.channels)) {
       throw new TypeError('High-depth composite layer требует RGB PixelBuffer');
     }
-    const nativeColor=entry?.blendMode==='color' && depth===16 && source.bitsPerChannel===16 &&
+    const nativeNonSeparable=['color','hue'].includes(entry?.blendMode) && depth===16 && source.bitsPerChannel===16 &&
       String(source.colorSpace).toLowerCase()==='srgb' && String(output.colorSpace).toLowerCase()==='srgb';
-    if ((!nativeColor && entry?.blendMode === 'color') || entry?.blendMode === 'hue' || entry?.blendMode === 'saturation' || entry?.blendMode === 'luminosity') throw new TypeError((entry.blendMode === 'luminosity' ? 'Luminosity' : entry.blendMode === 'saturation' ? 'Saturation' : entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
-    const mode=nativeColor?'color':HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
-    const sourceRgb=nativeColor?[0,0,0]:null, backdropRgb=nativeColor?[0,0,0]:null, colorRgb=nativeColor?[0,0,0]:null;
+    if ((!nativeNonSeparable && ['color','hue'].includes(entry?.blendMode)) || entry?.blendMode === 'saturation' || entry?.blendMode === 'luminosity') throw new TypeError((entry.blendMode === 'luminosity' ? 'Luminosity' : entry.blendMode === 'saturation' ? 'Saturation' : entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
+    const mode=nativeNonSeparable?entry.blendMode:HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
+    const sourceRgb=nativeNonSeparable?[0,0,0]:null, backdropRgb=nativeNonSeparable?[0,0,0]:null, blendRgb=nativeNonSeparable?[0,0,0]:null;
     const opacity=clampPreview01(entry?.opacity ?? 1);
     if (opacity<=0) continue;
     const x=Math.trunc(Number(entry?.x)||0);
@@ -531,17 +540,17 @@ export function compositePixelBufferLayers(width, height, layers = [], {
         const outputAlpha=sourceAlpha+backdropAlpha*(1-sourceAlpha);
         if (outputAlpha<=0) continue;
 
-        if(nativeColor){
+        if(nativeNonSeparable){
           for(let c=0;c<3;c++){
             sourceRgb[c]=compositeColorSample(source,sourceOffset+c,targetLinear);
             backdropRgb[c]=normalizedSample(output,targetOffset+c);
           }
-          compositeRgb16Color(sourceRgb,backdropRgb,colorRgb);
+          compositeRgb16NonSeparable(mode,sourceRgb,backdropRgb,blendRgb);
         }
         for (let channel=0; channel<3; channel+=1) {
-          const sourceColor=nativeColor?sourceRgb[channel]:compositeColorSample(source,sourceOffset+channel,targetLinear);
-          const backdropColor=nativeColor?backdropRgb[channel]:normalizedSample(output,targetOffset+channel);
-          const blended=nativeColor?colorRgb[channel]:compositeBlendChannel(mode,backdropColor,sourceColor);
+          const sourceColor=nativeNonSeparable?sourceRgb[channel]:compositeColorSample(source,sourceOffset+channel,targetLinear);
+          const backdropColor=nativeNonSeparable?backdropRgb[channel]:normalizedSample(output,targetOffset+channel);
+          const blended=nativeNonSeparable?blendRgb[channel]:compositeBlendChannel(mode,backdropColor,sourceColor);
           const premultiplied=
             sourceAlpha*((1-backdropAlpha)*sourceColor+backdropAlpha*blended)
             + backdropAlpha*(1-sourceAlpha)*backdropColor;

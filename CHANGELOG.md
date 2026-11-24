@@ -1,4 +1,9 @@
-## 1.47.36 — текущая версия: Native RGB16 Color (2026-11-24)
+## 1.47.37 — текущая версия: Native RGB16 Hue (2026-11-24)
+
+- Нативное наложение Hue для плоских растровых sRGB16-документов: перенос оттенка источника с сохранением яркости и насыщенности фона, ограничение цветового охвата, прозрачность, непрозрачность и маска. Сочетание с Color поддерживается. Экспорт сохраняет точные 16-битные каналы и редактируемые слои PSD/PSB; неподдерживаемые варианты отклоняются без Canvas8 fallback.
+- RED 1/4 → GREEN 6/6; 18/18 целевых тестов, 200 браузерных round-trip сценариев PASS. Windows full check FAIL (5 Linux-only cgroup/proc tests); Linux CI pending. Синтетический oracle, не Adobe-authored.
+
+## 1.47.36 — предыдущая версия: Native RGB16 Color (2026-11-24)
 
 - Native encoded sRGB16 Color for flat raster documents: SetLum, gamut clipping, opacity and raster mask, native PSD/PSB merged and editable layer words. Unsupported groups, adjustments, clipping, vector masks, Float32, CMYK and ICC remain fail-closed.
 - Local RED 1/4 → GREEN; focused 59/59 including version; build `1316667161393a2e`; targeted Chromium file:// PSD and PSB exact native merged/layer words, actual Color dropdown, History Undo/Redo, .zpe save/reopen PASS. Full dedicated Chromium 198 native editable export/reimport paths PASS (65.05 s). Synthetic, not Adobe-authored. Full Windows check NOT RUN in this pass; fresh remote gates required.
