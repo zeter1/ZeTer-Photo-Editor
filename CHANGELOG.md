@@ -1,4 +1,9 @@
-## 1.47.30 — текущая версия: Soft Light clipping bases (2026-11-24)
+## 1.47.31 — текущая версия: Color Dodge / Color Burn clipping bases (2026-11-24)
+
+- Correct raster and isolated folder Color Dodge / Color Burn clipping source stacks before backdrop blending.
+- Windows Chromium file://: 12 synthetic RGBA cases, 24 native editable PSD/PSB UI roundtrips, masks, History and .zpe PASS; Linux CI pending.
+
+## 1.47.30 — предыдущая версия: Soft Light clipping bases (2026-11-24)
 
 - Correct Soft Light raster and isolated folder clipping stacks before parent blending; preserve the source matte.
 - Chromium file://: 6 synthetic scalar RGBA cases, 12 native editable PSD/PSB UI roundtrips, mask/opacity, History and .zpe.
