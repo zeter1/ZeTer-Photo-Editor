@@ -1,5 +1,7 @@
 # Stage 17a — native raster mask Photoshop folder groups (v1.47.19)
 
+2026-11-24 — #414 exact-main `a3a5a5804b8b3d00e80c72e93699e7c4ef61fb04` [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45349938069), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45349938057). #415 head `73066bb661f07240f1f3f4f41601f10b6c3b678f` [core verify FAIL](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45350573727/job/138295795514): 1818/1819 Node PASS, only version-consistency CHANGELOG current-version marker missing. Restore required marker, no test/gate weakening. Fresh exact-head core and independent workflow required; no merge while failed/unknown gates. Branch protection REST returned 403; review requirements remain unverified. Next functional slice Hue after Color acceptance.
+
 **Дата:** 2026-11-23. **Base main:** `b9f5503be135f0750ff64337959f86adb98e0e78`, PR #400 MERGED. **Parent CAP:** IN PROGRESS. **Provenance:** synthetic ZPE-produced fixtures, not Photoshop-authored.
 
 ## RED и реализация
