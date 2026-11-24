@@ -6,7 +6,7 @@
 
 ## Current integrated v1.47.30 (2026-11-24)
 
-- **P1 Stage 17a IN PROGRESS:** Integrated v1.47.30 on the exact #412 precision head edb1dfd30332b1666efc72494fee9afb64312478: build 6f5ed8c3df7ce0ce, four precision unit tests PASS, full dedicated Windows Chromium file:// exit 0 (124 native editable PSD/PSB UI roundtrips including Soft Light and Difference/Exclusion; masks, History, .zpe, unchanged +/-2 oracle). Full Windows check running at authoring; Linux PR-head and merged-main gates NOT ACCEPTED. Synthetic, not Adobe-authored. [#413 draft](https://github.com/zeter1/ZeTer-Photo-Editor/pull/413) depends on #412 acceptance. [NEXT](NEXT.md).
+- **P1 Stage 17a IN PROGRESS:** Integrated v1.47.30 on the exact #412 precision head edb1dfd30332b1666efc72494fee9afb64312478: build 6f5ed8c3df7ce0ce, four precision unit tests PASS, full dedicated Windows Chromium file:// exit 0 (124 native editable PSD/PSB UI roundtrips including Soft Light and Difference/Exclusion; masks, History, .zpe, unchanged +/-2 oracle). Full Windows npm run check exit 1: 1815 total / 1800 PASS / 10 SKIP / 5 known Linux-only cgroup FAIL (browser-cgroup-delegation-probe and browser-chromium-cgroup-control). 62 PSD + 62 PSB live UI roundtrips; Exclusion folder alpha 128 x3 [61,171,188,160].  Linux PR-head and merged-main gates NOT ACCEPTED. Synthetic, not Adobe-authored. [#413 draft](https://github.com/zeter1/ZeTer-Photo-Editor/pull/413) depends on #412 acceptance. [NEXT](NEXT.md).
 
 ## Current acceptance correction v1.47.29 (2026-11-24)
 
