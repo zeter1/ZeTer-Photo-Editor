@@ -4,7 +4,12 @@
 **Единая матрица функциональности:** [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md).  
 **Не выдавай наличие кода за готовность функции:** статусы требуют acceptance evidence.
 
-## Текущая реализация (2026-11-23, Stage 17a)
+## Текущая реализация (2026-11-24, Stage 17a)
+
+- **1.47.24 bounded local candidate IN PROGRESS:** native `post`/`thrs` export for newly created Posterize/Threshold, real Chromium file:// 16 PSD/PSB UI roundtrips (including 8 cumulative Levels→Invert over transparent/opaque blue), group/raster masks, exact scalar RGBA within ±2, History and .zpe. 26/26 focused Node PASS. PR-head/merged-main CI for candidate not yet confirmed. [NEXT](NEXT.md) · [Journal](002-psd-folder-group-mask.md).
+- **#406 MERGED** exact main `c7007f4` Paths visibility fix; [core SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45223048593) / [independent SUCCESS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45223048729). #405 native Invert MERGED, its historical exact-main failure remains recorded separately.
+
+## История реализации (2026-11-23, Stage 17a)
 
 - **1.47.23 / CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY — bounded candidate IN PROGRESS:** native freshly-created clipped Invert `nvrt` export fixes flattened composite fallback. Real Chromium file:// Export/download/import PSD/PSB × Multiply/Screen keeps editable nested masked folders, partial clipped-raster masks, clipped Invert, 100/50/0% exact RGBA, Group Properties/History Undo-Redo/.zpe save/reopen. Photoshop-authored pixel golden and advanced knockout still open. [Journal](002-psd-folder-group-mask.md) · [NEXT](NEXT.md).
 

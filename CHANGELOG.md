@@ -1,4 +1,11 @@
-## 1.47.23 — текущая версия: PSD/PSB native clipped Invert UI roundtrip (Stage 17a, 2026-11-23)
+## 1.47.24 — текущая версия: editable Posterize/Threshold PSD/PSB (2026-11-24)
+
+- Native export: ZPE-created Posterize and Threshold now emit editable Photoshop `8BIM/post` and `8BIM/thrs` blocks (big-endian unsigned 16-bit parameter, two reserved zero bytes) instead of forcing the composite-preview fallback. Imported adjustment rewrite and style/filter guards are unchanged.
+- Cumulative clipped Levels → Invert verified on transparent and opaque blue backdrops, both Multiply and Screen, partial raster and group masks. Added four native Posterize/Threshold PSD/PSB roundtrips in the masked Multiply → Levels chain; independent scalar RGBA oracle, native layer order and parameters, Group Properties, History Undo/Redo and .zpe reopen.
+- Local RED 2 → GREEN 2, focused Node 26/26, dedicated Chromium file:// 16 native roundtrip paths PASS. Synthetic fixtures, not Adobe-authored pixel parity; PR-head and exact-main gates remain separate.
+- Next: complete PR-head/independent CI, then the next bounded Stage 17a gap: non-source-over clipping-base blend semantics, with a licensed independent Adobe pixel golden still BLOCKED. [Journal](task/002-psd-folder-group-mask.md).
+
+## 1.47.23 — предыдущая версия: PSD/PSB native clipped Invert UI roundtrip (Stage 17a, 2026-11-23)
 
 - UI fix (Paths): intrinsic-height «Контуры» card no longer clips the second Subpath operation select behind History; long Saved Paths list scrolls independently and short viewports use outer sidebar scrolling. Real Chromium file:// RED 253px content in 232px box → GREEN at 1280×768, 960×490, 900×700, 720×500, plus 12 saved paths. Dedicated browser CI gate and existing Pen/Path workflows maintained.
 

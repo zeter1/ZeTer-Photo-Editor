@@ -1,6 +1,6 @@
 // Production Chromium file://: actual Export modal -> binary download -> File input.
 // A separately masked clipped raster and nested folder must survive PSD and PSB.
-export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, expected, near}) {
+export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, expected, near, chained = false, effect = {kind:'invert'}, effectName = 'Clipped Invert'}) {
   const {evaluate, waitFor, assert}=harness;
   const run=fn=>evaluate(client,'('+fn.toString()+')()');
   function captureDownloads() {
@@ -104,13 +104,16 @@ export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, ex
     const inner=doc.groups.find(g=>g.name==='Nested Pass Through');
     const base=doc.layers.find(l=>l.name==='Translucent red');
     const overlay=doc.layers.find(l=>l.name==='Clipped blue raster');
-    const effect=doc.layers.find(l=>l.name==='Clipped Invert');
+    const levels=doc.layers.find(l=>l.name==='Clipped Levels');
+    const effect=doc.layers.find(l=>l.name===window.__clipNativeEffectName);
     return {groups:doc.groups.length,layers:doc.layers.length,outer:!!outer,
       outerMask:!!outer?.mask?.dataUrl,inner:!!inner,
       parent:inner?.parentGroupId===outer?.id,base:base?.type,
       clipped:overlay?.clipping,blend:overlay?.blendMode,opacity:overlay?.opacity,
       overlayMask:!!overlay?.mask?.dataUrl,maskEnabled:overlay?.mask?.enabled,
-      effect:effect?.adjustment?.kind,effectClipped:effect?.clipping};
+      effect:effect?.adjustment?.kind,effectModel:effect?.adjustment,effectClipped:effect?.clipping,
+      levels:levels?.adjustment?.kind,levelsClip:levels?.clipping,
+      levelsMaster:levels?.adjustment?.master,ordered:!levels||doc.layers.indexOf(levels)<doc.layers.indexOf(effect)};
   }
   function reopenProject() {
     const blob=window.__clipNativeCapture?.project;
@@ -122,6 +125,7 @@ export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, ex
     input.dispatchEvent(new Event('change',{bubbles:true}));
     return true;
   }
+  await evaluate(client,'window.__clipNativeEffectName='+JSON.stringify(effectName));
   assert(await run(captureDownloads),'install binary download observer');
   for(const [index,format] of ['PSD','PSB'].entries()) {
     await evaluate(client,'window.__clipNativeRequestedFormat='+JSON.stringify(format==='PSD'?'image/vnd.adobe.photoshop':'psb'));
@@ -131,10 +135,11 @@ export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, ex
       return result?.count===index+1&&result?.name?.endsWith('.'+format.toLowerCase())
         &&result.size>100&&result.signature==='8BPS'&&result.version===(format==='PSD'?1:2);
     },16000);
+    const previous=await run(importedIdentity);
     assert(await run(reopenBinary),format+' binary delivered to native file input');
     await waitFor(format+' native import publishes new document',async()=>{
       const state=await run(importedIdentity);
-      return state.id&&state.id!=='outer'&&state.layers===4;
+      return state.id&&state.id!==previous.id&&state.layers===(chained?5:4);
     },16000);
     await waitFor(format+' nested mask/clipped composite RGBA',async()=>{
       const pixels=await run(currentPixels);
@@ -161,10 +166,12 @@ export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, ex
     assert(await run(saveProject),format+' File menu saves editable .zpe');
     await waitFor(format+' .zpe JSON Blob',async()=>Boolean(await run(savedStructure)),12000);
     const saved=await run(savedStructure);
-    assert(saved?.groups===2&&saved.layers===4&&saved.outer&&saved.outerMask&&
+    assert(saved?.groups===2&&saved.layers===(chained?5:4)&&saved.outer&&saved.outerMask&&
       saved.inner&&saved.parent&&saved.base==='raster'&&saved.clipped===true&&
       saved.blend===mode&&saved.overlayMask&&saved.maskEnabled!==false&&
-      saved.effect==='invert'&&saved.effectClipped===true&&
+      saved.effect===effect.kind&&Object.entries(effect).every(([k,v])=>saved.effectModel?.[k]===v)&&saved.effectClipped===true&&
+      (!chained||(saved.levels==='levels'&&saved.levelsClip===true&&saved.ordered&&
+        saved.levelsMaster?.outputBlack===32&&saved.levelsMaster?.outputWhite===224))&&
       Math.abs(saved.opacity-(mode==='multiply'?1:.5))<.01,
       format+' retains editable native masked clipped stack: '+JSON.stringify(saved));
     assert(await run(reopenProject),format+' .zpe File Input reopen');
@@ -172,6 +179,6 @@ export async function verifyNativeClippedUiRoundTrips(client, harness, {mode, ex
       const pixels=await run(currentPixels);
       return pixels&&expected.every((want,i)=>near(pixels[i],want));
     },16000);
-    console.log(format+' '+mode+' native UI export/reimport, mask, History, ZPE PASS');
+    console.log(format+' '+mode+' '+effect.kind+' native UI export/reimport, mask, History, ZPE PASS');
   }
 }

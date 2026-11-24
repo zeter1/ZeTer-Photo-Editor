@@ -122,7 +122,7 @@ export function psdAdjustmentNativePlan(layer) {
   if(source&&source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
   if(layer.styles)return{eligible:false,reason:'layer styles на adjustment layer требуют composite fallback',metadata:null};
   if(hasNonDefaultFilters(layer.filters))return{eligible:false,reason:'дополнительные ZPE filters не кодируются в Photoshop adjustment record',metadata:null};
-  if(!source&&!['levels','curves','invert'].includes(adjustment.kind)){
+  if(!source&&!['levels','curves','invert','posterize','threshold'].includes(adjustment.kind)){
     return{eligible:false,reason:'нет imported Photoshop adjustment metadata для '+adjustment.kind,metadata:null};
   }
   try {
