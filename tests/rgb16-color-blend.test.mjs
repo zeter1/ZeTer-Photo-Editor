@@ -48,7 +48,7 @@ test('RGB16 flat Color preserves native layer words, composite and editable blen
 });
 
 test('unsupported RGB16 Color topology fails closed before Canvas or mutation',async()=>{
-  for(const mutate of [v=>{v.groups=[{id:'g',blendMode:'pass-through'}];v.layers[1].groupId='g';},v=>{v.layers[1].clipping=true;},v=>{v.layers[0].rotation=5;},v=>{v.layers[0].vectorMask={enabled:true,subpaths:[{}]};},v=>{delete v.layers[0].highDepthSource;},v=>{v.layers[0].blendMode='saturation';}]){
+  for(const mutate of [v=>{v.groups=[{id:'g',blendMode:'pass-through'}];v.layers[1].groupId='g';},v=>{v.layers[1].clipping=true;},v=>{v.layers[0].rotation=5;},v=>{v.layers[0].vectorMask={enabled:true,subpaths:[{}]};},v=>{delete v.layers[0].highDepthSource;},v=>{v.layers[0].blendMode='luminosity';}]){
     const value=doc();mutate(value);const before=JSON.stringify(value);
     await assert.rejects(controller().prepareDocument(value),/native high-depth/);
     assert.equal(JSON.stringify(value),before);
