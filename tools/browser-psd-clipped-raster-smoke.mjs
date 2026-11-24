@@ -4,6 +4,11 @@ import { verifyNativeClippedUiRoundTrips } from './browser-psd-clipped-native-ui
 // masked Pass Through folder over translucent blue. Every pixel has an oracle.
 export async function verifyClippedRasterStack(client, harness) {
   for (const alpha of [128,255,0]) {
+    await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over','hue');
+    await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'hue');
+  }
+  if (process.env.ZPE_HUE_CLIPPING_BASE_ONLY === '1') return;
+  for (const alpha of [128,255,0]) {
     await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'source-over','color');
     await verifyCase(client,harness,'screen',alpha,true,{kind:'invert'},'color');
   }
@@ -58,7 +63,7 @@ export async function verifyClippedRasterStack(client, harness) {
 }
 
 async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropAlpha = 128, chained = false, effect = {kind:'invert'}, baseMode = 'source-over', groupMode = null) {
-  const backdrop = (groupMode || baseMode) === 'soft-light' ? [180,48,220] : ['overlay','hard-light','darken','lighten','difference','exclusion','color-dodge','color-burn','color'].includes(groupMode || baseMode) ? [64,180,220] : [0,0,255];
+  const backdrop = (groupMode || baseMode) === 'soft-light' ? [180,48,220] : ['overlay','hard-light','darken','lighten','difference','exclusion','color-dodge','color-burn','color','hue'].includes(groupMode || baseMode) ? [64,180,220] : [0,0,255];
   const effectName='Clipped '+effect.kind[0].toUpperCase()+effect.kind.slice(1);
   const opened = await evaluate(client, `(() => {
     try {
@@ -134,7 +139,8 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
   console.log('Nested PSD '+(groupMode ? groupMode+' folder base / ' : '')+'clipped '+effect.kind+' / backdrop '+backdropAlpha+' / chained '+chained+' RGBA:', JSON.stringify(await pixels()));
 
   // Exercise the real mode controls as well as the imported document state.
-  if ((groupMode || baseMode) === 'color' && backdropAlpha > 0) {
+  const selectedMode = groupMode || baseMode;
+  if (['color','hue'].includes(selectedMode) && backdropAlpha > 0) {
     const changeMode = async value => evaluate(client, `(() => {
       if (${Boolean(groupMode)}) {
         const row=document.querySelector('[data-group-id="inner"]');
@@ -146,14 +152,14 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
         item.click();
         const modal=document.querySelector('.modal[aria-label="Параметры группы"]');
         const select=modal?.querySelector('select[name="blendMode"]');
-        if(!select||![...select.options].some(o=>o.value==='color')) return false;
+        if(!select||![...select.options].some(o=>o.value===${JSON.stringify(selectedMode)})) return false;
         select.value=${JSON.stringify(value)};
         select.dispatchEvent(new Event('change',{bubbles:true}));
         modal.requestSubmit();return true;
       }
       document.querySelector('[data-id="red-base"]')?.click();
       const select=document.querySelector('#blendMode');
-      if(!select||![...select.options].some(o=>o.value==='color')||select.disabled) return false;
+      if(!select||![...select.options].some(o=>o.value===${JSON.stringify(selectedMode)})||select.disabled) return false;
       select.value=${JSON.stringify(value)};
       select.dispatchEvent(new Event('change',{bubbles:true}));return true;
     })()`);
@@ -162,13 +168,13 @@ async function verifyCase(client, { evaluate, waitFor, assert }, mode, backdropA
     assert(await changeMode('source-over'),'Color UI can select Normal');
     try { await waitFor('Normal mode updates pixels',()=>matches(normal),12000); }
     catch(error) { console.error('Normal oracle',normal,'actual',await pixels()); throw error; }
-    assert(await changeMode('color'),'Color UI can select Color');
+    assert(await changeMode(selectedMode),'UI can select '+selectedMode);
     await waitFor('Color UI restores oracle',()=>matches(expected),12000);
     await evaluate(client,`document.querySelector('#undoBtn').click()`);
     await waitFor('Undo Color mode',()=>matches(normal),12000);
     await evaluate(client,`document.querySelector('#redoBtn').click()`);
     await waitFor('Redo Color mode',()=>matches(expected),12000);
-    console.log('Color blend UI Normal/Color + Undo/Redo PASS');
+    console.log(selectedMode+' blend UI Normal/mode + Undo/Redo PASS');
   }
 
   const changed = await evaluate(client, `(() => {
@@ -270,6 +276,13 @@ function chainedOracle(mode, backdropAlpha, effect, baseMode, groupMode, backdro
     const chroma=corrected.map(v=>v-sl);
     const factor=Math.min(1,...chroma.map(v=>v<0?-l/v:v>0?(255-l)/v:Infinity));
     const color=chroma.map(v=>l+v*factor);
+    // Independent byte-scale Hue oracle: normalize source channel differences,
+    // scale to backdrop range, then recenter luma and constrain RGB gamut.
+    const sourceRange=Math.max(...corrected)-Math.min(...corrected);
+    const backdropRange=Math.max(...backdrop)-Math.min(...backdrop);
+    const hueChroma=chroma.map(v=>sourceRange ? v*backdropRange/sourceRange : 0);
+    const hueFactor=Math.min(1,...hueChroma.map(v=>v<0?-l/v:v>0?(255-l)/v:Infinity));
+    const hue=hueChroma.map(v=>l+v*hueFactor);
     return [...corrected.map((v,c)=>{
       const back=backdrop[c];
       const blended=baseMode==='multiply'?v*back/255:baseMode==='screen'?255-(255-v)*(255-back)/255:
@@ -280,7 +293,7 @@ function chainedOracle(mode, backdropAlpha, effect, baseMode, groupMode, backdro
         baseMode==='soft-light'?softLightOracle(back/255,v/255)*255:
         baseMode==='color-dodge'?(back===0?0:v===255?255:Math.min(255,back*255/(255-v))):
         baseMode==='color-burn'?(back===255?255:v===0?0:255-Math.min(255,(255-back)*255/v)):
-        baseMode==='color'?color[c]:v;
+        baseMode==='color'?color[c]:baseMode==='hue'?hue[c]:v;
       return Math.round((a*((1-b)*v+b*blended)+back*b*(1-a))/alpha);
     }),Math.round(alpha*255)];
   });

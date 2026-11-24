@@ -1,4 +1,10 @@
-## 1.47.32 — текущая версия: Color blend mode (2026-11-24)
+## 1.47.33 — текущая версия: Hue (2026-11-24)
+
+- RGB8 Hue: цветовой тон источника, насыщенность и яркость фона; реальные слои, папки, clipping и корректировки; редактируемый PSD/PSB `hue `.
+- Нативный RGB16/32 и CMYK экспорт с Hue отклоняется без потери исходных данных.
+- RED→GREEN 3/3, focused 11/11, Windows Chromium file:// 172 native roundtrips PASS; Windows full check FAIL (5 Linux-only); Linux PR CI NOT RUN.
+
+## 1.47.32 — предыдущая версия: Color blend mode (2026-11-24)
 
 - RGB8 non-separable Color for raster, folders and adjustments; native PSD/PSB `colr` mapping, editable masks and clipping.
 - Explicit rejection of unsupported native RGB16/32/CMYK Color export; preserve source ZPE.
