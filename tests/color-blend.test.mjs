@@ -20,10 +20,10 @@ test('Color gamut clipping preserves luminance and alpha boundaries',()=>{
   compositeClippingStackPixels(target,source,'color');
   assert.deepEqual([...target.data],[0,0,0,255,255,255,255,255,100,150,50,128,10,20,30,255]);
 });
-test('native high-depth Color is explicitly rejected, not silently Normal',()=>{
-  for(const [model,channels,fn] of [['rgb',4,compositePixelBufferLayers],['cmyk',5,compositeCmykPixelBufferLayers]]) {
-    const buffer=createPixelBuffer({width:1,height:1,model,channels,bitsPerChannel:16});
-    assert.throws(()=>fn(1,1,[{buffer,blendMode:'color'}],{bitsPerChannel:16}),/Color/);
+test('native Float32 RGB and CMYK Color remain explicitly rejected, not silently Normal',()=>{
+  for(const [model,channels,depth,fn] of [['rgb',4,32,compositePixelBufferLayers],['cmyk',5,16,compositeCmykPixelBufferLayers]]) {
+    const buffer=createPixelBuffer({width:1,height:1,model,channels,bitsPerChannel:depth});
+    assert.throws(()=>fn(1,1,[{buffer,blendMode:'color'}],{bitsPerChannel:depth}),/Color/);
   }
 });
 
