@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { HistoryStack } from '../src/core/history.js';
 
 test('byte-budget eviction preserves the active snapshot and navigation after a new branch', () => {
-  const history = new HistoryStack(10, 12);
+  // Two ASCII code units occupy two bytes in compact V8 Latin-1 strings.
+  const history = new HistoryStack(10, 6);
   for (const label of ['A', 'B', 'C', 'D']) history.push(label, label.repeat(2));
 
   assert.deepEqual(history.entries.map(entry => entry.label), ['B', 'C', 'D']);
   assert.equal(history.index, 2);
-  assert.equal(history.totalBytes(), 12);
+  assert.equal(history.totalBytes(), 6);
   assert.equal(history.current().snapshot, 'DD');
   assert.equal(history.undo().label, 'C');
 

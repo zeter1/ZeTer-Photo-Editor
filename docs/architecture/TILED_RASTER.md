@@ -1,5 +1,10 @@
 # Tiled high-depth raster source — Stage 17d
 
+## Stage 003 cooperative native single-ROI kernel (2026-10-11)
+
+Sync Node/Worker inpaint continues to exhaust the deterministic sample generator without asynchronous scheduling. The main-thread fallback drives the exact same steps with a macrotask yield and staleness guard through selection scan, boundary queue, and PatchMatch row checkpoints inside each private ROI. A cancelled job returns the original serialized source and zero changed/filled counters; unfinished private working tiles cannot be published. Since 1.45.6 the cooperative fallback also checkpoints after every four changed tile encodes during private result serialization; cancelled encoding discards all partial payloads. Sync Worker/Node serialization and fallback byte output are identical. Tile region decoding/writes and RGBA8 preview are still synchronous, and the large connected ROI rectangle limit remains. Regression coverage: native Uint16 parity and mid-kernel Float32 cancellation. [PR #174](https://github.com/zeter1/ZeTer-Photo-Editor/pull/174) and its exact [main push CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38120614660) passed; the complete Stage 003 remains open.
+
+
 Stage 17d продолжает Stage 17a–17c: большие native RGB/CMYK 8/16/32-bit PixelBuffer sources остаются backward-compatible tiled persistence, Brush/Eraser используют stroke-scoped working set, а native Clone/Heal/Blur/Smudge/Dodge/Burn больше не обязаны материализовывать полный high-depth plane на старте штриха.
 
 ## Владельцы
@@ -27,7 +32,7 @@ Eraser без alpha логически повышает RGB→RGBA / CMYK→CMYK
 
 ## Region / halo retouch contract
 
-`readRegion(bounds)` собирает только запрошенный прямоугольник из пересекающихся tiles и не помечает их dirty. `writeRegion(region)` сравнивает samples, пишет обратно только реально изменившиеся pixels и отмечает только соответствующие tiles.
+`readRegion(bounds)` собирает только запрошенный прямоугольник из пересекающихся tiles и не помечает их dirty. `writeRegion(region)` сравнивает samples, пишет обратно только реально изменившиеся pixels и отмечает только соответствующие tiles. При недоступном Worker native Content-Aware Fill использует `readRegionCooperative()` и `writeRegionCooperative()` с checkpoint через каждые 32 768 pixels: запись сначала готовит изменённые tile arrays, а затем без `await` фиксирует их в приватном working set. Отмена отбрасывает staged arrays, не затрагивает предыдущие dirty/previewDirty и не публикует результат. Синхронный Worker использует те же пошаговые алгоритмы.
 
 - Dodge/Burn читают brush footprint; stroke coverage адресуется глобальными pixel coordinates, поэтому overlap semantics не зависят от границ tiles.
 - Blur читает brush footprint + kernel halo, поэтому neighborhood math видит соседние samples по обе стороны tile boundary.
@@ -43,12 +48,39 @@ Full RGBA8 display canvas пока остаётся нужен browser composito
 ## Оставшиеся contiguous/global boundaries
 
 - PSD/PSB binary decoder materializes bounded channel planes до tiled handoff.
-- Flood Fill и Content-Aware Fill требуют cross-tile/global connectivity/neighborhood semantics и пока используют contiguous PixelBuffer.
+- Flood Fill по-прежнему требует global cross-tile connectivity и использует contiguous PixelBuffer.
+- Content-Aware Fill на tiled v2 native sources сканирует frozen selection один раз по каждому пикселю без full-plane decode, сохраняет только выбранные индексы в списке не длиннее maxFillPixels, затем строит локальную Uint8Array маску для bounded ROI с 24 px donor halo и публикует только изменённые tiles через exact-source guard. После расчёта ROI selection predicate повторно не вызывается. Это сохраняет cross-tile neighborhood внутри ROI; удалённые доноры вне halo не участвуют в PatchMatch-style search (не полная эквивалентность full-plane алгоритму). ROI свыше 8 МП и выделения свыше 2 МП отклоняются без записи. Полный RGBA8 preview после обработки остаётся global boundary.
+- Для oversized bounding ROI группы строятся по фактическим bounds выбранных пикселей в каждой занятой tile-cell (не по полному размеру tile). Только непересекающиеся после halo padding группы вычисляются отдельно; перекрывающиеся bounding footprints объединяются транзитивно. 256 occupied cells и aggregate ROI budget продолжают ограничивать память. Широкая связная маска по-прежнему может превысить лимит и будет отклонена без публикации.
+- Если browser Worker недоступен, tiled Content-Aware Fill использует `inpaintTiledPixelBufferSourceFromIndicesCooperative()` с однократно зафиксированным на UI потоке выделением; legacy/test вызовы без Worker по-прежнему используют `inpaintTiledPixelBufferSourceCooperative()`: синхронный `inpaintTiledPixelBufferSource()` сохранён для детерминированных контрактов/профилей, обе ветки используют общую frozen ROI execution path. UI-сценарий делает настоящий macrotask yield каждые 32 768 координат, а владелец `persistTiledHighDepthInpaint()` проверяет exact doc/layer/source/lock до расчёта, между блоками сканирования и после preview. При отмене не выделяются и не декодируются рабочие ROI tiles, не создаются history/preview и не публикуются источники. Geometry predicate вызывается один раз на координату. **Worker в UI:** основной bounded ROI decode/inpaint/serialize вызывается в file://-совместимом classic Blob Worker с fallback при недоступном bootstrap. Scan geometry и полный RGBA8 preview остаются main-thread границами; fallback отдаёт управление перед первым ROI и между приватными ROI; kernel одного ROI использует cooperative checkpoints в fallback; tile serialization тоже отдаёт управление между группами dirty tiles. Worker compute errors не вызывают fallback, exact-owner revalidation перед publish обязательна; браузерный клиент проверяет `isCurrent()` каждые 50 мс только в период жизни Worker и вызывает `terminate()` при устаревании владельца без ожидания ответа; таймер освобождается при любом завершении. Если до создания Worker ожидание общего `file://` supplier отменено или вытеснено новым заданием, устаревший `run()` завершается сразу с `{ cancelled:true }` и не ждёт `onload`/timeout; загрузчик остаётся single-flight для следующего задания. Это не прерывает уже начатое вычисление внутри одного ROI либо preview; browser profiling всё ещё открыт.
 - Часть export/color-management paths материализует contiguous PixelBuffer.
 - Canvas compositor требует full RGBA8 display surface.
 - Нет IndexedDB/file-backed eviction store, worker-owned editing tiles, GPU renderer или RAW/DNG decode.
 
-Следующая безопасная проходка: workerize дорогие bounded tile/halo jobs с exact-owner cancellation, затем перенести cross-tile Flood Fill / Content-Aware Fill на streaming/tiled algorithms. После этого — lazy backing store/eviction; только затем имеет смысл пересматривать 512 MiB PSD/PSB input gate.
+Следующая безопасная проходка: проверить реальную Worker latency/RAM и proactive terminate при изменении владельца, затем перенести cross-tile Flood Fill / широкие связанные маски на bounded streaming/tiled algorithms. После этого — lazy backing store/eviction; только затем имеет смысл пересматривать 512 MiB PSD/PSB input gate.
+
+## Профилирование tiled Content-Aware Fill (Stage 003)
+
+Запуск: `node tools/profile-tiled-inpaint.mjs` (8, 24, 48 MiB) или `node tools/profile-tiled-inpaint.mjs --sizes 1,8`. Каждый размер запускается в **новом дочернем Node-процессе с `--expose-gc`**, поэтому RSS одного сценария не загрязняет следующий. Детерминированный synthetic fixture: native Float32 CMYKA, 256 px tiles, одно повреждённое непрозрачное значение на границе тайла. Инструмент проверяет, что изменён ровно один tile, и сохраняет JSON с версиями Node/OS, точным raw byte size, числом загруженных tiles, временем подготовки и временем вызова `inpaintTiledPixelBufferSource`.
+
+Поля `before`/`after` показывают `rss`, `heapUsed`, `arrayBuffers` и `process.resourceUsage().maxRSS`. `observedProcessHighWaterGrowthMiB` — **разница process-wide high-water marks**, а не точный peak RAM самой операции: максимумы включают создание fixture и сериализацию, краткоживущие аллокации могут не отражаться в конечном RSS. `fixtureMs` не смешивается с `inpaintMs`. Тайминги/память — информационные измерения без flaky CI performance gate. CI печатает baseline на Linux/Node 24. Это *не* benchmark PSD/PSB disk decode, Canvas preview, main-thread latency или Worker cancellation; эти проверки остаются отдельными этапами.
+
+### Первый baseline — 2026-10-10
+
+[PR #139, CI Linux x64 / Node v24.21.0](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/38051881786) (в каждом случае один выбранный пиксель, loadedTiles=2, changedTiles=1; время только функции):
+
+| Native source | `inpaintMs` | Process-wide HWM RSS |
+| --- | ---: | ---: |
+| 8 MiB (~8.0 фактически) | 113.92 мс | 188.18 MiB |
+| 24 MiB (~24.0 фактически) | 133.50 мс | 328.00 MiB |
+| 48 MiB (~48.0 фактически) | 186.92 мс | 426.89 MiB |
+
+Значения — не performance SLA и не peak RSS изолированного inpaint. Задача Worker/cancellation, широкий связный ROI и браузерный memory profile остаются открытыми.
+
+## Профиль на независимых PSD/PSB bytes (Stage 003)
+
+`node tools/profile-real-psd-inpaint.mjs` декодирует pinned external psd-tools CMYK PSD v1 (native 8-bit CMYKA raster) и layered PSB v2 (merged RGB raster), проверяя manifest SHA-256. Каждый fixture запускается отдельным `--expose-gc` child process; отдельные `decodeMs`, `serializeMs`, `inpaintMs` и RSS snapshots `before`, `afterDecode`, `afterTiles`, `afterInpaint` показывают затраты реального codec→tile→ROI пути. Стандартный вывод — JSON для отслеживания в CI; без нестабильных числовых порогов.
+
+Это маленький **8-bit** upstream corpus, а не замена synthetic 8/24/48 MiB high-depth baseline: process-wide `maxRSS` не является isolated peak tiled inpaint; PSB использует merged composite и не меряет layer UI preview/Workers. Для real 16/32-bit PSD/PSB UI/RAM и wide-selection performance остаются отдельные задачи. `tests/tiled-inpaint-external-psd-psb.test.mjs` дополнительно проверяет external CMYK cooperative parity и отмену frozen external PSB selection до ROI tile reads.
 
 ## Проверка
 
@@ -56,3 +88,25 @@ Full RGBA8 display canvas пока остаётся нужен browser composito
 - `tests/retouch-controller.test.mjs`: tiled Dodge, cross-tile Blur halo и immutable lazy Clone snapshot.
 - `tests/painting-gesture-controller.test.mjs`: native retouch opt-in в tiled v2 path.
 - полный gate: `npm run check`, generated bundle parity и `npm run test:browser` через CI.
+
+## Worker compute contract — Node proof stage (2026-10-10)
+
+`src/core/tiled-inpaint-worker-protocol.js` принимает detached tiled source и snapshot выбранных индексов (`Array` / `Uint32Array`), валидирует геометрию и индексы, строит frozen predicate и повторно использует канонический synchronous `inpaintTiledPixelBufferSource`. `tools/tiled-inpaint-worker-thread.mjs` исполняет этот контракт в Node `worker_threads` через structured clone; отрицательные задания возвращают `{ok:false,error}`, не уничтожая процесс Worker. Тест покрывает distant CMYKA Float32 и сравнивает `source` с синхронным эталоном.
+
+Для detached Worker selection membership теперь используется битовая карта из одного бита на пиксель (до 2 MiB при общем лимите native source 48 MiB), а не `Set` из JS-чисел. Индексы из `Array`/`Uint32Array` проверяются на границы и дубликаты до запуска kernel; malformed geometry выше предельного числа RGB8-пикселей отклоняется до аллокации bitmap. В detached Worker добавлен `inpaintTiledPixelBufferSourceFromIndices()`: список валидируется через битовую карту (до 2 MiB) и передаётся в frozen ROI kernel напрямую, **без повторного полного scan** `width × height`. В обычном UI geometry predicate всё ещё вычисляется однократно по всем координатам, Worker ещё не подключён к пользовательской заливке. Parity с синхронным ROI и входной immutable source проверяется отдельно.
+
+Это только portable compute/protocol seam: модуль **не** включён в `tools/build-bundle.mjs`, браузер не создаёт Worker, `file://` constraints не решены. Перед production integration нужны worker lifecycle, transfer/memory budget, exact-owner generation, real cancellation во время expensive ROI execution и browser smoke.
+
+## Classic Blob Worker bootstrap — isolated Stage 003 (2026-10-10)
+
+`tools/build-tiled-inpaint-worker.mjs` creates a deterministic, self-contained classic Worker source from `src/core/io.js`, `src/core/inpaint.js`, `src/core/pixel-buffer.js` and `src/core/tiled-inpaint-worker-protocol.js`. The generated `src/core/tiled-inpaint-worker-source.js` is a **classic script supplier**, not an importable Worker script: loading it from `file://` stores the source string in `globalThis.__zpeTiledInpaintWorkerSource`. The caller constructs a same-origin `Blob` URL and starts `new Worker(url)`, then revokes the URL after Worker creation/termination. The Worker itself never calls `fetch`, `importScripts` or dynamic imports, so it does not depend on `file://` resource fetching from inside the Worker. Error/result messages use the same `{ready:true}` / `{id,ok,result|error}` protocol as the Node thread.
+
+`npm run build` regenerates both the regular app bundle and the **independent Worker supplier**. `tests/tiled-inpaint-browser-bootstrap.test.mjs` checks generated source parity and runs the detached CMYKA calculation against the synchronous reference. `tools/browser-smoke.mjs` explicitly loads this supplier and executes a real 8-bit RGB tile job in Chromium opened via `file://`; the browser smoke verifies changed tile data, not just a trivial Worker echo.
+
+**Production boundary:** The normal page does **not** load this supplier and its Content-Aware Fill button is **not yet Worker-backed**. This isolated build/test step does not implement owner-aware cancellation, fallback for blocked Blob Workers, transfer budgeting or large-PSD/PSB browser profiling. The next pass must wire this source through a documented runtime loader and the existing job controller without introducing a hidden mutable global or breaking file:// startup.
+
+## Worker lifecycle seam — isolated Stage 003 (2026-10-10)
+
+`src/core/tiled-inpaint-worker-client.js` owns **one active isolated job** at a time using an injected `createWorker` factory. It speaks the existing `{ready:true}` → `{id,...job}` → `{id,ok,result|error}` protocol. Both Node `worker_threads` and browser-style Worker event APIs are supported; a new job supersedes the old worker, and `cancel()` detaches listeners, terminates the worker and resolves the obsolete job as `{cancelled:true}`. It also checks an injected `isCurrent()` predicate before dispatch and before accepting a reply. Errors and invalid replies reject, never publish partial data. The result is still detached; only the **calling document owner** can commit to a layer/history.
+
+**Граница:** это не UI wiring и не `file://` browser Worker bootstrap. Ошибки десериализации сообщений (`messageerror`) у browser и Node-shaped Worker завершают job с очисткой обработчиков/`terminate()`, а partially valid Worker из фабрики освобождается перед отказом, если у него есть `terminate()`. Это fail-closed обработка транспорта, а не retry/fallback выполнения. `isCurrent` не отслеживается автоматически во время синхронного kernel: владелец должен вызывать `cancel()` при смене документа/слоя/исходного source. Именно `terminate()`, а не cooperative check внутри kernel, обеспечивает принудительный останов. Для production ещё нужны гарантии lifetime/identity при каждом UI change и browser fallback при заблокированных `file://` Workers. Проверка: `tests/tiled-inpaint-worker-client.test.mjs` (real Node Worker, fake browser events, stale/superseded/error states).

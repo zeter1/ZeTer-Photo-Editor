@@ -51,12 +51,16 @@ export function createPathControlSurfaceController({
     const documentPathEditIndex = state.getDocumentPathEditIndex();
     if (documentPathEditIndex >= 0) {
       const path = owner.paths?.[documentPathEditIndex];
-      if (path?.subpaths?.length) {
+      // An empty Saved Path is a valid Pen edit target until its first subpath is drawn.
+      if (Array.isArray(path?.subpaths)) {
         return path.subpaths
           .map((subpath, subpathIndex) => ({
             layer: null,
             points: Array.isArray(subpath?.points) ? subpath.points : [],
             source: 'document-path',
+            pathTarget: path,
+            pathId: path.id ?? null,
+            subpath,
             documentPathIndex: documentPathEditIndex,
             subpathIndex,
             closed: subpath?.closed !== false,
@@ -79,6 +83,7 @@ export function createPathControlSurfaceController({
           layer,
           points: Array.isArray(subpath?.points) ? subpath.points : [],
           source: 'vector-mask',
+          subpath,
           documentPathIndex: null,
           subpathIndex,
           closed: subpath?.closed !== false,
@@ -120,7 +125,10 @@ export function createPathControlSurfaceController({
     if (candidate.source === 'document-path') {
       return (
         candidate.documentPathIndex === target.documentPathIndex &&
-        candidate.subpathIndex === target.subpathIndex
+        candidate.subpathIndex === target.subpathIndex &&
+        candidate.pathTarget === target.pathTarget &&
+        candidate.pathId === target.pathId &&
+        candidate.subpath === target.subpath
       );
     }
     if (candidate.layer !== target.layer) return false;
@@ -155,29 +163,94 @@ export function createPathControlSurfaceController({
       : 8 / currentZoom();
     const owner = state.getDocument();
 
+    // Prefer the nearest visible control, rather than every handle before every anchor.
+    // Short Bézier handles may sit inside an anchor's hit radius; otherwise their
+    // priority makes the actual anchor impossible to drag. Ties favor anchors.
+    let nearest = null;
+    let nearestDistance = Infinity;
     for (const target of selectedTargets()) {
       if (target.layer && isLayerLocked(owner, target.layer)) continue;
       for (let nodeIndex = 0; nodeIndex < target.points.length; nodeIndex += 1) {
         const node = target.points[nodeIndex];
-        for (const control of PATH_CONTROL_HANDLE_NAMES) {
+        for (const control of ['anchor', ...PATH_CONTROL_HANDLE_NAMES]) {
           const controlPoint = documentPoint(target, node, control);
-          if (
-            controlPoint &&
-            Math.hypot(px - controlPoint.x, py - controlPoint.y) <= hitRadius
-          ) {
-            return { ...target, nodeIndex, control };
+          if (!controlPoint) continue;
+          const distance = Math.hypot(px - controlPoint.x, py - controlPoint.y);
+          if (!Number.isFinite(distance) || distance > hitRadius) continue;
+          if (distance < nearestDistance - 1e-9 || (
+            Math.abs(distance - nearestDistance) <= 1e-9
+            && control === 'anchor' && nearest?.control !== 'anchor'
+          )) {
+            nearest = { ...target, nodeIndex, node, control,
+              groupId:target.layer?.groupId ?? null,
+              subpath:target.subpath ?? null,
+              vectorMask:target.layer?.vectorMask ?? null };
+            nearestDistance = distance;
           }
         }
       }
-      for (let nodeIndex = 0; nodeIndex < target.points.length; nodeIndex += 1) {
-        const node = target.points[nodeIndex];
-        const anchor = documentPoint(target, node, 'anchor');
-        if (anchor && Math.hypot(px - anchor.x, py - anchor.y) <= hitRadius) {
-          return { ...target, nodeIndex, control: 'anchor' };
+    }
+    return nearest;
+  }
+
+  function hitSegment(point, radius = null) {
+    const px = Number(point?.x);
+    const py = Number(point?.y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+    const candidateRadius = radius === null ? 7 / currentZoom() : Number(radius);
+    if (!Number.isFinite(candidateRadius) || candidateRadius < 0) return null;
+    const owner = state.getDocument();
+    let nearest = null;
+    let nearestDistance = candidateRadius;
+    const evaluate = (p0, p1, p2, p3, t) => {
+      const q = 1 - t;
+      return {
+        x:q*q*q*p0.x + 3*q*q*t*p1.x + 3*q*t*t*p2.x + t*t*t*p3.x,
+        y:q*q*q*p0.y + 3*q*q*t*p1.y + 3*q*t*t*p2.y + t*t*t*p3.y,
+      };
+    };
+    for (const target of selectedTargets()) {
+      if (target.layer && isLayerLocked(owner, target.layer)) continue;
+      const count = target.points.length;
+      const segments = target.closed ? count : count - 1;
+      for (let index = 0; index < segments; index += 1) {
+        const fromNode = target.points[index];
+        const toNode = target.points[(index + 1) % count];
+        const p0 = documentPoint(target, fromNode);
+        const p1 = documentPoint(target, fromNode, 'handleOut') ?? p0;
+        const p3 = documentPoint(target, toNode);
+        const p2 = documentPoint(target, toNode, 'handleIn') ?? p3;
+        if (![p0, p1, p2, p3].every(p => p &&
+          Number.isFinite(p.x) && Number.isFinite(p.y))) continue;
+        let previous = p0;
+        const steps = 48;
+        for (let step = 1; step <= steps; step += 1) {
+          const current = evaluate(p0, p1, p2, p3, step / steps);
+          const dx = current.x - previous.x;
+          const dy = current.y - previous.y;
+          const squared = dx * dx + dy * dy;
+          const projection = squared > 1e-12
+            ? Math.max(0, Math.min(1, ((px-previous.x)*dx+(py-previous.y)*dy)/squared))
+            : 0;
+          const distance = Math.hypot(
+            px - previous.x - dx * projection,
+            py - previous.y - dy * projection,
+          );
+          const t = (step - 1 + projection) / steps;
+          if (distance < nearestDistance && t > 0.0001 && t < 0.9999) {
+            nearestDistance = distance;
+            nearest = {
+              ...target, segmentIndex:index, t, fromNode, toNode,
+              groupId:target.layer?.groupId ?? null,
+              subpath:target.subpath ?? null,
+              vectorMask:target.source==='vector-mask' ? target.layer.vectorMask : null,
+            };
+          }
+          previous = current;
         }
       }
     }
-    return null;
+    return nearest;
   }
 
   function trace(context, target) {
@@ -290,6 +363,7 @@ export function createPathControlSurfaceController({
     targetPoints,
     resolveTarget,
     hit,
+    hitSegment,
     trace,
     draw,
     updateCursor,

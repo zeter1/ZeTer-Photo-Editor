@@ -166,17 +166,33 @@ test('recursively locked controls remain discoverable for rendering but are reje
   assert.ok(context.calls.some(call => call[0] === 'set' && call[1] === 'strokeStyle' && call[2] === '#aeb6c4'));
 });
 
-test('layer projection is used for controls, handles win anchor overlap, and default radius scales with zoom', () => {
+test('layer projection uses anchor precedence for coincident handles and a zoom-scaled hit radius', () => {
   const h = createHarness();
   h.node.handleIn = { x: 10, y: 20 };
   h.node.handleOut = null;
 
-  assert.equal(h.controller.hit({ x: 110, y: 70 })?.control, 'handleIn');
-  assert.equal(h.controller.hit({ x: 114, y: 70 })?.control, 'handleIn');
+  assert.equal(h.controller.hit({ x: 110, y: 70 })?.control, 'anchor');
+  assert.equal(h.controller.hit({ x: 114, y: 70 })?.control, 'anchor');
   assert.equal(h.controller.hit({ x: 114.01, y: 70 }), null);
 
   const target = h.controller.selectedTargets()[0];
   assert.equal(h.controller.targetPoints(target), h.layer.pathPoints);
+});
+
+test('Saved Path anchor stays draggable when its cubic handles are within the hit radius', () => {
+  const h = createHarness();
+  h.documentValue.paths = [{ id: 2000, subpaths: [{
+    closed: true, operation: 'add', points: [
+      pathNode({ x: 10, y: 20, handleIn: { x: 13, y: 20 }, handleOut: { x: 10, y: 23 } }),
+      pathNode({ x: 40, y: 40, handleIn: null, handleOut: null }),
+    ],
+  }] }];
+  h.setDocumentPathEditIndex(0);
+
+  assert.equal(h.controller.hit({ x: 10, y: 20 })?.control, 'anchor');
+  assert.equal(h.controller.hit({ x: 13, y: 20 })?.control, 'handleIn');
+  assert.equal(h.controller.hit({ x: 10, y: 23 })?.control, 'handleOut');
+  assert.equal(h.controller.hit({ x: 15, y: 20 })?.control, 'handleIn');
 });
 
 test('trace uses cubic handles and closes only closed targets', () => {

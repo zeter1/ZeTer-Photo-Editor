@@ -262,77 +262,6 @@ test('discard is serialized after a pending save', async () => {
   assert.deepEqual(order, ['save:start','save:end','clear']);
 });
 
-
-test('snapshot serialization failure does not throw, overwrite recovery or retry the invalid document', async () => {
-  const cyclicDoc = { name:'Cycle' };
-  cyclicDoc.self = cyclicDoc;
-  let snapshotCalls = 0;
-  const { controller, calls } = createHarness({
-    sessions:[{ id:'a', dirty:true, doc:cyclicDoc }],
-    snapshot: doc => { snapshotCalls += 1; return JSON.stringify(doc); },
-    save: async () => { throw new Error('must not write an invalid snapshot'); },
-    clear: async () => { throw new Error('must not clear a valid snapshot'); },
-  });
-
-  assert.doesNotThrow(() => controller.queueRecovery({ immediate:true }));
-  await controller.whenIdle();
-  assert.equal(controller.isStorageAvailable(), false);
-  assert.equal(snapshotCalls, 1);
-  assert.deepEqual(calls.saves, []);
-  assert.deepEqual(calls.clears, []);
-  assert.deepEqual(calls.toasts, [['Автосохранение не удалось: ошибка подготовки снимка проекта', 'warn']]);
-  assert.equal(calls.warnings.length, 1);
-  controller.queueRecovery({ immediate:true });
-  await controller.whenIdle();
-  assert.equal(snapshotCalls, 1);
-  assert.equal(calls.toasts.length, 1);
-});
-
-test('debounced snapshot failure is handled inside timer callback', async () => {
-  let timerCallback;
-  const { controller, calls } = createHarness({
-    sessions:[{ id:'a', dirty:true, doc:{ name:'Broken' } }],
-    snapshot: () => { throw new Error('snapshot failed'); },
-    setTimeoutFn: callback => { timerCallback = callback; return 1; },
-    clearTimeoutFn: () => {},
-  });
-
-  controller.queueRecovery();
-  assert.equal(typeof timerCallback, 'function');
-  assert.doesNotThrow(() => timerCallback());
-  await controller.whenIdle();
-  assert.equal(controller.isStorageAvailable(), false);
-  assert.equal(calls.toasts.length, 1);
-  assert.deepEqual(calls.saves, []);
-  assert.deepEqual(calls.clears, []);
-});
-
-test('late success of an older recovery write cannot clear a newer snapshot preparation error', async () => {
-  let releaseWrite;
-  const pendingWrite = new Promise(resolve => { releaseWrite = resolve; });
-  let shouldFail = false;
-  const { controller, calls } = createHarness({
-    sessions:[{ id:'a', dirty:true, doc:{ name:'A' } }],
-    snapshot: doc => {
-      if (shouldFail) throw new TypeError('cycle introduced by later edit');
-      return JSON.stringify(doc);
-    },
-    save: () => pendingWrite,
-  });
-
-  controller.queueRecovery({ immediate:true });
-  await Promise.resolve(); // first write has entered storage.save
-  shouldFail = true;
-  assert.doesNotThrow(() => controller.queueRecovery({ immediate:true }));
-  releaseWrite();
-  await controller.whenIdle();
-  assert.equal(controller.isStorageAvailable(), false);
-  assert.equal(calls.toasts.length, 1);
-  controller.queueRecovery({ immediate:true });
-  await controller.whenIdle();
-  assert.equal(calls.toasts.length, 1);
-});
-
 test('storage write failure disables repeated autosave and notifies once', async () => {
   let attempts = 0;
   const { controller, calls } = createHarness({
@@ -460,3 +389,84 @@ test('a concurrent failed read keeps autosave locked even when the pending write
 test('default recovery debounce remains intentionally short', () => {
   assert.equal(RECOVERY_DEBOUNCE_MS, 1500);
 });
+
+
+test('snapshot preparation failure preserves previous persisted recovery and locks out retry', async () => {
+  const doc = { name:'A' };
+  let persisted;
+  let writes = 0;
+  let clears = 0;
+  const { controller, calls } = createHarness({
+    sessions:[{ id:'a', dirty:true, doc }],
+    save: async documents => { writes++; persisted = documents.map(item => JSON.parse(item.snapshot)); },
+    clear: async () => { clears++; },
+  });
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.deepEqual(persisted, [{ name:'A' }]);
+  doc.self = doc;
+  assert.doesNotThrow(() => controller.queueRecovery({ immediate:true }));
+  await controller.whenIdle();
+  assert.equal(controller.isStorageAvailable(), false);
+  assert.deepEqual(persisted, [{ name:'A' }]);
+  assert.equal(writes, 1);
+  assert.equal(clears, 0);
+  assert.equal(calls.toasts.length, 1);
+  assert.equal(calls.toasts[0][1], 'warn');
+  assert.equal(calls.warnings.length, 1);
+  delete doc.self;
+  controller.queueRecovery({ immediate:true });
+  await controller.whenIdle();
+  assert.equal(writes, 1);
+  assert.equal(calls.toasts.length, 1);
+});
+
+test('debounced snapshot preparation failure cannot escape timer', async () => {
+  let timer;
+  const { controller, calls } = createHarness({
+    sessions:[{ id:'a', dirty:true, doc:{ name:'A' } }],
+    snapshot: () => { throw new TypeError('serialization'); },
+    setTimeoutFn: handler => { timer = handler; return 1; },
+    clearTimeoutFn: () => {},
+  });
+  controller.queueRecovery();
+  assert.doesNotThrow(() => timer());
+  await controller.whenIdle();
+  assert.equal(controller.isStorageAvailable(), false);
+  assert.equal(calls.toasts.length, 1);
+  assert.deepEqual(calls.saves, []);
+  assert.deepEqual(calls.clears, []);
+});
+
+for (const lateFailure of [false, true]) {
+  test('newer preparation failure stays fatal after older write ' + (lateFailure ? 'rejection' : 'success'), async () => {
+    let resolveWrite, rejectWrite;
+    const pending = new Promise((resolve, reject) => { resolveWrite = resolve; rejectWrite = reject; });
+    let fail = false;
+    let writes = 0;
+    let time = 100;
+    const { controller, calls } = createHarness({
+      sessions:[{ id:'a', dirty:true, doc:{ name:'A' } }],
+      snapshot: doc => { if (fail) throw new TypeError('serialization'); return JSON.stringify(doc); },
+      save: () => { writes++; return pending; },
+      now: () => time,
+    });
+    controller.queueRecovery({ immediate:true });
+    await Promise.resolve();
+    assert.equal(writes, 1);
+    fail = true;
+    let thrown;
+    try { controller.queueRecovery({ immediate:true }); } catch (error) { thrown = error; }
+    if (lateFailure) rejectWrite(new Error('older storage failure'));
+    else resolveWrite();
+    await controller.whenIdle();
+    assert.equal(thrown, undefined);
+    assert.equal(controller.isStorageAvailable(), false);
+    time += RECOVERY_RETRY_COOLDOWN_MS * 2;
+    fail = false;
+    controller.queueRecovery({ immediate:true });
+    await controller.whenIdle();
+    assert.equal(writes, 1);
+    assert.equal(calls.toasts.length, 1);
+  });
+}

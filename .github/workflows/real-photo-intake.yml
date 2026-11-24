@@ -1,0 +1,629 @@
+# A separate CC0 intake followed by frozen-byte checks and photo-derived
+# PSD16/PSB32 native readback. Photoshop/ICC/Chromium parity is NOT asserted.
+name: Real-photo CC0 intake and native PSD/PSB
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/real-photo-intake.yml
+      - tools/real-photo-source-integrity.mjs
+      - tools/fetch-real-photo-source.mjs
+      - tools/decode-real-photo.py
+      - tools/real-photo-bundle-admission.mjs
+      - tools/verify-pinned-real-photo.py
+      - tools/real-photo-psd-psb-cli.mjs
+      - tools/real-photo-psd-psb-fixtures.mjs
+      - tools/real-photo-psd-psb-artifacts.mjs
+      - tools/verify-real-photo-psd-native.py
+      - tools/verify-real-photo-psd-external.py
+      - tools/verify-photo-native-artifact-set.py
+      - tests/fixtures/real-photo/reviewed-manifest.json
+      - tests/fixtures/real-photo/reviewed-native-artifacts.json
+      - tests/browser-real-photo-ui-import.test.mjs
+      - tools/browser-smoke.mjs
+      - tools/verify-browser-real-photo-import-artifacts.mjs
+      - tools/browser-real-photo-ui-import.mjs
+      - tools/browser-real-photo-ui-worker.mjs
+      - tools/browser-real-photo-switch-failure.mjs
+      - tools/verify-browser-real-photo-malformed-alpha-artifacts.mjs
+      - tests/browser-real-photo-malformed-alpha.test.mjs
+      - tools/verify-browser-real-photo-malformed-counter-artifacts.mjs
+      - tests/browser-real-photo-malformed-counter.test.mjs
+      - tools/verify-browser-real-photo-memory-cap-artifacts.mjs
+      - tests/browser-real-photo-memory-cap.test.mjs
+      - tools/verify-browser-real-photo-malformed-extra-artifacts.mjs
+      - tests/browser-real-photo-malformed-extra.test.mjs
+      - tools/verify-browser-real-photo-switch-failure-artifacts.mjs
+      - tests/browser-real-photo-switch-failure.test.mjs
+      - tools/verify-browser-real-photo-mid-kernel-artifacts.mjs
+      - tests/browser-real-photo-mid-kernel.test.mjs
+      - tools/verify-browser-real-photo-mid-kernel-close-artifacts.mjs
+      - tests/browser-real-photo-mid-kernel-close.test.mjs
+      - tools/verify-browser-real-photo-mid-kernel-escape-artifacts.mjs
+      - tests/browser-real-photo-mid-kernel-escape.test.mjs
+      - tools/verify-browser-real-photo-completed-preview-escape-artifacts.mjs
+      - tests/browser-real-photo-completed-preview-escape.test.mjs
+      - tools/verify-browser-real-photo-completed-preview-success-artifacts.mjs
+      - tests/browser-real-photo-completed-preview-success.test.mjs
+      - src/workspace/session-controller.js
+      - src/app.bundle.js
+      - tools/browser-inpaint-mid-kernel-smoke.mjs
+      - tools/browser-real-photo-memory-evidence.mjs
+      - tests/browser-real-photo-memory-evidence.test.mjs
+      - tools/browser-real-photo-quality.mjs
+      - tools/verify-browser-real-photo-worker-artifacts.mjs
+      - tools/verify-browser-real-photo-acceptance.mjs
+      - tests/browser-real-photo-acceptance.test.mjs
+      - tests/fixtures/real-photo/acceptance-plan.json
+      - tests/browser-real-photo-quality.test.mjs
+      - tests/browser-real-photo-worker-artifacts.test.mjs
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/real-photo-intake.yml
+      - tools/real-photo-source-integrity.mjs
+      - tools/fetch-real-photo-source.mjs
+      - tools/decode-real-photo.py
+      - tools/real-photo-bundle-admission.mjs
+      - tools/verify-pinned-real-photo.py
+      - tools/real-photo-psd-psb-cli.mjs
+      - tools/real-photo-psd-psb-fixtures.mjs
+      - tools/real-photo-psd-psb-artifacts.mjs
+      - tools/verify-real-photo-psd-native.py
+      - tools/verify-real-photo-psd-external.py
+      - tools/verify-photo-native-artifact-set.py
+      - tests/fixtures/real-photo/reviewed-manifest.json
+      - tests/fixtures/real-photo/reviewed-native-artifacts.json
+      - tests/browser-real-photo-ui-import.test.mjs
+      - tools/browser-smoke.mjs
+      - tools/verify-browser-real-photo-import-artifacts.mjs
+      - tools/browser-real-photo-ui-import.mjs
+      - tools/browser-real-photo-ui-worker.mjs
+      - tools/browser-real-photo-switch-failure.mjs
+      - tools/verify-browser-real-photo-malformed-alpha-artifacts.mjs
+      - tests/browser-real-photo-malformed-alpha.test.mjs
+      - tools/verify-browser-real-photo-malformed-counter-artifacts.mjs
+      - tests/browser-real-photo-malformed-counter.test.mjs
+      - tools/verify-browser-real-photo-memory-cap-artifacts.mjs
+      - tests/browser-real-photo-memory-cap.test.mjs
+      - tools/verify-browser-real-photo-malformed-extra-artifacts.mjs
+      - tests/browser-real-photo-malformed-extra.test.mjs
+      - tools/verify-browser-real-photo-switch-failure-artifacts.mjs
+      - tests/browser-real-photo-switch-failure.test.mjs
+      - tools/verify-browser-real-photo-mid-kernel-artifacts.mjs
+      - tests/browser-real-photo-mid-kernel.test.mjs
+      - tools/verify-browser-real-photo-mid-kernel-close-artifacts.mjs
+      - tests/browser-real-photo-mid-kernel-close.test.mjs
+      - tools/verify-browser-real-photo-mid-kernel-escape-artifacts.mjs
+      - tests/browser-real-photo-mid-kernel-escape.test.mjs
+      - tools/verify-browser-real-photo-completed-preview-escape-artifacts.mjs
+      - tests/browser-real-photo-completed-preview-escape.test.mjs
+      - tools/verify-browser-real-photo-completed-preview-success-artifacts.mjs
+      - tests/browser-real-photo-completed-preview-success.test.mjs
+      - src/workspace/session-controller.js
+      - src/app.bundle.js
+      - tools/browser-inpaint-mid-kernel-smoke.mjs
+      - tools/browser-real-photo-memory-evidence.mjs
+      - tests/browser-real-photo-memory-evidence.test.mjs
+      - tools/browser-real-photo-quality.mjs
+      - tools/verify-browser-real-photo-worker-artifacts.mjs
+      - tools/verify-browser-real-photo-acceptance.mjs
+      - tests/browser-real-photo-acceptance.test.mjs
+      - tests/fixtures/real-photo/acceptance-plan.json
+      - tests/browser-real-photo-quality.test.mjs
+      - tests/browser-real-photo-worker-artifacts.test.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-photo-intake-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      ZPE_PHOTO_DIR: /tmp/zpe-real-photo-candidate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Pin external Pillow decoder
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zpe-photo-python"
+          "$RUNNER_TEMP/zpe-photo-python/bin/python" -m pip install --disable-pip-version-check Pillow==12.0.0 psd-tools==1.19.0
+          echo "$RUNNER_TEMP/zpe-photo-python/bin" >> "$GITHUB_PATH"
+
+      - name: Download exact Commons original (SHA-1 checked before write)
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR"
+          node tools/fetch-real-photo-source.mjs "$ZPE_PHOTO_DIR/original.jpg" > "$ZPE_PHOTO_DIR/acquisition.json"
+          node tools/inspect-real-photo-source.mjs "$ZPE_PHOTO_DIR/original.jpg" > "$ZPE_PHOTO_DIR/inspection.json"
+
+      - name: Decode actual JPEG entropy / orientation / ICC with Pillow
+        run: |
+          python3 tools/decode-real-photo.py "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" "$ZPE_PHOTO_DIR/decoder.json" > "$ZPE_PHOTO_DIR/decoder-run.json"
+          node tools/real-photo-bundle-cli.mjs candidate "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" "$ZPE_PHOTO_DIR/decoder.json" > "$ZPE_PHOTO_DIR/bundle-candidate.json"
+
+      - name: Independently recompute candidate digests (NOT pin review)
+        run: |
+          python3 - "$ZPE_PHOTO_DIR" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+
+          folder = Path(sys.argv[1])
+          original = (folder / 'original.jpg').read_bytes()
+          decoded = (folder / 'decoded.rgba').read_bytes()
+          acquire = json.loads((folder / 'acquisition.json').read_text())
+          inspection = json.loads((folder / 'inspection.json').read_text())
+          decoder_run = json.loads((folder / 'decoder-run.json').read_text())
+          candidate = json.loads((folder / 'bundle-candidate.json').read_text())
+          m = candidate['manifest']
+          sha1 = hashlib.sha1(original).hexdigest()
+          source_sha256 = hashlib.sha256(original).hexdigest()
+          decoded_sha256 = hashlib.sha256(decoded).hexdigest()
+          assert len(original) == 2783744, 'Commons original byte count mismatch'
+          assert sha1 == 'c7fc9f013c70e01f164d232462ddd6e37e4079c4'
+          assert len(decoded) == 2560 * 1920 * 4
+          assert acquire['status'] == 'source-candidate-unreviewed'
+          assert decoder_run['status'] == 'decoded-candidate-unreviewed'
+          assert candidate['status'] == 'candidate-unpinned-not-admitted'
+          assert acquire['sha256Candidate'] == source_sha256
+          assert inspection['sha256'] == source_sha256
+          assert decoder_run['sourceSha256Candidate'] == source_sha256
+          assert decoder_run['rgbaSha256Candidate'] == decoded_sha256
+          assert m['sourceSha256'] == source_sha256
+          assert m['decoded']['sha256'] == decoded_sha256
+          assert m['decoder'] == json.loads((folder / 'decoder.json').read_text())
+          receipt = {
+              'kind': 'zpe-real-photo-ci-candidate-receipt-v1',
+              'status': 'unreviewed-candidate',
+              'sourcePage': 'https://commons.wikimedia.org/wiki/File:Red-brick-wall-texture-clean.jpg',
+              'licenseClaim': 'CC0-1.0 (source page; human review still required)',
+              'authorClaim': 'MartinThoma',
+              'originalSha1': sha1,
+              'originalSha256Candidate': source_sha256,
+              'decodedRgbaSha256Candidate': decoded_sha256,
+              'originalBytes': len(original),
+              'decodedBytes': len(decoded),
+              'independentLicenseIccExifVisualReviewComplete': False,
+              'independentlyPinnedHashes': False,
+              'nativeRealPhotoPsdPsbVerified': False,
+              'browserRealPhotoBenchmarkVerified': False,
+              'photoshopCompatibilityVerified': False,
+          }
+          (folder / 'ci-candidate-receipt.json').write_text(
+              json.dumps(receipt, sort_keys=True, indent=2) + '\n'
+          )
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+          (cd "$ZPE_PHOTO_DIR" && sha256sum original.jpg decoded.rgba > SHA256SUMS)
+
+      - name: Verify externally frozen photo byte pins (JS and independent Python)
+        run: |
+          node tools/real-photo-bundle-cli.mjs verify \
+            tests/fixtures/real-photo/reviewed-manifest.json \
+            "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" \
+            > "$ZPE_PHOTO_DIR/pinned-js-verification.json"
+          python3 tools/verify-pinned-real-photo.py \
+            tests/fixtures/real-photo/reviewed-manifest.json \
+            "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" \
+            "$ZPE_PHOTO_DIR/decoder.json" \
+            > "$ZPE_PHOTO_DIR/pinned-python-verification.json"
+          python3 - "$ZPE_PHOTO_DIR" <<'PY'
+          from pathlib import Path
+          import json
+          import sys
+          folder = Path(sys.argv[1])
+          pin = json.loads(Path('tests/fixtures/real-photo/reviewed-manifest.json').read_text())
+          candidate = json.loads((folder/'bundle-candidate.json').read_text())
+          js = json.loads((folder/'pinned-js-verification.json').read_text())
+          py = json.loads((folder/'pinned-python-verification.json').read_text())
+          assert pin == candidate['manifest'], 'new upstream decode drifts from frozen pins'
+          assert js['status'] == 'pinned-byte-integrity-verified'
+          assert py['status'] == 'independent-byte-pins-verified'
+          assert js['originalSha256'] == py['sourceSha256'] == pin['sourceSha256']
+          assert js['decodedRgbaSha256'] == py['rgba8Sha256'] == pin['decoded']['sha256']
+          assert js['selectedPixels'] == py['selectionPixels'] == 8288
+          assert js['photoshopParityVerified'] is False and py['photoshopParityVerified'] is False
+          receipt_path = folder/'ci-candidate-receipt.json'
+          receipt = json.loads(receipt_path.read_text())
+          receipt['independentlyPinnedHashes'] = True
+          receipt['frozenBytePinsVerified'] = True
+          # Automated byte checks cannot give professional ICC/color sign-off.
+          assert receipt['independentLicenseIccExifVisualReviewComplete'] is False
+          receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\n')
+          PY
+
+      - name: Generate PSD16/PSB32 from verified genuine photo and check saved bytes
+        run: |
+          node tools/real-photo-psd-psb-cli.mjs \
+            tests/fixtures/real-photo/reviewed-manifest.json \
+            "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" \
+            "$ZPE_PHOTO_DIR/native-documents" > "$ZPE_PHOTO_DIR/native-generation.json"
+          node tools/real-photo-psd-psb-cli.mjs verify \
+            tests/fixtures/real-photo/reviewed-manifest.json \
+            "$ZPE_PHOTO_DIR/original.jpg" "$ZPE_PHOTO_DIR/decoded.rgba" \
+            "$ZPE_PHOTO_DIR/native-documents" > "$ZPE_PHOTO_DIR/native-saved-js.json"
+          python3 tools/verify-photo-native-artifact-set.py \
+            tests/fixtures/real-photo/reviewed-manifest.json \
+            "$ZPE_PHOTO_DIR/native-documents" \
+            tests/fixtures/real-photo/reviewed-native-artifacts.json \
+            > "$ZPE_PHOTO_DIR/native-independent-run.json"
+          python3 - "$ZPE_PHOTO_DIR" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          folder = Path(sys.argv[1])
+          saved = json.loads((folder/'native-saved-js.json').read_text())
+          independent = json.loads((folder/'native-independent-run.json').read_text())
+          persisted = json.loads((folder/'native-documents'/'independent-native-readback.json').read_text())
+          assert saved['status'] == 'saved-zpe-native-artifacts-verified'
+          assert independent == persisted, 'independent evidence changed after verification'
+          assert independent['status'] == 'saved-native-layer-and-merged-words-verified'
+          assert set(independent['documents']) == {'psd16', 'psb32'}
+          assert independent['selectionPixels'] == 8288
+          assert independent['frozenFilePinsVerified'] is True
+          assert not independent['photoshopParityVerified']
+          assert not independent['browserBenchmarkVerified']
+          for key in ('psd16', 'psb32'):
+              assert (saved['documents'][key]['fileSha256'] ==
+                      independent['documents'][key]['fileSha256'])
+              assert (saved['documents'][key]['nativeDefectSha256'] ==
+                      independent['documents'][key]['nativeLayerSha256'])
+              assert (independent['documents'][key]['nativeLayerSha256'] ==
+                      independent['documents'][key]['nativeMergedSha256'])
+          receipt_path = folder/'ci-candidate-receipt.json'
+          receipt = json.loads(receipt_path.read_text())
+          assert receipt['frozenBytePinsVerified'] is True
+          assert receipt['independentlyPinnedHashes'] is True
+          assert receipt['nativeRealPhotoPsdPsbVerified'] is False
+          receipt['nativeRealPhotoPsdPsbVerified'] = True
+          receipt['nativeArtifactReadbackStatus'] = independent['status']
+          receipt['nativeFileHashesFrozenVerified'] = True
+          assert receipt['independentLicenseIccExifVisualReviewComplete'] is False
+          assert receipt['photoshopCompatibilityVerified'] is False
+          assert receipt['browserRealPhotoBenchmarkVerified'] is False
+          receipt_path.write_text(json.dumps(receipt, sort_keys=True, indent=2)+'\n')
+          PY
+
+      - name: 037C-3b-3/2b-2 genuine-photo native memory cap and retry
+        timeout-minutes: 20
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-memory-cap"
+          for format in psd16 psb32; do
+            scenario_dir="$ZPE_PHOTO_DIR/browser-memory-cap/$format"
+            mkdir -p "$scenario_dir"
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MEMORY_CAP=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$scenario_dir" \
+              node tools/browser-smoke.mjs
+            cp "$scenario_dir/real-photo-$format-memory-cap-run-1.json" "$ZPE_PHOTO_DIR/browser-memory-cap/"
+          done
+          node tools/verify-browser-real-photo-memory-cap-artifacts.mjs "$ZPE_PHOTO_DIR/browser-memory-cap" \
+            > "$ZPE_PHOTO_DIR/browser-memory-cap-set.json"
+
+      - name: 037C-3a six genuine-photo Chromium Worker sessions with observational memory
+        timeout-minutes: 25
+        run: |
+          npm run build
+          mkdir -p "$ZPE_PHOTO_DIR/browser-baselines"
+          for format in psd16 psb32; do
+            for run in 1 2 3; do
+              ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+              ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+              ZPE_REAL_PHOTO_BROWSER_RUN="$run" \
+              ZPE_REAL_PHOTO_BROWSER_WORKER=1 \
+              ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-baselines" \
+                node tools/browser-smoke.mjs
+            done
+          done
+          node tools/verify-browser-real-photo-import-artifacts.mjs "$ZPE_PHOTO_DIR/browser-baselines" \
+            > "$ZPE_PHOTO_DIR/browser-baseline-set.json"
+          node tools/verify-browser-real-photo-worker-artifacts.mjs "$ZPE_PHOTO_DIR/browser-baselines" \
+            > "$ZPE_PHOTO_DIR/browser-worker-set.json"
+          node tools/browser-real-photo-memory-evidence.mjs "$ZPE_PHOTO_DIR/browser-baselines" \
+            > "$ZPE_PHOTO_DIR/browser-memory-set.json"
+
+      - name: 037C-3b-2a real-photo Chromium cancellation and late-result matrix
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-failures"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_FAILURE=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-failures" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-switch-failure-artifacts.mjs "$ZPE_PHOTO_DIR/browser-failures" \
+            > "$ZPE_PHOTO_DIR/browser-switch-failure-set.json"
+
+      - name: 037C-3b-2b-1 genuine-photo Chromium post-write kernel cancellation
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-mid-kernel"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MID_KERNEL=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-mid-kernel" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-mid-kernel-artifacts.mjs "$ZPE_PHOTO_DIR/browser-mid-kernel" \
+            > "$ZPE_PHOTO_DIR/browser-mid-kernel-set.json"
+
+      - name: 037C-3b-2b-2 genuine-photo public close after a real native kernel write
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-mid-kernel-close"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MID_KERNEL_CLOSE=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-mid-kernel-close" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-mid-kernel-close-artifacts.mjs "$ZPE_PHOTO_DIR/browser-mid-kernel-close" \
+            > "$ZPE_PHOTO_DIR/browser-mid-kernel-close-set.json"
+
+      - name: 037C-3b-2b-3a genuine-photo public Escape after real native kernel write
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-mid-kernel-escape"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MID_KERNEL_ESCAPE=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-mid-kernel-escape" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-mid-kernel-escape-artifacts.mjs "$ZPE_PHOTO_DIR/browser-mid-kernel-escape" \
+            > "$ZPE_PHOTO_DIR/browser-mid-kernel-escape-set.json"
+
+      - name: 037C-3b-2b-3b-1 genuine completed Worker preview -> public Escape
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-completed-preview-escape"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_ESCAPE=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-completed-preview-escape" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-completed-preview-escape-artifacts.mjs "$ZPE_PHOTO_DIR/browser-completed-preview-escape" \
+            > "$ZPE_PHOTO_DIR/browser-completed-preview-escape-set.json"
+
+      - name: 037C-3b-2b-3b-2a genuine Worker success -> publish -> public Escape
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-completed-preview-success"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_COMPLETED_PREVIEW_SUCCESS=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-completed-preview-success" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-completed-preview-success-artifacts.mjs "$ZPE_PHOTO_DIR/browser-completed-preview-success" \
+            > "$ZPE_PHOTO_DIR/browser-completed-preview-success-set.json"
+
+      - name: 037C-3b-2b-3b-2b real-photo cancel-first then genuine successor Worker
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-cancel-successor"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_CANCEL_SUCCESSOR=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-cancel-successor" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-cancel-successor-artifacts.mjs "$ZPE_PHOTO_DIR/browser-cancel-successor" \
+            > "$ZPE_PHOTO_DIR/browser-cancel-successor-set.json"
+
+      - name: 037C-3b-3/2a genuine-photo completed native Worker -> invalid selected alpha
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-malformed-alpha"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MALFORMED_ALPHA=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-malformed-alpha" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-malformed-alpha-artifacts.mjs "$ZPE_PHOTO_DIR/browser-malformed-alpha" \
+            > "$ZPE_PHOTO_DIR/browser-malformed-alpha-set.json"
+
+      - name: 037C-3b-3/2b-1 genuine-photo native Worker corrupted changed counter
+        timeout-minutes: 10
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-malformed-counter"
+          for format in psd16 psb32; do
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$format" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MALFORMED_COUNTER=1 \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$ZPE_PHOTO_DIR/browser-malformed-counter" \
+              node tools/browser-smoke.mjs
+          done
+          node tools/verify-browser-real-photo-malformed-counter-artifacts.mjs "$ZPE_PHOTO_DIR/browser-malformed-counter" \
+            > "$ZPE_PHOTO_DIR/browser-malformed-counter-set.json"
+
+      - name: 037C-3b-3/2b-2 genuine-photo non-finite and outside-ROI refusal
+        timeout-minutes: 15
+        run: |
+          mkdir -p "$ZPE_PHOTO_DIR/browser-malformed-extra"
+          for scenario in "psd16 outside" "psb32 outside" "psb32 nonfinite-nan" "psb32 nonfinite-infinity"; do
+            set -- $scenario
+            scenario_dir="$ZPE_PHOTO_DIR/browser-malformed-extra/$1-$2"
+            mkdir -p "$scenario_dir"
+            ZPE_REAL_PHOTO_BROWSER_DIR="$ZPE_PHOTO_DIR/native-documents" \
+            ZPE_REAL_PHOTO_BROWSER_FORMAT="$1" \
+            ZPE_REAL_PHOTO_BROWSER_RUN=1 \
+            ZPE_REAL_PHOTO_BROWSER_MALFORMED_EXTRA="$2" \
+            ZPE_REAL_PHOTO_BROWSER_ARTIFACT_DIR="$scenario_dir" \
+              node tools/browser-smoke.mjs
+            cp "$scenario_dir/real-photo-$1-malformed-$2-run-1.json" "$ZPE_PHOTO_DIR/browser-malformed-extra/"
+          done
+          node tools/verify-browser-real-photo-malformed-extra-artifacts.mjs "$ZPE_PHOTO_DIR/browser-malformed-extra" \
+            > "$ZPE_PHOTO_DIR/browser-malformed-extra-set.json"
+
+      - name: 037C-3c cross-check complete genuine-photo evidence matrix
+        run: |
+          node tools/verify-browser-real-photo-acceptance.mjs "$ZPE_PHOTO_DIR" \
+            > "$ZPE_PHOTO_DIR/browser-acceptance-ledger.json"
+
+      - name: Upload 037C-3c verified evidence ledger (SHA-256, not a signature)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: 037c3c-genuine-photo-acceptance
+          path: /tmp/zpe-real-photo-candidate/browser-acceptance-ledger.json
+          if-no-files-found: warn
+
+      - name: Upload 037C-3b-3/2b-2 memory-cap receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-memory-cap
+          path: /tmp/zpe-real-photo-candidate/browser-memory-cap/*.json
+          if-no-files-found: warn
+
+      - name: Upload 037C-3b-3/2b-2 malformed-extra receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-malformed-extra
+          path: /tmp/zpe-real-photo-candidate/browser-malformed-extra/*.json
+          if-no-files-found: warn
+
+      - name: Upload 037C-3b-3/2b-1 counter-refusal receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-malformed-counter
+          path: /tmp/zpe-real-photo-candidate/browser-malformed-counter/*.json
+          if-no-files-found: warn
+
+      - name: Upload 037C-1/2 evidence and 037C-3a sampled-memory receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-native-worker
+          path: /tmp/zpe-real-photo-candidate/browser-baselines/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-2a real-photo fail-closed Chromium receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-cancel-switch
+          path: /tmp/zpe-real-photo-candidate/browser-failures/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-2b-1 actual real-photo native kernel cancellation receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-mid-kernel
+          path: /tmp/zpe-real-photo-candidate/browser-mid-kernel/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-2b-2 public close post-write receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-mid-kernel-close
+          path: /tmp/zpe-real-photo-candidate/browser-mid-kernel-close/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-2b-3a public Escape post-write receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-mid-kernel-escape
+          path: /tmp/zpe-real-photo-candidate/browser-mid-kernel-escape/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-2b-3b-1 completed Worker preview Escape receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-completed-preview-escape
+          path: /tmp/zpe-real-photo-candidate/browser-completed-preview-escape/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-2b-3b-2a success-before-Escape receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-completed-preview-success
+          path: /tmp/zpe-real-photo-candidate/browser-completed-preview-success/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-2b-3b-2b cancel-first successor real Worker receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-cancel-successor
+          path: /tmp/zpe-real-photo-candidate/browser-cancel-successor/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload 037C-3b-3/2a malformed real Worker alpha refusal receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-browser-malformed-alpha
+          path: /tmp/zpe-real-photo-candidate/browser-malformed-alpha/*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload verified photo-derived native PSD16/PSB32 (not Adobe parity)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-native-psd-psb
+          path: /tmp/zpe-real-photo-candidate/native-documents/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload ephemeral unreviewed candidate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zpe-real-photo-unreviewed-candidate
+          path: |
+            /tmp/zpe-real-photo-candidate/
+            !/tmp/zpe-real-photo-candidate/native-documents/**
+          if-no-files-found: error
+          retention-days: 7

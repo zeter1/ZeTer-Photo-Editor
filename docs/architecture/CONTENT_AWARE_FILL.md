@@ -53,6 +53,16 @@ Alternating forward/backward passes make good offsets propagate across the hole 
 
 This is **PatchMatch-style texture synthesis**, not Adobe's proprietary implementation and not an ML/semantic fill system.
 
+## Stage 003 — tiled high-depth ROI
+
+For persisted v2 tiled RGB/CMYK sources, the command uses a single **selection bounding rectangle + 24 px halo** as the donor working region. It scans the frozen layer-local selection predicate without decoding any tiles, then reads only tiles that overlap the ROI, calls the existing native typed-sample inpaint kernel once, and writes back only changed tiles. No per-tile independent synthesis: the ROI spans tile boundaries.
+
+- The full **ROI** still obeys the existing 8 MP inpaint layer cap; the global selected count obeys the 2 MP fill cap. A selection of the whole source remains a no-donor no-op.
+- Small localized fills on an otherwise larger tiled layer can therefore succeed without the old full-plane decode. When a global bounding ROI is too large, up to 256 occupied source tiles may be grouped into halo-disjoint rectangles. The transitive padded-tile merge prevents any two donor regions from overlapping; the **sum** of actual ROI areas still obeys the original 8 MP cap. Broad connected sparse shapes can use an additional bounded tile-fragment fallback when the halo-disjoint merge is too large. Fragment halos may overlap, but every originally selected pixel is globally excluded from donor and PatchMatch context for all fragments, including after prior fragment writes. The aggregate region-area cap and 256 occupied tile limit still apply; dense or heavily fragmented selections remain safe rejections.
+- Donors remain immutable original non-selected pixels **inside the halo**. Disjoint ROIs cannot sample pixels synthesized by another ROI. All ROI changes remain unpublished in the working set until every region completes. PatchMatch search does not see donors outside the bounded ROI. This is a deliberate changed texture-search scope, not bit-identical full-plane output.
+- Unchanged tile payloads are reused as-is; the new source/preview is published only after exact document, live raster target/lock and original serialized-source identity survive asynchronous preparation. Stale jobs have zero publication/history.
+- The browser composite still requires a full RGBA8 preview surface; this is not a virtual-memory renderer, thread/worker implementation or Adobe result parity claim.
+
 ## Large-region fallback
 
 Patch search is intentionally capped. If the selected area exceeds the PatchMatch refinement budget, Stage 1 remains the final result.
@@ -77,6 +87,12 @@ The algorithm works directly on typed samples:
 - CMYK/CMYKA.
 
 Integer patch differences are normalized by their native sample range. Float differences use a bounded relative scale so HDR/unmanaged samples are compared without first clipping them to 0…1.
+
+### Model-aware channel and straight-alpha contract
+
+The inpaint kernel accepts an explicit `alphaChannel` (default RGBA=3, CMYKA=4, or `-1` for no alpha). The native PixelBuffer bridge derives it from validated `alphaMode`. Four-channel CMYK has **four opaque inks**, not an alpha channel; PatchMatch compares K along with C/M/Y. RGB3 and CMYK4 never exclude their final color channel.
+
+For straight alpha the boundary stage averages donor colors in premultiplied form, then returns straight colors, averaging alpha with the original spatial weights. Fully transparent donor colors cannot create colored halos; samples outside selection stay untouched. PatchMatch copies exact donor samples and retains the immutable original-selection donor rule.
 
 ## Tests
 

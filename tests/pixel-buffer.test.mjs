@@ -9,6 +9,7 @@ import {
   pixelBufferToRgba8Preview,
   serializePixelBufferSource,
   sanitizeSerializedPixelBufferSource,
+  serializeTiledPixelBufferSource,
   deserializePixelBufferSource,
   MAX_PIXEL_BUFFER_SOURCE_BYTES,
 } from '../src/core/pixel-buffer.js';
@@ -115,4 +116,37 @@ test('native edge-color decontamination works in CMYK Float32 without touching a
   assert.ok(output.data[8]<source.data[8]);
   assert.equal(output.data[9],source.data[9]);
   assert.equal(output.data[10],source.data[10],'unselected CMYK sample must stay exact');
+});
+
+test('native source sanitizer rejects noncanonical Base64 without decoding payloads', () => {
+  const buffer = createPixelBuffer({
+    width:1, height:1, model:'rgb', channels:4, bitsPerChannel:8,
+    data:Uint8ClampedArray.from([25, 64, 128, 255]),
+  });
+  const plain = serializePixelBufferSource(buffer);
+  const tiled = serializeTiledPixelBufferSource(buffer, { tileSize:1 });
+  assert.ok(sanitizeSerializedPixelBufferSource(plain));
+  assert.ok(sanitizeSerializedPixelBufferSource(tiled));
+
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  function alternativePadding(dataUrl) {
+    assert.ok(dataUrl.endsWith('=='), '4 bytes require two padding symbols');
+    const location = dataUrl.length - 3;
+    const sextet = alphabet.indexOf(dataUrl[location]);
+    assert.equal(sextet & 15, 0);
+    const changed = dataUrl.slice(0, location) + alphabet[sextet | 1] + dataUrl.slice(location + 1);
+    assert.deepEqual(Buffer.from(changed.slice(changed.indexOf('base64,') + 7), 'base64'),
+      Buffer.from(dataUrl.slice(dataUrl.indexOf('base64,') + 7), 'base64'),
+      'noncanonical tail should decode to the same bytes');
+    return changed;
+  }
+  assert.equal(sanitizeSerializedPixelBufferSource({
+    ...plain, dataUrl:alternativePadding(plain.dataUrl),
+  }), null, 'v1 rejects nonzero unused padding bits');
+  assert.equal(sanitizeSerializedPixelBufferSource({
+    ...tiled, tiles:[{ ...tiled.tiles[0], dataUrl:alternativePadding(tiled.tiles[0].dataUrl) }],
+  }), null, 'v2 rejects nonzero unused padding bits');
+  assert.equal(sanitizeSerializedPixelBufferSource({
+    ...plain, dataUrl:plain.dataUrl.replace(/==$/, 'A='),
+  }), null, 'incorrect padding position is invalid');
 });

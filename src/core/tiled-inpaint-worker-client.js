@@ -1,0 +1,222 @@
+/**
+ * Stage 003: detached tiled inpaint Worker lifecycle (used by the UI).
+ *
+ * No live document objects cross the boundary. A new job supersedes the old
+ * worker, and a caller must call cancel() when its document/target changes.
+ * isCurrent is checked before dispatch, periodically while pending (opt-in),
+ * and again before accepting a result. worker.terminate() stops stale kernels.
+ *
+ * Accept both browser Worker events and Node worker_threads events, allowing
+ * the same owner/cancellation contract to be tested without a browser Worker
+ * bootstrap (file:// module Worker loading is not supported by this seam).
+ */
+export function createTiledInpaintWorkerJobController({
+  createWorker,
+  pollIntervalMs = 0,
+  schedulePoll = setInterval,
+  cancelPoll = clearInterval,
+  // The portable Node client defaults to no deadline; browser enables one.
+  maxRunMs = 0,
+  scheduleDeadline = setTimeout,
+  cancelDeadline = clearTimeout,
+} = {}) {
+  if (typeof createWorker !== 'function') {
+    throw new TypeError('Tiled inpaint Worker: createWorker is required');
+  }
+  const pollDelay = Number.isFinite(pollIntervalMs) && pollIntervalMs > 0
+    ? Math.max(1, Math.trunc(pollIntervalMs)) : 0;
+  if (pollDelay && (typeof schedulePoll !== 'function' || typeof cancelPoll !== 'function')) {
+    throw new TypeError('Tiled inpaint Worker: invalid polling timer');
+  }
+  if (!Number.isSafeInteger(maxRunMs) || maxRunMs < 0) {
+    throw new RangeError('Tiled inpaint Worker: invalid execution deadline');
+  }
+  if (maxRunMs && (typeof scheduleDeadline !== 'function' ||
+                   typeof cancelDeadline !== 'function')) {
+    throw new TypeError('Tiled inpaint Worker: invalid deadline timer');
+  }
+  let active = null;
+  let nextId = 0;
+
+  function cancel() {
+    if (!active) return false;
+    active.cancel();
+    return true;
+  }
+
+  function run(job, { isCurrent = () => true } = {}) {
+    // Claim this generation BEFORE invoking user-controlled cancel/isCurrent
+    // callbacks or Worker factories. Any reentrant run wins over this one.
+    const id = ++nextId;
+    // Superseding a job must stop it even if the new request is stale.
+    cancel();
+    if (typeof isCurrent !== 'function') {
+      return Promise.reject(new TypeError('Tiled inpaint Worker: isCurrent must be a function'));
+    }
+    const current = () => {
+      try { return Boolean(isCurrent()); } catch { return false; }
+    };
+    if (!current() || id !== nextId) return Promise.resolve({ cancelled:true });
+
+    let worker;
+    try {
+      worker = createWorker();
+      if (!worker || typeof worker.postMessage !== 'function' ||
+          typeof worker.terminate !== 'function') {
+        // A factory may return a partially usable Worker. Release it before
+        // rejecting so a broken adapter does not leave a live thread behind.
+        try {
+          const termination = worker?.terminate?.();
+          if (termination && typeof termination.catch === 'function') termination.catch(() => {});
+        } catch { /* preserve the invalid Worker error */ }
+        throw new TypeError('Tiled inpaint Worker: invalid Worker instance');
+      }
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    // A Worker factory (or owner callback) can synchronously begin a newer
+    // run. Release the orphaned instance instead of replacing that owner's
+    // active handle or allowing a stale Worker to publish.
+    if (id !== nextId || !current() || id !== nextId) {
+      try {
+        const termination = worker.terminate();
+        if (termination && typeof termination.catch === 'function') termination.catch(() => {});
+      } catch { /* the superseded Worker must never publish */ }
+      return Promise.resolve({ cancelled:true });
+    }
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let dispatched = false;
+      let pollTimer = null;
+      let deadlineTimer = null;
+      let detach = () => {};
+      const terminate = () => {
+        try {
+          const result = worker.terminate();
+          // Node returns a Promise; a failed termination cannot turn a
+          // cancelled/stale result into an unhandled rejection.
+          if (result && typeof result.catch === 'function') result.catch(() => {});
+        } catch { /* the result is already settled; never publish it */ }
+      };
+      const finish = (result, error) => {
+        if (settled) return;
+        settled = true;
+        if (pollTimer !== null) {
+          try { cancelPoll(pollTimer); } catch { /* never leave a job pending on timer cleanup */ }
+          pollTimer = null;
+        }
+        if (deadlineTimer !== null) {
+          try { cancelDeadline(deadlineTimer); } catch { /* never publish stale tiles */ }
+          deadlineTimer = null;
+        }
+        detach();
+        if (active?.id === id) active = null;
+        terminate();
+        if (error) reject(error);
+        else resolve(result);
+      };
+      const stop = () => finish({ cancelled:true });
+      const fail = error => finish(null, error instanceof Error ? error : new Error(String(error?.message || error)));
+      const message = data => {
+        if (settled) return;
+        // Checking the owner can itself trigger a newer run (and settle us).
+        // Never post a job or publish a reply after that reentrant takeover.
+        if (!current() || id !== nextId || settled) { stop(); return; }
+        if (!dispatched) {
+          if (data?.ready !== true) return;
+          dispatched = true;
+          try { worker.postMessage({ ...job, id }); }
+          catch (error) { fail(error); }
+          return;
+        }
+        if (data?.id !== id) return;
+        if (data.ok === true) {
+          finish(data.result);
+        } else if (data.ok === false) {
+          const error = new Error(String(data.error?.message || 'Worker compute failed'));
+          error.name = String(data.error?.name || 'Error');
+          fail(error);
+        } else {
+          fail(new TypeError('Tiled inpaint Worker: invalid reply'));
+        }
+      };
+
+      // Subscribe may synchronously emit ready/error (or a test double may
+      // answer in postMessage). Register ownership and detachment first so
+      // a reentrant finish can clear the active job and release every listener.
+      active = { id, cancel:stop };
+      try {
+        if (typeof worker.addEventListener === 'function') {
+          const onMessage = event => message(event.data);
+          const onError = event => fail(new Error(String(event?.message || 'Worker error')));
+          // A structured-clone decoding failure emits messageerror, not error.
+          // Without this listener the awaiting UI job would never settle.
+          const onMessageError = () => fail(new Error('Tiled inpaint Worker: message deserialization failed'));
+          detach = () => {
+            worker.removeEventListener('message', onMessage);
+            worker.removeEventListener('error', onError);
+            worker.removeEventListener('messageerror', onMessageError);
+          };
+          worker.addEventListener('message', onMessage);
+          worker.addEventListener('error', onError);
+          worker.addEventListener('messageerror', onMessageError);
+        } else if (typeof worker.on === 'function' && typeof worker.off === 'function') {
+          const onMessage = data => message(data);
+          const onError = error => fail(error);
+          const onMessageError = () => fail(new Error('Tiled inpaint Worker: message deserialization failed'));
+          const onExit = code => fail(new Error('Tiled inpaint Worker exited before reply: ' + code));
+          detach = () => {
+            worker.off('message', onMessage);
+            worker.off('error', onError);
+            worker.off('messageerror', onMessageError);
+            worker.off('exit', onExit);
+          };
+          worker.on('message', onMessage);
+          worker.on('error', onError);
+          worker.on('messageerror', onMessageError);
+          worker.on('exit', onExit);
+        } else {
+          fail(new TypeError('Tiled inpaint Worker: missing message event API'));
+          return;
+        }
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      // A callback could have settled mid-subscription, before all handlers
+      // were registered: remove the late registrations as well.
+      if (settled) { detach(); return; }
+      // An owner can change synchronously inside a Worker factory/subscription.
+      if (!current()) { stop(); return; }
+      if (pollDelay) {
+        try {
+          // Poll only while a Worker is alive: a stale layer/lock/source may
+          // change without any Worker message or explicit document reset.
+          const timer = schedulePoll(() => { if (!current()) stop(); }, pollDelay);
+          // Handle even a synchronous/reentrant injected scheduler safely.
+          if (settled) cancelPoll(timer);
+          else pollTimer = timer;
+        } catch (error) { fail(error); }
+      }
+      if (!settled && maxRunMs) {
+        try {
+          // The UI-thread timer can stop a CPU-bound Worker that never replies.
+          // A timeout is a compute failure, never a cooperative fallback.
+          const token = scheduleDeadline(
+            () => fail(new Error('Tiled inpaint Worker: timed out after ' + maxRunMs + ' ms')),
+            maxRunMs,
+          );
+          // A test scheduler may fire synchronously during registration.
+          if (settled) {
+            try { cancelDeadline(token); } catch { /* already stopped */ }
+          } else {
+            deadlineTimer = token;
+          }
+        } catch (error) { fail(error); }
+      }
+    });
+  }
+
+  return { run, cancel };
+}

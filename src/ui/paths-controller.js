@@ -42,6 +42,7 @@ export function createPathsController({
   } = ui;
 
   let selectedIndex = -1;
+  let selectedSubpathIndex = 0;
 
   const documentValue = () => getDocument?.() || null;
   const paths = () => {
@@ -66,6 +67,7 @@ export function createPathsController({
   }
 
   function setSelectedIndex(index, { syncEdit = false, render = false, draw = false } = {}) {
+    if (selectedIndex !== index) selectedSubpathIndex = 0;
     selectedIndex = Number.isInteger(index) ? index : -1;
     const normalized = normalizeSelectedIndex();
     if (syncEdit && normalized >= 0) syncPathEditSelection(normalized);
@@ -176,6 +178,34 @@ export function createPathsController({
     return true;
   }
 
+  function createEmptyDocumentPath() {
+    const owner = documentValue();
+    if (!owner) return false;
+    if (paths().length >= SAVED_PATH_LIMIT) {
+      setStatus('Достигнут лимит 998 сохранённых контуров');
+      return false;
+    }
+    const id = allocateResourceId();
+    if (id === null) {
+      setStatus('Исчерпан диапазон Photoshop Path Resource ID 2000..2997');
+      return false;
+    }
+    if (!Array.isArray(owner.paths)) owner.paths = [];
+    const path = {
+      id,
+      name: uniqueName('Контур'),
+      fillStartsWithAllPixels: false,
+      subpaths: [],
+    };
+    owner.paths.push(path);
+    selectedIndex = owner.paths.length - 1;
+    commit('Создать контур');
+    beginPathEdit(selectedIndex);
+    updatePathsPanel();
+    setStatus(`Создан «${path.name}»: нарисуйте замкнутый контур пером`);
+    return true;
+  }
+
   function renameSelectedDocumentPath() {
     const owner = documentValue();
     const path = selectedPath();
@@ -251,7 +281,8 @@ export function createPathsController({
   }
 
   function canApplyPath(path = selectedPath(), layer = getSelectedLayer?.()) {
-    return Boolean(path && layer && layer.type !== 'adjustment' && !isLayerLocked(layer, documentValue()));
+    return Boolean(path?.subpaths?.some(subpath => subpath?.closed && subpath.points?.length >= 3)
+      && layer && !isLayerLocked(layer, documentValue()));
   }
 
   function applySelectedDocumentPathAsVectorMask() {
@@ -265,12 +296,12 @@ export function createPathsController({
       setStatus('Выберите слой для векторной маски');
       return false;
     }
-    if (layer.type === 'adjustment') {
-      setStatus('Сохранённый контур как vector mask пока применяется к обычным слоям, не к adjustment layer');
-      return false;
-    }
     if (isLayerLocked(layer, documentValue())) {
       setStatus('Слой или его группа заблокированы');
+      return false;
+    }
+    if (!canApplyPath(path, layer)) {
+      setStatus('Нарисуйте замкнутый контур перед созданием маски');
       return false;
     }
     const mask = importVectorMask({
@@ -288,6 +319,68 @@ export function createPathsController({
     clearVectorMaskEdit();
     commit('Применить контур как векторную маску');
     setStatus(`Контур «${path.name || 'Контур'}» применён как векторная маска`);
+    return true;
+  }
+
+  function appendPenSubpath(points, { index = getSelectedIndex(), expectedDocument = null, closed = false, operation = 'add' } = {}) {
+    const owner = documentValue();
+    const path = selectedPath();
+    if (!owner || (expectedDocument && expectedDocument !== owner) || index !== selectedIndex
+      || owner.paths?.[index] !== path || !Array.isArray(path?.subpaths)) return false;
+    if (!['add', 'subtract', 'intersect', 'exclude'].includes(operation)) {
+      setStatus('Недопустимая операция векторного контура');
+      return false;
+    }
+    if (!closed || !Array.isArray(points) || points.length < 3 || points.length > 16384) {
+      setStatus('Для векторной маски нужен замкнутый контур из трёх или более узлов');
+      return false;
+    }
+    if (path.subpaths.length >= 65535 || points.some(point => {
+      const valid = value => value && Number.isFinite(value.x) && Number.isFinite(value.y);
+      return !valid(point) || (point.handleIn != null && !valid(point.handleIn))
+        || (point.handleOut != null && !valid(point.handleOut));
+    })) {
+      setStatus('Недопустимая геометрия подпути');
+      return false;
+    }
+    const xs = points.map(point => point.x);
+    const ys = points.map(point => point.y);
+    if (Math.max(...xs) - Math.min(...xs) < 1 && Math.max(...ys) - Math.min(...ys) < 1) {
+      setStatus('Контур слишком мал');
+      return false;
+    }
+    const nodes = points.map(point => ({
+      x: point.x, y: point.y,
+      handleIn: point.handleIn ? { x: point.handleIn.x, y: point.handleIn.y } : null,
+      handleOut: point.handleOut ? { x: point.handleOut.x, y: point.handleOut.y } : null,
+      kind: point.kind === 'smooth' ? 'smooth' : 'corner',
+    }));
+    path.subpaths.push({ operation, closed: true, fillRule: 'non-zero', points: nodes });
+    commit('Добавить подпуть сохранённого контура');
+    setStatus(`Подпуть (${operation}) добавлен в «${path.name || 'Контур'}»`);
+    return true;
+  }
+
+  function changeSubpathOperation(pathIndex, subpathIndex, operation, {
+    expectedDocument = null, expectedPath = null, expectedSubpath = null,
+  } = {}) {
+    const owner = documentValue();
+    if (!owner || (expectedDocument && owner !== expectedDocument)
+      || !Number.isInteger(pathIndex) || pathIndex !== selectedIndex
+      || !Number.isInteger(subpathIndex) || subpathIndex < 0
+      || !['add', 'subtract', 'intersect', 'exclude'].includes(operation)) return false;
+    const path = owner.paths?.[pathIndex];
+    const subpath = path?.subpaths?.[subpathIndex];
+    if (!subpath || (expectedPath && path !== expectedPath)
+      || (expectedSubpath && subpath !== expectedSubpath)
+      || !subpath.closed || !Array.isArray(subpath.points) || subpath.points.length < 3
+      || subpath.operation === operation) return false;
+    subpath.operation = operation;
+    selectedSubpathIndex = subpathIndex;
+    commit('Изменить операцию подпути');
+    updatePathsPanel();
+    drawOverlay();
+    setStatus('Операция подпути изменена; повторно примените Saved Path к векторной маске');
     return true;
   }
 
@@ -317,6 +410,7 @@ export function createPathsController({
       || (layer?.type === 'shape' && layer.shape === 'path' && layer.pathPoints?.length >= 2)
     ) && list.length < SAVED_PATH_LIMIT;
     const enabled = {
+      new: Boolean(documentValue() && list.length < SAVED_PATH_LIMIT),
       add: canSave,
       edit: Boolean(path),
       applyMask: canApplyPath(path, layer),
@@ -326,6 +420,41 @@ export function createPathsController({
     };
     for (const [key, value] of Object.entries(enabled)) {
       if (controls[key]) controls[key].disabled = !value;
+    }
+    const owner = documentValue();
+    const subpaths = Array.isArray(path?.subpaths) ? path.subpaths : [];
+    if (!Number.isInteger(selectedSubpathIndex) || selectedSubpathIndex >= subpaths.length) {
+      selectedSubpathIndex = 0;
+    }
+    if (controls.subpath && documentRef?.createElement) {
+      const options = subpaths.map((subpath, index) => {
+        const option = documentRef.createElement('option');
+        option.value = String(index);
+        option.textContent = `${index + 1}: ${subpath.points?.length || 0} узлов`;
+        return option;
+      });
+      controls.subpath.replaceChildren(...options);
+      controls.subpath.disabled = !subpaths.length;
+      controls.subpath.value = subpaths.length ? String(selectedSubpathIndex) : '';
+      controls.subpath.onchange = () => {
+        if (documentValue() !== owner || owner?.paths?.[selectedIndex] !== path) return;
+        const next = Number(controls.subpath.value);
+        if (!Number.isInteger(next) || next < 0 || next >= subpaths.length) return;
+        selectedSubpathIndex = next;
+        updateControls(paths());
+      };
+    }
+    if (controls.subpathOperation) {
+      const current = subpaths[selectedSubpathIndex];
+      controls.subpathOperation.disabled = !current;
+      controls.subpathOperation.value = current?.operation || 'add';
+      const pathIndex = selectedIndex;
+      const subpathIndex = selectedSubpathIndex;
+      controls.subpathOperation.onchange = () => {
+        changeSubpathOperation(pathIndex, subpathIndex, controls.subpathOperation.value, {
+          expectedDocument: owner, expectedPath: path, expectedSubpath: current,
+        });
+      };
     }
     return enabled;
   }
@@ -391,6 +520,7 @@ export function createPathsController({
 
   function bindControls() {
     const bindings = {
+      new: createEmptyDocumentPath,
       add: addDocumentPathFromCurrent,
       edit: editSelectedDocumentPath,
       applyMask: applySelectedDocumentPathAsVectorMask,
@@ -414,11 +544,14 @@ export function createPathsController({
     selectedPath,
     pathFromCurrentSource,
     addDocumentPathFromCurrent,
+    createEmptyDocumentPath,
     renameSelectedDocumentPath,
     duplicateSelectedDocumentPath,
     deleteSelectedDocumentPath,
     editSelectedDocumentPath,
     applySelectedDocumentPathAsVectorMask,
+    appendPenSubpath,
+    changeSubpathOperation,
     pathContextMenu,
     updatePathsPanel,
     bindControls,

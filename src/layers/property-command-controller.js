@@ -15,7 +15,7 @@ const LAYER_PROPERTY_STRING_PROPS = new Set([
 ]);
 const LAYER_PROPERTY_BLEND_MODES = new Set([
   'source-over', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light',
-  'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'exclusion',
+  'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'exclusion', 'color', 'hue', 'saturation', 'luminosity',
 ]);
 
 export function createLayerPropertyCommandController({
@@ -286,6 +286,14 @@ export function createLayerPropertyCommandController({
     return publishCommit(owner, 'Режим наложения');
   }
 
+  function commandSetClipping(owner, layerId, enabled) {
+    const layer = exactLayer(owner, layerId);
+    if (!layer || layer.type !== 'raster' || isLayerLocked(owner, layer) || typeof enabled !== 'boolean') return false;
+    if (Boolean(layer.clipping) === enabled) return false;
+    layer.clipping = enabled;
+    return publishCommit(owner, 'Изменить clipping растрового слоя');
+  }
+
   function commandSetOpacity(owner, layerId, rawPercent, { commit = true } = {}) {
     const previewKey = `opacity:${layerId}`;
     const layer = exactLayer(owner, layerId);
@@ -408,6 +416,7 @@ export function createLayerPropertyCommandController({
     resetColorCorrection: commandResetColorCorrection,
     resetFilters: commandResetFilters,
     setBlendMode: commandSetBlendMode,
+    setClipping: commandSetClipping,
     setOpacity: commandSetOpacity,
     updateHighDepthPreview: commandUpdateHighDepthPreview,
     resetHighDepthPreview: commandResetHighDepthPreview,

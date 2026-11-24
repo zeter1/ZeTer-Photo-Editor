@@ -43,6 +43,10 @@ export function createLayerGroupCommandController({
     ['color-dodge', 'Осветление основы'],
     ['color-burn', 'Затемнение основы'],
     ['difference', 'Разница'],
+    ['color', 'Цветность (Color)'],
+    ['saturation', 'Насыщенность (Saturation)'],
+    ['luminosity', 'Яркость (Luminosity)'],
+    ['hue', 'Цветовой тон (Hue)'],
     ['exclusion', 'Исключение'],
   ];
 
@@ -254,6 +258,11 @@ export function createLayerGroupCommandController({
           step: 1,
           required: true,
         },
+        ...(group.mask ? [{
+          name: 'maskEnabled', label: 'Растровая маска папки', type: 'select',
+          value: group.mask.enabled === false ? 'disabled' : 'enabled',
+          options: [['enabled', 'Включена'], ['disabled', 'Отключена']],
+        }] : []),
       ],
       submitLabel: 'Применить',
       onSubmit: values => {
@@ -273,8 +282,10 @@ export function createLayerGroupCommandController({
           0,
           1,
         );
+        const maskEnabled = values?.maskEnabled !== 'disabled';
+        const changedMask = Boolean(liveGroup.mask) && (liveGroup.mask.enabled !== false) !== maskEnabled;
         if (
-          liveGroup.blendMode === blendMode &&
+          !changedMask && liveGroup.blendMode === blendMode &&
           Math.abs(Number(liveGroup.opacity ?? 1) - opacity) < 1e-9
         ) {
           return true;
@@ -282,6 +293,7 @@ export function createLayerGroupCommandController({
 
         liveGroup.blendMode = blendMode;
         liveGroup.opacity = opacity;
+        if (liveGroup.mask) liveGroup.mask.enabled = maskEnabled;
         publish(owner, 'Параметры группы');
         return true;
       },

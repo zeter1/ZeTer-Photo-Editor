@@ -66,8 +66,12 @@ export function createPsdExportController({
     const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
     let maskScale=1;
     if(layer.mask.dataUrl){
-      const localWidth=Math.max(1,Number(layer.width)||1);
-      const localHeight=Math.max(1,Number(layer.height)||1);
+      // Adjustment masks are document-scoped, even when their canonical layer
+      // has the default 1x1 geometry. Exporting through layerLocalTransform
+      // otherwise collapses a full-document raster mask into one pixel.
+      const documentMask=layer.type==='adjustment'||layer.type==='group';
+      const localWidth=documentMask?bounds.width:Math.max(1,Number(layer.width)||1);
+      const localHeight=documentMask?bounds.height:Math.max(1,Number(layer.height)||1);
       const source=createCanvas();
       source.width=Math.max(1,Math.ceil(localWidth));
       source.height=Math.max(1,Math.ceil(localHeight));
@@ -82,7 +86,7 @@ export function createPsdExportController({
       });
       await renderLayer(sourceCtx,maskLayer);
       const relative=normalizeAffineTransform(layer.mask.transform);
-      const world=multiplyAffineTransforms(layerLocalTransform(layer),relative);
+      const world=documentMask?relative:multiplyAffineTransforms(layerLocalTransform(layer),relative);
       maskScale=affineTransformMaxScale(world);
       ctx.setTransform(world.a,world.b,world.c,world.d,world.e-bounds.x,world.f-bounds.y);
       ctx.drawImage(source,0,0,source.width,source.height,0,0,localWidth,localHeight);
@@ -280,6 +284,26 @@ export function createPsdExportController({
   }
   
   async function preparePsdExport(exportDoc){
+    // Color, Hue, Saturation and Luminosity have a bounded native RGB16 path for flat, untransformed sRGB rasters.
+    // Do not let a non-separable native document silently use Canvas8 fallback.
+    const hasNativePrecision = exportDoc.layers.some(layer => layer.highDepthSource &&
+      (layer.highDepthSource.bitsPerChannel > 8 || layer.highDepthSource.model === 'cmyk'));
+    const nonSeparable = [...exportDoc.layers, ...(exportDoc.groups || [])].filter(entry =>
+      ['color','hue','saturation','luminosity'].includes(entry.blendMode));
+    const nativeNonSeparableBuffers=new Map();
+    const nativeNonSeparable = hasNativePrecision && nonSeparable.length>0 &&
+      nonSeparable.every(entry=>['color','hue','saturation','luminosity'].includes(entry.blendMode)) && !(exportDoc.groups||[]).length &&
+      exportDoc.colorProfile?.kind!=='icc' && exportDoc.layers.every(layer=>{
+        if(layer.groupId || layer.clipping || (layer.vectorMask?.enabled!==false && layer.vectorMask?.subpaths?.length)) return false;
+        const source=nativeHighDepthPsdSource(layer);
+        if(!(source?.model==='rgb' && source.bitsPerChannel===16 && String(source.colorSpace).toLowerCase()==='srgb'))return false;
+        nativeNonSeparableBuffers.set(layer,source);
+        return true;
+      });
+    if (hasNativePrecision && nonSeparable.length && !nativeNonSeparable) {
+      const unsupportedMode=nonSeparable.find(entry=>!['color','hue','saturation','luminosity'].includes(entry.blendMode))?.blendMode || nonSeparable[0].blendMode;
+      throw new Error((unsupportedMode === 'luminosity' ? 'Luminosity' : unsupportedMode === 'saturation' ? 'Saturation' : unsupportedMode === 'hue' ? 'Hue' : 'Color') + ' blend: native high-depth/CMYK PSD/PSB export is not supported; save the editable ZPE project');
+    }
     const warnings=[];
     const psdSmartPlan=psdSmartObjectRoundTripPlan(exportDoc);
     const visibleAdjustmentLayers=exportDoc.layers.filter(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
@@ -289,7 +313,7 @@ export function createPsdExportController({
     const hasAdjustmentLayers=visibleAdjustmentLayers.length>0;
     const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment'||(!needsAdjustmentRasterFallback&&adjustmentPlans.get(layer.id)?.eligible));
     const planned=sourceLayers.map(layer=>{
-      const nativePixelBuffer=nativeHighDepthPsdSource(layer);
+      const nativePixelBuffer=nativeNonSeparable?nativeNonSeparableBuffers.get(layer):nativeHighDepthPsdSource(layer);
       const nativeText=layer.psdText?psdTextNativePlan(layer):null;
       const nativeShape=layer.psdShape?psdShapeNativePlan(layer):null;
       const nativeAdjustment=layer.type==='adjustment'?adjustmentPlans.get(layer.id):null;
@@ -322,9 +346,9 @@ export function createPsdExportController({
         current=groupsById.get(current.parentGroupId);
       }
     }
-    const exportGroups=(exportDoc.groups||[])
+    const exportGroups=await Promise.all((exportDoc.groups||[])
       .filter(group=>sourceGroupIds.has(group.id))
-      .map(group=>({
+      .map(async group=>({
         key:group.id,
         parentKey:group.parentGroupId&&sourceGroupIds.has(group.parentGroupId)?group.parentGroupId:null,
         name:group.name||'Group',
@@ -332,7 +356,12 @@ export function createPsdExportController({
         collapsed:Boolean(group.collapsed),
         opacity:clamp(Number(group.opacity??1),0,1),
         blendMode:group.blendMode||'pass-through',
-      }));
+        ...(group.mask?{mask:{
+          pixels:await renderPsdMaskPixels({...group,type:'group'},{x:0,y:0,width:exportDoc.width,height:exportDoc.height}),
+          disabled:group.mask.enabled===false,
+          x:0,y:0,width:exportDoc.width,height:exportDoc.height,defaultColor:255,
+        }}:{}),
+      })));
     if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&!item.nativeShape?.eligible&&!item.nativeAdjustment?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
     const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
     const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
@@ -410,6 +439,7 @@ export function createPsdExportController({
     }else{
       compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
       if(!compositePixelBuffer){
+        if(nativeNonSeparable)throw new Error((nonSeparable.some(entry=>entry.blendMode==='luminosity')?'Luminosity':nonSeparable.some(entry=>entry.blendMode==='saturation')?'Saturation':nonSeparable.some(entry=>entry.blendMode==='hue')?'Hue':'Color')+' blend: native high-depth PSD/PSB composite unavailable; save the editable ZPE project');
         const compositeCanvas=createCanvas();
         await renderDocument(compositeCanvas,exportDoc,{checker:false});
         composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');

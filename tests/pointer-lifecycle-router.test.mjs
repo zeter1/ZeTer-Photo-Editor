@@ -188,3 +188,22 @@ test('late failure from a prior pointerdown never releases a newer same-ID gestu
   target.dispatch('pointerup', { pointerId:22 });
   assert.deepEqual(target.releases, [22, 22]);
 });
+
+test('stale lostpointercapture from a released gesture never cancels a new capture with the same pointerId', () => {
+  const target=new FakePointerTarget(),cancellations=[];
+  const router=createPointerLifecycleRouter({target,
+    onPointerCancel:(event,context)=>cancellations.push([event.pointerId,context.reason]),
+  });
+  target.dispatch('pointerdown',{pointerId:23});
+  target.dispatch('pointerup',{pointerId:23});
+  assert.equal(target.hasPointerCapture(23),false);
+  target.dispatch('pointerdown',{pointerId:23});
+  assert.equal(target.hasPointerCapture(23),true);
+  // A queued lostpointercapture from the previous release is delivered late.
+  target.dispatch('lostpointercapture',{pointerId:23});
+  assert.equal(router.isActivePointer(23),true);
+  assert.equal(target.hasPointerCapture(23),true);
+  assert.deepEqual(cancellations,[]);
+  target.dispatch('pointerup',{pointerId:23});
+  assert.deepEqual(target.releases,[23,23]);
+});

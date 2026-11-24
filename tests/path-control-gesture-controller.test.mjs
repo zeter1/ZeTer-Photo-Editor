@@ -358,13 +358,14 @@ test('recursive layer lock acquired mid-gesture blocks further writes and histor
   const gesture = h.controller.begin(h.documentValue, h.target, {x:10,y:20});
   h.controller.update(gesture, {x:16,y:26});
   const preview = structuredClone(h.node);
+  assert.notDeepEqual(preview, point());
 
   h.documentValue.groups[0].locked = true;
   assert.equal(
     h.controller.update(gesture, {x:30,y:40}),
     PATH_CONTROL_GESTURE_RESULT.REJECTED,
   );
-  assert.deepEqual(h.node, preview);
+  assert.deepEqual(h.node, point(), 'owned preview is rolled back on lock');
   assert.equal(
     h.controller.finish(gesture, {x:30,y:40}),
     PATH_CONTROL_GESTURE_RESULT.REJECTED,
@@ -381,4 +382,96 @@ test('composition root delegates update/finalize/cancel and no longer owns path-
   assert.equal((main.match(/pathControlGestures\.cancel\(d\)/g) || []).length, 2);
   assert.doesNotMatch(main, /restorePathControlDrag/);
   assert.doesNotMatch(main, /if \(drag\.kind === 'path-control'\)/);
+});
+
+
+test('grouped Levels vector-mask preview rolls back if its ancestor becomes locked mid-drag', () => {
+  const h = createHarness({source:'vector-mask'});
+  h.layer.type = 'adjustment';
+  h.layer.groupId = 'inner';
+  h.documentValue.groups = [
+    {id:'outer',locked:false},
+    {id:'inner',parentGroupId:'outer',locked:false},
+  ];
+  const original = structuredClone(h.node);
+  const gesture = h.controller.begin(h.documentValue,h.target,{x:10,y:20});
+  assert.ok(gesture);
+  assert.equal(h.controller.update(gesture,{x:17,y:25}),PATH_CONTROL_GESTURE_RESULT.UPDATED);
+  assert.notDeepEqual(h.node,original);
+  h.documentValue.groups[0].locked = true;
+  assert.equal(h.controller.finish(gesture,{x:17,y:25}),PATH_CONTROL_GESTURE_RESULT.REJECTED);
+  assert.deepEqual(h.node,original,'transient preview must not survive an inherited group lock');
+  assert.deepEqual(h.commits,[]);
+  assert.equal(h.controller.begin(h.documentValue,h.target,{x:10,y:20}),null,
+    'locked parent must prevent a new adjustment-mask gesture');
+});
+
+test('grouped Curves vector-mask preview does not leak into a stale document after tab switch', () => {
+  const h = createHarness({source:'vector-mask'});
+  h.layer.type = 'adjustment';
+  h.layer.groupId = 'inner';
+  h.documentValue.groups = [{id:'inner',locked:false}];
+  const original = structuredClone(h.node);
+  const gesture = h.controller.begin(h.documentValue,h.target,{x:10,y:20});
+  assert.ok(gesture);
+  assert.equal(h.controller.update(gesture,{x:18,y:26}),PATH_CONTROL_GESTURE_RESULT.UPDATED);
+  const replacement = structuredClone(h.documentValue);
+  const replacementNode = structuredClone(replacement.layers[0].vectorMask.subpaths[0].points[0]);
+  h.setActiveDocument(replacement);
+  assert.equal(h.controller.update(gesture,{x:22,y:29}),PATH_CONTROL_GESTURE_RESULT.REJECTED);
+  assert.deepEqual(h.node,original,'stale owner must recover its own transient geometry');
+  assert.deepEqual(replacement.layers[0].vectorMask.subpaths[0].points[0],
+    replacementNode, 'new document must never receive a redirected gesture');
+  assert.deepEqual(h.commits,[]);
+});
+
+test('grouped adjustment mask refuses initial edits through an already locked ancestor', () => {
+  const h = createHarness({source:'vector-mask'});
+  h.layer.type = 'adjustment';
+  h.layer.groupId = 'inner';
+  h.documentValue.groups = [
+    {id:'outer',locked:true},
+    {id:'inner',parentGroupId:'outer',locked:false},
+  ];
+  assert.equal(h.controller.begin(h.documentValue,h.target,{x:10,y:20}),null);
+  assert.deepEqual(h.commits,[]);
+});
+
+
+test('switching selected adjustment target mid-gesture rolls back the old mask without history', () => {
+  const h=createHarness({source:'vector-mask'});
+  h.layer.type='adjustment';
+  h.documentValue.selectedLayerId=h.layer.id;
+  const original=structuredClone(h.node);
+  const gesture=h.controller.begin(h.documentValue,h.target,{x:10,y:20});
+  assert.ok(gesture);
+  assert.equal(h.controller.update(gesture,{x:22,y:24}),PATH_CONTROL_GESTURE_RESULT.UPDATED);
+  h.documentValue.selectedLayerId='different-curves';
+  assert.equal(h.controller.finish(gesture,{x:22,y:24}),PATH_CONTROL_GESTURE_RESULT.REJECTED);
+  assert.deepEqual(h.node,original);
+  assert.deepEqual(h.commits,[]);
+});
+
+test('later external geometry modification is not overwritten by stale gesture rollback', () => {
+  const h=createHarness({source:'vector-mask'});
+  const gesture=h.controller.begin(h.documentValue,h.target,{x:10,y:20});
+  h.controller.update(gesture,{x:18,y:25});
+  h.node.x=31; // Different edit to the same node after our transient preview.
+  assert.equal(h.controller.finish(gesture,{x:18,y:25}),PATH_CONTROL_GESTURE_RESULT.REJECTED);
+  assert.equal(h.node.x,31,'do not restore over independent writer');
+  assert.deepEqual(h.commits,[]);
+});
+
+test('a mid-gesture adjustment move to a different group rejects an old mask edit', () => {
+  const h=createHarness({source:'vector-mask'});
+  h.layer.type='adjustment';
+  h.layer.groupId='a';
+  h.documentValue.groups=[{id:'a'},{id:'b'}];
+  const original=structuredClone(h.node);
+  const gesture=h.controller.begin(h.documentValue,h.target,{x:10,y:20});
+  h.controller.update(gesture,{x:18,y:25});
+  h.layer.groupId='b';
+  assert.equal(h.controller.finish(gesture,{x:18,y:25}),PATH_CONTROL_GESTURE_RESULT.REJECTED);
+  assert.deepEqual(h.node,original);
+  assert.deepEqual(h.commits,[]);
 });

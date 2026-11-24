@@ -24,6 +24,7 @@ export function createSelectionVectorMaskController({
   const {
     setStatus = () => {},
     toast = () => {},
+    showModal = () => {},
   } = ui;
 
   function selectionVectorMaskDocumentNodes(shape = getSelectionShape()) {
@@ -98,7 +99,12 @@ export function createSelectionVectorMaskController({
       return false;
     }
     if (operation === 'replace' || !layer.vectorMask) {
-      layer.vectorMask = createVectorMask({ enabled:true, invert:false, subpaths:[subpath] });
+      const previous = layer.vectorMask;
+      layer.vectorMask = createVectorMask({
+        enabled:true, invert:false,
+        density:previous?.density ?? 1, feather:previous?.feather ?? 0,
+        subpaths:[subpath],
+      });
     } else {
       if (layer.vectorMask.subpaths.length >= 128) {
         const message = 'Векторная маска ограничена 128 контурами';
@@ -133,7 +139,105 @@ export function createSelectionVectorMaskController({
       return false;
     }
     beginVectorMaskEdit(layer.id);
-    setStatus('Перо: редактирование векторной маски — перетаскивайте anchors и Bézier-handles');
+    setStatus('Перо: перетаскивайте узлы и ручки; Ctrl+клик по контуру — вставить узел, Ctrl+Alt+клик по узлу — удалить');
+    return true;
+  }
+
+  function editSelectedVectorMaskSubpathOperation(layer = getSelectedLayer()) {
+    const owner = getDocument();
+    const selectionAtOpen = getSelectedLayer();
+    const mask = layer?.vectorMask;
+    if (!owner || !layer || !mask || isLayerLocked(owner, layer)
+      || !Array.isArray(mask.subpaths) || !mask.subpaths.length) return false;
+    const subpaths = mask.subpaths.slice();
+    const initialIndex = subpaths.findIndex(subpath =>
+      subpath?.closed !== false && Array.isArray(subpath.points) && subpath.points.length >= 3);
+    if (initialIndex < 0) return false;
+    const operations = [
+      ['add','Добавить'], ['subtract','Вычесть'],
+      ['intersect','Пересечение'], ['exclude','Исключение'],
+    ];
+    showModal({
+      title:'Операция контура векторной маски',
+      fields:[
+        { name:'subpath', label:'Подпуть', type:'select', value:String(initialIndex),
+          options:subpaths.map((subpath, index) =>
+            [String(index), `${index + 1}: ${subpath?.points?.length || 0} узлов (${subpath?.operation || 'add'})`]) },
+        { name:'operation', label:'Операция', type:'select',
+          value:subpaths[initialIndex]?.operation || 'add', options:operations },
+      ],
+      submitLabel:'Применить',
+      onMount:({modal}) => {
+        const subpathSelect=modal.elements.subpath;
+        const operationSelect=modal.elements.operation;
+        subpathSelect?.addEventListener('change',()=>{
+          const value=subpathSelect.value;
+          const index=/^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : -1;
+          const current=subpaths[index];
+          if (!operationSelect) return;
+          operationSelect.disabled=!current || current.closed===false
+            || !Array.isArray(current.points) || current.points.length<3;
+          if (!operationSelect.disabled) operationSelect.value=current.operation || 'add';
+        });
+      },
+      onSubmit:values => {
+        if (getDocument() !== owner || getSelectedLayer() !== selectionAtOpen
+          || !owner.layers?.includes(layer) || layer.vectorMask !== mask
+          || isLayerLocked(owner, layer)) return false;
+        const selectedValue = values?.subpath;
+        if (typeof selectedValue !== 'string' || !/^(?:0|[1-9]\d*)$/.test(selectedValue)) return false;
+        const index = Number(selectedValue);
+        const operation = values?.operation;
+        if (!Number.isSafeInteger(index) || index < 0 || index >= subpaths.length
+          || !operations.some(([name]) => name === operation)
+          || mask.subpaths?.length !== subpaths.length) return false;
+        const subpath = mask.subpaths[index];
+        if (subpath !== subpaths[index] || subpath?.closed === false
+          || !Array.isArray(subpath?.points) || subpath.points.length < 3
+          || subpath.operation === operation) return false;
+        subpath.operation = operation;
+        commit('Изменить операцию контура векторной маски');
+        setStatus(`Векторная маска: операция подпути ${index + 1} — ${operation}`);
+        return true;
+      },
+    });
+    return true;
+  }
+
+  function editSelectedVectorMaskProperties() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.vectorMask;
+    const isCurrentTarget = () => ownerDocument === getDocument()
+      && getSelectedLayer() === layer
+      && ownerDocument?.layers?.includes(layer)
+      && layer.vectorMask === mask
+      && !isLayerLocked(ownerDocument, layer);
+    if (!mask || !isCurrentTarget()) return false;
+    showModal({
+      title:'Параметры векторной маски',
+      fields:[
+        { name:'density', label:'Плотность, %', type:'number', value:Math.round((mask.density ?? 1)*100), min:0, max:100, step:1 },
+        { name:'feather', label:'Растушёвка, px', type:'number', value:mask.feather ?? 0, min:0, max:250, step:.5 },
+      ],
+      submitLabel:'Применить',
+      onSubmit:values => {
+        if (!isCurrentTarget()) return false;
+        const percent = Number(values?.density);
+        const featherValue = Number(values?.feather);
+        const density = Number.isFinite(percent) ? Math.max(0,Math.min(100,percent))/100 : (mask.density ?? 1);
+        const feather = Number.isFinite(featherValue) ? Math.max(0,Math.min(250,featherValue)) : (mask.feather ?? 0);
+        if (Math.abs((mask.density ?? 1)-density)<1e-9 && Math.abs((mask.feather ?? 0)-feather)<1e-9) {
+          setStatus('Параметры векторной маски не изменились');
+          return true;
+        }
+        mask.density=density;
+        mask.feather=feather;
+        commit('Параметры векторной маски');
+        setStatus(`Векторная маска: плотность ${Math.round(density*100)}%, растушёвка ${feather}px`);
+        return true;
+      },
+    });
     return true;
   }
 
@@ -168,6 +272,8 @@ export function createSelectionVectorMaskController({
     selectionVectorMaskSubpath,
     applySelectionToVectorMask,
     editSelectedVectorMask,
+    editSelectedVectorMaskSubpathOperation,
+    editSelectedVectorMaskProperties,
     toggleSelectedVectorMask,
     invertSelectedVectorMask,
     removeSelectedVectorMask,

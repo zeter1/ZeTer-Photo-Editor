@@ -6,7 +6,7 @@ import {
   deserializePixelBufferSource, forEachSerializedPixelBufferTile,
   pixelBufferToToneMappedRgba8Preview, PIXEL_BUFFER_TILED_SOURCE_KIND,
 } from './pixel-buffer.js';
-import { applyAdjustmentPixels, compositeAdjustmentPixels } from './adjustments.js';
+import { applyAdjustmentPixels, compositeAdjustmentPixels, compositeClippedAdjustmentPixels, compositeClippedRasterPixels, compositeClippingStackPixels } from './adjustments.js';
 import { applyMaskControlsAlpha } from './pixels.js';
 import { normalizeAffineTransform } from './geometry.js';
 
@@ -399,7 +399,9 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
   const source = document.createElement('canvas');
   source.width = width; source.height = height;
   const sourceCtx = source.getContext('2d', { alpha: true, willReadFrequently: true });
-  sourceCtx.drawImage(canvas, 0, 0, width, height);
+  // A clipped adjustment changes its source raster, not the flattened parent.
+  sourceCtx.drawImage(clippingMask || canvas, 0, 0, width, height);
+  const clippingSource = clippingMask ? sourceCtx.getImageData(0, 0, width, height) : null;
   if(layer.adjustment){
     try{
       const pixels=sourceCtx.getImageData(0,0,width,height);
@@ -430,14 +432,8 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
     sourceCtx.drawImage(vectorMask,0,0,width,height);
     sourceCtx.restore();
   }
-  if(clippingMask){
-    sourceCtx.save();
-    sourceCtx.globalCompositeOperation='destination-in';
-    sourceCtx.globalAlpha=1;
-    sourceCtx.filter='none';
-    sourceCtx.drawImage(clippingMask,0,0,width,height);
-    sourceCtx.restore();
-  }
+  // Clipping is already present in source alpha; applying it again would
+  // square the base coverage on semitransparent pixels.
   const effect=document.createElement('canvas');
   effect.width=width;effect.height=height;
   const effectCtx=effect.getContext('2d',{alpha:true,willReadFrequently:true});
@@ -446,10 +442,16 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
   try{
     const basePixels=ctx.getImageData(0,0,width,height);
     const effectPixels=effectCtx.getImageData(0,0,width,height);
-    compositeAdjustmentPixels(basePixels,effectPixels,{
-      opacity:layer.opacity??1,
-      blendMode:layer.blendMode||'source-over',
-    });
+    const settings = { opacity: layer.opacity ?? 1,
+      blendMode: layer.blendMode || 'source-over' };
+    if (clippingSource) {
+      compositeClippedAdjustmentPixels(basePixels, clippingSource, effectPixels, settings);
+      // Subsequent clipped adjustments must see the preceding adjustment's
+      // pixels, not the original base. Keep the base's alpha unchanged so
+      // clipping coverage remains stable throughout the adjustment chain.
+      compositeAdjustmentPixels(clippingSource, effectPixels, settings);
+      clippingMask.getContext('2d').putImageData(clippingSource, 0, 0);
+    } else compositeAdjustmentPixels(basePixels, effectPixels, settings);
     ctx.putImageData(basePixels,0,0);
   }catch(error){
     console.warn('Adjustment layer compositing failed; previous composite preserved',error);
@@ -509,11 +511,37 @@ function buildGroupRenderPlan(doc) {
 
 async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides, clippingMask = null) {
   if (!isLayerVisible(doc, layer) || layer.opacity <= 0) return;
+  // An orphaned clipped layer (raster or adjustment) must never escape its base.
+  if (layer.clipping === true && !clippingMask) return;
   if (layer.type === 'adjustment') {
     await applyAdjustmentLayer(canvas, ctx, layer, { clippingMask });
     return;
   }
-  await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
+  const rasterOverride = rasterOverrides?.get?.(layer.id) || null;
+  if (layer.clipping !== true) {
+    await renderLayer(ctx, layer, { rasterOverride });
+    return;
+  }
+  // Clipped raster overlays modify the same reusable source stack as subsequent
+  // clipped adjustments. Render opacity/masks once, then blend the raster into
+  // the source RGB. Transfer only that RGB delta to the parent; a clipped
+  // overlay cannot increase the base matte or repaint the lower backdrop.
+  const overlay = document.createElement('canvas');
+  overlay.width = doc.width;
+  overlay.height = doc.height;
+  const overlayCtx = overlay.getContext('2d', { alpha: true, willReadFrequently: true });
+  await renderLayer(overlayCtx, { ...layer, blendMode: 'source-over' }, { rasterOverride });
+  try {
+    const sourceCtx = clippingMask.getContext('2d', { willReadFrequently: true });
+    const source = sourceCtx.getImageData(0, 0, doc.width, doc.height);
+    const target = ctx.getImageData(0, 0, doc.width, doc.height);
+    const pixels = overlayCtx.getImageData(0, 0, doc.width, doc.height);
+    compositeClippedRasterPixels(target, source, pixels, { blendMode: layer.blendMode || 'source-over' });
+    ctx.putImageData(target, 0, 0);
+    sourceCtx.putImageData(source, 0, 0);
+  } catch (error) {
+    console.warn('Clipped raster compositing failed; previous composite preserved', error);
+  }
 }
 
 async function renderClippingBase(doc, layer, rasterOverrides) {
@@ -527,6 +555,76 @@ async function renderClippingBase(doc, layer, rasterOverrides) {
   return canvas;
 }
 
+// A masked Pass Through folder modifies its parent's backdrop. Blend between
+// that exact backdrop and the rendered result; masking an isolated group would
+// apply child multiply/adjustments to transparent pixels instead. Tile reads
+// bound transient ImageData allocations even on very large documents.
+function compositeMaskedPassThrough(targetCtx, renderedCtx, maskCtx, width, height, opacity) {
+  const tile = 256;
+  for (let y = 0; y < height; y += tile) {
+    for (let x = 0; x < width; x += tile) {
+      const w = Math.min(tile, width - x);
+      const h = Math.min(tile, height - y);
+      const backdrop = targetCtx.getImageData(x, y, w, h);
+      const rendered = renderedCtx.getImageData(x, y, w, h).data;
+      const coverage = maskCtx.getImageData(x, y, w, h).data;
+      const result = backdrop.data;
+      for (let offset = 0; offset < result.length; offset += 4) {
+        const amount = (coverage[offset + 3] / 255) * opacity;
+        if (amount <= 0) continue;
+        if (amount >= 1) {
+          result.set(rendered.subarray(offset, offset + 4), offset);
+          continue;
+        }
+        const beforeAlpha = result[offset + 3] / 255;
+        const afterAlpha = rendered[offset + 3] / 255;
+        const beforeWeight = beforeAlpha * (1 - amount);
+        const afterWeight = afterAlpha * amount;
+        const alpha = beforeWeight + afterWeight;
+        if (alpha <= 0) {
+          result.fill(0, offset, offset + 4);
+          continue;
+        }
+        for (let channel = 0; channel < 3; channel += 1) {
+          result[offset + channel] = Math.round(
+            (result[offset + channel] * beforeWeight + rendered[offset + channel] * afterWeight) / alpha
+          );
+        }
+        result[offset + 3] = Math.round(alpha * 255);
+      }
+      targetCtx.putImageData(backdrop, x, y);
+    }
+  }
+}
+
+// Chromium can quantize clipping stacks at intermediate premultiplied
+// stages. Use a tiled straight-RGBA blend for Normal isolated folders,
+// Difference, Exclusion and Color, avoiding intermediate rounding.
+function drawClippingStack(targetCtx, stack, mode) {
+  if (mode === 'source-over' || mode === 'difference' || mode === 'exclusion' || mode === 'color' || mode === 'hue' || mode === 'saturation' || mode === 'luminosity') {
+    const sourceCtx = stack.getContext('2d');
+    const tile = 256;
+    for (let y = 0; y < stack.height; y += tile) {
+      for (let x = 0; x < stack.width; x += tile) {
+        const w = Math.min(tile, stack.width - x);
+        const h = Math.min(tile, stack.height - y);
+        const target = targetCtx.getImageData(x, y, w, h);
+        const source = sourceCtx.getImageData(x, y, w, h);
+        compositeClippingStackPixels(target, source, mode);
+        targetCtx.putImageData(target, x, y);
+      }
+    }
+    return;
+  }
+  targetCtx.save();
+  try {
+    targetCtx.globalAlpha = 1;
+    targetCtx.globalCompositeOperation = mode;
+    targetCtx.filter = 'none';
+    targetCtx.drawImage(stack, 0, 0);
+  } finally { targetCtx.restore(); }
+}
+
 async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
   const plan = buildGroupRenderPlan(doc);
   const activeGroups = new Set();
@@ -538,6 +636,24 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
       const entry=entries[entryIndex];
       if (entry.type === 'layer') {
         const clipped=entry.layer?.clipping===true;
+        const baseMode=entry.layer?.blendMode;
+        const next=entries[entryIndex+1];
+        // A supported non-normal clipping base must blend its corrected source
+        // against the backdrop, not add an RGB delta to an already blended
+        // destination. Compose the contiguous clipped stack on its own matte,
+        // then blend the resulting stack exactly once with the parent.
+        if(!clipped && entry.layer.type!=='adjustment' &&
+          ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color','hue','saturation','luminosity'].includes(baseMode) &&
+          next?.type==='layer' && next.layer?.clipping===true){
+          const stack=await renderClippingBase(doc,{...entry.layer,blendMode:'source-over'},rasterOverrides);
+          while(entries[entryIndex+1]?.type==='layer' && entries[entryIndex+1].layer?.clipping===true){
+            const child=entries[++entryIndex].layer;
+            if(stack)await renderLayerEntry(stack,stack.getContext('2d'),doc,child,rasterOverrides,stack);
+          }
+          if(stack) drawClippingStack(targetCtx, stack, baseMode);
+          clippingBase=null;
+          continue;
+        }
         await renderLayerEntry(targetCanvas,targetCtx,doc,entry.layer,rasterOverrides,clipped?clippingBase:null);
         if(!clipped){
           const next=entries[entryIndex+1];
@@ -550,24 +666,82 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
       clippingBase=null;
       const group = entry.group;
       if (!group || group.visible === false || Number(group.opacity ?? 1) <= 0 || activeGroups.has(group.id)) continue;
+      const next = entries[entryIndex + 1];
+      const needsClippingBase = next?.type === 'layer' && next.layer?.clipping === true;
       activeGroups.add(group.id);
       try {
         const opacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1)));
         const blendMode = group.blendMode || 'pass-through';
-        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9;
+        // A folder raster mask affects the group as a unit. Pass Through
+        // children first modify the actual parent backdrop; their masked
+        // result is interpolated below instead of composited as an isolated layer.
+        const groupMasked = Boolean(group.mask?.enabled !== false && (group.mask?.dataUrl || group.mask?.invert));
+        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9 || groupMasked;
+        const newGroupCanvas = () => {
+          const groupCanvas = document.createElement('canvas');
+          groupCanvas.width = doc.width;
+          groupCanvas.height = doc.height;
+          const groupCtx = groupCanvas.getContext('2d', { alpha:true });
+          groupCtx.imageSmoothingEnabled = true;
+          if ('imageSmoothingQuality' in groupCtx) groupCtx.imageSmoothingQuality = 'high';
+          return { groupCanvas, groupCtx };
+        };
 
         if (!isolated) {
+          // Pass-through renders against its parent backdrop; compute clipping
+          // coverage separately so the group's own alpha is not the parent's.
           await renderEntries(targetCanvas, targetCtx, group.id);
+          if (needsClippingBase) {
+            const { groupCanvas, groupCtx } = newGroupCanvas();
+            await renderEntries(groupCanvas, groupCtx, group.id);
+            clippingBase = groupCanvas;
+          }
           continue;
         }
 
-        const groupCanvas = document.createElement('canvas');
-        groupCanvas.width = doc.width;
-        groupCanvas.height = doc.height;
-        const groupCtx = groupCanvas.getContext('2d', { alpha:true });
-        groupCtx.imageSmoothingEnabled = true;
-        if ('imageSmoothingQuality' in groupCtx) groupCtx.imageSmoothingQuality = 'high';
+        if (blendMode === 'pass-through' && groupMasked) {
+          const coverage = await layerMaskCoverageCanvas(group.mask, doc.width, doc.height);
+          // Invalid mask data must not unexpectedly reveal masked descendants.
+          if (!coverage) continue;
+          const positioned = positionLayerMaskCoverage(coverage, group.mask, doc.width, doc.height);
+          const { groupCanvas: backdropCanvas, groupCtx: backdropCtx } = newGroupCanvas();
+          backdropCtx.drawImage(targetCanvas, 0, 0);
+          await renderEntries(backdropCanvas, backdropCtx, group.id);
+          compositeMaskedPassThrough(
+            targetCtx, backdropCtx, positioned.getContext('2d'),
+            doc.width, doc.height, opacity
+          );
+          if (needsClippingBase) {
+            const { groupCanvas: source, groupCtx: sourceCtx } = newGroupCanvas();
+            await renderEntries(source, sourceCtx, group.id);
+            await applyLayerMaskToContext(sourceCtx, group.mask, doc.width, doc.height);
+            const { groupCanvas: clippedCoverage, groupCtx: coverageCtx } = newGroupCanvas();
+            coverageCtx.globalAlpha = opacity;
+            coverageCtx.drawImage(source, 0, 0);
+            clippingBase = clippedCoverage;
+          }
+          continue;
+        }
+
+        const { groupCanvas, groupCtx } = newGroupCanvas();
         await renderEntries(groupCanvas, groupCtx, group.id);
+        if (groupMasked) await applyLayerMaskToContext(groupCtx, group.mask, doc.width, doc.height);
+
+        // An isolated folder used as a clipping base follows the
+        // same source-stack rule as a raster base. Apply folder mask/opacity
+        // once, edit the resulting matte, and blend once against the parent.
+        if (needsClippingBase && ['source-over','multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color','hue','saturation','luminosity'].includes(blendMode)) {
+          const { groupCanvas: stack, groupCtx: stackCtx } = newGroupCanvas();
+          stackCtx.globalAlpha = opacity;
+          stackCtx.drawImage(groupCanvas, 0, 0);
+          stackCtx.globalAlpha = 1;
+          while (entries[entryIndex + 1]?.type === 'layer' && entries[entryIndex + 1].layer?.clipping === true) {
+            const child = entries[++entryIndex].layer;
+            await renderLayerEntry(stack, stackCtx, doc, child, rasterOverrides, stack);
+          }
+          drawClippingStack(targetCtx, stack, blendMode);
+          continue;
+        }
 
         targetCtx.save();
         targetCtx.globalAlpha = opacity;
@@ -575,6 +749,13 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         targetCtx.filter = 'none';
         targetCtx.drawImage(groupCanvas, 0, 0);
         targetCtx.restore();
+        if (needsClippingBase) {
+          // Clipping follows visible group coverage, including group opacity.
+          const { groupCanvas: coverage, groupCtx: coverageCtx } = newGroupCanvas();
+          coverageCtx.globalAlpha = opacity;
+          coverageCtx.drawImage(groupCanvas, 0, 0);
+          clippingBase = coverage;
+        }
       } finally {
         activeGroups.delete(group.id);
       }
@@ -668,8 +849,23 @@ function renderVectorMaskBitmap(vectorMask, width, height) {
     initialized=true;
   }
 
-  if(vectorMask?.invert===true){
-    ctx.save();ctx.globalCompositeOperation='xor';ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+  const density=Number(vectorMask?.density ?? 1);
+  const feather=Number(vectorMask?.feather ?? 0);
+  if(vectorMask?.invert===true || density<1 || feather>0){
+    const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
+    const alpha=new Uint8ClampedArray(canvas.width*canvas.height);
+    for(let index=0;index<alpha.length;index++)alpha[index]=pixels.data[index*4+3];
+    const controlled=applyMaskControlsAlpha(alpha,canvas.width,canvas.height,{
+      invert:vectorMask?.invert===true,
+      density:Number.isFinite(density)?density:1,
+      feather:Number.isFinite(feather)?feather:0,
+    });
+    for(let index=0;index<controlled.length;index++){
+      const offset=index*4;
+      pixels.data[offset]=255;pixels.data[offset+1]=255;pixels.data[offset+2]=255;
+      pixels.data[offset+3]=controlled[index];
+    }
+    ctx.putImageData(pixels,0,0);
   }
   return canvas;
 }

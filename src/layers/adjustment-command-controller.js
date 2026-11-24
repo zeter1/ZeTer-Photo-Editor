@@ -1,11 +1,34 @@
 import { adjustmentModelEqual, sanitizeAdjustmentModel } from '../core/adjustments.js';
-import { isLayerLocked } from '../core/state.js';
+import { addLayer, createAdjustmentLayer, isLayerLocked } from '../core/state.js';
 
 export const ADJUSTMENT_COMMAND_RESULT = Object.freeze({
   COMMITTED: 'committed',
   NOOP: 'noop',
   INVALID: 'invalid',
   REJECTED: 'rejected',
+});
+
+// Only these kinds can be created by the editor; native PSD-only metadata is not fabricated.
+export const NEW_ADJUSTMENT_KINDS = Object.freeze([
+  ['brightness-contrast', 'Яркость / контраст'],
+  ['levels', 'Уровни (Levels)'],
+  ['curves', 'Кривые (Curves)'],
+  ['exposure', 'Экспозиция'],
+  ['hue-saturation', 'Цветовой тон / насыщенность'],
+  ['invert', 'Инверсия'],
+  ['posterize', 'Постеризация'],
+  ['threshold', 'Порог'],
+]);
+
+const ADJUSTMENT_INITIAL_MODELS = Object.freeze({
+  'brightness-contrast': { kind:'brightness-contrast', brightness:0, contrast:0 },
+  levels: { kind:'levels', master:{ inputBlack:0, inputWhite:255, gamma:1, outputBlack:0, outputWhite:255 }, channels:[] },
+  curves: { kind:'curves', channels:[{ id:0, points:[{ input:0, output:0 }, { input:255, output:255 }] }] },
+  exposure: { kind:'exposure', exposure:0, offset:0, gamma:1 },
+  'hue-saturation': { kind:'hue-saturation', hue:0, saturation:0, lightness:0, colorize:false },
+  invert: { kind:'invert' },
+  posterize: { kind:'posterize', levels:4 },
+  threshold: { kind:'threshold', level:128 },
 });
 
 const ADJUSTMENT_LEVEL_KEYS = new Set([
@@ -46,6 +69,26 @@ export function createAdjustmentLayerCommandController({ state, transaction } = 
     if (!activeDocument(owner)) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
     transaction.commit(label);
     return ADJUSTMENT_COMMAND_RESULT.COMMITTED;
+  }
+
+  function createLayer(owner, kind) {
+    if (!activeDocument(owner) || !Array.isArray(owner.layers) || owner.layers.length >= 500) {
+      return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    }
+    const preset = Object.hasOwn(ADJUSTMENT_INITIAL_MODELS, kind)
+      ? ADJUSTMENT_INITIAL_MODELS[kind] : null;
+    if (!preset) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const adjustment = sanitizeAdjustmentModel(preset);
+    if (!adjustment) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const label = NEW_ADJUSTMENT_KINDS.find(([id]) => id === kind)?.[1] || kind;
+    const layer = createAdjustmentLayer({
+      name: label,
+      width: owner.width,
+      height: owner.height,
+      adjustment,
+    });
+    addLayer(owner, layer);
+    return publish(owner, `Создать корректирующий слой: ${label}`);
   }
 
   function parseCurvePointsInput(raw) {
@@ -128,6 +171,20 @@ export function createAdjustmentLayerCommandController({ state, transaction } = 
     return publish(owner, 'Изменить точки Photoshop Curves');
   }
 
+  // Hue/Saturation's colorization flag changes the actual color transform.
+  // Persist a normalized model and one history entry, never a view-only checkbox.
+  function setColorize(owner, layerId, enabled) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    const current = sanitizeAdjustmentModel(layer.adjustment);
+    if (current?.kind !== 'hue-saturation') return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    if (typeof enabled !== 'boolean') return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const next = sanitizeAdjustmentModel({ ...current, colorize: enabled });
+    if (adjustmentModelEqual(layer.adjustment, next)) return ADJUSTMENT_COMMAND_RESULT.NOOP;
+    layer.adjustment = next;
+    return publish(owner, 'Изменить режим тонирования Hue/Saturation');
+  }
+
   function setClipping(owner, layerId, checked) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
@@ -137,5 +194,5 @@ export function createAdjustmentLayerCommandController({ state, transaction } = 
     return publish(owner, 'Изменить clipping adjustment layer');
   }
 
-  return { updateProperty, updateCurveChannel, setClipping };
+  return { createLayer, updateProperty, updateCurveChannel, setColorize, setClipping };
 }

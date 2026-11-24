@@ -125,8 +125,8 @@ export function createRecoveryController({
         activeIndex = unrestoredRecoveryDocuments.length
           + Math.max(0, dirtySessions.findIndex(session => session.id === getActiveSessionId()));
       } catch (error) {
-        // An in-memory preparation error is not an IndexedDB transaction failure.
-        // Preserve the last valid record; do not retry the same malformed state.
+        // Preparation failed before any storage mutation. Preserve the last
+        // valid record and prevent retries of the untrusted in-memory state.
         reportRecoveryFailure(error, {
           notify: true,
           toastMessage: 'Автосохранение не удалось: ошибка подготовки снимка проекта',

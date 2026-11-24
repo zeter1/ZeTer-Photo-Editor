@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
-  <meta name="application-version" content="1.43.4" />
-  <meta name="application-build" content="8f62263ae1de62e5" />
+  <meta name="application-version" content="1.47.41" />
+  <meta name="application-build" content="a5c4858e9bcc5813" />
   <title>ZeTer Photo Editor — локальный редактор изображений</title>
   <link rel="stylesheet" href="./src/styles.css" />
 </head>
@@ -127,6 +127,7 @@
       <label class="option-group gradient-only">Второй цвет <input id="secondaryColor" type="color" value="#ffffff" /></label>
       <label class="option-group gradient-only">Тип <select id="gradientType"><option value="linear">Линейный</option><option value="radial">Радиальный</option></select></label>
       <label class="option-group pen-only"><input id="penClosed" type="checkbox" /> Замкнуть контур</label>
+      <label class="option-group pen-only">Подпуть Saved Path <select id="penPathOperation" aria-label="Операция нового подпути сохранённого контура"><option value="add">Добавить</option><option value="subtract">Вычесть</option><option value="intersect">Пересечение</option><option value="exclude">Исключение</option></select></label>
       <label class="option-group text-only">Шрифт
         <select id="fontFamily">
           <option value="Inter, Arial, sans-serif">Inter / Arial</option>
@@ -262,6 +263,10 @@
               <option value="color-dodge">Осветление основы</option>
               <option value="color-burn">Затемнение основы</option>
               <option value="difference">Разница</option>
+              <option value="color">Цветность (Color)</option>
+              <option value="saturation">Насыщенность (Saturation)</option>
+              <option value="luminosity">Яркость (Luminosity)</option>
+              <option value="hue">Цветовой тон (Hue)</option>
               <option value="exclusion">Исключение</option>
             </select>
             <label>Непр. <input id="layerOpacity" type="range" min="0" max="100" value="100" /></label>
@@ -285,11 +290,23 @@
             </div>
           </header>
           <div class="paths-toolbar">
+            <button id="newPathBtn" type="button" title="Создать пустой контур и рисовать его пером" aria-label="Новый сохранённый контур"><svg class="ui-icon"><use href="#icon-plus" /></svg><span>Новый</span></button>
             <button id="editPathBtn" type="button" title="Редактировать выбранный сохранённый контур инструментом «Перо»"><svg class="ui-icon"><use href="#icon-pen" /></svg><span>Перо</span></button>
             <button id="applyPathMaskBtn" type="button" title="Применить выбранный сохранённый контур как векторную маску текущего слоя"><svg class="ui-icon"><use href="#icon-mask" /></svg><span>→ маска</span></button>
           </div>
           <div id="pathsList" class="paths-list" role="listbox" aria-label="Сохранённые контуры">
             <div class="paths-empty">Нет сохранённых контуров</div>
+          </div>
+          <div class="paths-toolbar paths-subpath-toolbar">
+            <label for="pathSubpathSelect">Подпуть</label>
+            <select id="pathSubpathSelect" aria-label="Подпуть выбранного сохранённого контура" disabled></select>
+            <label for="pathSubpathOperation">Операция</label>
+            <select id="pathSubpathOperation" aria-label="Операция существующего подпути" disabled>
+              <option value="add">Добавить</option>
+              <option value="subtract">Вычесть</option>
+              <option value="intersect">Пересечение</option>
+              <option value="exclude">Исключение</option>
+            </select>
           </div>
         </section>
 
@@ -352,6 +369,12 @@
     <div class="removal-progress-timing"><span id="backgroundRemovalElapsed">Прошло: 0 с</span><span id="backgroundRemovalRemaining">Оставшееся время пока неизвестно</span></div>
     <button id="backgroundRemovalProgressCancel" class="removal-reset" type="button">Отменить удаление</button>
   </aside>
+  <aside id="contentAwareProgressPanel" class="object-removal-progress" hidden aria-label="Контент-заливка выделения">
+    <strong>Контент-заливка выделения</strong>
+    <p role="status">Восстановление пикселей…</p>
+    <progress aria-label="Контент-заливка выполняется"></progress>
+    <button id="contentAwareProgressCancel" class="removal-reset" type="button">Отменить заливку</button>
+  </aside>
   <aside id="objectRemovalProgressPanel" class="object-removal-progress" hidden aria-label="Прогресс удаления объекта">
     <strong>Удаление объекта</strong>
     <p id="objectRemovalProgressLabel" role="status">Подготовка…</p>
@@ -360,7 +383,7 @@
     <button id="objectRemovalProgressCancel" class="removal-reset" type="button">Отменить удаление</button>
   </aside>
   <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-  <input id="fileInput" type="file" accept="image/*,.svg,.avif,.psd,.psb,image/vnd.adobe.photoshop" multiple hidden />
+  <input id="fileInput" type="file" accept="image/*,.svg,.avif,.dng,.psd,.psb,image/vnd.adobe.photoshop" multiple hidden />
   <input id="projectInput" type="file" accept="application/json,.json,.zpe,.pixforge" hidden />
 
   <script>

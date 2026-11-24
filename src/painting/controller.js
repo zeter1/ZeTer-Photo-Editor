@@ -6,19 +6,20 @@ import {
   applyPixelBufferStrokeSegment,
   applyCmykPixelBufferBrushDab,
   applyCmykPixelBufferStrokeSegment,
-  clonePixelBuffer,
   createSerializedPixelBufferTileWorkingSet,
   deserializePixelBufferSource,
+  deserializeEditablePixelBufferSource,
   forEachSerializedPixelBufferTile,
+  forEachSerializedPixelBufferTileCooperative,
   mutateSerializedPixelBufferTiles,
   pixelBufferByteLength,
   pixelBufferToToneMappedRgba8Preview,
-  pixelBufferWithStraightAlpha,
   serializePixelBufferSourceAdaptive,
   PIXEL_BUFFER_TILED_SOURCE_KIND,
   MAX_PIXEL_BUFFER_SOURCE_BYTES,
 } from '../core/pixel-buffer.js';
 import { cmykPixelBufferToRgba8Preview } from '../core/color-management.js';
+import { prepareTiledInpaintWithWorker } from './tiled-inpaint-dispatch.js';
 
 export function createRasterEditController({
   getDocument,
@@ -26,6 +27,8 @@ export function createRasterEditController({
   getCmykPreviewTransform = () => null,
   renderPaintPreview = () => {},
   documentRef = globalThis.document,
+  tiledInpaintWorker = null,
+  previewYieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
   requestFrame = callback => globalThis.requestAnimationFrame(callback),
   cancelFrame = frame => globalThis.cancelAnimationFrame(frame),
 } = {}) {
@@ -57,6 +60,14 @@ export function createRasterEditController({
     brushLayerId = null;
     brushOwner = null;
     brushLayer = null;
+  }
+
+  // Cancellation can finish after a newer edit has acquired another canvas.
+  // Only discard the cache still owned by the cancelled operation.
+  function discardRasterBuffer(owner, layer, canvas) {
+    if (!canvas || brushCanvas !== canvas || brushOwner !== owner || brushLayer !== layer) return false;
+    clearBrushBuffer();
+    return true;
   }
 
   function isCurrentRasterTarget(owner, layer) {
@@ -115,6 +126,7 @@ export function createRasterEditController({
   }
 
   function reset() {
+    tiledInpaintWorker?.cancel?.();
     cancelPaintPreview();
     clearBrushBuffer();
     clearHighDepthPaintState();
@@ -130,9 +142,11 @@ export function createRasterEditController({
 
   function editableHighDepthBuffer(layer, { requireAlpha = false } = {}) {
     if (!layer?.highDepthSource) return null;
-    const decoded = deserializePixelBufferSource(layer.highDepthSource);
+    // The decoder returns an exclusive typed plane. Re-cloning it would cost
+    // one whole extra RGB16/Float32/CMYK allocation on every legacy edit.
+    const decoded = deserializeEditablePixelBufferSource(layer.highDepthSource, { requireAlpha });
     if (decoded.model !== 'rgb' && decoded.model !== 'cmyk') return null;
-    const working = requireAlpha ? pixelBufferWithStraightAlpha(decoded) : clonePixelBuffer(decoded);
+    const working = decoded;
     if (pixelBufferByteLength(working) > highDepthBudgetForLayer(layer)) return null;
     return working;
   }
@@ -355,13 +369,18 @@ export function createRasterEditController({
   }
 
 
-  async function highDepthPreviewDataUrlFromSource(layer, source) {
+  async function highDepthPreviewDataUrlFromSource(layer, source, {
+    isCancelled = () => false,
+  } = {}) {
+    if (isCancelled()) return null;
     const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
     const canvas = documentRef.createElement('canvas');
     canvas.width = source.width;
     canvas.height = source.height;
     const context = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
-    forEachSerializedPixelBufferTile(source, ({ x, y, buffer }) => {
+    // This canvas is private until the complete preview is encoded and its
+    // exact owner has been rechecked. No partial image reaches the layer.
+    const completed = await forEachSerializedPixelBufferTileCooperative(source, ({ x, y, buffer }) => {
       const rgba = buffer.model === 'cmyk'
         ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
         : pixelBufferToToneMappedRgba8Preview(buffer, {}, {
@@ -371,13 +390,15 @@ export function createRasterEditController({
       const image = context.createImageData(buffer.width, buffer.height);
       image.data.set(rgba);
       context.putImageData(image, x, y);
-    });
+    }, { isCancelled, yieldControl:previewYieldControl, batchTiles:2 });
+    if (!completed || isCancelled()) return null;
     return canvasToDataURL(canvas, 'image/png');
   }
 
   async function prepareTiledHighDepthMutation(layer, visitor, {
     requireAlpha = false,
     maxBytes = null,
+    isCancelled = () => false,
   } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
     const byteBudget = maxBytes == null
@@ -397,7 +418,14 @@ export function createRasterEditController({
         mutation:null,
       };
     }
-    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source, { isCancelled });
+    if (dataUrl === null) return {
+      changed:prepared.changed,
+      changedTiles:prepared.changedTiles,
+      promotedAlpha:prepared.promotedAlpha,
+      mutation:null,
+      cancelled:true,
+    };
     return {
       changed:prepared.changed,
       changedTiles:prepared.changedTiles,
@@ -417,15 +445,18 @@ export function createRasterEditController({
     isContinuationCurrent,
   } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
-    const continuationCurrent = () => (
-      typeof isContinuationCurrent !== 'function' || isContinuationCurrent()
+    // Recheck canonical source identity, not just the owning layer object.
+    // A superseded async preview must not overwrite a newer edit on that layer.
+    const originalSource = layer.highDepthSource;
+    const stale = () => (
+      (typeof isContinuationCurrent === 'function' && !isContinuationCurrent()) ||
+      !isCurrentRasterTarget(owner, layer) ||
+      layer.highDepthSource !== originalSource
     );
-    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
-      return { changed:0, changedTiles:0, applied:false, stale:true };
-    }
-    const prepared = await prepareTiledHighDepthMutation(layer, visitor, { requireAlpha });
+    if (stale()) return { changed:0, changedTiles:0, applied:false, stale:true };
+    const prepared = await prepareTiledHighDepthMutation(layer, visitor, { requireAlpha, isCancelled:stale });
     if (!prepared) return null;
-    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
+    if (stale() || prepared.cancelled) {
       return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:false, stale:true };
     }
     if (!prepared.mutation) {
@@ -433,6 +464,44 @@ export function createRasterEditController({
     }
     applyHighDepthMutation(layer, prepared.mutation);
     return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:true, stale:false };
+  }
+
+  // Keep all ROI tile changes private until the exact document, layer and
+  // serialized source are revalidated after the asynchronous preview build.
+  async function persistTiledHighDepthInpaint(owner, layer, {
+    isAllowed, isContinuationCurrent, maxWorkerInputDataUrlChars = null,
+  } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const originalSource = layer.highDepthSource;
+    // A completed Worker can still be awaiting preview. Never publish after
+    // the command generation/lease was revoked, even for the same document.
+    const stale = () => (
+      (typeof isContinuationCurrent === 'function' && !isContinuationCurrent()) ||
+      !isCurrentRasterTarget(owner, layer) ||
+      layer.highDepthSource !== originalSource
+    );
+    if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
+    const prepared = await prepareTiledInpaintWithWorker(originalSource, {
+      isAllowed,
+      isCancelled:stale,
+      worker:tiledInpaintWorker,
+      maxBytes:highDepthBudgetForLayer(layer),
+      maxWorkerInputDataUrlChars,
+      // Read at command time to support a CDP observer injected after startup.
+      onTiming:globalThis.__zpeTiledInpaintTiming,
+    });
+    if (stale() || prepared?.cancelled) return { ...prepared, applied:false, stale:true };
+    if (!prepared.changed) return { ...prepared, applied:false, stale:false };
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source, { isCancelled:stale });
+    if (dataUrl === null || stale()) return { ...prepared, applied:false, stale:true };
+    applyHighDepthMutation(layer, {
+      highDepthSource:prepared.source,
+      dataUrl,
+      highDepthPreview:prepared.source.model === 'cmyk'
+        ? null
+        : sanitizeHighDepthPreview(layer.highDepthPreview),
+    });
+    return { ...prepared, applied:true, stale:false };
   }
 
   async function prepareHighDepthMutation(layer, buffer, { maxBytes = null } = {}) {
@@ -628,8 +697,10 @@ export function createRasterEditController({
     get highDepthPaintWorkingSet() { return highDepthPaintWorkingSet; },
     get highDepthPaintLayerId() { return highDepthPaintLayerId; },
     clearBrushBuffer,
+    discardRasterBuffer,
     clearHighDepthPaintState,
     reset,
+    cancelTiledInpaint: () => tiledInpaintWorker?.cancel?.(),
     markHighDepthPreviewDirty,
     isNativeHighDepthPaintTarget,
     highDepthBudgetForLayer,
@@ -640,6 +711,7 @@ export function createRasterEditController({
     applyNativeHighDepthStrokeSegment,
     prepareTiledHighDepthMutation,
     persistTiledHighDepthMutation,
+    persistTiledHighDepthInpaint,
     prepareHighDepthMutation,
     applyHighDepthMutation,
     persistHighDepthMutation,

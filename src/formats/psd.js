@@ -43,6 +43,10 @@ const PSD_BLEND_MODES = Object.freeze({
   idiv: 'color-burn',
   diff: 'difference',
   smud: 'exclusion',
+  colr: 'color',
+  'hue ': 'hue',
+  'sat ': 'saturation',
+  'lum ': 'luminosity',
 });
 
 export class PsdImportError extends Error {
@@ -1391,6 +1395,38 @@ function encodeCurvesAdjustmentBlock(sourceBlock,adjustment) {
   return writer.concat();
 }
 
+/**
+ * Build genuine PSD adjustment records for ZPE-created Levels/Curves/Invert/Posterize/Threshold layers.
+ * Native records are emitted only for these known layouts; unsupported kinds
+ * must fall back rather than claiming editable Photoshop metadata.
+ */
+export function createPsdAdjustmentBlocks(adjustment) {
+  const kind=String(adjustment?.kind||'');
+  // Photoshop Invert is an editable native adjustment with an empty nvrt body.
+  if(kind==='invert')return[{signature:'8BIM',key:'nvrt',data:new Uint8Array(0)}];
+  // Native post/thrs: unsigned big-endian parameter followed by two reserved bytes.
+  if(kind==='posterize'||kind==='threshold'){
+    const key=kind==='posterize'?'post':'thrs';
+    return rewritePsdAdjustmentBlocks([{signature:'8BIM',key,data:new Uint8Array(4)}],adjustment).blocks;
+  }
+  if(kind==='levels'){
+    // Photoshop Levels v2 contains 29 ten-byte channel records.
+    const bytes=new Uint8Array(2+29*10);
+    const view=new DataView(bytes.buffer);
+    view.setUint16(0,2,false);
+    for(let index=0;index<29;index+=1)patchLevelRecordAt(view,2+index*10,null);
+    return rewritePsdAdjustmentBlocks([{signature:'8BIM',key:'levl',data:bytes}],adjustment).blocks;
+  }
+  if(kind==='curves'){
+    // Point-based Curves v1: map flag, version, empty channel mask.
+    // The existing encoder writes the channel records and Crv extension.
+    return rewritePsdAdjustmentBlocks([
+      {signature:'8BIM',key:'curv',data:new Uint8Array([0,0,1,0,0,0,0])},
+    ],adjustment).blocks;
+  }
+  throw new PsdImportError('Нативное создание adjustment '+kind+' пока не поддерживается','PSD_ADJUSTMENT_CREATE');
+}
+
 export function rewritePsdAdjustmentBlocks(blocks,adjustment) {
   if(!Array.isArray(blocks)||!blocks.length)throw new PsdImportError('Adjustment rewrite: blocks отсутствуют','PSD_ADJUSTMENT_BLOCKS');
   const kind=String(adjustment?.kind||'');
@@ -1891,7 +1927,7 @@ function groupBlendModeFor(key, warnings, groupName) {
 }
 
 
-function reconstructPsdGroups(records, warnings) {
+function reconstructPsdGroups(records, warnings, documentWidth, documentHeight) {
   const stack = [];
   const groups = [];
   let sequence = 0;
@@ -1907,6 +1943,7 @@ function reconstructPsdGroups(records, warnings) {
         visible: true,
         opacity: 1,
         blendKey: 'pass',
+        mask: null,
       };
       groups.push(group);
       stack.push(group);
@@ -1924,6 +1961,9 @@ function reconstructPsdGroups(records, warnings) {
       group.visible = !(record.flags & 0x02);
       group.opacity = record.opacity / 255;
       group.blendKey = record.sectionBlendKey || record.blendKey || 'pass';
+      const maskPixels = buildMaskRgba(record, record.decodedChannels?.get(-2), documentWidth, documentHeight, {targetLeft:0,targetTop:0});
+      if (maskPixels) group.mask = { pixels:maskPixels, disabled:Boolean(record.mask?.disabled) };
+      else if (record.mask) warnings.push(`Группа «${group.name}»: raster mask channel не декодирован; группа импортирована без маски`);
       continue;
     }
 
@@ -1956,6 +1996,7 @@ function reconstructPsdGroups(records, warnings) {
       effectiveVisible: visible,
       opacity: group.opacity,
       blendMode: groupBlendModeFor(group.blendKey || 'pass', warnings, path.join(' / ')),
+      mask: group.mask,
     };
   });
 
@@ -2215,7 +2256,7 @@ export async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MA
     }
   }
 
-  const groups = reconstructPsdGroups(records, warnings);
+  const groups = reconstructPsdGroups(records, warnings, header.width, header.height);
 
   const layers = [];
   const fillLayers = [];
@@ -2331,6 +2372,10 @@ const PSD_BLEND_KEYS = Object.freeze({
   'color-burn': 'idiv',
   difference: 'diff',
   exclusion: 'smud',
+  color: 'colr',
+  hue: 'hue ',
+  saturation: 'sat ',
+  luminosity: 'lum ',
 });
 
 class Writer {
@@ -2898,13 +2943,25 @@ function normalizeExportGroups(groups = []) {
       collapsed: Boolean(group?.collapsed),
       opacity: Math.max(0, Math.min(1, Number(group?.opacity ?? 1))),
       blendMode: group?.blendMode === 'pass-through' || group?.blendMode in PSD_BLEND_KEYS ? group.blendMode : 'pass-through',
+      mask: group?.mask?.pixels ? group.mask : null,
     });
   }
   return normalized;
 }
 
-function makeExportGroupMarker(group, sectionDivider) {
+function makeExportGroupMarker(group, sectionDivider, version, bitsPerChannel, documentWidth, documentHeight) {
   const folder = sectionDivider !== 3;
+  let mask = null;
+  const channels = [];
+  if (folder && group.mask?.pixels) {
+    const width = Math.trunc(Number(group.mask.width ?? documentWidth));
+    const height = Math.trunc(Number(group.mask.height ?? documentHeight));
+    const x = Math.trunc(Number(group.mask.x ?? 0));
+    const y = Math.trunc(Number(group.mask.y ?? 0));
+    const source = exportPixelSource({pixels:group.mask.pixels}, width, height, `маска группы «${group.name}»`, 'PSD_EXPORT_MASK', 'rgb');
+    channels.push({id:-2, data:encodeExportChannel(source, 0, width, height, version, bitsPerChannel, {alpha:true})});
+    mask = {pixels:true,x,y,width,height,defaultColor:group.mask.defaultColor===0?0:255,disabled:Boolean(group.mask.disabled)};
+  }
   const sectionBlendKey = group.blendMode === 'pass-through' ? 'pass' : (PSD_BLEND_KEYS[group.blendMode] || 'norm');
   return {
     recordType: sectionDivider === 3 ? 'group-boundary' : 'group-folder',
@@ -2919,8 +2976,8 @@ function makeExportGroupMarker(group, sectionDivider) {
     blendMode: 'source-over',
     visible: folder ? group.visible : false,
     transparencyProtected: false,
-    mask: null,
-    channels: [],
+    mask,
+    channels,
   };
 }
 
@@ -2949,7 +3006,7 @@ function exportGroupLineage(groupMap, key) {
   return lineage;
 }
 
-function expandExportLayerGroups(layers, groups) {
+function expandExportLayerGroups(layers, groups, version, bitsPerChannel, documentWidth, documentHeight) {
   const groupMap = new Map(normalizeExportGroups(groups).map(group => [group.key, group]));
   if (!groupMap.size) return layers;
   const records = [];
@@ -2959,7 +3016,7 @@ function expandExportLayerGroups(layers, groups) {
   const closeTo = common => {
     while (open.length > common) {
       const group = open.pop();
-      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1));
+      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1, version, bitsPerChannel, documentWidth, documentHeight));
       closed.add(group.key);
     }
   };
@@ -2977,7 +3034,7 @@ function expandExportLayerGroups(layers, groups) {
           'PSD_EXPORT_GROUP_SPLIT',
         );
       }
-      records.push(makeExportGroupMarker(group, 3));
+      records.push(makeExportGroupMarker(group, 3, version, bitsPerChannel, documentWidth, documentHeight));
       open.push(group);
     }
     records.push(layer);
@@ -3088,6 +3145,11 @@ function writeImageResourceBlock(writer, id, data, name = '') {
 
 function writeSavedPathResources(resources, paths, width, height) {
   if (!Array.isArray(paths) || !paths.length) return;
+  // Path Information occupies resource IDs 2000..2997. Reject an overflow
+  // instead of silently dropping editable paths from a PSD/PSB export.
+  if (paths.length > 998) {
+    throw new PsdImportError('PSD/PSB writer: более 998 saved paths не помещаются в Path Information resources', 'PSD_EXPORT_PATH_RESOURCE_LIMIT');
+  }
   const used = new Set();
   let nextId = 2000;
   const allocateId = requested => {
@@ -3097,7 +3159,7 @@ function writeSavedPathResources(resources, paths, width, height) {
     if (nextId > 2997) throw new PsdImportError('PSD/PSB writer: исчерпан диапазон saved path resources 2000..2997', 'PSD_EXPORT_PATH_RESOURCE_LIMIT');
     const id = nextId++; used.add(id); return id;
   };
-  for (const path of paths.slice(0, 998)) {
+  for (const path of paths) {
     const data = new Writer();
     writePhotoshopPathRecords(data, path, width, height, `saved path «${path?.name || 'Path'}»`);
     writeImageResourceBlock(resources, allocateId(path?.id), data.concat(), path?.name || 'Path');
@@ -3186,7 +3248,7 @@ function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], c
   if (!layers.length) throw new PsdImportError('PSD/PSB writer: нужен хотя бы один слой', 'PSD_EXPORT_EMPTY');
 
   const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version, depth, mode));
-  const records = expandExportLayerGroups(normalized, groups);
+  const records = expandExportLayerGroups(normalized, groups, version, depth, documentWidth, documentHeight);
   if (records.length > 32767) {
     throw new PsdImportError(`PSD/PSB writer: слишком много layer records после добавления групп: ${records.length}`, 'PSD_EXPORT_LAYER_RECORD_LIMIT');
   }

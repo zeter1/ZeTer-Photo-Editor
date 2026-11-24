@@ -13,6 +13,51 @@ const PATH_CONTROL_CORNER_LABELS = Object.freeze({
   'document-path': 'Преобразовать узел сохранённого контура',
 });
 
+
+const PATH_CONTROL_SMOOTH_LABELS = Object.freeze({
+  shape: 'Сгладить Bézier-узел',
+  'vector-mask': 'Сгладить узел векторной маски',
+  'document-path': 'Сгладить узел сохранённого контура',
+});
+
+function finitePoint(node) {
+  const x = Number(node?.x);
+  const y = Number(node?.y);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+function smoothNodeHandles(points, index, closed) {
+  if (!Array.isArray(points) || points.length < 2 || !Number.isInteger(index)) return null;
+  const current = finitePoint(points[index]);
+  const previousIndex = index > 0 ? index - 1 : closed ? points.length - 1 : -1;
+  const nextIndex = index < points.length - 1 ? index + 1 : closed ? 0 : -1;
+  const previous = previousIndex < 0 ? null : finitePoint(points[previousIndex]);
+  const next = nextIndex < 0 ? null : finitePoint(points[nextIndex]);
+  if (!current || (previousIndex >= 0 && !previous) || (nextIndex >= 0 && !next)) return null;
+  if (!previous && !next) return null;
+
+  // The neighbour chord gives an aligned tangent; open end-points use the
+  // single adjacent segment. Keep each handle at most 1/3 of its segment.
+  let dx = (next ?? current).x - (previous ?? current).x;
+  let dy = (next ?? current).y - (previous ?? current).y;
+  let length = Math.hypot(dx, dy);
+  if (!Number.isFinite(length) || length < 1e-9) {
+    dx = next ? next.x - current.x : current.x - previous.x;
+    dy = next ? next.y - current.y : current.y - previous.y;
+    length = Math.hypot(dx, dy);
+  }
+  if (!Number.isFinite(length) || length < 1e-9) return null;
+  const inLength = previous ? Math.hypot(current.x - previous.x, current.y - previous.y) / 3 : 0;
+  const outLength = next ? Math.hypot(next.x - current.x, next.y - current.y) / 3 : 0;
+  if (!Number.isFinite(inLength) || !Number.isFinite(outLength)) return null;
+  const ux = dx / length;
+  const uy = dy / length;
+  const handleIn = previous ? { x:current.x - ux * inLength, y:current.y - uy * inLength } : null;
+  const handleOut = next ? { x:current.x + ux * outLength, y:current.y + uy * outLength } : null;
+  if ([handleIn, handleOut].some(point => point && !finitePoint(point))) return null;
+  return { handleIn, handleOut };
+}
+
 export function createPathControlCommandController({
   state,
   targets,
@@ -65,5 +110,214 @@ export function createPathControlCommandController({
     return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
   }
 
-  return { convertAnchorToCorner };
+
+  function convertAnchorToSmooth(owner, target, modifiers = {}) {
+    if (target?.control !== 'anchor' || !modifiers.altKey || !modifiers.shiftKey) {
+      return PATH_CONTROL_COMMAND_RESULT.IGNORED;
+    }
+    if (!owner || state.getDocument() !== owner) {
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    }
+    const resolved = targets.resolve(target);
+    const label = PATH_CONTROL_SMOOTH_LABELS[resolved?.source];
+    if (!resolved?.node || !label || (resolved.layer && isLayerLocked(owner, resolved.layer))) {
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    }
+    const node = resolved.node;
+    if (node.kind === 'smooth') {
+      ui.setStatus('Bézier-узел уже сглажен');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    const handles = smoothNodeHandles(resolved.points, resolved.nodeIndex, resolved.closed);
+    if (!handles) {
+      ui.setStatus('Для сглаживания нужны соседние узлы с разными координатами');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    node.handleIn = handles.handleIn;
+    node.handleOut = handles.handleOut;
+    node.kind = 'smooth';
+    transaction.commit(label);
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  function writableMaskTarget(owner, target) {
+    if (target?.source !== 'vector-mask' || !owner || state.getDocument() !== owner) return null;
+    const resolved = targets.resolve(target);
+    const layer = resolved?.layer;
+    if (!layer || !owner.layers?.includes(layer) || owner.selectedLayerId !== layer.id
+      || isLayerLocked(owner, layer) || target.layer !== layer
+      || (layer.groupId ?? null) !== (target.groupId ?? null)
+      || resolved.source !== 'vector-mask' || resolved.points !== target.points
+      || !Array.isArray(resolved.points) || resolved.points.length < 2) return null;
+    const mask = layer.vectorMask;
+    if (!mask || mask !== target.vectorMask ||
+      mask.subpaths?.[target.subpathIndex] !== target.subpath ||
+      mask.subpaths?.[target.subpathIndex]?.points !== resolved.points) return null;
+    return resolved;
+  }
+
+  function lerpPoint(a, b, t) {
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  }
+
+  // De Casteljau splits the *existing* cubic exactly. A new anchor must not
+  // subtly alter the mask alpha merely by being inserted.
+  function insertMaskNode(owner, target) {
+    if (!Number.isInteger(target?.segmentIndex) || !Number.isFinite(target?.t)
+      || target.t <= 0.0001 || target.t >= 0.9999) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const resolved = writableMaskTarget(owner, { ...target, nodeIndex:target.segmentIndex });
+    if (!resolved || resolved.nodeIndex !== target.segmentIndex) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const points = resolved.points;
+    const from = points[target.segmentIndex];
+    const subpath = resolved.layer.vectorMask.subpaths[target.subpathIndex];
+    const nextIndex = (target.segmentIndex + 1) % points.length;
+    if (nextIndex === 0 && subpath.closed === false) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const to = points[nextIndex];
+    if (!from || !to || from !== target.fromNode || to !== target.toNode
+      || points.length >= 1000) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const finite = point => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+    if (!finite(from) || !finite(to) ||
+      (from.handleOut && !finite(from.handleOut)) ||
+      (to.handleIn && !finite(to.handleIn))) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const t = target.t;
+    let node;
+    if (from.handleOut || to.handleIn) {
+      const a = lerpPoint(from, from.handleOut ?? from, t);
+      const b = lerpPoint(from.handleOut ?? from, to.handleIn ?? to, t);
+      const c = lerpPoint(to.handleIn ?? to, to, t);
+      const d = lerpPoint(a, b, t);
+      const e = lerpPoint(b, c, t);
+      const f = lerpPoint(d, e, t);
+      if (![a, c, d, e, f].every(finite)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      from.handleOut = a;
+      to.handleIn = c;
+      node = { x:f.x, y:f.y, handleIn:d, handleOut:e, kind:'smooth' };
+    } else {
+      const f = lerpPoint(from, to, t);
+      if (!finite(f)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      node = { x:f.x, y:f.y, handleIn:null, handleOut:null, kind:'corner' };
+    }
+    points.splice(target.segmentIndex + 1, 0, node);
+    transaction.commit('Добавить узел векторной маски');
+    ui.setStatus('Узел добавлен без изменения кривой');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  function deleteMaskNode(owner, target) {
+    if (target?.control !== 'anchor') return PATH_CONTROL_COMMAND_RESULT.IGNORED;
+    const resolved = writableMaskTarget(owner, target);
+    if (!resolved || resolved.nodeIndex !== target.nodeIndex || resolved.node !== target.node)
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const subpath = resolved.layer.vectorMask.subpaths[target.subpathIndex];
+    const points = resolved.points;
+    // Removing a point from a closed path with three anchors destroys the
+    // rasterizable polygon. Keep the user's current mask intact instead.
+    const minimum = subpath.closed === false ? 2 : 3;
+    if (points.length <= minimum) {
+      ui.setStatus('Недостаточно узлов для удаления');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    points.splice(resolved.nodeIndex, 1);
+    // The surviving neighbours keep their cubic handles and exact endpoint
+    // tangents. A general two-cubic arc cannot be represented exactly by one
+    // cubic after deletion; do not silently flatten it to a straight line.
+    transaction.commit('Удалить узел векторной маски');
+    ui.setStatus('Узел удалён; соседние Bézier-ручки сохранены');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  // Shape nodes are layer-local; Saved Path nodes are document-space. The
+  // surface supplies both through the same exact geometry/identity contract.
+  function writableEditablePathTarget(owner, target) {
+    if (!owner || state.getDocument() !== owner ||
+      !['shape', 'document-path'].includes(target?.source)) return null;
+    const resolved = targets.resolve(target);
+    if (!resolved || resolved.source !== target.source ||
+      resolved.points !== target.points || !Array.isArray(resolved.points) ||
+      resolved.points.length < 2 || resolved.closed !== target.closed) return null;
+
+    if (target.source === 'shape') {
+      const layer = resolved.layer;
+      if (!layer || !owner.layers?.includes(layer) || layer !== target.layer ||
+        owner.selectedLayerId !== layer.id || isLayerLocked(owner, layer) ||
+        (layer.groupId ?? null) !== (target.groupId ?? null) ||
+        layer.type !== 'shape' || layer.shape !== 'path' ||
+        layer.pathPoints !== target.points || Boolean(layer.pathClosed) !== target.closed) return null;
+    } else {
+      const path = owner.paths?.[target.documentPathIndex];
+      const subpath = path?.subpaths?.[target.subpathIndex];
+      if (!path || path !== target.pathTarget || path.id !== target.pathId ||
+        resolved.pathTarget !== path || resolved.pathId !== target.pathId ||
+        !subpath || subpath !== target.subpath ||
+        resolved.subpath !== subpath || subpath.points !== target.points ||
+        (subpath.closed !== false) !== target.closed) return null;
+    }
+    return resolved;
+  }
+
+  function insertPathNode(owner, target) {
+    if (!Number.isInteger(target?.segmentIndex) || !Number.isFinite(target?.t) ||
+      target.t <= 0.0001 || target.t >= 0.9999) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const resolved = writableEditablePathTarget(owner, { ...target, nodeIndex: target.segmentIndex });
+    if (!resolved || resolved.nodeIndex !== target.segmentIndex) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const points = resolved.points;
+    const index = target.segmentIndex;
+    if (points.length >= 1000 || index < 0 || index >= (target.closed ? points.length : points.length - 1))
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    if (!from || !to || from !== target.fromNode || to !== target.toNode)
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const finite = point => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+    if (!finite(from) || !finite(to) ||
+      (from.handleOut && !finite(from.handleOut)) ||
+      (to.handleIn && !finite(to.handleIn))) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+
+    const t = target.t;
+    let node;
+    if (from.handleOut || to.handleIn) {
+      const a = lerpPoint(from, from.handleOut ?? from, t);
+      const b = lerpPoint(from.handleOut ?? from, to.handleIn ?? to, t);
+      const c = lerpPoint(to.handleIn ?? to, to, t);
+      const d = lerpPoint(a, b, t);
+      const e = lerpPoint(b, c, t);
+      const f = lerpPoint(d, e, t);
+      if (![a, b, c, d, e, f].every(finite)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      from.handleOut = a;
+      to.handleIn = c;
+      node = { x:f.x, y:f.y, handleIn:d, handleOut:e, kind:'smooth' };
+    } else {
+      const f = lerpPoint(from, to, t);
+      if (!finite(f)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      node = { x:f.x, y:f.y, handleIn:null, handleOut:null, kind:'corner' };
+    }
+    points.splice(index + 1, 0, node);
+    transaction.commit(target.source === 'shape' ? 'Добавить Bézier-узел' : 'Добавить узел сохранённого контура');
+    ui.setStatus('Узел добавлен без изменения кривой');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  function deletePathNode(owner, target) {
+    if (target?.control !== 'anchor') return PATH_CONTROL_COMMAND_RESULT.IGNORED;
+    const resolved = writableEditablePathTarget(owner, target);
+    if (!resolved || resolved.nodeIndex !== target.nodeIndex ||
+      resolved.node !== target.node) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const points = resolved.points;
+    const minimum = target.closed ? 3 : 2;
+    if (points.length <= minimum) {
+      ui.setStatus('Недостаточно узлов для удаления');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    // Surviving neighbours retain their handles; merging arbitrary two cubics
+    // into one cannot preserve the full original geometry exactly.
+    points.splice(resolved.nodeIndex, 1);
+    transaction.commit(target.source === 'shape' ? 'Удалить Bézier-узел' : 'Удалить узел сохранённого контура');
+    ui.setStatus('Узел удалён; соседние Bézier-ручки сохранены');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  return {
+    convertAnchorToCorner, convertAnchorToSmooth,
+    insertMaskNode, deleteMaskNode, insertPathNode, deletePathNode,
+  };
 }

@@ -8,12 +8,15 @@ const STALE_TEXT = 'Новый документ не создан: активн�
 function makeHarness({
   dirty = false,
   pendingChecks = [],
+  pendingFill = false,
+  cancelFails = false,
   confirmResult = true,
   confirmResults = null,
   factory = values => ({ id: 'new-doc', ...values }),
 } = {}) {
   const state = {
     dirty,
+    pendingFill,
     documentValue: { id: 'doc-a' },
     sessionId: 'session-a',
     changeSerial: 0,
@@ -30,6 +33,13 @@ function makeHarness({
       getActiveSessionId: () => state.sessionId,
       getDocumentChangeSerial: () => state.changeSerial,
       blockPendingDocumentEdit: () => Boolean(pendingChecks[pendingIndex++]),
+      canCancelPendingContentAwareFill: () => state.pendingFill,
+      cancelPendingContentAwareFill: () => {
+        events.push('cancel-fill');
+        if (cancelFails) return false;
+        state.pendingFill = false;
+        return true;
+      },
       replaceHistory: () => events.push('history'),
       setDocument: (documentValue, options) => events.push(['document', documentValue, options]),
       markDirty: value => events.push(['dirty', value]),
@@ -206,4 +216,57 @@ test('canReplaceDocument is reusable by other document-open owners', () => {
   const dirty = makeHarness({ dirty: true, confirmResult: true });
   assert.equal(dirty.controller.canReplaceDocument(), true);
   assert.deepEqual(dirty.calls.confirms, [CONFIRM_TEXT]);
+});
+
+test('003W/2b-2f denied dirty File New leaves active native Worker untouched', async () => {
+  const h = makeHarness({ dirty:true, pendingFill:true, confirmResult:false,
+    pendingChecks:[true] });
+  await h.controller.open();
+  assert.equal(h.getModal(), null);
+  assert.equal(h.state.pendingFill, true);
+  assert.deepEqual(h.calls.confirms, [CONFIRM_TEXT]);
+  assert.deepEqual(h.events, []);
+});
+
+test('003W/2b-2f accepted New cancels only after valid factory and pre-publication', async () => {
+  const h = makeHarness({ dirty:true, pendingFill:true, pendingChecks:[false] });
+  await h.controller.open();
+  assert.equal(h.state.pendingFill, true, 'opening an approved dialog does not cancel');
+  assert.ok(h.getModal());
+  assert.equal(await h.getModal().onSubmit(values), undefined);
+  assert.equal(h.state.pendingFill, false);
+  assert.deepEqual(h.events.slice(0,4).map(x=>Array.isArray(x)?x[0]:x),
+    ['factory','cancel-fill','history','document']);
+  assert.deepEqual(h.calls.confirms, [CONFIRM_TEXT]);
+});
+
+test('003W/2b-2f invalid replacement and changed owner never revoke Worker', async () => {
+  const failed = makeHarness({ dirty:true, pendingFill:true,
+    factory:()=>{throw new Error('invalid dimensions');} });
+  await failed.controller.open();
+  assert.equal(await failed.getModal().onSubmit(values),false);
+  assert.equal(failed.state.pendingFill,true);
+  assert.ok(!failed.events.includes('cancel-fill'));
+
+  const stale=makeHarness({dirty:true,pendingFill:true});
+  await stale.controller.open();
+  stale.state.documentValue={id:'replacement-by-other-command'};
+  assert.equal(await stale.getModal().onSubmit(values),false);
+  assert.equal(stale.state.pendingFill,true);
+  assert.deepEqual(stale.events,[]);
+});
+
+test('003W/2b-2f cancellation failure forbids any History/document publication', async () => {
+  const h=makeHarness({dirty:true,pendingFill:true,cancelFails:true});
+  await h.controller.open();
+  assert.equal(await h.getModal().onSubmit(values),false);
+  assert.deepEqual(h.events,['factory','cancel-fill']);
+  assert.equal(h.state.pendingFill,true);
+});
+
+test('003W/2b-2f non-cancellable raster edit remains blocked', async () => {
+  const h=makeHarness({dirty:true,pendingFill:false,pendingChecks:[true]});
+  await h.controller.open();
+  assert.equal(h.getModal(),null);
+  assert.deepEqual(h.calls.confirms,[]);
 });

@@ -1,0 +1,2037 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import {createHash,randomUUID} from 'node:crypto';
+import {
+  installBrowserSelectionFreezeObserver,
+  validateBrowserSelectionPhaseEvidence,
+  validateBrowserSelectionRefusalPhaseEvidence,
+  summarizeBrowserSelectionPhaseEvidence,
+} from './browser-selection-freeze-observer.mjs';
+import {
+  validateBrowserPhaseAlignedEvidence,
+  summarizeBrowserPhaseAlignedEvidence,
+} from './browser-selection-phase-alignment.mjs';
+import { createBrowserHighDepthFixture } from './browser-high-depth-fixtures.mjs';
+import { inspectNativeSelectedPixelChanges } from './browser-native-selection-integrity.mjs';
+import { saveBrowserNearCapEvidence, validateBrowserNearCapEvidence } from './browser-near-cap-evidence.mjs';
+import {
+  saveBrowserDenseNearCapEvidence, validateBrowserDenseNearCapEvidence,
+  BROWSER_DENSE_NEAR_CAP_LIMITATIONS,
+} from './browser-dense-near-cap-evidence.mjs';
+import {
+  saveBrowserDenseCancelEvidence, validateBrowserDenseCancelEvidence,
+  BROWSER_DENSE_CANCEL_LIMITATIONS,
+} from './browser-dense-cancel-evidence.mjs';
+import {
+  saveBrowserDenseOwnerEvidence, validateBrowserDenseOwnerEvidence,
+  BROWSER_DENSE_OWNER_LIMITATIONS,
+} from './browser-dense-owner-evidence.mjs';
+import {
+  saveBrowserDenseCloseEvidence, validateBrowserDenseCloseEvidence,
+  BROWSER_DENSE_CLOSE_LIMITATIONS,
+} from './browser-dense-close-evidence.mjs';
+import {
+  saveBrowserDenseReplaceEvidence, validateBrowserDenseReplaceEvidence,
+  BROWSER_DENSE_REPLACE_LIMITATIONS,
+} from './browser-dense-replace-evidence.mjs';
+import {
+  saveBrowserDenseImportEvidence, validateBrowserDenseImportEvidence,
+  BROWSER_DENSE_IMPORT_LIMITATIONS,
+} from './browser-dense-import-evidence.mjs';
+import {
+  saveBrowserDenseFailedImportEvidence, validateBrowserDenseFailedImportEvidence,
+} from './browser-dense-failed-import-evidence.mjs';
+import {
+  saveBrowserDenseNaturalFailedImportEvidence,
+  validateBrowserDenseNaturalFailedImportEvidence,
+  BROWSER_DENSE_NATURAL_FAILED_IMPORT_LIMITATIONS,
+} from './browser-dense-natural-failed-import-evidence.mjs';
+
+// 003W/2b-2a: actual Chromium file:// PSD16/PSB32 import, UI marquee,
+// production Blob Worker + History, and >2M refusal. The successful selection
+// is intentionally small in legacy mode. Dense mode independently checks real near-2M Worker completion.
+export async function verifyBrowserNearCapUi(client,{evaluate,waitFor,assert,fixtureKey,dense=false,cancelDense=false,switchDense=false,closeDense=false,replaceDense=false,importDense=false,failedImportDense=false,naturalFailedImportDense=false,operationCpuCensus=null}={}) {
+  const repeat=process.env.ZPE_NEAR_CAP_REPETITION;
+  if(repeat!==undefined && repeat!=='2') throw new TypeError('003W/3b: invalid repetition');
+  const repeatSuffix=repeat==='2'?'-repeat2':'';
+  const fixture=createBrowserHighDepthFixture(fixtureKey);
+  const format=fixture.version===1?'PSD16':'PSB32';
+  assert(fixture.width===1450 && fixture.height===1400 &&
+    fixture.width*fixture.height===2_030_000,
+    '003W/2b-2a must load actual >2M high-depth native geometry');
+  await client.send('Emulation.setDeviceMetricsOverride',{
+    width:1280,height:900,deviceScaleFactor:1,mobile:false,
+  });
+  await evaluate(client,'window.__nearCapParts=[];window.__nearCapMeta='+
+    JSON.stringify({filename:fixture.filename,width:fixture.width,height:fixture.height,
+      x:fixture.defectX,y:fixture.defectY,bits:fixture.bitsPerChannel})+';true');
+  if(switchDense||closeDense||replaceDense||importDense||failedImportDense||naturalFailedImportDense)await evaluate(client,'window.__nearCapKeepFile=true;true');
+  const base64=Buffer.from(fixture.bytes).toString('base64');
+  for(let offset=0;offset<base64.length;offset+=192*1024) {
+    const part=base64.slice(offset,offset+192*1024);
+    await evaluate(client,'(() => {const b=atob('+JSON.stringify(part)+
+      ');window.__nearCapParts.push(Uint8Array.from(b,c=>c.charCodeAt(0)));return true})()');
+  }
+  function importFile() {
+    const transfer=new DataTransfer();
+    const file=window.__nearCapFixtureFile||new File(
+      window.__nearCapParts,window.__nearCapMeta.filename,{type:'image/vnd.adobe.photoshop'});
+    if(window.__nearCapKeepFile)window.__nearCapFixtureFile=file;
+    transfer.items.add(file);
+    const input=document.querySelector('#fileInput');
+    input.files=transfer.files;
+    const size=input.files[0].size;
+    delete window.__nearCapParts;
+    const old=window.confirm;
+    window.confirm=()=>true;
+    try{input.dispatchEvent(new Event('change',{bubbles:true}));}
+    finally{window.confirm=old;}
+    return size;
+  }
+  const size=await evaluate(client,'('+importFile.toString()+')()');
+  assert(size===fixture.bytes.length,'003W/2b-2a PSD/PSB transport must be exact');
+  await waitFor('003W/2b-2a actual PSD/PSB native import',
+    ()=>evaluate(client,'(() => {const f=window.__nearCapMeta;return '+
+      'document.querySelector("#editorCanvas").width===f.width && '+
+      'document.querySelector("#editorCanvas").height===f.height && '+
+      'document.querySelector("#statusText")?.textContent?.startsWith("PSD/PSB импортирован")})()'),
+    60_000);
+
+  function observeWorker() {
+    const original=Worker.prototype.postMessage;
+    const originalTerminate=Worker.prototype.terminate;
+    const watched=new WeakSet();
+    let priorPulse=performance.now(),active=false;
+    const observation={
+      jobs:0,selectedPixels:0,selectedBytes:0,selected:null,
+      pulseIntervalsMs:[],truncated:false,startedAtMs:0,
+      heapBeforeBytes:null,heapAfterBytes:null,
+      replies:0,terminatedJobs:0,firstDispatchAtMs:null,firstTerminatedAtMs:null,
+    };
+    const heap=()=>Number.isSafeInteger(performance.memory?.usedJSHeapSize)
+      ?performance.memory.usedJSHeapSize:null;
+    const interval=setInterval(()=>{
+      const now=performance.now(),elapsed=now-priorPulse;
+      priorPulse=now;
+      if(active) {
+        if(observation.pulseIntervalsMs.length<256)observation.pulseIntervalsMs.push(elapsed);
+        else observation.truncated=true;
+      }
+    },8);
+    Worker.prototype.postMessage=function(job,...rest) {
+      if(job?.source?.kind==='zpe-pixel-buffer-source-v2' &&
+          job.selectedIndices instanceof Uint32Array) {
+        observation.jobs++;
+        if(observation.firstDispatchAtMs===null)observation.firstDispatchAtMs=performance.now();
+        watched.add(this);
+        this.addEventListener('message',()=>{observation.replies++;},{once:true});
+        observation.selectedPixels=job.selectedIndices.length;
+        observation.selectedBytes=job.selectedIndices.byteLength;
+        observation.selected=Uint32Array.from(job.selectedIndices);
+      }
+      return original.call(this,job,...rest);
+    };
+    Worker.prototype.terminate=function(...args){
+      if(watched.has(this)){
+        observation.terminatedJobs++;
+        if(observation.firstTerminatedAtMs===null)observation.firstTerminatedAtMs=performance.now();
+        watched.delete(this);
+      }
+      return originalTerminate.apply(this,args);
+    };
+    window.__nearCapWorkerObservation={
+      begin(){observation.pulseIntervalsMs=[];observation.truncated=false;
+        observation.startedAtMs=performance.now();observation.heapBeforeBytes=heap();active=true;},
+      end(){active=false;observation.heapAfterBytes=heap();
+        return {pulseIntervalsMs:[...observation.pulseIntervalsMs],
+          truncated:observation.truncated,
+          elapsedMs:performance.now()-observation.startedAtMs,
+          heapBeforeBytes:observation.heapBeforeBytes,
+          heapAfterBytes:observation.heapAfterBytes};},
+      summary(){return {jobs:observation.jobs,selectedPixels:observation.selectedPixels,
+        selectedBytes:observation.selectedBytes,replies:observation.replies,
+        terminatedJobs:observation.terminatedJobs,
+        firstDispatchAtMs:observation.firstDispatchAtMs,
+        firstTerminatedAtMs:observation.firstTerminatedAtMs};},
+      selected(){return observation.selected;},
+      restore(){active=false;clearInterval(interval);Worker.prototype.postMessage=original;
+        Worker.prototype.terminate=originalTerminate;
+        delete window.__nearCapWorkerObservation;},
+    };
+    return true;
+  }
+  await evaluate(client,'('+observeWorker.toString()+')()');
+
+  // Each read goes through the real File > Save Project UI, without exposing
+  // editor-private state; native tile payloads are compared in the page.
+  function readNative() {
+    let blob=null;
+    const old=URL.createObjectURL;
+    URL.createObjectURL=function(value,...rest){
+      if(value instanceof Blob && value.type==='application/json')blob=value;
+      return old.call(URL,value,...rest);
+    };
+    try {
+      document.querySelector('.menu-button[data-menu="file"]').click();
+      const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+        button=>button.querySelector('span')?.textContent?.startsWith('Сохранить проект'));
+      if(!item || item.disabled)return {error:'Save Project unavailable'};
+      item.click();
+      if(!blob)return {error:'Save Project yielded no JSON blob'};
+      return blob.text().then(text=>{
+        const project=JSON.parse(text),f=window.__nearCapMeta;
+        const source=project.layers.find(l=>l.name==='Stage 003 native layer')?.highDepthSource;
+        if(!source)return {error:'Native high-depth source lost'};
+        const urls=source.tiles.map(tile=>tile.dataUrl);
+        const equal=(target)=>target?.length===urls.length &&
+          urls.every((value,i)=>target[i]===value);
+        if(!window.__nearCapBaseline) {
+          window.__nearCapBaseline=urls;
+          window.__nearCapBaselineSource=source;
+        }
+        const baselineEqual=equal(window.__nearCapBaseline);
+        const successEqual=equal(window.__nearCapSuccess);
+        let quality=null,alphaUnchanged=null;
+        if(window.__nearCapWorkerObservation?.selected() &&
+          window.__nearCapBaselineSource) {
+          quality=inspectNativeSelectedPixelChanges(
+            window.__nearCapBaselineSource,source,
+            window.__nearCapWorkerObservation.selected());
+          alphaUnchanged=true;
+          const before=window.__nearCapBaselineSource;
+          const bytesPerSample=f.bits/8, stride=4*bytesPerSample;
+          for(let i=0;i<source.tiles.length;i++){
+            if(before.tiles[i].dataUrl===source.tiles[i].dataUrl)continue;
+            const original=Uint8Array.from(atob(before.tiles[i].dataUrl.split(',')[1]),c=>c.charCodeAt(0));
+            const changed=Uint8Array.from(atob(source.tiles[i].dataUrl.split(',')[1]),c=>c.charCodeAt(0));
+            for(let off=3*bytesPerSample;off<original.length;off+=stride)
+              for(let b=0;b<bytesPerSample;b++)
+                if(original[off+b]!==changed[off+b])alphaUnchanged=false;
+          }
+        }
+        if(window.__nearCapCaptureSuccess) {
+          window.__nearCapSuccess=urls;
+          delete window.__nearCapCaptureSuccess;
+        }
+        return {bits:source.bitsPerChannel,pixels:source.width*source.height,
+          rawBytes:source.rawBytes,tiles:source.tiles.length,
+          baselineEqual,successEqual,quality,alphaUnchanged};
+      });
+    } finally { URL.createObjectURL=old; }
+  }
+  const snapshot='(() => {\n'+inspectNativeSelectedPixelChanges.toString()+
+    '\nreturn ('+readNative.toString()+')();\n})()';
+  function setupSelection(large) {
+    const f=window.__nearCapMeta;
+    document.querySelector('[data-tool="marquee"]').click();
+    const type=document.querySelector('#selectionType');
+    type.value='rect';type.dispatchEvent(new Event('change',{bubbles:true}));
+    const zoom=document.querySelector('#zoomRange');
+    zoom.value=large?'25':'50';zoom.dispatchEvent(new Event('input',{bubbles:true}));
+    document.querySelector('#canvasShell').scrollIntoView({block:'center',inline:'center'});
+    const viewport=document.querySelector('#stageViewport');
+    viewport.scrollLeft=(viewport.scrollWidth-viewport.clientWidth)/2;
+    viewport.scrollTop=(viewport.scrollHeight-viewport.clientHeight)/2;
+    const canvas=document.querySelector('#editorCanvas'),r=canvas.getBoundingClientRect();
+    const toClient=(x,y)=>({x:r.left+r.width*x/f.width,y:r.top+r.height*y/f.height});
+    const isWide=large===true||large==='dense',isDense=large==='dense';
+    const start=isWide?toClient(isDense?10:1,isDense?10:1):toClient(f.x-12,f.y-12);
+    const end=isWide?toClient(isDense?f.width-10:f.width-4,
+      isDense?f.height-10:f.height-2):toClient(f.x+12,f.y+12);
+    const center=toClient(f.x,f.y);
+    return {start,end,hit:document.elementFromPoint(center.x,center.y)?.id,
+      within:start.x>0&&start.y>0&&end.x<innerWidth&&end.y<innerHeight,
+      boundingPixels:large==='dense'?(f.width-20)*(f.height-20):
+        (f.width-5)*(f.height-3),width:r.width,height:r.height};
+  }
+  async function draw(view) {
+    const send=(type,point,buttons)=>client.send('Input.dispatchMouseEvent',{
+      type,x:point.x,y:point.y,button:'left',buttons,clickCount:1,
+    });
+    await send('mouseMoved',view.start,0);
+    await send('mousePressed',view.start,1);
+    await send('mouseMoved',view.end,1);
+    await send('mouseReleased',view.end,0);
+  }
+  function runFill() {
+    document.querySelector('.menu-button[data-menu="edit"]').click();
+    const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+      x=>x.querySelector('span')?.textContent==='Контент-заливка выделения');
+    const enabled=Boolean(item&&!item.disabled);
+    if(enabled)item.click();
+    return enabled;
+  }
+  function ui() {
+    const f=window.__nearCapMeta;
+    return {pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d')
+        .getImageData(f.x,f.y,1,1).data),
+      history:[...document.querySelectorAll('#historyList .history-row')].map(x=>x.textContent),
+      status:document.querySelector('#statusText')?.textContent||''};
+  }
+  try {
+    await waitFor('003W/2b-2a original defect preview',()=>evaluate(client,
+      '(() => {const f=window.__nearCapMeta;const p=document.querySelector("#editorCanvas")'+
+      '.getContext("2d").getImageData(f.x,f.y,1,1).data;return p[0]>100&&p[0]>p[1]*2})()'),30_000);
+    const baseline=await evaluate(client,snapshot);
+    const originalPreview=await evaluate(client,'('+ui.toString()+')()');
+    assert(baseline.bits===fixture.bitsPerChannel &&
+      baseline.rawBytes===fixture.width*fixture.height*4*(fixture.bitsPerChannel/8) &&
+      baseline.tiles>1 && baseline.baselineEqual,
+      '003W/2b-2a initial native PSD/PSB source bytes/geometry',JSON.stringify(baseline));
+
+
+
+    // 003W/2b-2g: an actually different File -> Open native source replaces the
+    // original while its dense production Blob Worker has already dispatched.
+    if(importDense||failedImportDense||naturalFailedImportDense){
+      const replacement=createBrowserHighDepthFixture(fixtureKey+'-alt');
+      assert(replacement.width===fixture.width && replacement.height===fixture.height &&
+        replacement.filename!==fixture.filename &&
+        replacement.bitsPerChannel===fixture.bitsPerChannel,
+        '003W/2b-2g independently named/different high-depth PSD/PSB replacement');
+      const alt64=Buffer.from(replacement.bytes).toString('base64');
+      await evaluate(client,'window.__nearCapReplacementParts=[];window.__nearCapReplacementMeta='+
+        JSON.stringify({filename:replacement.filename,width:replacement.width,height:replacement.height,
+          x:replacement.defectX,y:replacement.defectY,bits:replacement.bitsPerChannel})+';true');
+      for(let offset=0;offset<alt64.length;offset+=192*1024){
+        const part=alt64.slice(offset,offset+192*1024);
+        await evaluate(client,'(() => {const b=atob('+JSON.stringify(part)+
+          ');window.__nearCapReplacementParts.push(Uint8Array.from(b,c=>c.charCodeAt(0)));return true})()');
+      }
+      const altSize=await evaluate(client,'(() => {window.__nearCapReplacementFile=new File('+
+        'window.__nearCapReplacementParts,window.__nearCapReplacementMeta.filename,'+
+        '{type:"image/vnd.adobe.photoshop"});delete window.__nearCapReplacementParts;'+
+        'return window.__nearCapReplacementFile.size})()');
+      assert(altSize===replacement.bytes.length &&
+        replacement.bytes.length>0 && fixture.bytes.length>0,
+        '003W/2b-2g real different PSD/PSB bytes transported exactly');
+      const sameUi=(a,b)=>JSON.stringify(a.pixel)===JSON.stringify(b.pixel) &&
+        JSON.stringify(a.history)===JSON.stringify(b.history);
+      const dirty=await evaluate(client,
+        'document.querySelector("#docTabs .doc-tab-shell .dirty-dot")?.hidden===false');
+      assert(dirty,'003W/2b-2g original must be dirty before file import');
+      const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(view.hit==='overlayCanvas'&&view.within&&
+        view.boundingPixels>=1_900_000&&view.boundingPixels<=2_000_000,
+        '003W/2b-2g original native dense marquee',JSON.stringify(view));
+      await draw(view);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2g first real dense Worker command was enabled');
+      const workerExpr='window.__nearCapWorkerObservation.summary()';
+      await waitFor('003W/2b-2g real original native Worker dispatch',
+        async()=>(await evaluate(client,workerExpr)).jobs===1,75_000);
+      const first=await evaluate(client,workerExpr);
+      assert(first.selectedPixels>=1_900_000&&first.selectedPixels<=2_000_000 &&
+        first.selectedBytes===first.selectedPixels*4 && first.replies===0 &&
+        first.terminatedJobs===0,
+        '003W/2b-2g old native Worker truly in-flight',JSON.stringify(first));
+
+      // 003W/2b-2h: exercise the *real* PSD/PSB decoder through File Open
+      // while the original 1.97M native Worker is still running. A deliberately
+      // malformed Adobe signature/version must not change document or lease.
+      let failedImport=null;
+      if(failedImportDense||naturalFailedImportDense){
+        async function openMalformed(){
+          const input=document.querySelector('#fileInput');
+          const suffix=window.__nearCapMeta.filename.toLowerCase().endsWith('.psb')?'.psb':'.psd';
+          const name='malformed-native-'+suffix.slice(1)+suffix;
+          const malformed=new File([Uint8Array.from([56,66,80,83,0,0,0,99,0,0,0,0])],
+            name,{type:'image/vnd.adobe.photoshop'});
+          const previousConfirm=window.confirm,previousAlert=window.alert;
+          let approvedPrompts=0,alerts=0,errorMessage='',atFailure=null;
+          let notifyFailure;
+          const failed=new Promise(resolve=>{notifyFailure=resolve;});
+          try{
+            window.confirm=()=>{approvedPrompts++;return true;};
+            window.alert=message=>{
+              alerts++;errorMessage=String(message);
+              // Snapshot synchronously in the decode-error callback. A valid
+              // original Worker is allowed to finish afterwards, so polling
+              // the status text for seconds would incorrectly treat its
+              // legitimate completion as an import mutation.
+              const meta=window.__nearCapMeta;
+              atFailure={
+                worker:window.__nearCapWorkerObservation.summary(),
+                tabs:document.querySelectorAll('#docTabs .doc-tab').length,
+                pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d')
+                  .getImageData(meta.x,meta.y,1,1).data),
+                history:[...document.querySelectorAll('#historyList .history-row')].map(
+                  row=>row.textContent),
+              };
+              notifyFailure();
+            };
+            document.querySelector('.menu-button[data-menu="file"]').click();
+            const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+              x=>x.querySelector('span')?.textContent?.startsWith('Открыть изображение'));
+            if(!item||item.disabled)return {clicked:false,name,approvedPrompts,alerts};
+            item.click();
+            const transfer=new DataTransfer();transfer.items.add(malformed);
+            input.files=transfer.files;
+            input.dispatchEvent(new Event('change',{bubbles:true}));
+            await Promise.race([failed,new Promise(resolve=>setTimeout(resolve,1_200))]);
+            return {clicked:true,name,bytes:malformed.size,approvedPrompts,alerts,
+              errorMessage,atFailure};
+          }finally{window.confirm=previousConfirm;window.alert=previousAlert;}
+        }
+        const malformed=await evaluate(client,'('+openMalformed.toString()+')()');
+        const previewUnchanged=JSON.stringify(malformed.atFailure?.pixel)===
+          JSON.stringify(originalPreview.pixel);
+        const historyUnchanged=JSON.stringify(malformed.atFailure?.history)===
+          JSON.stringify(originalPreview.history);
+        assert(malformed.clicked&&malformed.bytes===12&&malformed.approvedPrompts===1&&
+          malformed.alerts===1&&malformed.errorMessage.startsWith('Не удалось импортировать PSD/PSB:') &&
+          malformed.atFailure?.tabs===1 &&
+          malformed.atFailure?.worker?.jobs===1&&malformed.atFailure?.worker?.replies===0&&
+          malformed.atFailure?.worker?.terminatedJobs===0 && previewUnchanged && historyUnchanged,
+          '003W/2b-2h corrupt File Open must report real decoder failure with unchanged in-flight native owner',
+          JSON.stringify({malformed,previewUnchanged,historyUnchanged}));
+        // 003W/2b-2i: intentionally let the *original* real Worker finish after
+        // a failed File Open. Validate its native and History publication before
+        // importing a different real high-depth source. No Escape/cancel.
+        if(naturalFailedImportDense){
+          const atFailure=malformed.atFailure.worker;
+          await waitFor('003W/2b-2i original Worker naturally publishes',
+            ()=>evaluate(client,'(() => {const w=window.__nearCapWorkerObservation.summary();'+
+              'return w.jobs===1&&w.replies===1&&'+
+              'document.querySelector("#statusText")?.textContent?.includes("tiled ")})()'),205_000);
+          const completed=await evaluate(client,workerExpr);
+          const firstTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+          assert(completed.jobs===1&&completed.replies===1&&
+            completed.selectedPixels===first.selectedPixels&&
+            completed.terminatedJobs<=1&&atFailure.terminatedJobs===0&&
+            atFailure.replies===0,
+            '003W/2b-2i natural completion not cancelled or redirected',
+            JSON.stringify({atFailure,completed}));
+          await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+          const originalSuccess=await evaluate(client,snapshot);
+          const originalSuccessUi=await evaluate(client,'('+ui.toString()+')()');
+          const fillRows=a=>a.filter(x=>x.includes('Контент-заливка')).length;
+          const originalHistoryOnce=fillRows(originalSuccessUi.history)===
+            fillRows(originalPreview.history)+1;
+          assert(originalSuccess.bits===fixture.bitsPerChannel&&
+            !originalSuccess.baselineEqual&&
+            originalSuccess.quality?.selectedPixels===first.selectedPixels&&
+            originalSuccess.quality.changedSelectedPixels>0&&
+            originalSuccess.quality.changedOutsideSelectionPixels===0&&
+            originalSuccess.alphaUnchanged===true&&originalHistoryOnce&&
+            await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length')===1,
+            '003W/2b-2i original Worker selected-only native/alpha and single History entry',
+            JSON.stringify({originalSuccess,originalSuccessUi}));
+          await evaluate(client,"document.querySelector('#undoBtn').click();true");
+          await waitFor('003W/2b-2i original native Undo',async()=>
+            (await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+          const originalUndo=await evaluate(client,snapshot);
+          await evaluate(client,"document.querySelector('#redoBtn').click();true");
+          await waitFor('003W/2b-2i original native Redo',async()=>
+            (await evaluate(client,snapshot))?.successEqual===true,90_000);
+          const originalRedo=await evaluate(client,snapshot);
+          assert(originalUndo.baselineEqual&&originalRedo.successEqual,
+            '003W/2b-2i natural original Worker exact native Undo/Redo');
+          const previousTile=await evaluate(client,
+            'window.__nearCapBaselineSource.tiles[0].dataUrl');
+
+          // Public File menu and actual #fileInput change, not a fake decoder
+          // callback. Unlike 2g, no Worker should remain in flight here.
+          async function openAfterCompletion(){
+            const input=document.querySelector('#fileInput');
+            const originalConfirm=window.confirm;
+            let approvedPrompts=0;
+            try{
+              window.confirm=()=>{approvedPrompts++;return true;};
+              document.querySelector('.menu-button[data-menu="file"]').click();
+              const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+                x=>x.querySelector('span')?.textContent?.startsWith('Открыть изображение'));
+              if(!item||item.disabled)return {clicked:false,approvedPrompts};
+              item.click();
+              const transfer=new DataTransfer();
+              transfer.items.add(window.__nearCapReplacementFile);
+              input.files=transfer.files;
+              input.dispatchEvent(new Event('change',{bubbles:true}));
+              await new Promise(resolve=>setTimeout(resolve,25));
+              return {clicked:true,approvedPrompts,
+                worker:window.__nearCapWorkerObservation.summary()};
+            }finally{window.confirm=originalConfirm;}
+          }
+          const validOpen=await evaluate(client,'('+openAfterCompletion.toString()+')()');
+          assert(validOpen.clicked&&validOpen.approvedPrompts===1&&
+            validOpen.worker.jobs===1&&validOpen.worker.replies===1,
+            '003W/2b-2i valid import begins only after original natural completion',
+            JSON.stringify(validOpen));
+          await waitFor('003W/2b-2i distinct valid PSD/PSB File Open',
+            ()=>evaluate(client,'document.querySelector("#statusText")?.textContent?.startsWith('+
+              JSON.stringify('PSD/PSB импортирован:')+') && '+
+              'document.querySelector("#docTabs .doc-tab .doc-tab-title")?.textContent?.includes('+
+              JSON.stringify(replacement.filename.replace(/\.ps[db]$/i,''))+')'),90_000);
+          await evaluate(client,'window.__nearCapMeta=window.__nearCapReplacementMeta;'+
+            'window.__nearCapBaseline=null;window.__nearCapBaselineSource=null;'+
+            'window.__nearCapSuccess=null;true');
+          const imported=await evaluate(client,snapshot);
+          const importedUi=await evaluate(client,'('+ui.toString()+')()');
+          const importedTile=await evaluate(client,
+            'window.__nearCapBaselineSource.tiles[0].dataUrl');
+          const expectedFirstPixel=Array.from(new Uint8Array(
+            new (fixture.bitsPerChannel===16?Uint16Array:Float32Array)(replacement.normal).buffer));
+          const importedFirstPixel=await evaluate(client,
+            '(() => {const tile=window.__nearCapBaselineSource.tiles[0];'+
+            'const bytes=Uint8Array.from(atob(tile.dataUrl.split(",")[1]),c=>c.charCodeAt(0));'+
+            'return Array.from(bytes.slice(0,'+expectedFirstPixel.length+'))})()');
+          const nativeSampleExpected=
+            JSON.stringify(importedFirstPixel)===JSON.stringify(expectedFirstPixel);
+          const importedPreviewDifferent=
+            JSON.stringify(importedUi.pixel)!==JSON.stringify(originalSuccessUi.pixel);
+          const importedHistoryClean=fillRows(importedUi.history)===0;
+          assert(imported.baselineEqual&&imported.bits===fixture.bitsPerChannel&&
+            imported.rawBytes===baseline.rawBytes&&
+            importedTile!==previousTile&&nativeSampleExpected&&
+            importedPreviewDifferent&&importedHistoryClean&&
+            await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length')===1,
+            '003W/2b-2i distinct valid native source, clean history and no ghost tab',
+            JSON.stringify({imported,importedUi,nativeSampleExpected}));
+          await new Promise(resolve=>setTimeout(resolve,1_250));
+          const stableNative=await evaluate(client,snapshot);
+          const stableUi=await evaluate(client,'('+ui.toString()+')()');
+          const stableWorker=await evaluate(client,workerExpr);
+          const stableAfterImport=stableNative.baselineEqual&&
+            JSON.stringify(stableUi.pixel)===JSON.stringify(importedUi.pixel)&&
+            JSON.stringify(stableUi.history)===JSON.stringify(importedUi.history)&&
+            stableWorker.jobs===1&&stableWorker.replies===1;
+          assert(stableAfterImport,
+            '003W/2b-2i old Worker cannot mutate new owner after valid File Open');
+          const retryView=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+          assert(retryView.hit==='overlayCanvas'&&retryView.within&&
+            retryView.boundingPixels===view.boundingPixels,
+            '003W/2b-2i fresh owner genuine dense marquee');
+          await draw(retryView);
+          await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+          assert(await evaluate(client,'('+runFill.toString()+')()'),
+            '003W/2b-2i second owner accepts real dense Content-Aware Fill');
+          await waitFor('003W/2b-2i new owner real Worker dispatched',
+            async()=> (await evaluate(client,workerExpr)).jobs===2,75_000);
+          const second=await evaluate(client,workerExpr);
+          assert(second.selectedPixels===first.selectedPixels&&
+            second.selectedBytes===first.selectedBytes,
+            '003W/2b-2i second Worker gets independent dense frozen indices');
+          await waitFor('003W/2b-2i new owner Worker completes',
+            ()=>evaluate(client,'(() => {const w=window.__nearCapWorkerObservation.summary();'+
+              'return w.jobs===2&&w.replies===2&&'+
+              'document.querySelector("#statusText")?.textContent?.includes("tiled ")})()'),205_000);
+          const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+          await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+          const retrySuccess=await evaluate(client,snapshot);
+          const retryUi=await evaluate(client,'('+ui.toString()+')()');
+          const retryHistoryOnce=fillRows(retryUi.history)===
+            fillRows(importedUi.history)+1;
+          assert(!retrySuccess.baselineEqual&&
+            retrySuccess.quality?.selectedPixels===second.selectedPixels&&
+            retrySuccess.quality.changedSelectedPixels>0&&
+            retrySuccess.quality.changedOutsideSelectionPixels===0&&
+            retrySuccess.alphaUnchanged===true&&retryHistoryOnce,
+            '003W/2b-2i second owner native selected-only/alpha/History',
+            JSON.stringify({retrySuccess,retryUi}));
+          await evaluate(client,"document.querySelector('#undoBtn').click();true");
+          await waitFor('003W/2b-2i second owner native Undo',async()=>
+            (await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+          const retryUndo=await evaluate(client,snapshot);
+          await evaluate(client,"document.querySelector('#redoBtn').click();true");
+          await waitFor('003W/2b-2i second owner native Redo',async()=>
+            (await evaluate(client,snapshot))?.successEqual===true,90_000);
+          const retryRedo=await evaluate(client,snapshot);
+          const finalWorker=await evaluate(client,workerExpr);
+          const finalTabs=await evaluate(client,
+            'document.querySelectorAll("#docTabs .doc-tab").length');
+          assert(finalWorker.jobs===2&&finalWorker.replies===2&&finalTabs===1,
+            '003W/2b-2i two genuine complete Workers, no ghost tab/owner');
+          const evidence={
+            kind:'zpe-browser-dense-failed-import-natural-completion-v1',
+            format,protocol:'file:',sourcePixels:fixture.width*fixture.height,
+            malformedFilename:malformed.name,malformedBytes:malformed.bytes,
+            approvedPrompts:malformed.approvedPrompts,
+            decodeFailed:malformed.alerts===1&&
+              malformed.errorMessage.startsWith('Не удалось импортировать PSD/PSB:'),
+            originalWorkerInFlightAtFailure:atFailure.jobs===1&&
+              atFailure.replies===0&&atFailure.terminatedJobs===0,
+            failedOpenPreviewUnchanged:previewUnchanged,
+            failedOpenHistoryUnchanged:historyUnchanged,
+            failedOpenTabs:malformed.atFailure.tabs,
+            selectedPixels:first.selectedPixels,selectedBytes:first.selectedBytes,
+            originalWorkerJobs:completed.jobs,
+            originalWorkerReplies:completed.replies,
+            originalWorkerTerminations:completed.terminatedJobs,
+            originalSelectedOnly:originalSuccess.quality.changedSelectedPixels>0&&
+              originalSuccess.quality.changedOutsideSelectionPixels===0,
+            originalAlphaUnchanged:originalSuccess.alphaUnchanged,
+            originalHistoryOnce,originalUndoExact:originalUndo.baselineEqual,
+            originalRedoExact:originalRedo.successEqual,
+            importApprovedPrompts:validOpen.approvedPrompts,
+            importedName:replacement.filename,
+            importedNativeDifferent:importedTile!==previousTile,
+            importedHighDepth:imported.bits===fixture.bitsPerChannel,
+            importedNativeExact:imported.baselineEqual&&nativeSampleExpected,
+            importedPreviewDifferent,importedHistoryClean,stableAfterImport,
+            retrySelectedPixels:second.selectedPixels,
+            retrySelectedOnly:retrySuccess.quality.changedSelectedPixels>0&&
+              retrySuccess.quality.changedOutsideSelectionPixels===0,
+            retryAlphaUnchanged:retrySuccess.alphaUnchanged,
+            retryHistoryOnce,retryUndoExact:retryUndo.baselineEqual,
+            retryRedoExact:retryRedo.successEqual,
+            finalTabs,finalWorkerJobs:finalWorker.jobs,
+            finalWorkerReplies:finalWorker.replies,
+            completionMs:firstTimer.elapsedMs,
+            retryCompletionMs:retryTimer.elapsedMs,
+            pulseIntervalsMs:firstTimer.pulseIntervalsMs,
+            heapBeforeBytes:firstTimer.heapBeforeBytes,
+            heapAfterBytes:retryTimer.heapAfterBytes,
+            workerPidMapping:'unknown',operationPeakKnown:false,
+            limitations:BROWSER_DENSE_NATURAL_FAILED_IMPORT_LIMITATIONS,
+          };
+          validateBrowserDenseNaturalFailedImportEvidence(evidence);
+          const saved=await saveBrowserDenseNaturalFailedImportEvidence(evidence,
+            process.env.ZPE_BROWSER_DENSE_NATURAL_FAILED_IMPORT_ARTIFACT_DIR);
+          console.log('003W/2b-2i malformed File Open, natural original Worker completion and distinct native retry:',
+            JSON.stringify({saved,evidence}));
+          return evidence;
+        }
+
+        // The active Worker may lock Save Project. Explicitly cancel only AFTER
+        // proving failed import retained it, then use the public Save Project
+        // path for exact native-byte verification before any valid replacement.
+        await client.send('Input.dispatchKeyEvent',{
+          type:'keyDown',key:'Escape',code:'Escape',
+          windowsVirtualKeyCode:27,nativeVirtualKeyCode:27,
+        });
+        await client.send('Input.dispatchKeyEvent',{
+          type:'keyUp',key:'Escape',code:'Escape',
+          windowsVirtualKeyCode:27,nativeVirtualKeyCode:27,
+        });
+        await waitFor('003W/2b-2h explicit original Worker cancellation',
+          async()=> (await evaluate(client,workerExpr)).terminatedJobs===1,15_000);
+        await waitFor('003W/2b-2h cancelled native command releases Save Project',
+          ()=>evaluate(client,'document.querySelector("#statusText")?.textContent==='+
+            JSON.stringify('Контент-заливка отменена')),15_000);
+        const afterCancelWorker=await evaluate(client,workerExpr);
+        const afterMalformed=await evaluate(client,snapshot);
+        const afterCancelUi=await evaluate(client,'('+ui.toString()+')()');
+        assert(afterCancelWorker.jobs===1&&afterCancelWorker.replies===0 &&
+          afterMalformed.baselineEqual&&afterMalformed.bits===baseline.bits &&
+          afterMalformed.rawBytes===baseline.rawBytes &&
+          JSON.stringify(afterCancelUi.pixel)===JSON.stringify(originalPreview.pixel) &&
+          JSON.stringify(afterCancelUi.history)===JSON.stringify(originalPreview.history),
+          '003W/2b-2h explicitly cancelled original retains exact native, preview and History',
+          JSON.stringify({afterCancelWorker,afterMalformed,afterCancelUi}));
+        failedImport={
+          malformedFilename:malformed.name,malformedBytes:malformed.bytes,
+          approvedPrompts:malformed.approvedPrompts,
+          decodeFailed:malformed.errorMessage.startsWith('Не удалось импортировать PSD/PSB:'),
+          oldWorkerRetained:malformed.atFailure.worker.terminatedJobs===0 &&
+            malformed.atFailure.worker.replies===0&&malformed.atFailure.worker.jobs===1,
+          nativeExact:afterMalformed.baselineEqual,
+          previewUnchanged,historyUnchanged,
+          explicitCancelNoReply:afterCancelWorker.terminatedJobs===1&&afterCancelWorker.replies===0,
+          tabsAfterFailure:malformed.atFailure.tabs,
+        };
+      }
+
+      // The two File -> Open actions run synchronously in the page. A denied
+      // confirmation must never start decoding or revoke the old Worker.
+      async function openReplacement(){
+        const input=document.querySelector('#fileInput');
+        const oldConfirm=window.confirm;
+        // File-picker activity and change handling can settle across browser
+        // tasks. Keep the confirmation spy alive during each entire attempt.
+        const selectReplacement=async()=>{
+          const transfer=new DataTransfer();
+          transfer.items.add(window.__nearCapReplacementFile);
+          input.files=transfer.files;
+          input.dispatchEvent(new Event('change',{bubbles:true}));
+          await new Promise(resolve=>setTimeout(resolve,25));
+        };
+        const menu=()=>{document.querySelector('.menu-button[data-menu="file"]').click();
+          const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+            x=>x.querySelector('span')?.textContent?.startsWith('Открыть изображение'));
+          if(!item||item.disabled)return false;
+          item.click();return true;};
+        let deniedPrompts=0,approvedPrompts=0,denied,approved;
+        try{
+          window.confirm=()=>{deniedPrompts++;return false;};
+          const deniedClicked=menu();
+          await selectReplacement();
+          denied={clicked:deniedClicked,worker:window.__nearCapWorkerObservation.summary(),
+            width:document.querySelector('#editorCanvas').width,
+            tabs:document.querySelectorAll('#docTabs .doc-tab').length,
+            pixel:Array.from(document.querySelector('#editorCanvas').getContext('2d').getImageData(
+              window.__nearCapMeta.x,window.__nearCapMeta.y,1,1).data),
+            history:[...document.querySelectorAll('#historyList .history-row')].map(x=>x.textContent),
+            status:document.querySelector('#statusText')?.textContent};
+          window.confirm=()=>{approvedPrompts++;return true;};
+          const approvedClicked=menu();
+          await selectReplacement();
+          approved={clicked:approvedClicked,worker:window.__nearCapWorkerObservation.summary()};
+        }finally{window.confirm=oldConfirm;}
+        return {deniedPrompts,approvedPrompts,denied,approved};
+      }
+      const transaction=await evaluate(client,'('+openReplacement.toString()+')()');
+      const deniedPreviewUnchanged=
+        JSON.stringify(transaction.denied.pixel)===JSON.stringify(originalPreview.pixel);
+      const deniedHistoryUnchanged=
+        JSON.stringify(transaction.denied.history)===JSON.stringify(originalPreview.history);
+      assert(transaction.deniedPrompts===1&&transaction.approvedPrompts===1 &&
+        transaction.denied.clicked&&transaction.approved.clicked &&
+        deniedPreviewUnchanged&&deniedHistoryUnchanged &&
+        transaction.denied.width===fixture.width&&transaction.denied.tabs===1 &&
+        transaction.denied.worker.jobs===1&&transaction.denied.worker.replies===0 &&
+        transaction.denied.worker.terminatedJobs===(failedImportDense?1:0) &&
+        transaction.approved.worker.terminatedJobs===(failedImportDense?1:0) &&
+        transaction.approved.worker.replies===0,
+        '003W/2b-2g dirty denial and authorized pre-decode must retain old Worker',
+        JSON.stringify(transaction));
+
+      // Distinguish a new native import from a File New / same-file reimport.
+      const previousTile=await evaluate(client,
+        'window.__nearCapBaselineSource.tiles[0].dataUrl');
+      await waitFor('003W/2b-2g accepted distinct native PSD/PSB import',
+        ()=>evaluate(client,'document.querySelector("#statusText")?.textContent?.startsWith('+
+          JSON.stringify('PSD/PSB импортирован:')+') && '+
+          'document.querySelector("#docTabs .doc-tab .doc-tab-title")?.textContent?.includes('+
+          JSON.stringify(replacement.filename.replace(/\.ps[db]$/i,''))+')'),90_000);
+      const cancelled=await evaluate(client,workerExpr);
+      const cancelTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      assert(cancelled.jobs===1&&cancelled.replies===0&&cancelled.terminatedJobs===1 &&
+        cancelled.firstTerminatedAtMs>=first.firstDispatchAtMs,
+        '003W/2b-2g imported owner must terminate old Worker before its reply',
+        JSON.stringify(cancelled));
+      await evaluate(client,'window.__nearCapMeta=window.__nearCapReplacementMeta;'+
+        'window.__nearCapBaseline=null;window.__nearCapBaselineSource=null;'+
+        'window.__nearCapSuccess=null;true');
+      const imported=await evaluate(client,snapshot);
+      const importedUi=await evaluate(client,'('+ui.toString()+')()');
+      const newTile=await evaluate(client,'window.__nearCapBaselineSource.tiles[0].dataUrl');
+      const expectedFirstPixel=Array.from(new Uint8Array(
+        new (fixture.bitsPerChannel===16?Uint16Array:Float32Array)(replacement.normal).buffer));
+      const importedFirstPixel=await evaluate(client,
+        '(() => {const tile=window.__nearCapBaselineSource.tiles[0];'+
+          'const bytes=Uint8Array.from(atob(tile.dataUrl.split(",")[1]),c=>c.charCodeAt(0));'+
+          'return Array.from(bytes.slice(0,'+expectedFirstPixel.length+'))})()');
+      const nativeSampleExpected=
+        JSON.stringify(importedFirstPixel)===JSON.stringify(expectedFirstPixel);
+      const previewDifferent=
+        JSON.stringify(importedUi.pixel)!==JSON.stringify(originalPreview.pixel);
+      const clean=importedUi.history.every(x=>!x.includes('Контент-заливка'));
+      assert(imported.baselineEqual&&imported.bits===fixture.bitsPerChannel &&
+        imported.pixels===fixture.width*fixture.height &&
+        imported.rawBytes===baseline.rawBytes && newTile!==previousTile &&
+        nativeSampleExpected&&previewDifferent&&
+        clean && await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length')===1,
+        '003W/2b-2g new named native source/bytes/preview/History',
+        JSON.stringify({imported,importedUi,clean,differentNativeTile:newTile!==previousTile,
+          nativeSampleExpected,previewDifferent,importedFirstPixel,expectedFirstPixel}));
+      await new Promise(resolve=>setTimeout(resolve,1_250));
+      const settled=await evaluate(client,snapshot);
+      const settledUi=await evaluate(client,'('+ui.toString()+')()');
+      const settledWorker=await evaluate(client,workerExpr);
+      const stable=settled.baselineEqual && sameUi(settledUi,importedUi) &&
+        settledWorker.jobs===1&&settledWorker.replies===0&&settledWorker.terminatedJobs===1;
+      assert(stable,'003W/2b-2g no late Worker preview/History/source pollution');
+
+      const retryView=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(retryView.hit==='overlayCanvas'&&retryView.within &&
+        retryView.boundingPixels===view.boundingPixels,
+        '003W/2b-2g fresh native marquee');
+      await draw(retryView);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2g new native owner must accept a second real Fill');
+      await waitFor('003W/2b-2g second dense native Worker dispatched',
+        async()=>(await evaluate(client,workerExpr)).jobs===2,75_000);
+      const second=await evaluate(client,workerExpr);
+      assert(second.selectedPixels===first.selectedPixels &&
+        second.selectedBytes===first.selectedBytes,
+        '003W/2b-2g fresh Worker must receive genuine frozen dense Uint32 indices');
+      await waitFor('003W/2b-2g new owner dense Worker completed',
+        ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===2 && '+
+          'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),205_000);
+      const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      const done=await evaluate(client,workerExpr);
+      assert(done.jobs===2&&done.replies===1&&[1,2].includes(done.terminatedJobs),
+        '003W/2b-2g ONLY new Worker can reply');
+      await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+      const success=await evaluate(client,snapshot);
+      const successUi=await evaluate(client,'('+ui.toString()+')()');
+      const count=a=>a.filter(x=>x.includes('Контент-заливка')).length;
+      const historyOnce=count(successUi.history)===count(importedUi.history)+1;
+      assert(!success.baselineEqual&&success.quality?.selectedPixels===second.selectedPixels &&
+        success.quality.changedSelectedPixels>0 &&
+        success.quality.changedOutsideSelectionPixels===0 &&
+        success.alphaUnchanged===true&&historyOnce,
+        '003W/2b-2g new native selected-only pixels/alpha/History',JSON.stringify({success,successUi}));
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('003W/2b-2g exact new-owner Undo',
+        async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+      const undo=await evaluate(client,snapshot);
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('003W/2b-2g exact new-owner Redo',
+        async()=>(await evaluate(client,snapshot))?.successEqual===true,90_000);
+      const redo=await evaluate(client,snapshot);
+      await new Promise(resolve=>setTimeout(resolve,750));
+      const final=await evaluate(client,workerExpr);
+      const finalTabs=await evaluate(client,
+        'document.querySelectorAll("#docTabs .doc-tab").length');
+      assert(finalTabs===1&&final.jobs===2&&final.replies===1,
+        '003W/2b-2g no ghost tab or late original Worker');
+      const evidence={
+        kind:'zpe-browser-dense-psd-import-replacement-v1',format,protocol:'file:',
+        sourcePixels:fixture.width*fixture.height,marqueeBoundingPixels:view.boundingPixels,
+        selectedPixels:first.selectedPixels,selectedBytes:first.selectedBytes,
+        deniedPrompts:transaction.deniedPrompts,approvedPrompts:transaction.approvedPrompts,
+        denialRetainedOwner:transaction.denied.width===fixture.width &&
+          transaction.denied.tabs===1&&transaction.denied.worker.terminatedJobs===0,
+        deniedPreviewUnchanged,deniedHistoryUnchanged,
+        preDecodeRetainedWorker:transaction.approved.worker.terminatedJobs===0,
+        originalName:fixture.filename,replacementName:replacement.filename,
+        importedNativeDifferent:newTile!==previousTile,importedHighDepth:imported.bits===fixture.bitsPerChannel,
+        importedNativeExact:imported.baselineEqual&&nativeSampleExpected,
+        importedPreviewDifferent:previewDifferent,importedHistoryClean:clean,
+        stableAfterSettle:stable,originalTerminations:cancelled.terminatedJobs,
+        oldReplies:cancelled.replies,oldRepliesAfterSettle:settledWorker.replies,
+        retrySelectedPixels:second.selectedPixels,retrySelectedBytes:second.selectedBytes,
+        changedSelectedPixels:success.quality.changedSelectedPixels,
+        outsideUnchanged:success.quality.changedOutsideSelectionPixels===0,
+        alphaUnchanged:success.alphaUnchanged,historyOnce,
+        undoExact:undo.baselineEqual,redoExact:redo.successEqual,
+        finalTabs,finalWorkerJobs:final.jobs,finalWorkerReplies:final.replies,
+        firstDispatchToTerminationMs:cancelled.firstTerminatedAtMs-first.firstDispatchAtMs,
+        retryCompletionMs:retryTimer.elapsedMs,
+        cancelPulseIntervalsMs:cancelTimer.pulseIntervalsMs,
+        retryPulseIntervalsMs:retryTimer.pulseIntervalsMs,
+        heapBeforeBytes:cancelTimer.heapBeforeBytes,
+        heapAfterBytes:retryTimer.heapAfterBytes,
+        workerPidMapping:'unknown',operationPeakKnown:false,
+        limitations:BROWSER_DENSE_IMPORT_LIMITATIONS,
+      };
+      if(!failedImportDense)validateBrowserDenseImportEvidence(evidence);
+      if(failedImportDense){
+        const recovery={
+          kind:'zpe-browser-dense-psd-import-failure-recovery-v1',
+          format,protocol:'file:',sourcePixels:fixture.width*fixture.height,
+          ...failedImport,validImportAndRetry:evidence,
+        };
+        validateBrowserDenseFailedImportEvidence(recovery);
+        const saved=await saveBrowserDenseFailedImportEvidence(recovery,
+          process.env.ZPE_BROWSER_DENSE_FAILED_IMPORT_ARTIFACT_DIR);
+        console.log('003W/2b-2h failed PSD/PSB import, retained original lease and native retry:',
+          JSON.stringify({saved,recovery}));
+        return recovery;
+      }
+      const saved=await saveBrowserDenseImportEvidence(evidence,
+        process.env.ZPE_BROWSER_DENSE_IMPORT_ARTIFACT_DIR);
+      console.log('003W/2b-2g real File Open PSD/PSB in-flight native replacement:',JSON.stringify({saved,evidence}));
+      return evidence;
+    }
+
+    // 003W/2b-2f: File -> New is a different authorization/owner path from
+    // close or tab switch. Refusal must not revoke a running native Worker.
+    if(replaceDense){
+      const sameUi=(a,b)=>JSON.stringify(a.pixel)===JSON.stringify(b.pixel) &&
+        JSON.stringify(a.history)===JSON.stringify(b.history);
+      const isDirty=await evaluate(client,
+        'document.querySelector("#docTabs .doc-tab-shell .dirty-dot")?.hidden===false');
+      assert(isDirty,'003W/2b-2f imported original must be dirty before File New');
+      const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(view.hit==='overlayCanvas' && view.within &&
+        view.boundingPixels>=1_900_000 && view.boundingPixels<=2_000_000,
+        '003W/2b-2f genuine high-depth dense marquee',JSON.stringify(view));
+      await draw(view);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2f first native Fill menu is enabled');
+      const workerExpr='window.__nearCapWorkerObservation.summary()';
+      await waitFor('003W/2b-2f real dense original Worker dispatch',
+        async()=>(await evaluate(client,workerExpr)).jobs===1,75_000);
+      const first=await evaluate(client,workerExpr);
+      assert(first.selectedPixels>=1_900_000&&first.selectedPixels<=2_000_000 &&
+        first.selectedBytes===first.selectedPixels*4 &&
+        first.replies===0 && first.terminatedJobs===0,
+        '003W/2b-2f first Worker must still be in flight',JSON.stringify(first));
+
+      // Two approvals occur in one browser task; the old CPU-bound Worker
+      // cannot race its own answer between denial and replacement submission.
+      function replaceWithNew(){
+        const oldConfirm=window.confirm;
+        const modal=()=>document.querySelector('.modal[aria-label="Новый документ"]');
+        const launch=()=>{
+          document.querySelector('.menu-button[data-menu="file"]').click();
+          const item=[...document.querySelectorAll('#menuPopover .menu-item')].find(
+            x=>x.querySelector('span')?.textContent?.startsWith('Новый'));
+          if(!item||item.disabled)return false;
+          item.click();return true;
+        };
+        let deniedPrompts=0,approvedPrompts=0,denied,approval;
+        try{
+          window.confirm=()=>{deniedPrompts++;return false;};
+          const deniedClick=launch();
+          denied={clicked:deniedClick,modalAbsent:!modal(),
+            docWidth:document.querySelector('#editorCanvas').width,
+            tabs:document.querySelectorAll('#docTabs .doc-tab').length,
+            worker:window.__nearCapWorkerObservation.summary()};
+          window.confirm=()=>{approvedPrompts++;return true;};
+          const approvedClick=launch(),form=modal();
+          let submitted=false;
+          if(form){
+            form.elements.namedItem('width').value='37';
+            form.elements.namedItem('height').value='29';
+            form.elements.namedItem('name').value='Worker replacement';
+            form.requestSubmit();
+            submitted=true;
+          }
+          approval={clicked:approvedClick,hadModal:Boolean(form),submitted,
+            worker:window.__nearCapWorkerObservation.summary()};
+        }finally{window.confirm=oldConfirm;}
+        return {deniedPrompts,approvedPrompts,denied,approval};
+      }
+      const transaction=await evaluate(client,'('+replaceWithNew.toString()+')()');
+      const cancelTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      assert(transaction.deniedPrompts===1 && transaction.approvedPrompts===1 &&
+        transaction.denied.clicked && transaction.denied.modalAbsent &&
+        transaction.denied.docWidth===fixture.width &&
+        transaction.denied.tabs===1 && transaction.denied.worker.jobs===1 &&
+        transaction.denied.worker.replies===0 &&
+        transaction.denied.worker.terminatedJobs===0,
+        '003W/2b-2f rejected dirty File New must keep native Worker alive',
+        JSON.stringify(transaction));
+      assert(transaction.approval.clicked && transaction.approval.hadModal &&
+        transaction.approval.submitted &&
+        transaction.approval.worker.jobs===1 &&
+        transaction.approval.worker.replies===0 &&
+        transaction.approval.worker.terminatedJobs===1 &&
+        transaction.approval.worker.firstTerminatedAtMs>=first.firstDispatchAtMs,
+        '003W/2b-2f accepted File New must terminate old Worker before reply',
+        JSON.stringify(transaction));
+
+      await waitFor('003W/2b-2f actual replacement creates 37x29 document',
+        ()=>evaluate(client,'document.querySelector("#editorCanvas").width===37 && '+
+          'document.querySelector("#editorCanvas").height===29 && '+
+          'document.querySelectorAll("#docTabs .doc-tab").length===1'),30_000);
+      const blank=await evaluate(client,snapshot);
+      const blankUi=await evaluate(client,'('+ui.toString()+')()');
+      const blankHistoryReset=blankUi.history.some(x=>x.includes('Новый документ')) &&
+        !blankUi.history.some(x=>x.includes('Контент-заливка'));
+      assert(blank.error==='Native high-depth source lost' && blankHistoryReset,
+        '003W/2b-2f new blank document has no old native tiles/history',
+        JSON.stringify({blank,blankUi}));
+      await new Promise(resolve=>setTimeout(resolve,1_250));
+      const settled=await evaluate(client,snapshot);
+      const settledUi=await evaluate(client,'('+ui.toString()+')()');
+      const settledWorker=await evaluate(client,workerExpr);
+      const stable=settled.error===blank.error && sameUi(settledUi,blankUi) &&
+        await evaluate(client,'document.querySelector("#editorCanvas").width===37 && '+
+          'document.querySelector("#editorCanvas").height===29');
+      assert(stable && settledWorker.jobs===1 && settledWorker.replies===0 &&
+        settledWorker.terminatedJobs===1,
+        '003W/2b-2f no stale result can mutate fresh blank document',
+        JSON.stringify({settled,settledWorker}));
+
+      // Blank Canvas8 is NOT a native high-depth retry. A new actual PSD/PSB
+      // file import must own the second 1.9M+ source and successful Worker.
+      await evaluate(client,'window.__nearCapBaseline=null;'+
+        'window.__nearCapBaselineSource=null;window.__nearCapSuccess=null;true');
+      assert(await evaluate(client,'('+importFile.toString()+')()')===fixture.bytes.length,
+        '003W/2b-2f fresh native PSD/PSB file transport');
+      await waitFor('003W/2b-2f new native PSD/PSB after approved File New',
+        ()=>evaluate(client,'(() => {const f=window.__nearCapMeta;return '+
+          'document.querySelector("#editorCanvas").width===f.width && '+
+          'document.querySelector("#editorCanvas").height===f.height && '+
+          'document.querySelector("#statusText")?.textContent?.startsWith("PSD/PSB импортирован")})()'),
+        60_000);
+      const reimport=await evaluate(client,snapshot);
+      const reimportUi=await evaluate(client,'('+ui.toString()+')()');
+      const reimportClean=reimportUi.history.every(x=>!x.includes('Контент-заливка'));
+      assert(reimport.baselineEqual && reimport.bits===fixture.bitsPerChannel &&
+        reimport.pixels===fixture.width*fixture.height && reimportClean,
+        '003W/2b-2f separately reimported real native source/History',
+        JSON.stringify({reimport,reimportUi}));
+
+      const retryView=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(retryView.hit==='overlayCanvas' && retryView.within &&
+        retryView.boundingPixels===view.boundingPixels,
+        '003W/2b-2f replacement owner draws independent genuine dense marquee');
+      await draw(retryView);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2f cancelled lease permits new native Worker Fill');
+      await waitFor('003W/2b-2f second fresh owner real dense Worker',
+        async()=>(await evaluate(client,workerExpr)).jobs===2,75_000);
+      const second=await evaluate(client,workerExpr);
+      assert(second.selectedPixels===first.selectedPixels &&
+        second.selectedBytes===first.selectedBytes && second.replies===0,
+        '003W/2b-2f native retry must post same frozen Uint32 indices',
+        JSON.stringify(second));
+      await waitFor('003W/2b-2f genuine fresh native dense Worker completion',
+        ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===2 && '+
+          'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),205_000);
+      const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      const done=await evaluate(client,workerExpr);
+      assert(done.jobs===2 && done.replies===1 && [1,2].includes(done.terminatedJobs),
+        '003W/2b-2f only second native Worker may reply',JSON.stringify(done));
+      await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+      const success=await evaluate(client,snapshot);
+      const successUi=await evaluate(client,'('+ui.toString()+')()');
+      const fillCount=a=>a.filter(x=>x.includes('Контент-заливка')).length;
+      const historyOnce=fillCount(successUi.history)===fillCount(reimportUi.history)+1;
+      assert(!success.baselineEqual && 
+        success.quality?.selectedPixels===second.selectedPixels &&
+        success.quality.changedSelectedPixels>0 &&
+        success.quality.changedOutsideSelectionPixels===0 &&
+        success.alphaUnchanged===true && historyOnce,
+        '003W/2b-2f fresh native retry selected-only colors, alpha and History',
+        JSON.stringify({success,successUi}));
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('003W/2b-2f new-owner native Undo',
+        async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+      const undo=await evaluate(client,snapshot);
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('003W/2b-2f new-owner native Redo',
+        async()=>(await evaluate(client,snapshot))?.successEqual===true,90_000);
+      const redo=await evaluate(client,snapshot);
+      await new Promise(resolve=>setTimeout(resolve,750));
+      const final=await evaluate(client,workerExpr);
+      const finalTabs=await evaluate(client,
+        'document.querySelectorAll("#docTabs .doc-tab").length');
+      assert(finalTabs===1&&final.jobs===2&&final.replies===1,
+        '003W/2b-2f no late original Worker or ghost owner after Undo/Redo');
+
+      const evidence={
+        kind:'zpe-browser-dense-document-replacement-v1',format,protocol:'file:',
+        sourcePixels:fixture.width*fixture.height,
+        marqueeBoundingPixels:view.boundingPixels,
+        selectedPixels:first.selectedPixels,selectedBytes:first.selectedBytes,
+        deniedPromptCount:transaction.deniedPrompts,
+        approvedPromptCount:transaction.approvedPrompts,
+        deniedModalAbsent:transaction.denied.modalAbsent,
+        deniedOwnerKept:transaction.denied.docWidth===fixture.width &&
+          transaction.denied.tabs===1,
+        deniedJobs:transaction.denied.worker.jobs,
+        deniedReplies:transaction.denied.worker.replies,
+        deniedTerminations:transaction.denied.worker.terminatedJobs,
+        newModalSubmitted:transaction.approval.submitted,newWidth:37,newHeight:29,
+        blankNativeRemoved:blank.error==='Native high-depth source lost',
+        blankHistoryReset,blankStableAfterSettle:stable,
+        terminatedBeforeReply:transaction.approval.worker.replies===0,
+        terminationsAfterNew:transaction.approval.worker.terminatedJobs,
+        oldRepliesAfterSettle:settledWorker.replies,
+        reimportedHighDepth:reimport.bits===fixture.bitsPerChannel,
+        reimportNativeBaselineExact:reimport.baselineEqual,
+        reimportHistoryClean:reimportClean,
+        retrySelectedPixels:second.selectedPixels,retrySelectedBytes:second.selectedBytes,
+        retryChangedSelectedPixels:success.quality.changedSelectedPixels,
+        retryOutsideUnchanged:success.quality.changedOutsideSelectionPixels===0,
+        retryAlphaUnchanged:success.alphaUnchanged,retryHistoryOnce:historyOnce,
+        undoExact:undo.baselineEqual,redoExact:redo.successEqual,
+        finalTabs,finalWorkerJobs:final.jobs,finalWorkerReplies:final.replies,
+        finalWorkerTerminations:final.terminatedJobs,
+        firstDispatchToTerminationMs:transaction.approval.worker.firstTerminatedAtMs -
+          first.firstDispatchAtMs,retryCompletionMs:retryTimer.elapsedMs,
+        cancelPulseIntervalsMs:cancelTimer.pulseIntervalsMs,
+        retryPulseIntervalsMs:retryTimer.pulseIntervalsMs,
+        heapBeforeBytes:cancelTimer.heapBeforeBytes,
+        heapAfterBytes:retryTimer.heapAfterBytes,
+        workerPidMapping:'unknown',operationPeakKnown:false,
+        limitations:BROWSER_DENSE_REPLACE_LIMITATIONS,
+      };
+      validateBrowserDenseReplaceEvidence(evidence);
+      const saved=await saveBrowserDenseReplaceEvidence(evidence,
+        process.env.ZPE_BROWSER_DENSE_REPLACE_ARTIFACT_DIR);
+      console.log('003W/2b-2f genuine File New denial/replacement/fresh native retry:',
+        JSON.stringify({saved,evidence}));
+      return evidence;
+    }
+
+    // 003W/2b-2e: a rejected dirty close MUST preserve its in-flight owner.
+    // A confirmed close MUST terminate the original genuine dense Blob Worker
+    // and unblock a new native dense Fill in the remaining real PSD/PSB tab.
+    if(closeDense){
+      const uiExact=(a,b)=>JSON.stringify(a.pixel)===JSON.stringify(b.pixel) &&
+        JSON.stringify(a.history)===JSON.stringify(b.history);
+      assert(await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length===1'),
+        '003W/2b-2e first real imported native document');
+      await evaluate(client,'window.__nearCapOriginalData={bytes:window.__nearCapBaseline,'+
+        'source:window.__nearCapBaselineSource};'+
+        'document.querySelector("#addDocTabBtn").click();true');
+      await waitFor('003W/2b-2e second tab created',()=>evaluate(client,
+        'document.querySelectorAll("#docTabs .doc-tab").length===2 && '+
+        'document.querySelectorAll("#docTabs .doc-tab")[1].getAttribute("aria-selected")==="true"'),15_000);
+      await evaluate(client,'window.__nearCapBaseline=null;'+
+        'window.__nearCapBaselineSource=null;window.__nearCapSuccess=null;true');
+      assert(await evaluate(client,'('+importFile.toString()+')()')===fixture.bytes.length,
+        '003W/2b-2e second native PSD/PSB import transport');
+      await waitFor('003W/2b-2e second real native import',()=>evaluate(client,
+        'document.querySelector("#statusText")?.textContent?.startsWith("PSD/PSB импортирован")'),60_000);
+      const secondary=await evaluate(client,snapshot);
+      const secondaryUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(secondary.baselineEqual && secondary.bits===fixture.bitsPerChannel,
+        '003W/2b-2e native survivor baseline',JSON.stringify(secondary));
+      await evaluate(client,'window.__nearCapSurvivorData={bytes:window.__nearCapBaseline,'+
+        'source:window.__nearCapBaselineSource};'+
+        'document.querySelectorAll("#docTabs .doc-tab")[0].click();'+
+        'window.__nearCapBaseline=window.__nearCapOriginalData.bytes;'+
+        'window.__nearCapBaselineSource=window.__nearCapOriginalData.source;true');
+      const original=await evaluate(client,snapshot);
+      const originalUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(original.baselineEqual && uiExact(originalUi,originalPreview),
+        '003W/2b-2e original native and History intact before close');
+      const dirty=await evaluate(client,
+        'document.querySelectorAll("#docTabs .doc-tab-shell")[0].querySelector(".dirty-dot")?.hidden===false');
+      assert(dirty,'003W/2b-2e original owner must be dirty to test rejected close');
+      const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(view.hit==='overlayCanvas' && view.within &&
+        view.boundingPixels>=1_900_000 && view.boundingPixels<=2_000_000,
+        '003W/2b-2e actual original dense UI selection',JSON.stringify(view));
+      await draw(view);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2e real first Fill menu enabled');
+      const expr='window.__nearCapWorkerObservation.summary()';
+      await waitFor('003W/2b-2e genuine dense original Worker dispatch',
+        async()=>(await evaluate(client,expr)).jobs===1,75_000);
+      const first=await evaluate(client,expr);
+      assert(first.selectedPixels>=1_900_000 && first.selectedPixels<=2_000_000 &&
+        first.selectedBytes===first.selectedPixels*4 &&
+        first.replies===0 && first.terminatedJobs===0,
+        '003W/2b-2e original Worker genuinely still in flight',JSON.stringify(first));
+      // Keep refusal and acceptance within a single browser task so a fast
+      // Worker cannot reply between the two synchronous close decisions.
+      function closeOriginal(){
+        const tabs=()=>[...document.querySelectorAll('#docTabs .doc-tab-shell')];
+        const shell=tabs()[0],close=shell?.querySelector('.doc-tab-close');
+        const oldConfirm=window.confirm;
+        let refusedPromptCount=0,confirmedPromptCount=0;
+        let refused,closed;
+        try {
+          window.confirm=()=>{refusedPromptCount++;return false;};
+          close.click();
+          refused={tabs:tabs().length,
+            ownerActive:tabs()[0].querySelector('.doc-tab')?.getAttribute('aria-selected')==='true',
+            worker:window.__nearCapWorkerObservation.summary()};
+          window.confirm=()=>{confirmedPromptCount++;return true;};
+          close.click();
+          closed={tabs:tabs().length,originalTabGone:!document.contains(shell),
+            survivorActive:tabs()[0]?.querySelector('.doc-tab')?.getAttribute('aria-selected')==='true',
+            worker:window.__nearCapWorkerObservation.summary()};
+        } finally {window.confirm=oldConfirm;}
+        return {refusedPromptCount,confirmedPromptCount,refused,closed};
+      }
+      const closed=await evaluate(client,'('+closeOriginal.toString()+')()');
+      const closeTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      assert(closed.refusedPromptCount===1 && closed.refused.tabs===2 &&
+        closed.refused.ownerActive && closed.refused.worker.jobs===1 &&
+        closed.refused.worker.replies===0 && closed.refused.worker.terminatedJobs===0,
+        '003W/2b-2e rejecting dirty close must not revoke an active Worker',
+        JSON.stringify(closed));
+      assert(closed.confirmedPromptCount===1 && closed.closed.tabs===1 &&
+        closed.closed.originalTabGone && closed.closed.survivorActive &&
+        closed.closed.worker.jobs===1 && closed.closed.worker.replies===0 &&
+        closed.closed.worker.terminatedJobs===1 &&
+        closed.closed.worker.firstTerminatedAtMs>=first.firstDispatchAtMs,
+        '003W/2b-2e confirmed close must remove original and terminate Worker',
+        JSON.stringify(closed));
+      await evaluate(client,'window.__nearCapBaseline=window.__nearCapSurvivorData.bytes;'+
+        'window.__nearCapBaselineSource=window.__nearCapSurvivorData.source;true');
+      const after=await evaluate(client,snapshot);
+      const afterUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(after.baselineEqual && uiExact(afterUi,secondaryUi),
+        '003W/2b-2e survivor native/preview/History after original close');
+      await new Promise(resolve=>setTimeout(resolve,1_250));
+      const settled=await evaluate(client,snapshot);
+      const settledUi=await evaluate(client,'('+ui.toString()+')()');
+      const preRetry=await evaluate(client,expr);
+      assert(settled.baselineEqual && uiExact(settledUi,secondaryUi) &&
+        preRetry.jobs===1 && preRetry.replies===0 && preRetry.terminatedJobs===1 &&
+        await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length===1'),
+        '003W/2b-2e no stale worker reply, ghost tab or survivor mutation after settling');
+      const retryView=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(retryView.hit==='overlayCanvas' && retryView.within &&
+        retryView.boundingPixels===view.boundingPixels,
+        '003W/2b-2e survivor draws independent dense marquee');
+      await draw(retryView);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2e cancelled owner must release paint persistence lease');
+      await waitFor('003W/2b-2e genuine survivor dense Worker dispatch',
+        async()=>(await evaluate(client,expr)).jobs===2,75_000);
+      const second=await evaluate(client,expr);
+      assert(second.selectedPixels===first.selectedPixels &&
+        second.selectedBytes===first.selectedBytes && second.replies===0,
+        '003W/2b-2e survivor must receive exact dense selection',JSON.stringify(second));
+      await waitFor('003W/2b-2e real dense survivor Worker completion',
+        ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===2 && '+
+          'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),205_000);
+      const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      const done=await evaluate(client,expr);
+      assert(done.jobs===2 && done.replies===1 &&
+        done.terminatedJobs>=1 && done.terminatedJobs<=2,
+        '003W/2b-2e original Worker must never reply');
+      await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+      const success=await evaluate(client,snapshot);
+      const successUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(!success.baselineEqual &&
+        success.quality?.selectedPixels===second.selectedPixels &&
+        success.quality.changedSelectedPixels>0 &&
+        success.quality.changedOutsideSelectionPixels===0 && success.alphaUnchanged,
+        '003W/2b-2e survivor selected-only native color and alpha integrity',
+        JSON.stringify(success));
+      const fillCount=rows=>rows.filter(s=>s.includes('Контент-заливка')).length;
+      assert(fillCount(successUi.history)===fillCount(secondaryUi.history)+1,
+        '003W/2b-2e exactly one survivor History transaction');
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('003W/2b-2e survivor exact native Undo',
+        async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+      const undo=await evaluate(client,snapshot);
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('003W/2b-2e survivor exact native Redo',
+        async()=>(await evaluate(client,snapshot))?.successEqual===true,90_000);
+      const redo=await evaluate(client,snapshot);
+      await new Promise(resolve=>setTimeout(resolve,750));
+      const final=await evaluate(client,expr);
+      const finalTabs=await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length');
+      assert(finalTabs===1 && final.jobs===2 && final.replies===1,
+        '003W/2b-2e no ghost owner or late reply after survivor Redo');
+      const evidence={
+        kind:'zpe-browser-dense-owner-close-v1',format,protocol:'file:',
+        sourcePixels:fixture.width*fixture.height,tabsBefore:2,
+        refusedPromptCount:closed.refusedPromptCount,refusedTabs:closed.refused.tabs,
+        refusedOwnerActive:closed.refused.ownerActive,
+        refusedWorkerJobs:closed.refused.worker.jobs,
+        refusedWorkerReplies:closed.refused.worker.replies,
+        refusedWorkerTerminations:closed.refused.worker.terminatedJobs,
+        confirmedPromptCount:closed.confirmedPromptCount,
+        tabsAfterClose:closed.closed.tabs,originalTabGone:closed.closed.originalTabGone,
+        remainingOwnerActive:closed.closed.survivorActive,
+        selectedPixels:first.selectedPixels,selectedBytes:first.selectedBytes,
+        jobsBeforeClose:first.jobs,repliesBeforeClose:first.replies,
+        terminatedOnClose:closed.closed.worker.terminatedJobs,
+        repliesAfterSettling:preRetry.replies,
+        survivorNativeExact:after.baselineEqual,survivorUiExact:uiExact(afterUi,secondaryUi),
+        settledNativeExact:settled.baselineEqual,
+        settledUiExact:uiExact(settledUi,secondaryUi),
+        dispatchToTerminationMs:closed.closed.worker.firstTerminatedAtMs-first.firstDispatchAtMs,
+        closePulseIntervalsMs:closeTimer.pulseIntervalsMs,
+        heapBeforeBytes:closeTimer.heapBeforeBytes,heapAfterBytes:closeTimer.heapAfterBytes,
+        successorSelectedPixels:second.selectedPixels,successorSelectedBytes:second.selectedBytes,
+        changedSelectedPixels:success.quality.changedSelectedPixels,
+        outsideSelectionUnchanged:success.quality.changedOutsideSelectionPixels===0,
+        alphaUnchanged:success.alphaUnchanged,
+        retryHistoryOnce:fillCount(successUi.history)===fillCount(secondaryUi.history)+1,
+        undoExact:undo.baselineEqual,redoExact:redo.successEqual,
+        finalTabs,finalWorkerJobs:final.jobs,finalWorkerReplies:final.replies,
+        finalWorkerTerminations:final.terminatedJobs,retryCompletionMs:retryTimer.elapsedMs,
+        retryPulseIntervalsMs:retryTimer.pulseIntervalsMs,
+        workerPidMapping:'unknown',operationPeakKnown:false,
+        limitations:BROWSER_DENSE_CLOSE_LIMITATIONS,
+      };
+      validateBrowserDenseCloseEvidence(evidence);
+      const saved=await saveBrowserDenseCloseEvidence(evidence,
+        process.env.ZPE_BROWSER_DENSE_CLOSE_ARTIFACT_DIR);
+      console.log('003W/2b-2e real dirty close refusal, termination and retry:',
+        JSON.stringify({saved,evidence}));
+      return evidence;
+    }
+
+    // 003W/2b-2d: actual high-depth documents and an in-flight 1.9M+ Worker.
+    // Tab actions are normal UI clicks; Worker.postMessage/terminate are observed,
+    // not mocked. This is the owner-switch isolation portion, not retry acceptance.
+    if(switchDense){
+      function tab(index){
+        const saved=window.__nearCapTabBaselines;
+        const current=window.__nearCapTabIndex;
+        saved[current]={bytes:window.__nearCapBaseline,
+          source:window.__nearCapBaselineSource,success:window.__nearCapSuccess};
+        const targets=[...document.querySelectorAll('#docTabs .doc-tab')];
+        targets[index].click();
+        const next=saved[index]||{};
+        window.__nearCapBaseline=next.bytes||null;
+        window.__nearCapBaselineSource=next.source||null;
+        window.__nearCapSuccess=next.success||null;
+        window.__nearCapTabIndex=index;
+        return document.querySelectorAll('#docTabs .doc-tab')[index]?.getAttribute('aria-selected')==='true';
+      }
+      const changeTab=index=>'('+tab.toString()+')('+index+')';
+      const uiExact=(a,b)=>JSON.stringify(a.pixel)===JSON.stringify(b.pixel) &&
+        JSON.stringify(a.history)===JSON.stringify(b.history);
+      assert(await evaluate(client,'document.querySelectorAll("#docTabs .doc-tab").length===1'),
+        '003W/2b-2d must begin with one imported PSD/PSB');
+      await evaluate(client,'window.__nearCapTabIndex=0;window.__nearCapTabBaselines=['+
+        '{bytes:window.__nearCapBaseline,source:window.__nearCapBaselineSource,success:null}];'+
+        'document.querySelector("#addDocTabBtn").click();true');
+      await waitFor('003W/2b-2d create second native document tab',()=>evaluate(client,
+        'document.querySelectorAll("#docTabs .doc-tab").length===2 && '+
+        'document.querySelectorAll("#docTabs .doc-tab")[1].getAttribute("aria-selected")==="true"'),15_000);
+      await evaluate(client,'window.__nearCapTabIndex=1;window.__nearCapBaseline=null;'+
+        'window.__nearCapBaselineSource=null;window.__nearCapSuccess=null;true');
+      const imported=await evaluate(client,'('+importFile.toString()+')()');
+      assert(imported===fixture.bytes.length,'003W/2b-2d second real PSD/PSB byte transport');
+      await waitFor('003W/2b-2d secondary native Photoshop import',()=>evaluate(client,
+        'document.querySelector("#statusText")?.textContent?.startsWith('+
+        JSON.stringify('PSD/PSB импортирован')+')'),60_000);
+      const secondary=await evaluate(client,snapshot);
+      const secondaryUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(secondary.baselineEqual && secondary.bits===fixture.bitsPerChannel &&
+        secondary.rawBytes===baseline.rawBytes && secondary.tiles===baseline.tiles,
+        '003W/2b-2d secondary native document exact baseline',JSON.stringify(secondary));
+      assert(await evaluate(client,changeTab(0)),'003W/2b-2d activate original tab');
+      const originalAgain=await evaluate(client,snapshot);
+      const originalUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(originalAgain.baselineEqual && uiExact(originalUi,originalPreview),
+        '003W/2b-2d original baseline preserved after secondary import');
+      const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(view.hit==='overlayCanvas' && view.within &&
+        view.boundingPixels>=1_900_000 && view.boundingPixels<=2_000_000,
+        '003W/2b-2d real dense original UI marquee',JSON.stringify(view));
+      await draw(view);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2d original Fill command enabled');
+      const expr='window.__nearCapWorkerObservation.summary()';
+      await waitFor('003W/2b-2d genuine dense Worker dispatch',
+        async()=>(await evaluate(client,expr)).jobs===1,75_000);
+      const inFlight=await evaluate(client,expr);
+      assert(inFlight.selectedPixels>=1_900_000 && inFlight.selectedPixels<=2_000_000 &&
+        inFlight.selectedBytes===inFlight.selectedPixels*4 &&
+        inFlight.replies===0 && inFlight.terminatedJobs===0,
+        '003W/2b-2d real Worker dispatched but not completed',JSON.stringify(inFlight));
+      assert(await evaluate(client,changeTab(1)),
+        '003W/2b-2d actual UI switch to independent second tab');
+      const switched=await evaluate(client,expr);
+      const timer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      assert(switched.jobs===1 && switched.replies===0 &&
+        switched.terminatedJobs===1 && switched.firstTerminatedAtMs>=inFlight.firstDispatchAtMs,
+        '003W/2b-2d in-flight original Worker terminated without reply',JSON.stringify(switched));
+      const survivorAfter=await evaluate(client,snapshot);
+      const survivorUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(survivorAfter.baselineEqual && uiExact(survivorUi,secondaryUi),
+        '003W/2b-2d switching cannot mutate survivor native/preview/History');
+      assert(await evaluate(client,changeTab(0)),
+        '003W/2b-2d reactivate owner for native integrity check');
+      const originalAfter=await evaluate(client,snapshot);
+      const originalAfterUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(originalAfter.baselineEqual && uiExact(originalAfterUi,originalPreview),
+        '003W/2b-2d original native/preview/History must remain exact');
+      await new Promise(resolve=>setTimeout(resolve,1250));
+      const originalSettled=await evaluate(client,snapshot);
+      const originalSettledUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(await evaluate(client,changeTab(1)),
+        '003W/2b-2d revisit survivor after bounded settling');
+      const survivorSettled=await evaluate(client,snapshot);
+      const survivorSettledUi=await evaluate(client,'('+ui.toString()+')()');
+      const finished=await evaluate(client,expr);
+      assert(originalSettled.baselineEqual && survivorSettled.baselineEqual &&
+        uiExact(originalSettledUi,originalPreview) &&
+        uiExact(survivorSettledUi,secondaryUi) && finished.replies===0 &&
+        finished.terminatedJobs===1,
+        '003W/2b-2d no stale native result in either tab after settling',JSON.stringify(finished));
+
+      const retryView=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(retryView.hit==='overlayCanvas' && retryView.within &&
+        retryView.boundingPixels===view.boundingPixels,
+        '003W/2b-2d redraw dense selection in surviving document');
+      await draw(retryView);
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2d survivor retry must use actual enabled menu Fill');
+      await waitFor('003W/2b-2d successor real Worker postMessage',
+        async()=>(await evaluate(client,expr)).jobs===2,75_000);
+      const successor=await evaluate(client,expr);
+      assert(successor.selectedPixels===inFlight.selectedPixels &&
+        successor.selectedBytes===inFlight.selectedBytes && successor.replies===0,
+        '003W/2b-2d successor must receive dense frozen native indices');
+      await waitFor('003W/2b-2d second real dense Worker completes',
+        ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===2 && '+
+          'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),205_000);
+      const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      const successorDone=await evaluate(client,expr);
+      assert(successorDone.jobs===2 && successorDone.replies===1 &&
+        successorDone.terminatedJobs>=1 && successorDone.terminatedJobs<=2,
+        '003W/2b-2d only successor Worker is authorized to publish',
+        JSON.stringify(successorDone));
+      await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+      const success=await evaluate(client,snapshot);
+      const successUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(!success.baselineEqual &&
+        success.quality?.selectedPixels===successor.selectedPixels &&
+        success.quality.changedSelectedPixels>0 &&
+        success.quality.changedOutsideSelectionPixels===0 &&
+        success.alphaUnchanged===true,
+        '003W/2b-2d success changes selected native colors without alpha');
+      const countFill=rows=>rows.filter(s=>s.includes('Контент-заливка')).length;
+      assert(countFill(successUi.history)===countFill(secondaryUi.history)+1,
+        '003W/2b-2d exactly one successful History entry in survivor');
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('003W/2b-2d exact survivor Undo',
+        async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+      const undo=await evaluate(client,snapshot);
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('003W/2b-2d exact survivor Redo',
+        async()=>(await evaluate(client,snapshot))?.successEqual===true,90_000);
+      const redo=await evaluate(client,snapshot);
+      assert(await evaluate(client,changeTab(0)),
+        '003W/2b-2d revisit original after successful survivor retry');
+      const originalFinal=await evaluate(client,snapshot);
+      const originalFinalUi=await evaluate(client,'('+ui.toString()+')()');
+      await new Promise(resolve=>setTimeout(resolve,750));
+      const allWorkers=await evaluate(client,expr);
+      assert(originalFinal.baselineEqual && uiExact(originalFinalUi,originalPreview) &&
+        allWorkers.jobs===2 && allWorkers.replies===1 &&
+        allWorkers.terminatedJobs>=1 && allWorkers.terminatedJobs<=2,
+        '003W/2b-2d no old reply or cross-tab mutation even after successor Redo');
+      const evidence={kind:'zpe-browser-dense-owner-switch-v1',format,protocol:'file:',
+        tabs:2,sourcePixels:fixture.width*fixture.height,
+        selectedPixels:inFlight.selectedPixels,selectedBytes:inFlight.selectedBytes,
+        workerJobs:finished.jobs,repliesBeforeSwitch:inFlight.replies,
+        terminatedOnSwitch:switched.terminatedJobs,repliesAfterSettling:finished.replies,
+        originalNativeExact:originalSettled.baselineEqual,
+        originalUiExact:uiExact(originalAfterUi,originalPreview),
+        survivorNativeExact:survivorSettled.baselineEqual,
+        survivorUiExact:uiExact(survivorSettledUi,secondaryUi),
+        dispatchToTerminationMs:switched.firstTerminatedAtMs-inFlight.firstDispatchAtMs,
+        pulseIntervalsMs:timer.pulseIntervalsMs,heapBeforeBytes:timer.heapBeforeBytes,
+        heapAfterBytes:timer.heapAfterBytes,
+        successorSelectedPixels:successor.selectedPixels,
+        successorSelectedBytes:successor.selectedBytes,
+        changedSelectedPixels:success.quality.changedSelectedPixels,
+        outsideSelectionUnchanged:success.quality.changedOutsideSelectionPixels===0,
+        alphaUnchanged:success.alphaUnchanged,
+        retryHistoryOnce:countFill(successUi.history)===countFill(secondaryUi.history)+1,
+        undoExact:undo.baselineEqual,redoExact:redo.successEqual,
+        originalFinalExact:originalFinal.baselineEqual&&uiExact(originalFinalUi,originalPreview),
+        retryCompletionMs:retryTimer.elapsedMs,retryPulseIntervalsMs:retryTimer.pulseIntervalsMs,
+        finalWorkerJobs:allWorkers.jobs,finalWorkerReplies:allWorkers.replies,
+        finalWorkerTerminations:allWorkers.terminatedJobs,
+        limitations:BROWSER_DENSE_OWNER_LIMITATIONS};
+      validateBrowserDenseOwnerEvidence(evidence);
+      const saved=await saveBrowserDenseOwnerEvidence(evidence,
+        process.env.ZPE_BROWSER_DENSE_OWNER_ARTIFACT_DIR);
+      console.log('003W/2b-2d genuine cross-document Worker switch:',
+        JSON.stringify({saved,evidence}));
+      return evidence;
+    }
+    // 003W/2b-2c: real near-cap Blob Worker after dispatch, real Escape,
+    // bounded stale-result settling, then a second real dense Worker Fill.
+    if(cancelDense){
+      const cpuStages=[],rssStages=[];
+      // 003T/4 is opt-in in the same real browser session; it does not
+      // perturb historical six CPU/RSS milestone receipts.
+      const retentionEnabled=process.env.ZPE_SAME_SESSION_RETENTION==='1';
+      const observerControlEnabled=process.env.ZPE_SAME_SESSION_RETENTION_CONTROL==='1';
+      const retentionCycles=[];
+      const sessionId=retentionEnabled?randomUUID():null;
+      const sessionStartedAtUnixMs=retentionEnabled?Date.now():null;
+      const retentionMark=async()=>{
+        const census=await operationCpuCensus?.();
+        if(!census?.cpu || !census.rss)
+          throw new TypeError('003T/4 needs independent CDP Linux CPU/RSS censuses');
+        return {cpu:census.cpu,rss:census.rss};
+      };
+      const cpuMark=async phase=>{
+        if(!operationCpuCensus)return;
+        const sample=await operationCpuCensus();
+        cpuStages.push({phase,census:sample?.cpu??sample});
+        if(sample?.rss)rssStages.push({phase,rss:sample.rss});
+      };
+      const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(view.hit==='overlayCanvas' && view.within &&
+        view.boundingPixels>=1_900_000 && view.boundingPixels<=2_000_000,
+        '003W/2b-2c dense UI marquee must be visible and bounded',JSON.stringify(view));
+      await draw(view);
+      const workerExpr='window.__nearCapWorkerObservation.summary()';
+      await cpuMark('before-first-fill');
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2c first real dense Fill menu must be enabled');
+      await waitFor('003W/2b-2c first real dense Worker postMessage',
+        async()=>(await evaluate(client,workerExpr)).jobs===1,75_000);
+      const first=await evaluate(client,workerExpr);
+      assert(first.selectedPixels>=1_900_000 && first.selectedPixels<=2_000_000 &&
+        first.selectedBytes===first.selectedPixels*4 &&
+        first.replies===0 && first.terminatedJobs===0,
+        '003W/2b-2c Worker must be in flight before Escape',JSON.stringify(first));
+      await cpuMark('first-worker-in-flight');
+      await client.send('Input.dispatchKeyEvent',{
+        type:'keyDown',key:'Escape',code:'Escape',
+        windowsVirtualKeyCode:27,nativeVirtualKeyCode:27,
+      });
+      await client.send('Input.dispatchKeyEvent',{
+        type:'keyUp',key:'Escape',code:'Escape',
+        windowsVirtualKeyCode:27,nativeVirtualKeyCode:27,
+      });
+      await waitFor('003W/2b-2c genuine owner Escape acknowledgement',
+        ()=>evaluate(client,'document.querySelector("#statusText")?.textContent==='+
+          JSON.stringify('Контент-заливка отменена')),15_000);
+      const stopped=await evaluate(client,workerExpr);
+      const cancelledTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      assert(stopped.jobs===1 && stopped.replies===0 && stopped.terminatedJobs===1 &&
+        stopped.firstTerminatedAtMs>=stopped.firstDispatchAtMs,
+        '003W/2b-2c real Worker terminated before reply',JSON.stringify(stopped));
+      await cpuMark('after-escape-cancel');
+      const samePreview=state=>JSON.stringify(state.pixel)===JSON.stringify(originalPreview.pixel);
+      const sameHistory=state=>JSON.stringify(state.history)===JSON.stringify(originalPreview.history);
+      const afterCancel=await evaluate(client,snapshot);
+      const cancelledUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(afterCancel.baselineEqual && samePreview(cancelledUi) && sameHistory(cancelledUi),
+        '003W/2b-2c no partial native/preview/History after Escape',
+        JSON.stringify({afterCancel,cancelledUi,originalPreview}));
+      const settleStarted=Date.now();
+      await new Promise(resolve=>setTimeout(resolve,1_250));
+      const settledMs=Date.now()-settleStarted;
+      const afterSettle=await evaluate(client,snapshot);
+      const settledUi=await evaluate(client,'('+ui.toString()+')()');
+      const beforeRetry=await evaluate(client,workerExpr);
+      assert(afterSettle.baselineEqual && samePreview(settledUi) && sameHistory(settledUi) &&
+        beforeRetry.jobs===1 && beforeRetry.replies===0 && beforeRetry.terminatedJobs===1,
+        '003W/2b-2c cancelled result must remain uncommitted after settling',
+        JSON.stringify({afterSettle,settledUi,beforeRetry}));
+      // Supersede the cancelled job's selection owner before retry:
+      // dense -> sparse -> freshly drawn dense, still no second Worker yet.
+      const newerSparse=await evaluate(client,'('+setupSelection.toString()+')(false)');
+      assert(newerSparse.hit==='overlayCanvas'&&newerSparse.within,
+        '003W/2b-2c new sparse selection must be a real pointer gesture');
+      await draw(newerSparse);
+      const newerDense=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(newerDense.hit==='overlayCanvas'&&newerDense.within &&
+        newerDense.boundingPixels===view.boundingPixels,
+        '003W/2b-2c new dense selection must be independently redrawn');
+      await draw(newerDense);
+      const superseded=await evaluate(client,workerExpr);
+      assert(superseded.jobs===1 && superseded.replies===0,
+        '003W/2b-2c changing selection must not revive cancelled Worker',
+        JSON.stringify(superseded));
+      await cpuMark('before-retry-fill');
+      const firstCycleStartMs=retentionEnabled?performance.now():null;
+      const firstCycleBefore=retentionEnabled?await retentionMark():null;
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2c retry must be an enabled real menu Fill');
+      await waitFor('003W/2b-2c second real dense Worker postMessage',
+        async()=>(await evaluate(client,workerExpr)).jobs===2,75_000);
+      const second=await evaluate(client,workerExpr);
+      assert(second.selectedPixels===first.selectedPixels &&
+        second.selectedBytes===first.selectedBytes && second.replies===0,
+        '003W/2b-2c retry must dispatch same dense frozen selection',
+        JSON.stringify(second));
+      await cpuMark('retry-worker-in-flight');
+      await waitFor('003W/2b-2c real retry Worker completion',
+        ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===2 && '+
+          'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),205_000);
+      const retryTimer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      const finished=await evaluate(client,workerExpr);
+      assert(finished.jobs===2 && finished.replies===1,
+        '003W/2b-2c only successor Worker may reply',JSON.stringify(finished));
+      await cpuMark('after-retry-completed');
+      await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+      const success=await evaluate(client,snapshot);
+      const successUi=await evaluate(client,'('+ui.toString()+')()');
+      assert(!success.baselineEqual &&
+        success.quality?.selectedPixels===second.selectedPixels &&
+        success.quality.changedSelectedPixels>0 &&
+        success.quality.changedOutsideSelectionPixels===0 &&
+        success.alphaUnchanged===true,
+        '003W/2b-2c retry changes only selected native colors, not alpha',
+        JSON.stringify(success));
+      const oldFillRows=originalPreview.history.filter(x=>x.includes('Контент-заливка')).length;
+      const newFillRows=successUi.history.filter(x=>x.includes('Контент-заливка')).length;
+      assert(newFillRows===oldFillRows+1,
+        '003W/2b-2c History must contain exactly one retry Fill',JSON.stringify(successUi.history));
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('003W/2b-2c exact native Undo',async()=>
+        (await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+      const undo=await evaluate(client,snapshot);
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('003W/2b-2c exact native Redo',async()=>
+        (await evaluate(client,snapshot))?.successEqual===true,90_000);
+      const redo=await evaluate(client,snapshot);
+      await new Promise(resolve=>setTimeout(resolve,750));
+      const finalWorker=await evaluate(client,workerExpr);
+      assert(finalWorker.jobs===2 && finalWorker.replies===1,
+        '003W/2b-2c no cancelled late reply after Undo/Redo',JSON.stringify(finalWorker));
+      if(retentionEnabled){
+        const after=await retentionMark();
+        retentionCycles.push({index:1,startMs:firstCycleStartMs,finishMs:performance.now(),
+          before:firstCycleBefore,after,
+          workerJobs:finalWorker.jobs,workerReplies:finalWorker.replies,
+          selectedPixels:second.selectedPixels,
+          selectedPixelsChanged:success.quality.changedSelectedPixels,
+          nativeExactAfterUndo:undo.baselineEqual,nativeExactAfterRedo:redo.successEqual,
+          outsideUnchanged:success.quality.changedOutsideSelectionPixels===0,
+          alphaUnchanged:success.alphaUnchanged,
+          historyOnce:newFillRows===oldFillRows+1,lateRepliesAbsent:true});
+      }
+      const evidence={
+        kind:'zpe-browser-near-cap-dense-cancel-v1',format,protocol:'file:',
+        sourcePixels:fixture.width*fixture.height,sourceRawBytes:baseline.rawBytes,
+        marqueeBoundingPixels:view.boundingPixels,
+        firstSelectedPixels:first.selectedPixels,firstSelectedBytes:first.selectedBytes,
+        secondSelectedPixels:second.selectedPixels,secondSelectedBytes:second.selectedBytes,
+        workerJobs:finalWorker.jobs,cancelAcknowledged:true,
+        selectionReplacedAfterCancel:true,
+        cancelBeforeReply:stopped.replies===0,
+        terminatedJobsBeforeRetry:beforeRetry.terminatedJobs,
+        repliesBeforeRetry:beforeRetry.replies,
+        cancelNativeExact:afterCancel.baselineEqual,
+        cancelPreviewExact:samePreview(cancelledUi),
+        cancelHistoryExact:sameHistory(cancelledUi),
+        settledNativeExact:afterSettle.baselineEqual,
+        settledPreviewExact:samePreview(settledUi),
+        settledHistoryExact:sameHistory(settledUi),
+        retryChangedSelectedPixels:success.quality.changedSelectedPixels,
+        retryOutsideUnchanged:success.quality.changedOutsideSelectionPixels===0,
+        retryAlphaUnchanged:success.alphaUnchanged,
+        retryUndoExact:undo.baselineEqual,retryRedoExact:redo.successEqual,
+        retryHistoryOnce:newFillRows===oldFillRows+1,finalReplies:finalWorker.replies,
+        firstDispatchToCancelMs:stopped.firstTerminatedAtMs-first.firstDispatchAtMs,
+        cancelSettledMs:settledMs,retryMenuToCompletionMs:retryTimer.elapsedMs,
+        requestedPulseMs:8,cancelPulseIntervalsMs:cancelledTimer.pulseIntervalsMs,
+        retryPulseIntervalsMs:retryTimer.pulseIntervalsMs,
+        cancelPulsesTruncated:cancelledTimer.truncated,
+        retryPulsesTruncated:retryTimer.truncated,
+        heapBeforeBytes:cancelledTimer.heapBeforeBytes,
+        heapAfterBytes:retryTimer.heapAfterBytes,
+        workerPidMapping:'unknown',operationPeakKnown:false,
+        limitations:BROWSER_DENSE_CANCEL_LIMITATIONS,
+      };
+      validateBrowserDenseCancelEvidence(evidence);
+      if(retentionEnabled){
+        if(observerControlEnabled){
+          // Independent control run: the genuine first Fill/Cancel/Undo/Redo
+          // above is shared with treatment. No additional Fill is dispatched.
+          // Repeated Save Project/native snapshot and History readbacks can
+          // themselves allocate/GC substantial memory.
+          const controls=[];
+          for(let index=1;index<=3;index++){
+            const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+            assert(view.hit==='overlayCanvas'&&view.within&&
+              view.boundingPixels===second.selectedPixels,
+              '003T/4b control must redraw same native selection');
+            await draw(view);
+            const startMs=performance.now();
+            const before=await retentionMark();
+            // Mirror the post-operation native project readback in the active
+            // treatment, without doing another Fill or claiming a new edit.
+            const observed=await evaluate(client,snapshot);
+            assert(observed.successEqual,
+              '003T/4b observer-only pre-History readback must keep exact native result');
+            await evaluate(client,"document.querySelector('#undoBtn').click();true");
+            await waitFor('003T/4b native control Undo '+index,
+              async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+            const undone=await evaluate(client,snapshot);
+            await evaluate(client,"document.querySelector('#redoBtn').click();true");
+            await waitFor('003T/4b native control Redo '+index,
+              async()=>(await evaluate(client,snapshot))?.successEqual===true,90_000);
+            const redone=await evaluate(client,snapshot);
+            const afterUi=await evaluate(client,'('+ui.toString()+')()');
+            await new Promise(resolve=>setTimeout(resolve,500));
+            const final=await evaluate(client,workerExpr);
+            const historyUnchanged=afterUi.history.filter(x=>x.includes('Контент-заливка')).length===
+              oldFillRows+1;
+            assert(undone.baselineEqual && redone.successEqual && historyUnchanged &&
+              final.jobs===2 && final.replies===1,
+              '003T/4b control must preserve native pixels, single History edit and zero new Worker dispatches');
+            const after=await retentionMark();
+            controls.push({index,startMs,finishMs:performance.now(),before,after,
+              workerJobs:final.jobs,workerReplies:final.replies,
+              undoNativeExact:undone.baselineEqual,redoNativeExact:redone.successEqual,
+              historyUnchanged,selectionUnchanged:view.boundingPixels===second.selectedPixels,
+              noNewWorker:final.jobs===2&&final.replies===1,projectReadbacks:3});
+          }
+          const {createNativeObserverControl,saveNativeObserverControl}=
+            await import('./browser-native-observer-control.mjs');
+          const fixtureSha256=createHash('sha256').update(Buffer.from(fixture.bytes)).digest('hex');
+          const report=createNativeObserverControl({format,sessionId,sessionStartedAtUnixMs,
+            fixtureSha256,nativeReceipt:evidence,baselineAfterFill:retentionCycles[0].after,
+            controls});
+          const file=await saveNativeObserverControl(report,evidence,fixtureSha256,
+            process.env.ZPE_SAME_SESSION_RETENTION_CONTROL_ARTIFACT_DIR);
+          console.log('003T/4b genuine observer-only native control:',
+            JSON.stringify({file,format,sessionId,comparisons:report.comparisons,
+              trueOperationPeakKnown:false,workerPidMapping:'unknown',leakProven:false}));
+        }else{
+        // Two additional genuine near-cap Workers. Each cycle starts from
+        // exact original native bytes via Undo, then Fill/Undo/Redo in this
+        // same tab and browser process. No new imports or profiles.
+        for(let index=2;index<=3;index++){
+          await evaluate(client,"document.querySelector('#undoBtn').click();true");
+          await waitFor('003T/4 repeat native reset '+index,
+            async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+          const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+          assert(view.hit==='overlayCanvas'&&view.within&&
+            view.boundingPixels===second.selectedPixels,
+            '003T/4 redraw genuine native dense selection');
+          await draw(view);
+          const startMs=performance.now();
+          const before=await retentionMark();
+          await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+          assert(await evaluate(client,'('+runFill.toString()+')()'),
+            '003T/4 repeat must invoke enabled native Fill');
+          const expectedJobs=index+1;
+          await waitFor('003T/4 real repeat dispatch '+index,
+            async()=>(await evaluate(client,workerExpr)).jobs===expectedJobs,75_000);
+          const dispatch=await evaluate(client,workerExpr);
+          assert(dispatch.selectedPixels===second.selectedPixels &&
+            dispatch.selectedBytes===second.selectedBytes &&
+            dispatch.replies===index-1,
+            '003T/4 repeat must dispatch exactly same frozen selected Uint32 indices');
+          await waitFor('003T/4 real repeat completion '+index,
+            ()=>evaluate(client,'(() => {const w=window.__nearCapWorkerObservation.summary();return w.jobs==='+
+              expectedJobs+' && w.replies==='+index+' && document.querySelector("#statusText")?.textContent?.includes("tiled ")})()'),
+            205_000);
+          await evaluate(client,'window.__nearCapWorkerObservation.end()');
+          await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+          const repeatedSuccess=await evaluate(client,snapshot);
+          const repeatedUi=await evaluate(client,'('+ui.toString()+')()');
+          const historyOnce=repeatedUi.history.filter(x=>x.includes('Контент-заливка')).length===
+            oldFillRows+1;
+          assert(!repeatedSuccess.baselineEqual &&
+            repeatedSuccess.quality?.changedSelectedPixels>0 &&
+            repeatedSuccess.quality.changedOutsideSelectionPixels===0 &&
+            repeatedSuccess.alphaUnchanged===true && historyOnce,
+            '003T/4 selected-only, alpha and one History entry must remain exact',
+            JSON.stringify(repeatedSuccess));
+          await evaluate(client,"document.querySelector('#undoBtn').click();true");
+          await waitFor('003T/4 repeat native Undo '+index,
+            async()=>(await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+          const undone=await evaluate(client,snapshot);
+          await evaluate(client,"document.querySelector('#redoBtn').click();true");
+          await waitFor('003T/4 repeat native Redo '+index,
+            async()=>(await evaluate(client,snapshot))?.successEqual===true,90_000);
+          const redone=await evaluate(client,snapshot);
+          await new Promise(resolve=>setTimeout(resolve,500));
+          const final=await evaluate(client,workerExpr);
+          assert(final.jobs===expectedJobs && final.replies===index,
+            '003T/4 no stale or extra Worker reply after repeated native History');
+          const after=await retentionMark();
+          retentionCycles.push({index,startMs,finishMs:performance.now(),before,after,
+            workerJobs:final.jobs,workerReplies:final.replies,
+            selectedPixels:dispatch.selectedPixels,
+            selectedPixelsChanged:repeatedSuccess.quality.changedSelectedPixels,
+            nativeExactAfterUndo:undone.baselineEqual,
+            nativeExactAfterRedo:redone.successEqual,
+            outsideUnchanged:repeatedSuccess.quality.changedOutsideSelectionPixels===0,
+            alphaUnchanged:repeatedSuccess.alphaUnchanged,
+            historyOnce,lateRepliesAbsent:final.replies===index});
+        }
+        const {createSameSessionNativeRetention,saveSameSessionNativeRetention}=
+          await import('./browser-same-session-native-retention.mjs');
+        const fixtureSha256=createHash('sha256').update(Buffer.from(fixture.bytes)).digest('hex');
+        const report=createSameSessionNativeRetention({
+          format,sessionId,sessionStartedAtUnixMs,fixtureSha256,
+          nativeReceipt:evidence,cycles:retentionCycles});
+        const file=await saveSameSessionNativeRetention(report,evidence,fixtureSha256,
+          process.env.ZPE_SAME_SESSION_RETENTION_ARTIFACT_DIR);
+        console.log('003T/4 genuine single-session three native Fill/Undo/Redo cycles:',
+          JSON.stringify({file,format,sessionId,
+            comparisons:report.comparisons,workerPidMapping:'unknown',
+            trueOperationPeakKnown:false,leakProven:false}));
+        }
+      }
+      const saved=await saveBrowserDenseCancelEvidence(evidence,
+        process.env.ZPE_BROWSER_DENSE_CANCEL_ARTIFACT_DIR);
+      if(operationCpuCensus){
+        const {createOperationCpuEvidence,saveOperationCpuEvidence}=
+          await import('./browser-operation-cpu-evidence.mjs');
+        const cpu=createOperationCpuEvidence({format,nativeReceipt:evidence,stages:cpuStages});
+        const file=await saveOperationCpuEvidence(cpu,evidence,
+          process.env.ZPE_OPERATION_CPU_ARTIFACT_DIR);
+        console.log('003T/3b genuine native operation-boundary CPU:',JSON.stringify({
+          file,format,availability:cpu.intervals.map(x=>x.comparison.availability),
+          unknownReasons:cpu.phases.map(x=>x.census.reason),
+          workerPidMapping:cpu.workerPidMapping,operationCpuTotalKnown:false}));
+        if(rssStages.length){
+          const {createOperationCpuRssCoverage,saveOperationCpuRssCoverage}=
+            await import('./browser-operation-cpu-rss-coverage.mjs');
+          const coverage=createOperationCpuRssCoverage({
+            cpuReport:cpu,nativeReceipt:evidence,stages:rssStages});
+          const rssFile=await saveOperationCpuRssCoverage(coverage,cpu,evidence,
+            process.env.ZPE_OPERATION_CPU_RSS_ARTIFACT_DIR);
+          console.log('003T/3c genuine native CPU/RSS milestone coverage:',JSON.stringify({
+            rssFile,format,availability:coverage.comparisons.map(x=>x.availability),
+            reasons:coverage.comparisons.map(x=>x.reason),
+            cpuUnknown:cpu.phases.map(x=>x.census.reason),
+            rssUnknown:coverage.stages.map(x=>x.rss.reason),
+            trueOperationPeakKnown:false,workerPidMapping:'unknown'}));
+        }
+      }
+      console.log('003W/2b-2c real dense Worker cancel and retry:',JSON.stringify({saved,evidence}));
+      return evidence;
+    }
+    // A separate fresh-profile scenario: actual ~2M selected indices must
+    // complete a production Worker job, not merely pass the UI safety scan.
+    if (dense) {
+      const view=await evaluate(client,'('+setupSelection.toString()+')("dense")');
+      assert(view.hit==='overlayCanvas' && view.within &&
+        view.boundingPixels>=1_900_000 && view.boundingPixels<=2_000_000,
+        '003W/2b-2b dense marquee must be visible and inside the safety cap',
+        JSON.stringify(view));
+      await draw(view);
+      await evaluate(client,'('+installBrowserSelectionFreezeObserver.toString()+')()');
+      await evaluate(client,'window.__stage003SelectionFreeze.begin("first-fill");true');
+      await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+      assert(await evaluate(client,'('+runFill.toString()+')()'),
+        '003W/2b-2b actual dense Fill menu item must be enabled');
+      // Dispatch evidence is independent from completion: a task can exceed
+      // the 180 s production Worker watchdog, fail with an error status or
+      // stall in UI selection freezing before postMessage. Log which phase
+      // actually happened instead of reporting only an opaque 240 s timeout.
+      const denseState='(() => ({worker:window.__nearCapWorkerObservation.summary(),'+
+        'status:document.querySelector("#statusText")?.textContent||""}))()';
+      try {
+        await waitFor('003W/2b-2b dense production Worker dispatch',
+          async()=>(await evaluate(client,denseState)).worker.jobs===1,75_000);
+        const dispatched=await evaluate(client,denseState);
+        console.log('003W/2b-2b '+format+' real dense Worker dispatched:',
+          JSON.stringify(dispatched));
+        assert(dispatched.worker.selectedPixels>=1_900_000 &&
+          dispatched.worker.selectedPixels<=2_000_000 &&
+          dispatched.worker.selectedBytes===dispatched.worker.selectedPixels*4,
+          '003W/2b-2b actual dense frozen selection before kernel completion',
+          JSON.stringify(dispatched));
+        await waitFor('003W/2b-2b genuine dense production Worker completion',
+          ()=>evaluate(client,'(() => window.__nearCapWorkerObservation.summary().jobs===1 && '+
+            'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),
+          205_000);
+      } catch(error) {
+        const observed=await evaluate(client,denseState).catch(e=>({readError:String(e)}));
+        const elapsed=await evaluate(client,
+          'window.__nearCapWorkerObservation.end()').catch(()=>null);
+        throw new Error('003W/2b-2b failed genuine dense Worker phase: '+
+          JSON.stringify({format,observed,elapsed,
+            productionWorkerDeadlineMs:180_000,
+            limitations:'No dense success, native output, or Undo/Redo claim'}),{cause:error});
+      }
+      const timer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+      const worker=await evaluate(client,'window.__nearCapWorkerObservation.summary()');
+      assert(worker.jobs===1 && worker.selectedPixels>=1_900_000 &&
+        worker.selectedPixels<=2_000_000 &&
+        worker.selectedBytes===worker.selectedPixels*4,
+        '003W/2b-2b real dense Worker must receive bounded frozen Uint32 indices',
+        JSON.stringify(worker));
+      await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+      const success=await evaluate(client,snapshot);
+      assert(!success.error && !success.baselineEqual &&
+        success.quality?.selectedPixels===worker.selectedPixels &&
+        success.quality.changedSelectedPixels>0 &&
+        success.quality.changedOutsideSelectionPixels===0 &&
+        success.alphaUnchanged===true,
+        '003W/2b-2b native changed pixels must be strictly selected colors',
+        JSON.stringify(success));
+      await evaluate(client,"document.querySelector('#undoBtn').click();true");
+      await waitFor('003W/2b-2b exact dense native Undo',async()=>
+        (await evaluate(client,snapshot))?.baselineEqual===true,90_000);
+      const undo=await evaluate(client,snapshot);
+      assert(undo.baselineEqual,'003W/2b-2b dense Undo must restore native bytes');
+      await evaluate(client,"document.querySelector('#redoBtn').click();true");
+      await waitFor('003W/2b-2b exact dense native Redo',async()=>
+        (await evaluate(client,snapshot))?.successEqual===true,90_000);
+      const redo=await evaluate(client,snapshot);
+      assert(redo.successEqual && !redo.baselineEqual,
+        '003W/2b-2b dense Redo must reproduce native bytes');
+      const evidence={
+        kind:'zpe-browser-near-cap-dense-v1',format,
+        sourcePixels:fixture.width*fixture.height,sourceRawBytes:baseline.rawBytes,
+        protocol:'file:',marqueeBoundingPixels:view.boundingPixels,
+        selectedPixels:worker.selectedPixels,selectedBytes:worker.selectedBytes,
+        workerJobs:worker.jobs,changedSelectedPixels:success.quality.changedSelectedPixels,
+        outsideSelectionUnchanged:success.quality.changedOutsideSelectionPixels===0,
+        alphaUnchanged:success.alphaUnchanged,
+        undoExact:undo.baselineEqual,redoExact:redo.successEqual,
+        sampledPulseIntervalsMs:timer.pulseIntervalsMs,requestedPulseMs:8,
+        pulsesTruncated:timer.truncated,menuToCompletionMs:timer.elapsedMs,
+        heapBeforeBytes:timer.heapBeforeBytes,heapAfterBytes:timer.heapAfterBytes,
+        workerPidMapping:'unknown',operationPeakKnown:false,
+        limitations:BROWSER_DENSE_NEAR_CAP_LIMITATIONS,
+      };
+      validateBrowserDenseNearCapEvidence(evidence);
+      const phase=await evaluate(client,'window.__stage003SelectionFreeze.phaseSnapshot()');
+      const alignedPhase=await evaluate(client,
+        'window.__stage003SelectionFreeze.phaseAlignedSnapshot()');
+      await evaluate(client,'window.__stage003SelectionFreeze.restore();true');
+      validateBrowserPhaseAlignedEvidence(alignedPhase,{
+        format,geometryPixels:fixture.width*fixture.height,selectionClass:'dense',
+      });
+      validateBrowserSelectionPhaseEvidence(phase,{
+        format,geometryPixels:fixture.width*fixture.height,selectionClass:'dense',
+      });
+      assert(phase.windows.length===1 &&
+        phase.windows[0].selectedPixels===worker.selectedPixels &&
+        phase.windows[0].selectedPixels===1_973_400,
+        '003W/3 phase boundary must refer to exact genuine dense native Worker',
+        JSON.stringify(phase));
+      const summary=summarizeBrowserSelectionPhaseEvidence(phase,{
+        format,geometryPixels:fixture.width*fixture.height,selectionClass:'dense',
+      });
+      const phaseDirectory=process.env.ZPE_BROWSER_DENSE_NEAR_CAP_ARTIFACT_DIR;
+      let phasePath=null;
+      if(phaseDirectory){
+        await mkdir(phaseDirectory,{recursive:true});
+        phasePath=path.join(phaseDirectory,'stage003-selection-phase-'+format.toLowerCase()+repeatSuffix+'.json');
+        await writeFile(phasePath,JSON.stringify(phase,null,2)+'\n');
+        await writeFile(path.join(phaseDirectory,
+          'stage003-selection-phase-aligned-'+format.toLowerCase()+repeatSuffix+'.json'),
+          JSON.stringify(alignedPhase,null,2)+'\n');
+      }
+      console.log('003W/3c dense timer attribution:',JSON.stringify({
+        format,repeat:repeat||'1',summary:summarizeBrowserPhaseAlignedEvidence(
+          alignedPhase,{format,geometryPixels:fixture.width*fixture.height,selectionClass:'dense'}),
+      }));
+      const densePath=await saveBrowserDenseNearCapEvidence(evidence,phaseDirectory);
+      console.log('003W/3 real dense selection freeze:',JSON.stringify({format,phasePath,summary}));
+      console.log('003W/2b-2b real dense Chromium native Worker:',JSON.stringify({path:densePath,evidence}));
+      return evidence;
+    }
+    const sparseView=await evaluate(client,'('+setupSelection.toString()+')(false)');
+    assert(sparseView.hit==='overlayCanvas' && sparseView.within,
+      '003W/2b-2a sparse UI selection must be visible',JSON.stringify(sparseView));
+    await draw(sparseView);
+    await evaluate(client,'('+installBrowserSelectionFreezeObserver.toString()+')()');
+    await evaluate(client,'window.__stage003SelectionFreeze.begin("first-fill");true');
+    assert(await evaluate(client,'('+runFill.toString()+')()'),
+      '003W/2b-2a actual sparse menu command must be enabled');
+    await waitFor('003W/2b-2a real sparse native Worker success',()=>evaluate(client,
+      '(() => window.__nearCapWorkerObservation.summary().jobs===1 && '+
+      'document.querySelector("#statusText")?.textContent?.includes("tiled "))()'),
+      75_000);
+    const sparse=await evaluate(client,'window.__nearCapWorkerObservation.summary()');
+    assert(sparse.jobs===1 && sparse.selectedPixels>=1 && sparse.selectedPixels<=1024 &&
+      sparse.selectedBytes===sparse.selectedPixels*4,
+      '003W/2b-2a actual frozen sparse indices from production Worker',JSON.stringify(sparse));
+    const filledPreview=await evaluate(client,'('+ui.toString()+')()');
+    assert(JSON.stringify(filledPreview.pixel)!==JSON.stringify(originalPreview.pixel),
+      '003W/2b-2a browser Worker must actually repaint defect preview',
+      JSON.stringify({original:originalPreview.pixel,filled:filledPreview.pixel}));
+    await evaluate(client,'window.__nearCapCaptureSuccess=true;true');
+    const success=await evaluate(client,snapshot);
+    assert(!success.error && !success.baselineEqual &&
+      success.quality?.changedSelectedPixels>0 &&
+      success.quality?.changedOutsideSelectionPixels===0 &&
+      success.alphaUnchanged===true,
+      '003W/2b-2a real Worker may change only selected native color bytes',
+      JSON.stringify(success));
+    await evaluate(client,"document.querySelector('#undoBtn').click();true");
+    // Exact persisted source is the primary precision/History oracle. Record
+    // actual canvas values separately to identify HDR tone-map/cache divergence.
+    await waitFor('003W/2b-2a exact native Undo',async()=>{
+      const state=await evaluate(client,snapshot);
+      return state?.baselineEqual===true;
+    },45_000);
+    const undo=await evaluate(client,snapshot);
+    const undoPreview=await evaluate(client,'('+ui.toString()+')()');
+    console.log('003W/2b-2a '+format+' Undo visual/native diagnostic:',JSON.stringify({
+      originalPreview:originalPreview.pixel,filledPreview:filledPreview.pixel,
+      undoPreview:undoPreview.pixel,sourceExact:undo.baselineEqual,
+    }));
+    assert(undo.baselineEqual,'003W/2b-2a Undo must restore exact source tile bytes',JSON.stringify(undo));
+    await evaluate(client,"document.querySelector('#redoBtn').click();true");
+    await waitFor('003W/2b-2a exact native Redo',async()=>{
+      const state=await evaluate(client,snapshot);
+      return state?.successEqual===true;
+    },45_000);
+    const redo=await evaluate(client,snapshot);
+    const redoPreview=await evaluate(client,'('+ui.toString()+')()');
+    console.log('003W/2b-2a '+format+' Redo visual/native diagnostic:',JSON.stringify({
+      filledPreview:filledPreview.pixel,redoPreview:redoPreview.pixel,
+      sourceExact:redo.successEqual,
+    }));
+    assert(redo.successEqual && !redo.baselineEqual,
+      '003W/2b-2a Redo must reproduce identical native tile payloads',JSON.stringify(redo));
+    const uiBefore=await evaluate(client,'('+ui.toString()+')()');
+    const sparsePhase=await evaluate(client,'window.__stage003SelectionFreeze.phaseSnapshot()');
+    validateBrowserSelectionPhaseEvidence(sparsePhase,{
+      format,geometryPixels:fixture.width*fixture.height,selectionClass:'sparse',
+    });
+    assert(sparsePhase.windows.length===1 &&
+      sparsePhase.windows[0].selectedPixels===sparse.selectedPixels,
+      '003W/3b sparse phase must belong to genuine native Worker');
+    const largeView=await evaluate(client,'('+setupSelection.toString()+')(true)');
+    assert(largeView.hit==='overlayCanvas' && largeView.within &&
+      largeView.boundingPixels>2_000_000,
+      '003W/2b-2a over-cap UI selection must be large and visible',JSON.stringify(largeView));
+    await draw(largeView);
+    const refusalBefore=await evaluate(client,'window.__nearCapWorkerObservation.summary()');
+    assert(refusalBefore.jobs===1,'003W/2b-2a over-cap baseline must have only sparse Worker');
+    await evaluate(client,'window.__nearCapWorkerObservation.begin();true');
+    await evaluate(client,'window.__stage003SelectionFreeze.begin("retry-fill");true');
+    assert(await evaluate(client,'('+runFill.toString()+')()'),
+      '003W/2b-2a actual over-cap menu command must be enabled');
+    await waitFor('003W/2b-2a production >2M safe refusal',()=>evaluate(client,
+      'document.querySelector("#statusText")?.textContent?.startsWith('+
+      JSON.stringify('Контент-заливка: выделено больше безопасного лимита 2000000 px')+')'),
+      90_000);
+    const timer=await evaluate(client,'window.__nearCapWorkerObservation.end()');
+    const refusalAfter=await evaluate(client,'window.__nearCapWorkerObservation.summary()');
+    const uiAfter=await evaluate(client,'('+ui.toString()+')()');
+    const afterNative=await evaluate(client,snapshot);
+    const evidence={
+      kind:'zpe-browser-near-cap-ui-v1',format,
+      sourcePixels:fixture.width*fixture.height,
+      sourceRawBytes:baseline.rawBytes,protocol:'file:',
+      sparseSelectedPixels:sparse.selectedPixels,
+      sparseSelectedBytes:sparse.selectedBytes,sparseWorkerJobs:sparse.jobs,
+      sparseChangedNative:success.quality.changedSelectedPixels>0,
+      sparseOutsideTilesUnchanged:success.quality.changedOutsideSelectionPixels===0,
+      alphaUnchanged:success.alphaUnchanged,
+      undoExact:undo.baselineEqual,redoExact:redo.successEqual,
+      overCapWorkerJobsBefore:refusalBefore.jobs,overCapWorkerJobsAfter:refusalAfter.jobs,
+      overCapStatus:uiAfter.status,
+      overCapNativeUnchanged:afterNative.successEqual,
+      overCapPreviewUnchanged:JSON.stringify(uiBefore.pixel)===JSON.stringify(uiAfter.pixel),
+      overCapHistoryUnchanged:JSON.stringify(uiBefore.history)===JSON.stringify(uiAfter.history),
+      sampledPulseIntervalsMs:timer.pulseIntervalsMs,requestedPulseMs:8,
+      pulsesTruncated:timer.truncated,menuToRefusalMs:timer.elapsedMs,
+      heapBeforeBytes:timer.heapBeforeBytes,heapAfterBytes:timer.heapAfterBytes,
+      workerPidMapping:'unknown',operationPeakKnown:false,
+      limitations:'Sparse Worker success and >2M refusal only; sampled renderer timer/heap, not continuous CPU, operation memory peak, Worker PID or dense near-2M completion.',
+    };
+    validateBrowserNearCapEvidence(evidence);
+    const sparseAndRefusalPhase=await evaluate(client,
+      'window.__stage003SelectionFreeze.phaseSnapshot()');
+    const alignedSparseAndRefusal=await evaluate(client,
+      'window.__stage003SelectionFreeze.phaseAlignedSnapshot()');
+    validateBrowserPhaseAlignedEvidence(alignedSparseAndRefusal,{
+      format,geometryPixels:fixture.width*fixture.height,selectionClass:'sparse-refusal',
+      expectedSparsePixels:sparse.selectedPixels,
+    });
+    validateBrowserSelectionRefusalPhaseEvidence(sparseAndRefusalPhase,{
+      format,geometryPixels:fixture.width*fixture.height,
+      expectedSparsePixels:sparse.selectedPixels,
+    });
+    assert(refusalAfter.jobs===refusalBefore.jobs &&
+      sparseAndRefusalPhase.windows[1].handoffAtMs===null,
+      '003W/3b genuine over-cap scan must not dispatch a Worker');
+    await evaluate(client,'window.__stage003SelectionFreeze.restore();true');
+    const phaseDirectory=process.env.ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR;
+    if(phaseDirectory){
+      await mkdir(phaseDirectory,{recursive:true});
+      const phasePath=path.join(phaseDirectory,
+        'stage003-selection-phase-sparse-'+format.toLowerCase()+repeatSuffix+'.json');
+      await writeFile(phasePath,JSON.stringify(sparseAndRefusalPhase,null,2)+'\n');
+      await writeFile(path.join(phaseDirectory,
+        'stage003-selection-phase-aligned-sparse-'+format.toLowerCase()+repeatSuffix+'.json'),
+        JSON.stringify(alignedSparseAndRefusal,null,2)+'\n');
+    }
+    console.log('003W/3c sparse/refusal timer attribution:',JSON.stringify({
+      format,repeat:repeat||'1',summary:summarizeBrowserPhaseAlignedEvidence(
+        alignedSparseAndRefusal,{format,geometryPixels:fixture.width*fixture.height,
+          selectionClass:'sparse-refusal',expectedSparsePixels:sparse.selectedPixels}),
+    }));
+    console.log('003W/3b actual sparse/refusal scan boundaries:',JSON.stringify({
+      format,repeat:repeat||'1',sparse:summarizeBrowserSelectionPhaseEvidence(sparsePhase,{
+        format,geometryPixels:fixture.width*fixture.height,selectionClass:'sparse',
+      }),refusalScanWallMs:sparseAndRefusalPhase.windows[1].phaseEvents[1].atMs-
+        sparseAndRefusalPhase.windows[1].phaseEvents[0].atMs,
+    }));
+    const evidencePath=await saveBrowserNearCapEvidence(evidence,
+      process.env.ZPE_BROWSER_NEAR_CAP_ARTIFACT_DIR);
+    console.log('003W/2b-2a real Chromium near-cap UI:',JSON.stringify({path:evidencePath,evidence}));
+    return evidence;
+  } finally {
+    await evaluate(client,'window.__stage003SelectionFreeze?.restore();true').catch(()=>{});
+    await evaluate(client,'window.__nearCapWorkerObservation?.restore();'+
+      'delete window.__nearCapBaseline;delete window.__nearCapBaselineSource;'+
+      'delete window.__nearCapSuccess;delete window.__nearCapMeta;true').catch(()=>{});
+  }
+}

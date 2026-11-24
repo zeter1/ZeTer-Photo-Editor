@@ -8,7 +8,7 @@ import { HistoryStack } from './core/history.js';
 import { createObjectRemovalController } from './painting/object-removal-controller.js';
 import { frameBounds, normalizeRect, constrainedRect, pointInLayer, layerPixelToDocumentPoint, snapLineEnd, selectionPixelBounds, selectionBounds, selectionPathPoints, pointInSelection, clamp } from './core/geometry.js';
 import {
-  createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createAdjustmentLayer, createVectorMask,
+  createDocument, createRasterLayer, createShapeLayer, linkedSmartObjectLayers, createVectorMask,
   addLayer, selectedLayer,
   snapshotDocument, restoreDocument, sanitizeProject, touch, checkedCanvasSize, DEFAULT_LAYER_FILTERS, sanitizeHighDepthPreview, sanitizeColorManagement,
   isLayerVisible, isLayerLocked, isGroupLocked, groupDepth,
@@ -39,7 +39,7 @@ import { createLayersPanelController } from './ui/layers-panel-controller.js';
 import { createHistoryPanelController } from './ui/history-panel-controller.js';
 import { createLayerGroupCommandController } from './layers/command-controller.js';
 import { createLayerPropertyCommandController } from './layers/property-command-controller.js';
-import { ADJUSTMENT_COMMAND_RESULT, createAdjustmentLayerCommandController } from './layers/adjustment-command-controller.js';
+import { ADJUSTMENT_COMMAND_RESULT, NEW_ADJUSTMENT_KINDS, createAdjustmentLayerCommandController } from './layers/adjustment-command-controller.js';
 import { LAYER_ALIGNMENT_LABELS, LAYER_TRANSFORM_COMMAND_RESULT, createLayerTransformCommandController } from './layers/transform-command-controller.js';
 import { createColorCorrectionController } from './ui/color-correction-controller.js';
 import { createPathsController } from './ui/paths-controller.js';
@@ -67,6 +67,10 @@ import { createSelectionClipboardController } from './selection/clipboard-contro
 import { createSelectionRasterMutationController } from './selection/raster-mutation-controller.js';
 import { createSelectionMaskController } from './selection/mask-controller.js';
 import { createSelectionVectorMaskController } from './selection/vector-mask-controller.js';
+import { inspectDng, developDng } from './formats/dng.js';
+import { readRawPresets, saveRawPreset, deleteRawPreset, normalizeRawPresetDevelopment,
+  exportRawPresetFile, parseRawPresetFile, importRawPresetFile } from './formats/dng-presets.js';
+import { markDisplayClippingWarning, markDisplayClippingWarningOnCanvas } from './formats/dng-clipping-warning.js';
 import { createDocumentImportController } from './document/import-controller.js';
 import { createNewDocumentController } from './document/new-document-controller.js';
 import { createProjectController } from './document/project-controller.js';
@@ -81,6 +85,7 @@ import { createPsdExportController } from './document/psd-export-controller.js';
 import { createDocumentExportController } from './document/export-controller.js';
 import { psdAdjustmentNativePlan, psdEmbeddedDocumentFingerprint, psdPreviewFingerprint, psdShapeNativePlan, psdTextNativePlan } from './document/psd-native-metadata-plans.js';
 import { createRasterEditController } from './painting/controller.js';
+import { createBrowserTiledInpaintWorkerController } from './core/tiled-inpaint-browser-worker.js';
 import { createRasterCommandController } from './painting/command-controller.js';
 import { createGradientCommandController } from './painting/gradient-command-controller.js';
 import { createPaintGestureController } from './painting/gesture-controller.js';
@@ -102,7 +107,9 @@ const els = {
 };
 
 let doc = createDocument();
-let history = new HistoryStack(80);
+// CDP-only A/B bootstrap hook; absent in ordinary user sessions. All History instances share the mode.
+const usePooledHistoryNativeUrls = globalThis.__ZPE_HISTORY_PROFILE_GENERIC__ !== true;
+let history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls });
 let zoom = 0.75;
 let documentSessions = [];
 let activeSessionId = '';
@@ -124,6 +131,7 @@ let selectionCopyMode = 'merged';
 let dragDepth = 0;
 let pointerLifecycle = null;
 let paintPersisting = false;
+let rasterCommandPersistLease = null;
 let hoverPoint = null;
 let smartSnapEnabled = true;
 let smartGuides = { x:null, y:null };
@@ -360,8 +368,10 @@ const viewportController = createViewportController({
 });
 const { setZoom, setZoomAtClientPoint, fitToView } = viewportController;
 
+const tiledInpaintWorker = createBrowserTiledInpaintWorkerController();
 const rasterEdit = createRasterEditController({
   getDocument: () => doc,
+  tiledInpaintWorker,
   getDrag: () => drag,
   getCmykPreviewTransform: () => currentCmykPreviewTransform(),
   renderPaintPreview: () => render({ paintPreview: true }),
@@ -375,10 +385,16 @@ const rasterCommands = createRasterCommandController({
     isPersisting: () => paintPersisting,
     beginPersist: () => {
       if (paintPersisting) return false;
+      const lease = {};
+      rasterCommandPersistLease = lease;
       paintPersisting = true;
-      return true;
+      return lease;
     },
-    endPersist: () => { paintPersisting = false; },
+    endPersist: lease => {
+      if (!lease || rasterCommandPersistLease !== lease) return;
+      rasterCommandPersistLease = null;
+      paintPersisting = false;
+    },
     resetPaintState: () => {
       rasterEdit.clearHighDepthPaintState();
       retouchController.resetStroke();
@@ -405,7 +421,16 @@ const rasterCommands = createRasterCommandController({
     fillTolerance: () => Number(els.fillTolerance?.value) || 0,
     rgbToCmyk: rgb8ToDocumentCmyk,
   },
-  ui: { setStatus, toast, render, commit },
+  ui: {
+    setStatus, toast, render, commit,
+    onContentAwarePendingChange: active => {
+      const panel = $('#contentAwareProgressPanel');
+      if (panel) panel.hidden = !active;
+    },
+  },
+});
+$('#contentAwareProgressCancel')?.addEventListener('click', () => {
+  if (rasterCommands.cancelPendingContentAwareFill()) setStatus('Контент-заливка отменена');
 });
 const {
   drawLine: drawLineOnCurrentRaster,
@@ -741,12 +766,14 @@ const selectionVectorMaskController = createSelectionVectorMaskController({
       if (layerId == null || vectorMaskEditLayerId === layerId) vectorMaskEditLayerId = null;
     },
   },
-  ui: { setStatus, toast },
+  ui: { setStatus, toast, showModal },
 });
 const {
   selectionVectorMaskDocumentNodes,
   applySelectionToVectorMask,
   editSelectedVectorMask,
+  editSelectedVectorMaskSubpathOperation,
+  editSelectedVectorMaskProperties,
   toggleSelectedVectorMask,
   invertSelectedVectorMask,
   removeSelectedVectorMask,
@@ -794,12 +821,15 @@ const pathsController = createPathsController({
     openContextMenu,
     pathList: els.paths,
     controls: {
+      new: $('#newPathBtn'),
       add: $('#addPathBtn'),
       edit: $('#editPathBtn'),
       applyMask: $('#applyPathMaskBtn'),
       rename: $('#renamePathBtn'),
       duplicate: $('#duplicatePathBtn'),
       delete: $('#deletePathBtn'),
+      subpath: $('#pathSubpathSelect'),
+      subpathOperation: $('#pathSubpathOperation'),
     },
     documentRef: document,
   },
@@ -864,7 +894,11 @@ const newDocumentController = createNewDocumentController({
     getActiveSessionId: () => activeSessionId,
     getDocumentChangeSerial: () => documentChangeSerial,
     blockPendingDocumentEdit,
-    replaceHistory: () => { history = new HistoryStack(80); },
+    canCancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
+    cancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls }); },
     setDocument: setDoc,
     markDirty,
   },
@@ -888,8 +922,12 @@ const psdImportController = createPsdImportController({
     getChangeSerial: () => documentChangeSerial,
     canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
+    canCancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
+    cancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
     publishDocument: (next,{label}) => {
-      history=new HistoryStack(80);
+      history=new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls });
       setDoc(next,{resetHistory:true,label});
       markDirty(true);
       queueRecovery({immediate:true});
@@ -899,7 +937,7 @@ const psdImportController = createPsdImportController({
   profiles: { profileBytes: colorProfileBytes },
   rendering: { rgbaPixelsToDataUrl },
   semantics: psdImportSemantics,
-  ui: { setStatus, toast, alert, consoleRef:console },
+  ui: { setStatus, toast, alert: message => window.alert(message), consoleRef:console },
 });
 
 const projectController = createProjectController({
@@ -911,7 +949,7 @@ const projectController = createProjectController({
     canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
     sanitizeProject,
-    replaceHistory: () => { history = new HistoryStack(80); },
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls }); },
     setDocument: setDoc,
     markDirty,
     getCurrentSession: () => currentSession(),
@@ -929,6 +967,10 @@ const documentImportController = createDocumentImportController({
   isPsdFile,
   readFileAsDataURL,
   dimensionsFromDataUrl,
+  inspectDng,
+  developDng,
+  rgbaPixelsToDataUrl,
+  bytesToDataUrl,
   checkedCanvasSize,
   createRasterLayer,
   addLayer,
@@ -1269,12 +1311,17 @@ documentSessionController = createDocumentSessionController({
     resetRetouchStroke();
     hoverPoint = null;
     pointerLifecycle?.releaseActivePointer();
-    paintPersisting = false;
+    // No unconditional unlock: only the owner lease may release persistence.
   },
   cloneSelectionShape,
   tabs: els.tabs,
   viewport: els.viewport,
   blockPendingDocumentEdit,
+  cancelPendingContentAwareFill: () => {
+    // Never revoke an active pointer or a non-cancellable raster gesture.
+    if (drag || pointerLifecycle?.hasActivePointer()) return false;
+    return rasterCommands.cancelPendingContentAwareFill();
+  },
   updateAll,
   fitToView,
   setStatus,
@@ -1481,7 +1528,9 @@ function documentPointToLayerPixel(point, layer) {
 }
 
 function beginPathControlDrag(hit,point,event){
-  const commandResult=pathControlCommands.convertAnchorToCorner(doc,hit,{altKey:event.altKey});
+  const commandResult=event.altKey&&event.shiftKey
+    ? pathControlCommands.convertAnchorToSmooth(doc,hit,{altKey:event.altKey,shiftKey:event.shiftKey})
+    : pathControlCommands.convertAnchorToCorner(doc,hit,{altKey:event.altKey});
   if(commandResult!==PATH_CONTROL_COMMAND_RESULT.IGNORED)return true;
   const gesture=pathControlGestures.begin(doc,hit,point,{shiftKey:event.shiftKey});
   if(!gesture)return false;
@@ -1602,6 +1651,32 @@ async function drainRenderQueue() {
     const visibleCtx = els.canvas.getContext('2d', { alpha: true });
     visibleCtx.clearRect(0, 0, doc.width, doc.height);
     visibleCtx.drawImage(renderBuffer, 0, 0);
+    // Display-only diagnostic: never touch renderBuffer, layer previews or exports.
+    if (rawClippingWarningEnabled && selected()?.rawDng && !request.paintPreview) {
+      const summaryOutput=els.props.querySelector('[data-raw-clipping-summary]');
+      try {
+        let summary;
+        if(doc.width*doc.height>8_000_000){
+          // Bounded display-only readback; yield between tiles and cancel for a newer render.
+          if(summaryOutput)summaryOutput.textContent='Анализ большого RGB кадра…';
+          summary=await markDisplayClippingWarningOnCanvas(visibleCtx,{
+            width:doc.width,height:doc.height,
+            shouldContinue:()=>request.version===renderVersion,
+            yieldFrame:()=>new Promise(resolve=>requestAnimationFrame(resolve)),
+          });
+        }else{
+          const pixels=visibleCtx.getImageData(0,0,doc.width,doc.height);
+          summary=markDisplayClippingWarning(pixels.data);
+          visibleCtx.putImageData(pixels,0,0);
+        }
+        if(summary&&request.version===renderVersion&&summaryOutput)summaryOutput.textContent=
+          'Света: '+summary.highlights+' · тени: '+summary.shadows+
+          ' из '+summary.eligible+' видимых пикселей';
+      }catch(error){
+        if(request.version===renderVersion&&summaryOutput)
+          summaryOutput.textContent='Анализ RGB недоступен: '+error.message;
+      }
+    }
     textEditController.syncPreviewCanvas();
     layerBlendingController.syncPreviewCanvas();
     if (!request.paintPreview) {
@@ -1645,7 +1720,8 @@ function drawOverlay() {
   if(penDraft?.points?.length){
     const points=penDraft.points;
     ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#72a7ff';ctx.fillStyle='#fff';ctx.setLineDash([]);
-    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover);ctx.stroke();
+    const closing=!penDraftGestures.isGesture(drag)&&penDraftGestures.canCloseAt(penDraft.hover);
+    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover,closing);ctx.stroke();
     ctx.lineWidth=1/zoom;ctx.strokeStyle='#8fc0ff';
     for(const point of points){
       for(const handle of [point.handleIn,point.handleOut]){
@@ -1656,6 +1732,7 @@ function drawOverlay() {
     }
     ctx.fillStyle='#fff';ctx.strokeStyle='#3976ea';
     for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,3/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();}
+    if(closing){ctx.beginPath();ctx.arc(points[0].x,points[0].y,6/zoom,0,Math.PI*2);ctx.stroke();}
     ctx.restore();
   } else {
     selectionGestures.drawMagneticDraft(ctx);
@@ -1795,6 +1872,134 @@ function formatDisplayExposure(value){
   return `${ev>=0?'+':''}${ev.toFixed(1)} EV`;
 }
 
+let rawDevelopCommandGeneration=0;
+let rawClippingWarningEnabled=false;
+function bindRawDevelopmentControls(root,owner,layerId){
+  const fields=['exposure','wbRed','wbBlue','highlights','shadows','contrast'];
+  const selectors=['[data-raw-exposure]','[data-raw-wb-red]','[data-raw-wb-blue]',
+    '[data-raw-highlights]','[data-raw-shadows]','[data-raw-contrast]','[data-raw-demosaic]'];
+  const controls=selectors.map(s=>root.querySelector(s));
+  if(controls.some(c=>!c))return;
+  async function applyRawDevelopment(reset=false,override=null){
+    const target=owner.layers.find(layer=>layer.id===layerId);
+    if(doc!==owner || selected()?.id!==layerId || !target?.rawDng ||
+      target.type!=='raster' || isLayerLocked(owner,target) || blockPendingDocumentEdit())return;
+    const chosen=override===null ? null : normalizeRawPresetDevelopment(override);
+    if(override!==null&&!chosen)return;
+    const next=reset ? {exposure:0,wbRed:1,wbBlue:1,highlights:0,shadows:0,contrast:0} :
+      chosen ? {...Object.fromEntries(fields.map(key=>[key,chosen[key]])),
+        ...(['edge-aware-green','edge-aware-rgb'].includes(chosen.demosaic)?{demosaic:chosen.demosaic}:{})} :
+      {...Object.fromEntries(fields.map((key,i)=>[key,Number(controls[i].value)])),
+       ...(['edge-aware-green','edge-aware-rgb'].includes(controls[6].value)?{demosaic:controls[6].value}:{})};
+    if(fields.some(key=>!Number.isFinite(next[key])))return;
+    const original=target.rawDng;
+    if(fields.every(key=>original.development[key]===next[key]) &&
+      (original.development.demosaic||'bilinear')===(next.demosaic||'bilinear'))return;
+    const oldPreview=target.dataUrl, session=activeSessionId, generation=++rawDevelopCommandGeneration;
+    controls.forEach(c=>{c.disabled=true;});
+    try{
+      const bytes=dataUrlToBytes(original.dataUrl,{maxBytes:48*1024*1024});
+      const buffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);
+      const source=inspectDng(buffer);
+      // Sensor provenance and the oriented preview have independent dimensions.
+      if(source.width!==original.width || source.height!==original.height ||
+        source.displayWidth!==target.width || source.displayHeight!==target.height)
+        throw new Error('Размер RAW-слоя изменился');
+      const {rgba,width,height}=developDng(source,next);
+      const newPreview=await rgbaPixelsToDataUrl(width,height,rgba,'RAW-проявка');
+      if(generation!==rawDevelopCommandGeneration || doc!==owner || session!==activeSessionId ||
+        selected()?.id!==layerId || !owner.layers.includes(target) || target.rawDng!==original ||
+        target.dataUrl!==oldPreview || isLayerLocked(owner,target) || blockPendingDocumentEdit())return;
+      target.rawDng={...original,development:next};
+      target.dataUrl=newPreview;
+      invalidateImageCache(oldPreview);
+      commit('RAW: экспозиция, баланс белого, контраст, тон и демозаика');
+      setStatus('RAW-проявка обновлена · исходный DNG не изменён');
+    }catch(error){
+      toast('RAW-проявка: '+error.message,'error');
+      setStatus('RAW-проявка не выполнена');
+    }finally{
+      controls.forEach(c=>{if(c.isConnected)c.disabled=false;});
+    }
+  }
+  controls.forEach(control=>control.addEventListener('change',()=>{void applyRawDevelopment();}));
+  root.querySelector('[data-raw-reset]')?.addEventListener('click',()=>{void applyRawDevelopment(true);});
+  const presetSelect=root.querySelector('[data-raw-preset-select]');
+  const presetName=root.querySelector('[data-raw-preset-name]');
+  const presetApply=root.querySelector('[data-raw-preset-apply]');
+  const presetDelete=root.querySelector('[data-raw-preset-delete]');
+  const presetStorage=()=>{try{return window.localStorage;}catch{return null;}};
+  function refreshPresets(selectedName=''){
+    if(!presetSelect)return;
+    const previous=selectedName||presetSelect.value;
+    presetSelect.replaceChildren(new Option('— Выберите пресет —',''));
+    for(const preset of readRawPresets(presetStorage())){
+      presetSelect.add(new Option(preset.name,preset.name));
+    }
+    presetSelect.value=[...presetSelect.options].some(opt=>opt.value===previous)?previous:'';
+    presetApply.disabled=presetDelete.disabled=!presetSelect.value;
+  }
+  refreshPresets();
+  presetSelect?.addEventListener('change',()=>{
+    if(presetSelect.value)presetName.value=presetSelect.value;
+    refreshPresets(presetSelect.value);
+  });
+  root.querySelector('[data-raw-preset-save]')?.addEventListener('click',()=>{
+    const target=owner.layers.find(layer=>layer.id===layerId);
+    if(doc!==owner||selected()?.id!==layerId||!target?.rawDng||
+      isLayerLocked(owner,target)||blockPendingDocumentEdit())return;
+    const result=saveRawPreset(presetStorage(),presetName.value,target.rawDng.development);
+    if(!result.ok){toast('RAW-пресет: неверное имя, лимит или недоступно хранилище','error');return;}
+    refreshPresets(presetName.value.trim().replace(/\s+/g,' '));
+    setStatus('RAW-пресет сохранён локально; исходный DNG не изменён');
+  });
+  presetApply?.addEventListener('click',()=>{
+    const preset=readRawPresets(presetStorage()).find(p=>p.name===presetSelect.value);
+    if(!preset)return;
+    void applyRawDevelopment(false,preset.development);
+  });
+  presetDelete?.addEventListener('click',()=>{
+    if(!deleteRawPreset(presetStorage(),presetSelect.value))return;
+    presetName.value='';
+    refreshPresets('');
+    setStatus('Локальный RAW-пресет удалён');
+  });
+  root.querySelector('[data-raw-preset-export]')?.addEventListener('click',()=>{
+    const result=exportRawPresetFile(presetStorage());
+    if(!result.ok){toast('Нет сохранённых RAW-пресетов для экспорта','error');return;}
+    const url=URL.createObjectURL(new Blob([result.content],{type:'application/json;charset=utf-8'}));
+    const link=document.createElement('a');
+    link.href=url;link.download=result.filename;document.body.append(link);
+    try{link.click();}finally{link.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);}
+    setStatus('RAW-пресеты экспортированы в JSON; данные DNG не включены');
+  });
+  const presetFile=root.querySelector('[data-raw-preset-file]');
+  root.querySelector('[data-raw-preset-import]')?.addEventListener('click',()=>presetFile?.click());
+  presetFile?.addEventListener('change',async()=>{
+    const file=presetFile.files?.[0];
+    presetFile.value='';
+    if(!file)return;
+    try{
+      if(file.size>24000)throw new Error('Файл RAW-пресетов слишком большой');
+      const text=await file.text();
+      const parsed=parseRawPresetFile(text);
+      if(!parsed.ok)throw new Error('Неверный формат, параметры или версия RAW-пресетов');
+      const local=readRawPresets(presetStorage());
+      const collisions=parsed.presets.filter(item=>local.some(p=>p.name.toLocaleLowerCase()===item.name.toLocaleLowerCase())).length;
+      if(!window.confirm('Импортировать '+parsed.presets.length+' RAW-пресетов? Совпадающие имена ('+
+        collisions+') будут заменены. Другие локальные пресеты сохранятся.'))return;
+      const result=importRawPresetFile(presetStorage(),text);
+      if(!result.ok)throw new Error(result.reason==='limit'?'Лимит 16 RAW-пресетов превышен':
+        'Импорт RAW-пресетов отклонён или хранилище недоступно');
+      if(root.isConnected)refreshPresets();
+      setStatus('RAW-пресеты импортированы: '+result.added+' новых, '+result.overwritten+' заменено');
+    }catch(error){toast('RAW-пресеты: '+error.message,'error');}
+  });
+  root.querySelector('[data-raw-clipping-warning]')?.addEventListener('change',event=>{
+    rawClippingWarningEnabled=event.target.checked;
+    render(); // View-only toggle: no History commit, no .zpe or export mutation.
+  });
+}
 function bindHighDepthPreviewControls(root, owner, layerId){
   const toneMap=root?.querySelector('[data-high-depth-tone-map]');
   if(toneMap)toneMap.addEventListener('change',()=>layerPropertyCommandController.updateHighDepthPreview(owner,layerId,'toneMap',toneMap.value,{commit:true}));
@@ -1842,6 +2047,62 @@ function updateProperties() {
       ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
       : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`) + nativeInfo;
   }
+  if (l.type === 'raster' && l.rawDng) {
+    const d=l.rawDng.development;
+    const colorLabel=l.rawDng.colorPipeline==='forward-d50-v1'?
+      'ForwardMatrix + AnalogBalance / CameraCalibration → XYZ D50 → sRGB (ограниченный профиль; без camera oracle)':
+      l.rawDng.colorPipeline==='matrix-d50-bradford-v1'?
+      'ColorMatrix → XYZ D50 → sRGB (приближённая калибровка; без camera oracle)':
+      'Без ColorMatrix: некалиброванный Bayer preview';
+    const scale=Array.isArray(l.rawDng.defaultScale)?l.rawDng.defaultScale:[1,1];
+    extra += '<label>RAW источник</label><span>DNG Bayer · сохранён в .zpe; экспорт PSD/PSB — проявленные пиксели</span>' +
+      '<label>Сжатие RAW</label><span>'+(l.rawDng.compression===7?'Lossless JPEG SOF3 (Compression=7)':'Без сжатия')+'</span>' +
+      '<label>Кодирование Bayer</label><span>'+(l.rawDng.bits??'не указано')+' бит · '+
+        (l.rawDng.compression===7?'Lossless JPEG SOF3':'TIFF uncompressed')+'</span>' +
+      '<label>Цвет RAW</label><span>'+colorLabel+'</span>' +
+      '<label>RAW баланс при съёмке</label><span>'+
+        (l.rawDng.whiteBalanceSource==='as-shot-white-xy'?
+          'AsShotWhiteXY (CIE xy → camera neutral через цветовую матрицу)':
+          l.rawDng.whiteBalanceSource==='as-shot-neutral'?'AsShotNeutral (camera neutral)':
+          'Не определено (legacy .zpe)')+'</span>' +
+      '<label>RAW linearization</label><span>'+(l.rawDng.linearizationTable?'LinearizationTable (до BlackLevel)':'Без LinearizationTable')+'</span>' +
+      '<label>RAW BlackLevel</label><span>Sensor grid '+[...(l.rawDng.blackRepeatDim||[1,1])].reverse().join('×')+' (cols×rows; от ActiveArea, до demosaic / crop)</span>' +
+      '<label>RAW BlackLevelDelta</label><span>' +
+      (l.rawDng.blackDeltaH?'H: sensor columns':'H: нет')+' · '+
+      (l.rawDng.blackDeltaV?'V: sensor rows':'V: нет')+' (SRATIONAL, до demosaic)</span>' +
+      '<label>Геометрия RAW</label><span>'+l.rawDng.width+'×'+l.rawDng.height+' сенсор → '+l.width+'×'+l.height+' кадр (ActiveArea / DefaultCrop / DefaultScale '+scale[0]+'×'+scale[1]+' / Orientation)</span>' +
+      '<label>RAW BaselineExposure</label><span>'+
+        ((l.rawDng.baselineExposure??0)>=0?'+':'')+(l.rawDng.baselineExposure??0).toFixed(2)+' EV · камера (в дополнение к ручной экспозиции)</span>' +
+       '<label>RAW BaselineExposureOffset</label><span>'+
+         ((l.rawDng.baselineExposureOffset??0)>=0?'+':'')+(l.rawDng.baselineExposureOffset??0).toFixed(2)+
+         ' EV · встроенный профиль (сценолинейная экспозиция)</span>' +
+      '<label>Экспозиция (EV)</label><input aria-label="RAW экспозиция" data-raw-exposure type="number" min="-5" max="5" step="0.1" value="' + d.exposure + '">' +
+      '<label>WB красный</label><input aria-label="RAW баланс красного" data-raw-wb-red type="number" min="0.25" max="4" step="0.05" value="' + d.wbRed + '">' +
+      '<label>WB синий</label><input aria-label="RAW баланс синего" data-raw-wb-blue type="number" min="0.25" max="4" step="0.05" value="' + d.wbBlue + '">' +
+      '<label>Света</label><input aria-label="RAW света" data-raw-highlights type="number" min="-1" max="1" step="0.05" value="' + (d.highlights??0) + '">' +
+      '<label>Тени</label><input aria-label="RAW тени" data-raw-shadows type="number" min="-1" max="1" step="0.05" value="' + (d.shadows??0) + '">' +
+      '<label>Контраст RAW</label><input aria-label="RAW контраст" data-raw-contrast type="number" min="-1" max="1" step="0.05" value="' + (d.contrast??0) + '">' +
+      '<label>Демозаика Bayer</label><select aria-label="RAW демозаика" data-raw-demosaic>' +
+      '<option value="bilinear"'+(!d.demosaic||d.demosaic==='bilinear'?' selected':'')+'>Билинейная (совместимость)</option>' +
+      '<option value="edge-aware-green"'+(d.demosaic==='edge-aware-green'?' selected':'')+'>Направленная интерполяция зелёного</option>' +
+      '<option value="edge-aware-rgb"'+(d.demosaic==='edge-aware-rgb'?' selected':'')+'>Зелёно-ориентированная цветовая демозаика (R/G/B)</option></select>' +
+      '<label>RAW-пресет</label><select aria-label="RAW выбор пресета" data-raw-preset-select></select>' +
+      '<div class="wide"><input type="text" maxlength="48" aria-label="RAW имя пресета" data-raw-preset-name placeholder="Название пресета">' +
+      ' <button type="button" class="mini-button" data-raw-preset-save>Сохранить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-apply>Применить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-delete>Удалить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-export>Экспорт JSON</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-import>Импорт JSON</button>' +
+      ' <input type="file" hidden accept=".json,application/json" aria-label="RAW файл пресетов" data-raw-preset-file></div>' +
+      '<div class="wide">Библиотека пресетов хранится в браузере. JSON переносит только параметры RAW (до 16 пресетов); в .zpe сохраняются применённые параметры, а не библиотека.</div>' +
+      '<div class="wide">Линейная коррекция до sRGB. Света: − затемнить / + осветлить; тени: − углубить / + поднять; контраст: − смягчить / + усилить без сдвига среднего серого. Не восстанавливает клиппинг сенсора.</div>' +
+      '<div class="wide"><label><input type="checkbox" data-raw-clipping-warning aria-label="RAW индикация клиппинга"'+
+        (rawClippingWarningEnabled?' checked':'')+'> Подсветить клиппинг отображаемого RGB</label></div>' +
+      '<div class="wide" data-raw-clipping-summary aria-live="polite">'+
+        (rawClippingWarningEnabled?'Расчёт после рендера…':'Выключено')+'</div>' +
+      '<div class="wide">Пурпурный — хотя бы один канал ≥ 254; голубой — все каналы ≤ 1. Это диагностика финального 8-bit RGB кадра, не насыщения RAW-сенсора; в .zpe и экспорт не записывается.</div>' +
+      '<div class="wide"><button type="button" class="mini-button" data-raw-reset>Сбросить RAW-проявку</button></div>';
+  }
   if (l.type === 'raster' && l.highDepthSource) {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
@@ -1883,10 +2144,19 @@ function updateProperties() {
     ${propField('Масштаб Y','scaleY',Number(l.scaleY ?? 1).toFixed(2),'number','step="0.01" min="0.01" max="100"')}
     ${propField('Поворот','rotation',Math.round(l.rotation ?? 0),'number','step="1"')}
     <label>Маски</label><span>${escapeHtml(layerMaskSummary(l))}</span>
+    ${l.type==='raster'?'<label for="rasterLayerClipping">Clipping</label><label><input id="rasterLayerClipping" type="checkbox" data-raster-clipping '+(l.clipping?'checked':'')+'> Ограничить alpha нижележащего слоя</label>':''}
     ${extra}
   </div>`;
   const propertyOwner=doc, propertyLayerId=l.id;
   bindPropertyInputs(els.props,propertyOwner,propertyLayerId);
+  els.props.querySelector('[data-raster-clipping]')?.addEventListener('change',event=>{
+    const enabled=event.currentTarget.checked;
+    if(!layerPropertyCommandController.setClipping(propertyOwner,propertyLayerId,enabled)) {
+      const live=propertyOwner.layers.find(layer=>layer.id===propertyLayerId);
+      event.currentTarget.checked=Boolean(live?.clipping);
+    }
+  });
+  if(l.type==='raster'&&l.rawDng)bindRawDevelopmentControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='cmyk')bindColorManagementControls(els.props);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
@@ -2087,17 +2357,30 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'wand') { magicWandSelect(p);return; }
   if (currentTool === 'pen') {
     const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
-    if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
-    if(documentPathEditIndex>=0){
-      setStatus('Сохранённый контур: перетаскивайте существующие anchors/handles; новые subpaths добавляются через маску/выделение и сохранение');
-      return;
+    if(hit){
+      if(e.ctrlKey && e.altKey && hit.control==='anchor'){
+        if(hit.source==='vector-mask')pathControlCommands.deleteMaskNode(doc,hit);
+        else pathControlCommands.deletePathNode(doc,hit);
+      }else{
+        beginPathControlDrag(hit,p,e);
+      }
+      drawOverlay();return;
+    }
+    if(e.ctrlKey && !e.altKey && !penDraftGestures.hasDraft()){
+      const segment=pathControlSurface.hitSegment(p);
+      if(segment){
+        if(segment.source==='vector-mask')pathControlCommands.insertMaskNode(doc,segment);
+        else pathControlCommands.insertPathNode(doc,segment);
+        drawOverlay();return;
+      }
     }
     if(vectorMaskEditLayerId===selected()?.id){
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
       return;
     }
     const penResult=penDraftGestures.beginPoint(p,{finish:e.detail>=2});
-    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
+    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.CLOSE_REQUESTED)finishPenPath({forceClosed:true});
+    else if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
     else{
       if(penResult.status)setStatus(penResult.status);
       if(penResult.result===PEN_DRAFT_BEGIN_RESULT.STARTED){drag=penResult.gesture;drawOverlay();}
@@ -2294,7 +2577,7 @@ function previewGradient(start,end) {
   ctx.restore();
 }
 
-function tracePenDraftPath(ctx,points,hover=null){
+function tracePenDraftPath(ctx,points,hover=null,closing=false){
   if(!Array.isArray(points)||!points.length)return false;
   ctx.moveTo(points[0].x,points[0].y);
   const segment=(from,to)=>{
@@ -2306,23 +2589,36 @@ function tracePenDraftPath(ctx,points,hover=null){
   };
   for(let index=1;index<points.length;index+=1)segment(points[index-1],points[index]);
   if(hover){
-    const last=points.at(-1);
-    const cp1=last.handleOut||last;
-    ctx.bezierCurveTo(cp1.x,cp1.y,hover.x,hover.y,hover.x,hover.y);
+    if(closing){segment(points.at(-1),points[0]);ctx.closePath();}
+    else {
+      const last=points.at(-1);
+      const cp1=last.handleOut||last;
+      ctx.bezierCurveTo(cp1.x,cp1.y,hover.x,hover.y,hover.x,hover.y);
+    }
   }
   return true;
 }
-function finishPenPath(){
+function finishPenPath({forceClosed=false}={}){
   const points=penDraftGestures.consumePoints();
   if(penDraftGestures.isGesture(drag))drag=null;
+  if(documentPathEditIndex>=0){
+    const applied=pathsController.appendPenSubpath(points,{
+      index:documentPathEditIndex,
+      expectedDocument:doc,
+      closed:Boolean(forceClosed||els.penClosed?.checked),
+      operation:$('#penPathOperation')?.value||'add',
+    });
+    if(applied){updatePathsPanel();drawOverlay();}
+    return applied;
+  }
   const outcome=penPathCommands.publish(doc,points,{
-    pathClosed:Boolean(els.penClosed?.checked),
+    pathClosed:Boolean(forceClosed||els.penClosed?.checked),
     stroke:els.primaryColor.value,
     strokeWidth:els.brushSize.value,
     opacity:Number(els.toolOpacity.value)/100,
   });
   if(outcome.result===PEN_PATH_COMMAND_RESULT.COMMITTED){
-    setStatus('Bézier-контур добавлен');drawOverlay();return true;
+    setStatus(forceClosed?'Bézier-контур замкнут':'Bézier-контур добавлен');drawOverlay();return true;
   }
   if(outcome.result===PEN_PATH_COMMAND_RESULT.NOOP&&outcome.reason===PEN_PATH_NOOP_REASON.TOO_SHORT)drawOverlay();
   return false;
@@ -2527,7 +2823,18 @@ function curvePointsInputValue(points) {
 
 function adjustmentCurveField(label,id,points) {
   const value=points?.length?points:[{input:0,output:0},{input:255,output:255}];
-  return '<label>'+escapeHtml(label)+'</label><input type="text" value="'+escapeAttr(curvePointsInputValue(value))+'" data-adjustment-curve-channel="'+id+'" title="Формат: input:output, например 0:0, 128:160, 255:255">';
+  const color=['#e5e7eb','#f87171','#4ade80','#60a5fa'][id]||'#e5e7eb';
+  const curve=value.map(point=>point.input+','+(255-point.output)).join(' ');
+  const handles=value.map((point,index)=>
+    '<circle data-curve-handle="'+index+'" cx="'+point.input+'" cy="'+(255-point.output)+'" r="6" fill="'+color+'" stroke="#111827" stroke-width="2"/>'
+  ).join('');
+  return '<label>'+escapeHtml(label)+'</label>'+
+    '<input type="text" value="'+escapeAttr(curvePointsInputValue(value))+'" data-adjustment-curve-channel="'+id+'" title="Формат: input:output, например 0:0, 128:160, 255:255">'+
+    '<details '+(id===0?'open':'')+'><summary>График: добавить — клик, сдвинуть — перетащить, удалить — Alt+клик</summary>'+
+    '<svg data-adjustment-curve-graph="'+id+'" viewBox="0 0 255 255" width="200" height="200" role="img" aria-label="Кривая '+escapeAttr(label)+' — перетащите точку или нажмите для добавления" style="display:block;max-width:100%;background:#111827;border:1px solid #475569;touch-action:none;cursor:crosshair">'+
+    '<path d="M63.75 0V255 M127.5 0V255 M191.25 0V255 M0 63.75H255 M0 127.5H255 M0 191.25H255" stroke="#334155" stroke-width="1" fill="none"/>'+
+    '<path d="M0 255L255 0" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4" fill="none"/>'+
+    '<polyline data-curve-line points="'+curve+'" stroke="'+color+'" stroke-width="2" fill="none"/>'+handles+'</svg></details>';
 }
 
 function adjustmentPropertiesMarkup(layer) {
@@ -2538,7 +2845,8 @@ function adjustmentPropertiesMarkup(layer) {
   const clipping='<label>Clipping</label><label><input type="checkbox" data-adjustment-clipping '+(layer.clipping?'checked':'')+'> к alpha нижележащего base layer</label>';
   if(value.kind==='brightness-contrast')return adjustmentNumberField('Яркость','brightness',value.brightness,-150,150)+adjustmentNumberField('Контраст','contrast',value.contrast,-100,100)+clipping+nativeInfo;
   if(value.kind==='exposure')return adjustmentNumberField('Exposure','exposure',value.exposure,-20,20,'0.05')+adjustmentNumberField('Offset','offset',value.offset,-2,2,'0.005')+adjustmentNumberField('Gamma','gamma',value.gamma,.1,10,'0.01')+clipping+nativeInfo;
-  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+clipping+nativeInfo;
+  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,value.colorize?0:-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+
+    '<label>Тонирование</label><label><input type="checkbox" data-adjustment-colorize '+(value.colorize?'checked':'')+'> Colorize (Hue/Saturation)</label>'+clipping+nativeInfo;
   if(value.kind==='invert')return '<label>Инверсия</label><span>Параметров нет</span>'+clipping+nativeInfo;
   if(value.kind==='posterize')return adjustmentNumberField('Уровни','levels',value.levels,2,255)+clipping+nativeInfo;
   if(value.kind==='threshold')return adjustmentNumberField('Порог','level',value.level,1,255)+clipping+nativeInfo;
@@ -2569,7 +2877,105 @@ function handleAdjustmentCommandResult(result,invalidMessage='') {
   return false;
 }
 
+// Curves graph edits the same persisted points as the numeric field. One pointer
+// gesture publishes exactly one History step; text input remains the precise fallback.
+function bindAdjustmentCurveGraphs(root,owner,layerId) {
+  root?.querySelectorAll('[data-adjustment-curve-graph]').forEach(graph=>{
+    const channelId=graph.dataset.adjustmentCurveGraph;
+    const input=root.querySelector('[data-adjustment-curve-channel="'+channelId+'"]');
+    if(!input)return;
+    graph.addEventListener('pointerdown',event=>{
+      if(event.button!==0 || doc!==owner || owner.selectedLayerId!==layerId)return;
+      const layer=owner.layers.find(item=>item.id===layerId);
+      if(!layer||layer.type!=='adjustment'||layer.locked)return;
+      const originalModel=JSON.stringify(layer.adjustment);
+      const originalText=input.value;
+      const points=originalText.split(',').map(token=>{
+        const match=token.trim().match(/^([0-9]{1,3}):([0-9]{1,3})$/);
+        return match?{input:Number(match[1]),output:Number(match[2])}:null;
+      });
+      if(points.length<2||points.some(point=>!point))return;
+      const bounds=graph.getBoundingClientRect();
+      const position=ev=>({
+        input:Math.max(0,Math.min(255,Math.round((ev.clientX-bounds.left)/bounds.width*255))),
+        output:Math.max(0,Math.min(255,Math.round((1-(ev.clientY-bounds.top)/bounds.height)*255))),
+      });
+      const handle=event.target.closest('[data-curve-handle]');
+      let index=handle?Number(handle.dataset.curveHandle):-1;
+      if(index<0){
+        if(points.length>=19)return;
+        const p=position(event);
+        if(p.input===0||p.input===255||points.some(item=>item.input===p.input))return;
+        index=points.findIndex(item=>item.input>p.input);
+        if(index<0)index=points.length;
+        points.splice(index,0,p);
+      }else if(event.altKey){
+        if(index===0||index===points.length-1)return;
+        points.splice(index,1);
+        index=-1;
+      }
+      const fixedEndpointX=(index===0||index===points.length-1)?points[index]?.input:null;
+      const color=['#e5e7eb','#f87171','#4ade80','#60a5fa'][Number(channelId)]||'#e5e7eb';
+      const paint=()=>{
+        input.value=curvePointsInputValue(points);
+        graph.querySelector('[data-curve-line]').setAttribute('points',
+          points.map(item=>item.input+','+(255-item.output)).join(' '));
+        graph.querySelectorAll('[data-curve-handle]').forEach(node=>node.remove());
+        points.forEach((point,pointIndex)=>{
+          const node=document.createElementNS('http://www.w3.org/2000/svg','circle');
+          for(const [name,value] of Object.entries({
+            'data-curve-handle':pointIndex,cx:point.input,cy:255-point.output,
+            r:6,fill:color,stroke:'#111827','stroke-width':2,
+          }))node.setAttribute(name,String(value));
+          graph.appendChild(node);
+        });
+      };
+      paint();
+      const move=ev=>{
+        if(ev.pointerId!==event.pointerId||index<0)return;
+        const value=position(ev);
+        const previous=points[index-1],next=points[index+1];
+        const low=previous?previous.input+1:0,high=next?next.input-1:255;
+        points[index]={
+          input:fixedEndpointX===null?Math.max(low,Math.min(high,value.input)):fixedEndpointX,
+          output:value.output,
+        };
+        paint();
+      };
+      const release=ev=>{
+        if(ev.pointerId!==event.pointerId)return;
+        window.removeEventListener('pointermove',move);
+        window.removeEventListener('pointerup',release);
+        window.removeEventListener('pointercancel',cancel);
+        if(doc!==owner||owner.selectedLayerId!==layerId||
+           owner.layers.find(item=>item.id===layerId)!==layer||
+           JSON.stringify(layer.adjustment)!==originalModel){
+          refreshInspectorPanels();
+          return;
+        }
+        if(input.value===originalText)return;
+        handleAdjustmentCommandResult(
+          adjustmentLayerCommandController.updateCurveChannel(owner,layerId,channelId,input.value),
+          'Curves: недопустимые точки кривой',
+        );
+      };
+      const cancel=ev=>{
+        if(ev.pointerId!==event.pointerId)return;
+        window.removeEventListener('pointermove',move);
+        window.removeEventListener('pointerup',release);
+        window.removeEventListener('pointercancel',cancel);
+        refreshInspectorPanels();
+      };
+      window.addEventListener('pointermove',move);
+      window.addEventListener('pointerup',release);
+      window.addEventListener('pointercancel',cancel);
+      event.preventDefault();
+    });
+  });
+}
+
 function bindAdjustmentControls(root,owner,layerId) {
+  bindAdjustmentCurveGraphs(root,owner,layerId);
   root?.querySelectorAll('[data-adjustment-prop]').forEach(input=>input.addEventListener('change',()=>{
     handleAdjustmentCommandResult(
       adjustmentLayerCommandController.updateProperty(owner,layerId,input.dataset.adjustmentProp,input.value),
@@ -2582,6 +2988,12 @@ function bindAdjustmentControls(root,owner,layerId) {
       'Curves: используйте 2–19 точек в формате input:output, 0..255',
     );
   }));
+  const colorizeInput=root?.querySelector('[data-adjustment-colorize]');
+  colorizeInput?.addEventListener('change',()=>{
+    handleAdjustmentCommandResult(
+      adjustmentLayerCommandController.setColorize(owner,layerId,colorizeInput.checked),
+    );
+  });
   const clippingInput=root?.querySelector('[data-adjustment-clipping]');
   clippingInput?.addEventListener('change',()=>{
     handleAdjustmentCommandResult(adjustmentLayerCommandController.setClipping(owner,layerId,clippingInput.checked));
@@ -2699,6 +3111,8 @@ function layerContextMenu(id) {
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
+    ['Операция контура векторной маски…','',()=>editSelectedVectorMaskSubpathOperation(target()),()=>selectedTarget()&&editable()&&Boolean(target().vectorMask?.subpaths?.length)],
+    ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
@@ -2728,9 +3142,23 @@ function groupContextMenu(id) {
 function addBlankLayer(){addLayer(doc,createRasterLayer({name:'Новый слой',width:doc.width,height:doc.height,dataUrl:null}));rasterEdit.clearBrushBuffer();commit('Новый растровый слой');}
 
 function addAdjustmentLayer(){
-  const layer=createAdjustmentLayer({name:'Корректирующий слой',width:doc.width,height:doc.height});
-  addLayer(doc,layer);commit('Новый корректирующий слой');
-  setStatus('Корректирующий слой применяет цвет и эффекты ко всему нижележащему стеку');
+  const owner=doc;
+  showModal({
+    title:'Новый корректирующий слой',
+    fields:[{name:'kind',label:'Тип коррекции',type:'select',value:'levels',options:NEW_ADJUSTMENT_KINDS}],
+    submitLabel:'Создать слой',
+    onSubmit:values=>{
+      const result=adjustmentLayerCommandController.createLayer(owner,values.kind);
+      if(result===ADJUSTMENT_COMMAND_RESULT.COMMITTED){
+        setStatus('Неразрушающая коррекция создана. Настройки доступны в панели свойств слоя.');
+        return true;
+      }
+      setStatus(result===ADJUSTMENT_COMMAND_RESULT.INVALID
+        ? 'Неизвестный тип корректирующего слоя'
+        : 'Документ изменился или достигнут предел в 500 слоёв');
+      return false;
+    },
+  });
 }
 
 function layerMaskSummary(layer){
@@ -2745,7 +3173,9 @@ function layerMaskSummary(layer){
   }
   if(layer?.vectorMask){
     const count=layer.vectorMask.subpaths?.length||0,state=layer.vectorMask.enabled===false?'отключена':layer.vectorMask.invert?'инвертирована':'включена';
-    parts.push(`векторная: ${count} контур(ов), ${state}`);
+    const density=Math.round((layer.vectorMask.density??1)*100);
+    const feather=Number(layer.vectorMask.feather)||0;
+    parts.push(`векторная: ${count} контур(ов), ${state}, плотность ${density}%, растушёвка ${feather}px`);
   }
   if(layer?.smartFilterMask){
     const state=layer.smartFilterMask.enabled===false?'отключена':layer.smartFilterMask.invert?'инвертирована':'включена';
@@ -2817,6 +3247,8 @@ const menus={
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
+    ['Операция контура векторной маски…','',editSelectedVectorMaskSubpathOperation,()=>Boolean(selected()?.vectorMask?.subpaths?.length)&&!isLayerLocked(doc,selected())],
+    ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
@@ -3038,6 +3470,13 @@ window.addEventListener('keydown',e=>{
     if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropGestures.hasDraft()){cropGestures.reset();drawOverlay();setStatus('Кадрирование отменено');return;}
+    // Escape has its usual selection/draft meaning when no Fill is pending.
+    // Do not intercept Escape inside a modal or during an active gesture.
+    if(!drag && !pointerLifecycle?.hasActivePointer() &&
+       !(e.target instanceof Node && els.modalRoot.contains(e.target)) &&
+       rasterCommands.cancelPendingContentAwareFill()){
+      e.preventDefault();setStatus('Контент-заливка отменена');return;
+    }
     if(toolRemoval().hasMask()){
       e.preventDefault();
       if(toolRemoval().reset()){drawOverlay();setStatus('Область удаления сброшена');}

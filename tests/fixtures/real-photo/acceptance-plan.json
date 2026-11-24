@@ -1,0 +1,16 @@
+{
+  "kind": "zpe-real-photo-037c-final-acceptance-plan-v1",
+  "sourceSha256": "dd01cf047c9b2b7a635e29c68a52c5585d7b346f4f99713f79968ea1ea4348b8",
+  "documents": {
+    "psd16": "6749ddddb9338a25197a3d2961ce5c1f555fd4ef677d14aa8c0ce73d7225a403",
+    "psb32": "a8cfa8b2dcd745550784e86216eeb39574c9da7cc76a95db502dc4056f8a778a"
+  },
+  "requiredSuites": [
+    "import", "worker", "memory",
+    "switch", "mid-kernel", "close", "mid-kernel-escape",
+    "completed-preview-escape", "completed-preview-success", "cancel-successor",
+    "malformed-alpha", "malformed-counter", "malformed-extra", "memory-cap"
+  ],
+  "memoryPeakVerified": false,
+  "photoshopCompatibilityVerified": false
+}

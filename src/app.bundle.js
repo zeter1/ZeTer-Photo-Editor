@@ -1469,6 +1469,7 @@ function createPathsController({
   } = ui;
 
   let selectedIndex = -1;
+  let selectedSubpathIndex = 0;
 
   const documentValue = () => getDocument?.() || null;
   const paths = () => {
@@ -1493,6 +1494,7 @@ function createPathsController({
   }
 
   function setSelectedIndex(index, { syncEdit = false, render = false, draw = false } = {}) {
+    if (selectedIndex !== index) selectedSubpathIndex = 0;
     selectedIndex = Number.isInteger(index) ? index : -1;
     const normalized = normalizeSelectedIndex();
     if (syncEdit && normalized >= 0) syncPathEditSelection(normalized);
@@ -1603,6 +1605,34 @@ function createPathsController({
     return true;
   }
 
+  function createEmptyDocumentPath() {
+    const owner = documentValue();
+    if (!owner) return false;
+    if (paths().length >= SAVED_PATH_LIMIT) {
+      setStatus('Достигнут лимит 998 сохранённых контуров');
+      return false;
+    }
+    const id = allocateResourceId();
+    if (id === null) {
+      setStatus('Исчерпан диапазон Photoshop Path Resource ID 2000..2997');
+      return false;
+    }
+    if (!Array.isArray(owner.paths)) owner.paths = [];
+    const path = {
+      id,
+      name: uniqueName('Контур'),
+      fillStartsWithAllPixels: false,
+      subpaths: [],
+    };
+    owner.paths.push(path);
+    selectedIndex = owner.paths.length - 1;
+    commit('Создать контур');
+    beginPathEdit(selectedIndex);
+    updatePathsPanel();
+    setStatus(`Создан «${path.name}»: нарисуйте замкнутый контур пером`);
+    return true;
+  }
+
   function renameSelectedDocumentPath() {
     const owner = documentValue();
     const path = selectedPath();
@@ -1678,7 +1708,8 @@ function createPathsController({
   }
 
   function canApplyPath(path = selectedPath(), layer = getSelectedLayer?.()) {
-    return Boolean(path && layer && layer.type !== 'adjustment' && !isLayerLocked(layer, documentValue()));
+    return Boolean(path?.subpaths?.some(subpath => subpath?.closed && subpath.points?.length >= 3)
+      && layer && !isLayerLocked(layer, documentValue()));
   }
 
   function applySelectedDocumentPathAsVectorMask() {
@@ -1692,12 +1723,12 @@ function createPathsController({
       setStatus('Выберите слой для векторной маски');
       return false;
     }
-    if (layer.type === 'adjustment') {
-      setStatus('Сохранённый контур как vector mask пока применяется к обычным слоям, не к adjustment layer');
-      return false;
-    }
     if (isLayerLocked(layer, documentValue())) {
       setStatus('Слой или его группа заблокированы');
+      return false;
+    }
+    if (!canApplyPath(path, layer)) {
+      setStatus('Нарисуйте замкнутый контур перед созданием маски');
       return false;
     }
     const mask = importVectorMask({
@@ -1715,6 +1746,68 @@ function createPathsController({
     clearVectorMaskEdit();
     commit('Применить контур как векторную маску');
     setStatus(`Контур «${path.name || 'Контур'}» применён как векторная маска`);
+    return true;
+  }
+
+  function appendPenSubpath(points, { index = getSelectedIndex(), expectedDocument = null, closed = false, operation = 'add' } = {}) {
+    const owner = documentValue();
+    const path = selectedPath();
+    if (!owner || (expectedDocument && expectedDocument !== owner) || index !== selectedIndex
+      || owner.paths?.[index] !== path || !Array.isArray(path?.subpaths)) return false;
+    if (!['add', 'subtract', 'intersect', 'exclude'].includes(operation)) {
+      setStatus('Недопустимая операция векторного контура');
+      return false;
+    }
+    if (!closed || !Array.isArray(points) || points.length < 3 || points.length > 16384) {
+      setStatus('Для векторной маски нужен замкнутый контур из трёх или более узлов');
+      return false;
+    }
+    if (path.subpaths.length >= 65535 || points.some(point => {
+      const valid = value => value && Number.isFinite(value.x) && Number.isFinite(value.y);
+      return !valid(point) || (point.handleIn != null && !valid(point.handleIn))
+        || (point.handleOut != null && !valid(point.handleOut));
+    })) {
+      setStatus('Недопустимая геометрия подпути');
+      return false;
+    }
+    const xs = points.map(point => point.x);
+    const ys = points.map(point => point.y);
+    if (Math.max(...xs) - Math.min(...xs) < 1 && Math.max(...ys) - Math.min(...ys) < 1) {
+      setStatus('Контур слишком мал');
+      return false;
+    }
+    const nodes = points.map(point => ({
+      x: point.x, y: point.y,
+      handleIn: point.handleIn ? { x: point.handleIn.x, y: point.handleIn.y } : null,
+      handleOut: point.handleOut ? { x: point.handleOut.x, y: point.handleOut.y } : null,
+      kind: point.kind === 'smooth' ? 'smooth' : 'corner',
+    }));
+    path.subpaths.push({ operation, closed: true, fillRule: 'non-zero', points: nodes });
+    commit('Добавить подпуть сохранённого контура');
+    setStatus(`Подпуть (${operation}) добавлен в «${path.name || 'Контур'}»`);
+    return true;
+  }
+
+  function changeSubpathOperation(pathIndex, subpathIndex, operation, {
+    expectedDocument = null, expectedPath = null, expectedSubpath = null,
+  } = {}) {
+    const owner = documentValue();
+    if (!owner || (expectedDocument && owner !== expectedDocument)
+      || !Number.isInteger(pathIndex) || pathIndex !== selectedIndex
+      || !Number.isInteger(subpathIndex) || subpathIndex < 0
+      || !['add', 'subtract', 'intersect', 'exclude'].includes(operation)) return false;
+    const path = owner.paths?.[pathIndex];
+    const subpath = path?.subpaths?.[subpathIndex];
+    if (!subpath || (expectedPath && path !== expectedPath)
+      || (expectedSubpath && subpath !== expectedSubpath)
+      || !subpath.closed || !Array.isArray(subpath.points) || subpath.points.length < 3
+      || subpath.operation === operation) return false;
+    subpath.operation = operation;
+    selectedSubpathIndex = subpathIndex;
+    commit('Изменить операцию подпути');
+    updatePathsPanel();
+    drawOverlay();
+    setStatus('Операция подпути изменена; повторно примените Saved Path к векторной маске');
     return true;
   }
 
@@ -1744,6 +1837,7 @@ function createPathsController({
       || (layer?.type === 'shape' && layer.shape === 'path' && layer.pathPoints?.length >= 2)
     ) && list.length < SAVED_PATH_LIMIT;
     const enabled = {
+      new: Boolean(documentValue() && list.length < SAVED_PATH_LIMIT),
       add: canSave,
       edit: Boolean(path),
       applyMask: canApplyPath(path, layer),
@@ -1753,6 +1847,41 @@ function createPathsController({
     };
     for (const [key, value] of Object.entries(enabled)) {
       if (controls[key]) controls[key].disabled = !value;
+    }
+    const owner = documentValue();
+    const subpaths = Array.isArray(path?.subpaths) ? path.subpaths : [];
+    if (!Number.isInteger(selectedSubpathIndex) || selectedSubpathIndex >= subpaths.length) {
+      selectedSubpathIndex = 0;
+    }
+    if (controls.subpath && documentRef?.createElement) {
+      const options = subpaths.map((subpath, index) => {
+        const option = documentRef.createElement('option');
+        option.value = String(index);
+        option.textContent = `${index + 1}: ${subpath.points?.length || 0} узлов`;
+        return option;
+      });
+      controls.subpath.replaceChildren(...options);
+      controls.subpath.disabled = !subpaths.length;
+      controls.subpath.value = subpaths.length ? String(selectedSubpathIndex) : '';
+      controls.subpath.onchange = () => {
+        if (documentValue() !== owner || owner?.paths?.[selectedIndex] !== path) return;
+        const next = Number(controls.subpath.value);
+        if (!Number.isInteger(next) || next < 0 || next >= subpaths.length) return;
+        selectedSubpathIndex = next;
+        updateControls(paths());
+      };
+    }
+    if (controls.subpathOperation) {
+      const current = subpaths[selectedSubpathIndex];
+      controls.subpathOperation.disabled = !current;
+      controls.subpathOperation.value = current?.operation || 'add';
+      const pathIndex = selectedIndex;
+      const subpathIndex = selectedSubpathIndex;
+      controls.subpathOperation.onchange = () => {
+        changeSubpathOperation(pathIndex, subpathIndex, controls.subpathOperation.value, {
+          expectedDocument: owner, expectedPath: path, expectedSubpath: current,
+        });
+      };
     }
     return enabled;
   }
@@ -1818,6 +1947,7 @@ function createPathsController({
 
   function bindControls() {
     const bindings = {
+      new: createEmptyDocumentPath,
       add: addDocumentPathFromCurrent,
       edit: editSelectedDocumentPath,
       applyMask: applySelectedDocumentPathAsVectorMask,
@@ -1841,11 +1971,14 @@ function createPathsController({
     selectedPath,
     pathFromCurrentSource,
     addDocumentPathFromCurrent,
+    createEmptyDocumentPath,
     renameSelectedDocumentPath,
     duplicateSelectedDocumentPath,
     deleteSelectedDocumentPath,
     editSelectedDocumentPath,
     applySelectedDocumentPathAsVectorMask,
+    appendPenSubpath,
+    changeSubpathOperation,
     pathContextMenu,
     updatePathsPanel,
     bindControls,
@@ -3914,6 +4047,9 @@ function createPointerLifecycleRouter({
 
   function handleLostPointerCapture(event) {
     if (!isActivePointer(event.pointerId)) return;
+    // The old gesture's lost-capture event can arrive after a new pointerdown
+    // recaptures the same mouse pointerId. Do not cancel the newer gesture.
+    if (typeof target.hasPointerCapture === 'function' && target.hasPointerCapture(event.pointerId)) return;
     activePointerId = null;
     activeStartToken = null;
     return onPointerCancel(event, { reason:'lostpointercapture' });
@@ -4132,20 +4268,192 @@ function createCropGestureController({ state } = {}) {
 }
 
 // ---- src/core/history.js ----
+const NATIVE_SOURCE_PREFIX = 'data:application/x-zeter-pixel-buffer';
+const NATIVE_SOURCE_BASE64 = ';base64,';
+const NATIVE_TILE_BASE64 = '-tile;base64,';
+
+function base64Code(code) {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) ||
+    (code >= 48 && code <= 57) || code === 43 || code === 47 || code === 61;
+}
+
+function* nativeUrlSpans(text) {
+  let offset = 0;
+  while (offset < text.length) {
+    const start = text.indexOf(NATIVE_SOURCE_PREFIX, offset);
+    if (start === -1) return;
+    const suffix = start + NATIVE_SOURCE_PREFIX.length;
+    const header = text.startsWith(NATIVE_TILE_BASE64, suffix)
+      ? NATIVE_TILE_BASE64.length
+      : text.startsWith(NATIVE_SOURCE_BASE64, suffix) ? NATIVE_SOURCE_BASE64.length : 0;
+    if (!header) { offset = suffix; continue; }
+    let end = suffix + header;
+    const payloadStart = end;
+    while (end < text.length && base64Code(text.charCodeAt(end))) end++;
+    if (end > payloadStart) yield [start, end];
+    offset = Math.max(end, suffix);
+  }
+}
+
+// Count retained *characters*, not browser heap bytes. No Base64 decoding.
+function countNativeDataUrlChars(snapshot) {
+  let text;
+  if (typeof snapshot === 'string') text = snapshot;
+  else {
+    try { text = JSON.stringify(snapshot); } catch { return 0; }
+  }
+  if (typeof text !== 'string') return 0;
+  let chars = 0;
+  for (const [start, end] of nativeUrlSpans(text)) chars += end - start;
+  return chars;
+}
+
+// A typed code-unit copy cannot retain the original large JSON string as a
+// dependent substring; it also preserves even malformed UTF-16 verbatim.
+function toUnits(text, start, end) {
+  const units = new Uint16Array(end - start);
+  for (let i = start; i < end; i++) units[i - start] = text.charCodeAt(i);
+  return units;
+}
+function fromUnits(units) {
+  const chunks = [];
+  for (let i = 0; i < units.length; i += 8192) {
+    chunks.push(String.fromCharCode(...units.subarray(i, i + 8192)));
+  }
+  return chunks.join('');
+}
+// Pooled native Data URLs are ASCII by construction (fixed headers + Base64).
+// Decode their Uint8Array directly instead of allocating JS arrays of 8192
+// arguments for each large reconstructed Undo snapshot. Keep the code-unit
+// path for arbitrary JSON text, including unpaired UTF-16 surrogates.
+const nativeUrlDecoder = typeof TextDecoder === 'function' ? new TextDecoder('utf-8', { fatal:true }) : null;
+function fromAsciiUrl(bytes) {
+  return nativeUrlDecoder ? nativeUrlDecoder.decode(bytes) : fromUnits(bytes);
+}
+function urlHash(text, start, end) {
+  let hash = 2166136261;
+  for (let i = start; i < end; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+  return (hash >>> 0).toString(16) + ':' + (end - start);
+}
 class HistoryStack {
-  constructor(limit = 60, byteLimit = 128 * 1024 * 1024) {
+  constructor(limit = 60, byteLimit = 128 * 1024 * 1024,
+    { maxRetainedNativeDataUrlChars = null, shareNativeDataUrls = false } = {}) {
+    if (maxRetainedNativeDataUrlChars !== null &&
+        (!Number.isSafeInteger(maxRetainedNativeDataUrlChars) ||
+          maxRetainedNativeDataUrlChars < 0)) {
+      throw new RangeError('invalid maxRetainedNativeDataUrlChars');
+    }
+    if (typeof shareNativeDataUrls !== 'boolean') throw new TypeError('invalid shareNativeDataUrls');
     this.limit = limit;
     this.byteLimit = byteLimit;
+    // Existing opt-in cap is *logical* URL characters; never evict only point.
+    this.maxRetainedNativeDataUrlChars = maxRetainedNativeDataUrlChars;
+    // Opt-in: string snapshots with native URLs use private pooled ASCII bytes.
+    // All external entry.snapshot reads still return the exact original text.
+    this.shareNativeDataUrls = shareNativeDataUrls;
     this.entries = [];
     this.index = -1;
+    this._stringByteSizes = new WeakMap();
+    this._nativeDataUrlChars = new WeakMap();
+    this._sharedEntries = new WeakMap();
+    this._nativeUrlPool = new Map();
+  }
+
+  _internUrl(text, start, end) {
+    // Hash collision is harmless: verify *all* bytes before sharing owners.
+    const key = urlHash(text, start, end);
+    let bucket = this._nativeUrlPool.get(key);
+    if (!bucket) { bucket = []; this._nativeUrlPool.set(key, bucket); }
+    let owner = bucket.find(item => {
+      if (item.bytes.length !== end - start) return false;
+      for (let i = start; i < end; i++) {
+        if (item.bytes[i - start] !== text.charCodeAt(i)) return false;
+      }
+      return true;
+    });
+    if (!owner) {
+      const bytes = new Uint8Array(end - start);
+      for (let i = start; i < end; i++) bytes[i - start] = text.charCodeAt(i);
+      owner = { key, bytes, refs:0 };
+      bucket.push(owner);
+    }
+    owner.refs++;
+    return owner;
+  }
+
+  _releaseOwners(owners) {
+    for (const owner of owners) {
+      owner.refs--;
+      if (owner.refs !== 0) continue;
+      const bucket = this._nativeUrlPool.get(owner.key);
+      if (!bucket) continue;
+      const i = bucket.indexOf(owner);
+      if (i !== -1) bucket.splice(i, 1);
+      if (!bucket.length) this._nativeUrlPool.delete(owner.key);
+    }
+  }
+
+  _releaseEntry(entry) {
+    const meta = this._sharedEntries.get(entry);
+    if (!meta) return;
+    this._sharedEntries.delete(entry);
+    this._releaseOwners(meta.owners);
+  }
+  _releaseEntries(entries) {
+    for (const entry of entries) this._releaseEntry(entry);
+  }
+
+  _makeEntry(label, snapshot) {
+    const entry = { label, snapshot, timestamp:Date.now() };
+    if (!this.shareNativeDataUrls || typeof snapshot !== 'string') return entry;
+    const parts = [], owners = [];
+    let cursor = 0, nativeChars = 0;
+    try {
+      for (const [start, end] of nativeUrlSpans(snapshot)) {
+        parts.push({ units:toUnits(snapshot, cursor, start) });
+        const owner = this._internUrl(snapshot, start, end);
+        owners.push(owner);
+        parts.push({ owner });
+        nativeChars += end - start;
+        cursor = end;
+      }
+      if (!owners.length) return entry;
+      parts.push({ units:toUnits(snapshot, cursor, snapshot.length) });
+      const meta = { parts, owners, nativeChars, logicalBytes:this.snapshotBytes(snapshot) };
+      // A getter does not hold a second permanent materialized JSON string.
+      // External writes retain the legacy mutable entry.snapshot contract.
+      Object.defineProperty(entry, 'snapshot', {
+        enumerable:true, configurable:true,
+        get:() => parts.map(part => part.owner
+          ? fromAsciiUrl(part.owner.bytes) : fromUnits(part.units)).join(''),
+        set:(value) => {
+          this._releaseEntry(entry);
+          Object.defineProperty(entry, 'snapshot', {
+            value, writable:true, enumerable:true, configurable:true,
+          });
+        },
+      });
+      this._sharedEntries.set(entry, meta);
+      return entry;
+    } catch (error) {
+      this._releaseOwners(owners);
+      throw error;
+    }
   }
 
   push(label, snapshot) {
-    const entry = { label, snapshot, timestamp: Date.now() };
+    // Prepare before mutating the current or redo branch: failure is atomic.
+    const entry = this._makeEntry(label, snapshot);
+    this._releaseEntries(this.entries.slice(this.index + 1));
     this.entries = this.entries.slice(0, this.index + 1);
     this.entries.push(entry);
-    while (this.entries.length > this.limit) this.entries.shift();
-    while (this.entries.length > 1 && this.totalBytes() > this.byteLimit) this.entries.shift();
+    while (this.entries.length > this.limit) this._releaseEntry(this.entries.shift());
+    while (this.entries.length > 1 &&
+        (this.totalBytes() > this.byteLimit ||
+          (this.maxRetainedNativeDataUrlChars !== null &&
+            this.retainedNativeDataUrlChars() > this.maxRetainedNativeDataUrlChars))) {
+      this._releaseEntry(this.entries.shift());
+    }
     this.index = this.entries.length - 1;
     return entry;
   }
@@ -4155,13 +4463,11 @@ class HistoryStack {
     this.index -= 1;
     return this.entries[this.index];
   }
-
   redo() {
     if (!this.canRedo()) return null;
     this.index += 1;
     return this.entries[this.index];
   }
-
   jump(index) {
     const next = Math.trunc(Number(index));
     if (!Number.isFinite(next) || next < 0 || next >= this.entries.length || next === this.index) return null;
@@ -4169,14 +4475,51 @@ class HistoryStack {
     return this.entries[this.index];
   }
 
+  retainedNativeDataUrlChars() {
+    return this.entries.reduce((sum, entry) => {
+      const shared = this._sharedEntries.get(entry);
+      if (shared) return sum + shared.nativeChars;
+      if (typeof entry.snapshot !== 'string') return sum + countNativeDataUrlChars(entry.snapshot);
+      const cached = this._nativeDataUrlChars.get(entry);
+      if (cached && cached.snapshot === entry.snapshot) return sum + cached.chars;
+      const chars = countNativeDataUrlChars(entry.snapshot);
+      this._nativeDataUrlChars.set(entry, { snapshot:entry.snapshot, chars });
+      return sum + chars;
+    }, 0);
+  }
+
+  // Exactly allocated unique native ASCII URL payload bytes, NOT JS heap/RSS.
+  pooledNativeDataUrlChars() {
+    let bytes = 0;
+    for (const bucket of this._nativeUrlPool.values()) {
+      for (const owner of bucket) bytes += owner.bytes.length;
+    }
+    return bytes;
+  }
 
   totalBytes() {
-    return this.entries.reduce((sum, entry) => sum + this.snapshotBytes(entry.snapshot), 0);
+    return this.entries.reduce((sum, entry) => {
+      const shared = this._sharedEntries.get(entry);
+      if (shared) return sum + shared.logicalBytes;
+      // Object snapshots may be mutated by callers; never cache their size.
+      if (typeof entry.snapshot !== 'string') return sum + this.snapshotBytes(entry.snapshot);
+      let bytes = this._stringByteSizes.get(entry);
+      if (bytes === undefined) {
+        bytes = this.snapshotBytes(entry.snapshot);
+        this._stringByteSizes.set(entry, bytes);
+      }
+      return sum + bytes;
+    }, 0);
   }
 
   snapshotBytes(snapshot) {
-    if (typeof snapshot === 'string') return snapshot.length * 2;
-    try { return JSON.stringify(snapshot).length * 2; } catch { return 0; }
+    try {
+      const encoded = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot);
+      if (typeof encoded !== 'string') return 0;
+      // V8 often holds Latin-1 JSON strings in one byte/char. Conservatively
+      // count two bytes/char if any wide code unit occurs.
+      return /[^\x00-\xff]/.test(encoded) ? encoded.length * 2 : encoded.length;
+    } catch { return 0; }
   }
 
   canUndo() { return this.index > 0; }
@@ -4184,20 +4527,33 @@ class HistoryStack {
   current() { return this.entries[this.index] ?? null; }
 
   reset(label, snapshot) {
-    this.entries = [{ label, snapshot, timestamp: Date.now() }];
+    const entry = this._makeEntry(label, snapshot);
+    this._releaseEntries(this.entries);
+    this.entries = [entry];
     this.index = 0;
   }
-
   clearToCurrent() {
     const current = this.current();
     if (!current) return;
+    this._releaseEntries(this.entries.filter(entry => entry !== current));
     this.entries = [current];
     this.index = 0;
   }
 }
 
 // ---- src/core/io.js ----
-function bytesToDataUrl(value, mime = 'application/octet-stream') {
+// Count retained ASCII data-URL characters before any binary-string/Base64
+// allocation. This is not a JS heap/RSS byte measurement.
+function encodedDataUrlChars(byteLength, mime = 'application/octet-stream') {
+  if (!Number.isSafeInteger(byteLength) || byteLength < 0) {
+    throw new RangeError('Binary data URL требует корректный размер байтов');
+  }
+  const count = `data:${String(mime || 'application/octet-stream')};base64,`.length
+    + 4 * Math.ceil(byteLength / 3);
+  if (!Number.isSafeInteger(count)) throw new RangeError('Binary data URL length overflow');
+  return count;
+}
+function bytesToDataUrl(value, mime = 'application/octet-stream', { maxDataUrlChars = null } = {}) {
   const bytes = value instanceof Uint8Array
     ? value
     : ArrayBuffer.isView(value)
@@ -4206,27 +4562,69 @@ function bytesToDataUrl(value, mime = 'application/octet-stream') {
         ? new Uint8Array(value)
         : null;
   if (!bytes) throw new TypeError('Ожидался бинарный буфер');
+  const mediaType = String(mime || 'application/octet-stream');
+  const requiredChars = encodedDataUrlChars(bytes.byteLength, mediaType);
+  if (maxDataUrlChars !== null &&
+      (!Number.isSafeInteger(maxDataUrlChars) || maxDataUrlChars < requiredChars)) {
+    throw new RangeError('Binary data URL превышает maxDataUrlChars');
+  }
   if (typeof btoa !== 'function') throw new Error('Base64 encoder недоступен');
-  const chunks = [];
-  const chunkSize = 0x8000;
+  // A multiple of three keeps Base64 groups aligned. Never join all source
+  // bytes into a second full-size binary string before calling btoa.
+  // Join the prefix and encoded chunks ONCE into the final URL. Joining
+  // Base64 first and then interpolating it retains an unnecessary full-length
+  // intermediate string at this synchronous serialization boundary.
+  const chunks = [`data:${mediaType};base64,`];
+  const chunkSize = 0x6000;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
     const chunk = bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
-    chunks.push(String.fromCharCode(...chunk));
+    chunks.push(btoa(String.fromCharCode(...chunk)));
   }
-  return `data:${String(mime || 'application/octet-stream')};base64,${btoa(chunks.join(''))}`;
+  return chunks.join('');
 }
 function dataUrlToBytes(dataUrl, { maxBytes = 4 * 1024 * 1024 } = {}) {
-  const match = /^data:([^;,]+)?;base64,([a-z\d+/=]*)$/i.exec(String(dataUrl || ''));
-  if (!match) throw new Error('Некорректный binary data URL');
-  const base64 = match[2];
-  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
-  const estimated = Math.max(0, Math.floor(base64.length * 3 / 4) - padding);
+  const source = String(dataUrl || '');
+  // Match only the MIME header; avoid capturing a full-length Base64 substring.
+  const header = /^data:([^;,]+)?;base64,/i.exec(source);
+  if (!header) throw new Error('Некорректный binary data URL');
+  const start = header[0].length;
+  const encodedLength = source.length - start;
+  const padding = source.endsWith('==') ? 2 : source.endsWith('=') ? 1 : 0;
+  const estimated = Math.max(0, Math.floor(encodedLength * 3 / 4) - padding);
   if (estimated > maxBytes) throw new Error(`Binary data URL превышает лимит ${maxBytes} байт`);
+
+  // Validate the full alphabet and padding before allocating the decoded output.
+  // No regexp capture or atob call owns the complete Base64 payload.
+  if (encodedLength % 4 === 1 || (padding && encodedLength % 4 !== 0)) {
+    throw new Error('Некорректный binary data URL');
+  }
+  let firstPadding = -1;
+  for (let index = start; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    if (code === 61) {
+      if (firstPadding === -1) firstPadding = index;
+    } else if (firstPadding !== -1 ||
+      !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) ||
+        (code >= 48 && code <= 57) || code === 43 || code === 47)) {
+      throw new Error('Некорректный binary data URL');
+    }
+  }
+  if (firstPadding !== -1 && source.length - firstPadding !== padding) {
+    throw new Error('Некорректный binary data URL');
+  }
   if (typeof atob !== 'function') throw new Error('Base64 decoder недоступен');
-  const binary = atob(base64);
-  if (binary.length > maxBytes) throw new Error(`Binary data URL превышает лимит ${maxBytes} байт`);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index) & 255;
+
+  const bytes = new Uint8Array(estimated);
+  // Input chunks are 32 KiB Base64 chars (multiple of 4). Each atob result
+  // is at most 24 KiB, rather than a complete native binary string.
+  // This does not imply a global JS heap, Worker or process RSS limit.
+  const chunkChars = 0x8000;
+  let written = 0;
+  for (let index = start; index < source.length; index += chunkChars) {
+    const binary = atob(source.slice(index, Math.min(index + chunkChars, source.length)));
+    for (let i = 0; i < binary.length; i += 1) bytes[written++] = binary.charCodeAt(i);
+  }
+  if (written !== estimated) throw new Error('Некорректный binary data URL');
   return bytes;
 }
 function readFileAsDataURL(file) {
@@ -4922,17 +5320,19 @@ function deterministicOffset(seed, radius) {
   return (hash32(seed) % span) - radius;
 }
 
-function patchMatchRefine(data, width, height, channels, selectedMask, donorIndex, bounds, {
+function* patchMatchRefineSteps(data, width, height, channels, selectedMask, donorIndex, bounds, {
   patchRadius,
   passes,
   randomSearchSteps,
+  alphaChannel,
+  preserveAlpha = false,
 } = {}) {
   if (!bounds || bounds.maxX < bounds.minX || bounds.maxY < bounds.minY) return;
   const radius = boundedInteger(patchRadius, 1, 1, 3);
   const passCount = boundedInteger(passes, 2, 1, 4);
   const randomSteps = boundedInteger(randomSearchSteps, 4, 0, 8);
   const scale = sampleScale(data);
-  const comparedChannels = channels === 4 ? 3 : channels === 5 ? 4 : channels;
+  const comparedChannels = alphaChannel < 0 ? channels : alphaChannel;
   const maxDimension = Math.max(width, height);
 
   const validDonor = index => index >= 0 && index < selectedMask.length && selectedMask[index] === 0;
@@ -4957,8 +5357,11 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
         if (tx < 0 || tx >= width || sx < 0 || sx >= width) continue;
         const targetNeighbor = ty * width + tx;
         const sourceNeighbor = sy * width + sx;
-        if (selectedMask[sourceNeighbor]) continue;
-        const contextWeight = selectedMask[targetNeighbor] ? 0.35 : 1;
+        // Excluded source pixels may belong to a different ROI, whose content
+        // has already changed in the private working set. Neither side of a
+        // patch comparison may use that originally selected content.
+        if (selectedMask[sourceNeighbor] || selectedMask[targetNeighbor] === 2) continue;
+        const contextWeight = selectedMask[targetNeighbor] === 1 ? 0.35 : 1;
         const spatialWeight = contextWeight / (1 + dx * dx + dy * dy);
         const targetOffset = targetNeighbor * channels;
         const sourceOffset = sourceNeighbor * channels;
@@ -4982,7 +5385,9 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
   const copyDonor = (targetIndex, donor) => {
     const targetOffset = targetIndex * channels;
     const donorOffset = donor * channels;
-    for (let channel = 0; channel < channels; channel += 1) data[targetOffset + channel] = data[donorOffset + channel];
+    for (let channel = 0; channel < channels; channel += 1) {
+      if (!preserveAlpha || channel !== alphaChannel) data[targetOffset + channel] = data[donorOffset + channel];
+    }
   };
 
   const propagatedDonor = (targetIndex, neighborIndex) => {
@@ -5000,6 +5405,7 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
     return validDonor(candidate) ? candidate : -1;
   };
 
+  let processedRows = 0;
   for (let pass = 0; pass < passCount; pass += 1) {
     const forward = pass % 2 === 0;
     const yStart = forward ? bounds.minY : bounds.maxY;
@@ -5012,7 +5418,7 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
     for (let y = yStart; forward ? y <= yEnd : y >= yEnd; y += yStep) {
       for (let x = xStart; forward ? x <= xEnd : x >= xEnd; x += xStep) {
         const index = y * width + x;
-        if (!selectedMask[index]) continue;
+        if (selectedMask[index] !== 1) continue;
         let bestDonor = donorIndex[index];
         if (!validDonor(bestDonor)) continue;
         let bestScore = scoreDonor(index, bestDonor);
@@ -5053,6 +5459,8 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
         donorIndex[index] = bestDonor;
         copyDonor(index, bestDonor);
       }
+      // An async caller can release the UI thread inside PatchMatch too.
+      if (++processedRows % 16 === 0) yield;
     }
   }
 }
@@ -5067,8 +5475,9 @@ function patchMatchRefine(data, width, height, channels, selectedMask, donorInde
  * texture neighborhood. Large fills keep the linear boundary synthesis path so
  * the operation remains memory/time bounded.
  */
-function inpaintSelectedSamples(data, width, height, channels, {
+function* inpaintSelectedSamplesSteps(data, width, height, channels, {
   isAllowed,
+  isDonorExcluded = null,
   sampleRadius = 2,
   maxLayerPixels = CONTENT_AWARE_MAX_LAYER_PIXELS,
   maxFillPixels = CONTENT_AWARE_MAX_FILL_PIXELS,
@@ -5076,15 +5485,23 @@ function inpaintSelectedSamples(data, width, height, channels, {
   patchRadius = 1,
   patchMatchPasses = 2,
   randomSearchSteps = 4,
+  alphaChannel = channels === 4 ? 3 : channels === 5 ? 4 : -1,
+  preserveAlpha = false,
 } = {}) {
   width = positiveInteger(width, 'width');
   height = positiveInteger(height, 'height');
   channels = positiveInteger(channels, 'channels');
+  if (!Number.isInteger(alphaChannel) || (alphaChannel !== -1 && alphaChannel !== channels - 1)) {
+    throw new RangeError('Контент-заливка: некорректный индекс alpha-канала');
+  }
   if (!isNumericTypedArray(data)) throw new TypeError('Контент-заливка требует typed pixel buffer');
   const total = width * height;
   if (!Number.isSafeInteger(total)) throw new RangeError('Контент-заливка: размер слоя выходит за безопасный диапазон');
   if (data.length !== total * channels) throw new RangeError('Контент-заливка: размер pixel buffer не совпадает с геометрией слоя');
   if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen selection predicate');
+  if (isDonorExcluded != null && typeof isDonorExcluded !== 'function') {
+    throw new TypeError('Контент-заливка: неверный frozen donor-exclusion predicate');
+  }
 
   maxLayerPixels = positiveInteger(maxLayerPixels, 'maxLayerPixels');
   maxFillPixels = positiveInteger(maxFillPixels, 'maxFillPixels');
@@ -5105,6 +5522,7 @@ function inpaintSelectedSamples(data, width, height, channels, {
 
   for (let y = 0, index = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1, index += 1) {
+      if (index > 0 && index % 16_384 === 0) yield;
       if (isAllowed(x, y)) {
         pending[index] = 1;
         selectedMask[index] = 1;
@@ -5113,6 +5531,11 @@ function inpaintSelectedSamples(data, width, height, channels, {
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
         maxY = Math.max(maxY, y);
+      } else if (isDonorExcluded?.(x, y)) {
+        // 2 denotes a frozen global selection pixel owned by a different ROI.
+        // It must not seed the boundary pass, supply a PatchMatch sample or
+        // become a valid source after an earlier ROI writes to the tile.
+        selectedMask[index] = 2;
       } else {
         donorIndex[index] = index;
       }
@@ -5140,13 +5563,14 @@ function inpaintSelectedSamples(data, width, height, channels, {
         if (!dx && !dy) continue;
         const xx = x + dx;
         if (xx < 0 || xx >= width) continue;
-        if (!pending[yy * width + xx]) return true;
+        if (donorIndex[yy * width + xx] >= 0) return true;
       }
     }
     return false;
   };
 
   for (let index = 0; index < total; index += 1) {
+    if (index > 0 && index % 16_384 === 0) yield;
     if (pending[index] && hasKnownNeighbor(index)) {
       queue[tail++] = index;
       queued[index] = 1;
@@ -5155,15 +5579,18 @@ function inpaintSelectedSamples(data, width, height, channels, {
 
   const radius = boundedInteger(sampleRadius, 2, 1, 6);
   const sums = new Float64Array(channels);
+  const alphaScale = sampleScale(data) || 1;
   let filled = 0;
 
   while (head < tail) {
     const index = queue[head++];
+    if (head % 1024 === 0) yield;
     if (!pending[index]) continue;
     const x = index % width;
     const y = Math.floor(index / width);
     sums.fill(0);
     let weightTotal = 0;
+    let alphaWeightTotal = 0;
     let bestDonor = -1;
     let bestDistance = Number.POSITIVE_INFINITY;
 
@@ -5186,10 +5613,15 @@ function inpaintSelectedSamples(data, width, height, channels, {
         const distanceSquared = ddx * ddx + ddy * ddy;
         const weight = 1 / (1 + distanceSquared);
         const donorOffset = donor * channels;
+        // Straight-alpha donors: invisible RGB/CMYK must not tint the replacement.
+        const donorAlpha = alphaChannel < 0 ? 1 : Math.max(0, Math.min(1,
+          Number(data[donorOffset + alphaChannel]) / alphaScale || 0));
         for (let channel = 0; channel < channels; channel += 1) {
-          sums[channel] += Number(data[donorOffset + channel]) * weight;
+          const channelWeight = channel === alphaChannel ? weight : weight * donorAlpha;
+          sums[channel] += Number(data[donorOffset + channel]) * channelWeight;
         }
         weightTotal += weight;
+        alphaWeightTotal += weight * donorAlpha;
         if (distanceSquared < bestDistance || (distanceSquared === bestDistance && (bestDonor < 0 || donor < bestDonor))) {
           bestDistance = distanceSquared;
           bestDonor = donor;
@@ -5200,7 +5632,10 @@ function inpaintSelectedSamples(data, width, height, channels, {
     if (bestDonor < 0 || weightTotal <= 0) continue;
     const targetOffset = index * channels;
     for (let channel = 0; channel < channels; channel += 1) {
-      data[targetOffset + channel] = sums[channel] / weightTotal;
+      // Native tiled Fill changes only colors: avoid rounded alpha writes.
+      if (preserveAlpha && channel === alphaChannel) continue;
+      const denominator = alphaChannel < 0 || channel === alphaChannel ? weightTotal : alphaWeightTotal;
+      data[targetOffset + channel] = denominator > 0 ? sums[channel] / denominator : 0;
     }
     pending[index] = 0;
     donorIndex[index] = bestDonor;
@@ -5223,14 +5658,47 @@ function inpaintSelectedSamples(data, width, height, channels, {
   }
 
   if (filled === selected && filled > 1 && selected <= patchMatchMaxFillPixels && width >= 3 && height >= 3) {
-    patchMatchRefine(data, width, height, channels, selectedMask, donorIndex, { minX, minY, maxX, maxY }, {
+    yield* patchMatchRefineSteps(data, width, height, channels, selectedMask, donorIndex, { minX, minY, maxX, maxY }, {
       patchRadius,
       passes:patchMatchPasses,
       randomSearchSteps,
+      alphaChannel,
+      preserveAlpha,
     });
   }
 
   return filled;
+}
+
+
+// The synchronous editor/Worker API exhausts exactly the same deterministic
+// kernel steps. Only the UI fallback awaits between checkpoints.
+function inpaintSelectedSamples(data, width, height, channels, options = {}) {
+  const steps = inpaintSelectedSamplesSteps(data, width, height, channels, options);
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
+}
+
+// null is an internal cancellation sentinel (0 remains a legitimate no-fill).
+// Callers must discard the private working buffer on cancellation.
+async function inpaintSelectedSamplesCooperative(data, width, height, channels, options = {}, {
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  if (isCancelled()) return null;
+  const steps = inpaintSelectedSamplesSteps(data, width, height, channels, options);
+  let next = steps.next();
+  while (!next.done) {
+    if (isCancelled()) return null;
+    await yieldControl();
+    if (isCancelled()) return null;
+    next = steps.next();
+  }
+  return isCancelled() ? null : next.value;
 }
 
 // ---- src/core/pixel-buffer.js ----
@@ -5658,6 +6126,33 @@ function compositeBlendChannel(mode, backdrop, source) {
   return cs;
 }
 
+// Native non-separable blend in normalized encoded sRGB16.
+// Hue: SetLum(SetSat(Cs, Sat(Cb)), Lum(Cb)); Saturation swaps Cs/Cb in SetSat.
+// Color: SetLum(Cs, Lum(Cb)); Luminosity: SetLum(Cb, Lum(Cs)).
+function compositeRgb16NonSeparable(mode, source, backdrop, out) {
+  const luminance = (r,g,b) => .3*r + .59*g + .11*b;
+  const l = luminance(...(mode==='luminosity'?source:backdrop));
+  if (mode==='hue' || mode==='saturation') {
+    const hueColor=mode==='hue'?source:backdrop;
+    const saturationColor=mode==='hue'?backdrop:source;
+    const low=Math.min(...hueColor), span=Math.max(...hueColor)-low;
+    const saturation=Math.max(...saturationColor)-Math.min(...saturationColor);
+    // Scaling relative to the minimum is equivalent to SetSat, including ties.
+    for(let c=0;c<3;c++) out[c]=span>0?(hueColor[c]-low)*saturation/span:0;
+  } else {
+    for(let c=0;c<3;c++) out[c]=(mode==='luminosity'?backdrop:source)[c];
+  }
+  const delta=l-luminance(...out);
+  for(let c=0;c<3;c++) out[c]+=delta;
+  const low=Math.min(...out), high=Math.max(...out);
+  if (low<0) for(let c=0;c<3;c++) out[c]=l+(out[c]-l)*l/(l-low);
+  if (high>1) {
+    const adjustedHigh=Math.max(...out);
+    if(adjustedHigh>1) for(let c=0;c<3;c++) out[c]=l+(out[c]-l)*(1-l)/(adjustedHigh-l);
+  }
+  return out;
+}
+
 function compositeBackgroundInto(buffer, background, targetLinear) {
   if (!background) return;
   const descriptor = Array.isArray(background) ? { rgba:background, colorSpace:'srgb' } : background;
@@ -5709,7 +6204,11 @@ function compositePixelBufferLayers(width, height, layers = [], {
     if (!isPixelBuffer(source)||source.model!=='rgb'||![3,4].includes(source.channels)) {
       throw new TypeError('High-depth composite layer требует RGB PixelBuffer');
     }
-    const mode=HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
+    const nativeNonSeparable=['color','hue','saturation','luminosity'].includes(entry?.blendMode) && depth===16 && source.bitsPerChannel===16 &&
+      String(source.colorSpace).toLowerCase()==='srgb' && String(output.colorSpace).toLowerCase()==='srgb';
+    if (!nativeNonSeparable && ['color','hue','saturation','luminosity'].includes(entry?.blendMode)) throw new TypeError((entry.blendMode === 'luminosity' ? 'Luminosity' : entry.blendMode === 'saturation' ? 'Saturation' : entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
+    const mode=nativeNonSeparable?entry.blendMode:HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
+    const sourceRgb=nativeNonSeparable?[0,0,0]:null, backdropRgb=nativeNonSeparable?[0,0,0]:null, blendRgb=nativeNonSeparable?[0,0,0]:null;
     const opacity=clampPreview01(entry?.opacity ?? 1);
     if (opacity<=0) continue;
     const x=Math.trunc(Number(entry?.x)||0);
@@ -5735,10 +6234,17 @@ function compositePixelBufferLayers(width, height, layers = [], {
         const outputAlpha=sourceAlpha+backdropAlpha*(1-sourceAlpha);
         if (outputAlpha<=0) continue;
 
+        if(nativeNonSeparable){
+          for(let c=0;c<3;c++){
+            sourceRgb[c]=compositeColorSample(source,sourceOffset+c,targetLinear);
+            backdropRgb[c]=normalizedSample(output,targetOffset+c);
+          }
+          compositeRgb16NonSeparable(mode,sourceRgb,backdropRgb,blendRgb);
+        }
         for (let channel=0; channel<3; channel+=1) {
-          const sourceColor=compositeColorSample(source,sourceOffset+channel,targetLinear);
-          const backdropColor=normalizedSample(output,targetOffset+channel);
-          const blended=compositeBlendChannel(mode,backdropColor,sourceColor);
+          const sourceColor=nativeNonSeparable?sourceRgb[channel]:compositeColorSample(source,sourceOffset+channel,targetLinear);
+          const backdropColor=nativeNonSeparable?backdropRgb[channel]:normalizedSample(output,targetOffset+channel);
+          const blended=nativeNonSeparable?blendRgb[channel]:compositeBlendChannel(mode,backdropColor,sourceColor);
           const premultiplied=
             sourceAlpha*((1-backdropAlpha)*sourceColor+backdropAlpha*blended)
             + backdropAlpha*(1-sourceAlpha)*backdropColor;
@@ -5788,6 +6294,7 @@ function compositeCmykPixelBufferLayers(width, height, layers = [], {
     if(!isPixelBuffer(source)||source.model!=='cmyk'||![4,5].includes(source.channels)){
       throw new TypeError('CMYK composite layer требует CMYK PixelBuffer');
     }
+    if (entry?.blendMode === 'color' || entry?.blendMode === 'hue' || entry?.blendMode === 'saturation' || entry?.blendMode === 'luminosity') throw new TypeError((entry.blendMode === 'luminosity' ? 'Luminosity' : entry.blendMode === 'saturation' ? 'Saturation' : entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
     const mode=HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
     const opacity=clampPreview01(entry?.opacity??1);
     if(opacity<=0)continue;
@@ -6438,7 +6945,20 @@ function clearPixelBufferPixels(buffer, { isAllowed=null } = {}) {
 }
 function inpaintPixelBuffer(buffer, options = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
-  return inpaintSelectedSamples(buffer.data, buffer.width, buffer.height, buffer.channels, options);
+  return inpaintSelectedSamples(buffer.data, buffer.width, buffer.height, buffer.channels, {
+    ...options,
+    // CMYK4 has four opaque ink channels; its K channel is not alpha.
+    alphaChannel: buffer.alphaMode === 'straight' ? buffer.channels - 1 : -1,
+  });
+}
+
+// Private ROI pixels are never published when the cooperative kernel cancels.
+function inpaintPixelBufferCooperative(buffer, options = {}, controls = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Контент-заливка требует корректный PixelBuffer');
+  return inpaintSelectedSamplesCooperative(buffer.data, buffer.width, buffer.height, buffer.channels, {
+    ...options,
+    alphaChannel:buffer.alphaMode === 'straight' ? buffer.channels - 1 : -1,
+  }, controls);
 }
 
 function sourceSampleBytes(bitsPerChannel) {
@@ -6450,19 +6970,9 @@ function sourceSampleBytes(bitsPerChannel) {
 
 function pixelBufferCanonicalBytes(buffer) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
-  const bytesPerSample = sourceSampleBytes(buffer.bitsPerChannel);
-  const bytes = new Uint8Array(buffer.data.length * bytesPerSample);
-  if (buffer.bitsPerChannel === 8) {
-    bytes.set(new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength));
-    return bytes;
-  }
-  const view = new DataView(bytes.buffer);
-  if (buffer.bitsPerChannel === 16) {
-    for (let index = 0; index < buffer.data.length; index += 1) view.setUint16(index * 2, buffer.data[index], true);
-  } else {
-    for (let index = 0; index < buffer.data.length; index += 1) view.setFloat32(index * 4, buffer.data[index], true);
-  }
-  return bytes;
+  // Reuse the full-plane native view where possible; preserve original
+  // Float32 payload bits rather than reading through JS Number.
+  return canonicalTileBytes(buffer, 0, 0, buffer.width, buffer.height);
 }
 
 function expectedSourceBytes({ width, height, channels, bitsPerChannel }) {
@@ -6480,28 +6990,39 @@ function sourceMetadata(buffer) {
   };
 }
 
+// A decoded tile already owns one contiguous native plane. On little-endian
+// runtimes the backing bytes are canonical as-is, including Float32 NaN payload
+// bits. Avoid a second raw tile allocation before synchronous Base64 encoding.
+const NATIVE_LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
 function canonicalTileBytes(buffer, x, y, width, height) {
+  if (NATIVE_LITTLE_ENDIAN && x === 0 && y === 0 && width === buffer.width && height === buffer.height) {
+    return new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
+  }
   const sampleBytes = sourceSampleBytes(buffer.bitsPerChannel);
-  const bytes = new Uint8Array(width * height * buffer.channels * sampleBytes);
-  if (buffer.bitsPerChannel === 8) {
-    let target = 0;
+  const rowBytes = width * buffer.channels * sampleBytes;
+  const bytes = new Uint8Array(rowBytes * height);
+  const sourceBytes = new Uint8Array(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
+
+  // A byte-wise row copy preserves Float32 signaling-NaN payloads, signed zero
+  // and alpha. Reading Float32 as a JS Number before setFloat32 can quiet NaNs.
+  if (NATIVE_LITTLE_ENDIAN || sampleBytes === 1) {
     for (let row = 0; row < height; row += 1) {
-      const source = ((y + row) * buffer.width + x) * buffer.channels;
-      const length = width * buffer.channels;
-      bytes.set(buffer.data.subarray(source, source + length), target);
-      target += length;
+      const sourceOffset = ((y + row) * buffer.width + x) * buffer.channels * sampleBytes;
+      bytes.set(sourceBytes.subarray(sourceOffset, sourceOffset + rowBytes), row * rowBytes);
     }
     return bytes;
   }
-  const view = new DataView(bytes.buffer);
-  let targetSample = 0;
+
+  // Big-endian hosts must swap the raw words, not round-trip through Number.
+  const sourceView = new DataView(buffer.data.buffer, buffer.data.byteOffset, buffer.data.byteLength);
+  const targetView = new DataView(bytes.buffer);
   for (let row = 0; row < height; row += 1) {
-    const source = ((y + row) * buffer.width + x) * buffer.channels;
-    const length = width * buffer.channels;
-    for (let offset = 0; offset < length; offset += 1) {
-      if (buffer.bitsPerChannel === 16) view.setUint16(targetSample * 2, buffer.data[source + offset], true);
-      else view.setFloat32(targetSample * 4, buffer.data[source + offset], true);
-      targetSample += 1;
+    const sourceOffset = ((y + row) * buffer.width + x) * buffer.channels * sampleBytes;
+    const targetOffset = row * rowBytes;
+    for (let offset = 0; offset < rowBytes; offset += sampleBytes) {
+      if (sampleBytes === 2) targetView.setUint16(targetOffset + offset, sourceView.getUint16(sourceOffset + offset, false), true);
+      else targetView.setUint32(targetOffset + offset, sourceView.getUint32(sourceOffset + offset, false), true);
     }
   }
   return bytes;
@@ -6509,10 +7030,25 @@ function canonicalTileBytes(buffer, x, y, width, height) {
 
 function decodeCanonicalSamples(bytes, bitsPerChannel, samples) {
   if (bitsPerChannel === 8) return new Uint8ClampedArray(bytes);
-  const data = bitsPerChannel === 16 ? new Uint16Array(samples) : new Float32Array(samples);
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let index = 0; index < samples; index += 1) {
-    data[index] = bitsPerChannel === 16 ? view.getUint16(index * 2, true) : view.getFloat32(index * 4, true);
+  const SampleArray = bitsPerChannel === 16 ? Uint16Array : Float32Array;
+  // dataUrlToBytes has already allocated a private exact-length byte plane.
+  // On little-endian hosts an aligned typed view can own those same bytes;
+  // allocating and copying another full plane only doubles the decoded
+  // transient and can unnecessarily retain both during tile traversal.
+  // The byte view never escapes independently, so writable PixelBuffer
+  // callers retain their existing ownership/isolation guarantees.
+  if (NATIVE_LITTLE_ENDIAN && bytes.byteOffset % SampleArray.BYTES_PER_ELEMENT === 0) {
+    return new SampleArray(bytes.buffer, bytes.byteOffset, samples);
+  }
+  const data = new SampleArray(samples);
+  const output = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  if (NATIVE_LITTLE_ENDIAN) {
+    output.set(bytes);
+  } else {
+    const size = sourceSampleBytes(bitsPerChannel);
+    for (let i = 0; i < bytes.length; i += size) {
+      for (let j = 0; j < size; j += 1) output[i + j] = bytes[i + size - 1 - j];
+    }
   }
   return data;
 }
@@ -6532,20 +7068,61 @@ function sanitizeSourceHeader(source, maxBytes) {
     colorSpace:String(source.colorSpace||'').slice(0,120),alphaMode:hasAlpha?'straight':'none',
     profileName:String(source.profileName||'').slice(0,240),byteOrder:'little-endian',rawBytes:expected};
 }
-function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
-  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
-  const bytes = pixelBufferCanonicalBytes(buffer);
-  const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
-  if (bytes.byteLength > limit) throw new RangeError('PixelBuffer source ' + bytes.byteLength + ' байт превышает лимит ' + limit + ' байт');
-  return {kind:PIXEL_BUFFER_SOURCE_KIND,...sourceMetadata(buffer),rawBytes:bytes.byteLength,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_SOURCE_MIME)};
+
+// Keep persisted native sources and detached Worker bytes in one exact
+// representation. atob() accepts several non-canonical spellings whose
+// padding bits differ, so a regex and encoded-length check alone is unsafe.
+function isCanonicalPixelBufferBase64(encoded, rawBytes) {
+  if (!Number.isSafeInteger(rawBytes) || rawBytes < 1 ||
+      typeof encoded !== 'string' ||
+      encoded.length !== 4 * Math.ceil(rawBytes / 3) ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
+  const padding = (3 - rawBytes % 3) % 3;
+  if (encoded.slice(encoded.length - padding) !== '='.repeat(padding)) return false;
+  const last = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    .indexOf(encoded[encoded.length - padding - 1]);
+  return last >= 0 && (last & ((1 << (2 * padding)) - 1)) === 0;
 }
-function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE } = {}) {
+
+// Optional limit accounts for actual persisted ASCII URL characters, not
+// raw bytes, JS heap copies, History, or Worker allocations.
+function assertEncodedSourceBudget(required, limit) {
+  if (!Number.isSafeInteger(required) || required < 0 ||
+      (limit !== null && (!Number.isSafeInteger(limit) || limit < required))) {
+    throw new RangeError('PixelBuffer encoded data URL превышает maxDataUrlChars');
+  }
+}
+function serializePixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, maxDataUrlChars = null } = {}) {
+  if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
+  const rawBytes = expectedSourceBytes(buffer);
+  const limit = Math.max(1, Math.trunc(Number(maxBytes) || 0));
+  // Refuse before allocating a canonical byte array or starting Base64 work.
+  if (!rawBytes || rawBytes > limit) throw new RangeError('PixelBuffer source ' + rawBytes + ' байт превышает лимит ' + limit + ' байт');
+  assertEncodedSourceBudget(encodedDataUrlChars(rawBytes, PIXEL_BUFFER_SOURCE_MIME), maxDataUrlChars);
+  const bytes = pixelBufferCanonicalBytes(buffer);
+  return {kind:PIXEL_BUFFER_SOURCE_KIND,...sourceMetadata(buffer),rawBytes,dataUrl:bytesToDataUrl(bytes,PIXEL_BUFFER_SOURCE_MIME)};
+}
+function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const rawBytes=expectedSourceBytes(buffer), limit=Math.max(1,Math.trunc(Number(maxBytes)||0));
   if(!rawBytes||rawBytes>limit)throw new RangeError('PixelBuffer source '+rawBytes+' байт превышает лимит '+limit+' байт');
   const size=Math.max(1,Math.min(2048,Math.trunc(Number(tileSize)||PIXEL_BUFFER_TILE_SIZE)));
   const columns=Math.ceil(buffer.width/size),rows=Math.ceil(buffer.height/size),count=columns*rows;
   if(!Number.isSafeInteger(count)||count<1||count>MAX_PIXEL_BUFFER_SOURCE_TILES)throw new RangeError('Tiled PixelBuffer требует '+count+' tiles; лимит '+MAX_PIXEL_BUFFER_SOURCE_TILES);
+  // Preflight the aggregate retained URLs, including one prefix per tile,
+  // before allocating even the first edge-tile raw byte array or Base64 chunk.
+  if (maxDataUrlChars !== null) {
+    let required = 0;
+    const pixelBytes = buffer.channels * sourceSampleBytes(buffer.bitsPerChannel);
+    for (let row = 0; row < rows; row += 1) {
+      const height = Math.min(size, buffer.height - row * size);
+      for (let column = 0; column < columns; column += 1) {
+        const width = Math.min(size, buffer.width - column * size);
+        required += encodedDataUrlChars(width * height * pixelBytes, PIXEL_BUFFER_TILE_MIME);
+        assertEncodedSourceBudget(required, maxDataUrlChars);
+      }
+    }
+  }
   const tiles=[]; let total=0;
   for(let row=0;row<rows;row+=1){
     const y=row*size,height=Math.min(size,buffer.height-y);
@@ -6558,10 +7135,10 @@ function serializeTiledPixelBufferSource(buffer, { maxBytes = MAX_PIXEL_BUFFER_S
   if(total!==rawBytes)throw new RangeError('Tiled PixelBuffer source имеет несогласованный byte budget');
   return {kind:PIXEL_BUFFER_TILED_SOURCE_KIND,...sourceMetadata(buffer),tileSize:size,rawBytes,tiles};
 }
-function serializePixelBufferSourceAdaptive(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, tiledThresholdBytes = PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES } = {}) {
+function serializePixelBufferSourceAdaptive(buffer, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES, tileSize = PIXEL_BUFFER_TILE_SIZE, tiledThresholdBytes = PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES, maxDataUrlChars = null } = {}) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   const threshold=Math.max(1,Math.trunc(Number(tiledThresholdBytes)||PIXEL_BUFFER_TILED_SOURCE_MIN_BYTES));
-  return buffer.data.byteLength>=threshold?serializeTiledPixelBufferSource(buffer,{maxBytes,tileSize}):serializePixelBufferSource(buffer,{maxBytes});
+  return buffer.data.byteLength>=threshold?serializeTiledPixelBufferSource(buffer,{maxBytes,tileSize,maxDataUrlChars}):serializePixelBufferSource(buffer,{maxBytes,maxDataUrlChars});
 }
 function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES } = {}) {
   const safe=sanitizeSourceHeader(source,maxBytes); if(!safe)return null;
@@ -6569,7 +7146,7 @@ function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFF
     const dataUrl=typeof source.dataUrl==='string'?source.dataUrl:'';
     if(dataUrl.length>MAX_PIXEL_BUFFER_SOURCE_DATA_URL)return null;
     const prefix='data:'+PIXEL_BUFFER_SOURCE_MIME+';base64,'; if(!dataUrl.startsWith(prefix))return null;
-    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(safe.rawBytes/3))return null;
+    const base64=dataUrl.slice(prefix.length); if(!isCanonicalPixelBufferBase64(base64,safe.rawBytes))return null;
     return {kind:PIXEL_BUFFER_SOURCE_KIND,...safe,dataUrl};
   }
   if(source.kind!==PIXEL_BUFFER_TILED_SOURCE_KIND)return null;
@@ -6584,7 +7161,7 @@ function sanitizeSerializedPixelBufferSource(source, { maxBytes = MAX_PIXEL_BUFF
     const rawBytes=expectedSourceBytes({width,height,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel});
     if(Number(tile.x)!==x||Number(tile.y)!==y||Number(tile.width)!==width||Number(tile.height)!==height||Number(tile.rawBytes)!==rawBytes)return null;
     const dataUrl=typeof tile.dataUrl==='string'?tile.dataUrl:''; if(!dataUrl.startsWith(prefix))return null;
-    const base64=dataUrl.slice(prefix.length); if(!/^[a-z\d+/=]+$/i.test(base64)||base64.length!==4*Math.ceil(rawBytes/3))return null;
+    const base64=dataUrl.slice(prefix.length); if(!isCanonicalPixelBufferBase64(base64,rawBytes))return null;
     total+=rawBytes; tiles.push({x,y,width,height,rawBytes,dataUrl});
   }
   if(total!==safe.rawBytes)return null;
@@ -6611,6 +7188,48 @@ function forEachSerializedPixelBufferTile(source,visitor,{maxBytes=MAX_PIXEL_BUF
     visitor({index,count,x:tile.x,y:tile.y,width:tile.width,height:tile.height,buffer:decodeSerializedTile(safe,tile)});
   }
   return count;
+}
+
+
+/**
+ * Decode/render one native tile at a time and yield between bounded batches.
+ * A cancelled traversal never invokes the remaining visitors. The caller
+ * owns its private preview canvas and must discard it when this returns false.
+ */
+async function forEachSerializedPixelBufferTileCooperative(source, visitor, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  batchTiles = 2,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof visitor !== 'function' || typeof isCancelled !== 'function' ||
+      typeof yieldControl !== 'function' || !Number.isSafeInteger(batchTiles) || batchTiles < 1) {
+    throw new TypeError('Tiled PixelBuffer cooperative preview: invalid callbacks/batchTiles');
+  }
+  const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
+  if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
+  const tiled = safe.kind === PIXEL_BUFFER_TILED_SOURCE_KIND;
+  const count = tiled ? safe.tiles.length : 1;
+  for (let index = 0; index < count; index += 1) {
+    if (isCancelled()) return false;
+    if (index > 0 && index % batchTiles === 0) {
+      await yieldControl();
+      if (isCancelled()) return false;
+    }
+    if (tiled) {
+      const tile = safe.tiles[index];
+      visitor({
+        index, count, x:tile.x, y:tile.y, width:tile.width, height:tile.height,
+        buffer:decodeSerializedTile(safe, tile),
+      });
+    } else {
+      visitor({
+        index, count, x:0, y:0, width:safe.width, height:safe.height,
+        buffer:deserializePixelBufferSource(safe, { maxBytes }),
+      });
+    }
+  }
+  return !isCancelled();
 }
 function mutateSerializedPixelBufferTiles(source, visitor, {
   maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
@@ -6665,6 +7284,14 @@ function mutateSerializedPixelBufferTiles(source, visitor, {
 function createSerializedPixelBufferTileWorkingSet(source, {
   maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
   requireAlpha = false,
+  // Maximum extra typed-array bytes owned by one synchronous tile visit.
+  maxVisitBytes = maxBytes,
+  // Maximum contiguous native ROI owned by readRegion (or accepted for writeRegion).
+  maxRegionBytes = maxBytes,
+  // Raw typed tile cache only; encoded dirty writebacks are retained separately.
+  maxResidentBytes = null,
+  // ASCII data-URL byte reservations for every dirty tile, resident or evicted.
+  maxEncodedDirtyBytes = null,
 } = {}) {
   const safe = sanitizeSerializedPixelBufferSource(source, { maxBytes });
   if (!safe) throw new TypeError('Некорректный serialized PixelBuffer source');
@@ -6678,19 +7305,121 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     throw new RangeError('Tiled PixelBuffer working set требует ' + targetRawBytes + ' байт; лимит ' + limit + ' байт');
   }
 
+  const visitByteLimit = Number(maxVisitBytes);
+  if (!Number.isSafeInteger(visitByteLimit) || visitByteLimit < 1) {
+    throw new RangeError('Tiled PixelBuffer maxVisitBytes должен быть положительным безопасным целым');
+  }
+  const regionByteLimit = Number(maxRegionBytes);
+  const oneRegionPixelBytes = targetChannels * sourceSampleBytes(safe.bitsPerChannel);
+  if (!Number.isSafeInteger(regionByteLimit) ||
+      regionByteLimit < oneRegionPixelBytes || regionByteLimit > limit) {
+    throw new RangeError('Tiled PixelBuffer maxRegionBytes должен вмещать один пиксель и не превышать maxBytes');
+  }
+
   const promoteAlpha = targetChannels !== safe.channels;
-  const loaded = new Map();
-  const dirty = new Set();
+  const sampleBytes = sourceSampleBytes(safe.bitsPerChannel);
+  const largestTileBytes = safe.tiles.reduce((largest, tile) =>
+    Math.max(largest, tile.width * tile.height * targetChannels * sampleBytes), 0);
+  // Default to a bounded 16 MiB typed working set, except when a single
+  // valid source tile itself requires more space.
+  const residentLimit = maxResidentBytes == null
+    ? Math.min(limit, Math.max(16 * 1024 * 1024, largestTileBytes))
+    : Number(maxResidentBytes);
+  if (!Number.isSafeInteger(residentLimit) || residentLimit < largestTileBytes || residentLimit > limit) {
+    throw new RangeError('Tiled PixelBuffer maxResidentBytes должен вмещать один tile и не превышать maxBytes');
+  }
+
+  // Charge the exact ASCII data-URL length, not compressed browser string
+  // heap bytes (which vary across JS engines). Include the MIME prefix.
+  const encodedPrefixBytes = `data:${PIXEL_BUFFER_TILE_MIME};base64,`.length;
+  const encodedTileBytes = tile => encodedPrefixBytes +
+    4 * Math.ceil(tile.width * tile.height * targetChannels * sampleBytes / 3);
+  const largestEncodedTileBytes = safe.tiles.reduce((largest, tile) =>
+    Math.max(largest, encodedTileBytes(tile)), 0);
+  // Default must not reject previously supported dense native edits. The
+  // entire validated source is bounded by maxBytes and the fixed tile count;
+  // callers can opt into a stricter overlay allowance explicitly.
+  const fullSourceEncodedBytes = safe.tiles.reduce((sum, tile) =>
+    sum + encodedTileBytes(tile), 0);
+  if (!Number.isSafeInteger(fullSourceEncodedBytes)) {
+    throw new RangeError('Tiled PixelBuffer encoded dirty tile byte budget overflow');
+  }
+  const encodedLimit = maxEncodedDirtyBytes == null
+    ? fullSourceEncodedBytes
+    : Number(maxEncodedDirtyBytes);
+  if (!Number.isSafeInteger(encodedLimit) ||
+      encodedLimit < largestEncodedTileBytes) {
+    throw new RangeError('Tiled PixelBuffer maxEncodedDirtyBytes должен вмещать один tile');
+  }
+
+  let loaded = new Map(); // LRU: oldest at the front
+  let dirty = new Set();
   const previewDirty = new Set();
+  let writtenBack = new Map(); // canonical encoded dirty tiles, never discarded without replacement
+  let residentBytes = 0;
+  let encodedDirtyBytes = 0; // reserved for dirty resident tiles too
+  let revision = 0;
+
+  function makeRoom(extraBytes) {
+    // Prepare every writeback before committing any eviction. If a later
+    // encoder fails, the original live LRU and dirty tiles remain intact.
+    let plannedBytes = residentBytes;
+    const victims = [];
+    for (const [index, buffer] of loaded) {
+      if (plannedBytes + extraBytes <= residentLimit) break;
+      let writeback = null;
+      if (dirty.has(index)) {
+        const tile = safe.tiles[index];
+        const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
+        const dataUrl = bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME);
+        if (dataUrl.length !== encodedTileBytes(tile)) {
+          throw new RangeError('Tiled PixelBuffer encoded dirty tile length mismatch');
+        }
+        writeback = { ...tile, rawBytes:bytes.byteLength, dataUrl };
+      }
+      victims.push({ index, byteLength:buffer.data.byteLength, writeback });
+      plannedBytes -= buffer.data.byteLength;
+    }
+    if (plannedBytes + extraBytes > residentLimit) {
+      throw new RangeError('Tiled PixelBuffer resident tile byte budget exceeded');
+    }
+    for (const victim of victims) {
+      if (victim.writeback) writtenBack.set(victim.index, victim.writeback);
+      loaded.delete(victim.index);
+    }
+    residentBytes = plannedBytes;
+  }
+
+  function cacheTile(index, buffer) {
+    const prior = loaded.get(index);
+    if (prior) {
+      loaded.delete(index);
+      residentBytes -= prior.data.byteLength;
+    }
+    makeRoom(buffer.data.byteLength);
+    loaded.set(index, buffer);
+    residentBytes += buffer.data.byteLength;
+  }
 
   function load(index) {
     if (!Number.isSafeInteger(index) || index < 0 || index >= safe.tiles.length) {
       throw new RangeError('Tiled PixelBuffer tile index вне диапазона');
     }
-    if (loaded.has(index)) return loaded.get(index);
-    let buffer = decodeSerializedTile(safe, safe.tiles[index]);
-    if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
-    loaded.set(index, buffer);
+    if (loaded.has(index)) {
+      const buffer = loaded.get(index);
+      loaded.delete(index);
+      loaded.set(index, buffer);
+      return buffer;
+    }
+    const pending = writtenBack.get(index);
+    let buffer = pending
+      ? decodeSerializedTile({ ...safe, channels:targetChannels,
+        alphaMode:promoteAlpha ? 'straight' : safe.alphaMode }, pending)
+      : decodeSerializedTile(safe, safe.tiles[index]);
+    if (promoteAlpha && !pending) buffer = pixelBufferWithStraightAlpha(buffer);
+    cacheTile(index, buffer);
+    // The typed cache now owns this dirty tile. Keep one representation only.
+    if (pending) writtenBack.delete(index);
     return buffer;
   }
 
@@ -6706,13 +7435,73 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     return right > tile.x && bottom > tile.y && left < tile.x + tile.width && top < tile.y + tile.height;
   }
 
+  // Plan all resident evictions and encode dirty victims BEFORE publishing a
+  // multi-tile edit. Both a budget refusal and a failing encoder leave the
+  // previous committed source intact (including all dirty tile contents).
+  function publishStaged(staged) {
+    if (!staged.length) return;
+    let reserved = encodedDirtyBytes;
+    for (const { index } of staged) {
+      if (dirty.has(index)) continue;
+      reserved += encodedTileBytes(safe.tiles[index]);
+      if (!Number.isSafeInteger(reserved) || reserved > encodedLimit) {
+        throw new RangeError('Tiled PixelBuffer encoded dirty tile byte budget exceeded');
+      }
+    }
+    const nextLoaded = new Map(loaded);
+    const nextWrittenBack = new Map(writtenBack);
+    const nextDirty = new Set(dirty);
+    let nextResidentBytes = residentBytes;
+    for (const { index, buffer } of staged) {
+      const existing = nextLoaded.get(index);
+      if (existing) {
+        nextLoaded.delete(index);
+        nextResidentBytes -= existing.data.byteLength;
+      }
+      nextWrittenBack.delete(index);
+      nextDirty.add(index);
+      while (nextResidentBytes + buffer.data.byteLength > residentLimit) {
+        const first = nextLoaded.entries().next().value;
+        if (!first) throw new RangeError('Tiled PixelBuffer resident tile byte budget exceeded');
+        const [evictedIndex, evicted] = first;
+        if (nextDirty.has(evictedIndex)) {
+          const tile = safe.tiles[evictedIndex];
+          const bytes = canonicalTileBytes(evicted, 0, 0, tile.width, tile.height);
+          const dataUrl = bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME);
+          if (dataUrl.length !== encodedTileBytes(tile)) {
+            throw new RangeError('Tiled PixelBuffer encoded dirty tile length mismatch');
+          }
+          nextWrittenBack.set(evictedIndex, { ...tile, rawBytes:bytes.byteLength, dataUrl });
+        }
+        nextLoaded.delete(evictedIndex);
+        nextResidentBytes -= evicted.data.byteLength;
+      }
+      nextLoaded.set(index, buffer);
+      nextResidentBytes += buffer.data.byteLength;
+    }
+    loaded = nextLoaded;
+    dirty = nextDirty;
+    writtenBack = nextWrittenBack;
+    residentBytes = nextResidentBytes;
+    encodedDirtyBytes = reserved;
+    for (const { index } of staged) previewDirty.add(index);
+    revision += 1;
+  }
+
+  // A visitor only owns a private tile copy. Its returned change count is the
+  // commit decision; false/zero, exceptions and budget failures discard all
+  // staged bytes (including changes to earlier tiles in the same visit).
+  // Publish synchronously after every visitor succeeds, never mid-transaction.
   function visit(bounds, visitor) {
     if (typeof visitor !== 'function') throw new TypeError('Tiled PixelBuffer working-set visitor должен быть функцией');
+    const staged = [];
+    let stagedBytes = 0;
     let changed = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!intersects(tile, bounds)) continue;
-      const buffer = load(index);
+      const original = load(index);
+      const buffer = clonePixelBuffer(original);
       const rawResult = visitor({
         index,
         count:safe.tiles.length,
@@ -6727,11 +7516,16 @@ function createSerializedPixelBufferTileWorkingSet(source, {
         throw new TypeError('Tiled PixelBuffer working-set visitor должен вернуть неотрицательное целое число изменений');
       }
       if (!delta) continue;
+      const nextBytes = stagedBytes + buffer.data.byteLength;
+      if (!Number.isSafeInteger(nextBytes) || nextBytes > visitByteLimit) {
+        throw new RangeError('Tiled PixelBuffer visit превысил private tile byte budget');
+      }
+      stagedBytes = nextBytes;
       changed += delta;
       if (!Number.isSafeInteger(changed)) throw new RangeError('Tiled PixelBuffer working-set change count переполнен');
-      dirty.add(index);
-      previewDirty.add(index);
+      staged.push({ index, buffer });
     }
+    publishStaged(staged);
     return changed;
   }
 
@@ -6765,11 +7559,17 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     return { left, top, right, bottom, width:right-left, height:bottom-top };
   }
 
-  function readRegion(bounds) {
+  function* readRegionSteps(bounds) {
     const area = normalizeRegionBounds(bounds);
     if (!area) return null;
+    const regionBytes = area.width * area.height * targetChannels * sampleBytes;
+    // Refuse before allocating or decoding any ROI tile. No implicit downcast.
+    if (!Number.isSafeInteger(regionBytes) || regionBytes > regionByteLimit) {
+      throw new RangeError('Tiled PixelBuffer region byte budget exceeded');
+    }
     const Expected = expectedArrayConstructor(safe.bitsPerChannel);
     const data = new Expected(area.width * area.height * targetChannels);
+    let copiedPixels = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!intersects(tile, area)) continue;
@@ -6782,6 +7582,12 @@ function createSerializedPixelBufferTileWorkingSet(source, {
         const sourceOffset = ((y - tile.y) * tile.width + (left - tile.x)) * targetChannels;
         const targetOffset = ((y - area.top) * area.width + (left - area.left)) * targetChannels;
         data.set(buffer.data.subarray(sourceOffset, sourceOffset + (right - left) * targetChannels), targetOffset);
+        copiedPixels += right - left;
+        // Yield within a single large ROI without changing the row-copy order.
+        if (copiedPixels >= 32_768) {
+          copiedPixels = 0;
+          yield;
+        }
       }
     }
     return {
@@ -6801,7 +7607,35 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     };
   }
 
-  function writeRegion(region) {
+  function readRegion(bounds) {
+    const steps = readRegionSteps(bounds);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    return step.value;
+  }
+
+  // A cancelled read drops the private region buffer; dirty tiles stay untouched.
+  async function readRegionCooperative(bounds, {
+    isCancelled = () => false,
+    yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  } = {}) {
+    if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+      throw new TypeError('Tiled PixelBuffer region read: invalid cancellation callbacks');
+    }
+    if (isCancelled()) return null;
+    const steps = readRegionSteps(bounds);
+    let step = steps.next();
+    while (!step.done) {
+      if (isCancelled()) return null;
+      await yieldControl();
+      if (isCancelled()) return null;
+      step = steps.next();
+    }
+    return isCancelled() ? null : step.value;
+  }
+
+  // Stage changes privately; cancellation must not dirty any working tiles.
+  function* writeRegionSteps(region) {
     const x = Math.trunc(Number(region?.x));
     const y = Math.trunc(Number(region?.y));
     const buffer = region?.buffer;
@@ -6815,9 +7649,16 @@ function createSerializedPixelBufferTileWorkingSet(source, {
       buffer.channels !== targetChannels ||
       buffer.bitsPerChannel !== safe.bitsPerChannel
     ) throw new TypeError('Tiled PixelBuffer writeRegion несовместим с working set');
+    if (buffer.data.byteLength > regionByteLimit) {
+      throw new RangeError('Tiled PixelBuffer region byte budget exceeded');
+    }
 
     const bounds = { left:x, top:y, right:x+buffer.width, bottom:y+buffer.height };
+    const startingRevision = revision;
+    const staged = [];
+    let stagedBytes = 0; // Private changed tile copies retained until atomic publication.
     let changedPixels = 0;
+    let scannedPixels = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!intersects(tile, bounds)) continue;
@@ -6826,7 +7667,7 @@ function createSerializedPixelBufferTileWorkingSet(source, {
       const top = Math.max(bounds.top, tile.y);
       const right = Math.min(bounds.right, tile.x + tile.width);
       const bottom = Math.min(bounds.bottom, tile.y + tile.height);
-      let tileChanged = false;
+      let nextData = null;
       for (let globalY = top; globalY < bottom; globalY += 1) {
         for (let globalX = left; globalX < right; globalX += 1) {
           const sourceOffset = ((globalY - y) * buffer.width + (globalX - x)) * targetChannels;
@@ -6838,25 +7679,71 @@ function createSerializedPixelBufferTileWorkingSet(source, {
               break;
             }
           }
-          if (!pixelChanged) continue;
-          for (let channel = 0; channel < targetChannels; channel += 1) {
-            target.data[targetOffset + channel] = buffer.data[sourceOffset + channel];
+          if (pixelChanged) {
+            if (!nextData) {
+              const nextStagedBytes = stagedBytes + target.data.byteLength;
+              // Check before slice(): even the rejected tile must not be allocated.
+              if (!Number.isSafeInteger(nextStagedBytes) || nextStagedBytes > visitByteLimit) {
+                throw new RangeError('Tiled PixelBuffer region write превысил private tile byte budget');
+              }
+              nextData = target.data.slice();
+              stagedBytes = nextStagedBytes;
+            }
+            nextData.set(buffer.data.subarray(sourceOffset, sourceOffset + targetChannels), targetOffset);
+            changedPixels += 1;
           }
-          changedPixels += 1;
-          tileChanged = true;
+          // One large ROI remains cancellable; staged arrays stay invisible here.
+          if (++scannedPixels >= 32_768) {
+            scannedPixels = 0;
+            yield;
+          }
         }
       }
-      if (tileChanged) {
-        dirty.add(index);
-        previewDirty.add(index);
-      }
+      if (nextData) staged.push({ index, buffer:createPixelBuffer({ ...target, data:nextData }) });
     }
+    // A cooperative writer must never overwrite a newer edit after yielding.
+    if (revision !== startingRevision) {
+      throw new Error('Tiled PixelBuffer stale region write: newer edit committed');
+    }
+    // No await/yield during validation, encoding or atomic publication.
+    publishStaged(staged);
     return changedPixels;
   }
 
-  function serialize() {
+  function writeRegion(region) {
+    const steps = writeRegionSteps(region);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    return step.value;
+  }
+
+  // null means cancelled; pending staged arrays are simply discarded.
+  async function writeRegionCooperative(region, {
+    isCancelled = () => false,
+    yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  } = {}) {
+    if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+      throw new TypeError('Tiled PixelBuffer region write: invalid cancellation callbacks');
+    }
+    if (isCancelled()) return null;
+    const steps = writeRegionSteps(region);
+    let step = steps.next();
+    while (!step.done) {
+      if (isCancelled()) return null;
+      await yieldControl();
+      if (isCancelled()) return null;
+      step = steps.next();
+    }
+    return isCancelled() ? null : step.value;
+  }
+
+  // Assemble privately; never expose the partially serialized tile list.
+  // Only modified/promoted tiles need encoding, and groups of four keep the
+  // cooperative fallback responsive without adding yields for tiny jobs.
+  function* serializeSteps() {
     const tiles = [];
     let total = 0;
+    let encodedTiles = 0;
     for (let index = 0; index < safe.tiles.length; index += 1) {
       const tile = safe.tiles[index];
       if (!dirty.has(index) && !promoteAlpha) {
@@ -6864,18 +7751,26 @@ function createSerializedPixelBufferTileWorkingSet(source, {
         total += tile.rawBytes;
         continue;
       }
+      if (encodedTiles && encodedTiles % 4 === 0) yield;
+      const writeback = writtenBack.get(index);
       let buffer = loaded.get(index);
-      if (!buffer) {
-        buffer = decodeSerializedTile(safe, tile);
-        if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+      if (!buffer && writeback) {
+        total += writeback.rawBytes;
+        tiles.push(writeback);
+      } else {
+        if (!buffer) {
+          buffer = decodeSerializedTile(safe, tile);
+          if (promoteAlpha) buffer = pixelBufferWithStraightAlpha(buffer);
+        }
+        const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
+        total += bytes.byteLength;
+        tiles.push({
+          ...tile,
+          rawBytes:bytes.byteLength,
+          dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME),
+        });
       }
-      const bytes = canonicalTileBytes(buffer, 0, 0, tile.width, tile.height);
-      total += bytes.byteLength;
-      tiles.push({
-        ...tile,
-        rawBytes:bytes.byteLength,
-        dataUrl:bytesToDataUrl(bytes, PIXEL_BUFFER_TILE_MIME),
-      });
+      encodedTiles += 1;
     }
     if (total !== targetRawBytes) throw new RangeError('Tiled PixelBuffer working-set serialization имеет несогласованный byte budget');
     return {
@@ -6885,6 +7780,34 @@ function createSerializedPixelBufferTileWorkingSet(source, {
       rawBytes:targetRawBytes,
       tiles,
     };
+  }
+
+  function serialize() {
+    const steps = serializeSteps();
+    let next = steps.next();
+    while (!next.done) next = steps.next();
+    return next.value;
+  }
+
+  // null signals cancellation. The original source remains immutable; even
+  // completed private payloads from prior checkpoints are discarded.
+  async function serializeCooperative({
+    isCancelled = () => false,
+    yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  } = {}) {
+    if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+      throw new TypeError('Tiled PixelBuffer serialization: invalid cancellation callbacks');
+    }
+    if (isCancelled()) return null;
+    const steps = serializeSteps();
+    let next = steps.next();
+    while (!next.done) {
+      if (isCancelled()) return null;
+      await yieldControl();
+      if (isCancelled()) return null;
+      next = steps.next();
+    }
+    return isCancelled() ? null : next.value;
   }
 
   return {
@@ -6898,11 +7821,696 @@ function createSerializedPixelBufferTileWorkingSet(source, {
     visit,
     forEachPreviewDirty,
     readRegion,
+    readRegionCooperative,
     writeRegion,
+    writeRegionCooperative,
     serialize,
+    serializeCooperative,
     get loadedTileCount() { return loaded.size; },
+    get residentTileBytes() { return residentBytes; },
+    get maxResidentBytes() { return residentLimit; },
+    get maxRegionBytes() { return regionByteLimit; },
+    get writtenBackTileCount() { return writtenBack.size; },
+    get encodedDirtyTileBytes() { return encodedDirtyBytes; },
+    get maxEncodedDirtyBytes() { return encodedLimit; },
     get dirtyTileCount() { return dirty.size; },
   };
+}
+
+// A bounded alternative to fixed tile/stripe fragmentation. Sort only small
+// frozen selections, then merge touching horizontal runs across at most eight
+// adjacent scanlines. This deliberately does not chase arbitrarily large
+// connected components (which can recreate an oversized bounding rectangle).
+// Caps bound sort memory, run count and number of private ROI allocations.
+function planAdaptiveTiledInpaintRuns(selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit = () => {}) {
+  const MAX_SORTED_PIXELS = 65_536;
+  const MAX_RUNS = 4_096;
+  const MAX_REGIONS = 256;
+  const MAX_GROUP_ROWS = 8;
+  if (selectedIndices.length > MAX_SORTED_PIXELS) return null;
+  // Reserve a bounded sort allowance before cloning the frozen indices.
+  chargePlanningVisit(selectedIndices.length * 16);
+  // InpaintFromIndices accepts arbitrary input order. Numeric sorting makes
+  // identical frozen masks produce exactly the same regions across paths.
+  const ordered = Uint32Array.from(selectedIndices).sort();
+  const groups = [];
+  let runCount = 0;
+  for (let i = 0; i < ordered.length;) {
+    chargePlanningVisit();
+    const first = ordered[i], y = Math.floor(first / width);
+    const left = first - y * width, start = i++;
+    let right = left + 1;
+    while (i < ordered.length && ordered[i] === ordered[i - 1] + 1 &&
+           Math.floor(ordered[i] / width) === y) {
+      right += 1;
+      i += 1;
+    }
+    if (++runCount > MAX_RUNS) return null;
+    const previous = groups[groups.length - 1];
+    const adjacent = previous && y === previous.lastY + 1 &&
+      y - previous.minY < MAX_GROUP_ROWS &&
+      left <= previous.lastRight + 1 && right >= previous.lastLeft - 1;
+    let group;
+    if (adjacent) {
+      group = previous;
+      group.minX = Math.min(group.minX, left);
+      group.maxX = Math.max(group.maxX, right - 1);
+      group.maxY = y;
+      group.lastY = y;
+      group.lastLeft = left;
+      group.lastRight = right;
+    } else {
+      if (groups.length >= MAX_REGIONS) return null;
+      group = {
+        minX:left, maxX:right - 1, minY:y, maxY:y,
+        lastY:y, lastLeft:left, lastRight:right, indices:[],
+      };
+      groups.push(group);
+    }
+    for (let j = start; j < i; j += 1) {
+      chargePlanningVisit();
+      group.indices.push(ordered[j]);
+    }
+  }
+  if (groups.length < 2) return null;
+  let totalArea = 0;
+  for (const group of groups) {
+    group.bounds = {
+      left:Math.max(0, group.minX - padding),
+      top:Math.max(0, group.minY - padding),
+      right:Math.min(width, group.maxX + 1 + padding),
+      bottom:Math.min(height, group.maxY + 1 + padding),
+    };
+    totalArea += (group.bounds.right - group.bounds.left) *
+      (group.bounds.bottom - group.bounds.top);
+    if (totalArea > maxLayerPixels) return null;
+  }
+  return groups;
+}
+
+// 010E-B2: bounded 8-connected horizontal-run components within eight-row
+// bands. Unlike the greedy previous-run planner, this joins forks, merges and
+// multiple simultaneous components irrespective of original index order.
+// Caps also bound sorting, adjacency checks, and private region allocations.
+function planConnectedTiledInpaintRunBands(selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit = () => {}) {
+  const MAX_SORTED_PIXELS = 65_536;
+  const MAX_RUNS = 4_096;
+  const MAX_LINK_CHECKS = 32_768;
+  const MAX_REGIONS = 256;
+  const BAND_HEIGHT = 8;
+  if (selectedIndices.length > MAX_SORTED_PIXELS) return null;
+  // Reserve a bounded sort allowance before cloning the frozen indices.
+  chargePlanningVisit(selectedIndices.length * 16);
+  const ordered = Uint32Array.from(selectedIndices).sort();
+  const runs = [];
+  for (let i = 0; i < ordered.length;) {
+    chargePlanningVisit();
+    const first = ordered[i], y = Math.floor(first / width);
+    const left = first - y * width, start = i++;
+    let right = left + 1;
+    while (i < ordered.length && ordered[i] === ordered[i - 1] + 1 &&
+           Math.floor(ordered[i] / width) === y) {
+      right++;
+      i++;
+    }
+    if (runs.length >= MAX_RUNS) return null;
+    runs.push({ y, left, right, start, end:i });
+  }
+  const parents = Int32Array.from({ length:runs.length }, (_, i) => i);
+  const root = index => {
+    while (parents[index] !== index) {
+      parents[index] = parents[parents[index]];
+      index = parents[index];
+    }
+    return index;
+  };
+  const join = (left, right) => {
+    const a = root(left), b = root(right);
+    if (a !== b) parents[Math.max(a, b)] = Math.min(a, b);
+  };
+  let lastY = -2, previousRow = [], currentRow = [], cursor = 0, checks = 0;
+  for (let i = 0; i < runs.length; i++) {
+    chargePlanningVisit();
+    const run = runs[i];
+    if (run.y !== lastY) {
+      previousRow = run.y === lastY + 1 ? currentRow : [];
+      currentRow = [];
+      cursor = 0;
+      lastY = run.y;
+    }
+    // Never connect across band boundaries: this bounds each private ROI's
+    // height even if the original connected component spans the whole image.
+    if (run.y % BAND_HEIGHT !== 0) {
+      while (cursor < previousRow.length && runs[previousRow[cursor]].right < run.left) {
+        if (++checks > MAX_LINK_CHECKS) return null;
+        chargePlanningVisit();
+        cursor++;
+      }
+      for (let j = cursor; j < previousRow.length; j++) {
+        const neighbor = runs[previousRow[j]];
+        if (neighbor.left > run.right) break;
+        if (++checks > MAX_LINK_CHECKS) return null;
+        chargePlanningVisit();
+        if (neighbor.right >= run.left) join(i, previousRow[j]);
+      }
+    }
+    currentRow.push(i);
+  }
+  const components = new Map();
+  for (let i = 0; i < runs.length; i++) {
+    chargePlanningVisit();
+    const run = runs[i], id = root(i);
+    let group = components.get(id);
+    if (!group) {
+      if (components.size >= MAX_REGIONS) return null;
+      group = { minX:run.left, maxX:run.right - 1,
+        minY:run.y, maxY:run.y, runs:[] };
+      components.set(id, group);
+    }
+    group.minX = Math.min(group.minX, run.left);
+    group.maxX = Math.max(group.maxX, run.right - 1);
+    group.minY = Math.min(group.minY, run.y);
+    group.maxY = Math.max(group.maxY, run.y);
+    group.runs.push(run);
+  }
+  if (components.size < 2) return null;
+  let area = 0;
+  for (const group of components.values()) {
+    chargePlanningVisit();
+    group.bounds = {
+      left:Math.max(0, group.minX - padding),
+      top:Math.max(0, group.minY - padding),
+      right:Math.min(width, group.maxX + 1 + padding),
+      bottom:Math.min(height, group.maxY + 1 + padding),
+    };
+    area += (group.bounds.right - group.bounds.left) *
+      (group.bounds.bottom - group.bounds.top);
+    if (area > maxLayerPixels) return null;
+  }
+  const groups = [...components.values()];
+  for (const group of groups) {
+    group.indices = [];
+    for (const run of group.runs) {
+      chargePlanningVisit();
+      for (let i = run.start; i < run.end; i++) {
+        chargePlanningVisit();
+        group.indices.push(ordered[i]);
+      }
+    }
+    delete group.runs;
+  }
+  return groups;
+}
+
+// Content-Aware Fill keeps source tiles private until exact-owner publication.
+// A frozen selected-index snapshot (not a full-document alpha plane) is shared
+// by synchronous and cooperative selection scanners.
+function newTiledInpaintSelection(width, height) {
+  return { selected:0, minX:width, minY:height, maxX:-1, maxY:-1, selectedIndices:[] };
+}
+
+function recordTiledInpaintSelection(scan, x, y, width, maxFillPixels) {
+  scan.selected += 1;
+  if (scan.selected <= maxFillPixels) scan.selectedIndices.push(y * width + x);
+  if (x < scan.minX) scan.minX = x;
+  if (y < scan.minY) scan.minY = y;
+  if (x > scan.maxX) scan.maxX = x;
+  if (y > scan.maxY) scan.maxY = y;
+}
+
+function* inpaintFrozenTiledSelectionSteps(source, working, scan, {
+  halo, maxLayerPixels, maxFillPixels,
+}) {
+  const { width, height } = working;
+  const { selected, minX, minY, maxX, maxY, selectedIndices } = scan;
+  const noChange = { source, changed:0, filled:0, changedTiles:0, loadedTiles:0 };
+  if (!selected || selected === width * height) return noChange;
+  if (selected > maxFillPixels) {
+    throw new RangeError('Контент-заливка: выделено больше безопасного лимита ' + maxFillPixels + ' px');
+  }
+
+  const requestedHalo = Math.trunc(Number(halo));
+  const padding = Number.isFinite(requestedHalo) ? Math.max(1, Math.min(128, requestedHalo)) : 24;
+  const bounds = {
+    left:Math.max(0, minX - padding),
+    top:Math.max(0, minY - padding),
+    right:Math.min(width, maxX + 1 + padding),
+    bottom:Math.min(height, maxY + 1 + padding),
+  };
+  const area = (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
+  if (area > maxLayerPixels) {
+    // Planning checkpoints are consumed by the cooperative runner before
+    // any private ROI is decoded. The synchronous/Worker runner simply
+    // resumes these steps; the chosen groups and native bytes stay identical.
+    const PLANNING_CHECKPOINT_PIXELS = 32_768;
+    const MAX_PLANNING_VISITS = 4_194_304;
+    let planningVisits = 0;
+    const chargePlanningVisit = (count = 1) => {
+      planningVisits += count;
+      if (planningVisits > MAX_PLANNING_VISITS) {
+        throw new RangeError('Контент-заливка: превышен лимит планирования ' + MAX_PLANNING_VISITS + ' операций');
+      }
+    };
+    // First try halo-disjoint groups for historical texture-search parity.
+    // When a connected/sparse selection merges into a huge bounding box,
+    // fall back to independent bounded tile fragments. Every fragment uses
+    // the SAME global frozen selection as the donor-exclusion authority.
+    const oversized = () => new RangeError('Контент-заливка: рабочая область ' + area + ' px превышает безопасный лимит ' + maxLayerPixels + ' px');
+    const tileSize = source.tileSize, columns = Math.ceil(width / tileSize);
+    const occupied = new Map();
+    for (const index of selectedIndices) {
+      chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+      const x = index % width, y = Math.floor(index / width);
+      const tx = Math.floor(x / tileSize), ty = Math.floor(y / tileSize);
+      const key = ty * columns + tx;
+      const cell = occupied.get(key);
+      if (cell) {
+        cell.left = Math.min(cell.left, x);
+        cell.top = Math.min(cell.top, y);
+        cell.right = Math.max(cell.right, x + 1);
+        cell.bottom = Math.max(cell.bottom, y + 1);
+        continue;
+      }
+      // Source topology is capped by MAX_PIXEL_BUFFER_SOURCE_TILES. For a wide
+      // but sparse selection, a fixed 256-cell cutoff is unnecessarily small:
+      // enforce the actual source-tile cap, then the aggregate ROI pixel budget.
+      if (occupied.size >= MAX_PIXEL_BUFFER_SOURCE_TILES) throw oversized();
+      occupied.set(key, { key, left:x, top:y, right:x + 1, bottom:y + 1 });
+    }
+    const cells = [...occupied.values()];
+    const makeFragments = () => cells.map(cell => ({ ...cell, keys:[cell.key], indices:[] }));
+    // Pairwise halo-group merging is intentionally limited to 256 occupied
+    // cells (quadratic comparisons, repeated merges). Above that threshold,
+    // plan independent bounded cells in a linear pass instead. Each cell still
+    // shares the global frozen selection donor-exclusion bitmap.
+    const groups = cells.length <= 256 ? makeFragments() : null;
+    // Preserve the old disjoint grouping whenever it fits the aggregate cap.
+    for (let i = 0; groups && i < groups.length; i += 1) {
+      let merged = false;
+      for (let j = i + 1; j < groups.length; j += 1) {
+        chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+        const a = groups[i], b = groups[j];
+        if (a.left - padding >= b.right + padding ||
+            b.left - padding >= a.right + padding ||
+            a.top - padding >= b.bottom + padding ||
+            b.top - padding >= a.bottom + padding) continue;
+        a.left = Math.min(a.left, b.left);
+        a.top = Math.min(a.top, b.top);
+        a.right = Math.max(a.right, b.right);
+        a.bottom = Math.max(a.bottom, b.bottom);
+        a.keys.push(...b.keys);
+        groups.splice(j, 1);
+        merged = true;
+        break;
+      }
+      if (merged) i = -1;
+    }
+
+    function* planRegions(candidate) {
+      const byTile = new Map();
+      for (const group of candidate) {
+        group.indices = [];
+        group.minX = width; group.minY = height; group.maxX = -1; group.maxY = -1;
+        for (const key of group.keys) byTile.set(key, group);
+      }
+      for (const index of selectedIndices) {
+        chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+        const x = index % width, y = Math.floor(index / width);
+        const group = byTile.get(Math.floor(y / tileSize) * columns + Math.floor(x / tileSize));
+        group.indices.push(index);
+        group.minX = Math.min(group.minX, x);
+        group.minY = Math.min(group.minY, y);
+        group.maxX = Math.max(group.maxX, x);
+        group.maxY = Math.max(group.maxY, y);
+      }
+      let totalArea = 0;
+      for (const group of candidate) {
+        group.bounds = {
+          left:Math.max(0, group.minX - padding), top:Math.max(0, group.minY - padding),
+          right:Math.min(width, group.maxX + 1 + padding),
+          bottom:Math.min(height, group.maxY + 1 + padding),
+        };
+        totalArea += (group.bounds.right - group.bounds.left) * (group.bounds.bottom - group.bounds.top);
+        if (totalArea > maxLayerPixels) return null;
+      }
+      return candidate;
+    }
+
+    let planned = groups?.length > 1 ? yield* planRegions(groups) : null;
+    if (!planned) planned = yield* planRegions(makeFragments());
+
+    // Dense islands can exceed the aggregate halo budget with per-tile
+    // fragments even though their filled pixels fit comfortably. Try bounded
+    // horizontal strips, optionally split into fixed-width segments. A first
+    // pass computes only group extents (not copies of millions of indices);
+    // allocate the group index lists only for the winning plan.
+    if (!planned) {
+      let best = null;
+      const segmentWidths = [...new Set([128, 256, width].map(value => Math.min(width, value)))];
+      for (const stripHeight of [32, 64, 128, 256]) {
+        for (const segmentWidth of segmentWidths) {
+          const segments = Math.ceil(width / segmentWidth);
+          const candidates = new Map();
+          let tooMany = false;
+          for (const index of selectedIndices) {
+            chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+            const y = Math.floor(index / width), x = index - y * width;
+            const key = Math.floor(y / stripHeight) * segments + Math.floor(x / segmentWidth);
+            let group = candidates.get(key);
+            if (!group) {
+              if (candidates.size >= 256) { tooMany = true; break; }
+              group = { key, minX:x, maxX:x, minY:y, maxY:y };
+              candidates.set(key, group);
+            } else {
+              group.minX = Math.min(group.minX, x);
+              group.maxX = Math.max(group.maxX, x);
+              group.minY = Math.min(group.minY, y);
+              group.maxY = Math.max(group.maxY, y);
+            }
+          }
+          if (tooMany) continue;
+          let totalArea = 0;
+          for (const group of candidates.values()) {
+            group.bounds = {
+              left:Math.max(0, group.minX - padding),
+              top:Math.max(0, group.minY - padding),
+              right:Math.min(width, group.maxX + 1 + padding),
+              bottom:Math.min(height, group.maxY + 1 + padding),
+            };
+            totalArea += (group.bounds.right - group.bounds.left) *
+              (group.bounds.bottom - group.bounds.top);
+            if (totalArea > maxLayerPixels) break;
+          }
+          if (totalArea > maxLayerPixels) continue;
+          if (!best || totalArea < best.area ||
+              (totalArea === best.area && candidates.size < best.groups.size)) {
+            best = { area:totalArea, groups:candidates, stripHeight, segmentWidth, segments };
+          }
+        }
+      }
+      if (best) {
+        // Stripe keys are geometric, so input index ordering cannot affect
+        // region execution order. Original-selection donors remain globally
+        // excluded by selectionBits in the common region executor below.
+        planned = [...best.groups.values()].sort((a, b) => a.key - b.key);
+        for (const group of planned) group.indices = [];
+        for (const index of selectedIndices) {
+          chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+          const y = Math.floor(index / width), x = index - y * width;
+          const key = Math.floor(y / best.stripHeight) * best.segments +
+            Math.floor(x / best.segmentWidth);
+          best.groups.get(key).indices.push(index);
+        }
+      }
+    }
+    // If fixed stripes still exceed the budget, try small touching horizontal
+    // runs. The planner has strict sorting/run/region caps; a pathological
+    // checkerboard falls back to the existing atomic refusal.
+    if (!planned) {
+      planned = planAdaptiveTiledInpaintRuns(
+        selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit);
+    }
+    // A forked/parallel 8-connected mask may have several runs per scanline.
+    // The greedy path cannot associate those runs across rows; use bounded
+    // union-find inside short bands before the existing atomic refusal.
+    if (!planned) {
+      planned = planConnectedTiledInpaintRunBands(
+        selectedIndices, width, height, padding, maxLayerPixels, chargePlanningVisit);
+    }
+    if (!planned) {
+      if (groups?.length === 1) throw oversized();
+      throw new RangeError('Контент-заливка: сумма рабочих областей превышает безопасный лимит ' + maxLayerPixels + ' px');
+    }
+
+    // A 1-bit global snapshot covers only frozen indices, not the mutable
+    // tile working set. Adjacent fragment halos can overlap; a selected pixel
+    // from ANY fragment is forbidden as a donor or PatchMatch context even
+    // after a previous fragment has filled it.
+    const selectionBits = new Uint8Array(Math.ceil(width * height / 8));
+    for (const index of selectedIndices) {
+      chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+      selectionBits[index >> 3] |= 1 << (index & 7);
+    }
+    let totalFilled = 0, totalChanged = 0;
+    for (const group of planned) {
+      const rect = group.bounds, regionWidth = rect.right - rect.left;
+      const mask = new Uint8Array(regionWidth * (rect.bottom - rect.top));
+      for (const index of group.indices) {
+        chargePlanningVisit();
+      if (planningVisits % PLANNING_CHECKPOINT_PIXELS === 0) yield { kind:'planningCheckpoint' };
+        const x = index % width, y = Math.floor(index / width);
+        mask[(y - rect.top) * regionWidth + (x - rect.left)] = 1;
+      }
+      const region = yield { kind:'readRegion', bounds:rect };
+      const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
+        isAllowed:(x, y) => mask[y * regionWidth + x] === 1,
+        isDonorExcluded:(x, y) => {
+          const index = (rect.top + y) * width + rect.left + x;
+          return (selectionBits[index >> 3] & (1 << (index & 7))) !== 0;
+        },
+        maxLayerPixels, maxFillPixels, preserveAlpha:true,
+      } };
+      if (filled !== group.indices.length) {
+        throw new RangeError('Контент-заливка: для отдельной области не найдены все доноры');
+      }
+      totalChanged += yield { kind:'writeRegion', region };
+      totalFilled += filled;
+      // No private tile escapes before the full job finishes.
+      yield;
+    }
+    const serialized = totalChanged ? yield { kind:'serialize' } : source;
+    return {
+      source:serialized, changed:totalChanged,
+      filled:totalFilled, changedTiles:working.dirtyTileCount, loadedTiles:working.loadedTileCount,
+    };
+  }
+  // The per-ROI mask is bounded by maxLayerPixels; no full-document mask or
+  // second call into potentially mutable/expensive selection geometry is needed.
+  const selectionMask = new Uint8Array(area);
+  const regionWidth = bounds.right - bounds.left;
+  for (const index of selectedIndices) {
+    const x = index % width, y = Math.floor(index / width);
+    selectionMask[(y - bounds.top) * regionWidth + (x - bounds.left)] = 1;
+  }
+  const region = yield { kind:'readRegion', bounds };
+  const filled = yield { kind:'inpaint', buffer:region.buffer, options:{
+    isAllowed:(x, y) => selectionMask[y * regionWidth + x] === 1,
+    maxLayerPixels,
+    maxFillPixels, preserveAlpha:true,
+  } };
+  if (!filled) return { ...noChange, loadedTiles:working.loadedTileCount };
+  const changed = yield { kind:'writeRegion', region };
+  // Yield before serializing the one-ROI result.
+  yield;
+  const serialized = changed ? yield { kind:'serialize' } : source;
+  return {
+    source:serialized,
+    changed,
+    filled,
+    changedTiles:working.dirtyTileCount,
+    loadedTiles:working.loadedTileCount,
+  };
+}
+
+// Synchronous and detached Worker callers exhaust the same deterministic steps.
+function inpaintFrozenTiledSelection(source, working, scan, options) {
+  const steps = inpaintFrozenTiledSelectionSteps(source, working, scan, options);
+  let step = steps.next();
+  while (!step.done) {
+    if (step.value?.kind === 'inpaint') {
+      step = steps.next(inpaintPixelBuffer(step.value.buffer, step.value.options));
+    } else if (step.value?.kind === 'readRegion') {
+      step = steps.next(working.readRegion(step.value.bounds));
+    } else if (step.value?.kind === 'writeRegion') {
+      step = steps.next(working.writeRegion(step.value.region));
+    } else if (step.value?.kind === 'serialize') {
+      step = steps.next(working.serialize());
+    } else {
+      step = steps.next();
+    }
+  }
+  return step.value;
+}
+
+// The asynchronous fallback also yields inside the deterministic single-ROI
+// kernel, without committing its working tiles until the entire job finishes.
+async function inpaintFrozenTiledSelectionCooperative(source, working, scan, options, {
+  isCancelled, yieldControl,
+}) {
+  const cancelled = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true });
+  const steps = inpaintFrozenTiledSelectionSteps(source, working, scan, options);
+  let step = steps.next();
+  while (!step.done) {
+    if (isCancelled()) return cancelled();
+    if (step.value?.kind === 'inpaint') {
+      const filled = await inpaintPixelBufferCooperative(step.value.buffer, step.value.options,
+        { isCancelled, yieldControl });
+      if (filled === null || isCancelled()) return cancelled();
+      step = steps.next(filled);
+      continue;
+    }
+    if (step.value?.kind === 'readRegion') {
+      const region = await working.readRegionCooperative(step.value.bounds, { isCancelled, yieldControl });
+      if (region === null || isCancelled()) return cancelled();
+      step = steps.next(region);
+      continue;
+    }
+    if (step.value?.kind === 'writeRegion') {
+      const changed = await working.writeRegionCooperative(step.value.region, { isCancelled, yieldControl });
+      if (changed === null || isCancelled()) return cancelled();
+      step = steps.next(changed);
+      continue;
+    }
+    if (step.value?.kind === 'serialize') {
+      const serialized = await working.serializeCooperative({ isCancelled, yieldControl });
+      if (serialized === null || isCancelled()) return cancelled();
+      step = steps.next(serialized);
+      continue;
+    }
+    await yieldControl();
+    if (isCancelled()) return cancelled();
+    step = steps.next();
+  }
+  return isCancelled() ? cancelled() : step.value;
+}
+
+// Frozen Worker indices use one validator for synchronous and cooperative paths.
+function prepareTiledInpaintFromIndices(source, selectedIndices, maxBytes, maxFillPixels) {
+  if (!Array.isArray(selectedIndices) && !(selectedIndices instanceof Uint32Array)) {
+    throw new TypeError('Tiled inpaint Worker: frozen selection indices must be an Array or Uint32Array');
+  }
+  const width = Number(source?.width);
+  const height = Number(source?.height);
+  const total = width * height;
+  const maxPixels = Math.floor(MAX_PIXEL_BUFFER_SOURCE_BYTES / 3);
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
+      width < 1 || height < 1 || !Number.isSafeInteger(total) || total > maxPixels) {
+    throw new RangeError('Tiled inpaint Worker: invalid source geometry');
+  }
+  if (selectedIndices.length > total) {
+    throw new RangeError('Tiled inpaint Worker: invalid or duplicate selected index');
+  }
+
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const seen = new Uint8Array(Math.ceil(total / 8));
+  const scan = newTiledInpaintSelection(width, height);
+  for (const index of selectedIndices) {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= total) {
+      throw new RangeError('Tiled inpaint Worker: invalid or duplicate selected index');
+    }
+    const byte = Math.floor(index / 8), bit = 1 << (index % 8);
+    if (seen[byte] & bit) {
+      throw new RangeError('Tiled inpaint Worker: invalid or duplicate selected index');
+    }
+    seen[byte] |= bit;
+    recordTiledInpaintSelection(scan, index % width, Math.floor(index / width), width, maxFillPixels);
+  }
+  return { working, scan };
+}
+function inpaintTiledPixelBufferSourceFromIndices(source, {
+  selectedIndices,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  const prepared = prepareTiledInpaintFromIndices(source, selectedIndices, maxBytes, maxFillPixels);
+  if (!prepared) return null;
+  return inpaintFrozenTiledSelection(source, prepared.working, prepared.scan, { halo, maxLayerPixels, maxFillPixels });
+}
+
+// UI fallback yields before the first ROI, within large kernels, and between
+// private ROIs. No source tile escapes before the complete job commits.
+async function inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+  selectedIndices,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+} = {}) {
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  const prepared = prepareTiledInpaintFromIndices(source, selectedIndices, maxBytes, maxFillPixels);
+  if (!prepared) return null;
+  const cancelled = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true });
+  if (isCancelled()) return cancelled();
+  await yieldControl();
+  if (isCancelled()) return cancelled();
+  return inpaintFrozenTiledSelectionCooperative(source, prepared.working, prepared.scan,
+    { halo, maxLayerPixels, maxFillPixels }, { isCancelled, yieldControl });
+}
+
+// Historical synchronous API remains deterministic for callers and profiles.
+function inpaintTiledPixelBufferSource(source, {
+  isAllowed,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen isAllowed predicate');
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const { width, height } = working;
+  const scan = newTiledInpaintSelection(width, height);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (isAllowed(x, y)) recordTiledInpaintSelection(scan, x, y, width, maxFillPixels);
+    }
+  }
+  return inpaintFrozenTiledSelection(source, working, scan, { halo, maxLayerPixels, maxFillPixels });
+}
+
+// Yield through a real macrotask between bounded scan chunks so navigation or
+// document changes can invalidate a pending job before expensive ROI decoding.
+// The fallback also yields inside a large private ROI kernel, while the
+// detached Worker remains the preferred path for expensive selections.
+async function inpaintTiledPixelBufferSourceCooperative(source, {
+  isAllowed,
+  isCancelled = () => false,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  scanChunkPixels = 32_768,
+  halo = 24,
+  maxLayerPixels = 8_000_000,
+  maxFillPixels = 2_000_000,
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+} = {}) {
+  if (typeof isAllowed !== 'function') throw new TypeError('Контент-заливка требует frozen isAllowed predicate');
+  if (typeof isCancelled !== 'function' || typeof yieldControl !== 'function') {
+    throw new TypeError('Контент-заливка: неверный callback отмены или yield');
+  }
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) return null;
+  const { width, height } = working;
+  const scan = newTiledInpaintSelection(width, height);
+  const chunk = Math.max(1, Math.min(262_144, Math.trunc(Number(scanChunkPixels) || 32_768)));
+  const cancelled = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true });
+  const total = width * height;
+  for (let start = 0; start < total; start += chunk) {
+    if (isCancelled()) return cancelled();
+    if (start > 0) {
+      await yieldControl();
+      if (isCancelled()) return cancelled();
+    }
+    const end = Math.min(total, start + chunk);
+    for (let index = start; index < end; index += 1) {
+      const y = Math.floor(index / width);
+      const x = index - y * width;
+      if (isAllowed(x, y)) recordTiledInpaintSelection(scan, x, y, width, maxFillPixels);
+    }
+  }
+  if (isCancelled()) return cancelled();
+  return inpaintFrozenTiledSelectionCooperative(source, working, scan, { halo, maxLayerPixels, maxFillPixels }, { isCancelled, yieldControl });
 }
 function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_BYTES}={}){
   const safe=sanitizeSerializedPixelBufferSource(source,{maxBytes}); if(!safe)throw new TypeError('Некорректный serialized PixelBuffer source');
@@ -6924,9 +8532,394 @@ function deserializePixelBufferSource(source,{maxBytes=MAX_PIXEL_BUFFER_SOURCE_B
   return createPixelBuffer({width:safe.width,height:safe.height,model:safe.model,channels:safe.channels,bitsPerChannel:safe.bitsPerChannel,
     colorSpace:safe.colorSpace,alphaMode:safe.alphaMode,profileName:safe.profileName,data});
 }
+
+// Serialized sources are immutable envelopes: decoding always allocates fresh
+// typed data. That first decoded plane is already caller-owned and writable;
+// cloning it again would allocate an unnecessary second full native plane.
+function deserializeEditablePixelBufferSource(source, {
+  maxBytes = MAX_PIXEL_BUFFER_SOURCE_BYTES,
+  requireAlpha = false,
+} = {}) {
+  const decoded = deserializePixelBufferSource(source, { maxBytes });
+  const alphaChannels = channelRange(decoded.model).max;
+  return requireAlpha && decoded.channels !== alphaChannels
+    ? pixelBufferWithStraightAlpha(decoded)
+    : decoded;
+}
 function pixelBufferByteLength(buffer) {
   if (!isPixelBuffer(buffer)) throw new TypeError('Ожидался PixelBuffer');
   return buffer.data.byteLength;
+}
+
+// ---- src/core/tiled-inpaint-worker-client.js ----
+/**
+ * Stage 003: detached tiled inpaint Worker lifecycle (used by the UI).
+ *
+ * No live document objects cross the boundary. A new job supersedes the old
+ * worker, and a caller must call cancel() when its document/target changes.
+ * isCurrent is checked before dispatch, periodically while pending (opt-in),
+ * and again before accepting a result. worker.terminate() stops stale kernels.
+ *
+ * Accept both browser Worker events and Node worker_threads events, allowing
+ * the same owner/cancellation contract to be tested without a browser Worker
+ * bootstrap (file:// module Worker loading is not supported by this seam).
+ */
+function createTiledInpaintWorkerJobController({
+  createWorker,
+  pollIntervalMs = 0,
+  schedulePoll = setInterval,
+  cancelPoll = clearInterval,
+  // The portable Node client defaults to no deadline; browser enables one.
+  maxRunMs = 0,
+  scheduleDeadline = setTimeout,
+  cancelDeadline = clearTimeout,
+} = {}) {
+  if (typeof createWorker !== 'function') {
+    throw new TypeError('Tiled inpaint Worker: createWorker is required');
+  }
+  const pollDelay = Number.isFinite(pollIntervalMs) && pollIntervalMs > 0
+    ? Math.max(1, Math.trunc(pollIntervalMs)) : 0;
+  if (pollDelay && (typeof schedulePoll !== 'function' || typeof cancelPoll !== 'function')) {
+    throw new TypeError('Tiled inpaint Worker: invalid polling timer');
+  }
+  if (!Number.isSafeInteger(maxRunMs) || maxRunMs < 0) {
+    throw new RangeError('Tiled inpaint Worker: invalid execution deadline');
+  }
+  if (maxRunMs && (typeof scheduleDeadline !== 'function' ||
+                   typeof cancelDeadline !== 'function')) {
+    throw new TypeError('Tiled inpaint Worker: invalid deadline timer');
+  }
+  let active = null;
+  let nextId = 0;
+
+  function cancel() {
+    if (!active) return false;
+    active.cancel();
+    return true;
+  }
+
+  function run(job, { isCurrent = () => true } = {}) {
+    // Claim this generation BEFORE invoking user-controlled cancel/isCurrent
+    // callbacks or Worker factories. Any reentrant run wins over this one.
+    const id = ++nextId;
+    // Superseding a job must stop it even if the new request is stale.
+    cancel();
+    if (typeof isCurrent !== 'function') {
+      return Promise.reject(new TypeError('Tiled inpaint Worker: isCurrent must be a function'));
+    }
+    const current = () => {
+      try { return Boolean(isCurrent()); } catch { return false; }
+    };
+    if (!current() || id !== nextId) return Promise.resolve({ cancelled:true });
+
+    let worker;
+    try {
+      worker = createWorker();
+      if (!worker || typeof worker.postMessage !== 'function' ||
+          typeof worker.terminate !== 'function') {
+        // A factory may return a partially usable Worker. Release it before
+        // rejecting so a broken adapter does not leave a live thread behind.
+        try {
+          const termination = worker?.terminate?.();
+          if (termination && typeof termination.catch === 'function') termination.catch(() => {});
+        } catch { /* preserve the invalid Worker error */ }
+        throw new TypeError('Tiled inpaint Worker: invalid Worker instance');
+      }
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    // A Worker factory (or owner callback) can synchronously begin a newer
+    // run. Release the orphaned instance instead of replacing that owner's
+    // active handle or allowing a stale Worker to publish.
+    if (id !== nextId || !current() || id !== nextId) {
+      try {
+        const termination = worker.terminate();
+        if (termination && typeof termination.catch === 'function') termination.catch(() => {});
+      } catch { /* the superseded Worker must never publish */ }
+      return Promise.resolve({ cancelled:true });
+    }
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let dispatched = false;
+      let pollTimer = null;
+      let deadlineTimer = null;
+      let detach = () => {};
+      const terminate = () => {
+        try {
+          const result = worker.terminate();
+          // Node returns a Promise; a failed termination cannot turn a
+          // cancelled/stale result into an unhandled rejection.
+          if (result && typeof result.catch === 'function') result.catch(() => {});
+        } catch { /* the result is already settled; never publish it */ }
+      };
+      const finish = (result, error) => {
+        if (settled) return;
+        settled = true;
+        if (pollTimer !== null) {
+          try { cancelPoll(pollTimer); } catch { /* never leave a job pending on timer cleanup */ }
+          pollTimer = null;
+        }
+        if (deadlineTimer !== null) {
+          try { cancelDeadline(deadlineTimer); } catch { /* never publish stale tiles */ }
+          deadlineTimer = null;
+        }
+        detach();
+        if (active?.id === id) active = null;
+        terminate();
+        if (error) reject(error);
+        else resolve(result);
+      };
+      const stop = () => finish({ cancelled:true });
+      const fail = error => finish(null, error instanceof Error ? error : new Error(String(error?.message || error)));
+      const message = data => {
+        if (settled) return;
+        // Checking the owner can itself trigger a newer run (and settle us).
+        // Never post a job or publish a reply after that reentrant takeover.
+        if (!current() || id !== nextId || settled) { stop(); return; }
+        if (!dispatched) {
+          if (data?.ready !== true) return;
+          dispatched = true;
+          try { worker.postMessage({ ...job, id }); }
+          catch (error) { fail(error); }
+          return;
+        }
+        if (data?.id !== id) return;
+        if (data.ok === true) {
+          finish(data.result);
+        } else if (data.ok === false) {
+          const error = new Error(String(data.error?.message || 'Worker compute failed'));
+          error.name = String(data.error?.name || 'Error');
+          fail(error);
+        } else {
+          fail(new TypeError('Tiled inpaint Worker: invalid reply'));
+        }
+      };
+
+      // Subscribe may synchronously emit ready/error (or a test double may
+      // answer in postMessage). Register ownership and detachment first so
+      // a reentrant finish can clear the active job and release every listener.
+      active = { id, cancel:stop };
+      try {
+        if (typeof worker.addEventListener === 'function') {
+          const onMessage = event => message(event.data);
+          const onError = event => fail(new Error(String(event?.message || 'Worker error')));
+          // A structured-clone decoding failure emits messageerror, not error.
+          // Without this listener the awaiting UI job would never settle.
+          const onMessageError = () => fail(new Error('Tiled inpaint Worker: message deserialization failed'));
+          detach = () => {
+            worker.removeEventListener('message', onMessage);
+            worker.removeEventListener('error', onError);
+            worker.removeEventListener('messageerror', onMessageError);
+          };
+          worker.addEventListener('message', onMessage);
+          worker.addEventListener('error', onError);
+          worker.addEventListener('messageerror', onMessageError);
+        } else if (typeof worker.on === 'function' && typeof worker.off === 'function') {
+          const onMessage = data => message(data);
+          const onError = error => fail(error);
+          const onMessageError = () => fail(new Error('Tiled inpaint Worker: message deserialization failed'));
+          const onExit = code => fail(new Error('Tiled inpaint Worker exited before reply: ' + code));
+          detach = () => {
+            worker.off('message', onMessage);
+            worker.off('error', onError);
+            worker.off('messageerror', onMessageError);
+            worker.off('exit', onExit);
+          };
+          worker.on('message', onMessage);
+          worker.on('error', onError);
+          worker.on('messageerror', onMessageError);
+          worker.on('exit', onExit);
+        } else {
+          fail(new TypeError('Tiled inpaint Worker: missing message event API'));
+          return;
+        }
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      // A callback could have settled mid-subscription, before all handlers
+      // were registered: remove the late registrations as well.
+      if (settled) { detach(); return; }
+      // An owner can change synchronously inside a Worker factory/subscription.
+      if (!current()) { stop(); return; }
+      if (pollDelay) {
+        try {
+          // Poll only while a Worker is alive: a stale layer/lock/source may
+          // change without any Worker message or explicit document reset.
+          const timer = schedulePoll(() => { if (!current()) stop(); }, pollDelay);
+          // Handle even a synchronous/reentrant injected scheduler safely.
+          if (settled) cancelPoll(timer);
+          else pollTimer = timer;
+        } catch (error) { fail(error); }
+      }
+      if (!settled && maxRunMs) {
+        try {
+          // The UI-thread timer can stop a CPU-bound Worker that never replies.
+          // A timeout is a compute failure, never a cooperative fallback.
+          const token = scheduleDeadline(
+            () => fail(new Error('Tiled inpaint Worker: timed out after ' + maxRunMs + ' ms')),
+            maxRunMs,
+          );
+          // A test scheduler may fire synchronously during registration.
+          if (settled) {
+            try { cancelDeadline(token); } catch { /* already stopped */ }
+          } else {
+            deadlineTimer = token;
+          }
+        } catch (error) { fail(error); }
+      }
+    });
+  }
+
+  return { run, cancel };
+}
+
+// ---- src/core/tiled-inpaint-browser-worker.js ----
+/**
+ * Browser file:// adapter for the generated classic tiled-inpaint Worker.
+ * No ESM importScripts/fetch is issued by the Worker. A failed bootstrap is
+ * reported as { unavailable:true } so the caller can use cooperative compute;
+ * protocol/compute errors still reject instead of silently changing results.
+ */
+function createBrowserTiledInpaintWorkerController({
+  documentRef = globalThis.document,
+  globalRef = globalThis,
+  WorkerType = globalThis.Worker,
+  BlobType = globalThis.Blob,
+  URLApi = globalThis.URL,
+  loadTimeoutMs = 5000,
+  // UI watchdog; no successful or stale result may arrive after this deadline.
+  jobTimeoutMs = 180_000,
+} = {}) {
+  const supplierName = '__zpeTiledInpaintWorkerSource';
+  let sourcePromise = null;
+  let source = null;
+  let unavailable = false;
+  let generation = 0;
+  // Loading the file:// supplier is shared, but each caller must be able to
+  // stop awaiting it immediately when cancelled or superseded.
+  const pendingBootstraps = new Set();
+  function interruptPendingBootstraps() {
+    for (const interrupt of pendingBootstraps) interrupt();
+    pendingBootstraps.clear();
+  }
+
+  const currentSource = () => {
+    const value = globalRef?.[supplierName];
+    return typeof value === 'string' && value.startsWith('/* ZeTer tiled Content-Aware Worker.')
+      ? value : null;
+  };
+
+  function loadSource() {
+    if (unavailable) return Promise.resolve(null);
+    if (source) return Promise.resolve(source);
+    if (typeof WorkerType !== 'function' || typeof BlobType !== 'function' ||
+        typeof URLApi?.createObjectURL !== 'function' || typeof URLApi?.revokeObjectURL !== 'function') {
+      unavailable = true;
+      return Promise.resolve(null);
+    }
+    const existing = currentSource();
+    if (existing) { source = existing; return Promise.resolve(source); }
+    if (sourcePromise) return sourcePromise;
+    if (!documentRef?.createElement || !documentRef?.head?.appendChild) {
+      unavailable = true;
+      return Promise.resolve(null);
+    }
+    sourcePromise = new Promise(resolve => {
+      let script;
+      let timer;
+      let finished = false;
+      const finish = candidate => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        if (script) {
+          script.onload = null;
+          script.onerror = null;
+          script.remove?.();
+        }
+        source = candidate;
+        if (!candidate) unavailable = true;
+        resolve(candidate);
+      };
+      try {
+        script = documentRef.createElement('script');
+        script.async = true;
+        script.onload = () => finish(currentSource());
+        script.onerror = () => finish(null);
+        script.src = new URL('./src/core/tiled-inpaint-worker-source.js', documentRef.baseURI).href;
+        timer = setTimeout(() => finish(null), Math.max(1, Number(loadTimeoutMs) || 5000));
+        documentRef.head.appendChild(script);
+      } catch {
+        finish(null);
+      }
+    });
+    return sourcePromise;
+  }
+
+  class BootstrapUnavailableError extends Error {}
+  const client = createTiledInpaintWorkerJobController({
+    // Exact-owner checks must terminate a stale in-flight computation even
+    // when the Worker is CPU-bound and cannot send another message.
+    pollIntervalMs:50,
+    maxRunMs:jobTimeoutMs,
+    createWorker() {
+      let url;
+      try {
+        url = URLApi.createObjectURL(new BlobType([source], { type:'text/javascript' }));
+        return new WorkerType(url);
+      } catch (error) {
+        unavailable = true;
+        throw new BootstrapUnavailableError(String(error?.message || error));
+      } finally {
+        if (url) {
+          try { URLApi.revokeObjectURL(url); } catch { /* resource already handed to Worker */ }
+        }
+      }
+    },
+  });
+
+  function cancel() {
+    generation += 1;
+    interruptPendingBootstraps();
+    return client.cancel();
+  }
+
+  async function run(job, { isCurrent = () => true } = {}) {
+    const owner = ++generation;
+    interruptPendingBootstraps();
+    client.cancel();
+    if (typeof isCurrent !== 'function') throw new TypeError('Tiled inpaint Worker: isCurrent must be a function');
+    const current = () => {
+      try { return owner === generation && Boolean(isCurrent()); }
+      catch { return false; }
+    };
+    if (!current()) return { cancelled:true };
+    // Do not hold a stale UI command until the supplier script loads or times
+    // out (up to loadTimeoutMs). Keep the shared loader alive for a successor.
+    let interrupt;
+    const interrupted = new Promise(resolve => {
+      interrupt = () => resolve(null);
+      pendingBootstraps.add(interrupt);
+    });
+    let ready;
+    try {
+      ready = await Promise.race([loadSource(), interrupted]);
+    } finally {
+      pendingBootstraps.delete(interrupt);
+    }
+    if (!current()) return { cancelled:true };
+    if (!ready) return { unavailable:true };
+    try {
+      return await client.run(job, { isCurrent:current });
+    } catch (error) {
+      if (error instanceof BootstrapUnavailableError) return current() ? { unavailable:true } : { cancelled:true };
+      throw error;
+    }
+  }
+
+  return { run, cancel };
 }
 
 // ---- src/core/color-management.js ----
@@ -8377,6 +10370,34 @@ function applyAdjustmentPixels(imageData,adjustment) {
   return imageData;
 }
 
+// Non-separable RGB modes: Color, Hue, Saturation and Luminosity.
+function colorBlendPixel(base, source, index, mode = 'color') {
+  const lum = (r,g,b) => .3*r + .59*g + .11*b;
+  const l = mode === 'luminosity' ? lum(source[index],source[index+1],source[index+2]) / 255 : lum(base[index],base[index+1],base[index+2]) / 255;
+  const rgb = [source[index]/255, source[index+1]/255, source[index+2]/255];
+  // Hue = SetLum(SetSat(Cs, Sat(Cb)), Lum(Cb)). A neutral source has no hue.
+  if (mode === 'hue') {
+    const lo = Math.min(...rgb), span = Math.max(...rgb) - lo;
+    const sat = (Math.max(base[index],base[index+1],base[index+2]) - Math.min(base[index],base[index+1],base[index+2])) / 255;
+    for (let c=0;c<3;c++) rgb[c] = span > 0 ? (rgb[c]-lo)*sat/span : 0;
+  }
+  // Saturation = SetLum(SetSat(Cb, Sat(Cs)), Lum(Cb)).
+  if (mode === 'saturation') {
+    const sat = Math.max(...rgb) - Math.min(...rgb);
+    const backdrop = [base[index]/255, base[index+1]/255, base[index+2]/255];
+    const lo = Math.min(...backdrop), span = Math.max(...backdrop) - lo;
+    for (let c=0;c<3;c++) rgb[c] = span > 0 ? (backdrop[c]-lo)*sat/span : 0;
+  }
+  // Luminosity = SetLum(Cb, Lum(Cs)).
+  if (mode === 'luminosity') for (let c=0;c<3;c++) rgb[c] = base[index+c]/255;
+  const delta = l - lum(...rgb);
+  for (let c=0;c<3;c++) rgb[c] += delta;
+  const low = Math.min(...rgb), high = Math.max(...rgb);
+  if (low < 0) for (let c=0;c<3;c++) rgb[c] = l+(rgb[c]-l)*l/(l-low);
+  if (high > 1) for (let c=0;c<3;c++) rgb[c] = l+(rgb[c]-l)*(1-l)/(high-l);
+  return rgb.map(v=>Math.max(0,Math.min(1,v)));
+}
+
 function blendAdjustmentChannel(base,effect,mode) {
   if(mode==='multiply')return base*effect;
   if(mode==='screen')return 1-(1-base)*(1-effect);
@@ -8396,6 +10417,32 @@ function blendAdjustmentChannel(base,effect,mode) {
   if(mode==='exclusion')return base+effect-2*base*effect;
   return effect;
 }
+
+// Blend a finished clipping stack once over the actual backdrop. Keep the
+// source immutable; round only the final straight RGBA values.
+function compositeClippingStackPixels(targetImageData, sourceImageData, mode) {
+  const target = targetImageData.data;
+  const source = sourceImageData.data;
+  for (let i = 0; i < target.length; i += 4) {
+    const a = source[i + 3] / 255;
+    if (a === 0) continue;
+    const b = target[i + 3] / 255;
+    if (b === 0) {
+      target.set(source.subarray(i, i + 4), i);
+      continue;
+    }
+    const alpha = a + b * (1 - a);
+    const color = (mode === 'color' || mode === 'hue' || mode === 'saturation' || mode === 'luminosity') ? colorBlendPixel(target,source,i,mode) : null;
+    for (let c = 0; c < 3; c++) {
+      const cb = target[i + c] / 255;
+      const cs = source[i + c] / 255;
+      const blended = color ? color[c] : blendAdjustmentChannel(cb, cs, mode);
+      target[i + c] = Math.round(255 * (a * (1 - b) * cs + a * b * blended + (1 - a) * b * cb) / alpha);
+    }
+    target[i + 3] = Math.round(alpha * 255);
+  }
+  return targetImageData;
+}
 function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity=1,blendMode='source-over'}={}) {
   if(!baseImageData?.data||!effectImageData?.data||baseImageData.data.length!==effectImageData.data.length)return baseImageData;
   const layerOpacity=clampAdjustment(opacity,0,1,1);
@@ -8407,14 +10454,81 @@ function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity=1,blen
     if(baseAlpha<=0||effectAlpha<=0)continue;
     const coverage=Math.min(1,effectAlpha/baseAlpha)*layerOpacity;
     if(coverage<=0)continue;
+    const color = (blendMode === 'color' || blendMode === 'hue' || blendMode === 'saturation' || blendMode === 'luminosity') ? colorBlendPixel(base,effect,index,blendMode) : null;
     for(let channel=0;channel<3;channel+=1){
       const original=base[index+channel]/255;
       const adjusted=effect[index+channel]/255;
-      const blended=blendAdjustmentChannel(original,adjusted,blendMode);
+      const blended=color ? color[channel] : blendAdjustmentChannel(original,adjusted,blendMode);
       base[index+channel]=Math.round(Math.max(0,Math.min(1,original+(blended-original)*coverage))*255);
     }
   }
   return baseImageData;
+}
+
+// Clipping adjustments operate on the raster base, not on the already
+// composited backdrop. Transfer only the base's premultiplied RGB change back
+// into the destination: this preserves destination alpha and the pixels below
+// a translucent base. The effect's alpha includes adjustment mask coverage.
+function compositeClippedAdjustmentPixels(targetImageData, baseImageData, effectImageData,
+  { opacity = 1, blendMode = 'source-over' } = {}) {
+  const target = targetImageData?.data;
+  const base = baseImageData?.data;
+  const effect = effectImageData?.data;
+  if (!target || !base || !effect || target.length !== base.length || base.length !== effect.length)
+    return targetImageData;
+  const layerOpacity = clampAdjustment(opacity, 0, 1, 1);
+  if (layerOpacity <= 0) return targetImageData;
+  for (let index = 0; index < target.length; index += 4) {
+    const baseAlpha = base[index + 3];
+    const targetAlpha = target[index + 3];
+    const effectAlpha = effect[index + 3];
+    if (baseAlpha <= 0 || targetAlpha <= 0 || effectAlpha <= 0) continue;
+    const amount = (baseAlpha / targetAlpha) *
+      Math.min(1, effectAlpha / baseAlpha) * layerOpacity;
+    if (amount <= 0) continue;
+    const color = (blendMode === 'color' || blendMode === 'hue' || blendMode === 'saturation' || blendMode === 'luminosity') ? colorBlendPixel(base,effect,index,blendMode) : null;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const original = base[index + channel] / 255;
+      const adjusted = effect[index + channel] / 255;
+      const blended = color ? color[channel] : blendAdjustmentChannel(original, adjusted, blendMode);
+      target[index + channel] = Math.round(Math.max(0, Math.min(255,
+        target[index + channel] + (blended * 255 - base[index + channel]) * amount
+      )));
+    }
+  }
+  return targetImageData;
+}
+
+// A clipped raster overlay changes the *source stack colors*, not its matte.
+// The render caller already applied raster opacity and pixel masks to overlay
+// alpha. Do not multiply that alpha by the base a second time: the base alpha
+// is used only to transfer the RGB delta into the visible parent composite.
+function compositeClippedRasterPixels(targetImageData, baseImageData, overlayImageData,
+  { blendMode = 'source-over' } = {}) {
+  const target = targetImageData?.data;
+  const base = baseImageData?.data;
+  const overlay = overlayImageData?.data;
+  if (!target || !base || !overlay || target.length !== base.length || base.length !== overlay.length)
+    return targetImageData;
+  for (let index = 0; index < target.length; index += 4) {
+    const baseAlpha = base[index + 3];
+    const targetAlpha = target[index + 3];
+    const overlayAlpha = overlay[index + 3];
+    if (baseAlpha <= 0 || targetAlpha <= 0 || overlayAlpha <= 0) continue;
+    const overlayCoverage = overlayAlpha / 255;
+    const contribution = Math.min(1, baseAlpha / targetAlpha);
+    const color = (blendMode === 'color' || blendMode === 'hue' || blendMode === 'saturation' || blendMode === 'luminosity') ? colorBlendPixel(base,overlay,index,blendMode) : null;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const original = base[index + channel];
+      const blended = color ? color[channel] : blendAdjustmentChannel(original / 255, overlay[index + channel] / 255, blendMode);
+      const corrected = Math.round(Math.max(0, Math.min(255,
+        original + (blended * 255 - original) * overlayCoverage)));
+      base[index + channel] = corrected;
+      target[index + channel] = Math.round(Math.max(0, Math.min(255,
+        target[index + channel] + (corrected - original) * contribution)));
+    }
+  }
+  return targetImageData;
 }
 function adjustmentModelEqual(left,right) {
   return JSON.stringify(sanitizeAdjustmentModel(left))===JSON.stringify(sanitizeAdjustmentModel(right));
@@ -8426,7 +10540,7 @@ const uid = (prefix = 'layer') => `${prefix}-${Date.now().toString(36)}-${(++lay
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const bounded = (value, fallback, min, max) => clamp(finite(value, fallback), min, max);
 const shortText = (value, fallback = '', max = 500) => String(value ?? fallback).slice(0, max);
-const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion']);
+const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion','color','hue','saturation','luminosity']);
 const GROUP_BLEND_MODES = new Set(['pass-through', ...BLEND_MODES]);
 const PROJECT_VERSION = 1;
 const DEFAULT_LAYER_FILTERS = Object.freeze({
@@ -8598,6 +10712,8 @@ function createVectorMask(overrides = {}) {
     enabled: true,
     invert: false,
     linked: true,
+    density: 1,
+    feather: 0,
     fillStartsWithAllPixels: false,
     subpaths: [],
     ...overrides,
@@ -8638,6 +10754,7 @@ function createLayerGroup(overrides = {}) {
     opacity: 1,
     blendMode: 'pass-through',
     parentGroupId: null,
+    mask: null,
     ...overrides,
   };
 }
@@ -9066,6 +11183,8 @@ function sanitizeVectorMask(mask) {
     enabled: mask.enabled !== false,
     invert: mask.invert === true,
     linked: mask.linked !== false,
+    density: bounded(mask.density, 1, 0, 1),
+    feather: bounded(mask.feather, 0, 0, 250),
     fillStartsWithAllPixels: mask.fillStartsWithAllPixels === true,
     subpaths,
   });
@@ -9365,6 +11484,59 @@ function sanitizePsdAdjustment(value) {
 
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
+// Keep the original Bayer bytes separate from the disposable 8-bit display preview.
+// RAW source survives .zpe Undo/Redo and re-open; never silently claim full DNG parity.
+function sanitizeRawDng(value, width, height) {
+  if (!value || typeof value !== 'object' || typeof value.dataUrl !== 'string' ||
+      value.dataUrl.length > 67_110_000 ||
+      !value.dataUrl.startsWith('data:application/x-adobe-dng;base64,') ||
+      !Number.isInteger(value.width) || !Number.isInteger(value.height) ||
+      value.width < 2 || value.height < 2 || value.width > 12000 || value.height > 12000 ||
+      value.width * value.height > 16_000_000) return null;
+  const d=value.development;
+  const exposure=Number(d?.exposure), wbRed=Number(d?.wbRed), wbBlue=Number(d?.wbBlue);
+  // Legacy .zpe projects default to neutral tone; invalid explicit tone fails closed.
+  const highlights=d?.highlights === undefined ? 0 : d.highlights;
+  const shadows=d?.shadows === undefined ? 0 : d.shadows;
+  const contrast=d?.contrast === undefined ? 0 : d.contrast;
+  const demosaic=d?.demosaic;
+  // Legacy RAW projects default to 0 EV. Invalid explicit metadata fails closed;
+  // actual future development always re-reads BaselineExposure from native bytes.
+  const baselineExposure=value.baselineExposure === undefined ? 0 : value.baselineExposure;
+  const baselineExposureOffset=value.baselineExposureOffset === undefined ? 0 : value.baselineExposureOffset;
+  if (!Number.isFinite(exposure) || exposure < -5 || exposure > 5 ||
+      !Number.isFinite(wbRed) || wbRed < 0.25 || wbRed > 4 ||
+      !Number.isFinite(wbBlue) || wbBlue < 0.25 || wbBlue > 4 ||
+      typeof highlights !== 'number' || !Number.isFinite(highlights) || highlights < -1 || highlights > 1 ||
+      typeof shadows !== 'number' || !Number.isFinite(shadows) || shadows < -1 || shadows > 1 ||
+      typeof contrast !== 'number' || !Number.isFinite(contrast) || contrast < -1 || contrast > 1 ||
+      (demosaic!==undefined && demosaic!=='bilinear' && demosaic!=='edge-aware-green' && demosaic!=='edge-aware-rgb') ||
+      typeof baselineExposure !== 'number' || !Number.isFinite(baselineExposure) ||
+      baselineExposure < -16 || baselineExposure > 16 ||
+       typeof baselineExposureOffset !== 'number' || !Number.isFinite(baselineExposureOffset) ||
+       baselineExposureOffset < -16 || baselineExposureOffset > 16) return null;
+  // Preserve only known provenance; the original DNG bytes remain authoritative.
+  const colorPipeline=value.colorPipeline==='forward-d50-v1'?'forward-d50-v1':
+    value.colorPipeline==='matrix-d50-bradford-v1'?
+    'matrix-d50-bradford-v1':'uncalibrated-bayer-preview';
+  const whiteBalanceSource=['as-shot-neutral','as-shot-white-xy','legacy-unspecified']
+    .includes(value.whiteBalanceSource)?value.whiteBalanceSource:'legacy-unspecified';
+  const defaultScale=Array.isArray(value.defaultScale)&&value.defaultScale.length===2&&
+    value.defaultScale.every(n=>Number.isFinite(n)&&n>=0.125&&n<=8)
+    ? [...value.defaultScale] : [1,1]; // Old .zpe v1/v2 RAW sources used implicit identity.
+  const blackRepeatDim=Array.isArray(value.blackRepeatDim)&&value.blackRepeatDim.length===2&&
+    value.blackRepeatDim.every(n=>Number.isInteger(n)&&n>=1&&n<=8)
+    ? [...value.blackRepeatDim] : [1,1]; // Legacy .zpe RAW has scalar BlackLevel.
+  return {dataUrl:value.dataUrl,width:value.width,height:value.height,
+    bits:[8,10,12,14,16].includes(value.bits)?value.bits:null,
+    colorPipeline,whiteBalanceSource,defaultScale,blackRepeatDim,baselineExposure,baselineExposureOffset,
+    blackDeltaH:value.blackDeltaH===true,blackDeltaV:value.blackDeltaV===true,
+    linearizationTable:value.linearizationTable===true,
+    compression:value.compression===7?7:1, // Old .zpe RAW defaults to uncompressed.
+    development:{exposure,wbRed,wbBlue,highlights,shadows,contrast,
+      ...(['edge-aware-green','edge-aware-rgb'].includes(demosaic)?{demosaic}: {})}};
+}
+
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
   const type = ['raster', 'text', 'shape', 'adjustment', 'smart-object'].includes(layer?.type) ? layer.type : 'shape';
   const defaults = baseLayer(type);
@@ -9399,6 +11571,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     checkedCanvasSize(result.width, result.height, `Растровый слой «${result.name || 'Без имени'}»`);
     const dataUrl = typeof layer?.dataUrl === 'string' && /^data:image\//i.test(layer.dataUrl) ? layer.dataUrl : null;
     result.dataUrl = dataUrl;
+    result.rawDng = sanitizeRawDng(layer?.rawDng,result.width,result.height);
     result.highDepthSource = sanitizeSerializedPixelBufferSource(layer?.highDepthSource);
     const hasRgbHighDepthPreview = result.highDepthSource?.model === 'rgb' && Number(result.highDepthSource.bitsPerChannel) > 8;
     result.highDepthPreview = hasRgbHighDepthPreview ? sanitizeHighDepthPreview(layer?.highDepthPreview) : null;
@@ -9470,6 +11643,7 @@ function sanitizeGroup(group, usedIds) {
     opacity: bounded(group?.opacity, 1, 0, 1),
     blendMode: GROUP_BLEND_MODES.has(group?.blendMode) ? group.blendMode : 'pass-through',
     parentGroupId: typeof group?.parentGroupId === 'string' ? shortText(group.parentGroupId, '', 160).trim() || null : null,
+    mask: sanitizeLayerMask(group?.mask),
   };
 }
 
@@ -10192,12 +12366,16 @@ function createPathControlSurfaceController({
     const documentPathEditIndex = state.getDocumentPathEditIndex();
     if (documentPathEditIndex >= 0) {
       const path = owner.paths?.[documentPathEditIndex];
-      if (path?.subpaths?.length) {
+      // An empty Saved Path is a valid Pen edit target until its first subpath is drawn.
+      if (Array.isArray(path?.subpaths)) {
         return path.subpaths
           .map((subpath, subpathIndex) => ({
             layer: null,
             points: Array.isArray(subpath?.points) ? subpath.points : [],
             source: 'document-path',
+            pathTarget: path,
+            pathId: path.id ?? null,
+            subpath,
             documentPathIndex: documentPathEditIndex,
             subpathIndex,
             closed: subpath?.closed !== false,
@@ -10220,6 +12398,7 @@ function createPathControlSurfaceController({
           layer,
           points: Array.isArray(subpath?.points) ? subpath.points : [],
           source: 'vector-mask',
+          subpath,
           documentPathIndex: null,
           subpathIndex,
           closed: subpath?.closed !== false,
@@ -10261,7 +12440,10 @@ function createPathControlSurfaceController({
     if (candidate.source === 'document-path') {
       return (
         candidate.documentPathIndex === target.documentPathIndex &&
-        candidate.subpathIndex === target.subpathIndex
+        candidate.subpathIndex === target.subpathIndex &&
+        candidate.pathTarget === target.pathTarget &&
+        candidate.pathId === target.pathId &&
+        candidate.subpath === target.subpath
       );
     }
     if (candidate.layer !== target.layer) return false;
@@ -10296,29 +12478,94 @@ function createPathControlSurfaceController({
       : 8 / currentZoom();
     const owner = state.getDocument();
 
+    // Prefer the nearest visible control, rather than every handle before every anchor.
+    // Short Bézier handles may sit inside an anchor's hit radius; otherwise their
+    // priority makes the actual anchor impossible to drag. Ties favor anchors.
+    let nearest = null;
+    let nearestDistance = Infinity;
     for (const target of selectedTargets()) {
       if (target.layer && isLayerLocked(owner, target.layer)) continue;
       for (let nodeIndex = 0; nodeIndex < target.points.length; nodeIndex += 1) {
         const node = target.points[nodeIndex];
-        for (const control of PATH_CONTROL_HANDLE_NAMES) {
+        for (const control of ['anchor', ...PATH_CONTROL_HANDLE_NAMES]) {
           const controlPoint = documentPoint(target, node, control);
-          if (
-            controlPoint &&
-            Math.hypot(px - controlPoint.x, py - controlPoint.y) <= hitRadius
-          ) {
-            return { ...target, nodeIndex, control };
+          if (!controlPoint) continue;
+          const distance = Math.hypot(px - controlPoint.x, py - controlPoint.y);
+          if (!Number.isFinite(distance) || distance > hitRadius) continue;
+          if (distance < nearestDistance - 1e-9 || (
+            Math.abs(distance - nearestDistance) <= 1e-9
+            && control === 'anchor' && nearest?.control !== 'anchor'
+          )) {
+            nearest = { ...target, nodeIndex, node, control,
+              groupId:target.layer?.groupId ?? null,
+              subpath:target.subpath ?? null,
+              vectorMask:target.layer?.vectorMask ?? null };
+            nearestDistance = distance;
           }
         }
       }
-      for (let nodeIndex = 0; nodeIndex < target.points.length; nodeIndex += 1) {
-        const node = target.points[nodeIndex];
-        const anchor = documentPoint(target, node, 'anchor');
-        if (anchor && Math.hypot(px - anchor.x, py - anchor.y) <= hitRadius) {
-          return { ...target, nodeIndex, control: 'anchor' };
+    }
+    return nearest;
+  }
+
+  function hitSegment(point, radius = null) {
+    const px = Number(point?.x);
+    const py = Number(point?.y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+    const candidateRadius = radius === null ? 7 / currentZoom() : Number(radius);
+    if (!Number.isFinite(candidateRadius) || candidateRadius < 0) return null;
+    const owner = state.getDocument();
+    let nearest = null;
+    let nearestDistance = candidateRadius;
+    const evaluate = (p0, p1, p2, p3, t) => {
+      const q = 1 - t;
+      return {
+        x:q*q*q*p0.x + 3*q*q*t*p1.x + 3*q*t*t*p2.x + t*t*t*p3.x,
+        y:q*q*q*p0.y + 3*q*q*t*p1.y + 3*q*t*t*p2.y + t*t*t*p3.y,
+      };
+    };
+    for (const target of selectedTargets()) {
+      if (target.layer && isLayerLocked(owner, target.layer)) continue;
+      const count = target.points.length;
+      const segments = target.closed ? count : count - 1;
+      for (let index = 0; index < segments; index += 1) {
+        const fromNode = target.points[index];
+        const toNode = target.points[(index + 1) % count];
+        const p0 = documentPoint(target, fromNode);
+        const p1 = documentPoint(target, fromNode, 'handleOut') ?? p0;
+        const p3 = documentPoint(target, toNode);
+        const p2 = documentPoint(target, toNode, 'handleIn') ?? p3;
+        if (![p0, p1, p2, p3].every(p => p &&
+          Number.isFinite(p.x) && Number.isFinite(p.y))) continue;
+        let previous = p0;
+        const steps = 48;
+        for (let step = 1; step <= steps; step += 1) {
+          const current = evaluate(p0, p1, p2, p3, step / steps);
+          const dx = current.x - previous.x;
+          const dy = current.y - previous.y;
+          const squared = dx * dx + dy * dy;
+          const projection = squared > 1e-12
+            ? Math.max(0, Math.min(1, ((px-previous.x)*dx+(py-previous.y)*dy)/squared))
+            : 0;
+          const distance = Math.hypot(
+            px - previous.x - dx * projection,
+            py - previous.y - dy * projection,
+          );
+          const t = (step - 1 + projection) / steps;
+          if (distance < nearestDistance && t > 0.0001 && t < 0.9999) {
+            nearestDistance = distance;
+            nearest = {
+              ...target, segmentIndex:index, t, fromNode, toNode,
+              groupId:target.layer?.groupId ?? null,
+              subpath:target.subpath ?? null,
+              vectorMask:target.source==='vector-mask' ? target.layer.vectorMask : null,
+            };
+          }
+          previous = current;
         }
       }
     }
-    return null;
+    return nearest;
   }
 
   function trace(context, target) {
@@ -10431,6 +12678,7 @@ function createPathControlSurfaceController({
     targetPoints,
     resolveTarget,
     hit,
+    hitSegment,
     trace,
     draw,
     updateCursor,
@@ -10450,6 +12698,51 @@ const PATH_CONTROL_CORNER_LABELS = Object.freeze({
   'vector-mask': 'Преобразовать узел векторной маски',
   'document-path': 'Преобразовать узел сохранённого контура',
 });
+
+
+const PATH_CONTROL_SMOOTH_LABELS = Object.freeze({
+  shape: 'Сгладить Bézier-узел',
+  'vector-mask': 'Сгладить узел векторной маски',
+  'document-path': 'Сгладить узел сохранённого контура',
+});
+
+function finitePoint(node) {
+  const x = Number(node?.x);
+  const y = Number(node?.y);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+function smoothNodeHandles(points, index, closed) {
+  if (!Array.isArray(points) || points.length < 2 || !Number.isInteger(index)) return null;
+  const current = finitePoint(points[index]);
+  const previousIndex = index > 0 ? index - 1 : closed ? points.length - 1 : -1;
+  const nextIndex = index < points.length - 1 ? index + 1 : closed ? 0 : -1;
+  const previous = previousIndex < 0 ? null : finitePoint(points[previousIndex]);
+  const next = nextIndex < 0 ? null : finitePoint(points[nextIndex]);
+  if (!current || (previousIndex >= 0 && !previous) || (nextIndex >= 0 && !next)) return null;
+  if (!previous && !next) return null;
+
+  // The neighbour chord gives an aligned tangent; open end-points use the
+  // single adjacent segment. Keep each handle at most 1/3 of its segment.
+  let dx = (next ?? current).x - (previous ?? current).x;
+  let dy = (next ?? current).y - (previous ?? current).y;
+  let length = Math.hypot(dx, dy);
+  if (!Number.isFinite(length) || length < 1e-9) {
+    dx = next ? next.x - current.x : current.x - previous.x;
+    dy = next ? next.y - current.y : current.y - previous.y;
+    length = Math.hypot(dx, dy);
+  }
+  if (!Number.isFinite(length) || length < 1e-9) return null;
+  const inLength = previous ? Math.hypot(current.x - previous.x, current.y - previous.y) / 3 : 0;
+  const outLength = next ? Math.hypot(next.x - current.x, next.y - current.y) / 3 : 0;
+  if (!Number.isFinite(inLength) || !Number.isFinite(outLength)) return null;
+  const ux = dx / length;
+  const uy = dy / length;
+  const handleIn = previous ? { x:current.x - ux * inLength, y:current.y - uy * inLength } : null;
+  const handleOut = next ? { x:current.x + ux * outLength, y:current.y + uy * outLength } : null;
+  if ([handleIn, handleOut].some(point => point && !finitePoint(point))) return null;
+  return { handleIn, handleOut };
+}
 function createPathControlCommandController({
   state,
   targets,
@@ -10502,7 +12795,216 @@ function createPathControlCommandController({
     return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
   }
 
-  return { convertAnchorToCorner };
+
+  function convertAnchorToSmooth(owner, target, modifiers = {}) {
+    if (target?.control !== 'anchor' || !modifiers.altKey || !modifiers.shiftKey) {
+      return PATH_CONTROL_COMMAND_RESULT.IGNORED;
+    }
+    if (!owner || state.getDocument() !== owner) {
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    }
+    const resolved = targets.resolve(target);
+    const label = PATH_CONTROL_SMOOTH_LABELS[resolved?.source];
+    if (!resolved?.node || !label || (resolved.layer && isLayerLocked(owner, resolved.layer))) {
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    }
+    const node = resolved.node;
+    if (node.kind === 'smooth') {
+      ui.setStatus('Bézier-узел уже сглажен');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    const handles = smoothNodeHandles(resolved.points, resolved.nodeIndex, resolved.closed);
+    if (!handles) {
+      ui.setStatus('Для сглаживания нужны соседние узлы с разными координатами');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    node.handleIn = handles.handleIn;
+    node.handleOut = handles.handleOut;
+    node.kind = 'smooth';
+    transaction.commit(label);
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  function writableMaskTarget(owner, target) {
+    if (target?.source !== 'vector-mask' || !owner || state.getDocument() !== owner) return null;
+    const resolved = targets.resolve(target);
+    const layer = resolved?.layer;
+    if (!layer || !owner.layers?.includes(layer) || owner.selectedLayerId !== layer.id
+      || isLayerLocked(owner, layer) || target.layer !== layer
+      || (layer.groupId ?? null) !== (target.groupId ?? null)
+      || resolved.source !== 'vector-mask' || resolved.points !== target.points
+      || !Array.isArray(resolved.points) || resolved.points.length < 2) return null;
+    const mask = layer.vectorMask;
+    if (!mask || mask !== target.vectorMask ||
+      mask.subpaths?.[target.subpathIndex] !== target.subpath ||
+      mask.subpaths?.[target.subpathIndex]?.points !== resolved.points) return null;
+    return resolved;
+  }
+
+  function lerpPoint(a, b, t) {
+    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+  }
+
+  // De Casteljau splits the *existing* cubic exactly. A new anchor must not
+  // subtly alter the mask alpha merely by being inserted.
+  function insertMaskNode(owner, target) {
+    if (!Number.isInteger(target?.segmentIndex) || !Number.isFinite(target?.t)
+      || target.t <= 0.0001 || target.t >= 0.9999) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const resolved = writableMaskTarget(owner, { ...target, nodeIndex:target.segmentIndex });
+    if (!resolved || resolved.nodeIndex !== target.segmentIndex) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const points = resolved.points;
+    const from = points[target.segmentIndex];
+    const subpath = resolved.layer.vectorMask.subpaths[target.subpathIndex];
+    const nextIndex = (target.segmentIndex + 1) % points.length;
+    if (nextIndex === 0 && subpath.closed === false) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const to = points[nextIndex];
+    if (!from || !to || from !== target.fromNode || to !== target.toNode
+      || points.length >= 1000) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const finite = point => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+    if (!finite(from) || !finite(to) ||
+      (from.handleOut && !finite(from.handleOut)) ||
+      (to.handleIn && !finite(to.handleIn))) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const t = target.t;
+    let node;
+    if (from.handleOut || to.handleIn) {
+      const a = lerpPoint(from, from.handleOut ?? from, t);
+      const b = lerpPoint(from.handleOut ?? from, to.handleIn ?? to, t);
+      const c = lerpPoint(to.handleIn ?? to, to, t);
+      const d = lerpPoint(a, b, t);
+      const e = lerpPoint(b, c, t);
+      const f = lerpPoint(d, e, t);
+      if (![a, c, d, e, f].every(finite)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      from.handleOut = a;
+      to.handleIn = c;
+      node = { x:f.x, y:f.y, handleIn:d, handleOut:e, kind:'smooth' };
+    } else {
+      const f = lerpPoint(from, to, t);
+      if (!finite(f)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      node = { x:f.x, y:f.y, handleIn:null, handleOut:null, kind:'corner' };
+    }
+    points.splice(target.segmentIndex + 1, 0, node);
+    transaction.commit('Добавить узел векторной маски');
+    ui.setStatus('Узел добавлен без изменения кривой');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  function deleteMaskNode(owner, target) {
+    if (target?.control !== 'anchor') return PATH_CONTROL_COMMAND_RESULT.IGNORED;
+    const resolved = writableMaskTarget(owner, target);
+    if (!resolved || resolved.nodeIndex !== target.nodeIndex || resolved.node !== target.node)
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const subpath = resolved.layer.vectorMask.subpaths[target.subpathIndex];
+    const points = resolved.points;
+    // Removing a point from a closed path with three anchors destroys the
+    // rasterizable polygon. Keep the user's current mask intact instead.
+    const minimum = subpath.closed === false ? 2 : 3;
+    if (points.length <= minimum) {
+      ui.setStatus('Недостаточно узлов для удаления');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    points.splice(resolved.nodeIndex, 1);
+    // The surviving neighbours keep their cubic handles and exact endpoint
+    // tangents. A general two-cubic arc cannot be represented exactly by one
+    // cubic after deletion; do not silently flatten it to a straight line.
+    transaction.commit('Удалить узел векторной маски');
+    ui.setStatus('Узел удалён; соседние Bézier-ручки сохранены');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  // Shape nodes are layer-local; Saved Path nodes are document-space. The
+  // surface supplies both through the same exact geometry/identity contract.
+  function writableEditablePathTarget(owner, target) {
+    if (!owner || state.getDocument() !== owner ||
+      !['shape', 'document-path'].includes(target?.source)) return null;
+    const resolved = targets.resolve(target);
+    if (!resolved || resolved.source !== target.source ||
+      resolved.points !== target.points || !Array.isArray(resolved.points) ||
+      resolved.points.length < 2 || resolved.closed !== target.closed) return null;
+
+    if (target.source === 'shape') {
+      const layer = resolved.layer;
+      if (!layer || !owner.layers?.includes(layer) || layer !== target.layer ||
+        owner.selectedLayerId !== layer.id || isLayerLocked(owner, layer) ||
+        (layer.groupId ?? null) !== (target.groupId ?? null) ||
+        layer.type !== 'shape' || layer.shape !== 'path' ||
+        layer.pathPoints !== target.points || Boolean(layer.pathClosed) !== target.closed) return null;
+    } else {
+      const path = owner.paths?.[target.documentPathIndex];
+      const subpath = path?.subpaths?.[target.subpathIndex];
+      if (!path || path !== target.pathTarget || path.id !== target.pathId ||
+        resolved.pathTarget !== path || resolved.pathId !== target.pathId ||
+        !subpath || subpath !== target.subpath ||
+        resolved.subpath !== subpath || subpath.points !== target.points ||
+        (subpath.closed !== false) !== target.closed) return null;
+    }
+    return resolved;
+  }
+
+  function insertPathNode(owner, target) {
+    if (!Number.isInteger(target?.segmentIndex) || !Number.isFinite(target?.t) ||
+      target.t <= 0.0001 || target.t >= 0.9999) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const resolved = writableEditablePathTarget(owner, { ...target, nodeIndex: target.segmentIndex });
+    if (!resolved || resolved.nodeIndex !== target.segmentIndex) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const points = resolved.points;
+    const index = target.segmentIndex;
+    if (points.length >= 1000 || index < 0 || index >= (target.closed ? points.length : points.length - 1))
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    if (!from || !to || from !== target.fromNode || to !== target.toNode)
+      return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const finite = point => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+    if (!finite(from) || !finite(to) ||
+      (from.handleOut && !finite(from.handleOut)) ||
+      (to.handleIn && !finite(to.handleIn))) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+
+    const t = target.t;
+    let node;
+    if (from.handleOut || to.handleIn) {
+      const a = lerpPoint(from, from.handleOut ?? from, t);
+      const b = lerpPoint(from.handleOut ?? from, to.handleIn ?? to, t);
+      const c = lerpPoint(to.handleIn ?? to, to, t);
+      const d = lerpPoint(a, b, t);
+      const e = lerpPoint(b, c, t);
+      const f = lerpPoint(d, e, t);
+      if (![a, b, c, d, e, f].every(finite)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      from.handleOut = a;
+      to.handleIn = c;
+      node = { x:f.x, y:f.y, handleIn:d, handleOut:e, kind:'smooth' };
+    } else {
+      const f = lerpPoint(from, to, t);
+      if (!finite(f)) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+      node = { x:f.x, y:f.y, handleIn:null, handleOut:null, kind:'corner' };
+    }
+    points.splice(index + 1, 0, node);
+    transaction.commit(target.source === 'shape' ? 'Добавить Bézier-узел' : 'Добавить узел сохранённого контура');
+    ui.setStatus('Узел добавлен без изменения кривой');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  function deletePathNode(owner, target) {
+    if (target?.control !== 'anchor') return PATH_CONTROL_COMMAND_RESULT.IGNORED;
+    const resolved = writableEditablePathTarget(owner, target);
+    if (!resolved || resolved.nodeIndex !== target.nodeIndex ||
+      resolved.node !== target.node) return PATH_CONTROL_COMMAND_RESULT.REJECTED;
+    const points = resolved.points;
+    const minimum = target.closed ? 3 : 2;
+    if (points.length <= minimum) {
+      ui.setStatus('Недостаточно узлов для удаления');
+      return PATH_CONTROL_COMMAND_RESULT.NOOP;
+    }
+    // Surviving neighbours retain their handles; merging arbitrary two cubics
+    // into one cannot preserve the full original geometry exactly.
+    points.splice(resolved.nodeIndex, 1);
+    transaction.commit(target.source === 'shape' ? 'Удалить Bézier-узел' : 'Удалить узел сохранённого контура');
+    ui.setStatus('Узел удалён; соседние Bézier-ручки сохранены');
+    return PATH_CONTROL_COMMAND_RESULT.COMMITTED;
+  }
+
+  return {
+    convertAnchorToCorner, convertAnchorToSmooth,
+    insertMaskNode, deleteMaskNode, insertPathNode, deletePathNode,
+  };
 }
 
 // ---- src/interaction/path-control-gesture-controller.js ----
@@ -10607,6 +13109,10 @@ function createPathControlGestureController({
     return Boolean(owner && state.getDocument() === owner);
   }
 
+  function ownsLiveGeometry(gesture, node) {
+    return sameNodeGeometry(node, gesture.preview ?? gesture.baseline);
+  }
+
   function captureLayerTarget(owner, target) {
     const layerId = target?.layer?.id ?? null;
     if (!layerId || !Array.isArray(owner.layers)) return null;
@@ -10678,8 +13184,8 @@ function createPathControlGestureController({
     return gesture.owner.paths.find(item => item === gesture.pathTarget) ?? null;
   }
 
-  function resolveExactTarget(gesture) {
-    if (!activeOwner(gesture.owner)) return null;
+  function resolveExactTarget(gesture, { requireWritable = true } = {}) {
+    if (requireWritable && !activeOwner(gesture.owner)) return null;
 
     if (gesture.source === 'document-path') {
       const path = resolveSavedPath(gesture);
@@ -10693,7 +13199,10 @@ function createPathControlGestureController({
 
     if (!Array.isArray(gesture.owner.layers)) return null;
     const layer = gesture.owner.layers.find(item => item.id === gesture.layerId) ?? null;
-    if (!layer || layer !== gesture.layerTarget || isLayerLocked(gesture.owner, layer)) return null;
+    if (!layer || layer !== gesture.layerTarget ||
+      (requireWritable && (isLayerLocked(gesture.owner, layer)
+        || (gesture.selectedLayerId !== null && gesture.owner.selectedLayerId !== gesture.selectedLayerId)
+        || (layer.groupId ?? null) !== gesture.groupId))) return null;
 
     let points = null;
     let subpath = null;
@@ -10739,6 +13248,8 @@ function createPathControlGestureController({
       control,
       layerId: captured.layerId,
       layerTarget: captured.layer,
+      selectedLayerId: owner.selectedLayerId ?? null,
+      groupId: captured.layer?.groupId ?? null,
       vectorMaskTarget: captured.vectorMask,
       pathId: captured.pathId,
       pathTarget: captured.path,
@@ -10749,6 +13260,7 @@ function createPathControlGestureController({
       startLocal,
       lastPointer: startDocument,
       baseline: structuredClone(captured.node),
+      preview: null,
       moved: false,
     };
   }
@@ -10781,12 +13293,37 @@ function createPathControlGestureController({
     };
   }
 
+  // Roll back only our own transient geometry. A rejected gesture must never
+  // overwrite a replacement mask/node or a newer independent edit. Rollback is
+  // allowed on the original identity even if a parent was locked or its tab is
+  // no longer active; it restores a preview, not a new user edit.
+  function restoreOwnedPreview(gesture) {
+    if (!gesture.preview) return false;
+    const resolved = resolveExactTarget(gesture, { requireWritable:false });
+    if (!resolved || !sameNodeGeometry(resolved.node, gesture.preview)) return false;
+    const changed = !sameNodeGeometry(resolved.node, gesture.baseline);
+    if (changed) restoreNode(resolved.node, gesture.baseline);
+    gesture.preview = null;
+    gesture.moved = false;
+    if (activeOwner(gesture.owner)) {
+      if (changed) runtime.refreshPreview(resolved);
+      else runtime.redrawOverlay();
+    }
+    return true;
+  }
+
+  function rejectGesture(gesture) {
+    gesture.active = false;
+    restoreOwnedPreview(gesture);
+    return PATH_CONTROL_GESTURE_RESULT.REJECTED;
+  }
+
   function update(gesture, point, modifiers = {}) {
     if (!isGesture(gesture) || !gesture.active) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
     const documentPoint = finitePoint(point);
     if (!documentPoint) return PATH_CONTROL_GESTURE_RESULT.INVALID;
     const resolved = resolveExactTarget(gesture);
-    if (!resolved) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
+    if (!resolved || !ownsLiveGeometry(gesture, resolved.node)) return rejectGesture(gesture);
 
     const local = resolved.layer
       ? finitePoint(geometry.documentPointToLayer(documentPoint, resolved.layer))
@@ -10805,6 +13342,7 @@ function createPathControlGestureController({
         runtime.redrawOverlay();
       }
       gesture.moved = false;
+      gesture.preview = null;
       return PATH_CONTROL_GESTURE_RESULT.NOOP;
     }
 
@@ -10812,6 +13350,7 @@ function createPathControlGestureController({
     else applyHandle(gesture, resolved.node, local, modifiers);
 
     gesture.moved = !sameNodeGeometry(resolved.node, gesture.baseline);
+    gesture.preview = gesture.moved ? structuredClone(resolved.node) : null;
     if (gesture.moved) runtime.refreshPreview(resolved);
     else runtime.redrawOverlay();
     return gesture.moved ? PATH_CONTROL_GESTURE_RESULT.UPDATED : PATH_CONTROL_GESTURE_RESULT.NOOP;
@@ -10827,6 +13366,7 @@ function createPathControlGestureController({
     const finalPoint = finitePoint(point);
     if (!finalPoint) {
       gesture.active = false;
+      restoreOwnedPreview(gesture);
       return PATH_CONTROL_GESTURE_RESULT.INVALID;
     }
 
@@ -10842,8 +13382,8 @@ function createPathControlGestureController({
     }
 
     const resolved = resolveExactTarget(gesture);
+    if (!resolved || !ownsLiveGeometry(gesture, resolved.node)) return rejectGesture(gesture);
     gesture.active = false;
-    if (!resolved) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
     gesture.moved = !sameNodeGeometry(resolved.node, gesture.baseline);
     if (!gesture.moved) {
       runtime.redrawOverlay();
@@ -10857,16 +13397,9 @@ function createPathControlGestureController({
   function cancel(gesture) {
     if (!isGesture(gesture) || !gesture.active) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
     const resolved = resolveExactTarget(gesture);
+    if (!resolved) return rejectGesture(gesture);
     gesture.active = false;
-    if (!resolved) return PATH_CONTROL_GESTURE_RESULT.REJECTED;
-
-    const changed = !sameNodeGeometry(resolved.node, gesture.baseline);
-    if (changed) {
-      restoreNode(resolved.node, gesture.baseline);
-      runtime.refreshPreview(resolved);
-    } else {
-      runtime.redrawOverlay();
-    }
+    if (!restoreOwnedPreview(gesture)) runtime.redrawOverlay();
     gesture.moved = false;
     return PATH_CONTROL_GESTURE_RESULT.CANCELED;
   }
@@ -10884,6 +13417,7 @@ function createPathControlGestureController({
 const PEN_DRAFT_BEGIN_RESULT = Object.freeze({
   STARTED: 'started',
   FINISH_REQUESTED: 'finish-requested',
+  CLOSE_REQUESTED: 'close-requested',
   TOO_SHORT: 'too-short',
   INVALID: 'invalid',
 });
@@ -10945,11 +13479,22 @@ function createPenDraftGestureController({ runtime } = {}) {
     draft = null;
   }
 
+  // Hit testing uses screen pixels at every zoom; closing never creates a duplicate node.
+  function canCloseAt(point) {
+    if (!draft || draft.points.length < 3) return false;
+    const hover = finitePoint(point);
+    if (!hover) return false;
+    const first = draft.points[0];
+    return Math.hypot(hover.x - first.x, hover.y - first.y) <= 6 / currentZoom();
+  }
+
   function updateIdleHover(point) {
     if (!draft) return false;
     const hover = finitePoint(point);
     if (!hover) return false;
-    draft.hover = hover;
+    draft.hover = canCloseAt(hover)
+      ? { x: draft.points[0].x, y: draft.points[0].y }
+      : hover;
     return true;
   }
 
@@ -10968,6 +13513,9 @@ function createPenDraftGestureController({ runtime } = {}) {
     const anchor = finitePoint(point);
     if (!anchor) {
       return { result: PEN_DRAFT_BEGIN_RESULT.INVALID, gesture: null, status: null };
+    }
+    if (canCloseAt(anchor)) {
+      return { result: PEN_DRAFT_BEGIN_RESULT.CLOSE_REQUESTED, gesture: null, status: null };
     }
     if (!draft) draft = { points: [], hover: anchor };
 
@@ -11093,6 +13641,7 @@ function createPenDraftGestureController({ runtime } = {}) {
     snapshot,
     reset,
     updateIdleHover,
+    canCloseAt,
     isGesture,
     beginPoint,
     update,
@@ -11587,6 +14136,10 @@ function createLayerGroupCommandController({
     ['color-dodge', 'Осветление основы'],
     ['color-burn', 'Затемнение основы'],
     ['difference', 'Разница'],
+    ['color', 'Цветность (Color)'],
+    ['saturation', 'Насыщенность (Saturation)'],
+    ['luminosity', 'Яркость (Luminosity)'],
+    ['hue', 'Цветовой тон (Hue)'],
     ['exclusion', 'Исключение'],
   ];
 
@@ -11798,6 +14351,11 @@ function createLayerGroupCommandController({
           step: 1,
           required: true,
         },
+        ...(group.mask ? [{
+          name: 'maskEnabled', label: 'Растровая маска папки', type: 'select',
+          value: group.mask.enabled === false ? 'disabled' : 'enabled',
+          options: [['enabled', 'Включена'], ['disabled', 'Отключена']],
+        }] : []),
       ],
       submitLabel: 'Применить',
       onSubmit: values => {
@@ -11817,8 +14375,10 @@ function createLayerGroupCommandController({
           0,
           1,
         );
+        const maskEnabled = values?.maskEnabled !== 'disabled';
+        const changedMask = Boolean(liveGroup.mask) && (liveGroup.mask.enabled !== false) !== maskEnabled;
         if (
-          liveGroup.blendMode === blendMode &&
+          !changedMask && liveGroup.blendMode === blendMode &&
           Math.abs(Number(liveGroup.opacity ?? 1) - opacity) < 1e-9
         ) {
           return true;
@@ -11826,6 +14386,7 @@ function createLayerGroupCommandController({
 
         liveGroup.blendMode = blendMode;
         liveGroup.opacity = opacity;
+        if (liveGroup.mask) liveGroup.mask.enabled = maskEnabled;
         publish(owner, 'Параметры группы');
         return true;
       },
@@ -11962,7 +14523,7 @@ const LAYER_PROPERTY_STRING_PROPS = new Set([
 ]);
 const LAYER_PROPERTY_BLEND_MODES = new Set([
   'source-over', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light',
-  'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'exclusion',
+  'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'exclusion', 'color', 'hue', 'saturation', 'luminosity',
 ]);
 function createLayerPropertyCommandController({
   state,
@@ -12232,6 +14793,14 @@ function createLayerPropertyCommandController({
     return publishCommit(owner, 'Режим наложения');
   }
 
+  function commandSetClipping(owner, layerId, enabled) {
+    const layer = exactLayer(owner, layerId);
+    if (!layer || layer.type !== 'raster' || isLayerLocked(owner, layer) || typeof enabled !== 'boolean') return false;
+    if (Boolean(layer.clipping) === enabled) return false;
+    layer.clipping = enabled;
+    return publishCommit(owner, 'Изменить clipping растрового слоя');
+  }
+
   function commandSetOpacity(owner, layerId, rawPercent, { commit = true } = {}) {
     const previewKey = `opacity:${layerId}`;
     const layer = exactLayer(owner, layerId);
@@ -12354,6 +14923,7 @@ function createLayerPropertyCommandController({
     resetColorCorrection: commandResetColorCorrection,
     resetFilters: commandResetFilters,
     setBlendMode: commandSetBlendMode,
+    setClipping: commandSetClipping,
     setOpacity: commandSetOpacity,
     updateHighDepthPreview: commandUpdateHighDepthPreview,
     resetHighDepthPreview: commandResetHighDepthPreview,
@@ -12387,6 +14957,29 @@ const ADJUSTMENT_COMMAND_RESULT = Object.freeze({
   NOOP: 'noop',
   INVALID: 'invalid',
   REJECTED: 'rejected',
+});
+
+// Only these kinds can be created by the editor; native PSD-only metadata is not fabricated.
+const NEW_ADJUSTMENT_KINDS = Object.freeze([
+  ['brightness-contrast', 'Яркость / контраст'],
+  ['levels', 'Уровни (Levels)'],
+  ['curves', 'Кривые (Curves)'],
+  ['exposure', 'Экспозиция'],
+  ['hue-saturation', 'Цветовой тон / насыщенность'],
+  ['invert', 'Инверсия'],
+  ['posterize', 'Постеризация'],
+  ['threshold', 'Порог'],
+]);
+
+const ADJUSTMENT_INITIAL_MODELS = Object.freeze({
+  'brightness-contrast': { kind:'brightness-contrast', brightness:0, contrast:0 },
+  levels: { kind:'levels', master:{ inputBlack:0, inputWhite:255, gamma:1, outputBlack:0, outputWhite:255 }, channels:[] },
+  curves: { kind:'curves', channels:[{ id:0, points:[{ input:0, output:0 }, { input:255, output:255 }] }] },
+  exposure: { kind:'exposure', exposure:0, offset:0, gamma:1 },
+  'hue-saturation': { kind:'hue-saturation', hue:0, saturation:0, lightness:0, colorize:false },
+  invert: { kind:'invert' },
+  posterize: { kind:'posterize', levels:4 },
+  threshold: { kind:'threshold', level:128 },
 });
 
 const ADJUSTMENT_LEVEL_KEYS = new Set([
@@ -12426,6 +15019,26 @@ function createAdjustmentLayerCommandController({ state, transaction } = {}) {
     if (!activeDocument(owner)) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
     transaction.commit(label);
     return ADJUSTMENT_COMMAND_RESULT.COMMITTED;
+  }
+
+  function createLayer(owner, kind) {
+    if (!activeDocument(owner) || !Array.isArray(owner.layers) || owner.layers.length >= 500) {
+      return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    }
+    const preset = Object.hasOwn(ADJUSTMENT_INITIAL_MODELS, kind)
+      ? ADJUSTMENT_INITIAL_MODELS[kind] : null;
+    if (!preset) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const adjustment = sanitizeAdjustmentModel(preset);
+    if (!adjustment) return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const label = NEW_ADJUSTMENT_KINDS.find(([id]) => id === kind)?.[1] || kind;
+    const layer = createAdjustmentLayer({
+      name: label,
+      width: owner.width,
+      height: owner.height,
+      adjustment,
+    });
+    addLayer(owner, layer);
+    return publish(owner, `Создать корректирующий слой: ${label}`);
   }
 
   function parseCurvePointsInput(raw) {
@@ -12508,6 +15121,20 @@ function createAdjustmentLayerCommandController({ state, transaction } = {}) {
     return publish(owner, 'Изменить точки Photoshop Curves');
   }
 
+  // Hue/Saturation's colorization flag changes the actual color transform.
+  // Persist a normalized model and one history entry, never a view-only checkbox.
+  function setColorize(owner, layerId, enabled) {
+    const layer = exactEditableLayer(owner, layerId);
+    if (!layer) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    const current = sanitizeAdjustmentModel(layer.adjustment);
+    if (current?.kind !== 'hue-saturation') return ADJUSTMENT_COMMAND_RESULT.REJECTED;
+    if (typeof enabled !== 'boolean') return ADJUSTMENT_COMMAND_RESULT.INVALID;
+    const next = sanitizeAdjustmentModel({ ...current, colorize: enabled });
+    if (adjustmentModelEqual(layer.adjustment, next)) return ADJUSTMENT_COMMAND_RESULT.NOOP;
+    layer.adjustment = next;
+    return publish(owner, 'Изменить режим тонирования Hue/Saturation');
+  }
+
   function setClipping(owner, layerId, checked) {
     const layer = exactEditableLayer(owner, layerId);
     if (!layer) return ADJUSTMENT_COMMAND_RESULT.REJECTED;
@@ -12517,7 +15144,7 @@ function createAdjustmentLayerCommandController({ state, transaction } = {}) {
     return publish(owner, 'Изменить clipping adjustment layer');
   }
 
-  return { updateProperty, updateCurveChannel, setClipping };
+  return { createLayer, updateProperty, updateCurveChannel, setColorize, setClipping };
 }
 
 // ---- src/layers/transform-command-controller.js ----
@@ -13871,6 +16498,7 @@ function createDocumentSessionController({
   tabs = null,
   viewport = null,
   blockPendingDocumentEdit = () => false,
+  cancelPendingContentAwareFill = () => false,
   updateAll = () => {},
   fitToView = () => {},
   setStatus = () => {},
@@ -13937,7 +16565,7 @@ function createDocumentSessionController({
     dirtyState = false,
     smartObjectLink = null,
   } = {}) {
-    const sessionHistory = new HistoryStack(80);
+    const sessionHistory = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:true });
     sessionHistory.reset(label, snapshotDocument(documentValue));
     return {
       id: createSessionId(),
@@ -14008,10 +16636,12 @@ function createDocumentSessionController({
       if (focusViewport) requestAnimationFrame(() => viewport?.focus());
       return;
     }
-    if (blockPendingDocumentEdit()) return;
-    syncCurrentSession();
     const session = sessions().find(item => item.id === id);
     if (!session) return;
+    // Activate only: other tab commands retain the ordinary pending-edit guard.
+    cancelPendingContentAwareFill();
+    if (blockPendingDocumentEdit()) return;
+    syncCurrentSession();
     setActiveSessionId(session.id);
     loadSession(session);
     updateAll();
@@ -14039,7 +16669,6 @@ function createDocumentSessionController({
   }
 
   function closeDocumentTab(id) {
-    if (blockPendingDocumentEdit()) return;
     const allSessions = sessions();
     const index = allSessions.findIndex(session => session.id === id);
     if (index === -1) return;
@@ -14053,6 +16682,15 @@ function createDocumentSessionController({
       return;
     }
     if (session.dirty && !window.confirm(`Во вкладке «${session.doc?.name || 'Без имени'}» есть несохранённые изменения. Закрыть её?`)) return;
+    // A successful close can change the active document just like tab activation.
+    // Revoke a pending native Content-Aware Fill BEFORE dropping its owner.
+    // Rejected confirmations and closes that keep the active tab must not cancel it.
+    const remaining = allSessions.filter(item => item.id !== session.id);
+    const nextSession = remaining[Math.max(0, Math.min(index, remaining.length - 1))];
+    if (!nextSession || nextSession.id !== activeId()) cancelPendingContentAwareFill();
+    // A cancellable Fill releases its persistence lease above. Non-cancellable
+    // paint/gesture transactions must still prevent the close.
+    if (blockPendingDocumentEdit()) return;
     allSessions.splice(index, 1);
     if (!allSessions.length) allSessions.push(buildSession(createDocument({ name:'Без имени' })));
     const nextIndex = Math.max(0, Math.min(index, allSessions.length - 1));
@@ -14381,8 +17019,8 @@ function createRecoveryController({
         activeIndex = unrestoredRecoveryDocuments.length
           + Math.max(0, dirtySessions.findIndex(session => session.id === getActiveSessionId()));
       } catch (error) {
-        // An in-memory preparation error is not an IndexedDB transaction failure.
-        // Preserve the last valid record; do not retry the same malformed state.
+        // Preparation failed before any storage mutation. Preserve the last
+        // valid record and prevent retries of the untrusted in-memory state.
         reportRecoveryFailure(error, {
           notify: true,
           toastMessage: 'Автосохранение не удалось: ошибка подготовки снимка проекта',
@@ -15260,7 +17898,9 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
   const source = document.createElement('canvas');
   source.width = width; source.height = height;
   const sourceCtx = source.getContext('2d', { alpha: true, willReadFrequently: true });
-  sourceCtx.drawImage(canvas, 0, 0, width, height);
+  // A clipped adjustment changes its source raster, not the flattened parent.
+  sourceCtx.drawImage(clippingMask || canvas, 0, 0, width, height);
+  const clippingSource = clippingMask ? sourceCtx.getImageData(0, 0, width, height) : null;
   if(layer.adjustment){
     try{
       const pixels=sourceCtx.getImageData(0,0,width,height);
@@ -15291,14 +17931,8 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
     sourceCtx.drawImage(vectorMask,0,0,width,height);
     sourceCtx.restore();
   }
-  if(clippingMask){
-    sourceCtx.save();
-    sourceCtx.globalCompositeOperation='destination-in';
-    sourceCtx.globalAlpha=1;
-    sourceCtx.filter='none';
-    sourceCtx.drawImage(clippingMask,0,0,width,height);
-    sourceCtx.restore();
-  }
+  // Clipping is already present in source alpha; applying it again would
+  // square the base coverage on semitransparent pixels.
   const effect=document.createElement('canvas');
   effect.width=width;effect.height=height;
   const effectCtx=effect.getContext('2d',{alpha:true,willReadFrequently:true});
@@ -15307,10 +17941,16 @@ async function applyAdjustmentLayer(canvas, ctx, layer, { clippingMask = null } 
   try{
     const basePixels=ctx.getImageData(0,0,width,height);
     const effectPixels=effectCtx.getImageData(0,0,width,height);
-    compositeAdjustmentPixels(basePixels,effectPixels,{
-      opacity:layer.opacity??1,
-      blendMode:layer.blendMode||'source-over',
-    });
+    const settings = { opacity: layer.opacity ?? 1,
+      blendMode: layer.blendMode || 'source-over' };
+    if (clippingSource) {
+      compositeClippedAdjustmentPixels(basePixels, clippingSource, effectPixels, settings);
+      // Subsequent clipped adjustments must see the preceding adjustment's
+      // pixels, not the original base. Keep the base's alpha unchanged so
+      // clipping coverage remains stable throughout the adjustment chain.
+      compositeAdjustmentPixels(clippingSource, effectPixels, settings);
+      clippingMask.getContext('2d').putImageData(clippingSource, 0, 0);
+    } else compositeAdjustmentPixels(basePixels, effectPixels, settings);
     ctx.putImageData(basePixels,0,0);
   }catch(error){
     console.warn('Adjustment layer compositing failed; previous composite preserved',error);
@@ -15370,11 +18010,37 @@ function buildGroupRenderPlan(doc) {
 
 async function renderLayerEntry(canvas, ctx, doc, layer, rasterOverrides, clippingMask = null) {
   if (!isLayerVisible(doc, layer) || layer.opacity <= 0) return;
+  // An orphaned clipped layer (raster or adjustment) must never escape its base.
+  if (layer.clipping === true && !clippingMask) return;
   if (layer.type === 'adjustment') {
     await applyAdjustmentLayer(canvas, ctx, layer, { clippingMask });
     return;
   }
-  await renderLayer(ctx, layer, { rasterOverride: rasterOverrides?.get?.(layer.id) || null });
+  const rasterOverride = rasterOverrides?.get?.(layer.id) || null;
+  if (layer.clipping !== true) {
+    await renderLayer(ctx, layer, { rasterOverride });
+    return;
+  }
+  // Clipped raster overlays modify the same reusable source stack as subsequent
+  // clipped adjustments. Render opacity/masks once, then blend the raster into
+  // the source RGB. Transfer only that RGB delta to the parent; a clipped
+  // overlay cannot increase the base matte or repaint the lower backdrop.
+  const overlay = document.createElement('canvas');
+  overlay.width = doc.width;
+  overlay.height = doc.height;
+  const overlayCtx = overlay.getContext('2d', { alpha: true, willReadFrequently: true });
+  await renderLayer(overlayCtx, { ...layer, blendMode: 'source-over' }, { rasterOverride });
+  try {
+    const sourceCtx = clippingMask.getContext('2d', { willReadFrequently: true });
+    const source = sourceCtx.getImageData(0, 0, doc.width, doc.height);
+    const target = ctx.getImageData(0, 0, doc.width, doc.height);
+    const pixels = overlayCtx.getImageData(0, 0, doc.width, doc.height);
+    compositeClippedRasterPixels(target, source, pixels, { blendMode: layer.blendMode || 'source-over' });
+    ctx.putImageData(target, 0, 0);
+    sourceCtx.putImageData(source, 0, 0);
+  } catch (error) {
+    console.warn('Clipped raster compositing failed; previous composite preserved', error);
+  }
 }
 
 async function renderClippingBase(doc, layer, rasterOverrides) {
@@ -15388,6 +18054,76 @@ async function renderClippingBase(doc, layer, rasterOverrides) {
   return canvas;
 }
 
+// A masked Pass Through folder modifies its parent's backdrop. Blend between
+// that exact backdrop and the rendered result; masking an isolated group would
+// apply child multiply/adjustments to transparent pixels instead. Tile reads
+// bound transient ImageData allocations even on very large documents.
+function compositeMaskedPassThrough(targetCtx, renderedCtx, maskCtx, width, height, opacity) {
+  const tile = 256;
+  for (let y = 0; y < height; y += tile) {
+    for (let x = 0; x < width; x += tile) {
+      const w = Math.min(tile, width - x);
+      const h = Math.min(tile, height - y);
+      const backdrop = targetCtx.getImageData(x, y, w, h);
+      const rendered = renderedCtx.getImageData(x, y, w, h).data;
+      const coverage = maskCtx.getImageData(x, y, w, h).data;
+      const result = backdrop.data;
+      for (let offset = 0; offset < result.length; offset += 4) {
+        const amount = (coverage[offset + 3] / 255) * opacity;
+        if (amount <= 0) continue;
+        if (amount >= 1) {
+          result.set(rendered.subarray(offset, offset + 4), offset);
+          continue;
+        }
+        const beforeAlpha = result[offset + 3] / 255;
+        const afterAlpha = rendered[offset + 3] / 255;
+        const beforeWeight = beforeAlpha * (1 - amount);
+        const afterWeight = afterAlpha * amount;
+        const alpha = beforeWeight + afterWeight;
+        if (alpha <= 0) {
+          result.fill(0, offset, offset + 4);
+          continue;
+        }
+        for (let channel = 0; channel < 3; channel += 1) {
+          result[offset + channel] = Math.round(
+            (result[offset + channel] * beforeWeight + rendered[offset + channel] * afterWeight) / alpha
+          );
+        }
+        result[offset + 3] = Math.round(alpha * 255);
+      }
+      targetCtx.putImageData(backdrop, x, y);
+    }
+  }
+}
+
+// Chromium can quantize clipping stacks at intermediate premultiplied
+// stages. Use a tiled straight-RGBA blend for Normal isolated folders,
+// Difference, Exclusion and Color, avoiding intermediate rounding.
+function drawClippingStack(targetCtx, stack, mode) {
+  if (mode === 'source-over' || mode === 'difference' || mode === 'exclusion' || mode === 'color' || mode === 'hue' || mode === 'saturation' || mode === 'luminosity') {
+    const sourceCtx = stack.getContext('2d');
+    const tile = 256;
+    for (let y = 0; y < stack.height; y += tile) {
+      for (let x = 0; x < stack.width; x += tile) {
+        const w = Math.min(tile, stack.width - x);
+        const h = Math.min(tile, stack.height - y);
+        const target = targetCtx.getImageData(x, y, w, h);
+        const source = sourceCtx.getImageData(x, y, w, h);
+        compositeClippingStackPixels(target, source, mode);
+        targetCtx.putImageData(target, x, y);
+      }
+    }
+    return;
+  }
+  targetCtx.save();
+  try {
+    targetCtx.globalAlpha = 1;
+    targetCtx.globalCompositeOperation = mode;
+    targetCtx.filter = 'none';
+    targetCtx.drawImage(stack, 0, 0);
+  } finally { targetCtx.restore(); }
+}
+
 async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
   const plan = buildGroupRenderPlan(doc);
   const activeGroups = new Set();
@@ -15399,6 +18135,24 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
       const entry=entries[entryIndex];
       if (entry.type === 'layer') {
         const clipped=entry.layer?.clipping===true;
+        const baseMode=entry.layer?.blendMode;
+        const next=entries[entryIndex+1];
+        // A supported non-normal clipping base must blend its corrected source
+        // against the backdrop, not add an RGB delta to an already blended
+        // destination. Compose the contiguous clipped stack on its own matte,
+        // then blend the resulting stack exactly once with the parent.
+        if(!clipped && entry.layer.type!=='adjustment' &&
+          ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color','hue','saturation','luminosity'].includes(baseMode) &&
+          next?.type==='layer' && next.layer?.clipping===true){
+          const stack=await renderClippingBase(doc,{...entry.layer,blendMode:'source-over'},rasterOverrides);
+          while(entries[entryIndex+1]?.type==='layer' && entries[entryIndex+1].layer?.clipping===true){
+            const child=entries[++entryIndex].layer;
+            if(stack)await renderLayerEntry(stack,stack.getContext('2d'),doc,child,rasterOverrides,stack);
+          }
+          if(stack) drawClippingStack(targetCtx, stack, baseMode);
+          clippingBase=null;
+          continue;
+        }
         await renderLayerEntry(targetCanvas,targetCtx,doc,entry.layer,rasterOverrides,clipped?clippingBase:null);
         if(!clipped){
           const next=entries[entryIndex+1];
@@ -15411,24 +18165,82 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
       clippingBase=null;
       const group = entry.group;
       if (!group || group.visible === false || Number(group.opacity ?? 1) <= 0 || activeGroups.has(group.id)) continue;
+      const next = entries[entryIndex + 1];
+      const needsClippingBase = next?.type === 'layer' && next.layer?.clipping === true;
       activeGroups.add(group.id);
       try {
         const opacity = Math.max(0, Math.min(1, Number(group.opacity ?? 1)));
         const blendMode = group.blendMode || 'pass-through';
-        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9;
+        // A folder raster mask affects the group as a unit. Pass Through
+        // children first modify the actual parent backdrop; their masked
+        // result is interpolated below instead of composited as an isolated layer.
+        const groupMasked = Boolean(group.mask?.enabled !== false && (group.mask?.dataUrl || group.mask?.invert));
+        const isolated = blendMode !== 'pass-through' || opacity < 1 - 1e-9 || groupMasked;
+        const newGroupCanvas = () => {
+          const groupCanvas = document.createElement('canvas');
+          groupCanvas.width = doc.width;
+          groupCanvas.height = doc.height;
+          const groupCtx = groupCanvas.getContext('2d', { alpha:true });
+          groupCtx.imageSmoothingEnabled = true;
+          if ('imageSmoothingQuality' in groupCtx) groupCtx.imageSmoothingQuality = 'high';
+          return { groupCanvas, groupCtx };
+        };
 
         if (!isolated) {
+          // Pass-through renders against its parent backdrop; compute clipping
+          // coverage separately so the group's own alpha is not the parent's.
           await renderEntries(targetCanvas, targetCtx, group.id);
+          if (needsClippingBase) {
+            const { groupCanvas, groupCtx } = newGroupCanvas();
+            await renderEntries(groupCanvas, groupCtx, group.id);
+            clippingBase = groupCanvas;
+          }
           continue;
         }
 
-        const groupCanvas = document.createElement('canvas');
-        groupCanvas.width = doc.width;
-        groupCanvas.height = doc.height;
-        const groupCtx = groupCanvas.getContext('2d', { alpha:true });
-        groupCtx.imageSmoothingEnabled = true;
-        if ('imageSmoothingQuality' in groupCtx) groupCtx.imageSmoothingQuality = 'high';
+        if (blendMode === 'pass-through' && groupMasked) {
+          const coverage = await layerMaskCoverageCanvas(group.mask, doc.width, doc.height);
+          // Invalid mask data must not unexpectedly reveal masked descendants.
+          if (!coverage) continue;
+          const positioned = positionLayerMaskCoverage(coverage, group.mask, doc.width, doc.height);
+          const { groupCanvas: backdropCanvas, groupCtx: backdropCtx } = newGroupCanvas();
+          backdropCtx.drawImage(targetCanvas, 0, 0);
+          await renderEntries(backdropCanvas, backdropCtx, group.id);
+          compositeMaskedPassThrough(
+            targetCtx, backdropCtx, positioned.getContext('2d'),
+            doc.width, doc.height, opacity
+          );
+          if (needsClippingBase) {
+            const { groupCanvas: source, groupCtx: sourceCtx } = newGroupCanvas();
+            await renderEntries(source, sourceCtx, group.id);
+            await applyLayerMaskToContext(sourceCtx, group.mask, doc.width, doc.height);
+            const { groupCanvas: clippedCoverage, groupCtx: coverageCtx } = newGroupCanvas();
+            coverageCtx.globalAlpha = opacity;
+            coverageCtx.drawImage(source, 0, 0);
+            clippingBase = clippedCoverage;
+          }
+          continue;
+        }
+
+        const { groupCanvas, groupCtx } = newGroupCanvas();
         await renderEntries(groupCanvas, groupCtx, group.id);
+        if (groupMasked) await applyLayerMaskToContext(groupCtx, group.mask, doc.width, doc.height);
+
+        // An isolated folder used as a clipping base follows the
+        // same source-stack rule as a raster base. Apply folder mask/opacity
+        // once, edit the resulting matte, and blend once against the parent.
+        if (needsClippingBase && ['source-over','multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color','hue','saturation','luminosity'].includes(blendMode)) {
+          const { groupCanvas: stack, groupCtx: stackCtx } = newGroupCanvas();
+          stackCtx.globalAlpha = opacity;
+          stackCtx.drawImage(groupCanvas, 0, 0);
+          stackCtx.globalAlpha = 1;
+          while (entries[entryIndex + 1]?.type === 'layer' && entries[entryIndex + 1].layer?.clipping === true) {
+            const child = entries[++entryIndex].layer;
+            await renderLayerEntry(stack, stackCtx, doc, child, rasterOverrides, stack);
+          }
+          drawClippingStack(targetCtx, stack, blendMode);
+          continue;
+        }
 
         targetCtx.save();
         targetCtx.globalAlpha = opacity;
@@ -15436,6 +18248,13 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         targetCtx.filter = 'none';
         targetCtx.drawImage(groupCanvas, 0, 0);
         targetCtx.restore();
+        if (needsClippingBase) {
+          // Clipping follows visible group coverage, including group opacity.
+          const { groupCanvas: coverage, groupCtx: coverageCtx } = newGroupCanvas();
+          coverageCtx.globalAlpha = opacity;
+          coverageCtx.drawImage(groupCanvas, 0, 0);
+          clippingBase = coverage;
+        }
       } finally {
         activeGroups.delete(group.id);
       }
@@ -15528,8 +18347,23 @@ function renderVectorMaskBitmap(vectorMask, width, height) {
     initialized=true;
   }
 
-  if(vectorMask?.invert===true){
-    ctx.save();ctx.globalCompositeOperation='xor';ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.restore();
+  const density=Number(vectorMask?.density ?? 1);
+  const feather=Number(vectorMask?.feather ?? 0);
+  if(vectorMask?.invert===true || density<1 || feather>0){
+    const pixels=ctx.getImageData(0,0,canvas.width,canvas.height);
+    const alpha=new Uint8ClampedArray(canvas.width*canvas.height);
+    for(let index=0;index<alpha.length;index++)alpha[index]=pixels.data[index*4+3];
+    const controlled=applyMaskControlsAlpha(alpha,canvas.width,canvas.height,{
+      invert:vectorMask?.invert===true,
+      density:Number.isFinite(density)?density:1,
+      feather:Number.isFinite(feather)?feather:0,
+    });
+    for(let index=0;index<controlled.length;index++){
+      const offset=index*4;
+      pixels.data[offset]=255;pixels.data[offset+1]=255;pixels.data[offset+2]=255;
+      pixels.data[offset+3]=controlled[index];
+    }
+    ctx.putImageData(pixels,0,0);
   }
   return canvas;
 }
@@ -15731,6 +18565,278 @@ function clearImageCache() {
   smartFilterCache.clear();
 }
 
+// ---- src/painting/tiled-inpaint-dispatch.js ----
+const TILED_INPAINT_RESULT_TILE_URL_PREFIX = 'data:application/x-zeter-pixel-buffer-tile;base64,';
+
+// A detached Worker crosses a structured-clone boundary. Never allow a
+// malformed or stale-shaped result to reach preview/History publication.
+// This validates changed payloads without decoding every unchanged native tile.
+function assertTiledInpaintWorkerResult(result, source, selectedIndices) {
+  const invalid = () => new TypeError('Tiled inpaint: invalid Worker result');
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw invalid();
+  const counts = [result.changed, result.filled, result.changedTiles, result.loadedTiles];
+  if (!counts.every(value => Number.isSafeInteger(value) && value >= 0) ||
+      result.filled !== selectedIndices.length ||
+      result.changed > result.filled ||
+      result.changedTiles > result.changed ||
+      result.changedTiles > result.loadedTiles ||
+      result.loadedTiles > source.tiles.length ||
+      (result.changed === 0) !== (result.changedTiles === 0)) throw invalid();
+
+  const returned = result.source;
+  if (!returned || typeof returned !== 'object' || Array.isArray(returned) ||
+      !Array.isArray(returned.tiles) || returned.tiles.length !== source.tiles.length) throw invalid();
+  for (const field of ['kind', 'width', 'height', 'model', 'channels', 'bitsPerChannel',
+    'tileSize', 'rawBytes']) {
+    if (returned[field] !== source[field]) throw invalid();
+  }
+  if (returned.colorSpace !== String(source.colorSpace || '').slice(0, 120) ||
+      returned.profileName !== String(source.profileName || '').slice(0, 240) ||
+      returned.alphaMode !== (source.channels === (source.model === 'cmyk' ? 5 : 4) ? 'straight' : 'none') ||
+      returned.sampleType !== (source.bitsPerChannel === 32 ? 'float' : 'uint') ||
+      returned.byteOrder !== 'little-endian') throw invalid();
+
+  const columns = Math.ceil(source.width / source.tileSize);
+  const editableTiles = new Set();
+  // One bit per document pixel (at most 2 MiB with the 48 MiB source cap),
+  // avoiding a multi-million-element Set of selected coordinates.
+  const selectedBits = new Uint8Array(Math.ceil(source.width * source.height / 8));
+  for (const index of selectedIndices) {
+    const x = index % source.width, y = Math.floor(index / source.width);
+    editableTiles.add(Math.floor(y / source.tileSize) * columns + Math.floor(x / source.tileSize));
+    selectedBits[index >> 3] |= 1 << (index & 7);
+  }
+
+  const pixelBytes = source.channels * source.bitsPerChannel / 8;
+  // Content-Aware Fill is a color operation: even selected pixels must retain
+  // their original native alpha samples byte-for-byte (RGB and CMYK).
+  const alphaBytes = source.channels === (source.model === 'cmyk' ? 5 : 4)
+    ? source.bitsPerChannel / 8 : 0;
+  let changedTilePayloads = 0;
+  let changedPixels = 0;
+  for (let index = 0; index < source.tiles.length; index += 1) {
+    const before = source.tiles[index], after = returned.tiles[index];
+    if (!after || typeof after !== 'object' || Array.isArray(after)) throw invalid();
+    for (const field of ['x', 'y', 'width', 'height', 'rawBytes']) {
+      if (after[field] !== before[field]) throw invalid();
+    }
+    if (typeof after.dataUrl !== 'string') throw invalid();
+    if (after.dataUrl === before.dataUrl) continue;
+    if (!editableTiles.has(index) ||
+        !after.dataUrl.startsWith(TILED_INPAINT_RESULT_TILE_URL_PREFIX)) throw invalid();
+    const encoded = after.dataUrl.slice(TILED_INPAINT_RESULT_TILE_URL_PREFIX.length);
+    if (!isCanonicalPixelBufferBase64(encoded, before.rawBytes)) throw invalid();
+
+    // A selected tile may contain unselected donor pixels. Compare the exact
+    // native little-endian bytes, not a lossy 8-bit preview or float values.
+    // Only changed tiles are decoded; memory is bounded to two tile payloads.
+    let originalBytes, returnedBytes;
+    try {
+      originalBytes = dataUrlToBytes(before.dataUrl, { maxBytes:before.rawBytes });
+      returnedBytes = dataUrlToBytes(after.dataUrl, { maxBytes:before.rawBytes });
+    } catch { throw invalid(); }
+    if (originalBytes.length !== before.rawBytes ||
+        returnedBytes.length !== before.rawBytes) throw invalid();
+    // Reuse a single view per changed tile (up to millions of selected pixels).
+    const returnedFloatView = source.bitsPerChannel === 32
+      ? new DataView(returnedBytes.buffer, returnedBytes.byteOffset, returnedBytes.byteLength)
+      : null;
+    let tilePixelChanges = 0;
+    for (let local = 0; local < before.width * before.height; local += 1) {
+      const offset = local * pixelBytes;
+      let different = false;
+      for (let byte = 0; byte < pixelBytes; byte += 1) {
+        if (originalBytes[offset + byte] !== returnedBytes[offset + byte]) {
+          different = true;
+          break;
+        }
+      }
+      if (!different) continue;
+      // A malformed Worker must never change opacity or poison the saved
+      // Float32 document with NaN/Infinity. HDR values >1 remain permitted.
+      for (let byte = pixelBytes - alphaBytes; byte < pixelBytes; byte += 1) {
+        if (originalBytes[offset + byte] !== returnedBytes[offset + byte]) throw invalid();
+      }
+      if (returnedFloatView) {
+        for (let channel = 0; channel < source.channels - (alphaBytes ? 1 : 0); channel += 1) {
+          if (!Number.isFinite(returnedFloatView.getFloat32(offset + channel * 4, true))) throw invalid();
+        }
+      }
+      const globalX = before.x + local % before.width;
+      const globalY = before.y + Math.floor(local / before.width);
+      const global = globalY * source.width + globalX;
+      if (!(selectedBits[global >> 3] & (1 << (global & 7)))) throw invalid();
+      tilePixelChanges += 1;
+    }
+    if (!tilePixelChanges) throw invalid();
+    changedPixels += tilePixelChanges;
+    changedTilePayloads += 1;
+  }
+  if (changedTilePayloads !== result.changedTiles || changedPixels !== result.changed) throw invalid();
+  return result;
+}
+
+// Rebuild the full native source ONLY on the UI side, reusing the unchanged
+// Data URL owners already retained by the document. Reject duplicate, sparse-
+// invalid or oversized Worker patches before the existing byte-exact validator.
+function expandCompactTiledInpaintWorkerResult(result, source) {
+  if (!result || !Object.hasOwn(result, 'tileUpdates')) return result;
+  const invalid = () => new TypeError('Tiled inpaint: invalid Worker result');
+  if (Object.hasOwn(result, 'source') || !Array.isArray(result.tileUpdates) ||
+      result.tileUpdates.length !== result.changedTiles ||
+      result.tileUpdates.length > source.tiles.length) throw invalid();
+  const tiles = source.tiles.slice();
+  const seen = new Set();
+  for (const update of result.tileUpdates) {
+    if (!update || typeof update !== 'object' || Array.isArray(update) ||
+        !Number.isSafeInteger(update.index) || update.index < 0 ||
+        update.index >= tiles.length || seen.has(update.index) ||
+        typeof update.dataUrl !== 'string') throw invalid();
+    seen.add(update.index);
+    tiles[update.index] = { ...source.tiles[update.index], dataUrl:update.dataUrl };
+  }
+  const { tileUpdates, ...counts } = result;
+  return { ...counts, source:{ ...source, tiles } };
+}
+
+// Stage 003: freeze geometry on the UI thread, then run the bounded native
+// tile kernel in the browser Worker. A missing Worker is the ONLY fallback;
+// compute/protocol failures fail closed rather than silently rerunning work.
+async function prepareTiledInpaintWithWorker(source, {
+  isAllowed,
+  isCancelled = () => false,
+  worker = null,
+  maxBytes,
+  // Opt-in ceiling for the full native Data URL payload cloned UI -> Worker.
+  // Count ASCII characters, not measured JS heap / structured-clone bytes.
+  maxWorkerInputDataUrlChars = null,
+  maxFillPixels = 2_000_000,
+  scanChunkPixels = 32_768,
+  yieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
+  onTiming = null, // opt-in monotonic observer; must not affect compute
+} = {}) {
+  // Refuse over-budget sources before the first selection predicate call,
+  // cooperative yield or Worker message. Returning null here used to send the
+  // caller into a second (contiguous) native fallback, hiding the budget error.
+  if (Number.isSafeInteger(maxBytes) && Number.isSafeInteger(source?.rawBytes) &&
+      source.rawBytes > maxBytes) {
+    throw new RangeError('Контент-заливка: native source превышает доступный лимит памяти (' +
+      source.rawBytes + ' > ' + maxBytes + ' байт)');
+  }
+  if (!worker) {
+    return inpaintTiledPixelBufferSourceCooperative(source, {
+      isAllowed, isCancelled, maxBytes, maxFillPixels, scanChunkPixels, yieldControl,
+    });
+  }
+  if (typeof isAllowed !== 'function' || typeof isCancelled !== 'function' ||
+      typeof yieldControl !== 'function' || typeof worker.run !== 'function') {
+    throw new TypeError('Tiled inpaint: invalid Worker selection callbacks');
+  }
+  const working = createSerializedPixelBufferTileWorkingSet(source, { maxBytes });
+  if (!working) throw new TypeError('Tiled inpaint: invalid native source');
+  // A Worker must structured-clone every native tile URL on input, even
+  // though 6c-5 eliminated the unchanged URL copies in its *reply*.
+  // Fail before selection scans, Worker creation or source/History mutation
+  // when the caller opts into an aggregate URL-character budget.
+  if (maxWorkerInputDataUrlChars !== null) {
+    if (!Number.isSafeInteger(maxWorkerInputDataUrlChars) ||
+        maxWorkerInputDataUrlChars < 0) {
+      throw new RangeError('Tiled inpaint: invalid maxWorkerInputDataUrlChars');
+    }
+    let inputUrlChars = 0;
+    for (const tile of source.tiles) {
+      if (tile.dataUrl.length > maxWorkerInputDataUrlChars - inputUrlChars) {
+        throw new RangeError('Tiled inpaint: Worker input exceeds maxWorkerInputDataUrlChars');
+      }
+      inputUrlChars += tile.dataUrl.length;
+    }
+  }
+  const { width, height } = working;
+  const total = width * height;
+  // The Worker protocol uses Uint32 indices. Never allocate a huge JS
+  // number[] plus a second typed copy while freezing the UI selection.
+  if (!Number.isSafeInteger(total) || total < 1 || total > 0x1_0000_0000 ||
+      !Number.isSafeInteger(maxFillPixels) || maxFillPixels < 1) {
+    throw new RangeError('Tiled inpaint: unsafe selection size or maxFillPixels');
+  }
+  const maxStored = Math.min(total, maxFillPixels);
+  let indices = new Uint32Array(0);
+  let selected = 0;
+  function storeSelected(index) {
+    if (selected > maxStored) return;
+    if (selected > indices.length) {
+      // Geometric growth, capped to the admissible selection; tiny sparse
+      // regions never reserve the entire multi-million-pixel fill budget.
+      const capacity = Math.min(maxStored, Math.max(selected,
+        indices.length ? indices.length * 2 : 32));
+      const next = new Uint32Array(capacity);
+      next.set(indices);
+      indices = next;
+    }
+    indices[selected - 1] = index;
+  }
+  const emitTiming = (phase, selectedPixels = null) => {
+    if (typeof onTiming !== 'function') return;
+    try {
+      const atMs = globalThis.performance?.now?.();
+      if (Number.isFinite(atMs)) onTiming({ phase, atMs, selectedPixels });
+    } catch { /* instrumentation is strictly observational */ }
+  };
+  const chunk = Math.max(1, Math.min(262_144, Math.trunc(Number(scanChunkPixels) || 32_768)));
+  const cancelled = () => ({
+    source, changed:0, filled:0, changedTiles:0, loadedTiles:0, cancelled:true,
+  });
+  const unchanged = () => ({ source, changed:0, filled:0, changedTiles:0, loadedTiles:0 });
+
+  emitTiming('selection-start');
+  for (let start = 0; start < total; start += chunk) {
+    if (isCancelled()) return cancelled();
+    if (start > 0) {
+      await yieldControl();
+      if (isCancelled()) return cancelled();
+    }
+    const end = Math.min(total, start + chunk);
+    for (let index = start; index < end; index += 1) {
+      // A synchronous owner/session cancellation can arise inside isAllowed.
+      // Honor it within a bounded number of predicates even for a large chunk.
+      if (index !== start && ((index - start) & 63) === 0 && isCancelled()) return cancelled();
+      const y = Math.floor(index / width), x = index - y * width;
+      if (!isAllowed(x, y)) continue;
+      selected += 1;
+      storeSelected(index);
+    }
+  }
+  emitTiming('selection-end', selected);
+  if (isCancelled()) return cancelled();
+  // Preserve existing native semantics: empty/full selection is a no-op,
+  // even when full selection exceeds the bounded maxFillPixels.
+  if (!selected || selected === total) return unchanged();
+  if (selected > maxFillPixels) {
+    throw new RangeError('Контент-заливка: выделено больше безопасного лимита ' + maxFillPixels + ' px');
+  }
+  // Detach a compact, exact-length immutable snapshot from any spare buffer
+  // capacity; no transient JS Array of pixel indices is ever constructed.
+  const selectedIndices = indices.length === selected ? indices : indices.slice(0, selected);
+  const job = { source, selectedIndices, maxBytes, maxFillPixels, compactResult:true };
+  emitTiming('worker-run-start', selected);
+  const result = await worker.run(job, { isCurrent:() => !isCancelled() });
+  if (isCancelled() || result?.cancelled) return cancelled();
+  if (result?.unavailable) {
+    // Only a pure supplier failure may trigger fallback. A Worker reply that
+    // mixes an unavailable flag with native payloads is a protocol failure.
+    if (result.unavailable !== true || Object.keys(result).length !== 1) {
+      throw new TypeError('Tiled inpaint: invalid Worker result');
+    }
+    // Use the SAME frozen snapshot: do not call a mutable predicate twice.
+    return inpaintTiledPixelBufferSourceFromIndicesCooperative(source, {
+      ...job, isCancelled, yieldControl,
+    });
+  }
+  return assertTiledInpaintWorkerResult(
+    expandCompactTiledInpaintWorkerResult(result, source), source, job.selectedIndices,
+  );
+}
+
 // ---- src/painting/controller.js ----
 function createRasterEditController({
   getDocument,
@@ -15738,6 +18844,8 @@ function createRasterEditController({
   getCmykPreviewTransform = () => null,
   renderPaintPreview = () => {},
   documentRef = globalThis.document,
+  tiledInpaintWorker = null,
+  previewYieldControl = () => new Promise(resolve => setTimeout(resolve, 0)),
   requestFrame = callback => globalThis.requestAnimationFrame(callback),
   cancelFrame = frame => globalThis.cancelAnimationFrame(frame),
 } = {}) {
@@ -15769,6 +18877,14 @@ function createRasterEditController({
     brushLayerId = null;
     brushOwner = null;
     brushLayer = null;
+  }
+
+  // Cancellation can finish after a newer edit has acquired another canvas.
+  // Only discard the cache still owned by the cancelled operation.
+  function discardRasterBuffer(owner, layer, canvas) {
+    if (!canvas || brushCanvas !== canvas || brushOwner !== owner || brushLayer !== layer) return false;
+    clearBrushBuffer();
+    return true;
   }
 
   function isCurrentRasterTarget(owner, layer) {
@@ -15827,6 +18943,7 @@ function createRasterEditController({
   }
 
   function reset() {
+    tiledInpaintWorker?.cancel?.();
     cancelPaintPreview();
     clearBrushBuffer();
     clearHighDepthPaintState();
@@ -15842,9 +18959,11 @@ function createRasterEditController({
 
   function editableHighDepthBuffer(layer, { requireAlpha = false } = {}) {
     if (!layer?.highDepthSource) return null;
-    const decoded = deserializePixelBufferSource(layer.highDepthSource);
+    // The decoder returns an exclusive typed plane. Re-cloning it would cost
+    // one whole extra RGB16/Float32/CMYK allocation on every legacy edit.
+    const decoded = deserializeEditablePixelBufferSource(layer.highDepthSource, { requireAlpha });
     if (decoded.model !== 'rgb' && decoded.model !== 'cmyk') return null;
-    const working = requireAlpha ? pixelBufferWithStraightAlpha(decoded) : clonePixelBuffer(decoded);
+    const working = decoded;
     if (pixelBufferByteLength(working) > highDepthBudgetForLayer(layer)) return null;
     return working;
   }
@@ -16067,13 +19186,18 @@ function createRasterEditController({
   }
 
 
-  async function highDepthPreviewDataUrlFromSource(layer, source) {
+  async function highDepthPreviewDataUrlFromSource(layer, source, {
+    isCancelled = () => false,
+  } = {}) {
+    if (isCancelled()) return null;
     const preview = sanitizeHighDepthPreview(layer.highDepthPreview);
     const canvas = documentRef.createElement('canvas');
     canvas.width = source.width;
     canvas.height = source.height;
     const context = canvas.getContext('2d', { alpha:true, willReadFrequently:true });
-    forEachSerializedPixelBufferTile(source, ({ x, y, buffer }) => {
+    // This canvas is private until the complete preview is encoded and its
+    // exact owner has been rechecked. No partial image reaches the layer.
+    const completed = await forEachSerializedPixelBufferTileCooperative(source, ({ x, y, buffer }) => {
       const rgba = buffer.model === 'cmyk'
         ? cmykPixelBufferToRgba8Preview(buffer, getCmykPreviewTransform())
         : pixelBufferToToneMappedRgba8Preview(buffer, {}, {
@@ -16083,13 +19207,15 @@ function createRasterEditController({
       const image = context.createImageData(buffer.width, buffer.height);
       image.data.set(rgba);
       context.putImageData(image, x, y);
-    });
+    }, { isCancelled, yieldControl:previewYieldControl, batchTiles:2 });
+    if (!completed || isCancelled()) return null;
     return canvasToDataURL(canvas, 'image/png');
   }
 
   async function prepareTiledHighDepthMutation(layer, visitor, {
     requireAlpha = false,
     maxBytes = null,
+    isCancelled = () => false,
   } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
     const byteBudget = maxBytes == null
@@ -16109,7 +19235,14 @@ function createRasterEditController({
         mutation:null,
       };
     }
-    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source);
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source, { isCancelled });
+    if (dataUrl === null) return {
+      changed:prepared.changed,
+      changedTiles:prepared.changedTiles,
+      promotedAlpha:prepared.promotedAlpha,
+      mutation:null,
+      cancelled:true,
+    };
     return {
       changed:prepared.changed,
       changedTiles:prepared.changedTiles,
@@ -16129,15 +19262,18 @@ function createRasterEditController({
     isContinuationCurrent,
   } = {}) {
     if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
-    const continuationCurrent = () => (
-      typeof isContinuationCurrent !== 'function' || isContinuationCurrent()
+    // Recheck canonical source identity, not just the owning layer object.
+    // A superseded async preview must not overwrite a newer edit on that layer.
+    const originalSource = layer.highDepthSource;
+    const stale = () => (
+      (typeof isContinuationCurrent === 'function' && !isContinuationCurrent()) ||
+      !isCurrentRasterTarget(owner, layer) ||
+      layer.highDepthSource !== originalSource
     );
-    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
-      return { changed:0, changedTiles:0, applied:false, stale:true };
-    }
-    const prepared = await prepareTiledHighDepthMutation(layer, visitor, { requireAlpha });
+    if (stale()) return { changed:0, changedTiles:0, applied:false, stale:true };
+    const prepared = await prepareTiledHighDepthMutation(layer, visitor, { requireAlpha, isCancelled:stale });
     if (!prepared) return null;
-    if (!continuationCurrent() || !isCurrentRasterTarget(owner, layer)) {
+    if (stale() || prepared.cancelled) {
       return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:false, stale:true };
     }
     if (!prepared.mutation) {
@@ -16145,6 +19281,44 @@ function createRasterEditController({
     }
     applyHighDepthMutation(layer, prepared.mutation);
     return { changed:prepared.changed, changedTiles:prepared.changedTiles, applied:true, stale:false };
+  }
+
+  // Keep all ROI tile changes private until the exact document, layer and
+  // serialized source are revalidated after the asynchronous preview build.
+  async function persistTiledHighDepthInpaint(owner, layer, {
+    isAllowed, isContinuationCurrent, maxWorkerInputDataUrlChars = null,
+  } = {}) {
+    if (layer?.highDepthSource?.kind !== PIXEL_BUFFER_TILED_SOURCE_KIND) return null;
+    const originalSource = layer.highDepthSource;
+    // A completed Worker can still be awaiting preview. Never publish after
+    // the command generation/lease was revoked, even for the same document.
+    const stale = () => (
+      (typeof isContinuationCurrent === 'function' && !isContinuationCurrent()) ||
+      !isCurrentRasterTarget(owner, layer) ||
+      layer.highDepthSource !== originalSource
+    );
+    if (stale()) return { changed:0, filled:0, changedTiles:0, applied:false, stale:true };
+    const prepared = await prepareTiledInpaintWithWorker(originalSource, {
+      isAllowed,
+      isCancelled:stale,
+      worker:tiledInpaintWorker,
+      maxBytes:highDepthBudgetForLayer(layer),
+      maxWorkerInputDataUrlChars,
+      // Read at command time to support a CDP observer injected after startup.
+      onTiming:globalThis.__zpeTiledInpaintTiming,
+    });
+    if (stale() || prepared?.cancelled) return { ...prepared, applied:false, stale:true };
+    if (!prepared.changed) return { ...prepared, applied:false, stale:false };
+    const dataUrl = await highDepthPreviewDataUrlFromSource(layer, prepared.source, { isCancelled:stale });
+    if (dataUrl === null || stale()) return { ...prepared, applied:false, stale:true };
+    applyHighDepthMutation(layer, {
+      highDepthSource:prepared.source,
+      dataUrl,
+      highDepthPreview:prepared.source.model === 'cmyk'
+        ? null
+        : sanitizeHighDepthPreview(layer.highDepthPreview),
+    });
+    return { ...prepared, applied:true, stale:false };
   }
 
   async function prepareHighDepthMutation(layer, buffer, { maxBytes = null } = {}) {
@@ -16340,8 +19514,10 @@ function createRasterEditController({
     get highDepthPaintWorkingSet() { return highDepthPaintWorkingSet; },
     get highDepthPaintLayerId() { return highDepthPaintLayerId; },
     clearBrushBuffer,
+    discardRasterBuffer,
     clearHighDepthPaintState,
     reset,
+    cancelTiledInpaint: () => tiledInpaintWorker?.cancel?.(),
     markHighDepthPreviewDirty,
     isNativeHighDepthPaintTarget,
     highDepthBudgetForLayer,
@@ -16352,6 +19528,7 @@ function createRasterEditController({
     applyNativeHighDepthStrokeSegment,
     prepareTiledHighDepthMutation,
     persistTiledHighDepthMutation,
+    persistTiledHighDepthInpaint,
     prepareHighDepthMutation,
     applyHighDepthMutation,
     persistHighDepthMutation,
@@ -16416,10 +19593,29 @@ function createRasterCommandController({
     return true;
   }
 
+  // Keep the host's identity-checked lease; boolean test bridges also work.
   function beginPersist() {
-    if (state.beginPersist()) return true;
+    const lease = state.beginPersist();
+    if (lease) return lease;
     status('Сохраняется предыдущая растровая операция…');
     return false;
+  }
+
+  let pendingContentAwareFill = null;
+  function hasPendingContentAwareFill() {
+    return Boolean(pendingContentAwareFill && !pendingContentAwareFill.cancelled);
+  }
+  function cancelPendingContentAwareFill() {
+    const pending = pendingContentAwareFill;
+    if (!pending || pending.cancelled) return false;
+    pending.cancelled = true;
+    ui?.onContentAwarePendingChange?.(false);
+    // Revoke publication before terminating the CPU-bound Worker. A stale
+    // finally must never unlock a newer document's persistence lease.
+    state.endPersist(pending.lease);
+    pending.releaseRaster?.();
+    rasterEdit.cancelTiledInpaint?.();
+    return true;
   }
 
   function selectionPredicate(layer, selectionSnapshot) {
@@ -16459,7 +19655,8 @@ function createRasterCommandController({
       });
       addLayer(doc, layer);
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
 
     try {
       const from = target.toLocal(start, layer);
@@ -16549,7 +19746,7 @@ function createRasterCommandController({
       ui?.toast?.('Не удалось нарисовать линию', 'error');
       return false;
     } finally {
-      state.endPersist();
+      state.endPersist(persistLease);
     }
   }
 
@@ -16567,7 +19764,8 @@ function createRasterCommandController({
       ui?.toast?.('Выберите растровый слой или щёлкните по изображению', 'warn');
       return false;
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
 
     try {
       const local = target.toLocal(point, layer);
@@ -16656,7 +19854,7 @@ function createRasterCommandController({
       ui?.toast?.('Не удалось выполнить заливку', 'error');
       return false;
     } finally {
-      state.endPersist();
+      state.endPersist(persistLease);
     }
   }
 
@@ -16687,25 +19885,70 @@ function createRasterCommandController({
       status('Контент-заливка: не удалось зафиксировать геометрию выделения');
       return false;
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
+    const pending = { lease:persistLease, cancelled:false };
+    pendingContentAwareFill = pending;
+    ui?.onContentAwarePendingChange?.(true);
+    const isInpaintCurrent = () => !pending.cancelled &&
+      pendingContentAwareFill === pending && state.getDocument() === doc;
+    let releaseRasterOnFailure = null;
 
     try {
       status('Контент-заливка: анализ окружения…');
 
       if (layer.highDepthSource) {
+        if (
+          layer.highDepthSource.kind === PIXEL_BUFFER_TILED_SOURCE_KIND &&
+          typeof rasterEdit.persistTiledHighDepthInpaint === 'function'
+        ) {
+          const result = await rasterEdit.persistTiledHighDepthInpaint(doc, layer, {
+            isAllowed,
+            // Worker completion can precede asynchronous preview publication.
+            // Escape/tab cancellation must revoke that publication too.
+            isContinuationCurrent:isInpaintCurrent,
+          });
+          if (!isInpaintCurrent()) return false;
+          if (result) {
+            resetNativeState();
+            if (result.stale) return false;
+            if (!result.applied) {
+              status('Контент-заливка: нужны исходные пиксели за пределами выделения или результат не изменился');
+              return false;
+            }
+            ui?.commit?.(historyLabel);
+            status(`Контент-заливка: восстановлено ${result.filled.toLocaleString('ru-RU')} px · tiled ${result.changedTiles} tiles`);
+            return true;
+          }
+        }
         const buffer = rasterEdit.editableHighDepthBuffer(layer);
         if (!buffer) {
           resetNativeState();
           status('Контент-заливка: native high-depth buffer недоступен; precision сохранён без raster fallback');
           return false;
         }
-        const filled = inpaintPixelBuffer(buffer, { isAllowed });
+        // The contiguous high-depth path previously blocked the UI and could
+        // publish a late preview after Escape/tab cancellation. Work only on a
+        // privately decoded native plane and yield between kernel checkpoints.
+        const sourceForFill = layer.highDepthSource;
+        const stillOwnsSource = () => isInpaintCurrent() &&
+          layer.highDepthSource === sourceForFill &&
+          doc.layers.includes(layer) && target.selected?.() === layer &&
+          target.isEditableRasterLayer(layer);
+        const filled = await inpaintPixelBufferCooperative(buffer, { isAllowed }, {
+          isCancelled:() => !stillOwnsSource(),
+        });
+        if (!stillOwnsSource() || filled === null) return false;
         if (!filled) {
           resetNativeState();
           status('Контент-заливка: нужны исходные пиксели за пределами выделения');
           return false;
         }
-        if (!await rasterEdit.persistHighDepthMutation(doc, layer, buffer)) {
+        const published = await rasterEdit.persistHighDepthMutation(doc, layer, buffer, {
+          isContinuationCurrent:stillOwnsSource,
+        });
+        if (!isInpaintCurrent()) return false;
+        if (!published) {
           resetNativeState();
           return false;
         }
@@ -16716,30 +19959,70 @@ function createRasterCommandController({
       }
 
       const prepared = await rasterEdit.ensureRasterBuffer(doc, layer);
+      // A cancelled image decode may finish after a newer raster action started.
+      // Discard only the canvas from this operation, never the newer one's.
+      const releaseRaster = () => prepared && rasterEdit.discardRasterBuffer?.(doc, layer, prepared.canvas);
+      releaseRasterOnFailure = releaseRaster;
+      if (!isInpaintCurrent()) {
+        releaseRaster();
+        return false;
+      }
       if (!prepared) return false;
+      pending.releaseRaster = releaseRaster;
       if (state.getDocument() !== doc || !doc.layers.includes(layer) || !target.isEditableRasterLayer(layer)) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         status('Контент-заливка отменена: документ или слой изменился');
         return false;
       }
 
+      // Match native/high-depth cancellation semantics for ordinary RGBA8.
+      // The ImageData is a private working copy until the operation is current.
+      const originalRasterSource = layer.dataUrl;
+      const stillOwnsRaster = () => isInpaintCurrent() &&
+        layer.dataUrl === originalRasterSource &&
+        !layer.highDepthSource && doc.layers.includes(layer) &&
+        target.selected?.() === layer && target.isEditableRasterLayer(layer);
       const imageData = prepared.ctx.getImageData(0, 0, prepared.canvas.width, prepared.canvas.height);
-      const filled = inpaintSelectedSamples(imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed });
+      const filled = await inpaintSelectedSamplesCooperative(
+        imageData.data, prepared.canvas.width, prepared.canvas.height, 4, { isAllowed },
+        { isCancelled: () => !stillOwnsRaster() },
+      );
+      if (!stillOwnsRaster() || filled === null) {
+        releaseRaster();
+        return false;
+      }
       if (!filled) {
-        rasterEdit.clearBrushBuffer();
+        releaseRaster();
         status('Контент-заливка: нужны исходные пиксели за пределами выделения');
         return false;
       }
       prepared.ctx.putImageData(imageData, 0, 0);
-      if (!await rasterEdit.persistPaintLayer(doc, layer)) {
-        rasterEdit.clearBrushBuffer();
+      const published = await rasterEdit.persistPaintLayer(doc, layer, {
+        isContinuationCurrent: stillOwnsRaster,
+      });
+      // A successful publication intentionally replaces layer.dataUrl.
+      if (!isInpaintCurrent()) {
+        releaseRaster();
+        return false;
+      }
+      if (!published) {
+        releaseRaster();
         return false;
       }
       ui?.commit?.(historyLabel);
       status(`Контент-заливка: восстановлено ${filled.toLocaleString('ru-RU')} px`);
       return true;
     } catch (error) {
-      resetNativeState();
+      // A rejected async PNG encode may arrive after tab replacement without
+      // an explicit Escape. Discard only this operation's canvas even if stale;
+      // never reset the currently selected document's newer raster cache.
+      releaseRasterOnFailure?.();
+      if (!isInpaintCurrent()) return false;
+      if (releaseRasterOnFailure) {
+        state.resetPaintState?.();
+      } else {
+        resetNativeState();
+      }
       ui?.render?.();
       if (error instanceof RangeError && String(error.message).startsWith('Контент-заливка:')) {
         status(error.message);
@@ -16751,7 +20034,11 @@ function createRasterCommandController({
       ui?.toast?.('Не удалось выполнить контент-заливку', 'error');
       return false;
     } finally {
-      state.endPersist();
+      if (pendingContentAwareFill === pending) {
+        pendingContentAwareFill = null;
+        if (!pending.cancelled) ui?.onContentAwarePendingChange?.(false);
+      }
+      state.endPersist(persistLease);
     }
   }
 
@@ -16785,7 +20072,8 @@ function createRasterCommandController({
       status('Выделение не пересекает выбранный слой');
       return false;
     }
-    if (!beginPersist()) return false;
+    const persistLease = beginPersist();
+    if (!persistLease) return false;
 
     try {
       if (layer.highDepthSource) {
@@ -16862,11 +20150,11 @@ function createRasterCommandController({
       ui?.toast?.('Не удалось очистить выделение', 'error');
       return false;
     } finally {
-      state.endPersist();
+      state.endPersist(persistLease);
     }
   }
 
-  return { drawLine, fillAt, contentAwareFill, clearSelection };
+  return { drawLine, fillAt, contentAwareFill, clearSelection, hasPendingContentAwareFill, cancelPendingContentAwareFill };
 }
 
 // ---- src/ai/lama-assets.js ----
@@ -19973,6 +23261,7 @@ function createSelectionVectorMaskController({
   const {
     setStatus = () => {},
     toast = () => {},
+    showModal = () => {},
   } = ui;
 
   function selectionVectorMaskDocumentNodes(shape = getSelectionShape()) {
@@ -20047,7 +23336,12 @@ function createSelectionVectorMaskController({
       return false;
     }
     if (operation === 'replace' || !layer.vectorMask) {
-      layer.vectorMask = createVectorMask({ enabled:true, invert:false, subpaths:[subpath] });
+      const previous = layer.vectorMask;
+      layer.vectorMask = createVectorMask({
+        enabled:true, invert:false,
+        density:previous?.density ?? 1, feather:previous?.feather ?? 0,
+        subpaths:[subpath],
+      });
     } else {
       if (layer.vectorMask.subpaths.length >= 128) {
         const message = 'Векторная маска ограничена 128 контурами';
@@ -20082,7 +23376,105 @@ function createSelectionVectorMaskController({
       return false;
     }
     beginVectorMaskEdit(layer.id);
-    setStatus('Перо: редактирование векторной маски — перетаскивайте anchors и Bézier-handles');
+    setStatus('Перо: перетаскивайте узлы и ручки; Ctrl+клик по контуру — вставить узел, Ctrl+Alt+клик по узлу — удалить');
+    return true;
+  }
+
+  function editSelectedVectorMaskSubpathOperation(layer = getSelectedLayer()) {
+    const owner = getDocument();
+    const selectionAtOpen = getSelectedLayer();
+    const mask = layer?.vectorMask;
+    if (!owner || !layer || !mask || isLayerLocked(owner, layer)
+      || !Array.isArray(mask.subpaths) || !mask.subpaths.length) return false;
+    const subpaths = mask.subpaths.slice();
+    const initialIndex = subpaths.findIndex(subpath =>
+      subpath?.closed !== false && Array.isArray(subpath.points) && subpath.points.length >= 3);
+    if (initialIndex < 0) return false;
+    const operations = [
+      ['add','Добавить'], ['subtract','Вычесть'],
+      ['intersect','Пересечение'], ['exclude','Исключение'],
+    ];
+    showModal({
+      title:'Операция контура векторной маски',
+      fields:[
+        { name:'subpath', label:'Подпуть', type:'select', value:String(initialIndex),
+          options:subpaths.map((subpath, index) =>
+            [String(index), `${index + 1}: ${subpath?.points?.length || 0} узлов (${subpath?.operation || 'add'})`]) },
+        { name:'operation', label:'Операция', type:'select',
+          value:subpaths[initialIndex]?.operation || 'add', options:operations },
+      ],
+      submitLabel:'Применить',
+      onMount:({modal}) => {
+        const subpathSelect=modal.elements.subpath;
+        const operationSelect=modal.elements.operation;
+        subpathSelect?.addEventListener('change',()=>{
+          const value=subpathSelect.value;
+          const index=/^(?:0|[1-9]\d*)$/.test(value) ? Number(value) : -1;
+          const current=subpaths[index];
+          if (!operationSelect) return;
+          operationSelect.disabled=!current || current.closed===false
+            || !Array.isArray(current.points) || current.points.length<3;
+          if (!operationSelect.disabled) operationSelect.value=current.operation || 'add';
+        });
+      },
+      onSubmit:values => {
+        if (getDocument() !== owner || getSelectedLayer() !== selectionAtOpen
+          || !owner.layers?.includes(layer) || layer.vectorMask !== mask
+          || isLayerLocked(owner, layer)) return false;
+        const selectedValue = values?.subpath;
+        if (typeof selectedValue !== 'string' || !/^(?:0|[1-9]\d*)$/.test(selectedValue)) return false;
+        const index = Number(selectedValue);
+        const operation = values?.operation;
+        if (!Number.isSafeInteger(index) || index < 0 || index >= subpaths.length
+          || !operations.some(([name]) => name === operation)
+          || mask.subpaths?.length !== subpaths.length) return false;
+        const subpath = mask.subpaths[index];
+        if (subpath !== subpaths[index] || subpath?.closed === false
+          || !Array.isArray(subpath?.points) || subpath.points.length < 3
+          || subpath.operation === operation) return false;
+        subpath.operation = operation;
+        commit('Изменить операцию контура векторной маски');
+        setStatus(`Векторная маска: операция подпути ${index + 1} — ${operation}`);
+        return true;
+      },
+    });
+    return true;
+  }
+
+  function editSelectedVectorMaskProperties() {
+    const ownerDocument = getDocument();
+    const layer = getSelectedLayer();
+    const mask = layer?.vectorMask;
+    const isCurrentTarget = () => ownerDocument === getDocument()
+      && getSelectedLayer() === layer
+      && ownerDocument?.layers?.includes(layer)
+      && layer.vectorMask === mask
+      && !isLayerLocked(ownerDocument, layer);
+    if (!mask || !isCurrentTarget()) return false;
+    showModal({
+      title:'Параметры векторной маски',
+      fields:[
+        { name:'density', label:'Плотность, %', type:'number', value:Math.round((mask.density ?? 1)*100), min:0, max:100, step:1 },
+        { name:'feather', label:'Растушёвка, px', type:'number', value:mask.feather ?? 0, min:0, max:250, step:.5 },
+      ],
+      submitLabel:'Применить',
+      onSubmit:values => {
+        if (!isCurrentTarget()) return false;
+        const percent = Number(values?.density);
+        const featherValue = Number(values?.feather);
+        const density = Number.isFinite(percent) ? Math.max(0,Math.min(100,percent))/100 : (mask.density ?? 1);
+        const feather = Number.isFinite(featherValue) ? Math.max(0,Math.min(250,featherValue)) : (mask.feather ?? 0);
+        if (Math.abs((mask.density ?? 1)-density)<1e-9 && Math.abs((mask.feather ?? 0)-feather)<1e-9) {
+          setStatus('Параметры векторной маски не изменились');
+          return true;
+        }
+        mask.density=density;
+        mask.feather=feather;
+        commit('Параметры векторной маски');
+        setStatus(`Векторная маска: плотность ${Math.round(density*100)}%, растушёвка ${feather}px`);
+        return true;
+      },
+    });
     return true;
   }
 
@@ -20117,6 +23509,8 @@ function createSelectionVectorMaskController({
     selectionVectorMaskSubpath,
     applySelectionToVectorMask,
     editSelectedVectorMask,
+    editSelectedVectorMaskSubpathOperation,
+    editSelectedVectorMaskProperties,
     toggleSelectedVectorMask,
     invertSelectedVectorMask,
     removeSelectedVectorMask,
@@ -20485,6 +23879,8 @@ function createNewDocumentController({
     getActiveSessionId,
     getDocumentChangeSerial,
     blockPendingDocumentEdit,
+    canCancelPendingContentAwareFill = () => false,
+    cancelPendingContentAwareFill = () => false,
     replaceHistory,
     setDocument,
     markDirty,
@@ -20515,6 +23911,12 @@ function createNewDocumentController({
   requirePort(setStatus, 'status');
   requirePort(toast, 'toast');
 
+  // In-flight content-aware Fill is revocable, unlike a painting gesture or
+  // another persistence operation. Do not revoke it before user approval.
+  function blockUncancellableEdit() {
+    return canCancelPendingContentAwareFill() ? false : blockPendingDocumentEdit();
+  }
+
   function canReplaceDocument() {
     return !isDirty() || confirmDiscard(DISCARD_CONFIRM_MESSAGE);
   }
@@ -20543,7 +23945,7 @@ function createNewDocumentController({
   }
 
   async function open() {
-    if (blockPendingDocumentEdit()) return;
+    if (blockUncancellableEdit()) return;
     if (!canReplaceDocument()) return;
     const authority = captureReplacementAuthority();
     showModal({
@@ -20566,7 +23968,7 @@ function createNewDocumentController({
       ],
       submitLabel: 'Создать',
       onSubmit: async values => {
-        if (blockPendingDocumentEdit()) return false;
+        if (blockUncancellableEdit()) return false;
         if (!replacementOwnerIsCurrent(authority)) return rejectStaleReplacementOwner();
         if (needsFreshDiscardConfirmation(authority) && !confirmDiscard(DISCARD_CONFIRM_MESSAGE)) return false;
         try {
@@ -20576,6 +23978,10 @@ function createNewDocumentController({
             height: Number(values.height),
             background: values.background,
           });
+          // Validation and the latest discard decision must succeed before
+          // cancelling a running Worker. Recheck the lease before publication.
+          if (canCancelPendingContentAwareFill() && !cancelPendingContentAwareFill()) return false;
+          if (blockPendingDocumentEdit()) return false;
           replaceHistory();
           setDocument(next, { resetHistory: true, label: 'Новый документ' });
           markDirty(false);
@@ -20685,6 +24091,1163 @@ function createProjectController({
   return { openProject, saveProject };
 }
 
+// ---- src/formats/dng-clipping-warning.js ----
+// Display-only RAW clipping warning. Mutates a caller-owned ImageData buffer;
+// do not pass native sensor samples, layer previews or export buffers here.
+function markDisplayClippingWarning(rgba) {
+  if (!(rgba instanceof Uint8ClampedArray) || rgba.length % 4 !== 0)
+    throw new TypeError('Expected Uint8ClampedArray RGBA display pixels');
+  let highlights=0,shadows=0,eligible=0;
+  for(let i=0;i<rgba.length;i+=4){
+    const r=rgba[i],g=rgba[i+1],b=rgba[i+2];
+    // Transparent / antialiased edge pixels are not reliable clipping evidence.
+    if(rgba[i+3]<128)continue;
+    eligible++;
+    const high=r>=254||g>=254||b>=254;
+    const low=r<=1&&g<=1&&b<=1;
+    if(!high&&!low)continue;
+    if(high)highlights++;
+    else shadows++;
+    // Magenta indicates at least one clipped output channel; cyan marks black.
+    // A warning is NOT camera sensor saturation or highlight reconstruction.
+    const marker=high?[255,0,255]:[0,255,255];
+    rgba[i]=Math.round((r+marker[0])/2);
+    rgba[i+1]=Math.round((g+marker[1])/2);
+    rgba[i+2]=Math.round((b+marker[2])/2);
+  }
+  return {highlights,shadows,eligible};
+}
+
+/**
+ * Mark only the visible Canvas, in bounded readback tiles. This never edits
+ * RAW samples or the document render buffer; a newer render cancels the scan.
+ * A tile is at most 1 MiB of RGBA regardless of image aspect ratio.
+ */
+async function markDisplayClippingWarningOnCanvas(context,{
+  width,height,maxTilePixels=262144,
+  shouldContinue=()=>true,
+  yieldFrame=()=>new Promise(resolve=>setTimeout(resolve,0)),
+}={}) {
+  if(!Number.isSafeInteger(width)||!Number.isSafeInteger(height)||
+     width<=0||height<=0||!Number.isSafeInteger(width*height))
+    throw new RangeError('Invalid display canvas dimensions');
+  if(typeof context?.getImageData!=='function'||typeof context?.putImageData!=='function')
+    throw new TypeError('Display canvas context must provide getImageData and putImageData');
+  if(!Number.isSafeInteger(maxTilePixels)||maxTilePixels<2||maxTilePixels>262144)
+    throw new RangeError('Invalid bounded RGBA tile size');
+  if(typeof shouldContinue!=='function'||typeof yieldFrame!=='function')
+    throw new TypeError('Display scan callbacks must be functions');
+  const tileWidth=Math.min(width,maxTilePixels);
+  const tileHeight=Math.max(1,Math.floor(maxTilePixels/tileWidth));
+  const summary={highlights:0,shadows:0,eligible:0};
+  for(let y=0;y<height;y+=tileHeight){
+    const h=Math.min(tileHeight,height-y);
+    for(let x=0;x<width;x+=tileWidth){
+      if(!shouldContinue())return null;
+      const w=Math.min(tileWidth,width-x);
+      const image=context.getImageData(x,y,w,h);
+      const result=markDisplayClippingWarning(image.data);
+      if(!shouldContinue())return null;
+      if(result.highlights||result.shadows)context.putImageData(image,x,y);
+      summary.highlights+=result.highlights;
+      summary.shadows+=result.shadows;
+      summary.eligible+=result.eligible;
+      if(y+h<height||x+w<width){
+        await yieldFrame();
+      }
+    }
+  }
+  return shouldContinue()?summary:null;
+}
+
+// ---- src/formats/dng-presets.js ----
+// User-scoped RAW developing recipes. They never contain sensor bytes or raster previews.
+const RAW_PRESET_STORAGE_KEY='zeter.rawDevelopmentPresets.v1';
+const MAX_PRESETS=16;
+const MAX_STORAGE_BYTES=24000;
+const LIMITS={exposure:[-5,5],wbRed:[0.25,4],wbBlue:[0.25,4],highlights:[-1,1],shadows:[-1,1],contrast:[-1,1]};
+const DEMOSAIC=['bilinear','edge-aware-green','edge-aware-rgb'];
+function normalizeRawPresetDevelopment(source){
+  if(!source||typeof source!=='object'||Array.isArray(source))return null;
+  const result={};
+  for(const [key,[min,max]] of Object.entries(LIMITS)){
+    const value=key==='contrast' && source[key]===undefined ? 0 : source[key];
+    if(typeof value!=='number'||!Number.isFinite(value))return null;
+    result[key]=Math.max(min,Math.min(max,value));
+  }
+  const mode=source.demosaic??'bilinear';
+  if(!DEMOSAIC.includes(mode))return null;
+  result.demosaic=mode;
+  return result;
+}
+function normalizeRawPresetName(value){
+  if(typeof value!=='string')return '';
+  const name=value.replace(/[\u0000-\u001f\u007f]/g,' ').trim().replace(/\s+/g,' ');
+  return name.length<=48?name:'';
+}
+function readRawPresets(storage){
+  try{
+    const raw=storage?.getItem(RAW_PRESET_STORAGE_KEY);
+    if(!raw||raw.length>MAX_STORAGE_BYTES)return [];
+    const parsed=JSON.parse(raw);
+    if(parsed?.schema!==1||!Array.isArray(parsed.presets)||parsed.presets.length>MAX_PRESETS)return [];
+    const presets=[],names=new Set();
+    for(const entry of parsed.presets){
+      const name=normalizeRawPresetName(entry?.name);
+      const development=normalizeRawPresetDevelopment(entry?.development);
+      if(!name||!development||names.has(name.toLocaleLowerCase()))continue;
+      names.add(name.toLocaleLowerCase());
+      presets.push({name,development});
+    }
+    return presets;
+  }catch{return [];} // Privacy mode, corrupt storage or disabled localStorage.
+}
+function saveRawPreset(storage,name,development){
+  const normalizedName=normalizeRawPresetName(name);
+  const normalized=normalizeRawPresetDevelopment(development);
+  if(!normalizedName||!normalized)return {ok:false,reason:'invalid'};
+  const previous=readRawPresets(storage);
+  const index=previous.findIndex(p=>p.name.toLocaleLowerCase()===normalizedName.toLocaleLowerCase());
+  if(index<0&&previous.length>=MAX_PRESETS)return {ok:false,reason:'limit'};
+  const presets=previous.slice();
+  if(index>=0)presets[index]={name:normalizedName,development:normalized};
+  else presets.push({name:normalizedName,development:normalized});
+  try{
+    if(typeof storage?.setItem!=='function')return {ok:false,reason:'storage'};
+    storage.setItem(RAW_PRESET_STORAGE_KEY,JSON.stringify({schema:1,presets}));
+    return {ok:true,presets};
+  }catch{return {ok:false,reason:'storage'};}
+}
+function deleteRawPreset(storage,name){
+  const previous=readRawPresets(storage);
+  const presets=previous.filter(p=>p.name!==name);
+  if(previous.length===presets.length)return false;
+  try{
+    if(typeof storage?.setItem!=='function')return false;
+    storage.setItem(RAW_PRESET_STORAGE_KEY,JSON.stringify({schema:1,presets}));
+    return true;
+  }catch{return false;}
+}
+const RAW_PRESET_FILE_FORMAT='zeter-raw-development-presets';
+const PORTABLE_KEYS=['format','schema','presets'];
+const PRESET_KEYS=['name','development'];
+const DEVELOPMENT_KEYS=[...Object.keys(LIMITS),'demosaic'];
+const onlyKeys=(value,keys)=>value && typeof value==='object' && !Array.isArray(value) &&
+  Object.keys(value).every(key=>keys.includes(key));
+
+/** Portable v1 interchange: strict, small, named recipes only; never image or document bytes. */
+function parseRawPresetFile(text){
+  if(typeof text!=='string' || new TextEncoder().encode(text).byteLength>MAX_STORAGE_BYTES)
+    return {ok:false,reason:'size'};
+  let source;
+  try{source=JSON.parse(text);}catch{return {ok:false,reason:'invalid'};}
+  if(!onlyKeys(source,PORTABLE_KEYS) || source.format!==RAW_PRESET_FILE_FORMAT ||
+    source.schema!==1 || !Array.isArray(source.presets) ||
+    source.presets.length===0 || source.presets.length>MAX_PRESETS)
+    return {ok:false,reason:'invalid'};
+  const names=new Set(),presets=[];
+  for(const entry of source.presets){
+    if(!onlyKeys(entry,PRESET_KEYS) || !onlyKeys(entry.development,DEVELOPMENT_KEYS))
+      return {ok:false,reason:'invalid'};
+    const name=normalizeRawPresetName(entry.name);
+    const development=normalizeRawPresetDevelopment(entry.development);
+    if(!name || name!==entry.name || !development || names.has(name.toLocaleLowerCase()))
+      return {ok:false,reason:'invalid'};
+    // Imported recipes must not be silently clamped: reject unsupported bounds.
+    if(Object.entries(LIMITS).some(([key,[min,max]])=>
+      (entry.development[key]!==undefined &&
+        (entry.development[key]<min || entry.development[key]>max))))
+      return {ok:false,reason:'invalid'};
+    names.add(name.toLocaleLowerCase());
+    presets.push({name,development});
+  }
+  return {ok:true,presets};
+}
+function exportRawPresetFile(storage){
+  const presets=readRawPresets(storage);
+  if(!presets.length)return {ok:false,reason:'empty'};
+  return {ok:true,filename:'ZeTer-RAW-presets.json',
+    content:JSON.stringify({format:RAW_PRESET_FILE_FORMAT,schema:1,presets},null,2)+'\n'};
+}
+/** Atomic merge; existing names retain their slot, matching names are replaced only on confirmation in UI. */
+function importRawPresetFile(storage,text){
+  const parsed=parseRawPresetFile(text);
+  if(!parsed.ok)return parsed;
+  try{
+    if(typeof storage?.getItem!=='function'||typeof storage?.setItem!=='function')
+      return {ok:false,reason:'storage'};
+    const raw=storage.getItem(RAW_PRESET_STORAGE_KEY);
+    const previous=readRawPresets(storage);
+    // Do not erase corrupt local data when a migration is attempted.
+    if(raw!==null && raw!==undefined){
+      if(raw.length>MAX_STORAGE_BYTES)return {ok:false,reason:'storage'};
+      const existing=JSON.parse(raw);
+      if(existing?.schema!==1 || !Array.isArray(existing.presets) ||
+        existing.presets.length!==previous.length)return {ok:false,reason:'storage'};
+    }
+    const presets=previous.slice();
+    let added=0,overwritten=0;
+    for(const entry of parsed.presets){
+      const index=presets.findIndex(p=>p.name.toLocaleLowerCase()===entry.name.toLocaleLowerCase());
+      if(index>=0){presets[index]=entry;overwritten++;}
+      else{presets.push(entry);added++;}
+    }
+    if(presets.length>MAX_PRESETS)return {ok:false,reason:'limit'};
+    const encoded=JSON.stringify({schema:1,presets});
+    if(encoded.length>MAX_STORAGE_BYTES)return {ok:false,reason:'size'};
+    storage.setItem(RAW_PRESET_STORAGE_KEY,encoded);
+    return {ok:true,presets,added,overwritten};
+  }catch{return {ok:false,reason:'storage'};}
+}
+
+// ---- src/formats/dng-color.js ----
+// Bounded three-channel DNG colour pipeline. ForwardMatrix maps white-balanced
+// reference-camera RGB directly to D50 PCS; ColorMatrix is the legacy fallback.
+// Adobe DNG SDK's AB*CC mapping and FM*diag(1/referenceNeutral)*inverse(AB*CC)
+// are used, but this remains a limited colour workflow, not camera parity.
+const D50=[0.96422,1,0.82521], D65=[0.95047,1,1.08883];
+const ID=[1,0,0,0,1,0,0,0,1];
+const BRADFORD=[0.8951,0.2664,-0.1614,-0.7502,1.7135,0.0367,0.0389,-0.0685,1.0296];
+const XYZ_D65_TO_RGB=[3.2404542,-1.5371385,-0.4985314,-0.969266,1.8760108,0.041556,0.0556434,-0.2040259,1.0572252];
+const ILLUMINANT_KELVIN={1:5500,3:2856,17:2856,18:4874,19:6774,20:5503,21:6504,22:7504,23:5003,24:3200};
+function invalid(message){throw new Error('DNG: '+message);}
+function dot(a,b){return [0,1,2].map(r=>a[r*3]*b[0]+a[r*3+1]*b[1]+a[r*3+2]*b[2]);}
+function multiply(a,b){
+  const out=[];
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++)
+    out.push(a[r*3]*b[c]+a[r*3+1]*b[c+3]+a[r*3+2]*b[c+6]);
+  return out;
+}
+function invert(m,label='ColorMatrix'){
+  if(!Array.isArray(m)||m.length!==9||m.some(v=>!Number.isFinite(v)))
+    invalid('некорректная '+label);
+  const [a,b,c,d,e,f,g,h,i]=m;
+  const cof=[e*i-f*h,c*h-b*i,b*f-c*e,f*g-d*i,a*i-c*g,c*d-a*f,d*h-e*g,b*g-a*h,a*e-b*d];
+  const det=a*cof[0]+b*cof[3]+c*cof[6];
+  const scale=Math.max(...m.map(Math.abs));
+  if(!Number.isFinite(det)||scale===0||Math.abs(det)<=1e-8*scale**3)
+    invalid('вырожденная '+label);
+  return cof.map(v=>v/det);
+}
+function adapt(src,dst){
+  const from=dot(BRADFORD,src),to=dot(BRADFORD,dst);
+  if(from.some(v=>v<=1e-7)||to.some(v=>v<=0))invalid('неверная точка белого DNG');
+  const diag=[to[0]/from[0],to[1]/from[1],to[2]/from[2]];
+  return multiply(invert(BRADFORD),BRADFORD.map((v,i)=>v*diag[Math.floor(i/3)]));
+}
+function temperature(xyz){
+  const sum=xyz.reduce((a,b)=>a+b,0);
+  if(sum<=1e-9)invalid('неверная точка белого DNG');
+  const x=xyz[0]/sum,y=xyz[1]/sum;
+  const n=(x-0.332)/(0.1858-y);
+  const t=-449*n**3+3525*n**2-6823.3*n+5520.33;
+  if(!Number.isFinite(t))invalid('неверная цветовая температура DNG');
+  return Math.max(1667,Math.min(25000,t));
+}
+function normalizedForward(m){
+  invert(m,'ForwardMatrix'); // A singular three-channel profile must not silently lose gamut.
+  const out=[...m];
+  for(let row=0;row<3;row++){
+    const start=row*3,white=m[start]+m[start+1]+m[start+2];
+    if(!Number.isFinite(white)||white<=1e-8)invalid('ForwardMatrix не отображает единичный белый в D50');
+    for(let col=0;col<3;col++)out[start+col]*=D50[row]/white;
+  }
+  return out;
+}
+function lerp(a,b,weight){
+  return a.map((v,i)=>v*weight+b[i]*(1-weight));
+}
+function dngCameraToLinearSrgb(color,{wbRed=1,wbBlue=1}={}){
+  if(!color)return null;
+  const {matrix1,matrix2,illuminant1,illuminant2,neutral,whiteXY,
+    forward1,forward2,calibration1,calibration2,analogBalance,calibrationMatches}=color;
+  if(!ILLUMINANT_KELVIN[illuminant1])invalid('неподдерживаемый CalibrationIlluminant1');
+  invert(matrix1); if(matrix2)invert(matrix2);
+  if(!Number.isFinite(wbRed)||wbRed<=0||!Number.isFinite(wbBlue)||wbBlue<=0)
+    invalid('неверные пользовательские WB gains');
+  if(Boolean(matrix2)!==Boolean(illuminant2)||(matrix2&&!ILLUMINANT_KELVIN[illuminant2]))
+    invalid('неполная или неподдерживаемая двойная CalibrationIlluminant/ColorMatrix');
+  if(matrix2&&illuminant1===illuminant2)invalid('совпадающие CalibrationIlluminant');
+  if(forward2&&!matrix2)invalid('ForwardMatrix2 без ColorMatrix2');
+  if(calibration2&&!matrix2)invalid('CameraCalibration2 без ColorMatrix2');
+  if(forward1)normalizedForward(forward1);
+  if(forward2)normalizedForward(forward2);
+  if(calibration1)invert(calibration1,'CameraCalibration');
+  if(calibration2)invert(calibration2,'CameraCalibration');
+  if(analogBalance&&(!Array.isArray(analogBalance)||analogBalance.length!==3||
+     analogBalance.some(v=>!Number.isFinite(v)||v<=0||v>1024)))
+    invalid('неверный AnalogBalance');
+  if(whiteXY){
+    if(neutral!==null||!Array.isArray(whiteXY)||whiteXY.length!==2||
+      whiteXY.some(v=>!Number.isFinite(v)||v<=0||v>=1)||
+      whiteXY[0]+whiteXY[1]>=1)invalid('неверный AsShotWhiteXY');
+  }else if(!Array.isArray(neutral)||neutral.length!==3||
+    neutral.some(v=>!Number.isFinite(v)||v<=0))invalid('неверный баланс белого DNG');
+  const xyXyz=whiteXY ? [whiteXY[0]/whiteXY[1],1,
+    (1-whiteXY[0]-whiteXY[1])/whiteXY[1]] : null;
+  const ab=analogBalance||[1,1,1];
+  const balance=[ab[0],0,0,0,ab[1],0,0,0,ab[2]];
+  const hasCalibration=Boolean(calibrationMatches);
+  const adjusted=(m,cc)=>multiply(balance,multiply(hasCalibration?(cc||ID):ID,m));
+  const select=(weight)=>{
+    const matrix=matrix2?lerp(matrix1,matrix2,weight):matrix1;
+    const calibration=matrix2&&hasCalibration?
+      lerp(calibration1||ID,calibration2||ID,weight):(hasCalibration?(calibration1||ID):ID);
+    return {matrix,calibration,abcc:multiply(balance,calibration)};
+  };
+  let weight=1;
+  if(matrix2&&xyXyz){
+    // AsShotWhiteXY gives the white point directly, avoiding a circular
+    // camera-neutral estimate. The two-light interpolation is approximate.
+    const kelvin=temperature(xyXyz);
+    const t1=ILLUMINANT_KELVIN[illuminant1],t2=ILLUMINANT_KELVIN[illuminant2];
+    weight=Math.max(0,Math.min(1,(1/kelvin-1/t2)/(1/t1-1/t2)));
+  }else if(matrix2){
+    // Approximate reciprocal-Kelvin selection, iterating the calibrated XYZ to camera transform.
+    weight=0.5;
+    for(let j=0;j<5;j++){
+      const {matrix,calibration}=select(weight);
+      const xyz=dot(invert(adjusted(matrix,calibration)),neutral);
+      const kelvin=temperature(xyz);
+      const t1=ILLUMINANT_KELVIN[illuminant1],t2=ILLUMINANT_KELVIN[illuminant2];
+      weight=Math.max(0,Math.min(1,(1/kelvin-1/t2)/(1/t1-1/t2)));
+    }
+  }
+  const {matrix,abcc}=select(weight);
+  // DNG: CameraNeutral = AB * CC * ColorMatrix * XYZ(xy,Y=1).
+  // Resolve the interpolated calibration first, including signature gating.
+  const cameraNeutral=xyXyz ? dot(multiply(abcc,matrix),xyXyz) : neutral;
+  if(cameraNeutral.some(v=>!Number.isFinite(v)||v<=1e-7))
+    invalid('AsShotWhiteXY: некорректная camera neutral');
+  let cameraToD50;
+  if(forward1){
+    const forward=forward2?lerp(normalizedForward(forward1),normalizedForward(forward2),weight):
+      normalizedForward(forward1);
+    const individualToReference=invert(abcc,'AnalogBalance/CameraCalibration');
+    const maxNeutral=Math.max(...cameraNeutral);
+    const cameraWhite=cameraNeutral.map(v=>v/maxNeutral);
+    const referenceNeutral=dot(individualToReference,cameraWhite);
+    if(referenceNeutral.some(v=>!Number.isFinite(v)||v<=1e-7))
+      invalid('ForwardMatrix: некорректная reference camera neutral');
+    const invNeutral=[1/referenceNeutral[0],0,0,0,1/referenceNeutral[1],0,0,0,1/referenceNeutral[2]];
+    cameraToD50=multiply(forward,multiply(invNeutral,individualToReference));
+  }else{
+    const cameraToXyz=invert(multiply(abcc,matrix));
+    const illuminantXyz=dot(cameraToXyz,cameraNeutral);
+    cameraToD50=multiply(adapt(illuminantXyz,D50),cameraToXyz);
+  }
+  const d50ToD65=adapt(D50,D65);
+  const transform=multiply(XYZ_D65_TO_RGB,multiply(d50ToD65,cameraToD50));
+  if(transform.some(v=>!Number.isFinite(v)))invalid('неверное цветовое преобразование DNG');
+  return multiply(transform,[wbRed,0,0,0,1,0,0,0,wbBlue]);
+}
+// Luminance-selective, hue-preserving tonal controls applied to scene-linear
+// RGB after colour calibration/exposure, *before* display sRGB transfer.
+// Shadows affect darker pixels; highlights affect brighter ones. Contrast
+// is a luminance S-curve. All preserve black and unit white, are monotonic
+// for [-1, 1] amounts, and preserve RGB ratios.
+// This is not raw highlight reconstruction from clipped sensor channels.
+function applyDngTonalControls(rgb,{highlights=0,shadows=0,contrast=0}={}){
+  if(!Array.isArray(rgb)||rgb.length!==3||rgb.some(v=>!Number.isFinite(v))||
+     !Number.isFinite(highlights)||highlights < -1||highlights > 1||
+     !Number.isFinite(shadows)||shadows < -1||shadows > 1||
+     typeof contrast!=='number'||!Number.isFinite(contrast)||contrast < -1||contrast > 1)
+    invalid('неверные параметры RAW тональной коррекции');
+  if(highlights===0&&shadows===0&&contrast===0)return rgb;
+  const luminance=0.2126*rgb[0]+0.7152*rgb[1]+0.0722*rgb[2];
+  const y=Math.max(0,Math.min(1,luminance));
+  if(y<=1e-8 || y>=1)return rgb;
+  const lift=shadows*y*(1-y)*(1-y);
+  const shoulder=highlights*y*y*(1-y);
+  const tonal=y+lift+shoulder;
+  // f(v)=v+c*v*(1-v)*(2*v-1) fixes 0, middle gray and 1, and stays monotonic.
+  const contrasted=tonal+contrast*tonal*(1-tonal)*(2*tonal-1);
+  const scale=Math.max(0,contrasted/y);
+  return rgb.map(v=>v*scale);
+}
+function applyDngColorMatrix(transform,r,g,b){
+  return dot(transform,[r,g,b]);
+}
+
+// ---- src/formats/dng-lossless-jpeg.js ----
+// Bounded ISO/IEC 10918-1 SOF3 decoder for DNG CFA strips/tiles.
+// Supports full interleaved or disjoint 1/2-component SOS partitions
+// (including mixed 1+2+1) for four-component CFA streams; each SOS carries
+// its own entropy/predictor/restart sequence and writes native Bayer positions.
+// No subsampling or camera-specific JPEG slices.
+function requireJpeg(condition, reason) {
+  if (!condition) throw new Error('DNG: lossless JPEG ' + reason);
+}
+function decodeDngLosslessJpeg(bytes, {width, height, bits}) {
+  requireJpeg(bytes instanceof Uint8Array && bytes.length >= 16, 'усечённый поток');
+  requireJpeg(Number.isInteger(width) && Number.isInteger(height) &&
+    width >= 1 && height >= 1 && width * height <= 16_000_000, 'небезопасные размеры');
+  requireJpeg(bytes[0] === 0xff && bytes[1] === 0xd8, 'нет SOI');
+  let position = 2, frame = null, scanMode = null, restartInterval = 0, driSeen = false;
+  const tables = new Map(), seen = new Set();
+  const result = new Uint16Array(width * height);
+
+  function segment() {
+    requireJpeg(position + 2 <= bytes.length, 'усечённая длина сегмента');
+    const length = bytes[position] * 256 + bytes[position + 1];
+    requireJpeg(length >= 2 && position + length <= bytes.length, 'усечённый сегмент');
+    const data = bytes.subarray(position + 2, position + length);
+    position += length;
+    return data;
+  }
+
+  function marker() {
+    requireJpeg(position < bytes.length && bytes[position++] === 0xff, 'ожидался маркер');
+    while (position < bytes.length && bytes[position] === 0xff) position++;
+    requireJpeg(position < bytes.length, 'усечённый маркер');
+    const id = bytes[position++];
+    requireJpeg(id !== 0 && id !== 0xd8 && !(id >= 0xd0 && id <= 0xd7),
+      frame && seen.size === frame.components ? 'нет конечного EOI' : 'неожиданный JPEG маркер');
+    return id;
+  }
+
+  function decodeScan(scan) {
+    let current = 0, available = 0;
+    function readBit() {
+      if (!available) {
+        requireJpeg(position < bytes.length, 'усечённый entropy scan');
+        current = bytes[position++];
+        if (current === 0xff) {
+          requireJpeg(position < bytes.length && bytes[position++] === 0x00,
+            'маркер или неверное byte stuffing внутри entropy scan');
+        }
+        available = 8;
+      }
+      available--;
+      return (current >> available) & 1;
+    }
+    function readBits(n) {
+      let value = 0;
+      for (let i = 0; i < n; i++) value = (value << 1) | readBit();
+      return value;
+    }
+    function category(table) {
+      let code = 0;
+      for (let length = 1; length <= 16; length++) {
+        code = (code << 1) | readBit();
+        const value = table[length].get(code);
+        if (value !== undefined) return value;
+      }
+      requireJpeg(false, 'неверный код Huffman');
+    }
+    const shift = scan.pointTransform, frameWidth = frame.width;
+    const initial = 1 << (bits - shift - 1), mask = (1 << (bits - shift)) - 1;
+    for (let y = 0; y < height; y++) for (let x = 0; x < frameWidth; x++) {
+      const mcu = y * frameWidth + x;
+      if (restartInterval && mcu > 0 && mcu % restartInterval === 0) {
+        requireJpeg(!available || (current & ((1 << available) - 1)) ===
+          (1 << available) - 1, 'неверные padding bits перед restart');
+        available = 0;
+        requireJpeg(position + 2 <= bytes.length && bytes[position] === 0xff &&
+          bytes[position + 1] === 0xd0 + ((mcu / restartInterval - 1) % 8),
+          'отсутствует или нарушен порядок restart RSTn маркеров');
+        position += 2;
+      }
+      for (let s = 0; s < scan.indices.length; s++) {
+        const c = scan.indices[s];
+        const index = mcu * frame.components + c;
+        const left = x ? result[index - frame.components] >> shift : 0;
+        const above = y ? result[index - width] >> shift : 0;
+        const upperLeft = x && y ? result[index - width - frame.components] >> shift : 0;
+        let predictor;
+        if ((restartInterval && mcu % restartInterval === 0) || (x === 0 && y === 0))
+          predictor = initial;
+        else if (y === 0) predictor = left;
+        else if (x === 0) predictor = above;
+        else switch (scan.predictor) {
+          case 1: predictor = left; break;
+          case 2: predictor = above; break;
+          case 3: predictor = upperLeft; break;
+          case 4: predictor = left + above - upperLeft; break;
+          case 5: predictor = left + ((above - upperLeft) >> 1); break;
+          case 6: predictor = above + ((left - upperLeft) >> 1); break;
+          case 7: predictor = (left + above) >> 1; break;
+        }
+        const size = category(scan.tables[s]);
+        const magnitude = size === 16 ? 0 : readBits(size);
+        const difference = size === 16 ? -32768 :
+          (size && magnitude < 2 ** (size - 1) ? magnitude - (2 ** size - 1) : magnitude);
+        result[index] = ((predictor + difference) & mask) << shift;
+      }
+    }
+    // Each SOS contains exactly its own component samples. Only padding may
+    // precede the next marker; a marker appearing inside entropy is an error.
+    requireJpeg(!available || (current & ((1 << available) - 1)) ===
+      (1 << available) - 1, 'неверные padding bits');
+  }
+
+  while (true) {
+    const id = marker();
+    if (id === 0xd9) {
+      requireJpeg(frame && seen.size === frame.components, 'неполный набор SOS scan-компонентов');
+      requireJpeg(position === bytes.length, 'нет конечного EOI или лишние данные');
+      return result;
+    }
+    requireJpeg(!frame || seen.size !== frame.components, 'ожидался EOI после всех scan');
+    if (id === 0xc3) {
+      const d = segment(), components = d[5];
+      requireJpeg(!frame && [1, 2, 4].includes(components) &&
+        d.length === 6 + components * 3, 'неподдерживаемое число компонентов SOF3');
+      const precision = d[0], rows = d[1] * 256 + d[2], cols = d[3] * 256 + d[4];
+      requireJpeg(precision === bits && precision >= 8 && precision <= 16 &&
+        rows === height && cols * components === width,
+        'SOF3 precision/размеры не совпадают с DNG');
+      const ids = [];
+      for (let c = 0; c < components; c++) {
+        const component = d[6 + c * 3], sampling = d[7 + c * 3], quant = d[8 + c * 3];
+        requireJpeg(!ids.includes(component) && sampling === 0x11 && quant === 0,
+          'повторный SOF3 ID, subsampling или quantization');
+        ids.push(component);
+      }
+      frame = {ids, components, width: cols};
+    } else if (id === 0xc4) {
+      const d = segment();
+      let i = 0;
+      while (i < d.length) {
+        requireJpeg(i + 17 <= d.length, 'усечённая таблица Huffman');
+        const selector = d[i++], counts = d.subarray(i, i + 16);
+        i += 16;
+        const count = counts.reduce((sum, n) => sum + n, 0);
+        requireJpeg((selector >> 4) === 0 && count > 0 && count <= 17 &&
+          i + count <= d.length, 'неподдерживаемая таблица Huffman');
+        const lookup = Array.from({length: 17}, () => new Map());
+        let code = 0, index = i;
+        for (let length = 1; length <= 16; length++) {
+          code <<= 1;
+          requireJpeg(code + counts[length - 1] <= 2 ** length, 'переполненная таблица Huffman');
+          for (let j = 0; j < counts[length - 1]; j++) {
+            const value = d[index++];
+            requireJpeg(value <= 16 && !lookup[length].has(code), 'неверная Huffman категория');
+            lookup[length].set(code++, value);
+          }
+        }
+        tables.set(selector & 15, lookup);
+        i += count;
+      }
+    } else if (id === 0xdd) {
+      const d = segment();
+      requireJpeg(!driSeen && d.length === 2 && seen.size === 0,
+        'неверный или повторный DRI');
+      restartInterval = d[0] * 256 + d[1];
+      driSeen = true;
+      requireJpeg(restartInterval > 0, 'нулевой restart interval в DRI');
+    } else if (id === 0xda) {
+      const d = segment();
+      requireJpeg(frame && d.length >= 6, 'неподдерживаемая структура SOS');
+      const count = d[0];
+      requireJpeg(count >= 1 && d.length === 1 + 2 * count + 3,
+        'неподдерживаемая структура SOS');
+      // A four-channel CFA may be partitioned into 1- or 2-component
+      // disjoint SOS groups, e.g. 1+2+1. Each SOS walks its own MCU grid;
+      // component IDs map into the original frame, not scan order. Reject
+      // switching from a full-frame scan to partitioned scans (or vice versa).
+      const mode = count === frame.components ? 'interleaved' :
+        (count === 1 || (frame.components === 4 && count === 2))
+          ? 'partitioned' : null;
+      requireJpeg(mode && (!scanMode || mode === scanMode),
+        'неподдерживаемая смесь SOS scan-компонентов');
+      if (!scanMode) scanMode = mode;
+      const indices = [], scanTables = [];
+      for (let s = 0; s < count; s++) {
+        const componentId = d[1 + 2 * s], selector = d[2 + 2 * s];
+        const index = frame.ids.indexOf(componentId);
+        requireJpeg(index !== -1 && !seen.has(index) && !indices.includes(index) &&
+          (selector & 15) === 0 && tables.has(selector >> 4),
+          'неизвестный/повторный SOS компонент или таблица Huffman');
+        indices.push(index);
+        scanTables.push(tables.get(selector >> 4));
+      }
+      const predictor = d[1 + count * 2], transformByte = d[3 + count * 2];
+      const pointTransform = transformByte & 15;
+      requireJpeg(d[2 + count * 2] === 0 && (transformByte >> 4) === 0 &&
+        predictor >= 1 && predictor <= 7 && pointTransform < bits &&
+        bits - pointTransform >= 2, 'неподдерживаемый predictor/point transform/SOS');
+      decodeScan({indices, tables: scanTables, predictor, pointTransform});
+      for (const index of indices) seen.add(index);
+    } else if (id === 0xe0 || (id >= 0xe1 && id <= 0xef) || id === 0xfe) {
+      segment(); // APPn / COM only. No implicit colour calibration or slice geometry.
+    } else {
+      requireJpeg(false, 'неподдерживаемый JPEG сегмент 0x' + id.toString(16));
+    }
+  }
+}
+
+// ---- src/formats/dng.js ----
+// Bounded, dependency-free TIFF/DNG Bayer reader for offline file:// imports.
+// Classic TIFF (II/MM), uncompressed 8/10/12/14/16-bit or bounded lossless JPEG SOF3 CFA strips/tiles.
+// Unsupported RAW layouts fail explicitly instead of falling back to browser image decoders.
+const dng_MAX_FILE_BYTES = 48 * 1024 * 1024;
+const dng_MAX_PIXELS = 16_000_000;
+const dng_TYPE_SIZE = { 1:1, 2:1, 3:2, 4:4, 5:8, 6:1, 7:1, 8:2, 9:4, 10:8, 11:4, 12:8 };
+const dng_TAG = {
+  width:256, height:257, bits:258, compression:259, photometric:262,
+  stripOffsets:273, orientation:274, fillOrder:266, samples:277, rowsPerStrip:278, stripBytes:279, planar:284,
+  subIfds:330, cfaDims:33421, cfaPattern:33422,
+  tileWidth:322, tileLength:323, tileOffsets:324, tileBytes:325,
+  dngVersion:50706, linearization:50712, blackRepeat:50713,
+  black:50714, blackDeltaH:50715, blackDeltaV:50716, white:50717, neutral:50728, whiteXY:50729, activeArea:50829,
+  defaultScale:50718, defaultCropOrigin:50719, defaultCropSize:50720, baselineExposure:50730,
+  baselineExposureOffset:51109,
+  colorMatrix1:50721, colorMatrix2:50722, cameraCalibration1:50723,
+  cameraCalibration2:50724, analogBalance:50727,
+  illuminant1:50778, illuminant2:50779, forwardMatrix1:50964, forwardMatrix2:50965,
+  cameraCalibrationSignature:50931, profileCalibrationSignature:50932,
+};
+function dng_invalid(message) { throw new Error('DNG: ' + message); }
+function dng_requireThat(ok, message) { if (!ok) dng_invalid(message); }
+function dng_finite(value) { return typeof value === 'number' && Number.isFinite(value); }
+function dng_clamp(value, low, high) { return Math.max(low, Math.min(high, value)); }
+function inspectDng(buffer) {
+  dng_requireThat(buffer instanceof ArrayBuffer, 'ожидаются бинарные данные ArrayBuffer');
+  dng_requireThat(buffer.byteLength >= 8 && buffer.byteLength <= dng_MAX_FILE_BYTES, 'недопустимый размер RAW-файла (максимум 48 МиБ)');
+  const view = new DataView(buffer);
+  const a = view.getUint8(0), b = view.getUint8(1);
+  dng_requireThat((a === 73 && b === 73) || (a === 77 && b === 77), 'неверная сигнатура TIFF');
+  const le = a === 73;
+  const u16 = off => { dng_requireThat(off >= 0 && off + 2 <= buffer.byteLength, 'усечённый TIFF'); return view.getUint16(off,le); };
+  const u32 = off => { dng_requireThat(off >= 0 && off + 4 <= buffer.byteLength, 'усечённый TIFF'); return view.getUint32(off,le); };
+  dng_requireThat(u16(2) === 42, 'BigTIFF или неизвестный TIFF не поддерживается');
+  const entriesAt = offset => {
+    dng_requireThat(Number.isSafeInteger(offset) && offset >= 8 && offset + 2 <= buffer.byteLength, 'неверный IFD offset');
+    const length=u16(offset);
+    dng_requireThat(length <= 512 && offset + 2 + length * 12 + 4 <= buffer.byteLength, 'повреждённая или слишком большая IFD');
+    const tags=new Map();
+    for(let i=0;i<length;i++){
+      const pos=offset+2+i*12;
+      const tag=u16(pos), type=u16(pos+2), count=u32(pos+4);
+      const size=dng_TYPE_SIZE[type];
+      // TIFF tile metadata is structural: invalid types/counts cannot fall back to strip mode.
+      if([dng_TAG.tileWidth,dng_TAG.tileLength,dng_TAG.tileOffsets,dng_TAG.tileBytes].includes(tag) &&
+        (type!==3&&type!==4 || count===0 || count>1024))
+        dng_invalid('неверный TIFF Tile tag '+tag);
+      // Unknown/oversized FillOrder must not silently use a different packed bit order.
+      if(tag===dng_TAG.fillOrder && (type!==3 || count!==1))
+        dng_invalid('FillOrder должен быть SHORT[1]');
+      // Invalid LUT metadata must not be silently interpreted as identity.
+      if(tag===dng_TAG.linearization && (type!==3 || count<2 || count>65536))
+        dng_invalid('LinearizationTable должен быть SHORT[2..65536]');
+      if(tag===dng_TAG.blackRepeat && (type!==3 || count!==2))
+        dng_invalid('BlackLevelRepeatDim должен быть SHORT[2]');
+      if(tag===dng_TAG.black && (![3,4,5].includes(type) || count<1 || count>64))
+        dng_invalid('BlackLevel должен быть SHORT/LONG/RATIONAL[1..64]');
+      // A bad BaselineExposure cannot be silently ignored as 0 EV.
+      if(tag===dng_TAG.baselineExposure && (type!==10 || count!==1))
+        dng_invalid('BaselineExposure должен быть SRATIONAL[1]');
+      // A profile-authored EV offset is not interchangeable with user Exposure.
+      if(tag===dng_TAG.baselineExposureOffset && (type!==10 || count!==1))
+        dng_invalid('BaselineExposureOffset должен быть SRATIONAL[1]');
+      // DNG BlackLevelDeltaH/V are signed rational offsets, one per ActiveArea
+      // column/row. Even an unknown TIFF type/count must be rejected here.
+      if((tag===dng_TAG.blackDeltaH||tag===dng_TAG.blackDeltaV) &&
+        (type!==10 || count<1 || count>12000))
+        dng_invalid('BlackLevelDeltaH/V должен быть SRATIONAL с допустимым count');
+      if(!size || count > dng_MAX_PIXELS){
+        // An invalid crop/scale tag must never silently become an uncropped preview.
+        if([dng_TAG.defaultScale,dng_TAG.defaultCropOrigin,dng_TAG.defaultCropSize].includes(tag))
+          dng_invalid('invalid DefaultCrop/DefaultScale TIFF tag '+tag);
+        // Never interpret a malformed calibration tag as an uncalibrated image.
+        if([50721,50722,50723,50724,50727,50728,50729,50778,50779,50964,50965,50931,50932].includes(tag))
+          dng_invalid('неподдерживаемый тип или count цветового TIFF tag '+tag);
+        continue;
+      }
+      const byteLength=count*size;
+      dng_requireThat(Number.isSafeInteger(byteLength) && byteLength <= dng_MAX_FILE_BYTES, 'недопустимый TIFF tag');
+      const start=byteLength <= 4 ? pos+8 : u32(pos+8);
+      dng_requireThat(start >= 0 && start + byteLength <= buffer.byteLength, 'TIFF tag за границами файла');
+      if(!tags.has(tag))tags.set(tag,{tag,type,count,start});
+    }
+    return {tags,next:u32(offset+2+length*12)};
+  };
+  const values = (tags, tag, limit=64) => {
+    const e=tags.get(tag);
+    if(!e) return null;
+    dng_requireThat(e.count <= limit, 'слишком длинный TIFF tag ' + tag);
+    const out=[];
+    for(let i=0;i<e.count;i++){
+      const p=e.start+i*dng_TYPE_SIZE[e.type];let value;
+      if(e.type===1||e.type===7) value=view.getUint8(p);
+      else if(e.type===3) value=view.getUint16(p,le);
+      else if(e.type===4) value=view.getUint32(p,le);
+      else if(e.type===5||e.type===10){
+        const numerator=e.type===5 ? view.getUint32(p,le) : view.getInt32(p,le);
+        const denominator=e.type===5 ? view.getUint32(p+4,le) : view.getInt32(p+4,le);
+        dng_requireThat(denominator !== 0,'нулевой знаменатель TIFF rational');
+        value=numerator/denominator;
+      } else if(e.type===8) value=view.getInt16(p,le);
+      else if(e.type===9) value=view.getInt32(p,le);
+      else if(e.type===11) value=view.getFloat32(p,le);
+      else if(e.type===12) value=view.getFloat64(p,le);
+      else dng_invalid('неподдерживаемый тип TIFF tag ' + tag);
+      dng_requireThat(dng_finite(value), 'нечисловое значение TIFF tag');
+      out.push(value);
+    }
+    return out;
+  };
+  const single = (tags,tag,fallback) => values(tags,tag,1)?.[0] ?? fallback;
+  const visited=new Set(), pending=[u32(4)], ifds=[];
+  while(pending.length && visited.size < 20) {
+    const offset=pending.shift();
+    if(!offset || visited.has(offset)) continue;
+    visited.add(offset);
+    const {tags,next}=entriesAt(offset);
+    ifds.push(tags);
+    if(next) pending.push(next);
+    const subs=values(tags,dng_TAG.subIfds,16) || [];
+    for(const sub of subs) if(Number.isInteger(sub) && sub) pending.push(sub);
+  }
+  dng_requireThat(ifds.length > 0 && ifds[0].has(dng_TAG.dngVersion), 'нет обязательного DNGVersion: это не DNG');
+  const dngVersion=values(ifds[0],dng_TAG.dngVersion,4);
+  dng_requireThat(dngVersion.length === 4 && dngVersion[0] === 1, 'неподдерживаемая версия DNG');
+  const tags=ifds.find(t=>single(t,dng_TAG.photometric,0)===32803);
+  dng_requireThat(tags, 'нет Bayer CFA IFD (PhotometricInterpretation=32803)');
+  const width=single(tags,dng_TAG.width,0), height=single(tags,dng_TAG.height,0);
+  dng_requireThat(Number.isInteger(width) && Number.isInteger(height) && width >= 2 && height >= 2 &&
+    width <= 12000 && height <= 12000 && width*height <= dng_MAX_PIXELS, 'небезопасные размеры Bayer изображения');
+  const bits=values(tags,dng_TAG.bits,3);
+  const compression=single(tags,dng_TAG.compression,1);
+  dng_requireThat(compression===1 || compression===7,
+    'поддерживается только uncompressed CFA или lossless JPEG SOF3 (Compression=7)');
+  dng_requireThat(bits?.length===1 && (compression===1 ?
+    [8,10,12,14,16].includes(bits[0]) : [8,10,12,14,16].includes(bits[0])),
+    'неподдерживаемый BitsPerSample для uncompressed/JPEG Bayer');
+  if(compression===1 && tags.has(dng_TAG.fillOrder))
+    dng_requireThat(single(tags,dng_TAG.fillOrder,1)===1,
+      'uncompressed Bayer поддерживает только FillOrder=1 (MSB-first)');
+  dng_requireThat(single(tags,dng_TAG.samples,1)===1 && single(tags,dng_TAG.planar,1)===1, 'многоканальный CFA не поддерживается');
+  const patternDims=values(tags,dng_TAG.cfaDims,2);
+  const pattern=values(tags,dng_TAG.cfaPattern,16);
+  dng_requireThat(patternDims?.[0]===2 && patternDims?.[1]===2 &&
+    pattern?.length===4 && pattern.filter(c=>c===0).length===1 &&
+    pattern.filter(c=>c===1).length===2 && pattern.filter(c=>c===2).length===1,
+    'поддерживается только 2×2 Bayer RGGB/BGGR/GRBG/GBRG');
+  // DNG stored sample code -> linear reference, before BlackLevel subtraction.
+  // Table entries are unsigned 16-bit even for 8-bit stored Bayer samples.
+  let linearization=null;
+  if(tags.has(dng_TAG.linearization)){
+    const entry=tags.get(dng_TAG.linearization);
+    dng_requireThat(entry.type===3 && entry.count>=2 && entry.count<=2**bits[0],
+      'LinearizationTable имеет неверный SHORT count для Bayer bits');
+    linearization=new Uint16Array(entry.count);
+    for(let i=0;i<entry.count;i++)linearization[i]=view.getUint16(entry.start+i*2,le);
+  }
+  // Deltas and BlackLevelRepeatDim both refer to original sensor coordinates.
+  // Resolve ActiveArea before reading the per-column/per-row signed deltas.
+  const activeArea=values(tags,dng_TAG.activeArea,4) ?? values(ifds[0],dng_TAG.activeArea,4) ?? [0,0,height,width];
+  dng_requireThat(activeArea.length===4 && activeArea.every(Number.isInteger) &&
+    activeArea[0]>=0 && activeArea[1]>=0 && activeArea[2]<=height && activeArea[3]<=width &&
+    activeArea[2]-activeArea[0]>=2 && activeArea[3]-activeArea[1]>=2,
+    'некорректная ActiveArea DNG');
+  const activeWidth=activeArea[3]-activeArea[1], activeHeight=activeArea[2]-activeArea[0];
+  // DNG BlackLevelRepeatDim is [rows,columns]. The repeating pattern starts
+  // at ActiveArea top-left (in original sensor coordinates), not at (0,0)
+  // or the rotated/cropped preview origin.
+  const blackRepeat=values(tags,dng_TAG.blackRepeat,2) || [1,1];
+  dng_requireThat(blackRepeat.length===2 && blackRepeat.every(v=>Number.isInteger(v)&&v>=1&&v<=8) &&
+    blackRepeat[0]*blackRepeat[1]<=64, 'BlackLevelRepeatDim вне поддерживаемой сетки 1..8');
+  const black=values(tags,dng_TAG.black,64) || [0];
+  dng_requireThat(black.length===blackRepeat[0]*blackRepeat[1],
+    'BlackLevel count не совпадает с BlackLevelRepeatDim');
+  const blackDeltaH=values(tags,dng_TAG.blackDeltaH,activeWidth);
+  const blackDeltaV=values(tags,dng_TAG.blackDeltaV,activeHeight);
+  dng_requireThat(!blackDeltaH || blackDeltaH.length===activeWidth,
+    'BlackLevelDeltaH count должен совпадать с шириной ActiveArea');
+  dng_requireThat(!blackDeltaV || blackDeltaV.length===activeHeight,
+    'BlackLevelDeltaV count должен совпадать с высотой ActiveArea');
+  const white=values(tags,dng_TAG.white,4) || [2**bits[0]-1];
+  dng_requireThat(white.length===1, 'неподдерживаемый WhiteLevel');
+  // LinearizationTable produces 16-bit linear reference values even when the
+  // stored CFA uses 8 bits. WhiteLevel/BlackLevel are in that *output* domain.
+  const whiteLimit=linearization ? 65535 : 2**bits[0]-1;
+  dng_requireThat(white[0]>0 && white[0]<=whiteLimit && black.every(v=>v>=0 && v<white[0]),
+    'WhiteLevel/BlackLevel вне диапазона');
+  // Validate the combined signed offset for every ActiveArea sensor site.
+  // A negative delta is legal, but the resulting black must remain below
+  // white and nonnegative for this bounded CFA normalizer.
+  if(blackDeltaH||blackDeltaV){
+    for(let y=activeArea[0];y<activeArea[2];y++)for(let x=activeArea[1];x<activeArea[3];x++){
+      const row=(y-activeArea[0])%blackRepeat[0],col=(x-activeArea[1])%blackRepeat[1];
+      const level=black[row*blackRepeat[1]+col]+(blackDeltaH?.[x-activeArea[1]]??0)+
+        (blackDeltaV?.[y-activeArea[0]]??0);
+      dng_requireThat(dng_finite(level)&&level>=0&&level<white[0],
+        'WhiteLevel/BlackLevelDeltaH/V дают недопустимый BlackLevel');
+    }
+  }
+  // The DNG spec permits AsShotNeutral OR AsShotWhiteXY, never both. The
+  // latter is CIE xy and must be converted through AB*CC*CM, not used as
+  // three direct camera multipliers.
+  const hasNeutral=ifds[0].has(dng_TAG.neutral)||tags.has(dng_TAG.neutral);
+  const hasWhiteXY=ifds[0].has(dng_TAG.whiteXY)||tags.has(dng_TAG.whiteXY);
+  dng_requireThat(!(hasNeutral&&hasWhiteXY),
+    'AsShotWhiteXY и AsShotNeutral взаимоисключающие');
+  const neutralOwner=ifds[0].has(dng_TAG.neutral)?ifds[0]:tags;
+  const whiteOwner=ifds[0].has(dng_TAG.whiteXY)?ifds[0]:tags;
+  const neutral=hasNeutral?values(neutralOwner,dng_TAG.neutral,3):hasWhiteXY?null:[1,1,1];
+  if(neutral)dng_requireThat(neutral.length===3 && neutral.every(v=>v>0 && dng_finite(v)),
+    'ошибочный AsShotNeutral');
+  const xyEntry=whiteOwner.get(dng_TAG.whiteXY);
+  dng_requireThat(!xyEntry || (xyEntry.type===5 && xyEntry.count===2),
+    'AsShotWhiteXY должен быть RATIONAL[2]');
+  const whiteXY=xyEntry?values(whiteOwner,dng_TAG.whiteXY,2):null;
+  if(whiteXY)dng_requireThat(whiteXY.every(v=>dng_finite(v)&&v>0&&v<1) &&
+    whiteXY[0]+whiteXY[1]<1, 'некорректный AsShotWhiteXY');
+  // DNG BaselineExposure is a signed camera default in EV, separate from the user's
+  // editable Exposure. Accept it in IFD0 or the raw CFA IFD, never a thumbnail.
+  const baselineOwner=ifds[0].has(dng_TAG.baselineExposure)?ifds[0]:tags;
+  const baselineExposure=single(baselineOwner,dng_TAG.baselineExposure,0);
+  dng_requireThat(dng_finite(baselineExposure) && baselineExposure>=-16 && baselineExposure<=16,
+    'BaselineExposure вне безопасного диапазона ±16 EV');
+  if(ifds[0]!==tags && ifds[0].has(dng_TAG.baselineExposure) && tags.has(dng_TAG.baselineExposure))
+    dng_requireThat(single(tags,dng_TAG.baselineExposure)===baselineExposure,
+      'конфликтующая BaselineExposure между IFD0 и CFA');
+  // Bounded inline-camera-profile support: IFD0 (with CFA IFD fallback),
+  // not external .dcp or ExtraCameraProfiles IFD selection.
+  const offsetOwner=ifds[0].has(dng_TAG.baselineExposureOffset)?ifds[0]:tags;
+  const baselineExposureOffset=single(offsetOwner,dng_TAG.baselineExposureOffset,0);
+  dng_requireThat(dng_finite(baselineExposureOffset) &&
+    baselineExposureOffset>=-16 && baselineExposureOffset<=16,
+    'BaselineExposureOffset вне безопасного диапазона ±16 EV');
+  if(ifds[0]!==tags && ifds[0].has(dng_TAG.baselineExposureOffset) && tags.has(dng_TAG.baselineExposureOffset))
+    dng_requireThat(single(tags,dng_TAG.baselineExposureOffset)===baselineExposureOffset,
+      'конфликтующая BaselineExposureOffset между IFD0 и CFA');
+  // Colour tags live in IFD 0 or the CFA IFD, never rely on a thumbnail IFD.
+  const colorTag = tag => ifds[0].has(tag) ? ifds[0] : tags;
+  const matrix = (tag,label='ColorMatrix') => {
+    const owner=colorTag(tag),entry=owner.get(tag);
+    if(!entry)return null;
+    dng_requireThat(entry.type===10 && entry.count===9,
+      label+' должна быть SRATIONAL[9] (3×3)');
+    return values(owner,tag,9);
+  };
+  const matrix1=matrix(dng_TAG.colorMatrix1),matrix2=matrix(dng_TAG.colorMatrix2);
+  dng_requireThat(!matrix2 || matrix1,'ColorMatrix2 без ColorMatrix1');
+  const illuminant = tag => {
+    const owner=colorTag(tag),entry=owner.get(tag);
+    if(!entry)return null;
+    dng_requireThat(entry.type===3 && entry.count===1,'CalibrationIlluminant должен быть SHORT');
+    return values(owner,tag,1)[0];
+  };
+  const illuminant1=illuminant(dng_TAG.illuminant1);
+  const illuminant2=illuminant(dng_TAG.illuminant2);
+  // DNG profile matrices are signed rationals, camera analogue gain is unsigned rational.
+  // Invalid profiles fail closed before publication of a document/layer.
+  const forward1=matrix(dng_TAG.forwardMatrix1,'ForwardMatrix1');
+  const forward2=matrix(dng_TAG.forwardMatrix2,'ForwardMatrix2');
+  const calibration1=matrix(dng_TAG.cameraCalibration1,'CameraCalibration1');
+  const calibration2=matrix(dng_TAG.cameraCalibration2,'CameraCalibration2');
+  const analogEntry=colorTag(dng_TAG.analogBalance).get(dng_TAG.analogBalance);
+  dng_requireThat(!analogEntry || (analogEntry.type===5 && analogEntry.count===3),
+    'AnalogBalance должен быть RATIONAL[3]');
+  const analogBalance=analogEntry?values(colorTag(dng_TAG.analogBalance),dng_TAG.analogBalance,3):null;
+  // CameraCalibration is only authoritative if the UTF-8 signatures match.
+  // Both absent means both default to empty (and therefore match), per DNG.
+  const signature=tag=>{
+    const owner=colorTag(tag),entry=owner.get(tag);
+    if(!entry)return '';
+    dng_requireThat([1,2].includes(entry.type)&&entry.count>=1&&entry.count<=256,
+      'Camera/ProfileCalibrationSignature должен быть ASCII/BYTE[1..256]');
+    const bytes=new Uint8Array(buffer,entry.start,entry.count);
+    dng_requireThat(bytes[bytes.length-1]===0 && !bytes.subarray(0,-1).includes(0),
+      'CalibrationSignature должен заканчиваться нулевым байтом');
+    try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(0,-1));}
+    catch{dng_invalid('неверная UTF-8 CalibrationSignature');}
+  };
+  const cameraSignature=signature(dng_TAG.cameraCalibrationSignature);
+  const profileSignature=signature(dng_TAG.profileCalibrationSignature);
+  dng_requireThat(matrix1 || ![forward1,forward2,calibration1,calibration2,analogBalance].some(Boolean),
+    'ForwardMatrix/CameraCalibration/AnalogBalance без ColorMatrix1');
+  dng_requireThat(!forward2 || forward1,'ForwardMatrix2 без ForwardMatrix1');
+  dng_requireThat(!matrix1 || hasNeutral || hasWhiteXY,
+    'нет AsShotNeutral или AsShotWhiteXY для ColorMatrix');
+  dng_requireThat(matrix1 || !hasWhiteXY, 'AsShotWhiteXY требует ColorMatrix');
+  const color=matrix1 ? {matrix1,matrix2,illuminant1,illuminant2,neutral,whiteXY,
+    forward1,forward2,calibration1,calibration2,analogBalance,
+    calibrationMatches:cameraSignature===profileSignature} : null;
+  if(color)dngCameraToLinearSrgb(color); // Reject malformed/singular profiles before import.
+  // DefaultScale defines output pixel aspect / dimensions, not a sensor crop.
+  // Resample linear camera channels before ColorMatrix and the sRGB transfer.
+  let defaultScale=[1,1];
+  if(tags.has(dng_TAG.defaultScale)){
+    const entry=tags.get(dng_TAG.defaultScale);
+    dng_requireThat(entry.type===5&&entry.count===2,'DefaultScale должен быть RATIONAL[2]');
+    defaultScale=values(tags,dng_TAG.defaultScale,2);
+    dng_requireThat(defaultScale.every(v=>dng_finite(v)&&v>=0.125&&v<=8),
+      'DefaultScale вне безопасного диапазона 1/8..8');
+  }
+  // DNG 1.6: DefaultCropOrigin [H,V] is relative to ActiveArea's top-left.
+  // SHORT/LONG/RATIONAL are legal. Read from the raw CFA IFD, not a thumbnail.
+  const defaultCropValues=(tag,label)=>{
+    const entry=tags.get(tag);
+    if(!entry)return null;
+    dng_requireThat([3,4,5].includes(entry.type) && entry.count===2,
+      label+' должен быть SHORT/LONG/RATIONAL[2]');
+    return values(tags,tag,2);
+  };
+  const cropOrigin=defaultCropValues(dng_TAG.defaultCropOrigin,'DefaultCropOrigin') || [0,0];
+  const cropSize=defaultCropValues(dng_TAG.defaultCropSize,'DefaultCropSize') || [activeWidth,activeHeight];
+  dng_requireThat(cropOrigin.every(v=>dng_finite(v)&&v>=0) &&
+    cropSize.every(v=>dng_finite(v)&&v>=2) &&
+    cropOrigin[0]+cropSize[0]<=activeWidth && cropOrigin[1]+cropSize[1]<=activeHeight,
+    'DefaultCrop выходит за ActiveArea или имеет неверные размеры');
+  // Fractional crop/scale are evaluated once in original sensor coordinates.
+  // The output pixel grid is rounded only after applying each scale component.
+  const cropWindow=[activeArea[1]+cropOrigin[0],activeArea[0]+cropOrigin[1],cropSize[0],cropSize[1]];
+  const cropWidth=Math.round(cropSize[0]*defaultScale[0]);
+  const cropHeight=Math.round(cropSize[1]*defaultScale[1]);
+  dng_requireThat(cropWidth>=2&&cropHeight>=2&&cropWidth<=12000&&cropHeight<=12000&&
+    cropWidth*cropHeight<=dng_MAX_PIXELS,
+    'DefaultCrop/DefaultScale имеют небезопасные выходные размеры');
+  const orientation=single(ifds[0],dng_TAG.orientation,single(tags,dng_TAG.orientation,1));
+  dng_requireThat(Number.isInteger(orientation) && orientation>=1 && orientation<=8,
+    'неподдерживаемая Orientation DNG');
+  const displayWidth=orientation>=5?cropHeight:cropWidth;
+  const displayHeight=orientation>=5?cropWidth:cropHeight;
+  // TIFF tiles and strips are mutually exclusive sensor layouts. Edge tiles
+  // carry a full padded JPEG frame; padding never enters the Bayer pixel grid.
+  const tileTags=[dng_TAG.tileWidth,dng_TAG.tileLength,dng_TAG.tileOffsets,dng_TAG.tileBytes];
+  const tiled=tileTags.some(tag=>tags.has(tag));
+  dng_requireThat(!tiled || (tileTags.every(tag=>tags.has(tag)) &&
+    !tags.has(dng_TAG.stripOffsets) && !tags.has(dng_TAG.stripBytes) &&
+    !tags.has(dng_TAG.rowsPerStrip)), 'неполный или смешанный TIFF Tile layout');
+  const rowsPerStrip=tiled ? height : single(tags,dng_TAG.rowsPerStrip,height);
+  dng_requireThat(Number.isInteger(rowsPerStrip) && rowsPerStrip>=1, 'неверный RowsPerStrip');
+  const rowBytes=compression===1 ? Math.ceil(width*bits[0]/8) : 0;
+  const compressedSamples=compression===7 ? new Uint16Array(width*height) : null;
+  const tileWidth=tiled ? single(tags,dng_TAG.tileWidth,0) : 0;
+  const tileHeight=tiled ? single(tags,dng_TAG.tileLength,0) : 0;
+  // Each TIFF tile/strip row starts on a byte boundary. Edge tiles keep their
+  // full padded physical width, although only useful pixels enter the sensor.
+  const blockWidth=tiled?tileWidth:width;
+  const blockRowBytes=compression===1 ? Math.ceil(blockWidth*bits[0]/8) : 0;
+  dng_requireThat(!tiled || (Number.isInteger(tileWidth) && Number.isInteger(tileHeight) &&
+    tileWidth>=2 && tileHeight>=1 && tileWidth<=12000 && tileHeight<=12000),
+    'неверные TIFF TileWidth/TileLength');
+  const chunks=tiled ? Math.ceil(width/tileWidth)*Math.ceil(height/tileHeight) :
+    Math.ceil(height/rowsPerStrip);
+  dng_requireThat(Number.isSafeInteger(chunks) && chunks>=1 && chunks<=1024,
+    'слишком много TIFF Tile/Strip частей');
+  const offsets=values(tags,tiled?dng_TAG.tileOffsets:dng_TAG.stripOffsets,1024);
+  const byteCounts=values(tags,tiled?dng_TAG.tileBytes:dng_TAG.stripBytes,1024);
+  dng_requireThat(offsets?.length===chunks && byteCounts?.length===chunks,
+    tiled?'неверные TileOffsets/TileByteCounts':'неверные StripOffsets/StripByteCounts');
+  for(let i=0;i<chunks;i++){
+    const stripHeight=tiled?tileHeight:Math.min(rowsPerStrip,height-i*rowsPerStrip);
+    const expected=compression===1 ? stripHeight*blockRowBytes : 16;
+    dng_requireThat(Number.isInteger(offsets[i]) && Number.isInteger(byteCounts[i]) &&
+      offsets[i]>=8 && (compression===1?byteCounts[i]===expected:byteCounts[i]>=expected) &&
+      offsets[i]+byteCounts[i]<=buffer.byteLength,
+      tiled?'усечённый или неверный TIFF Tile':'усечённая или некорректная Bayer-полоса');
+    if(compressedSamples){
+      const scanWidth=tiled?tileWidth:width;
+      const scan=decodeDngLosslessJpeg(new Uint8Array(buffer,offsets[i],byteCounts[i]),
+        {width:scanWidth,height:stripHeight,bits:bits[0]});
+      if(tiled){
+        const left=(i%Math.ceil(width/tileWidth))*tileWidth;
+        const top=Math.floor(i/Math.ceil(width/tileWidth))*tileHeight;
+        const usefulWidth=Math.min(tileWidth,width-left);
+        const usefulHeight=Math.min(tileHeight,height-top);
+        for(let y=0;y<usefulHeight;y++)
+          compressedSamples.set(scan.subarray(y*tileWidth,y*tileWidth+usefulWidth),
+            (top+y)*width+left);
+      } else {
+        compressedSamples.set(scan,i*rowsPerStrip*width);
+      }
+    }
+  }
+  return {width,height,displayWidth,displayHeight,orientation,activeArea,cropWindow,defaultScale,
+    whiteBalanceSource:hasWhiteXY?'as-shot-white-xy':hasNeutral?'as-shot-neutral':'legacy-unspecified',
+    bits:bits[0],compression,compressedSamples,pattern,black,blackRepeat,blackDeltaH,blackDeltaV,white:white[0],neutral,color,linearization,baselineExposure,baselineExposureOffset,
+    tiled,tileWidth,tileHeight,offsets,rowsPerStrip,rowBytes,blockRowBytes,le,buffer};
+}
+function developDng(source, {exposure=0, wbRed=1, wbBlue=1, highlights=0, shadows=0, contrast=0, demosaic='bilinear'}={}) {
+  dng_requireThat(source && source.buffer instanceof ArrayBuffer, 'нет DNG-источника');
+  dng_requireThat(dng_finite(source.baselineExposure) &&
+    source.baselineExposure>=-16 && source.baselineExposure<=16,
+    'неверная BaselineExposure DNG');
+  dng_requireThat(dng_finite(source.baselineExposureOffset) &&
+    source.baselineExposureOffset>=-16 && source.baselineExposureOffset<=16,
+    'неверная BaselineExposureOffset DNG');
+  dng_requireThat(dng_finite(exposure) && exposure>=-5 && exposure<=5 &&
+    dng_finite(wbRed) && wbRed>=0.25 && wbRed<=4 &&
+    dng_finite(wbBlue) && wbBlue>=0.25 && wbBlue<=4 &&
+    dng_finite(highlights) && highlights>=-1 && highlights<=1 &&
+    dng_finite(shadows) && shadows>=-1 && shadows<=1 &&
+    typeof contrast==='number' && dng_finite(contrast) && contrast>=-1 && contrast<=1 &&
+    (demosaic==='bilinear'||demosaic==='edge-aware-green'||demosaic==='edge-aware-rgb'), 'неверные параметры RAW-проявки');
+  const {width,height,displayWidth,displayHeight,orientation,activeArea,cropWindow,defaultScale,
+    bits,pattern,black,blackRepeat,blackDeltaH,blackDeltaV,white,neutral,color,linearization,baselineExposure,baselineExposureOffset,
+    offsets,rowsPerStrip,rowBytes,blockRowBytes,le,buffer,compressedSamples,tiled,tileWidth,tileHeight}=source;
+  const view=new DataView(buffer);
+  const normalized=new Float32Array(width*height), channels=new Uint8Array(width*height);
+  // Apply the camera's EV zero-point as a scene-linear gain, BEFORE tonal
+  // adjustments and sRGB. The manual slider stays relative to this baseline.
+  const exposureScale=2**(baselineExposure+baselineExposureOffset+exposure);
+  for(let y=0;y<height;y++){
+    const blockY=tiled?Math.floor(y/tileHeight):Math.floor(y/rowsPerStrip);
+    const localRow=tiled?y%tileHeight:y-blockY*rowsPerStrip;
+    for(let x=0;x<width;x++){
+      const index=y*width+x,phase=(y&1)*2+(x&1);
+      const block=tiled?blockY*Math.ceil(width/tileWidth)+Math.floor(x/tileWidth):blockY;
+      const col=tiled?x%tileWidth:x;
+      const byteOffset=offsets[block]+localRow*blockRowBytes;
+      let stored;
+      if(compressedSamples) stored=compressedSamples[index];
+      else if(bits===8) stored=view.getUint8(byteOffset+col);
+      else if(bits===16) stored=view.getUint16(byteOffset+col*2,le);
+      else {
+        // TIFF FillOrder=1: MSB-first packed 10/12/14-bit CFA samples.
+        // Reset bit position on every scanline (and at tile boundaries).
+        const startBit=col*bits,bitShift=startBit&7;
+        const nbytes=Math.ceil((bitShift+bits)/8);
+        const first=byteOffset+(startBit>>3);
+        let word=0;
+        for(let n=0;n<nbytes;n++)word=(word<<8)|view.getUint8(first+n);
+        stored=(word>>>(nbytes*8-bitShift-bits))&((1<<bits)-1);
+      }
+      // Adobe DNG LUT semantics clamp sample indexes beyond the final entry.
+      const sample=linearization ? linearization[Math.min(stored,linearization.length-1)] : stored;
+      // Positive modulo also maps masked margins outside ActiveArea safely.
+      const repeatY=((y-activeArea[0])%blackRepeat[0]+blackRepeat[0])%blackRepeat[0];
+      const repeatX=((x-activeArea[1])%blackRepeat[1]+blackRepeat[1])%blackRepeat[1];
+      const siteBlack=black[repeatY*blackRepeat[1]+repeatX];
+      // Deltas are indexed by original ActiveArea columns/rows, never by
+      // cropped, rescaled or rotated preview coordinates. Clamp the marginal
+      // demosaic halo to the nearest active calibration column/row.
+      const hx=blackDeltaH?.[dng_clamp(x-activeArea[1],0,blackDeltaH.length-1)]??0;
+      const vy=blackDeltaV?.[dng_clamp(y-activeArea[0],0,blackDeltaV.length-1)]??0;
+      const level=siteBlack+hx+vy;
+      dng_requireThat(level>=0&&level<white,'WhiteLevel/BlackLevelDelta вне диапазона');
+      normalized[index]=dng_clamp((sample-level)/(white-level),0,1);
+      channels[index]=pattern[phase];
+    }
+  }
+  const multipliers=color ? null : [(neutral[1]/neutral[0])*wbRed,1,(neutral[1]/neutral[2])*wbBlue];
+  const colorTransform=dngCameraToLinearSrgb(color,{wbRed,wbBlue});
+  const rgba=new Uint8ClampedArray(displayWidth*displayHeight*4);
+  function sampleChannel(x,y,c){
+    const index=y*width+x;
+    if(channels[index]===c)return normalized[index];
+    // In the opt-in RGB mode, interpolate camera-space R-G/B-G differences
+    // rather than independent color intensities. This avoids luminance-edge
+    // false colors while leaving original CFA samples untouched. All reads
+    // are sensor-space, before fractional crop, white balance and color OETF.
+    if(demosaic==='edge-aware-rgb' && c!==1 &&
+       x>=2 && x<width-2 && y>=2 && y<height-2){
+      const green=sampleChannel(x,y,1);
+      if(channels[index]===1){
+        // At green sites, the required color occupies exactly one CFA axis.
+        const horizontal=channels[index-1]===c && channels[index+1]===c;
+        const a=horizontal?index-1:index-width;
+        const b=horizontal?index+1:index+width;
+        if(channels[a]===c && channels[b]===c){
+          const da=normalized[a]-sampleChannel(x-(horizontal?1:0),y-(horizontal?0:1),1);
+          const db=normalized[b]-sampleChannel(x+(horizontal?1:0),y+(horizontal?0:1),1);
+          return dng_clamp(green+(da+db)/2,0,1);
+        }
+      } else {
+        // At the opposite CFA color, four diagonal same-color neighbors
+        // have measured chroma; use their differences to interpolated G.
+        const a=index-width-1,b=index-width+1,d=index+width-1,e=index+width+1;
+        if(channels[a]===c && channels[b]===c &&
+           channels[d]===c && channels[e]===c){
+          const delta=(normalized[a]-sampleChannel(x-1,y-1,1)+
+            normalized[b]-sampleChannel(x+1,y-1,1)+
+            normalized[d]-sampleChannel(x-1,y+1,1)+
+            normalized[e]-sampleChannel(x+1,y+1,1))/4;
+          return dng_clamp(green+delta,0,1);
+        }
+      }
+    }
+    // An opt-in directional interpolation for green at red/blue Bayer sites.
+    // Compare sensor-space directional differences and same-color second
+    // neighbors; do not apply this correction after crop/rotation or OETF.
+    // At a missing halo, retain the legacy bilinear boundary behavior.
+    if((demosaic==='edge-aware-green'||demosaic==='edge-aware-rgb') && c===1 &&
+       x>=2 && x<width-2 && y>=2 && y<height-2){
+      const site=channels[index];
+      const l=index-1,r=index+1,t=index-width,b=index+width;
+      if(channels[l]===1 && channels[r]===1 && channels[t]===1 && channels[b]===1 &&
+         channels[index-2]===site && channels[index+2]===site &&
+         channels[index-2*width]===site && channels[index+2*width]===site){
+        const correctionH=2*normalized[index]-normalized[index-2]-normalized[index+2];
+        const correctionV=2*normalized[index]-normalized[index-2*width]-normalized[index+2*width];
+        const horizontal=(normalized[l]+normalized[r])/2+correctionH/4;
+        const vertical=(normalized[t]+normalized[b])/2+correctionV/4;
+        const gradientH=Math.abs(normalized[l]-normalized[r])+Math.abs(correctionH);
+        const gradientV=Math.abs(normalized[t]-normalized[b])+Math.abs(correctionV);
+        return dng_clamp(gradientH<gradientV?horizontal:
+          gradientV<gradientH?vertical:(horizontal+vertical)/2,0,1);
+      }
+    }
+    // Bilinear same-channel neighbors; widen only at edges/corners.
+    for(let radius=1;radius<=2;radius++){
+      let sum=0,n=0;
+      for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){
+        if(Math.max(Math.abs(dx),Math.abs(dy))!==radius)continue;
+        const px=x+dx,py=y+dy;
+        if(px<0||py<0||px>=width||py>=height)continue;
+        const j=py*width+px;
+        if(channels[j]===c){sum+=normalized[j];n++;}
+      }
+      if(n)return sum/n;
+    }
+    return normalized[index];
+  }
+  function srgb(linear){
+    const v=dng_clamp(linear,0,1);
+    return Math.round(255*(v<=0.0031308?12.92*v:1.055*v**(1/2.4)-0.055));
+  }
+  // Demosaic in original sensor space (including margin neighbors), then sample
+  // the exact fractional crop rectangle on its integer output pixel grid.
+  // This interpolates *linear camera channels*, before ColorMatrix and sRGB OETF.
+  const [left,top,sensorCropWidth,sensorCropHeight]=cropWindow;
+  const cropWidth=Math.round(sensorCropWidth*defaultScale[0]);
+  const cropHeight=Math.round(sensorCropHeight*defaultScale[1]);
+  const resampleChannel=(x,y,c)=>{
+    if(Number.isInteger(x)&&Number.isInteger(y))return sampleChannel(x,y,c);
+    const x0=Math.floor(x),y0=Math.floor(y),tx=x-x0,ty=y-y0;
+    const a=dng_clamp(x0,0,width-1),b=dng_clamp(x0+1,0,width-1);
+    const d=dng_clamp(y0,0,height-1),e=dng_clamp(y0+1,0,height-1);
+    return (1-ty)*((1-tx)*sampleChannel(a,d,c)+tx*sampleChannel(b,d,c))+
+      ty*((1-tx)*sampleChannel(a,e,c)+tx*sampleChannel(b,e,c));
+  };
+  // EXIF/TIFF orientation 1..8 is applied to developed pixels, not a CSS flag.
+  for(let cy=0;cy<cropHeight;cy++)for(let cx=0;cx<cropWidth;cx++){
+    const x=left+(cx+0.5)*(sensorCropWidth/cropWidth)-0.5;
+    const y=top+(cy+0.5)*(sensorCropHeight/cropHeight)-0.5;
+    let dx=cx,dy=cy;
+    switch(orientation){
+      case 2: dx=cropWidth-1-cx; break;
+      case 3: dx=cropWidth-1-cx;dy=cropHeight-1-cy;break;
+      case 4: dy=cropHeight-1-cy;break;
+      case 5: dx=cy;dy=cx;break;
+      case 6: dx=cropHeight-1-cy;dy=cx;break;
+      case 7: dx=cropHeight-1-cy;dy=cropWidth-1-cx;break;
+      case 8: dx=cy;dy=cropWidth-1-cx;break;
+    }
+    const index=(dy*displayWidth+dx)*4;
+    const camera=[resampleChannel(x,y,0),resampleChannel(x,y,1),resampleChannel(x,y,2)];
+    const linear=colorTransform ? applyDngColorMatrix(colorTransform,...camera) :
+      camera.map((value,c)=>value*multipliers[c]);
+    const exposed=linear.map(v=>v*exposureScale);
+    const toned=applyDngTonalControls(exposed,{highlights,shadows,contrast});
+    for(let c=0;c<3;c++)rgba[index+c]=srgb(toned[c]);
+    rgba[index+3]=255;
+  }
+  return {width:displayWidth,height:displayHeight,rgba,
+    whiteBalanceSource:source.whiteBalanceSource,
+    colorPipeline:color?.forward1?'forward-d50-v1':color?'matrix-d50-bradford-v1':'uncalibrated-bayer-preview',
+    baselineExposure,baselineExposureOffset,development:{exposure,wbRed,wbBlue,highlights,shadows,contrast,
+      ...(['edge-aware-green','edge-aware-rgb'].includes(demosaic)?{demosaic}: {})}};
+}
+function decodeDng(buffer, development) {
+  return developDng(inspectDng(buffer),development);
+}
+
 // ---- src/document/import-controller.js ----
 function createDocumentImportController({
   getDocument,
@@ -20692,6 +25255,10 @@ function createDocumentImportController({
   isPsdFile,
   readFileAsDataURL,
   dimensionsFromDataUrl,
+  inspectDng,
+  developDng,
+  rgbaPixelsToDataUrl,
+  bytesToDataUrl,
   checkedCanvasSize,
   createRasterLayer,
   addLayer,
@@ -20706,9 +25273,13 @@ function createDocumentImportController({
   resetBrushBuffer=()=>{},
   DateClass=globalThis.Date,
 } = {}) {
+  function isDngFile(file) {
+    return Boolean(file) && (/\.dng$/i.test(file.name || '') || /^(image\/x-adobe-dng|image\/dng)$/i.test(file.type || ''));
+  }
+
   function isImageFile(file) {
     return Boolean(file) && !isPsdFile(file) &&
-      (String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
+      (isDngFile(file) || String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
   }
 
   function isProjectFile(file) {
@@ -20724,10 +25295,33 @@ function createDocumentImportController({
 
     const prepared=[];
     for(const file of images){
-      const dataUrl=await readFileAsDataURL(file);
-      const dimensions=await dimensionsFromDataUrl(dataUrl);
-      checkedCanvasSize(dimensions.width,dimensions.height,`Изображение «${file.name || 'Без имени'}»`);
-      prepared.push({file,dataUrl,width:dimensions.width,height:dimensions.height});
+      if(isDngFile(file)){
+        try {
+          const raw=await file.arrayBuffer();
+          const source=inspectDng(raw);
+          checkedCanvasSize(source.width,source.height,`RAW «${file.name || 'Без имени'}»`);
+          const pixels=developDng(source);
+          const dataUrl=await rgbaPixelsToDataUrl(pixels.width,pixels.height,pixels.rgba,'DNG RAW');
+          const rawDng={dataUrl:bytesToDataUrl(raw,'application/x-adobe-dng'),
+            development:pixels.development,colorPipeline:pixels.colorPipeline,
+            whiteBalanceSource:source.whiteBalanceSource,baselineExposure:source.baselineExposure,
+             baselineExposureOffset:source.baselineExposureOffset,
+            bits:source.bits,width:source.width,height:source.height,defaultScale:[...source.defaultScale],
+            blackRepeatDim:[...source.blackRepeat],
+            blackDeltaH:Boolean(source.blackDeltaH),blackDeltaV:Boolean(source.blackDeltaV),
+            linearizationTable:Boolean(source.linearization),compression:source.compression};
+          prepared.push({file,dataUrl,width:pixels.width,height:pixels.height,rawDng});
+        } catch(error) {
+          setStatus('Ошибка DNG: ' + error.message);
+          toast('DNG не импортирован: ' + error.message,'error');
+          return 0;
+        }
+      } else {
+        const dataUrl=await readFileAsDataURL(file);
+        const dimensions=await dimensionsFromDataUrl(dataUrl);
+        checkedCanvasSize(dimensions.width,dimensions.height,`Изображение «${file.name || 'Без имени'}»`);
+        prepared.push({file,dataUrl,width:dimensions.width,height:dimensions.height});
+      }
     }
 
     if(getDocument()!==targetDocument||getActiveSessionId()!==targetSessionId){
@@ -20758,6 +25352,7 @@ function createDocumentImportController({
         width:item.width,
         height:item.height,
         dataUrl:item.dataUrl,
+        ...(item.rawDng ? {rawDng:item.rawDng} : {}),
       }));
       offset+=18;
     }
@@ -21892,14 +26487,22 @@ function psdTextNativePlan(layer) {
 }
 function psdAdjustmentNativePlan(layer) {
   const source=layer?.psdAdjustment, adjustment=sanitizeAdjustmentModel(layer?.adjustment);
-  if(layer?.type!=='adjustment'||!source||!adjustment)return{eligible:false,reason:'нет imported Photoshop adjustment metadata',metadata:null};
-  if(source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
+  if(layer?.type!=='adjustment'||!adjustment)return{eligible:false,reason:'нет корректной модели adjustment layer',metadata:null};
+  if(source&&source.kind!==adjustment.kind)return{eligible:false,reason:'тип adjustment не совпадает с исходным Photoshop block',metadata:null};
   if(layer.styles)return{eligible:false,reason:'layer styles на adjustment layer требуют composite fallback',metadata:null};
   if(hasNonDefaultFilters(layer.filters))return{eligible:false,reason:'дополнительные ZPE filters не кодируются в Photoshop adjustment record',metadata:null};
+  if(!source&&!['levels','curves','invert','posterize','threshold'].includes(adjustment.kind)){
+    return{eligible:false,reason:'нет imported Photoshop adjustment metadata для '+adjustment.kind,metadata:null};
+  }
   try {
-    const blocks=(source.blocks||[]).map(block=>psdOpaqueBlockFromState(block,{maxBytes:MAX_ADJUSTMENT_BLOCK_BYTES})).filter(Boolean);
-    const rewritten=rewritePsdAdjustmentBlocks(blocks,adjustment);
-    return{eligible:true,reason:null,metadata:{kind:adjustment.kind,blocks:rewritten.blocks,channelIds:Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[]}};
+    const blocks=source
+      ? (source.blocks||[]).map(block=>psdOpaqueBlockFromState(block,{maxBytes:MAX_ADJUSTMENT_BLOCK_BYTES})).filter(Boolean)
+      : createPsdAdjustmentBlocks(adjustment);
+    const rewritten=source?rewritePsdAdjustmentBlocks(blocks,adjustment).blocks:blocks;
+    return{eligible:true,reason:null,metadata:{
+      kind:adjustment.kind,blocks:rewritten,
+      channelIds:source&&Array.isArray(source.channelIds)?source.channelIds.slice(0,16):[-1,0,1,2,-2],
+    }};
   } catch(error) {
     return{eligible:false,reason:error?.message||String(error),metadata:null};
   }
@@ -22087,14 +26690,17 @@ function createPsdImportSemantics({
     const transform=isCmyk?createCmykToSrgbTransform(parsed.iccProfile?.bytes||null,{intent:'perceptual'}):null;
     const previewFor=buffer=>buffer?.model==='cmyk'?cmykPixelBufferToRgba8Preview(buffer,transform):pixelBufferToRgba8Preview(buffer);
     const groupMap=new Map();
-    nested.groups=(parsed.groups||[]).map(sourceGroup=>{
+    nested.groups=await Promise.all((parsed.groups||[]).map(async sourceGroup=>{
+      const groupMaskDataUrl=sourceGroup.mask?.pixels
+        ? await encodePreview(parsed.width,parsed.height,sourceGroup.mask.pixels,'Embedded PSD group mask') : null;
       const group=createLayerGroup({
+        mask:groupMaskDataUrl?createLayerMask({enabled:sourceGroup.mask.disabled!==true,dataUrl:groupMaskDataUrl}):null,
         name:sourceGroup.name||'PSD Group',visible:sourceGroup.visible!==false,collapsed:Boolean(sourceGroup.collapsed),
         opacity:clamp(Number(sourceGroup.opacity??1),0,1),blendMode:sourceGroup.blendMode||'pass-through',
       });
       groupMap.set(sourceGroup.key,group.id);
       return group;
-    });
+    }));
     for(const sourceGroup of parsed.groups||[]){
       const target=nested.groups.find(group=>group.id===groupMap.get(sourceGroup.key));
       if(target)target.parentGroupId=sourceGroup.parentKey?(groupMap.get(sourceGroup.parentKey)??null):null;
@@ -22217,8 +26823,16 @@ function createPsdImportController({
 } = {}) {
   let openGeneration=0;
 
+  // A running Content-Aware Fill has an explicit revocable persistence lease.
+  // Unlike other raster operations it may be replaced, but only after the
+  // user authorizes the import and every decode/preview step succeeds.
+  function blockUncancellableEdit() {
+    return runtime.canCancelPendingContentAwareFill?.() ? false
+      : runtime.blockPendingDocumentEdit();
+  }
+
   async function open(file){
-    if(runtime.blockPendingDocumentEdit())return;
+    if(blockUncancellableEdit())return;
     if(!runtime.canReplaceDocument())return;
     if(Number(file?.size)>512*1024*1024){
       const message='PSD/PSB больше 512 МБ пока не импортируется: tiled high-depth source уже снижает retained preview memory, но текущий PSD/PSB decoder всё ещё materializes bounded channel planes';
@@ -22284,7 +26898,11 @@ function createPsdImportController({
       const groupIdByKey=new Map();
       for(const sourceGroup of parsed.groups||[]){
         if(!usedGroupKeys.has(sourceGroup.key))continue;
+        const groupMaskDataUrl=sourceGroup.mask?.pixels
+          ? await rendering.rgbaPixelsToDataUrl(parsed.width,parsed.height,sourceGroup.mask.pixels,`PSD group mask «${sourceGroup.name}»`)
+          : null;
         const group=createLayerGroup({
+          mask:groupMaskDataUrl?createLayerMask({enabled:sourceGroup.mask.disabled!==true,dataUrl:groupMaskDataUrl}):null,
           name:sourceGroup.name||'PSD Group',
           visible:sourceGroup.visible!==false,
           collapsed:Boolean(sourceGroup.collapsed),
@@ -22468,7 +27086,7 @@ function createPsdImportController({
         ui.toast('Повторите импорт PSD/PSB в нужной вкладке','warn');
         return;
       }
-      if(runtime.blockPendingDocumentEdit())return;
+      if(blockUncancellableEdit())return;
       const next=createDocument({
         name:(file.name||'PSD').replace(/\.ps[db]$/i,''),
         width:parsed.width,height:parsed.height,background:'transparent'
@@ -22494,6 +27112,13 @@ function createPsdImportController({
       }:(parsed.iccUntagged?{kind:'untagged',untagged:true}:null);
       if(parsed.iccProfile)parsed.iccProfile.bytes=null;
       next.selectedLayerId=prepared.at(-1)?.id??null;
+      // Do not revoke the original Worker's lease during file read, decode,
+      // previews or failed/stale imports. Every potentially throwing prepare
+      // step has completed; cancellation and replacement now share a single
+      // synchronous publication boundary.
+      if(runtime.canCancelPendingContentAwareFill?.() &&
+        !runtime.cancelPendingContentAwareFill?.())return;
+      if(runtime.blockPendingDocumentEdit())return;
       runtime.publishDocument(next,{label:'Импорт PSD/PSB'});
       ui.setStatus(`PSD/PSB импортирован: ${prepared.length} слоёв, групп: ${importedGroups.length}, paths: ${next.paths.length}. Сохраните проект как .zpe`);
       ui.toast(`PSD/PSB открыт: ${prepared.length} слоёв, групп: ${importedGroups.length}, paths: ${next.paths.length}`,'success');
@@ -22564,8 +27189,12 @@ function createPsdExportController({
     const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
     let maskScale=1;
     if(layer.mask.dataUrl){
-      const localWidth=Math.max(1,Number(layer.width)||1);
-      const localHeight=Math.max(1,Number(layer.height)||1);
+      // Adjustment masks are document-scoped, even when their canonical layer
+      // has the default 1x1 geometry. Exporting through layerLocalTransform
+      // otherwise collapses a full-document raster mask into one pixel.
+      const documentMask=layer.type==='adjustment'||layer.type==='group';
+      const localWidth=documentMask?bounds.width:Math.max(1,Number(layer.width)||1);
+      const localHeight=documentMask?bounds.height:Math.max(1,Number(layer.height)||1);
       const source=createCanvas();
       source.width=Math.max(1,Math.ceil(localWidth));
       source.height=Math.max(1,Math.ceil(localHeight));
@@ -22580,7 +27209,7 @@ function createPsdExportController({
       });
       await renderLayer(sourceCtx,maskLayer);
       const relative=normalizeAffineTransform(layer.mask.transform);
-      const world=multiplyAffineTransforms(layerLocalTransform(layer),relative);
+      const world=documentMask?relative:multiplyAffineTransforms(layerLocalTransform(layer),relative);
       maskScale=affineTransformMaxScale(world);
       ctx.setTransform(world.a,world.b,world.c,world.d,world.e-bounds.x,world.f-bounds.y);
       ctx.drawImage(source,0,0,source.width,source.height,0,0,localWidth,localHeight);
@@ -22778,6 +27407,26 @@ function createPsdExportController({
   }
   
   async function preparePsdExport(exportDoc){
+    // Color, Hue, Saturation and Luminosity have a bounded native RGB16 path for flat, untransformed sRGB rasters.
+    // Do not let a non-separable native document silently use Canvas8 fallback.
+    const hasNativePrecision = exportDoc.layers.some(layer => layer.highDepthSource &&
+      (layer.highDepthSource.bitsPerChannel > 8 || layer.highDepthSource.model === 'cmyk'));
+    const nonSeparable = [...exportDoc.layers, ...(exportDoc.groups || [])].filter(entry =>
+      ['color','hue','saturation','luminosity'].includes(entry.blendMode));
+    const nativeNonSeparableBuffers=new Map();
+    const nativeNonSeparable = hasNativePrecision && nonSeparable.length>0 &&
+      nonSeparable.every(entry=>['color','hue','saturation','luminosity'].includes(entry.blendMode)) && !(exportDoc.groups||[]).length &&
+      exportDoc.colorProfile?.kind!=='icc' && exportDoc.layers.every(layer=>{
+        if(layer.groupId || layer.clipping || (layer.vectorMask?.enabled!==false && layer.vectorMask?.subpaths?.length)) return false;
+        const source=nativeHighDepthPsdSource(layer);
+        if(!(source?.model==='rgb' && source.bitsPerChannel===16 && String(source.colorSpace).toLowerCase()==='srgb'))return false;
+        nativeNonSeparableBuffers.set(layer,source);
+        return true;
+      });
+    if (hasNativePrecision && nonSeparable.length && !nativeNonSeparable) {
+      const unsupportedMode=nonSeparable.find(entry=>!['color','hue','saturation','luminosity'].includes(entry.blendMode))?.blendMode || nonSeparable[0].blendMode;
+      throw new Error((unsupportedMode === 'luminosity' ? 'Luminosity' : unsupportedMode === 'saturation' ? 'Saturation' : unsupportedMode === 'hue' ? 'Hue' : 'Color') + ' blend: native high-depth/CMYK PSD/PSB export is not supported; save the editable ZPE project');
+    }
     const warnings=[];
     const psdSmartPlan=psdSmartObjectRoundTripPlan(exportDoc);
     const visibleAdjustmentLayers=exportDoc.layers.filter(layer=>layer.type==='adjustment'&&isLayerVisible(exportDoc,layer));
@@ -22787,7 +27436,7 @@ function createPsdExportController({
     const hasAdjustmentLayers=visibleAdjustmentLayers.length>0;
     const sourceLayers=exportDoc.layers.filter(layer=>layer.type!=='adjustment'||(!needsAdjustmentRasterFallback&&adjustmentPlans.get(layer.id)?.eligible));
     const planned=sourceLayers.map(layer=>{
-      const nativePixelBuffer=nativeHighDepthPsdSource(layer);
+      const nativePixelBuffer=nativeNonSeparable?nativeNonSeparableBuffers.get(layer):nativeHighDepthPsdSource(layer);
       const nativeText=layer.psdText?psdTextNativePlan(layer):null;
       const nativeShape=layer.psdShape?psdShapeNativePlan(layer):null;
       const nativeAdjustment=layer.type==='adjustment'?adjustmentPlans.get(layer.id):null;
@@ -22820,9 +27469,9 @@ function createPsdExportController({
         current=groupsById.get(current.parentGroupId);
       }
     }
-    const exportGroups=(exportDoc.groups||[])
+    const exportGroups=await Promise.all((exportDoc.groups||[])
       .filter(group=>sourceGroupIds.has(group.id))
-      .map(group=>({
+      .map(async group=>({
         key:group.id,
         parentKey:group.parentGroupId&&sourceGroupIds.has(group.parentGroupId)?group.parentGroupId:null,
         name:group.name||'Group',
@@ -22830,7 +27479,12 @@ function createPsdExportController({
         collapsed:Boolean(group.collapsed),
         opacity:clamp(Number(group.opacity??1),0,1),
         blendMode:group.blendMode||'pass-through',
-      }));
+        ...(group.mask?{mask:{
+          pixels:await renderPsdMaskPixels({...group,type:'group'},{x:0,y:0,width:exportDoc.width,height:exportDoc.height}),
+          disabled:group.mask.enabled===false,
+          x:0,y:0,width:exportDoc.width,height:exportDoc.height,defaultColor:255,
+        }}:{}),
+      })));
     if(planned.some(item=>!(psdSmartPlan.eligible&&item.layer.psdSmartObject)&&!item.nativeText?.eligible&&!item.nativeShape?.eligible&&!item.nativeAdjustment?.eligible&&layerNeedsSemanticRasterWarning(item.layer)))warnings.push('Text/shape, transforms, filters и layer styles экспортированы как raster preview соответствующих слоёв');
     const nativeTextCount=planned.filter(item=>item.nativeText?.eligible).length;
     const fallbackText=planned.filter(item=>item.layer.psdText&&!item.nativeText?.eligible);
@@ -22908,6 +27562,7 @@ function createPsdExportController({
     }else{
       compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
       if(!compositePixelBuffer){
+        if(nativeNonSeparable)throw new Error((nonSeparable.some(entry=>entry.blendMode==='luminosity')?'Luminosity':nonSeparable.some(entry=>entry.blendMode==='saturation')?'Saturation':nonSeparable.some(entry=>entry.blendMode==='hue')?'Hue':'Color')+' blend: native high-depth PSD/PSB composite unavailable; save the editable ZPE project');
         const compositeCanvas=createCanvas();
         await renderDocument(compositeCanvas,exportDoc,{checker:false});
         composite=canvasRgbaPixels(compositeCanvas,'PSD/PSB composite');
@@ -23126,6 +27781,10 @@ const PSD_BLEND_MODES = Object.freeze({
   idiv: 'color-burn',
   diff: 'difference',
   smud: 'exclusion',
+  colr: 'color',
+  'hue ': 'hue',
+  'sat ': 'saturation',
+  'lum ': 'luminosity',
 });
 class PsdImportError extends Error {
   constructor(message, code = 'PSD_IMPORT_ERROR') {
@@ -24468,6 +29127,38 @@ function encodeCurvesAdjustmentBlock(sourceBlock,adjustment) {
   while(writer.length%4)writer.u8(0);
   return writer.concat();
 }
+
+/**
+ * Build genuine PSD adjustment records for ZPE-created Levels/Curves/Invert/Posterize/Threshold layers.
+ * Native records are emitted only for these known layouts; unsupported kinds
+ * must fall back rather than claiming editable Photoshop metadata.
+ */
+function createPsdAdjustmentBlocks(adjustment) {
+  const kind=String(adjustment?.kind||'');
+  // Photoshop Invert is an editable native adjustment with an empty nvrt body.
+  if(kind==='invert')return[{signature:'8BIM',key:'nvrt',data:new Uint8Array(0)}];
+  // Native post/thrs: unsigned big-endian parameter followed by two reserved bytes.
+  if(kind==='posterize'||kind==='threshold'){
+    const key=kind==='posterize'?'post':'thrs';
+    return rewritePsdAdjustmentBlocks([{signature:'8BIM',key,data:new Uint8Array(4)}],adjustment).blocks;
+  }
+  if(kind==='levels'){
+    // Photoshop Levels v2 contains 29 ten-byte channel records.
+    const bytes=new Uint8Array(2+29*10);
+    const view=new DataView(bytes.buffer);
+    view.setUint16(0,2,false);
+    for(let index=0;index<29;index+=1)patchLevelRecordAt(view,2+index*10,null);
+    return rewritePsdAdjustmentBlocks([{signature:'8BIM',key:'levl',data:bytes}],adjustment).blocks;
+  }
+  if(kind==='curves'){
+    // Point-based Curves v1: map flag, version, empty channel mask.
+    // The existing encoder writes the channel records and Crv extension.
+    return rewritePsdAdjustmentBlocks([
+      {signature:'8BIM',key:'curv',data:new Uint8Array([0,0,1,0,0,0,0])},
+    ],adjustment).blocks;
+  }
+  throw new PsdImportError('Нативное создание adjustment '+kind+' пока не поддерживается','PSD_ADJUSTMENT_CREATE');
+}
 function rewritePsdAdjustmentBlocks(blocks,adjustment) {
   if(!Array.isArray(blocks)||!blocks.length)throw new PsdImportError('Adjustment rewrite: blocks отсутствуют','PSD_ADJUSTMENT_BLOCKS');
   const kind=String(adjustment?.kind||'');
@@ -24968,7 +29659,7 @@ function groupBlendModeFor(key, warnings, groupName) {
 }
 
 
-function reconstructPsdGroups(records, warnings) {
+function reconstructPsdGroups(records, warnings, documentWidth, documentHeight) {
   const stack = [];
   const groups = [];
   let sequence = 0;
@@ -24984,6 +29675,7 @@ function reconstructPsdGroups(records, warnings) {
         visible: true,
         opacity: 1,
         blendKey: 'pass',
+        mask: null,
       };
       groups.push(group);
       stack.push(group);
@@ -25001,6 +29693,9 @@ function reconstructPsdGroups(records, warnings) {
       group.visible = !(record.flags & 0x02);
       group.opacity = record.opacity / 255;
       group.blendKey = record.sectionBlendKey || record.blendKey || 'pass';
+      const maskPixels = buildMaskRgba(record, record.decodedChannels?.get(-2), documentWidth, documentHeight, {targetLeft:0,targetTop:0});
+      if (maskPixels) group.mask = { pixels:maskPixels, disabled:Boolean(record.mask?.disabled) };
+      else if (record.mask) warnings.push(`Группа «${group.name}»: raster mask channel не декодирован; группа импортирована без маски`);
       continue;
     }
 
@@ -25033,6 +29728,7 @@ function reconstructPsdGroups(records, warnings) {
       effectiveVisible: visible,
       opacity: group.opacity,
       blendMode: groupBlendModeFor(group.blendKey || 'pass', warnings, path.join(' / ')),
+      mask: group.mask,
     };
   });
 
@@ -25291,7 +29987,7 @@ async function decodePsd(buffer, { maxPixels = 48_000_000, maxLayers = MAX_PSD_L
     }
   }
 
-  const groups = reconstructPsdGroups(records, warnings);
+  const groups = reconstructPsdGroups(records, warnings, header.width, header.height);
 
   const layers = [];
   const fillLayers = [];
@@ -25407,6 +30103,10 @@ const PSD_BLEND_KEYS = Object.freeze({
   'color-burn': 'idiv',
   difference: 'diff',
   exclusion: 'smud',
+  color: 'colr',
+  hue: 'hue ',
+  saturation: 'sat ',
+  luminosity: 'lum ',
 });
 
 class Writer {
@@ -25973,13 +30673,25 @@ function normalizeExportGroups(groups = []) {
       collapsed: Boolean(group?.collapsed),
       opacity: Math.max(0, Math.min(1, Number(group?.opacity ?? 1))),
       blendMode: group?.blendMode === 'pass-through' || group?.blendMode in PSD_BLEND_KEYS ? group.blendMode : 'pass-through',
+      mask: group?.mask?.pixels ? group.mask : null,
     });
   }
   return normalized;
 }
 
-function makeExportGroupMarker(group, sectionDivider) {
+function makeExportGroupMarker(group, sectionDivider, version, bitsPerChannel, documentWidth, documentHeight) {
   const folder = sectionDivider !== 3;
+  let mask = null;
+  const channels = [];
+  if (folder && group.mask?.pixels) {
+    const width = Math.trunc(Number(group.mask.width ?? documentWidth));
+    const height = Math.trunc(Number(group.mask.height ?? documentHeight));
+    const x = Math.trunc(Number(group.mask.x ?? 0));
+    const y = Math.trunc(Number(group.mask.y ?? 0));
+    const source = exportPixelSource({pixels:group.mask.pixels}, width, height, `маска группы «${group.name}»`, 'PSD_EXPORT_MASK', 'rgb');
+    channels.push({id:-2, data:encodeExportChannel(source, 0, width, height, version, bitsPerChannel, {alpha:true})});
+    mask = {pixels:true,x,y,width,height,defaultColor:group.mask.defaultColor===0?0:255,disabled:Boolean(group.mask.disabled)};
+  }
   const sectionBlendKey = group.blendMode === 'pass-through' ? 'pass' : (PSD_BLEND_KEYS[group.blendMode] || 'norm');
   return {
     recordType: sectionDivider === 3 ? 'group-boundary' : 'group-folder',
@@ -25994,8 +30706,8 @@ function makeExportGroupMarker(group, sectionDivider) {
     blendMode: 'source-over',
     visible: folder ? group.visible : false,
     transparencyProtected: false,
-    mask: null,
-    channels: [],
+    mask,
+    channels,
   };
 }
 
@@ -26024,7 +30736,7 @@ function exportGroupLineage(groupMap, key) {
   return lineage;
 }
 
-function expandExportLayerGroups(layers, groups) {
+function expandExportLayerGroups(layers, groups, version, bitsPerChannel, documentWidth, documentHeight) {
   const groupMap = new Map(normalizeExportGroups(groups).map(group => [group.key, group]));
   if (!groupMap.size) return layers;
   const records = [];
@@ -26034,7 +30746,7 @@ function expandExportLayerGroups(layers, groups) {
   const closeTo = common => {
     while (open.length > common) {
       const group = open.pop();
-      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1));
+      records.push(makeExportGroupMarker(group, group.collapsed ? 2 : 1, version, bitsPerChannel, documentWidth, documentHeight));
       closed.add(group.key);
     }
   };
@@ -26052,7 +30764,7 @@ function expandExportLayerGroups(layers, groups) {
           'PSD_EXPORT_GROUP_SPLIT',
         );
       }
-      records.push(makeExportGroupMarker(group, 3));
+      records.push(makeExportGroupMarker(group, 3, version, bitsPerChannel, documentWidth, documentHeight));
       open.push(group);
     }
     records.push(layer);
@@ -26163,6 +30875,11 @@ function writeImageResourceBlock(writer, id, data, name = '') {
 
 function writeSavedPathResources(resources, paths, width, height) {
   if (!Array.isArray(paths) || !paths.length) return;
+  // Path Information occupies resource IDs 2000..2997. Reject an overflow
+  // instead of silently dropping editable paths from a PSD/PSB export.
+  if (paths.length > 998) {
+    throw new PsdImportError('PSD/PSB writer: более 998 saved paths не помещаются в Path Information resources', 'PSD_EXPORT_PATH_RESOURCE_LIMIT');
+  }
   const used = new Set();
   let nextId = 2000;
   const allocateId = requested => {
@@ -26172,7 +30889,7 @@ function writeSavedPathResources(resources, paths, width, height) {
     if (nextId > 2997) throw new PsdImportError('PSD/PSB writer: исчерпан диапазон saved path resources 2000..2997', 'PSD_EXPORT_PATH_RESOURCE_LIMIT');
     const id = nextId++; used.add(id); return id;
   };
-  for (const path of paths.slice(0, 998)) {
+  for (const path of paths) {
     const data = new Writer();
     writePhotoshopPathRecords(data, path, width, height, `saved path «${path?.name || 'Path'}»`);
     writeImageResourceBlock(resources, allocateId(path?.id), data.concat(), path?.name || 'Path');
@@ -26261,7 +30978,7 @@ function buildPsdWriter({ width, height, layers = [], groups = [], paths = [], c
   if (!layers.length) throw new PsdImportError('PSD/PSB writer: нужен хотя бы один слой', 'PSD_EXPORT_EMPTY');
 
   const normalized = layers.map((layer, index) => normalizeExportLayer(layer, index, maxPixels, version, depth, mode));
-  const records = expandExportLayerGroups(normalized, groups);
+  const records = expandExportLayerGroups(normalized, groups, version, depth, documentWidth, documentHeight);
   if (records.length > 32767) {
     throw new PsdImportError(`PSD/PSB writer: слишком много layer records после добавления групп: ${records.length}`, 'PSD_EXPORT_LAYER_RECORD_LIMIT');
   }
@@ -26461,7 +31178,9 @@ const els = {
 };
 
 let doc = createDocument();
-let history = new HistoryStack(80);
+// CDP-only A/B bootstrap hook; absent in ordinary user sessions. All History instances share the mode.
+const usePooledHistoryNativeUrls = globalThis.__ZPE_HISTORY_PROFILE_GENERIC__ !== true;
+let history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls });
 let zoom = 0.75;
 let documentSessions = [];
 let activeSessionId = '';
@@ -26483,6 +31202,7 @@ let selectionCopyMode = 'merged';
 let dragDepth = 0;
 let pointerLifecycle = null;
 let paintPersisting = false;
+let rasterCommandPersistLease = null;
 let hoverPoint = null;
 let smartSnapEnabled = true;
 let smartGuides = { x:null, y:null };
@@ -26719,8 +31439,10 @@ const viewportController = createViewportController({
 });
 const { setZoom, setZoomAtClientPoint, fitToView } = viewportController;
 
+const tiledInpaintWorker = createBrowserTiledInpaintWorkerController();
 const rasterEdit = createRasterEditController({
   getDocument: () => doc,
+  tiledInpaintWorker,
   getDrag: () => drag,
   getCmykPreviewTransform: () => currentCmykPreviewTransform(),
   renderPaintPreview: () => render({ paintPreview: true }),
@@ -26734,10 +31456,16 @@ const rasterCommands = createRasterCommandController({
     isPersisting: () => paintPersisting,
     beginPersist: () => {
       if (paintPersisting) return false;
+      const lease = {};
+      rasterCommandPersistLease = lease;
       paintPersisting = true;
-      return true;
+      return lease;
     },
-    endPersist: () => { paintPersisting = false; },
+    endPersist: lease => {
+      if (!lease || rasterCommandPersistLease !== lease) return;
+      rasterCommandPersistLease = null;
+      paintPersisting = false;
+    },
     resetPaintState: () => {
       rasterEdit.clearHighDepthPaintState();
       retouchController.resetStroke();
@@ -26764,7 +31492,16 @@ const rasterCommands = createRasterCommandController({
     fillTolerance: () => Number(els.fillTolerance?.value) || 0,
     rgbToCmyk: rgb8ToDocumentCmyk,
   },
-  ui: { setStatus, toast, render, commit },
+  ui: {
+    setStatus, toast, render, commit,
+    onContentAwarePendingChange: active => {
+      const panel = $('#contentAwareProgressPanel');
+      if (panel) panel.hidden = !active;
+    },
+  },
+});
+$('#contentAwareProgressCancel')?.addEventListener('click', () => {
+  if (rasterCommands.cancelPendingContentAwareFill()) setStatus('Контент-заливка отменена');
 });
 const {
   drawLine: drawLineOnCurrentRaster,
@@ -27100,12 +31837,14 @@ const selectionVectorMaskController = createSelectionVectorMaskController({
       if (layerId == null || vectorMaskEditLayerId === layerId) vectorMaskEditLayerId = null;
     },
   },
-  ui: { setStatus, toast },
+  ui: { setStatus, toast, showModal },
 });
 const {
   selectionVectorMaskDocumentNodes,
   applySelectionToVectorMask,
   editSelectedVectorMask,
+  editSelectedVectorMaskSubpathOperation,
+  editSelectedVectorMaskProperties,
   toggleSelectedVectorMask,
   invertSelectedVectorMask,
   removeSelectedVectorMask,
@@ -27153,12 +31892,15 @@ const pathsController = createPathsController({
     openContextMenu,
     pathList: els.paths,
     controls: {
+      new: $('#newPathBtn'),
       add: $('#addPathBtn'),
       edit: $('#editPathBtn'),
       applyMask: $('#applyPathMaskBtn'),
       rename: $('#renamePathBtn'),
       duplicate: $('#duplicatePathBtn'),
       delete: $('#deletePathBtn'),
+      subpath: $('#pathSubpathSelect'),
+      subpathOperation: $('#pathSubpathOperation'),
     },
     documentRef: document,
   },
@@ -27223,7 +31965,11 @@ const newDocumentController = createNewDocumentController({
     getActiveSessionId: () => activeSessionId,
     getDocumentChangeSerial: () => documentChangeSerial,
     blockPendingDocumentEdit,
-    replaceHistory: () => { history = new HistoryStack(80); },
+    canCancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
+    cancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls }); },
     setDocument: setDoc,
     markDirty,
   },
@@ -27247,8 +31993,12 @@ const psdImportController = createPsdImportController({
     getChangeSerial: () => documentChangeSerial,
     canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
+    canCancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.hasPendingContentAwareFill(),
+    cancelPendingContentAwareFill: () => !drag &&
+      !pointerLifecycle?.hasActivePointer() && rasterCommands.cancelPendingContentAwareFill(),
     publishDocument: (next,{label}) => {
-      history=new HistoryStack(80);
+      history=new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls });
       setDoc(next,{resetHistory:true,label});
       markDirty(true);
       queueRecovery({immediate:true});
@@ -27258,7 +32008,7 @@ const psdImportController = createPsdImportController({
   profiles: { profileBytes: colorProfileBytes },
   rendering: { rgbaPixelsToDataUrl },
   semantics: psdImportSemantics,
-  ui: { setStatus, toast, alert, consoleRef:console },
+  ui: { setStatus, toast, alert: message => window.alert(message), consoleRef:console },
 });
 
 const projectController = createProjectController({
@@ -27270,7 +32020,7 @@ const projectController = createProjectController({
     canReplaceDocument: newDocumentController.canReplaceDocument,
     blockPendingDocumentEdit,
     sanitizeProject,
-    replaceHistory: () => { history = new HistoryStack(80); },
+    replaceHistory: () => { history = new HistoryStack(80, 128 * 1024 * 1024, { shareNativeDataUrls:usePooledHistoryNativeUrls }); },
     setDocument: setDoc,
     markDirty,
     getCurrentSession: () => currentSession(),
@@ -27288,6 +32038,10 @@ const documentImportController = createDocumentImportController({
   isPsdFile,
   readFileAsDataURL,
   dimensionsFromDataUrl,
+  inspectDng,
+  developDng,
+  rgbaPixelsToDataUrl,
+  bytesToDataUrl,
   checkedCanvasSize,
   createRasterLayer,
   addLayer,
@@ -27628,12 +32382,17 @@ documentSessionController = createDocumentSessionController({
     resetRetouchStroke();
     hoverPoint = null;
     pointerLifecycle?.releaseActivePointer();
-    paintPersisting = false;
+    // No unconditional unlock: only the owner lease may release persistence.
   },
   cloneSelectionShape,
   tabs: els.tabs,
   viewport: els.viewport,
   blockPendingDocumentEdit,
+  cancelPendingContentAwareFill: () => {
+    // Never revoke an active pointer or a non-cancellable raster gesture.
+    if (drag || pointerLifecycle?.hasActivePointer()) return false;
+    return rasterCommands.cancelPendingContentAwareFill();
+  },
   updateAll,
   fitToView,
   setStatus,
@@ -27840,7 +32599,9 @@ function documentPointToLayerPixel(point, layer) {
 }
 
 function beginPathControlDrag(hit,point,event){
-  const commandResult=pathControlCommands.convertAnchorToCorner(doc,hit,{altKey:event.altKey});
+  const commandResult=event.altKey&&event.shiftKey
+    ? pathControlCommands.convertAnchorToSmooth(doc,hit,{altKey:event.altKey,shiftKey:event.shiftKey})
+    : pathControlCommands.convertAnchorToCorner(doc,hit,{altKey:event.altKey});
   if(commandResult!==PATH_CONTROL_COMMAND_RESULT.IGNORED)return true;
   const gesture=pathControlGestures.begin(doc,hit,point,{shiftKey:event.shiftKey});
   if(!gesture)return false;
@@ -27961,6 +32722,32 @@ async function drainRenderQueue() {
     const visibleCtx = els.canvas.getContext('2d', { alpha: true });
     visibleCtx.clearRect(0, 0, doc.width, doc.height);
     visibleCtx.drawImage(renderBuffer, 0, 0);
+    // Display-only diagnostic: never touch renderBuffer, layer previews or exports.
+    if (rawClippingWarningEnabled && selected()?.rawDng && !request.paintPreview) {
+      const summaryOutput=els.props.querySelector('[data-raw-clipping-summary]');
+      try {
+        let summary;
+        if(doc.width*doc.height>8_000_000){
+          // Bounded display-only readback; yield between tiles and cancel for a newer render.
+          if(summaryOutput)summaryOutput.textContent='Анализ большого RGB кадра…';
+          summary=await markDisplayClippingWarningOnCanvas(visibleCtx,{
+            width:doc.width,height:doc.height,
+            shouldContinue:()=>request.version===renderVersion,
+            yieldFrame:()=>new Promise(resolve=>requestAnimationFrame(resolve)),
+          });
+        }else{
+          const pixels=visibleCtx.getImageData(0,0,doc.width,doc.height);
+          summary=markDisplayClippingWarning(pixels.data);
+          visibleCtx.putImageData(pixels,0,0);
+        }
+        if(summary&&request.version===renderVersion&&summaryOutput)summaryOutput.textContent=
+          'Света: '+summary.highlights+' · тени: '+summary.shadows+
+          ' из '+summary.eligible+' видимых пикселей';
+      }catch(error){
+        if(request.version===renderVersion&&summaryOutput)
+          summaryOutput.textContent='Анализ RGB недоступен: '+error.message;
+      }
+    }
     textEditController.syncPreviewCanvas();
     layerBlendingController.syncPreviewCanvas();
     if (!request.paintPreview) {
@@ -28004,7 +32791,8 @@ function drawOverlay() {
   if(penDraft?.points?.length){
     const points=penDraft.points;
     ctx.save();ctx.lineWidth=1.5/zoom;ctx.strokeStyle='#72a7ff';ctx.fillStyle='#fff';ctx.setLineDash([]);
-    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover);ctx.stroke();
+    const closing=!penDraftGestures.isGesture(drag)&&penDraftGestures.canCloseAt(penDraft.hover);
+    ctx.beginPath();tracePenDraftPath(ctx,points,penDraftGestures.isGesture(drag)?null:penDraft.hover,closing);ctx.stroke();
     ctx.lineWidth=1/zoom;ctx.strokeStyle='#8fc0ff';
     for(const point of points){
       for(const handle of [point.handleIn,point.handleOut]){
@@ -28015,6 +32803,7 @@ function drawOverlay() {
     }
     ctx.fillStyle='#fff';ctx.strokeStyle='#3976ea';
     for(const point of points){ctx.beginPath();ctx.arc(point.x,point.y,3/zoom,0,Math.PI*2);ctx.fill();ctx.stroke();}
+    if(closing){ctx.beginPath();ctx.arc(points[0].x,points[0].y,6/zoom,0,Math.PI*2);ctx.stroke();}
     ctx.restore();
   } else {
     selectionGestures.drawMagneticDraft(ctx);
@@ -28154,6 +32943,134 @@ function formatDisplayExposure(value){
   return `${ev>=0?'+':''}${ev.toFixed(1)} EV`;
 }
 
+let rawDevelopCommandGeneration=0;
+let rawClippingWarningEnabled=false;
+function bindRawDevelopmentControls(root,owner,layerId){
+  const fields=['exposure','wbRed','wbBlue','highlights','shadows','contrast'];
+  const selectors=['[data-raw-exposure]','[data-raw-wb-red]','[data-raw-wb-blue]',
+    '[data-raw-highlights]','[data-raw-shadows]','[data-raw-contrast]','[data-raw-demosaic]'];
+  const controls=selectors.map(s=>root.querySelector(s));
+  if(controls.some(c=>!c))return;
+  async function applyRawDevelopment(reset=false,override=null){
+    const target=owner.layers.find(layer=>layer.id===layerId);
+    if(doc!==owner || selected()?.id!==layerId || !target?.rawDng ||
+      target.type!=='raster' || isLayerLocked(owner,target) || blockPendingDocumentEdit())return;
+    const chosen=override===null ? null : normalizeRawPresetDevelopment(override);
+    if(override!==null&&!chosen)return;
+    const next=reset ? {exposure:0,wbRed:1,wbBlue:1,highlights:0,shadows:0,contrast:0} :
+      chosen ? {...Object.fromEntries(fields.map(key=>[key,chosen[key]])),
+        ...(['edge-aware-green','edge-aware-rgb'].includes(chosen.demosaic)?{demosaic:chosen.demosaic}:{})} :
+      {...Object.fromEntries(fields.map((key,i)=>[key,Number(controls[i].value)])),
+       ...(['edge-aware-green','edge-aware-rgb'].includes(controls[6].value)?{demosaic:controls[6].value}:{})};
+    if(fields.some(key=>!Number.isFinite(next[key])))return;
+    const original=target.rawDng;
+    if(fields.every(key=>original.development[key]===next[key]) &&
+      (original.development.demosaic||'bilinear')===(next.demosaic||'bilinear'))return;
+    const oldPreview=target.dataUrl, session=activeSessionId, generation=++rawDevelopCommandGeneration;
+    controls.forEach(c=>{c.disabled=true;});
+    try{
+      const bytes=dataUrlToBytes(original.dataUrl,{maxBytes:48*1024*1024});
+      const buffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);
+      const source=inspectDng(buffer);
+      // Sensor provenance and the oriented preview have independent dimensions.
+      if(source.width!==original.width || source.height!==original.height ||
+        source.displayWidth!==target.width || source.displayHeight!==target.height)
+        throw new Error('Размер RAW-слоя изменился');
+      const {rgba,width,height}=developDng(source,next);
+      const newPreview=await rgbaPixelsToDataUrl(width,height,rgba,'RAW-проявка');
+      if(generation!==rawDevelopCommandGeneration || doc!==owner || session!==activeSessionId ||
+        selected()?.id!==layerId || !owner.layers.includes(target) || target.rawDng!==original ||
+        target.dataUrl!==oldPreview || isLayerLocked(owner,target) || blockPendingDocumentEdit())return;
+      target.rawDng={...original,development:next};
+      target.dataUrl=newPreview;
+      invalidateImageCache(oldPreview);
+      commit('RAW: экспозиция, баланс белого, контраст, тон и демозаика');
+      setStatus('RAW-проявка обновлена · исходный DNG не изменён');
+    }catch(error){
+      toast('RAW-проявка: '+error.message,'error');
+      setStatus('RAW-проявка не выполнена');
+    }finally{
+      controls.forEach(c=>{if(c.isConnected)c.disabled=false;});
+    }
+  }
+  controls.forEach(control=>control.addEventListener('change',()=>{void applyRawDevelopment();}));
+  root.querySelector('[data-raw-reset]')?.addEventListener('click',()=>{void applyRawDevelopment(true);});
+  const presetSelect=root.querySelector('[data-raw-preset-select]');
+  const presetName=root.querySelector('[data-raw-preset-name]');
+  const presetApply=root.querySelector('[data-raw-preset-apply]');
+  const presetDelete=root.querySelector('[data-raw-preset-delete]');
+  const presetStorage=()=>{try{return window.localStorage;}catch{return null;}};
+  function refreshPresets(selectedName=''){
+    if(!presetSelect)return;
+    const previous=selectedName||presetSelect.value;
+    presetSelect.replaceChildren(new Option('— Выберите пресет —',''));
+    for(const preset of readRawPresets(presetStorage())){
+      presetSelect.add(new Option(preset.name,preset.name));
+    }
+    presetSelect.value=[...presetSelect.options].some(opt=>opt.value===previous)?previous:'';
+    presetApply.disabled=presetDelete.disabled=!presetSelect.value;
+  }
+  refreshPresets();
+  presetSelect?.addEventListener('change',()=>{
+    if(presetSelect.value)presetName.value=presetSelect.value;
+    refreshPresets(presetSelect.value);
+  });
+  root.querySelector('[data-raw-preset-save]')?.addEventListener('click',()=>{
+    const target=owner.layers.find(layer=>layer.id===layerId);
+    if(doc!==owner||selected()?.id!==layerId||!target?.rawDng||
+      isLayerLocked(owner,target)||blockPendingDocumentEdit())return;
+    const result=saveRawPreset(presetStorage(),presetName.value,target.rawDng.development);
+    if(!result.ok){toast('RAW-пресет: неверное имя, лимит или недоступно хранилище','error');return;}
+    refreshPresets(presetName.value.trim().replace(/\s+/g,' '));
+    setStatus('RAW-пресет сохранён локально; исходный DNG не изменён');
+  });
+  presetApply?.addEventListener('click',()=>{
+    const preset=readRawPresets(presetStorage()).find(p=>p.name===presetSelect.value);
+    if(!preset)return;
+    void applyRawDevelopment(false,preset.development);
+  });
+  presetDelete?.addEventListener('click',()=>{
+    if(!deleteRawPreset(presetStorage(),presetSelect.value))return;
+    presetName.value='';
+    refreshPresets('');
+    setStatus('Локальный RAW-пресет удалён');
+  });
+  root.querySelector('[data-raw-preset-export]')?.addEventListener('click',()=>{
+    const result=exportRawPresetFile(presetStorage());
+    if(!result.ok){toast('Нет сохранённых RAW-пресетов для экспорта','error');return;}
+    const url=URL.createObjectURL(new Blob([result.content],{type:'application/json;charset=utf-8'}));
+    const link=document.createElement('a');
+    link.href=url;link.download=result.filename;document.body.append(link);
+    try{link.click();}finally{link.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);}
+    setStatus('RAW-пресеты экспортированы в JSON; данные DNG не включены');
+  });
+  const presetFile=root.querySelector('[data-raw-preset-file]');
+  root.querySelector('[data-raw-preset-import]')?.addEventListener('click',()=>presetFile?.click());
+  presetFile?.addEventListener('change',async()=>{
+    const file=presetFile.files?.[0];
+    presetFile.value='';
+    if(!file)return;
+    try{
+      if(file.size>24000)throw new Error('Файл RAW-пресетов слишком большой');
+      const text=await file.text();
+      const parsed=parseRawPresetFile(text);
+      if(!parsed.ok)throw new Error('Неверный формат, параметры или версия RAW-пресетов');
+      const local=readRawPresets(presetStorage());
+      const collisions=parsed.presets.filter(item=>local.some(p=>p.name.toLocaleLowerCase()===item.name.toLocaleLowerCase())).length;
+      if(!window.confirm('Импортировать '+parsed.presets.length+' RAW-пресетов? Совпадающие имена ('+
+        collisions+') будут заменены. Другие локальные пресеты сохранятся.'))return;
+      const result=importRawPresetFile(presetStorage(),text);
+      if(!result.ok)throw new Error(result.reason==='limit'?'Лимит 16 RAW-пресетов превышен':
+        'Импорт RAW-пресетов отклонён или хранилище недоступно');
+      if(root.isConnected)refreshPresets();
+      setStatus('RAW-пресеты импортированы: '+result.added+' новых, '+result.overwritten+' заменено');
+    }catch(error){toast('RAW-пресеты: '+error.message,'error');}
+  });
+  root.querySelector('[data-raw-clipping-warning]')?.addEventListener('change',event=>{
+    rawClippingWarningEnabled=event.target.checked;
+    render(); // View-only toggle: no History commit, no .zpe or export mutation.
+  });
+}
 function bindHighDepthPreviewControls(root, owner, layerId){
   const toneMap=root?.querySelector('[data-high-depth-tone-map]');
   if(toneMap)toneMap.addEventListener('change',()=>layerPropertyCommandController.updateHighDepthPreview(owner,layerId,'toneMap',toneMap.value,{commit:true}));
@@ -28201,6 +33118,62 @@ function updateProperties() {
       ? `${propField('Цвет линии','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 1,'number','min="1" max="1000"')}`
       : `${propField('Заливка','fill',l.fill,'color')}${propField('Обводка','stroke',l.stroke === 'transparent' ? '#000000' : l.stroke,'color')}${propField('Толщина','strokeWidth',l.strokeWidth ?? 0,'number','min="0" max="1000"')}`) + nativeInfo;
   }
+  if (l.type === 'raster' && l.rawDng) {
+    const d=l.rawDng.development;
+    const colorLabel=l.rawDng.colorPipeline==='forward-d50-v1'?
+      'ForwardMatrix + AnalogBalance / CameraCalibration → XYZ D50 → sRGB (ограниченный профиль; без camera oracle)':
+      l.rawDng.colorPipeline==='matrix-d50-bradford-v1'?
+      'ColorMatrix → XYZ D50 → sRGB (приближённая калибровка; без camera oracle)':
+      'Без ColorMatrix: некалиброванный Bayer preview';
+    const scale=Array.isArray(l.rawDng.defaultScale)?l.rawDng.defaultScale:[1,1];
+    extra += '<label>RAW источник</label><span>DNG Bayer · сохранён в .zpe; экспорт PSD/PSB — проявленные пиксели</span>' +
+      '<label>Сжатие RAW</label><span>'+(l.rawDng.compression===7?'Lossless JPEG SOF3 (Compression=7)':'Без сжатия')+'</span>' +
+      '<label>Кодирование Bayer</label><span>'+(l.rawDng.bits??'не указано')+' бит · '+
+        (l.rawDng.compression===7?'Lossless JPEG SOF3':'TIFF uncompressed')+'</span>' +
+      '<label>Цвет RAW</label><span>'+colorLabel+'</span>' +
+      '<label>RAW баланс при съёмке</label><span>'+
+        (l.rawDng.whiteBalanceSource==='as-shot-white-xy'?
+          'AsShotWhiteXY (CIE xy → camera neutral через цветовую матрицу)':
+          l.rawDng.whiteBalanceSource==='as-shot-neutral'?'AsShotNeutral (camera neutral)':
+          'Не определено (legacy .zpe)')+'</span>' +
+      '<label>RAW linearization</label><span>'+(l.rawDng.linearizationTable?'LinearizationTable (до BlackLevel)':'Без LinearizationTable')+'</span>' +
+      '<label>RAW BlackLevel</label><span>Sensor grid '+[...(l.rawDng.blackRepeatDim||[1,1])].reverse().join('×')+' (cols×rows; от ActiveArea, до demosaic / crop)</span>' +
+      '<label>RAW BlackLevelDelta</label><span>' +
+      (l.rawDng.blackDeltaH?'H: sensor columns':'H: нет')+' · '+
+      (l.rawDng.blackDeltaV?'V: sensor rows':'V: нет')+' (SRATIONAL, до demosaic)</span>' +
+      '<label>Геометрия RAW</label><span>'+l.rawDng.width+'×'+l.rawDng.height+' сенсор → '+l.width+'×'+l.height+' кадр (ActiveArea / DefaultCrop / DefaultScale '+scale[0]+'×'+scale[1]+' / Orientation)</span>' +
+      '<label>RAW BaselineExposure</label><span>'+
+        ((l.rawDng.baselineExposure??0)>=0?'+':'')+(l.rawDng.baselineExposure??0).toFixed(2)+' EV · камера (в дополнение к ручной экспозиции)</span>' +
+       '<label>RAW BaselineExposureOffset</label><span>'+
+         ((l.rawDng.baselineExposureOffset??0)>=0?'+':'')+(l.rawDng.baselineExposureOffset??0).toFixed(2)+
+         ' EV · встроенный профиль (сценолинейная экспозиция)</span>' +
+      '<label>Экспозиция (EV)</label><input aria-label="RAW экспозиция" data-raw-exposure type="number" min="-5" max="5" step="0.1" value="' + d.exposure + '">' +
+      '<label>WB красный</label><input aria-label="RAW баланс красного" data-raw-wb-red type="number" min="0.25" max="4" step="0.05" value="' + d.wbRed + '">' +
+      '<label>WB синий</label><input aria-label="RAW баланс синего" data-raw-wb-blue type="number" min="0.25" max="4" step="0.05" value="' + d.wbBlue + '">' +
+      '<label>Света</label><input aria-label="RAW света" data-raw-highlights type="number" min="-1" max="1" step="0.05" value="' + (d.highlights??0) + '">' +
+      '<label>Тени</label><input aria-label="RAW тени" data-raw-shadows type="number" min="-1" max="1" step="0.05" value="' + (d.shadows??0) + '">' +
+      '<label>Контраст RAW</label><input aria-label="RAW контраст" data-raw-contrast type="number" min="-1" max="1" step="0.05" value="' + (d.contrast??0) + '">' +
+      '<label>Демозаика Bayer</label><select aria-label="RAW демозаика" data-raw-demosaic>' +
+      '<option value="bilinear"'+(!d.demosaic||d.demosaic==='bilinear'?' selected':'')+'>Билинейная (совместимость)</option>' +
+      '<option value="edge-aware-green"'+(d.demosaic==='edge-aware-green'?' selected':'')+'>Направленная интерполяция зелёного</option>' +
+      '<option value="edge-aware-rgb"'+(d.demosaic==='edge-aware-rgb'?' selected':'')+'>Зелёно-ориентированная цветовая демозаика (R/G/B)</option></select>' +
+      '<label>RAW-пресет</label><select aria-label="RAW выбор пресета" data-raw-preset-select></select>' +
+      '<div class="wide"><input type="text" maxlength="48" aria-label="RAW имя пресета" data-raw-preset-name placeholder="Название пресета">' +
+      ' <button type="button" class="mini-button" data-raw-preset-save>Сохранить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-apply>Применить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-delete>Удалить</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-export>Экспорт JSON</button>' +
+      ' <button type="button" class="mini-button" data-raw-preset-import>Импорт JSON</button>' +
+      ' <input type="file" hidden accept=".json,application/json" aria-label="RAW файл пресетов" data-raw-preset-file></div>' +
+      '<div class="wide">Библиотека пресетов хранится в браузере. JSON переносит только параметры RAW (до 16 пресетов); в .zpe сохраняются применённые параметры, а не библиотека.</div>' +
+      '<div class="wide">Линейная коррекция до sRGB. Света: − затемнить / + осветлить; тени: − углубить / + поднять; контраст: − смягчить / + усилить без сдвига среднего серого. Не восстанавливает клиппинг сенсора.</div>' +
+      '<div class="wide"><label><input type="checkbox" data-raw-clipping-warning aria-label="RAW индикация клиппинга"'+
+        (rawClippingWarningEnabled?' checked':'')+'> Подсветить клиппинг отображаемого RGB</label></div>' +
+      '<div class="wide" data-raw-clipping-summary aria-live="polite">'+
+        (rawClippingWarningEnabled?'Расчёт после рендера…':'Выключено')+'</div>' +
+      '<div class="wide">Пурпурный — хотя бы один канал ≥ 254; голубой — все каналы ≤ 1. Это диагностика финального 8-bit RGB кадра, не насыщения RAW-сенсора; в .zpe и экспорт не записывается.</div>' +
+      '<div class="wide"><button type="button" class="mini-button" data-raw-reset>Сбросить RAW-проявку</button></div>';
+  }
   if (l.type === 'raster' && l.highDepthSource) {
     const source=l.highDepthSource;
     const sizeMb=(Number(source.rawBytes||0)/1024/1024).toFixed(1);
@@ -28242,10 +33215,19 @@ function updateProperties() {
     ${propField('Масштаб Y','scaleY',Number(l.scaleY ?? 1).toFixed(2),'number','step="0.01" min="0.01" max="100"')}
     ${propField('Поворот','rotation',Math.round(l.rotation ?? 0),'number','step="1"')}
     <label>Маски</label><span>${escapeHtml(layerMaskSummary(l))}</span>
+    ${l.type==='raster'?'<label for="rasterLayerClipping">Clipping</label><label><input id="rasterLayerClipping" type="checkbox" data-raster-clipping '+(l.clipping?'checked':'')+'> Ограничить alpha нижележащего слоя</label>':''}
     ${extra}
   </div>`;
   const propertyOwner=doc, propertyLayerId=l.id;
   bindPropertyInputs(els.props,propertyOwner,propertyLayerId);
+  els.props.querySelector('[data-raster-clipping]')?.addEventListener('change',event=>{
+    const enabled=event.currentTarget.checked;
+    if(!layerPropertyCommandController.setClipping(propertyOwner,propertyLayerId,enabled)) {
+      const live=propertyOwner.layers.find(layer=>layer.id===propertyLayerId);
+      event.currentTarget.checked=Boolean(live?.clipping);
+    }
+  });
+  if(l.type==='raster'&&l.rawDng)bindRawDevelopmentControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='rgb'&&Number(l.highDepthSource.bitsPerChannel)>8)bindHighDepthPreviewControls(els.props,propertyOwner,propertyLayerId);
   if(l.type==='raster'&&l.highDepthSource?.model==='cmyk')bindColorManagementControls(els.props);
   const smartObjectEdit=els.props.querySelector('[data-smart-object-edit]');
@@ -28446,17 +33428,30 @@ async function onOverlayPointerDown(e) {
   if (currentTool === 'wand') { magicWandSelect(p);return; }
   if (currentTool === 'pen') {
     const hit=!penDraftGestures.hasDraft()?pathControlSurface.hit(p):null;
-    if(hit){beginPathControlDrag(hit,p,e);drawOverlay();return;}
-    if(documentPathEditIndex>=0){
-      setStatus('Сохранённый контур: перетаскивайте существующие anchors/handles; новые subpaths добавляются через маску/выделение и сохранение');
-      return;
+    if(hit){
+      if(e.ctrlKey && e.altKey && hit.control==='anchor'){
+        if(hit.source==='vector-mask')pathControlCommands.deleteMaskNode(doc,hit);
+        else pathControlCommands.deletePathNode(doc,hit);
+      }else{
+        beginPathControlDrag(hit,p,e);
+      }
+      drawOverlay();return;
+    }
+    if(e.ctrlKey && !e.altKey && !penDraftGestures.hasDraft()){
+      const segment=pathControlSurface.hitSegment(p);
+      if(segment){
+        if(segment.source==='vector-mask')pathControlCommands.insertMaskNode(doc,segment);
+        else pathControlCommands.insertPathNode(doc,segment);
+        drawOverlay();return;
+      }
     }
     if(vectorMaskEditLayerId===selected()?.id){
       setStatus('Векторная маска: перетаскивайте существующие anchors/handles; новые контуры добавляются через выделение + Add');
       return;
     }
     const penResult=penDraftGestures.beginPoint(p,{finish:e.detail>=2});
-    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
+    if(penResult.result===PEN_DRAFT_BEGIN_RESULT.CLOSE_REQUESTED)finishPenPath({forceClosed:true});
+    else if(penResult.result===PEN_DRAFT_BEGIN_RESULT.FINISH_REQUESTED)finishPenPath();
     else{
       if(penResult.status)setStatus(penResult.status);
       if(penResult.result===PEN_DRAFT_BEGIN_RESULT.STARTED){drag=penResult.gesture;drawOverlay();}
@@ -28653,7 +33648,7 @@ function previewGradient(start,end) {
   ctx.restore();
 }
 
-function tracePenDraftPath(ctx,points,hover=null){
+function tracePenDraftPath(ctx,points,hover=null,closing=false){
   if(!Array.isArray(points)||!points.length)return false;
   ctx.moveTo(points[0].x,points[0].y);
   const segment=(from,to)=>{
@@ -28665,23 +33660,36 @@ function tracePenDraftPath(ctx,points,hover=null){
   };
   for(let index=1;index<points.length;index+=1)segment(points[index-1],points[index]);
   if(hover){
-    const last=points.at(-1);
-    const cp1=last.handleOut||last;
-    ctx.bezierCurveTo(cp1.x,cp1.y,hover.x,hover.y,hover.x,hover.y);
+    if(closing){segment(points.at(-1),points[0]);ctx.closePath();}
+    else {
+      const last=points.at(-1);
+      const cp1=last.handleOut||last;
+      ctx.bezierCurveTo(cp1.x,cp1.y,hover.x,hover.y,hover.x,hover.y);
+    }
   }
   return true;
 }
-function finishPenPath(){
+function finishPenPath({forceClosed=false}={}){
   const points=penDraftGestures.consumePoints();
   if(penDraftGestures.isGesture(drag))drag=null;
+  if(documentPathEditIndex>=0){
+    const applied=pathsController.appendPenSubpath(points,{
+      index:documentPathEditIndex,
+      expectedDocument:doc,
+      closed:Boolean(forceClosed||els.penClosed?.checked),
+      operation:$('#penPathOperation')?.value||'add',
+    });
+    if(applied){updatePathsPanel();drawOverlay();}
+    return applied;
+  }
   const outcome=penPathCommands.publish(doc,points,{
-    pathClosed:Boolean(els.penClosed?.checked),
+    pathClosed:Boolean(forceClosed||els.penClosed?.checked),
     stroke:els.primaryColor.value,
     strokeWidth:els.brushSize.value,
     opacity:Number(els.toolOpacity.value)/100,
   });
   if(outcome.result===PEN_PATH_COMMAND_RESULT.COMMITTED){
-    setStatus('Bézier-контур добавлен');drawOverlay();return true;
+    setStatus(forceClosed?'Bézier-контур замкнут':'Bézier-контур добавлен');drawOverlay();return true;
   }
   if(outcome.result===PEN_PATH_COMMAND_RESULT.NOOP&&outcome.reason===PEN_PATH_NOOP_REASON.TOO_SHORT)drawOverlay();
   return false;
@@ -28886,7 +33894,18 @@ function curvePointsInputValue(points) {
 
 function adjustmentCurveField(label,id,points) {
   const value=points?.length?points:[{input:0,output:0},{input:255,output:255}];
-  return '<label>'+escapeHtml(label)+'</label><input type="text" value="'+escapeAttr(curvePointsInputValue(value))+'" data-adjustment-curve-channel="'+id+'" title="Формат: input:output, например 0:0, 128:160, 255:255">';
+  const color=['#e5e7eb','#f87171','#4ade80','#60a5fa'][id]||'#e5e7eb';
+  const curve=value.map(point=>point.input+','+(255-point.output)).join(' ');
+  const handles=value.map((point,index)=>
+    '<circle data-curve-handle="'+index+'" cx="'+point.input+'" cy="'+(255-point.output)+'" r="6" fill="'+color+'" stroke="#111827" stroke-width="2"/>'
+  ).join('');
+  return '<label>'+escapeHtml(label)+'</label>'+
+    '<input type="text" value="'+escapeAttr(curvePointsInputValue(value))+'" data-adjustment-curve-channel="'+id+'" title="Формат: input:output, например 0:0, 128:160, 255:255">'+
+    '<details '+(id===0?'open':'')+'><summary>График: добавить — клик, сдвинуть — перетащить, удалить — Alt+клик</summary>'+
+    '<svg data-adjustment-curve-graph="'+id+'" viewBox="0 0 255 255" width="200" height="200" role="img" aria-label="Кривая '+escapeAttr(label)+' — перетащите точку или нажмите для добавления" style="display:block;max-width:100%;background:#111827;border:1px solid #475569;touch-action:none;cursor:crosshair">'+
+    '<path d="M63.75 0V255 M127.5 0V255 M191.25 0V255 M0 63.75H255 M0 127.5H255 M0 191.25H255" stroke="#334155" stroke-width="1" fill="none"/>'+
+    '<path d="M0 255L255 0" stroke="#64748b" stroke-width="1" stroke-dasharray="4 4" fill="none"/>'+
+    '<polyline data-curve-line points="'+curve+'" stroke="'+color+'" stroke-width="2" fill="none"/>'+handles+'</svg></details>';
 }
 
 function adjustmentPropertiesMarkup(layer) {
@@ -28897,7 +33916,8 @@ function adjustmentPropertiesMarkup(layer) {
   const clipping='<label>Clipping</label><label><input type="checkbox" data-adjustment-clipping '+(layer.clipping?'checked':'')+'> к alpha нижележащего base layer</label>';
   if(value.kind==='brightness-contrast')return adjustmentNumberField('Яркость','brightness',value.brightness,-150,150)+adjustmentNumberField('Контраст','contrast',value.contrast,-100,100)+clipping+nativeInfo;
   if(value.kind==='exposure')return adjustmentNumberField('Exposure','exposure',value.exposure,-20,20,'0.05')+adjustmentNumberField('Offset','offset',value.offset,-2,2,'0.005')+adjustmentNumberField('Gamma','gamma',value.gamma,.1,10,'0.01')+clipping+nativeInfo;
-  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+clipping+nativeInfo;
+  if(value.kind==='hue-saturation')return adjustmentNumberField('Hue','hue',value.hue,-180,180)+adjustmentNumberField('Saturation','saturation',value.saturation,value.colorize?0:-100,100)+adjustmentNumberField('Lightness','lightness',value.lightness,-100,100)+
+    '<label>Тонирование</label><label><input type="checkbox" data-adjustment-colorize '+(value.colorize?'checked':'')+'> Colorize (Hue/Saturation)</label>'+clipping+nativeInfo;
   if(value.kind==='invert')return '<label>Инверсия</label><span>Параметров нет</span>'+clipping+nativeInfo;
   if(value.kind==='posterize')return adjustmentNumberField('Уровни','levels',value.levels,2,255)+clipping+nativeInfo;
   if(value.kind==='threshold')return adjustmentNumberField('Порог','level',value.level,1,255)+clipping+nativeInfo;
@@ -28928,7 +33948,105 @@ function handleAdjustmentCommandResult(result,invalidMessage='') {
   return false;
 }
 
+// Curves graph edits the same persisted points as the numeric field. One pointer
+// gesture publishes exactly one History step; text input remains the precise fallback.
+function bindAdjustmentCurveGraphs(root,owner,layerId) {
+  root?.querySelectorAll('[data-adjustment-curve-graph]').forEach(graph=>{
+    const channelId=graph.dataset.adjustmentCurveGraph;
+    const input=root.querySelector('[data-adjustment-curve-channel="'+channelId+'"]');
+    if(!input)return;
+    graph.addEventListener('pointerdown',event=>{
+      if(event.button!==0 || doc!==owner || owner.selectedLayerId!==layerId)return;
+      const layer=owner.layers.find(item=>item.id===layerId);
+      if(!layer||layer.type!=='adjustment'||layer.locked)return;
+      const originalModel=JSON.stringify(layer.adjustment);
+      const originalText=input.value;
+      const points=originalText.split(',').map(token=>{
+        const match=token.trim().match(/^([0-9]{1,3}):([0-9]{1,3})$/);
+        return match?{input:Number(match[1]),output:Number(match[2])}:null;
+      });
+      if(points.length<2||points.some(point=>!point))return;
+      const bounds=graph.getBoundingClientRect();
+      const position=ev=>({
+        input:Math.max(0,Math.min(255,Math.round((ev.clientX-bounds.left)/bounds.width*255))),
+        output:Math.max(0,Math.min(255,Math.round((1-(ev.clientY-bounds.top)/bounds.height)*255))),
+      });
+      const handle=event.target.closest('[data-curve-handle]');
+      let index=handle?Number(handle.dataset.curveHandle):-1;
+      if(index<0){
+        if(points.length>=19)return;
+        const p=position(event);
+        if(p.input===0||p.input===255||points.some(item=>item.input===p.input))return;
+        index=points.findIndex(item=>item.input>p.input);
+        if(index<0)index=points.length;
+        points.splice(index,0,p);
+      }else if(event.altKey){
+        if(index===0||index===points.length-1)return;
+        points.splice(index,1);
+        index=-1;
+      }
+      const fixedEndpointX=(index===0||index===points.length-1)?points[index]?.input:null;
+      const color=['#e5e7eb','#f87171','#4ade80','#60a5fa'][Number(channelId)]||'#e5e7eb';
+      const paint=()=>{
+        input.value=curvePointsInputValue(points);
+        graph.querySelector('[data-curve-line]').setAttribute('points',
+          points.map(item=>item.input+','+(255-item.output)).join(' '));
+        graph.querySelectorAll('[data-curve-handle]').forEach(node=>node.remove());
+        points.forEach((point,pointIndex)=>{
+          const node=document.createElementNS('http://www.w3.org/2000/svg','circle');
+          for(const [name,value] of Object.entries({
+            'data-curve-handle':pointIndex,cx:point.input,cy:255-point.output,
+            r:6,fill:color,stroke:'#111827','stroke-width':2,
+          }))node.setAttribute(name,String(value));
+          graph.appendChild(node);
+        });
+      };
+      paint();
+      const move=ev=>{
+        if(ev.pointerId!==event.pointerId||index<0)return;
+        const value=position(ev);
+        const previous=points[index-1],next=points[index+1];
+        const low=previous?previous.input+1:0,high=next?next.input-1:255;
+        points[index]={
+          input:fixedEndpointX===null?Math.max(low,Math.min(high,value.input)):fixedEndpointX,
+          output:value.output,
+        };
+        paint();
+      };
+      const release=ev=>{
+        if(ev.pointerId!==event.pointerId)return;
+        window.removeEventListener('pointermove',move);
+        window.removeEventListener('pointerup',release);
+        window.removeEventListener('pointercancel',cancel);
+        if(doc!==owner||owner.selectedLayerId!==layerId||
+           owner.layers.find(item=>item.id===layerId)!==layer||
+           JSON.stringify(layer.adjustment)!==originalModel){
+          refreshInspectorPanels();
+          return;
+        }
+        if(input.value===originalText)return;
+        handleAdjustmentCommandResult(
+          adjustmentLayerCommandController.updateCurveChannel(owner,layerId,channelId,input.value),
+          'Curves: недопустимые точки кривой',
+        );
+      };
+      const cancel=ev=>{
+        if(ev.pointerId!==event.pointerId)return;
+        window.removeEventListener('pointermove',move);
+        window.removeEventListener('pointerup',release);
+        window.removeEventListener('pointercancel',cancel);
+        refreshInspectorPanels();
+      };
+      window.addEventListener('pointermove',move);
+      window.addEventListener('pointerup',release);
+      window.addEventListener('pointercancel',cancel);
+      event.preventDefault();
+    });
+  });
+}
+
 function bindAdjustmentControls(root,owner,layerId) {
+  bindAdjustmentCurveGraphs(root,owner,layerId);
   root?.querySelectorAll('[data-adjustment-prop]').forEach(input=>input.addEventListener('change',()=>{
     handleAdjustmentCommandResult(
       adjustmentLayerCommandController.updateProperty(owner,layerId,input.dataset.adjustmentProp,input.value),
@@ -28941,6 +34059,12 @@ function bindAdjustmentControls(root,owner,layerId) {
       'Curves: используйте 2–19 точек в формате input:output, 0..255',
     );
   }));
+  const colorizeInput=root?.querySelector('[data-adjustment-colorize]');
+  colorizeInput?.addEventListener('change',()=>{
+    handleAdjustmentCommandResult(
+      adjustmentLayerCommandController.setColorize(owner,layerId,colorizeInput.checked),
+    );
+  });
   const clippingInput=root?.querySelector('[data-adjustment-clipping]');
   clippingInput?.addEventListener('change',()=>{
     handleAdjustmentCommandResult(adjustmentLayerCommandController.setClipping(owner,layerId,clippingInput.checked));
@@ -29058,6 +34182,8 @@ function layerContextMenu(id) {
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>selectedTarget()&&editable()&&Boolean(selectionShape)&&Boolean(target().vectorMask)],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
+    ['Операция контура векторной маски…','',()=>editSelectedVectorMaskSubpathOperation(target()),()=>selectedTarget()&&editable()&&Boolean(target().vectorMask?.subpaths?.length)],
+    ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>selectedTarget()&&editable()&&Boolean(target().vectorMask)],
@@ -29087,9 +34213,23 @@ function groupContextMenu(id) {
 function addBlankLayer(){addLayer(doc,createRasterLayer({name:'Новый слой',width:doc.width,height:doc.height,dataUrl:null}));rasterEdit.clearBrushBuffer();commit('Новый растровый слой');}
 
 function addAdjustmentLayer(){
-  const layer=createAdjustmentLayer({name:'Корректирующий слой',width:doc.width,height:doc.height});
-  addLayer(doc,layer);commit('Новый корректирующий слой');
-  setStatus('Корректирующий слой применяет цвет и эффекты ко всему нижележащему стеку');
+  const owner=doc;
+  showModal({
+    title:'Новый корректирующий слой',
+    fields:[{name:'kind',label:'Тип коррекции',type:'select',value:'levels',options:NEW_ADJUSTMENT_KINDS}],
+    submitLabel:'Создать слой',
+    onSubmit:values=>{
+      const result=adjustmentLayerCommandController.createLayer(owner,values.kind);
+      if(result===ADJUSTMENT_COMMAND_RESULT.COMMITTED){
+        setStatus('Неразрушающая коррекция создана. Настройки доступны в панели свойств слоя.');
+        return true;
+      }
+      setStatus(result===ADJUSTMENT_COMMAND_RESULT.INVALID
+        ? 'Неизвестный тип корректирующего слоя'
+        : 'Документ изменился или достигнут предел в 500 слоёв');
+      return false;
+    },
+  });
 }
 
 function layerMaskSummary(layer){
@@ -29104,7 +34244,9 @@ function layerMaskSummary(layer){
   }
   if(layer?.vectorMask){
     const count=layer.vectorMask.subpaths?.length||0,state=layer.vectorMask.enabled===false?'отключена':layer.vectorMask.invert?'инвертирована':'включена';
-    parts.push(`векторная: ${count} контур(ов), ${state}`);
+    const density=Math.round((layer.vectorMask.density??1)*100);
+    const feather=Number(layer.vectorMask.feather)||0;
+    parts.push(`векторная: ${count} контур(ов), ${state}, плотность ${density}%, растушёвка ${feather}px`);
   }
   if(layer?.smartFilterMask){
     const state=layer.smartFilterMask.enabled===false?'отключена':layer.smartFilterMask.invert?'инвертирована':'включена';
@@ -29176,6 +34318,8 @@ const menus={
     ['Пересечь векторную маску с выделением','',()=>applySelectionToVectorMask('intersect'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Исключить пересечение из векторной маски','',()=>applySelectionToVectorMask('exclude'),()=>Boolean(selected()?.vectorMask)&&Boolean(selectionShape)&&!isLayerLocked(doc,selected())],
     ['Редактировать векторную маску пером','',editSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
+    ['Операция контура векторной маски…','',editSelectedVectorMaskSubpathOperation,()=>Boolean(selected()?.vectorMask?.subpaths?.length)&&!isLayerLocked(doc,selected())],
+    ['Параметры векторной маски…','',editSelectedVectorMaskProperties,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Инвертировать векторную маску','',invertSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Включить / отключить векторную маску','',toggleSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
     ['Удалить векторную маску','',removeSelectedVectorMask,()=>Boolean(selected()?.vectorMask)&&!isLayerLocked(doc,selected())],
@@ -29397,6 +34541,13 @@ window.addEventListener('keydown',e=>{
     if(penDraftGestures.hasDraft()){e.preventDefault();penDraftGestures.cancelDraft();drawOverlay();setStatus('Контур отменён');return;}
     if(selectionGestures.hasMagneticDraft()){e.preventDefault();selectionGestures.cancelMagneticDraft({announce:true});return;}
     if(cropGestures.hasDraft()){cropGestures.reset();drawOverlay();setStatus('Кадрирование отменено');return;}
+    // Escape has its usual selection/draft meaning when no Fill is pending.
+    // Do not intercept Escape inside a modal or during an active gesture.
+    if(!drag && !pointerLifecycle?.hasActivePointer() &&
+       !(e.target instanceof Node && els.modalRoot.contains(e.target)) &&
+       rasterCommands.cancelPendingContentAwareFill()){
+      e.preventDefault();setStatus('Контент-заливка отменена');return;
+    }
     if(toolRemoval().hasMask()){
       e.preventDefault();
       if(toolRemoval().reset()){drawOverlay();setStatus('Область удаления сброшена');}

@@ -8,7 +8,7 @@ const uid = (prefix = 'layer') => `${prefix}-${Date.now().toString(36)}-${(++lay
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const bounded = (value, fallback, min, max) => clamp(finite(value, fallback), min, max);
 const shortText = (value, fallback = '', max = 500) => String(value ?? fallback).slice(0, max);
-const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion']);
+const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion','color','hue','saturation','luminosity']);
 const GROUP_BLEND_MODES = new Set(['pass-through', ...BLEND_MODES]);
 export const PROJECT_VERSION = 1;
 export const DEFAULT_LAYER_FILTERS = Object.freeze({
@@ -193,6 +193,8 @@ export function createVectorMask(overrides = {}) {
     enabled: true,
     invert: false,
     linked: true,
+    density: 1,
+    feather: 0,
     fillStartsWithAllPixels: false,
     subpaths: [],
     ...overrides,
@@ -238,6 +240,7 @@ export function createLayerGroup(overrides = {}) {
     opacity: 1,
     blendMode: 'pass-through',
     parentGroupId: null,
+    mask: null,
     ...overrides,
   };
 }
@@ -697,6 +700,8 @@ export function sanitizeVectorMask(mask) {
     enabled: mask.enabled !== false,
     invert: mask.invert === true,
     linked: mask.linked !== false,
+    density: bounded(mask.density, 1, 0, 1),
+    feather: bounded(mask.feather, 0, 0, 250),
     fillStartsWithAllPixels: mask.fillStartsWithAllPixels === true,
     subpaths,
   });
@@ -998,6 +1003,59 @@ function sanitizePsdAdjustment(value) {
 
 const MAX_EMBEDDED_DOCUMENT_DEPTH = 3;
 
+// Keep the original Bayer bytes separate from the disposable 8-bit display preview.
+// RAW source survives .zpe Undo/Redo and re-open; never silently claim full DNG parity.
+function sanitizeRawDng(value, width, height) {
+  if (!value || typeof value !== 'object' || typeof value.dataUrl !== 'string' ||
+      value.dataUrl.length > 67_110_000 ||
+      !value.dataUrl.startsWith('data:application/x-adobe-dng;base64,') ||
+      !Number.isInteger(value.width) || !Number.isInteger(value.height) ||
+      value.width < 2 || value.height < 2 || value.width > 12000 || value.height > 12000 ||
+      value.width * value.height > 16_000_000) return null;
+  const d=value.development;
+  const exposure=Number(d?.exposure), wbRed=Number(d?.wbRed), wbBlue=Number(d?.wbBlue);
+  // Legacy .zpe projects default to neutral tone; invalid explicit tone fails closed.
+  const highlights=d?.highlights === undefined ? 0 : d.highlights;
+  const shadows=d?.shadows === undefined ? 0 : d.shadows;
+  const contrast=d?.contrast === undefined ? 0 : d.contrast;
+  const demosaic=d?.demosaic;
+  // Legacy RAW projects default to 0 EV. Invalid explicit metadata fails closed;
+  // actual future development always re-reads BaselineExposure from native bytes.
+  const baselineExposure=value.baselineExposure === undefined ? 0 : value.baselineExposure;
+  const baselineExposureOffset=value.baselineExposureOffset === undefined ? 0 : value.baselineExposureOffset;
+  if (!Number.isFinite(exposure) || exposure < -5 || exposure > 5 ||
+      !Number.isFinite(wbRed) || wbRed < 0.25 || wbRed > 4 ||
+      !Number.isFinite(wbBlue) || wbBlue < 0.25 || wbBlue > 4 ||
+      typeof highlights !== 'number' || !Number.isFinite(highlights) || highlights < -1 || highlights > 1 ||
+      typeof shadows !== 'number' || !Number.isFinite(shadows) || shadows < -1 || shadows > 1 ||
+      typeof contrast !== 'number' || !Number.isFinite(contrast) || contrast < -1 || contrast > 1 ||
+      (demosaic!==undefined && demosaic!=='bilinear' && demosaic!=='edge-aware-green' && demosaic!=='edge-aware-rgb') ||
+      typeof baselineExposure !== 'number' || !Number.isFinite(baselineExposure) ||
+      baselineExposure < -16 || baselineExposure > 16 ||
+       typeof baselineExposureOffset !== 'number' || !Number.isFinite(baselineExposureOffset) ||
+       baselineExposureOffset < -16 || baselineExposureOffset > 16) return null;
+  // Preserve only known provenance; the original DNG bytes remain authoritative.
+  const colorPipeline=value.colorPipeline==='forward-d50-v1'?'forward-d50-v1':
+    value.colorPipeline==='matrix-d50-bradford-v1'?
+    'matrix-d50-bradford-v1':'uncalibrated-bayer-preview';
+  const whiteBalanceSource=['as-shot-neutral','as-shot-white-xy','legacy-unspecified']
+    .includes(value.whiteBalanceSource)?value.whiteBalanceSource:'legacy-unspecified';
+  const defaultScale=Array.isArray(value.defaultScale)&&value.defaultScale.length===2&&
+    value.defaultScale.every(n=>Number.isFinite(n)&&n>=0.125&&n<=8)
+    ? [...value.defaultScale] : [1,1]; // Old .zpe v1/v2 RAW sources used implicit identity.
+  const blackRepeatDim=Array.isArray(value.blackRepeatDim)&&value.blackRepeatDim.length===2&&
+    value.blackRepeatDim.every(n=>Number.isInteger(n)&&n>=1&&n<=8)
+    ? [...value.blackRepeatDim] : [1,1]; // Legacy .zpe RAW has scalar BlackLevel.
+  return {dataUrl:value.dataUrl,width:value.width,height:value.height,
+    bits:[8,10,12,14,16].includes(value.bits)?value.bits:null,
+    colorPipeline,whiteBalanceSource,defaultScale,blackRepeatDim,baselineExposure,baselineExposureOffset,
+    blackDeltaH:value.blackDeltaH===true,blackDeltaV:value.blackDeltaV===true,
+    linearizationTable:value.linearizationTable===true,
+    compression:value.compression===7?7:1, // Old .zpe RAW defaults to uncompressed.
+    development:{exposure,wbRed,wbBlue,highlights,shadows,contrast,
+      ...(['edge-aware-green','edge-aware-rgb'].includes(demosaic)?{demosaic}: {})}};
+}
+
 function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth = 0) {
   const type = ['raster', 'text', 'shape', 'adjustment', 'smart-object'].includes(layer?.type) ? layer.type : 'shape';
   const defaults = baseLayer(type);
@@ -1032,6 +1090,7 @@ function sanitizeLayer(layer, usedIds, validGroupIds = new Set(), embeddedDepth 
     checkedCanvasSize(result.width, result.height, `Растровый слой «${result.name || 'Без имени'}»`);
     const dataUrl = typeof layer?.dataUrl === 'string' && /^data:image\//i.test(layer.dataUrl) ? layer.dataUrl : null;
     result.dataUrl = dataUrl;
+    result.rawDng = sanitizeRawDng(layer?.rawDng,result.width,result.height);
     result.highDepthSource = sanitizeSerializedPixelBufferSource(layer?.highDepthSource);
     const hasRgbHighDepthPreview = result.highDepthSource?.model === 'rgb' && Number(result.highDepthSource.bitsPerChannel) > 8;
     result.highDepthPreview = hasRgbHighDepthPreview ? sanitizeHighDepthPreview(layer?.highDepthPreview) : null;
@@ -1103,6 +1162,7 @@ function sanitizeGroup(group, usedIds) {
     opacity: bounded(group?.opacity, 1, 0, 1),
     blendMode: GROUP_BLEND_MODES.has(group?.blendMode) ? group.blendMode : 'pass-through',
     parentGroupId: typeof group?.parentGroupId === 'string' ? shortText(group.parentGroupId, '', 160).trim() || null : null,
+    mask: sanitizeLayerMask(group?.mask),
   };
 }
 

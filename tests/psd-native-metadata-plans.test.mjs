@@ -100,3 +100,37 @@ test('smart-object native plan preserves opaque identity only while baseline inv
   const changed=psdSmartObjectRoundTripPlan({...doc,layers:[{...layer,x:11}]});
   assert.equal(changed.eligible,false);assert.match(changed.reason,/трансформирован/);
 });
+
+test('new ZeTer Levels/Curves are exported as editable native PSD/PSB adjustments, without imported Photoshop metadata',async()=>{
+  const {encodePsd,encodePsb}=await import('../src/formats/psd.js');
+  const cases=[
+    {kind:'levels',master:{inputBlack:12,inputWhite:230,outputBlack:4,outputWhite:250,gamma:1.4},channels:[{id:2,inputBlack:20,inputWhite:220,outputBlack:3,outputWhite:242,gamma:1.7}]},
+    {kind:'curves',channels:[{id:0,points:[{input:0,output:0},{input:128,output:145},{input:255,output:255}]},{id:1,points:[{input:0,output:10},{input:255,output:240}]}]},
+  ];
+  for(const adjustment of cases){
+    const layer={id:'new',type:'adjustment',name:'New '+adjustment.kind,adjustment,filters:{},styles:null,visible:true,opacity:1,blendMode:'source-over'};
+    const plan=psdAdjustmentNativePlan(layer);
+    assert.equal(plan.eligible,true,adjustment.kind+' should be native, not flattened: '+plan.reason);
+    assert.equal(plan.metadata.kind,adjustment.kind);
+    assert.deepEqual(plan.metadata.channelIds,[-1,0,1,2,-2]);
+    assert.equal(plan.metadata.blocks[0].key,adjustment.kind==='levels'?'levl':'curv');
+    for(const [format,encode] of [['PSD',encodePsd],['PSB',encodePsb]]){
+      const binary=encode({width:2,height:2,bitsPerChannel:8,colorMode:3,composite:new Uint8ClampedArray(16),layers:[{
+        name:layer.name,x:0,y:0,width:0,height:0,opacity:1,blendMode:'source-over',visible:true,psdAdjustment:plan.metadata,
+      }]});
+      const decoded=await decodePsd(binary,{maxPixels:100,maxLayers:20});
+      assert.equal(decoded.adjustmentLayers.length,1,format+' '+adjustment.kind+' preserved as native adjustment');
+      const parsed=decoded.adjustmentLayers[0].psdAdjustment.parsed;
+      if(adjustment.kind==='levels'){
+        assert.equal(parsed.master.inputBlack,12);
+        assert.equal(parsed.master.gamma,1.4);
+        assert.equal(parsed.channels.find(c=>c.id===2).gamma,1.7);
+      }else{
+        assert.deepEqual(parsed.channels.find(c=>c.id===0).points,adjustment.channels[0].points);
+        assert.deepEqual(parsed.channels.find(c=>c.id===1).points,adjustment.channels[1].points);
+      }
+    }
+  }
+  const unsupported=psdAdjustmentNativePlan({type:'adjustment',adjustment:{kind:'exposure',exposure:1,offset:0,gamma:1},filters:{},styles:null});
+  assert.equal(unsupported.eligible,false,'unsupported newly-created kinds must not masquerade as native');
+});

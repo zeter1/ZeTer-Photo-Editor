@@ -19,6 +19,8 @@ export function createNewDocumentController({
     getActiveSessionId,
     getDocumentChangeSerial,
     blockPendingDocumentEdit,
+    canCancelPendingContentAwareFill = () => false,
+    cancelPendingContentAwareFill = () => false,
     replaceHistory,
     setDocument,
     markDirty,
@@ -49,6 +51,12 @@ export function createNewDocumentController({
   requirePort(setStatus, 'status');
   requirePort(toast, 'toast');
 
+  // In-flight content-aware Fill is revocable, unlike a painting gesture or
+  // another persistence operation. Do not revoke it before user approval.
+  function blockUncancellableEdit() {
+    return canCancelPendingContentAwareFill() ? false : blockPendingDocumentEdit();
+  }
+
   function canReplaceDocument() {
     return !isDirty() || confirmDiscard(DISCARD_CONFIRM_MESSAGE);
   }
@@ -77,7 +85,7 @@ export function createNewDocumentController({
   }
 
   async function open() {
-    if (blockPendingDocumentEdit()) return;
+    if (blockUncancellableEdit()) return;
     if (!canReplaceDocument()) return;
     const authority = captureReplacementAuthority();
     showModal({
@@ -100,7 +108,7 @@ export function createNewDocumentController({
       ],
       submitLabel: 'Создать',
       onSubmit: async values => {
-        if (blockPendingDocumentEdit()) return false;
+        if (blockUncancellableEdit()) return false;
         if (!replacementOwnerIsCurrent(authority)) return rejectStaleReplacementOwner();
         if (needsFreshDiscardConfirmation(authority) && !confirmDiscard(DISCARD_CONFIRM_MESSAGE)) return false;
         try {
@@ -110,6 +118,10 @@ export function createNewDocumentController({
             height: Number(values.height),
             background: values.background,
           });
+          // Validation and the latest discard decision must succeed before
+          // cancelling a running Worker. Recheck the lease before publication.
+          if (canCancelPendingContentAwareFill() && !cancelPendingContentAwareFill()) return false;
+          if (blockPendingDocumentEdit()) return false;
           replaceHistory();
           setDocument(next, { resetHistory: true, label: 'Новый документ' });
           markDirty(false);

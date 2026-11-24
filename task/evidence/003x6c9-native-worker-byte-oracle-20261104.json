@@ -1,0 +1,94 @@
+{
+  "kind": "zpe-003x6c9-native-worker-output-byte-oracle-v1",
+  "date": "2026-11-04",
+  "platform": "Windows Chrome real file://",
+  "productionChanged": false,
+  "repoBase": "1962b5f64d3b8bfe8ed3d74a161edc0a18d3f6c0",
+  "method": "Run real Blob Worker on native v2 .zpe from Chrome File API; byte-compare output changed tile and exact untouched dataUrls; History baseline/pooled fresh browser 2 sessions x 4 positions, one repetition",
+  "commands": [
+    "node --check tools/browser-history-native-worker-smoke.mjs",
+    "node --test tests/003x6c8-history-shared-native-urls.test.mjs tests/003x6c9-history-profile.test.mjs",
+    "npm run test:browser",
+    "ZPE_PROFILE_WORKER=1 ZPE_PROFILE_REPEATS=1 ZPE_PROFILE_WIDTH=65 ZPE_PROFILE_HEIGHT=65 node tools/profile-history-sharing-chrome.mjs",
+    "ZPE_PROFILE_WORKER=1 ZPE_PROFILE_REPEATS=1 ZPE_PROFILE_WIDTH=1025 ZPE_PROFILE_HEIGHT=1025 node tools/profile-history-sharing-chrome.mjs"
+  ],
+  "validations": {
+    "focusedNode": "10/10 PASS",
+    "browserSmoke": "PASS exit 0 (107.81 s)",
+    "nodeCheck": "PASS",
+    "gitDiffCheck": "PASS",
+    "historyFreshChromeEachSize": "4/4 PASS",
+    "nativeWorkerAll": "4/4 PASS"
+  },
+  "cases": [
+    {
+      "model": "rgb",
+      "bitsPerChannel": 16,
+      "width": 65,
+      "height": 65,
+      "worker": "PASS",
+      "changedTileIndex": 0,
+      "changedColorBytes": 6,
+      "selectedTileRawBytesCompared": 33800,
+      "untouchedTilesVerified": 0
+    },
+    {
+      "model": "cmyk",
+      "bitsPerChannel": 32,
+      "height": 65,
+      "width": 65,
+      "worker": "PASS",
+      "changedTileIndex": 0,
+      "changedColorBytes": 12,
+      "selectedTileRawBytesCompared": 84500,
+      "untouchedTilesVerified": 0
+    },
+    {
+      "model": "rgb",
+      "bitsPerChannel": 16,
+      "width": 1025,
+      "height": 1025,
+      "worker": "PASS",
+      "changedTileIndex": 12,
+      "changedColorBytes": 6,
+      "selectedTileRawBytesCompared": 524288,
+      "untouchedTilesVerified": 24,
+      "observedWorkerRoundTripMs": 112
+    },
+    {
+      "model": "cmyk",
+      "bitsPerChannel": 32,
+      "width": 1025,
+      "height": 1025,
+      "worker": "PASS",
+      "changedTileIndex": 12,
+      "changedColorBytes": 11,
+      "selectedTileRawBytesCompared": 1310720,
+      "untouchedTilesVerified": 24,
+      "observedWorkerRoundTripMs": 246.6
+    }
+  ],
+  "localOriginalEvidence": [
+    {
+      "path": "task/evidence/003x6c9-worker-bit-oracle-20261104.json",
+      "sha256": "ABFB84C01752B6B97E58D6F2F967DB8E8E6E94C4CBA6D3E2B9D9E00AA2C15E79"
+    },
+    {
+      "path": "task/evidence/003x6c9-worker-bit-oracle-large-20261104.json",
+      "sha256": "9E85352C3C6DDAC67039CA3EE8BC51DA0B56FE7D3F1BD135C3F632B5A6690E2C"
+    }
+  ],
+  "priorPRHeadCoreCI": {
+    "head": "f53613bae84f95f562e394f8228e29e42d7ebc38",
+    "run": "https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/41789287535",
+    "result": "SUCCESS 12/12 BEFORE new oracle commit"
+  },
+  "ciNote": "New PR-head CI, independent real-photo CI, merge, exact-main CI are not verified by this file",
+  "limitations": [
+    "Synthetic (ZeTer-created), not independently Adobe-authored PSB32",
+    "Direct Blob Worker protocol, not in-kernel cancel/stale/session-close UI E2E",
+    "No true physical RSS or peak memory, Worker-specific PID mapping unavailable",
+    "One-run CPU times not statistically representative",
+    "Remote CI for this oracle commit not yet observed"
+  ]
+}

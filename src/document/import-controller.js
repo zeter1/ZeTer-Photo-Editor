@@ -4,6 +4,10 @@ export function createDocumentImportController({
   isPsdFile,
   readFileAsDataURL,
   dimensionsFromDataUrl,
+  inspectDng,
+  developDng,
+  rgbaPixelsToDataUrl,
+  bytesToDataUrl,
   checkedCanvasSize,
   createRasterLayer,
   addLayer,
@@ -18,9 +22,13 @@ export function createDocumentImportController({
   resetBrushBuffer=()=>{},
   DateClass=globalThis.Date,
 } = {}) {
+  function isDngFile(file) {
+    return Boolean(file) && (/\.dng$/i.test(file.name || '') || /^(image\/x-adobe-dng|image\/dng)$/i.test(file.type || ''));
+  }
+
   function isImageFile(file) {
     return Boolean(file) && !isPsdFile(file) &&
-      (String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
+      (isDngFile(file) || String(file.type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg|avif)$/i.test(file.name || ''));
   }
 
   function isProjectFile(file) {
@@ -36,10 +44,33 @@ export function createDocumentImportController({
 
     const prepared=[];
     for(const file of images){
-      const dataUrl=await readFileAsDataURL(file);
-      const dimensions=await dimensionsFromDataUrl(dataUrl);
-      checkedCanvasSize(dimensions.width,dimensions.height,`Изображение «${file.name || 'Без имени'}»`);
-      prepared.push({file,dataUrl,width:dimensions.width,height:dimensions.height});
+      if(isDngFile(file)){
+        try {
+          const raw=await file.arrayBuffer();
+          const source=inspectDng(raw);
+          checkedCanvasSize(source.width,source.height,`RAW «${file.name || 'Без имени'}»`);
+          const pixels=developDng(source);
+          const dataUrl=await rgbaPixelsToDataUrl(pixels.width,pixels.height,pixels.rgba,'DNG RAW');
+          const rawDng={dataUrl:bytesToDataUrl(raw,'application/x-adobe-dng'),
+            development:pixels.development,colorPipeline:pixels.colorPipeline,
+            whiteBalanceSource:source.whiteBalanceSource,baselineExposure:source.baselineExposure,
+             baselineExposureOffset:source.baselineExposureOffset,
+            bits:source.bits,width:source.width,height:source.height,defaultScale:[...source.defaultScale],
+            blackRepeatDim:[...source.blackRepeat],
+            blackDeltaH:Boolean(source.blackDeltaH),blackDeltaV:Boolean(source.blackDeltaV),
+            linearizationTable:Boolean(source.linearization),compression:source.compression};
+          prepared.push({file,dataUrl,width:pixels.width,height:pixels.height,rawDng});
+        } catch(error) {
+          setStatus('Ошибка DNG: ' + error.message);
+          toast('DNG не импортирован: ' + error.message,'error');
+          return 0;
+        }
+      } else {
+        const dataUrl=await readFileAsDataURL(file);
+        const dimensions=await dimensionsFromDataUrl(dataUrl);
+        checkedCanvasSize(dimensions.width,dimensions.height,`Изображение «${file.name || 'Без имени'}»`);
+        prepared.push({file,dataUrl,width:dimensions.width,height:dimensions.height});
+      }
     }
 
     if(getDocument()!==targetDocument||getActiveSessionId()!==targetSessionId){
@@ -70,6 +101,7 @@ export function createDocumentImportController({
         width:item.width,
         height:item.height,
         dataUrl:item.dataUrl,
+        ...(item.rawDng ? {rawDng:item.rawDng} : {}),
       }));
       offset+=18;
     }

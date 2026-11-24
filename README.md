@@ -1,10 +1,38 @@
+**Язык / Language:** **Русский** · [English](README_EN.md)
+
 # ZeTer Photo Editor
 
 [![CI](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml/badge.svg)](https://github.com/zeter1/ZeTer-Photo-Editor/actions/workflows/ci.yml)
 
-**Онлайн-версия:** https://dkl.do.am/servisi/PhotoEditor/index.html  
+**Онлайн-версия:** https://dkoles.com/servisi/PhotoEditor/index.html
 
 ZeTer Photo Editor — браузерный графический редактор со слоями, историей действий и Canvas 2D-рендером. Он работает как онлайн, так и локально через обычный `index.html`. Редактор вдохновлён рабочим процессом Photopea / Photoshop, но остаётся самостоятельным приложением. Пользовательские изображения обрабатываются в браузере и для обычной работы не требуют загрузки на внешний сервер.
+
+**Current candidate 1.47.24 (Stage 17a):** Native editable Posterize and Threshold for ZPE-created adjustment layers in PSD/PSB; cumulative clipped Levels → Invert verified on transparent and opaque blue backdrops with Multiply/Screen, partial group/raster masks, History and .zpe round-trip. Synthetic browser oracle, not Adobe pixel parity. [Journal](task/002-psd-folder-group-mask.md).
+
+**Previous 1.47.23 (Stage 17a):** ZPE-created clipped Invert now exports as real editable native Photoshop `nvrt`, avoiding destructive `ZPE Composite Preview` fallback. Actual Chromium `file://` UI export/download/import PSD and PSB in both Multiply and Screen nested masked groups preserves exact RGBA, partially masked raster overlay, editable layers, Group Properties/Undo-Redo and `.zpe` reopen. Independent Adobe-authored parity and knockout are still open. [Journal](task/002-psd-folder-group-mask.md).
+
+**Previous 1.47.22 (Stage 17a):** Multiply/Screen clipped raster now updates the reusable clipping stack before subsequent Invert/Levels corrections, without increasing backdrop alpha. Exact real Chromium `file://` pixels in nested masked Pass Through, Group Properties, History Undo/Redo and native `.zpe` reopen PASS; PSD/PSB editable group/raster/adjustment records checked. Independent Photoshop-authored pixel oracle and advanced knockout remain IN PROGRESS. Earlier 1.47.21:  Nested clipped Invert adjustment now uses its translucent raster clipping base instead of modifying the flattened backdrop; masked Pass Through folder uses correct premultiplied RGBA over transparent blue. Real Chromium `file://` pixels, Group Properties, Undo/Redo and native `.zpe` reopen PASS; PSD/PSB editable structure verified with codec regressions. Clipped raster-overlays followed by adjustments and Adobe-authored pixel parity remain IN PROGRESS. Consecutive clipped adjustments retain their own cumulative RGB stack and correct group opacity. [Journal](task/002-psd-folder-group-mask.md).
+
+**Previous 1.47.20 (Stage 17a):** Masked Pass Through groups now blend raster/adjustment children against the actual parent backdrop before the group mask attenuates the result; real Chromium file:// exact RGBA, Group Properties, Undo/Redo and .zpe reopen verified. Independent Photoshop-authored pixel parity and advanced knockout remain open. [Implementation journal](task/002-psd-folder-group-mask.md).
+
+**Previous increment 1.47.19 (Stage 17a):** native Photoshop folder raster mask в PSD/PSB: групповая маска, вложенные папки, .zpe и Group Properties (enable/disable), History Undo/Redo, точные RGBA в Chromium file://. Маска дочернего слоя не подменяется маской группы. Полный Photoshop-authored pixel golden и backdrop-sensitive masked Pass Through пока не реализованы. [Журнал](task/002-psd-folder-group-mask.md).
+
+**Предыдущий срез 1.47.18 (Stage 17a):** raster clipping корректно ограничивается альфой нижележащего слоя внутри изолированных PSD/PSB-групп (в том числе с mask/opacity/blend). В Properties добавлен переключатель с History Undo/Redo; сохраняются `.zpe` и native PSD/PSB layer records. Независимое соответствие Photoshop-authored pixel golden остаётся открытым. [Журнал Stage 17a](task/002-psd-isolated-clipping.md). RAW-контраст 1.47.17 уже объединён в main через #399.
+
+## Попробовать редактор
+
+Для обработки фотографий, ретуши, добавления текста и работы с многослойными документами — без установки настольного редактора.
+
+1. [Откройте онлайн-версию](https://dkoles.com/servisi/PhotoEditor/index.html) или [скачайте исходники ZIP](https://github.com/zeter1/ZeTer-Photo-Editor/archive/refs/heads/main.zip) и распакуйте всю папку.
+2. Для локального запуска на Windows дважды нажмите `start.bat` или `index.html`. Python и Node.js для обычного использования не нужны.
+3. Откройте изображение, выполните правки и сохраните редактируемый проект в `.zpe`; готовое изображение экспортируйте в нужный формат.
+
+Изображения обрабатываются в браузере. Нейросетевые инструменты требуют отдельной установки моделей; совместимость со сложными Photoshop-документами имеет [ограничения](#ограничения-относительно-photopea). Для важных файлов сохраняйте исходники и проект отдельно от браузерного восстановления.
+
+**Для разработчиков:** [карта проекта](docs/PROJECT.md), [архитектура](#архитектура), [тесты](#тесты).
+
+## Работа с текстом
 
 Для текста доступны встроенные шрифты с поддержкой кириллицы, загрузка своего файла шрифта и кнопка показа шрифтов компьютера (если браузер предоставит доступ). В окне текста параметры сразу видны на холсте и в предпросмотре фрагмента изображения; окно можно переместить за заголовок и изменить его размер за угол. Размер малого предпросмотра меняется за его нижний угол. «Отмена» убирает временный результат.
 
@@ -12,12 +40,15 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Возможности
 
-**Текущая версия:** 1.43.4
+**Текущая версия:** 1.47.41
+
+> Кандидат локальной ветки, не опубликован в `main`.
 
 ### Ключевые возможности
 
 - **Полноценная работа со слоями:** растровые, текстовые, фигурные, корректирующие слои и Smart Objects; группы, вложенные группы, блокировка, видимость, непрозрачность и режимы наложения.
 - **PSD/PSB-совместимость:** импорт и экспорт многослойных Photoshop-документов с сохранением поддерживаемой структуры, групп, масок, blend modes, ICC-метаданных и совместимых native-данных.
+- **DNG RAW (ограниченный локальный срез v1.47.14, ещё не GitHub main):** импорт CFA Bayer TIFF без сжатия 8/10/12/14/16-bit и JPEG lossless SOF3 с отдельными/смешанными SOS-сканами (включая 2+2 и 1+2+1), strips, tiles и restart markers; sensor LinearizationTable, BlackLevelRepeatDim + signed BlackLevelDeltaH/V, DefaultCrop/Scale, Orientation 1–8 и профили ColorMatrix либо ForwardMatrix1/2 (AnalogBalance/CameraCalibration). RAW Properties с тремя выбираемыми режимами Bayer (bilinear, направленный G, зелёно-ориентированный RGB), неразрушающие Exposure/WB/Highlights/Shadows, переключаемая подсветка display-RGB клиппинга (пурпурный/голубой, в том числе >8 Мп через ограниченные 1 МиБ RGBA тайлы, без записи в экспорт/.zpe) и History Undo/Redo, сохранение неизменных RAW bytes/provenance в `.zpe`, экспорт только проявленных PNG/PSD/PSB raster. Синтетические TIFF-тесты и Chromium `file://` подтверждены, но camera-authored DNG/LibRaw pixel oracle и Linux PR-head CI этой локальной ветки отсутствуют; не заявляется Photoshop/Adobe camera parity. [Журнал](task/002-raw-dng-forward-matrix-port.md).
 - **16-bit и 32-bit HDR pipeline:** импорт, хранение, редактирование и экспорт высокоточных RGB-данных без обязательного сведения всего документа к 8-bit.
 - **CMYK и ICC color management:** поддержка CMYK PSD/PSB, встроенных ICC-профилей, преобразований CMYK↔RGB, display-profile policy и soft proofing.
 - **Неразрушающее редактирование:** Adjustment Layers, маски слоёв, векторные маски, эффекты, цветокоррекция и редактируемые параметры без изменения исходных пикселей.
@@ -74,7 +105,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - кисть размытия работает локально по текущему растровому слою: размер кисти задаёт область, «Сила размытия» — интенсивность одного штриха в процентах; повторные отпечатки внутри одного штриха не усиливают размытие;
 - ретушь текущего растрового слоя: **Штамп (`S`)**, **Лечебная кисть (`J`)** и **Палец (`N`)** используют мягкие края, **Осветлитель (`O`)** и **Затемнитель (`Shift+O`)** меняют только RGB существующих пикселей и сохраняют прозрачность; сила осветления и затемнения регулируется отдельно для каждого инструмента и не накапливается от соседних отпечатков одного штриха; источник штампа и лечебной кисти задаётся через `Alt+клик`;
 - **Градиент (`Shift+G`)** создаёт линейный или радиальный переход между двумя цветами на отдельном слое и показывает сам переход до отпускания кнопки мыши;
-- **Перо (`P`)**, Stage 2b: клик создаёт corner-узел, click+drag — smooth Bézier-узел; у выбранного path-слоя видны anchors/handles, anchor можно перетаскивать вместе с ручками, handle — менять отдельно, `Alt+drag` разрывает симметрию, `Shift+drag` по anchor создаёт smooth handles, `Alt+click` по anchor сбрасывает его в corner; cubic-контуры сохраняются в `.zpe`, старые прямолинейные pathPoints остаются совместимыми; **Магнитное лассо (`A`)** прослеживает границу промежуточными точками между кликами, а **Волшебная палочка (`W`)** выделяет связанную область похожего цвета;
+- **Перо (`P`)**, Stage 2b: клик создаёт corner-узел, click+drag — smooth Bézier-узел; у выбранного path-слоя видны anchors/handles, anchor можно перетаскивать вместе с ручками, handle — менять отдельно, `Alt+drag` разрывает симметрию, `Shift+drag` по anchor создаёт smooth handles, `Alt+click` по anchor сбрасывает его в corner, `Alt+Shift+клик` сглаживает угловой anchor по соседним сегментам (с сохранением Undo/Redo); при создании нового контура клик по первой точке после третьего узла замыкает cubic-контур без дублирования anchor и сохраняет его в Shape-слое с Undo/Redo; cubic-контуры сохраняются в `.zpe`, старые прямолинейные pathPoints остаются совместимыми; **Магнитное лассо (`A`)** прослеживает границу промежуточными точками между кликами, а **Волшебная палочка (`W`)** выделяет связанную область похожего цвета;
 - панель инструментов на широком экране имеет две колонки; у каждого инструмента есть развёрнутая подсказка с назначением и горячей клавишей;
 - заливка (`G`) связной области с регулируемым допуском цвета и непрозрачностью;
 - **Правка → Контент-заливка выделения** восстанавливает выбранную область детерминированным boundary-inpainting по исходным пикселям вокруг выделения; Canvas8 и native 16/32-bit RGB/CMYK проходят через один sample-domain алгоритм без скрытой 8-bit rasterization. Для предсказуемой памяти один запуск ограничен слоем до 8 МП и выделением до 2 МП;
@@ -103,6 +134,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 - **Select & Mask Edge Detection Stage 9c**: добавлены Radius, Strength и Smart Radius. В полосе вокруг грубой границы маски алгоритм ищет уверенные foreground/background samples и переносит край по сходству RGBA, поэтому тонкие контрастные детали рядом с исходной границей могут возвращаться в маску. Smart Radius уменьшает влияние там, где цветовые классы неразличимы; preview и финальное применение используют один pipeline. Это собственная bounded эвристика ZPE, а не заявление о pixel-identical Photoshop Refine Edge;
 - **Select & Mask View Modes Stage 9d**: live preview переключается между «Чёрно-белая маска», «Наложение», «На чёрном» и «На белом». Режим просмотра влияет только на визуализацию preview и не меняет параметры/результат маски; compositor вынесен в pure `composeMaskPreviewRgba()` и покрыт regression tests;
 - **Vector Masks Stage 10a + Path Operations Stage 10b**: любой слой может хранить `.zpe` vector mask как набор cubic Bézier subpaths в локальных координатах слоя. Текущее выделение можно превратить в маску, заменить ею маску или добавить как `Add / Subtract / Intersect / Exclude`; прямоугольник остаётся 4 узлами, эллипс сохраняется четырьмя cubic Bézier-сегментами. Vector mask можно включать/выключать, инвертировать и удалять; raster mask и vector mask пересекаются в одном isolated render pipeline;
+- **Pen Shape/Saved Path node editing v1.46.17:** Ctrl+click по Bézier-сегменту вставляет математически точный узел Shape Path или Saved Paths, Ctrl+Alt+click по anchor удаляет узел (минимумы для open/closed paths). Работают History Undo/Redo, .zpe и native PSD/PSB Saved Paths; source identity/lock guards исключают запись в чужой путь. Adobe-authored совместимость отдельно не заявлена;
 - **Vector Mask Direct Edit Stage 10c**: команда «Редактировать векторную маску пером» включает отдельный Pen edit mode для всех subpaths выбранной маски. На холсте виден пунктирный контур, anchors и Bézier handles; anchors/handles двигаются теми же gesture-контрактами, что shape path, а история различает изменения mask/path. Клик мимо существующего узла в mask edit mode не создаёт случайный shape-layer;
 - **Native PSD/PSB Vector Masks Stage 10d**: adapter читает и пишет Photoshop Additional Layer Info `vmsk`/`vsms` по 26-byte Path Resource records: invert/disable/not-link flags, initial fill, closed/open subpaths, linked/unlinked Bézier knots и `Add / Subtract / Intersect / Exclude`. При экспорте vector mask больше не запекается в layer pixels; source bitmap и native mask сохраняются раздельно;
 - **PSD/PSB Saved Paths Stage 10e**: Image Resources `2000..2997` читаются в `document.paths`, сохраняются в `.zpe` и записываются обратно в PSD/PSB. Поддерживаются open/closed cubic paths, fill rule и исходный resource id/name;
@@ -216,7 +248,7 @@ ZeTer Photo Editor — браузерный графический редакт�
 
 ## Запуск на Windows
 
-Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.43.4 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
+Самый простой вариант: дважды кликните `start.bat` или сразу `index.html`. Версия 1.47.41 специально собрана так, чтобы работать через обычный `file://` запуск — **Python, Node.js и локальный HTTP-сервер для использования редактора больше не нужны**.
 
 Если браузер показывает старую версию после обновления архива, закройте старую вкладку и откройте `index.html` из новой распакованной папки.
 
@@ -279,3 +311,18 @@ npm test
 PSD Import Stage 3 / Export Stage 4 и PSB Stage 7a дают layered round-trip, Stage 12e–12g сохраняют native RGB 16/32-bit typed channels и compatible high-depth composite, Stage 13a–13e закрывают native CMYK/color-management и real-world ICC corpus, Stage 14a–14c закрывают основную embedded Smart Object цепочку, Stage 15a–15d дают editable Photoshop Text/solid Shape mapping, а Stage 16a–16c дают native basic Adjustment Layers с raster masks, clipping, channel-specific Levels и editable point Curves. Ограничения здесь теперь точечные: clipping base внутри сложных isolated/pass-through group chains и Photoshop blend-if ещё не моделируются полностью; Gradient/Pattern Fill renderer, multi-subpath boolean geometry, полная isolated-group/vector-mask parity и tiled/streaming pipeline ещё впереди. Content-Aware Fill уже выполняет реальное bounded inpainting и сохраняет native sample precision, но это пока детерминированный donor-propagation v1, а не полноценный PatchMatch/ML synthesis для больших текстурных удалений.
 
 Следующий imaging-этап: **Stage 17a — Isolated Groups / Vector Mask Composite Parity**: приблизить Photoshop group compositing для pass-through/isolated stacks, clipping chains и mask interactions, добавить real PSD/PSB group fixtures и pixel-reference regressions; после этого — editable Gradient/Pattern Fill renderer и tiled/worker/GPU pipeline.
+
+## Контакты для связи:
+
+- [zeter11@gmail.com](mailto:zeter11@gmail.com)
+- [https://t.me/zeter1](https://t.me/zeter1)
+- [https://www.linkedin.com/in/zeter/](https://www.linkedin.com/in/zeter/)
+- [https://www.facebook.com/zeter1](https://www.facebook.com/zeter1)
+- [https://vk.ru/zeter1](https://vk.ru/zeter1)
+- [https://www.instagram.com/zeter1992/](https://www.instagram.com/zeter1992/)
+- [https://tenchat.ru/zeter](https://tenchat.ru/zeter)
+- [https://x.com/zeter1](https://x.com/zeter1)
+- [https://www.threads.com/@zeter1992](https://www.threads.com/@zeter1992)
+- [https://ok.ru/zeter1](https://ok.ru/zeter1)
+- [https://t.me/zeterchat](https://t.me/zeterchat) - Telegram-группа для общения
+- [https://dkoles.com/](https://dkoles.com/) - сайт.

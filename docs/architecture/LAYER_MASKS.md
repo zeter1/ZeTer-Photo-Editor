@@ -1,4 +1,4 @@
-# Raster Layer Masks
+# Raster and Vector Layer Masks
 
 This document is the fast path for AI/Codex work on raster layer masks.
 
@@ -71,6 +71,25 @@ Compensation is always computed from the captured command/gesture baseline, neve
 `transform: null` is the compact identity. Re-linking does not erase a non-identity transform: it preserves the current relative placement and only changes how future layer transforms behave.
 
 Runtime and PSD/PSB export both compose the same relative transform. Do not implement link/unlink by modifying the mask bitmap or by adding one-off x/y offsets in `src/main.js`.
+
+## Vector Mask density/feather (CAP-MASK-VD)
+
+Векторная маска хранит оригинальные кубические subpaths и добавляет независимые
+`density: 1` и `feather: 0`. Старые проекты без полей получают прежний результат.
+Санитайзер ограничивает значения [0,1] и [0,250], а replace selection сохраняет
+существующие controls. Рендер в `renderVectorMaskBitmap` применяет
+`applyMaskControlsAlpha` *после* операций над path coverage, в обоих
+путях композитинга: сначала feather, затем invert и density.
+
+В меню слоя доступны «Параметры векторной маски…» с единственным History
+commit на успешное изменение, no-op и защитой identity от stale modal.
+Сводка маски показывает значения. Реальный Chrome file:// тест
+`npm run test:browser:vector-mask` проверяет пиксели, Undo/Redo и
+скачанный/повторно открытый .zpe Blob.
+
+**Граница:** PSD/PSB экспортер ещё не сохраняет density/feather как отдельные
+редактируемые метаданные vector mask; визуальный parity при экспорте
+и Photoshop-authored round-trip требуют отдельной приёмки.
 
 ## PSD/PSB compatibility
 
