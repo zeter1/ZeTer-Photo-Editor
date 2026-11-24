@@ -1,19 +1,19 @@
 # NEXT - ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY / v1.47.32 RGB8 Color non-separable mode.
+> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-COMPOSITE-PARITY / Hue v1.47.33 acceptance.
 > **PRIORITY:** P1.
-> **STATUS:** IN PROGRESS — #414 MERGED and exact-main PASS; #415 OPEN, initial verify FAIL, marker corrected, fresh gates required.
-> **BASE MAIN SHA:** a3a5a5804b8b3d00e80c72e93699e7c4ef61fb04 (#414 MERGED; exact-main core + independent PASS).
-> **ACTIVE PR:** [#415](https://github.com/zeter1/ZeTer-Photo-Editor/pull/415), base main.
-> **LAST VERIFIED:** 2026-11-24: [#415](https://github.com/zeter1/ZeTer-Photo-Editor/pull/415) direct Color/Normal UI acceptance RED→GREEN: Normal isolated-folder alpha128 x3 blue expected 221 vs actual 218 (strict ±2 failed); compose the isolated Normal clipping stack once on its source matte with tiled straight RGBA, no tolerance relaxation. Targeted Chromium exit 0; full dedicated genuine Windows Chromium file:// 160 native editable PSD/PSB export/reimport paths PASS (61.88 s, exit 0), 4 explicit layer/folder × backdrop-alpha 128/255 mode-control changes + History Undo/Redo PASS, Color six cases and ZPE PASS. Latest build `4e64fd3c7de5a54e`, focused Color Node 4/4 PASS on final build, 35/35 earlier same feature kernel. Full npm check NOT RUN. Runtime/test/build blobs match final local files. Exact-head Linux core/independent CI required. #414 exact-main core and independent PASS (45349938069/45349938057). 2026-11-24 — #414 exact-main `a3a5a5804b8b3d00e80c72e93699e7c4ef61fb04` [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45349938069), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45349938057). #415 head `73066bb661f07240f1f3f4f41601f10b6c3b678f` [core verify FAIL](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45350573727/job/138295795514): 1818/1819 Node PASS, only version-consistency CHANGELOG current-version marker missing. Restore required marker, no test/gate weakening. Fresh exact-head core and independent workflow required; no merge while failed/unknown gates. Branch protection REST returned 403; review requirements remain unverified. Next functional slice Hue after Color acceptance. Adobe-authored oracle and native high-depth Color remain unaccepted.
-> **REMAINING ACCEPTANCE:** #414 accepted exact-main [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45349938069) and [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45349938057); #415 exact new head core/independent, checks/review/mergeability, guarded merge and exact-main CI. Native RGB16/32 and CMYK Color unsupported and fails closed; Adobe-authored oracle still blocked.
-> **NEXT IMPLEMENTATION ACTION:** Accept #415 exact-head and merged-main gates; implement Hue as the next non-separable RGB8 blend mode (source hue, backdrop saturation/luminance) with state/UI, native PSD/PSB hue key, raster/folder and clipped adjustment paths, independent oracle, Undo/Redo, ZPE and native high-depth fail-closed.
-> **BLOCKERS:** licensed Adobe-authored clipping/knockout oracle; genuine camera DNG and LibRaw reference.
+> **STATUS:** IN PROGRESS — Color #415 MERGED; Hue #416 OPEN, ready, exact-head gates required.
+> **BASE MAIN SHA:** eeacad5e9475b56dcabf0ca3bf84ca4d289c7d2d.
+> **ACTIVE PR:** [#416 Hue](https://github.com/zeter1/ZeTer-Photo-Editor/pull/416).
+> **LAST VERIFIED:** 2026-11-24 — #415 Color MERGED (exact head `f960d582a869ff08b22445e47fbe7515256300b6`, 13/13 checks PASS, [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45351179185), [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45351178498)). Exact main `eeacad5e9475b56dcabf0ca3bf84ca4d289c7d2d` tree identical to tested Color head; [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45353319761) and [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45353319695) queued at readback. #416 Hue reconciled with accepted main without force, unchanged tested Hue tree `98496e26068bf3d79184dd2a8dd92daf0b94e1b6`, retargeted to main, ready and mergeable. Exact new head gates required; prior Windows tests historical. Parent CAP IN PROGRESS.
+> **REMAINING ACCEPTANCE:** Fresh exact-head Linux core and independent workflow, guarded merge and exact-main CI. Prior local Hue focused Node 11/11, version 1/1 and dedicated Chromium 172 native editable roundtrips PASS; full Windows check FAIL (1807 PASS / 10 SKIP / 5 Linux-only cgroup FAIL). Synthetic, not Adobe-authored.
+> **NEXT IMPLEMENTATION ACTION:** Accept #416 without duplicate implementation. Implement independent RGB8 Saturation vertical slice (source saturation, backdrop hue/luma) and then Luminosity, preserving Color/Hue regression and native high-depth fail-closed.
+> **BLOCKERS:** Adobe-authored clipping/knockout oracle; genuine camera DNG and LibRaw reference; native RGB16/32/CMYK non-separable math unimplemented.
 
 ## Short queue
 
-1. P1 #415 Color fresh exact-head and merged-main gates (initial verify FAIL fixed).
-2. P1 Hue, then Saturation/Luminosity.
+1. P1 Hue #416 exact-head and main gates.
+2. P1 Saturation, then Luminosity.
 3. P1 CAP-RAW-CAMERA-ORACLE (external reference blocked).
 4. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 

@@ -6177,7 +6177,7 @@ function compositePixelBufferLayers(width, height, layers = [], {
     if (!isPixelBuffer(source)||source.model!=='rgb'||![3,4].includes(source.channels)) {
       throw new TypeError('High-depth composite layer требует RGB PixelBuffer');
     }
-    if (entry?.blendMode === 'color') throw new TypeError('Color blend is not supported by the native pixel compositor');
+    if (entry?.blendMode === 'color' || entry?.blendMode === 'hue') throw new TypeError((entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
     const mode=HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
     const opacity=clampPreview01(entry?.opacity ?? 1);
     if (opacity<=0) continue;
@@ -6257,7 +6257,7 @@ function compositeCmykPixelBufferLayers(width, height, layers = [], {
     if(!isPixelBuffer(source)||source.model!=='cmyk'||![4,5].includes(source.channels)){
       throw new TypeError('CMYK composite layer требует CMYK PixelBuffer');
     }
-    if (entry?.blendMode === 'color') throw new TypeError('Color blend is not supported by the native pixel compositor');
+    if (entry?.blendMode === 'color' || entry?.blendMode === 'hue') throw new TypeError((entry.blendMode === 'hue' ? 'Hue' : 'Color') + ' blend is not supported by the native pixel compositor');
     const mode=HIGH_DEPTH_COMPOSITE_BLEND_MODES.has(entry?.blendMode)?entry.blendMode:'source-over';
     const opacity=clampPreview01(entry?.opacity??1);
     if(opacity<=0)continue;
@@ -10334,11 +10334,18 @@ function applyAdjustmentPixels(imageData,adjustment) {
 }
 
 // Non-separable Color: transfer source chroma while retaining backdrop luminance.
-function colorBlendPixel(base, source, index) {
+function colorBlendPixel(base, source, index, mode = 'color') {
   const lum = (r,g,b) => .3*r + .59*g + .11*b;
   const l = lum(base[index],base[index+1],base[index+2]) / 255;
-  const delta = l - lum(source[index],source[index+1],source[index+2]) / 255;
-  const rgb = [source[index]/255+delta, source[index+1]/255+delta, source[index+2]/255+delta];
+  const rgb = [source[index]/255, source[index+1]/255, source[index+2]/255];
+  // Hue = SetLum(SetSat(Cs, Sat(Cb)), Lum(Cb)). A neutral source has no hue.
+  if (mode === 'hue') {
+    const lo = Math.min(...rgb), span = Math.max(...rgb) - lo;
+    const sat = (Math.max(base[index],base[index+1],base[index+2]) - Math.min(base[index],base[index+1],base[index+2])) / 255;
+    for (let c=0;c<3;c++) rgb[c] = span > 0 ? (rgb[c]-lo)*sat/span : 0;
+  }
+  const delta = l - lum(...rgb);
+  for (let c=0;c<3;c++) rgb[c] += delta;
   const low = Math.min(...rgb), high = Math.max(...rgb);
   if (low < 0) for (let c=0;c<3;c++) rgb[c] = l+(rgb[c]-l)*l/(l-low);
   if (high > 1) for (let c=0;c<3;c++) rgb[c] = l+(rgb[c]-l)*(1-l)/(high-l);
@@ -10379,7 +10386,7 @@ function compositeClippingStackPixels(targetImageData, sourceImageData, mode) {
       continue;
     }
     const alpha = a + b * (1 - a);
-    const color = mode === 'color' ? colorBlendPixel(target,source,i) : null;
+    const color = (mode === 'color' || mode === 'hue') ? colorBlendPixel(target,source,i,mode) : null;
     for (let c = 0; c < 3; c++) {
       const cb = target[i + c] / 255;
       const cs = source[i + c] / 255;
@@ -10401,7 +10408,7 @@ function compositeAdjustmentPixels(baseImageData,effectImageData,{opacity=1,blen
     if(baseAlpha<=0||effectAlpha<=0)continue;
     const coverage=Math.min(1,effectAlpha/baseAlpha)*layerOpacity;
     if(coverage<=0)continue;
-    const color = blendMode === 'color' ? colorBlendPixel(base,effect,index) : null;
+    const color = (blendMode === 'color' || blendMode === 'hue') ? colorBlendPixel(base,effect,index,blendMode) : null;
     for(let channel=0;channel<3;channel+=1){
       const original=base[index+channel]/255;
       const adjusted=effect[index+channel]/255;
@@ -10433,7 +10440,7 @@ function compositeClippedAdjustmentPixels(targetImageData, baseImageData, effect
     const amount = (baseAlpha / targetAlpha) *
       Math.min(1, effectAlpha / baseAlpha) * layerOpacity;
     if (amount <= 0) continue;
-    const color = blendMode === 'color' ? colorBlendPixel(base,effect,index) : null;
+    const color = (blendMode === 'color' || blendMode === 'hue') ? colorBlendPixel(base,effect,index,blendMode) : null;
     for (let channel = 0; channel < 3; channel += 1) {
       const original = base[index + channel] / 255;
       const adjusted = effect[index + channel] / 255;
@@ -10464,7 +10471,7 @@ function compositeClippedRasterPixels(targetImageData, baseImageData, overlayIma
     if (baseAlpha <= 0 || targetAlpha <= 0 || overlayAlpha <= 0) continue;
     const overlayCoverage = overlayAlpha / 255;
     const contribution = Math.min(1, baseAlpha / targetAlpha);
-    const color = blendMode === 'color' ? colorBlendPixel(base,overlay,index) : null;
+    const color = (blendMode === 'color' || blendMode === 'hue') ? colorBlendPixel(base,overlay,index,blendMode) : null;
     for (let channel = 0; channel < 3; channel += 1) {
       const original = base[index + channel];
       const blended = color ? color[channel] : blendAdjustmentChannel(original / 255, overlay[index + channel] / 255, blendMode);
@@ -10487,7 +10494,7 @@ const uid = (prefix = 'layer') => `${prefix}-${Date.now().toString(36)}-${(++lay
 const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const bounded = (value, fallback, min, max) => clamp(finite(value, fallback), min, max);
 const shortText = (value, fallback = '', max = 500) => String(value ?? fallback).slice(0, max);
-const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion','color']);
+const BLEND_MODES = new Set(['source-over','multiply','screen','overlay','soft-light','hard-light','darken','lighten','color-dodge','color-burn','difference','exclusion','color','hue']);
 const GROUP_BLEND_MODES = new Set(['pass-through', ...BLEND_MODES]);
 const PROJECT_VERSION = 1;
 const DEFAULT_LAYER_FILTERS = Object.freeze({
@@ -14084,6 +14091,7 @@ function createLayerGroupCommandController({
     ['color-burn', 'Затемнение основы'],
     ['difference', 'Разница'],
     ['color', 'Цветность (Color)'],
+    ['hue', 'Цветовой тон (Hue)'],
     ['exclusion', 'Исключение'],
   ];
 
@@ -14467,7 +14475,7 @@ const LAYER_PROPERTY_STRING_PROPS = new Set([
 ]);
 const LAYER_PROPERTY_BLEND_MODES = new Set([
   'source-over', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light',
-  'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'exclusion', 'color',
+  'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'exclusion', 'color', 'hue',
 ]);
 function createLayerPropertyCommandController({
   state,
@@ -18032,7 +18040,7 @@ function compositeMaskedPassThrough(targetCtx, renderedCtx, maskCtx, width, heig
 // stages. Use a tiled straight-RGBA blend for Normal isolated folders,
 // Difference, Exclusion and Color, avoiding intermediate rounding.
 function drawClippingStack(targetCtx, stack, mode) {
-  if (mode === 'source-over' || mode === 'difference' || mode === 'exclusion' || mode === 'color') {
+  if (mode === 'source-over' || mode === 'difference' || mode === 'exclusion' || mode === 'color' || mode === 'hue') {
     const sourceCtx = stack.getContext('2d');
     const tile = 256;
     for (let y = 0; y < stack.height; y += tile) {
@@ -18074,7 +18082,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         // destination. Compose the contiguous clipped stack on its own matte,
         // then blend the resulting stack exactly once with the parent.
         if(!clipped && entry.layer.type!=='adjustment' &&
-          ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color'].includes(baseMode) &&
+          ['multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color','hue'].includes(baseMode) &&
           next?.type==='layer' && next.layer?.clipping===true){
           const stack=await renderClippingBase(doc,{...entry.layer,blendMode:'source-over'},rasterOverrides);
           while(entries[entryIndex+1]?.type==='layer' && entries[entryIndex+1].layer?.clipping===true){
@@ -18161,7 +18169,7 @@ async function renderGroupHierarchy(canvas, ctx, doc, rasterOverrides) {
         // An isolated folder used as a clipping base follows the
         // same source-stack rule as a raster base. Apply folder mask/opacity
         // once, edit the resulting matte, and blend once against the parent.
-        if (needsClippingBase && ['source-over','multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color'].includes(blendMode)) {
+        if (needsClippingBase && ['source-over','multiply','screen','overlay','hard-light','darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn','color','hue'].includes(blendMode)) {
           const { groupCanvas: stack, groupCtx: stackCtx } = newGroupCanvas();
           stackCtx.globalAlpha = opacity;
           stackCtx.drawImage(groupCanvas, 0, 0);
@@ -27342,10 +27350,9 @@ function createPsdExportController({
     // Preserve native channels: Color is currently RGB Canvas8 only.
     const hasNativePrecision = exportDoc.layers.some(layer => layer.highDepthSource &&
       (layer.highDepthSource.bitsPerChannel > 8 || layer.highDepthSource.model === 'cmyk'));
-    const hasColor = exportDoc.layers.some(layer => layer.blendMode === 'color') ||
-      (exportDoc.groups || []).some(group => group.blendMode === 'color');
-    if (hasNativePrecision && hasColor) {
-      throw new Error('Color blend: native high-depth/CMYK PSD/PSB export is not supported; save the editable ZPE project');
+    const unsupportedMode = [...exportDoc.layers, ...(exportDoc.groups || [])].find(entry => entry.blendMode === 'color' || entry.blendMode === 'hue')?.blendMode;
+    if (hasNativePrecision && unsupportedMode) {
+      throw new Error((unsupportedMode === 'hue' ? 'Hue' : 'Color') + ' blend: native high-depth/CMYK PSD/PSB export is not supported; save the editable ZPE project');
     }
     const warnings=[];
     const psdSmartPlan=psdSmartObjectRoundTripPlan(exportDoc);
@@ -27701,6 +27708,7 @@ const PSD_BLEND_MODES = Object.freeze({
   diff: 'difference',
   smud: 'exclusion',
   colr: 'color',
+  'hue ': 'hue',
 });
 class PsdImportError extends Error {
   constructor(message, code = 'PSD_IMPORT_ERROR') {
@@ -30020,6 +30028,7 @@ const PSD_BLEND_KEYS = Object.freeze({
   difference: 'diff',
   exclusion: 'smud',
   color: 'colr',
+  hue: 'hue ',
 });
 
 class Writer {

@@ -4,6 +4,7 @@ Use the smallest relevant set while developing; finish source changes with the r
 
 | Change area | Targeted tests / checks | Extra runtime gate |
 |---|---|---|
+| Stage 17a 1.47.33 Hue | RED→GREEN 3/3; focused 11/11 and version 1/1 PASS; full Windows check 1807 PASS / 10 SKIP / 5 Linux-only FAIL | Windows Chromium file:// 172 native editable PSD/PSB roundtrips, 8 mode changes + Undo/Redo PASS; Linux CI NOT RUN. |
 | Stage 17a 1.47.32 Color | Focused Node 35/35 PASS incl. high-depth/CMYK refusal | Windows Chromium file:// full 160 native editable PSD/PSB roundtrips PASS, 4 direct Normal/Color UI + Undo/Redo cases PASS; final Color Node 4/4; Linux CI pending. |
 | Stage 17a 1.47.31 Color Dodge/Burn | Focused Node 24/24 PASS | Windows Chromium file:// 12 synthetic cases / 24 new native PSD/PSB editable roundtrips PASS; full dedicated exit 0; exact Linux CI pending. |
 | Stage 17a 1.47.30 integrated Soft Light + precision | Four clipping precision Node tests PASS; Windows full check 1815 / 1800 PASS / 10 SKIP / 5 Linux-only cgroup FAIL | Full dedicated Chromium file:// 124 native editable PSD/PSB roundtrips PASS, unchanged +/-2; exact Linux CI pending. |

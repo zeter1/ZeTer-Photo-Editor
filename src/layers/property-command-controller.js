@@ -15,7 +15,7 @@ const LAYER_PROPERTY_STRING_PROPS = new Set([
 ]);
 const LAYER_PROPERTY_BLEND_MODES = new Set([
   'source-over', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light',
-  'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'exclusion', 'color',
+  'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'exclusion', 'color', 'hue',
 ]);
 
 export function createLayerPropertyCommandController({
