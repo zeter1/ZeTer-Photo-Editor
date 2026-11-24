@@ -1,4 +1,8 @@
-## 1.47.43 — текущая версия: Native RGB16 isolated Multiply/Screen (2026-11-24)
+## 1.47.44 — текущая версия: Native RGB16 isolated Overlay/Hard Light (2026-11-24)
+
+- Native PSD/PSB export of isolated RGB16 Overlay and Hard Light folders using the shared typed compositor; distinct backdrop/source branch, straight alpha, opacity, prepared mask, editable native channels and fail-closed unsupported combinations.
+
+## 1.47.43 — предыдущая версия: Native RGB16 isolated Multiply/Screen (2026-11-24)
 
 - Native PSD/PSB export of a single isolated sRGB16 raster folder using Multiply or Screen; exact straight-alpha composite, editable layer and folder channels, fail-closed unsupported native topology.
 

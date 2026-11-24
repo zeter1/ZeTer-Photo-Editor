@@ -6,9 +6,10 @@ import { encodePsd, decodePsd } from '../src/formats/psd.js';
 export async function verifyRgb16GroupModesUi(client, ports) {
   await verifyGroupModesUi(client,ports,false);
   await verifyGroupModesUi(client,ports,true);
+  await verifyGroupModesUi(client,ports,'contrast');
 }
 async function verifyGroupModesUi(client, {evaluate,waitFor,assert}, separable) {
-  const modes=separable?[['multiply',[34,45,85,255]],['screen',[121,91,148,255]]]:[['color',[105,46,105,255]],['hue',[80,60,99,255]],['saturation',[23,82,140,255]],['luminosity',[51,90,129,255]]];
+  const modes=separable==='contrast'?[['overlay',[49,51,112,255]],['hard-light',[96,51,112,255]]]:separable?[['multiply',[34,45,85,255]],['screen',[121,91,148,255]]]:[['color',[105,46,105,255]],['hue',[80,60,99,255]],['saturation',[23,82,140,255]],['luminosity',[51,90,129,255]]];
   const [previousMode,previousPreview]=modes.at(-2),[finalMode,finalPreview]=modes.at(-1);
   const run=fn=>evaluate(client,'('+fn.toString()+')()');
   const pixels=words=>createPixelBuffer({width:2,height:2,model:'rgb',channels:4,bitsPerChannel:16,colorSpace:'srgb',data:Uint16Array.from(Array.from({length:4},()=>words).flat())});
@@ -114,7 +115,7 @@ async function verifyGroupModesUi(client, {evaluate,waitFor,assert}, separable) 
       assert(parsed.groups[0]?.blendMode===finalMode&&Math.abs(parsed.groups[0].opacity-128/255)<1e-9,format+' editable group mode and encoded opacity');
       const words=new DataView(bytes.buffer,bytes.byteOffset+bytes.byteLength-34,34);
       // PSB is exported after PSD reimport: folder opacity is now the PSD byte 128/255.
-      const expected=[0,...(separable?(version===1?[31185,23474,38133,65535]:[31268,23488,38165,65535]):(version===1?[13050,23050,33050,65535]:[13062,23062,33062,65535])).flatMap(v=>[v,v,v,v])];
+      const expected=[0,...(separable==='contrast'?(version===1?[24603,13052,28733,65535]:[24660,13025,28728,65535]):separable?(version===1?[31185,23474,38133,65535]:[31268,23488,38165,65535]):(version===1?[13050,23050,33050,65535]:[13062,23062,33062,65535])).flatMap(v=>[v,v,v,v])];
       assert(expected.every((v,i)=>words.getUint16(i*2,false)===v),format+' exact raw composite plane words');
       for(const [name,expectedWords,blend] of [['RGB16 Group Modes top',top,'source-over'],['RGB16 Group Modes base',bottom,'source-over']]){
         const layer=parsed.layers.find(l=>l.name===name);
