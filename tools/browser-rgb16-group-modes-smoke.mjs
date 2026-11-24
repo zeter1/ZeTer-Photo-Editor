@@ -3,7 +3,13 @@ import { encodePsd, decodePsd } from '../src/formats/psd.js';
 
 // Live Chromium file://, actual UI import, blend control, History, save and export.
 // The synthetic fixture has native words not representable by an 8-bit expansion.
-export async function verifyRgb16GroupModesUi(client, {evaluate,waitFor,assert}) {
+export async function verifyRgb16GroupModesUi(client, ports) {
+  await verifyGroupModesUi(client,ports,false);
+  await verifyGroupModesUi(client,ports,true);
+}
+async function verifyGroupModesUi(client, {evaluate,waitFor,assert}, separable) {
+  const modes=separable?[['multiply',[34,45,85,255]],['screen',[121,91,148,255]]]:[['color',[105,46,105,255]],['hue',[80,60,99,255]],['saturation',[23,82,140,255]],['luminosity',[51,90,129,255]]];
+  const [previousMode,previousPreview]=modes.at(-2),[finalMode,finalPreview]=modes.at(-1);
   const run=fn=>evaluate(client,'('+fn.toString()+')()');
   const pixels=words=>createPixelBuffer({width:2,height:2,model:'rgb',channels:4,bitsPerChannel:16,colorSpace:'srgb',data:Uint16Array.from(Array.from({length:4},()=>words).flat())});
   const bottom=[1000,2000,3000,65535], top=[50000,10000,30000,65535], outer=[10000,20000,30000,65535];
@@ -41,14 +47,14 @@ export async function verifyRgb16GroupModesUi(client, {evaluate,waitFor,assert})
     if(!select||![...select.options].some(o=>o.value===mode))return false;
     select.value=mode;form.elements.opacity.value='50';form.requestSubmit();return true;
   }
-  for(const [mode,expected] of [['color',[105,46,105,255]],['hue',[80,60,99,255]],['saturation',[23,82,140,255]],['luminosity',[51,90,129,255]]]){
+  for(const [mode,expected] of modes){
     assert(await evaluate(client,'('+setGroupMode.toString()+')('+JSON.stringify(mode)+')'),'actual group Properties '+mode);
     await waitFor('RGB16 group '+mode,async()=> (await value()).includes(mode)&&await preview(expected),12000);
   }
   await evaluate(client,"document.querySelector('#undoBtn').click()");
-  await waitFor('RGB16 group Undo',async()=> (await value()).includes('saturation')&&await preview([23,82,140,255]),12000);
+  await waitFor('RGB16 group Undo',async()=> (await value()).includes(previousMode)&&await preview(previousPreview),12000);
   await evaluate(client,"document.querySelector('#redoBtn').click()");
-  await waitFor('RGB16 group Redo',async()=> (await value()).includes('luminosity')&&await preview([51,90,129,255]),12000);
+  await waitFor('RGB16 group Redo',async()=> (await value()).includes(finalMode)&&await preview(finalPreview),12000);
   assert(await run(()=>{
     const state={downloads:[],urls:new Map(),url:URL.createObjectURL,click:HTMLAnchorElement.prototype.click};
     window.__rgb16GroupModesCapture=state;
@@ -73,7 +79,7 @@ export async function verifyRgb16GroupModesUi(client, {evaluate,waitFor,assert})
     await waitFor('RGB16 saved .zpe',async()=>Boolean(await saved()),12000);
     const project=await saved();
     const group=project.groups.find(g=>g.name==='RGB16 group modes');
-    assert(group?.blendMode==='luminosity'&&Math.abs(group.opacity-.5)<1e-6,'saved native group opacity');
+    assert(group?.blendMode===finalMode&&Math.abs(group.opacity-.5)<1e-6,'saved native group opacity');
     assert(project.layers.filter(l=>l.groupId===group.id).length===2,'saved group membership');
     for(const [name,expected,blendMode] of [['RGB16 Group Modes top',top,'source-over'],['RGB16 Group Modes base',bottom,'source-over']]){
       const l=project.layers.find(x=>x.name===name);
@@ -86,9 +92,9 @@ export async function verifyRgb16GroupModesUi(client, {evaluate,waitFor,assert})
       if(!item)return false;const t=new DataTransfer();t.items.add(new File([item.blob],'rgb16-group-modes-reopened.zpe',{type:'application/json'}));
       const input=document.querySelector('#projectInput');input.files=t.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
     }),'reopen saved .zpe');
-    await waitFor('RGB16 reopened .zpe',async()=>await evaluate(client,"document.querySelector('#statusText')?.textContent==='Проект открыт'")&&await preview([51,90,129,255]),16000);
+    await waitFor('RGB16 reopened .zpe',async()=>await evaluate(client,"document.querySelector('#statusText')?.textContent==='Проект открыт'")&&await preview(finalPreview),16000);
     assert(await selectTop(),'select reopened top');
-    await waitFor('RGB16 reopened Luminosity',async()=>(await value()).includes('luminosity'),12000);
+    await waitFor('RGB16 reopened final mode',async()=>(await value()).includes(finalMode),12000);
     for(const [format,version] of [['psd',1],['psb',2]]){
       assert(await evaluate(client,`(() => {
         document.querySelector('#exportQuickBtn').click();
@@ -105,10 +111,10 @@ export async function verifyRgb16GroupModesUi(client, {evaluate,waitFor,assert})
       const bytes=Uint8Array.from(Buffer.from(exported.encoded,'base64'));
       const parsed=await decodePsd(bytes,{maxPixels:64,maxLayers:8});
       assert(parsed.version===version&&parsed.bitsPerChannel===16&&parsed.layers.length===3,format+' native layered structure');
-      assert(parsed.groups[0]?.blendMode==='luminosity'&&Math.abs(parsed.groups[0].opacity-128/255)<1e-9,format+' editable group mode and encoded opacity');
+      assert(parsed.groups[0]?.blendMode===finalMode&&Math.abs(parsed.groups[0].opacity-128/255)<1e-9,format+' editable group mode and encoded opacity');
       const words=new DataView(bytes.buffer,bytes.byteOffset+bytes.byteLength-34,34);
       // PSB is exported after PSD reimport: folder opacity is now the PSD byte 128/255.
-      const expected=[0,...(version===1?[13050,23050,33050,65535]:[13062,23062,33062,65535]).flatMap(v=>[v,v,v,v])];
+      const expected=[0,...(separable?(version===1?[31185,23474,38133,65535]:[31268,23488,38165,65535]):(version===1?[13050,23050,33050,65535]:[13062,23062,33062,65535])).flatMap(v=>[v,v,v,v])];
       assert(expected.every((v,i)=>words.getUint16(i*2,false)===v),format+' exact raw composite plane words');
       for(const [name,expectedWords,blend] of [['RGB16 Group Modes top',top,'source-over'],['RGB16 Group Modes base',bottom,'source-over']]){
         const layer=parsed.layers.find(l=>l.name===name);
@@ -119,9 +125,9 @@ export async function verifyRgb16GroupModesUi(client, {evaluate,waitFor,assert})
         if(!item)return false;const t=new DataTransfer();t.items.add(new File([item.blob],'rgb16-group-modes-roundtrip.'+${JSON.stringify(format)},{type:'application/octet-stream'}));
         const input=document.querySelector('#fileInput');input.files=t.files;input.dispatchEvent(new Event('change',{bubbles:true}));return true;
       })()`),format+' reimport native export');
-      await waitFor(format+' native reimport preview',async()=>await evaluate(client,"document.querySelector('#statusText')?.textContent?.startsWith('PSD/PSB импортирован')")&&await preview([51,90,129,255]),16000);
+      await waitFor(format+' native reimport preview',async()=>await evaluate(client,"document.querySelector('#statusText')?.textContent?.startsWith('PSD/PSB импортирован')")&&await preview(finalPreview),16000);
       assert(await selectTop(),format+' select reimported top');
-      await waitFor(format+' reimported editable Luminosity',async()=>(await value()).includes('luminosity'),12000);
+      await waitFor(format+' reimported editable final mode',async()=>(await value()).includes(finalMode),12000);
       console.log(format.toUpperCase()+' RGB16 Group Modes exact merged and editable native words, UI import/export, History, ZPE PASS');
     }
   } finally {

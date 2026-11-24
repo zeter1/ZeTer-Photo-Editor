@@ -38,7 +38,7 @@ test('isolated group opacity zero and hidden group exclude children',async()=>{
   }
 });
 test('unsupported RGB16 group topology fails closed',async()=>{
-  for(const change of [d=>d.groups[0].blendMode='pass-through',d=>d.groups[0].blendMode='multiply',d=>d.groups[0].parentGroupId='g',d=>d.layers.push(layer('other',[1,2,3,65535],'unknown')),d=>d.layers.splice(2,0,layer('interleaved',[1,2,3,65535])),d=>d.layers[1].clipping=true]){
+  for(const change of [d=>d.groups[0].blendMode='pass-through',d=>d.groups[0].blendMode='overlay',d=>d.groups[0].parentGroupId='g',d=>d.layers.push(layer('other',[1,2,3,65535],'unknown')),d=>d.layers.splice(2,0,layer('interleaved',[1,2,3,65535])),d=>d.layers[1].clipping=true]){
     const doc=make();change(doc);const before=JSON.stringify(doc);
     await assert.rejects(controller().prepareDocument(doc),/native high-depth/);
     assert.equal(JSON.stringify(doc),before);
@@ -116,4 +116,69 @@ test('isolated group with partial source alpha and transparent parent preserves 
   doc.layers=[layer('top',[50000,10000,30000,32768],'g')];
   const out=await controller().prepareDocument(doc);
   assert.deepEqual([...out.compositePixelBuffer.data],[50000,10000,30000,16384]);
+});
+test('isolated RGB16 Multiply and Screen use the finished folder as source, with exact PSD/PSB words',async()=>{
+  for(const mode of ['multiply','screen']){
+    for(const backdropAlpha of [0,32768,65535]){
+      const doc=make();
+      doc.groups[0].blendMode=mode;
+      const b=[10001,20003,30007,backdropAlpha], f=[50009,10011,30013,40015];
+      doc.layers=[layer('outer',b),layer('top',f,'g')];
+      const before=JSON.stringify(doc);
+      // Independent normalized straight-alpha Porter-Duff source-over oracle.
+      const ab=b[3]/65535, as=f[3]/65535*.5, ao=as+ab*(1-as);
+      const expected=b.slice(0,3).map((v,i)=>{
+        const cb=v/65535,cs=f[i]/65535;
+        const blend=mode==='multiply'?cb*cs:1-(1-cb)*(1-cs);
+        return Math.round(65535*((1-as)*ab*cb+(1-ab)*as*cs+ab*as*blend)/ao);
+      }).concat(Math.round(ao*65535));
+      const out=await controller().prepareDocument(doc);
+      assert.equal(out.composite,null,mode);
+      assert.deepEqual([...out.compositePixelBuffer.data],expected,mode);
+      for(const encode of [encodePsd,encodePsb]){
+        const bytes=new Uint8Array(encode({width:1,height:1,bitsPerChannel:16,colorMode:3,layers:out.layers,groups:out.groups,compositePixelBuffer:out.compositePixelBuffer}));
+        const raw=new DataView(bytes.buffer,bytes.byteOffset+bytes.byteLength-10,10);
+        // PSD merged RGB channels use a white matte for partial alpha; editable
+        // layer channels remain straight. Compute the file words independently.
+        const alpha=expected[3]/65535;
+        const matte=expected.slice(0,3).map(v=>alpha>0&&alpha<1?Math.round(v*alpha+65535*(1-alpha)):v);
+        assert.deepEqual([0,2,4,6,8].map(i=>raw.getUint16(i,false)),[0,...matte,expected[3]]);
+        const parsed=await decodePsd(bytes,{maxPixels:16,maxLayers:16});
+        assert.equal(parsed.groups[0].blendMode,mode);
+        assert.deepEqual([...parsed.layers.find(l=>l.name==='top').pixelBuffer.data],f);
+      }
+      assert.equal(JSON.stringify(doc),before);
+    }
+  }
+});
+test('native separable folder rejects unsupported topology without Canvas fallback or mutation',async()=>{
+  for(const change of [d=>d.groups[0].parentGroupId='g',d=>d.layers[1].clipping=true,d=>d.layers[1].scaleX=2,d=>delete d.layers[1].highDepthSource]){
+    const doc=make();doc.groups[0].blendMode='multiply';doc.layers[2].blendMode='source-over';change(doc);
+    const before=JSON.stringify(doc);
+    await assert.rejects(controller().prepareDocument(doc),/native high-depth/);
+    assert.equal(JSON.stringify(doc),before);
+  }
+});
+
+test('Multiply/Screen folder uses group mask once and keeps a mixed native child blend editable',async()=>{
+  const maskController=createPsdExportController({vectors:{exportPsdVectorMask:()=>null},rendering:{
+    createCanvas(){return {getContext(){return {fillRect(){},getImageData(){return {data:Uint8ClampedArray.of(255,255,255,255)};}};}};},
+    renderLayer(){throw Error('unexpected rasterization');},renderDocument(){throw Error('unexpected display composite');}
+  }});
+  for(const mode of ['multiply','screen']){
+    const doc=make();
+    doc.groups[0].blendMode=mode;
+    doc.groups[0].mask={enabled:true,invert:true,density:.5};
+    const b=[10001,20003,30007], inner=[31001,22003,19007], top=[50009,10011,30013];
+    doc.layers=[layer('outer',[...b,65535]),layer('inner',[...inner,65535],'g'),layer('top',[...top,65535],'g','multiply')];
+    const isolated=inner.map((v,i)=>Math.round(v*top[i]/65535));
+    const coverage=.5*128/255;
+    const expected=b.map((v,i)=>Math.round(v*(1-coverage)+coverage*(mode==='multiply'?v*isolated[i]/65535:v+isolated[i]-v*isolated[i]/65535))).concat(65535);
+    const before=JSON.stringify(doc);
+    const out=await maskController.prepareDocument(doc);
+    assert.deepEqual([...out.compositePixelBuffer.data],expected);
+    assert.equal(out.groups[0].mask.pixels[3],128);
+    assert.equal(out.layers.find(l=>l.name==='top').blendMode,'multiply');
+    assert.equal(JSON.stringify(doc),before);
+  }
 });
