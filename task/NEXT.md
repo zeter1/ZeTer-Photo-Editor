@@ -1,24 +1,23 @@
 # NEXT - ZeTer Photo Editor
 
-> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-BLEND-MODES / bounded native RGB16 Multiply and Screen v1.47.43.
+> **CURRENT TASK/ID:** Stage 17a / CAP-PSD-ISOLATED-GROUP-BLEND-MODES / bounded native RGB16 Overlay and Hard Light v1.47.44.
 > **PRIORITY:** P1 HIGH native precision.
-> **STATUS:** IN PROGRESS - functional candidate implemented; local targeted and full dedicated browser PASS; remote acceptance pending.
-> **BASE MAIN SHA:** 0c7aef4c5fc490a52144b4bb803937cb22f3d020 (tree c5466653609626036c63c8ca438330ee74d693f2).
-> **ACTIVE CANDIDATE:** [feat/psd-rgb16-isolated-multiply-screen-20261124](https://github.com/zeter1/ZeTer-Photo-Editor/tree/feat/psd-rgb16-isolated-multiply-screen-20261124); candidate branch/PR, not main.
-> **LAST VERIFIED MAIN:** [#424](https://github.com/zeter1/ZeTer-Photo-Editor/pull/424) MERGED, 093f961ad67341feb673ec661cd0b15423b551ee, [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45377600104), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45377600481).
-> **RECOVERY MERGED:** [#124](https://github.com/zeter1/ZeTer-Photo-Editor/pull/124), head 4bafde2edaf8a2d9377fa1d6c9c09f973b452908, 13/13 checks, [core PASS attempt 2](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45377953912), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45377953886), exact merge tree identical to head. Separate merged-main CI pending readback; close #115 only after exact-main acceptance. Preparation failure fault-injected, previous snapshot preserved; no gate weakened.
-> **IMPLEMENTATION:** Native sRGB16 Multiply/Screen root isolated folder, bounded contiguous raster children; opacity, straight alpha, prepared raster mask applied once. Exact editable layer/folder and PSD/PSB merged words. Explicit rejection of unsupported native precision/topology, not Canvas8 fallback.
-> **EVIDENCE:** RED 8/10 -> GREEN; 55/55 focused incl. recovery/version PASS; build 5990f57711063b89. Chromium file:// both group mode sets, preview, Properties, History, .zpe, exact PSD/PSB and editable reimport PASS; full dedicated browser PASS exit 0. Windows full check FAIL 5 existing Linux-only proc/cgroup tests (1866 total / 1851 PASS / 10 SKIP).
-> **REMAINING ACCEPTANCE:** Recovery exact-main core/independent; candidate exact-head core/independent, review/protection and merge gates, then exact-main CI. Do not mark accepted until verified; rollback by ordinary revert.
-> **NEXT ACTION:** Read candidate PR exact-head core and independent checks, and recovery exact-main CI; fix persistent failures without weakening tests. Close #115 after recovery exact-main PASS. Merge candidate only when required gates pass, then verify exact-main separately.
-> **NEXT IMPLEMENTATION ACTION:** After bounded Multiply/Screen accepted, extend the same typed isolated-group path to Overlay/Hard Light with independent exact-word oracle (partial alpha, mask, reversed source/backdrop branch, negative topology), actual group Properties/History/.zpe/PSD/PSB roundtrip.
-> **BLOCKERS:** Adobe-authored clipping/knockout oracle; genuine camera DNG/LibRaw; nested/pass-through/clipping/adjustments/Float32/CMYK remain outside this bounded native contract.
+> **STATUS:** IN PROGRESS — functional candidate; RED→GREEN, targeted and full dedicated Chromium PASS; remote acceptance pending.
+> **BASE MAIN SHA:** d2e449cd6e834e9c922a46ce806e6949e31f29f4 (tree fbb50b671382b655b67172b0435ff747acdba85d).
+> **LAST VERIFIED MAIN:** #124 MERGED 0c7aef4c5fc490a52144b4bb803937cb22f3d020, [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45389420787), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45389421025). Issue [#115 CLOSED](https://github.com/zeter1/ZeTer-Photo-Editor/issues/115).
+> **MERGED CANDIDATE:** [#425](https://github.com/zeter1/ZeTer-Photo-Editor/pull/425) v1.47.43, head b593ab108ceb352a5246286c763a97e1d29c50dd, 13/13 checks, [core PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45389832066), [independent PASS](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45389832045). Squash merged as d2e449cd6e834e9c922a46ce806e6949e31f29f4, tree equal to verified head; separate [core](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45391479624) and [independent](https://github.com/zeter1/ZeTer-Photo-Editor/actions/runs/45391479743) pending at readback.
+> **ACTIVE CANDIDATE:** feat/psd-rgb16-isolated-overlay-hardlight-20261124, base above; not main.
+> **IMPLEMENTATION:** One root isolated contiguous RGB16 encoded sRGB raster folder; Overlay branches on parent backdrop, Hard Light on finished folder source. Shared typed compositor, straight alpha, opacity and prepared raster mask once. Native PSD/PSB editable group/layer and exact merged words. Explicit fail-closed outside bounded topology/precision; no Canvas8 fallback for these requested native folder modes.
+> **EVIDENCE:** RED 11/14 → GREEN 14/14; focused 58/58 including recovery/version; build 7ee854ac29f8e3f0. Live Chromium file:// actual Group Properties, preview, Undo/Redo, .zpe, PSD/PSB exact merged words and editable reimport PASS (three mode sets); synthetic independent arithmetic, not Adobe-authored parity. Full dedicated Chromium exit 0 (68.03s). Windows npm run check FAIL: 1869 total / 1854 PASS / 10 SKIP / 5 existing Linux-only proc/cgroup FAIL; no gate weakened.
+> **NEXT ACTION:** Verify separate #425 exact-main core and independent; new candidate exact-head core/independent and all review/protection gates, then guarded merge and separate exact-main verification. Never merge red/pending. Ordinary revert if needed.
+> **NEXT IMPLEMENTATION ACTION:** Extend bounded native RGB16 isolated folder support to remaining typed separable modes (Darken/Lighten, Difference/Exclusion, Soft Light, Color Dodge/Burn), with independently verified branches and endpoint cases, partial alpha, mask, negative topology, Group Properties/History/.zpe and PSD/PSB roundtrip; split only if evidence or risk requires.
+> **BLOCKERS:** Adobe-authored clipping/knockout oracle; genuine camera DNG/LibRaw; nested/pass-through/clipping/adjustments/Float32/CMYK outside bounded native contract.
 
 ## Short queue
 
-1. P1 HIGH verify #124 exact merged-main core and independent, close #115 if PASS.
-2. P1 Bounded RGB16 Multiply/Screen folder candidate exact head/main acceptance.
-3. P1 Overlay/Hard Light native isolated RGB16 group.
+1. P1 #425 exact merged-main core and independent.
+2. P1 Overlay/Hard Light candidate exact head/main acceptance.
+3. P1 Remaining bounded native RGB16 isolated separable folder modes.
 4. P1 CAP-RAW-CAMERA-ORACLE (external reference blocked).
 5. P2 Stage 6 Tiled Worker, Stage 8 ICC, Stage 2 vector masks.
 
