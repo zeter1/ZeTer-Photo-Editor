@@ -199,6 +199,53 @@ export function createPsdExportController({
     }
   }
   
+  // Bounded topology: one root isolated folder with contiguous raster children.
+  // Keep pass-through, nested and unsupported group modes outside this native contract.
+  function nativeRgb16IsolatedGroup(exportDoc){
+    const groups=exportDoc.groups||[];
+    if(groups.length!==1)return null;
+    const group=groups[0];
+    const modes=['source-over','color','hue','saturation','luminosity'];
+    if(!group.id||group.parentGroupId||!modes.includes(group.blendMode)||group.clipping||
+      (group.vectorMask?.enabled!==false&&group.vectorMask?.subpaths?.length))return null;
+    const members=exportDoc.layers.map((layer,index)=>layer.groupId===group.id?index:-1).filter(index=>index>=0);
+    if(!members.length||members.at(-1)-members[0]+1!==members.length)return null;
+    if(exportDoc.layers.some(layer=>(layer.groupId&&layer.groupId!==group.id)||!modes.includes(layer.blendMode||'source-over')))return null;
+    // Root and isolated group Uint16 RGBA surfaces plus prepared RGBA8 group mask.
+    const bytes=exportDoc.width*exportDoc.height*(group.mask?20:16);
+    if(!Number.isSafeInteger(bytes)||bytes>MAX_HIGH_DEPTH_COMPOSITE_BYTES)return null;
+    return group;
+  }
+
+  function buildNativeRgb16IsolatedComposite(exportDoc,planned,prepared,group,exportGroups){
+    const background=highDepthCompositeBackground(exportDoc);
+    if(background.reason)throw new Error(background.reason);
+    const root=[],children=[];
+    const groupMetadata=exportGroups.find(entry=>entry.key===group.id);
+    if(!groupMetadata)throw new Error('Native RGB16 isolated group metadata unavailable');
+    const groupVisible=group.visible!==false&&Number(group.opacity??1)>0;
+    let insertAt=-1;
+    for(let i=0;i<planned.length;i++){
+      const item=planned[i], exported=prepared[i], layer=item.layer;
+      const inGroup=layer.groupId===group.id;
+      if(inGroup&&insertAt<0)insertAt=root.length;
+      if(layer.visible===false||Number(layer.opacity??1)<=0||(inGroup&&!groupVisible))continue;
+      if(!item.nativePixelBuffer)throw new Error('Native RGB16 isolated group source unavailable');
+      (inGroup?children:root).push({
+        buffer:item.nativePixelBuffer,x:item.bounds.x,y:item.bounds.y,
+        opacity:clamp(Number(layer.opacity??1),0,1),blendMode:layer.blendMode||'source-over',
+        maskPixels:exported.mask&&!exported.mask.disabled?exported.mask.pixels:null,
+      });
+    }
+    const options={bitsPerChannel:16,colorSpace:'srgb',maxBytes:MAX_HIGH_DEPTH_COMPOSITE_BYTES};
+    if(groupVisible&&children.length){
+      const isolated=compositePixelBufferLayers(exportDoc.width,exportDoc.height,children,options);
+      root.splice(insertAt,0,{buffer:isolated,blendMode:groupMetadata.blendMode,opacity:groupMetadata.opacity,
+        maskPixels:groupMetadata.mask&&!groupMetadata.mask.disabled?groupMetadata.mask.pixels:null});
+    }
+    return compositePixelBufferLayers(exportDoc.width,exportDoc.height,root,{...options,background:background.background});
+  }
+
   function buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings){
     if(bitsPerChannel<=8||hasAdjustmentLayers)return null;
     const plan=highDepthCompositePlan(exportDoc,planned);
@@ -284,17 +331,18 @@ export function createPsdExportController({
   }
   
   async function preparePsdExport(exportDoc){
-    // Color, Hue, Saturation and Luminosity have a bounded native RGB16 path for flat, untransformed sRGB rasters.
+    // Native RGB16 non-separable modes: flat rasters or one bounded isolated folder.
     // Do not let a non-separable native document silently use Canvas8 fallback.
     const hasNativePrecision = exportDoc.layers.some(layer => layer.highDepthSource &&
       (layer.highDepthSource.bitsPerChannel > 8 || layer.highDepthSource.model === 'cmyk'));
     const nonSeparable = [...exportDoc.layers, ...(exportDoc.groups || [])].filter(entry =>
       ['color','hue','saturation','luminosity'].includes(entry.blendMode));
     const nativeNonSeparableBuffers=new Map();
+    const isolatedRgb16Group=nativeRgb16IsolatedGroup(exportDoc);
     const nativeNonSeparable = hasNativePrecision && nonSeparable.length>0 &&
-      nonSeparable.every(entry=>['color','hue','saturation','luminosity'].includes(entry.blendMode)) && !(exportDoc.groups||[]).length &&
+      nonSeparable.every(entry=>['color','hue','saturation','luminosity'].includes(entry.blendMode)) && (!(exportDoc.groups||[]).length || isolatedRgb16Group) &&
       exportDoc.colorProfile?.kind!=='icc' && exportDoc.layers.every(layer=>{
-        if(layer.groupId || layer.clipping || (layer.vectorMask?.enabled!==false && layer.vectorMask?.subpaths?.length)) return false;
+        if((layer.groupId && layer.groupId!==isolatedRgb16Group?.id) || layer.clipping || (layer.vectorMask?.enabled!==false && layer.vectorMask?.subpaths?.length)) return false;
         const source=nativeHighDepthPsdSource(layer);
         if(!(source?.model==='rgb' && source.bitsPerChannel===16 && String(source.colorSpace).toLowerCase()==='srgb'))return false;
         nativeNonSeparableBuffers.set(layer,source);
@@ -437,7 +485,9 @@ export function createPsdExportController({
     if(colorMode==='cmyk'){
       compositePixelBuffer=buildNativeCmykComposite(exportDoc,planned,prepared,bitsPerChannel,cmykEligibility);
     }else{
-      compositePixelBuffer=buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
+      compositePixelBuffer=nativeNonSeparable&&isolatedRgb16Group
+        ?buildNativeRgb16IsolatedComposite(exportDoc,planned,prepared,isolatedRgb16Group,exportGroups)
+        :buildHighDepthComposite(exportDoc,planned,prepared,bitsPerChannel,hasAdjustmentLayers,warnings);
       if(!compositePixelBuffer){
         if(nativeNonSeparable)throw new Error((nonSeparable.some(entry=>entry.blendMode==='luminosity')?'Luminosity':nonSeparable.some(entry=>entry.blendMode==='saturation')?'Saturation':nonSeparable.some(entry=>entry.blendMode==='hue')?'Hue':'Color')+' blend: native high-depth PSD/PSB composite unavailable; save the editable ZPE project');
         const compositeCanvas=createCanvas();
