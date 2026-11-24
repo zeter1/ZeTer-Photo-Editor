@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPixelBuffer, serializePixelBufferSource } from '../src/core/pixel-buffer.js';
+import { createPixelBuffer, serializePixelBufferSource, compositePixelBufferLayers } from '../src/core/pixel-buffer.js';
 import { createPsdExportController } from '../src/document/psd-export-controller.js';
 import { encodePsd, encodePsb, decodePsd } from '../src/formats/psd.js';
 
@@ -38,7 +38,7 @@ test('isolated group opacity zero and hidden group exclude children',async()=>{
   }
 });
 test('unsupported RGB16 group topology fails closed',async()=>{
-  for(const change of [d=>d.groups[0].blendMode='pass-through',d=>d.groups[0].blendMode='color-dodge',d=>d.groups[0].parentGroupId='g',d=>d.layers.push(layer('other',[1,2,3,65535],'unknown')),d=>d.layers.splice(2,0,layer('interleaved',[1,2,3,65535])),d=>d.layers[1].clipping=true]){
+  for(const change of [d=>d.groups[0].blendMode='pass-through',d=>d.groups[0].parentGroupId='g',d=>d.layers.push(layer('other',[1,2,3,65535],'unknown')),d=>d.layers.splice(2,0,layer('interleaved',[1,2,3,65535])),d=>d.layers[1].clipping=true]){
     const doc=make();change(doc);const before=JSON.stringify(doc);
     await assert.rejects(controller().prepareDocument(doc),/native high-depth/);
     assert.equal(JSON.stringify(doc),before);
@@ -251,7 +251,7 @@ test('Overlay and Hard Light apply prepared mask once after native child composi
   }
 });
 
-const remainingSeparableModes=['darken','lighten','difference','exclusion','soft-light'];
+const remainingSeparableModes=['darken','lighten','difference','exclusion','soft-light','color-dodge','color-burn'];
 // Independent word-domain oracle; soft light uses the W3C polynomial below 1/4.
 function remainingBlendWord(mode,b,s){
   const max=65535;
@@ -260,6 +260,8 @@ function remainingBlendWord(mode,b,s){
     case 'lighten':return Math.max(b,s);
     case 'difference':return Math.abs(b-s);
     case 'exclusion':return b+s-2*b*s/max;
+    case 'color-dodge':return b===0?0:s===max?max:Math.min(max,max*b/(max-s));
+    case 'color-burn':return b===max?max:s===0?0:Math.max(0,max-max*(max-b)/s);
     case 'soft-light':{
       const x=b/max,y=s/max;
       const d=x<=.25?16*x*x*x-12*x*x+4*x:Math.sqrt(x);
@@ -275,6 +277,8 @@ test('remaining separable RGB16 groups preserve exact PSD/PSB samples across bra
       [[0,16383,16384,65535],[65535,32768,50001,65535]],
       [[65535,12345,0,0],[0,65535,32768,40015]],
       [[0,65535,32767,65535],[0,65535,32768,65535]],
+      [[0,65535,1,65535],[65535,0,65534,65535]],
+      [[65534,1,40000,32768],[1,65534,10000,40015]],
     ]){
       const doc=make();doc.groups[0].blendMode=mode;
       doc.layers=[layer('outer',b),layer('top',f,'g')];
@@ -320,5 +324,20 @@ test('remaining separable folder modes reject unsupported topology and precision
       await assert.rejects(controller().prepareDocument(doc),/native high-depth/);
       assert.equal(JSON.stringify(doc),before);
     }
+  }
+});
+
+
+test('typed Color Dodge and Burn preserve extreme backdrop before source singularity (W3C 10.1.7-8)',()=>{
+  const buffer=values=>createPixelBuffer({width:1,height:1,model:'rgb',channels:4,bitsPerChannel:16,colorSpace:'srgb',data:Uint16Array.from(values)});
+  const cases=[
+    ['color-dodge',[0,1,32000,65535],[65535,65534,0,65535],[0,65535,32000,65535]],
+    ['color-burn',[65535,65534,32000,65535],[0,1,65535,65535],[65535,0,32000,65535]]
+  ];
+  for(const [blendMode,b,s,expected] of cases){
+    const base=buffer(b), source=buffer(s);
+    const out=compositePixelBufferLayers(1,1,[{buffer:base},{buffer:source,blendMode}],{bitsPerChannel:16});
+    assert.deepEqual([...out.data],expected,blendMode);
+    assert.deepEqual([...base.data],b);assert.deepEqual([...source.data],s);
   }
 });

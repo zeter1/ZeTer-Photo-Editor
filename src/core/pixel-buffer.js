@@ -416,14 +416,17 @@ function compositeBlendChannel(mode, backdrop, source) {
   }
   if (mode === 'darken') return Math.min(cb, cs);
   if (mode === 'lighten') return Math.max(cb, cs);
+  // W3C Compositing 10.1.7?8: backdrop extrema take precedence at 0/0.
   if (mode === 'color-dodge') {
-    if (cs >= 1) return 1;
     const base = clampPreview01(cb);
+    if (base === 0) return 0;
+    if (cs >= 1) return 1;
     return Math.min(1, base / Math.max(1e-12, 1 - clampPreview01(cs)));
   }
   if (mode === 'color-burn') {
-    if (cs <= 0) return 0;
     const base = clampPreview01(cb);
+    if (base === 1) return 1;
+    if (cs <= 0) return 0;
     return 1 - Math.min(1, (1 - base) / Math.max(1e-12, clampPreview01(cs)));
   }
   if (mode === 'difference') return Math.abs(clampPreview01(cb)-clampPreview01(cs));
